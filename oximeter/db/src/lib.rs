@@ -16,6 +16,10 @@ pub enum Error {
     #[error("Oximeter core error: {0}")]
     Oximeter(#[from] oximeter::Error),
 
+    /// The telemetry database could not be reached.
+    #[error("Telemetry database unavailable: {0}")]
+    DatabaseUnavailable(String),
+
     /// An error interacting with the telemetry database
     #[error("Error interacting with telemetry database: {0}")]
     Database(String),

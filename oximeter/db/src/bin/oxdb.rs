@@ -125,7 +125,12 @@ enum Subcommand {
 async fn make_client(port: u16, log: &Logger) -> Result<Client, anyhow::Error> {
     let client_log = log.new(o!("component" => "oximeter_client"));
     let address = SocketAddr::new("::1".parse().unwrap(), port);
-    Client::new(address, client_log).await.context("Failed to connect to DB")
+    let client = Client::new(address, client_log);
+    client
+        .init_db()
+        .await
+        .context("Failed to initialize timeseries database")?;
+    Ok(client)
 }
 
 fn describe_data() {

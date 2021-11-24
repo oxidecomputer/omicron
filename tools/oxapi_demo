@@ -234,7 +234,7 @@ function cmd_instance_create_demo
 	# memory is 1024 * 1024 * 256
 	[[ $# != 3 ]] && usage "expected ORGANIZATION_NAME PROJECT_NAME INSTANCE_NAME"
 	mkjson name="$3" description="an instance called $3" ncpus=1 \
-	    memory=268435456 bootDiskSize=1 hostname="$2" |
+	    memory=268435456 bootDiskSize=1 hostname="$3" |
 		do_curl "/organizations/$1/projects/$2/instances" -X POST -T -
 }
 
