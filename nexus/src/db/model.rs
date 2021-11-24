@@ -1783,15 +1783,16 @@ pub struct NetworkInterface {
     pub ip: ipnetwork::IpNetwork,
 }
 
+/// Conversion to the external API type.
 impl From<NetworkInterface> for external::NetworkInterface {
-    fn from(iface: NetworkInterface) -> Self {
-        Self {
-            identity: iface.identity(),
-            instance_id: iface.instance_id,
-            vpc_id: iface.vpc_id,
-            subnet_id: iface.subnet_id,
-            ip: iface.ip.ip(),
-            mac: *iface.mac,
+    fn from(interface: NetworkInterface) -> external::NetworkInterface {
+        external::NetworkInterface {
+            identity: interface.identity(),
+            instance_id: interface.instance_id,
+            vpc_id: interface.vpc_id,
+            subnet_id: interface.subnet_id,
+            mac: interface.mac.into(),
+            ip: interface.ip.ip(),
         }
     }
 }

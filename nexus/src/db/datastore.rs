@@ -844,18 +844,21 @@ impl DataStore {
 
     /// Identify all IPs in use by each instance
     // TODO: how to name/where to put this
-    pub async fn resolve_instances_to_ips<T: IntoIterator<Item = Name>>(
+    pub async fn resolve_instances_to_interfaces<
+        T: IntoIterator<Item = Name>,
+    >(
         &self,
         vpc: &Vpc,
         instance_names: T,
-    ) -> Result<HashMap<Name, Vec<ipnetwork::IpNetwork>>, Error> {
+    ) -> Result<HashMap<Name, Vec<NetworkInterface>>, Error> {
         use db::schema::{instance, network_interface};
-        let mut addrs = network_interface::table
+        // TODO: make sure there's an index on network_interface::instance_id
+        let ifaces = network_interface::table
             .inner_join(
                 instance::table
                     .on(instance::id.eq(network_interface::instance_id)),
             )
-            .select((instance::name, network_interface::ip))
+            .select((instance::name, NetworkInterface::as_select()))
             .filter(instance::project_id.eq(vpc.project_id))
             .filter(instance::name.eq_any(instance_names))
             .filter(network_interface::time_deleted.is_null())
@@ -870,9 +873,45 @@ impl DataStore {
                 )
             })?;
 
-        let mut result = HashMap::with_capacity(addrs.len());
-        for (name, addr) in addrs.drain(..) {
-            result.entry(name).or_insert(vec![]).push(addr)
+        let mut result = HashMap::with_capacity(ifaces.len());
+        for (name, iface) in ifaces.into_iter() {
+            result.entry(name).or_insert(vec![]).push(iface)
+        }
+        Ok(result)
+    }
+
+    /// Identify all VNICs connected to each VpcSubnet
+    // TODO: how to name/where to put this
+    pub async fn resolve_subnets_to_interfaces<T: IntoIterator<Item = Name>>(
+        &self,
+        vpc: &Vpc,
+        subnet_names: T,
+    ) -> Result<HashMap<Name, Vec<NetworkInterface>>, Error> {
+        use db::schema::{network_interface, vpc_subnet};
+        // TODO: make sure there's an index on network_interface::subnet_id
+        let subnets = network_interface::table
+            .inner_join(
+                vpc_subnet::table
+                    .on(vpc_subnet::id.eq(network_interface::subnet_id)),
+            )
+            .select((vpc_subnet::name, NetworkInterface::as_select()))
+            .filter(vpc_subnet::vpc_id.eq(vpc.id()))
+            .filter(vpc_subnet::name.eq_any(subnet_names))
+            .filter(network_interface::time_deleted.is_null())
+            .filter(vpc_subnet::time_deleted.is_null())
+            .get_results_async(self.pool())
+            .await
+            .map_err(|e| {
+                public_error_from_diesel_pool(
+                    e,
+                    ResourceType::VpcSubnet,
+                    LookupType::Other("Resolving to interfaces".to_string()),
+                )
+            })?;
+        let mut result = HashMap::with_capacity(subnets.len());
+        for (name, interface) in subnets.into_iter() {
+            let entry = result.entry(name).or_insert(vec![]);
+            entry.push(interface);
         }
         Ok(result)
     }

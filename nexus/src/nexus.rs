@@ -39,6 +39,7 @@ use omicron_common::api::external::Ipv6Net;
 use omicron_common::api::external::ListResult;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
+use omicron_common::api::external::NetworkInterface;
 use omicron_common::api::external::PaginationOrder;
 use omicron_common::api::external::ResourceType;
 use omicron_common::api::external::RouteDestination;
@@ -1744,23 +1745,41 @@ impl Nexus {
                 }
             }
         }
-        let instance_ips: HashMap<external::Name, Vec<ipnetwork::IpNetwork>> =
-            self.db_datastore
-                .resolve_instances_to_ips(vpc, instances)
-                .await?
-                .drain()
-                .map(|(name, v)| (name.0, v))
-                .collect();
+
+        // TODO-correctness: It's possible these three queries produce
+        // inconsistent results due to concurrent changes. These should be
+        // transactional
+        let instance_interfaces: HashMap<
+            external::Name,
+            Vec<NetworkInterface>,
+        > = self
+            .db_datastore
+            .resolve_instances_to_interfaces(vpc, instances)
+            .await?
+            .into_iter()
+            .map(|(name, v)| {
+                (name.0, v.into_iter().map(|iface| iface.into()).collect())
+            })
+            .collect();
         let subnet_networks: HashMap<
             external::Name,
             Vec<ipnetwork::IpNetwork>,
         > = self
             .db_datastore
-            .resolve_subnets_to_ips(vpc, subnets)
+            .resolve_subnets_to_ips(vpc, subnets.clone())
             .await?
-            .drain()
+            .into_iter()
             .map(|(name, v)| (name.0, v))
             .collect();
+        let subnet_interfaces: HashMap<external::Name, Vec<NetworkInterface>> =
+            self.db_datastore
+                .resolve_subnets_to_interfaces(vpc, subnets)
+                .await?
+                .into_iter()
+                .map(|(name, v)| {
+                    (name.0, v.into_iter().map(|iface| iface.into()).collect())
+                })
+                .collect();
 
         let mut opte_rules = Vec::with_capacity(rules.len());
         for rule in rules {
@@ -1777,7 +1796,7 @@ impl Nexus {
                     //    references should likely at least be flagged to users
                     external::VpcFirewallRuleTarget::Instance(name) => {
                         targets.extend_from_slice(
-                            instance_ips
+                            instance_interfaces
                                 .get(&name)
                                 .ok_or_else(|| {
                                     Error::not_found_by_name(
@@ -1790,7 +1809,7 @@ impl Nexus {
                     }
                     external::VpcFirewallRuleTarget::Subnet(name) => {
                         targets.extend_from_slice(
-                            subnet_networks
+                            subnet_interfaces
                                 .get(&name)
                                 .ok_or_else(|| {
                                     Error::not_found_by_name(
@@ -1814,12 +1833,14 @@ impl Nexus {
                         match &host.0 {
                             // TODO: See above about handling missing names
                             external::VpcFirewallRuleHostFilter::Instance(name) => {
-                                host_addrs.extend_from_slice(instance_ips.get(&name).ok_or_else(|| {
+                                for interface in instance_interfaces.get(&name).ok_or_else(|| {
                                     Error::not_found_by_name(
                                         ResourceType::Instance,
                                         &name,
                                     )
-                                })?.as_slice());
+                                })? {
+                                    host_addrs.push(interface.ip.into());
+                                }
                             }
                             external::VpcFirewallRuleHostFilter::Subnet(name) => {
                                 host_addrs.extend_from_slice(subnet_networks.get(&name).ok_or_else(|| {
@@ -2553,7 +2574,7 @@ lazy_static! {
 pub struct OpteFirewallRule {
     pub status: crate::db::model::VpcFirewallRuleStatus,
     pub direction: crate::db::model::VpcFirewallRuleDirection,
-    pub targets: Vec<ipnetwork::IpNetwork>,
+    pub targets: Vec<external::NetworkInterface>,
     pub filter_hosts: Option<Vec<ipnetwork::IpNetwork>>,
     pub filter_ports: Option<Vec<crate::db::model::L4PortRange>>,
     pub filter_protocols:
