@@ -1,3 +1,9 @@
+//
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+//
+
 use super::http_testing::dropshot_compat::objects_post;
 use super::http_testing::AuthnMode;
 use super::http_testing::NexusRequest;
