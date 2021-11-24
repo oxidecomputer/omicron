@@ -153,7 +153,7 @@ async fn serve_console_index(
 // not on the console pages.
 #[endpoint {
    method = GET,
-   path = "/c/{path:.*}",
+   path = "/orgs/{path:.*}",
    unpublished = true,
 }]
 pub async fn console_page(

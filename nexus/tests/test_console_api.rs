@@ -46,7 +46,7 @@ async fn test_sessions() {
         .expect("failed to 401 on unauthed API request");
 
     // console pages don't 401, they 302
-    RequestBuilder::new(&testctx, Method::GET, "/c/whatever")
+    RequestBuilder::new(&testctx, Method::GET, "/orgs/whatever")
         .expect_status(Some(StatusCode::FOUND))
         .execute()
         .await
@@ -62,7 +62,7 @@ async fn test_sessions() {
         .await
         .expect("failed to create org with session cookie");
 
-    RequestBuilder::new(&testctx, Method::GET, "/c/whatever")
+    RequestBuilder::new(&testctx, Method::GET, "/orgs/whatever")
         .header(header::COOKIE, &session_token)
         .expect_status(Some(StatusCode::OK))
         .execute()
@@ -92,7 +92,7 @@ async fn test_sessions() {
         .await
         .expect("failed to get 401 for unauthed API request");
 
-    RequestBuilder::new(&testctx, Method::GET, "/c/whatever")
+    RequestBuilder::new(&testctx, Method::GET, "/orgs/whatever")
         .header(header::COOKIE, &session_token)
         .expect_status(Some(StatusCode::FOUND))
         .execute()
@@ -108,7 +108,7 @@ async fn test_console_pages() {
     let testctx = &cptestctx.external_client;
 
     // request to console page route without auth should redirect to IdP
-    let _ = RequestBuilder::new(&testctx, Method::GET, "/c/irrelevant-path")
+    let _ = RequestBuilder::new(&testctx, Method::GET, "/orgs/irrelevant-path")
         .expect_status(Some(StatusCode::FOUND))
         .expect_response_header(header::LOCATION, "/login")
         .execute()
@@ -119,7 +119,7 @@ async fn test_console_pages() {
 
     // hit console page with session, should get back HTML response
     let console_page =
-        RequestBuilder::new(&testctx, Method::GET, "/c/irrelevant-path")
+        RequestBuilder::new(&testctx, Method::GET, "/orgs/irrelevant-path")
             .header(http::header::COOKIE, session_token)
             .expect_status(Some(StatusCode::OK))
             .expect_response_header(
