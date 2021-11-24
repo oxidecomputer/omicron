@@ -184,37 +184,8 @@ impl Vnic {
             _ => return Err("OPTE only supports IPv4 guest IPs at the moment"),
         };
 
-        let public_mac = match mac {
-            Some(v) => {
-                let bytes = v.0.into_array();
-                bytes[0] = 0xA8;
-                bytes[1] = 0x40;
-                bytes[2] = 0x25;
-                EtherAddr::from(bytes)
-            },
-
-            // TODO (rpz): We could use allocator ID here, but
-            // honestly I just want this to go away. The only reason I
-            // added a "public mac" was so I could convince my home
-            // router that the `public_ip` is legit (it doesn't like
-            // having more than one IP with the same MAC address).
-            _ => EtherAddr::from([0xA8, 0x40, 0x25, 0x00, 0x00, 0x01])
-        };
-
-        // TODO (rpz): This is conjured from thin air and assumes
-        // the Oxide lab environment (see "Engineering Lab
-        // Network" in the meta repo). I decided to grab the
-        // 172.20.24.0/24 space. OPTE will pretend to be this IP
-        // and ARP for it.
-        let public_ip = Ipv4Addr::from((172, 20, 24, ip4.to_be_bytes()[0]));
-
-        // TODO (rpz): As the current "source NAT" is a bit of a lie
-        // (and I wrote it to work with my home network + terrible
-        // home router), it might make more sense to put the NAT
-        // config behind something like `Option<SrcNatConfig>`. This
-        // way we could specify `None` until we are ready to properly
-        // demo this behavior. With this in place, Sled Agent would
-        // need to provide only the following:
+        // TODO (rpz): For now we assume the lab environment for the
+        // sake of the demo.
         //
         // * private_ip: `172.20.14.xxx`
         // * gw_mac: `AA:00:04:00:FF:01`
@@ -234,29 +205,13 @@ impl Vnic {
         // get by with a lot less information by pushing SNAT to the
         // side for now.
         let ipcfg = IpConfig {
-            // TODO (rpz): For each interface a guest could have an
-            // IPv4 address, an IPv6 address, or both. Right now Sled
-            // Agent only allows specifying one or the other. And
-            // currently OPTE only allows IPv4 guest addresses.
-            //
             // NOTE: OPTE has it's own Ipv4Addr, thus the into().
             private_ip: ip4.into(),
-
-            public_mac,
-
-            public_ip,
-
-            // These ports are used to Source NAT flows into the
-            // public_ip.
-            port_start: 4096,
-            port_end: 8192,
-
-            // Once again, this is based on the Oxide lab environment.
-            vpc_sub4: opteadm::VpcSubnet4::new(VpcIpv4Cidr::new(ip4, 24)),
             gw_mac: opteadm::EtherAddr::from(
                 [0xAA, 0x00, 0x04, 0x00, 0xFF, 0x01]
             ),
             gw_ip: "172.20.14.1".parse().unwrap(),
+	    snat: None,
         };
 
         let req = RegisterPortReq {

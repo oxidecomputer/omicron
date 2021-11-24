@@ -153,11 +153,25 @@ async fn sic_create_instance_record(
         .await
         .map_err(ActionError::action_failed)?;
 
+    let rpz_nic = NetworkInterface {
+        identity: IdentityMetadata {
+            id: Uuid::new_v4(),
+            name: "rpz_nic".parse().unwrap(),
+            description: "test nic",
+            time_created: Utc::now(),
+            time_modified: Utc::now(),
+        },
+        vpc_id: Uuid::new_v4(),
+        subnet_id: Uuid::new_v4(),
+        mac: MacAddr::V6(MacAddr6::from([0xA8, 0x40, 0x25, 0x00, 0x00, 0xD5]),
+        ip: IpAddr::V4(Ipv4Addr::new(10, 0, 0, 213)),
+    };
+
     // TODO: Populate this with an appropriate NIC.
     // See also: instance_set_runtime in nexus.rs for a similar construction.
     Ok(InstanceHardware {
         runtime: instance.runtime().clone().into(),
-        nics: vec![],
+        nics: vec![rpz_nic],
     })
 }
 
