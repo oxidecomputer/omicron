@@ -196,7 +196,7 @@ function cmd_project_create_demo
 {
 	[[ $# != 2 ]] && usage "expected ORGANIZATION_NAME PROJECT_NAME"
 	mkjson name="$2" description="a project called $2" |
-		do_curl_authz "/organizations/$1/projects" -X POST -T -
+		do_curl_authn "/organizations/$1/projects" -X POST -T -
 }
 
 function cmd_project_delete
@@ -308,7 +308,7 @@ function cmd_disk_get
 function cmd_disk_delete
 {
 	[[ $# != 3 ]] && usage "expected ORGANIZATION_NAME PROJECT_NAME DISK_NAME"
-	do_curl_authz "/organizations/$1/projects/$2/disks/$3" -X DELETE
+	do_curl_authn "/organizations/$1/projects/$2/disks/$3" -X DELETE
 }
 
 function cmd_vpc_create_demo
