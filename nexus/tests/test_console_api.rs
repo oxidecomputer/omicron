@@ -1,3 +1,4 @@
+use dropshot::test_util::ClientTestContext;
 use http::header::HeaderName;
 use http::{header, method::Method, StatusCode};
 
@@ -27,18 +28,7 @@ async fn test_sessions() {
         .expect("failed to clear cookie and 204 on logout");
 
     // log in and pull the token out of the header so we can use it for authed requests
-    let login = RequestBuilder::new(&testctx, Method::POST, "/login")
-        .body(Some(LoginParams { username: "privileged".to_string() }))
-        .expect_status(Some(StatusCode::OK))
-        .execute()
-        .await
-        .expect("failed to log in");
-
-    let session_cookie = get_header_value(login, header::SET_COOKIE);
-    let (session_token, rest) = session_cookie.split_once("; ").unwrap();
-
-    assert!(session_token.starts_with("session="));
-    assert_eq!(rest, "Secure; HttpOnly; SameSite=Lax; Max-Age=3600");
+    let session_token = log_in_and_extract_token(&testctx).await;
 
     let org_params = OrganizationCreate {
         identity: IdentityMetadataCreateParams {
@@ -64,7 +54,7 @@ async fn test_sessions() {
 
     // now make same requests with cookie
     RequestBuilder::new(&testctx, Method::POST, "/organizations")
-        .header(header::COOKIE, session_token)
+        .header(header::COOKIE, &session_token)
         .body(Some(org_params.clone()))
         // TODO: explicit expect_status not needed. decide whether to keep it anyway
         .expect_status(Some(StatusCode::CREATED))
@@ -73,22 +63,20 @@ async fn test_sessions() {
         .expect("failed to create org with session cookie");
 
     RequestBuilder::new(&testctx, Method::GET, "/c/whatever")
-        .header(header::COOKIE, session_token)
-        .expect_status(Some(StatusCode::NOT_FOUND))
-        // TODO: this will stop 404ing once we handle rendering the template better
-        // .expect_status(Some(StatusCode::OK))
+        .header(header::COOKIE, &session_token)
+        .expect_status(Some(StatusCode::OK))
         .execute()
         .await
         .expect("failed to get console page with session cookie");
 
     // logout with an actual session should delete the session in the db
     RequestBuilder::new(&testctx, Method::POST, "/logout")
-        .header(header::COOKIE, session_token)
+        .header(header::COOKIE, &session_token)
         .expect_status(Some(StatusCode::NO_CONTENT))
         // logout also clears the cookie client-side
         .expect_response_header(
             header::SET_COOKIE,
-            "session=\"\"; Secure; HttpOnly; SameSite=Lax; Max-Age=0",
+            "session=; Secure; HttpOnly; SameSite=Lax; Max-Age=0",
         )
         .execute()
         .await
@@ -97,7 +85,7 @@ async fn test_sessions() {
     // now the same requests with the same session cookie should 401/302 because
     // logout also deletes the session server-side
     RequestBuilder::new(&testctx, Method::POST, "/organizations")
-        .header(header::COOKIE, session_token)
+        .header(header::COOKIE, &session_token)
         .body(Some(org_params))
         .expect_status(Some(StatusCode::UNAUTHORIZED))
         .execute()
@@ -105,7 +93,7 @@ async fn test_sessions() {
         .expect("failed to get 401 for unauthed API request");
 
     RequestBuilder::new(&testctx, Method::GET, "/c/whatever")
-        .header(header::COOKIE, session_token)
+        .header(header::COOKIE, &session_token)
         .expect_status(Some(StatusCode::FOUND))
         .execute()
         .await
@@ -127,9 +115,43 @@ async fn test_console_pages() {
         .await
         .expect("failed to redirect to IdP on auth failure");
 
-    // get session
+    let session_token = log_in_and_extract_token(&testctx).await;
 
     // hit console page with session, should get back HTML response
+    let console_page =
+        RequestBuilder::new(&testctx, Method::GET, "/c/irrelevant-path")
+            .header(http::header::COOKIE, session_token)
+            .expect_status(Some(StatusCode::OK))
+            .expect_response_header(
+                http::header::CONTENT_TYPE,
+                "text/html; charset=UTF-8",
+            )
+            .execute()
+            .await
+            .expect("failed to get console index");
+
+    assert_eq!(console_page.body, "<html></html>".as_bytes());
+
+    cptestctx.teardown().await;
+}
+
+#[tokio::test]
+async fn text_login_form() {
+    let cptestctx = test_setup("test_login_form").await;
+    let testctx = &cptestctx.external_client;
+
+    // login route returns bundle too, but is not auth gated
+    let console_page = RequestBuilder::new(&testctx, Method::GET, "/login")
+        .expect_status(Some(StatusCode::OK))
+        .expect_response_header(
+            http::header::CONTENT_TYPE,
+            "text/html; charset=UTF-8",
+        )
+        .execute()
+        .await
+        .expect("failed to get login form");
+
+    assert_eq!(console_page.body, "<html></html>".as_bytes());
 
     cptestctx.teardown().await;
 }
@@ -167,4 +189,21 @@ async fn test_assets() {
 
 fn get_header_value(resp: TestResponse, header_name: HeaderName) -> String {
     resp.headers.get(header_name).unwrap().to_str().unwrap().to_string()
+}
+
+async fn log_in_and_extract_token(testctx: &ClientTestContext) -> String {
+    let login = RequestBuilder::new(&testctx, Method::POST, "/login")
+        .body(Some(LoginParams { username: "privileged".to_string() }))
+        .expect_status(Some(StatusCode::OK))
+        .execute()
+        .await
+        .expect("failed to log in");
+
+    let session_cookie = get_header_value(login, header::SET_COOKIE);
+    let (session_token, rest) = session_cookie.split_once("; ").unwrap();
+
+    assert!(session_token.starts_with("session="));
+    assert_eq!(rest, "Secure; HttpOnly; SameSite=Lax; Max-Age=3600");
+
+    session_token.to_string()
 }
