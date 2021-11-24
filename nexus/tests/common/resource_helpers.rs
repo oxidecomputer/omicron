@@ -39,7 +39,7 @@ pub async fn create_organization(
             description: "an org".to_string(),
         },
     };
-    NexusRequest::objects_post(client, "/organizations", input)
+    NexusRequest::objects_post(client, "/organizations", &input)
         .authn_as(AuthnMode::PrivilegedUser)
         .execute()
         .await
@@ -53,17 +53,22 @@ pub async fn create_project(
     organization_name: &str,
     project_name: &str,
 ) -> Project {
-    objects_post(
-        &client,
-        format!("/organizations/{}/projects", &organization_name).as_str(),
-        params::ProjectCreate {
+    NexusRequest::objects_post(
+        client,
+        &format!("/organizations/{}/projects", &organization_name),
+        &params::ProjectCreate {
             identity: IdentityMetadataCreateParams {
                 name: project_name.parse().unwrap(),
                 description: "a pier".to_string(),
             },
         },
     )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
     .await
+    .expect("failed to make request")
+    .response_body()
+    .unwrap()
 }
 
 pub async fn create_vpc(

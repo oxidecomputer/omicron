@@ -409,8 +409,13 @@ async fn organization_projects_post(
     let params = path_params.into_inner();
     let organization_name = &params.organization_name;
     let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
         let project = nexus
-            .project_create(&organization_name, &new_project.into_inner())
+            .project_create(
+                &opctx,
+                &organization_name,
+                &new_project.into_inner(),
+            )
             .await?;
         Ok(HttpResponseCreated(project.into()))
     };

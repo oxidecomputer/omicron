@@ -242,6 +242,10 @@ pub struct Organization {
 }
 
 impl Organization {
+    pub fn id(&self) -> Uuid {
+        self.organization_id
+    }
+
     pub fn project(&self, project_id: Uuid) -> Project {
         Project { organization_id: self.organization_id, project_id }
     }
