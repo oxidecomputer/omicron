@@ -1544,6 +1544,139 @@
         }
       }
     },
+    "/organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/firewall/rules": {
+      "get": {
+        "description": "List firewall rules for a VPC.",
+        "operationId": "vpc_firewall_rules_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "nullable": true,
+              "description": "Maximum number of items returned by a single call",
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 1
+            },
+            "style": "form"
+          },
+          {
+            "in": "query",
+            "name": "page_token",
+            "schema": {
+              "nullable": true,
+              "description": "Token returned by previous call to retreive the subsequent page",
+              "type": "string"
+            },
+            "style": "form"
+          },
+          {
+            "in": "query",
+            "name": "sort_by",
+            "schema": {
+              "$ref": "#/components/schemas/NameSortMode"
+            },
+            "style": "form"
+          },
+          {
+            "in": "path",
+            "name": "organization_name",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Name"
+            },
+            "style": "simple"
+          },
+          {
+            "in": "path",
+            "name": "project_name",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Name"
+            },
+            "style": "simple"
+          },
+          {
+            "in": "path",
+            "name": "vpc_name",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Name"
+            },
+            "style": "simple"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VpcFirewallRuleResultsPage"
+                }
+              }
+            }
+          }
+        },
+        "x-dropshot-pagination": true
+      },
+      "put": {
+        "description": "Replace the firewall rules for a VPC",
+        "operationId": "vpc_firewall_rules_put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "organization_name",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Name"
+            },
+            "style": "simple"
+          },
+          {
+            "in": "path",
+            "name": "project_name",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Name"
+            },
+            "style": "simple"
+          },
+          {
+            "in": "path",
+            "name": "vpc_name",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Name"
+            },
+            "style": "simple"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/VpcFirewallRuleUpdateParams"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VpcFirewallRuleUpdateResult"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/routers": {
       "get": {
         "description": "List VPC Custom and System Routers",
@@ -3025,6 +3158,14 @@
         "pattern": "^(fd|FD)00:((([0-9a-fA-F]{1,4}\\:){6}[0-9a-fA-F]{1,4})|(([0-9a-fA-F]{1,4}:){1,6}:))/(6[4-9]|[7-9][0-9]|1[0-1][0-9]|12[0-6])$",
         "maxLength": 43
       },
+      "L4PortRange": {
+        "title": "A range of IP ports",
+        "description": "An inclusive-inclusive range of IP ports. The second port may be omitted to represent a single port",
+        "type": "string",
+        "pattern": "^[0-9]{1,5}(-[0-9]{1,5})?$",
+        "minLength": 1,
+        "maxLength": 11
+      },
       "Name": {
         "title": "A name used in the API",
         "description": "Names must begin with a lower case ASCII letter, be composed exclusively of lowercase ASCII, uppercase ASCII, numbers, and '-', and may not end with a '-'.",
@@ -3863,6 +4004,388 @@
           "dnsName",
           "name"
         ]
+      },
+      "VpcFirewallRule": {
+        "description": "A single rule in a VPC firewall",
+        "type": "object",
+        "properties": {
+          "action": {
+            "description": "whether traffic matching the rule should be allowed or dropped",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/VpcFirewallRuleAction"
+              }
+            ]
+          },
+          "direction": {
+            "description": "whether this rule is for incoming or outgoing traffic",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/VpcFirewallRuleDirection"
+              }
+            ]
+          },
+          "filters": {
+            "description": "reductions on the scope of the rule",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/VpcFirewallRuleFilter"
+              }
+            ]
+          },
+          "identity": {
+            "description": "common identifying metadata",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/IdentityMetadata"
+              }
+            ]
+          },
+          "priority": {
+            "description": "the relative priority of this rule",
+            "type": "integer",
+            "format": "uint16",
+            "minimum": 0
+          },
+          "status": {
+            "description": "whether this rule is in effect",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/VpcFirewallRuleStatus"
+              }
+            ]
+          },
+          "targets": {
+            "description": "list of sets of instances that the rule applies to",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/VpcFirewallRuleTarget"
+            }
+          }
+        },
+        "required": [
+          "action",
+          "direction",
+          "filters",
+          "identity",
+          "priority",
+          "status",
+          "targets"
+        ]
+      },
+      "VpcFirewallRuleAction": {
+        "type": "string",
+        "enum": [
+          "allow",
+          "deny"
+        ]
+      },
+      "VpcFirewallRuleDirection": {
+        "type": "string",
+        "enum": [
+          "inbound",
+          "outbound"
+        ]
+      },
+      "VpcFirewallRuleFilter": {
+        "description": "Filter for a firewall rule. A given packet must match every field that is present for the rule to apply to it. A packet matches a field if any entry in that field matches the packet.",
+        "type": "object",
+        "properties": {
+          "hosts": {
+            "nullable": true,
+            "description": "If present, the sources (if incoming) or destinations (if outgoing) this rule applies to.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/VpcFirewallRuleHostFilter"
+            }
+          },
+          "ports": {
+            "nullable": true,
+            "description": "If present, the destination ports this rule applies to.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/L4PortRange"
+            }
+          },
+          "protocols": {
+            "nullable": true,
+            "description": "If present, the networking protocols this rule applies to.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/VpcFirewallRuleProtocol"
+            }
+          }
+        }
+      },
+      "VpcFirewallRuleHostFilter": {
+        "description": "A subset of [`NetworkTarget`], `VpcFirewallRuleHostFilter` specifies all possible targets that a route can forward to.",
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "vpc"
+                ]
+              },
+              "value": {
+                "$ref": "#/components/schemas/Name"
+              }
+            },
+            "required": [
+              "type",
+              "value"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "subnet"
+                ]
+              },
+              "value": {
+                "$ref": "#/components/schemas/Name"
+              }
+            },
+            "required": [
+              "type",
+              "value"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "instance"
+                ]
+              },
+              "value": {
+                "$ref": "#/components/schemas/Name"
+              }
+            },
+            "required": [
+              "type",
+              "value"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "ip"
+                ]
+              },
+              "value": {
+                "type": "string",
+                "format": "ip"
+              }
+            },
+            "required": [
+              "type",
+              "value"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "internetGateway"
+                ]
+              },
+              "value": {
+                "$ref": "#/components/schemas/Name"
+              }
+            },
+            "required": [
+              "type",
+              "value"
+            ]
+          }
+        ]
+      },
+      "VpcFirewallRuleProtocol": {
+        "description": "The protocols that may be specified in a firewall rule's filter",
+        "type": "string",
+        "enum": [
+          "TCP",
+          "UDP",
+          "ICMP"
+        ]
+      },
+      "VpcFirewallRuleResultsPage": {
+        "description": "A single page of results",
+        "type": "object",
+        "properties": {
+          "items": {
+            "description": "list of items on this page of results",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/VpcFirewallRule"
+            }
+          },
+          "next_page": {
+            "nullable": true,
+            "description": "token used to fetch the next page of results (if any)",
+            "type": "string"
+          }
+        },
+        "required": [
+          "items"
+        ]
+      },
+      "VpcFirewallRuleStatus": {
+        "type": "string",
+        "enum": [
+          "disabled",
+          "enabled"
+        ]
+      },
+      "VpcFirewallRuleTarget": {
+        "description": "A subset of [`NetworkTarget`], `VpcFirewallRuleTarget` specifies all possible targets that a firewall rule can be attached to.",
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "vpc"
+                ]
+              },
+              "value": {
+                "$ref": "#/components/schemas/Name"
+              }
+            },
+            "required": [
+              "type",
+              "value"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "subnet"
+                ]
+              },
+              "value": {
+                "$ref": "#/components/schemas/Name"
+              }
+            },
+            "required": [
+              "type",
+              "value"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "instance"
+                ]
+              },
+              "value": {
+                "$ref": "#/components/schemas/Name"
+              }
+            },
+            "required": [
+              "type",
+              "value"
+            ]
+          }
+        ]
+      },
+      "VpcFirewallRuleUpdate": {
+        "description": "A single rule in a VPC firewall",
+        "type": "object",
+        "properties": {
+          "action": {
+            "description": "whether traffic matching the rule should be allowed or dropped",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/VpcFirewallRuleAction"
+              }
+            ]
+          },
+          "description": {
+            "description": "human-readable free-form text about a resource",
+            "type": "string"
+          },
+          "direction": {
+            "description": "whether this rule is for incoming or outgoing traffic",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/VpcFirewallRuleDirection"
+              }
+            ]
+          },
+          "filters": {
+            "description": "reductions on the scope of the rule",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/VpcFirewallRuleFilter"
+              }
+            ]
+          },
+          "priority": {
+            "description": "the relative priority of this rule",
+            "type": "integer",
+            "format": "uint16",
+            "minimum": 0
+          },
+          "status": {
+            "description": "whether this rule is in effect",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/VpcFirewallRuleStatus"
+              }
+            ]
+          },
+          "targets": {
+            "description": "list of sets of instances that the rule applies to",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/VpcFirewallRuleTarget"
+            }
+          }
+        },
+        "required": [
+          "action",
+          "description",
+          "direction",
+          "filters",
+          "priority",
+          "status",
+          "targets"
+        ]
+      },
+      "VpcFirewallRuleUpdateParams": {
+        "description": "Updateable properties of a [`Vpc`]'s firewall Note that VpcFirewallRules are implicitly created along with a Vpc, so there is no explicit creation.",
+        "type": "object",
+        "additionalProperties": {
+          "$ref": "#/components/schemas/VpcFirewallRuleUpdate"
+        }
+      },
+      "VpcFirewallRuleUpdateResult": {
+        "description": "Response to an update replacing [`Vpc`]'s firewall",
+        "type": "object",
+        "additionalProperties": {
+          "$ref": "#/components/schemas/VpcFirewallRule"
+        }
       },
       "VpcResultsPage": {
         "description": "A single page of results",

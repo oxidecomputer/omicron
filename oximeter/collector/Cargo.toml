@@ -6,6 +6,7 @@ description = "The oximeter metric collection server"
 
 [dependencies]
 dropshot = { git = "https://github.com/oxidecomputer/dropshot", branch = "main" }
+nexus-client = { path = "../../nexus-client" }
 omicron-common = { path = "../../common" }
 oximeter = { path = "../oximeter" }
 oximeter-db = { path = "../db" }
@@ -14,7 +15,7 @@ serde = { version = "1", features = [ "derive" ] }
 slog = { version = "2.5", features = [ "max_level_trace", "release_max_level_debug" ] }
 structopt = "0.3"
 thiserror = "1.0.30"
-tokio = "1.13"
+tokio = "1.14"
 toml = "0.5.8"
 uuid = { version = "0.8.2", features = [ "v4", "serde" ] }
 
@@ -22,7 +23,7 @@ uuid = { version = "0.8.2", features = [ "v4", "serde" ] }
 expectorate = "1.0.4"
 omicron-test-utils = { path = "../../test-utils" }
 openapiv3 = "0.5.0"
-serde_json = "1.0.70"
+serde_json = "1.0.71"
 subprocess = "0.2.8"
 
 [dev-dependencies.openapi-lint]

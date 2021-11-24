@@ -3,6 +3,7 @@
 pub mod common;
 
 use omicron_test_utils::dev::poll::{wait_for_condition, CondCheckError};
+use oximeter_db::DbWrite;
 use std::net;
 use std::time::Duration;
 use uuid::Uuid;
@@ -101,9 +102,8 @@ async fn test_oximeter_reregistration() {
         0,
     );
     let client =
-        oximeter_db::Client::new(ch_address.into(), context.logctx.log.clone())
-            .await
-            .unwrap();
+        oximeter_db::Client::new(ch_address.into(), context.logctx.log.clone());
+    client.init_db().await.expect("Failed to initialize timeseries database");
 
     // Helper to retrieve the timeseries from ClickHouse
     let timeseries_name = "integration_target:integration_metric";

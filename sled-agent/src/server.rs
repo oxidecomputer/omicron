@@ -12,7 +12,7 @@ use std::sync::Arc;
 #[cfg(test)]
 use crate::mocks::MockNexusClient as NexusClient;
 #[cfg(not(test))]
-use omicron_common::NexusClient;
+use nexus_client::Client as NexusClient;
 
 /// Packages up a [`SledAgent`], running the sled agent API under a Dropshot
 /// server wired up to the sled agent
@@ -71,7 +71,9 @@ impl Server {
             nexus_client
                 .cpapi_sled_agents_post(
                     &config.id,
-                    &omicron_common::nexus_client::types::SledAgentStartupInfo { sa_address: sa_address.to_string() },
+                    &nexus_client::types::SledAgentStartupInfo {
+                        sa_address: sa_address.to_string(),
+                    },
                 )
                 .await
                 .map_err(BackoffError::Transient)

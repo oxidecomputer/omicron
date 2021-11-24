@@ -52,7 +52,7 @@ impl From<BootstrapError> for ExternalError {
 }
 
 /// The entity responsible for bootstrapping an Oxide rack.
-pub struct Agent {
+pub(crate) struct Agent {
     /// Debug log
     log: Logger,
     peer_monitor: discovery::PeerMonitor,
