@@ -192,7 +192,6 @@
     },
     "/logout": {
       "post": {
-        "description": "Log user out of web console by deleting session.",
         "operationId": "logout",
         "responses": {}
       }

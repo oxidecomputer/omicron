@@ -30,7 +30,7 @@ pub struct LoginParams {
     pub username: String,
 }
 
-/// This is just for demo purposes. we will probably end up with a real username/password login
+// This is just for demo purposes. we will probably end up with a real username/password login
 // endpoint, but I think it will only be for use while setting up the rack
 #[endpoint {
    method = POST,
@@ -74,9 +74,7 @@ pub async fn spoof_login(
         .body("ok".into())?) // TODO: what do we return from login?
 }
 
-/**
- * Log user out of web console by deleting session in both server and browser.
- */
+// Log user out of web console by deleting session in both server and browser
 #[endpoint {
    // important for security that this be a POST despite the empty req body
    method = POST,

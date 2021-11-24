@@ -19,7 +19,7 @@ use oximeter::types::ProducerRegistry;
 use oximeter_instruments::http::{HttpService, LatencyTracker};
 use slog::Logger;
 use std::collections::BTreeMap;
-use std::env::current_dir;
+use std::env;
 use std::fmt::Debug;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -107,10 +107,11 @@ impl ServerContext {
             .register_producer(external_latencies.clone())
             .unwrap();
 
-        // TODO: currently relative to the execution dir, should this be absolute?
-        let assets_directory = current_dir()
-            .map_err(|e| e.to_string())?
-            .join(config.console.assets_directory.to_owned());
+        let assets_directory = PathBuf::from(
+            env::var("CARGO_MANIFEST_DIR")
+            .map_err(|_e| "env var CARGO_MANIFEST_DIR must be defined because the path for static assets is relative to it")?,
+        )
+        .join(config.console.assets_directory.to_owned());
 
         if !assets_directory.exists() {
             return Err("assets_directory must exist at start time".to_string());
