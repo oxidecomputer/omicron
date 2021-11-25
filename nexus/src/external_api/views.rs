@@ -35,7 +35,7 @@ impl Into<Organization> for model::Organization {
  */
 
 /**
- * Client view of an [`Project`]
+ * Client view of a [`Project`]
  */
 #[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
@@ -62,6 +62,9 @@ impl Into<Project> for model::Project {
  * VPCs
  */
 
+/**
+ * Client view of a [`Vpc`]
+ */
 #[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct Vpc {

@@ -6,7 +6,6 @@ use dropshot::HttpErrorResponseBody;
 use dropshot::Method;
 use http::StatusCode;
 use omicron_common::api::external::IdentityMetadataCreateParams;
-use omicron_common::api::external::VpcCreateParams;
 use omicron_common::api::external::VpcRouter;
 use omicron_common::api::external::VpcRouterCreateParams;
 use omicron_nexus::external_api::params;
@@ -78,7 +77,7 @@ pub async fn create_vpc(
             &organization_name, &project_name
         )
         .as_str(),
-        VpcCreateParams {
+        params::VpcCreate {
             identity: IdentityMetadataCreateParams {
                 name: vpc_name.parse().unwrap(),
                 description: "vpc description".to_string(),
@@ -106,7 +105,7 @@ pub async fn create_vpc_with_error(
                 &organization_name, &project_name
             )
             .as_str(),
-            VpcCreateParams {
+            params::VpcCreate {
                 identity: IdentityMetadataCreateParams {
                     name: vpc_name.parse().unwrap(),
                     description: String::from("vpc description"),

@@ -1044,28 +1044,6 @@ impl From<steno::SagaStateView> for SagaState {
     }
 }
 
-/**
- * Create-time parameters for a [`Vpc`]
- */
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct VpcCreateParams {
-    #[serde(flatten)]
-    pub identity: IdentityMetadataCreateParams,
-    pub dns_name: Name,
-}
-
-/**
- * Updateable properties of a [`Vpc`]
- */
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct VpcUpdateParams {
-    #[serde(flatten)]
-    pub identity: IdentityMetadataUpdateParams,
-    pub dns_name: Option<Name>,
-}
-
 /// An `Ipv4Net` represents a IPv4 subnetwork, including the address and network mask.
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Serialize)]
 pub struct Ipv4Net(pub ipnetwork::Ipv4Network);

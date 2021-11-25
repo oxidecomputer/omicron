@@ -913,7 +913,7 @@ impl Vpc {
         vpc_id: Uuid,
         project_id: Uuid,
         system_router_id: Uuid,
-        params: external::VpcCreateParams,
+        params: params::VpcCreate,
     ) -> Self {
         let identity = VpcIdentity::new(vpc_id, params.identity);
         Self {
@@ -942,8 +942,8 @@ pub struct VpcUpdate {
     pub dns_name: Option<Name>,
 }
 
-impl From<external::VpcUpdateParams> for VpcUpdate {
-    fn from(params: external::VpcUpdateParams) -> Self {
+impl From<params::VpcUpdate> for VpcUpdate {
+    fn from(params: params::VpcUpdate) -> Self {
         Self {
             name: params.identity.name.map(Name),
             description: params.identity.description,
