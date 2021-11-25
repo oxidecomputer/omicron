@@ -61,7 +61,7 @@ pub struct ConsoleConfig {
     /** how long browsers can cache static assets */
     pub cache_control_max_age: Duration,
     /** directory containing static assets */
-    pub assets_directory: PathBuf,
+    pub assets_directory: Option<PathBuf>,
 }
 
 impl ServerContext {
@@ -111,18 +111,16 @@ impl ServerContext {
             .register_producer(external_latencies.clone())
             .unwrap();
 
-        let assets_directory = PathBuf::from(
-            env::var("CARGO_MANIFEST_DIR")
-            .map_err(|_e| "env var CARGO_MANIFEST_DIR must be defined because the path for static assets is relative to it")?,
-        )
-        .join(config.console.assets_directory.to_owned());
+        let assets_directory = env::var("CARGO_MANIFEST_DIR")
+            .map(|root| {
+                PathBuf::from(root)
+                    .join(config.console.assets_directory.to_owned())
+            })
+            .ok();
 
-        if !assets_directory.exists() {
-            return Err("assets_directory must exist at start time".to_string());
-        }
-
-        // TODO: check for particular assets, like console index.html
-        // leaving that out for now so we don't break nexus in dev for everyone
+        // TODO: check that asset directory exists, check for particular assets
+        // like console index.html. leaving that out for now so we don't break
+        // nexus in dev for everyone
 
         Ok(Arc::new(ServerContext {
             nexus: Nexus::new_with_id(

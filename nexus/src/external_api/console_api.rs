@@ -189,7 +189,10 @@ pub async fn asset(
     let apictx = rqctx.context();
     let path = path_params.into_inner().path;
 
-    let file = find_file(path, &apictx.console_config.assets_directory)?;
+    let file = match &apictx.console_config.assets_directory {
+        Some(assets_directory) => find_file(path, assets_directory),
+        _ => Err(not_found("assets_directory undefined")),
+    }?;
     let file_contents =
         tokio::fs::read(&file).await.map_err(|_| not_found("EBADF"))?;
 
@@ -215,10 +218,13 @@ fn cache_control_header_value(apictx: &Arc<ServerContext>) -> String {
 async fn serve_console_index(
     apictx: &Arc<ServerContext>,
 ) -> Result<Response<Body>, HttpError> {
-    let file = apictx
-        .console_config
-        .assets_directory
-        .join(PathBuf::from("index.html"));
+    let assets_directory =
+        &apictx
+            .console_config
+            .assets_directory
+            .to_owned()
+            .ok_or_else(|| not_found("assets_directory undefined"))?;
+    let file = assets_directory.join(PathBuf::from("index.html"));
     let file_contents =
         tokio::fs::read(&file).await.map_err(|_| not_found("EBADF"))?;
     Ok(Response::builder()
