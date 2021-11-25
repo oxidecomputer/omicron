@@ -3,6 +3,7 @@ name = "oximeter-collector"
 version = "0.1.0"
 edition = "2018"
 description = "The oximeter metric collection server"
+license = "MPL-2.0"
 
 [dependencies]
 dropshot = { git = "https://github.com/oxidecomputer/dropshot", branch = "main" }
