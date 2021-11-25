@@ -5,8 +5,7 @@
 use http::method::Method;
 use http::StatusCode;
 use omicron_common::api::external::IdentityMetadataUpdateParams;
-use omicron_common::api::external::Vpc;
-use omicron_common::api::external::VpcUpdateParams;
+use omicron_nexus::external_api::{params, views::Vpc};
 
 use dropshot::test_util::object_get;
 use dropshot::test_util::objects_list_page;
@@ -92,7 +91,7 @@ async fn test_vpcs() {
     vpcs_eq(&vpcs[1], &vpc);
 
     /* Update the VPC */
-    let update_params = VpcUpdateParams {
+    let update_params = params::VpcUpdate {
         identity: IdentityMetadataUpdateParams {
             name: Some("new-name".parse().unwrap()),
             description: Some("another description".to_string()),
@@ -147,7 +146,7 @@ async fn vpc_get(client: &ClientTestContext, vpc_url: &str) -> Vpc {
 async fn vpc_put(
     client: &ClientTestContext,
     vpc_url: &str,
-    params: VpcUpdateParams,
+    params: params::VpcUpdate,
 ) {
     client
         .make_request(Method::PUT, &vpc_url, Some(params), StatusCode::OK)

@@ -48,7 +48,6 @@ use omicron_common::api::external::RouterRouteCreateParams;
 use omicron_common::api::external::RouterRouteKind;
 use omicron_common::api::external::RouterRouteUpdateParams;
 use omicron_common::api::external::UpdateResult;
-use omicron_common::api::external::VpcCreateParams;
 use omicron_common::api::external::VpcFirewallRuleUpdateParams;
 use omicron_common::api::external::VpcFirewallRuleUpdateResult;
 use omicron_common::api::external::VpcRouterCreateParams;
@@ -56,7 +55,6 @@ use omicron_common::api::external::VpcRouterKind;
 use omicron_common::api::external::VpcRouterUpdateParams;
 use omicron_common::api::external::VpcSubnetCreateParams;
 use omicron_common::api::external::VpcSubnetUpdateParams;
-use omicron_common::api::external::VpcUpdateParams;
 use omicron_common::api::internal::nexus;
 use omicron_common::api::internal::nexus::DiskRuntimeState;
 use omicron_common::api::internal::sled_agent::InstanceRuntimeStateRequested;
@@ -484,7 +482,7 @@ impl Nexus {
             .project_create_vpc(
                 &organization_name,
                 &new_project.identity.name.clone().into(),
-                &VpcCreateParams {
+                &params::VpcCreate {
                     identity: IdentityMetadataCreateParams {
                         name: "default".parse().unwrap(),
                         description: "Default VPC".to_string(),
@@ -1421,7 +1419,7 @@ impl Nexus {
         &self,
         organization_name: &Name,
         project_name: &Name,
-        params: &VpcCreateParams,
+        params: &params::VpcCreate,
     ) -> CreateResult<db::model::Vpc> {
         let organization_id = self
             .db_datastore
@@ -1543,7 +1541,7 @@ impl Nexus {
         organization_name: &Name,
         project_name: &Name,
         vpc_name: &Name,
-        params: &VpcUpdateParams,
+        params: &params::VpcUpdate,
     ) -> UpdateResult<()> {
         let organization_id = self
             .db_datastore

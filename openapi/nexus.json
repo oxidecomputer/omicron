@@ -1413,7 +1413,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/VpcCreateParams"
+                "$ref": "#/components/schemas/VpcCreate"
               }
             }
           },
@@ -1515,7 +1515,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/VpcUpdateParams"
+                "$ref": "#/components/schemas/VpcUpdate"
               }
             }
           },
@@ -3302,7 +3302,7 @@
         }
       },
       "Project": {
-        "description": "Client view of an [`Project`]",
+        "description": "Client view of a [`Project`]",
         "type": "object",
         "properties": {
           "description": {
@@ -3958,7 +3958,7 @@
         ]
       },
       "Vpc": {
-        "description": "Identity-related metadata that's included in nearly all public API objects",
+        "description": "Client view of a [`Vpc`]",
         "type": "object",
         "properties": {
           "description": {
@@ -4018,7 +4018,7 @@
           "timeModified"
         ]
       },
-      "VpcCreateParams": {
+      "VpcCreate": {
         "description": "Create-time parameters for a [`Vpc`]",
         "type": "object",
         "properties": {
@@ -4658,7 +4658,7 @@
           }
         }
       },
-      "VpcUpdateParams": {
+      "VpcUpdate": {
         "description": "Updateable properties of a [`Vpc`]",
         "type": "object",
         "properties": {
