@@ -665,9 +665,14 @@ mod test {
     use tokio::sync::watch;
 
     static INST_UUID_STR: &str = "e398c5d5-5059-4e55-beac-3a1071083aaa";
+    static PROPOLIS_UUID_STR: &str = "ed895b13-55d5-4e0b-88e9-3f4e74d0d936";
 
     fn test_uuid() -> Uuid {
         INST_UUID_STR.parse().unwrap()
+    }
+
+    fn test_propolis_uuid() -> Uuid {
+        PROPOLIS_UUID_STR.parse().unwrap()
     }
 
     // Endpoints for a fake Propolis server.
@@ -876,7 +881,7 @@ mod test {
             .times(1)
             .in_sequence(&mut seq)
             .returning(|_, zone, vnics| {
-                assert_eq!(zone, zone_name(&test_uuid()));
+                assert_eq!(zone, zone_name(&test_propolis_uuid()));
                 assert_eq!(vnics.len(), 1);
                 assert_eq!(vnics[0], vnic_name(0));
                 Ok(())
@@ -888,14 +893,14 @@ mod test {
             .times(1)
             .in_sequence(&mut seq)
             .returning(|zone| {
-                assert_eq!(zone, zone_name(&test_uuid()));
+                assert_eq!(zone, zone_name(&test_propolis_uuid()));
                 Ok(())
             });
 
         let zone_boot_ctx = MockZones::boot_context();
         zone_boot_ctx.expect().times(1).in_sequence(&mut seq).returning(
             |zone| {
-                assert_eq!(zone, zone_name(&test_uuid()));
+                assert_eq!(zone, zone_name(&test_propolis_uuid()));
                 Ok(())
             },
         );
@@ -904,7 +909,7 @@ mod test {
             crate::illumos::svc::wait_for_service_context();
         wait_for_service_ctx.expect().times(1).in_sequence(&mut seq).returning(
             |zone, fmri| {
-                assert_eq!(zone.unwrap(), zone_name(&test_uuid()));
+                assert_eq!(zone.unwrap(), zone_name(&test_propolis_uuid()));
                 assert_eq!(fmri, "svc:/milestone/network:default");
                 Ok(())
             },
@@ -916,7 +921,7 @@ mod test {
             .times(1)
             .in_sequence(&mut seq)
             .returning(|zone, iface| {
-                assert_eq!(zone, zone_name(&test_uuid()));
+                assert_eq!(zone, zone_name(&test_propolis_uuid()));
                 assert_eq!(iface, interface_name(&vnic_name(0)));
                 Ok("127.0.0.1/24".parse().unwrap())
             });
@@ -927,8 +932,8 @@ mod test {
             .times(1)
             .in_sequence(&mut seq)
             .returning(|zone, id, addr| {
-                assert_eq!(zone, zone_name(&test_uuid()));
-                assert_eq!(id, &test_uuid());
+                assert_eq!(zone, zone_name(&test_propolis_uuid()));
+                assert_eq!(id, &test_propolis_uuid());
                 assert_eq!(
                     addr,
                     &"127.0.0.1:12400".parse::<SocketAddr>().unwrap()
@@ -940,7 +945,7 @@ mod test {
             crate::illumos::svc::wait_for_service_context();
         wait_for_service_ctx.expect().times(1).in_sequence(&mut seq).returning(
             |zone, fmri| {
-                let id = test_uuid();
+                let id = test_propolis_uuid();
                 assert_eq!(zone.unwrap(), zone_name(&id));
                 assert_eq!(
                     fmri,
@@ -994,7 +999,7 @@ mod test {
             runtime: InstanceRuntimeState {
                 run_state: InstanceState::Creating,
                 sled_uuid: Uuid::new_v4(),
-                propolis_uuid: Uuid::new_v4(),
+                propolis_uuid: test_propolis_uuid(),
                 ncpus: InstanceCpuCount(2),
                 memory: ByteCount::from_mebibytes_u32(512),
                 hostname: "myvm".to_string(),
