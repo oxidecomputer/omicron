@@ -6,12 +6,13 @@
  * Views are response bodies, most of which are public lenses onto DB models.
  */
 
-use crate::db::identity::Resource;
+use crate::db::identity::{Asset, Resource};
 use crate::db::model;
 use api_identity::ObjectIdentity;
 use omicron_common::api::external::{IdentityMetadata, Name, ObjectIdentity};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use std::net::SocketAddr;
 use uuid::Uuid;
 
 /*
@@ -94,5 +95,45 @@ impl Into<Vpc> for model::Vpc {
             system_router_id: self.system_router_id,
             dns_name: self.dns_name.0,
         }
+    }
+}
+
+/*
+ * RACKS
+ */
+
+/**
+ * Client view of an [`Rack`]
+ */
+#[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct Rack {
+    pub identity: IdentityMetadata,
+}
+
+impl Into<Rack> for model::Rack {
+    fn into(self) -> Rack {
+        Rack { identity: self.identity() }
+    }
+}
+
+/*
+ * SLEDS
+ */
+
+/**
+ * Client view of an [`Sled`]
+ */
+#[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct Sled {
+    #[serde(flatten)]
+    pub identity: IdentityMetadata,
+    pub service_address: SocketAddr,
+}
+
+impl Into<Sled> for model::Sled {
+    fn into(self) -> Sled {
+        Sled { identity: self.identity(), service_address: self.address() }
     }
 }

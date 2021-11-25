@@ -35,7 +35,7 @@ use std::fmt::Display;
 use std::fmt::Formatter;
 use std::fmt::Result as FormatResult;
 use std::iter::FromIterator;
-use std::net::{IpAddr, SocketAddr};
+use std::net::IpAddr;
 use std::num::{NonZeroU16, NonZeroU32};
 use std::str::FromStr;
 use uuid::Uuid;
@@ -897,34 +897,6 @@ pub struct DiskAttachment {
     pub disk_id: Uuid,
     pub disk_name: Name,
     pub disk_state: DiskState,
-}
-
-/*
- * RACKS
- */
-
-/**
- * Client view of an [`Rack`]
- */
-#[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct Rack {
-    pub identity: IdentityMetadata,
-}
-
-/*
- * SLEDS
- */
-
-/**
- * Client view of an [`Sled`]
- */
-#[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct Sled {
-    #[serde(flatten)]
-    pub identity: IdentityMetadata,
-    pub service_address: SocketAddr,
 }
 
 /*

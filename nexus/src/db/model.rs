@@ -338,12 +338,6 @@ pub struct Rack {
     pub identity: RackIdentity,
 }
 
-impl Into<external::Rack> for Rack {
-    fn into(self) -> external::Rack {
-        external::Rack { identity: self.identity() }
-    }
-}
-
 /// Database representation of a Sled.
 #[derive(Queryable, Insertable, Debug, Clone, Selectable, Asset)]
 #[table_name = "sled"]
@@ -369,13 +363,6 @@ impl Sled {
     pub fn address(&self) -> SocketAddr {
         // TODO: avoid this unwrap
         SocketAddr::new(self.ip.ip(), u16::try_from(self.port).unwrap())
-    }
-}
-
-impl Into<external::Sled> for Sled {
-    fn into(self) -> external::Sled {
-        let service_address = self.address();
-        external::Sled { identity: self.identity(), service_address }
     }
 }
 

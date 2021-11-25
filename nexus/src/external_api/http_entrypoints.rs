@@ -12,7 +12,7 @@ use crate::ServerContext;
 
 use super::{
     console_api, params,
-    views::{Organization, Project, Vpc},
+    views::{Organization, Project, Rack, Sled, Vpc},
 };
 use crate::context::OpContext;
 use dropshot::endpoint;
@@ -46,13 +46,11 @@ use omicron_common::api::external::DiskAttachment;
 use omicron_common::api::external::Instance;
 use omicron_common::api::external::InstanceCreateParams;
 use omicron_common::api::external::PaginationOrder;
-use omicron_common::api::external::Rack;
 use omicron_common::api::external::RouterRoute;
 use omicron_common::api::external::RouterRouteCreateParams;
 use omicron_common::api::external::RouterRouteKind;
 use omicron_common::api::external::RouterRouteUpdateParams;
 use omicron_common::api::external::Saga;
-use omicron_common::api::external::Sled;
 use omicron_common::api::external::VpcFirewallRule;
 use omicron_common::api::external::VpcFirewallRuleUpdateParams;
 use omicron_common::api::external::VpcFirewallRuleUpdateResult;
