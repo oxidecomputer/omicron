@@ -926,17 +926,6 @@ impl Vpc {
     }
 }
 
-impl Into<external::Vpc> for Vpc {
-    fn into(self) -> external::Vpc {
-        external::Vpc {
-            identity: self.identity(),
-            project_id: self.project_id,
-            system_router_id: self.system_router_id,
-            dns_name: self.dns_name.0,
-        }
-    }
-}
-
 impl DatastoreCollection<VpcFirewallRule> for Vpc {
     type CollectionId = Uuid;
     type GenerationNumberColumn = vpc::dsl::firewall_gen;

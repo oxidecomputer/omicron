@@ -1,8 +1,8 @@
 use http::method::Method;
 use http::StatusCode;
 use omicron_common::api::external::IdentityMetadataUpdateParams;
-use omicron_common::api::external::Vpc;
 use omicron_common::api::external::VpcUpdateParams;
+use omicron_nexus::external_api::views::Vpc;
 
 use dropshot::test_util::object_get;
 use dropshot::test_util::objects_list_page;
