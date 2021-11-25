@@ -650,7 +650,7 @@ impl Disk {
     pub fn new(
         disk_id: Uuid,
         project_id: Uuid,
-        params: external::DiskCreateParams,
+        params: params::DiskCreate,
         runtime_initial: DiskRuntimeState,
     ) -> Self {
         let identity = DiskIdentity::new(disk_id, params.identity);

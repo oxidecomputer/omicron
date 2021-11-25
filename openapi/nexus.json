@@ -664,7 +664,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/DiskCreateParams"
+                "$ref": "#/components/schemas/DiskCreate"
               }
             }
           },
@@ -2801,8 +2801,8 @@
           "instanceId"
         ]
       },
-      "DiskCreateParams": {
-        "description": "Create-time parameters for an [`Disk`]",
+      "DiskCreate": {
+        "description": "Create-time parameters for a [`Disk`]",
         "type": "object",
         "properties": {
           "description": {

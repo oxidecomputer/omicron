@@ -11,14 +11,13 @@ use http::StatusCode;
 use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::Disk;
 use omicron_common::api::external::DiskAttachment;
-use omicron_common::api::external::DiskCreateParams;
 use omicron_common::api::external::DiskState;
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::Instance;
 use omicron_common::api::external::InstanceCpuCount;
 use omicron_common::api::external::InstanceCreateParams;
-use omicron_nexus::Nexus;
 use omicron_nexus::TestInterfaces as _;
+use omicron_nexus::{external_api::params, Nexus};
 use sled_agent_client::TestInterfaces as _;
 use std::sync::Arc;
 use uuid::Uuid;
@@ -82,7 +81,7 @@ async fn test_disks() {
     assert_eq!(error.message, "not found: disk with name \"just-rainsticks\"");
 
     /* Create a disk. */
-    let new_disk = DiskCreateParams {
+    let new_disk = params::DiskCreate {
         identity: IdentityMetadataCreateParams {
             name: "just-rainsticks".parse().unwrap(),
             description: String::from("sells rainsticks"),

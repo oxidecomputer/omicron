@@ -888,21 +888,6 @@ impl DiskState {
 }
 
 /**
- * Create-time parameters for an [`Disk`]
- */
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct DiskCreateParams {
-    /** common identifying metadata */
-    #[serde(flatten)]
-    pub identity: IdentityMetadataCreateParams,
-    /** id for snapshot from which the Disk should be created, if any */
-    pub snapshot_id: Option<Uuid>, /* TODO should be a name? */
-    /** size of the Disk */
-    pub size: ByteCount,
-}
-
-/**
  * Describes a Disk's attachment to an Instance
  */
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]

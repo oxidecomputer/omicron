@@ -7,10 +7,11 @@
  */
 
 use omicron_common::api::external::{
-    IdentityMetadataCreateParams, IdentityMetadataUpdateParams, Name,
+    ByteCount, IdentityMetadataCreateParams, IdentityMetadataUpdateParams, Name,
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use uuid::Uuid;
 
 /*
  * ORGANIZATIONS
@@ -61,7 +62,7 @@ pub struct ProjectUpdate {
 }
 
 /*
- * VPCs
+ * VPCS
  */
 
 /**
@@ -84,4 +85,23 @@ pub struct VpcUpdate {
     #[serde(flatten)]
     pub identity: IdentityMetadataUpdateParams,
     pub dns_name: Option<Name>,
+}
+
+/*
+ * DISKS
+ */
+
+/**
+ * Create-time parameters for a [`Disk`]
+ */
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct DiskCreate {
+    /** common identifying metadata */
+    #[serde(flatten)]
+    pub identity: IdentityMetadataCreateParams,
+    /** id for snapshot from which the Disk should be created, if any */
+    pub snapshot_id: Option<Uuid>, /* TODO should be a name? */
+    /** size of the Disk */
+    pub size: ByteCount,
 }

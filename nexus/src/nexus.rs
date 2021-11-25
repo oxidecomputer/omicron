@@ -29,7 +29,6 @@ use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::DeleteResult;
 use omicron_common::api::external::DiskAttachment;
-use omicron_common::api::external::DiskCreateParams;
 use omicron_common::api::external::DiskState;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::IdentityMetadataCreateParams;
@@ -591,7 +590,7 @@ impl Nexus {
         &self,
         organization_name: &Name,
         project_name: &Name,
-        params: &DiskCreateParams,
+        params: &params::DiskCreate,
     ) -> CreateResult<db::model::Disk> {
         let project =
             self.project_fetch(organization_name, project_name).await?;

@@ -43,7 +43,6 @@ use omicron_common::api::external::to_list;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Disk;
 use omicron_common::api::external::DiskAttachment;
-use omicron_common::api::external::DiskCreateParams;
 use omicron_common::api::external::Instance;
 use omicron_common::api::external::InstanceCreateParams;
 use omicron_common::api::external::PaginationOrder;
@@ -563,7 +562,7 @@ async fn project_disks_get(
 async fn project_disks_post(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<ProjectPathParam>,
-    new_disk: TypedBody<DiskCreateParams>,
+    new_disk: TypedBody<params::DiskCreate>,
 ) -> Result<HttpResponseCreated<Disk>, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
