@@ -12,9 +12,6 @@ pub enum SpdmError {
 
     #[error(transparent)]
     Io(#[from] std::io::Error),
-
-    #[error("connection closed")]
-    ConnectionClosed
 }
 
 impl From<RequesterError> for SpdmError {

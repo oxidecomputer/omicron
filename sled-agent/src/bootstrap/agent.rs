@@ -38,7 +38,7 @@ pub enum BootstrapError {
     Api(#[from] anyhow::Error),
 
     #[error("Error running SPDM protocol: {0}")]
-    Spdm(#[from] SpdmError)
+    Spdm(#[from] SpdmError),
 }
 
 /// The entity responsible for bootstrapping an Oxide rack.

@@ -18,6 +18,7 @@ use super::{recv, SpdmError, Transport};
 /// The protocol operates over a TCP stream framed with a 2 byte size
 /// header. Requesters and Responders are decoupled from whether the endpoint of
 /// a socket is a TCP client or server.
+#[allow(dead_code)]
 pub async fn run(
     log: Logger,
     mut transport: Transport,

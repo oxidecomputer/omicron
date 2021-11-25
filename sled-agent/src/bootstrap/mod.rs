@@ -6,5 +6,5 @@ pub mod config;
 mod http_entrypoints;
 mod params;
 pub mod server;
-mod views;
 mod spdm;
+mod views;
