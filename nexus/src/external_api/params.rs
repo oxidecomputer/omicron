@@ -7,7 +7,8 @@
  */
 
 use omicron_common::api::external::{
-    ByteCount, IdentityMetadataCreateParams, IdentityMetadataUpdateParams, Name,
+    ByteCount, IdentityMetadataCreateParams, IdentityMetadataUpdateParams,
+    InstanceCpuCount, Name,
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -59,6 +60,28 @@ pub struct ProjectCreate {
 pub struct ProjectUpdate {
     #[serde(flatten)]
     pub identity: IdentityMetadataUpdateParams,
+}
+
+/*
+ * INSTANCES
+ */
+
+/**
+ * Create-time parameters for an [`Instance`]
+ */
+/*
+ * TODO We're ignoring "type" for now because no types are specified by the API.
+ * Presumably this will need to be its own kind of API object that can be
+ * created, modified, removed, etc.
+ */
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct InstanceCreate {
+    #[serde(flatten)]
+    pub identity: IdentityMetadataCreateParams,
+    pub ncpus: InstanceCpuCount,
+    pub memory: ByteCount,
+    pub hostname: String, /* TODO-cleanup different type? */
 }
 
 /*

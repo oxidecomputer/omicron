@@ -44,7 +44,6 @@ use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Disk;
 use omicron_common::api::external::DiskAttachment;
 use omicron_common::api::external::Instance;
-use omicron_common::api::external::InstanceCreateParams;
 use omicron_common::api::external::PaginationOrder;
 use omicron_common::api::external::RouterRoute;
 use omicron_common::api::external::RouterRouteCreateParams;
@@ -706,7 +705,7 @@ async fn project_instances_get(
 async fn project_instances_post(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<ProjectPathParam>,
-    new_instance: TypedBody<InstanceCreateParams>,
+    new_instance: TypedBody<params::InstanceCreate>,
 ) -> Result<HttpResponseCreated<Instance>, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;

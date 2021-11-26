@@ -14,11 +14,11 @@
  */
 
 use crate::db;
+use crate::external_api::params;
 use crate::saga_interface::SagaContext;
 use chrono::Utc;
 use lazy_static::lazy_static;
 use omicron_common::api::external::Generation;
-use omicron_common::api::external::InstanceCreateParams;
 use omicron_common::api::external::InstanceState;
 use omicron_common::api::internal::nexus::InstanceRuntimeState;
 use omicron_common::api::internal::sled_agent::InstanceHardware;
@@ -67,7 +67,7 @@ fn all_templates(
 #[derive(Debug, Deserialize, Serialize)]
 pub struct ParamsInstanceCreate {
     pub project_id: Uuid,
-    pub create_params: InstanceCreateParams,
+    pub create_params: params::InstanceCreate,
 }
 
 #[derive(Debug)]

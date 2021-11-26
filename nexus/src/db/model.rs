@@ -472,7 +472,7 @@ impl Instance {
     pub fn new(
         instance_id: Uuid,
         project_id: Uuid,
-        params: &external::InstanceCreateParams,
+        params: &params::InstanceCreate,
         runtime: InstanceRuntimeState,
     ) -> Self {
         let identity =

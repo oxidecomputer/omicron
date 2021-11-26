@@ -737,34 +737,6 @@ pub struct Instance {
     pub runtime: InstanceRuntimeState,
 }
 
-/**
- * Create-time parameters for an [`Instance`]
- */
-/*
- * TODO We're ignoring "type" for now because no types are specified by the API.
- * Presumably this will need to be its own kind of API object that can be
- * created, modified, removed, etc.
- */
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct InstanceCreateParams {
-    #[serde(flatten)]
-    pub identity: IdentityMetadataCreateParams,
-    pub ncpus: InstanceCpuCount,
-    pub memory: ByteCount,
-    pub hostname: String, /* TODO-cleanup different type? */
-}
-
-/**
- * Updateable properties of an [`Instance`]
- */
-#[derive(Clone, Debug, Deserialize, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct InstanceUpdateParams {
-    #[serde(flatten)]
-    pub identity: IdentityMetadataUpdateParams,
-}
-
 /*
  * DISKS
  */

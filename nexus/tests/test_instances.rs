@@ -12,10 +12,9 @@ use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::Instance;
 use omicron_common::api::external::InstanceCpuCount;
-use omicron_common::api::external::InstanceCreateParams;
 use omicron_common::api::external::InstanceState;
-use omicron_nexus::Nexus;
 use omicron_nexus::TestInterfaces as _;
+use omicron_nexus::{external_api::params, Nexus};
 use sled_agent_client::TestInterfaces as _;
 use std::sync::Arc;
 use uuid::Uuid;
@@ -96,7 +95,7 @@ async fn test_instances_create_reboot_halt() {
 
     /* Create an instance. */
     let instance_url = format!("{}/just-rainsticks", url_instances);
-    let new_instance = InstanceCreateParams {
+    let new_instance = params::InstanceCreate {
         identity: IdentityMetadataCreateParams {
             name: "just-rainsticks".parse().unwrap(),
             description: "sells rainsticks".to_string(),
@@ -379,7 +378,7 @@ async fn test_instances_delete_fails_when_running_succeeds_when_stopped() {
 
     // Create an instance.
     let instance_url = format!("{}/just-rainsticks", url_instances);
-    let new_instance = InstanceCreateParams {
+    let new_instance = params::InstanceCreate {
         identity: IdentityMetadataCreateParams {
             name: "just-rainsticks".parse().unwrap(),
             description: "sells rainsticks".to_string(),

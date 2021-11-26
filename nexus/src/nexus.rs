@@ -32,7 +32,6 @@ use omicron_common::api::external::DiskAttachment;
 use omicron_common::api::external::DiskState;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::IdentityMetadataCreateParams;
-use omicron_common::api::external::InstanceCreateParams;
 use omicron_common::api::external::InstanceState;
 use omicron_common::api::external::Ipv4Net;
 use omicron_common::api::external::Ipv6Net;
@@ -751,7 +750,7 @@ impl Nexus {
         self: &Arc<Self>,
         organization_name: &Name,
         project_name: &Name,
-        params: &InstanceCreateParams,
+        params: &params::InstanceCreate,
     ) -> CreateResult<db::model::Instance> {
         let organization_id = self
             .db_datastore
