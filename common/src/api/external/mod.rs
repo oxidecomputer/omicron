@@ -1085,54 +1085,6 @@ impl JsonSchema for Ipv6Net {
     }
 }
 
-/// A VPC subnet represents a logical grouping for instances that allows network traffic between
-/// them, within a IPv4 subnetwork or optionall an IPv6 subnetwork.
-#[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
-pub struct VpcSubnet {
-    /** common identifying metadata */
-    pub identity: IdentityMetadata,
-
-    /** The VPC to which the subnet belongs. */
-    pub vpc_id: Uuid,
-
-    // TODO-design: RFD 21 says that V4 subnets are currently required, and V6 are optional. If a
-    // V6 address is _not_ specified, one is created with a prefix that depends on the VPC and a
-    // unique subnet-specific portion of the prefix (40 and 16 bits for each, respectively).
-    //
-    // We're leaving out the "view" types here for the external HTTP API for now, so it's not clear
-    // how to do the validation of user-specified CIDR blocks, or how to create a block if one is
-    // not given.
-    /** The IPv4 subnet CIDR block. */
-    pub ipv4_block: Option<Ipv4Net>,
-
-    /** The IPv6 subnet CIDR block. */
-    pub ipv6_block: Option<Ipv6Net>,
-}
-
-/**
- * Create-time parameters for a [`VpcSubnet`]
- */
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct VpcSubnetCreateParams {
-    #[serde(flatten)]
-    pub identity: IdentityMetadataCreateParams,
-    pub ipv4_block: Option<Ipv4Net>,
-    pub ipv6_block: Option<Ipv6Net>,
-}
-
-/**
- * Updateable properties of a [`VpcSubnet`]
- */
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct VpcSubnetUpdateParams {
-    #[serde(flatten)]
-    pub identity: IdentityMetadataUpdateParams,
-    pub ipv4_block: Option<Ipv4Net>,
-    pub ipv6_block: Option<Ipv6Net>,
-}
-
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub enum VpcRouterKind {

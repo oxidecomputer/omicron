@@ -51,8 +51,6 @@ use omicron_common::api::external::VpcFirewallRuleUpdateResult;
 use omicron_common::api::external::VpcRouterCreateParams;
 use omicron_common::api::external::VpcRouterKind;
 use omicron_common::api::external::VpcRouterUpdateParams;
-use omicron_common::api::external::VpcSubnetCreateParams;
-use omicron_common::api::external::VpcSubnetUpdateParams;
 use omicron_common::api::internal::nexus;
 use omicron_common::api::internal::nexus::DiskRuntimeState;
 use omicron_common::api::internal::sled_agent::InstanceRuntimeStateRequested;
@@ -1481,7 +1479,7 @@ impl Nexus {
         let subnet = db::model::VpcSubnet::new(
             default_subnet_id,
             vpc_id,
-            VpcSubnetCreateParams {
+            params::VpcSubnetCreate {
                 identity: IdentityMetadataCreateParams {
                     name: "default".parse().unwrap(),
                     description: format!(
@@ -1655,7 +1653,7 @@ impl Nexus {
         organization_name: &Name,
         project_name: &Name,
         vpc_name: &Name,
-        params: &VpcSubnetCreateParams,
+        params: &params::VpcSubnetCreate,
     ) -> CreateResult<db::model::VpcSubnet> {
         let vpc = self
             .project_lookup_vpc(organization_name, project_name, vpc_name)
@@ -1691,7 +1689,7 @@ impl Nexus {
         project_name: &Name,
         vpc_name: &Name,
         subnet_name: &Name,
-        params: &VpcSubnetUpdateParams,
+        params: &params::VpcSubnetUpdate,
     ) -> UpdateResult<()> {
         let subnet = self
             .vpc_lookup_subnet(

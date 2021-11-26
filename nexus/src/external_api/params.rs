@@ -8,7 +8,7 @@
 
 use omicron_common::api::external::{
     ByteCount, IdentityMetadataCreateParams, IdentityMetadataUpdateParams,
-    InstanceCpuCount, Name,
+    InstanceCpuCount, Ipv4Net, Ipv6Net, Name,
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -108,6 +108,30 @@ pub struct VpcUpdate {
     #[serde(flatten)]
     pub identity: IdentityMetadataUpdateParams,
     pub dns_name: Option<Name>,
+}
+
+/**
+ * Create-time parameters for a [`VpcSubnet`]
+ */
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct VpcSubnetCreate {
+    #[serde(flatten)]
+    pub identity: IdentityMetadataCreateParams,
+    pub ipv4_block: Option<Ipv4Net>,
+    pub ipv6_block: Option<Ipv6Net>,
+}
+
+/**
+ * Updateable properties of a [`VpcSubnet`]
+ */
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct VpcSubnetUpdate {
+    #[serde(flatten)]
+    pub identity: IdentityMetadataUpdateParams,
+    pub ipv4_block: Option<Ipv4Net>,
+    pub ipv6_block: Option<Ipv6Net>,
 }
 
 /*

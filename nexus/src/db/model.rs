@@ -959,7 +959,7 @@ impl VpcSubnet {
     pub fn new(
         subnet_id: Uuid,
         vpc_id: Uuid,
-        params: external::VpcSubnetCreateParams,
+        params: params::VpcSubnetCreate,
     ) -> Self {
         let identity = VpcSubnetIdentity::new(subnet_id, params.identity);
         Self {
@@ -967,17 +967,6 @@ impl VpcSubnet {
             vpc_id,
             ipv4_block: params.ipv4_block.map(Ipv4Net),
             ipv6_block: params.ipv6_block.map(Ipv6Net),
-        }
-    }
-}
-
-impl Into<external::VpcSubnet> for VpcSubnet {
-    fn into(self) -> external::VpcSubnet {
-        external::VpcSubnet {
-            identity: self.identity(),
-            vpc_id: self.vpc_id,
-            ipv4_block: self.ipv4_block.map(|ip| ip.into()),
-            ipv6_block: self.ipv6_block.map(|ip| ip.into()),
         }
     }
 }
@@ -992,8 +981,8 @@ pub struct VpcSubnetUpdate {
     pub ipv6_block: Option<Ipv6Net>,
 }
 
-impl From<external::VpcSubnetUpdateParams> for VpcSubnetUpdate {
-    fn from(params: external::VpcSubnetUpdateParams) -> Self {
+impl From<params::VpcSubnetUpdate> for VpcSubnetUpdate {
+    fn from(params: params::VpcSubnetUpdate) -> Self {
         Self {
             name: params.identity.name.map(Name),
             description: params.identity.description,

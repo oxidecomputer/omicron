@@ -12,7 +12,7 @@ use crate::ServerContext;
 
 use super::{
     console_api, params,
-    views::{Organization, Project, Rack, Sled, Vpc},
+    views::{Organization, Project, Rack, Sled, Vpc, VpcSubnet},
 };
 use crate::context::OpContext;
 use dropshot::endpoint;
@@ -57,9 +57,6 @@ use omicron_common::api::external::VpcRouter;
 use omicron_common::api::external::VpcRouterCreateParams;
 use omicron_common::api::external::VpcRouterKind;
 use omicron_common::api::external::VpcRouterUpdateParams;
-use omicron_common::api::external::VpcSubnet;
-use omicron_common::api::external::VpcSubnetCreateParams;
-use omicron_common::api::external::VpcSubnetUpdateParams;
 use ref_cast::RefCast;
 use schemars::JsonSchema;
 use serde::Deserialize;
@@ -1267,7 +1264,7 @@ async fn vpc_subnets_get_subnet(
 async fn vpc_subnets_post(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<VpcPathParam>,
-    create_params: TypedBody<VpcSubnetCreateParams>,
+    create_params: TypedBody<params::VpcSubnetCreate>,
 ) -> Result<HttpResponseCreated<VpcSubnet>, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
@@ -1324,7 +1321,7 @@ async fn vpc_subnets_delete_subnet(
 async fn vpc_subnets_put_subnet(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<VpcSubnetPathParam>,
-    subnet_params: TypedBody<VpcSubnetUpdateParams>,
+    subnet_params: TypedBody<params::VpcSubnetUpdate>,
 ) -> Result<HttpResponseOk<()>, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;

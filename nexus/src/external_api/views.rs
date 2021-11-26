@@ -9,7 +9,9 @@
 use crate::db::identity::{Asset, Resource};
 use crate::db::model;
 use api_identity::ObjectIdentity;
-use omicron_common::api::external::{IdentityMetadata, Name, ObjectIdentity};
+use omicron_common::api::external::{
+    IdentityMetadata, Ipv4Net, Ipv6Net, Name, ObjectIdentity,
+};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::net::SocketAddr;
@@ -94,6 +96,41 @@ impl Into<Vpc> for model::Vpc {
             project_id: self.project_id,
             system_router_id: self.system_router_id,
             dns_name: self.dns_name.0,
+        }
+    }
+}
+
+/// A VPC subnet represents a logical grouping for instances that allows network traffic between
+/// them, within a IPv4 subnetwork or optionall an IPv6 subnetwork.
+#[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct VpcSubnet {
+    /** common identifying metadata */
+    pub identity: IdentityMetadata,
+
+    /** The VPC to which the subnet belongs. */
+    pub vpc_id: Uuid,
+
+    // TODO-design: RFD 21 says that V4 subnets are currently required, and V6 are optional. If a
+    // V6 address is _not_ specified, one is created with a prefix that depends on the VPC and a
+    // unique subnet-specific portion of the prefix (40 and 16 bits for each, respectively).
+    //
+    // We're leaving out the "view" types here for the external HTTP API for now, so it's not clear
+    // how to do the validation of user-specified CIDR blocks, or how to create a block if one is
+    // not given.
+    /** The IPv4 subnet CIDR block. */
+    pub ipv4_block: Option<Ipv4Net>,
+
+    /** The IPv6 subnet CIDR block. */
+    pub ipv6_block: Option<Ipv6Net>,
+}
+
+impl Into<VpcSubnet> for model::VpcSubnet {
+    fn into(self) -> VpcSubnet {
+        VpcSubnet {
+            identity: self.identity(),
+            vpc_id: self.vpc_id,
+            ipv4_block: self.ipv4_block.map(|ip| ip.into()),
+            ipv6_block: self.ipv6_block.map(|ip| ip.into()),
         }
     }
 }
