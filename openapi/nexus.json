@@ -864,7 +864,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/InstanceCreateParams"
+                "$ref": "#/components/schemas/InstanceCreate"
               }
             }
           },
@@ -2443,7 +2443,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/VpcSubnetCreateParams"
+                "$ref": "#/components/schemas/VpcSubnetCreate"
               }
             }
           },
@@ -2563,7 +2563,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/VpcSubnetUpdateParams"
+                "$ref": "#/components/schemas/VpcSubnetUpdate"
               }
             }
           },
@@ -3102,7 +3102,7 @@
         "format": "uint16",
         "minimum": 0
       },
-      "InstanceCreateParams": {
+      "InstanceCreate": {
         "description": "Create-time parameters for an [`Instance`]",
         "type": "object",
         "properties": {
@@ -4571,7 +4571,7 @@
           "vpc_id"
         ]
       },
-      "VpcSubnetCreateParams": {
+      "VpcSubnetCreate": {
         "description": "Create-time parameters for a [`VpcSubnet`]",
         "type": "object",
         "properties": {
@@ -4624,7 +4624,7 @@
           "items"
         ]
       },
-      "VpcSubnetUpdateParams": {
+      "VpcSubnetUpdate": {
         "description": "Updateable properties of a [`VpcSubnet`]",
         "type": "object",
         "properties": {
