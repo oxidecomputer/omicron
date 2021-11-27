@@ -69,11 +69,6 @@ pub struct ProjectUpdate {
 /**
  * Create-time parameters for an [`Instance`]
  */
-/*
- * TODO We're ignoring "type" for now because no types are specified by the API.
- * Presumably this will need to be its own kind of API object that can be
- * created, modified, removed, etc.
- */
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct InstanceCreate {
