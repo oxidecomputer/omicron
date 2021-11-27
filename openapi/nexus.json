@@ -1812,7 +1812,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/VpcRouterCreateParams"
+                "$ref": "#/components/schemas/VpcRouterCreate"
               }
             }
           },
@@ -1932,7 +1932,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/VpcRouterUpdateParams"
+                "$ref": "#/components/schemas/VpcRouterUpdate"
               }
             }
           },
@@ -4468,7 +4468,7 @@
           "vpc_id"
         ]
       },
-      "VpcRouterCreateParams": {
+      "VpcRouterCreate": {
         "description": "Create-time parameters for a [`VpcRouter`]",
         "type": "object",
         "properties": {
@@ -4512,7 +4512,7 @@
           "items"
         ]
       },
-      "VpcRouterUpdateParams": {
+      "VpcRouterUpdate": {
         "description": "Updateable properties of a [`VpcRouter`]",
         "type": "object",
         "properties": {

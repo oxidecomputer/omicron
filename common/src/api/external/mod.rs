@@ -1105,22 +1105,6 @@ pub struct VpcRouter {
     pub vpc_id: Uuid,
 }
 
-/// Create-time parameters for a [`VpcRouter`]
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct VpcRouterCreateParams {
-    #[serde(flatten)]
-    pub identity: IdentityMetadataCreateParams,
-}
-
-/// Updateable properties of a [`VpcRouter`]
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct VpcRouterUpdateParams {
-    #[serde(flatten)]
-    pub identity: IdentityMetadataUpdateParams,
-}
-
 /// Represents all possible network target strings as defined in RFD-21
 /// This enum itself isn't intended to be used directly but rather as a
 /// delegate for subset enums to not have to re-implement all the base type conversions.

@@ -1083,7 +1083,7 @@ impl VpcRouter {
         router_id: Uuid,
         vpc_id: Uuid,
         kind: external::VpcRouterKind,
-        params: external::VpcRouterCreateParams,
+        params: params::VpcRouterCreate,
     ) -> Self {
         let identity = VpcRouterIdentity::new(router_id, params.identity);
         Self {
@@ -1120,8 +1120,8 @@ pub struct VpcRouterUpdate {
     pub time_modified: DateTime<Utc>,
 }
 
-impl From<external::VpcRouterUpdateParams> for VpcRouterUpdate {
-    fn from(params: external::VpcRouterUpdateParams) -> Self {
+impl From<params::VpcRouterUpdate> for VpcRouterUpdate {
+    fn from(params: params::VpcRouterUpdate) -> Self {
         Self {
             name: params.identity.name.map(Name),
             description: params.identity.description,

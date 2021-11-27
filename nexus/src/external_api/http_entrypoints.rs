@@ -54,9 +54,7 @@ use omicron_common::api::external::VpcFirewallRule;
 use omicron_common::api::external::VpcFirewallRuleUpdateParams;
 use omicron_common::api::external::VpcFirewallRuleUpdateResult;
 use omicron_common::api::external::VpcRouter;
-use omicron_common::api::external::VpcRouterCreateParams;
 use omicron_common::api::external::VpcRouterKind;
-use omicron_common::api::external::VpcRouterUpdateParams;
 use ref_cast::RefCast;
 use schemars::JsonSchema;
 use serde::Deserialize;
@@ -1499,7 +1497,7 @@ async fn vpc_routers_get_router(
 async fn vpc_routers_post(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<VpcPathParam>,
-    create_params: TypedBody<VpcRouterCreateParams>,
+    create_params: TypedBody<params::VpcRouterCreate>,
 ) -> Result<HttpResponseCreated<VpcRouter>, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
@@ -1557,7 +1555,7 @@ async fn vpc_routers_delete_router(
 async fn vpc_routers_put_router(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<VpcRouterPathParam>,
-    router_params: TypedBody<VpcRouterUpdateParams>,
+    router_params: TypedBody<params::VpcRouterUpdate>,
 ) -> Result<HttpResponseOk<()>, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;

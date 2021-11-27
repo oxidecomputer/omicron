@@ -135,6 +135,26 @@ pub struct VpcSubnetUpdate {
 }
 
 /*
+ * VPC ROUTERS
+ */
+
+/// Create-time parameters for a [`VpcRouter`]
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct VpcRouterCreate {
+    #[serde(flatten)]
+    pub identity: IdentityMetadataCreateParams,
+}
+
+/// Updateable properties of a [`VpcRouter`]
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct VpcRouterUpdate {
+    #[serde(flatten)]
+    pub identity: IdentityMetadataUpdateParams,
+}
+
+/*
  * DISKS
  */
 

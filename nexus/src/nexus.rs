@@ -48,9 +48,7 @@ use omicron_common::api::external::RouterRouteUpdateParams;
 use omicron_common::api::external::UpdateResult;
 use omicron_common::api::external::VpcFirewallRuleUpdateParams;
 use omicron_common::api::external::VpcFirewallRuleUpdateResult;
-use omicron_common::api::external::VpcRouterCreateParams;
 use omicron_common::api::external::VpcRouterKind;
-use omicron_common::api::external::VpcRouterUpdateParams;
 use omicron_common::api::internal::nexus;
 use omicron_common::api::internal::nexus::DiskRuntimeState;
 use omicron_common::api::internal::sled_agent::InstanceRuntimeStateRequested;
@@ -1437,7 +1435,7 @@ impl Nexus {
             system_router_id,
             vpc_id,
             VpcRouterKind::System,
-            VpcRouterCreateParams {
+            params::VpcRouterCreate {
                 identity: IdentityMetadataCreateParams {
                     name: "system".parse().unwrap(),
                     description: "Routes are automatically added to this router as vpc subnets are created".into()
@@ -1742,7 +1740,7 @@ impl Nexus {
         project_name: &Name,
         vpc_name: &Name,
         kind: &VpcRouterKind,
-        params: &VpcRouterCreateParams,
+        params: &params::VpcRouterCreate,
     ) -> CreateResult<db::model::VpcRouter> {
         let vpc = self
             .project_lookup_vpc(organization_name, project_name, vpc_name)
@@ -1786,7 +1784,7 @@ impl Nexus {
         project_name: &Name,
         vpc_name: &Name,
         router_name: &Name,
-        params: &VpcRouterUpdateParams,
+        params: &params::VpcRouterUpdate,
     ) -> UpdateResult<()> {
         let router = self
             .vpc_lookup_router(
