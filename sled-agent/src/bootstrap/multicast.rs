@@ -133,6 +133,11 @@ pub fn new_ipv6_udp_pair(
 mod test {
     use super::*;
 
+    // NOTE: This test is ignored by default - it relies on a networking
+    // setup that isn't consistent between our automated test infrastructure.
+    // It can still be run locally with:
+    //
+    // $ cargo test -p omicron-sled-agent -- --ignored
     #[tokio::test]
     #[ignore]
     async fn test_multicast_ipv6() {
