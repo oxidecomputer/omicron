@@ -370,6 +370,15 @@
               }
             ]
           },
+          "migrate": {
+            "nullable": true,
+            "description": "If we're migrating this instance, the details needed to drive the migration",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/InstanceMigrateParams"
+              }
+            ]
+          },
           "target": {
             "description": "requested runtime state of the Instance",
             "allOf": [
@@ -403,6 +412,22 @@
           "runtime"
         ]
       },
+      "InstanceMigrateParams": {
+        "type": "object",
+        "properties": {
+          "src_propolis_addr": {
+            "type": "string"
+          },
+          "src_propolis_uuid": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "required": [
+          "src_propolis_addr",
+          "src_propolis_uuid"
+        ]
+      },
       "InstanceRuntimeState": {
         "description": "Runtime state of the Instance, including the actual running state and minimal metadata\n\nThis state is owned by the sled agent running that Instance.",
         "type": "object",
@@ -434,6 +459,11 @@
                 "$ref": "#/components/schemas/InstanceCpuCount"
               }
             ]
+          },
+          "propolis_addr": {
+            "nullable": true,
+            "description": "address of propolis-server running this Instance",
+            "type": "string"
           },
           "propolis_uuid": {
             "description": "which propolis-server is running this Instance",

@@ -1248,6 +1248,63 @@
         }
       }
     },
+    "/organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/migrate": {
+      "put": {
+        "description": "Migrate an instance to a different propolis-server, possibly on a different sled.",
+        "operationId": "project_instances_migrate_instance",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "instance_name",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Name"
+            },
+            "style": "simple"
+          },
+          {
+            "in": "path",
+            "name": "organization_name",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Name"
+            },
+            "style": "simple"
+          },
+          {
+            "in": "path",
+            "name": "project_name",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Name"
+            },
+            "style": "simple"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InstanceMigrate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Instance"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/reboot": {
       "post": {
         "tags": [
@@ -3602,6 +3659,19 @@
           "memory",
           "name",
           "ncpus"
+        ]
+      },
+      "InstanceMigrate": {
+        "description": "Migration parameters for an [`Instance`]",
+        "type": "object",
+        "properties": {
+          "dstSledUuid": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "required": [
+          "dstSledUuid"
         ]
       },
       "InstanceResultsPage": {

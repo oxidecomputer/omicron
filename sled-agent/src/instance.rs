@@ -12,10 +12,11 @@ use crate::illumos::svc::wait_for_service;
 use crate::illumos::zone::PROPOLIS_ZONE_PREFIX;
 use crate::instance_manager::InstanceTicket;
 use crate::vnic::{interface_name, IdAllocator, Vnic};
-use futures::lock::Mutex;
+use futures::lock::{Mutex, MutexGuard};
 use omicron_common::api::external::NetworkInterface;
 use omicron_common::api::internal::nexus::InstanceRuntimeState;
 use omicron_common::api::internal::sled_agent::InstanceHardware;
+use omicron_common::api::internal::sled_agent::InstanceMigrateParams;
 use omicron_common::api::internal::sled_agent::InstanceRuntimeStateRequested;
 use omicron_common::backoff;
 use propolis_client::Client as PropolisClient;
@@ -154,6 +155,13 @@ impl Drop for RunningState {
     }
 }
 
+// Named type for values returned during propolis zone creation
+struct PropolisSetup {
+    client: Arc<PropolisClient>,
+    control_nic: Vnic,
+    guest_nics: Vec<Vnic>,
+}
+
 struct InstanceInner {
     id: Uuid,
 
@@ -233,7 +241,11 @@ impl InstanceInner {
         Ok(())
     }
 
-    async fn ensure(&self, guest_nics: &Vec<Vnic>) -> Result<(), Error> {
+    async fn ensure(
+        &self,
+        guest_nics: &Vec<Vnic>,
+        migrate: Option<InstanceMigrateParams>,
+    ) -> Result<(), Error> {
         // TODO: Store slot in NetworkInterface, make this more stable.
         let nics = self
             .requested_nics
@@ -245,11 +257,19 @@ impl InstanceInner {
             })
             .collect();
 
+        let migrate = migrate.map(|params| {
+            propolis_client::api::InstanceMigrateInitiateRequest {
+                src_addr: params.src_propolis_addr,
+                src_uuid: params.src_propolis_uuid,
+            }
+        });
+
         let request = propolis_client::api::InstanceEnsureRequest {
             properties: self.properties.clone(),
             nics,
             // TODO: Actual disks need to be wired up here.
             disks: vec![],
+            migrate,
         };
 
         info!(self.log, "Sending ensure request to propolis: {:?}", request);
@@ -311,6 +331,12 @@ mockall::mock! {
             nexus_client: Arc<NexusClient>,
         ) -> Result<Self, Error>;
         pub async fn start(&self, ticket: InstanceTicket) -> Result<(), Error>;
+        pub async fn migrate(
+            &self,
+            initial_hardware: InstanceHardware,
+            ticket: Option<InstanceTicket>,
+            params: InstanceMigrateParams
+        ) -> Result<(), Error>;
         pub async fn transition(
             &self,
             target: InstanceRuntimeStateRequested,
@@ -373,10 +399,10 @@ impl Instance {
         Ok(Instance { inner })
     }
 
-    /// Begins the execution of the instance's service (Propolis).
-    pub async fn start(&self, ticket: InstanceTicket) -> Result<(), Error> {
-        let mut inner = self.inner.lock().await;
-
+    async fn setup_propolis_locked(
+        &self,
+        inner: &mut MutexGuard<'_, InstanceInner>,
+    ) -> Result<PropolisSetup, Error> {
         // Create the VNIC which will be attached to the zone.
         //
         // It would be preferable to use the UUID of the instance as a component
@@ -463,6 +489,8 @@ impl Instance {
             .await
             .map_err(|_| Error::Timeout(fmri.to_string()))?;
 
+        inner.state.current_mut().propolis_addr = Some(server_addr);
+
         let client = Arc::new(PropolisClient::new(
             server_addr,
             inner.log.new(o!("component" => "propolis-client")),
@@ -473,12 +501,91 @@ impl Instance {
         // don't need to worry about initialization races.
         wait_for_http_server(&inner.log, &client).await?;
 
+        Ok(PropolisSetup { client, control_nic, guest_nics })
+    }
+
+    /// Begins the execution of the instance's service (Propolis).
+    pub async fn start(&self, ticket: InstanceTicket) -> Result<(), Error> {
+        let mut inner = self.inner.lock().await;
+
+        // Create the propolis zone and resources
+        let PropolisSetup { client, control_nic, guest_nics } =
+            self.setup_propolis_locked(&mut inner).await?;
+
         inner.running_state =
             Some(RunningState { client, ticket, monitor_task: None });
 
         // Ensure the instance exists in the Propolis Server before we start
         // using it.
-        inner.ensure(&guest_nics).await?;
+        inner.ensure(&guest_nics, None).await?;
+
+        // Monitor propolis for state changes in the background.
+        let self_clone = self.clone();
+        inner.running_state.as_mut().unwrap().monitor_task =
+            Some(tokio::task::spawn(async move {
+                let r = self_clone.monitor_state_task().await;
+                let log = &self_clone.inner.lock().await.log;
+                match r {
+                    Err(e) => warn!(log, "State monitoring task failed: {}", e),
+                    Ok(()) => info!(log, "State monitoring task complete"),
+                }
+            }));
+
+        // Store the VNICs while the instance is running.
+        inner.allocated_nics = guest_nics
+            .into_iter()
+            .chain(std::iter::once(control_nic))
+            .collect();
+
+        Ok(())
+    }
+
+    #[cfg(not(test))]
+    pub async fn migrate(
+        &self,
+        initial_hardware: InstanceHardware,
+        ticket: Option<InstanceTicket>,
+        params: InstanceMigrateParams,
+    ) -> Result<(), Error> {
+        let mut inner = self.inner.lock().await;
+
+        let ticket = if *inner.propolis_id() == params.src_propolis_uuid {
+            // This is an in-place migration
+
+            let mut state =
+                inner.running_state.take().expect("missing running state");
+
+            // Clear off the previous propolis' monitor task
+            if let Some(task) = state.monitor_task.take() {
+                task.abort();
+            }
+
+            // Replace propolis properties with new values
+            inner.properties.id = initial_hardware.runtime.propolis_uuid;
+
+            // TODO: clean up previously allocated vNICs
+            let _old_nics =
+                std::mem::replace(&mut inner.allocated_nics, vec![]);
+
+            // Grab the InstanceTicket to reuse for the new propolis
+            std::mem::replace(
+                &mut state.ticket,
+                InstanceTicket::null(Uuid::nil()),
+            )
+        } else {
+            // This is a completely different sled so we should have the InstanceTicket passed in
+            ticket.expect("no instance ticket")
+        };
+
+        // Create our new propolis zone and resources
+        let PropolisSetup { client, control_nic, guest_nics } =
+            self.setup_propolis_locked(&mut inner).await?;
+
+        inner.running_state =
+            Some(RunningState { client, ticket, monitor_task: None });
+
+        // Migrate from the src propolis and ensure the new instance exists
+        inner.ensure(&guest_nics, Some(params)).await?;
 
         // Monitor propolis for state changes in the background.
         let self_clone = self.clone();
@@ -651,7 +758,9 @@ mod test {
             ));
         } else {
             *server = Some(FakeInstance { id });
-            return Ok(HttpResponseCreated(api::InstanceEnsureResponse {}));
+            return Ok(HttpResponseCreated(api::InstanceEnsureResponse {
+                migrate: None,
+            }));
         }
     }
 
@@ -957,6 +1066,7 @@ mod test {
                 run_state: InstanceState::Creating,
                 sled_uuid: Uuid::new_v4(),
                 propolis_uuid: test_propolis_uuid(),
+                propolis_addr: None,
                 ncpus: InstanceCpuCount(2),
                 memory: ByteCount::from_mebibytes_u32(512),
                 hostname: "myvm".to_string(),

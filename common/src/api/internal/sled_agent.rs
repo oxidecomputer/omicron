@@ -8,6 +8,8 @@ use crate::api::{external, internal};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::fmt::{Debug, Display, Formatter, Result as FormatResult};
+use std::net::SocketAddr;
+use uuid::Uuid;
 
 /// Describes the instance hardware.
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
@@ -24,6 +26,14 @@ pub struct InstanceEnsureBody {
     pub initial: InstanceHardware,
     /// requested runtime state of the Instance
     pub target: InstanceRuntimeStateRequested,
+    /// If we're migrating this instance, the details needed to drive the migration
+    pub migrate: Option<InstanceMigrateParams>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct InstanceMigrateParams {
+    pub src_propolis_uuid: Uuid,
+    pub src_propolis_addr: SocketAddr,
 }
 
 /// Requestable running state of an Instance.

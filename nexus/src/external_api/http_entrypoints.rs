@@ -92,6 +92,7 @@ pub fn external_api() -> NexusApiDescription {
         api.register(project_instances_post)?;
         api.register(project_instances_get_instance)?;
         api.register(project_instances_delete_instance)?;
+        api.register(project_instances_migrate_instance)?;
         api.register(project_instances_instance_reboot)?;
         api.register(project_instances_instance_start)?;
         api.register(project_instances_instance_stop)?;
@@ -839,6 +840,39 @@ async fn project_instances_delete_instance(
             )
             .await?;
         Ok(HttpResponseDeleted())
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/**
+ * Migrate an instance to a different propolis-server, possibly on a different sled.
+ */
+#[endpoint {
+    method = PUT,
+    path = "/organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/migrate",
+}]
+async fn project_instances_migrate_instance(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    path_params: Path<InstancePathParam>,
+    migrate_params: TypedBody<params::InstanceMigrate>,
+) -> Result<HttpResponseOk<Instance>, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let path = path_params.into_inner();
+    let organization_name = &path.organization_name;
+    let project_name = &path.project_name;
+    let instance_name = &path.instance_name;
+    let migrate_instance_params = migrate_params.into_inner();
+    let handler = async {
+        let instance = nexus
+            .project_migrate_instance(
+                &organization_name,
+                &project_name,
+                &instance_name,
+                migrate_instance_params,
+            )
+            .await?;
+        Ok(HttpResponseOk(instance.into()))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }

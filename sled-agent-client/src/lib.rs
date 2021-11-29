@@ -23,6 +23,7 @@ impl From<omicron_common::api::internal::nexus::InstanceRuntimeState>
             run_state: s.run_state.into(),
             sled_uuid: s.sled_uuid,
             propolis_uuid: s.propolis_uuid,
+            propolis_addr: s.propolis_addr.map(|addr| addr.to_string()),
             ncpus: s.ncpus.into(),
             memory: s.memory.into(),
             hostname: s.hostname,
@@ -121,6 +122,7 @@ impl From<types::InstanceRuntimeState>
             run_state: s.run_state.into(),
             sled_uuid: s.sled_uuid,
             propolis_uuid: s.propolis_uuid,
+            propolis_addr: s.propolis_addr.map(|addr| addr.parse().unwrap()),
             ncpus: s.ncpus.into(),
             memory: s.memory.into(),
             hostname: s.hostname,
@@ -244,6 +246,20 @@ impl From<omicron_common::api::internal::sled_agent::InstanceHardware>
         }
     }
 }
+
+impl From<omicron_common::api::internal::sled_agent::InstanceMigrateParams>
+    for types::InstanceMigrateParams
+{
+    fn from(
+        s: omicron_common::api::internal::sled_agent::InstanceMigrateParams,
+    ) -> Self {
+        Self {
+            src_propolis_addr: s.src_propolis_addr.to_string(),
+            src_propolis_uuid: s.src_propolis_uuid,
+        }
+    }
+}
+
 impl From<&omicron_common::api::external::NetworkInterface>
     for types::NetworkInterface
 {

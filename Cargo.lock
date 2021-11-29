@@ -183,7 +183,7 @@ dependencies = [
 [[package]]
 name = "bhyve_api"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=00ec8cf18f6a2311b0907f0b16b0ff8a327944d1#00ec8cf18f6a2311b0907f0b16b0ff8a327944d1"
+source = "git+https://github.com/oxidecomputer/propolis?branch=live-migrate#fc5cdf3d9add4daa944a041afbf07bb1e675a5a9"
 dependencies = [
  "bitflags",
  "libc",
@@ -394,6 +394,26 @@ name = "const-oid"
 version = "0.6.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9d6f2aa4d0537bcc1c74df8755072bd31c1ef1a3a1b85a68e8404a8c353b7b8b"
+
+[[package]]
+name = "const_format"
+version = "0.2.22"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "22bc6cd49b0ec407b680c3e380182b6ac63b73991cb7602de350352fc309b614"
+dependencies = [
+ "const_format_proc_macros",
+]
+
+[[package]]
+name = "const_format_proc_macros"
+version = "0.2.22"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ef196d5d972878a48da7decb7686eded338b4858fbabeed513d63a7c98b2b82d"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "unicode-xid",
+]
 
 [[package]]
 name = "convert_case"
@@ -891,7 +911,7 @@ dependencies = [
 [[package]]
 name = "dladm"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=00ec8cf18f6a2311b0907f0b16b0ff8a327944d1#00ec8cf18f6a2311b0907f0b16b0ff8a327944d1"
+source = "git+https://github.com/oxidecomputer/propolis?branch=live-migrate#fc5cdf3d9add4daa944a041afbf07bb1e675a5a9"
 dependencies = [
  "libc",
  "num_enum",
@@ -2811,7 +2831,7 @@ dependencies = [
 [[package]]
 name = "propolis"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=00ec8cf18f6a2311b0907f0b16b0ff8a327944d1#00ec8cf18f6a2311b0907f0b16b0ff8a327944d1"
+source = "git+https://github.com/oxidecomputer/propolis?branch=live-migrate#fc5cdf3d9add4daa944a041afbf07bb1e675a5a9"
 dependencies = [
  "anyhow",
  "bhyve_api",
@@ -2837,7 +2857,7 @@ dependencies = [
 [[package]]
 name = "propolis-client"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=00ec8cf18f6a2311b0907f0b16b0ff8a327944d1#00ec8cf18f6a2311b0907f0b16b0ff8a327944d1"
+source = "git+https://github.com/oxidecomputer/propolis?branch=live-migrate#fc5cdf3d9add4daa944a041afbf07bb1e675a5a9"
 dependencies = [
  "reqwest",
  "ring",
@@ -2853,9 +2873,10 @@ dependencies = [
 [[package]]
 name = "propolis-server"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=00ec8cf18f6a2311b0907f0b16b0ff8a327944d1#00ec8cf18f6a2311b0907f0b16b0ff8a327944d1"
+source = "git+https://github.com/oxidecomputer/propolis?branch=live-migrate#fc5cdf3d9add4daa944a041afbf07bb1e675a5a9"
 dependencies = [
  "anyhow",
+ "const_format",
  "dropshot",
  "futures",
  "hyper",
@@ -2863,6 +2884,7 @@ dependencies = [
  "propolis-client",
  "serde",
  "serde_derive",
+ "serde_json",
  "slog",
  "structopt",
  "thiserror",
@@ -4486,7 +4508,7 @@ checksum = "5fecdca9a5291cc2b8dcf7dc02453fee791a280f3743cb0905f8822ae463b3fe"
 [[package]]
 name = "viona_api"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=00ec8cf18f6a2311b0907f0b16b0ff8a327944d1#00ec8cf18f6a2311b0907f0b16b0ff8a327944d1"
+source = "git+https://github.com/oxidecomputer/propolis?branch=live-migrate#fc5cdf3d9add4daa944a041afbf07bb1e675a5a9"
 
 [[package]]
 name = "vsss-rs"

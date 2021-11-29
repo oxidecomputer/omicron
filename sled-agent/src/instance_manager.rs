@@ -8,6 +8,7 @@ use crate::common::vlan::VlanID;
 use crate::vnic::IdAllocator;
 use omicron_common::api::internal::nexus::InstanceRuntimeState;
 use omicron_common::api::internal::sled_agent::InstanceHardware;
+use omicron_common::api::internal::sled_agent::InstanceMigrateParams;
 use omicron_common::api::internal::sled_agent::InstanceRuntimeStateRequested;
 use slog::Logger;
 use std::collections::BTreeMap;
@@ -82,6 +83,7 @@ impl InstanceManager {
         instance_id: Uuid,
         initial_hardware: InstanceHardware,
         target: InstanceRuntimeStateRequested,
+        migrate: Option<InstanceMigrateParams>,
     ) -> Result<InstanceRuntimeState, Error> {
         info!(
             &self.inner.log,
@@ -107,7 +109,7 @@ impl InstanceManager {
                         instance_log,
                         instance_id,
                         self.inner.nic_id_allocator.clone(),
-                        initial_hardware,
+                        initial_hardware.clone(),
                         self.inner.vlan,
                         self.inner.nexus_client.clone(),
                     )?,
@@ -119,13 +121,24 @@ impl InstanceManager {
             }
         };
 
-        // If we created a new instance, start it - but do so outside
-        // the "instances" lock, since initialization may take a while.
-        //
-        // Additionally, this makes it possible to manage the "instance_ticket",
-        // which might need to grab the lock to remove the instance during
-        // teardown.
-        if let Some(instance_ticket) = maybe_instance_ticket {
+        if let Some(migrate_params) = migrate {
+            // The instance we need to ensure exists is being migrated
+            // from an existing instance.
+            // TODO: transition to target?
+            instance
+                .migrate(
+                    initial_hardware,
+                    maybe_instance_ticket,
+                    migrate_params,
+                )
+                .await?;
+        } else if let Some(instance_ticket) = maybe_instance_ticket {
+            // If we created a new instance, start it - but do so outside
+            // the "instances" lock, since initialization may take a while.
+            //
+            // Additionally, this makes it possible to manage the "instance_ticket",
+            // which might need to grab the lock to remove the instance during
+            // teardown.
             instance.start(instance_ticket).await?;
         }
 
@@ -146,10 +159,9 @@ impl InstanceTicket {
         InstanceTicket { id, inner: Some(inner) }
     }
 
-    // (Test-only) Creates a null ticket that does nothing.
+    // Creates a null ticket that does nothing.
     //
     // Useful when testing instances without the an entire instance manager.
-    #[cfg(test)]
     pub(crate) fn null(id: Uuid) -> Self {
         InstanceTicket { id, inner: None }
     }
@@ -204,6 +216,7 @@ mod test {
                 run_state: InstanceState::Creating,
                 sled_uuid: Uuid::new_v4(),
                 propolis_uuid: Uuid::new_v4(),
+                propolis_addr: None,
                 ncpus: InstanceCpuCount(2),
                 memory: ByteCount::from_mebibytes_u32(512),
                 hostname: "myvm".to_string(),
@@ -278,6 +291,7 @@ mod test {
                 InstanceRuntimeStateRequested {
                     run_state: InstanceStateRequested::Running,
                 },
+                None,
             )
             .await
             .unwrap();
@@ -358,11 +372,11 @@ mod test {
         };
 
         // Creates instance, start + transition.
-        im.ensure(id, rt.clone(), target.clone()).await.unwrap();
+        im.ensure(id, rt.clone(), target.clone(), None).await.unwrap();
         // Transition only.
-        im.ensure(id, rt.clone(), target.clone()).await.unwrap();
+        im.ensure(id, rt.clone(), target.clone(), None).await.unwrap();
         // Transition only.
-        im.ensure(id, rt, target).await.unwrap();
+        im.ensure(id, rt, target, None).await.unwrap();
 
         assert_eq!(im.inner.instances.lock().unwrap().len(), 1);
         ticket.lock().unwrap().take();

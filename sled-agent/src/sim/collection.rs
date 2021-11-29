@@ -361,6 +361,7 @@ mod test {
                 run_state: InstanceState::Creating,
                 sled_uuid: uuid::Uuid::new_v4(),
                 propolis_uuid: uuid::Uuid::new_v4(),
+                propolis_addr: None,
                 ncpus: InstanceCpuCount(2),
                 memory: ByteCount::from_mebibytes_u32(512),
                 hostname: "myvm".to_string(),

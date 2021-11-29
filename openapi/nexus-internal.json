@@ -1260,6 +1260,11 @@
               }
             ]
           },
+          "propolis_addr": {
+            "nullable": true,
+            "description": "address of propolis-server running this Instance",
+            "type": "string"
+          },
           "propolis_uuid": {
             "description": "which propolis-server is running this Instance",
             "type": "string",
