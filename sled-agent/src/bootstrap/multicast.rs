@@ -129,11 +129,12 @@ pub fn new_ipv6_udp_pair(
     Ok((sender, listener))
 }
 
-#[cfg(all(test, not(target_os = "macos")))]
+#[cfg(test)]
 mod test {
     use super::*;
 
     #[tokio::test]
+    #[ignore]
     async fn test_multicast_ipv6() {
         let message = b"Hello World!";
         let scope = Ipv6MulticastScope::LinkLocal.first_hextet();
