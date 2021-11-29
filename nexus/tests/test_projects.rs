@@ -1,4 +1,8 @@
-use omicron_common::api::external::Project;
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
+use omicron_nexus::external_api::views::Project;
 
 use dropshot::test_util::object_get;
 use dropshot::test_util::objects_list_page;

@@ -1,10 +1,12 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
 //! Mock structures for testing.
 
 use mockall::mock;
-use omicron_common::{
-    api::external::Error,
-    nexus_client::types::{InstanceRuntimeState, SledAgentStartupInfo},
-};
+use nexus_client::types::{InstanceRuntimeState, SledAgentStartupInfo};
+use omicron_common::api::external::Error;
 use slog::Logger;
 use uuid::Uuid;
 

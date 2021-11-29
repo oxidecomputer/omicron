@@ -1,3 +1,7 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
 /*!
  * Shared integration testing facilities
  */
@@ -19,6 +23,7 @@ use std::path::Path;
 use std::time::Duration;
 use uuid::Uuid;
 
+pub mod http_testing;
 pub mod resource_helpers;
 
 pub const SLED_AGENT_UUID: &str = "b6d65341-167c-41df-9b5c-41cded99c229";

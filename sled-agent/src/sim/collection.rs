@@ -1,3 +1,7 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
 /*!
  * Simulated sled agent object collection
  */
@@ -8,8 +12,8 @@ use futures::channel::mpsc::Receiver;
 use futures::channel::mpsc::Sender;
 use futures::lock::Mutex;
 use futures::stream::StreamExt;
+use nexus_client::Client as NexusClient;
 use omicron_common::api::external::Error;
-use omicron_common::NexusClient;
 use slog::Logger;
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -329,6 +333,7 @@ impl<S: Simulatable + 'static> SimCollection<S> {
 
 #[cfg(test)]
 mod test {
+    use crate::params::DiskStateRequested;
     use crate::sim::collection::SimObject;
     use crate::sim::disk::SimDisk;
     use crate::sim::instance::SimInstance;
@@ -344,7 +349,6 @@ mod test {
     use omicron_common::api::external::InstanceState;
     use omicron_common::api::internal::nexus::DiskRuntimeState;
     use omicron_common::api::internal::nexus::InstanceRuntimeState;
-    use omicron_common::api::internal::sled_agent::DiskStateRequested;
     use omicron_common::api::internal::sled_agent::InstanceRuntimeStateRequested;
     use omicron_common::api::internal::sled_agent::InstanceStateRequested;
     use omicron_test_utils::dev::test_setup_log;

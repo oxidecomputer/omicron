@@ -1,9 +1,13 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
 //! Bootstrap-related APIs.
 
 use super::client::types as bootstrap_types;
 use super::client::Client as BootstrapClient;
+use super::views::ShareResponse;
 use omicron_common::api::external::Error;
-use omicron_common::api::internal::bootstrap_agent::ShareResponse;
 use omicron_common::packaging::sha256_digest;
 
 use slog::Logger;
@@ -38,7 +42,7 @@ pub enum BootstrapError {
 }
 
 /// The entity responsible for bootstrapping an Oxide rack.
-pub struct Agent {
+pub(crate) struct Agent {
     /// Debug log
     log: Logger,
 }

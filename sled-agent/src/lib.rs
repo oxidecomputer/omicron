@@ -1,3 +1,7 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
 //! Library interface to the sled agent
 
 // We only use rustdoc for internal documentation, including private items, so
@@ -19,6 +23,7 @@ mod http_entrypoints;
 mod illumos;
 mod instance;
 mod instance_manager;
+mod params;
 pub mod server;
 mod sled_agent;
 

@@ -1,7 +1,12 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
 /*!
  * HTTP entrypoint functions for the sled agent's exposed API
  */
 
+use crate::params::DiskEnsureBody;
 use dropshot::endpoint;
 use dropshot::ApiDescription;
 use dropshot::HttpError;
@@ -12,7 +17,6 @@ use dropshot::RequestContext;
 use dropshot::TypedBody;
 use omicron_common::api::internal::nexus::DiskRuntimeState;
 use omicron_common::api::internal::nexus::InstanceRuntimeState;
-use omicron_common::api::internal::sled_agent::DiskEnsureBody;
 use omicron_common::api::internal::sled_agent::InstanceEnsureBody;
 use schemars::JsonSchema;
 use serde::Deserialize;
