@@ -2925,7 +2925,7 @@ dependencies = [
 [[package]]
 name = "spdm"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/spdm?rev=94899d6#94899d6403d8ec4b444e81b8ff48818facadf20f"
+source = "git+https://github.com/oxidecomputer/spdm?rev=9742f6e#9742f6eae7b86cc8bc8bc2fb0feeb44f770a1fb6"
 dependencies = [
  "bitflags",
  "rand",
