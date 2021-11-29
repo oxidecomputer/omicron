@@ -18,7 +18,8 @@ use std::path::Path;
 use tar::Archive;
 use thiserror::Error;
 
-const UNLOCK_THRESHOLD: usize = 1;
+const UNLOCK_THRESHOLD: usize = 2;
+const BOOTSTRAP_PORT: u16 = 12346;
 
 /// Describes errors which may occur while operating the bootstrap service.
 #[derive(Error, Debug)]
@@ -88,6 +89,7 @@ impl Agent {
             internal_service_policy(),
             || async {
                 let other_agents = self.peer_monitor.addrs().await;
+                info!(&self.log, "Bootstrap: Communicating with peers: {:?}", other_agents);
 
                 // "-1" to account for ourselves.
                 //
@@ -96,10 +98,12 @@ impl Agent {
                 // peers to unlock.
                 #[allow(clippy::absurd_extreme_comparisons)]
                 if other_agents.len() < UNLOCK_THRESHOLD - 1 {
+                    warn!(&self.log, "Not enough peers to start establishing quorum");
                     return Err(BackoffError::Transient(
                         BootstrapError::NotEnoughPeers,
                     ));
                 }
+                info!(&self.log, "Bootstrap: Enough peers to start share transfer");
 
                 // TODO-correctness:
                 // - Establish trust quorum.
@@ -109,10 +113,23 @@ impl Agent {
                 // agents, but does not actually create a quorum / unlock anything.
                 let other_agents: Vec<BootstrapClient> = other_agents
                     .into_iter()
-                    .map(|addr| {
-                        let addr_str = addr.to_string();
+                    .map(|mut addr| {
+                        addr.set_port(BOOTSTRAP_PORT);
+                        // TODO-correctness:
+                        //
+                        // Many rust crates - such as "URL" - really dislike
+                        // using scopes in IPv6 addresses. Using
+                        // "addr.to_string()" results in an IP address format
+                        // that is rejected when embedded into a URL.
+                        //
+                        // Instead, we merely use IP and port for the moment,
+                        // which loses the scope information. Longer-term, if we
+                        // use ULAs (Unique Local Addresses) the scope shouldn't
+                        // be a factor anyway.
+                        let addr_str = format!("[{}]:{}", addr.ip(), addr.port());
+                        info!(&self.log, "bootstrap: Connecting to {}", addr_str);
                         BootstrapClient::new(
-                            &format!("http://{}", addr_str,),
+                            &format!("http://{}", addr_str),
                             self.log.new(o!(
                                 "Address" => addr_str,
                             )),
@@ -126,8 +143,10 @@ impl Agent {
                         })
                         .await
                         .map_err(|e| {
+                            info!(&self.log, "Bootstrap: Failed to share request with peer: {:?}", e);
                             BackoffError::Transient(BootstrapError::Api(e))
                         })?;
+                        info!(&self.log, "Bootstrap: Shared request with peer");
                 }
                 Ok(())
             },
