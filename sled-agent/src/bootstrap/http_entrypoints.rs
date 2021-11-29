@@ -30,6 +30,7 @@ use dropshot::HttpError;
 use dropshot::HttpResponseOk;
 use dropshot::RequestContext;
 use dropshot::TypedBody;
+use omicron_common::api::external::Error as ExternalError;
 use std::sync::Arc;
 
 use super::agent::Agent;
@@ -62,5 +63,10 @@ async fn api_request_share(
     let bootstrap_agent = rqctx.context();
 
     let request = request.into_inner();
-    Ok(HttpResponseOk(bootstrap_agent.request_share(request.identity).await?))
+    Ok(HttpResponseOk(
+        bootstrap_agent
+            .request_share(request.identity)
+            .await
+            .map_err(|e| ExternalError::from(e))?,
+    ))
 }
