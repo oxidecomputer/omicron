@@ -166,6 +166,8 @@ CREATE TABLE omicron.public.instance (
      * servers involved in the migration.
      */
     active_server_id UUID,
+    /* Identifies the underlying propolis-server backing the instance. */
+    active_propolis_id UUID,
 
     /* Instance configuration */
     ncpus INT NOT NULL,

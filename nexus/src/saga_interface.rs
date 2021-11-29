@@ -7,9 +7,9 @@
  */
 
 use crate::db;
+use crate::external_api::params;
 use crate::Nexus;
 use omicron_common::api::external::Error;
-use omicron_common::api::external::InstanceCreateParams;
 use sled_agent_client::Client as SledAgentClient;
 use std::fmt;
 use std::sync::Arc;
@@ -48,7 +48,7 @@ impl SagaContext {
      */
     pub async fn alloc_server(
         &self,
-        _params: &InstanceCreateParams,
+        _params: &params::InstanceCreate,
     ) -> Result<Uuid, Error> {
         self.nexus.sled_allocate().await
     }

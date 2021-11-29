@@ -22,6 +22,7 @@ impl From<omicron_common::api::internal::nexus::InstanceRuntimeState>
         Self {
             run_state: s.run_state.into(),
             sled_uuid: s.sled_uuid,
+            propolis_uuid: s.propolis_uuid,
             ncpus: s.ncpus.into(),
             memory: s.memory.into(),
             hostname: s.hostname,
@@ -119,6 +120,7 @@ impl From<types::InstanceRuntimeState>
         Self {
             run_state: s.run_state.into(),
             sled_uuid: s.sled_uuid,
+            propolis_uuid: s.propolis_uuid,
             ncpus: s.ncpus.into(),
             memory: s.memory.into(),
             hostname: s.hostname,

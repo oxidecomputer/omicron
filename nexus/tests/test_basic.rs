@@ -21,7 +21,10 @@ use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::IdentityMetadataUpdateParams;
 use omicron_common::api::external::Name;
 use omicron_common::api::external::Sled;
-use omicron_nexus::external_api::{params, views::Project};
+use omicron_nexus::external_api::{
+    params,
+    views::{Project, Sled},
+};
 use serde::Serialize;
 use uuid::Uuid;
 
