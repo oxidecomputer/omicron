@@ -453,18 +453,17 @@ impl Nexus {
 
     pub async fn project_create(
         &self,
+        opctx: &OpContext,
         organization_name: &Name,
         new_project: &params::ProjectCreate,
     ) -> CreateResult<db::model::Project> {
-        let organization_id = self
-            .db_datastore
-            .organization_lookup_id_by_name(organization_name)
-            .await?;
+        let org =
+            self.db_datastore.organization_lookup(organization_name).await?;
 
         // Create a project.
+        let db_project = db::model::Project::new(org.id(), new_project.clone());
         let db_project =
-            db::model::Project::new(organization_id, new_project.clone());
-        let db_project = self.db_datastore.project_create(db_project).await?;
+            self.db_datastore.project_create(opctx, &org, db_project).await?;
 
         // TODO: We probably want to have "project creation" and "default VPC
         // creation" co-located within a saga for atomicity.
