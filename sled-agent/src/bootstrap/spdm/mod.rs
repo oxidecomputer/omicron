@@ -1,3 +1,9 @@
+//! Instantiate a SPDM requester and responder with particular capabilities,
+//! algorithms, and credentials.
+//!
+//! Sled agents run the SPDM protocol over a tokio TCP stream with a 2 byte size
+//! header for framing.
+
 mod error;
 mod requester;
 mod responder;

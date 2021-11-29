@@ -1,3 +1,5 @@
+//! Wrap errors returned from the `spdm` crate and std::io::Error.
+
 use spdm::{requester::RequesterError, responder::ResponderError};
 use thiserror::Error;
 
@@ -12,6 +14,9 @@ pub enum SpdmError {
 
     #[error(transparent)]
     Io(#[from] std::io::Error),
+
+    #[error("invalid state transition: expected {expected}, got {got}")]
+    InvalidState { expected: &'static str, got: &'static str },
 }
 
 impl From<RequesterError> for SpdmError {

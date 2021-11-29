@@ -70,7 +70,12 @@ impl Ctx {
         use responder::capabilities::Transition;
         let state = match transition {
             Transition::Algorithms(state) => state,
-            _ => panic!("Expected transition to Algorithms state"),
+            _ => {
+                return Err(SpdmError::InvalidState {
+                    expected: "Algorithms",
+                    got: "Capabilities",
+                })
+            }
         };
 
         self.transport.send(data).await?;
@@ -92,7 +97,12 @@ impl Ctx {
         use responder::algorithms::Transition;
         let state = match transition {
             Transition::IdAuth(state) => state,
-            _ => panic!("Expected transition to Algorithms state"),
+            _ => {
+                return Err(SpdmError::InvalidState {
+                    expected: "IdAuth",
+                    got: "Capabilities",
+                })
+            }
         };
 
         self.transport.send(data).await?;

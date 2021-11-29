@@ -77,21 +77,18 @@ impl Ctx {
     ) -> Result<id_auth::State, SpdmError> {
         let req = NegotiateAlgorithms {
             measurement_spec: MeasurementSpec::DMTF,
-            base_asym_algo: BaseAsymAlgo::ECDSA_ECC_NIST_P384,
-            base_hash_algo: BaseHashAlgo::SHA_256 | BaseHashAlgo::SHA3_256,
+            base_asym_algo: BaseAsymAlgo::ECDSA_ECC_NIST_P256,
+            base_hash_algo: BaseHashAlgo::SHA_256,
             num_algorithm_requests: 4,
             algorithm_requests: [
                 AlgorithmRequest::Dhe(DheAlgorithm {
-                    supported: DheFixedAlgorithms::FFDHE_3072
-                        | DheFixedAlgorithms::SECP_384_R1,
+                    supported: DheFixedAlgorithms::SECP_256_R1,
                 }),
                 AlgorithmRequest::Aead(AeadAlgorithm {
-                    supported: AeadFixedAlgorithms::AES_256_GCM
-                        | AeadFixedAlgorithms::CHACHA20_POLY1305,
+                    supported: AeadFixedAlgorithms::AES_256_GCM,
                 }),
                 AlgorithmRequest::ReqBaseAsym(ReqBaseAsymAlgorithm {
-                    supported: ReqBaseAsymFixedAlgorithms::ECDSA_ECC_NIST_P384
-                        | ReqBaseAsymFixedAlgorithms::ECDSA_ECC_NIST_P256,
+                    supported: ReqBaseAsymFixedAlgorithms::ECDSA_ECC_NIST_P256,
                 }),
                 AlgorithmRequest::KeySchedule(KeyScheduleAlgorithm {
                     supported: KeyScheduleFixedAlgorithms::SPDM,
@@ -160,7 +157,7 @@ mod tests {
         let addr: SocketAddr = "127.0.0.1:9999".parse().unwrap();
         let listener = TcpListener::bind(addr.clone()).await.unwrap();
 
-        tokio::spawn(async move {
+        let handle = tokio::spawn(async move {
             let (sock, _) = listener.accept().await.unwrap();
             let transport = Transport::new(sock);
             responder::run(log, transport).await.unwrap();
@@ -169,5 +166,7 @@ mod tests {
         let sock = TcpStream::connect(addr).await.unwrap();
         let transport = Transport::new(sock);
         run(log2, transport).await.unwrap();
+
+        handle.await.unwrap();
     }
 }
