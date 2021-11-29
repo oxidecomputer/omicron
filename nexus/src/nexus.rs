@@ -1394,6 +1394,54 @@ impl Nexus {
             .map(|_| ())
     }
 
+    /**
+     * Creates a new network interface for this instance
+     */
+    pub async fn instance_create_network_interface(
+        &self,
+        organization_name: &Name,
+        project_name: &Name,
+        instance_name: &Name,
+        vpc_name: &Name,
+        subnet_name: &Name,
+        params: &params::NetworkInterfaceCreate,
+    ) -> CreateResult<db::model::NetworkInterface> {
+        let instance = self
+            .project_lookup_instance(
+                organization_name,
+                project_name,
+                instance_name,
+            )
+            .await?;
+        let vpc = self
+            .db_datastore
+            .vpc_fetch_by_name(&instance.project_id, vpc_name)
+            .await?;
+        let subnet = self
+            .db_datastore
+            .vpc_subnet_fetch_by_name(&vpc.id(), subnet_name)
+            .await?;
+
+        let mac = self.db_datastore.generate_mac_address()?;
+
+        let interface_id = Uuid::new_v4();
+        // Request an allocation
+        let ip = None;
+        let interface = db::model::IncompleteNetworkInterface::new(
+            interface_id,
+            instance.id(),
+            // TODO-correctness: vpc_id here is used for name uniqueness. Should
+            // interface names be unique to the subnet's VPC or to the
+            // VPC associated with the instance's default interface?
+            vpc.id(),
+            subnet,
+            mac,
+            ip,
+            params.clone(),
+        );
+        self.db_datastore.instance_create_network_interface(interface).await
+    }
+
     pub async fn project_list_vpcs(
         &self,
         organization_name: &Name,

@@ -358,6 +358,13 @@ CREATE UNIQUE INDEX ON omicron.public.network_interface (
 ) WHERE
     time_deleted IS NULL;
 
+/* Ensure we do not assign the same address twice within a subnet */
+CREATE UNIQUE INDEX ON omicron.public.network_interface (
+    subnet_id,
+    ip
+) WHERE
+    time_deleted IS NULL;
+
 CREATE TYPE omicron.public.vpc_router_kind AS ENUM (
     'system',
     'custom'

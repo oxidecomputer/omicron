@@ -55,3 +55,17 @@ pub struct ProjectUpdate {
     #[serde(flatten)]
     pub identity: IdentityMetadataUpdateParams,
 }
+
+/*
+ * NETWORK INTERFACES
+ */
+
+/**
+ * Create-time parameters for a [`NetworkInterface`]
+ */
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct NetworkInterfaceCreate {
+    #[serde(flatten)]
+    pub identity: IdentityMetadataCreateParams,
+}

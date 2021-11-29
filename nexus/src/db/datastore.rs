@@ -29,6 +29,7 @@ use crate::context::OpContext;
 use async_bb8_diesel::{AsyncConnection, AsyncRunQueryDsl, ConnectionManager};
 use chrono::Utc;
 use diesel::prelude::*;
+use diesel::sql_types;
 use diesel::{ExpressionMethods, QueryDsl, SelectableHelper};
 use omicron_common::api;
 use omicron_common::api::external::CreateResult;
@@ -38,9 +39,11 @@ use omicron_common::api::external::Error;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::LookupType;
+use omicron_common::api::external::MacAddr;
 use omicron_common::api::external::ResourceType;
 use omicron_common::api::external::UpdateResult;
 use omicron_common::bail_unless;
+use rand::{rngs::StdRng, SeedableRng};
 use std::convert::TryFrom;
 use std::sync::Arc;
 use uuid::Uuid;
@@ -52,8 +55,9 @@ use crate::db::{
     },
     model::{
         ConsoleSession, Disk, DiskAttachment, DiskRuntimeState, Generation,
-        Instance, InstanceRuntimeState, Name, Organization, OrganizationUpdate,
-        OximeterInfo, ProducerEndpoint, Project, ProjectUpdate, RouterRoute,
+        IncompleteNetworkInterface, Instance, InstanceRuntimeState, Name,
+        NetworkInterface, Organization, OrganizationUpdate, OximeterInfo,
+        ProducerEndpoint, Project, ProjectUpdate, RouterRoute,
         RouterRouteUpdate, Sled, Vpc, VpcFirewallRule, VpcRouter,
         VpcRouterUpdate, VpcSubnet, VpcSubnetUpdate, VpcUpdate,
     },
@@ -946,6 +950,76 @@ impl DataStore {
                 ),
             }),
         }
+    }
+
+    /*
+     * Network interfaces
+     */
+
+    /**
+     * Generate a unique MAC address for an interface
+     */
+    pub fn generate_mac_address(&self) -> Result<db::model::MacAddr, Error> {
+        // Bitmasks defined in RFC7042 section 2.1
+        const LOCALLY_ADMINISTERED: u8 = 0b1;
+        const MULTICAST: u8 = 0b10;
+
+        // Generate a unique address from the locally administered space.
+        use rand::Fill;
+        let mut addr = [0u8; 6];
+        addr.try_fill(&mut StdRng::from_entropy())
+            .map_err(|_| Error::internal_error("failed to generate MAC"))?;
+        addr[0] = (addr[0] & !MULTICAST) | LOCALLY_ADMINISTERED;
+        Ok(MacAddr(macaddr::MacAddr6::from(addr)).into())
+    }
+
+    pub async fn instance_create_network_interface(
+        &self,
+        interface: IncompleteNetworkInterface,
+    ) -> CreateResult<NetworkInterface> {
+        use db::schema::network_interface::dsl;
+
+        let name = interface.identity.name.clone();
+        let result = match interface.ip {
+            // Attempt an insert with a requested IP address
+            Some(ip) => {
+                let row = NetworkInterface {
+                    identity: interface.identity,
+                    instance_id: interface.instance_id,
+                    vpc_id: interface.vpc_id,
+                    subnet_id: interface.subnet.id(),
+                    mac: interface.mac,
+                    ip: ip.into(),
+                };
+                diesel::insert_into(dsl::network_interface)
+                    .values(row)
+                    .returning(NetworkInterface::as_returning())
+                    .get_result_async(self.pool())
+                    .await
+            }
+            // Insert and allocate an IP address
+            None => {
+                let block = interface.subnet.ipv4_block.ok_or_else(|| {
+                    Error::internal_error("assuming subnets all have v4 block")
+                })?;
+                let allocation_query = AllocateIpQuery {
+                    block: ipnetwork::IpNetwork::V4(block.0 .0),
+                    interface,
+                };
+                diesel::insert_into(dsl::network_interface)
+                    .values(allocation_query)
+                    .returning(NetworkInterface::as_returning())
+                    .get_result_async(self.pool())
+                    .await
+            }
+        };
+        result.map_err(|e| {
+            public_error_from_diesel_pool_create(
+                e,
+                ResourceType::NetworkInterface,
+                name.as_str(),
+            )
+        })
     }
 
     // Create a record for a new Oximeter instance
@@ -1842,6 +1916,206 @@ impl DataStore {
                     e
                 ))
             })
+    }
+}
+
+// TODO: Move this somewhere else
+use diesel::pg::Pg;
+struct AllocateIpQuery {
+    interface: IncompleteNetworkInterface,
+    block: ipnetwork::IpNetwork,
+}
+
+struct AllocateIpQueryValues(AllocateIpQuery);
+
+impl diesel::query_builder::QueryId for AllocateIpQuery {
+    type QueryId = ();
+    const HAS_STATIC_QUERY_ID: bool = false;
+}
+
+impl Insertable<db::schema::network_interface::table> for AllocateIpQuery {
+    type Values = AllocateIpQueryValues;
+
+    fn values(self) -> Self::Values {
+        AllocateIpQueryValues(self)
+    }
+}
+
+/// Generate the query
+/// SELECT <id> as id, <name> as name, <description> as description,
+///        <time_created> as time_created, <time_modified> as time_modified,
+///        <instance_id> as instance_id, <vpc_id> as vpc_id,
+///        <subnet_id> as subnet_id, <mac> as mac, <subnet_base> + off as ip
+///   FROM
+///        generate_series(1, <num_addresses_in_subnet>) as off
+///   LEFT OUTER JOIN
+///        network_interface
+///   ON (subnet_id, ip, time_deleted IS NULL) =
+///      (<subnet_id>, <subnet_base> + off, TRUE)
+///   WHERE ip IS NULL LIMIT 1;
+impl diesel::query_builder::QueryFragment<Pg> for AllocateIpQuery {
+    fn walk_ast(
+        &self,
+        mut out: diesel::query_builder::AstPass<Pg>,
+    ) -> diesel::QueryResult<()> {
+        use db::schema::network_interface::dsl;
+
+        let last_address_offset = match self.block {
+            ipnetwork::IpNetwork::V4(network) => network.size() as i64 - 1,
+            ipnetwork::IpNetwork::V6(network) => {
+                // If we're allocating from a v6 subnet with more than 2^63 - 1
+                // addresses, just cap the size we'll explore.  This will never
+                // fail in practice since we're never going to be storing 2^64
+                // rows in the network_interface table.
+                i64::try_from(network.size() - 1).unwrap_or(i64::MAX)
+            }
+        };
+        let now = Utc::now();
+
+        out.push_sql("SELECT ");
+
+        out.push_bind_param::<sql_types::Uuid, Uuid>(
+            &self.interface.identity.id,
+        )?;
+        out.push_sql(" AS ");
+        out.push_identifier(dsl::id::NAME)?;
+        out.push_sql(",");
+
+        out.push_bind_param::<sql_types::Text, String>(
+            &self.interface.identity.name.to_string(),
+        )?;
+        out.push_sql(" AS ");
+        out.push_identifier(dsl::name::NAME)?;
+        out.push_sql(",");
+
+        out.push_bind_param::<sql_types::Text, String>(
+            &self.interface.identity.description,
+        )?;
+        out.push_sql(" AS ");
+        out.push_identifier(dsl::description::NAME)?;
+        out.push_sql(",");
+
+        out.push_bind_param::<sql_types::Timestamptz, _>(&now)?;
+        out.push_sql(" AS ");
+        out.push_identifier(dsl::time_created::NAME)?;
+        out.push_sql(",");
+
+        out.push_bind_param::<sql_types::Timestamptz, _>(&now)?;
+        out.push_sql(" AS ");
+        out.push_identifier(dsl::time_modified::NAME)?;
+        out.push_sql(",");
+
+        out.push_bind_param::<sql_types::Uuid, Uuid>(
+            &self.interface.instance_id,
+        )?;
+        out.push_sql(" AS ");
+        out.push_identifier(dsl::instance_id::NAME)?;
+        out.push_sql(",");
+
+        out.push_bind_param::<sql_types::Uuid, Uuid>(&self.interface.vpc_id)?;
+        out.push_sql(" AS ");
+        out.push_identifier(dsl::vpc_id::NAME)?;
+        out.push_sql(",");
+
+        out.push_bind_param::<sql_types::Uuid, Uuid>(
+            &self.interface.subnet.id(),
+        )?;
+        out.push_sql(" AS ");
+        out.push_identifier(dsl::subnet_id::NAME)?;
+        out.push_sql(",");
+
+        out.push_bind_param::<sql_types::Text, String>(
+            &self.interface.mac.to_string(),
+        )?;
+        out.push_sql(" AS ");
+        out.push_identifier(dsl::mac::NAME)?;
+        out.push_sql(",");
+
+        out.push_bind_param::<sql_types::Inet, ipnetwork::IpNetwork>(
+            &self.block.network().into(),
+        )?;
+        out.push_sql(" + ");
+        out.push_identifier("off")?;
+        out.push_sql(" AS ");
+        out.push_identifier(dsl::ip::NAME)?;
+
+        // Start the offsets from 1 to exclude the network base address.
+        out.push_sql(" FROM generate_series(1, ");
+        out.push_bind_param::<sql_types::BigInt, _>(
+            // Subtract 1 to exclude the broadcast address
+            &(last_address_offset - 1),
+        )?;
+        out.push_sql(") AS ");
+        out.push_identifier("off")?;
+        out.push_sql(" LEFT OUTER JOIN ");
+        dsl::network_interface.from_clause().walk_ast(out.reborrow())?;
+
+        //   ON (subnet_id, ip, time_deleted IS NULL) =
+        //      (<subnet_id>, <subnet_base> + off, TRUE)
+        out.push_sql(" ON (");
+        out.push_identifier(dsl::subnet_id::NAME)?;
+        out.push_sql(",");
+        out.push_identifier(dsl::ip::NAME)?;
+        out.push_sql(",");
+        out.push_identifier(dsl::time_deleted::NAME)?;
+        out.push_sql(" IS NULL) = (");
+        out.push_bind_param::<sql_types::Uuid, Uuid>(
+            &self.interface.subnet.id(),
+        )?;
+        out.push_sql(",");
+        out.push_bind_param::<sql_types::Inet, ipnetwork::IpNetwork>(
+            &self.block.network().into(),
+        )?;
+        out.push_sql(" + ");
+        out.push_identifier("off")?;
+        out.push_sql(", TRUE) ");
+        //   WHERE ip IS NULL LIMIT 1;
+        out.push_sql("WHERE ");
+        out.push_identifier(dsl::ip::NAME)?;
+        out.push_sql("IS NULL LIMIT 1");
+        Ok(())
+    }
+}
+
+impl diesel::query_builder::QueryId for AllocateIpQueryValues {
+    type QueryId = ();
+    const HAS_STATIC_QUERY_ID: bool = false;
+}
+
+impl diesel::insertable::CanInsertInSingleQuery<Pg> for AllocateIpQueryValues {
+    fn rows_to_insert(&self) -> Option<usize> {
+        Some(1)
+    }
+}
+
+impl diesel::query_builder::QueryFragment<Pg> for AllocateIpQueryValues {
+    fn walk_ast(
+        &self,
+        mut out: diesel::query_builder::AstPass<Pg>,
+    ) -> diesel::QueryResult<()> {
+        use db::schema::network_interface::dsl;
+        out.push_sql("(");
+        out.push_identifier(dsl::id::NAME)?;
+        out.push_sql(",");
+        out.push_identifier(dsl::name::NAME)?;
+        out.push_sql(",");
+        out.push_identifier(dsl::description::NAME)?;
+        out.push_sql(",");
+        out.push_identifier(dsl::time_created::NAME)?;
+        out.push_sql(",");
+        out.push_identifier(dsl::time_modified::NAME)?;
+        out.push_sql(",");
+        out.push_identifier(dsl::instance_id::NAME)?;
+        out.push_sql(",");
+        out.push_identifier(dsl::vpc_id::NAME)?;
+        out.push_sql(",");
+        out.push_identifier(dsl::subnet_id::NAME)?;
+        out.push_sql(",");
+        out.push_identifier(dsl::mac::NAME)?;
+        out.push_sql(",");
+        out.push_identifier(dsl::ip::NAME)?;
+        out.push_sql(") ");
+        self.0.walk_ast(out)
     }
 }
 

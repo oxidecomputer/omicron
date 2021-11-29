@@ -10,17 +10,22 @@
  */
 
 use crate::db;
+use crate::db::identity::Resource;
+use crate::external_api::params;
 use crate::saga_interface::SagaContext;
 use chrono::Utc;
 use lazy_static::lazy_static;
 use omicron_common::api::external::Generation;
+use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::InstanceCreateParams;
 use omicron_common::api::external::InstanceState;
+use omicron_common::api::external::Name;
 use omicron_common::api::internal::nexus::InstanceRuntimeState;
 use omicron_common::api::internal::sled_agent::InstanceHardware;
 use serde::Deserialize;
 use serde::Serialize;
 use std::collections::BTreeMap;
+use std::convert::TryFrom;
 use std::sync::Arc;
 use steno::new_action_noop_undo;
 use steno::ActionContext;
@@ -154,11 +159,57 @@ async fn sic_create_instance_record(
         .await
         .map_err(ActionError::action_failed)?;
 
+    let default_name =
+        db::model::Name(Name::try_from("default".to_string()).unwrap());
+
+    let vpc = osagactx
+        .datastore()
+        .vpc_fetch_by_name(&instance.project_id, &default_name)
+        .await
+        .map_err(ActionError::action_failed)?;
+    let subnet = osagactx
+        .datastore()
+        .vpc_subnet_fetch_by_name(&vpc.id(), &default_name)
+        .await
+        .map_err(ActionError::action_failed)?;
+
+    let mac = osagactx
+        .datastore()
+        .generate_mac_address()
+        .map_err(ActionError::action_failed)?;
+    let interface_id = Uuid::new_v4();
+    // Request an allocation
+    let ip = None;
+    let interface = db::model::IncompleteNetworkInterface::new(
+        interface_id,
+        instance.id(),
+        // TODO-correctness: vpc_id here is used for name uniqueness. Should
+        // interface names be unique to the subnet's VPC or to the
+        // VPC associated with the instance's default interface?
+        vpc.id(),
+        subnet,
+        mac,
+        ip,
+        params::NetworkInterfaceCreate {
+            identity: IdentityMetadataCreateParams {
+                // TODO: Generate a unique name here, since we're not guaranteed
+                // this interface name is available
+                name: instance.name().0.clone(),
+                description: "default interface".to_string(),
+            },
+        },
+    );
+    let interface = osagactx
+        .datastore()
+        .instance_create_network_interface(interface)
+        .await
+        .map_err(ActionError::action_failed)?;
+
     // TODO: Populate this with an appropriate NIC.
     // See also: instance_set_runtime in nexus.rs for a similar construction.
     Ok(InstanceHardware {
         runtime: instance.runtime().clone().into(),
-        nics: vec![],
+        nics: vec![interface.into()],
     })
 }
 
