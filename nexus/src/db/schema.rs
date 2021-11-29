@@ -1,3 +1,7 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
 //! Describes the Diesel database schema.
 //!
 //! NOTE: Should be kept up-to-date with dbinit.sql.
@@ -33,6 +37,7 @@ table! {
         time_state_updated -> Timestamptz,
         state_generation -> Int8,
         active_server_id -> Uuid,
+        active_propolis_id -> Uuid,
         ncpus -> Int8,
         memory -> Int8,
         hostname -> Text,
@@ -165,6 +170,7 @@ table! {
         project_id -> Uuid,
         system_router_id -> Uuid,
         dns_name -> Text,
+        firewall_gen -> Int8,
     }
 }
 
@@ -211,6 +217,29 @@ table! {
     }
 }
 
+table! {
+    use crate::db::model;
+    use diesel::sql_types::*;
+
+    vpc_firewall_rule (id) {
+        id -> Uuid,
+        name -> Text,
+        description -> Text,
+        time_created -> Timestamptz,
+        time_modified -> Timestamptz,
+        time_deleted -> Nullable<Timestamptz>,
+        vpc_id -> Uuid,
+        status -> model::VpcFirewallRuleStatusEnum,
+        direction -> model::VpcFirewallRuleDirectionEnum,
+        targets -> Array<Text>,
+        filter_hosts -> Nullable<Array<Text>>,
+        filter_ports -> Nullable<Array<Text>>,
+        filter_protocols -> Nullable<Array<model::VpcFirewallRuleProtocolEnum>>,
+        action -> model::VpcFirewallRuleActionEnum,
+        priority -> Int4,
+    }
+}
+
 allow_tables_to_appear_in_same_query!(
     disk,
     instance,
@@ -226,5 +255,6 @@ allow_tables_to_appear_in_same_query!(
     router_route,
     vpc,
     vpc_subnet,
-    vpc_router
+    vpc_router,
+    vpc_firewall_rule,
 );

@@ -1,3 +1,7 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
 /*!
  * Simulated sled agent implementation
  */
@@ -5,11 +9,11 @@
 use crate::params::DiskStateRequested;
 use crate::sim::simulatable::Simulatable;
 use async_trait::async_trait;
+use nexus_client::Client as NexusClient;
 use omicron_common::api::external::DiskState;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::Generation;
 use omicron_common::api::internal::nexus::DiskRuntimeState;
-use omicron_common::NexusClient;
 use propolis_client::api::DiskAttachmentState as PropolisDiskState;
 use std::sync::Arc;
 use uuid::Uuid;
@@ -88,9 +92,7 @@ impl Simulatable for SimDisk {
         nexus_client
             .cpapi_disks_put(
                 id,
-                &omicron_common::nexus_client::types::DiskRuntimeState::from(
-                    current,
-                ),
+                &nexus_client::types::DiskRuntimeState::from(current),
             )
             .await
             .map_err(Error::from)

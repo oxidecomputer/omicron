@@ -1,3 +1,7 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
 //! Server API for bootstrap-related functionality.
 
 use super::agent::Agent;
@@ -24,7 +28,8 @@ impl Server {
             "component" => "Agent",
             "server" => config.id.clone().to_string()
         ));
-        let bootstrap_agent = Arc::new(Agent::new(ba_log));
+        let bootstrap_agent =
+            Arc::new(Agent::new(ba_log).map_err(|e| e.to_string())?);
 
         let ba = Arc::clone(&bootstrap_agent);
         let dropshot_log = log.new(o!("component" => "dropshot"));
@@ -43,7 +48,7 @@ impl Server {
         // This ordering allows the bootstrap agent to communicate with
         // other bootstrap agents on the rack during the initialization
         // process.
-        if let Err(e) = server.bootstrap_agent.initialize(vec![]).await {
+        if let Err(e) = server.bootstrap_agent.initialize().await {
             let _ = server.close().await;
             return Err(e.to_string());
         }

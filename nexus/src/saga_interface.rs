@@ -1,12 +1,16 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
 /*!
  * Interfaces available to saga actions and undo actions
  */
 
 use crate::db;
+use crate::external_api::params;
 use crate::Nexus;
 use omicron_common::api::external::Error;
-use omicron_common::api::external::InstanceCreateParams;
-use omicron_common::SledAgentClient;
+use sled_agent_client::Client as SledAgentClient;
 use std::fmt;
 use std::sync::Arc;
 use uuid::Uuid;
@@ -44,7 +48,7 @@ impl SagaContext {
      */
     pub async fn alloc_server(
         &self,
-        _params: &InstanceCreateParams,
+        _params: &params::InstanceCreate,
     ) -> Result<Uuid, Error> {
         self.nexus.sled_allocate().await
     }

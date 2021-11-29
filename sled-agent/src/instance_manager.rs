@@ -1,3 +1,7 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
 //! API for controlling multiple instances on a sled.
 
 use crate::common::vlan::VlanID;
@@ -17,7 +21,7 @@ use uuid::Uuid;
 #[cfg(test)]
 use crate::mocks::MockNexusClient as NexusClient;
 #[cfg(not(test))]
-use omicron_common::NexusClient;
+use nexus_client::Client as NexusClient;
 
 #[cfg(not(test))]
 use crate::{
@@ -247,6 +251,7 @@ mod test {
             runtime: InstanceRuntimeState {
                 run_state: InstanceState::Creating,
                 sled_uuid: Uuid::new_v4(),
+                propolis_uuid: Uuid::new_v4(),
                 ncpus: InstanceCpuCount(2),
                 memory: ByteCount::from_mebibytes_u32(512),
                 hostname: "myvm".to_string(),

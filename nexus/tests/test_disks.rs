@@ -1,3 +1,7 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
 /*!
  * Tests basic disk support in the API
  */
@@ -7,15 +11,13 @@ use http::StatusCode;
 use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::Disk;
 use omicron_common::api::external::DiskAttachment;
-use omicron_common::api::external::DiskCreateParams;
 use omicron_common::api::external::DiskState;
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::Instance;
 use omicron_common::api::external::InstanceCpuCount;
-use omicron_common::api::external::InstanceCreateParams;
-use omicron_common::SledAgentTestInterfaces as _;
-use omicron_nexus::Nexus;
 use omicron_nexus::TestInterfaces as _;
+use omicron_nexus::{external_api::params, Nexus};
+use sled_agent_client::TestInterfaces as _;
 use std::sync::Arc;
 use uuid::Uuid;
 
@@ -26,6 +28,9 @@ use dropshot::test_util::read_json;
 use dropshot::test_util::ClientTestContext;
 
 pub mod common;
+use common::http_testing::AuthnMode;
+use common::http_testing::NexusRequest;
+use common::http_testing::RequestBuilder;
 use common::identity_eq;
 use common::resource_helpers::create_organization;
 use common::resource_helpers::create_project;
@@ -62,13 +67,20 @@ async fn test_disks() {
     assert_eq!(error.message, "not found: disk with name \"just-rainsticks\"");
 
     /* We should also get a 404 if we delete one. */
-    let error = client
-        .make_request_error(Method::DELETE, &disk_url, StatusCode::NOT_FOUND)
-        .await;
+    let error = NexusRequest::new(
+        RequestBuilder::new(client, Method::DELETE, &disk_url)
+            .expect_status(Some(StatusCode::NOT_FOUND)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .expect("unexpected success")
+    .parsed_body::<dropshot::HttpErrorResponseBody>()
+    .unwrap();
     assert_eq!(error.message, "not found: disk with name \"just-rainsticks\"");
 
     /* Create a disk. */
-    let new_disk = DiskCreateParams {
+    let new_disk = params::DiskCreate {
         identity: IdentityMetadataCreateParams {
             name: "just-rainsticks".parse().unwrap(),
             description: String::from("sells rainsticks"),
@@ -121,7 +133,7 @@ async fn test_disks() {
     let instance: Instance = objects_post(
         &client,
         &url_instances,
-        InstanceCreateParams {
+        params::InstanceCreate {
             identity: IdentityMetadataCreateParams {
                 name: "just-rainsticks".parse().unwrap(),
                 description: String::from("sells rainsticks"),
@@ -236,7 +248,7 @@ async fn test_disks() {
     let instance2: Instance = objects_post(
         &client,
         &url_instances,
-        InstanceCreateParams {
+        params::InstanceCreate {
             identity: IdentityMetadataCreateParams {
                 name: "instance2".parse().unwrap(),
                 description: "instance2".to_string(),
@@ -491,11 +503,30 @@ async fn test_disks() {
         "disk \"just-rainsticks\" is not attached to instance \"instance2\""
     );
 
-    /* It's not allowed to delete a disk that's detaching, either. */
-    client
-        .make_request_no_body(Method::DELETE, &disk_url, StatusCode::NO_CONTENT)
+    /*
+     * If we're not authenticated, or authenticated as an unprivileged user, we
+     * shouldn't be able to delete this disk.
+     */
+    NexusRequest::new(
+        RequestBuilder::new(client, Method::DELETE, &disk_url)
+            .expect_status(Some(StatusCode::UNAUTHORIZED)),
+    )
+    .execute()
+    .await
+    .expect("expected request to fail");
+    NexusRequest::new(
+        RequestBuilder::new(client, Method::DELETE, &disk_url)
+            .expect_status(Some(StatusCode::FORBIDDEN)),
+    )
+    .authn_as(AuthnMode::UnprivilegedUser)
+    .execute()
+    .await
+    .expect("expected request to fail");
+    NexusRequest::object_delete(client, &disk_url)
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
         .await
-        .unwrap();
+        .expect("failed to delete disk");
 
     /* It should no longer be present in our list of disks. */
     assert_eq!(disks_list(&client, &url_disks).await.len(), 0);

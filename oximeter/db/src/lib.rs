@@ -1,3 +1,7 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
 //! Tools for interacting with the control plane telemetry database.
 
 // Copyright 2021 Oxide Computer Company
@@ -15,6 +19,10 @@ pub use client::{Client, DbWrite};
 pub enum Error {
     #[error("Oximeter core error: {0}")]
     Oximeter(#[from] oximeter::Error),
+
+    /// The telemetry database could not be reached.
+    #[error("Telemetry database unavailable: {0}")]
+    DatabaseUnavailable(String),
 
     /// An error interacting with the telemetry database
     #[error("Error interacting with telemetry database: {0}")]

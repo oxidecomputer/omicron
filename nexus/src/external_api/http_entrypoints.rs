@@ -1,3 +1,7 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
 /*!
  * Handler functions (entrypoints) for external HTTP APIs
  */
@@ -6,8 +10,10 @@ use crate::db;
 use crate::db::model::Name;
 use crate::ServerContext;
 
-use super::params;
-use super::views::{Organization, Project};
+use super::{
+    console_api, params,
+    views::{Organization, Project, Rack, Sled, Vpc, VpcSubnet},
+};
 use crate::context::OpContext;
 use dropshot::endpoint;
 use dropshot::ApiDescription;
@@ -37,27 +43,18 @@ use omicron_common::api::external::to_list;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Disk;
 use omicron_common::api::external::DiskAttachment;
-use omicron_common::api::external::DiskCreateParams;
 use omicron_common::api::external::Instance;
-use omicron_common::api::external::InstanceCreateParams;
 use omicron_common::api::external::PaginationOrder;
-use omicron_common::api::external::Rack;
 use omicron_common::api::external::RouterRoute;
 use omicron_common::api::external::RouterRouteCreateParams;
 use omicron_common::api::external::RouterRouteKind;
 use omicron_common::api::external::RouterRouteUpdateParams;
 use omicron_common::api::external::Saga;
-use omicron_common::api::external::Sled;
-use omicron_common::api::external::Vpc;
-use omicron_common::api::external::VpcCreateParams;
+use omicron_common::api::external::VpcFirewallRule;
+use omicron_common::api::external::VpcFirewallRuleUpdateParams;
+use omicron_common::api::external::VpcFirewallRuleUpdateResult;
 use omicron_common::api::external::VpcRouter;
-use omicron_common::api::external::VpcRouterCreateParams;
 use omicron_common::api::external::VpcRouterKind;
-use omicron_common::api::external::VpcRouterUpdateParams;
-use omicron_common::api::external::VpcSubnet;
-use omicron_common::api::external::VpcSubnetCreateParams;
-use omicron_common::api::external::VpcSubnetUpdateParams;
-use omicron_common::api::external::VpcUpdateParams;
 use ref_cast::RefCast;
 use schemars::JsonSchema;
 use serde::Deserialize;
@@ -120,6 +117,9 @@ pub fn external_api() -> NexusApiDescription {
         api.register(vpc_routers_delete_router)?;
         api.register(vpc_routers_put_router)?;
 
+        api.register(vpc_firewall_rules_get)?;
+        api.register(vpc_firewall_rules_put)?;
+
         api.register(routers_routes_get)?;
         api.register(routers_routes_get_route)?;
         api.register(routers_routes_post)?;
@@ -133,6 +133,12 @@ pub fn external_api() -> NexusApiDescription {
 
         api.register(sagas_get)?;
         api.register(sagas_get_saga)?;
+
+        api.register(console_api::spoof_login)?;
+        api.register(console_api::spoof_login_form)?;
+        api.register(console_api::logout)?;
+        api.register(console_api::console_page)?;
+        api.register(console_api::asset)?;
 
         Ok(())
     }
@@ -196,6 +202,7 @@ async fn organizations_get(
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
     let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
         let query = query_params.into_inner();
         let params = ScanByNameOrId::from_query(&query)?;
         let field = pagination_field_for_scan_params(params);
@@ -203,14 +210,14 @@ async fn organizations_get(
         let organizations = match field {
             PagField::Id => {
                 let page_selector = data_page_params_nameid_id(&rqctx, &query)?;
-                nexus.organizations_list_by_id(&page_selector).await?
+                nexus.organizations_list_by_id(&opctx, &page_selector).await?
             }
 
             PagField::Name => {
                 let page_selector =
                     data_page_params_nameid_name(&rqctx, &query)?
                         .map_name(|n| Name::ref_cast(n));
-                nexus.organizations_list_by_name(&page_selector).await?
+                nexus.organizations_list_by_name(&opctx, &page_selector).await?
             }
         }
         .into_iter()
@@ -547,7 +554,7 @@ async fn project_disks_get(
 async fn project_disks_post(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<ProjectPathParam>,
-    new_disk: TypedBody<DiskCreateParams>,
+    new_disk: TypedBody<params::DiskCreate>,
 ) -> Result<HttpResponseCreated<Disk>, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
@@ -596,7 +603,7 @@ async fn project_disks_get_disk(
     let project_name = &path.project_name;
     let disk_name = &path.disk_name;
     let handler = async {
-        let disk = nexus
+        let (disk, _) = nexus
             .project_lookup_disk(&organization_name, &project_name, &disk_name)
             .await?;
         Ok(HttpResponseOk(disk.into()))
@@ -622,8 +629,14 @@ async fn project_disks_delete_disk(
     let project_name = &path.project_name;
     let disk_name = &path.disk_name;
     let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
         nexus
-            .project_delete_disk(&organization_name, &project_name, &disk_name)
+            .project_delete_disk(
+                &opctx,
+                &organization_name,
+                &project_name,
+                &disk_name,
+            )
             .await?;
         Ok(HttpResponseDeleted())
     };
@@ -687,7 +700,7 @@ async fn project_instances_get(
 async fn project_instances_post(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<ProjectPathParam>,
-    new_instance: TypedBody<InstanceCreateParams>,
+    new_instance: TypedBody<params::InstanceCreate>,
 ) -> Result<HttpResponseCreated<Instance>, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
@@ -1034,7 +1047,11 @@ async fn project_vpcs_get(
                 &data_page_params_for(&rqctx, &query)?
                     .map_name(|n| Name::ref_cast(n)),
             )
-            .await?;
+            .await?
+            .into_iter()
+            .map(|p| p.into())
+            .collect();
+
         Ok(HttpResponseOk(ScanByName::results_page(&query, vpcs)?))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
@@ -1071,7 +1088,7 @@ async fn project_vpcs_get_vpc(
         let vpc = nexus
             .project_lookup_vpc(&organization_name, &project_name, &vpc_name)
             .await?;
-        Ok(HttpResponseOk(vpc))
+        Ok(HttpResponseOk(vpc.into()))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
@@ -1086,7 +1103,7 @@ async fn project_vpcs_get_vpc(
 async fn project_vpcs_post(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<ProjectPathParam>,
-    new_vpc: TypedBody<VpcCreateParams>,
+    new_vpc: TypedBody<params::VpcCreate>,
 ) -> Result<HttpResponseCreated<Vpc>, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
@@ -1102,7 +1119,7 @@ async fn project_vpcs_post(
                 &new_vpc_params,
             )
             .await?;
-        Ok(HttpResponseCreated(vpc))
+        Ok(HttpResponseCreated(vpc.into()))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
@@ -1117,7 +1134,7 @@ async fn project_vpcs_post(
 async fn project_vpcs_put_vpc(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<VpcPathParam>,
-    updated_vpc: TypedBody<VpcUpdateParams>,
+    updated_vpc: TypedBody<params::VpcUpdate>,
 ) -> Result<HttpResponseOk<()>, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
@@ -1187,7 +1204,10 @@ async fn vpc_subnets_get(
                 &data_page_params_for(&rqctx, &query)?
                     .map_name(|n| Name::ref_cast(n)),
             )
-            .await?;
+            .await?
+            .into_iter()
+            .map(|vpc| vpc.into())
+            .collect();
         Ok(HttpResponseOk(ScanByName::results_page(&query, vpcs)?))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
@@ -1227,7 +1247,7 @@ async fn vpc_subnets_get_subnet(
                 &path.subnet_name,
             )
             .await?;
-        Ok(HttpResponseOk(subnet))
+        Ok(HttpResponseOk(subnet.into()))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
@@ -1242,7 +1262,7 @@ async fn vpc_subnets_get_subnet(
 async fn vpc_subnets_post(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<VpcPathParam>,
-    create_params: TypedBody<VpcSubnetCreateParams>,
+    create_params: TypedBody<params::VpcSubnetCreate>,
 ) -> Result<HttpResponseCreated<VpcSubnet>, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
@@ -1256,7 +1276,7 @@ async fn vpc_subnets_post(
                 &create_params.into_inner(),
             )
             .await?;
-        Ok(HttpResponseCreated(subnet))
+        Ok(HttpResponseCreated(subnet.into()))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
@@ -1299,7 +1319,7 @@ async fn vpc_subnets_delete_subnet(
 async fn vpc_subnets_put_subnet(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<VpcSubnetPathParam>,
-    subnet_params: TypedBody<VpcSubnetUpdateParams>,
+    subnet_params: TypedBody<params::VpcSubnetUpdate>,
 ) -> Result<HttpResponseOk<()>, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
@@ -1315,6 +1335,77 @@ async fn vpc_subnets_put_subnet(
             )
             .await?;
         Ok(HttpResponseOk(()))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/*
+ * VPC Firewalls
+ */
+
+/**
+ * List firewall rules for a VPC.
+ */
+#[endpoint {
+     method = GET,
+     path = "/organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/firewall/rules",
+ }]
+async fn vpc_firewall_rules_get(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    query_params: Query<PaginatedByName>,
+    path_params: Path<VpcPathParam>,
+) -> Result<HttpResponseOk<ResultsPage<VpcFirewallRule>>, HttpError> {
+    // TODO: Check If-Match and fail if the ETag doesn't match anymore.
+    // Without this check, if firewall rules change while someone is listing
+    // the rules, they will see a mix of the old and new rules.
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let query = query_params.into_inner();
+    let path = path_params.into_inner();
+    let handler = async {
+        let rules = nexus
+            .vpc_list_firewall_rules(
+                &path.organization_name,
+                &path.project_name,
+                &path.vpc_name,
+                &data_page_params_for(&rqctx, &query)?
+                    .map_name(|n| Name::ref_cast(n)),
+            )
+            .await?
+            .into_iter()
+            .map(|rule| rule.into())
+            .collect();
+        Ok(HttpResponseOk(ScanByName::results_page(&query, rules)?))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/**
+ * Replace the firewall rules for a VPC
+ */
+#[endpoint {
+    method = PUT,
+    path = "/organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/firewall/rules",
+}]
+async fn vpc_firewall_rules_put(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    path_params: Path<VpcPathParam>,
+    router_params: TypedBody<VpcFirewallRuleUpdateParams>,
+) -> Result<HttpResponseOk<VpcFirewallRuleUpdateResult>, HttpError> {
+    // TODO: Check If-Match and fail if the ETag doesn't match anymore.
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let path = path_params.into_inner();
+    let handler = async {
+        let rules = nexus
+            .vpc_update_firewall_rules(
+                &path.organization_name,
+                &path.project_name,
+                &path.vpc_name,
+                &router_params.into_inner(),
+            )
+            .await?;
+        Ok(HttpResponseOk(rules))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
@@ -1348,7 +1439,10 @@ async fn vpc_routers_get(
                 &data_page_params_for(&rqctx, &query)?
                     .map_name(|n| Name::ref_cast(n)),
             )
-            .await?;
+            .await?
+            .into_iter()
+            .map(|s| s.into())
+            .collect();
         Ok(HttpResponseOk(ScanByName::results_page(&query, routers)?))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
@@ -1388,7 +1482,7 @@ async fn vpc_routers_get_router(
                 &path.router_name,
             )
             .await?;
-        Ok(HttpResponseOk(vpc_router))
+        Ok(HttpResponseOk(vpc_router.into()))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
@@ -1403,7 +1497,7 @@ async fn vpc_routers_get_router(
 async fn vpc_routers_post(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<VpcPathParam>,
-    create_params: TypedBody<VpcRouterCreateParams>,
+    create_params: TypedBody<params::VpcRouterCreate>,
 ) -> Result<HttpResponseCreated<VpcRouter>, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
@@ -1418,7 +1512,7 @@ async fn vpc_routers_post(
                 &create_params.into_inner(),
             )
             .await?;
-        Ok(HttpResponseCreated(router))
+        Ok(HttpResponseCreated(router.into()))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
@@ -1461,7 +1555,7 @@ async fn vpc_routers_delete_router(
 async fn vpc_routers_put_router(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<VpcRouterPathParam>,
-    router_params: TypedBody<VpcRouterUpdateParams>,
+    router_params: TypedBody<params::VpcRouterUpdate>,
 ) -> Result<HttpResponseOk<()>, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
@@ -1511,7 +1605,10 @@ async fn routers_routes_get(
                 &data_page_params_for(&rqctx, &query)?
                     .map_name(|n| Name::ref_cast(n)),
             )
-            .await?;
+            .await?
+            .into_iter()
+            .map(|route| route.into())
+            .collect();
         Ok(HttpResponseOk(ScanByName::results_page(&query, routes)?))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
@@ -1553,7 +1650,7 @@ async fn routers_routes_get_route(
                 &path.route_name,
             )
             .await?;
-        Ok(HttpResponseOk(route))
+        Ok(HttpResponseOk(route.into()))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
@@ -1574,7 +1671,7 @@ async fn routers_routes_post(
     let nexus = &apictx.nexus;
     let path = path_params.into_inner();
     let handler = async {
-        let router = nexus
+        let route = nexus
             .router_create_route(
                 &path.organization_name,
                 &path.project_name,
@@ -1584,7 +1681,7 @@ async fn routers_routes_post(
                 &create_params.into_inner(),
             )
             .await?;
-        Ok(HttpResponseCreated(router))
+        Ok(HttpResponseCreated(route.into()))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }

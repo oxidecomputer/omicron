@@ -1,3 +1,7 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
 /*!
  * Smoke tests against the API server
  *
@@ -16,8 +20,10 @@ use http::StatusCode;
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::IdentityMetadataUpdateParams;
 use omicron_common::api::external::Name;
-use omicron_common::api::external::Sled;
-use omicron_nexus::external_api::{params, views::Project};
+use omicron_nexus::external_api::{
+    params,
+    views::{Project, Sled},
+};
 use uuid::Uuid;
 
 pub mod common;

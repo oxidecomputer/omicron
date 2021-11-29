@@ -1,3 +1,7 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
 //! APIs exposed by Nexus.
 
 use crate::api::external::{
@@ -32,6 +36,8 @@ pub struct InstanceRuntimeState {
     pub run_state: InstanceState,
     /// which sled is running this Instance
     pub sled_uuid: Uuid,
+    /// which propolis-server is running this Instance
+    pub propolis_uuid: Uuid,
     /// number of CPUs allocated for this Instance
     pub ncpus: InstanceCpuCount,
     /// memory allocated for this Instance

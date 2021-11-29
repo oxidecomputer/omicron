@@ -1,3 +1,7 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
 //! Functions for querying the timeseries database.
 // Copyright 2021 Oxide Computer Company
 
@@ -234,12 +238,13 @@ impl TimeseriesFilter {
                     "{timeseries_name},\n",
                     "{timeseries_key}\n",
                     "FROM {table_name}\n",
-                    "WHERE ({where_fragment})",
+                    "WHERE ({where_fragment} AND (timeseries_name = '{ts_name}'))",
                 ),
                 timeseries_name = indent("timeseries_name", 4),
                 timeseries_key = indent("timeseries_key", 4),
                 table_name = table_name,
                 where_fragment = filter.as_where_fragment(),
+                ts_name = self.timeseries_name,
             )
         };
         self.table_names()
@@ -320,7 +325,7 @@ impl TimeseriesFilter {
             WHERE ({filter_columns}) IN (\n\
             {query}\n\
             ){timestamp_filter}\n\
-            ORDER BY (timeseries_key, timestamp)\n\
+            ORDER BY (timeseries_name, timeseries_key, timestamp)\n\
             FORMAT JSONEachRow;",
             db_name = DATABASE_NAME,
             data_type = db_type_name_for_datum(&datum_type),
@@ -465,7 +470,7 @@ mod tests {
         let query = filter.as_select_query(DatumType::F64);
         let expected = "SELECT * FROM oximeter.measurements_f64 \
             WHERE (timeseries_name) IN ('virtual_machine:cpu_busy') \
-            ORDER BY (timeseries_key, timestamp) \
+            ORDER BY (timeseries_name, timeseries_key, timestamp) \
             FORMAT JSONEachRow;"
             .replace(" ", "");
         assert_eq!(query.replace(|c| c == '\n' || c == ' ', ""), expected);
@@ -484,7 +489,7 @@ mod tests {
             "SELECT * FROM oximeter.measurements_f64 \
             WHERE (timeseries_name) IN ('virtual_machine:cpu_busy') \
             AND {} \
-            ORDER BY (timeseries_key, timestamp) \
+            ORDER BY (timeseries_name, timeseries_key, timestamp) \
             FORMAT JSONEachRow;",
             time.as_where_fragment(),
         )
@@ -504,8 +509,9 @@ mod tests {
             WHERE (timeseries_name, timeseries_key) IN ( \
                 SELECT timeseries_name, timeseries_key \
                 FROM oximeter.fields_i64 \
-                WHERE (field_name = 'cpu_id' AND ((field_value = 0)))) \
-            ORDER BY (timeseries_key, timestamp) \
+                WHERE (field_name = 'cpu_id' AND ((field_value = 0)) AND \
+                    (timeseries_name = 'virtual_machine:cpu_busy'))) \
+            ORDER BY (timeseries_name, timeseries_key, timestamp) \
             FORMAT JSONEachRow;"
             .replace(" ", "");
         assert_eq!(query.replace(|c| c == '\n' || c == ' ', ""), expected,);

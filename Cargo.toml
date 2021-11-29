@@ -3,14 +3,17 @@ members = [
     "common",
     "nexus",
     "nexus/src/db/db-macros",
+    "nexus-client",
     "rpaths",
     "sled-agent",
+    "sled-agent-client",
     "oximeter/oximeter",
     "oximeter/collector",
     "oximeter/db",
     "oximeter/instruments",
     "oximeter/producer",
     "oximeter/oximeter-macro-impl",
+    "oximeter-client",
     "test-utils",
 ]
 
@@ -20,12 +23,14 @@ default-members = [
     "nexus/src/db/db-macros",
     "rpaths",
     "sled-agent",
+    "sled-agent-client",
     "oximeter/oximeter",
     "oximeter/collector",
     "oximeter/db",
     "oximeter/instruments",
     "oximeter/producer",
     "oximeter/oximeter-macro-impl",
+    "oximeter-client",
     "test-utils",
 ]
 resolver = "2"
