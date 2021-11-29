@@ -1,3 +1,7 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
 //! Types for serving produced metric data to an Oximeter collector server.
 
 // Copyright 2021 Oxide Computer Company
@@ -85,14 +89,8 @@ impl Server {
         }
 
         debug!(log, "registering metric server as a producer");
-        register(
-            config.registration_address,
-            &log,
-            &omicron_common::nexus_client::types::ProducerEndpoint::from(
-                &config.server_info,
-            ),
-        )
-        .await?;
+        register(config.registration_address, &log, &config.server_info)
+            .await?;
         info!(
             log,
             "starting oximeter metric server";
@@ -164,14 +162,12 @@ async fn collect_endpoint(
 pub async fn register(
     address: SocketAddr,
     log: &slog::Logger,
-    server_info: &omicron_common::nexus_client::types::ProducerEndpoint,
+    server_info: &omicron_common::api::internal::nexus::ProducerEndpoint,
 ) -> Result<(), Error> {
-    let client = omicron_common::NexusClient::new(
-        &format!("http://{}", address),
-        log.clone(),
-    );
+    let client =
+        nexus_client::Client::new(&format!("http://{}", address), log.clone());
     client
-        .cpapi_producers_post(server_info)
+        .cpapi_producers_post(&server_info.into())
         .await
         .map_err(|msg| Error::RegistrationError(msg.to_string()))
 }

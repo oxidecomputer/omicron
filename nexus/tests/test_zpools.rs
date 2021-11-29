@@ -1,7 +1,11 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
 use http::method::Method;
 use http::StatusCode;
 use omicron_common::api::external::ByteCount;
-use omicron_common::api::internal::nexus::ZpoolPutRequest;
+use omicron_nexus::internal_api::params::ZpoolPutRequest;
 use uuid::Uuid;
 
 pub mod common;

@@ -1,3 +1,7 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
 // Copyright 2020 Oxide Computer Company
 /*!
  * This macro is a helper to generate an accessor for the identity of any
@@ -43,8 +47,8 @@ fn do_object_identity(item: TokenStream) -> Result<TokenStream, syn::Error> {
     };
 
     let stream = quote! {
-        impl crate::api::external::ObjectIdentity for #name {
-            fn identity(&self) -> &crate::api::external::IdentityMetadata {
+        impl ObjectIdentity for #name {
+            fn identity(&self) -> &IdentityMetadata {
                 &self.identity
             }
         }
@@ -68,8 +72,8 @@ mod test {
         );
 
         let expected = quote! {
-            impl crate::api::external::ObjectIdentity for Foo {
-                fn identity(&self) -> &crate::api::external::IdentityMetadata {
+            impl ObjectIdentity for Foo {
+                fn identity(&self) -> &IdentityMetadata {
                     &self.identity
                 }
             }

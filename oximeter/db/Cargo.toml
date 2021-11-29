@@ -3,6 +3,7 @@ name = "oximeter-db"
 version = "0.1.0"
 edition = "2018"
 description = "Tools for interacting with the Oxide control plane telemetry database"
+license = "MPL-2.0"
 
 [dependencies]
 anyhow = "1.0"
@@ -13,13 +14,13 @@ oximeter = { path = "../oximeter" }
 reqwest = { version = "0.11.6", features = [ "json" ] }
 schemars = { version = "0.8.7", features = [ "uuid", "bytes", "chrono" ] }
 serde = { version = "1", features = [ "derive" ] }
-serde_json = "1.0.70"
+serde_json = "1.0.71"
 slog = { version = "2.5", features = [ "max_level_trace", "release_max_level_debug" ] }
 slog-async = "2.6"
 slog-term = "2.8"
 structopt = "0.3"
 thiserror = "1.0.30"
-tokio = "1.13"
+tokio = "1.14"
 uuid = { version = "0.8.2", features = [ "v4", "serde" ] }
 
 [dev-dependencies]

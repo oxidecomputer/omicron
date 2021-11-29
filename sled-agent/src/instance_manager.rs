@@ -1,3 +1,7 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
 //! API for controlling multiple instances on a sled.
 
 use crate::common::vlan::VlanID;
@@ -13,7 +17,7 @@ use uuid::Uuid;
 #[cfg(test)]
 use crate::mocks::MockNexusClient as NexusClient;
 #[cfg(not(test))]
-use omicron_common::NexusClient;
+use nexus_client::Client as NexusClient;
 
 #[cfg(test)]
 use crate::{

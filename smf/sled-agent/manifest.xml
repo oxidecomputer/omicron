@@ -41,7 +41,7 @@
 
   <property_group name='config' type='application'>
     <propval name='server_id' type='astring' value='fb0f7546-4d46-40ca-9d56-cbb810684ca7' />
-    <propval name='bootstrap_addr' type='astring' value='127.0.0.1:12346' />
+    <propval name='bootstrap_addr' type='astring' value='[::]:12346' />
     <propval name='server_addr' type='astring' value='127.0.0.1:12345' />
     <propval name='nexus_addr' type='astring' value='127.0.0.1:12221' />
   </property_group>

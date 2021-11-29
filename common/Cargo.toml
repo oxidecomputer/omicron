@@ -2,20 +2,22 @@
 name = "omicron-common"
 version = "0.1.0"
 edition = "2018"
+license = "MPL-2.0"
 
 [dependencies]
 anyhow = "1.0"
 async-trait = "0.1.51"
-futures = "0.3.15"
+futures = "0.3.18"
 http = "0.2.5"
 hyper = "0.14"
 ipnetwork = "0.18"
-propolis-server = { git = "https://github.com/oxidecomputer/propolis", rev = "bc0661e" }
+propolis-server = { git = "https://github.com/oxidecomputer/propolis", rev = "b56e473" }
 rayon = "1.5"
 reqwest = { version = "0.11", default-features = false, features = ["rustls-tls"] }
 ring = "0.16"
 serde_derive = "1.0"
 serde_json = "1.0"
+serde_with = "1.11.0"
 smf = "0.2"
 structopt = "0.3"
 tar = "0.4"
@@ -28,7 +30,7 @@ progenitor = { git = "https://github.com/oxidecomputer/progenitor" }
 percent-encoding = "2.1.0"
 
 [dependencies.api_identity]
-path = "src/api/external/api_identity"
+path = "../api_identity"
 
 [dependencies.backoff]
 version = "0.3.0"
@@ -67,7 +69,7 @@ git = "https://github.com/oxidecomputer/steno"
 branch = "main"
 
 [dependencies.tokio]
-version = "1.13"
+version = "1.14"
 features = [ "full" ]
 
 [dependencies.tokio-postgres]
@@ -81,7 +83,7 @@ features = [ "serde", "v4" ]
 [dev-dependencies]
 expectorate = "1.0.4"
 serde_urlencoded = "0.7.0"
-tokio = { version = "1.13", features = [ "test-util" ] }
+tokio = { version = "1.14", features = [ "test-util" ] }
 
 # Disable doc builds by default for our binaries to work around issue
 # rust-lang/cargo#8373.  These docs would not be very useful anyway.

@@ -1,8 +1,16 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
 /**
  * Handler functions (entrypoints) for HTTP APIs internal to the control plane
  */
-use super::ServerContext;
+use crate::ServerContext;
 
+use super::params::{
+    DatasetPutRequest, DatasetPutResponse, OximeterInfo, SledAgentStartupInfo,
+    ZpoolPutRequest, ZpoolPutResponse,
+};
 use dropshot::endpoint;
 use dropshot::ApiDescription;
 use dropshot::HttpError;
@@ -11,15 +19,9 @@ use dropshot::HttpResponseUpdatedNoContent;
 use dropshot::Path;
 use dropshot::RequestContext;
 use dropshot::TypedBody;
-use omicron_common::api::internal::nexus::DatasetPutRequest;
-use omicron_common::api::internal::nexus::DatasetPutResponse;
 use omicron_common::api::internal::nexus::DiskRuntimeState;
 use omicron_common::api::internal::nexus::InstanceRuntimeState;
-use omicron_common::api::internal::nexus::OximeterInfo;
 use omicron_common::api::internal::nexus::ProducerEndpoint;
-use omicron_common::api::internal::nexus::SledAgentStartupInfo;
-use omicron_common::api::internal::nexus::ZpoolPutRequest;
-use omicron_common::api::internal::nexus::ZpoolPutResponse;
 use oximeter::types::ProducerResults;
 use oximeter_producer::{collect, ProducerIdPathParams};
 use schemars::JsonSchema;

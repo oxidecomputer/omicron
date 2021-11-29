@@ -1,8 +1,12 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
 //! Mock structures for testing.
 
 use anyhow::Error;
 use mockall::mock;
-use omicron_common::nexus_client::types::{
+use nexus_client::types::{
     DatasetPutRequest, DatasetPutResponse, InstanceRuntimeState,
     SledAgentStartupInfo, ZpoolPutRequest, ZpoolPutResponse,
 };

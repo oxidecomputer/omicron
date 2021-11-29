@@ -1,3 +1,7 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
 //! Sled agent implementation
 
 use crate::config::Config;
@@ -5,10 +9,10 @@ use crate::illumos::zfs::{
     Mountpoint, ZONE_ZFS_DATASET, ZONE_ZFS_DATASET_MOUNTPOINT,
 };
 use crate::instance_manager::InstanceManager;
+use crate::params::DiskStateRequested;
 use crate::storage_manager::StorageManager;
 use omicron_common::api::{
     internal::nexus::DiskRuntimeState, internal::nexus::InstanceRuntimeState,
-    internal::sled_agent::DiskStateRequested,
     internal::sled_agent::InstanceHardware,
     internal::sled_agent::InstanceRuntimeStateRequested,
 };
@@ -19,7 +23,7 @@ use uuid::Uuid;
 #[cfg(not(test))]
 use {
     crate::illumos::{dladm::Dladm, zfs::Zfs, zone::Zones},
-    omicron_common::NexusClient,
+    nexus_client::Client as NexusClient,
 };
 #[cfg(test)]
 use {
