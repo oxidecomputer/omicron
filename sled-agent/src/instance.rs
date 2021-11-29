@@ -1,3 +1,7 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
 //! API for controlling a single instance.
 
 use crate::common::{
@@ -33,7 +37,7 @@ use crate::illumos::{dladm::MockDladm as Dladm, zone::MockZones as Zones};
 #[cfg(test)]
 use crate::mocks::MockNexusClient as NexusClient;
 #[cfg(not(test))]
-use omicron_common::NexusClient;
+use nexus_client::Client as NexusClient;
 
 // Issues read-only, idempotent HTTP requests at propolis until it responds with
 // an acknowledgement. This provides a hacky mechanism to "wait until the HTTP
@@ -243,7 +247,7 @@ impl InstanceInner {
         self.nexus_client
             .cpapi_instances_put(
                 self.id(),
-                &omicron_common::nexus_client::types::InstanceRuntimeState::from(
+                &nexus_client::types::InstanceRuntimeState::from(
                     self.state.current(),
                 ),
             )

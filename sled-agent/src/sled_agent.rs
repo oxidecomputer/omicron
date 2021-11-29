@@ -1,3 +1,7 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
 //! Sled agent implementation
 
 use crate::updates;
@@ -16,7 +20,7 @@ use uuid::Uuid;
 #[cfg(test)]
 use crate::mocks::MockNexusClient as NexusClient;
 #[cfg(not(test))]
-use omicron_common::NexusClient;
+use nexus_client::Client as NexusClient;
 
 use crate::common::vlan::VlanID;
 use crate::instance_manager::InstanceManager;
@@ -72,7 +76,7 @@ impl SledAgent {
         &self,
         artifact: &updates::UpdateArtifact,
     ) -> Result<(), Error> {
-        updates::apply_update(self.nexus_client.as_ref(), artifact).await;
+        updates::apply_update(self.nexus_client.as_ref(), artifact).await?;
         Ok(())
     }
 }

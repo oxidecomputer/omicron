@@ -1,3 +1,7 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
 use http::method::Method;
 use http::StatusCode;
 use ipnetwork::{Ipv4Network, Ipv6Network};
@@ -43,7 +47,22 @@ async fn test_vpc_subnets() {
     let vpc_url = format!("{}/{}", vpcs_url, vpc_name);
     let subnets_url = format!("{}/subnets", vpc_url);
 
-    // get subnets should be empty
+    // get subnets should return the default subnet
+    let subnets =
+        objects_list_page::<VpcSubnet>(client, &subnets_url).await.items;
+    assert_eq!(subnets.len(), 1);
+
+    // delete default subnet
+    client
+        .make_request_no_body(
+            Method::DELETE,
+            &format!("{}/{}", subnets_url, subnets[0].identity.name),
+            StatusCode::NO_CONTENT,
+        )
+        .await
+        .unwrap();
+
+    // get subnets should now be empty
     let subnets =
         objects_list_page::<VpcSubnet>(client, &subnets_url).await.items;
     assert_eq!(subnets.len(), 0);

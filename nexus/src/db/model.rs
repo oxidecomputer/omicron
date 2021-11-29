@@ -1,11 +1,15 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
 //! Structures stored to the database.
 
 use crate::db::collection_insert::DatastoreCollection;
 use crate::db::identity::{Asset, Resource};
 use crate::db::schema::{
     console_session, disk, instance, metric_producer, network_interface,
-    organization, oximeter, project, rack, router_route, sled, vpc, vpc_router,
-    vpc_subnet,
+    organization, oximeter, project, rack, router_route, sled, vpc,
+    vpc_firewall_rule, vpc_router, vpc_subnet,
 };
 use crate::external_api::params;
 use crate::internal_api;
@@ -146,6 +150,48 @@ where
         external::Generation::try_from(i64::from_sql(bytes)?)
             .map(Generation)
             .map_err(|e| e.into())
+    }
+}
+
+/// Representation of a [`u16`] in the database.
+/// We need this because the database does not support unsigned types.
+/// This handles converting from the database's INT4 to the actual u16.
+#[derive(
+    Copy, Clone, Debug, Eq, Ord, PartialEq, PartialOrd, AsExpression, FromSqlRow,
+)]
+#[sql_type = "sql_types::Int4"]
+#[repr(transparent)]
+pub struct SqlU16(pub u16);
+
+NewtypeFrom! { () pub struct SqlU16(u16); }
+NewtypeDeref! { () pub struct SqlU16(u16); }
+
+impl SqlU16 {
+    pub fn new(port: u16) -> Self {
+        Self(port)
+    }
+}
+
+impl<DB> ToSql<sql_types::Int4, DB> for SqlU16
+where
+    DB: Backend,
+    i32: ToSql<sql_types::Int4, DB>,
+{
+    fn to_sql<W: std::io::Write>(
+        &self,
+        out: &mut serialize::Output<W, DB>,
+    ) -> serialize::Result {
+        i32::from(self.0).to_sql(out)
+    }
+}
+
+impl<DB> FromSql<sql_types::Int4, DB> for SqlU16
+where
+    DB: Backend,
+    i32: FromSql<sql_types::Int4, DB>,
+{
+    fn from_sql(bytes: RawValue<DB>) -> deserialize::Result<Self> {
+        u16::try_from(i32::from_sql(bytes)?).map(SqlU16).map_err(|e| e.into())
     }
 }
 
@@ -307,6 +353,7 @@ pub struct Sled {
 
     // ServiceAddress (Sled Agent).
     pub ip: ipnetwork::IpNetwork,
+    // TODO: Make use of SqlU16
     pub port: i32,
 }
 
@@ -791,6 +838,7 @@ pub struct ProducerEndpoint {
     identity: ProducerEndpointIdentity,
 
     pub ip: ipnetwork::IpNetwork,
+    // TODO: Make use of SqlU16
     pub port: i32,
     pub interval: f64,
     pub base_route: String,
@@ -832,6 +880,7 @@ pub struct OximeterInfo {
     pub time_modified: DateTime<Utc>,
     /// The address on which this oximeter instance listens for requests
     pub ip: ipnetwork::IpNetwork,
+    // TODO: Make use of SqlU16
     pub port: i32,
 }
 
@@ -857,6 +906,10 @@ pub struct Vpc {
     pub project_id: Uuid,
     pub system_router_id: Uuid,
     pub dns_name: Name,
+
+    /// firewall generation number, used as a child resource generation number
+    /// per RFD 192
+    pub firewall_gen: Generation,
 }
 
 impl Vpc {
@@ -864,7 +917,7 @@ impl Vpc {
         vpc_id: Uuid,
         project_id: Uuid,
         system_router_id: Uuid,
-        params: external::VpcCreateParams,
+        params: params::VpcCreate,
     ) -> Self {
         let identity = VpcIdentity::new(vpc_id, params.identity);
         Self {
@@ -872,19 +925,16 @@ impl Vpc {
             project_id,
             system_router_id,
             dns_name: params.dns_name.into(),
+            firewall_gen: Generation::new(),
         }
     }
 }
 
-impl Into<external::Vpc> for Vpc {
-    fn into(self) -> external::Vpc {
-        external::Vpc {
-            identity: self.identity(),
-            project_id: self.project_id,
-            system_router_id: self.system_router_id,
-            dns_name: self.dns_name.0,
-        }
-    }
+impl DatastoreCollection<VpcFirewallRule> for Vpc {
+    type CollectionId = Uuid;
+    type GenerationNumberColumn = vpc::dsl::firewall_gen;
+    type CollectionTimeDeletedColumn = vpc::dsl::time_deleted;
+    type CollectionIdColumn = vpc_firewall_rule::dsl::vpc_id;
 }
 
 #[derive(AsChangeset)]
@@ -896,8 +946,8 @@ pub struct VpcUpdate {
     pub dns_name: Option<Name>,
 }
 
-impl From<external::VpcUpdateParams> for VpcUpdate {
-    fn from(params: external::VpcUpdateParams) -> Self {
+impl From<params::VpcUpdate> for VpcUpdate {
+    fn from(params: params::VpcUpdate) -> Self {
         Self {
             name: params.identity.name.map(Name),
             description: params.identity.description,
@@ -969,7 +1019,6 @@ impl From<external::VpcSubnetUpdateParams> for VpcSubnetUpdate {
 
 /// This macro implements serialization and deserialization of an enum type
 /// from our database into our model types.
-/// See VpcRouterKindEnum and VpcRouterKind for a sample usage
 /// See [`VpcRouterKindEnum`] and [`VpcRouterKind`] for a sample usage
 macro_rules! impl_enum_type {
     (
@@ -1188,6 +1237,7 @@ where
         ))
     }
 }
+
 #[derive(Queryable, Insertable, Clone, Debug, Selectable, Resource)]
 #[table_name = "router_route"]
 pub struct RouterRoute {
@@ -1248,6 +1298,307 @@ impl From<external::RouterRouteUpdateParams> for RouterRouteUpdate {
             time_modified: Utc::now(),
             target: RouteTarget(params.target),
             destination: RouteDestination::new(params.destination),
+        }
+    }
+}
+
+impl_enum_type!(
+    #[derive(SqlType, Debug)]
+    #[postgres(type_name = "vpc_firewall_rule_status", type_schema = "public")]
+    pub struct VpcFirewallRuleStatusEnum;
+
+    #[derive(Clone, Debug, AsExpression, FromSqlRow)]
+    #[sql_type = "VpcFirewallRuleStatusEnum"]
+    pub struct VpcFirewallRuleStatus(pub external::VpcFirewallRuleStatus);
+
+    Disabled => b"disabled"
+    Enabled => b"enabled"
+);
+NewtypeFrom! { () pub struct VpcFirewallRuleStatus(external::VpcFirewallRuleStatus); }
+NewtypeDeref! { () pub struct VpcFirewallRuleStatus(external::VpcFirewallRuleStatus); }
+
+impl_enum_type!(
+    #[derive(SqlType, Debug)]
+    #[postgres(type_name = "vpc_firewall_rule_direction", type_schema = "public")]
+    pub struct VpcFirewallRuleDirectionEnum;
+
+    #[derive(Clone, Debug, AsExpression, FromSqlRow)]
+    #[sql_type = "VpcFirewallRuleDirectionEnum"]
+    pub struct VpcFirewallRuleDirection(pub external::VpcFirewallRuleDirection);
+
+    Inbound => b"inbound"
+    Outbound => b"outbound"
+);
+NewtypeFrom! { () pub struct VpcFirewallRuleDirection(external::VpcFirewallRuleDirection); }
+NewtypeDeref! { () pub struct VpcFirewallRuleDirection(external::VpcFirewallRuleDirection); }
+
+impl_enum_type!(
+    #[derive(SqlType, Debug)]
+    #[postgres(type_name = "vpc_firewall_rule_action", type_schema = "public")]
+    pub struct VpcFirewallRuleActionEnum;
+
+    #[derive(Clone, Debug, AsExpression, FromSqlRow)]
+    #[sql_type = "VpcFirewallRuleActionEnum"]
+    pub struct VpcFirewallRuleAction(pub external::VpcFirewallRuleAction);
+
+    Allow => b"allow"
+    Deny => b"deny"
+);
+NewtypeFrom! { () pub struct VpcFirewallRuleAction(external::VpcFirewallRuleAction); }
+NewtypeDeref! { () pub struct VpcFirewallRuleAction(external::VpcFirewallRuleAction); }
+
+impl_enum_type!(
+    #[derive(SqlType, Debug)]
+    #[postgres(type_name = "vpc_firewall_rule_protocol", type_schema = "public")]
+    pub struct VpcFirewallRuleProtocolEnum;
+
+    #[derive(Clone, Debug, AsExpression, FromSqlRow)]
+    #[sql_type = "VpcFirewallRuleProtocolEnum"]
+    pub struct VpcFirewallRuleProtocol(pub external::VpcFirewallRuleProtocol);
+
+    Tcp => b"TCP"
+    Udp => b"UDP"
+    Icmp => b"ICMP"
+);
+NewtypeFrom! { () pub struct VpcFirewallRuleProtocol(external::VpcFirewallRuleProtocol); }
+NewtypeDeref! { () pub struct VpcFirewallRuleProtocol(external::VpcFirewallRuleProtocol); }
+
+/// Newtype wrapper around [`external::VpcFirewallRuleTarget`] so we can derive
+/// diesel traits for it
+#[derive(Clone, Debug, AsExpression, FromSqlRow)]
+#[sql_type = "sql_types::Text"]
+#[repr(transparent)]
+pub struct VpcFirewallRuleTarget(pub external::VpcFirewallRuleTarget);
+NewtypeFrom! { () pub struct VpcFirewallRuleTarget(external::VpcFirewallRuleTarget); }
+NewtypeDeref! { () pub struct VpcFirewallRuleTarget(external::VpcFirewallRuleTarget); }
+
+impl<DB> ToSql<sql_types::Text, DB> for VpcFirewallRuleTarget
+where
+    DB: Backend,
+    String: ToSql<sql_types::Text, DB>,
+{
+    fn to_sql<W: std::io::Write>(
+        &self,
+        out: &mut serialize::Output<W, DB>,
+    ) -> serialize::Result {
+        self.0.to_string().to_sql(out)
+    }
+}
+
+// Deserialize the "VpcFirewallRuleTarget" object from SQL TEXT.
+impl<DB> FromSql<sql_types::Text, DB> for VpcFirewallRuleTarget
+where
+    DB: Backend,
+    String: FromSql<sql_types::Text, DB>,
+{
+    fn from_sql(bytes: RawValue<DB>) -> deserialize::Result<Self> {
+        Ok(VpcFirewallRuleTarget(
+            String::from_sql(bytes)?
+                .parse::<external::VpcFirewallRuleTarget>()?,
+        ))
+    }
+}
+
+/// Newtype wrapper around [`external::VpcFirewallRuleHostFilter`] so we can derive
+/// diesel traits for it
+#[derive(Clone, Debug, AsExpression, FromSqlRow)]
+#[sql_type = "sql_types::Text"]
+#[repr(transparent)]
+pub struct VpcFirewallRuleHostFilter(pub external::VpcFirewallRuleHostFilter);
+NewtypeFrom! { () pub struct VpcFirewallRuleHostFilter(external::VpcFirewallRuleHostFilter); }
+NewtypeDeref! { () pub struct VpcFirewallRuleHostFilter(external::VpcFirewallRuleHostFilter); }
+
+impl<DB> ToSql<sql_types::Text, DB> for VpcFirewallRuleHostFilter
+where
+    DB: Backend,
+    String: ToSql<sql_types::Text, DB>,
+{
+    fn to_sql<W: std::io::Write>(
+        &self,
+        out: &mut serialize::Output<W, DB>,
+    ) -> serialize::Result {
+        self.0.to_string().to_sql(out)
+    }
+}
+
+// Deserialize the "VpcFirewallRuleHostFilter" object from SQL TEXT.
+impl<DB> FromSql<sql_types::Text, DB> for VpcFirewallRuleHostFilter
+where
+    DB: Backend,
+    String: FromSql<sql_types::Text, DB>,
+{
+    fn from_sql(bytes: RawValue<DB>) -> deserialize::Result<Self> {
+        Ok(VpcFirewallRuleHostFilter(
+            String::from_sql(bytes)?
+                .parse::<external::VpcFirewallRuleHostFilter>()?,
+        ))
+    }
+}
+
+/// Newtype wrapper around [`external::L4PortRange`] so we can derive
+/// diesel traits for it
+#[derive(Clone, Copy, Debug, AsExpression, FromSqlRow)]
+#[sql_type = "sql_types::Text"]
+#[repr(transparent)]
+pub struct L4PortRange(pub external::L4PortRange);
+NewtypeFrom! { () pub struct L4PortRange(external::L4PortRange); }
+NewtypeDeref! { () pub struct L4PortRange(external::L4PortRange); }
+
+impl<DB> ToSql<sql_types::Text, DB> for L4PortRange
+where
+    DB: Backend,
+    String: ToSql<sql_types::Text, DB>,
+{
+    fn to_sql<W: std::io::Write>(
+        &self,
+        out: &mut serialize::Output<W, DB>,
+    ) -> serialize::Result {
+        self.0.to_string().to_sql(out)
+    }
+}
+
+// Deserialize the "L4PortRange" object from SQL TEXT.
+impl<DB> FromSql<sql_types::Text, DB> for L4PortRange
+where
+    DB: Backend,
+    String: FromSql<sql_types::Text, DB>,
+{
+    fn from_sql(bytes: RawValue<DB>) -> deserialize::Result<Self> {
+        String::from_sql(bytes)?.parse().map(L4PortRange).map_err(|e| e.into())
+    }
+}
+
+/// Newtype wrapper around [`external::VpcFirewallRulePriority`] so we can derive
+/// diesel traits for it
+#[derive(Clone, Copy, Debug, AsExpression, FromSqlRow)]
+#[repr(transparent)]
+#[sql_type = "sql_types::Int4"]
+pub struct VpcFirewallRulePriority(pub external::VpcFirewallRulePriority);
+NewtypeFrom! { () pub struct VpcFirewallRulePriority(external::VpcFirewallRulePriority); }
+NewtypeDeref! { () pub struct VpcFirewallRulePriority(external::VpcFirewallRulePriority); }
+
+impl<DB> ToSql<sql_types::Int4, DB> for VpcFirewallRulePriority
+where
+    DB: Backend,
+    SqlU16: ToSql<sql_types::Int4, DB>,
+{
+    fn to_sql<W: std::io::Write>(
+        &self,
+        out: &mut serialize::Output<W, DB>,
+    ) -> serialize::Result {
+        SqlU16(self.0 .0).to_sql(out)
+    }
+}
+
+// Deserialize the "VpcFirewallRulePriority" object from SQL TEXT.
+impl<DB> FromSql<sql_types::Int4, DB> for VpcFirewallRulePriority
+where
+    DB: Backend,
+    SqlU16: FromSql<sql_types::Int4, DB>,
+{
+    fn from_sql(bytes: RawValue<DB>) -> deserialize::Result<Self> {
+        Ok(VpcFirewallRulePriority(external::VpcFirewallRulePriority(
+            *SqlU16::from_sql(bytes)?,
+        )))
+    }
+}
+
+#[derive(Queryable, Insertable, Clone, Debug, Selectable, Resource)]
+#[table_name = "vpc_firewall_rule"]
+pub struct VpcFirewallRule {
+    #[diesel(embed)]
+    pub identity: VpcFirewallRuleIdentity,
+
+    pub vpc_id: Uuid,
+    pub status: VpcFirewallRuleStatus,
+    pub direction: VpcFirewallRuleDirection,
+    pub targets: Vec<VpcFirewallRuleTarget>,
+    pub filter_hosts: Option<Vec<VpcFirewallRuleHostFilter>>,
+    pub filter_ports: Option<Vec<L4PortRange>>,
+    pub filter_protocols: Option<Vec<VpcFirewallRuleProtocol>>,
+    pub action: VpcFirewallRuleAction,
+    pub priority: VpcFirewallRulePriority,
+}
+
+impl VpcFirewallRule {
+    pub fn new(
+        rule_id: Uuid,
+        vpc_id: Uuid,
+        rule_name: external::Name,
+        rule: &external::VpcFirewallRuleUpdate,
+    ) -> Self {
+        let identity = VpcFirewallRuleIdentity::new(
+            rule_id,
+            external::IdentityMetadataCreateParams {
+                name: rule_name,
+                description: rule.description.clone(),
+            },
+        );
+        Self {
+            identity,
+            vpc_id,
+            status: rule.status.into(),
+            direction: rule.direction.into(),
+            targets: rule
+                .targets
+                .iter()
+                .map(|target| target.clone().into())
+                .collect(),
+            filter_hosts: rule.filters.hosts.as_ref().map(|hosts| {
+                hosts
+                    .iter()
+                    .map(|target| VpcFirewallRuleHostFilter(target.clone()))
+                    .collect()
+            }),
+            filter_ports: rule.filters.ports.as_ref().map(|ports| {
+                ports.iter().map(|range| L4PortRange(*range)).collect()
+            }),
+            filter_protocols: rule.filters.protocols.as_ref().map(|protos| {
+                protos.iter().map(|proto| (*proto).into()).collect()
+            }),
+            action: rule.action.into(),
+            priority: rule.priority.into(),
+        }
+    }
+
+    pub fn vec_from_params(
+        vpc_id: Uuid,
+        params: external::VpcFirewallRuleUpdateParams,
+    ) -> Vec<VpcFirewallRule> {
+        params
+            .rules
+            .iter()
+            .map(|(name, rule)| {
+                VpcFirewallRule::new(Uuid::new_v4(), vpc_id, name.clone(), rule)
+            })
+            .collect()
+    }
+}
+
+impl Into<external::VpcFirewallRule> for VpcFirewallRule {
+    fn into(self) -> external::VpcFirewallRule {
+        external::VpcFirewallRule {
+            identity: self.identity(),
+            status: self.status.into(),
+            direction: self.direction.into(),
+            targets: self
+                .targets
+                .iter()
+                .map(|target| target.clone().into())
+                .collect(),
+            filters: external::VpcFirewallRuleFilter {
+                hosts: self.filter_hosts.map(|hosts| {
+                    hosts.iter().map(|host| host.0.clone()).collect()
+                }),
+                ports: self
+                    .filter_ports
+                    .map(|ports| ports.iter().map(|range| range.0).collect()),
+                protocols: self.filter_protocols.map(|protocols| {
+                    protocols.iter().map(|protocol| protocol.0).collect()
+                }),
+            },
+            action: self.action.into(),
+            priority: self.priority.into(),
         }
     }
 }
