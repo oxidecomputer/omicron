@@ -1,3 +1,7 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
 use super::http_testing::dropshot_compat::objects_post;
 use super::http_testing::AuthnMode;
 use super::http_testing::NexusRequest;
@@ -6,12 +10,10 @@ use dropshot::HttpErrorResponseBody;
 use dropshot::Method;
 use http::StatusCode;
 use omicron_common::api::external::IdentityMetadataCreateParams;
-use omicron_common::api::external::Vpc;
-use omicron_common::api::external::VpcCreateParams;
 use omicron_common::api::external::VpcRouter;
 use omicron_common::api::external::VpcRouterCreateParams;
 use omicron_nexus::external_api::params;
-use omicron_nexus::external_api::views::{Organization, Project};
+use omicron_nexus::external_api::views::{Organization, Project, Vpc};
 
 pub async fn objects_list_page_authz<ItemType>(
     client: &ClientTestContext,
@@ -84,7 +86,7 @@ pub async fn create_vpc(
             &organization_name, &project_name
         )
         .as_str(),
-        VpcCreateParams {
+        params::VpcCreate {
             identity: IdentityMetadataCreateParams {
                 name: vpc_name.parse().unwrap(),
                 description: "vpc description".to_string(),
@@ -112,7 +114,7 @@ pub async fn create_vpc_with_error(
                 &organization_name, &project_name
             )
             .as_str(),
-            VpcCreateParams {
+            params::VpcCreate {
                 identity: IdentityMetadataCreateParams {
                     name: vpc_name.parse().unwrap(),
                     description: String::from("vpc description"),

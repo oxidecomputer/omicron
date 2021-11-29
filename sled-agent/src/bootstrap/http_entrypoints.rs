@@ -1,3 +1,7 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
 //! HTTP entrypoint functions for the bootstrap agent's exposed API
 //!
 //! Note that care must be taken when evolving this interface. In particular,
@@ -26,6 +30,7 @@ use dropshot::HttpError;
 use dropshot::HttpResponseOk;
 use dropshot::RequestContext;
 use dropshot::TypedBody;
+use omicron_common::api::external::Error as ExternalError;
 use std::sync::Arc;
 
 use super::agent::Agent;
@@ -58,5 +63,10 @@ async fn api_request_share(
     let bootstrap_agent = rqctx.context();
 
     let request = request.into_inner();
-    Ok(HttpResponseOk(bootstrap_agent.request_share(request.identity).await?))
+    Ok(HttpResponseOk(
+        bootstrap_agent
+            .request_share(request.identity)
+            .await
+            .map_err(|e| ExternalError::from(e))?,
+    ))
 }
