@@ -4408,17 +4408,11 @@
       },
       "VpcFirewallRuleUpdateParams": {
         "description": "Updateable properties of a [`Vpc`]'s firewall Note that VpcFirewallRules are implicitly created along with a Vpc, so there is no explicit creation.",
-        "type": "object",
-        "additionalProperties": {
-          "$ref": "#/components/schemas/VpcFirewallRuleUpdate"
-        }
+        "type": "object"
       },
       "VpcFirewallRuleUpdateResult": {
         "description": "Response to an update replacing [`Vpc`]'s firewall",
-        "type": "object",
-        "additionalProperties": {
-          "$ref": "#/components/schemas/VpcFirewallRule"
-        }
+        "type": "object"
       },
       "VpcResultsPage": {
         "description": "A single page of results",
