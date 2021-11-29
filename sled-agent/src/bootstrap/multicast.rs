@@ -129,7 +129,7 @@ pub fn new_ipv6_udp_pair(
     Ok((sender, listener))
 }
 
-#[cfg(test)]
+#[cfg(all(test, not(target_os = "macos")))]
 mod test {
     use super::*;
 
