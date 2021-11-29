@@ -43,7 +43,7 @@ async fn test_sessions() {
 
     // hitting auth-gated API endpoint without session cookie 401s
     RequestBuilder::new(&testctx, Method::POST, "/organizations")
-        .body(Some(org_params.clone()))
+        .body(Some(&org_params))
         .expect_status(Some(StatusCode::UNAUTHORIZED))
         .execute()
         .await
@@ -59,7 +59,7 @@ async fn test_sessions() {
     // now make same requests with cookie
     RequestBuilder::new(&testctx, Method::POST, "/organizations")
         .header(header::COOKIE, &session_token)
-        .body(Some(org_params.clone()))
+        .body(Some(&org_params))
         // TODO: explicit expect_status not needed. decide whether to keep it anyway
         .expect_status(Some(StatusCode::CREATED))
         .execute()
@@ -90,7 +90,7 @@ async fn test_sessions() {
     // logout also deletes the session server-side
     RequestBuilder::new(&testctx, Method::POST, "/organizations")
         .header(header::COOKIE, &session_token)
-        .body(Some(org_params))
+        .body(Some(&org_params))
         .expect_status(Some(StatusCode::UNAUTHORIZED))
         .execute()
         .await
@@ -197,7 +197,7 @@ fn get_header_value(resp: TestResponse, header_name: HeaderName) -> String {
 
 async fn log_in_and_extract_token(testctx: &ClientTestContext) -> String {
     let login = RequestBuilder::new(&testctx, Method::POST, "/login")
-        .body(Some(LoginParams { username: "privileged".to_string() }))
+        .body(Some(&LoginParams { username: "privileged".to_string() }))
         .expect_status(Some(StatusCode::OK))
         .execute()
         .await

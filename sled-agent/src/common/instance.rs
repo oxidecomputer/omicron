@@ -275,6 +275,7 @@ mod test {
         InstanceStates::new(InstanceRuntimeState {
             run_state: State::Creating,
             sled_uuid: uuid::Uuid::new_v4(),
+            propolis_uuid: uuid::Uuid::new_v4(),
             ncpus: InstanceCpuCount(2),
             memory: ByteCount::from_mebibytes_u32(512),
             hostname: "myvm".to_string(),
