@@ -1,3 +1,7 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
 //! Structures stored to the database.
 
 use crate::db::collection_insert::DatastoreCollection;
@@ -913,7 +917,7 @@ impl Vpc {
         vpc_id: Uuid,
         project_id: Uuid,
         system_router_id: Uuid,
-        params: external::VpcCreateParams,
+        params: params::VpcCreate,
     ) -> Self {
         let identity = VpcIdentity::new(vpc_id, params.identity);
         Self {
@@ -922,17 +926,6 @@ impl Vpc {
             system_router_id,
             dns_name: params.dns_name.into(),
             firewall_gen: Generation::new(),
-        }
-    }
-}
-
-impl Into<external::Vpc> for Vpc {
-    fn into(self) -> external::Vpc {
-        external::Vpc {
-            identity: self.identity(),
-            project_id: self.project_id,
-            system_router_id: self.system_router_id,
-            dns_name: self.dns_name.0,
         }
     }
 }
@@ -953,8 +946,8 @@ pub struct VpcUpdate {
     pub dns_name: Option<Name>,
 }
 
-impl From<external::VpcUpdateParams> for VpcUpdate {
-    fn from(params: external::VpcUpdateParams) -> Self {
+impl From<params::VpcUpdate> for VpcUpdate {
+    fn from(params: params::VpcUpdate) -> Self {
         Self {
             name: params.identity.name.map(Name),
             description: params.identity.description,

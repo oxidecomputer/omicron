@@ -1,3 +1,7 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
 //! Basic end-to-end tests for authorization
 use common::http_testing::RequestBuilder;
 use dropshot::HttpErrorResponseBody;
@@ -94,6 +98,6 @@ async fn try_create_organization(
         .execute()
         .await
         .expect("failed to make request")
-        .response_body()
+        .parsed_body()
         .unwrap()
 }

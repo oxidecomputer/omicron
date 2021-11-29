@@ -1,3 +1,7 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
 /*!
  * Handler functions (entrypoints) for external HTTP APIs
  */
@@ -6,8 +10,10 @@ use crate::db;
 use crate::db::model::Name;
 use crate::ServerContext;
 
-use super::params;
-use super::views::{Organization, Project};
+use super::{
+    console_api, params,
+    views::{Organization, Project, Vpc},
+};
 use crate::context::OpContext;
 use dropshot::endpoint;
 use dropshot::ApiDescription;
@@ -48,8 +54,6 @@ use omicron_common::api::external::RouterRouteKind;
 use omicron_common::api::external::RouterRouteUpdateParams;
 use omicron_common::api::external::Saga;
 use omicron_common::api::external::Sled;
-use omicron_common::api::external::Vpc;
-use omicron_common::api::external::VpcCreateParams;
 use omicron_common::api::external::VpcFirewallRule;
 use omicron_common::api::external::VpcFirewallRuleUpdateParams;
 use omicron_common::api::external::VpcFirewallRuleUpdateResult;
@@ -60,7 +64,6 @@ use omicron_common::api::external::VpcRouterUpdateParams;
 use omicron_common::api::external::VpcSubnet;
 use omicron_common::api::external::VpcSubnetCreateParams;
 use omicron_common::api::external::VpcSubnetUpdateParams;
-use omicron_common::api::external::VpcUpdateParams;
 use ref_cast::RefCast;
 use schemars::JsonSchema;
 use serde::Deserialize;
@@ -139,6 +142,12 @@ pub fn external_api() -> NexusApiDescription {
 
         api.register(sagas_get)?;
         api.register(sagas_get_saga)?;
+
+        api.register(console_api::spoof_login)?;
+        api.register(console_api::spoof_login_form)?;
+        api.register(console_api::logout)?;
+        api.register(console_api::console_page)?;
+        api.register(console_api::asset)?;
 
         Ok(())
     }
@@ -1103,7 +1112,7 @@ async fn project_vpcs_get_vpc(
 async fn project_vpcs_post(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<ProjectPathParam>,
-    new_vpc: TypedBody<VpcCreateParams>,
+    new_vpc: TypedBody<params::VpcCreate>,
 ) -> Result<HttpResponseCreated<Vpc>, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
@@ -1134,7 +1143,7 @@ async fn project_vpcs_post(
 async fn project_vpcs_put_vpc(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<VpcPathParam>,
-    updated_vpc: TypedBody<VpcUpdateParams>,
+    updated_vpc: TypedBody<params::VpcUpdate>,
 ) -> Result<HttpResponseOk<()>, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;

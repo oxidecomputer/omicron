@@ -1,3 +1,7 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
 //! Facilities for testing HTTP servers
 
 use anyhow::anyhow;
@@ -55,6 +59,8 @@ pub struct RequestBuilder<'a> {
 
     expected_status: Option<http::StatusCode>,
     allowed_headers: Option<Vec<http::header::HeaderName>>,
+    // doesn't need Option<> because if it's empty, we don't check anything
+    expected_response_headers: http::HeaderMap<http::header::HeaderValue>,
 }
 
 impl<'a> RequestBuilder<'a> {
@@ -73,12 +79,15 @@ impl<'a> RequestBuilder<'a> {
             body: hyper::Body::empty(),
             expected_status: None,
             allowed_headers: Some(vec![
+                http::header::CACHE_CONTROL,
                 http::header::CONTENT_LENGTH,
                 http::header::CONTENT_TYPE,
                 http::header::DATE,
+                http::header::LOCATION,
                 http::header::SET_COOKIE,
                 http::header::HeaderName::from_static("x-request-id"),
             ]),
+            expected_response_headers: http::HeaderMap::new(),
             error: None,
         }
     }
@@ -91,30 +100,14 @@ impl<'a> RequestBuilder<'a> {
         KE: std::error::Error + Send + Sync + 'static,
         VE: std::error::Error + Send + Sync + 'static,
     {
-        let header_name_dbg = format!("{:?}", name);
-        let header_value_dbg = format!("{:?}", value);
-        let header_name: Result<http::header::HeaderName, _> =
-            name.try_into().with_context(|| {
-                format!("converting header name {}", header_name_dbg)
-            });
-        let header_value: Result<http::header::HeaderValue, _> =
-            value.try_into().with_context(|| {
-                format!(
-                    "converting value for header {}: {}",
-                    header_name_dbg, header_value_dbg
-                )
-            });
-        match (header_name, header_value) {
-            (Ok(name), Ok(value)) => {
+        match parse_header_pair(name, value) {
+            Err(error) => {
+                self.error = Some(error);
+            }
+            Ok((name, value)) => {
                 self.headers.append(name, value);
             }
-            (Err(error), _) => {
-                self.error = Some(error);
-            }
-            (_, Err(error)) => {
-                self.error = Some(error);
-            }
-        };
+        }
         self
     }
 
@@ -162,6 +155,32 @@ impl<'a> RequestBuilder<'a> {
         allowed_headers: I,
     ) -> Self {
         self.allowed_headers = Some(allowed_headers.into_iter().collect());
+        self
+    }
+
+    /// Add header and value to check for at execution time
+    ///
+    /// Behaves like header() rather than expect_allowed_headers() in that it
+    /// takes one header at a time rather than a whole set.
+    pub fn expect_response_header<K, V, KE, VE>(
+        mut self,
+        name: K,
+        value: V,
+    ) -> Self
+    where
+        K: TryInto<http::header::HeaderName, Error = KE> + Debug,
+        V: TryInto<http::header::HeaderValue, Error = VE> + Debug,
+        KE: std::error::Error + Send + Sync + 'static,
+        VE: std::error::Error + Send + Sync + 'static,
+    {
+        match parse_header_pair(name, value) {
+            Err(error) => {
+                self.error = Some(error);
+            }
+            Ok((name, value)) => {
+                self.expected_response_headers.append(name, value);
+            }
+        }
         self
     }
 
@@ -225,6 +244,25 @@ impl<'a> RequestBuilder<'a> {
                     header_name
                 );
             }
+        }
+
+        // Check that we do have all expected headers
+        for (header_name, expected_value) in
+            self.expected_response_headers.iter()
+        {
+            ensure!(
+                headers.contains_key(header_name),
+                "response did not contain expected header {:?}",
+                header_name
+            );
+            let actual_value = headers.get(header_name).unwrap();
+            ensure!(
+                actual_value == expected_value,
+                "response contained expected header {:?}, but with value {:?} instead of expected {:?}",
+                header_name,
+                actual_value,
+                expected_value,
+            );
         }
 
         // Sanity check the Date header in the response.  This check assumes
@@ -298,7 +336,7 @@ impl<'a> RequestBuilder<'a> {
         };
         if status.is_client_error() || status.is_server_error() {
             let error_body = test_response
-                .response_body::<dropshot::HttpErrorResponseBody>()
+                .parsed_body::<dropshot::HttpErrorResponseBody>()
                 .context("parsing error body")?;
             ensure!(
                 error_body.request_id == request_id_header,
@@ -313,18 +351,44 @@ impl<'a> RequestBuilder<'a> {
     }
 }
 
+fn parse_header_pair<K, V, KE, VE>(
+    name: K,
+    value: V,
+) -> Result<(http::header::HeaderName, http::header::HeaderValue), anyhow::Error>
+where
+    K: TryInto<http::header::HeaderName, Error = KE> + Debug,
+    V: TryInto<http::header::HeaderValue, Error = VE> + Debug,
+    KE: std::error::Error + Send + Sync + 'static,
+    VE: std::error::Error + Send + Sync + 'static,
+{
+    let header_name_dbg = format!("{:?}", name);
+    let header_value_dbg = format!("{:?}", value);
+
+    let header_name = name.try_into().with_context(|| {
+        format!("converting header name {}", header_name_dbg)
+    })?;
+    let header_value = value.try_into().with_context(|| {
+        format!(
+            "converting value for header {}: {}",
+            header_name_dbg, header_value_dbg
+        )
+    })?;
+
+    Ok((header_name, header_value))
+}
+
 /// Represents a response from an HTTP server
 pub struct TestResponse {
     pub status: http::StatusCode,
     pub headers: http::HeaderMap,
-    body: bytes::Bytes,
+    pub body: bytes::Bytes,
 }
 
 impl TestResponse {
     /// Parse the response body as an instance of `R` and returns it
     ///
     /// Fails if the body could not be parsed as an `R`.
-    pub fn response_body<R: serde::de::DeserializeOwned>(
+    pub fn parsed_body<R: serde::de::DeserializeOwned>(
         &self,
     ) -> Result<R, anyhow::Error> {
         serde_json::from_slice(self.body.as_ref())
@@ -434,7 +498,7 @@ pub mod dropshot_compat {
             .execute()
             .await
             .unwrap()
-            .response_body::<T>()
+            .parsed_body::<T>()
             .unwrap()
     }
 
@@ -450,7 +514,7 @@ pub mod dropshot_compat {
             .execute()
             .await
             .unwrap()
-            .response_body::<ResultsPage<T>>()
+            .parsed_body::<ResultsPage<T>>()
             .unwrap()
     }
 
@@ -468,7 +532,7 @@ pub mod dropshot_compat {
             .execute()
             .await
             .unwrap()
-            .response_body::<T>()
+            .parsed_body::<T>()
             .unwrap()
     }
 }

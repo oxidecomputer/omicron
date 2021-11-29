@@ -1,5 +1,14 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
 use anyhow::Context;
+use async_trait::async_trait;
 use cookie::{Cookie, CookieJar, ParseError};
+use dropshot::{
+    Extractor, ExtractorMetadata, HttpError, RequestContext, ServerContext,
+};
+use std::sync::Arc;
 
 pub fn parse_cookies(
     headers: &http::HeaderMap<http::HeaderValue>,
@@ -18,6 +27,26 @@ pub fn parse_cookies(
         }
     }
     Ok(cookies)
+}
+pub struct Cookies(pub CookieJar);
+
+NewtypeFrom! { () pub struct Cookies(pub CookieJar); }
+NewtypeDeref! { () pub struct Cookies(pub CookieJar); }
+
+#[async_trait]
+impl Extractor for Cookies {
+    async fn from_request<Context: ServerContext>(
+        rqctx: Arc<RequestContext<Context>>,
+    ) -> Result<Self, HttpError> {
+        let request = &rqctx.request.lock().await;
+        let cookies = parse_cookies(request.headers())
+            .unwrap_or_else(|_| CookieJar::new());
+        Ok(cookies.into())
+    }
+
+    fn metadata() -> ExtractorMetadata {
+        ExtractorMetadata { paginated: false, parameters: vec![] }
+    }
 }
 
 #[cfg(test)]
