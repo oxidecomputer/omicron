@@ -7,9 +7,8 @@ use http::StatusCode;
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::IdentityMetadataUpdateParams;
 use omicron_common::api::external::VpcRouter;
-use omicron_common::api::external::VpcRouterCreateParams;
 use omicron_common::api::external::VpcRouterKind;
-use omicron_common::api::external::VpcRouterUpdateParams;
+use omicron_nexus::external_api::params;
 
 use dropshot::test_util::object_get;
 use dropshot::test_util::objects_list_page;
@@ -63,7 +62,7 @@ async fn test_vpc_routers() {
     assert_eq!(error.message, "not found: vpc router with name \"router1\"");
 
     /* Create a VPC Router. */
-    let new_router = VpcRouterCreateParams {
+    let new_router = params::VpcRouterCreate {
         identity: IdentityMetadataCreateParams {
             name: router_name.parse().unwrap(),
             description: "it's not really a router".to_string(),
@@ -107,7 +106,7 @@ async fn test_vpc_routers() {
     assert_eq!(error.message, "not found: vpc router with name \"router2\"");
 
     // create second custom router
-    let new_router = VpcRouterCreateParams {
+    let new_router = params::VpcRouterCreate {
         identity: IdentityMetadataCreateParams {
             name: router2_name.parse().unwrap(),
             description: "it's also not really a router".to_string(),
@@ -128,7 +127,7 @@ async fn test_vpc_routers() {
     routers_eq(&routers[1], &router2);
 
     // update first router
-    let update_params = VpcRouterUpdateParams {
+    let update_params = params::VpcRouterUpdate {
         identity: IdentityMetadataUpdateParams {
             name: Some("new-name".parse().unwrap()),
             description: Some("another description".to_string()),
