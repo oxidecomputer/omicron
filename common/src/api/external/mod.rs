@@ -1378,7 +1378,9 @@ pub struct VpcFirewallRuleUpdate {
  * so there is no explicit creation.
  */
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
+// TODO we're controlling the schemars output, but not the serde
+// deserialization here because of surprising behavior; see #449
+#[schemars(deny_unknown_fields)]
 pub struct VpcFirewallRuleUpdateParams {
     #[serde(flatten)]
     pub rules: HashMap<Name, VpcFirewallRuleUpdate>,
@@ -1388,7 +1390,9 @@ pub struct VpcFirewallRuleUpdateParams {
  * Response to an update replacing [`Vpc`]'s firewall
  */
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
+// TODO we're controlling the schemars output, but not the serde
+// deserialization here because of surprising behavior; see #449
+#[schemars(deny_unknown_fields)]
 pub struct VpcFirewallRuleUpdateResult {
     #[serde(flatten)]
     pub rules: HashMap<Name, VpcFirewallRule>,
