@@ -20,6 +20,9 @@ pub enum Error {
 
     #[error("Failed to contact nexus: {0}")]
     Nexus(anyhow::Error),
+
+    #[error("Failed to read response from Nexus: {0}")]
+    Response(reqwest::Error),
 }
 
 #[derive(Clone, Debug, Deserialize, JsonSchema)]
@@ -43,11 +46,12 @@ impl UpdateArtifact {
     }
 
     /// Downloads an update artifact.
-    // TODO: Fix error types
     pub async fn download(&self, nexus: &NexusClient) -> Result<(), Error> {
         let file_name = format!("{}-{}", self.name, self.version);
-        let response = nexus.cpapi_artifact_download(&file_name)
-            .await?;
+        let response = nexus
+            .cpapi_artifact_download(&file_name)
+            .await
+            .map_err(|e| Error::Nexus(e))?;
 
         let mut path = PathBuf::from(self.artifact_directory());
         tokio::fs::create_dir_all(&path).await?;
@@ -60,7 +64,10 @@ impl UpdateArtifact {
         path.push(&self.name);
 
         // Write the file in its entirety, replacing it if it exists.
-        tokio::fs::write(&tmp_path, response.bytes().await?).await?;
+        // TODO: Would love to stream this instead.
+        let contents =
+            response.bytes().await.map_err(|e| Error::Response(e))?;
+        tokio::fs::write(&tmp_path, contents).await?;
         tokio::fs::rename(&tmp_path, &path).await?;
 
         Ok(())

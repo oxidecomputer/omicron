@@ -4,8 +4,8 @@
 
 //! Sled agent implementation
 
-use crate::updates;
 use crate::params::DiskStateRequested;
+use crate::updates;
 use omicron_common::api::{
     external::Error, internal::nexus::DiskRuntimeState,
     internal::nexus::InstanceRuntimeState,
@@ -76,9 +76,9 @@ impl SledAgent {
         &self,
         artifact: &updates::UpdateArtifact,
     ) -> Result<(), Error> {
-        artifact.download(self.nexus_client.as_ref())
-            .await
-            .map_err(|e| Error::internal_error(&format!("Failed download: {}", e)))?;
+        artifact.download(self.nexus_client.as_ref()).await.map_err(|e| {
+            Error::internal_error(&format!("Failed download: {}", e))
+        })?;
         Ok(())
     }
 }

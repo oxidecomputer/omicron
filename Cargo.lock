@@ -1164,7 +1164,7 @@ dependencies = [
  "rustls",
  "tokio",
  "tokio-rustls",
- "webpki",
+ "webpki 0.21.4",
 ]
 
 [[package]]
@@ -1705,6 +1705,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "async-trait",
+ "bytes",
  "cfg-if",
  "chrono",
  "dropshot",
@@ -1726,14 +1727,18 @@ dependencies = [
  "serde_json",
  "serial_test",
  "slog",
+ "slog-async",
+ "slog-term",
  "smf",
  "socket2",
+ "spdm",
  "structopt",
  "subprocess",
  "tar",
  "tempfile",
  "thiserror",
  "tokio",
+ "tokio-util",
  "toml",
  "uuid",
  "zone",
@@ -2705,7 +2710,7 @@ dependencies = [
  "log",
  "ring",
  "sct",
- "webpki",
+ "webpki 0.21.4",
 ]
 
 [[package]]
@@ -3177,6 +3182,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "spdm"
+version = "0.1.0"
+source = "git+https://github.com/oxidecomputer/spdm?rev=9742f6e#9742f6eae7b86cc8bc8bc2fb0feeb44f770a1fb6"
+dependencies = [
+ "bitflags",
+ "rand",
+ "ring",
+ "webpki 0.22.0",
+]
+
+[[package]]
 name = "spin"
 version = "0.5.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3632,7 +3648,7 @@ checksum = "bc6844de72e57df1980054b38be3a9f4702aba4858be64dd700181a8a6d0e1b6"
 dependencies = [
  "rustls",
  "tokio",
- "webpki",
+ "webpki 0.21.4",
 ]
 
 [[package]]
@@ -3650,9 +3666,9 @@ dependencies = [
 
 [[package]]
 name = "tokio-util"
-version = "0.6.8"
+version = "0.6.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "08d3725d3efa29485e87311c5b699de63cde14b00ed4d256b8318aa30ca452cd"
+checksum = "9e99e1983e5d376cd8eb4b66604d2e99e79f5bd988c3055891dcd8c9e2604cc0"
 dependencies = [
  "bytes",
  "futures-core",
@@ -4113,12 +4129,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "webpki"
+version = "0.22.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f095d78192e208183081cc07bc5515ef55216397af48b873e5edcd72637fa1bd"
+dependencies = [
+ "ring",
+ "untrusted",
+]
+
+[[package]]
 name = "webpki-roots"
 version = "0.21.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "aabe153544e473b775453675851ecc86863d2a81d786d741f6b76778f2a48940"
 dependencies = [
- "webpki",
+ "webpki 0.21.4",
 ]
 
 [[package]]
