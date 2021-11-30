@@ -664,7 +664,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/DiskCreateParams"
+                "$ref": "#/components/schemas/DiskCreate"
               }
             }
           },
@@ -864,7 +864,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/InstanceCreateParams"
+                "$ref": "#/components/schemas/InstanceCreate"
               }
             }
           },
@@ -1812,7 +1812,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/VpcRouterCreateParams"
+                "$ref": "#/components/schemas/VpcRouterCreate"
               }
             }
           },
@@ -1932,7 +1932,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/VpcRouterUpdateParams"
+                "$ref": "#/components/schemas/VpcRouterUpdate"
               }
             }
           },
@@ -2443,7 +2443,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/VpcSubnetCreateParams"
+                "$ref": "#/components/schemas/VpcSubnetCreate"
               }
             }
           },
@@ -2563,7 +2563,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/VpcSubnetUpdateParams"
+                "$ref": "#/components/schemas/VpcSubnetUpdate"
               }
             }
           },
@@ -2801,8 +2801,8 @@
           "instanceId"
         ]
       },
-      "DiskCreateParams": {
-        "description": "Create-time parameters for an [`Disk`]",
+      "DiskCreate": {
+        "description": "Create-time parameters for a [`Disk`]",
         "type": "object",
         "properties": {
           "description": {
@@ -3102,7 +3102,7 @@
         "format": "uint16",
         "minimum": 0
       },
-      "InstanceCreateParams": {
+      "InstanceCreate": {
         "description": "Create-time parameters for an [`Instance`]",
         "type": "object",
         "properties": {
@@ -4468,7 +4468,7 @@
           "vpc_id"
         ]
       },
-      "VpcRouterCreateParams": {
+      "VpcRouterCreate": {
         "description": "Create-time parameters for a [`VpcRouter`]",
         "type": "object",
         "properties": {
@@ -4512,7 +4512,7 @@
           "items"
         ]
       },
-      "VpcRouterUpdateParams": {
+      "VpcRouterUpdate": {
         "description": "Updateable properties of a [`VpcRouter`]",
         "type": "object",
         "properties": {
@@ -4571,7 +4571,7 @@
           "vpc_id"
         ]
       },
-      "VpcSubnetCreateParams": {
+      "VpcSubnetCreate": {
         "description": "Create-time parameters for a [`VpcSubnet`]",
         "type": "object",
         "properties": {
@@ -4624,7 +4624,7 @@
           "items"
         ]
       },
-      "VpcSubnetUpdateParams": {
+      "VpcSubnetUpdate": {
         "description": "Updateable properties of a [`VpcSubnet`]",
         "type": "object",
         "properties": {

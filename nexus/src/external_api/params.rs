@@ -7,10 +7,12 @@
  */
 
 use omicron_common::api::external::{
-    IdentityMetadataCreateParams, IdentityMetadataUpdateParams, Name,
+    ByteCount, IdentityMetadataCreateParams, IdentityMetadataUpdateParams,
+    InstanceCpuCount, Ipv4Net, Ipv6Net, Name,
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use uuid::Uuid;
 
 /*
  * ORGANIZATIONS
@@ -61,7 +63,24 @@ pub struct ProjectUpdate {
 }
 
 /*
- * VPCs
+ * INSTANCES
+ */
+
+/**
+ * Create-time parameters for an [`Instance`]
+ */
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct InstanceCreate {
+    #[serde(flatten)]
+    pub identity: IdentityMetadataCreateParams,
+    pub ncpus: InstanceCpuCount,
+    pub memory: ByteCount,
+    pub hostname: String, /* TODO-cleanup different type? */
+}
+
+/*
+ * VPCS
  */
 
 /**
@@ -84,4 +103,67 @@ pub struct VpcUpdate {
     #[serde(flatten)]
     pub identity: IdentityMetadataUpdateParams,
     pub dns_name: Option<Name>,
+}
+
+/**
+ * Create-time parameters for a [`VpcSubnet`]
+ */
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct VpcSubnetCreate {
+    #[serde(flatten)]
+    pub identity: IdentityMetadataCreateParams,
+    pub ipv4_block: Option<Ipv4Net>,
+    pub ipv6_block: Option<Ipv6Net>,
+}
+
+/**
+ * Updateable properties of a [`VpcSubnet`]
+ */
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct VpcSubnetUpdate {
+    #[serde(flatten)]
+    pub identity: IdentityMetadataUpdateParams,
+    pub ipv4_block: Option<Ipv4Net>,
+    pub ipv6_block: Option<Ipv6Net>,
+}
+
+/*
+ * VPC ROUTERS
+ */
+
+/// Create-time parameters for a [`VpcRouter`]
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct VpcRouterCreate {
+    #[serde(flatten)]
+    pub identity: IdentityMetadataCreateParams,
+}
+
+/// Updateable properties of a [`VpcRouter`]
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct VpcRouterUpdate {
+    #[serde(flatten)]
+    pub identity: IdentityMetadataUpdateParams,
+}
+
+/*
+ * DISKS
+ */
+
+/**
+ * Create-time parameters for a [`Disk`]
+ */
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct DiskCreate {
+    /** common identifying metadata */
+    #[serde(flatten)]
+    pub identity: IdentityMetadataCreateParams,
+    /** id for snapshot from which the Disk should be created, if any */
+    pub snapshot_id: Option<Uuid>, /* TODO should be a name? */
+    /** size of the Disk */
+    pub size: ByteCount,
 }

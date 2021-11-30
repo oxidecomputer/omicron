@@ -399,12 +399,6 @@ pub struct Rack {
     pub identity: RackIdentity,
 }
 
-impl Into<external::Rack> for Rack {
-    fn into(self) -> external::Rack {
-        external::Rack { identity: self.identity() }
-    }
-}
-
 /// Database representation of a Sled.
 #[derive(Queryable, Insertable, Debug, Clone, Selectable, Asset)]
 #[table_name = "sled"]
@@ -442,13 +436,6 @@ impl DatastoreCollection<Zpool> for Sled {
     type GenerationNumberColumn = sled::dsl::rcgen;
     type CollectionTimeDeletedColumn = sled::dsl::time_deleted;
     type CollectionIdColumn = zpool::dsl::sled_id;
-}
-
-impl Into<external::Sled> for Sled {
-    fn into(self) -> external::Sled {
-        let service_address = self.address();
-        external::Sled { identity: self.identity(), service_address }
-    }
 }
 
 /// Database representation of a Pool.
@@ -699,7 +686,7 @@ impl Instance {
     pub fn new(
         instance_id: Uuid,
         project_id: Uuid,
-        params: &external::InstanceCreateParams,
+        params: &params::InstanceCreate,
         runtime: InstanceRuntimeState,
     ) -> Self {
         let identity =
@@ -747,6 +734,8 @@ pub struct InstanceRuntimeState {
     // TODO: should this be optional?
     #[column_name = "active_server_id"]
     pub sled_uuid: Uuid,
+    #[column_name = "active_propolis_id"]
+    pub propolis_uuid: Uuid,
     #[column_name = "ncpus"]
     pub ncpus: InstanceCpuCount,
     #[column_name = "memory"]
@@ -772,6 +761,7 @@ impl From<internal::nexus::InstanceRuntimeState> for InstanceRuntimeState {
         Self {
             state: InstanceState::new(state.run_state),
             sled_uuid: state.sled_uuid,
+            propolis_uuid: state.propolis_uuid,
             ncpus: state.ncpus.into(),
             memory: state.memory.into(),
             hostname: state.hostname,
@@ -787,6 +777,7 @@ impl Into<internal::nexus::InstanceRuntimeState> for InstanceRuntimeState {
         internal::nexus::InstanceRuntimeState {
             run_state: *self.state.state(),
             sled_uuid: self.sled_uuid,
+            propolis_uuid: self.propolis_uuid,
             ncpus: self.ncpus.into(),
             memory: self.memory.into(),
             hostname: self.hostname,
@@ -867,7 +858,7 @@ impl Disk {
     pub fn new(
         disk_id: Uuid,
         project_id: Uuid,
-        params: external::DiskCreateParams,
+        params: params::DiskCreate,
         runtime_initial: DiskRuntimeState,
     ) -> Self {
         let identity = DiskIdentity::new(disk_id, params.identity);
@@ -1190,7 +1181,7 @@ impl VpcSubnet {
     pub fn new(
         subnet_id: Uuid,
         vpc_id: Uuid,
-        params: external::VpcSubnetCreateParams,
+        params: params::VpcSubnetCreate,
     ) -> Self {
         let identity = VpcSubnetIdentity::new(subnet_id, params.identity);
         Self {
@@ -1198,17 +1189,6 @@ impl VpcSubnet {
             vpc_id,
             ipv4_block: params.ipv4_block.map(Ipv4Net),
             ipv6_block: params.ipv6_block.map(Ipv6Net),
-        }
-    }
-}
-
-impl Into<external::VpcSubnet> for VpcSubnet {
-    fn into(self) -> external::VpcSubnet {
-        external::VpcSubnet {
-            identity: self.identity(),
-            vpc_id: self.vpc_id,
-            ipv4_block: self.ipv4_block.map(|ip| ip.into()),
-            ipv6_block: self.ipv6_block.map(|ip| ip.into()),
         }
     }
 }
@@ -1223,8 +1203,8 @@ pub struct VpcSubnetUpdate {
     pub ipv6_block: Option<Ipv6Net>,
 }
 
-impl From<external::VpcSubnetUpdateParams> for VpcSubnetUpdate {
-    fn from(params: external::VpcSubnetUpdateParams) -> Self {
+impl From<params::VpcSubnetUpdate> for VpcSubnetUpdate {
+    fn from(params: params::VpcSubnetUpdate) -> Self {
         Self {
             name: params.identity.name.map(Name),
             description: params.identity.description,
@@ -1265,7 +1245,7 @@ impl VpcRouter {
         router_id: Uuid,
         vpc_id: Uuid,
         kind: external::VpcRouterKind,
-        params: external::VpcRouterCreateParams,
+        params: params::VpcRouterCreate,
     ) -> Self {
         let identity = VpcRouterIdentity::new(router_id, params.identity);
         Self {
@@ -1302,8 +1282,8 @@ pub struct VpcRouterUpdate {
     pub time_modified: DateTime<Utc>,
 }
 
-impl From<external::VpcRouterUpdateParams> for VpcRouterUpdate {
-    fn from(params: external::VpcRouterUpdateParams) -> Self {
+impl From<params::VpcRouterUpdate> for VpcRouterUpdate {
+    fn from(params: params::VpcRouterUpdate) -> Self {
         Self {
             name: params.identity.name.map(Name),
             description: params.identity.description,
