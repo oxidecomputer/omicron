@@ -26,19 +26,33 @@ pub struct UpdateArtifact {
     pub kind: UpdateArtifactKind,
 }
 
-/// Downloads an entire update artifact.
-// TODO: Fix error types
-pub async fn apply_update(nexus: &NexusClient, artifact: &UpdateArtifact) -> anyhow::Result<()> {
-    let file_name = format!("{}-{}", artifact.name, artifact.version);
-    let response = nexus.cpapi_artifact_download(&file_name).await?;
+impl UpdateArtifact {
+    fn artifact_directory(&self) -> &str {
+        match self.kind {
+            UpdateArtifactKind::Zone => "/var/tmp/zones",
+        }
+    }
 
-    let mut path = PathBuf::from("/opt/oxide");
-    path.push(file_name);
+    /// Downloads an update artifact.
+    // TODO: Fix error types
+    pub async fn download(&self, nexus: &NexusClient) -> anyhow::Result<()> {
+        let file_name = format!("{}-{}", self.name, self.version);
+        let response = nexus.cpapi_artifact_download(&file_name).await?;
 
-    // Write the file in its entirety, replacing it if it exists.
-    tokio::fs::write(path, response.bytes().await?).await?;
+        let mut path = PathBuf::from(self.artifact_directory());
+        tokio::fs::create_dir_all(&path).await?;
 
-    // TODO: Call nexus endpoint, download the thing
-    // TODO: put it in the right spot
-    Ok(())
+        // We download the file to a location named "<artifact-name>-<version>".
+        // We then rename it to "<artifact-name>" after it has successfully
+        // downloaded, to signify that it is ready for usage.
+        let mut tmp_path = path.clone();
+        tmp_path.push(file_name);
+        path.push(&self.name);
+
+        // Write the file in its entirety, replacing it if it exists.
+        tokio::fs::write(&tmp_path, response.bytes().await?).await?;
+        tokio::fs::rename(&tmp_path, &path).await?;
+
+        Ok(())
+    }
 }

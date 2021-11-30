@@ -76,7 +76,7 @@ impl SledAgent {
         &self,
         artifact: &updates::UpdateArtifact,
     ) -> Result<(), Error> {
-        updates::apply_update(self.nexus_client.as_ref(), artifact).await?;
+        artifact.download(self.nexus_client.as_ref()).await?;
         Ok(())
     }
 }
