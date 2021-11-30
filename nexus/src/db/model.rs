@@ -34,7 +34,6 @@ use uuid::Uuid;
 
 /// This macro implements serialization and deserialization of an enum type
 /// from our database into our model types.
-/// See VpcRouterKindEnum and VpcRouterKind for a sample usage
 /// See [`VpcRouterKindEnum`] and [`VpcRouterKind`] for a sample usage
 macro_rules! impl_enum_type {
     (
