@@ -75,6 +75,10 @@ jobs:
         os: [ ubuntu-18.04, macos-10.15 ]
         # See rust-toolchain for why we're using nightly here.
         toolchain: [ nightly-2021-11-24 ]
+        include:
+          - os: macos-10.15
+            toolchain: nightly-2021-11-24
+            extra_test_args: "-- --test-threads 1"
     steps:
     # actions/checkout@v2
     - uses: actions/checkout@28c7f3d2b5162b5ddd3dfd9a45aa55eaf396478b
@@ -123,4 +127,4 @@ jobs:
       # rebuild here.
       # Put "./cockroachdb/bin" and "./clickhouse" on the PATH for the test
       # suite.
-      run: PATH="$PATH:$PWD/cockroachdb/bin:$PWD/clickhouse" RUSTFLAGS="-D warnings" RUSTDOCFLAGS="-D warnings" cargo +${{ matrix.toolchain }} test --workspace --locked --verbose
+      run: PATH="$PATH:$PWD/cockroachdb/bin:$PWD/clickhouse" RUSTFLAGS="-D warnings" RUSTDOCFLAGS="-D warnings" cargo +${{ matrix.toolchain }} test --workspace --locked --verbose ${{matrix.extra_test_args }}
