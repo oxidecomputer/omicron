@@ -165,23 +165,3 @@ fn test_nexus_openapi_internal() {
      */
     assert_contents("../openapi/nexus-internal.json", &stdout_text);
 }
-
-#[test]
-fn test_oxapi_demo_no_args() {
-    let exec = Exec::cmd("../tools/oxapi_demo");
-    let (exit_status, stdout_text, stderr_text) = dbg!(run_command(exec));
-
-    assert_exit_code(exit_status, EXIT_USAGE);
-    assert!(stdout_text.contains("usage:"));
-    assert_eq!(stderr_text, "oxapi_demo: command not specified\n");
-}
-
-#[test]
-fn test_oxapi_demo() {
-    let exec = Exec::cmd("../tools/oxapi_demo").arg("organizations_list");
-    let (exit_status, stdout_text, stderr_text) = dbg!(run_command(exec));
-
-    assert_exit_code(exit_status, EXIT_SUCCESS);
-    assert_eq!(stdout_text, "");
-    assert!(stderr_text.contains("Failed to connect"));
-}
