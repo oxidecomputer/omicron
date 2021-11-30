@@ -87,7 +87,7 @@ async fn try_create_organization(
 
     let mut builder =
         RequestBuilder::new(client, Method::POST, "/organizations")
-            .body(Some(input))
+            .body(Some(&input))
             .expect_status(Some(expected_status));
     if let Some(user_id) = maybe_user_id {
         let authn_header = http::HeaderValue::from_static(user_id);

@@ -202,6 +202,106 @@
           }
         }
       }
+    },
+    "/sled_agents/{sled_id}/zpools/{zpool_id}": {
+      "put": {
+        "description": "Report that a pool for a specified sled has come online.",
+        "operationId": "zpool_put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "sled_id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "style": "simple"
+          },
+          {
+            "in": "path",
+            "name": "zpool_id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "style": "simple"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ZpoolPutRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ZpoolPutResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/zpools/{zpool_id}/dataset/{dataset_id}": {
+      "put": {
+        "description": "Report that a dataset within a pool has come online.",
+        "operationId": "dataset_put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "dataset_id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "style": "simple"
+          },
+          {
+            "in": "path",
+            "name": "zpool_id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "style": "simple"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DatasetPutRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DatasetPutResponse"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -415,6 +515,61 @@
           "start_time",
           "value"
         ]
+      },
+      "DatasetKind": {
+        "description": "Describes the purpose of the dataset.",
+        "type": "string",
+        "enum": [
+          "Crucible",
+          "Cockroach",
+          "Clickhouse"
+        ]
+      },
+      "DatasetPutRequest": {
+        "description": "Describes a dataset within a pool.",
+        "type": "object",
+        "properties": {
+          "address": {
+            "description": "Address on which a service is responding to requests for the dataset.",
+            "type": "string"
+          },
+          "kind": {
+            "description": "Type of dataset being inserted.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/DatasetKind"
+              }
+            ]
+          }
+        },
+        "required": [
+          "address",
+          "kind"
+        ]
+      },
+      "DatasetPutResponse": {
+        "description": "Describes which ZFS properties should be set for a particular allocated dataset.",
+        "type": "object",
+        "properties": {
+          "quota": {
+            "nullable": true,
+            "description": "A maximum quota on filesystem usage. Refer to ZFS native properties for more detail.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ByteCount"
+              }
+            ]
+          },
+          "reservation": {
+            "nullable": true,
+            "description": "A minimum reservation size for a filesystem. Refer to ZFS native properties for more detail.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ByteCount"
+              }
+            ]
+          }
+        }
       },
       "Datum": {
         "description": "A `Datum` is a single sampled data point from a metric.",
@@ -1123,6 +1278,11 @@
               }
             ]
           },
+          "propolis_uuid": {
+            "description": "which propolis-server is running this Instance",
+            "type": "string",
+            "format": "uuid"
+          },
           "run_state": {
             "description": "runtime state of the Instance",
             "allOf": [
@@ -1147,6 +1307,7 @@
           "hostname",
           "memory",
           "ncpus",
+          "propolis_uuid",
           "run_state",
           "sled_uuid",
           "time_updated"
@@ -1305,6 +1466,26 @@
         "required": [
           "sa_address"
         ]
+      },
+      "ZpoolPutRequest": {
+        "description": "Sent by a sled agent on startup to Nexus to request further instruction",
+        "type": "object",
+        "properties": {
+          "size": {
+            "description": "Total size of the pool.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ByteCount"
+              }
+            ]
+          }
+        },
+        "required": [
+          "size"
+        ]
+      },
+      "ZpoolPutResponse": {
+        "type": "object"
       }
     }
   }

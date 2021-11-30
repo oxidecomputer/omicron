@@ -11,7 +11,6 @@ use dropshot::Method;
 use http::StatusCode;
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::VpcRouter;
-use omicron_common::api::external::VpcRouterCreateParams;
 use omicron_nexus::external_api::params;
 use omicron_nexus::external_api::views::{Organization, Project, Vpc};
 
@@ -41,7 +40,7 @@ pub async fn create_organization(
             description: "an org".to_string(),
         },
     };
-    NexusRequest::objects_post(client, "/organizations", input)
+    NexusRequest::objects_post(client, "/organizations", &input)
         .authn_as(AuthnMode::PrivilegedUser)
         .execute()
         .await
@@ -55,17 +54,22 @@ pub async fn create_project(
     organization_name: &str,
     project_name: &str,
 ) -> Project {
-    objects_post(
-        &client,
-        format!("/organizations/{}/projects", &organization_name).as_str(),
-        params::ProjectCreate {
+    NexusRequest::objects_post(
+        client,
+        &format!("/organizations/{}/projects", &organization_name),
+        &params::ProjectCreate {
             identity: IdentityMetadataCreateParams {
                 name: project_name.parse().unwrap(),
                 description: "a pier".to_string(),
             },
         },
     )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
     .await
+    .expect("failed to make request")
+    .parsed_body()
+    .unwrap()
 }
 
 pub async fn create_vpc(
@@ -135,7 +139,7 @@ pub async fn create_router(
             &organization_name, &project_name, &vpc_name
         )
         .as_str(),
-        VpcRouterCreateParams {
+        params::VpcRouterCreate {
             identity: IdentityMetadataCreateParams {
                 name: router_name.parse().unwrap(),
                 description: String::from("router description"),

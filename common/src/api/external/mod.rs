@@ -35,7 +35,7 @@ use std::fmt::Display;
 use std::fmt::Formatter;
 use std::fmt::Result as FormatResult;
 use std::iter::FromIterator;
-use std::net::{IpAddr, SocketAddr};
+use std::net::IpAddr;
 use std::num::{NonZeroU16, NonZeroU32};
 use std::str::FromStr;
 use uuid::Uuid;
@@ -469,6 +469,7 @@ impl TryFrom<i64> for Generation {
 pub enum ResourceType {
     Organization,
     Project,
+    Dataset,
     Disk,
     DiskAttachment,
     Instance,
@@ -482,6 +483,7 @@ pub enum ResourceType {
     RouterRoute,
     Oximeter,
     MetricProducer,
+    Zpool,
 }
 
 impl Display for ResourceType {
@@ -492,6 +494,7 @@ impl Display for ResourceType {
             match self {
                 ResourceType::Organization => "organization",
                 ResourceType::Project => "project",
+                ResourceType::Dataset => "dataset",
                 ResourceType::Disk => "disk",
                 ResourceType::DiskAttachment => "disk attachment",
                 ResourceType::Instance => "instance",
@@ -505,6 +508,7 @@ impl Display for ResourceType {
                 ResourceType::RouterRoute => "vpc router route",
                 ResourceType::Oximeter => "oximeter",
                 ResourceType::MetricProducer => "metric producer",
+                ResourceType::Zpool => "zpool",
             }
         )
     }
@@ -737,34 +741,6 @@ pub struct Instance {
     pub runtime: InstanceRuntimeState,
 }
 
-/**
- * Create-time parameters for an [`Instance`]
- */
-/*
- * TODO We're ignoring "type" for now because no types are specified by the API.
- * Presumably this will need to be its own kind of API object that can be
- * created, modified, removed, etc.
- */
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct InstanceCreateParams {
-    #[serde(flatten)]
-    pub identity: IdentityMetadataCreateParams,
-    pub ncpus: InstanceCpuCount,
-    pub memory: ByteCount,
-    pub hostname: String, /* TODO-cleanup different type? */
-}
-
-/**
- * Updateable properties of an [`Instance`]
- */
-#[derive(Clone, Debug, Deserialize, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct InstanceUpdateParams {
-    #[serde(flatten)]
-    pub identity: IdentityMetadataUpdateParams,
-}
-
 /*
  * DISKS
  */
@@ -888,21 +864,6 @@ impl DiskState {
 }
 
 /**
- * Create-time parameters for an [`Disk`]
- */
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct DiskCreateParams {
-    /** common identifying metadata */
-    #[serde(flatten)]
-    pub identity: IdentityMetadataCreateParams,
-    /** id for snapshot from which the Disk should be created, if any */
-    pub snapshot_id: Option<Uuid>, /* TODO should be a name? */
-    /** size of the Disk */
-    pub size: ByteCount,
-}
-
-/**
  * Describes a Disk's attachment to an Instance
  */
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
@@ -912,34 +873,6 @@ pub struct DiskAttachment {
     pub disk_id: Uuid,
     pub disk_name: Name,
     pub disk_state: DiskState,
-}
-
-/*
- * RACKS
- */
-
-/**
- * Client view of an [`Rack`]
- */
-#[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct Rack {
-    pub identity: IdentityMetadata,
-}
-
-/*
- * SLEDS
- */
-
-/**
- * Client view of an [`Sled`]
- */
-#[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct Sled {
-    #[serde(flatten)]
-    pub identity: IdentityMetadata,
-    pub service_address: SocketAddr,
 }
 
 /*
@@ -1156,54 +1089,6 @@ impl JsonSchema for Ipv6Net {
     }
 }
 
-/// A VPC subnet represents a logical grouping for instances that allows network traffic between
-/// them, within a IPv4 subnetwork or optionall an IPv6 subnetwork.
-#[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
-pub struct VpcSubnet {
-    /** common identifying metadata */
-    pub identity: IdentityMetadata,
-
-    /** The VPC to which the subnet belongs. */
-    pub vpc_id: Uuid,
-
-    // TODO-design: RFD 21 says that V4 subnets are currently required, and V6 are optional. If a
-    // V6 address is _not_ specified, one is created with a prefix that depends on the VPC and a
-    // unique subnet-specific portion of the prefix (40 and 16 bits for each, respectively).
-    //
-    // We're leaving out the "view" types here for the external HTTP API for now, so it's not clear
-    // how to do the validation of user-specified CIDR blocks, or how to create a block if one is
-    // not given.
-    /** The IPv4 subnet CIDR block. */
-    pub ipv4_block: Option<Ipv4Net>,
-
-    /** The IPv6 subnet CIDR block. */
-    pub ipv6_block: Option<Ipv6Net>,
-}
-
-/**
- * Create-time parameters for a [`VpcSubnet`]
- */
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct VpcSubnetCreateParams {
-    #[serde(flatten)]
-    pub identity: IdentityMetadataCreateParams,
-    pub ipv4_block: Option<Ipv4Net>,
-    pub ipv6_block: Option<Ipv6Net>,
-}
-
-/**
- * Updateable properties of a [`VpcSubnet`]
- */
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct VpcSubnetUpdateParams {
-    #[serde(flatten)]
-    pub identity: IdentityMetadataUpdateParams,
-    pub ipv4_block: Option<Ipv4Net>,
-    pub ipv6_block: Option<Ipv6Net>,
-}
-
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub enum VpcRouterKind {
@@ -1222,22 +1107,6 @@ pub struct VpcRouter {
 
     /// The VPC to which the router belongs.
     pub vpc_id: Uuid,
-}
-
-/// Create-time parameters for a [`VpcRouter`]
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct VpcRouterCreateParams {
-    #[serde(flatten)]
-    pub identity: IdentityMetadataCreateParams,
-}
-
-/// Updateable properties of a [`VpcRouter`]
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct VpcRouterUpdateParams {
-    #[serde(flatten)]
-    pub identity: IdentityMetadataUpdateParams,
 }
 
 /// Represents all possible network target strings as defined in RFD-21
@@ -1513,7 +1382,9 @@ pub struct VpcFirewallRuleUpdate {
  * so there is no explicit creation.
  */
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
+// TODO we're controlling the schemars output, but not the serde
+// deserialization here because of surprising behavior; see #449
+#[schemars(deny_unknown_fields)]
 pub struct VpcFirewallRuleUpdateParams {
     #[serde(flatten)]
     pub rules: HashMap<Name, VpcFirewallRuleUpdate>,
@@ -1523,7 +1394,9 @@ pub struct VpcFirewallRuleUpdateParams {
  * Response to an update replacing [`Vpc`]'s firewall
  */
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
+// TODO we're controlling the schemars output, but not the serde
+// deserialization here because of surprising behavior; see #449
+#[schemars(deny_unknown_fields)]
 pub struct VpcFirewallRuleUpdateResult {
     #[serde(flatten)]
     pub rules: HashMap<Name, VpcFirewallRule>,

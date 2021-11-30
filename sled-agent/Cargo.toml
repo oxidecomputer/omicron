@@ -16,7 +16,7 @@ nexus-client = { path = "../nexus-client" }
 omicron-common = { path = "../common" }
 percent-encoding = "2.1.0"
 progenitor = { git = "https://github.com/oxidecomputer/progenitor" }
-propolis-client = { git = "https://github.com/oxidecomputer/propolis", rev = "b56e473" }
+propolis-client = { git = "https://github.com/oxidecomputer/propolis", rev = "00ec8cf18f6a2311b0907f0b16b0ff8a327944d1" }
 reqwest = "0.11.5"
 schemars = { version = "0.8", features = [ "chrono", "uuid" ] }
 serde = { version = "1.0", features = [ "derive" ] }

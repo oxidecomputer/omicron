@@ -36,6 +36,8 @@ pub struct InstanceRuntimeState {
     pub run_state: InstanceState,
     /// which sled is running this Instance
     pub sled_uuid: Uuid,
+    /// which propolis-server is running this Instance
+    pub propolis_uuid: Uuid,
     /// number of CPUs allocated for this Instance
     pub ncpus: InstanceCpuCount,
     /// memory allocated for this Instance

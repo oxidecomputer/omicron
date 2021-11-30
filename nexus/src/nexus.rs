@@ -11,9 +11,10 @@ use crate::config;
 use crate::context::OpContext;
 use crate::db;
 use crate::db::identity::{Asset, Resource};
+use crate::db::model::DatasetKind;
 use crate::db::model::Name;
 use crate::external_api::params;
-use crate::internal_api::params::OximeterInfo;
+use crate::internal_api::params::{OximeterInfo, ZpoolPutRequest};
 use crate::saga_interface::SagaContext;
 use crate::sagas;
 use anyhow::Context;
@@ -29,11 +30,9 @@ use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::DeleteResult;
 use omicron_common::api::external::DiskAttachment;
-use omicron_common::api::external::DiskCreateParams;
 use omicron_common::api::external::DiskState;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::IdentityMetadataCreateParams;
-use omicron_common::api::external::InstanceCreateParams;
 use omicron_common::api::external::InstanceState;
 use omicron_common::api::external::Ipv4Net;
 use omicron_common::api::external::Ipv6Net;
@@ -50,11 +49,7 @@ use omicron_common::api::external::RouterRouteUpdateParams;
 use omicron_common::api::external::UpdateResult;
 use omicron_common::api::external::VpcFirewallRuleUpdateParams;
 use omicron_common::api::external::VpcFirewallRuleUpdateResult;
-use omicron_common::api::external::VpcRouterCreateParams;
 use omicron_common::api::external::VpcRouterKind;
-use omicron_common::api::external::VpcRouterUpdateParams;
-use omicron_common::api::external::VpcSubnetCreateParams;
-use omicron_common::api::external::VpcSubnetUpdateParams;
 use omicron_common::api::internal::nexus;
 use omicron_common::api::internal::nexus::DiskRuntimeState;
 use omicron_common::api::internal::sled_agent::InstanceRuntimeStateRequested;
@@ -211,11 +206,35 @@ impl Nexus {
         address: SocketAddr,
     ) -> Result<(), Error> {
         info!(self.log, "registered sled agent"; "sled_uuid" => id.to_string());
-
-        // Insert the sled into the database.
         let sled = db::model::Sled::new(id, address);
         self.db_datastore.sled_upsert(sled).await?;
+        Ok(())
+    }
 
+    /// Upserts a Zpool into the database, updating it if it already exists.
+    pub async fn upsert_zpool(
+        &self,
+        id: Uuid,
+        sled_id: Uuid,
+        info: ZpoolPutRequest,
+    ) -> Result<(), Error> {
+        info!(self.log, "upserting zpool"; "sled_id" => sled_id.to_string(), "zpool_id" => id.to_string());
+        let zpool = db::model::Zpool::new(id, sled_id, &info);
+        self.db_datastore.zpool_upsert(zpool).await?;
+        Ok(())
+    }
+
+    /// Upserts a dataset into the database, updating it if it already exists.
+    pub async fn upsert_dataset(
+        &self,
+        id: Uuid,
+        zpool_id: Uuid,
+        address: SocketAddr,
+        kind: DatasetKind,
+    ) -> Result<(), Error> {
+        info!(self.log, "upserting dataset"; "zpool_id" => zpool_id.to_string(), "dataset_id" => id.to_string());
+        let dataset = db::model::Dataset::new(id, zpool_id, address, kind);
+        self.db_datastore.dataset_upsert(dataset).await?;
         Ok(())
     }
 
@@ -462,18 +481,17 @@ impl Nexus {
 
     pub async fn project_create(
         &self,
+        opctx: &OpContext,
         organization_name: &Name,
         new_project: &params::ProjectCreate,
     ) -> CreateResult<db::model::Project> {
-        let organization_id = self
-            .db_datastore
-            .organization_lookup_id_by_name(organization_name)
-            .await?;
+        let org =
+            self.db_datastore.organization_lookup(organization_name).await?;
 
         // Create a project.
+        let db_project = db::model::Project::new(org.id(), new_project.clone());
         let db_project =
-            db::model::Project::new(organization_id, new_project.clone());
-        let db_project = self.db_datastore.project_create(db_project).await?;
+            self.db_datastore.project_create(opctx, &org, db_project).await?;
 
         // TODO: We probably want to have "project creation" and "default VPC
         // creation" co-located within a saga for atomicity.
@@ -594,7 +612,7 @@ impl Nexus {
         &self,
         organization_name: &Name,
         project_name: &Name,
-        params: &DiskCreateParams,
+        params: &params::DiskCreate,
     ) -> CreateResult<db::model::Disk> {
         let project =
             self.project_fetch(organization_name, project_name).await?;
@@ -618,6 +636,13 @@ impl Nexus {
             db::model::DiskRuntimeState::new(),
         );
         let disk_created = self.db_datastore.project_create_disk(disk).await?;
+
+        // TODO: Here, we should ensure the disk is backed by appropriate
+        // regions. This is blocked behind actually having Crucible agents
+        // running in zones for dedicated zpools.
+        //
+        // TODO: Performing this operation, alongside "create" and "update
+        // state from create to detach", should be executed in a Saga.
 
         /*
          * This is a little hokey.  We'd like to simulate an asynchronous
@@ -755,7 +780,7 @@ impl Nexus {
         self: &Arc<Self>,
         organization_name: &Name,
         project_name: &Name,
-        params: &InstanceCreateParams,
+        params: &params::InstanceCreate,
     ) -> CreateResult<db::model::Instance> {
         let organization_id = self
             .db_datastore
@@ -1444,7 +1469,7 @@ impl Nexus {
             system_router_id,
             vpc_id,
             VpcRouterKind::System,
-            VpcRouterCreateParams {
+            params::VpcRouterCreate {
                 identity: IdentityMetadataCreateParams {
                     name: "system".parse().unwrap(),
                     description: "Routes are automatically added to this router as vpc subnets are created".into()
@@ -1486,7 +1511,7 @@ impl Nexus {
         let subnet = db::model::VpcSubnet::new(
             default_subnet_id,
             vpc_id,
-            VpcSubnetCreateParams {
+            params::VpcSubnetCreate {
                 identity: IdentityMetadataCreateParams {
                     name: "default".parse().unwrap(),
                     description: format!(
@@ -1660,7 +1685,7 @@ impl Nexus {
         organization_name: &Name,
         project_name: &Name,
         vpc_name: &Name,
-        params: &VpcSubnetCreateParams,
+        params: &params::VpcSubnetCreate,
     ) -> CreateResult<db::model::VpcSubnet> {
         let vpc = self
             .project_lookup_vpc(organization_name, project_name, vpc_name)
@@ -1696,7 +1721,7 @@ impl Nexus {
         project_name: &Name,
         vpc_name: &Name,
         subnet_name: &Name,
-        params: &VpcSubnetUpdateParams,
+        params: &params::VpcSubnetUpdate,
     ) -> UpdateResult<()> {
         let subnet = self
             .vpc_lookup_subnet(
@@ -1749,7 +1774,7 @@ impl Nexus {
         project_name: &Name,
         vpc_name: &Name,
         kind: &VpcRouterKind,
-        params: &VpcRouterCreateParams,
+        params: &params::VpcRouterCreate,
     ) -> CreateResult<db::model::VpcRouter> {
         let vpc = self
             .project_lookup_vpc(organization_name, project_name, vpc_name)
@@ -1793,7 +1818,7 @@ impl Nexus {
         project_name: &Name,
         vpc_name: &Name,
         router_name: &Name,
-        params: &VpcRouterUpdateParams,
+        params: &params::VpcRouterUpdate,
     ) -> UpdateResult<()> {
         let router = self
             .vpc_lookup_router(
