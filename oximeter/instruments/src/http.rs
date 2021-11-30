@@ -1,3 +1,7 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
 //! Instrumentation tools for HTTP services.
 
 // Copyright 2021 Oxide Computer Company
@@ -169,7 +173,7 @@ impl LatencyTracker {
         self.update(&request, status_code, latency).map_err(|e| {
             HttpError::for_internal_error(format!(
                 "error instrumenting dropshot request handler: {}",
-                e.to_string()
+                e
             ))
         })?;
         result

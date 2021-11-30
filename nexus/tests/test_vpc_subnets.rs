@@ -1,3 +1,7 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
 use http::method::Method;
 use http::StatusCode;
 use ipnetwork::{Ipv4Network, Ipv6Network};
@@ -5,9 +9,7 @@ use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::IdentityMetadataUpdateParams;
 use omicron_common::api::external::Ipv4Net;
 use omicron_common::api::external::Ipv6Net;
-use omicron_common::api::external::VpcSubnet;
-use omicron_common::api::external::VpcSubnetCreateParams;
-use omicron_common::api::external::VpcSubnetUpdateParams;
+use omicron_nexus::external_api::{params, views::VpcSubnet};
 
 use dropshot::test_util::object_get;
 use dropshot::test_util::objects_list_page;
@@ -77,7 +79,7 @@ async fn test_vpc_subnets() {
         Some(Ipv4Net("10.1.9.32/16".parse::<Ipv4Network>().unwrap()));
     let ipv6_block =
         Some(Ipv6Net("2001:db8::0/96".parse::<Ipv6Network>().unwrap()));
-    let new_subnet = VpcSubnetCreateParams {
+    let new_subnet = params::VpcSubnetCreate {
         identity: IdentityMetadataCreateParams {
             name: subnet_name.parse().unwrap(),
             description: "it's below the net".to_string(),
@@ -142,7 +144,7 @@ async fn test_vpc_subnets() {
     assert_eq!(error.message, "not found: vpc subnet with name \"subnet2\"");
 
     // create second subnet
-    let new_subnet = VpcSubnetCreateParams {
+    let new_subnet = params::VpcSubnetCreate {
         identity: IdentityMetadataCreateParams {
             name: subnet2_name.parse().unwrap(),
             description: "it's also below the net".to_string(),
@@ -166,7 +168,7 @@ async fn test_vpc_subnets() {
     subnets_eq(&subnets[1], &subnet2);
 
     // update first subnet
-    let update_params = VpcSubnetUpdateParams {
+    let update_params = params::VpcSubnetUpdate {
         identity: IdentityMetadataUpdateParams {
             name: Some("new-name".parse().unwrap()),
             description: Some("another description".to_string()),

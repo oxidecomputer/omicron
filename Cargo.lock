@@ -3,6 +3,15 @@
 version = 3
 
 [[package]]
+name = "aead"
+version = "0.4.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0b613b8e1e3cf911a086f53f03bf286f52fd7a7258e4fa606f0ef220d39d8877"
+dependencies = [
+ "generic-array 0.14.4",
+]
+
+[[package]]
 name = "aes"
 version = "0.7.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -12,6 +21,21 @@ dependencies = [
  "cipher",
  "cpufeatures",
  "opaque-debug 0.3.0",
+]
+
+[[package]]
+name = "aes-gcm-siv"
+version = "0.10.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "589c637f0e68c877bbd59a4599bbe849cac8e5f3e4b5a3ebae8f528cd218dcdc"
+dependencies = [
+ "aead",
+ "aes",
+ "cipher",
+ "ctr",
+ "polyval",
+ "subtle",
+ "zeroize",
 ]
 
 [[package]]
@@ -34,9 +58,9 @@ dependencies = [
 
 [[package]]
 name = "anyhow"
-version = "1.0.48"
+version = "1.0.51"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "62e1f47f7dc0422027a4e370dd4548d4d66b26782e513e98dca1e689e058a80e"
+checksum = "8b26702f315f53b6071259e15dd9d64528213b44d61de1ec926eca7715d62203"
 
 [[package]]
 name = "api_identity"
@@ -144,7 +168,7 @@ dependencies = [
 [[package]]
 name = "bhyve_api"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=b56e473#b56e47369caa9e1484e69d34c0b855d376fe4664"
+source = "git+https://github.com/oxidecomputer/propolis?rev=00ec8cf18f6a2311b0907f0b16b0ff8a327944d1#00ec8cf18f6a2311b0907f0b16b0ff8a327944d1"
 dependencies = [
  "bitflags",
  "libc",
@@ -420,9 +444,10 @@ dependencies = [
 [[package]]
 name = "crucible"
 version = "0.0.1"
-source = "git+https://github.com/oxidecomputer/crucible?branch=main#8564e768fa94431bad9c4bc5f67c2496f1e0bbc6"
+source = "git+https://github.com/oxidecomputer/crucible?branch=main#9df1c1230f125e4ea20700d9f0630f90b18a3c70"
 dependencies = [
  "aes",
+ "aes-gcm-siv",
  "anyhow",
  "base64",
  "bytes",
@@ -432,6 +457,7 @@ dependencies = [
  "futures",
  "futures-core",
  "rand",
+ "rand_chacha",
  "ringbuffer",
  "serde",
  "serde_json",
@@ -448,7 +474,7 @@ dependencies = [
 [[package]]
 name = "crucible-common"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/crucible?branch=main#8564e768fa94431bad9c4bc5f67c2496f1e0bbc6"
+source = "git+https://github.com/oxidecomputer/crucible?branch=main#9df1c1230f125e4ea20700d9f0630f90b18a3c70"
 dependencies = [
  "anyhow",
  "serde",
@@ -462,7 +488,7 @@ dependencies = [
 [[package]]
 name = "crucible-protocol"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/crucible?branch=main#8564e768fa94431bad9c4bc5f67c2496f1e0bbc6"
+source = "git+https://github.com/oxidecomputer/crucible?branch=main#9df1c1230f125e4ea20700d9f0630f90b18a3c70"
 dependencies = [
  "anyhow",
  "bincode",
@@ -476,7 +502,7 @@ dependencies = [
 [[package]]
 name = "crucible-scope"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/crucible?branch=main#8564e768fa94431bad9c4bc5f67c2496f1e0bbc6"
+source = "git+https://github.com/oxidecomputer/crucible?branch=main#9df1c1230f125e4ea20700d9f0630f90b18a3c70"
 dependencies = [
  "anyhow",
  "futures",
@@ -514,6 +540,15 @@ checksum = "b1d1a86f49236c215f271d40892d5fc950490551400b02ef360692c29815c714"
 dependencies = [
  "generic-array 0.14.4",
  "subtle",
+]
+
+[[package]]
+name = "ctr"
+version = "0.8.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "049bb91fb4aaf0e3c7efa6cd5ef877dbbbd15b39dad06d9948de4ec8a75761ea"
+dependencies = [
+ "cipher",
 ]
 
 [[package]]
@@ -681,7 +716,7 @@ checksum = "212d0f5754cb6769937f4501cc0e67f4f4483c8d2c3e1e922ee9edbe4ab4c7c0"
 [[package]]
 name = "dladm"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=b56e473#b56e47369caa9e1484e69d34c0b855d376fe4664"
+source = "git+https://github.com/oxidecomputer/propolis?rev=00ec8cf18f6a2311b0907f0b16b0ff8a327944d1#00ec8cf18f6a2311b0907f0b16b0ff8a327944d1"
 dependencies = [
  "libc",
  "num_enum",
@@ -706,7 +741,7 @@ checksum = "4bb454f0228b18c7f4c3b0ebbee346ed9c52e7443b0999cd543ff3571205701d"
 [[package]]
 name = "dropshot"
 version = "0.6.1-dev"
-source = "git+https://github.com/oxidecomputer/dropshot?branch=main#a1f980db2188a9187702ff804de5f2f557a52c92"
+source = "git+https://github.com/oxidecomputer/dropshot?branch=main#ff33033ad3d7fcf32caa352d76fc243bd20db176"
 dependencies = [
  "async-trait",
  "base64",
@@ -741,7 +776,7 @@ dependencies = [
 [[package]]
 name = "dropshot_endpoint"
 version = "0.6.1-dev"
-source = "git+https://github.com/oxidecomputer/dropshot?branch=main#a1f980db2188a9187702ff804de5f2f557a52c92"
+source = "git+https://github.com/oxidecomputer/dropshot?branch=main#ff33033ad3d7fcf32caa352d76fc243bd20db176"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -1244,7 +1279,7 @@ dependencies = [
  "rustls",
  "tokio",
  "tokio-rustls",
- "webpki",
+ "webpki 0.21.4",
 ]
 
 [[package]]
@@ -1504,6 +1539,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2a60c7ce501c71e03a9c9c0d35b861413ae925bd979cc7a4e30d060069aaac8d"
 
 [[package]]
+name = "mime_guess"
+version = "2.0.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2684d4c2e97d99848d30b324b00c8fcc7e5c897b7cbb5819b09e7c90e8baf212"
+dependencies = [
+ "mime",
+ "unicase",
+]
+
+[[package]]
 name = "mio"
 version = "0.7.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1602,6 +1647,7 @@ dependencies = [
  "progenitor",
  "reqwest",
  "serde",
+ "serde_json",
  "slog",
  "uuid",
 ]
@@ -1740,6 +1786,7 @@ dependencies = [
  "lazy_static",
  "libc",
  "macaddr",
+ "mime_guess",
  "newtype_derive",
  "omicron-common",
  "omicron-rpaths",
@@ -1786,6 +1833,7 @@ dependencies = [
  "anyhow",
  "async-trait",
  "bincode",
+ "bytes",
  "cfg-if",
  "chrono",
  "dropshot",
@@ -1809,13 +1857,18 @@ dependencies = [
  "serde_json",
  "serial_test",
  "slog",
+ "slog-async",
+ "slog-term",
  "smf",
+ "socket2",
+ "spdm",
  "structopt",
  "subprocess",
  "tar",
  "tempfile",
  "thiserror",
  "tokio",
+ "tokio-util",
  "toml",
  "uuid",
  "vsss-rs",
@@ -2303,6 +2356,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "polyval"
+version = "0.5.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8419d2b623c7c0896ff2d5d96e2cb4ede590fed28fcc34934f4c33c036e620a1"
+dependencies = [
+ "cfg-if",
+ "cpufeatures",
+ "opaque-debug 0.3.0",
+ "universal-hash",
+]
+
+[[package]]
 name = "postgres-protocol"
 version = "0.6.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2484,7 +2549,7 @@ dependencies = [
 [[package]]
 name = "propolis"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=b56e473#b56e47369caa9e1484e69d34c0b855d376fe4664"
+source = "git+https://github.com/oxidecomputer/propolis?rev=00ec8cf18f6a2311b0907f0b16b0ff8a327944d1#00ec8cf18f6a2311b0907f0b16b0ff8a327944d1"
 dependencies = [
  "anyhow",
  "bhyve_api",
@@ -2499,6 +2564,7 @@ dependencies = [
  "libc",
  "num_enum",
  "serde",
+ "serde_arrays",
  "slog",
  "thiserror",
  "tokio",
@@ -2509,7 +2575,7 @@ dependencies = [
 [[package]]
 name = "propolis-client"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=b56e473#b56e47369caa9e1484e69d34c0b855d376fe4664"
+source = "git+https://github.com/oxidecomputer/propolis?rev=00ec8cf18f6a2311b0907f0b16b0ff8a327944d1#00ec8cf18f6a2311b0907f0b16b0ff8a327944d1"
 dependencies = [
  "reqwest",
  "ring",
@@ -2525,7 +2591,7 @@ dependencies = [
 [[package]]
 name = "propolis-server"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=b56e473#b56e47369caa9e1484e69d34c0b855d376fe4664"
+source = "git+https://github.com/oxidecomputer/propolis?rev=00ec8cf18f6a2311b0907f0b16b0ff8a327944d1#00ec8cf18f6a2311b0907f0b16b0ff8a327944d1"
 dependencies = [
  "anyhow",
  "dropshot",
@@ -2802,7 +2868,7 @@ dependencies = [
  "log",
  "ring",
  "sct",
- "webpki",
+ "webpki 0.21.4",
 ]
 
 [[package]]
@@ -2847,9 +2913,9 @@ dependencies = [
 
 [[package]]
 name = "schemars"
-version = "0.8.7"
+version = "0.8.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "271ac0c667b8229adf70f0f957697c96fafd7486ab7481e15dc5e45e3e6a4368"
+checksum = "c6b5a3c80cea1ab61f4260238409510e814e38b4b563c06044edf91e7dc070e3"
 dependencies = [
  "bytes",
  "chrono",
@@ -2862,9 +2928,9 @@ dependencies = [
 
 [[package]]
 name = "schemars_derive"
-version = "0.8.7"
+version = "0.8.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6ebda811090b257411540779860bc09bf321bc587f58d2c5864309d1566214e7"
+checksum = "41ae4dce13e8614c46ac3c38ef1c0d668b101df6ac39817aebdaa26642ddae9b"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -2970,6 +3036,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "serde_arrays"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "38636132857f68ec3d5f3eb121166d2af33cb55174c4d5ff645db6165cbef0fd"
+dependencies = [
+ "serde",
+]
+
+[[package]]
 name = "serde_cbor"
 version = "0.11.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3003,9 +3078,9 @@ dependencies = [
 
 [[package]]
 name = "serde_json"
-version = "1.0.71"
+version = "1.0.72"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "063bf466a64011ac24040a49009724ee60a57da1b437617ceb32e53ad61bfb19"
+checksum = "d0ffa0837f2dfa6fb90868c2b5468cad482e175f7dad97e7421951e663f2b527"
 dependencies = [
  "itoa",
  "ryu",
@@ -3295,6 +3370,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "spdm"
+version = "0.1.0"
+source = "git+https://github.com/oxidecomputer/spdm?rev=9742f6e#9742f6eae7b86cc8bc8bc2fb0feeb44f770a1fb6"
+dependencies = [
+ "bitflags",
+ "rand",
+ "ring",
+ "webpki 0.22.0",
+]
+
+[[package]]
 name = "spin"
 version = "0.5.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3487,9 +3573,9 @@ checksum = "6bdef32e8150c2a081110b42772ffe7d7c9032b606bc226c8260fd97e0976601"
 
 [[package]]
 name = "syn"
-version = "1.0.81"
+version = "1.0.82"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f2afee18b8beb5a596ecb4a2dce128c719b4ba399d34126b9e4396e3f9860966"
+checksum = "8daf5dd0bb60cbd4137b1b587d2fc0ae729bc07cf01cd70b36a1ed5ade3b9d59"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -3765,7 +3851,7 @@ checksum = "bc6844de72e57df1980054b38be3a9f4702aba4858be64dd700181a8a6d0e1b6"
 dependencies = [
  "rustls",
  "tokio",
- "webpki",
+ "webpki 0.21.4",
 ]
 
 [[package]]
@@ -3783,9 +3869,9 @@ dependencies = [
 
 [[package]]
 name = "tokio-util"
-version = "0.6.8"
+version = "0.6.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "08d3725d3efa29485e87311c5b699de63cde14b00ed4d256b8318aa30ca452cd"
+checksum = "9e99e1983e5d376cd8eb4b66604d2e99e79f5bd988c3055891dcd8c9e2604cc0"
 dependencies = [
  "bytes",
  "futures-core",
@@ -3957,6 +4043,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "56dee185309b50d1f11bfedef0fe6d036842e3fb77413abef29f8f8d1c5d4c1c"
 
 [[package]]
+name = "unicase"
+version = "2.6.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "50f37be617794602aabbeee0be4f259dc1778fabe05e2d67ee8f79326d5cb4f6"
+dependencies = [
+ "version_check",
+]
+
+[[package]]
 name = "unicode-bidi"
 version = "0.3.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3994,6 +4089,16 @@ name = "unindent"
 version = "0.1.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f14ee04d9415b52b3aeab06258a3f07093182b88ba0f9b8d203f211a7a7d41c7"
+
+[[package]]
+name = "universal-hash"
+version = "0.4.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9f214e8f697e925001e66ec2c6e37a4ef93f0f78c2eed7814394e10c62025b05"
+dependencies = [
+ "generic-array 0.14.4",
+ "subtle",
+]
 
 [[package]]
 name = "untrusted"
@@ -4111,7 +4216,7 @@ checksum = "5fecdca9a5291cc2b8dcf7dc02453fee791a280f3743cb0905f8822ae463b3fe"
 [[package]]
 name = "viona_api"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=b56e473#b56e47369caa9e1484e69d34c0b855d376fe4664"
+source = "git+https://github.com/oxidecomputer/propolis?rev=00ec8cf18f6a2311b0907f0b16b0ff8a327944d1#00ec8cf18f6a2311b0907f0b16b0ff8a327944d1"
 
 [[package]]
 name = "vsss-rs"
@@ -4248,12 +4353,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "webpki"
+version = "0.22.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f095d78192e208183081cc07bc5515ef55216397af48b873e5edcd72637fa1bd"
+dependencies = [
+ "ring",
+ "untrusted",
+]
+
+[[package]]
 name = "webpki-roots"
 version = "0.21.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "aabe153544e473b775453675851ecc86863d2a81d786d741f6b76778f2a48940"
 dependencies = [
- "webpki",
+ "webpki 0.21.4",
 ]
 
 [[package]]
@@ -4356,9 +4471,9 @@ dependencies = [
 
 [[package]]
 name = "zeroize"
-version = "1.4.3"
+version = "1.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d68d9dcec5f9b43a30d38c49f91dfedfaac384cb8f085faca366c26207dd1619"
+checksum = "4756f7db3f7b5574938c3eb1c117038b8e07f95ee6718c0efad4ac21508f1efd"
 dependencies = [
  "zeroize_derive",
 ]

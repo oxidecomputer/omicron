@@ -1,3 +1,7 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
 /*!
  * Saga actions, undo actions, and saga constructors used in Nexus.
  */
@@ -10,11 +14,11 @@
  */
 
 use crate::db;
+use crate::external_api::params;
 use crate::saga_interface::SagaContext;
 use chrono::Utc;
 use lazy_static::lazy_static;
 use omicron_common::api::external::Generation;
-use omicron_common::api::external::InstanceCreateParams;
 use omicron_common::api::external::InstanceState;
 use omicron_common::api::internal::nexus::InstanceRuntimeState;
 use omicron_common::api::internal::sled_agent::InstanceHardware;
@@ -63,7 +67,7 @@ fn all_templates(
 #[derive(Debug, Deserialize, Serialize)]
 pub struct ParamsInstanceCreate {
     pub project_id: Uuid,
-    pub create_params: InstanceCreateParams,
+    pub create_params: params::InstanceCreate,
 }
 
 #[derive(Debug)]
@@ -79,7 +83,13 @@ pub fn saga_instance_create() -> SagaTemplate<SagaInstanceCreate> {
     template_builder.append(
         "instance_id",
         "GenerateInstanceId",
-        new_action_noop_undo(sic_generate_instance_id),
+        new_action_noop_undo(sic_generate_uuid),
+    );
+
+    template_builder.append(
+        "propolis_id",
+        "GeneratePropolisId",
+        new_action_noop_undo(sic_generate_uuid),
     );
 
     template_builder.append(
@@ -106,7 +116,7 @@ pub fn saga_instance_create() -> SagaTemplate<SagaInstanceCreate> {
     template_builder.build()
 }
 
-async fn sic_generate_instance_id(
+async fn sic_generate_uuid(
     _: ActionContext<SagaInstanceCreate>,
 ) -> Result<Uuid, ActionError> {
     Ok(Uuid::new_v4())
@@ -130,10 +140,12 @@ async fn sic_create_instance_record(
     let params = sagactx.saga_params();
     let sled_uuid = sagactx.lookup::<Uuid>("server_id");
     let instance_id = sagactx.lookup::<Uuid>("instance_id");
+    let propolis_uuid = sagactx.lookup::<Uuid>("propolis_id");
 
     let runtime = InstanceRuntimeState {
         run_state: InstanceState::Creating,
         sled_uuid: sled_uuid?,
+        propolis_uuid: propolis_uuid?,
         hostname: params.create_params.hostname.clone(),
         memory: params.create_params.memory,
         ncpus: params.create_params.ncpus,
