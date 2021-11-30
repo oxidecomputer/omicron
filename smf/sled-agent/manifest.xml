@@ -34,8 +34,15 @@
       <envvar name="LD_LIBRARY_PATH" value="/opt/ooce/pgsql-13/lib/amd64" />
     </method_environment>
   </method_context>
+  <!-- TODO: A file-backed zpool can be manually created with the following:
+    $ truncate -s 10GB testpool.vdev
+    $ zpool create d462a7f7-b628-40fe-80ff-4e4189e2d62b testpool.vdev
+
+    Plus adding the "\-\-zpools d462a7f7-b628-40fe-80ff-4e4189e2d62b" argument
+    when initializing the sled agent.
+  -->
   <exec_method type='method' name='start'
-    exec='ctrun -l child -o noorphan,regent /opt/oxide/sled-agent/sled-agent run %{config/server_id} %{config/bootstrap_addr} %{config/server_addr} %{config/nexus_addr} --zpools d462a7f7-b628-40fe-80ff-4e4189e2d62b &amp;'
+    exec='ctrun -l child -o noorphan,regent /opt/oxide/sled-agent/sled-agent run %{config/server_id} %{config/bootstrap_addr} %{config/server_addr} %{config/nexus_addr} &amp;'
     timeout_seconds='0' />
   <exec_method type='method' name='stop' exec=':kill' timeout_seconds='0' />
 
