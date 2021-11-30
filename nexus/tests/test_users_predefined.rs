@@ -40,7 +40,7 @@ async fn test_users_predefined() {
         .execute()
         .await
         .unwrap()
-        .response_body::<ResultsPage<User>>()
+        .parsed_body::<ResultsPage<User>>()
         .unwrap()
         .items
         .into_iter()
