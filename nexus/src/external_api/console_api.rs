@@ -190,9 +190,9 @@ pub async fn asset(
     let apictx = rqctx.context();
     let path = path_params.into_inner().path;
 
-    let file = match &apictx.console_config.assets_directory {
-        Some(assets_directory) => find_file(path, assets_directory),
-        _ => Err(not_found("assets_directory undefined")),
+    let file = match &apictx.console_config.static_dir {
+        Some(static_dir) => find_file(path, &static_dir.join("assets")),
+        _ => Err(not_found("static_dir undefined")),
     }?;
     let file_contents =
         tokio::fs::read(&file).await.map_err(|_| not_found("EBADF"))?;
@@ -219,13 +219,12 @@ fn cache_control_header_value(apictx: &Arc<ServerContext>) -> String {
 async fn serve_console_index(
     apictx: &Arc<ServerContext>,
 ) -> Result<Response<Body>, HttpError> {
-    let assets_directory =
-        &apictx
-            .console_config
-            .assets_directory
-            .to_owned()
-            .ok_or_else(|| not_found("assets_directory undefined"))?;
-    let file = assets_directory.join(PathBuf::from("index.html"));
+    let static_dir = &apictx
+        .console_config
+        .static_dir
+        .to_owned()
+        .ok_or_else(|| not_found("static_dir undefined"))?;
+    let file = static_dir.join(PathBuf::from("index.html"));
     let file_contents =
         tokio::fs::read(&file).await.map_err(|_| not_found("EBADF"))?;
     Ok(Response::builder()
@@ -242,8 +241,8 @@ fn not_found(internal_msg: &str) -> HttpError {
 lazy_static! {
     static ref ALLOWED_EXTENSIONS: HashSet<OsString> = HashSet::from(
         [
-            "js", "css", "html", "map", "otf", "png", "svg", "ttf", "woff",
-            "woff2",
+            "js", "css", "html", "ico", "map", "otf", "png", "svg", "ttf",
+            "txt", "woff", "woff2",
         ]
         .map(|s| OsString::from(s))
     );
@@ -287,8 +286,8 @@ fn find_file(
         return Err(not_found("EISDIR"));
     }
 
-    if file_ext_allowed(&current) {
-        return Err(not_found("ESPIPE"));
+    if !file_ext_allowed(&current) {
+        return Err(not_found("EACCES"));
     }
 
     Ok(current)
@@ -307,16 +306,17 @@ mod test {
     #[test]
     fn test_find_file_finds_file() {
         let root = current_dir().unwrap();
-        let file = find_file(get_path("tests/fixtures/hello.txt"), &root);
+        let file = find_file(get_path("tests/static/assets/hello.txt"), &root);
+        assert!(file.is_ok());
+        let file = find_file(get_path("tests/static/index.html"), &root);
         assert!(file.is_ok());
     }
 
     #[test]
     fn test_find_file_404_on_nonexistent() {
         let root = current_dir().unwrap();
-        let error =
-            find_file(get_path("tests/fixtures/nonexistent.svg"), &root)
-                .unwrap_err();
+        let error = find_file(get_path("tests/static/nonexistent.svg"), &root)
+            .unwrap_err();
         assert_eq!(error.status_code, StatusCode::NOT_FOUND);
         assert_eq!(error.internal_message, "ENOENT".to_string());
     }
@@ -325,7 +325,7 @@ mod test {
     fn test_find_file_404_on_nonexistent_nested() {
         let root = current_dir().unwrap();
         let error =
-            find_file(get_path("tests/fixtures/a/b/c/nonexistent.svg"), &root)
+            find_file(get_path("tests/static/a/b/c/nonexistent.svg"), &root)
                 .unwrap_err();
         assert_eq!(error.status_code, StatusCode::NOT_FOUND);
         assert_eq!(error.internal_message, "ENOENT".to_string());
@@ -334,8 +334,9 @@ mod test {
     #[test]
     fn test_find_file_404_on_directory() {
         let root = current_dir().unwrap();
-        let error = find_file(get_path("tests/fixtures/a_directory"), &root)
-            .unwrap_err();
+        let error =
+            find_file(get_path("tests/static/assets/a_directory"), &root)
+                .unwrap_err();
         assert_eq!(error.status_code, StatusCode::NOT_FOUND);
         assert_eq!(error.internal_message, "EISDIR".to_string());
     }
@@ -343,7 +344,7 @@ mod test {
     #[test]
     fn test_find_file_404_on_symlink() {
         let root = current_dir().unwrap();
-        let path_str = "tests/fixtures/a_symlink";
+        let path_str = "tests/static/assets/a_symlink";
 
         // the file in question does exist and is a symlink
         assert!(root
@@ -362,7 +363,7 @@ mod test {
     #[test]
     fn test_find_file_wont_follow_symlink() {
         let root = current_dir().unwrap();
-        let path_str = "tests/fixtures/a_symlink/another_file.txt";
+        let path_str = "tests/static/assets/a_symlink/another_file.txt";
 
         // the file in question does exist
         assert!(root.join(PathBuf::from(path_str)).exists());
@@ -371,5 +372,20 @@ mod test {
         let error = find_file(get_path(path_str), &root).unwrap_err();
         assert_eq!(error.status_code, StatusCode::NOT_FOUND);
         assert_eq!(error.internal_message, "EMLINK".to_string());
+    }
+
+    #[test]
+    fn test_find_file_404_on_disallowed_ext() {
+        let root = current_dir().unwrap();
+        let error =
+            find_file(get_path("tests/static/assets/blocked.ext"), &root)
+                .unwrap_err();
+        assert_eq!(error.status_code, StatusCode::NOT_FOUND);
+        assert_eq!(error.internal_message, "EACCES".to_string());
+
+        let error = find_file(get_path("tests/static/assets/no_ext"), &root)
+            .unwrap_err();
+        assert_eq!(error.status_code, StatusCode::NOT_FOUND);
+        assert_eq!(error.internal_message, "EACCES".to_string());
     }
 }

@@ -60,8 +60,8 @@ pub struct ConsoleConfig {
     pub session_absolute_timeout: Duration,
     /** how long browsers can cache static assets */
     pub cache_control_max_age: Duration,
-    /** directory containing static assets */
-    pub assets_directory: Option<PathBuf>,
+    /** directory containing static file to serve */
+    pub static_dir: Option<PathBuf>,
 }
 
 impl ServerContext {
@@ -114,17 +114,22 @@ impl ServerContext {
         // Support both absolute and relative paths. If configured dir is
         // absolute, use it directly. If not, assume it's relative to the
         // current working directory.
-        let assets_directory = if config.console.assets_directory.is_absolute()
-        {
-            Some(config.console.assets_directory.to_owned())
+        let static_dir = if config.console.static_dir.is_absolute() {
+            Some(config.console.static_dir.to_owned())
         } else {
             env::current_dir()
                 .map(|root| {
                     PathBuf::from(root)
-                        .join(config.console.assets_directory.to_owned())
+                        .join(config.console.static_dir.to_owned())
                 })
                 .ok()
         };
+
+        // we don't want to fail outright yet, but we do want to try to make
+        // problems slightly easier to debug
+        if static_dir.is_none() {
+            println!("WARNING: no assets directory configured. All console page and asset requests will 404.");
+        }
 
         // TODO: check that asset directory exists, check for particular assets
         // like console index.html. leaving that out for now so we don't break
@@ -151,7 +156,7 @@ impl ServerContext {
                 session_absolute_timeout: Duration::minutes(
                     config.console.session_absolute_timeout_minutes.into(),
                 ),
-                assets_directory,
+                static_dir,
                 cache_control_max_age: Duration::minutes(
                     config.console.cache_control_max_age_minutes.into(),
                 ),

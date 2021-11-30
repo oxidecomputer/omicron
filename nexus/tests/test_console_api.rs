@@ -173,6 +173,13 @@ async fn test_assets() {
             .await
             .expect("failed to 404 on nonexistent asset");
 
+    // existing file with disallowed extension 404s
+    let _ = RequestBuilder::new(&testctx, Method::GET, "/assets/blocked.ext")
+        .expect_status(Some(StatusCode::NOT_FOUND))
+        .execute()
+        .await
+        .expect("failed to 404 on disallowed extension");
+
     // symlink 404s
     let _ = RequestBuilder::new(&testctx, Method::GET, "/assets/a_symlink")
         .expect_status(Some(StatusCode::NOT_FOUND))
