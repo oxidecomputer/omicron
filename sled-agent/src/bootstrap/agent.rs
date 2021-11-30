@@ -23,7 +23,7 @@ use std::path::Path;
 use tar::Archive;
 use thiserror::Error;
 
-const UNLOCK_THRESHOLD: usize = 2;
+const UNLOCK_THRESHOLD: usize = 1;
 const BOOTSTRAP_PORT: u16 = 12346;
 
 /// Describes errors which may occur while operating the bootstrap service.
