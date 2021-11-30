@@ -17,7 +17,6 @@ use crate::external_api::params;
 use crate::internal_api::params::{OximeterInfo, ZpoolPutRequest};
 use crate::saga_interface::SagaContext;
 use crate::sagas;
-use crate::updates::ArtifactsDocument;
 use anyhow::Context;
 use async_trait::async_trait;
 use futures::future::ready;
@@ -2262,72 +2261,26 @@ impl Nexus {
         self.db_datastore.session_hard_delete(token).await
     }
 
-    fn updates_load_artifacts(
-        &self,
-    ) -> Result<
-        Vec<db::model::UpdateAvailableArtifact>,
-        Box<dyn std::error::Error + Send + Sync>,
-    > {
-        // TODO(iliana): make async/.await. awslabs/tough#213
-        use std::io::Read;
-
-        let rack = self.as_rack();
-        let repository = tough::RepositoryLoader::new(
-            self.tuf_trusted_root.as_slice(),
-            rack.tuf_metadata_base_url.parse()?,
-            rack.tuf_targets_base_url.parse()?,
-        )
-        .load()?;
-
-        let mut artifact_document = Vec::new();
-        match repository.read_target(&"artifacts.json".parse()?)? {
-            Some(mut target) => target.read_to_end(&mut artifact_document)?,
-            None => return Err("artifacts.json missing".into()),
-        };
-        let artifacts: ArtifactsDocument =
-            serde_json::from_slice(&artifact_document)?;
-
-        let earliest_expiration = unimplemented!();
-
-        let mut v = Vec::new();
-        for artifact in artifacts.artifacts {
-            if let Some(target) = repository
-                .targets()
-                .signed
-                .targets
-                .get(&artifact.target.parse()?)
-            {
-                v.push(db::model::UpdateAvailableArtifact {
-                    name: artifact.name,
-                    version: artifact.version,
-                    kind: db::model::UpdateArtifactKind(artifact.kind),
-                    targets_version: repository
-                        .targets()
-                        .signed
-                        .version
-                        .get()
-                        .try_into()?,
-                    metadata_expiration: earliest_expiration,
-                    target_name: artifact.target,
-                    target_sha256: hex::encode(&target.hashes.sha256),
-                    target_length: target.length.try_into()?,
-                });
-            }
-        }
-        Ok(v)
-    }
-
     pub async fn updates_refresh_metadata(&self) -> Result<(), Error> {
-        for artifact in self.updates_load_artifacts().map_err(|e| {
-            Error::InternalError { internal_message: e.to_string() }
-        })? {
+        let rack = self.as_rack();
+        let trust_root = self.tuf_trusted_root.clone();
+        let artifacts = tokio::task::spawn_blocking(move || {
+            crate::updates::read_artifacts(&rack, &trust_root)
+        })
+        .await
+        // first, the JoinError:
+        .map_err(|e| Error::InternalError { internal_message: e.to_string() })?
+        // next, the boxed dyn Error:
+        .map_err(|e| Error::InternalError {
+            internal_message: e.to_string(),
+        })?;
+        for artifact in artifacts {
             self.db_datastore
                 .update_available_artifact_upsert(artifact)
                 .await?;
         }
 
-        // delete all rows remaining with a targets_version < repository.targets().version()
-        unimplemented!();
+        // TODO: delete all rows remaining with a targets_version < repository.targets().version()
 
         Ok(())
     }
