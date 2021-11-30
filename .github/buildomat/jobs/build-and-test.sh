@@ -3,7 +3,7 @@
 #: name = "helios / build-and-test"
 #: variety = "basic"
 #: target = "helios"
-#: rust_toolchain = "nightly-2021-09-03"
+#: rust_toolchain = "nightly-2021-11-24"
 #: output_rules = []
 #:
 
@@ -28,12 +28,10 @@ rustc --version
 #   run.  Building with `--locked` ensures that the checked-in Cargo.lock
 #   is up to date.
 #
-# - Work-around for cargo#9895 via RUSTDOCFLAGS also.
-#
 banner build
 export RUSTFLAGS="-D warnings"
-export RUSTDOCFLAGS="-D warnings -Clink-args=-Wl,-R$(pg_config --libdir)"
-ptime -m cargo +'nightly-2021-09-03' build --locked --all-targets --verbose
+export RUSTDOCFLAGS="-D warnings"
+ptime -m cargo +'nightly-2021-11-24' build --locked --all-targets --verbose
 
 banner clickhouse
 ptime -m ./tools/ci_download_clickhouse
@@ -52,4 +50,4 @@ export PATH="$PATH:$PWD/cockroachdb/bin:$PWD/clickhouse"
 # having to rebuild here.
 #
 banner test
-ptime -m cargo +'nightly-2021-09-03' test --workspace --locked --verbose
+ptime -m cargo +'nightly-2021-11-24' test --workspace --locked --verbose

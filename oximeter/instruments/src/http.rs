@@ -173,7 +173,7 @@ impl LatencyTracker {
         self.update(&request, status_code, latency).map_err(|e| {
             HttpError::for_internal_error(format!(
                 "error instrumenting dropshot request handler: {}",
-                e.to_string()
+                e
             ))
         })?;
         result
