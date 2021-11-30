@@ -1,3 +1,7 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
 //! authn scheme for console that looks up cookie values in a session table
 
 use super::cookies::parse_cookies;
@@ -48,6 +52,21 @@ pub trait SessionStore {
 pub const SESSION_COOKIE_COOKIE_NAME: &str = "session";
 pub const SESSION_COOKIE_SCHEME_NAME: authn::SchemeName =
     authn::SchemeName("session_cookie");
+
+/// Generate session cookie header
+pub fn session_cookie_header_value(token: &str, max_age: Duration) -> String {
+    format!(
+        "{}={}; Secure; HttpOnly; SameSite=Lax; Max-Age={}",
+        SESSION_COOKIE_COOKIE_NAME,
+        token,
+        max_age.num_seconds()
+    )
+}
+
+/// Generate session cookie with empty token and max-age=0 so browser deletes it
+pub fn clear_session_cookie_header_value() -> String {
+    session_cookie_header_value("", Duration::zero())
+}
 
 /// Implements an authentication scheme where we check the DB to see if we have
 /// a session matching the token in a cookie ([`SESSION_COOKIE_COOKIE_NAME`]) on
@@ -148,8 +167,9 @@ fn get_token_from_cookie(
 #[cfg(test)]
 mod test {
     use super::{
-        get_token_from_cookie, Details, HttpAuthnScheme,
-        HttpAuthnSessionCookie, Reason, SchemeResult, Session, SessionStore,
+        get_token_from_cookie, session_cookie_header_value, Details,
+        HttpAuthnScheme, HttpAuthnSessionCookie, Reason, SchemeResult, Session,
+        SessionStore,
     };
     use async_trait::async_trait;
     use chrono::{DateTime, Duration, Utc};
@@ -354,5 +374,23 @@ mod test {
         );
         let token = get_token_from_cookie(&headers);
         assert_eq!(token, None);
+    }
+
+    #[test]
+    fn test_session_cookie_value() {
+        assert_eq!(
+            session_cookie_header_value("abc", Duration::seconds(5)),
+            "session=abc; Secure; HttpOnly; SameSite=Lax; Max-Age=5"
+        );
+
+        assert_eq!(
+            session_cookie_header_value("abc", Duration::seconds(-5)),
+            "session=abc; Secure; HttpOnly; SameSite=Lax; Max-Age=-5"
+        );
+
+        assert_eq!(
+            session_cookie_header_value("", Duration::zero()),
+            "session=; Secure; HttpOnly; SameSite=Lax; Max-Age=0"
+        );
     }
 }

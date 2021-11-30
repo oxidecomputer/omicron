@@ -1,3 +1,7 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
 /*!
  * Shared state used by API request handlers
  */
@@ -19,7 +23,9 @@ use oximeter::types::ProducerRegistry;
 use oximeter_instruments::http::{HttpService, LatencyTracker};
 use slog::Logger;
 use std::collections::BTreeMap;
+use std::env;
 use std::fmt::Debug;
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Instant;
 use std::time::SystemTime;
@@ -43,15 +49,19 @@ pub struct ServerContext {
     pub external_latencies: LatencyTracker,
     /** registry of metric producers */
     pub producer_registry: ProducerRegistry,
-    /** the whole config */
-    pub tunables: Tunables,
+    /** tunable settings needed for the console at runtime */
+    pub console_config: ConsoleConfig,
 }
 
-pub struct Tunables {
+pub struct ConsoleConfig {
     /** how long a session can be idle before expiring */
     pub session_idle_timeout: Duration,
     /** how long a session can exist before expiring */
     pub session_absolute_timeout: Duration,
+    /** how long browsers can cache static assets */
+    pub cache_control_max_age: Duration,
+    /** directory containing static assets */
+    pub assets_directory: Option<PathBuf>,
 }
 
 impl ServerContext {
@@ -64,7 +74,7 @@ impl ServerContext {
         log: Logger,
         pool: db::Pool,
         config: &config::Config,
-    ) -> Arc<ServerContext> {
+    ) -> Result<Arc<ServerContext>, String> {
         let nexus_schemes = config
             .authn
             .schemes_external
@@ -101,7 +111,18 @@ impl ServerContext {
             .register_producer(external_latencies.clone())
             .unwrap();
 
-        Arc::new(ServerContext {
+        let assets_directory = env::var("CARGO_MANIFEST_DIR")
+            .map(|root| {
+                PathBuf::from(root)
+                    .join(config.console.assets_directory.to_owned())
+            })
+            .ok();
+
+        // TODO: check that asset directory exists, check for particular assets
+        // like console index.html. leaving that out for now so we don't break
+        // nexus in dev for everyone
+
+        Ok(Arc::new(ServerContext {
             nexus: Nexus::new_with_id(
                 rack_id,
                 log.new(o!("component" => "nexus")),
@@ -115,15 +136,19 @@ impl ServerContext {
             internal_latencies,
             external_latencies,
             producer_registry,
-            tunables: Tunables {
+            console_config: ConsoleConfig {
                 session_idle_timeout: Duration::minutes(
-                    config.authn.session_idle_timeout_minutes.into(),
+                    config.console.session_idle_timeout_minutes.into(),
                 ),
                 session_absolute_timeout: Duration::minutes(
-                    config.authn.session_absolute_timeout_minutes.into(),
+                    config.console.session_absolute_timeout_minutes.into(),
+                ),
+                assets_directory,
+                cache_control_max_age: Duration::minutes(
+                    config.console.cache_control_max_age_minutes.into(),
                 ),
             },
-        })
+        }))
     }
 }
 
@@ -368,11 +393,11 @@ impl SessionStore for Arc<ServerContext> {
     }
 
     fn session_idle_timeout(&self) -> Duration {
-        self.tunables.session_idle_timeout
+        self.console_config.session_idle_timeout
     }
 
     fn session_absolute_timeout(&self) -> Duration {
-        self.tunables.session_absolute_timeout
+        self.console_config.session_absolute_timeout
     }
 }
 

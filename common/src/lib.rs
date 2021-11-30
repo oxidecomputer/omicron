@@ -1,3 +1,7 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
 /*!
  * # Oxide Control Plane
  *
@@ -26,32 +30,22 @@ pub mod cmd;
 pub mod config;
 pub mod packaging;
 
+#[macro_export]
 macro_rules! generate_logging_api {
     ($path:literal) => {
         progenitor::generate_api!(
             $path,
             slog::Logger,
             |log: &slog::Logger, request: &reqwest::Request| {
-                debug!(log, "client request";
+                slog::debug!(log, "client request";
                     "method" => %request.method(),
                     "uri" => %request.url(),
                     "body" => ?&request.body(),
                 );
             },
             |log: &slog::Logger, result: &Result<_, _>| {
-                debug!(log, "client response"; "result" => ?result);
+                slog::debug!(log, "client response"; "result" => ?result);
             },
         );
     };
 }
-
-pub mod sled_agent_client;
-pub use sled_agent_client::Client as SledAgentClient;
-pub use sled_agent_client::TestInterfaces as SledAgentTestInterfaces;
-pub mod nexus_client;
-pub use nexus_client::Client as NexusClient;
-pub mod oximeter_client;
-pub use oximeter_client::Client as OximeterClient;
-
-#[macro_use]
-extern crate slog;

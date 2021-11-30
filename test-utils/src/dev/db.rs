@@ -1,3 +1,7 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
 //! Facilities for managing a local database for development
 
 use crate::dev::poll;
@@ -5,9 +9,10 @@ use anyhow::anyhow;
 use anyhow::bail;
 use anyhow::Context;
 use omicron_common::config::PostgresConfigWithUrl;
-use std::ffi::OsStr;
+use std::ffi::{OsStr, OsString};
 use std::fmt;
 use std::ops::Deref;
+use std::os::unix::ffi::OsStringExt;
 use std::path::Path;
 use std::path::PathBuf;
 use std::process::Stdio;
@@ -42,6 +47,13 @@ const COCKROACHDB_DATABASE: &'static str = "omicron";
  */
 const COCKROACHDB_USER: &'static str = "root";
 
+/// Path to the CockroachDB binary
+const COCKROACHDB_BIN: &str = "cockroach";
+
+/// The expected CockroachDB version
+const COCKROACHDB_VERSION: &str =
+    include_str!("../../../tools/cockroachdb_version");
+
 /**
  * Builder for [`CockroachStarter`] that supports setting some command-line
  * arguments for the `cockroach start-single-node` command
@@ -74,7 +86,7 @@ pub struct CockroachStarterBuilder {
 
 impl CockroachStarterBuilder {
     pub fn new() -> CockroachStarterBuilder {
-        CockroachStarterBuilder::new_with_cmd("cockroach")
+        CockroachStarterBuilder::new_with_cmd(COCKROACHDB_BIN)
     }
 
     fn new_with_cmd(cmd: &str) -> CockroachStarterBuilder {
@@ -281,6 +293,8 @@ impl CockroachStarter {
     pub async fn start(
         mut self,
     ) -> Result<CockroachInstance, CockroachStartError> {
+        check_db_version().await?;
+
         let mut child_process = self.cmd_builder.spawn().map_err(|source| {
             CockroachStartError::BadCmd { cmd: self.args[0].clone(), source }
         })?;
@@ -377,6 +391,9 @@ pub enum CockroachStartError {
         #[source]
         source: std::io::Error,
     },
+
+    #[error("wrong version of CockroachDB installed. expected '{expected:}', found: '{found:?}")]
+    BadVersion { expected: String, found: Result<String, anyhow::Error> },
 
     #[error("cockroach failed to start (see error output above)")]
     Exited,
@@ -546,6 +563,41 @@ impl Drop for CockroachInstance {
             }
         }
     }
+}
+
+/// Verify that CockroachDB has the correct version
+pub async fn check_db_version() -> Result<(), CockroachStartError> {
+    let mut cmd = tokio::process::Command::new(COCKROACHDB_BIN);
+    cmd.args(&["version", "--build-tag"]);
+    let output = cmd.output().await.map_err(|source| {
+        CockroachStartError::BadCmd { cmd: COCKROACHDB_BIN.to_string(), source }
+    })?;
+    if !output.status.success() {
+        return Err(CockroachStartError::BadVersion {
+            expected: COCKROACHDB_VERSION.trim().to_string(),
+            found: Err(anyhow!(
+                "error {:?} when checking CockroachDB version",
+                output.status.code()
+            )),
+        });
+    }
+    let version_str =
+        OsString::from_vec(output.stdout).into_string().map_err(|_| {
+            CockroachStartError::BadVersion {
+                expected: COCKROACHDB_VERSION.trim().to_string(),
+                found: Err(anyhow!("Error parsing CockroachDB version output")),
+            }
+        })?;
+    let version_str = version_str.trim();
+
+    if version_str != COCKROACHDB_VERSION.trim() {
+        return Err(CockroachStartError::BadVersion {
+            found: Ok(version_str.to_string()),
+            expected: COCKROACHDB_VERSION.trim().to_string(),
+        });
+    }
+
+    Ok(())
 }
 
 /**

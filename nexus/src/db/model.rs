@@ -1,11 +1,16 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
 //! Structures stored to the database.
 
 use crate::db::collection_insert::DatastoreCollection;
 use crate::db::identity::{Asset, Resource};
 use crate::db::schema::{
-    console_session, disk, instance, metric_producer, network_interface,
-    organization, oximeter, project, rack, router_route, sled, user_predefined,
-    vpc, vpc_firewall_rule, vpc_router, vpc_subnet,
+    console_session, dataset, disk, instance, metric_producer,
+    network_interface, organization, oximeter, project, rack, region,
+    router_route, sled, user_predefined, vpc, vpc_firewall_rule, vpc_router,
+    vpc_subnet, zpool,
 };
 use crate::external_api::params;
 use crate::internal_api;
@@ -27,6 +32,66 @@ use std::net::SocketAddr;
 use uuid::Uuid;
 
 // TODO: Break up types into multiple files
+
+/// This macro implements serialization and deserialization of an enum type
+/// from our database into our model types.
+/// See [`VpcRouterKindEnum`] and [`VpcRouterKind`] for a sample usage
+macro_rules! impl_enum_type {
+    (
+        $(#[$enum_meta:meta])*
+        pub struct $diesel_type:ident;
+
+        $(#[$model_meta:meta])*
+        pub struct $model_type:ident(pub $ext_type:ty);
+        $($enum_item:ident => $sql_value:literal)+
+    ) => {
+
+        $(#[$enum_meta])*
+        pub struct $diesel_type;
+
+        $(#[$model_meta])*
+        pub struct $model_type(pub $ext_type);
+
+        impl<DB> ToSql<$diesel_type, DB> for $model_type
+        where
+            DB: Backend,
+        {
+            fn to_sql<W: std::io::Write>(
+                &self,
+                out: &mut serialize::Output<W, DB>,
+            ) -> serialize::Result {
+                match self.0 {
+                    $(
+                    <$ext_type>::$enum_item => {
+                        out.write_all($sql_value)?
+                    }
+                    )*
+                }
+                Ok(IsNull::No)
+            }
+        }
+
+        impl<DB> FromSql<$diesel_type, DB> for $model_type
+        where
+            DB: Backend + for<'a> BinaryRawValue<'a>,
+        {
+            fn from_sql(bytes: RawValue<DB>) -> deserialize::Result<Self> {
+                match DB::as_bytes(bytes) {
+                    $(
+                    $sql_value => {
+                        Ok($model_type(<$ext_type>::$enum_item))
+                    }
+                    )*
+                    _ => {
+                        Err(concat!("Unrecognized enum variant for ",
+                                stringify!{$model_type})
+                            .into())
+                    }
+                }
+            }
+        }
+    }
+}
 
 /// Newtype wrapper around [external::Name].
 #[derive(
@@ -334,18 +399,14 @@ pub struct Rack {
     pub identity: RackIdentity,
 }
 
-impl Into<external::Rack> for Rack {
-    fn into(self) -> external::Rack {
-        external::Rack { identity: self.identity() }
-    }
-}
-
 /// Database representation of a Sled.
 #[derive(Queryable, Insertable, Debug, Clone, Selectable, Asset)]
 #[table_name = "sled"]
 pub struct Sled {
     #[diesel(embed)]
     identity: SledIdentity,
+    time_deleted: Option<DateTime<Utc>>,
+    rcgen: Generation,
 
     // ServiceAddress (Sled Agent).
     pub ip: ipnetwork::IpNetwork,
@@ -357,6 +418,8 @@ impl Sled {
     pub fn new(id: Uuid, addr: SocketAddr) -> Self {
         Self {
             identity: SledIdentity::new(id),
+            time_deleted: None,
+            rcgen: Generation::new(),
             ip: addr.ip().into(),
             port: addr.port().into(),
         }
@@ -368,11 +431,153 @@ impl Sled {
     }
 }
 
-impl Into<external::Sled> for Sled {
-    fn into(self) -> external::Sled {
-        let service_address = self.address();
-        external::Sled { identity: self.identity(), service_address }
+impl DatastoreCollection<Zpool> for Sled {
+    type CollectionId = Uuid;
+    type GenerationNumberColumn = sled::dsl::rcgen;
+    type CollectionTimeDeletedColumn = sled::dsl::time_deleted;
+    type CollectionIdColumn = zpool::dsl::sled_id;
+}
+
+/// Database representation of a Pool.
+///
+/// A zpool represents a ZFS storage pool, allocated on a single
+/// physical sled.
+#[derive(Queryable, Insertable, Debug, Clone, Selectable, Asset)]
+#[table_name = "zpool"]
+pub struct Zpool {
+    #[diesel(embed)]
+    identity: ZpoolIdentity,
+    time_deleted: Option<DateTime<Utc>>,
+    rcgen: Generation,
+
+    // Sled to which this Zpool belongs.
+    pub sled_id: Uuid,
+
+    // TODO: In the future, we may expand this structure to include
+    // size, allocation, and health information.
+    pub total_size: ByteCount,
+}
+
+impl Zpool {
+    pub fn new(
+        id: Uuid,
+        sled_id: Uuid,
+        info: &internal_api::params::ZpoolPutRequest,
+    ) -> Self {
+        Self {
+            identity: ZpoolIdentity::new(id),
+            time_deleted: None,
+            rcgen: Generation::new(),
+            sled_id,
+            total_size: info.size.into(),
+        }
     }
+}
+
+impl DatastoreCollection<Dataset> for Zpool {
+    type CollectionId = Uuid;
+    type GenerationNumberColumn = zpool::dsl::rcgen;
+    type CollectionTimeDeletedColumn = zpool::dsl::time_deleted;
+    type CollectionIdColumn = dataset::dsl::pool_id;
+}
+
+impl_enum_type!(
+    #[derive(SqlType, Debug)]
+    #[postgres(type_name = "dataset_kind", type_schema = "public")]
+    pub struct DatasetKindEnum;
+
+    #[derive(Clone, Debug, AsExpression, FromSqlRow)]
+    #[sql_type = "DatasetKindEnum"]
+    pub struct DatasetKind(pub internal_api::params::DatasetKind);
+
+    // Enum values
+    Crucible => b"crucible"
+    Cockroach => b"cockroach"
+    Clickhouse => b"clickhouse"
+);
+
+impl From<internal_api::params::DatasetKind> for DatasetKind {
+    fn from(k: internal_api::params::DatasetKind) -> Self {
+        Self(k)
+    }
+}
+
+/// Database representation of a Dataset.
+///
+/// A dataset represents a portion of a Zpool, which is then made
+/// available to a service on the Sled.
+#[derive(Queryable, Insertable, Debug, Clone, Selectable, Asset)]
+#[table_name = "dataset"]
+pub struct Dataset {
+    #[diesel(embed)]
+    identity: DatasetIdentity,
+    time_deleted: Option<DateTime<Utc>>,
+    rcgen: Generation,
+
+    pub pool_id: Uuid,
+
+    ip: ipnetwork::IpNetwork,
+    port: i32,
+
+    kind: DatasetKind,
+}
+
+impl Dataset {
+    pub fn new(
+        id: Uuid,
+        pool_id: Uuid,
+        addr: SocketAddr,
+        kind: DatasetKind,
+    ) -> Self {
+        Self {
+            identity: DatasetIdentity::new(id),
+            time_deleted: None,
+            rcgen: Generation::new(),
+            pool_id,
+            ip: addr.ip().into(),
+            port: addr.port().into(),
+            kind,
+        }
+    }
+
+    pub fn address(&self) -> SocketAddr {
+        // TODO: avoid this unwrap
+        SocketAddr::new(self.ip.ip(), u16::try_from(self.port).unwrap())
+    }
+}
+
+// Datasets contain regions
+impl DatastoreCollection<Region> for Dataset {
+    type CollectionId = Uuid;
+    type GenerationNumberColumn = dataset::dsl::rcgen;
+    type CollectionTimeDeletedColumn = dataset::dsl::time_deleted;
+    type CollectionIdColumn = region::dsl::dataset_id;
+}
+
+// Virtual disks contain regions
+impl DatastoreCollection<Region> for Disk {
+    type CollectionId = Uuid;
+    type GenerationNumberColumn = disk::dsl::rcgen;
+    type CollectionTimeDeletedColumn = disk::dsl::time_deleted;
+    type CollectionIdColumn = region::dsl::disk_id;
+}
+
+/// Database representation of a Region.
+///
+/// A region represents a portion of a Crucible Downstairs dataset
+/// allocated within a volume.
+#[derive(Queryable, Insertable, Debug, Clone, Selectable, Asset)]
+#[table_name = "region"]
+pub struct Region {
+    #[diesel(embed)]
+    identity: RegionIdentity,
+
+    dataset_id: Uuid,
+    disk_id: Uuid,
+
+    block_size: i64,
+    extent_size: i64,
+    extent_count: i64,
 }
 
 /// Describes an organization within the database.
@@ -481,7 +686,7 @@ impl Instance {
     pub fn new(
         instance_id: Uuid,
         project_id: Uuid,
-        params: &external::InstanceCreateParams,
+        params: &params::InstanceCreate,
         runtime: InstanceRuntimeState,
     ) -> Self {
         let identity =
@@ -529,6 +734,8 @@ pub struct InstanceRuntimeState {
     // TODO: should this be optional?
     #[column_name = "active_server_id"]
     pub sled_uuid: Uuid,
+    #[column_name = "active_propolis_id"]
+    pub propolis_uuid: Uuid,
     #[column_name = "ncpus"]
     pub ncpus: InstanceCpuCount,
     #[column_name = "memory"]
@@ -554,6 +761,7 @@ impl From<internal::nexus::InstanceRuntimeState> for InstanceRuntimeState {
         Self {
             state: InstanceState::new(state.run_state),
             sled_uuid: state.sled_uuid,
+            propolis_uuid: state.propolis_uuid,
             ncpus: state.ncpus.into(),
             memory: state.memory.into(),
             hostname: state.hostname,
@@ -569,6 +777,7 @@ impl Into<internal::nexus::InstanceRuntimeState> for InstanceRuntimeState {
         internal::nexus::InstanceRuntimeState {
             run_state: *self.state.state(),
             sled_uuid: self.sled_uuid,
+            propolis_uuid: self.propolis_uuid,
             ncpus: self.ncpus.into(),
             memory: self.memory.into(),
             hostname: self.hostname,
@@ -626,6 +835,9 @@ pub struct Disk {
     #[diesel(embed)]
     identity: DiskIdentity,
 
+    /// child resource generation number, per RFD 192
+    rcgen: Generation,
+
     /// id for the project containing this Disk
     pub project_id: Uuid,
 
@@ -646,12 +858,13 @@ impl Disk {
     pub fn new(
         disk_id: Uuid,
         project_id: Uuid,
-        params: external::DiskCreateParams,
+        params: params::DiskCreate,
         runtime_initial: DiskRuntimeState,
     ) -> Self {
         let identity = DiskIdentity::new(disk_id, params.identity);
         Self {
             identity,
+            rcgen: external::Generation::new().into(),
             project_id,
             runtime_state: runtime_initial,
             size: params.size.into(),
@@ -913,7 +1126,7 @@ impl Vpc {
         vpc_id: Uuid,
         project_id: Uuid,
         system_router_id: Uuid,
-        params: external::VpcCreateParams,
+        params: params::VpcCreate,
     ) -> Self {
         let identity = VpcIdentity::new(vpc_id, params.identity);
         Self {
@@ -922,17 +1135,6 @@ impl Vpc {
             system_router_id,
             dns_name: params.dns_name.into(),
             firewall_gen: Generation::new(),
-        }
-    }
-}
-
-impl Into<external::Vpc> for Vpc {
-    fn into(self) -> external::Vpc {
-        external::Vpc {
-            identity: self.identity(),
-            project_id: self.project_id,
-            system_router_id: self.system_router_id,
-            dns_name: self.dns_name.0,
         }
     }
 }
@@ -953,8 +1155,8 @@ pub struct VpcUpdate {
     pub dns_name: Option<Name>,
 }
 
-impl From<external::VpcUpdateParams> for VpcUpdate {
-    fn from(params: external::VpcUpdateParams) -> Self {
+impl From<params::VpcUpdate> for VpcUpdate {
+    fn from(params: params::VpcUpdate) -> Self {
         Self {
             name: params.identity.name.map(Name),
             description: params.identity.description,
@@ -979,7 +1181,7 @@ impl VpcSubnet {
     pub fn new(
         subnet_id: Uuid,
         vpc_id: Uuid,
-        params: external::VpcSubnetCreateParams,
+        params: params::VpcSubnetCreate,
     ) -> Self {
         let identity = VpcSubnetIdentity::new(subnet_id, params.identity);
         Self {
@@ -987,17 +1189,6 @@ impl VpcSubnet {
             vpc_id,
             ipv4_block: params.ipv4_block.map(Ipv4Net),
             ipv6_block: params.ipv6_block.map(Ipv6Net),
-        }
-    }
-}
-
-impl Into<external::VpcSubnet> for VpcSubnet {
-    fn into(self) -> external::VpcSubnet {
-        external::VpcSubnet {
-            identity: self.identity(),
-            vpc_id: self.vpc_id,
-            ipv4_block: self.ipv4_block.map(|ip| ip.into()),
-            ipv6_block: self.ipv6_block.map(|ip| ip.into()),
         }
     }
 }
@@ -1012,74 +1203,14 @@ pub struct VpcSubnetUpdate {
     pub ipv6_block: Option<Ipv6Net>,
 }
 
-impl From<external::VpcSubnetUpdateParams> for VpcSubnetUpdate {
-    fn from(params: external::VpcSubnetUpdateParams) -> Self {
+impl From<params::VpcSubnetUpdate> for VpcSubnetUpdate {
+    fn from(params: params::VpcSubnetUpdate) -> Self {
         Self {
             name: params.identity.name.map(Name),
             description: params.identity.description,
             time_modified: Utc::now(),
             ipv4_block: params.ipv4_block.map(Ipv4Net),
             ipv6_block: params.ipv6_block.map(Ipv6Net),
-        }
-    }
-}
-
-/// This macro implements serialization and deserialization of an enum type
-/// from our database into our model types.
-/// See [`VpcRouterKindEnum`] and [`VpcRouterKind`] for a sample usage
-macro_rules! impl_enum_type {
-    (
-        $(#[$enum_meta:meta])*
-        pub struct $diesel_type:ident;
-
-        $(#[$model_meta:meta])*
-        pub struct $model_type:ident(pub $ext_type:ty);
-        $($enum_item:ident => $sql_value:literal)+
-    ) => {
-
-        $(#[$enum_meta])*
-        pub struct $diesel_type;
-
-        $(#[$model_meta])*
-        pub struct $model_type(pub $ext_type);
-
-        impl<DB> ToSql<$diesel_type, DB> for $model_type
-        where
-            DB: Backend,
-        {
-            fn to_sql<W: std::io::Write>(
-                &self,
-                out: &mut serialize::Output<W, DB>,
-            ) -> serialize::Result {
-                match self.0 {
-                    $(
-                    <$ext_type>::$enum_item => {
-                        out.write_all($sql_value)?
-                    }
-                    )*
-                }
-                Ok(IsNull::No)
-            }
-        }
-
-        impl<DB> FromSql<$diesel_type, DB> for $model_type
-        where
-            DB: Backend + for<'a> BinaryRawValue<'a>,
-        {
-            fn from_sql(bytes: RawValue<DB>) -> deserialize::Result<Self> {
-                match DB::as_bytes(bytes) {
-                    $(
-                    $sql_value => {
-                        Ok($model_type(<$ext_type>::$enum_item))
-                    }
-                    )*
-                    _ => {
-                        Err(concat!("Unrecognized enum variant for ",
-                                stringify!{$model_type})
-                            .into())
-                    }
-                }
-            }
         }
     }
 }
@@ -1114,7 +1245,7 @@ impl VpcRouter {
         router_id: Uuid,
         vpc_id: Uuid,
         kind: external::VpcRouterKind,
-        params: external::VpcRouterCreateParams,
+        params: params::VpcRouterCreate,
     ) -> Self {
         let identity = VpcRouterIdentity::new(router_id, params.identity);
         Self {
@@ -1151,8 +1282,8 @@ pub struct VpcRouterUpdate {
     pub time_modified: DateTime<Utc>,
 }
 
-impl From<external::VpcRouterUpdateParams> for VpcRouterUpdate {
-    fn from(params: external::VpcRouterUpdateParams) -> Self {
+impl From<params::VpcRouterUpdate> for VpcRouterUpdate {
+    fn from(params: params::VpcRouterUpdate) -> Self {
         Self {
             name: params.identity.name.map(Name),
             description: params.identity.description,
