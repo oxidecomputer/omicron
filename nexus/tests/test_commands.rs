@@ -169,7 +169,7 @@ fn test_nexus_openapi_internal() {
 #[test]
 fn test_oxapi_demo_no_args() {
     let exec = Exec::cmd("../tools/oxapi_demo");
-    let (exit_status, stdout_text, stderr_text) = run_command(exec);
+    let (exit_status, stdout_text, stderr_text) = dbg!(run_command(exec));
 
     assert_exit_code(exit_status, EXIT_USAGE);
     assert!(stdout_text.contains("usage:"));
@@ -179,7 +179,7 @@ fn test_oxapi_demo_no_args() {
 #[test]
 fn test_oxapi_demo() {
     let exec = Exec::cmd("../tools/oxapi_demo").arg("organizations_list");
-    let (exit_status, stdout_text, stderr_text) = run_command(exec);
+    let (exit_status, stdout_text, stderr_text) = dbg!(run_command(exec));
 
     assert_exit_code(exit_status, EXIT_SUCCESS);
     assert_eq!(stdout_text, "");
