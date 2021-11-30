@@ -13,6 +13,15 @@ use crate::mocks::MockNexusClient as NexusClient;
 #[cfg(not(test))]
 use nexus_client::Client as NexusClient;
 
+#[derive(thiserror::Error, Debug)]
+pub enum Error {
+    #[error("I/O Error: {0}")]
+    Io(#[from] std::io::Error),
+
+    #[error("Failed to contact nexus: {0}")]
+    Nexus(anyhow::Error),
+}
+
 #[derive(Clone, Debug, Deserialize, JsonSchema)]
 pub enum UpdateArtifactKind {
     Zone,
@@ -35,9 +44,10 @@ impl UpdateArtifact {
 
     /// Downloads an update artifact.
     // TODO: Fix error types
-    pub async fn download(&self, nexus: &NexusClient) -> anyhow::Result<()> {
+    pub async fn download(&self, nexus: &NexusClient) -> Result<(), Error> {
         let file_name = format!("{}-{}", self.name, self.version);
-        let response = nexus.cpapi_artifact_download(&file_name).await?;
+        let response = nexus.cpapi_artifact_download(&file_name)
+            .await?;
 
         let mut path = PathBuf::from(self.artifact_directory());
         tokio::fs::create_dir_all(&path).await?;
