@@ -252,7 +252,7 @@ fn file_ext_allowed(path: &PathBuf) -> bool {
     let ext = path
         .extension()
         .map(|ext| ext.to_os_string())
-        .unwrap_or(OsString::from("disallowed"));
+        .unwrap_or_else(|| OsString::from("disallowed"));
     ALLOWED_EXTENSIONS.contains(&ext)
 }
 

@@ -118,10 +118,7 @@ impl ServerContext {
             Some(config.console.static_dir.to_owned())
         } else {
             env::current_dir()
-                .map(|root| {
-                    PathBuf::from(root)
-                        .join(config.console.static_dir.to_owned())
-                })
+                .map(|root| root.join(config.console.static_dir.to_owned()))
                 .ok()
         };
 
