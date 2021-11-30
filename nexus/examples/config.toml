@@ -47,3 +47,7 @@ mode = "stderr-terminal"
 #mode = "file"
 #path = "logs/server.log"
 #if_exists = "append"
+
+[updates]
+# If not present, accessing the TUF updates repository will fail
+#tuf_trusted_root = ""
