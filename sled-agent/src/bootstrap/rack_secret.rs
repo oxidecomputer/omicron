@@ -1,10 +1,8 @@
 use std::convert::AsRef;
 use std::fmt::Debug;
 
-#[cfg(test)]
-use std::fmt;
-
 use p256::elliptic_curve::group::ff::PrimeField;
+use p256::elliptic_curve::subtle::ConstantTimeEq;
 use p256::{NonZeroScalar, ProjectivePoint, Scalar, SecretKey};
 use rand::rngs::OsRng;
 use serde::{Deserialize, Serialize};
@@ -42,17 +40,9 @@ pub struct RackSecret {
     secret: NonZeroScalar,
 }
 
-// This is a secret. Let's not print it outside of tests.
-#[cfg(test)]
-impl Debug for RackSecret {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.secret.as_ref().fmt(f)
-    }
-}
-
 impl PartialEq for RackSecret {
     fn eq(&self, other: &Self) -> bool {
-        self.as_ref() == other.as_ref()
+        self.secret.ct_eq(&other.secret).into()
     }
 }
 
@@ -89,27 +79,24 @@ impl RackSecret {
     /// `threshold` of the shares can be used to recover the secret.
     pub fn split(
         &self,
-        threshold: u8,
-        total_shares: u8,
+        threshold: usize,
+        total_shares: usize,
     ) -> Result<(Vec<Share>, Verifier), vsss_rs::Error> {
-        assert!(total_shares >= threshold);
         let mut rng = OsRng::default();
-        let (shares, verifier) =
-            Feldman { t: threshold as usize, n: total_shares as usize }
-                .split_secret(*self.as_ref(), None, &mut rng)?;
+        let (shares, verifier) = Feldman { t: threshold, n: total_shares }
+            .split_secret(*self.as_ref(), None, &mut rng)?;
         Ok((shares, Verifier { verifier }))
     }
 
     /// Combine a set of shares and return a RackSecret
     pub fn combine_shares(
-        threshold: u8,
-        total_shares: u8,
+        threshold: usize,
+        total_shares: usize,
         shares: &[Share],
     ) -> Result<RackSecret, vsss_rs::Error> {
         assert!(total_shares >= threshold);
-        let scalar =
-            Feldman { t: threshold as usize, n: total_shares as usize }
-                .combine_shares::<Scalar>(shares)?;
+        let scalar = Feldman { t: threshold, n: total_shares }
+            .combine_shares::<Scalar>(shares)?;
         let nzs = NonZeroScalar::from_repr(scalar.to_repr()).unwrap();
         let sk = SecretKey::from(nzs);
         Ok(RackSecret { secret: sk.to_secret_scalar() })
@@ -124,7 +111,16 @@ impl AsRef<Scalar> for RackSecret {
 
 #[cfg(test)]
 mod tests {
+    use std::fmt;
+
     use super::*;
+
+    // This is a secret. Let's not print it outside of tests.
+    impl Debug for RackSecret {
+        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            self.secret.as_ref().fmt(f)
+        }
+    }
 
     fn verify(secret: &RackSecret, verifier: &Verifier, shares: &[Share]) {
         for s in shares {
@@ -148,6 +144,12 @@ mod tests {
         let secret = RackSecret::new();
         let (shares, verifier) = secret.split(3, 5).unwrap();
         verify(&secret, &verifier, &shares);
+    }
+
+    #[test]
+    fn secret_splitting_fails_with_threshold_larger_than_total_shares() {
+        let secret = RackSecret::new();
+        assert!(secret.split(5, 3).is_err());
     }
 
     #[test]
