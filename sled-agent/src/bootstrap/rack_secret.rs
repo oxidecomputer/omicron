@@ -94,7 +94,6 @@ impl RackSecret {
         total_shares: usize,
         shares: &[Share],
     ) -> Result<RackSecret, vsss_rs::Error> {
-        assert!(total_shares >= threshold);
         let scalar = Feldman { t: threshold, n: total_shares }
             .combine_shares::<Scalar>(shares)?;
         let nzs = NonZeroScalar::from_repr(scalar.to_repr()).unwrap();
