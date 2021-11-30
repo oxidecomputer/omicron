@@ -469,6 +469,7 @@ impl TryFrom<i64> for Generation {
 pub enum ResourceType {
     Organization,
     Project,
+    Dataset,
     Disk,
     DiskAttachment,
     Instance,
@@ -482,6 +483,7 @@ pub enum ResourceType {
     RouterRoute,
     Oximeter,
     MetricProducer,
+    Zpool,
 }
 
 impl Display for ResourceType {
@@ -492,6 +494,7 @@ impl Display for ResourceType {
             match self {
                 ResourceType::Organization => "organization",
                 ResourceType::Project => "project",
+                ResourceType::Dataset => "dataset",
                 ResourceType::Disk => "disk",
                 ResourceType::DiskAttachment => "disk attachment",
                 ResourceType::Instance => "instance",
@@ -505,6 +508,7 @@ impl Display for ResourceType {
                 ResourceType::RouterRoute => "vpc router route",
                 ResourceType::Oximeter => "oximeter",
                 ResourceType::MetricProducer => "metric producer",
+                ResourceType::Zpool => "zpool",
             }
         )
     }

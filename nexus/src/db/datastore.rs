@@ -33,6 +33,7 @@ use crate::context::OpContext;
 use async_bb8_diesel::{AsyncConnection, AsyncRunQueryDsl, ConnectionManager};
 use chrono::Utc;
 use diesel::prelude::*;
+use diesel::upsert::excluded;
 use diesel::{ExpressionMethods, QueryDsl, SelectableHelper};
 use omicron_common::api;
 use omicron_common::api::external::CreateResult;
@@ -55,11 +56,12 @@ use crate::db::{
         public_error_from_diesel_pool, public_error_from_diesel_pool_create,
     },
     model::{
-        ConsoleSession, Disk, DiskAttachment, DiskRuntimeState, Generation,
-        Instance, InstanceRuntimeState, Name, Organization, OrganizationUpdate,
-        OximeterInfo, ProducerEndpoint, Project, ProjectUpdate, RouterRoute,
-        RouterRouteUpdate, Sled, Vpc, VpcFirewallRule, VpcRouter,
-        VpcRouterUpdate, VpcSubnet, VpcSubnetUpdate, VpcUpdate,
+        ConsoleSession, Dataset, Disk, DiskAttachment, DiskRuntimeState,
+        Generation, Instance, InstanceRuntimeState, Name, Organization,
+        OrganizationUpdate, OximeterInfo, ProducerEndpoint, Project,
+        ProjectUpdate, RouterRoute, RouterRouteUpdate, Sled, Vpc,
+        VpcFirewallRule, VpcRouter, VpcRouterUpdate, VpcSubnet,
+        VpcSubnetUpdate, VpcUpdate, Zpool,
     },
     pagination::paginated,
     update_and_check::{UpdateAndCheck, UpdateStatus},
@@ -148,6 +150,79 @@ impl DataStore {
                     LookupType::ById(id),
                 )
             })
+    }
+
+    /// Stores a new zpool in the database.
+    pub async fn zpool_upsert(&self, zpool: Zpool) -> CreateResult<Zpool> {
+        use db::schema::zpool::dsl;
+
+        let sled_id = zpool.sled_id;
+        Sled::insert_resource(
+            sled_id,
+            diesel::insert_into(dsl::zpool)
+                .values(zpool.clone())
+                .on_conflict(dsl::id)
+                .do_update()
+                .set((
+                    dsl::time_modified.eq(Utc::now()),
+                    dsl::sled_id.eq(excluded(dsl::sled_id)),
+                    dsl::total_size.eq(excluded(dsl::total_size)),
+                )),
+        )
+        .insert_and_get_result_async(self.pool())
+        .await
+        .map_err(|e| match e {
+            AsyncInsertError::CollectionNotFound => Error::ObjectNotFound {
+                type_name: ResourceType::Sled,
+                lookup_type: LookupType::ById(sled_id),
+            },
+            AsyncInsertError::DatabaseError(e) => {
+                public_error_from_diesel_pool_create(
+                    e,
+                    ResourceType::Zpool,
+                    &zpool.id().to_string(),
+                )
+            }
+        })
+    }
+
+    /// Stores a new dataset in the database.
+    pub async fn dataset_upsert(
+        &self,
+        dataset: Dataset,
+    ) -> CreateResult<Dataset> {
+        use db::schema::dataset::dsl;
+
+        let zpool_id = dataset.pool_id;
+        Zpool::insert_resource(
+            zpool_id,
+            diesel::insert_into(dsl::dataset)
+                .values(dataset.clone())
+                .on_conflict(dsl::id)
+                .do_update()
+                .set((
+                    dsl::time_modified.eq(Utc::now()),
+                    dsl::pool_id.eq(excluded(dsl::id)),
+                    dsl::ip.eq(excluded(dsl::ip)),
+                    dsl::port.eq(excluded(dsl::port)),
+                    dsl::kind.eq(excluded(dsl::kind)),
+                )),
+        )
+        .insert_and_get_result_async(self.pool())
+        .await
+        .map_err(|e| match e {
+            AsyncInsertError::CollectionNotFound => Error::ObjectNotFound {
+                type_name: ResourceType::Zpool,
+                lookup_type: LookupType::ById(zpool_id),
+            },
+            AsyncInsertError::DatabaseError(e) => {
+                public_error_from_diesel_pool_create(
+                    e,
+                    ResourceType::Dataset,
+                    &dataset.id().to_string(),
+                )
+            }
+        })
     }
 
     /// Create a organization
