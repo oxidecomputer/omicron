@@ -262,6 +262,12 @@ impl From<anyhow::Error> for crate::api::external::Error {
     }
 }
 
+impl From<opteadm::Error> for Error {
+    fn from(err: opteadm::Error) -> Self {
+        Error::InternalError { internal_message: format!("{}", err) }
+    }
+}
+
 /**
  * Like [`assert!`], except that instead of panicking, this function returns an
  * `Err(Error::InternalError)` with an appropriate message if the given

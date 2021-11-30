@@ -13,9 +13,12 @@ use crate::db;
 use crate::saga_interface::SagaContext;
 use chrono::Utc;
 use lazy_static::lazy_static;
+use omicron_common::api::external;
 use omicron_common::api::external::Generation;
+use omicron_common::api::external::IdentityMetadata;
 use omicron_common::api::external::InstanceCreateParams;
 use omicron_common::api::external::InstanceState;
+use omicron_common::api::external::NetworkInterface;
 use omicron_common::api::internal::nexus::InstanceRuntimeState;
 use omicron_common::api::internal::sled_agent::InstanceHardware;
 use serde::Deserialize;
@@ -158,14 +161,16 @@ async fn sic_create_instance_record(
         identity: IdentityMetadata {
             id: Uuid::new_v4(),
             name: "rpz_nic".parse().unwrap(),
-            description: "test nic",
+            description: "test nic".to_string(),
             time_created: Utc::now(),
             time_modified: Utc::now(),
         },
         vpc_id: Uuid::new_v4(),
         subnet_id: Uuid::new_v4(),
-        mac: MacAddr::V6(MacAddr6::from([0xA8, 0x40, 0x25, 0x00, 0x00, 0xD5]),
-        ip: IpAddr::V4(Ipv4Addr::new(10, 0, 0, 213)),
+        mac: external::MacAddr(
+            macaddr::MacAddr6::from([0xA8, 0x40, 0x25, 0x00, 0x00, 0xD5])
+        ),
+        ip: std::net::IpAddr::V4(std::net::Ipv4Addr::new(10, 0, 0, 213)),
     };
 
     // TODO: Populate this with an appropriate NIC.

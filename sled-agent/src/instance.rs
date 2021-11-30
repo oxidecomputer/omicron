@@ -181,7 +181,14 @@ impl Vnic {
         // and assume the lab environment here for the demo.
         let ip4 = match ip {
             IpAddr::V4(v) => v,
-            _ => return Err("OPTE only supports IPv4 guest IPs at the moment"),
+
+            _ => {
+                return Err(Error::InternalError {
+                    internal_message: format!(
+                        "OPTE only supports IPv4 guests at the moment",
+                    ),
+                });
+            }
         };
 
         // TODO (rpz): For now we assume the lab environment for the
@@ -204,18 +211,18 @@ impl Vnic {
         // of the VPC subnet. In any event, the point is that we can
         // get by with a lot less information by pushing SNAT to the
         // side for now.
-        let ip_cfg = IpConfig {
+        let ip_cfg = opte_core::ioctl::IpConfig {
             // NOTE: OPTE has it's own Ipv4Addr, thus the into().
             private_ip: ip4.into(),
-            gw_mac: opteadm::EtherAddr::from(
+            gw_mac: opte_core::ether::EtherAddr::from(
                 [0xAA, 0x00, 0x04, 0x00, 0xFF, 0x01]
             ),
             gw_ip: "172.20.14.1".parse().unwrap(),
 	    snat: None,
         };
 
-        let req = RegisterPortReq {
-            link_name: name,
+        let req = opte_core::ioctl::RegisterPortReq {
+            link_name: name.clone(),
             ip_cfg,
         };
 
