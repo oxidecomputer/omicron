@@ -155,6 +155,8 @@ impl Drop for RunningState {
 }
 
 struct InstanceInner {
+    id: Uuid,
+
     log: Logger,
 
     // Properties visible to Propolis
@@ -176,6 +178,11 @@ struct InstanceInner {
 
 impl InstanceInner {
     fn id(&self) -> &Uuid {
+        &self.id
+    }
+
+    /// UUID of the underlying propolis-server process
+    fn propolis_id(&self) -> &Uuid {
         &self.properties.id
     }
 
@@ -221,7 +228,7 @@ impl InstanceInner {
             .as_ref()
             .expect("Propolis client should be initialized before usage")
             .client
-            .instance_state_put(*self.id(), request)
+            .instance_state_put(*self.propolis_id(), request)
             .await?;
         Ok(())
     }
@@ -338,9 +345,10 @@ impl Instance {
         info!(log, "Instance::new w/initial HW: {:?}", initial);
         let instance = InstanceInner {
             log: log.new(o!("instance id" => id.to_string())),
+            id,
             // NOTE: Mostly lies.
             properties: propolis_client::api::InstanceProperties {
-                id,
+                id: initial.runtime.propolis_uuid,
                 name: initial.runtime.hostname.clone(),
                 description: "Test description".to_string(),
                 image_id: Uuid::nil(),
@@ -406,7 +414,7 @@ impl Instance {
 
         // Create a zone for the propolis instance, using the previously
         // configured VNICs.
-        let zname = propolis_zone_name(inner.id());
+        let zname = propolis_zone_name(inner.propolis_id());
 
         let nics_to_put_in_zone: Vec<String> = guest_nics
             .iter()
@@ -444,13 +452,13 @@ impl Instance {
         // Run Propolis in the Zone.
         let port = 12400;
         let server_addr = SocketAddr::new(network.ip(), port);
-        Zones::run_propolis(&zname, inner.id(), &server_addr)?;
+        Zones::run_propolis(&zname, inner.propolis_id(), &server_addr)?;
         info!(inner.log, "Started propolis in zone: {}", zname);
 
         // This isn't strictly necessary - we wait for the HTTP server below -
         // but it helps distinguish "online in SMF" from "responding to HTTP
         // requests".
-        let fmri = fmri_name(inner.id());
+        let fmri = fmri_name(inner.propolis_id());
         wait_for_service(Some(&zname), &fmri)
             .await
             .map_err(|_| Error::Timeout(fmri.to_string()))?;
@@ -497,7 +505,7 @@ impl Instance {
     async fn stop(&self) -> Result<(), Error> {
         let mut inner = self.inner.lock().await;
 
-        let zname = propolis_zone_name(inner.id());
+        let zname = propolis_zone_name(inner.propolis_id());
         warn!(inner.log, "Halting and removing zone: {}", zname);
         Zones::halt_and_remove(&inner.log, &zname).unwrap();
 
@@ -526,9 +534,9 @@ impl Instance {
         //
         // They aren't modified after being initialized, so it's fine to grab
         // a copy.
-        let (id, client) = {
+        let (propolis_id, client) = {
             let inner = self.inner.lock().await;
-            let id = *inner.id();
+            let id = *inner.propolis_id();
             let client = inner.running_state.as_ref().unwrap().client.clone();
             (id, client)
         };
@@ -537,7 +545,8 @@ impl Instance {
         loop {
             // State monitoring always returns the most recent state/gen pair
             // known to Propolis.
-            let response = client.instance_state_monitor(id, gen).await?;
+            let response =
+                client.instance_state_monitor(propolis_id, gen).await?;
             let reaction =
                 self.inner.lock().await.observe_state(response.state).await?;
 
@@ -609,9 +618,14 @@ mod test {
     use tokio::sync::watch;
 
     static INST_UUID_STR: &str = "e398c5d5-5059-4e55-beac-3a1071083aaa";
+    static PROPOLIS_UUID_STR: &str = "ed895b13-55d5-4e0b-88e9-3f4e74d0d936";
 
     fn test_uuid() -> Uuid {
         INST_UUID_STR.parse().unwrap()
+    }
+
+    fn test_propolis_uuid() -> Uuid {
+        PROPOLIS_UUID_STR.parse().unwrap()
     }
 
     // Endpoints for a fake Propolis server.
@@ -820,7 +834,7 @@ mod test {
             .times(1)
             .in_sequence(&mut seq)
             .returning(|_, zone, vnics| {
-                assert_eq!(zone, propolis_zone_name(&test_uuid()));
+                assert_eq!(zone, propolis_zone_name(&test_propolis_uuid()));
                 assert_eq!(vnics.len(), 1);
                 assert_eq!(vnics[0], control_vnic_name(0));
                 Ok(())
@@ -833,14 +847,14 @@ mod test {
             .times(1)
             .in_sequence(&mut seq)
             .returning(|zone| {
-                assert_eq!(zone, propolis_zone_name(&test_uuid()));
+                assert_eq!(zone, propolis_zone_name(&test_propolis_uuid()));
                 Ok(())
             });
 
         let zone_boot_ctx = MockZones::boot_context();
         zone_boot_ctx.expect().times(1).in_sequence(&mut seq).returning(
             |zone| {
-                assert_eq!(zone, propolis_zone_name(&test_uuid()));
+                assert_eq!(zone, propolis_zone_name(&test_propolis_uuid()));
                 Ok(())
             },
         );
@@ -849,7 +863,10 @@ mod test {
             crate::illumos::svc::wait_for_service_context();
         wait_for_service_ctx.expect().times(1).in_sequence(&mut seq).returning(
             |zone, fmri| {
-                assert_eq!(zone.unwrap(), propolis_zone_name(&test_uuid()));
+                assert_eq!(
+                    zone.unwrap(),
+                    propolis_zone_name(&test_propolis_uuid())
+                );
                 assert_eq!(fmri, "svc:/milestone/network:default");
                 Ok(())
             },
@@ -861,7 +878,7 @@ mod test {
             .times(1)
             .in_sequence(&mut seq)
             .returning(|zone, iface| {
-                assert_eq!(zone, propolis_zone_name(&test_uuid()));
+                assert_eq!(zone, propolis_zone_name(&test_propolis_uuid()));
                 assert_eq!(iface, interface_name(&control_vnic_name(0)));
                 Ok("127.0.0.1/24".parse().unwrap())
             });
@@ -872,8 +889,8 @@ mod test {
             .times(1)
             .in_sequence(&mut seq)
             .returning(|zone, id, addr| {
-                assert_eq!(zone, propolis_zone_name(&test_uuid()));
-                assert_eq!(id, &test_uuid());
+                assert_eq!(zone, propolis_zone_name(&test_propolis_uuid()));
+                assert_eq!(id, &test_propolis_uuid());
                 assert_eq!(
                     addr,
                     &"127.0.0.1:12400".parse::<SocketAddr>().unwrap()
@@ -885,7 +902,7 @@ mod test {
             crate::illumos::svc::wait_for_service_context();
         wait_for_service_ctx.expect().times(1).in_sequence(&mut seq).returning(
             |zone, fmri| {
-                let id = test_uuid();
+                let id = test_propolis_uuid();
                 assert_eq!(zone.unwrap(), propolis_zone_name(&id));
                 assert_eq!(
                     fmri,
@@ -939,6 +956,7 @@ mod test {
             runtime: InstanceRuntimeState {
                 run_state: InstanceState::Creating,
                 sled_uuid: Uuid::new_v4(),
+                propolis_uuid: test_propolis_uuid(),
                 ncpus: InstanceCpuCount(2),
                 memory: ByteCount::from_mebibytes_u32(512),
                 hostname: "myvm".to_string(),
