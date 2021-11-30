@@ -104,7 +104,7 @@ fn service_name() -> &'static str {
 }
 
 fn instance_name(id: &Uuid) -> String {
-    format!("vm-{}", id.to_string())
+    format!("vm-{}", id)
 }
 
 fn fmri_name(id: &Uuid) -> String {
