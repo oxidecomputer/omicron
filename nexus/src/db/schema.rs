@@ -14,6 +14,7 @@ table! {
         time_created -> Timestamptz,
         time_modified -> Timestamptz,
         time_deleted -> Nullable<Timestamptz>,
+        rcgen -> Int8,
         project_id -> Uuid,
         disk_state -> Text,
         attach_instance_id -> Nullable<Uuid>,
@@ -153,9 +154,57 @@ table! {
         id -> Uuid,
         time_created -> Timestamptz,
         time_modified -> Timestamptz,
+        time_deleted -> Nullable<Timestamptz>,
+        rcgen -> Int8,
 
         ip -> Inet,
         port -> Int4,
+    }
+}
+
+table! {
+    zpool (id) {
+        id -> Uuid,
+        time_created -> Timestamptz,
+        time_modified -> Timestamptz,
+        time_deleted -> Nullable<Timestamptz>,
+        rcgen -> Int8,
+
+        sled_id -> Uuid,
+
+        total_size -> Int8,
+    }
+}
+
+table! {
+    dataset (id) {
+        id -> Uuid,
+        time_created -> Timestamptz,
+        time_modified -> Timestamptz,
+        time_deleted -> Nullable<Timestamptz>,
+        rcgen -> Int8,
+
+        pool_id -> Uuid,
+
+        ip -> Inet,
+        port -> Int4,
+
+        kind -> crate::db::model::DatasetKindEnum,
+    }
+}
+
+table! {
+    region (id) {
+        id -> Uuid,
+        time_created -> Timestamptz,
+        time_modified -> Timestamptz,
+
+        dataset_id -> Uuid,
+        disk_id -> Uuid,
+
+        block_size -> Int8,
+        extent_size -> Int8,
+        extent_count -> Int8,
     }
 }
 
