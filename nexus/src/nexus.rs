@@ -128,7 +128,7 @@ pub struct Nexus {
     /** Task representing completion of recovered Sagas */
     recovery_task: std::sync::Mutex<Option<db::RecoveryTask>>,
 
-    tuf_trusted_root: Vec<u8>,
+    tuf_trusted_root: Option<Vec<u8>>,
 }
 
 /*
@@ -174,9 +174,10 @@ impl Nexus {
             db_datastore: Arc::clone(&db_datastore),
             sec_client: Arc::clone(&sec_client),
             recovery_task: std::sync::Mutex::new(None),
-            tuf_trusted_root: tokio::fs::read(&config.tuf_trusted_root)
-                .await
-                .unwrap(),
+            tuf_trusted_root: match &config.updates.tuf_trusted_root {
+                Some(root) => Some(tokio::fs::read(root).await.unwrap()),
+                None => None,
+            },
         };
 
         /* TODO-cleanup all the extra Arcs here seems wrong */
@@ -2263,7 +2264,14 @@ impl Nexus {
 
     pub async fn updates_refresh_metadata(&self) -> Result<(), Error> {
         let rack = self.as_rack();
-        let trust_root = self.tuf_trusted_root.clone();
+        let trust_root = self
+            .tuf_trusted_root
+            .as_ref()
+            .ok_or_else(|| Error::InvalidRequest {
+                message: "updates system not configured".into(),
+            })?
+            .clone();
+
         let artifacts = tokio::task::spawn_blocking(move || {
             crate::updates::read_artifacts(&rack, &trust_root)
         })
@@ -2274,6 +2282,7 @@ impl Nexus {
         .map_err(|e| Error::InternalError {
             internal_message: e.to_string(),
         })?;
+
         for artifact in artifacts {
             self.db_datastore
                 .update_available_artifact_upsert(artifact)

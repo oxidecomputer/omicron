@@ -40,6 +40,10 @@ level = "info"
 #mode = "stderr-terminal"
 
 # Example output to a file, appending if it already exists.
-mode = "file"
-path = "logs/server.log"
-if_exists = "append"
+#mode = "file"
+#path = "logs/server.log"
+#if_exists = "append"
+
+[updates]
+# If not present, accessing the TUF updates repository will fail
+#tuf_trusted_root = ""

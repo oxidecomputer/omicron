@@ -40,6 +40,13 @@ pub struct ConsoleConfig {
     pub session_absolute_timeout_minutes: u32,
 }
 
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+pub struct UpdatesConfig {
+    /** Trusted root.json role for the TUF updates repository. If `None`, accessing the TUF
+     * repository will fail. */
+    pub tuf_trusted_root: Option<PathBuf>,
+}
+
 /**
  * Configuration for a nexus server
  */
@@ -59,8 +66,8 @@ pub struct Config {
     pub database: db::Config,
     /** Authentication-related configuration */
     pub authn: AuthnConfig,
-
-    pub tuf_trusted_root: PathBuf,
+    /** Updates-related configuration */
+    pub updates: UpdatesConfig,
 }
 
 #[derive(Debug)]
