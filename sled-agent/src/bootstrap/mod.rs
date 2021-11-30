@@ -12,4 +12,5 @@ mod http_entrypoints;
 mod multicast;
 mod params;
 pub mod server;
+mod spdm;
 mod views;
