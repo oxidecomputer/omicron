@@ -469,6 +469,7 @@ impl TryFrom<i64> for Generation {
 pub enum ResourceType {
     Organization,
     Project,
+    Dataset,
     Disk,
     DiskAttachment,
     Instance,
@@ -482,6 +483,7 @@ pub enum ResourceType {
     RouterRoute,
     Oximeter,
     MetricProducer,
+    Zpool,
 }
 
 impl Display for ResourceType {
@@ -492,6 +494,7 @@ impl Display for ResourceType {
             match self {
                 ResourceType::Organization => "organization",
                 ResourceType::Project => "project",
+                ResourceType::Dataset => "dataset",
                 ResourceType::Disk => "disk",
                 ResourceType::DiskAttachment => "disk attachment",
                 ResourceType::Instance => "instance",
@@ -505,6 +508,7 @@ impl Display for ResourceType {
                 ResourceType::RouterRoute => "vpc router route",
                 ResourceType::Oximeter => "oximeter",
                 ResourceType::MetricProducer => "metric producer",
+                ResourceType::Zpool => "zpool",
             }
         )
     }
@@ -1378,7 +1382,9 @@ pub struct VpcFirewallRuleUpdate {
  * so there is no explicit creation.
  */
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
+// TODO we're controlling the schemars output, but not the serde
+// deserialization here because of surprising behavior; see #449
+#[schemars(deny_unknown_fields)]
 pub struct VpcFirewallRuleUpdateParams {
     #[serde(flatten)]
     pub rules: HashMap<Name, VpcFirewallRuleUpdate>,
@@ -1388,7 +1394,9 @@ pub struct VpcFirewallRuleUpdateParams {
  * Response to an update replacing [`Vpc`]'s firewall
  */
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
+// TODO we're controlling the schemars output, but not the serde
+// deserialization here because of surprising behavior; see #449
+#[schemars(deny_unknown_fields)]
 pub struct VpcFirewallRuleUpdateResult {
     #[serde(flatten)]
     pub rules: HashMap<Name, VpcFirewallRule>,
