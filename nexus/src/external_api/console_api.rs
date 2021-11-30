@@ -22,10 +22,11 @@ use crate::ServerContext;
 use dropshot::{endpoint, HttpError, Path, RequestContext, TypedBody};
 use http::{header, Response, StatusCode};
 use hyper::Body;
+use lazy_static::lazy_static;
 use mime_guess;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use std::{path::PathBuf, sync::Arc};
+use std::{collections::HashSet, ffi::OsString, path::PathBuf, sync::Arc};
 use uuid::Uuid;
 
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
@@ -238,6 +239,24 @@ fn not_found(internal_msg: &str) -> HttpError {
     HttpError::for_not_found(None, internal_msg.to_string())
 }
 
+lazy_static! {
+    static ref ALLOWED_EXTENSIONS: HashSet<OsString> = HashSet::from(
+        [
+            "js", "css", "html", "map", "otf", "png", "svg", "ttf", "woff",
+            "woff2",
+        ]
+        .map(|s| OsString::from(s))
+    );
+}
+
+fn file_ext_allowed(path: &PathBuf) -> bool {
+    let ext = path
+        .extension()
+        .map(|ext| ext.to_os_string())
+        .unwrap_or(OsString::from("disallowed"));
+    ALLOWED_EXTENSIONS.contains(&ext)
+}
+
 /// Starting from `root_dir`, follow the segments of `path` down the file tree
 /// until we find a file (or not). Do not follow symlinks.
 fn find_file(
@@ -266,6 +285,10 @@ fn find_file(
     // can't serve a directory
     if current.is_dir() {
         return Err(not_found("EISDIR"));
+    }
+
+    if file_ext_allowed(&current) {
+        return Err(not_found("ESPIPE"));
     }
 
     Ok(current)

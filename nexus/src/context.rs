@@ -111,12 +111,20 @@ impl ServerContext {
             .register_producer(external_latencies.clone())
             .unwrap();
 
-        let assets_directory = env::var("CARGO_MANIFEST_DIR")
-            .map(|root| {
-                PathBuf::from(root)
-                    .join(config.console.assets_directory.to_owned())
-            })
-            .ok();
+        // Support both absolute and relative paths. If configured dir is
+        // absolute, use it directly. If not, assume it's relative to the
+        // current working directory.
+        let assets_directory = if config.console.assets_directory.is_absolute()
+        {
+            Some(config.console.assets_directory.to_owned())
+        } else {
+            env::current_dir()
+                .map(|root| {
+                    PathBuf::from(root)
+                        .join(config.console.assets_directory.to_owned())
+                })
+                .ok()
+        };
 
         // TODO: check that asset directory exists, check for particular assets
         // like console index.html. leaving that out for now so we don't break
