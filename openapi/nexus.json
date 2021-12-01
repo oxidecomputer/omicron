@@ -2703,6 +2703,17 @@
           }
         }
       }
+    },
+    "/updates/refresh": {
+      "post": {
+        "description": "Refresh update metadata",
+        "operationId": "updates_refresh",
+        "responses": {
+          "200": {
+            "description": "successful operation"
+          }
+        }
+      }
     }
   },
   "components": {
