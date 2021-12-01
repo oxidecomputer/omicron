@@ -120,7 +120,12 @@ impl InstanceManager {
                 (instance, ticket)
             }
         };
-
+        // If we created a new instance, start or migrate it - but do so outside
+        // the "instances" lock, since initialization may take a while.
+        //
+        // Additionally, this makes it possible to manage the "instance_ticket",
+        // which might need to grab the lock to remove the instance during
+        // teardown.
         if let Some(migrate_params) = migrate {
             // The instance we need to ensure exists is being migrated
             // from an existing instance.
@@ -132,12 +137,6 @@ impl InstanceManager {
                 )
                 .await?;
         } else if let Some(instance_ticket) = maybe_instance_ticket {
-            // If we created a new instance, start it - but do so outside
-            // the "instances" lock, since initialization may take a while.
-            //
-            // Additionally, this makes it possible to manage the "instance_ticket",
-            // which might need to grab the lock to remove the instance during
-            // teardown.
             instance.start(instance_ticket).await?;
         }
 
