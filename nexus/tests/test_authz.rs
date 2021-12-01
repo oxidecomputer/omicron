@@ -1,3 +1,7 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
 //! Basic end-to-end tests for authorization
 use common::http_testing::RequestBuilder;
 use dropshot::HttpErrorResponseBody;
@@ -83,7 +87,7 @@ async fn try_create_organization(
 
     let mut builder =
         RequestBuilder::new(client, Method::POST, "/organizations")
-            .body(Some(input))
+            .body(Some(&input))
             .expect_status(Some(expected_status));
     if let Some(user_id) = maybe_user_id {
         let authn_header = http::HeaderValue::from_static(user_id);

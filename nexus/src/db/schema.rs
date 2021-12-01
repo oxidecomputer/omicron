@@ -1,3 +1,7 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
 //! Describes the Diesel database schema.
 //!
 //! NOTE: Should be kept up-to-date with dbinit.sql.
@@ -10,6 +14,7 @@ table! {
         time_created -> Timestamptz,
         time_modified -> Timestamptz,
         time_deleted -> Nullable<Timestamptz>,
+        rcgen -> Int8,
         project_id -> Uuid,
         disk_state -> Text,
         attach_instance_id -> Nullable<Uuid>,
@@ -33,6 +38,7 @@ table! {
         time_state_updated -> Timestamptz,
         state_generation -> Int8,
         active_server_id -> Uuid,
+        active_propolis_id -> Uuid,
         ncpus -> Int8,
         memory -> Int8,
         hostname -> Text,
@@ -149,9 +155,57 @@ table! {
         id -> Uuid,
         time_created -> Timestamptz,
         time_modified -> Timestamptz,
+        time_deleted -> Nullable<Timestamptz>,
+        rcgen -> Int8,
 
         ip -> Inet,
         port -> Int4,
+    }
+}
+
+table! {
+    zpool (id) {
+        id -> Uuid,
+        time_created -> Timestamptz,
+        time_modified -> Timestamptz,
+        time_deleted -> Nullable<Timestamptz>,
+        rcgen -> Int8,
+
+        sled_id -> Uuid,
+
+        total_size -> Int8,
+    }
+}
+
+table! {
+    dataset (id) {
+        id -> Uuid,
+        time_created -> Timestamptz,
+        time_modified -> Timestamptz,
+        time_deleted -> Nullable<Timestamptz>,
+        rcgen -> Int8,
+
+        pool_id -> Uuid,
+
+        ip -> Inet,
+        port -> Int4,
+
+        kind -> crate::db::model::DatasetKindEnum,
+    }
+}
+
+table! {
+    region (id) {
+        id -> Uuid,
+        time_created -> Timestamptz,
+        time_modified -> Timestamptz,
+
+        dataset_id -> Uuid,
+        disk_id -> Uuid,
+
+        block_size -> Int8,
+        extent_size -> Int8,
+        extent_count -> Int8,
     }
 }
 

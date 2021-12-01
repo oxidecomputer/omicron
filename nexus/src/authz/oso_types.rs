@@ -1,3 +1,7 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
 //! Types and impls used for integration with Oso
 
 // Most of the types here are used in the Polar configuration, which means they
@@ -242,6 +246,10 @@ pub struct Organization {
 }
 
 impl Organization {
+    pub fn id(&self) -> Uuid {
+        self.organization_id
+    }
+
     pub fn project(&self, project_id: Uuid) -> Project {
         Project { organization_id: self.organization_id, project_id }
     }

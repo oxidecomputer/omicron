@@ -58,9 +58,79 @@ CREATE TABLE omicron.public.sled (
     id UUID PRIMARY KEY,
     time_created TIMESTAMPTZ NOT NULL,
     time_modified TIMESTAMPTZ NOT NULL,
+    time_deleted TIMESTAMPTZ,
+    rcgen INT NOT NULL,
 
     ip INET NOT NULL,
     port INT4 NOT NULL
+);
+
+/*
+ * ZPools of Storage, attached to Sleds.
+ * Typically these are backed by a single physical disk.
+ */
+CREATE TABLE omicron.public.Zpool (
+    /* Identity metadata (asset) */
+    id UUID PRIMARY KEY,
+    time_created TIMESTAMPTZ NOT NULL,
+    time_modified TIMESTAMPTZ NOT NULL,
+    time_deleted TIMESTAMPTZ,
+    rcgen INT NOT NULL,
+
+    /* FK into the Sled table */
+    sled_id UUID NOT NULL,
+
+    /* TODO: Could also store physical disk FK here */
+
+    total_size INT NOT NULL
+);
+
+CREATE TYPE omicron.public.dataset_kind AS ENUM (
+  'crucible',
+  'cockroach',
+  'clickhouse'
+);
+
+/*
+ * A dataset of allocated space within a zpool.
+ */
+CREATE TABLE omicron.public.Dataset (
+    /* Identity metadata (asset) */
+    id UUID PRIMARY KEY,
+    time_created TIMESTAMPTZ NOT NULL,
+    time_modified TIMESTAMPTZ NOT NULL,
+    time_deleted TIMESTAMPTZ,
+    rcgen INT NOT NULL,
+
+    /* FK into the Pool table */
+    pool_id UUID NOT NULL,
+
+    /* Contact information for the downstairs region */
+    ip INET NOT NULL,
+    port INT4 NOT NULL,
+
+    kind omicron.public.dataset_kind NOT NULL
+);
+
+/*
+ * A region of space allocated to Crucible Downstairs, within a dataset.
+ */
+CREATE TABLE omicron.public.Region (
+    /* Identity metadata (asset) */
+    id UUID PRIMARY KEY,
+    time_created TIMESTAMPTZ NOT NULL,
+    time_modified TIMESTAMPTZ NOT NULL,
+
+    /* FK into the Dataset table */
+    dataset_id UUID NOT NULL,
+
+    /* FK into the (Guest-visible, Virtual) Disk table */
+    disk_id UUID NOT NULL,
+
+    /* Metadata describing the region */
+    block_size INT NOT NULL,
+    extent_size INT NOT NULL,
+    extent_count INT NOT NULL
 );
 
 /*
@@ -166,6 +236,8 @@ CREATE TABLE omicron.public.instance (
      * servers involved in the migration.
      */
     active_server_id UUID,
+    /* Identifies the underlying propolis-server backing the instance. */
+    active_propolis_id UUID,
 
     /* Instance configuration */
     ncpus INT NOT NULL,
@@ -181,7 +253,7 @@ CREATE UNIQUE INDEX ON omicron.public.instance (
 
 
 /*
- * Disks
+ * Guest-Visible, Virtual Disks
  */
 
 /*
@@ -207,6 +279,7 @@ CREATE TABLE omicron.public.disk (
     /* Indicates that the object has been deleted */
     /* This is redundant for Disks, but we keep it here for consistency. */
     time_deleted TIMESTAMPTZ,
+    rcgen INT NOT NULL,
 
     /* Every Disk is in exactly one Project at a time. */
     project_id UUID NOT NULL,

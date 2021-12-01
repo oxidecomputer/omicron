@@ -1,3 +1,7 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
 /*!
  * Primary control plane interface for database read and write operations
  */
@@ -29,6 +33,7 @@ use crate::context::OpContext;
 use async_bb8_diesel::{AsyncConnection, AsyncRunQueryDsl, ConnectionManager};
 use chrono::Utc;
 use diesel::prelude::*;
+use diesel::upsert::excluded;
 use diesel::{ExpressionMethods, QueryDsl, SelectableHelper};
 use omicron_common::api;
 use omicron_common::api::external::CreateResult;
@@ -53,12 +58,12 @@ use crate::db::{
         public_error_from_diesel_pool, public_error_from_diesel_pool_create,
     },
     model::{
-        ConsoleSession, Disk, DiskAttachment, DiskRuntimeState, Generation,
-        IncompleteNetworkInterface, Instance, InstanceRuntimeState, Name,
-        NetworkInterface, Organization, OrganizationUpdate, OximeterInfo,
+        ConsoleSession, Dataset, Disk, DiskAttachment, DiskRuntimeState,
+        Generation, IncompleteNetworkInterface, Instance, InstanceRuntimeState,
+        Name, NetworkInterface, Organization, OrganizationUpdate, OximeterInfo,
         ProducerEndpoint, Project, ProjectUpdate, RouterRoute,
         RouterRouteUpdate, Sled, Vpc, VpcFirewallRule, VpcRouter,
-        VpcRouterUpdate, VpcSubnet, VpcSubnetUpdate, VpcUpdate,
+        VpcRouterUpdate, VpcSubnet, VpcSubnetUpdate, VpcUpdate, Zpool,
     },
     pagination::paginated,
     subnet_allocation::AllocateIpQuery,
@@ -148,6 +153,79 @@ impl DataStore {
                     LookupType::ById(id),
                 )
             })
+    }
+
+    /// Stores a new zpool in the database.
+    pub async fn zpool_upsert(&self, zpool: Zpool) -> CreateResult<Zpool> {
+        use db::schema::zpool::dsl;
+
+        let sled_id = zpool.sled_id;
+        Sled::insert_resource(
+            sled_id,
+            diesel::insert_into(dsl::zpool)
+                .values(zpool.clone())
+                .on_conflict(dsl::id)
+                .do_update()
+                .set((
+                    dsl::time_modified.eq(Utc::now()),
+                    dsl::sled_id.eq(excluded(dsl::sled_id)),
+                    dsl::total_size.eq(excluded(dsl::total_size)),
+                )),
+        )
+        .insert_and_get_result_async(self.pool())
+        .await
+        .map_err(|e| match e {
+            AsyncInsertError::CollectionNotFound => Error::ObjectNotFound {
+                type_name: ResourceType::Sled,
+                lookup_type: LookupType::ById(sled_id),
+            },
+            AsyncInsertError::DatabaseError(e) => {
+                public_error_from_diesel_pool_create(
+                    e,
+                    ResourceType::Zpool,
+                    &zpool.id().to_string(),
+                )
+            }
+        })
+    }
+
+    /// Stores a new dataset in the database.
+    pub async fn dataset_upsert(
+        &self,
+        dataset: Dataset,
+    ) -> CreateResult<Dataset> {
+        use db::schema::dataset::dsl;
+
+        let zpool_id = dataset.pool_id;
+        Zpool::insert_resource(
+            zpool_id,
+            diesel::insert_into(dsl::dataset)
+                .values(dataset.clone())
+                .on_conflict(dsl::id)
+                .do_update()
+                .set((
+                    dsl::time_modified.eq(Utc::now()),
+                    dsl::pool_id.eq(excluded(dsl::id)),
+                    dsl::ip.eq(excluded(dsl::ip)),
+                    dsl::port.eq(excluded(dsl::port)),
+                    dsl::kind.eq(excluded(dsl::kind)),
+                )),
+        )
+        .insert_and_get_result_async(self.pool())
+        .await
+        .map_err(|e| match e {
+            AsyncInsertError::CollectionNotFound => Error::ObjectNotFound {
+                type_name: ResourceType::Zpool,
+                lookup_type: LookupType::ById(zpool_id),
+            },
+            AsyncInsertError::DatabaseError(e) => {
+                public_error_from_diesel_pool_create(
+                    e,
+                    ResourceType::Dataset,
+                    &dataset.id().to_string(),
+                )
+            }
+        })
     }
 
     /// Create a organization
@@ -264,11 +342,11 @@ impl DataStore {
         Ok(())
     }
 
-    /// Look up the id for a organization based on its name
-    pub async fn organization_lookup_id_by_name(
+    /// Look up an organization by name
+    pub async fn organization_lookup(
         &self,
         name: &Name,
-    ) -> Result<Uuid, Error> {
+    ) -> Result<authz::Organization, Error> {
         use db::schema::organization::dsl;
         dsl::organization
             .filter(dsl::time_deleted.is_null())
@@ -283,6 +361,18 @@ impl DataStore {
                     LookupType::ByName(name.as_str().to_owned()),
                 )
             })
+            .map(|o| authz::FLEET.organization(o))
+    }
+
+    /// Look up the id for a organization based on its name
+    ///
+    /// As endpoints move to doing authorization, they should move to
+    /// [`organization_lookup()`] instead of this function.
+    pub async fn organization_lookup_id_by_name(
+        &self,
+        name: &Name,
+    ) -> Result<Uuid, Error> {
+        self.organization_lookup(name).await.map(|o| o.id())
     }
 
     pub async fn organizations_list_by_id(
@@ -354,9 +444,13 @@ impl DataStore {
     /// Create a project
     pub async fn project_create(
         &self,
+        opctx: &OpContext,
+        org: &authz::Organization,
         project: Project,
     ) -> CreateResult<Project> {
         use db::schema::project::dsl;
+
+        opctx.authorize(authz::Action::CreateChild, *org)?;
 
         let name = project.name().as_str().to_string();
         let organization_id = project.organization_id;
@@ -364,7 +458,7 @@ impl DataStore {
             organization_id,
             diesel::insert_into(dsl::project).values(project),
         )
-        .insert_and_get_result_async(self.pool())
+        .insert_and_get_result_async(self.pool_authorized(opctx)?)
         .await
         .map_err(|e| match e {
             AsyncInsertError::CollectionNotFound => Error::ObjectNotFound {
@@ -1921,6 +2015,7 @@ impl DataStore {
 
 #[cfg(test)]
 mod test {
+    use crate::authz;
     use crate::context::OpContext;
     use crate::db;
     use crate::db::identity::Resource;
@@ -1960,7 +2055,8 @@ mod test {
                 },
             },
         );
-        datastore.project_create(project).await.unwrap();
+        let org = authz::FLEET.organization(organization.id());
+        datastore.project_create(&opctx, &org, project).await.unwrap();
         let organization_after_project_create =
             datastore.organization_fetch(organization.name()).await.unwrap();
         assert!(organization_after_project_create.rcgen > organization.rcgen);

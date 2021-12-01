@@ -1,3 +1,7 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
 //! Facilities for testing HTTP servers
 
 use anyhow::anyhow;
@@ -112,11 +116,10 @@ impl<'a> RequestBuilder<'a> {
     /// If `body` is `None`, the request body will be empty.
     pub fn body<RequestBodyType: serde::Serialize>(
         mut self,
-        body: Option<RequestBodyType>,
+        body: Option<&RequestBodyType>,
     ) -> Self {
         let new_body = body.map(|b| {
-            serde_json::to_string(&b)
-                .context("failed to serialize request body")
+            serde_json::to_string(b).context("failed to serialize request body")
         });
         match new_body {
             Some(Err(error)) => self.error = Some(error),
@@ -449,7 +452,7 @@ impl<'a> NexusRequest<'a> {
     pub fn objects_post<BodyType: serde::Serialize>(
         testctx: &'a ClientTestContext,
         uri: &str,
-        body: BodyType,
+        body: &BodyType,
     ) -> Self {
         NexusRequest::new(
             RequestBuilder::new(testctx, http::Method::POST, uri)
@@ -524,7 +527,7 @@ pub mod dropshot_compat {
         S: Serialize + std::fmt::Debug,
         T: DeserializeOwned,
     {
-        NexusRequest::objects_post(testctx, collection_url, input)
+        NexusRequest::objects_post(testctx, collection_url, &input)
             .execute()
             .await
             .unwrap()

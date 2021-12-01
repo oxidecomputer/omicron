@@ -475,6 +475,11 @@
               }
             ]
           },
+          "propolis_uuid": {
+            "description": "which propolis-server is running this Instance",
+            "type": "string",
+            "format": "uuid"
+          },
           "run_state": {
             "description": "runtime state of the Instance",
             "allOf": [
@@ -499,6 +504,7 @@
           "hostname",
           "memory",
           "ncpus",
+          "propolis_uuid",
           "run_state",
           "sled_uuid",
           "time_updated"

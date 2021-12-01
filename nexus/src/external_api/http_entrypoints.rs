@@ -1,3 +1,7 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
 /*!
  * Handler functions (entrypoints) for external HTTP APIs
  */
@@ -8,7 +12,7 @@ use crate::ServerContext;
 
 use super::{
     console_api, params,
-    views::{Organization, Project},
+    views::{Organization, Project, Rack, Sled, Vpc, VpcSubnet},
 };
 use crate::context::OpContext;
 use dropshot::endpoint;
@@ -39,30 +43,18 @@ use omicron_common::api::external::to_list;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Disk;
 use omicron_common::api::external::DiskAttachment;
-use omicron_common::api::external::DiskCreateParams;
 use omicron_common::api::external::Instance;
-use omicron_common::api::external::InstanceCreateParams;
 use omicron_common::api::external::PaginationOrder;
-use omicron_common::api::external::Rack;
 use omicron_common::api::external::RouterRoute;
 use omicron_common::api::external::RouterRouteCreateParams;
 use omicron_common::api::external::RouterRouteKind;
 use omicron_common::api::external::RouterRouteUpdateParams;
 use omicron_common::api::external::Saga;
-use omicron_common::api::external::Sled;
-use omicron_common::api::external::Vpc;
-use omicron_common::api::external::VpcCreateParams;
 use omicron_common::api::external::VpcFirewallRule;
 use omicron_common::api::external::VpcFirewallRuleUpdateParams;
 use omicron_common::api::external::VpcFirewallRuleUpdateResult;
 use omicron_common::api::external::VpcRouter;
-use omicron_common::api::external::VpcRouterCreateParams;
 use omicron_common::api::external::VpcRouterKind;
-use omicron_common::api::external::VpcRouterUpdateParams;
-use omicron_common::api::external::VpcSubnet;
-use omicron_common::api::external::VpcSubnetCreateParams;
-use omicron_common::api::external::VpcSubnetUpdateParams;
-use omicron_common::api::external::VpcUpdateParams;
 use ref_cast::RefCast;
 use schemars::JsonSchema;
 use serde::Deserialize;
@@ -409,8 +401,13 @@ async fn organization_projects_post(
     let params = path_params.into_inner();
     let organization_name = &params.organization_name;
     let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
         let project = nexus
-            .project_create(&organization_name, &new_project.into_inner())
+            .project_create(
+                &opctx,
+                &organization_name,
+                &new_project.into_inner(),
+            )
             .await?;
         Ok(HttpResponseCreated(project.into()))
     };
@@ -562,7 +559,7 @@ async fn project_disks_get(
 async fn project_disks_post(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<ProjectPathParam>,
-    new_disk: TypedBody<DiskCreateParams>,
+    new_disk: TypedBody<params::DiskCreate>,
 ) -> Result<HttpResponseCreated<Disk>, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
@@ -708,7 +705,7 @@ async fn project_instances_get(
 async fn project_instances_post(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<ProjectPathParam>,
-    new_instance: TypedBody<InstanceCreateParams>,
+    new_instance: TypedBody<params::InstanceCreate>,
 ) -> Result<HttpResponseCreated<Instance>, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
@@ -1111,7 +1108,7 @@ async fn project_vpcs_get_vpc(
 async fn project_vpcs_post(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<ProjectPathParam>,
-    new_vpc: TypedBody<VpcCreateParams>,
+    new_vpc: TypedBody<params::VpcCreate>,
 ) -> Result<HttpResponseCreated<Vpc>, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
@@ -1142,7 +1139,7 @@ async fn project_vpcs_post(
 async fn project_vpcs_put_vpc(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<VpcPathParam>,
-    updated_vpc: TypedBody<VpcUpdateParams>,
+    updated_vpc: TypedBody<params::VpcUpdate>,
 ) -> Result<HttpResponseOk<()>, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
@@ -1270,7 +1267,7 @@ async fn vpc_subnets_get_subnet(
 async fn vpc_subnets_post(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<VpcPathParam>,
-    create_params: TypedBody<VpcSubnetCreateParams>,
+    create_params: TypedBody<params::VpcSubnetCreate>,
 ) -> Result<HttpResponseCreated<VpcSubnet>, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
@@ -1327,7 +1324,7 @@ async fn vpc_subnets_delete_subnet(
 async fn vpc_subnets_put_subnet(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<VpcSubnetPathParam>,
-    subnet_params: TypedBody<VpcSubnetUpdateParams>,
+    subnet_params: TypedBody<params::VpcSubnetUpdate>,
 ) -> Result<HttpResponseOk<()>, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
@@ -1505,7 +1502,7 @@ async fn vpc_routers_get_router(
 async fn vpc_routers_post(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<VpcPathParam>,
-    create_params: TypedBody<VpcRouterCreateParams>,
+    create_params: TypedBody<params::VpcRouterCreate>,
 ) -> Result<HttpResponseCreated<VpcRouter>, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
@@ -1563,7 +1560,7 @@ async fn vpc_routers_delete_router(
 async fn vpc_routers_put_router(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<VpcRouterPathParam>,
-    router_params: TypedBody<VpcRouterUpdateParams>,
+    router_params: TypedBody<params::VpcRouterUpdate>,
 ) -> Result<HttpResponseOk<()>, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;

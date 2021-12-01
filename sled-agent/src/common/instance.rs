@@ -1,3 +1,7 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
 //! Describes the states of VM instances.
 
 use chrono::Utc;
@@ -271,6 +275,7 @@ mod test {
         InstanceStates::new(InstanceRuntimeState {
             run_state: State::Creating,
             sled_uuid: uuid::Uuid::new_v4(),
+            propolis_uuid: uuid::Uuid::new_v4(),
             ncpus: InstanceCpuCount(2),
             memory: ByteCount::from_mebibytes_u32(512),
             hostname: "myvm".to_string(),
