@@ -53,7 +53,7 @@ pub fn read_artifacts(
     let artifacts: ArtifactsDocument =
         serde_json::from_slice(&artifact_document)?;
 
-    let earliest_expiration = repository
+    let valid_until = repository
         .root()
         .signed
         .expires
@@ -70,13 +70,13 @@ pub fn read_artifacts(
                 name: artifact.name,
                 version: artifact.version,
                 kind: db::model::UpdateArtifactKind(artifact.kind),
-                targets_version: repository
+                targets_role_version: repository
                     .targets()
                     .signed
                     .version
                     .get()
                     .try_into()?,
-                metadata_expiration: earliest_expiration,
+                valid_until,
                 target_name: artifact.target,
                 target_sha256: hex::encode(&target.hashes.sha256),
                 target_length: target.length.try_into()?,
