@@ -561,9 +561,12 @@ impl Instance {
             // Replace propolis properties with new values
             inner.properties.id = initial_hardware.runtime.propolis_uuid;
 
-            // TODO: clean up previously allocated vNICs
-            let _old_nics =
+            // TODO: clean up previously allocated vNICs.
+            // For now we just forget them so they don't disappear before the
+            // migration is completed.
+            let old_nics =
                 std::mem::replace(&mut inner.allocated_nics, vec![]);
+            std::mem::forget(old_nics);
 
             // Grab the InstanceTicket to reuse for the new propolis
             std::mem::replace(
