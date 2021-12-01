@@ -113,7 +113,7 @@ async fn test_oximeter_reregistration() {
     let timeseries_name = "integration_target:integration_metric";
     let retrieve_timeseries = || async {
         match client
-            .filter_timeseries_with(timeseries_name, &[], None, None)
+            .select_timeseries_with(timeseries_name, &[], None, None)
             .await
         {
             Ok(maybe_series) => {
