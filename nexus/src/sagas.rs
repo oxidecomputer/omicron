@@ -400,16 +400,6 @@ pub fn saga_instance_migrate(
         new_action_noop_undo(saga_generate_uuid),
     );
 
-    // Make sure we have a sled allocated for the destination
-    template_builder.append(
-        "dst_server_id",
-        "AllocServer",
-        // TODO robustness This still needs an undo action, and we should really
-        // keep track of resources and reservations, etc. See the comment on
-        // SagaContext::alloc_server()
-        new_action_noop_undo(sim_alloc_server),
-    );
-
     template_builder.append(
         "instance_migrate",
         "InstanceMigrate",
@@ -428,45 +418,13 @@ pub fn saga_instance_migrate(
     template_builder.build()
 }
 
-async fn sim_alloc_server(
-    sagactx: ActionContext<SagaInstanceMigrate>,
-) -> Result<Uuid, ActionError> {
-    use omicron_common::api::external::{ByteCount, InstanceCpuCount};
-
-    let osagactx = sagactx.user_data();
-    let params = sagactx.saga_params();
-
-    let migrate_type = sagactx.lookup::<MigrateType>("migrate_type")?;
-
-    if let MigrateType::InPlace = migrate_type {
-        Ok(params.migrate_params.dst_sled_uuid)
-    } else {
-        // TODO: These parameters are unused, `alloc_server` just
-        // needs to be passed something. See comment on
-        // SagaContext::alloc_server()
-        let create_params = params::InstanceCreate {
-            identity: IdentityMetadataCreateParams {
-                name: "unused".parse().unwrap(),
-                description: "unused".to_string(),
-            },
-            ncpus: InstanceCpuCount(0),
-            memory: ByteCount::from_mebibytes_u32(0),
-            hostname: "unused".to_string(),
-        };
-        osagactx
-            .alloc_server(&create_params)
-            .await
-            .map_err(ActionError::action_failed)
-    }
-}
-
 async fn sim_instance_migrate(
     sagactx: ActionContext<SagaInstanceMigrate>,
 ) -> Result<(), ActionError> {
     let osagactx = sagactx.user_data();
     let params = sagactx.saga_params();
 
-    let dst_sled_uuid = sagactx.lookup("dst_server_id")?;
+    let dst_sled_uuid = params.migrate_params.dst_sled_uuid;
     let dst_propolis_uuid = sagactx.lookup::<Uuid>("dst_propolis_id")?;
 
     let instance = osagactx
