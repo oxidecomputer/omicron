@@ -176,8 +176,8 @@ pub async fn console_page(
         .body("".into())?)
 }
 
-/// Fetch a static asset from the configured assets directory. 404 on virtually
-/// all errors. No auth. NO SENSITIVE FILES.
+/// Fetch a static asset from `<static_dir>/assets`. 404 on virtually all
+/// errors. No auth. NO SENSITIVE FILES.
 #[endpoint {
    method = GET,
    path = "/assets/{path:.*}",
@@ -191,6 +191,7 @@ pub async fn asset(
     let path = path_params.into_inner().path;
 
     let file = match &apictx.console_config.static_dir {
+        // important: we only serve assets from assets/ within static_dir
         Some(static_dir) => find_file(path, &static_dir.join("assets")),
         _ => Err(not_found("static_dir undefined")),
     }?;

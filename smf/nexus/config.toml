@@ -6,8 +6,8 @@
 id = "e6bff1ff-24fb-49dc-a54e-c6a350cd4d6c"
 
 [console]
-# Directory of static assets for the console. Relative to nexus/.
-static_dir = "tests/static" # TODO: figure out value
+# Directory for static assets. Absolute path or relative to CWD.
+static_dir = "nexus/static"
 cache_control_max_age_minutes = 10
 session_idle_timeout_minutes = 60
 session_absolute_timeout_minutes = 480
