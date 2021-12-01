@@ -110,13 +110,13 @@ mod test {
         let expected_path = artifact.artifact_directory().join(expected_name);
 
         // Remove the file if it already exists.
-        let _ = tokio::fs::remove_file(expected_path).await;
+        let _ = tokio::fs::remove_file(&expected_path).await;
 
         // Let's pretend this is an artifact Nexus can actually give us.
         let mut nexus_client = MockNexusClient::default();
         nexus_client.expect_cpapi_artifact_download().times(1).return_once(
-            |name| {
-                assert_eq!(name, expected_name);
+            move |name| {
+                assert_eq!(name, "test_artifact-3");
                 let response = Response::builder()
                     .status(StatusCode::OK)
                     .body(expected_contents)
