@@ -4,9 +4,9 @@
 
 //! Mock structures for testing.
 
+use anyhow::Error;
 use mockall::mock;
 use nexus_client::types::{InstanceRuntimeState, SledAgentStartupInfo};
-use omicron_common::api::external::Error;
 use reqwest::Response;
 use slog::Logger;
 use uuid::Uuid;

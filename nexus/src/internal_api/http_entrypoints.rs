@@ -312,19 +312,19 @@ async fn cpapi_artifact_download(
     // to only accepting single-component paths.
     let path = vec![path.into_inner().path];
 
-    let handler = async {
-        for component in &path {
-            // Dropshot should not provide "." and ".." components.
-            assert_ne!(component, ".");
-            assert_ne!(component, "..");
-            entry.push(component);
+    for component in &path {
+        // Dropshot should not provide "." and ".." components.
+        assert_ne!(component, ".");
+        assert_ne!(component, "..");
+        entry.push(component);
 
+        if entry.exists() {
             // We explicitly prohibit consumers from following symlinks to prevent
             // showing data outside of the intended directory.
-            let m = entry.symlink_metadata().map_err(|_| {
+            let m = entry.symlink_metadata().map_err(|e| {
                 HttpError::for_bad_request(
                     None,
-                    "Cannot query for symlink info".to_string(),
+                    format!("Failed to query file metadata: {}", e),
                 )
             })?;
             if m.file_type().is_symlink() {
@@ -334,35 +334,27 @@ async fn cpapi_artifact_download(
                 ));
             }
         }
+    }
 
-        if entry.is_dir() {
-            return Err(HttpError::for_bad_request(
-                None,
-                "Directory download not supported".to_string(),
-            ));
-        }
+    // Note - at this point, "entry" may or may not actually exist.
+    // We try to avoid creating intermediate artifacts until we know there
+    // is something "real" to download, as this would let malformed paths
+    // create defunct intermediate directories.
+    if entry.is_dir() {
+        return Err(HttpError::for_bad_request(
+            None,
+            "Directory download not supported".to_string(),
+        ));
+    }
+    let body = nexus.download_artifact(&entry).await?;
 
-        let entry = entry.canonicalize().map_err(|e| {
-            HttpError::for_bad_request(
-                None,
-                format!("Cannot canonicalize path: {}", e),
-            )
-        })?;
+    // Derive the MIME type from the file name
+    let content_type = mime_guess::from_path(&entry)
+        .first()
+        .map_or_else(|| "text/plain".to_string(), |m| m.to_string());
 
-        let body = nexus.download_artifact(&entry).await?;
-
-        // Derive the MIME type from the file name
-        let content_type = mime_guess::from_path(&entry)
-            .first()
-            .map_or_else(|| "text/plain".to_string(), |m| m.to_string());
-
-        Ok(Response::builder()
-            .status(StatusCode::OK)
-            .header(http::header::CONTENT_TYPE, content_type)
-            .body(body.into())?)
-    };
-    context
-        .internal_latencies
-        .instrument_dropshot_handler(&request_context, handler)
-        .await
+    Ok(Response::builder()
+        .status(StatusCode::OK)
+        .header(http::header::CONTENT_TYPE, content_type)
+        .body(body.into())?)
 }

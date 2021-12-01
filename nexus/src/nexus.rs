@@ -2253,7 +2253,7 @@ impl Nexus {
         self.db_datastore.session_hard_delete(token).await
     }
 
-    /// Downloads a file from the within [`BASE_ARTIFACT_DIR`].
+    /// Downloads a file from within [`BASE_ARTIFACT_DIR`].
     pub async fn download_artifact<P: AsRef<Path>>(
         &self,
         path: P,
@@ -2265,11 +2265,59 @@ impl Nexus {
             ));
         }
 
-        // TODO: If the artifact doesn't exist, we should download it.
-        //
-        // There also exists the question of "when should we *remove* things
-        // from BASE_ARTIFACT_DIR", which we should also resolve. Demo-quality solution
-        // could be "destroy it on boot" or something.
+        if !path.exists() {
+            info!(
+                self.log,
+                "Accessing {} - needs to be downloaded",
+                path.display()
+            );
+            // If the artifact doesn't exist, we should download it.
+            //
+            // TODO: There also exists the question of "when should we *remove*
+            // things from BASE_ARTIFACT_DIR", which we should also resolve.
+            // Demo-quality solution could be "destroy it on boot" or something?
+            // (we aren't doing that yet).
+
+            let file_name = path.strip_prefix(BASE_ARTIFACT_DIR).unwrap();
+            match file_name.to_str().unwrap() {
+                // TODO: iliana if you're reading this,
+                // 1. I'm sorry
+                // 2. We should probably do something less bad here
+                //
+                // At the moment, the only file we "know" how to download is a
+                // testfile, which is pulled out of thin air. Realistically, we
+                // should pull this from the DB + query an external server.
+                // Happy to delete this as soon as we can.
+                "testfile" => {
+                    // We should only create the intermediate directories
+                    // after validating that this is a real artifact that
+                    // can (and should) be downloaded.
+                    if let Some(parent) = path.parent() {
+                        tokio::fs::create_dir_all(parent).await.map_err(|e| {
+                            Error::internal_error(
+                                &format!("Failed to create intermediate directory: {}", e)
+                            )
+                        })?;
+                    }
+                    tokio::fs::write(path, "testfile contents").await.map_err(
+                        |e| {
+                            Error::internal_error(&format!(
+                                "Failed to write file: {}",
+                                e
+                            ))
+                        },
+                    )?;
+                }
+                _ => {
+                    return Err(Error::not_found_other(
+                        ResourceType::DownloadArtifact,
+                        file_name.display().to_string(),
+                    ));
+                }
+            }
+        } else {
+            info!(self.log, "Accessing {} - already exists", path.display());
+        }
 
         // TODO: These artifacts could be quite large - we should figure out how to
         // stream this file back instead of holding it entirely in-memory in a
