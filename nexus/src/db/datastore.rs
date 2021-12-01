@@ -1960,6 +1960,26 @@ impl DataStore {
                 )
             })
     }
+
+    pub async fn update_available_artifact_hard_delete_outdated(
+        &self,
+        current_targets_role_version: i64,
+    ) -> DeleteResult {
+        // We use the `targets_role_version` column in the table to delete any old rows, keeping
+        // the table in sync with the current copy of artifacts.json.
+        use db::schema::update_available_artifact::dsl;
+        diesel::delete(dsl::update_available_artifact)
+            .filter(dsl::targets_role_version.lt(current_targets_role_version))
+            .execute_async(self.pool())
+            .await
+            .map(|_rows_deleted| ())
+            .map_err(|e| {
+                Error::internal_error(&format!(
+                    "error deleting outdated available artifacts: {:?}",
+                    e
+                ))
+            })
+    }
 }
 
 #[cfg(test)]

@@ -2281,13 +2281,24 @@ impl Nexus {
             internal_message: e.to_string(),
         })?;
 
+        // FIXME: if we hit an error in any of these database calls, the available artifact table
+        // will be out of sync with the current artifacts.json. can we do a transaction or
+        // something?
+
+        let mut current_version = None;
         for artifact in artifacts {
+            current_version = Some(artifact.targets_role_version);
             self.db_datastore
                 .update_available_artifact_upsert(artifact)
                 .await?;
         }
 
-        // TODO: delete all rows remaining with a targets_version < repository.targets().version()
+        // ensure table is in sync with current copy of artifacts.json
+        if let Some(current_version) = current_version {
+            self.db_datastore
+                .update_available_artifact_hard_delete_outdated(current_version)
+                .await?;
+        }
 
         Ok(())
     }
