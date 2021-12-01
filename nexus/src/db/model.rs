@@ -1800,8 +1800,8 @@ pub struct UpdateAvailableArtifact {
     pub kind: UpdateArtifactKind,
     /// `version` field of targets.json from the repository
     // FIXME this *should* be a NonZeroU64
-    pub targets_version: i64,
-    pub metadata_expiration: DateTime<Utc>,
+    pub targets_role_version: i64,
+    pub valid_until: DateTime<Utc>,
     pub target_name: String,
     // FIXME should this be [u8; 32]?
     pub target_sha256: String,

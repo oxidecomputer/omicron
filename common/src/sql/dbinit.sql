@@ -658,10 +658,10 @@ CREATE TABLE omicron.public.update_available_artifact (
     kind omicron.public.update_artifact_kind NOT NULL,
 
     /* the version of the targets.json role this came from */
-    targets_version INT NOT NULL,
+    targets_role_version INT NOT NULL,
 
     /* when the metadata this artifact was cached from expires */
-    metadata_expiration TIMESTAMPTZ NOT NULL,
+    valid_until TIMESTAMPTZ NOT NULL,
 
     /* data about the target from the targets.json role */
     target_name STRING(512) NOT NULL,
