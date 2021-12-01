@@ -42,4 +42,4 @@ mode = "stderr-terminal"
 
 [updates]
 # If not present, accessing the TUF updates repository will fail
-#tuf_trusted_root = ""
+#tuf_trusted_root = "/opt/oxide/nexus/pkg/root.json"
