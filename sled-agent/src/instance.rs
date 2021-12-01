@@ -242,10 +242,14 @@ impl InstanceInner {
     }
 
     async fn ensure(
-        &self,
-        guest_nics: &Vec<Vnic>,
+        &mut self,
+        instance: Instance,
+        ticket: InstanceTicket,
+        setup: PropolisSetup,
         migrate: Option<InstanceMigrateParams>,
     ) -> Result<(), Error> {
+        let PropolisSetup { client, control_nic, guest_nics } = setup;
+
         // TODO: Store slot in NetworkInterface, make this more stable.
         let nics = self
             .requested_nics
@@ -273,12 +277,27 @@ impl InstanceInner {
         };
 
         info!(self.log, "Sending ensure request to propolis: {:?}", request);
-        self.running_state
-            .as_ref()
-            .expect("Propolis client should be initialized before usage")
-            .client
-            .instance_ensure(&request)
-            .await?;
+        client.instance_ensure(&request).await?;
+
+        // Monitor propolis for state changes in the background.
+        let monitor_task = Some(tokio::task::spawn(async move {
+            let r = instance.monitor_state_task().await;
+            let log = &instance.inner.lock().await.log;
+            match r {
+                Err(e) => warn!(log, "State monitoring task failed: {}", e),
+                Ok(()) => info!(log, "State monitoring task complete"),
+            }
+        }));
+
+        self.running_state =
+            Some(RunningState { client, ticket, monitor_task });
+
+        // Store the VNICs while the instance is running.
+        self.allocated_nics = guest_nics
+            .into_iter()
+            .chain(std::iter::once(control_nic))
+            .collect();
+
         Ok(())
     }
 
@@ -509,33 +528,11 @@ impl Instance {
         let mut inner = self.inner.lock().await;
 
         // Create the propolis zone and resources
-        let PropolisSetup { client, control_nic, guest_nics } =
-            self.setup_propolis_locked(&mut inner).await?;
-
-        inner.running_state =
-            Some(RunningState { client, ticket, monitor_task: None });
+        let setup = self.setup_propolis_locked(&mut inner).await?;
 
         // Ensure the instance exists in the Propolis Server before we start
         // using it.
-        inner.ensure(&guest_nics, None).await?;
-
-        // Monitor propolis for state changes in the background.
-        let self_clone = self.clone();
-        inner.running_state.as_mut().unwrap().monitor_task =
-            Some(tokio::task::spawn(async move {
-                let r = self_clone.monitor_state_task().await;
-                let log = &self_clone.inner.lock().await.log;
-                match r {
-                    Err(e) => warn!(log, "State monitoring task failed: {}", e),
-                    Ok(()) => info!(log, "State monitoring task complete"),
-                }
-            }));
-
-        // Store the VNICs while the instance is running.
-        inner.allocated_nics = guest_nics
-            .into_iter()
-            .chain(std::iter::once(control_nic))
-            .collect();
+        inner.ensure(self.clone(), ticket, setup, None).await?;
 
         Ok(())
     }
@@ -578,32 +575,10 @@ impl Instance {
         };
 
         // Create our new propolis zone and resources
-        let PropolisSetup { client, control_nic, guest_nics } =
-            self.setup_propolis_locked(&mut inner).await?;
-
-        inner.running_state =
-            Some(RunningState { client, ticket, monitor_task: None });
+        let setup = self.setup_propolis_locked(&mut inner).await?;
 
         // Migrate from the src propolis and ensure the new instance exists
-        inner.ensure(&guest_nics, Some(params)).await?;
-
-        // Monitor propolis for state changes in the background.
-        let self_clone = self.clone();
-        inner.running_state.as_mut().unwrap().monitor_task =
-            Some(tokio::task::spawn(async move {
-                let r = self_clone.monitor_state_task().await;
-                let log = &self_clone.inner.lock().await.log;
-                match r {
-                    Err(e) => warn!(log, "State monitoring task failed: {}", e),
-                    Ok(()) => info!(log, "State monitoring task complete"),
-                }
-            }));
-
-        // Store the VNICs while the instance is running.
-        inner.allocated_nics = guest_nics
-            .into_iter()
-            .chain(std::iter::once(control_nic))
-            .collect();
+        inner.ensure(self.clone(), ticket, setup, Some(params)).await?;
 
         Ok(())
     }
