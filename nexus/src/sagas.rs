@@ -55,17 +55,13 @@ use uuid::Uuid;
  */
 pub const SAGA_INSTANCE_CREATE_NAME: &'static str = "instance-create";
 pub const SAGA_INSTANCE_MIGRATE_NAME: &'static str = "instance-migrate";
-pub const SAGA_INSTANCE_MIGRATE_INPLACE_NAME: &'static str =
-    "instance-migrate-inplace";
 pub const SAGA_DISK_CREATE_NAME: &'static str = "disk-create";
 pub const SAGA_DISK_DELETE_NAME: &'static str = "disk-delete";
 lazy_static! {
     pub static ref SAGA_INSTANCE_CREATE_TEMPLATE: Arc<SagaTemplate<SagaInstanceCreate>> =
         Arc::new(saga_instance_create());
     pub static ref SAGA_INSTANCE_MIGRATE_TEMPLATE: Arc<SagaTemplate<SagaInstanceMigrate>> =
-        Arc::new(saga_instance_migrate(MigrateType::Sled));
-    pub static ref SAGA_INSTANCE_MIGRATE_INPLACE_TEMPLATE: Arc<SagaTemplate<SagaInstanceMigrate>> =
-        Arc::new(saga_instance_migrate(MigrateType::InPlace));
+        Arc::new(saga_instance_migrate());
     pub static ref SAGA_DISK_CREATE_TEMPLATE: Arc<SagaTemplate<SagaDiskCreate>> =
         Arc::new(saga_disk_create());
     pub static ref SAGA_DISK_DELETE_TEMPLATE: Arc<SagaTemplate<SagaDiskDelete>> =
@@ -88,11 +84,6 @@ fn all_templates(
         (
             SAGA_INSTANCE_MIGRATE_NAME,
             Arc::clone(&SAGA_INSTANCE_MIGRATE_TEMPLATE)
-                as Arc<dyn SagaTemplateGeneric<Arc<SagaContext>>>,
-        ),
-        (
-            SAGA_INSTANCE_MIGRATE_INPLACE_NAME,
-            Arc::clone(&SAGA_INSTANCE_MIGRATE_INPLACE_TEMPLATE)
                 as Arc<dyn SagaTemplateGeneric<Arc<SagaContext>>>,
         ),
         (
@@ -375,24 +366,8 @@ impl SagaType for SagaInstanceMigrate {
     type ExecContextType = Arc<SagaContext>;
 }
 
-#[derive(Copy, Clone, Debug, Deserialize, Serialize)]
-pub enum MigrateType {
-    /// Migrate to a new propolis instance on a different sled
-    Sled,
-    /// Migrate to a new propolis instance on the same sled
-    InPlace,
-}
-
-pub fn saga_instance_migrate(
-    migrate_type: MigrateType,
-) -> SagaTemplate<SagaInstanceMigrate> {
+pub fn saga_instance_migrate() -> SagaTemplate<SagaInstanceMigrate> {
     let mut template_builder = SagaTemplateBuilder::new();
-
-    template_builder.append(
-        "migrate_type",
-        "MigrateType",
-        new_action_noop_undo(move |_| futures::future::ok(migrate_type)),
-    );
 
     template_builder.append(
         "dst_propolis_id",
