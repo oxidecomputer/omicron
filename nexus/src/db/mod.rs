@@ -15,6 +15,7 @@ mod pool;
 mod saga_recovery;
 mod saga_types;
 mod sec_store;
+mod subnet_allocation;
 mod update_and_check;
 
 #[cfg(test)]
