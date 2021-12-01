@@ -32,7 +32,7 @@ pub const EXIT_USAGE: u32 = 2;
  * This is important because a bug might actually cause this test to start one
  * of the servers and run it indefinitely.
  */
-const TIMEOUT: Duration = Duration::from_millis(10000);
+const TIMEOUT: Duration = Duration::from_millis(60000);
 
 pub fn path_to_executable(cmd_name: &str) -> PathBuf {
     let mut rv = PathBuf::from(cmd_name);
@@ -79,7 +79,7 @@ pub fn run_command(exec: Exec) -> (ExitStatus, String, String) {
         .unwrap_or_else(|_| panic!("failed to start command: {}", cmdline));
 
     let exit_status = subproc
-        .wait_timeout(TIMEOUT)
+        .wait_timeout(timeout)
         .unwrap_or_else(|_| panic!("failed to wait for command: {}", cmdline))
         .unwrap_or_else(|| {
             panic!(
