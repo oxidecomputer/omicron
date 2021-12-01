@@ -92,52 +92,66 @@ impl InstanceManager {
 
         let (instance, maybe_instance_ticket) = {
             let mut instances = self.inner.instances.lock().unwrap();
-            if let Some(instance) = instances.get_mut(&instance_id) {
-                // Instance already exists.
-                info!(&self.inner.log, "instance already exists");
-                (instance.clone(), None)
-            } else {
-                // Instance does not exist - create it.
-                info!(&self.inner.log, "new instance");
-                let instance_log = self
-                    .inner
-                    .log
-                    .new(o!("instance" => instance_id.to_string()));
-                instances.insert(
-                    instance_id,
-                    Instance::new(
-                        instance_log,
+            match instances.get_mut(&instance_id) {
+                Some(instance) if migrate.is_none() => {
+                    // Instance already exists and we're not performing a migration
+                    info!(&self.inner.log, "instance already exists");
+                    (instance.clone(), None)
+                }
+                _ => {
+                    // Instance does not exist or one does but we're performing
+                    // a intra-sled migration. Either way - create an instance
+                    info!(&self.inner.log, "new instance");
+                    let instance_log = self
+                        .inner
+                        .log
+                        .new(o!("instance" => instance_id.to_string()));
+                    let old_instance = instances.insert(
                         instance_id,
-                        self.inner.nic_id_allocator.clone(),
-                        initial_hardware.clone(),
-                        self.inner.vlan,
-                        self.inner.nexus_client.clone(),
-                    )?,
-                );
-                let instance = instances.get_mut(&instance_id).unwrap().clone();
-                let ticket =
-                    Some(InstanceTicket::new(instance_id, self.inner.clone()));
-                (instance, ticket)
+                        Instance::new(
+                            instance_log,
+                            instance_id,
+                            self.inner.nic_id_allocator.clone(),
+                            initial_hardware,
+                            self.inner.vlan,
+                            self.inner.nexus_client.clone(),
+                        )?,
+                    );
+                    if let Some(old_instance) = old_instance {
+                        // If we had a previous instance, we must be migrating
+                        assert!(migrate.is_some());
+                        // TODO: assert that old_instance.inner.propolis_id() == migrate.src_uuid
+
+                        // We forget the old instance because otherwise if it is the last
+                        // handle, the `InstanceTicket` it holds will also be dropped.
+                        // `InstanceTicket::drop` will try to remove the corresponding
+                        // instance from the instance manager. It does this based off the
+                        // instance's ID. Given that we just replaced said instance using
+                        // the same ID, that would inadvertantly remove our newly created
+                        // instance instead.
+                        // TODO: cleanup source instance properly
+                        std::mem::forget(old_instance);
+                    }
+
+                    let instance =
+                        instances.get_mut(&instance_id).unwrap().clone();
+                    let ticket = Some(InstanceTicket::new(
+                        instance_id,
+                        self.inner.clone(),
+                    ));
+                    (instance, ticket)
+                }
             }
         };
+
         // If we created a new instance, start or migrate it - but do so outside
         // the "instances" lock, since initialization may take a while.
         //
         // Additionally, this makes it possible to manage the "instance_ticket",
         // which might need to grab the lock to remove the instance during
         // teardown.
-        if let Some(migrate_params) = migrate {
-            // The instance we need to ensure exists is being migrated
-            // from an existing instance.
-            instance
-                .migrate(
-                    initial_hardware,
-                    maybe_instance_ticket,
-                    migrate_params,
-                )
-                .await?;
-        } else if let Some(instance_ticket) = maybe_instance_ticket {
-            instance.start(instance_ticket).await?;
+        if let Some(instance_ticket) = maybe_instance_ticket {
+            instance.start(instance_ticket, migrate).await?;
         }
 
         instance.transition(target).await.map_err(|e| e.into())
@@ -157,9 +171,10 @@ impl InstanceTicket {
         InstanceTicket { id, inner: Some(inner) }
     }
 
-    // Creates a null ticket that does nothing.
+    // (Test-only) Creates a null ticket that does nothing.
     //
     // Useful when testing instances without the an entire instance manager.
+    #[cfg(test)]
     pub(crate) fn null(id: Uuid) -> Self {
         InstanceTicket { id, inner: None }
     }
@@ -266,7 +281,7 @@ mod test {
             let mut inst = MockInstance::default();
             inst.expect_clone().return_once(move || {
                 let mut inst = MockInstance::default();
-                inst.expect_start().return_once(move |t| {
+                inst.expect_start().return_once(move |t, _| {
                     // Grab hold of the ticket, so we don't try to remove the
                     // instance immediately after "start" completes.
                     let mut ticket_guard = ticket_clone.lock().unwrap();
@@ -335,7 +350,7 @@ mod test {
             inst.expect_clone().times(1).in_sequence(&mut seq).return_once(
                 move || {
                     let mut inst = MockInstance::default();
-                    inst.expect_start().return_once(move |t| {
+                    inst.expect_start().return_once(move |t, _| {
                         let mut ticket_guard = ticket_clone.lock().unwrap();
                         *ticket_guard = Some(t);
                         Ok(())

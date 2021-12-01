@@ -349,12 +349,10 @@ mockall::mock! {
             vlan: Option<VlanID>,
             nexus_client: Arc<NexusClient>,
         ) -> Result<Self, Error>;
-        pub async fn start(&self, ticket: InstanceTicket) -> Result<(), Error>;
-        pub async fn migrate(
+        pub async fn start(
             &self,
-            initial_hardware: InstanceHardware,
-            ticket: Option<InstanceTicket>,
-            params: InstanceMigrateParams
+            ticket: InstanceTicket,
+            migrate: Option<InstanceMigrateParams>,
         ) -> Result<(), Error>;
         pub async fn transition(
             &self,
@@ -524,7 +522,11 @@ impl Instance {
     }
 
     /// Begins the execution of the instance's service (Propolis).
-    pub async fn start(&self, ticket: InstanceTicket) -> Result<(), Error> {
+    pub async fn start(
+        &self,
+        ticket: InstanceTicket,
+        migrate: Option<InstanceMigrateParams>,
+    ) -> Result<(), Error> {
         let mut inner = self.inner.lock().await;
 
         // Create the propolis zone and resources
@@ -532,57 +534,7 @@ impl Instance {
 
         // Ensure the instance exists in the Propolis Server before we start
         // using it.
-        inner.ensure(self.clone(), ticket, setup, None).await?;
-
-        Ok(())
-    }
-
-    // TODO: add test exercising migrate
-    #[cfg_attr(test, allow(dead_code))]
-    pub async fn migrate(
-        &self,
-        initial_hardware: InstanceHardware,
-        ticket: Option<InstanceTicket>,
-        params: InstanceMigrateParams,
-    ) -> Result<(), Error> {
-        let mut inner = self.inner.lock().await;
-
-        let ticket = if *inner.propolis_id() == params.src_propolis_uuid {
-            // This is an in-place migration
-
-            let mut state =
-                inner.running_state.take().expect("missing running state");
-
-            // Clear off the previous propolis' monitor task
-            if let Some(task) = state.monitor_task.take() {
-                task.abort();
-            }
-
-            // Replace propolis properties with new values
-            inner.properties.id = initial_hardware.runtime.propolis_uuid;
-
-            // TODO: clean up previously allocated vNICs.
-            // For now we just forget them so they don't disappear before the
-            // migration is completed.
-            let old_nics =
-                std::mem::replace(&mut inner.allocated_nics, vec![]);
-            std::mem::forget(old_nics);
-
-            // Grab the InstanceTicket to reuse for the new propolis
-            std::mem::replace(
-                &mut state.ticket,
-                InstanceTicket::null(Uuid::nil()),
-            )
-        } else {
-            // This is a completely different sled so we should have the InstanceTicket passed in
-            ticket.expect("no instance ticket")
-        };
-
-        // Create our new propolis zone and resources
-        let setup = self.setup_propolis_locked(&mut inner).await?;
-
-        // Migrate from the src propolis and ensure the new instance exists
-        inner.ensure(self.clone(), ticket, setup, Some(params)).await?;
+        inner.ensure(self.clone(), ticket, setup, migrate).await?;
 
         Ok(())
     }
@@ -1004,7 +956,7 @@ mod test {
         );
 
         // This invocation triggers all the aforementioned expectations.
-        inst.start(ticket).await.unwrap();
+        inst.start(ticket, None).await.unwrap();
     }
 
     // Returns a future which resolves when a state transition is reached.
