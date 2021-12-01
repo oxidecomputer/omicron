@@ -124,7 +124,6 @@ impl InstanceManager {
         if let Some(migrate_params) = migrate {
             // The instance we need to ensure exists is being migrated
             // from an existing instance.
-            // TODO: transition to target?
             instance
                 .migrate(
                     initial_hardware,
