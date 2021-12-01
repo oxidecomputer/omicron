@@ -7,6 +7,7 @@
 
 use crate::histogram;
 use crate::traits;
+use crate::Producer;
 use bytes::Bytes;
 use chrono::{DateTime, Utc};
 use num_traits::{One, Zero};
@@ -581,7 +582,7 @@ impl Sample {
     }
 }
 
-type ProducerList = Vec<Box<dyn crate::Producer>>;
+type ProducerList = Vec<Box<dyn Producer>>;
 pub type ProducerResults = Vec<Result<BTreeSet<Sample>, Error>>;
 
 /// The `ProducerRegistry` is a centralized collection point for metrics in consumer code.
@@ -611,7 +612,7 @@ impl ProducerRegistry {
     /// Add a new [`Producer`] object to the registry.
     pub fn register_producer<P>(&self, producer: P) -> Result<(), Error>
     where
-        P: crate::Producer,
+        P: Producer,
     {
         self.producers.lock().unwrap().push(Box::new(producer));
         Ok(())
@@ -621,7 +622,7 @@ impl ProducerRegistry {
     ///
     /// This method returns a vector of results, one from each producer. If the producer generates
     /// an error, that's propagated here. Successfully produced samples are returned in a set,
-    /// ordered by the [`types::Sample::cmp`] method.
+    /// ordered by the [`Sample::cmp`] method.
     pub fn collect(&self) -> ProducerResults {
         let mut producers = self.producers.lock().unwrap();
         let mut results = Vec::with_capacity(producers.len());
