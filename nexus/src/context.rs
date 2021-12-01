@@ -122,10 +122,11 @@ impl ServerContext {
                 .ok()
         };
 
-        // we don't want to fail outright yet, but we do want to try to make
-        // problems slightly easier to debug
+        // We don't want to fail outright yet, but we do want to try to make
+        // problems slightly easier to debug. The only way it's None is if
+        // current_dir() fails.
         if static_dir.is_none() {
-            println!("WARNING: no assets directory configured. All console page and asset requests will 404.");
+            error!(log, "No assets directory configured. All console page and asset requests will 404.");
         }
 
         // TODO: check that asset directory exists, check for particular assets
