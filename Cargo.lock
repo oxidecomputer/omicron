@@ -1851,9 +1851,9 @@ dependencies = [
 
 [[package]]
 name = "oso"
-version = "0.23.0"
+version = "0.24.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4b4a9939d99f534e1fb3da82bafd75700c0448d96c67bbbb2e2f71b98bf6db6b"
+checksum = "e3af15682bd0dcd0d6ee3ffb17644991c909560c86ec0e9e420b48797050eec5"
 dependencies = [
  "impl-trait-for-tuples",
  "lazy_static",
@@ -1867,9 +1867,9 @@ dependencies = [
 
 [[package]]
 name = "oso-derive"
-version = "0.23.0"
+version = "0.24.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2f0b65c690950395b643741e081d83b24d6f35954be9483f27619470c1c39d80"
+checksum = "54340ae5015a6c1a4da9dec9c14cfbdb8b3360d94fd0cdf8730f267b3da0597e"
 dependencies = [
  "quote",
  "syn",
@@ -2186,9 +2186,9 @@ checksum = "7c9b1041b4387893b91ee6746cddfc28516aff326a3519fb2adf820932c5e6cb"
 
 [[package]]
 name = "polar-core"
-version = "0.23.0"
+version = "0.24.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f761b5f02567ab5b0f239740d35421cbf7b82b34aa533284f8c3333b42239c8e"
+checksum = "16888ba25e546f502c016be622a847f32626fc2e3c87d0314a221ed07fa51636"
 dependencies = [
  "indoc",
  "js-sys",
@@ -3737,9 +3737,9 @@ dependencies = [
 
 [[package]]
 name = "tracing-subscriber"
-version = "0.2.25"
+version = "0.3.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0e0d2eaa99c3c2e41547cfa109e910a68ea03823cccad4a0525dcbc9b01e8c71"
+checksum = "245da694cc7fc4729f3f418b304cb57789f1bed2a78c575407ab8a23f53cb4d3"
 dependencies = [
  "sharded-slab",
  "thread_local",
