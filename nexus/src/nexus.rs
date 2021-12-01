@@ -1981,10 +1981,8 @@ impl Nexus {
     fn as_rack(&self) -> db::model::Rack {
         db::model::Rack {
             identity: self.api_rack_identity.clone(),
-            // FIXME your username is embedded in a path ya dingus
-            tuf_metadata_base_url: "file:///home/iliana/tuf/metadata"
-                .to_string(),
-            tuf_targets_base_url: "file:///home/iliana/tuf/targets".to_string(),
+            tuf_metadata_base_url: "http://localhost:8000/metadata".to_string(),
+            tuf_targets_base_url: "http://localhost:8000/targets".to_string(),
         }
     }
 
