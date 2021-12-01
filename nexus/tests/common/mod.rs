@@ -101,7 +101,7 @@ pub async fn test_setup_with_config(
     let clickhouse = dev::clickhouse::ClickHouseInstance::new(0).await.unwrap();
 
     config.database.url = database.pg_config().clone();
-    let server = omicron_nexus::Server::start(&config, &rack_id, &logctx.log)
+    let server = omicron_nexus::Server::start(&config, rack_id, &logctx.log)
         .await
         .unwrap();
     let testctx_external = ClientTestContext::new(

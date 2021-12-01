@@ -40,7 +40,7 @@ pub struct ConsoleConfig {
     pub session_absolute_timeout_minutes: u32,
 }
 
-#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]
 pub struct UpdatesConfig {
     /** Trusted root.json role for the TUF updates repository. If `None`, accessing the TUF
      * repository will fail. */
@@ -67,6 +67,7 @@ pub struct Config {
     /** Authentication-related configuration */
     pub authn: AuthnConfig,
     /** Updates-related configuration */
+    #[serde(default)]
     pub updates: UpdatesConfig,
 }
 
@@ -173,7 +174,7 @@ impl Config {
 mod test {
     use super::{
         AuthnConfig, Config, ConsoleConfig, LoadError, LoadErrorKind,
-        SchemeName,
+        SchemeName, UpdatesConfig,
     };
     use crate::db;
     use dropshot::ConfigDropshot;
@@ -339,6 +340,7 @@ mod test {
                         .parse()
                         .unwrap()
                 },
+                updates: UpdatesConfig { tuf_trusted_root: None },
             }
         );
 
