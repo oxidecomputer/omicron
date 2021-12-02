@@ -1,0 +1,27 @@
+[package]
+name = "omicron-package"
+version = "0.1.0"
+edition = "2018"
+license = "MPL-2.0"
+
+[dependencies]
+anyhow = "1.0"
+omicron-common = { path = "../common" }
+propolis-server = { git = "https://github.com/oxidecomputer/propolis", rev = "00ec8cf18f6a2311b0907f0b16b0ff8a327944d1" }
+rayon = "1.5"
+reqwest = { version = "0.11", default-features = false, features = ["rustls-tls"] }
+serde = { version = "1.0", features = [ "derive" ] }
+serde_derive = "1.0"
+smf = "0.2"
+structopt = "0.3"
+tar = "0.4"
+thiserror = "1.0"
+tokio = { version = "1.14", features = [ "full" ] }
+toml = "0.5.6"
+walkdir = "2.3"
+
+# Disable doc builds by default for our binaries to work around issue
+# rust-lang/cargo#8373.  These docs would not be very useful anyway.
+[[bin]]
+name = "omicron-package"
+doc = false
