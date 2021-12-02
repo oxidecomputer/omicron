@@ -334,12 +334,13 @@ impl Zones {
     /// Identical to [`Self::get`], but filters out "base" zones.
     pub fn get_non_base_zones() -> Result<Vec<zone::Zone>, Error> {
         Self::get().map(|zones| {
-            zones.into_iter().filter(|z| {
-                match z.name() {
+            zones
+                .into_iter()
+                .filter(|z| match z.name() {
                     PROPOLIS_BASE_ZONE | STORAGE_BASE_ZONE => false,
                     _ => true,
-                }
-            }).collect()
+                })
+                .collect()
         })
     }
 
