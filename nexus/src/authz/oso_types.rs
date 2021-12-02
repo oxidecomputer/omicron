@@ -6,8 +6,7 @@
 
 // Most of the types here are used in the Polar configuration, which means they
 // must impl [`oso::PolarClass`].  There is a derive(PolarClass), but it's
-// pretty limited: it doesn't define an equality operator even when the type
-// itself impls PartialEq and Eq.  It also doesn't let you define methods.  We
+// pretty limited: It also doesn't let you define methods.  We
 // may want to define our own macro(s) to avoid having to impl this by hand
 // everywhere.
 //
@@ -125,6 +124,7 @@ impl fmt::Display for Perm {
 /// unauthenticated actor) for Polar
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct AnyActor {
+    #[polar(attribute)]
     authenticated: bool,
     actor_id: Option<Uuid>,
 }
@@ -133,10 +133,7 @@ impl oso::PolarClass for AnyActor {
     fn get_polar_class_builder() -> oso::ClassBuilder<Self> {
         oso::Class::builder()
             .name("AnyActor")
-            .set_equality_check(|a1: &AnyActor, a2: &AnyActor| a1 == a2)
-            .add_attribute_getter("authenticated", |a: &AnyActor| {
-                a.authenticated
-            })
+            .with_equality_check()
             .add_attribute_getter("authn_actor", |a: &AnyActor| {
                 a.actor_id.map(|actor_id| AuthenticatedActor { actor_id })
             })
@@ -195,9 +192,7 @@ impl AuthenticatedActor {
 impl oso::PolarClass for AuthenticatedActor {
     fn get_polar_class_builder() -> oso::ClassBuilder<Self> {
         oso::Class::builder()
-            .set_equality_check(
-                |a1: &AuthenticatedActor, a2: &AuthenticatedActor| a1 == a2,
-            )
+            .with_equality_check()
             .add_attribute_getter("id", |a: &AuthenticatedActor| {
                 a.actor_id.to_string()
             })
@@ -230,7 +225,7 @@ impl Fleet {
 
 impl oso::PolarClass for Fleet {
     fn get_polar_class_builder() -> oso::ClassBuilder<Self> {
-        oso::Class::builder().set_equality_check(|a1, a2| a1 == a2).add_method(
+        oso::Class::builder().with_equality_check().add_method(
             "has_role",
             |fleet: &Fleet, actor: AuthenticatedActor, role: String| {
                 actor.has_role_fleet(fleet, &role)
@@ -258,7 +253,7 @@ impl Organization {
 impl oso::PolarClass for Organization {
     fn get_polar_class_builder() -> oso::ClassBuilder<Self> {
         oso::Class::builder()
-            .set_equality_check(|a1, a2| a1 == a2)
+            .with_equality_check()
             .add_method(
                 "has_role",
                 |o: &Organization, actor: AuthenticatedActor, role: String| {
@@ -304,7 +299,7 @@ impl Project {
 impl oso::PolarClass for Project {
     fn get_polar_class_builder() -> oso::ClassBuilder<Self> {
         oso::Class::builder()
-            .set_equality_check(|a1, a2| a1 == a2)
+            .with_equality_check()
             .add_method(
                 "has_role",
                 |p: &Project, actor: AuthenticatedActor, role: String| {
@@ -350,7 +345,7 @@ impl ProjectChild {
 impl oso::PolarClass for ProjectChild {
     fn get_polar_class_builder() -> oso::ClassBuilder<Self> {
         oso::Class::builder()
-            .set_equality_check(|a1, a2| a1 == a2)
+            .with_equality_check()
             .add_method(
                 "has_role",
                 |pr: &ProjectChild, actor: AuthenticatedActor, role: String| {
