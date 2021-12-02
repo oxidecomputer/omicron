@@ -75,9 +75,9 @@ pub enum Action {
 
 impl oso::PolarClass for Action {
     fn get_polar_class_builder() -> oso::ClassBuilder<Self> {
-        oso::Class::builder()
-            .set_equality_check(|a1, a2| a1 == a2)
-            .add_method("to_perm", |a: &Action| {
+        oso::Class::builder().set_equality_check(|a1, a2| a1 == a2).add_method(
+            "to_perm",
+            |a: &Action| {
                 match a {
                     Action::Query => Perm::Query,
                     Action::Read => Perm::Read,
@@ -87,7 +87,8 @@ impl oso::PolarClass for Action {
                     Action::CreateChild => Perm::CreateChild,
                 }
                 .to_string()
-            })
+            },
+        )
     }
 }
 
