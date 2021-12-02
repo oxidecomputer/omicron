@@ -76,7 +76,6 @@ pub enum Action {
 impl oso::PolarClass for Action {
     fn get_polar_class_builder() -> oso::ClassBuilder<Self> {
         oso::Class::builder()
-            .name("Action")
             .set_equality_check(|a1, a2| a1 == a2)
             .add_method("to_perm", |a: &Action| {
                 match a {
@@ -124,7 +123,6 @@ impl fmt::Display for Perm {
 /// unauthenticated actor) for Polar
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct AnyActor {
-    #[polar(attribute)]
     authenticated: bool,
     actor_id: Option<Uuid>,
 }
@@ -132,8 +130,10 @@ pub struct AnyActor {
 impl oso::PolarClass for AnyActor {
     fn get_polar_class_builder() -> oso::ClassBuilder<Self> {
         oso::Class::builder()
-            .name("AnyActor")
             .with_equality_check()
+            .add_attribute_getter("authenticated", |a: &AnyActor| {
+                a.authenticated
+            })
             .add_attribute_getter("authn_actor", |a: &AnyActor| {
                 a.actor_id.map(|actor_id| AuthenticatedActor { actor_id })
             })
