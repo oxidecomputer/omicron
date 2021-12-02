@@ -62,3 +62,8 @@ doc = false
 [[bin]]
 name = "sled-agent"
 doc = false
+
+# TODO: Remove when rack secrets are generated dynamically
+[[bin]]
+name = "gen-trust-quorum-config"
+doc = false

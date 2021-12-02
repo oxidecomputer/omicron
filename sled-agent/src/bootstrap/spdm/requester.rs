@@ -38,7 +38,7 @@ impl Ctx {
         debug!(self.log, "Requester sending GET_VERSION");
         self.transport.send(data).await?;
 
-        let rsp = self.transport.recv(&self.log).await?;
+        let rsp = self.transport.recv().await?;
         debug!(self.log, "Requester received VERSION");
 
         state.handle_msg(&rsp[..], &mut self.transcript).map_err(|e| e.into())
@@ -66,7 +66,7 @@ impl Ctx {
             state.write_msg(&req, &mut self.buf, &mut self.transcript)?;
         self.transport.send(data).await?;
 
-        let rsp = self.transport.recv(&self.log).await?;
+        let rsp = self.transport.recv().await?;
         debug!(self.log, "Requester received CAPABILITIES");
         state.handle_msg(&rsp, &mut self.transcript).map_err(|e| e.into())
     }
@@ -100,7 +100,7 @@ impl Ctx {
         let data = state.write_msg(req, &mut self.buf, &mut self.transcript)?;
         self.transport.send(data).await?;
 
-        let rsp = self.transport.recv(&self.log).await?;
+        let rsp = self.transport.recv().await?;
         debug!(self.log, "Requester received ALGORITHMS");
 
         state
@@ -118,7 +118,10 @@ impl Ctx {
 /// header. Requesters and Responders are decoupled from whether the endpoint of
 /// a socket is a TCP client or server.
 #[allow(dead_code)]
-pub async fn run(log: Logger, transport: Transport) -> Result<(), SpdmError> {
+pub async fn run(
+    log: Logger,
+    transport: Transport,
+) -> Result<Transport, SpdmError> {
     let mut ctx = Ctx::new(log, transport);
 
     info!(ctx.log, "Requester starting version negotiation");
@@ -133,14 +136,12 @@ pub async fn run(log: Logger, transport: Transport) -> Result<(), SpdmError> {
     info!(ctx.log, "Requester completed negotiation phase");
     debug!(ctx.log, "Requester transcript: {:x?}", ctx.transcript.get());
 
-    Ok(())
+    Ok(ctx.transport)
 }
 
 #[cfg(test)]
 mod tests {
     use std::net::SocketAddr;
-
-    use slog::Drain;
     use tokio::net::{TcpListener, TcpStream};
 
     use super::super::responder;
@@ -148,24 +149,23 @@ mod tests {
 
     #[tokio::test]
     async fn negotiation() {
-        let decorator = slog_term::TermDecorator::new().build();
-        let drain = slog_term::FullFormat::new(decorator).build().fuse();
-        let drain = slog_async::Async::new(drain).build().fuse();
-        let log = slog::Logger::root(drain, o!("component" => "spdm"));
+        let log = omicron_test_utils::dev::test_slog_logger("negotiation");
         let log2 = log.clone();
+        let log3 = log.clone();
 
         let addr: SocketAddr = "127.0.0.1:9999".parse().unwrap();
         let listener = TcpListener::bind(addr.clone()).await.unwrap();
 
         let handle = tokio::spawn(async move {
             let (sock, _) = listener.accept().await.unwrap();
-            let transport = Transport::new(sock);
-            responder::run(log, transport).await.unwrap();
+            let log2 = log.clone();
+            let transport = Transport::new(sock, log);
+            responder::run(log2, transport).await.unwrap();
         });
 
         let sock = TcpStream::connect(addr).await.unwrap();
-        let transport = Transport::new(sock);
-        run(log2, transport).await.unwrap();
+        let transport = Transport::new(sock, log2);
+        run(log3, transport).await.unwrap();
 
         handle.await.unwrap();
     }

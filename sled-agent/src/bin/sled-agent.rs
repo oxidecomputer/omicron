@@ -77,6 +77,9 @@ enum Args {
         /// Optional list of zpools managed by Sled agent.
         #[structopt(long = "zpools", name = "zpools", parse(try_from_str))]
         zpools: Option<Vec<String>>,
+
+        #[structopt(name = "RACK_SECRET_DIR", parse(try_from_str))]
+        rack_secret_dir: String,
     },
 }
 
@@ -108,6 +111,7 @@ async fn do_run() -> Result<(), CmdError> {
             nexus_addr,
             vlan,
             zpools,
+            rack_secret_dir,
         } => {
             // Configure and run the Bootstrap server.
             let config = BootstrapConfig {
@@ -119,6 +123,7 @@ async fn do_run() -> Result<(), CmdError> {
                 log: ConfigLogging::StderrTerminal {
                     level: ConfigLoggingLevel::Info,
                 },
+                rack_secret_dir,
             };
             let boot_server = bootstrap_server::Server::start(&config)
                 .await

@@ -17,6 +17,9 @@ pub enum SpdmError {
 
     #[error("invalid state transition: expected {expected}, got {got}")]
     InvalidState { expected: &'static str, got: &'static str },
+
+    #[error("timeout")]
+    Timeout(#[from] tokio::time::error::Elapsed),
 }
 
 impl From<RequesterError> for SpdmError {

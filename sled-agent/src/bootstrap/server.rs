@@ -28,8 +28,10 @@ impl Server {
             "component" => "Agent",
             "server" => config.id.clone().to_string()
         ));
-        let bootstrap_agent =
-            Arc::new(Agent::new(ba_log).map_err(|e| e.to_string())?);
+        let bootstrap_agent = Arc::new(
+            Agent::new(ba_log, &config.rack_secret_dir)
+                .map_err(|e| e.to_string())?,
+        );
 
         let ba = Arc::clone(&bootstrap_agent);
         let dropshot_log = log.new(o!("component" => "dropshot"));

@@ -42,7 +42,7 @@
     when initializing the sled agent.
   -->
   <exec_method type='method' name='start'
-    exec='ctrun -l child -o noorphan,regent /opt/oxide/sled-agent/sled-agent run %{config/server_id} %{config/bootstrap_addr} %{config/server_addr} %{config/nexus_addr} &amp;'
+    exec='ctrun -l child -o noorphan,regent /opt/oxide/sled-agent/sled-agent run %{config/server_id} %{config/bootstrap_addr} %{config/server_addr} %{config/nexus_addr} %{config/rack_secret_dir} &amp;'
     timeout_seconds='0' />
   <exec_method type='method' name='stop' exec=':kill' timeout_seconds='0' />
 
@@ -51,6 +51,9 @@
     <propval name='bootstrap_addr' type='astring' value='[::]:12346' />
     <propval name='server_addr' type='astring' value='127.0.0.1:12345' />
     <propval name='nexus_addr' type='astring' value='127.0.0.1:12221' />
+    <!-- This is only temporary. Rack secrets will be generated dynamically and
+    shares distributed automatically in the future. -->
+    <propval name='rack_secret_dir' type='astring' value='/opt/oxide/sled-agent/pkg' />
   </property_group>
 
   <property_group name='startd' type='framework'>

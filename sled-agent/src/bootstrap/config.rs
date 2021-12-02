@@ -20,4 +20,8 @@ pub struct Config {
     pub id: Uuid,
     pub dropshot: ConfigDropshot,
     pub log: ConfigLogging,
+
+    /// Configuration of the rack secret
+    /// TODO: Remove this when rack secret initialization becomes dynamic
+    pub rack_secret_dir: String,
 }
