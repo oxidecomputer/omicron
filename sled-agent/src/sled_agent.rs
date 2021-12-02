@@ -94,7 +94,7 @@ impl SledAgent {
         // NOTE: Currently, we're removing these zones. In the future, we should
         // re-establish contact (i.e., if the Sled Agent crashed, but we wanted
         // to leave the running Zones intact).
-        let zones = Zones::get()?;
+        let zones = Zones::get_non_base_zones()?;
         for z in zones {
             warn!(log, "Deleting zone: {}", z.name());
             Zones::halt_and_remove(&log, z.name())?;
