@@ -26,7 +26,7 @@ libc = "0.2.108"
 macaddr = { version = "1.0.1", features = [ "serde_std" ]}
 mime_guess = "2.0.3"
 newtype_derive = "0.1.6"
-oso = "0.23"
+oso = "0.24"
 oximeter-client = { path = "../oximeter-client" }
 parse-display = "0.5.3"
 # See omicron-rpaths for more about the "pq-sys" dependency.
