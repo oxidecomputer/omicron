@@ -116,10 +116,10 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "title": "Array_of_Result_of_Set_of_Sample_or_Error",
+                  "title": "Array_of_Result_of_Array_of_Sample_or_Error",
                   "type": "array",
                   "items": {
-                    "$ref": "#/components/schemas/Result_of_Set_of_Sample_or_Error"
+                    "$ref": "#/components/schemas/Result_of_Array_of_Sample_or_Error"
                   }
                 }
               }
@@ -1389,7 +1389,7 @@
           "interval"
         ]
       },
-      "Result_of_Set_of_Sample_or_Error": {
+      "Result_of_Array_of_Sample_or_Error": {
         "oneOf": [
           {
             "type": "object",
@@ -1398,8 +1398,7 @@
                 "type": "array",
                 "items": {
                   "$ref": "#/components/schemas/Sample"
-                },
-                "uniqueItems": true
+                }
               }
             },
             "required": [
@@ -1437,10 +1436,6 @@
           "target": {
             "$ref": "#/components/schemas/FieldSet"
           },
-          "timeseries_key": {
-            "description": "The key of the timeseries this sample belongs to",
-            "type": "string"
-          },
           "timeseries_name": {
             "description": "The name of the timeseries this sample belongs to",
             "type": "string"
@@ -1450,7 +1445,6 @@
           "measurement",
           "metric",
           "target",
-          "timeseries_key",
           "timeseries_name"
         ]
       },

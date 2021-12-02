@@ -6,7 +6,10 @@
 
 use anyhow::Error;
 use mockall::mock;
-use nexus_client::types::{InstanceRuntimeState, SledAgentStartupInfo};
+use nexus_client::types::{
+    DatasetPutRequest, DatasetPutResponse, InstanceRuntimeState,
+    SledAgentStartupInfo, ZpoolPutRequest, ZpoolPutResponse,
+};
 use reqwest::Response;
 use slog::Logger;
 use uuid::Uuid;
@@ -28,5 +31,17 @@ mock! {
             &self,
             name: &str
         ) -> Result<Response, Error>;
+        pub async fn zpool_put(
+            &self,
+            sled_id: &Uuid,
+            zpool_id: &Uuid,
+            info: &ZpoolPutRequest,
+        ) -> Result<ZpoolPutResponse, Error>;
+        pub async fn dataset_put(
+            &self,
+            zpool_id: &Uuid,
+            dataset_id: &Uuid,
+            info: &DatasetPutRequest,
+        ) -> Result<DatasetPutResponse, Error>;
     }
 }

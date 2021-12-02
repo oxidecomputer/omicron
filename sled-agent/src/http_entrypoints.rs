@@ -10,6 +10,7 @@ use dropshot::{
     endpoint, ApiDescription, HttpError, HttpResponseOk, Path, RequestContext,
     TypedBody,
 };
+use omicron_common::api::external::Error;
 use omicron_common::api::internal::nexus::DiskRuntimeState;
 use omicron_common::api::internal::nexus::InstanceRuntimeState;
 use omicron_common::api::internal::sled_agent::InstanceEnsureBody;
@@ -58,7 +59,8 @@ async fn instance_put(
     let body_args = body.into_inner();
     Ok(HttpResponseOk(
         sa.instance_ensure(instance_id, body_args.initial, body_args.target)
-            .await?,
+            .await
+            .map_err(|e| Error::from(e))?,
     ))
 }
 
@@ -86,7 +88,8 @@ async fn disk_put(
             body_args.initial_runtime.clone(),
             body_args.target.clone(),
         )
-        .await?,
+        .await
+        .map_err(|e| Error::from(e))?,
     ))
 }
 
@@ -101,5 +104,7 @@ async fn update_artifact(
     let sa = rqctx.context();
     let artifact = artifact.into_inner();
 
-    Ok(HttpResponseOk(sa.update_artifact(&artifact).await?))
+    Ok(HttpResponseOk(
+        sa.update_artifact(&artifact).await.map_err(|e| Error::from(e))?,
+    ))
 }
