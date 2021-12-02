@@ -444,7 +444,7 @@ dependencies = [
 [[package]]
 name = "crucible"
 version = "0.0.1"
-source = "git+https://github.com/oxidecomputer/crucible?branch=main#9df1c1230f125e4ea20700d9f0630f90b18a3c70"
+source = "git+https://github.com/oxidecomputer/crucible?branch=main#cda0bf8b0fd8e53566d1918b4d14824103a1d410"
 dependencies = [
  "aes",
  "aes-gcm-siv",
@@ -474,7 +474,7 @@ dependencies = [
 [[package]]
 name = "crucible-common"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/crucible?branch=main#9df1c1230f125e4ea20700d9f0630f90b18a3c70"
+source = "git+https://github.com/oxidecomputer/crucible?branch=main#cda0bf8b0fd8e53566d1918b4d14824103a1d410"
 dependencies = [
  "anyhow",
  "serde",
@@ -488,7 +488,7 @@ dependencies = [
 [[package]]
 name = "crucible-protocol"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/crucible?branch=main#9df1c1230f125e4ea20700d9f0630f90b18a3c70"
+source = "git+https://github.com/oxidecomputer/crucible?branch=main#cda0bf8b0fd8e53566d1918b4d14824103a1d410"
 dependencies = [
  "anyhow",
  "bincode",
@@ -502,7 +502,7 @@ dependencies = [
 [[package]]
 name = "crucible-scope"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/crucible?branch=main#9df1c1230f125e4ea20700d9f0630f90b18a3c70"
+source = "git+https://github.com/oxidecomputer/crucible?branch=main#cda0bf8b0fd8e53566d1918b4d14824103a1d410"
 dependencies = [
  "anyhow",
  "futures",
@@ -1364,9 +1364,6 @@ name = "ipnet"
 version = "2.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "68f2d64f2edebec4ce84ad108148e67e1064789bee435edc5b60ad398714a3a9"
-dependencies = [
- "serde",
-]
 
 [[package]]
 name = "ipnetwork"
@@ -1722,7 +1719,6 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "api_identity",
- "async-trait",
  "backoff",
  "chrono",
  "dropshot",
@@ -1730,14 +1726,10 @@ dependencies = [
  "futures",
  "http",
  "hyper",
- "ipnet",
  "ipnetwork",
  "macaddr",
  "parse-display",
- "percent-encoding",
  "progenitor",
- "propolis-server",
- "rayon",
  "reqwest",
  "ring",
  "schemars",
@@ -1750,14 +1742,10 @@ dependencies = [
  "smf",
  "steno",
  "structopt",
- "tar",
- "tempfile",
  "thiserror",
  "tokio",
  "tokio-postgres",
- "toml",
  "uuid",
- "walkdir",
 ]
 
 [[package]]
@@ -1818,6 +1806,26 @@ dependencies = [
  "tokio-postgres",
  "toml",
  "uuid",
+]
+
+[[package]]
+name = "omicron-package"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "omicron-common",
+ "propolis-server",
+ "rayon",
+ "reqwest",
+ "serde",
+ "serde_derive",
+ "smf",
+ "structopt",
+ "tar",
+ "thiserror",
+ "tokio",
+ "toml",
+ "walkdir",
 ]
 
 [[package]]
