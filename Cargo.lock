@@ -1885,6 +1885,7 @@ dependencies = [
  "dropshot",
  "expectorate",
  "futures",
+ "http",
  "ipnetwork",
  "mockall",
  "nexus-client",

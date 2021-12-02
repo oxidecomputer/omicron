@@ -10,6 +10,7 @@ use nexus_client::types::{
     DatasetPutRequest, DatasetPutResponse, InstanceRuntimeState,
     SledAgentStartupInfo, ZpoolPutRequest, ZpoolPutResponse,
 };
+use reqwest::Response;
 use slog::Logger;
 use uuid::Uuid;
 
@@ -26,6 +27,10 @@ mock! {
             id: &Uuid,
             new_runtime_state: &InstanceRuntimeState,
         ) -> Result<(), Error>;
+        pub async fn cpapi_artifact_download(
+            &self,
+            name: &str
+        ) -> Result<Response, Error>;
         pub async fn zpool_put(
             &self,
             sled_id: &Uuid,

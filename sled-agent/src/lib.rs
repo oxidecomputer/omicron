@@ -28,6 +28,7 @@ mod running_zone;
 pub mod server;
 mod sled_agent;
 mod storage_manager;
+mod updates;
 mod vnic;
 
 #[cfg(test)]

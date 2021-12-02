@@ -63,6 +63,7 @@ use sled_agent_client::Client as SledAgentClient;
 use slog::Logger;
 use std::convert::TryInto;
 use std::net::SocketAddr;
+use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
 use steno::SagaId;
@@ -102,6 +103,8 @@ pub trait TestInterfaces {
         session: db::model::ConsoleSession,
     ) -> CreateResult<db::model::ConsoleSession>;
 }
+
+pub static BASE_ARTIFACT_DIR: &str = "/var/tmp/oxide_artifacts";
 
 /**
  * Manages an Oxide fleet -- the heart of the control plane
@@ -2299,6 +2302,90 @@ impl Nexus {
         }
 
         Ok(())
+    }
+
+    /// Downloads a file from within [`BASE_ARTIFACT_DIR`].
+    pub async fn download_artifact<P: AsRef<Path>>(
+        &self,
+        path: P,
+    ) -> Result<Vec<u8>, Error> {
+        let path = path.as_ref();
+        if !path.starts_with(BASE_ARTIFACT_DIR) {
+            return Err(Error::internal_error(
+                "Cannot access path outside artifact directory",
+            ));
+        }
+
+        if !path.exists() {
+            info!(
+                self.log,
+                "Accessing {} - needs to be downloaded",
+                path.display()
+            );
+            // If the artifact doesn't exist, we should download it.
+            //
+            // TODO: There also exists the question of "when should we *remove*
+            // things from BASE_ARTIFACT_DIR", which we should also resolve.
+            // Demo-quality solution could be "destroy it on boot" or something?
+            // (we aren't doing that yet).
+
+            let file_name = path.strip_prefix(BASE_ARTIFACT_DIR).unwrap();
+            match file_name.to_str().unwrap() {
+                // TODO: iliana if you're reading this,
+                // 1. I'm sorry
+                // 2. We should probably do something less bad here
+                //
+                // At the moment, the only file we "know" how to download is a
+                // testfile, which is pulled out of thin air. Realistically, we
+                // should pull this from the DB + query an external server.
+                // Happy to delete this as soon as we can.
+                "testfile" => {
+                    // We should only create the intermediate directories
+                    // after validating that this is a real artifact that
+                    // can (and should) be downloaded.
+                    if let Some(parent) = path.parent() {
+                        tokio::fs::create_dir_all(parent).await.map_err(|e| {
+                            Error::internal_error(
+                                &format!("Failed to create intermediate directory: {}", e)
+                            )
+                        })?;
+                    }
+                    tokio::fs::write(path, "testfile contents").await.map_err(
+                        |e| {
+                            Error::internal_error(&format!(
+                                "Failed to write file: {}",
+                                e
+                            ))
+                        },
+                    )?;
+                }
+                _ => {
+                    return Err(Error::not_found_other(
+                        ResourceType::DownloadArtifact,
+                        file_name.display().to_string(),
+                    ));
+                }
+            }
+        } else {
+            info!(self.log, "Accessing {} - already exists", path.display());
+        }
+
+        // TODO: These artifacts could be quite large - we should figure out how to
+        // stream this file back instead of holding it entirely in-memory in a
+        // Vec<u8>.
+        //
+        // Options:
+        // - RFC 7233 - "Range Requests" (is this HTTP/1.1 only?)
+        // https://developer.mozilla.org/en-US/docs/Web/HTTP/Range_requests
+        // - "Roll our own". See:
+        // https://stackoverflow.com/questions/20969331/standard-method-for-http-partial-upload-resume-upload
+        let body = tokio::fs::read(&path).await.map_err(|e| {
+            Error::internal_error(&format!(
+                "Cannot read artifact from filesystem: {}",
+                e
+            ))
+        })?;
+        Ok(body)
     }
 }
 
