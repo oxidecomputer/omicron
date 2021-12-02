@@ -200,6 +200,18 @@ $ cargo run --bin=sled-agent-sim -- $(uuidgen) 127.0.0.1:12345 127.0.0.1:12221
 Jun 02 12:21:50.989 INFO listening, local_addr: 127.0.0.1:12345, component: dropshot
 ----
 
+. `oximeter` is similar to `nexus`, requiring a configuration file. You can use `oximeter/collector/config.toml`, and the whole thing can be run with:
++
+[source,text]
+----
+$ cargo run --bin=nexus -- nexus/examples/config.toml
+Dec 02 18:00:01.062 INFO starting oximeter server
+Dec 02 18:00:01.062 DEBG creating ClickHouse client
+Dec 02 18:00:01.068 DEBG initializing ClickHouse database, component: clickhouse-client, collector_id: 1da65e5b-210c-4859-a7d7-200c1e659972, component: oximeter-agent
+Dec 02 18:00:01.093 DEBG registered endpoint, path: /producers, method: POST, local_addr: [::1]:12223, component: dropshot
+...
+----
+
 Once everything is up and running, you can use `curl` directly to hit either of the servers.  But it's easier to use the `oxapi_demo` wrapper (see below).
 
 == Docker image
