@@ -22,6 +22,7 @@ use dropshot::HttpResponseAccepted;
 use dropshot::HttpResponseCreated;
 use dropshot::HttpResponseDeleted;
 use dropshot::HttpResponseOk;
+use dropshot::HttpResponseUpdatedNoContent;
 use dropshot::Path;
 use dropshot::Query;
 use dropshot::RequestContext;
@@ -1140,7 +1141,7 @@ async fn project_vpcs_put_vpc(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<VpcPathParam>,
     updated_vpc: TypedBody<params::VpcUpdate>,
-) -> Result<HttpResponseOk<()>, HttpError> {
+) -> Result<HttpResponseUpdatedNoContent, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
     let path = path_params.into_inner();
@@ -1153,7 +1154,7 @@ async fn project_vpcs_put_vpc(
                 &updated_vpc.into_inner(),
             )
             .await?;
-        Ok(HttpResponseOk(()))
+        Ok(HttpResponseUpdatedNoContent())
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
@@ -1325,7 +1326,7 @@ async fn vpc_subnets_put_subnet(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<VpcSubnetPathParam>,
     subnet_params: TypedBody<params::VpcSubnetUpdate>,
-) -> Result<HttpResponseOk<()>, HttpError> {
+) -> Result<HttpResponseUpdatedNoContent, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
     let path = path_params.into_inner();
@@ -1339,7 +1340,7 @@ async fn vpc_subnets_put_subnet(
                 &subnet_params.into_inner(),
             )
             .await?;
-        Ok(HttpResponseOk(()))
+        Ok(HttpResponseUpdatedNoContent())
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
@@ -1561,7 +1562,7 @@ async fn vpc_routers_put_router(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<VpcRouterPathParam>,
     router_params: TypedBody<params::VpcRouterUpdate>,
-) -> Result<HttpResponseOk<()>, HttpError> {
+) -> Result<HttpResponseUpdatedNoContent, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
     let path = path_params.into_inner();
@@ -1575,7 +1576,7 @@ async fn vpc_routers_put_router(
                 &router_params.into_inner(),
             )
             .await?;
-        Ok(HttpResponseOk(()))
+        Ok(HttpResponseUpdatedNoContent())
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
@@ -1731,7 +1732,7 @@ async fn routers_routes_put_route(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<RouterRoutePathParam>,
     router_params: TypedBody<RouterRouteUpdateParams>,
-) -> Result<HttpResponseOk<()>, HttpError> {
+) -> Result<HttpResponseUpdatedNoContent, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
     let path = path_params.into_inner();
@@ -1746,7 +1747,7 @@ async fn routers_routes_put_route(
                 &router_params.into_inner(),
             )
             .await?;
-        Ok(HttpResponseOk(()))
+        Ok(HttpResponseUpdatedNoContent())
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
