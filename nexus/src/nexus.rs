@@ -2274,11 +2274,9 @@ impl Nexus {
             crate::updates::read_artifacts(&rack, &trust_root)
         })
         .await
-        // first, the JoinError:
-        .map_err(|e| Error::InternalError { internal_message: e.to_string() })?
-        // next, the boxed dyn Error:
+        .unwrap()
         .map_err(|e| Error::InternalError {
-            internal_message: e.to_string(),
+            internal_message: format!("error trying to refresh updates: {}", e),
         })?;
 
         // FIXME: if we hit an error in any of these database calls, the available artifact table
