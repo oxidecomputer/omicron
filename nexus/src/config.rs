@@ -303,6 +303,8 @@ mod test {
             level = "debug"
             path = "/nonexistent/path"
             if_exists = "fail"
+            [updates]
+            tuf_trusted_root = "/path/to/root.json"
             "##,
         )
         .unwrap();
@@ -340,7 +342,9 @@ mod test {
                         .parse()
                         .unwrap()
                 },
-                updates: UpdatesConfig { tuf_trusted_root: None },
+                updates: UpdatesConfig {
+                    tuf_trusted_root: Some(PathBuf::from("/path/to/root.json"))
+                },
             }
         );
 
