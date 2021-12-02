@@ -214,10 +214,19 @@ impl Vnic {
         let ip_cfg = opte_core::ioctl::IpConfig {
             // NOTE: OPTE has it's own Ipv4Addr, thus the into().
             private_ip: ip4.into(),
+            // This is lab config.
+            //
+            // gw_mac: opte_core::ether::EtherAddr::from(
+            //     [0xAA, 0x00, 0x04, 0x00, 0xFF, 0x01]
+            // ),
+            // gw_ip: "172.20.14.1".parse().unwrap(),
+
+            // This is home config.
             gw_mac: opte_core::ether::EtherAddr::from(
-                [0xAA, 0x00, 0x04, 0x00, 0xFF, 0x01]
+                [0x78, 0x23, 0xAE, 0x5D, 0x4F, 0x0D]
             ),
-            gw_ip: "172.20.14.1".parse().unwrap(),
+            gw_ip: "10.0.0.1".parse().unwrap(),
+
 	    snat: None,
         };
 

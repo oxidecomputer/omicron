@@ -1921,14 +1921,23 @@ impl JsonSchema for L4PortRange {
 /// hardware devices on a network.
 // NOTE: We're using the `macaddr` crate for the internal representation. But as with the `ipnet`,
 // this crate does not implement `JsonSchema`.
-#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Serialize)]
+#[derive(Clone, Copy, Debug, DeserializeFromStr, PartialEq, SerializeDisplay)]
 pub struct MacAddr(pub macaddr::MacAddr6);
 
+impl FromStr for MacAddr {
+     type Err = macaddr::ParseError;
+
+     fn from_str(s: &str) -> Result<Self, Self::Err> {
+         s.parse().map(|addr| MacAddr(addr))
+     }
+}
+
 impl TryFrom<String> for MacAddr {
-    type Error = macaddr::ParseError;
+    type Error = <Self as FromStr>::Err;
 
     fn try_from(s: String) -> Result<Self, Self::Error> {
-        s.parse().map(|addr| MacAddr(addr))
+        // s.parse().map(|addr| MacAddr(addr))
+        MacAddr::from_str(s.as_ref())
     }
 }
 
