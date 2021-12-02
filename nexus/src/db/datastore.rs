@@ -916,6 +916,39 @@ impl DataStore {
         Ok(result)
     }
 
+    /// Identify all VNICs connected to each Vpc
+    // TODO: how to name/where to put this
+    pub async fn resolve_vpcs_to_interfaces<T: IntoIterator<Item = Name>>(
+        &self,
+        project_id: &Uuid,
+        vpc_names: T,
+    ) -> Result<HashMap<Name, Vec<NetworkInterface>>, Error> {
+        use db::schema::{network_interface, vpc};
+        // TODO-performance: paginate the results of this query?
+        let interfaces = network_interface::table
+            .inner_join(vpc::table.on(vpc::id.eq(network_interface::vpc_id)))
+            .select((vpc::name, NetworkInterface::as_select()))
+            .filter(vpc::project_id.eq(*project_id))
+            .filter(vpc::name.eq_any(vpc_names))
+            .filter(network_interface::time_deleted.is_null())
+            .filter(vpc::time_deleted.is_null())
+            .get_results_async(self.pool())
+            .await
+            .map_err(|e| {
+                public_error_from_diesel_pool(
+                    e,
+                    ResourceType::Vpc,
+                    LookupType::Other("Resolving to interfaces".to_string()),
+                )
+            })?;
+        let mut result = HashMap::with_capacity(interfaces.len());
+        for (name, interface) in interfaces.into_iter() {
+            let entry = result.entry(name).or_insert(vec![]);
+            entry.push(interface);
+        }
+        Ok(result)
+    }
+
     /// Identify all subnets in use by each VpcSubnet
     // TODO: how to name/where to put this
     pub async fn resolve_subnets_to_ips<T: IntoIterator<Item = Name>>(
@@ -1709,9 +1742,7 @@ impl DataStore {
                 instance::table
                     .on(instance::id.eq(network_interface::instance_id)),
             )
-            .inner_join(
-                sled::table.on(sled::id.eq(instance::active_propolis_id)),
-            )
+            .inner_join(sled::table.on(sled::id.eq(instance::active_server_id)))
             .filter(network_interface::vpc_id.eq(*vpc_id))
             .filter(network_interface::time_deleted.is_null())
             .filter(instance::time_deleted.is_null())

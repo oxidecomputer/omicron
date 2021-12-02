@@ -1745,6 +1745,7 @@ impl Nexus {
         // Gather list of Instances and Subnets to resolve
         let mut instances = HashSet::new();
         let mut subnets = HashSet::new();
+        let mut vpcs = HashSet::new();
         for rule in rules {
             for target in &rule.targets {
                 match &target.0 {
@@ -1754,8 +1755,14 @@ impl Nexus {
                     external::VpcFirewallRuleTarget::Subnet(name) => {
                         subnets.insert(name.clone().into());
                     }
-                    // TODO: How do we resolve VPC targets?
-                    external::VpcFirewallRuleTarget::Vpc(name) => (),
+                    external::VpcFirewallRuleTarget::Vpc(name) => {
+                        if *name != vpc.name().0 {
+                            return Err(Error::InvalidRequest {
+                                message: "firewall target ".to_string(),
+                            });
+                        }
+                        vpcs.insert(name.clone().into());
+                    }
                 }
             }
 
@@ -1768,9 +1775,16 @@ impl Nexus {
                         subnets.insert(name.clone().into());
                     }
                     // We don't need to resolve anything for Ip
-                    external::VpcFirewallRuleHostFilter::Ip(addr) => (),
+                    external::VpcFirewallRuleHostFilter::Ip(_) => (),
                     // TODO: How do we resolve VPC targets?
-                    external::VpcFirewallRuleHostFilter::Vpc(name) => (),
+                    external::VpcFirewallRuleHostFilter::Vpc(name) => {
+                        if *name != vpc.name().0 {
+                            return Err(Error::InvalidRequest {
+                                message: "firewall target ".to_string(),
+                            });
+                        }
+                        vpcs.insert(name.clone().into());
+                    }
                     // TODO: How do we resolve InternetGateway targets?
                     external::VpcFirewallRuleHostFilter::InternetGateway(
                         name,
@@ -1807,6 +1821,15 @@ impl Nexus {
         let subnet_interfaces: HashMap<external::Name, Vec<NetworkInterface>> =
             self.db_datastore
                 .resolve_subnets_to_interfaces(vpc, subnets)
+                .await?
+                .into_iter()
+                .map(|(name, v)| {
+                    (name.0, v.into_iter().map(|iface| iface.into()).collect())
+                })
+                .collect();
+        let vpc_interfaces: HashMap<external::Name, Vec<NetworkInterface>> =
+            self.db_datastore
+                .resolve_vpcs_to_interfaces(&vpc.project_id, vpcs)
                 .await?
                 .into_iter()
                 .map(|(name, v)| {
@@ -1851,8 +1874,18 @@ impl Nexus {
                             targets.push(interface.into());
                         }
                     }
-                    // TODO: How do we resolve VPC targets?
-                    external::VpcFirewallRuleTarget::Vpc(_name) => (),
+                    external::VpcFirewallRuleTarget::Vpc(name) => {
+                        for interface in
+                            vpc_interfaces.get(&name).ok_or_else(|| {
+                                Error::not_found_by_name(
+                                    ResourceType::Vpc,
+                                    &name,
+                                )
+                            })?
+                        {
+                            targets.push(interface.into());
+                        }
+                    }
                 };
             }
 
@@ -1886,8 +1919,15 @@ impl Nexus {
                             external::VpcFirewallRuleHostFilter::Ip(addr) => {
                                 host_addrs.push(ipnetwork::IpNetwork::from(*addr).into());
                             }
-                            // TODO: How do we resolve VPC targets?
-                            external::VpcFirewallRuleHostFilter::Vpc(_name) => {
+                            external::VpcFirewallRuleHostFilter::Vpc(name) => {
+                                for interface in vpc_interfaces.get(&name).ok_or_else(|| {
+                                    Error::not_found_by_name(
+                                        ResourceType::Vpc,
+                                        &name,
+                                    )
+                                })? {
+                                    host_addrs.push(ipnetwork::IpNetwork::from(interface.ip).into());
+                                }
                             }
                             // TODO: How do we resolve InternetGateway targets?
                             external::VpcFirewallRuleHostFilter::InternetGateway(
