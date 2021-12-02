@@ -21,7 +21,7 @@ slog-async = "2.6"
 slog-term = "2.8"
 structopt = "0.3"
 thiserror = "1.0.30"
-tokio = "1.14"
+tokio = { version = "1.14", features = [ "rt-multi-thread", "macros" ] }
 uuid = { version = "0.8.2", features = [ "v4", "serde" ] }
 
 [dev-dependencies]

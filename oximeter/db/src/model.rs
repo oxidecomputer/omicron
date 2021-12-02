@@ -763,8 +763,6 @@ pub(crate) fn parse_field_select_row(
     row: &FieldSelectRow,
     schema: &TimeseriesSchema,
 ) -> (TimeseriesKey, Target, Metric) {
-    println!("{:#?}", row);
-    println!("{:#?}", schema.fields);
     assert_eq!(
         row.fields.len(),
         2 * schema.fields.len(),
