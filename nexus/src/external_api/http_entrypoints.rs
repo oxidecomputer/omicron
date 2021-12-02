@@ -1883,7 +1883,6 @@ async fn hardware_sleds_get_sled(
 }]
 async fn updates_refresh(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
-    // _query_params: Query<PaginatedById>,
 ) -> Result<HttpResponseOk<()>, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
