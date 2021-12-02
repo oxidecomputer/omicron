@@ -72,6 +72,10 @@ HARDWARE
 
     sleds_list
     sled_get     SLED_ID
+
+UPDATES
+
+    updates_refresh
 EOF
 )"
 
@@ -361,6 +365,11 @@ function cmd_sled_get
 {
 	[[ $# != 1 ]] && usage "expected SLED_ID"
 	do_curl "/hardware/sleds/$1"
+}
+
+function cmd_updates_refresh
+{
+	do_curl /updates/refresh -X POST
 }
 
 main "$@"
