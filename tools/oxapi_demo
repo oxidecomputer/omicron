@@ -1,4 +1,4 @@
-#!/usr/bin/bash
+#!/usr/bin/env bash
 
 #
 # oxapi_demo: wrapper around curl(1) to run basic requests against the Oxide API

@@ -60,8 +60,8 @@ pub struct ConsoleConfig {
     pub session_absolute_timeout: Duration,
     /** how long browsers can cache static assets */
     pub cache_control_max_age: Duration,
-    /** directory containing static assets */
-    pub assets_directory: Option<PathBuf>,
+    /** directory containing static file to serve */
+    pub static_dir: Option<PathBuf>,
 }
 
 impl ServerContext {
@@ -111,12 +111,23 @@ impl ServerContext {
             .register_producer(external_latencies.clone())
             .unwrap();
 
-        let assets_directory = env::var("CARGO_MANIFEST_DIR")
-            .map(|root| {
-                PathBuf::from(root)
-                    .join(config.console.assets_directory.to_owned())
-            })
-            .ok();
+        // Support both absolute and relative paths. If configured dir is
+        // absolute, use it directly. If not, assume it's relative to the
+        // current working directory.
+        let static_dir = if config.console.static_dir.is_absolute() {
+            Some(config.console.static_dir.to_owned())
+        } else {
+            env::current_dir()
+                .map(|root| root.join(config.console.static_dir.to_owned()))
+                .ok()
+        };
+
+        // We don't want to fail outright yet, but we do want to try to make
+        // problems slightly easier to debug. The only way it's None is if
+        // current_dir() fails.
+        if static_dir.is_none() {
+            error!(log, "No assets directory configured. All console page and asset requests will 404.");
+        }
 
         // TODO: check that asset directory exists, check for particular assets
         // like console index.html. leaving that out for now so we don't break
@@ -143,7 +154,7 @@ impl ServerContext {
                 session_absolute_timeout: Duration::minutes(
                     config.console.session_absolute_timeout_minutes.into(),
                 ),
-                assets_directory,
+                static_dir,
                 cache_control_max_age: Duration::minutes(
                     config.console.cache_control_max_age_minutes.into(),
                 ),
