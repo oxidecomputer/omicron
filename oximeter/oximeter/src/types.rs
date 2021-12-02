@@ -7,14 +7,13 @@
 
 use crate::histogram;
 use crate::traits;
+use crate::Producer;
 use bytes::Bytes;
 use chrono::{DateTime, Utc};
 use num_traits::{One, Zero};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::boxed::Box;
-use std::cmp::Ordering;
-use std::collections::BTreeSet;
 use std::fmt;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use std::ops::{Add, AddAssign};
@@ -24,7 +23,16 @@ use uuid::Uuid;
 
 /// The `FieldType` identifies the data type of a target or metric field.
 #[derive(
-    Clone, Copy, Debug, PartialEq, Eq, JsonSchema, Serialize, Deserialize,
+    Clone,
+    Copy,
+    Debug,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    JsonSchema,
+    Serialize,
+    Deserialize,
 )]
 pub enum FieldType {
     String,
@@ -57,7 +65,9 @@ impl_field_type_from! { Uuid, FieldType::Uuid }
 impl_field_type_from! { bool, FieldType::Bool }
 
 /// The `FieldValue` contains the value of a target or metric field.
-#[derive(Clone, Debug, PartialEq, Eq, JsonSchema, Serialize, Deserialize)]
+#[derive(
+    Clone, Debug, Hash, PartialEq, Eq, JsonSchema, Serialize, Deserialize,
+)]
 pub enum FieldValue {
     String(String),
     I64(i64),
@@ -176,7 +186,9 @@ where
 }
 
 /// A `Field` is a named aspect of a target or metric.
-#[derive(Clone, Debug, PartialEq, Eq, JsonSchema, Serialize, Deserialize)]
+#[derive(
+    Clone, Debug, Hash, PartialEq, Eq, JsonSchema, Serialize, Deserialize,
+)]
 pub struct Field {
     pub name: String,
     pub value: FieldValue,
@@ -229,6 +241,12 @@ impl DatumType {
                 | DatumType::HistogramI64
                 | DatumType::HistogramF64
         )
+    }
+}
+
+impl std::fmt::Display for DatumType {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        write!(f, "{:?}", self)
     }
 }
 
@@ -323,6 +341,12 @@ pub struct Measurement {
     timestamp: DateTime<Utc>,
     // The underlying data point for the metric
     datum: Datum,
+}
+
+impl PartialEq<&Measurement> for Measurement {
+    fn eq(&self, other: &&Measurement) -> bool {
+        self.timestamp.eq(&other.timestamp) && self.datum.eq(&other.datum)
+    }
 }
 
 impl Measurement {
@@ -481,9 +505,6 @@ pub struct Sample {
     /// The name of the timeseries this sample belongs to
     pub timeseries_name: String,
 
-    /// The key of the timeseries this sample belongs to
-    pub timeseries_key: String,
-
     // Target name and fields
     target: FieldSet,
 
@@ -504,35 +525,6 @@ impl PartialEq for Sample {
     }
 }
 
-impl Eq for Sample {}
-
-impl Ord for Sample {
-    /// Order two Samples.
-    ///
-    /// Samples are ordered by their target and metric keys, which include the field values of
-    /// those, and then by timestamps. Importantly, the _data_ is not used for ordering.
-    fn cmp(&self, other: &Sample) -> Ordering {
-        self.timeseries_key
-            .cmp(&other.timeseries_key)
-            .then(
-                self.measurement
-                    .timestamp()
-                    .cmp(&other.measurement.timestamp()),
-            )
-            .then(
-                self.measurement
-                    .start_time()
-                    .cmp(&other.measurement.start_time()),
-            )
-    }
-}
-
-impl PartialOrd for Sample {
-    fn partial_cmp(&self, other: &Sample) -> Option<Ordering> {
-        Some(self.cmp(other))
-    }
-}
-
 impl Sample {
     /// Construct a new sample.
     ///
@@ -545,7 +537,6 @@ impl Sample {
     {
         Self {
             timeseries_name: format!("{}:{}", target.name(), metric.name()),
-            timeseries_key: format!("{}:{}", target.key(), metric.key()),
             target: FieldSet::from_target(target),
             metric: FieldSet::from_metric(metric),
             measurement: metric.measure(),
@@ -581,8 +572,8 @@ impl Sample {
     }
 }
 
-type ProducerList = Vec<Box<dyn crate::Producer>>;
-pub type ProducerResults = Vec<Result<BTreeSet<Sample>, Error>>;
+type ProducerList = Vec<Box<dyn Producer>>;
+pub type ProducerResults = Vec<Result<Vec<Sample>, Error>>;
 
 /// The `ProducerRegistry` is a centralized collection point for metrics in consumer code.
 #[derive(Debug, Clone)]
@@ -611,7 +602,7 @@ impl ProducerRegistry {
     /// Add a new [`Producer`] object to the registry.
     pub fn register_producer<P>(&self, producer: P) -> Result<(), Error>
     where
-        P: crate::Producer,
+        P: Producer,
     {
         self.producers.lock().unwrap().push(Box::new(producer));
         Ok(())
@@ -621,7 +612,7 @@ impl ProducerRegistry {
     ///
     /// This method returns a vector of results, one from each producer. If the producer generates
     /// an error, that's propagated here. Successfully produced samples are returned in a set,
-    /// ordered by the [`types::Sample::cmp`] method.
+    /// ordered by the [`Sample::cmp`] method.
     pub fn collect(&self) -> ProducerResults {
         let mut producers = self.producers.lock().unwrap();
         let mut results = Vec::with_capacity(producers.len());
@@ -726,7 +717,6 @@ mod tests {
             sample.timeseries_name,
             format!("{}:{}", t.name(), m.name())
         );
-        assert_eq!(sample.timeseries_key, format!("{}:{}", t.key(), m.key()));
         assert!(sample.measurement.start_time().is_none());
         assert_eq!(sample.measurement.datum(), &Datum::from(1i64));
 

@@ -11,5 +11,7 @@ mod discovery;
 mod http_entrypoints;
 mod multicast;
 mod params;
+pub mod rack_secret;
 pub mod server;
+mod spdm;
 mod views;

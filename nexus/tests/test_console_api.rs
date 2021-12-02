@@ -5,10 +5,11 @@
 use dropshot::test_util::ClientTestContext;
 use http::header::HeaderName;
 use http::{header, method::Method, StatusCode};
+use std::env::current_dir;
 
 pub mod common;
 use common::http_testing::{RequestBuilder, TestResponse};
-use common::test_setup;
+use common::{load_test_config, test_setup, test_setup_with_config};
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_nexus::external_api::console_api::LoginParams;
 use omicron_nexus::external_api::params::OrganizationCreate;
@@ -173,6 +174,13 @@ async fn test_assets() {
             .await
             .expect("failed to 404 on nonexistent asset");
 
+    // existing file with disallowed extension 404s
+    let _ = RequestBuilder::new(&testctx, Method::GET, "/assets/blocked.ext")
+        .expect_status(Some(StatusCode::NOT_FOUND))
+        .execute()
+        .await
+        .expect("failed to 404 on disallowed extension");
+
     // symlink 404s
     let _ = RequestBuilder::new(&testctx, Method::GET, "/assets/a_symlink")
         .expect_status(Some(StatusCode::NOT_FOUND))
@@ -189,6 +197,23 @@ async fn test_assets() {
     assert_eq!(resp.body, "hello there".as_bytes());
 
     cptestctx.teardown().await;
+}
+
+#[tokio::test]
+async fn test_absolute_static_dir() {
+    let mut config = load_test_config();
+    config.console.static_dir = current_dir().unwrap().join("tests/static");
+    let cptestctx =
+        test_setup_with_config("test_absolute_static_dir", &mut config).await;
+    let testctx = &cptestctx.external_client;
+
+    // existing file is returned
+    let resp = RequestBuilder::new(&testctx, Method::GET, "/assets/hello.txt")
+        .execute()
+        .await
+        .expect("failed to get existing file");
+
+    assert_eq!(resp.body, "hello there".as_bytes());
 }
 
 fn get_header_value(resp: TestResponse, header_name: HeaderName) -> String {

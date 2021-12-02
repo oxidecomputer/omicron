@@ -7,6 +7,7 @@
 use super::client::types as bootstrap_types;
 use super::client::Client as BootstrapClient;
 use super::discovery;
+use super::spdm::SpdmError;
 use super::views::ShareResponse;
 use omicron_common::api::external::Error as ExternalError;
 use omicron_common::backoff::{
@@ -22,7 +23,7 @@ use std::path::Path;
 use tar::Archive;
 use thiserror::Error;
 
-const UNLOCK_THRESHOLD: usize = 2;
+const UNLOCK_THRESHOLD: usize = 1;
 const BOOTSTRAP_PORT: u16 = 12346;
 
 /// Describes errors which may occur while operating the bootstrap service.
@@ -45,6 +46,9 @@ pub enum BootstrapError {
 
     #[error("Error making HTTP request")]
     Api(#[from] anyhow::Error),
+
+    #[error("Error running SPDM protocol: {0}")]
+    Spdm(#[from] SpdmError),
 
     #[error("Not enough peers to unlock storage")]
     NotEnoughPeers,

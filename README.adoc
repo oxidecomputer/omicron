@@ -189,6 +189,7 @@ $ cargo run --bin=nexus -- nexus/examples/config.toml
 ...
 listening: http://127.0.0.1:12220
 ----
+Nexus can also serve the web console. Instructions for generating the static assets and pointing Nexus to them are https://github.com/oxidecomputer/console/blob/main/docs/serve-from-nexus.md[here]. Without console assets, Nexus will still start and run normally as an API. A few link:./nexus/src/external_api/console_api.rs[console-specific routes] will 404.
 
 . `sled-agent-sim` only accepts configuration on the command line.  Run it with a uuid identifying itself (this would be a uuid for the sled it's managing), an IP:port for itself, and the IP:port of `nexus`'s _internal_ interface.  Using default config, this might look like this:
 +
@@ -197,6 +198,18 @@ listening: http://127.0.0.1:12220
 $ cargo run --bin=sled-agent-sim -- $(uuidgen) 127.0.0.1:12345 127.0.0.1:12221
 ...
 Jun 02 12:21:50.989 INFO listening, local_addr: 127.0.0.1:12345, component: dropshot
+----
+
+. `oximeter` is similar to `nexus`, requiring a configuration file. You can use `oximeter/collector/config.toml`, and the whole thing can be run with:
++
+[source,text]
+----
+$ cargo run --bin=nexus -- nexus/examples/config.toml
+Dec 02 18:00:01.062 INFO starting oximeter server
+Dec 02 18:00:01.062 DEBG creating ClickHouse client
+Dec 02 18:00:01.068 DEBG initializing ClickHouse database, component: clickhouse-client, collector_id: 1da65e5b-210c-4859-a7d7-200c1e659972, component: oximeter-agent
+Dec 02 18:00:01.093 DEBG registered endpoint, path: /producers, method: POST, local_addr: [::1]:12223, component: dropshot
+...
 ----
 
 Once everything is up and running, you can use `curl` directly to hit either of the servers.  But it's easier to use the `oxapi_demo` wrapper (see below).

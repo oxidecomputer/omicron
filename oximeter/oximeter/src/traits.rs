@@ -81,12 +81,6 @@ pub trait Target {
             .map(|(name, value)| Field { name: name.to_string(), value })
             .collect()
     }
-
-    /// Return the key for this target.
-    ///
-    /// Targets are uniquely identified by the sequence of _values_ of their fields. These are
-    /// converted to strings and joined by the `":"` character.
-    fn key(&self) -> String;
 }
 
 /// The `Metric` trait identifies a measured feature of a target.
@@ -162,12 +156,6 @@ pub trait Metric {
             .map(|(name, value)| Field { name: name.to_string(), value })
             .collect()
     }
-
-    /// Return the key for this metric.
-    ///
-    /// Metrics are uniquely identified by the sequence of _values_ of their fields. These are
-    /// converted to strings and joined by the `":"` character.
-    fn key(&self) -> String;
 
     /// Return the data type of a measurement for this this metric.
     fn datum_type(&self) -> DatumType;
@@ -443,7 +431,6 @@ mod tests {
         let t = Targ { good: false, id: 2 };
 
         assert_eq!(t.name(), "targ");
-        assert_eq!(t.key(), "false:2");
         assert_eq!(t.field_names(), &["good", "id"]);
         assert_eq!(t.field_types(), &[FieldType::Bool, FieldType::I64]);
         assert_eq!(
@@ -456,7 +443,6 @@ mod tests {
     fn test_metric_trait() {
         let m = Met { good: false, id: 2, datum: 0 };
         assert_eq!(m.name(), "met");
-        assert_eq!(m.key(), "false:2");
         assert_eq!(m.field_names(), &["good", "id"]);
         assert_eq!(m.field_types(), &[FieldType::Bool, FieldType::I64]);
         assert_eq!(
@@ -473,7 +459,6 @@ mod tests {
         let m = Met { good: false, id: 2, datum: 0 };
         let mut p = Prod { target: t.clone(), metric: m.clone() };
         let sample = p.produce().unwrap().next().unwrap();
-        assert_eq!(sample.timeseries_key, format!("{}:{}", t.key(), m.key()));
         assert_eq!(
             sample.timeseries_name,
             format!("{}:{}", t.name(), m.name())
