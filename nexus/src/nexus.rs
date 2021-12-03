@@ -2399,9 +2399,13 @@ impl Nexus {
                     e
                 ))
             })?;
-            let mut file = tokio::fs::File::open(path).await.map_err(|e| {
-                Error::internal_error(&format!("Failed to open file: {}", e))
-            })?;
+            let mut file =
+                tokio::fs::File::create(path).await.map_err(|e| {
+                    Error::internal_error(&format!(
+                        "Failed to create file: {}",
+                        e
+                    ))
+                })?;
             while let Some(chunk) = response.chunk().await.map_err(|e| {
                 Error::internal_error(&format!(
                     "Failed to read HTTP body: {}",
