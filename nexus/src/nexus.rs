@@ -70,6 +70,7 @@ use steno::SagaId;
 use steno::SagaResultOk;
 use steno::SagaTemplate;
 use steno::SagaType;
+use tokio::io::AsyncWriteExt;
 use uuid::Uuid;
 
 // TODO: When referring to API types, we should try to include
@@ -2309,6 +2310,8 @@ impl Nexus {
         &self,
         path: P,
     ) -> Result<Vec<u8>, Error> {
+        let rack = self.as_rack();
+
         let path = path.as_ref();
         if !path.starts_with(BASE_ARTIFACT_DIR) {
             return Err(Error::internal_error(
@@ -2330,42 +2333,56 @@ impl Nexus {
             // (we aren't doing that yet).
 
             let file_name = path.strip_prefix(BASE_ARTIFACT_DIR).unwrap();
-            match file_name.to_str().unwrap() {
-                // TODO: iliana if you're reading this,
-                // 1. I'm sorry
-                // 2. We should probably do something less bad here
-                //
-                // At the moment, the only file we "know" how to download is a
-                // testfile, which is pulled out of thin air. Realistically, we
-                // should pull this from the DB + query an external server.
-                // Happy to delete this as soon as we can.
-                "testfile" => {
-                    // We should only create the intermediate directories
-                    // after validating that this is a real artifact that
-                    // can (and should) be downloaded.
-                    if let Some(parent) = path.parent() {
-                        tokio::fs::create_dir_all(parent).await.map_err(|e| {
-                            Error::internal_error(
-                                &format!("Failed to create intermediate directory: {}", e)
-                            )
-                        })?;
-                    }
-                    tokio::fs::write(path, "testfile contents").await.map_err(
-                        |e| {
-                            Error::internal_error(&format!(
-                                "Failed to write file: {}",
-                                e
-                            ))
-                        },
-                    )?;
-                }
-                _ => {
-                    return Err(Error::not_found_other(
-                        ResourceType::DownloadArtifact,
-                        file_name.display().to_string(),
-                    ));
-                }
+            let artifact = self
+                .db_datastore
+                .update_available_artifact_fetch(
+                    file_name.to_str().unwrap().into(),
+                )
+                .await?;
+
+            // We should only create the intermediate directories
+            // after validating that this is a real artifact that
+            // can (and should) be downloaded.
+            if let Some(parent) = path.parent() {
+                tokio::fs::create_dir_all(parent).await.map_err(|e| {
+                    Error::internal_error(&format!(
+                        "Failed to create intermediate directory: {}",
+                        e
+                    ))
+                })?;
             }
+
+            let mut response = reqwest::get(format!(
+                "{}/{}.{}",
+                rack.tuf_targets_base_url,
+                artifact.target_sha256,
+                artifact.target_name
+            ))
+            .await
+            .map_err(|e| {
+                Error::internal_error(&format!(
+                    "Failed to fetch artifact: {}",
+                    e
+                ))
+            })?;
+            let mut file = tokio::fs::File::open(path).await.map_err(|e| {
+                Error::internal_error(&format!("Failed to open file: {}", e))
+            })?;
+            while let Some(chunk) = response.chunk().await.map_err(|e| {
+                Error::internal_error(&format!(
+                    "Failed to read HTTP body: {}",
+                    e
+                ))
+            })? {
+                file.write_all(&chunk).await.map_err(|e| {
+                    Error::internal_error(&format!(
+                        "Failed to write to file: {}",
+                        e
+                    ))
+                })?;
+            }
+
+            info!(self.log, "wrote {} to artifact dir", artifact.target_name);
         } else {
             info!(self.log, "Accessing {} - already exists", path.display());
         }

@@ -1980,6 +1980,26 @@ impl DataStore {
                 ))
             })
     }
+
+    pub async fn update_available_artifact_fetch(
+        &self,
+        // TODO(iliana or sean): change this to look up the artifact by name/version/kind instead
+        // of the target_name
+        target_name: String,
+    ) -> LookupResult<UpdateAvailableArtifact> {
+        use db::schema::update_available_artifact::dsl;
+        dsl::update_available_artifact
+            .filter(dsl::target_name.eq(target_name.clone()))
+            .select(UpdateAvailableArtifact::as_select())
+            .first_async(self.pool())
+            .await
+            .map_err(|e| {
+                Error::internal_error(&format!(
+                    "error fetching artifact: {:?}",
+                    e
+                ))
+            })
+    }
 }
 
 #[cfg(test)]
