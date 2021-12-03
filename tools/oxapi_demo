@@ -51,7 +51,6 @@ INSTANCES
 
 DISKS
 
-    disks_list       ORGANIZATION_NAME PROJECT_NAME
     disk_create_demo ORGANIZATION_NAME PROJECT_NAME DISK_NAME
     disk_get         ORGANIZATION_NAME PROJECT_NAME DISK_NAME
     disk_delete      ORGANIZATION_NAME PROJECT_NAME DISK_NAME
@@ -304,12 +303,6 @@ function cmd_instance_get_disk
 {
 	[[ $# != 4 ]] && usage "expected ORGANIZATION_NAME PROJECT_NAME INSTANCE_NAME DISK_NAME"
 	do_curl "/organizations/$1/projects/$2/instances/$3/disks/$4"
-}
-
-function cmd_disks_list
-{
-	[[ $# != 2 ]] && usage "expected ORGANIZATION_NAME PROJECT_NAME"
-	do_curl "/organizations/$1/projects/$2/disks/"
 }
 
 function cmd_disk_create_demo
