@@ -198,7 +198,6 @@ impl Nexus {
         };
 
         /* TODO-cleanup all the extra Arcs here seems wrong */
-        // XXX add authz to saga recovery
         let nexus_arc = Arc::new(nexus);
         let opctx = OpContext::for_background(
             log.new(o!("component" => "SagaRecoverer")),
