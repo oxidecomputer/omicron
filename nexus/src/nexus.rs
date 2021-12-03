@@ -63,6 +63,7 @@ use sled_agent_client::Client as SledAgentClient;
 use slog::Logger;
 use std::convert::TryInto;
 use std::net::SocketAddr;
+use std::num::NonZeroU32;
 use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
@@ -2288,10 +2289,10 @@ impl Nexus {
         // something?
 
         let mut current_version = None;
-        for artifact in artifacts {
+        for artifact in &artifacts {
             current_version = Some(artifact.targets_role_version);
             self.db_datastore
-                .update_available_artifact_upsert(artifact)
+                .update_available_artifact_upsert(artifact.clone())
                 .await?;
         }
 
@@ -2300,6 +2301,39 @@ impl Nexus {
             self.db_datastore
                 .update_available_artifact_hard_delete_outdated(current_version)
                 .await?;
+        }
+
+        // demo-grade update logic: tell all sleds to apply all artifacts
+        for sled in self
+            .db_datastore
+            .sled_list(&DataPageParams {
+                marker: None,
+                direction: PaginationOrder::Ascending,
+                limit: NonZeroU32::new(100).unwrap(),
+            })
+            .await?
+        {
+            let client = self.sled_client(&sled.id()).await?;
+            for artifact in &artifacts {
+                info!(
+                    self.log,
+                    "telling sled {} to apply {}",
+                    sled.id(),
+                    artifact.target_name
+                );
+                client
+                    .update_artifact(
+                        &sled_agent_client::types::UpdateArtifact {
+                            name: artifact.name.clone(),
+                            version: artifact.version,
+                            // TODO: de-duplicate these structs between nexus and sled-agent so
+                            // that we don't have to assume there is one kind of artifact
+                            kind: sled_agent_client::types::UpdateArtifactKind::Zone,
+                        },
+                    )
+                    .await?;
+            }
+            unimplemented!();
         }
 
         Ok(())
