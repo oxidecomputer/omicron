@@ -6,7 +6,6 @@
  * Shared integration testing facilities
  */
 
-use anyhow::anyhow;
 use dropshot::test_util::ClientTestContext;
 use dropshot::test_util::LogContext;
 use dropshot::ConfigDropshot;
@@ -14,9 +13,7 @@ use dropshot::ConfigLogging;
 use dropshot::ConfigLoggingLevel;
 use omicron_common::api::external::IdentityMetadata;
 use omicron_common::api::internal::nexus::ProducerEndpoint;
-use omicron_nexus::DataPopulateStatus;
 use omicron_test_utils::dev;
-use omicron_test_utils::dev::poll::CondCheckError;
 use oximeter_collector::Oximeter;
 use oximeter_producer::Server as ProducerServer;
 use slog::o;
@@ -89,11 +86,6 @@ pub async fn test_setup(test_name: &str) -> ControlPlaneTestContext {
     test_setup_with_config(test_name, &mut config).await
 }
 
-/// Wrapper for [`anyhow::Error`] that impls [`std::error::Error`].
-#[derive(thiserror::Error, Debug)]
-#[error(transparent)]
-struct SimpleError(#[from] anyhow::Error);
-
 pub async fn test_setup_with_config(
     test_name: &str,
     config: &mut omicron_nexus::Config,
@@ -112,22 +104,12 @@ pub async fn test_setup_with_config(
     let server = omicron_nexus::Server::start(&config, &rack_id, &logctx.log)
         .await
         .unwrap();
-    /* XXX This sucks */
-    omicron_test_utils::dev::poll::wait_for_condition(
-        || async {
-            match server.apictx.nexus.populate_status().await {
-                DataPopulateStatus::Done => Ok(()),
-                DataPopulateStatus::Failed(message) => Err(
-                    CondCheckError::Failed(SimpleError(anyhow!("{}", message))),
-                ),
-                _ => Err(CondCheckError::NotYet),
-            }
-        },
-        &Duration::from_millis(100),
-        &Duration::from_secs(10),
-    )
-    .await
-    .expect("Nexus never loaded users");
+    server
+        .apictx
+        .nexus
+        .wait_for_populate()
+        .await
+        .expect("Nexus never loaded users");
 
     let testctx_external = ClientTestContext::new(
         server.http_server_external.local_addr(),

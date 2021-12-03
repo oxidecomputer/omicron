@@ -17,9 +17,10 @@ use crate::db::model::Name;
 use crate::external_api::params;
 use crate::internal_api::params::{OximeterInfo, ZpoolPutRequest};
 use crate::populate::populate_start;
-use crate::populate::DataPopulateStatus;
+use crate::populate::PopulateStatus;
 use crate::saga_interface::SagaContext;
 use crate::sagas;
+use anyhow::anyhow;
 use anyhow::Context;
 use async_trait::async_trait;
 use futures::future::ready;
@@ -131,9 +132,8 @@ pub struct Nexus {
     /** Task representing completion of recovered Sagas */
     recovery_task: std::sync::Mutex<Option<db::RecoveryTask>>,
 
-    /** Status of background task to populate database (here for debugging) */
-    #[allow(dead_code)]
-    populate_status: Arc<tokio::sync::Mutex<DataPopulateStatus>>,
+    /** Status of background task to populate database */
+    populate_status: tokio::sync::watch::Receiver<PopulateStatus>,
 }
 
 /*
@@ -178,18 +178,13 @@ impl Nexus {
          * for each one, status communication via channels, and a single task to
          * run them all.
          */
-        let populate_status =
-            Arc::new(tokio::sync::Mutex::new(DataPopulateStatus::default()));
         let populate_ctx = OpContext::for_background(
             log.new(o!("component" => "DataLoader")),
             Arc::clone(&authz),
             authn::Context::internal_db_init(),
         );
-        populate_start(
-            populate_ctx,
-            Arc::clone(&db_datastore),
-            Arc::clone(&populate_status),
-        );
+        let populate_status =
+            populate_start(populate_ctx, Arc::clone(&db_datastore));
 
         let nexus = Nexus {
             id: config.id,
@@ -223,8 +218,21 @@ impl Nexus {
         nexus_arc
     }
 
-    pub async fn populate_status(&self) -> DataPopulateStatus {
-        self.populate_status.lock().await.clone()
+    pub async fn wait_for_populate(&self) -> Result<(), anyhow::Error> {
+        let mut my_rx = self.populate_status.clone();
+        loop {
+            my_rx
+                .changed()
+                .await
+                .map_err(|error| anyhow!(error.to_string()))?;
+            match &*my_rx.borrow() {
+                PopulateStatus::NotDone => (),
+                PopulateStatus::Done => return Ok(()),
+                PopulateStatus::Failed(error) => {
+                    return Err(anyhow!(error.clone()))
+                }
+            };
+        }
     }
 
     /*

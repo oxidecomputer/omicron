@@ -4,43 +4,37 @@ use crate::context::OpContext;
 use crate::db::DataStore;
 use omicron_common::backoff;
 use std::sync::Arc;
-use tokio::sync::Mutex;
 
-// This exists only for debugging today.  We could include more information
-// here, like how many attempts we've made, when we started, etc.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub enum DataPopulateStatus {
-    Unstarted,
-    InProgress,
+#[derive(Clone, Debug)]
+pub enum PopulateStatus {
+    NotDone,
     Done,
     Failed(String),
-}
-
-impl Default for DataPopulateStatus {
-    fn default() -> Self {
-        DataPopulateStatus::Unstarted
-    }
 }
 
 pub fn populate_start(
     opctx: OpContext,
     datastore: Arc<DataStore>,
-    result: Arc<Mutex<DataPopulateStatus>>,
-) {
-    tokio::spawn(populate(opctx, datastore, result));
+) -> tokio::sync::watch::Receiver<PopulateStatus> {
+    let (tx, rx) = tokio::sync::watch::channel(PopulateStatus::NotDone);
+
+    tokio::spawn(async move {
+        let result = populate(&opctx, datastore).await;
+        if let Err(error) = tx.send(match result {
+            Ok(()) => PopulateStatus::Done,
+            Err(message) => PopulateStatus::Failed(message),
+        }) {
+            error!(opctx.log, "nobody waiting for populate: {:#}", error)
+        }
+    });
+
+    rx
 }
 
 async fn populate(
-    opctx: OpContext,
+    opctx: &OpContext,
     datastore: Arc<DataStore>,
-    result: Arc<Mutex<DataPopulateStatus>>,
-) {
-    {
-        let mut status = result.lock().await;
-        assert_eq!(*status, DataPopulateStatus::Unstarted);
-        *status = DataPopulateStatus::InProgress;
-    }
-
+) -> Result<(), String> {
     let db_result = backoff::retry_notify(
         backoff::internal_service_policy(),
         || async {
@@ -64,9 +58,7 @@ async fn populate(
     )
     .await;
 
-    let mut status = result.lock().await;
-    assert_eq!(*status, DataPopulateStatus::InProgress);
-    if let Err(error) = db_result {
+    if let Err(error) = &db_result {
         /*
          * TODO-autonomy this should raise an alert, bump a counter, or raise
          * some other red flag that something is wrong.  (This should be
@@ -76,8 +68,7 @@ async fn populate(
             "gave up trying to load predefined users";
             "error_message" => ?error
         );
-        *status = DataPopulateStatus::Failed(error.to_string());
-    } else {
-        *status = DataPopulateStatus::Done;
     }
+
+    db_result.map_err(|error| error.to_string())
 }
