@@ -114,14 +114,12 @@ impl Context {
 
     /// Returns an authenticated context for saga recovery
     pub fn internal_saga_recovery() -> Context {
-        // XXX TODO-coverage
         Context::context_for_actor(USER_UUID_SAGA_RECOVERY.parse().unwrap())
     }
 
     /// Returns an authenticated context for Nexus-startup database
     /// initialization
     pub fn internal_db_init() -> Context {
-        // XXX TODO-coverage
         Context::context_for_actor(USER_UUID_DB_INIT.parse().unwrap())
     }
 
@@ -154,6 +152,8 @@ impl Context {
 #[cfg(test)]
 mod test {
     use super::Context;
+    use super::USER_UUID_DB_INIT;
+    use super::USER_UUID_SAGA_RECOVERY;
     use super::USER_UUID_TEST_PRIVILEGED;
 
     #[test]
@@ -162,11 +162,20 @@ mod test {
         // associated actor.
         let authn = Context::internal_unauthenticated();
         assert!(authn.actor().is_none());
-        // The "internal_test_user()" context ought to refer to the predefined
-        // test user.  This is used in a few places.
+
+        // Validate the actor behind various test contexts.
+        // The privileges are (or will be) verified in authz tests.
         let authn = Context::internal_test_user();
         let actor = authn.actor().unwrap();
         assert_eq!(actor.0.to_string(), USER_UUID_TEST_PRIVILEGED);
+
+        let authn = Context::internal_db_init();
+        let actor = authn.actor().unwrap();
+        assert_eq!(actor.0.to_string(), USER_UUID_DB_INIT);
+
+        let authn = Context::internal_saga_recovery();
+        let actor = authn.actor().unwrap();
+        assert_eq!(actor.0.to_string(), USER_UUID_SAGA_RECOVERY);
     }
 }
 
