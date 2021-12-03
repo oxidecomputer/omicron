@@ -2007,17 +2007,17 @@ impl DataStore {
              */
             UserPredefinedInfo {
                 id: authn::USER_UUID_SAGA_RECOVERY,
-                name: "saga-recovery",
+                name: authn::USER_NAME_SAGA_RECOVERY,
                 description: "used for saga recovery",
             },
             UserPredefinedInfo {
                 id: authn::USER_UUID_TEST_PRIVILEGED,
-                name: "test-privileged",
+                name: authn::USER_NAME_TEST_PRIVILEGED,
                 description: "used for testing with all privileges",
             },
             UserPredefinedInfo {
                 id: authn::USER_UUID_TEST_UNPRIVILEGED,
-                name: "test-unprivileged",
+                name: authn::USER_NAME_TEST_UNPRIVILEGED,
                 description: "used for testing with no privileges",
             },
         ]

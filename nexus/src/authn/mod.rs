@@ -45,26 +45,32 @@ use uuid::Uuid;
 // be very useful, but it beats a random uuid.
 //
 
+// TODO-cleanup It would be cleaner to have global structs here instead.
+
 /// User id reserved for an internal user that can initialize the database
-// NOTE: This uuid is duplicated in dbinit.sql.
+// NOTE: This uuid and name are duplicated in dbinit.sql.
 // "0001" is the first possible user that wouldn't be confused with 0, or root
 pub const USER_UUID_DB_INIT: &str = "001de000-05e4-0000-0000-000000000001";
+pub const USER_NAME_DB_INIT: &str = "db-init";
 
 /// User id reserved for an internal user used for saga recovery
 // "3a8a" looks a bit like "saga"
 pub const USER_UUID_SAGA_RECOVERY: &str =
     "001de000-05e4-0000-0000-000000003a8a";
+pub const USER_NAME_SAGA_RECOVERY: &str = "saga-recovery";
 
 /// User id reserved for a test user that's granted many privileges for the
 /// purpose of running automated tests.
 // "4007" looks a bit like "root".
 pub const USER_UUID_TEST_PRIVILEGED: &str =
     "001de000-05e4-0000-0000-000000004007";
+pub const USER_NAME_TEST_PRIVILEGED: &str = "test-privileged";
 
 /// User id reserved for a test user that has no privileges.
 // 60001 is the decimal uid for "nobody" on Helios.
 pub const USER_UUID_TEST_UNPRIVILEGED: &str =
     "001de000-05e4-0000-0000-000000060001";
+pub const USER_NAME_TEST_UNPRIVILEGED: &str = "test-unprivileged";
 
 /// Describes how the actor performing the current operation is authenticated
 ///

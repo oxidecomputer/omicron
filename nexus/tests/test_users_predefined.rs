@@ -47,14 +47,15 @@ async fn test_users_predefined() {
         .map(|u| (u.identity.name.to_string(), u))
         .collect::<BTreeMap<String, User>>();
 
-    // XXX names should be constants too?
-    let u = users.remove(&"db-init".to_string()).unwrap();
+    let u = users.remove(&authn::USER_NAME_DB_INIT.to_string()).unwrap();
     assert_eq!(u.identity.id.to_string(), authn::USER_UUID_DB_INIT);
-    let u = users.remove(&"saga-recovery".to_string()).unwrap();
+    let u = users.remove(&authn::USER_NAME_SAGA_RECOVERY.to_string()).unwrap();
     assert_eq!(u.identity.id.to_string(), authn::USER_UUID_SAGA_RECOVERY);
-    let u = users.remove(&"test-privileged".to_string()).unwrap();
+    let u =
+        users.remove(&authn::USER_NAME_TEST_PRIVILEGED.to_string()).unwrap();
     assert_eq!(u.identity.id.to_string(), authn::USER_UUID_TEST_PRIVILEGED);
-    let u = users.remove(&"test-unprivileged".to_string()).unwrap();
+    let u =
+        users.remove(&authn::USER_NAME_TEST_UNPRIVILEGED.to_string()).unwrap();
     assert_eq!(u.identity.id.to_string(), authn::USER_UUID_TEST_UNPRIVILEGED);
     assert!(users.is_empty(), "found unexpected built-in users");
     cptestctx.teardown().await;
