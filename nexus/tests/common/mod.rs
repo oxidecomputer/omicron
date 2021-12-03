@@ -89,7 +89,7 @@ pub async fn test_setup(test_name: &str) -> ControlPlaneTestContext {
     test_setup_with_config(test_name, &mut config).await
 }
 
-// XXX
+/// Wrapper for [`anyhow::Error`] that impls [`std::error::Error`].
 #[derive(thiserror::Error, Debug)]
 #[error(transparent)]
 struct SimpleError(#[from] anyhow::Error);
