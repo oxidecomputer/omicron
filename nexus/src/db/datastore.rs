@@ -1099,6 +1099,7 @@ impl DataStore {
                 let allocation_query = AllocateIpQuery {
                     block: ipnetwork::IpNetwork::V4(block.0 .0),
                     interface,
+                    now: Utc::now(),
                 };
                 diesel::insert_into(dsl::network_interface)
                     .values(allocation_query)

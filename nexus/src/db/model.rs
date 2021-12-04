@@ -1757,7 +1757,7 @@ impl IncompleteNetworkInterface {
     pub fn new(
         interface_id: Uuid,
         instance_id: Uuid,
-        vpc_id: uuid::Uuid,
+        vpc_id: Uuid,
         subnet: VpcSubnet,
         mac: MacAddr,
         ip: Option<std::net::IpAddr>,
