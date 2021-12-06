@@ -119,17 +119,15 @@ mod test {
 
     #[test]
     fn test_database() {
-        let authz_privileged = authz_context_for_actor(
-            authn::Context::internal_test_user(),
-        );
+        let authz_privileged =
+            authz_context_for_actor(authn::Context::internal_test_user());
         authz_privileged
             .authorize(Action::Query, DATABASE)
             .expect("expected privileged user to be able to query database");
-        let authz_nobody = authz_context_for_actor(
-            authn::Context::test_context_for_actor(
+        let authz_nobody =
+            authz_context_for_actor(authn::Context::test_context_for_actor(
                 authn::USER_TEST_UNPRIVILEGED.id,
-            ),
-        );
+            ));
         authz_nobody
             .authorize(Action::Query, DATABASE)
             .expect("expected unprivileged user to be able to query database");
@@ -141,17 +139,15 @@ mod test {
 
     #[test]
     fn test_organization() {
-        let authz_privileged = authz_context_for_actor(
-            authn::Context::internal_test_user(),
-        );
+        let authz_privileged =
+            authz_context_for_actor(authn::Context::internal_test_user());
         authz_privileged.authorize(Action::CreateChild, FLEET).expect(
             "expected privileged user to be able to create organization",
         );
-        let authz_nobody = authz_context_for_actor(
-            authn::Context::test_context_for_actor(
+        let authz_nobody =
+            authz_context_for_actor(authn::Context::test_context_for_actor(
                 authn::USER_TEST_UNPRIVILEGED.id,
-            ),
-        );
+            ));
         authz_nobody.authorize(Action::CreateChild, FLEET).expect_err(
             "expected unprivileged user not to be able to create organization",
         );
