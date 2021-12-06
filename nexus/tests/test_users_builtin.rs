@@ -47,16 +47,16 @@ async fn test_users_builtin() {
         .map(|u| (u.identity.name.to_string(), u))
         .collect::<BTreeMap<String, User>>();
 
-    let u = users.remove(&authn::USER_NAME_DB_INIT.to_string()).unwrap();
-    assert_eq!(u.identity.id.to_string(), authn::USER_UUID_DB_INIT);
-    let u = users.remove(&authn::USER_NAME_SAGA_RECOVERY.to_string()).unwrap();
-    assert_eq!(u.identity.id.to_string(), authn::USER_UUID_SAGA_RECOVERY);
+    let u = users.remove(&authn::USER_DB_INIT.name.to_string()).unwrap();
+    assert_eq!(u.identity.id, authn::USER_DB_INIT.id);
+    let u = users.remove(&authn::USER_SAGA_RECOVERY.name.to_string()).unwrap();
+    assert_eq!(u.identity.id, authn::USER_SAGA_RECOVERY.id);
     let u =
-        users.remove(&authn::USER_NAME_TEST_PRIVILEGED.to_string()).unwrap();
-    assert_eq!(u.identity.id.to_string(), authn::USER_UUID_TEST_PRIVILEGED);
+        users.remove(&authn::USER_TEST_PRIVILEGED.name.to_string()).unwrap();
+    assert_eq!(u.identity.id, authn::USER_TEST_PRIVILEGED.id);
     let u =
-        users.remove(&authn::USER_NAME_TEST_UNPRIVILEGED.to_string()).unwrap();
-    assert_eq!(u.identity.id.to_string(), authn::USER_UUID_TEST_UNPRIVILEGED);
+        users.remove(&authn::USER_TEST_UNPRIVILEGED.name.to_string()).unwrap();
+    assert_eq!(u.identity.id, authn::USER_TEST_UNPRIVILEGED.id);
     assert!(users.is_empty(), "found unexpected built-in users");
     cptestctx.teardown().await;
 }

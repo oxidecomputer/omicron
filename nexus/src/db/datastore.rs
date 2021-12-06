@@ -1994,53 +1994,20 @@ impl DataStore {
 
         opctx.authorize(authz::Action::Modify, authz::FLEET)?;
 
-        struct UserBuiltinInfo {
-            id: &'static str,
-            name: &'static str,
-            description: &'static str,
-        }
-
         let builtin_users = [
-            /*
-             * Note: "db_init" is also a builtin user, but that one by
-             * necessity is created with the database.
-             */
-            UserBuiltinInfo {
-                id: authn::USER_UUID_SAGA_RECOVERY,
-                name: authn::USER_NAME_SAGA_RECOVERY,
-                description: "used for saga recovery",
-            },
-            UserBuiltinInfo {
-                id: authn::USER_UUID_TEST_PRIVILEGED,
-                name: authn::USER_NAME_TEST_PRIVILEGED,
-                description: "used for testing with all privileges",
-            },
-            UserBuiltinInfo {
-                id: authn::USER_UUID_TEST_UNPRIVILEGED,
-                name: authn::USER_NAME_TEST_UNPRIVILEGED,
-                description: "used for testing with no privileges",
-            },
+            // Note: "db_init" is also a builtin user, but that one by necessity
+            // is created with the database.
+            &*authn::USER_SAGA_RECOVERY,
+            &*authn::USER_TEST_PRIVILEGED,
+            &*authn::USER_TEST_UNPRIVILEGED,
         ]
         .iter()
         .map(|u| {
-            let id = u.id.parse().unwrap_or_else(|error| {
-                panic!(
-                    "hardcoded id for user {:?} is invalid: {:#}",
-                    u.id, error
-                )
-            });
-            let name = api::external::Name::try_from(String::from(u.name))
-                .unwrap_or_else(|error| {
-                    panic!(
-                        "hardcoded name for user {} is invalid: {:#}",
-                        id, error
-                    )
-                });
             UserBuiltin::new(
-                id,
+                u.id,
                 params::UserBuiltinCreate {
                     identity: IdentityMetadataCreateParams {
-                        name,
+                        name: u.name.clone(),
                         description: String::from(u.description),
                     },
                 },
@@ -2048,7 +2015,7 @@ impl DataStore {
         })
         .collect::<Vec<UserBuiltin>>();
 
-        debug!(opctx.log, "attempting to create builtin users");
+        debug!(opctx.log, "attempting to create built-in users");
         let count = diesel::insert_into(dsl::user_builtin)
             .values(builtin_users)
             .on_conflict(dsl::id)
@@ -2056,7 +2023,7 @@ impl DataStore {
             .execute_async(self.pool_authorized(opctx)?)
             .await
             .map_err(public_error_from_diesel_pool_shouldnt_fail)?;
-        info!(opctx.log, "created {} builtin users", count);
+        info!(opctx.log, "created {} built-in users", count);
         Ok(())
     }
 }

@@ -429,15 +429,16 @@ impl<'a> NexusRequest<'a> {
     pub fn authn_as(mut self, mode: AuthnMode) -> Self {
         use omicron_nexus::authn;
         let header_value = match mode {
-            AuthnMode::UnprivilegedUser => authn::USER_UUID_TEST_UNPRIVILEGED,
-            AuthnMode::PrivilegedUser => authn::USER_UUID_TEST_PRIVILEGED,
+            AuthnMode::UnprivilegedUser => authn::USER_TEST_UNPRIVILEGED.id,
+            AuthnMode::PrivilegedUser => authn::USER_TEST_PRIVILEGED.id,
         };
 
         self.request_builder = self.request_builder.header(
             http::header::HeaderName::from_static(
                 authn::external::spoof::HTTP_HEADER_OXIDE_AUTHN_SPOOF,
             ),
-            http::header::HeaderValue::from_static(header_value),
+            http::header::HeaderValue::from_str(&header_value.to_string())
+                .unwrap(),
         );
         self
     }

@@ -172,7 +172,7 @@ impl AuthenticatedActor {
          * the actor has for this resource or else at this point we will go
          * fetch them from the database.
          */
-        self.actor_id.to_string() == authn::USER_UUID_TEST_PRIVILEGED
+        self.actor_id == authn::USER_TEST_PRIVILEGED.id
     }
 
     /**
@@ -186,8 +186,8 @@ impl AuthenticatedActor {
      * to load the fleet_id from the Organization.)
      */
     fn has_role_fleet(&self, _fleet: &Fleet, _role: &str) -> bool {
-        self.actor_id.to_string() == authn::USER_UUID_TEST_PRIVILEGED
-            || self.actor_id.to_string() == authn::USER_UUID_DB_INIT
+        self.actor_id == authn::USER_TEST_PRIVILEGED.id
+            || self.actor_id == authn::USER_DB_INIT.id
     }
 }
 

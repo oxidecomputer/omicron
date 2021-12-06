@@ -41,7 +41,7 @@ async fn test_authz_basic() {
     // get back a 403 "Forbidden" response.
     let error = try_create_organization(
         client,
-        Some(omicron_nexus::authn::USER_UUID_TEST_UNPRIVILEGED),
+        Some(omicron_nexus::authn::USER_TEST_UNPRIVILEGED.id.to_string()),
         StatusCode::FORBIDDEN,
     )
     .await;
@@ -54,7 +54,9 @@ async fn test_authz_basic() {
     // This one verifies that we've correctly integrated authn with Nexus.
     let error = try_create_organization(
         client,
-        Some(omicron_nexus::authn::external::spoof::SPOOF_RESERVED_BAD_ACTOR),
+        Some(String::from(
+            omicron_nexus::authn::external::spoof::SPOOF_RESERVED_BAD_ACTOR,
+        )),
         StatusCode::UNAUTHORIZED,
     )
     .await;
@@ -63,7 +65,9 @@ async fn test_authz_basic() {
 
     let error = try_create_organization(
         client,
-        Some(omicron_nexus::authn::external::spoof::SPOOF_RESERVED_BAD_CREDS),
+        Some(String::from(
+            omicron_nexus::authn::external::spoof::SPOOF_RESERVED_BAD_CREDS,
+        )),
         StatusCode::UNAUTHORIZED,
     )
     .await;
@@ -75,7 +79,7 @@ async fn test_authz_basic() {
 
 async fn try_create_organization(
     client: &dropshot::test_util::ClientTestContext,
-    maybe_user_id: Option<&'static str>,
+    maybe_user_id: Option<String>,
     expected_status: http::StatusCode,
 ) -> HttpErrorResponseBody {
     let input = params::OrganizationCreate {
@@ -90,7 +94,7 @@ async fn try_create_organization(
             .body(Some(&input))
             .expect_status(Some(expected_status));
     if let Some(user_id) = maybe_user_id {
-        let authn_header = http::HeaderValue::from_static(user_id);
+        let authn_header = http::HeaderValue::from_str(&user_id).unwrap();
         builder = builder.header(HTTP_HEADER_OXIDE_AUTHN_SPOOF, authn_header);
     }
 

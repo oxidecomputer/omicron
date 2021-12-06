@@ -26,6 +26,8 @@
 
 pub mod external;
 
+use lazy_static::lazy_static;
+use omicron_common::api;
 use uuid::Uuid;
 
 //
@@ -45,32 +47,65 @@ use uuid::Uuid;
 // be very useful, but it beats a random uuid.
 //
 
-// TODO-cleanup It would be cleaner to have global structs here instead.
+pub struct UserBuiltinConfig {
+    pub id: Uuid,
+    pub name: api::external::Name,
+    pub description: &'static str,
+}
 
-/// User id reserved for an internal user that can initialize the database
-// NOTE: This uuid and name are duplicated in dbinit.sql.
-// "0001" is the first possible user that wouldn't be confused with 0, or root
-pub const USER_UUID_DB_INIT: &str = "001de000-05e4-0000-0000-000000000001";
-pub const USER_NAME_DB_INIT: &str = "db-init";
+impl UserBuiltinConfig {
+    fn new_static(
+        id: &str,
+        name: &str,
+        description: &'static str,
+    ) -> UserBuiltinConfig {
+        UserBuiltinConfig {
+            id: id.parse().expect("invalid uuid for builtin user id"),
+            name: name.parse().expect("invalid name for builtin user name"),
+            description,
+        }
+    }
+}
 
-/// User id reserved for an internal user used for saga recovery
-// "3a8a" looks a bit like "saga"
-pub const USER_UUID_SAGA_RECOVERY: &str =
-    "001de000-05e4-0000-0000-000000003a8a";
-pub const USER_NAME_SAGA_RECOVERY: &str = "saga-recovery";
+lazy_static! {
+    /// Internal user used for seeding initial database data
+    // NOTE: This uuid and name are duplicated in dbinit.sql.
+    pub static ref USER_DB_INIT: UserBuiltinConfig =
+        UserBuiltinConfig::new_static(
+            // "0001" is the first possible user that wouldn't be confused with
+            // 0, or root.
+            "001de000-05e4-0000-0000-000000000001",
+            "db-init",
+            "used for seeding initial database data",
+        );
 
-/// User id reserved for a test user that's granted many privileges for the
-/// purpose of running automated tests.
-// "4007" looks a bit like "root".
-pub const USER_UUID_TEST_PRIVILEGED: &str =
-    "001de000-05e4-0000-0000-000000004007";
-pub const USER_NAME_TEST_PRIVILEGED: &str = "test-privileged";
+    /// Internal user used by Nexus when recovering sagas
+    pub static ref USER_SAGA_RECOVERY: UserBuiltinConfig =
+        UserBuiltinConfig::new_static(
+            // "3a8a" looks a bit like "saga".
+            "001de000-05e4-0000-0000-000000003a8a",
+            "saga-recovery",
+            "used by Nexus when recovering sagas",
+        );
 
-/// User id reserved for a test user that has no privileges.
-// 60001 is the decimal uid for "nobody" on Helios.
-pub const USER_UUID_TEST_UNPRIVILEGED: &str =
-    "001de000-05e4-0000-0000-000000060001";
-pub const USER_NAME_TEST_UNPRIVILEGED: &str = "test-unprivileged";
+    /// Test user that's granted all privileges, used for automated testing
+    pub static ref USER_TEST_PRIVILEGED: UserBuiltinConfig =
+        UserBuiltinConfig::new_static(
+            // "4007" looks a bit like "root".
+            "001de000-05e4-0000-0000-000000004007",
+            "test-privileged",
+            "used for testing with all privileges",
+        );
+
+    /// Test user that's granted no privileges, used for automated testing
+    pub static ref USER_TEST_UNPRIVILEGED: UserBuiltinConfig =
+        UserBuiltinConfig::new_static(
+            // 60001 is the decimal uid for "nobody" on Helios.
+            "001de000-05e4-0000-0000-000000060001",
+            "test-unprivileged",
+            "used for testing with no privileges",
+        );
+}
 
 /// Describes how the actor performing the current operation is authenticated
 ///
@@ -114,13 +149,13 @@ impl Context {
 
     /// Returns an authenticated context for saga recovery
     pub fn internal_saga_recovery() -> Context {
-        Context::context_for_actor(USER_UUID_SAGA_RECOVERY.parse().unwrap())
+        Context::context_for_actor(USER_SAGA_RECOVERY.id)
     }
 
     /// Returns an authenticated context for Nexus-startup database
     /// initialization
     pub fn internal_db_init() -> Context {
-        Context::context_for_actor(USER_UUID_DB_INIT.parse().unwrap())
+        Context::context_for_actor(USER_DB_INIT.id)
     }
 
     fn context_for_actor(actor_id: Uuid) -> Context {
@@ -135,9 +170,7 @@ impl Context {
     // in unit tests.
     #[cfg(test)]
     pub fn internal_test_user() -> Context {
-        Context::test_context_for_actor(
-            USER_UUID_TEST_PRIVILEGED.parse().unwrap(),
-        )
+        Context::test_context_for_actor(USER_TEST_PRIVILEGED.id)
     }
 
     /// Returns an authenticated context for a specific user
@@ -152,9 +185,9 @@ impl Context {
 #[cfg(test)]
 mod test {
     use super::Context;
-    use super::USER_UUID_DB_INIT;
-    use super::USER_UUID_SAGA_RECOVERY;
-    use super::USER_UUID_TEST_PRIVILEGED;
+    use super::USER_DB_INIT;
+    use super::USER_SAGA_RECOVERY;
+    use super::USER_TEST_PRIVILEGED;
 
     #[test]
     fn test_internal_users() {
@@ -167,15 +200,15 @@ mod test {
         // The privileges are (or will be) verified in authz tests.
         let authn = Context::internal_test_user();
         let actor = authn.actor().unwrap();
-        assert_eq!(actor.0.to_string(), USER_UUID_TEST_PRIVILEGED);
+        assert_eq!(actor.0, USER_TEST_PRIVILEGED.id);
 
         let authn = Context::internal_db_init();
         let actor = authn.actor().unwrap();
-        assert_eq!(actor.0.to_string(), USER_UUID_DB_INIT);
+        assert_eq!(actor.0, USER_DB_INIT.id);
 
         let authn = Context::internal_saga_recovery();
         let actor = authn.actor().unwrap();
-        assert_eq!(actor.0.to_string(), USER_UUID_SAGA_RECOVERY);
+        assert_eq!(actor.0, USER_SAGA_RECOVERY.id);
     }
 }
 
