@@ -1,1 +1,4 @@
 /target
+
+# convenient because this is the value of console.static_dir in the example config
+/static

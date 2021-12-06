@@ -5,10 +5,10 @@
 //! Rust client to ClickHouse database
 // Copyright 2021 Oxide Computer Company
 
+use crate::TimeseriesKey;
 use crate::{model, query, Error};
 use async_trait::async_trait;
-use chrono::{DateTime, Utc};
-use oximeter::{types::Sample, Field, FieldValue};
+use oximeter::types::Sample;
 use slog::{debug, error, trace, Logger};
 use std::collections::{btree_map::Entry, BTreeMap, BTreeSet};
 use std::net::SocketAddr;
@@ -45,17 +45,25 @@ impl Client {
         Ok(())
     }
 
-    /// Search for timeseries matching the given criteria, building filters from the input.
-    ///
-    /// This method builds up the objects used to query the database from loosly-typed input,
-    /// especially string field=value pairs for the timeseries fields.
-    pub async fn filter_timeseries_with(
+    /// Select timeseries from criteria on the fields and start/end timestamps.
+    pub async fn select_timeseries_with(
         &self,
         timeseries_name: &str,
-        filters: &[query::Filter],
-        after: Option<DateTime<Utc>>,
-        before: Option<DateTime<Utc>>,
+        criteria: &[&str],
+        start_time: Option<query::Timestamp>,
+        end_time: Option<query::Timestamp>,
     ) -> Result<Vec<model::Timeseries>, Error> {
+        // Querying uses up to three queries to the database:
+        //  1. Retrieve the schema
+        //  2. Retrieve the keys and field names/values for matching timeseries
+        //  3. Retrieve the actual timeseries measurements.
+        //
+        //  This seems roundabout, but it's all around better. It normalizes the database more than
+        //  previously, as we don't store the stringified field values inline with the
+        //  measurements. The queries are easier to write and understand. By removing the field
+        //  values from the measurement rows, we avoid transferring the data from those columns
+        //  to/from the database, as well as the cost of parsing them for each measurement, only to
+        //  promptly throw away almost all of them (except for the first).
         let schema = self
             .schema_for_timeseries(&timeseries_name)
             .await?
@@ -65,75 +73,26 @@ impl Client {
                     timeseries_name
                 ))
             })?;
-
-        // Convert the filters as strings to typed `FieldValue`s for each field in the schema.
-        let mut fields = BTreeMap::new();
-        for filter in filters.into_iter() {
-            let ty = schema
-                .fields
-                .iter()
-                .find(|f| f.name == filter.name)
-                .ok_or_else(|| {
-                    Error::QueryError(format!(
-                        "No field '{}' for timeseries '{}'",
-                        filter.name, timeseries_name
-                    ))
-                })?
-                .ty;
-            fields
-                .entry(&filter.name)
-                .or_insert_with(Vec::new)
-                .push(FieldValue::parse_as_type(&filter.value, ty)?);
+        let mut query_builder = query::SelectQueryBuilder::new(&schema)
+            .start_time(start_time)
+            .end_time(end_time);
+        for criterion in criteria.iter() {
+            query_builder = query_builder.filter_str(criterion)?;
         }
 
-        // Aggregate all filters on all fields
-        let filters = fields
-            .iter()
-            .map(|(field_name, field_filters)| {
-                query::FieldFilter::new(&field_name, &field_filters)
-            })
-            .collect::<Result<Vec<_>, _>>()?;
-        let time_filter = query::TimeFilter::from_timestamps(after, before)?;
-        let filter = query::TimeseriesFilter {
-            timeseries_name: timeseries_name.to_string(),
-            filters,
-            time_filter,
+        let query = query_builder.build();
+        let info = match query.field_query() {
+            Some(field_query) => {
+                self.select_matching_timeseries_info(&field_query, &schema)
+                    .await?
+            }
+            None => BTreeMap::new(),
         };
-        self.filter_timeseries(&filter).await
-    }
-
-    /// Search for samples from timeseries matching the given criteria.
-    pub async fn filter_timeseries(
-        &self,
-        filter: &query::TimeseriesFilter,
-    ) -> Result<Vec<model::Timeseries>, Error> {
-        let schema =
-            self.schema_for_timeseries(&filter.timeseries_name).await?.unwrap();
-        let query = filter.as_select_query(schema.datum_type);
-        let body = self.execute_with_body(query).await?;
-        let mut timeseries_by_key = BTreeMap::new();
-        for line in body.lines() {
-            let (key, measurement) =
-                model::parse_measurement_from_row(line, schema.datum_type);
-            timeseries_by_key
-                .entry(key)
-                .or_insert_with(Vec::new)
-                .push(measurement);
+        if info.is_empty() {
+            Ok(vec![])
+        } else {
+            self.select_timeseries_with_keys(&query, &info, &schema).await
         }
-        timeseries_by_key
-            .into_iter()
-            .map(|(timeseries_key, measurements)| {
-                reconstitute_from_schema(&timeseries_key, &schema).map(
-                    |(target, metric)| model::Timeseries {
-                        timeseries_name: filter.timeseries_name.clone(),
-                        timeseries_key: timeseries_key.to_string(),
-                        target,
-                        metric,
-                        measurements,
-                    },
-                )
-            })
-            .collect::<Result<Vec<_>, _>>()
     }
 
     /// Return the schema for a timeseries by name.
@@ -197,11 +156,67 @@ impl Client {
         }))
     }
 
+    // Select the timeseries, including keys and field values, that match the given field-selection
+    // query.
+    async fn select_matching_timeseries_info(
+        &self,
+        field_query: &str,
+        schema: &model::TimeseriesSchema,
+    ) -> Result<BTreeMap<TimeseriesKey, (model::Target, model::Metric)>, Error>
+    {
+        let body = self.execute_with_body(field_query).await?;
+        let mut results = BTreeMap::new();
+        for line in body.lines() {
+            let row: model::FieldSelectRow = serde_json::from_str(line)
+                .expect("Unable to deserialize an expected row");
+            let (id, target, metric) =
+                model::parse_field_select_row(&row, schema);
+            results.insert(id, (target, metric));
+        }
+        Ok(results)
+    }
+
+    // Given information returned from `select_matching_timeseries_info`, select the actual
+    // measurements from timeseries with those keys.
+    async fn select_timeseries_with_keys(
+        &self,
+        query: &query::SelectQuery,
+        info: &BTreeMap<TimeseriesKey, (model::Target, model::Metric)>,
+        schema: &model::TimeseriesSchema,
+    ) -> Result<Vec<model::Timeseries>, Error> {
+        let mut timeseries_by_key = BTreeMap::new();
+        let keys = info.keys().copied().collect::<Vec<_>>();
+        let measurement_query = query.measurement_query(&keys);
+        for line in self.execute_with_body(&measurement_query).await?.lines() {
+            let (key, measurement) =
+                model::parse_measurement_from_row(line, schema.datum_type);
+            let timeseries = timeseries_by_key.entry(key).or_insert_with(
+                || {
+                    let (target, metric) = info
+                        .get(&key)
+                        .expect("Timeseries key in measurement query but not field query")
+                        .clone();
+                    model::Timeseries {
+                        timeseries_name: schema.timeseries_name.to_string(),
+                        target,
+                        metric,
+                        measurements: Vec::new(),
+                    }
+                }
+            );
+            timeseries.measurements.push(measurement);
+        }
+        Ok(timeseries_by_key.into_iter().map(|(_, item)| item).collect())
+    }
+
     // Initialize ClickHouse with the database and metric table schema.
     // Execute a generic SQL statement.
     //
     // TODO-robustness This currently does no validation of the statement.
-    async fn execute(&self, sql: String) -> Result<(), Error> {
+    async fn execute<S>(&self, sql: S) -> Result<(), Error>
+    where
+        S: AsRef<str>,
+    {
         self.execute_with_body(sql).await?;
         Ok(())
     }
@@ -209,7 +224,11 @@ impl Client {
     // Execute a generic SQL statement, awaiting the response as text
     //
     // TODO-robustness This currently does no validation of the statement.
-    async fn execute_with_body(&self, sql: String) -> Result<String, Error> {
+    async fn execute_with_body<S>(&self, sql: S) -> Result<String, Error>
+    where
+        S: AsRef<str>,
+    {
+        let sql = sql.as_ref().to_string();
         trace!(self.log, "executing SQL query: {}", sql);
         handle_db_response(
             self.client
@@ -231,7 +250,7 @@ impl Client {
         debug!(self.log, "retrieving timeseries schema from database");
         let sql = format!(
             "SELECT * FROM {}.timeseries_schema FORMAT JSONEachRow;",
-            model::DATABASE_NAME,
+            crate::DATABASE_NAME,
         );
         let body = self.execute_with_body(sql).await?;
         if body.is_empty() {
@@ -296,7 +315,7 @@ impl DbWrite for Client {
             // Key on both the timeseries name and key, as timeseries may actually share keys.
             let key = (
                 sample.timeseries_name.as_str(),
-                sample.timeseries_key.as_str(),
+                crate::timeseries_key(&sample),
             );
             if !seen_timeseries.contains(&key) {
                 for (table_name, table_rows) in model::unroll_field_rows(sample)
@@ -338,7 +357,7 @@ impl DbWrite for Client {
             );
             let body = format!(
                 "INSERT INTO {db_name}.timeseries_schema FORMAT JSONEachRow\n{row_data}\n",
-                db_name = model::DATABASE_NAME,
+                db_name = crate::DATABASE_NAME,
                 row_data = new_schema.join("\n")
             );
             self.execute(body).await?;
@@ -427,50 +446,13 @@ fn error_for_schema_mismatch(
     }
 }
 
-// Reconstitute a target and metric struct from a timeseries key and its schema, if possible.
-fn reconstitute_from_schema(
-    timeseries_key: &str,
-    schema: &model::TimeseriesSchema,
-) -> Result<(model::Target, model::Metric), Error> {
-    let (target_name, metric_name) =
-        schema.timeseries_name.split_once(':').unwrap();
-    let (target_fields, metric_fields): (Vec<_>, Vec<_>) = schema
-        .fields
-        .iter()
-        .zip(timeseries_key.split(':'))
-        .map(|(field, value_str)| {
-            FieldValue::parse_as_type(value_str, field.ty)
-                .map(|value| {
-                    (field.source, Field { name: field.name.clone(), value })
-                })
-                .expect("Failed to parse field value from timeseries key part")
-        })
-        .partition(|(source, _)| source == &model::FieldSource::Target);
-    let target = model::Target {
-        name: target_name.to_string(),
-        fields: target_fields.into_iter().map(|(_, field)| field).collect(),
-    };
-    let metric = model::Metric {
-        name: metric_name.to_string(),
-        fields: metric_fields.into_iter().map(|(_, field)| field).collect(),
-        datum_type: schema.datum_type,
-    };
-    assert_eq!(
-        target.fields.len() + metric.fields.len(),
-        schema.fields.len(),
-        "Missing a target or metric field in the timeseries key",
-    );
-    Ok((target, metric))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::query;
-    use chrono::Utc;
     use omicron_test_utils::dev::clickhouse::ClickHouseInstance;
     use oximeter::test_util;
-    use oximeter::types::{DatumType, FieldType};
+    use oximeter::{Metric, Target};
     use slog::o;
 
     // NOTE: It's important that each test run the ClickHouse server with different ports.
@@ -653,87 +635,6 @@ mod tests {
         db.cleanup().await.expect("Failed to cleanup ClickHouse server");
     }
 
-    fn make_schema() -> (model::TimeseriesSchema, String) {
-        let schema = model::TimeseriesSchema {
-            timeseries_name: "some_target:some_metric".to_string(),
-            fields: vec![
-                model::Field {
-                    name: String::from("target_field2"),
-                    ty: FieldType::I64,
-                    source: model::FieldSource::Target,
-                },
-                model::Field {
-                    name: String::from("target_field1"),
-                    ty: FieldType::I64,
-                    source: model::FieldSource::Target,
-                },
-                model::Field {
-                    name: String::from("metric_field1"),
-                    ty: FieldType::I64,
-                    source: model::FieldSource::Metric,
-                },
-                model::Field {
-                    name: String::from("metric_field2"),
-                    ty: FieldType::I64,
-                    source: model::FieldSource::Metric,
-                },
-            ],
-            datum_type: DatumType::F64,
-            created: Utc::now(),
-        };
-        (schema, "0:1:2:3".to_string())
-    }
-
-    #[test]
-    fn test_reconstitute_from_schema() {
-        let (schema, timeseries_key) = make_schema();
-        let (target, metric) =
-            reconstitute_from_schema(&timeseries_key, &schema).unwrap();
-        assert_eq!(target.name, "some_target");
-        assert_eq!(metric.name, "some_metric");
-        assert_eq!(
-            target.fields.iter().collect::<Vec<_>>(),
-            vec![
-                &Field {
-                    name: "target_field2".to_string(),
-                    value: FieldValue::I64(0)
-                },
-                &Field {
-                    name: "target_field1".to_string(),
-                    value: FieldValue::I64(1)
-                },
-            ],
-        );
-        assert_eq!(
-            metric.fields.iter().collect::<Vec<_>>(),
-            vec![
-                &Field {
-                    name: "metric_field1".to_string(),
-                    value: FieldValue::I64(2)
-                },
-                &Field {
-                    name: "metric_field2".to_string(),
-                    value: FieldValue::I64(3)
-                },
-            ],
-        );
-    }
-
-    #[test]
-    #[should_panic]
-    fn test_reconstitute_from_schema_empty_key() {
-        let (schema, _) = make_schema();
-        let _ = reconstitute_from_schema("", &schema);
-    }
-
-    #[test]
-    #[should_panic]
-    fn test_reconstitute_from_schema_missing_field() {
-        let (schema, _) = make_schema();
-        let missing_field = "1:2:3";
-        let _ = reconstitute_from_schema(missing_field, &schema);
-    }
-
     async fn setup_filter_testcase() -> (ClickHouseInstance, Client, Vec<Sample>)
     {
         let log = slog::Logger::root(slog::Discard, o!());
@@ -768,31 +669,39 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_client_filter_timeseries_one() {
+    async fn test_client_select_timeseries_one() {
         let (mut db, client, samples) = setup_filter_testcase().await;
         let sample = samples.first().unwrap();
-        let filter = query::TimeseriesFilter {
-            timeseries_name: String::from("virtual_machine:cpu_busy"),
-            filters: vec![
-                query::FieldFilter::new(
-                    "project_id",
-                    &[sample.target_fields()[0].value.clone()],
-                )
-                .unwrap(),
-                query::FieldFilter::new(
-                    "instance_id",
-                    &[sample.target_fields()[1].value.clone()],
-                )
-                .unwrap(),
-                query::FieldFilter::new(
-                    "cpu_id",
-                    &[sample.metric_fields()[0].value.clone()],
-                )
-                .unwrap(),
-            ],
-            time_filter: None,
-        };
-        let results = client.filter_timeseries(&filter).await.unwrap();
+        let target_fields = sample.target_fields();
+        let metric_fields = sample.metric_fields();
+        let criteria = &[
+            format!(
+                "project_id=={}",
+                target_fields
+                    .iter()
+                    .find(|f| f.name == "project_id")
+                    .unwrap()
+                    .value
+            ),
+            format!(
+                "instance_id=={}",
+                target_fields
+                    .iter()
+                    .find(|f| f.name == "instance_id")
+                    .unwrap()
+                    .value
+            ),
+            format!("cpu_id=={}", metric_fields[0].value),
+        ];
+        let results = client
+            .select_timeseries_with(
+                &sample.timeseries_name,
+                &criteria.iter().map(|x| x.as_str()).collect::<Vec<_>>(),
+                None,
+                None,
+            )
+            .await
+            .unwrap();
         assert_eq!(results.len(), 1, "Expected to find a single timeseries");
         let timeseries = &results[0];
         assert_eq!(
@@ -800,7 +709,6 @@ mod tests {
             2,
             "Expected 2 samples per timeseries"
         );
-        assert_eq!(timeseries.timeseries_key, sample.timeseries_key);
 
         // Compare measurements themselves
         let expected_measurements =
@@ -810,9 +718,22 @@ mod tests {
             .zip(expected_measurements)
             .all(|(first, second)| first == second));
         assert_eq!(timeseries.target.name, "virtual_machine");
-        assert_eq!(&timeseries.target.fields, sample.target_fields());
+        // Compare fields, but order might be different.
+        let field_cmp = |needle: &oximeter::Field,
+                         haystack: &[oximeter::Field]| {
+            needle == haystack.iter().find(|f| f.name == needle.name).unwrap()
+        };
+        timeseries
+            .target
+            .fields
+            .iter()
+            .all(|field| field_cmp(field, sample.target_fields()));
         assert_eq!(timeseries.metric.name, "cpu_busy");
-        assert_eq!(&timeseries.metric.fields, sample.metric_fields());
+        timeseries
+            .metric
+            .fields
+            .iter()
+            .all(|field| field_cmp(field, sample.metric_fields()));
         db.cleanup().await.expect("Failed to cleanup ClickHouse server");
     }
 
@@ -937,18 +858,16 @@ mod tests {
             .await
             .expect("Failed to insert test samples");
 
-        let filter = query::TimeseriesFilter {
-            timeseries_name: String::from("my_target:second_metric"),
-            filters: vec![query::FieldFilter::new("id", &[0]).unwrap()],
-            time_filter: None,
-        };
-        println!("{:#?}", filter);
         let results = client
-            .filter_timeseries(&filter)
+            .select_timeseries_with(
+                "my_target:second_metric",
+                &["id==0"],
+                None,
+                None,
+            )
             .await
             .expect("Failed to select test samples");
         println!("{:#?}", results);
-        //std::thread::sleep(std::time::Duration::from_secs(1000));
         assert_eq!(results.len(), 1, "Expected only one timeseries");
         let timeseries = &results[0];
         assert_eq!(
@@ -958,5 +877,356 @@ mod tests {
         );
         assert_eq!(timeseries.target.name, "my_target");
         assert_eq!(timeseries.metric.name, "second_metric");
+    }
+
+    #[derive(Debug, Clone, oximeter::Target)]
+    struct Service {
+        name: String,
+        id: uuid::Uuid,
+    }
+    #[derive(Debug, Clone, oximeter::Metric)]
+    struct RequestLatency {
+        route: String,
+        method: String,
+        status_code: i64,
+        #[datum]
+        latency: f64,
+    }
+
+    const SELECT_TEST_ID: &str = "4fa827ea-38bb-c37e-ac2d-f8432ca9c76e";
+    fn setup_select_test() -> (Service, Vec<RequestLatency>, Vec<Sample>) {
+        // One target
+        let id = SELECT_TEST_ID.parse().unwrap();
+        let target = Service { name: "oximeter".to_string(), id };
+
+        // Many metrics
+        let routes = &["/a", "/b"];
+        let methods = &["GET", "POST"];
+        let status_codes = &[200, 204, 500];
+
+        // Two samples each
+        let n_timeseries = routes.len() * methods.len() * status_codes.len();
+        let mut metrics = Vec::with_capacity(n_timeseries);
+        let mut samples = Vec::with_capacity(n_timeseries * 2);
+        for (route, method, status_code) in
+            itertools::iproduct!(routes, methods, status_codes)
+        {
+            let metric = RequestLatency {
+                route: route.to_string(),
+                method: method.to_string(),
+                status_code: *status_code,
+                latency: 0.0,
+            };
+            samples.push(Sample::new(&target, &metric));
+            samples.push(Sample::new(&target, &metric));
+            metrics.push(metric);
+        }
+        (target, metrics, samples)
+    }
+
+    async fn test_select_timeseries_with_impl(
+        criteria: &[&str],
+        start_time: Option<query::Timestamp>,
+        end_time: Option<query::Timestamp>,
+        test_fn: impl Fn(
+            &Service,
+            &[RequestLatency],
+            &[Sample],
+            &[model::Timeseries],
+        ),
+    ) {
+        let (target, metrics, samples) = setup_select_test();
+        let mut db = ClickHouseInstance::new(0)
+            .await
+            .expect("Failed to start ClickHouse");
+        let address = SocketAddr::new("::1".parse().unwrap(), db.port());
+        let log = Logger::root(slog::Discard, o!());
+        let client = Client::new(address, log);
+        client
+            .init_db()
+            .await
+            .expect("Failed to initialize timeseries database");
+        client
+            .insert_samples(&samples)
+            .await
+            .expect("Failed to insert samples");
+        let timeseries_name = "service:request_latency";
+        let mut timeseries = client
+            .select_timeseries_with(
+                timeseries_name,
+                criteria,
+                start_time,
+                end_time,
+            )
+            .await
+            .expect("Failed to select timeseries");
+
+        // NOTE: Timeseries as returned from the database are sorted by (name, key, timestamp).
+        // However, that key is a hash of the field values, which effectively randomizes each
+        // timeseries with the same name relative to one another. Resort them here, so that the
+        // timeseries are in ascending order of first timestamp, so that we can reliably test them.
+        timeseries.sort_by(|first, second| {
+            first.measurements[0]
+                .timestamp()
+                .cmp(&second.measurements[0].timestamp())
+        });
+
+        test_fn(&target, &metrics, &samples, &timeseries);
+
+        db.cleanup().await.expect("Failed to cleanup database");
+    }
+
+    // Small helper to go from a mulidimensional index to a flattened array index.
+    fn unravel_index(idx: &[usize; 4]) -> usize {
+        let strides = [12, 6, 2, 1];
+        let mut index = 0;
+        for (i, stride) in idx.iter().rev().zip(strides.iter().rev()) {
+            index += i * stride;
+        }
+        index
+    }
+
+    #[test]
+    fn test_unravel_index() {
+        assert_eq!(unravel_index(&[0, 0, 0, 0]), 0);
+        assert_eq!(unravel_index(&[0, 0, 1, 0]), 2);
+        assert_eq!(unravel_index(&[1, 0, 0, 0]), 12);
+        assert_eq!(unravel_index(&[1, 0, 0, 1]), 13);
+        assert_eq!(unravel_index(&[1, 0, 1, 0]), 14);
+        assert_eq!(unravel_index(&[1, 1, 2, 1]), 23);
+    }
+
+    fn verify_measurements(
+        measurements: &[oximeter::Measurement],
+        samples: &[Sample],
+    ) {
+        for (measurement, sample) in measurements.iter().zip(samples.iter()) {
+            assert_eq!(
+                measurement, &sample.measurement,
+                "Mismatch between retrieved and expected measurement",
+            );
+        }
+    }
+
+    fn verify_target(actual: &model::Target, expected: &Service) {
+        assert_eq!(actual.name, expected.name());
+        for (field_name, field_value) in expected
+            .field_names()
+            .into_iter()
+            .zip(expected.field_values().into_iter())
+        {
+            let actual_field = actual
+                .fields
+                .iter()
+                .find(|f| f.name == *field_name)
+                .expect("Missing field in recovered timeseries target");
+            assert_eq!(
+                actual_field.value, field_value,
+                "Incorrect field value in timeseries target"
+            );
+        }
+    }
+
+    fn verify_metric(actual: &model::Metric, expected: &RequestLatency) {
+        assert_eq!(actual.name, expected.name());
+        for (field_name, field_value) in expected
+            .field_names()
+            .into_iter()
+            .zip(expected.field_values().into_iter())
+        {
+            let actual_field = actual
+                .fields
+                .iter()
+                .find(|f| f.name == *field_name)
+                .expect("Missing field in recovered timeseries metric");
+            assert_eq!(
+                actual_field.value, field_value,
+                "Incorrect field value in timeseries metric"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn test_select_timeseries_with_select_one() {
+        // This set of criteria should select exactly one timeseries, with two measurements.
+        // The target is the same in all cases, but we're looking for the first of the metrics, and
+        // the first two samples/measurements.
+        let criteria =
+            &["name==oximeter", "route==/a", "method==GET", "status_code==200"];
+        fn test_fn(
+            target: &Service,
+            metrics: &[RequestLatency],
+            samples: &[Sample],
+            timeseries: &[model::Timeseries],
+        ) {
+            assert_eq!(timeseries.len(), 1, "Expected one timeseries");
+            let timeseries = timeseries.get(0).unwrap();
+            assert_eq!(
+                timeseries.measurements.len(),
+                2,
+                "Expected exactly two measurements"
+            );
+            verify_measurements(&timeseries.measurements, &samples[..2]);
+            verify_target(&timeseries.target, target);
+            verify_metric(&timeseries.metric, metrics.get(0).unwrap());
+        }
+        test_select_timeseries_with_impl(criteria, None, None, test_fn).await;
+    }
+
+    #[tokio::test]
+    async fn test_select_timeseries_with_select_one_field_with_multiple_values()
+    {
+        // This set of criteria should select the last two metrics, and so the last two
+        // timeseries. The target is the same in all cases.
+        let criteria =
+            &["name==oximeter", "route==/a", "method==GET", "status_code>200"];
+        fn test_fn(
+            target: &Service,
+            metrics: &[RequestLatency],
+            samples: &[Sample],
+            timeseries: &[model::Timeseries],
+        ) {
+            assert_eq!(timeseries.len(), 2, "Expected two timeseries");
+            for (i, ts) in timeseries.iter().enumerate() {
+                assert_eq!(
+                    ts.measurements.len(),
+                    2,
+                    "Expected exactly two measurements"
+                );
+
+                // Metrics 1..3 in the third axis, status code.
+                let sample_start = unravel_index(&[0, 0, i + 1, 0]);
+                let sample_end = sample_start + 2;
+                verify_measurements(
+                    &ts.measurements,
+                    &samples[sample_start..sample_end],
+                );
+                verify_target(&ts.target, target);
+            }
+
+            for (ts, metric) in timeseries.iter().zip(metrics[1..3].iter()) {
+                verify_metric(&ts.metric, metric);
+            }
+        }
+        test_select_timeseries_with_impl(criteria, None, None, test_fn).await;
+    }
+
+    #[tokio::test]
+    async fn test_select_timeseries_with_select_multiple_fields_with_multiple_values(
+    ) {
+        // This is non-selective for the route, which is the "second axis", and has two values for
+        // the third axis, status code. There should be a total of 4 timeseries, since there are
+        // two methods and two possible status codes.
+        let criteria = &["name==oximeter", "route==/a", "status_code>200"];
+        fn test_fn(
+            target: &Service,
+            metrics: &[RequestLatency],
+            samples: &[Sample],
+            timeseries: &[model::Timeseries],
+        ) {
+            assert_eq!(timeseries.len(), 4, "Expected four timeseries");
+            let indices = &[(0, 1), (0, 2), (1, 1), (1, 2)];
+            for (i, ts) in timeseries.iter().enumerate() {
+                assert_eq!(
+                    ts.measurements.len(),
+                    2,
+                    "Expected exactly two measurements"
+                );
+
+                // Metrics 0..2 in the second axis, method
+                // Metrics 1..3 in the third axis, status code.
+                let (i0, i1) = indices[i];
+                let sample_start = unravel_index(&[0, i0, i1, 0]);
+                let sample_end = sample_start + 2;
+                verify_measurements(
+                    &ts.measurements,
+                    &samples[sample_start..sample_end],
+                );
+                verify_target(&ts.target, target);
+            }
+
+            let mut ts_iter = timeseries.iter();
+            for i in 0..2 {
+                for j in 1..3 {
+                    let ts = ts_iter.next().unwrap();
+                    let metric = metrics.get(i * 3 + j).unwrap();
+                    verify_metric(&ts.metric, metric);
+                }
+            }
+        }
+        test_select_timeseries_with_impl(criteria, None, None, test_fn).await;
+    }
+
+    #[tokio::test]
+    async fn test_select_timeseries_with_all() {
+        // We're selecting all timeseries/samples here.
+        let criteria = &[];
+        fn test_fn(
+            target: &Service,
+            metrics: &[RequestLatency],
+            samples: &[Sample],
+            timeseries: &[model::Timeseries],
+        ) {
+            assert_eq!(timeseries.len(), 12, "Expected 12 timeseries");
+            for (i, ts) in timeseries.iter().enumerate() {
+                assert_eq!(
+                    ts.measurements.len(),
+                    2,
+                    "Expected exactly two measurements"
+                );
+
+                let sample_start = i * 2;
+                let sample_end = sample_start + 2;
+                verify_measurements(
+                    &ts.measurements,
+                    &samples[sample_start..sample_end],
+                );
+                verify_target(&ts.target, target);
+                verify_metric(&ts.metric, metrics.get(i).unwrap());
+            }
+        }
+        test_select_timeseries_with_impl(criteria, None, None, test_fn).await;
+    }
+
+    #[tokio::test]
+    async fn test_select_timeseries_with_start_time() {
+        let (_, metrics, samples) = setup_select_test();
+        let mut db = ClickHouseInstance::new(0)
+            .await
+            .expect("Failed to start ClickHouse");
+        let address = SocketAddr::new("::1".parse().unwrap(), db.port());
+        let log = Logger::root(slog::Discard, o!());
+        let client = Client::new(address, log);
+        client
+            .init_db()
+            .await
+            .expect("Failed to initialize timeseries database");
+        client
+            .insert_samples(&samples)
+            .await
+            .expect("Failed to insert samples");
+        let timeseries_name = "service:request_latency";
+        let start_time = samples[samples.len() / 2].measurement.timestamp();
+        let mut timeseries = client
+            .select_timeseries_with(
+                timeseries_name,
+                &[],
+                Some(query::Timestamp::Exclusive(start_time)),
+                None,
+            )
+            .await
+            .expect("Failed to select timeseries");
+        timeseries.sort_by(|first, second| {
+            first.measurements[0]
+                .timestamp()
+                .cmp(&second.measurements[0].timestamp())
+        });
+        assert_eq!(timeseries.len(), metrics.len() / 2);
+        for ts in timeseries.iter() {
+            for meas in ts.measurements.iter() {
+                assert!(meas.timestamp() > start_time);
+            }
+        }
+        db.cleanup().await.expect("Failed to cleanup database");
     }
 }
