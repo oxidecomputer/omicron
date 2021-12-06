@@ -649,12 +649,12 @@ CREATE INDEX ON omicron.public.console_session (
  */
 
 /*
- * Users defined by the system
+ * Users built into the system
  *
  * The ids and names for these users are well-known (i.e., they are used by
  * Nexus directly, so changing these would potentially break compatibility).
  */
-CREATE TABLE omicron.public.user_predefined (
+CREATE TABLE omicron.public.user_builtin (
     /*
      * Identity metadata
      *
@@ -670,10 +670,10 @@ CREATE TABLE omicron.public.user_predefined (
     time_deleted TIMESTAMPTZ
 );
 
-CREATE UNIQUE INDEX ON omicron.public.user_predefined (name);
+CREATE UNIQUE INDEX ON omicron.public.user_builtin (name);
 
 /* User used by Nexus to create other users.  Do NOT add more users here! */
-INSERT INTO omicron.public.user_predefined (
+INSERT INTO omicron.public.user_builtin (
     id,
     name,
     description,

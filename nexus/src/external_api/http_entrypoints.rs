@@ -1928,7 +1928,7 @@ async fn sagas_get_saga(
 }
 
 /*
- * Predefined users
+ * Built-in (system) users
  */
 
 /**
@@ -1950,7 +1950,7 @@ async fn users_get(
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
         let users = nexus
-            .users_predefined_list(&opctx, &pagparams)
+            .users_builtin_list(&opctx, &pagparams)
             .await?
             .into_iter()
             .map(|i| i.into())
@@ -1965,7 +1965,7 @@ async fn users_get(
  */
 #[derive(Deserialize, JsonSchema)]
 struct UserPathParam {
-    /// The predefined (system) user's unique name.
+    /// The built-in user's unique name.
     user_name: Name,
 }
 
@@ -1986,7 +1986,7 @@ async fn users_get_user(
     let user_name = &path.user_name;
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
-        let user = nexus.user_predefined_fetch(&opctx, &user_name).await?;
+        let user = nexus.user_builtin_fetch(&opctx, &user_name).await?;
         Ok(HttpResponseOk(user.into()))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await

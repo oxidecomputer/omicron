@@ -2097,23 +2097,23 @@ impl Nexus {
     }
 
     /*
-     * Predefined users
+     * Built-in users
      */
 
-    pub async fn users_predefined_list(
+    pub async fn users_builtin_list(
         &self,
         opctx: &OpContext,
         pagparams: &DataPageParams<'_, Name>,
-    ) -> ListResultVec<db::model::UserPredefined> {
-        self.db_datastore.users_predefined_list_by_name(opctx, pagparams).await
+    ) -> ListResultVec<db::model::UserBuiltin> {
+        self.db_datastore.users_builtin_list_by_name(opctx, pagparams).await
     }
 
-    pub async fn user_predefined_fetch(
+    pub async fn user_builtin_fetch(
         &self,
         opctx: &OpContext,
         name: &Name,
-    ) -> LookupResult<db::model::UserPredefined> {
-        self.db_datastore.user_predefined_fetch(opctx, name).await
+    ) -> LookupResult<db::model::UserBuiltin> {
+        self.db_datastore.user_builtin_fetch(opctx, name).await
     }
 
     /*

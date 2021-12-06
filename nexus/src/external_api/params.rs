@@ -169,7 +169,7 @@ pub struct DiskCreate {
 }
 
 /*
- * PREDEFINED USERS
+ * BUILT-IN USERS
  *
  * These cannot be created via the external API, but we use the same interfaces
  * for creating them internally as we use for types that can be created in the
@@ -177,11 +177,11 @@ pub struct DiskCreate {
  */
 
 /**
- * Create-time parameters for a [`UserPredefined`]
+ * Create-time parameters for a [`UserBuiltin`]
  */
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
-pub struct UserPredefinedCreate {
+pub struct UserBuiltinCreate {
     #[serde(flatten)]
     pub identity: IdentityMetadataCreateParams,
 }

@@ -9,7 +9,7 @@ use crate::db::identity::{Asset, Resource};
 use crate::db::schema::{
     console_session, dataset, disk, instance, metric_producer,
     network_interface, organization, oximeter, project, rack, region,
-    router_route, sled, user_predefined, vpc, vpc_firewall_rule, vpc_router,
+    router_route, sled, user_builtin, vpc, vpc_firewall_rule, vpc_router,
     vpc_subnet, zpool,
 };
 use crate::external_api::params;
@@ -1771,17 +1771,17 @@ impl ConsoleSession {
     }
 }
 
-/// Describes a predefined user, as stored in the database
+/// Describes a built-in user, as stored in the database
 #[derive(Queryable, Insertable, Debug, Resource, Selectable)]
-#[table_name = "user_predefined"]
-pub struct UserPredefined {
+#[table_name = "user_builtin"]
+pub struct UserBuiltin {
     #[diesel(embed)]
-    identity: UserPredefinedIdentity,
+    identity: UserBuiltinIdentity,
 }
 
-impl UserPredefined {
-    /// Creates a new database UserPredefined object.
-    pub fn new(id: Uuid, params: params::UserPredefinedCreate) -> Self {
-        Self { identity: UserPredefinedIdentity::new(id, params.identity) }
+impl UserBuiltin {
+    /// Creates a new database UserBuiltin object.
+    pub fn new(id: Uuid, params: params::UserBuiltinCreate) -> Self {
+        Self { identity: UserBuiltinIdentity::new(id, params.identity) }
     }
 }

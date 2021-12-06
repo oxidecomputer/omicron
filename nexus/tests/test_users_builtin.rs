@@ -16,8 +16,8 @@ use omicron_nexus::external_api::views::User;
 extern crate slog;
 
 #[tokio::test]
-async fn test_users_predefined() {
-    let cptestctx = test_setup("test_users_predefined").await;
+async fn test_users_builtin() {
+    let cptestctx = test_setup("test_users_builtin").await;
     let testctx = &cptestctx.external_client;
 
     RequestBuilder::new(testctx, Method::GET, "/users")

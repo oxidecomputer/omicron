@@ -38,7 +38,7 @@ async fn populate(
     let db_result = backoff::retry_notify(
         backoff::internal_service_policy(),
         || async {
-            datastore.load_predefined_users(&opctx).await.map_err(|error| {
+            datastore.load_builtin_users(&opctx).await.map_err(|error| {
                 use omicron_common::api::external::Error;
                 match &error {
                     Error::ServiceUnavailable { .. } => {
@@ -51,7 +51,7 @@ async fn populate(
         |error, delay| {
             warn!(
                 opctx.log,
-                "failed to load predefined users; will retry in {:?}", delay;
+                "failed to load builtin users; will retry in {:?}", delay;
                 "error_message" => ?error,
             );
         },
@@ -65,7 +65,7 @@ async fn populate(
          * unlikely in practice.)
          */
         error!(opctx.log,
-            "gave up trying to load predefined users";
+            "gave up trying to load builtin users";
             "error_message" => ?error
         );
     }

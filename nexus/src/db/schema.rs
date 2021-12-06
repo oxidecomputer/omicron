@@ -290,7 +290,7 @@ table! {
 }
 
 table! {
-    user_predefined (id) {
+    user_builtin (id) {
         id -> Uuid,
         name -> Text,
         description -> Text,
@@ -317,5 +317,5 @@ allow_tables_to_appear_in_same_query!(
     vpc_subnet,
     vpc_router,
     vpc_firewall_rule,
-    user_predefined,
+    user_builtin,
 );

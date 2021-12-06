@@ -632,10 +632,10 @@ pub async fn populate(
     client.batch_execute(sql).await.context("populating Omicron database")
 
     /*
-     * It's tempting to put hardcoded data in here (like predefined users).
-     * That probably belongs in Nexus initialization instead.  Populating data
-     * here would work for initial setup, but not for rolling out new data (part
-     * of a new version of Nexus) to an existing deployment.
+     * It's tempting to put hardcoded data in here (like builtin users).  That
+     * probably belongs in Nexus initialization instead.  Populating data here
+     * would work for initial setup, but not for rolling out new data (part of a
+     * new version of Nexus) to an existing deployment.
      */
 }
 

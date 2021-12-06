@@ -176,7 +176,7 @@ impl Into<Sled> for model::Sled {
 }
 
 /*
- * PREDEFINED USERS
+ * BUILT-IN USERS
  */
 
 /**
@@ -193,7 +193,7 @@ pub struct User {
     pub identity: IdentityMetadata,
 }
 
-impl Into<User> for model::UserPredefined {
+impl Into<User> for model::UserBuiltin {
     fn into(self) -> User {
         User { identity: self.identity() }
     }

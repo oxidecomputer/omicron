@@ -64,8 +64,8 @@ use crate::db::{
         ConsoleSession, Dataset, Disk, DiskAttachment, DiskRuntimeState,
         Generation, Instance, InstanceRuntimeState, Name, Organization,
         OrganizationUpdate, OximeterInfo, ProducerEndpoint, Project,
-        ProjectUpdate, RouterRoute, RouterRouteUpdate, Sled, UserPredefined,
-        Vpc, VpcFirewallRule, VpcRouter, VpcRouterUpdate, VpcSubnet,
+        ProjectUpdate, RouterRoute, RouterRouteUpdate, Sled, UserBuiltin, Vpc,
+        VpcFirewallRule, VpcRouter, VpcRouterUpdate, VpcSubnet,
         VpcSubnetUpdate, VpcUpdate, Zpool,
     },
     pagination::paginated,
@@ -1944,16 +1944,16 @@ impl DataStore {
             })
     }
 
-    pub async fn users_predefined_list_by_name(
+    pub async fn users_builtin_list_by_name(
         &self,
         opctx: &OpContext,
         pagparams: &DataPageParams<'_, Name>,
-    ) -> ListResultVec<UserPredefined> {
-        use db::schema::user_predefined::dsl;
+    ) -> ListResultVec<UserBuiltin> {
+        use db::schema::user_builtin::dsl;
         opctx.authorize(authz::Action::ListChildren, authz::FLEET)?;
-        paginated(dsl::user_predefined, dsl::name, pagparams)
-            .select(UserPredefined::as_select())
-            .load_async::<UserPredefined>(self.pool_authorized(opctx)?)
+        paginated(dsl::user_builtin, dsl::name, pagparams)
+            .select(UserBuiltin::as_select())
+            .load_async::<UserBuiltin>(self.pool_authorized(opctx)?)
             .await
             .map_err(|e| {
                 public_error_from_diesel_pool(
@@ -1964,17 +1964,17 @@ impl DataStore {
             })
     }
 
-    pub async fn user_predefined_fetch(
+    pub async fn user_builtin_fetch(
         &self,
         opctx: &OpContext,
         name: &Name,
-    ) -> LookupResult<UserPredefined> {
-        use db::schema::user_predefined::dsl;
+    ) -> LookupResult<UserBuiltin> {
+        use db::schema::user_builtin::dsl;
         opctx.authorize(authz::Action::ListChildren, authz::FLEET)?;
-        dsl::user_predefined
+        dsl::user_builtin
             .filter(dsl::name.eq(name.clone()))
-            .select(UserPredefined::as_select())
-            .first_async::<UserPredefined>(self.pool_authorized(opctx)?)
+            .select(UserBuiltin::as_select())
+            .first_async::<UserBuiltin>(self.pool_authorized(opctx)?)
             .await
             .map_err(|e| {
                 public_error_from_diesel_pool(
@@ -1986,36 +1986,36 @@ impl DataStore {
     }
 
     /// Load built-in users into the database
-    pub async fn load_predefined_users(
+    pub async fn load_builtin_users(
         &self,
         opctx: &OpContext,
     ) -> Result<(), Error> {
-        use db::schema::user_predefined::dsl;
+        use db::schema::user_builtin::dsl;
 
         opctx.authorize(authz::Action::Modify, authz::FLEET)?;
 
-        struct UserPredefinedInfo {
+        struct UserBuiltinInfo {
             id: &'static str,
             name: &'static str,
             description: &'static str,
         }
 
-        let predefined_users = [
+        let builtin_users = [
             /*
-             * Note: "db_init" is also a predefined user, but that one by
+             * Note: "db_init" is also a builtin user, but that one by
              * necessity is created with the database.
              */
-            UserPredefinedInfo {
+            UserBuiltinInfo {
                 id: authn::USER_UUID_SAGA_RECOVERY,
                 name: authn::USER_NAME_SAGA_RECOVERY,
                 description: "used for saga recovery",
             },
-            UserPredefinedInfo {
+            UserBuiltinInfo {
                 id: authn::USER_UUID_TEST_PRIVILEGED,
                 name: authn::USER_NAME_TEST_PRIVILEGED,
                 description: "used for testing with all privileges",
             },
-            UserPredefinedInfo {
+            UserBuiltinInfo {
                 id: authn::USER_UUID_TEST_UNPRIVILEGED,
                 name: authn::USER_NAME_TEST_UNPRIVILEGED,
                 description: "used for testing with no privileges",
@@ -2036,9 +2036,9 @@ impl DataStore {
                         id, error
                     )
                 });
-            UserPredefined::new(
+            UserBuiltin::new(
                 id,
-                params::UserPredefinedCreate {
+                params::UserBuiltinCreate {
                     identity: IdentityMetadataCreateParams {
                         name,
                         description: String::from(u.description),
@@ -2046,17 +2046,17 @@ impl DataStore {
                 },
             )
         })
-        .collect::<Vec<UserPredefined>>();
+        .collect::<Vec<UserBuiltin>>();
 
-        debug!(opctx.log, "attempting to create predefined users");
-        let count = diesel::insert_into(dsl::user_predefined)
-            .values(predefined_users)
+        debug!(opctx.log, "attempting to create builtin users");
+        let count = diesel::insert_into(dsl::user_builtin)
+            .values(builtin_users)
             .on_conflict(dsl::id)
             .do_nothing()
             .execute_async(self.pool_authorized(opctx)?)
             .await
             .map_err(public_error_from_diesel_pool_shouldnt_fail)?;
-        info!(opctx.log, "created {} predefined users", count);
+        info!(opctx.log, "created {} builtin users", count);
         Ok(())
     }
 }
