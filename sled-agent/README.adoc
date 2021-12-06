@@ -17,6 +17,8 @@ between the two implementations.
 == Code Tour
 
 * `src/bin`: Contains binaries for the sled agent (and simulated sled agent).
+* `src/bootstrap`: Contains bootstrap-related services, operating on a distinct
+  HTTP endpoint from typical sled operation.
 * `src/common`: Shared state machine code between the simulated and real sled agent.
 * `src/sim`: Library code responsible for operating a simulated sled agent.
 * `src/illumos`: Illumos-specific helpers for accessing OS utilities to manage a sled.
@@ -25,6 +27,12 @@ Additionally, there are some noteworthy top-level files used by the sled agent:
 
 * `src/instance_manager.rs`: Manages multiple instances on a sled.
 * `src/instance.rs`: Manages a single instance.
+* `src/storage_manager.rs`: Manages storage within a sled.
+
+As well as some utilities:
+
+* `src/running_zone.rs`: RAII wrapper around a running Zone owned by the Sled Agent.
+* `src/vnic.rs`: RAII wrapper around VNICs owned by the Sled Agent.
 
 == Life of an Instance
 
@@ -39,8 +47,8 @@ following steps on initialization to manage OS-local resources.
 . ... creates a new "base zone", which contains the necessary pieces to execute
 a Propolis server, and as little else as possible. This base zone is derived
 from the "sparse" zone template.
-. ... identifies all Oxide-controlled zones (with the prefix `propolis_instance_`)
-and all Oxide-controlled VNICs (with the prefix `vnic_propolis`), which are
+. ... identifies all Oxide-controlled zones (with the prefix `oxz_`)
+and all Oxide-controlled VNICs (with the prefix `ox_vnic_`), which are
 removed from the machine.
 
 .To allocate an instance on the Sled, the following steps occur:
