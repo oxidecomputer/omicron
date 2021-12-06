@@ -438,6 +438,15 @@ CREATE UNIQUE INDEX ON omicron.public.network_interface (
 ) WHERE
     time_deleted IS NULL;
 
+/* Ensure we do not assign the same MAC twice within a VPC
+ * See RFD174's discussion on the scope of virtual MACs
+ */
+CREATE UNIQUE INDEX ON omicron.public.network_interface (
+    vpc_id,
+    mac
+) WHERE
+    time_deleted IS NULL;
+
 CREATE TYPE omicron.public.vpc_router_kind AS ENUM (
     'system',
     'custom'

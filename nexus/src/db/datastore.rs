@@ -1054,16 +1054,17 @@ impl DataStore {
      * Generate a unique MAC address for an interface
      */
     pub fn generate_mac_address(&self) -> Result<db::model::MacAddr, Error> {
-        // Bitmasks defined in RFC7042 section 2.1
-        const LOCALLY_ADMINISTERED: u8 = 0b1;
-        const MULTICAST: u8 = 0b10;
-
-        // Generate a unique address from the locally administered space.
         use rand::Fill;
-        let mut addr = [0u8; 6];
-        addr.try_fill(&mut StdRng::from_entropy())
+        // Use the Oxide OUI A8 40 25
+        let mut addr = [0xA8, 0x40, 0x25, 0x00, 0x00, 0x00];
+        addr[3..]
+            .try_fill(&mut StdRng::from_entropy())
             .map_err(|_| Error::internal_error("failed to generate MAC"))?;
-        addr[0] = (addr[0] & !MULTICAST) | LOCALLY_ADMINISTERED;
+        // Oxide virtual MACs are constrained to have these bits set.
+        addr[3] |= 0xF0;
+        // TODO-correctness: We should use an explicit allocator for the MACs
+        // given the small address space. Right now creation requests may fail
+        // due to MAC collision, especially given the 20-bit space.
         Ok(MacAddr(macaddr::MacAddr6::from(addr)).into())
     }
 
