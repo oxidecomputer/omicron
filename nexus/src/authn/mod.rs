@@ -88,7 +88,10 @@ lazy_static! {
             "used by Nexus when recovering sagas",
         );
 
-    /// Test user that's granted all privileges, used for automated testing
+    /// Test user that's granted all privileges, used for automated testing and
+    /// local development
+    // TODO-security This eventually needs to go, maybe replaced with some kind
+    // of deployment-specific customization.
     pub static ref USER_TEST_PRIVILEGED: UserBuiltinConfig =
         UserBuiltinConfig::new_static(
             // "4007" looks a bit like "root".
@@ -166,8 +169,6 @@ impl Context {
     }
 
     /// Returns an authenticated context for a special testing user
-    // TODO-security This eventually needs to go.  But for now, this is used
-    // in unit tests.
     #[cfg(test)]
     pub fn internal_test_user() -> Context {
         Context::test_context_for_actor(USER_TEST_PRIVILEGED.id)
