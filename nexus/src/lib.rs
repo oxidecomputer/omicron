@@ -167,6 +167,13 @@ pub async fn run_server(config: &Config) -> Result<(), String> {
         .log
         .to_logger("nexus")
         .map_err(|message| format!("initializing logger: {}", message))?;
+    if let Err(e) = usdt::register_probes() {
+        let msg = format!("failed to register DTrace probes: {}", e);
+        error!(log, "{}", msg);
+        return Err(msg);
+    } else {
+        debug!(log, "registered DTrace probes");
+    }
     let rack_id = Uuid::new_v4();
     let server = Server::start(config, &rack_id, &log).await?;
     server.register_as_producer().await;
