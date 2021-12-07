@@ -7,6 +7,7 @@
 use super::agent::Agent;
 use super::config::Config;
 use super::http_entrypoints::ba_api as http_api;
+use slog::Drain;
 use std::sync::Arc;
 
 /// Wraps a [Agent] object, and provides helper methods for exposing it
@@ -18,10 +19,19 @@ pub struct Server {
 
 impl Server {
     pub async fn start(config: &Config) -> Result<Self, String> {
-        let log = config
-            .log
-            .to_logger("bootstrap-agent")
-            .map_err(|message| format!("initializing logger: {}", message))?;
+        let (drain, registration) = slog_dtrace::with_drain(
+            config.log.to_logger("bootstrap-agent").map_err(|message| {
+                format!("initializing logger: {}", message)
+            })?,
+        );
+        let log = slog::Logger::root(drain.fuse(), slog::o!());
+        if let slog_dtrace::ProbeRegistration::Failed(e) = registration {
+            let msg = format!("Failed to register DTrace probes: {}", e);
+            error!(log, "{}", msg);
+            return Err(msg);
+        } else {
+            debug!(log, "registered DTrace probes");
+        }
         info!(log, "setting up bootstrap agent server");
 
         let ba_log = log.new(o!(
