@@ -169,16 +169,6 @@ impl Vnic {
         let name = guest_vnic_name(allocator.next());
         Dladm::create_vnic(physical_dl, &name, mac, vlan)?;
 
-        // TODO (rpz): If vlan is Some(N), then OPTE is going to have
-        // a bad time...haven't been doing anything with VLANs. Easy
-        // enough to add, but need to know if this is something I need
-        // to implement before next demo.
-        //
-        // TODO (rpz): OPTE needs data in a reified state. I.e., it
-        // has no idea what a VPC UUID or VPC logical name means. It
-        // deals purely in concrete data like MAC addresses, IPs, and
-        // CIDRs. Until this data is wired up, we need to get grimey
-        // and assume the lab environment here for the demo.
         let ip4 = match ip {
             IpAddr::V4(v) => v,
 
@@ -191,52 +181,19 @@ impl Vnic {
             }
         };
 
-        // TODO (rpz): For now we assume the lab environment for the
-        // sake of the demo.
-        //
-        // * private_ip: `172.20.14.xxx`
-        // * gw_mac: `AA:00:04:00:FF:01`
-        // * gw_ip: `172.20.14.1`
-        //
-        // The private IP and gateway information are needed so that
-        // OPTE can proxy ARP in both directions. That is, instead of
-        // letting the guest VM ARP on the native IPv4 network, we
-        // make it look more like what the production Oxide Network
-        // will look like and only allow OPTE to generate ARP replies.
-        // This works because in the Oxide VPC Network the guest's IPs
-        // are always on a /32 or /128, which means all communication
-        // is "off link" and must hit the gateway. In the lab
-        // environment this is literally the actual IPv4 gateway, in
-        // the Oxide VPC Network this would be address XXX.XXX.XXX.1
-        // of the VPC subnet. In any event, the point is that we can
-        // get by with a lot less information by pushing SNAT to the
-        // side for now.
         let ip_cfg = opte_core::ioctl::IpConfig {
             // NOTE: OPTE has it's own Ipv4Addr, thus the into().
             private_ip: ip4.into(),
-            // This is lab config.
-            //
-            // gw_mac: opte_core::ether::EtherAddr::from(
-            //     [0xAA, 0x00, 0x04, 0x00, 0xFF, 0x01]
-            // ),
-            // gw_ip: "172.20.14.1".parse().unwrap(),
-
-            // This is home config.
-            gw_mac: opte_core::ether::EtherAddr::from(
-                [0x78, 0x23, 0xAE, 0x5D, 0x4F, 0x0D]
-            ),
-            gw_ip: "10.0.0.1".parse().unwrap(),
-
 	    snat: None,
         };
 
-        let req = opte_core::ioctl::RegisterPortReq {
+        let req = opte_core::ioctl::AddPortReq {
             link_name: name.clone(),
             ip_cfg,
         };
 
         let hdl = opteadm::OpteAdm::open()?;
-        hdl.register_port(&req)?;
+        hdl.add_port(&req)?;
 
         Ok(Vnic { name, deleted: false })
     }
@@ -259,11 +216,8 @@ impl Vnic {
             Ok(())
         } else {
             self.deleted = true;
-            // TODO (rpz): The `hdl` is something we could create once
-            // and stash in `self`, but it's also fine to open a new
-            // one for each operation.
             let hdl = opteadm::OpteAdm::open()?;
-            hdl.unregister_port(&self.name)?;
+            hdl.delete_port(&self.name)?;
             Dladm::delete_vnic(&self.name)
         }
     }
