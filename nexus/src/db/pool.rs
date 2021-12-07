@@ -31,24 +31,27 @@
 use super::Config as DbConfig;
 use async_bb8_diesel::ConnectionManager;
 use diesel::PgConnection;
+use diesel_dtrace::DTraceConnection;
+
+pub type DbConnection = DTraceConnection<PgConnection>;
 
 /// Wrapper around a database connection pool.
 ///
 /// Expected to be used as the primary interface to the database.
 pub struct Pool {
-    pool: bb8::Pool<ConnectionManager<diesel::PgConnection>>,
+    pool: bb8::Pool<ConnectionManager<DbConnection>>,
 }
 
 impl Pool {
     pub fn new(db_config: &DbConfig) -> Self {
         let manager =
-            ConnectionManager::<PgConnection>::new(&db_config.url.url());
+            ConnectionManager::<DbConnection>::new(&db_config.url.url());
         let pool = bb8::Builder::new().build_unchecked(manager);
         Pool { pool }
     }
 
     /// Returns a reference to the underlying pool.
-    pub fn pool(&self) -> &bb8::Pool<ConnectionManager<diesel::PgConnection>> {
+    pub fn pool(&self) -> &bb8::Pool<ConnectionManager<DbConnection>> {
         &self.pool
     }
 }
