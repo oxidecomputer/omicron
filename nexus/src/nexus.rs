@@ -1782,6 +1782,27 @@ impl Nexus {
             .await?)
     }
 
+    pub async fn subnet_list_network_interfaces(
+        &self,
+        organization_name: &Name,
+        project_name: &Name,
+        vpc_name: &Name,
+        subnet_name: &Name,
+        pagparams: &DataPageParams<'_, Name>,
+    ) -> ListResultVec<db::model::NetworkInterface> {
+        let subnet = self
+            .vpc_lookup_subnet(
+                organization_name,
+                project_name,
+                vpc_name,
+                subnet_name,
+            )
+            .await?;
+        self.db_datastore
+            .subnet_list_network_interfaces(&subnet.id(), pagparams)
+            .await
+    }
+
     pub async fn vpc_list_routers(
         &self,
         organization_name: &Name,

@@ -1699,6 +1699,28 @@ impl DataStore {
         Ok(())
     }
 
+    pub async fn subnet_list_network_interfaces(
+        &self,
+        subnet_id: &Uuid,
+        pagparams: &DataPageParams<'_, Name>,
+    ) -> ListResultVec<NetworkInterface> {
+        use db::schema::network_interface::dsl;
+
+        paginated(dsl::network_interface, dsl::name, pagparams)
+            .filter(dsl::time_deleted.is_null())
+            .filter(dsl::subnet_id.eq(*subnet_id))
+            .select(NetworkInterface::as_select())
+            .load_async::<db::model::NetworkInterface>(self.pool())
+            .await
+            .map_err(|e| {
+                public_error_from_diesel_pool(
+                    e,
+                    ResourceType::NetworkInterface,
+                    LookupType::Other("Listing All".to_string()),
+                )
+            })
+    }
+
     pub async fn vpc_list_routers(
         &self,
         vpc_id: &Uuid,
