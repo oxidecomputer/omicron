@@ -43,9 +43,11 @@ use omicron_common::api::external::Error;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::LookupType;
+use omicron_common::api::external::MacAddr;
 use omicron_common::api::external::ResourceType;
 use omicron_common::api::external::UpdateResult;
 use omicron_common::bail_unless;
+use rand::{rngs::StdRng, SeedableRng};
 use std::convert::TryFrom;
 use std::sync::Arc;
 use uuid::Uuid;
@@ -57,13 +59,14 @@ use crate::db::{
     },
     model::{
         ConsoleSession, Dataset, Disk, DiskAttachment, DiskRuntimeState,
-        Generation, Instance, InstanceRuntimeState, Name, Organization,
-        OrganizationUpdate, OximeterInfo, ProducerEndpoint, Project,
-        ProjectUpdate, RouterRoute, RouterRouteUpdate, Sled, Vpc,
-        VpcFirewallRule, VpcRouter, VpcRouterUpdate, VpcSubnet,
-        VpcSubnetUpdate, VpcUpdate, Zpool,
+        Generation, IncompleteNetworkInterface, Instance, InstanceRuntimeState,
+        Name, NetworkInterface, Organization, OrganizationUpdate, OximeterInfo,
+        ProducerEndpoint, Project, ProjectUpdate, RouterRoute,
+        RouterRouteUpdate, Sled, Vpc, VpcFirewallRule, VpcRouter,
+        VpcRouterUpdate, VpcSubnet, VpcSubnetUpdate, VpcUpdate, Zpool,
     },
     pagination::paginated,
+    subnet_allocation::AllocateIpQuery,
     update_and_check::{UpdateAndCheck, UpdateStatus},
 };
 
@@ -1041,6 +1044,78 @@ impl DataStore {
                 ),
             }),
         }
+    }
+
+    /*
+     * Network interfaces
+     */
+
+    /**
+     * Generate a unique MAC address for an interface
+     */
+    pub fn generate_mac_address(&self) -> Result<db::model::MacAddr, Error> {
+        use rand::Fill;
+        // Use the Oxide OUI A8 40 25
+        let mut addr = [0xA8, 0x40, 0x25, 0x00, 0x00, 0x00];
+        addr[3..]
+            .try_fill(&mut StdRng::from_entropy())
+            .map_err(|_| Error::internal_error("failed to generate MAC"))?;
+        // Oxide virtual MACs are constrained to have these bits set.
+        addr[3] |= 0xF0;
+        // TODO-correctness: We should use an explicit allocator for the MACs
+        // given the small address space. Right now creation requests may fail
+        // due to MAC collision, especially given the 20-bit space.
+        Ok(MacAddr(macaddr::MacAddr6::from(addr)).into())
+    }
+
+    pub async fn instance_create_network_interface(
+        &self,
+        interface: IncompleteNetworkInterface,
+    ) -> CreateResult<NetworkInterface> {
+        use db::schema::network_interface::dsl;
+
+        let name = interface.identity.name.clone();
+        let result = match interface.ip {
+            // Attempt an insert with a requested IP address
+            Some(ip) => {
+                let row = NetworkInterface {
+                    identity: interface.identity,
+                    instance_id: interface.instance_id,
+                    vpc_id: interface.vpc_id,
+                    subnet_id: interface.subnet.id(),
+                    mac: interface.mac,
+                    ip: ip.into(),
+                };
+                diesel::insert_into(dsl::network_interface)
+                    .values(row)
+                    .returning(NetworkInterface::as_returning())
+                    .get_result_async(self.pool())
+                    .await
+            }
+            // Insert and allocate an IP address
+            None => {
+                let block = interface.subnet.ipv4_block.ok_or_else(|| {
+                    Error::internal_error("assuming subnets all have v4 block")
+                })?;
+                let allocation_query = AllocateIpQuery {
+                    block: ipnetwork::IpNetwork::V4(block.0 .0),
+                    interface,
+                    now: Utc::now(),
+                };
+                diesel::insert_into(dsl::network_interface)
+                    .values(allocation_query)
+                    .returning(NetworkInterface::as_returning())
+                    .get_result_async(self.pool())
+                    .await
+            }
+        };
+        result.map_err(|e| {
+            public_error_from_diesel_pool_create(
+                e,
+                ResourceType::NetworkInterface,
+                name.as_str(),
+            )
+        })
     }
 
     // Create a record for a new Oximeter instance

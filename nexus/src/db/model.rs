@@ -1740,16 +1740,59 @@ impl Into<external::VpcFirewallRule> for VpcFirewallRule {
     }
 }
 
-#[derive(Queryable, Insertable, Clone, Debug, Resource)]
+/// A not fully constructed NetworkInterface. It may not yet have an IP
+/// address allocated.
+#[derive(Clone, Debug)]
+pub struct IncompleteNetworkInterface {
+    pub identity: NetworkInterfaceIdentity,
+
+    pub instance_id: Uuid,
+    pub vpc_id: Uuid,
+    pub subnet: VpcSubnet,
+    pub mac: MacAddr,
+    pub ip: Option<std::net::IpAddr>,
+}
+
+impl IncompleteNetworkInterface {
+    pub fn new(
+        interface_id: Uuid,
+        instance_id: Uuid,
+        vpc_id: Uuid,
+        subnet: VpcSubnet,
+        mac: MacAddr,
+        ip: Option<std::net::IpAddr>,
+        params: params::NetworkInterfaceCreate,
+    ) -> Self {
+        let identity =
+            NetworkInterfaceIdentity::new(interface_id, params.identity);
+        Self { identity, instance_id, subnet, vpc_id, mac, ip }
+    }
+}
+
+#[derive(Selectable, Queryable, Insertable, Clone, Debug, Resource)]
 #[table_name = "network_interface"]
 pub struct NetworkInterface {
     #[diesel(embed)]
     pub identity: NetworkInterfaceIdentity,
 
+    pub instance_id: Uuid,
     pub vpc_id: Uuid,
     pub subnet_id: Uuid,
     pub mac: MacAddr,
     pub ip: ipnetwork::IpNetwork,
+}
+
+impl From<NetworkInterface> for external::NetworkInterface {
+    fn from(iface: NetworkInterface) -> Self {
+        Self {
+            identity: iface.identity(),
+            instance_id: iface.instance_id,
+            vpc_id: iface.vpc_id,
+            subnet_id: iface.subnet_id,
+            ip: iface.ip.ip(),
+            mac: *iface.mac,
+        }
+    }
 }
 
 // TODO: `struct SessionToken(String)` for session token
