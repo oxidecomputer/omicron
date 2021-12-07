@@ -20,7 +20,7 @@ use omicron_common::api::internal::sled_agent::InstanceRuntimeStateRequested;
 use omicron_common::backoff;
 use propolis_client::Client as PropolisClient;
 use slog::Logger;
-use std::net::{IpAddr, SocketAddr};
+use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::task::JoinHandle;
 use uuid::Uuid;

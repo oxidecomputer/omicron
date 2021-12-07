@@ -24,6 +24,11 @@ pub enum Error {
 
     #[error("Failed to parse output: {0}")]
     Parse(#[from] std::string::FromUtf8Error),
+
+    // TODO: This isn't the right place to put this, but I just want
+    // to get integration going.
+    #[error("OPTE error: {0}")]
+    OpteErr(#[from] opteadm::Error),
 }
 
 /// The name of a physical datalink.

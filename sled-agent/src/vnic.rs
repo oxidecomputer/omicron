@@ -9,6 +9,7 @@ use crate::illumos::dladm::{
     PhysicalLink, VNIC_PREFIX_CONTROL, VNIC_PREFIX_GUEST,
 };
 use omicron_common::api::external::MacAddr;
+use std::net::IpAddr;
 use std::sync::{
     atomic::{AtomicU64, Ordering},
     Arc,
@@ -83,11 +84,7 @@ impl Vnic {
             IpAddr::V4(v) => v,
 
             _ => {
-                return Err(Error::InternalError {
-                    internal_message: format!(
-                        "OPTE only supports IPv4 guests at the moment",
-                    ),
-                });
+                todo!("OPTE supports IPv4 guests only at the moment");
             }
         };
         let ip_cfg = opte_core::ioctl::IpConfig {
