@@ -48,7 +48,7 @@ impl Client {
         if self.verifier.verify(&share) {
             Ok(share)
         } else {
-            Err(BootstrapError::InvalidShare(self.addr.clone()))
+            Err(BootstrapError::InvalidShare(self.addr))
         }
     }
 }
