@@ -45,6 +45,7 @@ pub fn make_omicron_oso() -> Result<Oso, anyhow::Error> {
         Organization::get_polar_class(),
         Project::get_polar_class(),
         ProjectChild::get_polar_class(),
+        FleetChild::get_polar_class(),
     ];
     for c in classes {
         oso.register_class(c).context("registering class")?;
@@ -223,6 +224,10 @@ impl Fleet {
     pub fn organization(&self, organization_id: Uuid) -> Organization {
         Organization { organization_id }
     }
+
+    pub fn child_generic(&self) -> FleetChild {
+        FleetChild {}
+    }
 }
 
 impl oso::PolarClass for Fleet {
@@ -362,6 +367,30 @@ impl oso::PolarClass for ProjectChild {
                 organization_id: pr.organization_id,
                 project_id: pr.project_id,
             })
+    }
+}
+
+/// Wraps any resource that lives inside a Fleet but outside an Organization
+///
+/// This includes [`db::model::UserBuiltin`] and future resources describing
+/// hardware.
+// We do not currently store any state here because we don't do anything with
+// it, so if callers provided it, we'd have no way to test that it was correct.
+// If we wind up supporting attaching roles to these, then we could add a
+// resource type and id like we have with ProjectChild.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct FleetChild {}
+
+impl oso::PolarClass for FleetChild {
+    fn get_polar_class_builder() -> oso::ClassBuilder<Self> {
+        oso::Class::builder()
+            .with_equality_check()
+            .add_method(
+                "has_role",
+                /* Roles are not supported on FleetChilds today. */
+                |_: &FleetChild, _: AuthenticatedActor, _: String| false,
+            )
+            .add_attribute_getter("fleet", |_: &FleetChild| Fleet {})
     }
 }
 

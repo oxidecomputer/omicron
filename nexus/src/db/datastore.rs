@@ -1970,7 +1970,7 @@ impl DataStore {
         name: &Name,
     ) -> LookupResult<UserBuiltin> {
         use db::schema::user_builtin::dsl;
-        opctx.authorize(authz::Action::ListChildren, authz::FLEET)?;
+        opctx.authorize(authz::Action::Read, authz::FLEET.child_generic())?;
         dsl::user_builtin
             .filter(dsl::name.eq(name.clone()))
             .select(UserBuiltin::as_select())
