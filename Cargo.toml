@@ -59,6 +59,9 @@ panic = "abort"
 #progenitor = { path = "../progenitor/progenitor" }
 #[patch."https://github.com/oxidecomputer/typify"]
 #typify = { path = "../typify/typify" }
+[patch."crates-io"]
+oso = { path = "../oso-local/languages/rust/oso" }
+polar-core = { path = "../oso-local/polar-core" }
 
 #
 # We maintain a fork of pq-sys to address upstream issues.  See the
@@ -67,4 +70,3 @@ panic = "abort"
 [patch.crates-io.pq-sys]
 git = 'https://github.com/oxidecomputer/pq-sys'
 branch = "oxide/omicron"
-

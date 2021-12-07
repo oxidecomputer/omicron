@@ -1788,6 +1788,7 @@ dependencies = [
  "oximeter-instruments",
  "oximeter-producer",
  "parse-display",
+ "polar-core",
  "pq-sys",
  "rand",
  "ref-cast",
@@ -1989,8 +1990,6 @@ dependencies = [
 [[package]]
 name = "oso"
 version = "0.24.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e3af15682bd0dcd0d6ee3ffb17644991c909560c86ec0e9e420b48797050eec5"
 dependencies = [
  "impl-trait-for-tuples",
  "lazy_static",
@@ -2005,8 +2004,6 @@ dependencies = [
 [[package]]
 name = "oso-derive"
 version = "0.24.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "54340ae5015a6c1a4da9dec9c14cfbdb8b3360d94fd0cdf8730f267b3da0597e"
 dependencies = [
  "quote",
  "syn",
@@ -2347,8 +2344,6 @@ checksum = "12295df4f294471248581bc09bef3c38a5e46f1e36d6a37353621a0c6c357e1f"
 [[package]]
 name = "polar-core"
 version = "0.24.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "16888ba25e546f502c016be622a847f32626fc2e3c87d0314a221ed07fa51636"
 dependencies = [
  "indoc",
  "js-sys",

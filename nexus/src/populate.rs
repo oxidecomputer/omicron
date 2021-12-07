@@ -3,6 +3,7 @@
 use crate::context::OpContext;
 use crate::db::DataStore;
 use omicron_common::backoff;
+use std::collections::BTreeMap;
 use std::sync::Arc;
 
 #[derive(Clone, Debug)]
@@ -15,11 +16,12 @@ pub enum PopulateStatus {
 pub fn populate_start(
     opctx: OpContext,
     datastore: Arc<DataStore>,
+    builtin_roles: std::collections::BTreeMap<String, Vec<String>>,
 ) -> tokio::sync::watch::Receiver<PopulateStatus> {
     let (tx, rx) = tokio::sync::watch::channel(PopulateStatus::NotDone);
 
     tokio::spawn(async move {
-        let result = populate(&opctx, datastore).await;
+        let result = populate(&opctx, &datastore, &builtin_roles).await;
         if let Err(error) = tx.send(match result {
             Ok(()) => PopulateStatus::Done,
             Err(message) => PopulateStatus::Failed(message),
@@ -33,7 +35,16 @@ pub fn populate_start(
 
 async fn populate(
     opctx: &OpContext,
-    datastore: Arc<DataStore>,
+    datastore: &DataStore,
+    builtin_roles: &std::collections::BTreeMap<String, Vec<String>>,
+) -> Result<(), String> {
+    populate_users(opctx, &datastore).await?;
+    populate_roles(opctx, &datastore, builtin_roles).await
+}
+
+async fn populate_users(
+    opctx: &OpContext,
+    datastore: &DataStore,
 ) -> Result<(), String> {
     let db_result = backoff::retry_notify(
         backoff::internal_service_policy(),
@@ -51,7 +62,7 @@ async fn populate(
         |error, delay| {
             warn!(
                 opctx.log,
-                "failed to load builtin users; will retry in {:?}", delay;
+                "failed to load built-in users; will retry in {:?}", delay;
                 "error_message" => ?error,
             );
         },
@@ -65,7 +76,52 @@ async fn populate(
          * unlikely in practice.)
          */
         error!(opctx.log,
-            "gave up trying to load builtin users";
+            "gave up trying to load built-in users";
+            "error_message" => ?error
+        );
+    }
+
+    db_result.map_err(|error| error.to_string())
+}
+
+async fn populate_roles(
+    opctx: &OpContext,
+    datastore: &DataStore,
+    builtin_roles: &BTreeMap<String, Vec<String>>,
+) -> Result<(), String> {
+    let db_result = backoff::retry_notify(
+        backoff::internal_service_policy(),
+        || async {
+            datastore.load_builtin_roles(&opctx, builtin_roles).await.map_err(
+                |error| {
+                    use omicron_common::api::external::Error;
+                    match &error {
+                        Error::ServiceUnavailable { .. } => {
+                            backoff::BackoffError::Transient(error)
+                        }
+                        _ => backoff::BackoffError::Permanent(error),
+                    }
+                },
+            )
+        },
+        |error, delay| {
+            warn!(
+                opctx.log,
+                "failed to load built-in roles; will retry in {:?}", delay;
+                "error_message" => ?error,
+            );
+        },
+    )
+    .await;
+
+    if let Err(error) = &db_result {
+        /*
+         * TODO-autonomy this should raise an alert, bump a counter, or raise
+         * some other red flag that something is wrong.  (This should be
+         * unlikely in practice.)
+         */
+        error!(opctx.log,
+            "gave up trying to load built-in roles";
             "error_message" => ?error
         );
     }

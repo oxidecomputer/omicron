@@ -183,8 +183,11 @@ impl Nexus {
             Arc::clone(&authz),
             authn::Context::internal_db_init(),
         );
-        let populate_status =
-            populate_start(populate_ctx, Arc::clone(&db_datastore));
+        let populate_status = populate_start(
+            populate_ctx,
+            Arc::clone(&db_datastore),
+            authz.builtin_roles().expect("failed to introspect Oso file"),
+        );
 
         let nexus = Nexus {
             id: config.id,

@@ -689,6 +689,16 @@ INSERT INTO omicron.public.user_builtin (
 );
 
 
+/*
+ * Roles built into the system
+ */
+
+CREATE TABLE omicron.public.role_builtin (
+    name STRING(80),
+    resource_name STRING(80),
+    PRIMARY KEY(name, resource_name)
+);
+
 /*******************************************************************/
 
 /*

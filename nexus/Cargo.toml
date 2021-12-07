@@ -29,6 +29,8 @@ newtype_derive = "0.1.6"
 oso = "0.24"
 oximeter-client = { path = "../oximeter-client" }
 parse-display = "0.5.3"
+# Pick up whatever polar-core Oso gets us.
+polar-core = "*"
 # See omicron-rpaths for more about the "pq-sys" dependency.
 pq-sys = "*"
 rand = "0.8.4"

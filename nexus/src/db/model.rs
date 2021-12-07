@@ -9,8 +9,8 @@ use crate::db::identity::{Asset, Resource};
 use crate::db::schema::{
     console_session, dataset, disk, instance, metric_producer,
     network_interface, organization, oximeter, project, rack, region,
-    router_route, sled, user_builtin, vpc, vpc_firewall_rule, vpc_router,
-    vpc_subnet, zpool,
+    role_builtin, router_route, sled, user_builtin, vpc, vpc_firewall_rule,
+    vpc_router, vpc_subnet, zpool,
 };
 use crate::external_api::params;
 use crate::internal_api;
@@ -1783,5 +1783,23 @@ impl UserBuiltin {
     /// Creates a new database UserBuiltin object.
     pub fn new(id: Uuid, params: params::UserBuiltinCreate) -> Self {
         Self { identity: UserBuiltinIdentity::new(id, params.identity) }
+    }
+}
+
+/// Describes a built-in role, as stored in the database
+#[derive(Queryable, Insertable, Debug, Selectable)]
+#[table_name = "role_builtin"]
+pub struct RoleBuiltin {
+    resource_name: String,
+    name: String,
+}
+
+impl RoleBuiltin {
+    /// Creates a new database UserBuiltin object.
+    pub fn new(resource_name: &str, name: &str) -> Self {
+        Self {
+            resource_name: String::from(resource_name),
+            name: String::from(name),
+        }
     }
 }

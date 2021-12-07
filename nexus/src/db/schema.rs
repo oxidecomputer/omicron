@@ -300,6 +300,13 @@ table! {
     }
 }
 
+table! {
+    role_builtin (name, resource_name) {
+        name -> Text,
+        resource_name -> Text,
+    }
+}
+
 allow_tables_to_appear_in_same_query!(
     disk,
     instance,
@@ -318,4 +325,5 @@ allow_tables_to_appear_in_same_query!(
     vpc_router,
     vpc_firewall_rule,
     user_builtin,
+    role_builtin,
 );
