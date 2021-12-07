@@ -24,6 +24,7 @@ pub mod db; // Public only for some documentation examples
 pub mod external_api; // public for testing
 pub mod internal_api; // public for testing
 mod nexus;
+mod populate;
 mod saga_interface;
 mod sagas;
 

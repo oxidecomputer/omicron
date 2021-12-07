@@ -28,15 +28,16 @@ use super::collection_insert::{
 use super::error::diesel_pool_result_optional;
 use super::identity::{Asset, Resource};
 use super::Pool;
+use crate::authn;
 use crate::authz;
 use crate::context::OpContext;
+use crate::external_api::params;
 use async_bb8_diesel::{AsyncConnection, AsyncRunQueryDsl, ConnectionManager};
 use chrono::Utc;
 use diesel::prelude::*;
 use diesel::upsert::excluded;
 use diesel::{ExpressionMethods, QueryDsl, SelectableHelper};
 use omicron_common::api;
-use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::DeleteResult;
 use omicron_common::api::external::Error;
@@ -45,6 +46,9 @@ use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::LookupType;
 use omicron_common::api::external::ResourceType;
 use omicron_common::api::external::UpdateResult;
+use omicron_common::api::external::{
+    CreateResult, IdentityMetadataCreateParams,
+};
 use omicron_common::bail_unless;
 use std::convert::TryFrom;
 use std::sync::Arc;
@@ -54,12 +58,13 @@ use crate::db::{
     self,
     error::{
         public_error_from_diesel_pool, public_error_from_diesel_pool_create,
+        public_error_from_diesel_pool_shouldnt_fail,
     },
     model::{
         ConsoleSession, Dataset, Disk, DiskAttachment, DiskRuntimeState,
         Generation, Instance, InstanceRuntimeState, Name, Organization,
         OrganizationUpdate, OximeterInfo, ProducerEndpoint, Project,
-        ProjectUpdate, RouterRoute, RouterRouteUpdate, Sled, Vpc,
+        ProjectUpdate, RouterRoute, RouterRouteUpdate, Sled, UserBuiltin, Vpc,
         VpcFirewallRule, VpcRouter, VpcRouterUpdate, VpcSubnet,
         VpcSubnetUpdate, VpcUpdate, Zpool,
     },
@@ -1937,6 +1942,89 @@ impl DataStore {
                     e
                 ))
             })
+    }
+
+    pub async fn users_builtin_list_by_name(
+        &self,
+        opctx: &OpContext,
+        pagparams: &DataPageParams<'_, Name>,
+    ) -> ListResultVec<UserBuiltin> {
+        use db::schema::user_builtin::dsl;
+        opctx.authorize(authz::Action::ListChildren, authz::FLEET)?;
+        paginated(dsl::user_builtin, dsl::name, pagparams)
+            .select(UserBuiltin::as_select())
+            .load_async::<UserBuiltin>(self.pool_authorized(opctx)?)
+            .await
+            .map_err(|e| {
+                public_error_from_diesel_pool(
+                    e,
+                    ResourceType::User,
+                    LookupType::Other("Listing All".to_string()),
+                )
+            })
+    }
+
+    pub async fn user_builtin_fetch(
+        &self,
+        opctx: &OpContext,
+        name: &Name,
+    ) -> LookupResult<UserBuiltin> {
+        use db::schema::user_builtin::dsl;
+        opctx.authorize(authz::Action::Read, authz::FLEET.child_generic())?;
+        dsl::user_builtin
+            .filter(dsl::name.eq(name.clone()))
+            .select(UserBuiltin::as_select())
+            .first_async::<UserBuiltin>(self.pool_authorized(opctx)?)
+            .await
+            .map_err(|e| {
+                public_error_from_diesel_pool(
+                    e,
+                    ResourceType::User,
+                    LookupType::ByName(name.as_str().to_owned()),
+                )
+            })
+    }
+
+    /// Load built-in users into the database
+    pub async fn load_builtin_users(
+        &self,
+        opctx: &OpContext,
+    ) -> Result<(), Error> {
+        use db::schema::user_builtin::dsl;
+
+        opctx.authorize(authz::Action::Modify, authz::FLEET)?;
+
+        let builtin_users = [
+            // Note: "db_init" is also a builtin user, but that one by necessity
+            // is created with the database.
+            &*authn::USER_SAGA_RECOVERY,
+            &*authn::USER_TEST_PRIVILEGED,
+            &*authn::USER_TEST_UNPRIVILEGED,
+        ]
+        .iter()
+        .map(|u| {
+            UserBuiltin::new(
+                u.id,
+                params::UserBuiltinCreate {
+                    identity: IdentityMetadataCreateParams {
+                        name: u.name.clone(),
+                        description: String::from(u.description),
+                    },
+                },
+            )
+        })
+        .collect::<Vec<UserBuiltin>>();
+
+        debug!(opctx.log, "attempting to create built-in users");
+        let count = diesel::insert_into(dsl::user_builtin)
+            .values(builtin_users)
+            .on_conflict(dsl::id)
+            .do_nothing()
+            .execute_async(self.pool_authorized(opctx)?)
+            .await
+            .map_err(public_error_from_diesel_pool_shouldnt_fail)?;
+        info!(opctx.log, "created {} built-in users", count);
+        Ok(())
     }
 }
 

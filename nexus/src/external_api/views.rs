@@ -174,3 +174,27 @@ impl Into<Sled> for model::Sled {
         Sled { identity: self.identity(), service_address: self.address() }
     }
 }
+
+/*
+ * BUILT-IN USERS
+ */
+
+/**
+ * Client view of a [`User`]
+ */
+#[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct User {
+    /*
+     * TODO-correctness is flattening here (and in all the other types) the
+     * intent in RFD 4?
+     */
+    #[serde(flatten)]
+    pub identity: IdentityMetadata,
+}
+
+impl Into<User> for model::UserBuiltin {
+    fn into(self) -> User {
+        User { identity: self.identity() }
+    }
+}
