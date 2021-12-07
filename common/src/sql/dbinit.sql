@@ -659,7 +659,7 @@ CREATE TABLE omicron.public.user_builtin (
      * Identity metadata
      *
      * TODO-cleanup This uses the "resource identity" pattern because we want a
-     * name and description, but it's not valid to support sort-deleting these
+     * name and description, but it's not valid to support soft-deleting these
      * records.
      */
     id UUID PRIMARY KEY,
