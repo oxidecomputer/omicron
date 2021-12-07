@@ -681,7 +681,7 @@ INSERT INTO omicron.public.user_builtin (
     time_modified
 ) VALUES (
     /* NOTE: this uuid and name are duplicated in nexus::authn. */
-    '001de000-05e4-0000-0000-000000000001',
+    '001de000-05e4-4000-8000-000000000001',
     'db-init',
     'user used for database initialization',
     NOW(),
