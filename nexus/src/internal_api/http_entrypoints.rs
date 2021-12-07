@@ -1,9 +1,16 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
 /**
  * Handler functions (entrypoints) for HTTP APIs internal to the control plane
  */
 use crate::ServerContext;
 
-use super::params::{OximeterInfo, SledAgentStartupInfo};
+use super::params::{
+    DatasetPutRequest, DatasetPutResponse, OximeterInfo, SledAgentStartupInfo,
+    ZpoolPutRequest, ZpoolPutResponse,
+};
 use dropshot::endpoint;
 use dropshot::ApiDescription;
 use dropshot::HttpError;
@@ -30,6 +37,8 @@ type NexusApiDescription = ApiDescription<Arc<ServerContext>>;
 pub fn internal_api() -> NexusApiDescription {
     fn register_endpoints(api: &mut NexusApiDescription) -> Result<(), String> {
         api.register(cpapi_sled_agents_post)?;
+        api.register(zpool_put)?;
+        api.register(dataset_put)?;
         api.register(cpapi_instances_put)?;
         api.register(cpapi_disks_put)?;
         api.register(cpapi_producers_post)?;
@@ -53,9 +62,11 @@ struct SledAgentPathParam {
     sled_id: Uuid,
 }
 
-/**
- * Report that the sled agent for the specified sled has come online.
- */
+/// Report that the sled agent for the specified sled has come online.
+// TODO: Should probably be "PUT", since:
+// 1. We're upserting the value
+// 2. The client supplies the UUID
+// 3. This call is idempotent (mod "time_modified").
 #[endpoint {
      method = POST,
      path = "/sled_agents/{sled_id}",
@@ -75,6 +86,68 @@ async fn cpapi_sled_agents_post(
         Ok(HttpResponseUpdatedNoContent())
     };
     apictx.internal_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/**
+ * Path parameters for Sled Agent requests (internal API)
+ */
+#[derive(Deserialize, JsonSchema)]
+struct ZpoolPathParam {
+    sled_id: Uuid,
+    zpool_id: Uuid,
+}
+
+/**
+ * Report that a pool for a specified sled has come online.
+ */
+#[endpoint {
+     method = PUT,
+     path = "/sled_agents/{sled_id}/zpools/{zpool_id}",
+ }]
+async fn zpool_put(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    path_params: Path<ZpoolPathParam>,
+    pool_info: TypedBody<ZpoolPutRequest>,
+) -> Result<HttpResponseOk<ZpoolPutResponse>, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let path = path_params.into_inner();
+    let pi = pool_info.into_inner();
+    nexus.upsert_zpool(path.zpool_id, path.sled_id, pi).await?;
+    Ok(HttpResponseOk(ZpoolPutResponse {}))
+}
+
+#[derive(Deserialize, JsonSchema)]
+struct DatasetPathParam {
+    zpool_id: Uuid,
+    dataset_id: Uuid,
+}
+
+/**
+ * Report that a dataset within a pool has come online.
+ */
+#[endpoint {
+     method = PUT,
+     path = "/zpools/{zpool_id}/dataset/{dataset_id}",
+ }]
+async fn dataset_put(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    path_params: Path<DatasetPathParam>,
+    info: TypedBody<DatasetPutRequest>,
+) -> Result<HttpResponseOk<DatasetPutResponse>, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let path = path_params.into_inner();
+    let info = info.into_inner();
+    nexus
+        .upsert_dataset(
+            path.dataset_id,
+            path.zpool_id,
+            info.address,
+            info.kind.into(),
+        )
+        .await?;
+    Ok(HttpResponseOk(DatasetPutResponse { reservation: None, quota: None }))
 }
 
 /**

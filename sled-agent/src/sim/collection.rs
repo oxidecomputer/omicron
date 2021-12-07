@@ -1,3 +1,7 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
 /*!
  * Simulated sled agent object collection
  */
@@ -356,6 +360,7 @@ mod test {
             InstanceRuntimeState {
                 run_state: InstanceState::Creating,
                 sled_uuid: uuid::Uuid::new_v4(),
+                propolis_uuid: uuid::Uuid::new_v4(),
                 ncpus: InstanceCpuCount(2),
                 memory: ByteCount::from_mebibytes_u32(512),
                 hostname: "myvm".to_string(),

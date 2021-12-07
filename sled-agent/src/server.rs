@@ -1,3 +1,7 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
 //! Library interface to the sled agent
 
 use super::config::Config;
@@ -41,13 +45,9 @@ impl Server {
             "component" => "SledAgent",
             "server" => config.id.clone().to_string()
         ));
-        let sled_agent = SledAgent::new(
-            &config.id,
-            sa_log,
-            config.vlan,
-            nexus_client.clone(),
-        )
-        .map_err(|e| e.to_string())?;
+        let sled_agent = SledAgent::new(&config, sa_log, nexus_client.clone())
+            .await
+            .map_err(|e| e.to_string())?;
 
         let dropshot_log = log.new(o!("component" => "dropshot"));
         let http_server = dropshot::HttpServerStarter::new(
@@ -67,7 +67,10 @@ impl Server {
         // return a permanent error from the `notify_nexus` closure.
         let sa_address = http_server.local_addr();
         let notify_nexus = || async {
-            debug!(log, "contacting server nexus");
+            info!(
+                log,
+                "contacting server nexus, registering sled: {}", config.id
+            );
             nexus_client
                 .cpapi_sled_agents_post(
                     &config.id,

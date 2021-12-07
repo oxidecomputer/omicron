@@ -1,3 +1,7 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
 //! Integration tests for oximeter collectors and producers.
 
 pub mod common;
@@ -109,7 +113,7 @@ async fn test_oximeter_reregistration() {
     let timeseries_name = "integration_target:integration_metric";
     let retrieve_timeseries = || async {
         match client
-            .filter_timeseries_with(timeseries_name, &[], None, None)
+            .select_timeseries_with(timeseries_name, &[], None, None)
             .await
         {
             Ok(maybe_series) => {

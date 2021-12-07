@@ -1,3 +1,7 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
 //! Tools for generating and collecting metric data in the Oxide rack.
 //!
 //! Overview
@@ -111,3 +115,12 @@ pub use traits::{Metric, Producer, Target};
 pub use types::{
     Datum, DatumType, Error, Field, FieldType, FieldValue, Measurement, Sample,
 };
+
+/// Construct the timeseries name for a Target and Metric.
+pub fn timeseries_name<T, M>(target: &T, metric: &M) -> String
+where
+    T: Target,
+    M: Metric,
+{
+    format!("{}:{}", target.name(), metric.name())
+}

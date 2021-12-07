@@ -1,17 +1,17 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
 //! API for controlling multiple instances on a sled.
 
 use crate::common::vlan::VlanID;
-use crate::illumos::zfs::ZONE_ZFS_DATASET;
-use omicron_common::api::external::Error;
+use crate::vnic::IdAllocator;
 use omicron_common::api::internal::nexus::InstanceRuntimeState;
 use omicron_common::api::internal::sled_agent::InstanceHardware;
 use omicron_common::api::internal::sled_agent::InstanceRuntimeStateRequested;
 use slog::Logger;
 use std::collections::BTreeMap;
-use std::sync::{
-    atomic::{AtomicU64, Ordering},
-    Arc, Mutex,
-};
+use std::sync::{Arc, Mutex};
 use uuid::Uuid;
 
 #[cfg(test)]
@@ -19,35 +19,20 @@ use crate::mocks::MockNexusClient as NexusClient;
 #[cfg(not(test))]
 use nexus_client::Client as NexusClient;
 
-#[cfg(not(test))]
-use crate::{
-    illumos::{dladm::Dladm, zfs::Zfs, zone::Zones},
-    instance::Instance,
-};
 #[cfg(test)]
 use crate::{
-    illumos::{
-        dladm::MockDladm as Dladm, zfs::MockZfs as Zfs,
-        zone::MockZones as Zones,
-    },
-    instance::MockInstance as Instance,
+    illumos::zone::MockZones as Zones, instance::MockInstance as Instance,
 };
+#[cfg(not(test))]
+use crate::{illumos::zone::Zones, instance::Instance};
 
-/// A shareable wrapper around an atomic counter.
-/// May be used to allocate runtime-unique IDs.
-#[derive(Clone, Debug)]
-pub struct IdAllocator {
-    value: Arc<AtomicU64>,
-}
+#[derive(thiserror::Error, Debug)]
+pub enum Error {
+    #[error("Instance error: {0}")]
+    Instance(#[from] crate::instance::Error),
 
-impl IdAllocator {
-    pub fn new() -> Self {
-        Self { value: Arc::new(AtomicU64::new(0)) }
-    }
-
-    pub fn next(&self) -> u64 {
-        self.value.fetch_add(1, Ordering::SeqCst)
-    }
+    #[error(transparent)]
+    Zone(#[from] crate::illumos::zone::Error),
 }
 
 struct InstanceManagerInternal {
@@ -75,37 +60,8 @@ impl InstanceManager {
         vlan: Option<VlanID>,
         nexus_client: Arc<NexusClient>,
     ) -> Result<InstanceManager, Error> {
-        // Before we start creating instances, we need to ensure that the
-        // necessary ZFS and Zone resources are ready.
-        Zfs::ensure_dataset(ZONE_ZFS_DATASET)?;
-
         // Create a base zone, from which all running instance zones are cloned.
-        Zones::create_base(&log)?;
-
-        // Identify all existing zones which should be managed by the Sled
-        // Agent.
-        //
-        // NOTE: Currently, we're removing these zones. In the future, we should
-        // re-establish contact (i.e., if the Sled Agent crashed, but we wanted
-        // to leave the running Zones intact).
-        let zones = Zones::get()?;
-        for z in zones {
-            warn!(log, "Deleting zone: {}", z.name());
-            Zones::halt_and_remove(&log, z.name())?;
-        }
-
-        // Identify all VNICs which should be managed by the Sled Agent.
-        //
-        // NOTE: Currently, we're removing these VNICs. In the future, we should
-        // identify if they're being used by the aforementioned existing zones,
-        // and track them once more.
-        //
-        // (dladm show-vnic -p -o ZONE,LINK) might help
-        let vnics = Dladm::get_vnics()?;
-        for vnic in vnics {
-            warn!(log, "Deleting VNIC: {}", vnic);
-            Dladm::delete_vnic(&vnic)?;
-        }
+        Zones::create_propolis_base(&log)?;
 
         Ok(InstanceManager {
             inner: Arc::new(InstanceManagerInternal {
@@ -173,7 +129,7 @@ impl InstanceManager {
             instance.start(instance_ticket).await?;
         }
 
-        instance.transition(target).await
+        instance.transition(target).await.map_err(|e| e.into())
     }
 }
 
@@ -217,7 +173,7 @@ impl Drop for InstanceTicket {
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::illumos::{dladm::MockDladm, zfs::MockZfs, zone::MockZones};
+    use crate::illumos::{dladm::MockDladm, zone::MockZones};
     use crate::instance::MockInstance;
     use crate::mocks::MockNexusClient;
     use chrono::Utc;
@@ -247,6 +203,7 @@ mod test {
             runtime: InstanceRuntimeState {
                 run_state: InstanceState::Creating,
                 sled_uuid: Uuid::new_v4(),
+                propolis_uuid: Uuid::new_v4(),
                 ncpus: InstanceCpuCount(2),
                 memory: ByteCount::from_mebibytes_u32(512),
                 hostname: "myvm".to_string(),
@@ -267,14 +224,9 @@ mod test {
         // checks - creation of the base zone, and cleanup of existing
         // zones + vnics.
 
-        let zfs_ensure_dataset_ctx = MockZfs::ensure_dataset_context();
-        zfs_ensure_dataset_ctx.expect().return_once(|pool| {
-            assert_eq!(pool, ZONE_ZFS_DATASET);
-            Ok(())
-        });
-
-        let zones_create_base_ctx = MockZones::create_base_context();
-        zones_create_base_ctx.expect().return_once(|_| Ok(()));
+        let zones_create_propolis_base_ctx =
+            MockZones::create_propolis_base_context();
+        zones_create_propolis_base_ctx.expect().return_once(|_| Ok(()));
 
         let zones_get_ctx = MockZones::get_context();
         zones_get_ctx.expect().return_once(|| Ok(vec![]));
@@ -349,14 +301,9 @@ mod test {
 
         // Instance Manager creation.
 
-        let zfs_ensure_dataset_ctx = MockZfs::ensure_dataset_context();
-        zfs_ensure_dataset_ctx.expect().return_once(|pool| {
-            assert_eq!(pool, ZONE_ZFS_DATASET);
-            Ok(())
-        });
-
-        let zones_create_base_ctx = MockZones::create_base_context();
-        zones_create_base_ctx.expect().return_once(|_| Ok(()));
+        let zones_create_propolis_base_ctx =
+            MockZones::create_propolis_base_context();
+        zones_create_propolis_base_ctx.expect().return_once(|_| Ok(()));
 
         let zones_get_ctx = MockZones::get_context();
         zones_get_ctx.expect().return_once(|| Ok(vec![]));

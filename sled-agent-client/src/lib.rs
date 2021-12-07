@@ -1,3 +1,7 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
 /*!
  * Interface for making API requests to a Sled Agent
  */
@@ -18,6 +22,7 @@ impl From<omicron_common::api::internal::nexus::InstanceRuntimeState>
         Self {
             run_state: s.run_state.into(),
             sled_uuid: s.sled_uuid,
+            propolis_uuid: s.propolis_uuid,
             ncpus: s.ncpus.into(),
             memory: s.memory.into(),
             hostname: s.hostname,
@@ -115,6 +120,7 @@ impl From<types::InstanceRuntimeState>
         Self {
             run_state: s.run_state.into(),
             sled_uuid: s.sled_uuid,
+            propolis_uuid: s.propolis_uuid,
             ncpus: s.ncpus.into(),
             memory: s.memory.into(),
             hostname: s.hostname,

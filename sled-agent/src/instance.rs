@@ -1,3 +1,7 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
 //! API for controlling a single instance.
 
 use crate::common::{
@@ -5,14 +9,10 @@ use crate::common::{
     vlan::VlanID,
 };
 use crate::illumos::svc::wait_for_service;
-use crate::illumos::{
-    dladm::{PhysicalLink, VNIC_PREFIX},
-    zone::ZONE_PREFIX,
-};
-use crate::instance_manager::{IdAllocator, InstanceTicket};
+use crate::illumos::zone::PROPOLIS_ZONE_PREFIX;
+use crate::instance_manager::InstanceTicket;
+use crate::vnic::{interface_name, IdAllocator, Vnic};
 use futures::lock::Mutex;
-use omicron_common::api::external::Error;
-use omicron_common::api::external::MacAddr;
 use omicron_common::api::external::NetworkInterface;
 use omicron_common::api::internal::nexus::InstanceRuntimeState;
 use omicron_common::api::internal::sled_agent::InstanceHardware;
@@ -34,6 +34,29 @@ use crate::illumos::{dladm::MockDladm as Dladm, zone::MockZones as Zones};
 use crate::mocks::MockNexusClient as NexusClient;
 #[cfg(not(test))]
 use nexus_client::Client as NexusClient;
+
+#[derive(thiserror::Error, Debug)]
+pub enum Error {
+    #[error("Failed to wait for service: {0}")]
+    Timeout(String),
+
+    #[error("Failure accessing data links: {0}")]
+    Datalink(#[from] crate::illumos::dladm::Error),
+
+    #[error("Error accessing zones: {0}")]
+    Zone(#[from] crate::illumos::zone::Error),
+
+    #[error("Failure from Propolis Client: {0}")]
+    Propolis(#[from] propolis_client::Error),
+
+    // TODO: Remove this error; prefer to retry notifications.
+    #[error("Notifying Nexus failed: {0}")]
+    Notification(anyhow::Error),
+
+    // TODO: This error type could become more specific
+    #[error("Error performing a state transition: {0}")]
+    Transition(omicron_common::api::external::Error),
+}
 
 // Issues read-only, idempotent HTTP requests at propolis until it responds with
 // an acknowledgement. This provides a hacky mechanism to "wait until the HTTP
@@ -73,9 +96,7 @@ async fn wait_for_http_server(
         log_notification_failure,
     )
     .await
-    .map_err(|e| Error::InternalError {
-        internal_message: format!("Failed to wait for HTTP server: {}", e),
-    })
+    .map_err(|_| Error::Timeout("Propolis".to_string()))
 }
 
 fn service_name() -> &'static str {
@@ -83,27 +104,15 @@ fn service_name() -> &'static str {
 }
 
 fn instance_name(id: &Uuid) -> String {
-    format!("vm-{}", id.to_string())
+    format!("vm-{}", id)
 }
 
 fn fmri_name(id: &Uuid) -> String {
     format!("{}:{}", service_name(), instance_name(id))
 }
 
-fn zone_name(id: &Uuid) -> String {
-    format!("{}{}", ZONE_PREFIX, id)
-}
-
-fn vnic_name(id: u64) -> String {
-    format!("{}{}", VNIC_PREFIX, id)
-}
-
-fn guest_vnic_name(id: u64) -> String {
-    format!("{}_guest{}", VNIC_PREFIX, id)
-}
-
-fn interface_name(vnic_name: &str) -> String {
-    format!("{}/omicron", vnic_name)
+fn propolis_zone_name(id: &Uuid) -> String {
+    format!("{}{}", PROPOLIS_ZONE_PREFIX, id)
 }
 
 // Action to be taken by the Sled Agent after monitoring Propolis for
@@ -145,91 +154,9 @@ impl Drop for RunningState {
     }
 }
 
-/// Represents an allocated VNIC on the system.
-/// The VNIC is de-allocated when it goes out of scope.
-///
-/// Note that the "ownership" of the VNIC is based on convention;
-/// another process in the global zone could also modify / destroy
-/// the VNIC while this object is alive.
-#[derive(Debug)]
-struct Vnic {
-    name: String,
-    deleted: bool,
-}
-
-impl Vnic {
-    // Creates a new NIC, intended for usage by the guest.
-    fn new_guest(
-        allocator: &IdAllocator,
-        physical_dl: &PhysicalLink,
-        mac: Option<MacAddr>,
-        ip: IpAddr,
-        vlan: Option<VlanID>,
-    ) -> Result<Self, Error> {
-        let name = guest_vnic_name(allocator.next());
-        Dladm::create_vnic(physical_dl, &name, mac, vlan)?;
-
-        let ip4 = match ip {
-            IpAddr::V4(v) => v,
-
-            _ => {
-                return Err(Error::InternalError {
-                    internal_message: format!(
-                        "OPTE only supports IPv4 guests at the moment",
-                    ),
-                });
-            }
-        };
-
-        let ip_cfg = opte_core::ioctl::IpConfig {
-            // NOTE: OPTE has it's own Ipv4Addr, thus the into().
-            private_ip: ip4.into(),
-	    snat: None,
-        };
-
-        let req = opte_core::ioctl::AddPortReq {
-            link_name: name.clone(),
-            ip_cfg,
-        };
-
-        let hdl = opteadm::OpteAdm::open()?;
-        hdl.add_port(&req)?;
-
-        Ok(Vnic { name, deleted: false })
-    }
-
-    // Creates a new NIC, intended for allowing Propolis to communicate
-    // with the control plane.
-    fn new_control(
-        allocator: &IdAllocator,
-        physical_dl: &PhysicalLink,
-        mac: Option<MacAddr>,
-    ) -> Result<Self, Error> {
-        let name = vnic_name(allocator.next());
-        Dladm::create_vnic(physical_dl, &name, mac, None)?;
-        Ok(Vnic { name, deleted: false })
-    }
-
-    // Deletes a NIC (if it has not already been deleted).
-    fn delete(&mut self) -> Result<(), Error> {
-        if self.deleted {
-            Ok(())
-        } else {
-            self.deleted = true;
-            let hdl = opteadm::OpteAdm::open()?;
-            hdl.delete_port(&self.name)?;
-            Dladm::delete_vnic(&self.name)
-        }
-    }
-}
-
-impl Drop for Vnic {
-    fn drop(&mut self) {
-        let _ = self.delete();
-    }
-}
-
 struct InstanceInner {
+    id: Uuid,
+
     log: Logger,
 
     // Properties visible to Propolis
@@ -251,6 +178,11 @@ struct InstanceInner {
 
 impl InstanceInner {
     fn id(&self) -> &Uuid {
+        &self.id
+    }
+
+    /// UUID of the underlying propolis-server process
+    fn propolis_id(&self) -> &Uuid {
         &self.properties.id
     }
 
@@ -278,7 +210,7 @@ impl InstanceInner {
                 ),
             )
             .await
-            .map_err(Error::from)?;
+            .map_err(|e| Error::Notification(e))?;
 
         // Take the next action, if any.
         if let Some(action) = action {
@@ -296,14 +228,9 @@ impl InstanceInner {
             .as_ref()
             .expect("Propolis client should be initialized before usage")
             .client
-            .instance_state_put(*self.id(), request)
-            .await
-            .map_err(|e| Error::InternalError {
-                internal_message: format!(
-                    "Failed to set state of instance: {}",
-                    e
-                ),
-            })
+            .instance_state_put(*self.propolis_id(), request)
+            .await?;
+        Ok(())
     }
 
     async fn ensure(&self, guest_nics: &Vec<Vnic>) -> Result<(), Error> {
@@ -313,7 +240,7 @@ impl InstanceInner {
             .iter()
             .enumerate()
             .map(|(i, _)| propolis_client::api::NetworkInterfaceRequest {
-                name: guest_nics[i].name.clone(),
+                name: guest_nics[i].name().to_string(),
                 slot: propolis_client::api::Slot(i as u8),
             })
             .collect();
@@ -331,10 +258,7 @@ impl InstanceInner {
             .expect("Propolis client should be initialized before usage")
             .client
             .instance_ensure(&request)
-            .await
-            .map_err(|e| Error::InternalError {
-                internal_message: format!("Failed to ensure instance: {}", e),
-            })?;
+            .await?;
         Ok(())
     }
 
@@ -421,9 +345,10 @@ impl Instance {
         info!(log, "Instance::new w/initial HW: {:?}", initial);
         let instance = InstanceInner {
             log: log.new(o!("instance id" => id.to_string())),
+            id,
             // NOTE: Mostly lies.
             properties: propolis_client::api::InstanceProperties {
-                id,
+                id: initial.runtime.propolis_uuid,
                 name: initial.runtime.hostname.clone(),
                 description: "Test description".to_string(),
                 image_id: Uuid::nil(),
@@ -484,49 +409,60 @@ impl Instance {
                     nic.ip,
                     inner.vlan,
                 )
+                .map_err(|e| e.into())
             })
             .collect::<Result<Vec<_>, Error>>()?;
 
         // Create a zone for the propolis instance, using the previously
         // configured VNICs.
-        let zname = zone_name(inner.id());
+        let zname = propolis_zone_name(inner.propolis_id());
 
         let nics_to_put_in_zone: Vec<String> = guest_nics
             .iter()
-            .map(|nic| nic.name.clone())
-            .chain(std::iter::once(control_nic.name.clone()))
+            .map(|nic| nic.name().to_string())
+            .chain(std::iter::once(control_nic.name().to_string()))
             .collect();
 
-        Zones::configure_child_zone(&inner.log, &zname, nics_to_put_in_zone)?;
-        info!(inner.log, "Configured child zone: {}", zname);
+        Zones::configure_propolis_zone(
+            &inner.log,
+            &zname,
+            nics_to_put_in_zone,
+        )?;
+        info!(inner.log, "Configured propolis zone: {}", zname);
 
         // Clone the zone from a base zone (faster than installing) and
         // boot it up.
-        Zones::clone_from_base(&zname)?;
+        Zones::clone_from_base_propolis(&zname)?;
         info!(inner.log, "Cloned child zone: {}", zname);
         Zones::boot(&zname)?;
         info!(inner.log, "Booted zone: {}", zname);
 
         // Wait for the network services to come online, then create an address.
-        wait_for_service(Some(&zname), "svc:/milestone/network:default")
-            .await?;
+        let fmri = "svc:/milestone/network:default";
+        wait_for_service(Some(&zname), fmri)
+            .await
+            .map_err(|_| Error::Timeout(fmri.to_string()))?;
         info!(inner.log, "Network milestone ready for {}", zname);
 
-        let network =
-            Zones::create_address(&zname, &interface_name(&control_nic.name))?;
+        let network = Zones::create_address(
+            &zname,
+            &interface_name(&control_nic.name()),
+        )?;
         info!(inner.log, "Created address {} for zone: {}", network, zname);
 
         // Run Propolis in the Zone.
         let port = 12400;
         let server_addr = SocketAddr::new(network.ip(), port);
-        Zones::run_propolis(&zname, inner.id(), &server_addr)?;
+        Zones::run_propolis(&zname, inner.propolis_id(), &server_addr)?;
         info!(inner.log, "Started propolis in zone: {}", zname);
 
         // This isn't strictly necessary - we wait for the HTTP server below -
         // but it helps distinguish "online in SMF" from "responding to HTTP
         // requests".
-        let fmri = fmri_name(inner.id());
-        wait_for_service(Some(&zname), &fmri).await?;
+        let fmri = fmri_name(inner.propolis_id());
+        wait_for_service(Some(&zname), &fmri)
+            .await
+            .map_err(|_| Error::Timeout(fmri.to_string()))?;
 
         let client = Arc::new(PropolisClient::new(
             server_addr,
@@ -570,7 +506,7 @@ impl Instance {
     async fn stop(&self) -> Result<(), Error> {
         let mut inner = self.inner.lock().await;
 
-        let zname = zone_name(inner.id());
+        let zname = propolis_zone_name(inner.propolis_id());
         warn!(inner.log, "Halting and removing zone: {}", zname);
         Zones::halt_and_remove(&inner.log, &zname).unwrap();
 
@@ -599,9 +535,9 @@ impl Instance {
         //
         // They aren't modified after being initialized, so it's fine to grab
         // a copy.
-        let (id, client) = {
+        let (propolis_id, client) = {
             let inner = self.inner.lock().await;
-            let id = *inner.id();
+            let id = *inner.propolis_id();
             let client = inner.running_state.as_ref().unwrap().client.clone();
             (id, client)
         };
@@ -610,15 +546,8 @@ impl Instance {
         loop {
             // State monitoring always returns the most recent state/gen pair
             // known to Propolis.
-            let response = client
-                .instance_state_monitor(id, gen)
-                .await
-                .map_err(|e| Error::InternalError {
-                    internal_message: format!(
-                        "Failed to monitor propolis: {}",
-                        e
-                    ),
-                })?;
+            let response =
+                client.instance_state_monitor(propolis_id, gen).await?;
             let reaction =
                 self.inner.lock().await.observe_state(response.state).await?;
 
@@ -648,8 +577,10 @@ impl Instance {
         target: InstanceRuntimeStateRequested,
     ) -> Result<InstanceRuntimeState, Error> {
         let mut inner = self.inner.lock().await;
-        if let Some(action) =
-            inner.state.request_transition(target.run_state)?
+        if let Some(action) = inner
+            .state
+            .request_transition(target.run_state)
+            .map_err(|e| Error::Transition(e))?
         {
             info!(
                 &inner.log,
@@ -664,8 +595,12 @@ impl Instance {
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::illumos::{dladm::MockDladm, zone::MockZones};
+    use crate::illumos::{
+        dladm::{MockDladm, PhysicalLink},
+        zone::MockZones,
+    };
     use crate::mocks::MockNexusClient;
+    use crate::vnic::control_vnic_name;
     use chrono::Utc;
     use dropshot::{
         endpoint, ApiDescription, ConfigDropshot, ConfigLogging,
@@ -684,9 +619,14 @@ mod test {
     use tokio::sync::watch;
 
     static INST_UUID_STR: &str = "e398c5d5-5059-4e55-beac-3a1071083aaa";
+    static PROPOLIS_UUID_STR: &str = "ed895b13-55d5-4e0b-88e9-3f4e74d0d936";
 
     fn test_uuid() -> Uuid {
         INST_UUID_STR.parse().unwrap()
+    }
+
+    fn test_propolis_uuid() -> Uuid {
+        PROPOLIS_UUID_STR.parse().unwrap()
     }
 
     // Endpoints for a fake Propolis server.
@@ -884,37 +824,38 @@ mod test {
             .in_sequence(&mut seq)
             .returning(|phys, vnic, _maybe_mac, _maybe_vlan| {
                 assert_eq!(phys.0, "physical");
-                assert_eq!(vnic, vnic_name(0));
+                assert_eq!(vnic, control_vnic_name(0));
                 Ok(())
             });
 
-        let zone_configure_child_ctx =
-            MockZones::configure_child_zone_context();
-        zone_configure_child_ctx
+        let zone_configure_propolis_ctx =
+            MockZones::configure_propolis_zone_context();
+        zone_configure_propolis_ctx
             .expect()
             .times(1)
             .in_sequence(&mut seq)
             .returning(|_, zone, vnics| {
-                assert_eq!(zone, zone_name(&test_uuid()));
+                assert_eq!(zone, propolis_zone_name(&test_propolis_uuid()));
                 assert_eq!(vnics.len(), 1);
-                assert_eq!(vnics[0], vnic_name(0));
+                assert_eq!(vnics[0], control_vnic_name(0));
                 Ok(())
             });
 
-        let zone_clone_from_base_ctx = MockZones::clone_from_base_context();
-        zone_clone_from_base_ctx
+        let zone_clone_from_base_propolis_ctx =
+            MockZones::clone_from_base_propolis_context();
+        zone_clone_from_base_propolis_ctx
             .expect()
             .times(1)
             .in_sequence(&mut seq)
             .returning(|zone| {
-                assert_eq!(zone, zone_name(&test_uuid()));
+                assert_eq!(zone, propolis_zone_name(&test_propolis_uuid()));
                 Ok(())
             });
 
         let zone_boot_ctx = MockZones::boot_context();
         zone_boot_ctx.expect().times(1).in_sequence(&mut seq).returning(
             |zone| {
-                assert_eq!(zone, zone_name(&test_uuid()));
+                assert_eq!(zone, propolis_zone_name(&test_propolis_uuid()));
                 Ok(())
             },
         );
@@ -923,7 +864,10 @@ mod test {
             crate::illumos::svc::wait_for_service_context();
         wait_for_service_ctx.expect().times(1).in_sequence(&mut seq).returning(
             |zone, fmri| {
-                assert_eq!(zone.unwrap(), zone_name(&test_uuid()));
+                assert_eq!(
+                    zone.unwrap(),
+                    propolis_zone_name(&test_propolis_uuid())
+                );
                 assert_eq!(fmri, "svc:/milestone/network:default");
                 Ok(())
             },
@@ -935,8 +879,8 @@ mod test {
             .times(1)
             .in_sequence(&mut seq)
             .returning(|zone, iface| {
-                assert_eq!(zone, zone_name(&test_uuid()));
-                assert_eq!(iface, interface_name(&vnic_name(0)));
+                assert_eq!(zone, propolis_zone_name(&test_propolis_uuid()));
+                assert_eq!(iface, interface_name(&control_vnic_name(0)));
                 Ok("127.0.0.1/24".parse().unwrap())
             });
 
@@ -946,8 +890,8 @@ mod test {
             .times(1)
             .in_sequence(&mut seq)
             .returning(|zone, id, addr| {
-                assert_eq!(zone, zone_name(&test_uuid()));
-                assert_eq!(id, &test_uuid());
+                assert_eq!(zone, propolis_zone_name(&test_propolis_uuid()));
+                assert_eq!(id, &test_propolis_uuid());
                 assert_eq!(
                     addr,
                     &"127.0.0.1:12400".parse::<SocketAddr>().unwrap()
@@ -959,8 +903,8 @@ mod test {
             crate::illumos::svc::wait_for_service_context();
         wait_for_service_ctx.expect().times(1).in_sequence(&mut seq).returning(
             |zone, fmri| {
-                let id = test_uuid();
-                assert_eq!(zone.unwrap(), zone_name(&id));
+                let id = test_propolis_uuid();
+                assert_eq!(zone.unwrap(), propolis_zone_name(&id));
                 assert_eq!(
                     fmri,
                     format!("{}:{}", service_name(), instance_name(&id))
@@ -1013,6 +957,7 @@ mod test {
             runtime: InstanceRuntimeState {
                 run_state: InstanceState::Creating,
                 sled_uuid: Uuid::new_v4(),
+                propolis_uuid: test_propolis_uuid(),
                 ncpus: InstanceCpuCount(2),
                 memory: ByteCount::from_mebibytes_u32(512),
                 hostname: "myvm".to_string(),
@@ -1099,7 +1044,7 @@ mod test {
             .times(1)
             .in_sequence(&mut seq)
             .returning(|vnic| {
-                assert_eq!(vnic, vnic_name(0));
+                assert_eq!(vnic, control_vnic_name(0));
                 Ok(())
             });
         inst.transition(InstanceRuntimeStateRequested {

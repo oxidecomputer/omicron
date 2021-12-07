@@ -1,3 +1,7 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
 //! Implementation of procedural macros for deriving oximeter's traits.
 //!
 //! This crate provides the implementation of the `Target` derive macro and the `oximeter::metric`
@@ -144,9 +148,6 @@ fn build_shared_methods(item_name: &Ident, fields: &[&Field]) -> TokenStream {
         .collect::<Vec<_>>();
     let name = to_snake_case(&format!("{}", item_name));
 
-    // key format: "field0_value:field1_value:..."
-    let fmt = vec!["{}"; fields.len()].join(":");
-    let key_formatter = quote! { format!(#fmt, #(self.#field_idents),*) };
     quote! {
         fn name(&self) -> &'static str {
             #name
@@ -162,10 +163,6 @@ fn build_shared_methods(item_name: &Ident, fields: &[&Field]) -> TokenStream {
 
         fn field_values(&self) -> Vec<::oximeter::FieldValue> {
             vec![#(::oximeter::FieldValue::from(&self.#field_idents),)*]
-        }
-
-        fn key(&self) -> String {
-            #key_formatter
         }
     }
 }

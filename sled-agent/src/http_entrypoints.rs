@@ -1,3 +1,7 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
 //! HTTP entrypoint functions for the sled agent's exposed API
 
 use super::params::DiskEnsureBody;
@@ -8,6 +12,7 @@ use dropshot::HttpResponseOk;
 use dropshot::Path;
 use dropshot::RequestContext;
 use dropshot::TypedBody;
+use omicron_common::api::external::Error;
 use omicron_common::api::internal::nexus::DiskRuntimeState;
 use omicron_common::api::internal::nexus::InstanceRuntimeState;
 use omicron_common::api::internal::sled_agent::InstanceEnsureBody;
@@ -55,7 +60,8 @@ async fn instance_put(
     let body_args = body.into_inner();
     Ok(HttpResponseOk(
         sa.instance_ensure(instance_id, body_args.initial, body_args.target)
-            .await?,
+            .await
+            .map_err(|e| Error::from(e))?,
     ))
 }
 
@@ -83,6 +89,7 @@ async fn disk_put(
             body_args.initial_runtime.clone(),
             body_args.target.clone(),
         )
-        .await?,
+        .await
+        .map_err(|e| Error::from(e))?,
     ))
 }

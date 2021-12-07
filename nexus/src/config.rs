@@ -1,3 +1,7 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
 /*!
  * Interfaces for parsing configuration files and working with a nexus server
  * configuration
@@ -23,6 +27,13 @@ use std::path::{Path, PathBuf};
 pub struct AuthnConfig {
     /** allowed authentication schemes for external HTTP server */
     pub schemes_external: Vec<SchemeName>,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+pub struct ConsoleConfig {
+    pub static_dir: PathBuf,
+    /** how long the browser can cache static assets */
+    pub cache_control_max_age_minutes: u32,
     /** how long a session can be idle before expiring */
     pub session_idle_timeout_minutes: u32,
     /** how long a session can exist before expiring */
@@ -40,6 +51,8 @@ pub struct Config {
     pub dropshot_internal: ConfigDropshot,
     /** Identifier for this instance of Nexus */
     pub id: uuid::Uuid,
+    /** Console-related tunables */
+    pub console: ConsoleConfig,
     /** Server-wide logging configuration. */
     pub log: ConfigLogging,
     /** Database parameters */
@@ -149,7 +162,10 @@ impl Config {
 
 #[cfg(test)]
 mod test {
-    use super::{AuthnConfig, Config, LoadError, LoadErrorKind, SchemeName};
+    use super::{
+        AuthnConfig, Config, ConsoleConfig, LoadError, LoadErrorKind,
+        SchemeName,
+    };
     use crate::db;
     use dropshot::ConfigDropshot;
     use dropshot::ConfigLogging;
@@ -257,10 +273,13 @@ mod test {
             "valid",
             r##"
             id = "28b90dc4-c22a-65ba-f49a-f051fe01208f"
-            [authn]
-            schemes_external = []
+            [console]
+            static_dir = "tests/static"
+            cache_control_max_age_minutes = 10
             session_idle_timeout_minutes = 60
             session_absolute_timeout_minutes = 480
+            [authn]
+            schemes_external = []
             [dropshot_external]
             bind_address = "10.1.2.3:4567"
             request_body_max_bytes = 1024
@@ -282,11 +301,13 @@ mod test {
             config,
             Config {
                 id: "28b90dc4-c22a-65ba-f49a-f051fe01208f".parse().unwrap(),
-                authn: AuthnConfig {
-                    schemes_external: Vec::new(),
+                console: ConsoleConfig {
+                    static_dir: "tests/static".parse().unwrap(),
+                    cache_control_max_age_minutes: 10,
                     session_idle_timeout_minutes: 60,
                     session_absolute_timeout_minutes: 480
                 },
+                authn: AuthnConfig { schemes_external: Vec::new() },
                 dropshot_external: ConfigDropshot {
                     bind_address: "10.1.2.3:4567"
                         .parse::<SocketAddr>()
@@ -316,10 +337,13 @@ mod test {
             "valid",
             r##"
             id = "28b90dc4-c22a-65ba-f49a-f051fe01208f"
-            [authn]
-            schemes_external = [ "spoof", "session_cookie" ]
+            [console]
+            static_dir = "tests/static"
+            cache_control_max_age_minutes = 10
             session_idle_timeout_minutes = 60
             session_absolute_timeout_minutes = 480
+            [authn]
+            schemes_external = [ "spoof", "session_cookie" ]
             [dropshot_external]
             bind_address = "10.1.2.3:4567"
             request_body_max_bytes = 1024
@@ -351,10 +375,13 @@ mod test {
             "bad authn.schemes_external",
             r##"
             id = "28b90dc4-c22a-65ba-f49a-f051fe01208f"
-            [authn]
-            schemes_external = ["trust-me"]
+            [console]
+            static_dir = "tests/static"
+            cache_control_max_age_minutes = 10
             session_idle_timeout_minutes = 60
             session_absolute_timeout_minutes = 480
+            [authn]
+            schemes_external = ["trust-me"]
             [dropshot_external]
             bind_address = "10.1.2.3:4567"
             request_body_max_bytes = 1024

@@ -72,9 +72,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ ubuntu-18.04, macos-10.15 ]
+        os: [ ubuntu-18.04, macos-11 ]
         # See rust-toolchain for why we're using nightly here.
-        toolchain: [ nightly-2021-09-03 ]
+        toolchain: [ nightly-2021-11-24 ]
     steps:
     # actions/checkout@v2
     - uses: actions/checkout@28c7f3d2b5162b5ddd3dfd9a45aa55eaf396478b

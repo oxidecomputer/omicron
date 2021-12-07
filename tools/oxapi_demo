@@ -1,3 +1,5 @@
+#!/usr/bin/env bash
+
 #
 # oxapi_demo: wrapper around curl(1) to run basic requests against the Oxide API
 # prototype server.
@@ -13,7 +15,7 @@ GENERAL OPTIONS
 
     -A        do not attempt to authenticate
               (default behavior: use "spoof" authentication for endpoints
-	      that require it)
+               that require it)
 
 ORGANIZATIONS
 
@@ -82,7 +84,18 @@ function main
 	local cmd
 
 	type curl > /dev/null 2>&1 || fail "curl not found in PATH."
-	type json > /dev/null 2>&1 || fail "json not found in PATH. Install it with npm i -g json."
+
+	if ! type json > /dev/null 2>&1;
+	then
+		if ! type jq > /dev/null 2>&1;
+		then
+			fail "json or jq not found in PATH. Install with 'npm i -g json' or 'apt install jq'"
+		else
+			JSONTOOL="jq ."
+		fi
+	else
+		JSONTOOL="json -ga"
+	fi
 
 	if [[ "$1" == "-A" ]]; then
 		NO_AUTHENTICATE=true
@@ -121,7 +134,7 @@ function do_curl
 
 	path="$1"
 	shift
-	(set -o xtrace; curl -sSi "$OXAPI_URL$path" "$@" | json -ga)
+	(set -o xtrace; curl -sSq "$OXAPI_URL$path" "$@" | ${JSONTOOL})
 }
 
 function do_curl_authn
@@ -130,7 +143,7 @@ function do_curl_authn
 		do_curl "$@"
 	else
 		do_curl "$@" \
-		    -H "oxide-authn-spoof: 001de000-05e4-0000-0000-000000004007"
+			-H "oxide-authn-spoof: 001de000-05e4-0000-0000-000000004007"
 	fi
 }
 
@@ -154,7 +167,7 @@ function mkjson
 		str="$str \"$key\": $value"
 	done
 	str="$str }"
-	echo "$str" | json
+	echo "$str" | ${JSONTOOL}
 }
 
 #
@@ -196,7 +209,7 @@ function cmd_project_create_demo
 {
 	[[ $# != 2 ]] && usage "expected ORGANIZATION_NAME PROJECT_NAME"
 	mkjson name="$2" description="a project called $2" |
-		do_curl "/organizations/$1/projects" -X POST -T -
+		do_curl_authn "/organizations/$1/projects" -X POST -T -
 }
 
 function cmd_project_delete
@@ -234,7 +247,7 @@ function cmd_instance_create_demo
 	# memory is 1024 * 1024 * 256
 	[[ $# != 3 ]] && usage "expected ORGANIZATION_NAME PROJECT_NAME INSTANCE_NAME"
 	mkjson name="$3" description="an instance called $3" ncpus=1 \
-	    memory=268435456 bootDiskSize=1 hostname="$3" |
+		memory=268435456 bootDiskSize=1 hostname="$3" |
 		do_curl "/organizations/$1/projects/$2/instances" -X POST -T -
 }
 
@@ -296,7 +309,7 @@ function cmd_disk_create_demo
 {
 	[[ $# != 3 ]] && usage "expected ORGANIZATION_NAME PROJECT_NAME DISK_NAME"
 	mkjson name="$3" description="a disk called $3" size=1024 |
-	    do_curl "/organizations/$1/projects/$2/disks" -X POST -T -
+		do_curl "/organizations/$1/projects/$2/disks" -X POST -T -
 }
 
 function cmd_disk_get
@@ -308,14 +321,14 @@ function cmd_disk_get
 function cmd_disk_delete
 {
 	[[ $# != 3 ]] && usage "expected ORGANIZATION_NAME PROJECT_NAME DISK_NAME"
-	do_curl_authz "/organizations/$1/projects/$2/disks/$3" -X DELETE
+	do_curl_authn "/organizations/$1/projects/$2/disks/$3" -X DELETE
 }
 
 function cmd_vpc_create_demo
 {
 	[[ $# != 4 ]] && usage "expected ORGANIZATION_NAME PROJECT_NAME VPC_NAME DNS_NAME"
 	mkjson name="$3" dnsName="$4" description="a vpc called $3" |
-	    do_curl "/organizations/$1/projects/$2/vpcs" -X POST -T -
+		do_curl "/organizations/$1/projects/$2/vpcs" -X POST -T -
 }
 
 

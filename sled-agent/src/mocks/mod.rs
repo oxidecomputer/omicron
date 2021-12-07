@@ -1,8 +1,15 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
 //! Mock structures for testing.
 
+use anyhow::Error;
 use mockall::mock;
-use nexus_client::types::{InstanceRuntimeState, SledAgentStartupInfo};
-use omicron_common::api::external::Error;
+use nexus_client::types::{
+    DatasetPutRequest, DatasetPutResponse, InstanceRuntimeState,
+    SledAgentStartupInfo, ZpoolPutRequest, ZpoolPutResponse,
+};
 use slog::Logger;
 use uuid::Uuid;
 
@@ -19,5 +26,17 @@ mock! {
             id: &Uuid,
             new_runtime_state: &InstanceRuntimeState,
         ) -> Result<(), Error>;
+        pub async fn zpool_put(
+            &self,
+            sled_id: &Uuid,
+            zpool_id: &Uuid,
+            info: &ZpoolPutRequest,
+        ) -> Result<ZpoolPutResponse, Error>;
+        pub async fn dataset_put(
+            &self,
+            zpool_id: &Uuid,
+            dataset_id: &Uuid,
+            info: &DatasetPutRequest,
+        ) -> Result<DatasetPutResponse, Error>;
     }
 }
