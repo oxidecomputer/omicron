@@ -1490,7 +1490,7 @@ impl Nexus {
             .vpc_subnet_fetch_by_name(&vpc.id(), subnet_name)
             .await?;
 
-        let mac = self.db_datastore.generate_mac_address()?;
+        let mac = db::model::MacAddr::new()?;
 
         let interface_id = Uuid::new_v4();
         // Request an allocation

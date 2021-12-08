@@ -24,6 +24,7 @@ use ipnetwork::IpNetwork;
 use omicron_common::api::external;
 use omicron_common::api::internal;
 use parse_display::Display;
+use rand::{rngs::StdRng, SeedableRng};
 use ref_cast::RefCast;
 use schemars::JsonSchema;
 use serde::Deserialize;
@@ -359,6 +360,27 @@ where
 #[derive(Clone, Copy, Debug, PartialEq, AsExpression, FromSqlRow)]
 #[sql_type = "sql_types::Text"]
 pub struct MacAddr(pub external::MacAddr);
+
+impl MacAddr {
+    /**
+     * Generate a unique MAC address for an interface
+     */
+    pub fn new() -> Result<Self, external::Error> {
+        use rand::Fill;
+        // Use the Oxide OUI A8 40 25
+        let mut addr = [0xA8, 0x40, 0x25, 0x00, 0x00, 0x00];
+        addr[3..].try_fill(&mut StdRng::from_entropy()).map_err(|_| {
+            external::Error::internal_error("failed to generate MAC")
+        })?;
+        // From RFD 174, Oxide virtual MACs are constrained to have these bits
+        // set.
+        addr[3] |= 0xF0;
+        // TODO-correctness: We should use an explicit allocator for the MACs
+        // given the small address space. Right now creation requests may fail
+        // due to MAC collision, especially given the 20-bit space.
+        Ok(Self(external::MacAddr(macaddr::MacAddr6::from(addr))))
+    }
+}
 
 NewtypeFrom! { () pub struct MacAddr(external::MacAddr); }
 NewtypeDeref! { () pub struct MacAddr(external::MacAddr); }

@@ -48,14 +48,12 @@ use omicron_common::api::external::Error;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::LookupType;
-use omicron_common::api::external::MacAddr;
 use omicron_common::api::external::ResourceType;
 use omicron_common::api::external::UpdateResult;
 use omicron_common::api::external::{
     CreateResult, IdentityMetadataCreateParams,
 };
 use omicron_common::bail_unless;
-use rand::{rngs::StdRng, SeedableRng};
 use std::convert::TryFrom;
 use std::sync::Arc;
 use uuid::Uuid;
@@ -1058,24 +1056,6 @@ impl DataStore {
      * Network interfaces
      */
 
-    /**
-     * Generate a unique MAC address for an interface
-     */
-    pub fn generate_mac_address(&self) -> Result<db::model::MacAddr, Error> {
-        use rand::Fill;
-        // Use the Oxide OUI A8 40 25
-        let mut addr = [0xA8, 0x40, 0x25, 0x00, 0x00, 0x00];
-        addr[3..]
-            .try_fill(&mut StdRng::from_entropy())
-            .map_err(|_| Error::internal_error("failed to generate MAC"))?;
-        // Oxide virtual MACs are constrained to have these bits set.
-        addr[3] |= 0xF0;
-        // TODO-correctness: We should use an explicit allocator for the MACs
-        // given the small address space. Right now creation requests may fail
-        // due to MAC collision, especially given the 20-bit space.
-        Ok(MacAddr(macaddr::MacAddr6::from(addr)).into())
-    }
-
     pub async fn instance_create_network_interface(
         &self,
         interface: IncompleteNetworkInterface,
@@ -1127,10 +1107,10 @@ impl DataStore {
                             diesel::result::Error::NotFound,
                         )) = e
                         {
-                            Error::not_found_other(
-                                ResourceType::NetworkInterface,
-                                "no available IP addresses".to_string(),
-                            )
+                            Error::InvalidRequest {
+                                message: "no available IP addresses"
+                                    .to_string(),
+                            }
                         } else {
                             public_error_from_diesel_pool_create(
                                 e,

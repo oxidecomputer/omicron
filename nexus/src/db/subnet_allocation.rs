@@ -21,9 +21,9 @@ use uuid::Uuid;
 /// SELECT <id> AS id, <name> AS name, <description> AS description,
 ///        <time_created> AS time_created, <time_modified> AS time_modified,
 ///        <instance_id> AS instance_id, <vpc_id> AS vpc_id,
-///        <subnet_id> AS subnet_id, <mac> AS mac, <block_bASe> + off AS ip
+///        <subnet_id> AS subnet_id, <mac> AS mac, <block_base> + off AS ip
 ///   FROM
-///        generate_series(5, <num_addresses_in_block>) AS off
+///        generate_series(5, <last_address_in_block>) AS off
 ///   LEFT OUTER JOIN
 ///        network_interface
 ///   ON (subnet_id, ip, time_deleted IS NULL) =
@@ -32,6 +32,10 @@ use uuid::Uuid;
 ///
 /// Note that generate_series receives a start value of 5 in accordance with
 /// RFD 21's reservation of addresses 0 through 4 in a subnet.
+// TODO-performance: This query scales linearly with the number of IPs
+// allocated, which is highly undesirable. It will also return the same
+// candidate address to two parallel executors, which will cause additional
+// retries.
 pub struct AllocateIpQuery {
     pub interface: IncompleteNetworkInterface,
     pub block: ipnetwork::IpNetwork,
