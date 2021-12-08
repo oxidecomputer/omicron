@@ -89,7 +89,7 @@ dependencies = [
 [[package]]
 name = "async-bb8-diesel"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/async-bb8-diesel?rev=1a5c55d#1a5c55d9e31210fd7dfff944798e89578e3a0dfc"
+source = "git+https://github.com/oxidecomputer/async-bb8-diesel?rev=22c26ef#22c26ef840075a57b18ac2eae3ead989b992773e"
 dependencies = [
  "async-trait",
  "bb8",
@@ -631,7 +631,7 @@ dependencies = [
 [[package]]
 name = "diesel"
 version = "2.0.0"
-source = "git+https://github.com/diesel-rs/diesel?rev=a39dd2e#a39dd2ebc5acccb8cde73d40b0d81dde3e073170"
+source = "git+https://github.com/diesel-rs/diesel?rev=ce77c382#ce77c382d2836f6b385225991cf58cb2d2dd65d6"
 dependencies = [
  "bitflags",
  "byteorder",
@@ -647,9 +647,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "diesel-dtrace"
+version = "0.1.0"
+source = "git+https://github.com/oxidecomputer/diesel-dtrace?branch=main#dfeff3201eb8180220542b29021f0b5f71e50b46"
+dependencies = [
+ "diesel",
+ "usdt",
+]
+
+[[package]]
 name = "diesel_derives"
 version = "2.0.0"
-source = "git+https://github.com/diesel-rs/diesel?rev=a39dd2e#a39dd2ebc5acccb8cde73d40b0d81dde3e073170"
+source = "git+https://github.com/diesel-rs/diesel?rev=ce77c382#ce77c382d2836f6b385225991cf58cb2d2dd65d6"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -741,7 +750,7 @@ checksum = "4bb454f0228b18c7f4c3b0ebbee346ed9c52e7443b0999cd543ff3571205701d"
 [[package]]
 name = "dropshot"
 version = "0.6.1-dev"
-source = "git+https://github.com/oxidecomputer/dropshot?branch=main#ff33033ad3d7fcf32caa352d76fc243bd20db176"
+source = "git+https://github.com/oxidecomputer/dropshot?branch=main#56f60da71be392de46dd576e9564ac1b5428dd5c"
 dependencies = [
  "async-trait",
  "base64",
@@ -776,7 +785,7 @@ dependencies = [
 [[package]]
 name = "dropshot_endpoint"
 version = "0.6.1-dev"
-source = "git+https://github.com/oxidecomputer/dropshot?branch=main#ff33033ad3d7fcf32caa352d76fc243bd20db176"
+source = "git+https://github.com/oxidecomputer/dropshot?branch=main#56f60da71be392de46dd576e9564ac1b5428dd5c"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -1762,6 +1771,7 @@ dependencies = [
  "cookie",
  "db-macros",
  "diesel",
+ "diesel-dtrace",
  "dropshot",
  "expectorate",
  "futures",
@@ -1798,6 +1808,7 @@ dependencies = [
  "serde_with",
  "sled-agent-client",
  "slog",
+ "slog-dtrace",
  "steno",
  "structopt",
  "subprocess",
@@ -1805,6 +1816,7 @@ dependencies = [
  "tokio",
  "tokio-postgres",
  "toml",
+ "usdt",
  "uuid",
 ]
 
@@ -1864,6 +1876,7 @@ dependencies = [
  "serial_test",
  "slog",
  "slog-async",
+ "slog-dtrace",
  "slog-term",
  "smf",
  "socket2",
@@ -2059,6 +2072,7 @@ dependencies = [
  "serde",
  "serde_json",
  "slog",
+ "slog-dtrace",
  "structopt",
  "subprocess",
  "thiserror",
@@ -2127,6 +2141,7 @@ dependencies = [
  "schemars",
  "serde",
  "slog",
+ "slog-dtrace",
  "thiserror",
  "tokio",
  "uuid",
@@ -3330,6 +3345,19 @@ dependencies = [
  "hostname",
  "slog",
  "slog-json",
+]
+
+[[package]]
+name = "slog-dtrace"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c4ec6883908a7f628be97d107387c45de771d8a2fa8af147337ec38549f93cdd"
+dependencies = [
+ "chrono",
+ "serde",
+ "serde_json",
+ "slog",
+ "usdt",
 ]
 
 [[package]]

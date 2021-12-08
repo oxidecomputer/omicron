@@ -6,6 +6,7 @@
  * Nexus, the service that operates much of the control plane in an Oxide fleet
  */
 
+use crate::authn;
 use crate::authz;
 use crate::config;
 use crate::context::OpContext;
@@ -15,8 +16,11 @@ use crate::db::model::DatasetKind;
 use crate::db::model::Name;
 use crate::external_api::params;
 use crate::internal_api::params::{OximeterInfo, ZpoolPutRequest};
+use crate::populate::populate_start;
+use crate::populate::PopulateStatus;
 use crate::saga_interface::SagaContext;
 use crate::sagas;
+use anyhow::anyhow;
 use anyhow::Context;
 use async_trait::async_trait;
 // use chrono::Utc;
@@ -128,6 +132,9 @@ pub struct Nexus {
 
     /** Task representing completion of recovered Sagas */
     recovery_task: std::sync::Mutex<Option<db::RecoveryTask>>,
+
+    /** Status of background task to populate database */
+    populate_status: tokio::sync::watch::Receiver<PopulateStatus>,
 }
 
 /*
@@ -165,6 +172,21 @@ impl Nexus {
             )),
             sec_store,
         ));
+
+        /*
+         * TODO-cleanup We may want a first-class subsystem for managing startup
+         * background tasks.  It could use a Future for each one, a status enum
+         * for each one, status communication via channels, and a single task to
+         * run them all.
+         */
+        let populate_ctx = OpContext::for_background(
+            log.new(o!("component" => "DataLoader")),
+            Arc::clone(&authz),
+            authn::Context::internal_db_init(),
+        );
+        let populate_status =
+            populate_start(populate_ctx, Arc::clone(&db_datastore));
+
         let nexus = Nexus {
             id: config.id,
             rack_id: *rack_id,
@@ -173,6 +195,7 @@ impl Nexus {
             db_datastore: Arc::clone(&db_datastore),
             sec_client: Arc::clone(&sec_client),
             recovery_task: std::sync::Mutex::new(None),
+            populate_status,
         };
 
         /* TODO-cleanup all the extra Arcs here seems wrong */
@@ -180,6 +203,7 @@ impl Nexus {
         let opctx = OpContext::for_background(
             log.new(o!("component" => "SagaRecoverer")),
             authz,
+            authn::Context::internal_saga_recovery(),
         );
         let recovery_task = db::recover(
             opctx,
@@ -192,6 +216,23 @@ impl Nexus {
 
         *nexus_arc.recovery_task.lock().unwrap() = Some(recovery_task);
         nexus_arc
+    }
+
+    pub async fn wait_for_populate(&self) -> Result<(), anyhow::Error> {
+        let mut my_rx = self.populate_status.clone();
+        loop {
+            my_rx
+                .changed()
+                .await
+                .map_err(|error| anyhow!(error.to_string()))?;
+            match &*my_rx.borrow() {
+                PopulateStatus::NotDone => (),
+                PopulateStatus::Done => return Ok(()),
+                PopulateStatus::Failed(error) => {
+                    return Err(anyhow!(error.clone()))
+                }
+            };
+        }
     }
 
     /*
@@ -2121,6 +2162,26 @@ impl Nexus {
             .map_err(|_: ()| {
                 Error::not_found_by_id(ResourceType::SagaDbg, &id)
             })?
+    }
+
+    /*
+     * Built-in users
+     */
+
+    pub async fn users_builtin_list(
+        &self,
+        opctx: &OpContext,
+        pagparams: &DataPageParams<'_, Name>,
+    ) -> ListResultVec<db::model::UserBuiltin> {
+        self.db_datastore.users_builtin_list_by_name(opctx, pagparams).await
+    }
+
+    pub async fn user_builtin_fetch(
+        &self,
+        opctx: &OpContext,
+        name: &Name,
+    ) -> LookupResult<db::model::UserBuiltin> {
+        self.db_datastore.user_builtin_fetch(opctx, name).await
     }
 
     /*
