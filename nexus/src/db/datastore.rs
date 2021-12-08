@@ -30,7 +30,10 @@ use super::identity::{Asset, Resource};
 use super::Pool;
 use crate::authz;
 use crate::context::OpContext;
-use async_bb8_diesel::{AsyncConnection, AsyncRunQueryDsl, ConnectionManager};
+use async_bb8_diesel::{
+    AsyncConnection, AsyncRunQueryDsl, ConnectionError, ConnectionManager,
+    PoolError,
+};
 use chrono::Utc;
 use diesel::prelude::*;
 use diesel::upsert::excluded;
@@ -1075,7 +1078,7 @@ impl DataStore {
         use db::schema::network_interface::dsl;
 
         let name = interface.identity.name.clone();
-        let result = match interface.ip {
+        match interface.ip {
             // Attempt an insert with a requested IP address
             Some(ip) => {
                 let row = NetworkInterface {
@@ -1091,6 +1094,13 @@ impl DataStore {
                     .returning(NetworkInterface::as_returning())
                     .get_result_async(self.pool())
                     .await
+                    .map_err(|e| {
+                        public_error_from_diesel_pool_create(
+                            e,
+                            ResourceType::NetworkInterface,
+                            name.as_str(),
+                        )
+                    })
             }
             // Insert and allocate an IP address
             None => {
@@ -1107,15 +1117,25 @@ impl DataStore {
                     .returning(NetworkInterface::as_returning())
                     .get_result_async(self.pool())
                     .await
+                    .map_err(|e| {
+                        if let PoolError::Connection(ConnectionError::Query(
+                            diesel::result::Error::NotFound,
+                        )) = e
+                        {
+                            Error::not_found_other(
+                                ResourceType::NetworkInterface,
+                                "no available IP addresses".to_string(),
+                            )
+                        } else {
+                            public_error_from_diesel_pool_create(
+                                e,
+                                ResourceType::NetworkInterface,
+                                name.as_str(),
+                            )
+                        }
+                    })
             }
-        };
-        result.map_err(|e| {
-            public_error_from_diesel_pool_create(
-                e,
-                ResourceType::NetworkInterface,
-                name.as_str(),
-            )
-        })
+        }
     }
 
     // Create a record for a new Oximeter instance
