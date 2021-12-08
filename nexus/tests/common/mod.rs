@@ -104,6 +104,13 @@ pub async fn test_setup_with_config(
     let server = omicron_nexus::Server::start(&config, &rack_id, &logctx.log)
         .await
         .unwrap();
+    server
+        .apictx
+        .nexus
+        .wait_for_populate()
+        .await
+        .expect("Nexus never loaded users");
+
     let testctx_external = ClientTestContext::new(
         server.http_server_external.local_addr(),
         logctx.log.new(o!("component" => "external client test context")),

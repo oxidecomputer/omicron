@@ -7,6 +7,7 @@
 use super::config::Config;
 use super::http_entrypoints::api as http_api;
 use super::sled_agent::SledAgent;
+use slog::Drain;
 
 use omicron_common::backoff::{
     internal_service_policy, retry_notify, BackoffError,
@@ -28,11 +29,19 @@ pub struct Server {
 impl Server {
     /// Starts a SledAgent server
     pub async fn start(config: &Config) -> Result<Server, String> {
-        let log = config
-            .log
-            .to_logger("sled-agent")
-            .map_err(|message| format!("initializing logger: {}", message))?;
-
+        let (drain, registration) = slog_dtrace::with_drain(
+            config.log.to_logger("sled-agent").map_err(|message| {
+                format!("initializing logger: {}", message)
+            })?,
+        );
+        let log = slog::Logger::root(drain.fuse(), slog::o!());
+        if let slog_dtrace::ProbeRegistration::Failed(e) = registration {
+            let msg = format!("Failed to register DTrace probes: {}", e);
+            error!(log, "{}", msg);
+            return Err(msg);
+        } else {
+            debug!(log, "registered DTrace probes");
+        }
         info!(log, "setting up sled agent server");
 
         let client_log = log.new(o!("component" => "NexusClient"));
@@ -45,13 +54,9 @@ impl Server {
             "component" => "SledAgent",
             "server" => config.id.clone().to_string()
         ));
-        let sled_agent = SledAgent::new(
-            &config.id,
-            sa_log,
-            config.vlan,
-            nexus_client.clone(),
-        )
-        .map_err(|e| e.to_string())?;
+        let sled_agent = SledAgent::new(&config, sa_log, nexus_client.clone())
+            .await
+            .map_err(|e| e.to_string())?;
 
         let dropshot_log = log.new(o!("component" => "dropshot"));
         let http_server = dropshot::HttpServerStarter::new(
@@ -71,7 +76,10 @@ impl Server {
         // return a permanent error from the `notify_nexus` closure.
         let sa_address = http_server.local_addr();
         let notify_nexus = || async {
-            debug!(log, "contacting server nexus");
+            info!(
+                log,
+                "contacting server nexus, registering sled: {}", config.id
+            );
             nexus_client
                 .cpapi_sled_agents_post(
                     &config.id,
