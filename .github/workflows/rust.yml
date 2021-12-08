@@ -32,6 +32,22 @@ jobs:
     - name: Check style
       run: cargo fmt -- --check
 
+  check-omicron-deployment:
+    needs: skip_duplicate_jobs
+    if: ${{ needs.skip_duplicate_jobs.outputs.should_skip != 'true' }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ ubuntu-18.04, macos-11 ]
+    steps:
+    # actions/checkout@v2
+    - uses: actions/checkout@28c7f3d2b5162b5ddd3dfd9a45aa55eaf396478b
+    - name: Report cargo version
+      run: cargo --version
+    - name: Check build of deployed Omicron packages
+      run: cargo run --bin omicron-package -- check
+
   clippy-lint:
     needs: skip_duplicate_jobs
     if: ${{ needs.skip_duplicate_jobs.outputs.should_skip != 'true' }}
