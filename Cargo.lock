@@ -1750,6 +1750,7 @@ dependencies = [
  "serde",
  "serde_json",
  "slog",
+ "tokio",
  "uuid",
 ]
 
