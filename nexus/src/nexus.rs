@@ -19,7 +19,7 @@ use crate::saga_interface::SagaContext;
 use crate::sagas;
 use anyhow::Context;
 use async_trait::async_trait;
-use chrono::Utc;
+// use chrono::Utc;
 use futures::future::ready;
 use futures::StreamExt;
 use hex;
@@ -1096,23 +1096,23 @@ impl Nexus {
         let runtime: nexus::InstanceRuntimeState =
             instance.runtime().clone().into();
 
-        let rpz_nic = sled_agent_client::types::NetworkInterface {
-            identity: sled_agent_client::types::IdentityMetadata {
-                id: Uuid::new_v4(),
-                name: sled_agent_client::types::Name("rpz-nic".to_string()),
-                description: "test nic".to_string(),
-                time_created: Utc::now(),
-                time_modified: Utc::now(),
-            },
-            vpc_id: Uuid::new_v4(),
-            subnet_id: Uuid::new_v4(),
-            mac: sled_agent_client::types::MacAddr(
-                format!("02:08:20:BE:A0:F2")
-            ),
-            ip: std::net::IpAddr::V4(
-                std::net::Ipv4Addr::new(10, 0, 0, 213)
-            ).to_string(),
-        };
+        // let rpz_nic = sled_agent_client::types::NetworkInterface {
+        //     identity: sled_agent_client::types::IdentityMetadata {
+        //         id: Uuid::new_v4(),
+        //         name: sled_agent_client::types::Name("rpz-nic".to_string()),
+        //         description: "test nic".to_string(),
+        //         time_created: Utc::now(),
+        //         time_modified: Utc::now(),
+        //     },
+        //     vpc_id: Uuid::new_v4(),
+        //     subnet_id: Uuid::new_v4(),
+        //     mac: sled_agent_client::types::MacAddr(
+        //         format!("02:08:20:BE:A0:F2")
+        //     ),
+        //     ip: std::net::IpAddr::V4(
+        //         std::net::Ipv4Addr::new(10, 0, 0, 213)
+        //     ).to_string(),
+        // };
 
         // TODO: Populate this with an appropriate NIC.
         // See also: sic_create_instance_record in sagas.rs for a similar
@@ -1121,7 +1121,8 @@ impl Nexus {
             runtime: sled_agent_client::types::InstanceRuntimeState::from(
                 runtime,
             ),
-            nics: vec![rpz_nic],
+            nics: vec![],
+            // nics: vec![rpz_nic],
         };
 
         let new_runtime = sa
