@@ -89,7 +89,7 @@ async fn test_subnet_allocation() {
         "/organizations/{}/projects/{}/vpcs/default/subnets/default",
         organization_name, project_name
     );
-    let subnet = "192.168.42.0/30".parse().unwrap();
+    let subnet = "192.168.42.0/29".parse().unwrap();
     let subnet_update = params::VpcSubnetUpdate {
         identity: IdentityMetadataUpdateParams {
             name: Some("default".parse().unwrap()),
@@ -108,9 +108,8 @@ async fn test_subnet_allocation() {
         .await
         .unwrap();
 
-    // The valid addresses for allocation in `subnet` are 192.168.42.1 and
-    // 192.168.42.2. The rest are reserved as the network address and broadcast
-    // address.
+    // The valid addresses for allocation in `subnet` are 192.168.42.5 and
+    // 192.168.42.6. The rest are reserved as described in RFD21.
     create_instance(client, &url_instances, "i1").await;
     create_instance(client, &url_instances, "i2").await;
 
@@ -126,11 +125,11 @@ async fn test_subnet_allocation() {
     assert_eq!(network_interfaces.len(), 2);
     assert_eq!(
         network_interfaces[0].ip,
-        "192.168.42.1".parse::<IpAddr>().unwrap()
+        "192.168.42.5".parse::<IpAddr>().unwrap()
     );
     assert_eq!(
         network_interfaces[1].ip,
-        "192.168.42.2".parse::<IpAddr>().unwrap()
+        "192.168.42.6".parse::<IpAddr>().unwrap()
     );
 
     cptestctx.teardown().await;
