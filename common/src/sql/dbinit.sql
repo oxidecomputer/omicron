@@ -439,7 +439,16 @@ CREATE UNIQUE INDEX ON omicron.public.network_interface (
     time_deleted IS NULL;
 
 CREATE INDEX ON omicron.public.network_interface (
-   instance_id
+    instance_id
+) WHERE
+    time_deleted IS NULL;
+
+/* Ensure we do not assign the same MAC twice within a VPC
+ * See RFD174's discussion on the scope of virtual MACs
+ */
+CREATE UNIQUE INDEX ON omicron.public.network_interface (
+    vpc_id,
+    mac
 ) WHERE
     time_deleted IS NULL;
 
@@ -655,6 +664,53 @@ CREATE TABLE omicron.public.console_session (
 CREATE INDEX ON omicron.public.console_session (
     time_created
 );
+
+/*******************************************************************/
+
+/*
+ * IAM
+ */
+
+/*
+ * Users built into the system
+ *
+ * The ids and names for these users are well-known (i.e., they are used by
+ * Nexus directly, so changing these would potentially break compatibility).
+ */
+CREATE TABLE omicron.public.user_builtin (
+    /*
+     * Identity metadata
+     *
+     * TODO-cleanup This uses the "resource identity" pattern because we want a
+     * name and description, but it's not valid to support soft-deleting these
+     * records.
+     */
+    id UUID PRIMARY KEY,
+    name STRING(63) NOT NULL,
+    description STRING(512) NOT NULL,
+    time_created TIMESTAMPTZ NOT NULL,
+    time_modified TIMESTAMPTZ NOT NULL,
+    time_deleted TIMESTAMPTZ
+);
+
+CREATE UNIQUE INDEX ON omicron.public.user_builtin (name);
+
+/* User used by Nexus to create other users.  Do NOT add more users here! */
+INSERT INTO omicron.public.user_builtin (
+    id,
+    name,
+    description,
+    time_created,
+    time_modified
+) VALUES (
+    /* NOTE: this uuid and name are duplicated in nexus::authn. */
+    '001de000-05e4-4000-8000-000000000001',
+    'db-init',
+    'user used for database initialization',
+    NOW(),
+    NOW()
+);
+
 
 /*******************************************************************/
 

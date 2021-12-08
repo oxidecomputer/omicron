@@ -13,6 +13,7 @@ use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::Instance;
 use omicron_common::api::external::InstanceCpuCount;
 use omicron_common::api::external::InstanceState;
+use omicron_common::api::external::NetworkInterface;
 use omicron_nexus::TestInterfaces as _;
 use omicron_nexus::{external_api::params, Nexus};
 use sled_agent_client::TestInterfaces as _;
@@ -134,6 +135,17 @@ async fn test_instances_create_reboot_halt() {
     let instance = instance_get(&client, &instance_url).await;
     instances_eq(&instances[0], &instance);
     assert_eq!(instance.runtime.run_state, InstanceState::Starting);
+
+    /* Check that the instance got a network interface */
+    let ips_url = format!(
+        "/organizations/{}/projects/{}/vpcs/default/subnets/default/ips",
+        ORGANIZATION_NAME, PROJECT_NAME
+    );
+    let network_interfaces =
+        objects_list_page::<NetworkInterface>(client, &ips_url).await.items;
+    assert_eq!(network_interfaces.len(), 1);
+    assert_eq!(network_interfaces[0].instance_id, instance.identity.id);
+    assert_eq!(network_interfaces[0].identity.name, instance.identity.name);
 
     /*
      * Now, simulate completion of instance boot and check the state reported.

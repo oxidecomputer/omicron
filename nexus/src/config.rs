@@ -31,7 +31,7 @@ pub struct AuthnConfig {
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct ConsoleConfig {
-    pub assets_directory: PathBuf,
+    pub static_dir: PathBuf,
     /** how long the browser can cache static assets */
     pub cache_control_max_age_minutes: u32,
     /** how long a session can be idle before expiring */
@@ -274,7 +274,7 @@ mod test {
             r##"
             id = "28b90dc4-c22a-65ba-f49a-f051fe01208f"
             [console]
-            assets_directory = "tests/fixtures"
+            static_dir = "tests/static"
             cache_control_max_age_minutes = 10
             session_idle_timeout_minutes = 60
             session_absolute_timeout_minutes = 480
@@ -302,7 +302,7 @@ mod test {
             Config {
                 id: "28b90dc4-c22a-65ba-f49a-f051fe01208f".parse().unwrap(),
                 console: ConsoleConfig {
-                    assets_directory: "tests/fixtures".parse().unwrap(),
+                    static_dir: "tests/static".parse().unwrap(),
                     cache_control_max_age_minutes: 10,
                     session_idle_timeout_minutes: 60,
                     session_absolute_timeout_minutes: 480
@@ -338,7 +338,7 @@ mod test {
             r##"
             id = "28b90dc4-c22a-65ba-f49a-f051fe01208f"
             [console]
-            assets_directory = "tests/fixtures"
+            static_dir = "tests/static"
             cache_control_max_age_minutes = 10
             session_idle_timeout_minutes = 60
             session_absolute_timeout_minutes = 480
@@ -359,6 +359,7 @@ mod test {
             if_exists = "fail"
             [insecure]
             allow_any_request_to_spoof_authn_header = true
+            if_exists = "fail"
             "##,
         )
         .unwrap();
@@ -376,7 +377,7 @@ mod test {
             r##"
             id = "28b90dc4-c22a-65ba-f49a-f051fe01208f"
             [console]
-            assets_directory = "tests/fixtures"
+            static_dir = "tests/static"
             cache_control_max_age_minutes = 10
             session_idle_timeout_minutes = 60
             session_absolute_timeout_minutes = 480

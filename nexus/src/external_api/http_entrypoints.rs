@@ -12,7 +12,7 @@ use crate::ServerContext;
 
 use super::{
     console_api, params,
-    views::{Organization, Project, Rack, Sled, Vpc, VpcSubnet},
+    views::{Organization, Project, Rack, Sled, User, Vpc, VpcSubnet},
 };
 use crate::context::OpContext;
 use dropshot::endpoint;
@@ -44,6 +44,7 @@ use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Disk;
 use omicron_common::api::external::DiskAttachment;
 use omicron_common::api::external::Instance;
+use omicron_common::api::external::NetworkInterface;
 use omicron_common::api::external::PaginationOrder;
 use omicron_common::api::external::RouterRoute;
 use omicron_common::api::external::RouterRouteCreateParams;
@@ -111,6 +112,8 @@ pub fn external_api() -> NexusApiDescription {
         api.register(vpc_subnets_delete_subnet)?;
         api.register(vpc_subnets_put_subnet)?;
 
+        api.register(subnets_ips_get)?;
+
         api.register(vpc_routers_get)?;
         api.register(vpc_routers_get_router)?;
         api.register(vpc_routers_post)?;
@@ -133,6 +136,9 @@ pub fn external_api() -> NexusApiDescription {
 
         api.register(sagas_get)?;
         api.register(sagas_get_saga)?;
+
+        api.register(users_get)?;
+        api.register(users_get_user)?;
 
         api.register(console_api::spoof_login)?;
         api.register(console_api::spoof_login_form)?;
@@ -1344,6 +1350,44 @@ async fn vpc_subnets_put_subnet(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
+/**
+ * List IP addresses on a VPC subnet.
+ */
+// TODO-correctness: This API has not actually been specified in an RFD yet, and
+// may not actually be what we want. It is being implemented here to give our
+// testing introspection into network interfaces.
+#[endpoint {
+     method = GET,
+     path = "/organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/subnets/{subnet_name}/ips",
+ }]
+async fn subnets_ips_get(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    query_params: Query<PaginatedByName>,
+    path_params: Path<VpcSubnetPathParam>,
+) -> Result<HttpResponseOk<ResultsPage<NetworkInterface>>, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let query = query_params.into_inner();
+    let path = path_params.into_inner();
+    let handler = async {
+        let interfaces = nexus
+            .subnet_list_network_interfaces(
+                &path.organization_name,
+                &path.project_name,
+                &path.vpc_name,
+                &path.subnet_name,
+                &data_page_params_for(&rqctx, &query)?
+                    .map_name(|n| Name::ref_cast(n)),
+            )
+            .await?
+            .into_iter()
+            .map(|interfaces| interfaces.into())
+            .collect();
+        Ok(HttpResponseOk(ScanByName::results_page(&query, interfaces)?))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
 /*
  * VPC Firewalls
  */
@@ -1920,6 +1964,71 @@ async fn sagas_get_saga(
     let handler = async {
         let saga = nexus.saga_get(path.saga_id).await?;
         Ok(HttpResponseOk(saga))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/*
+ * Built-in (system) users
+ */
+
+/**
+ * List the built-in system users
+ */
+#[endpoint {
+    method = GET,
+    path = "/users",
+}]
+async fn users_get(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    query_params: Query<PaginatedByName>,
+) -> Result<HttpResponseOk<ResultsPage<User>>, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let query = query_params.into_inner();
+    let pagparams =
+        data_page_params_for(&rqctx, &query)?.map_name(|n| Name::ref_cast(n));
+    let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let users = nexus
+            .users_builtin_list(&opctx, &pagparams)
+            .await?
+            .into_iter()
+            .map(|i| i.into())
+            .collect();
+        Ok(HttpResponseOk(ScanByName::results_page(&query, users)?))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/**
+ * Path parameters for global (system) user requests
+ */
+#[derive(Deserialize, JsonSchema)]
+struct UserPathParam {
+    /// The built-in user's unique name.
+    user_name: Name,
+}
+
+/**
+ * Fetch a specific built-in system user
+ */
+#[endpoint {
+    method = GET,
+    path = "/users/{user_name}",
+}]
+async fn users_get_user(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    path_params: Path<UserPathParam>,
+) -> Result<HttpResponseOk<User>, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let path = path_params.into_inner();
+    let user_name = &path.user_name;
+    let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let user = nexus.user_builtin_fetch(&opctx, &user_name).await?;
+        Ok(HttpResponseOk(user.into()))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }

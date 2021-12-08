@@ -9,7 +9,8 @@ use crate::db::identity::{Asset, Resource};
 use crate::db::schema::{
     console_session, dataset, disk, instance, metric_producer,
     network_interface, organization, oximeter, project, rack, region,
-    router_route, sled, vpc, vpc_firewall_rule, vpc_router, vpc_subnet, zpool,
+    router_route, sled, user_builtin, vpc, vpc_firewall_rule, vpc_router,
+    vpc_subnet, zpool,
 };
 use crate::external_api::params;
 use crate::internal_api;
@@ -1758,7 +1759,7 @@ impl IncompleteNetworkInterface {
     pub fn new(
         interface_id: Uuid,
         instance_id: Uuid,
-        vpc_id: uuid::Uuid,
+        vpc_id: Uuid,
         subnet: VpcSubnet,
         mac: MacAddr,
         ip: Option<std::net::IpAddr>,
@@ -1812,5 +1813,20 @@ impl ConsoleSession {
     pub fn new(token: String, user_id: Uuid) -> Self {
         let now = Utc::now();
         Self { token, user_id, time_last_used: now, time_created: now }
+    }
+}
+
+/// Describes a built-in user, as stored in the database
+#[derive(Queryable, Insertable, Debug, Resource, Selectable)]
+#[table_name = "user_builtin"]
+pub struct UserBuiltin {
+    #[diesel(embed)]
+    identity: UserBuiltinIdentity,
+}
+
+impl UserBuiltin {
+    /// Creates a new database UserBuiltin object.
+    pub fn new(id: Uuid, params: params::UserBuiltinCreate) -> Self {
+        Self { identity: UserBuiltinIdentity::new(id, params.identity) }
     }
 }

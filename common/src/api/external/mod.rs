@@ -484,6 +484,7 @@ pub enum ResourceType {
     RouterRoute,
     Oximeter,
     MetricProducer,
+    User,
     Zpool,
 }
 
@@ -510,6 +511,7 @@ impl Display for ResourceType {
                 ResourceType::RouterRoute => "vpc router route",
                 ResourceType::Oximeter => "oximeter",
                 ResourceType::MetricProducer => "metric producer",
+                ResourceType::User => "user",
                 ResourceType::Zpool => "zpool",
             }
         )
@@ -1829,7 +1831,7 @@ impl JsonSchema for MacAddr {
 }
 
 /// A `NetworkInterface` represents a virtual network interface device.
-#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize)]
+#[derive(ObjectIdentity, Clone, Debug, Deserialize, JsonSchema, Serialize)]
 pub struct NetworkInterface {
     /** common identifying metadata */
     pub identity: IdentityMetadata,

@@ -27,16 +27,21 @@ use super::collection_insert::{
 };
 use super::error::diesel_pool_result_optional;
 use super::identity::{Asset, Resource};
+use super::pool::DbConnection;
 use super::Pool;
+use crate::authn;
 use crate::authz;
 use crate::context::OpContext;
-use async_bb8_diesel::{AsyncConnection, AsyncRunQueryDsl, ConnectionManager};
+use crate::external_api::params;
+use async_bb8_diesel::{
+    AsyncConnection, AsyncRunQueryDsl, ConnectionError, ConnectionManager,
+    PoolError,
+};
 use chrono::Utc;
 use diesel::prelude::*;
 use diesel::upsert::excluded;
 use diesel::{ExpressionMethods, QueryDsl, SelectableHelper};
 use omicron_common::api;
-use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::DeleteResult;
 use omicron_common::api::external::Error;
@@ -46,6 +51,9 @@ use omicron_common::api::external::LookupType;
 use omicron_common::api::external::MacAddr;
 use omicron_common::api::external::ResourceType;
 use omicron_common::api::external::UpdateResult;
+use omicron_common::api::external::{
+    CreateResult, IdentityMetadataCreateParams,
+};
 use omicron_common::bail_unless;
 use rand::{rngs::StdRng, SeedableRng};
 use std::collections::HashMap;
@@ -57,13 +65,14 @@ use crate::db::{
     self,
     error::{
         public_error_from_diesel_pool, public_error_from_diesel_pool_create,
+        public_error_from_diesel_pool_shouldnt_fail,
     },
     model::{
         ConsoleSession, Dataset, Disk, DiskAttachment, DiskRuntimeState,
         Generation, IncompleteNetworkInterface, Instance, InstanceRuntimeState,
         Name, NetworkInterface, Organization, OrganizationUpdate, OximeterInfo,
         ProducerEndpoint, Project, ProjectUpdate, RouterRoute,
-        RouterRouteUpdate, Sled, Vpc, VpcFirewallRule, VpcRouter,
+        RouterRouteUpdate, Sled, UserBuiltin, Vpc, VpcFirewallRule, VpcRouter,
         VpcRouterUpdate, VpcSubnet, VpcSubnetUpdate, VpcUpdate, Zpool,
     },
     pagination::paginated,
@@ -85,15 +94,14 @@ impl DataStore {
     // the database.  Eventually, this function should only be used for doing
     // authentication in the first place (since we can't do an authz check in
     // that case).
-    fn pool(&self) -> &bb8::Pool<ConnectionManager<diesel::PgConnection>> {
+    fn pool(&self) -> &bb8::Pool<ConnectionManager<DbConnection>> {
         self.pool.pool()
     }
 
     fn pool_authorized(
         &self,
         opctx: &OpContext,
-    ) -> Result<&bb8::Pool<ConnectionManager<diesel::PgConnection>>, Error>
-    {
+    ) -> Result<&bb8::Pool<ConnectionManager<DbConnection>>, Error> {
         opctx.authorize(authz::Action::Query, authz::DATABASE)?;
         Ok(self.pool.pool())
     }
@@ -1198,16 +1206,17 @@ impl DataStore {
      * Generate a unique MAC address for an interface
      */
     pub fn generate_mac_address(&self) -> Result<db::model::MacAddr, Error> {
-        // Bitmasks defined in RFC7042 section 2.1
-        const LOCALLY_ADMINISTERED: u8 = 0b1;
-        const MULTICAST: u8 = 0b10;
-
-        // Generate a unique address from the locally administered space.
         use rand::Fill;
-        let mut addr = [0u8; 6];
-        addr.try_fill(&mut StdRng::from_entropy())
+        // Use the Oxide OUI A8 40 25
+        let mut addr = [0xA8, 0x40, 0x25, 0x00, 0x00, 0x00];
+        addr[3..]
+            .try_fill(&mut StdRng::from_entropy())
             .map_err(|_| Error::internal_error("failed to generate MAC"))?;
-        addr[0] = (addr[0] & !MULTICAST) | LOCALLY_ADMINISTERED;
+        // Oxide virtual MACs are constrained to have these bits set.
+        addr[3] |= 0xF0;
+        // TODO-correctness: We should use an explicit allocator for the MACs
+        // given the small address space. Right now creation requests may fail
+        // due to MAC collision, especially given the 20-bit space.
         Ok(MacAddr(macaddr::MacAddr6::from(addr)).into())
     }
 
@@ -1218,7 +1227,7 @@ impl DataStore {
         use db::schema::network_interface::dsl;
 
         let name = interface.identity.name.clone();
-        let result = match interface.ip {
+        match interface.ip {
             // Attempt an insert with a requested IP address
             Some(ip) => {
                 let row = NetworkInterface {
@@ -1234,6 +1243,13 @@ impl DataStore {
                     .returning(NetworkInterface::as_returning())
                     .get_result_async(self.pool())
                     .await
+                    .map_err(|e| {
+                        public_error_from_diesel_pool_create(
+                            e,
+                            ResourceType::NetworkInterface,
+                            name.as_str(),
+                        )
+                    })
             }
             // Insert and allocate an IP address
             None => {
@@ -1243,21 +1259,32 @@ impl DataStore {
                 let allocation_query = AllocateIpQuery {
                     block: ipnetwork::IpNetwork::V4(block.0 .0),
                     interface,
+                    now: Utc::now(),
                 };
                 diesel::insert_into(dsl::network_interface)
                     .values(allocation_query)
                     .returning(NetworkInterface::as_returning())
                     .get_result_async(self.pool())
                     .await
+                    .map_err(|e| {
+                        if let PoolError::Connection(ConnectionError::Query(
+                            diesel::result::Error::NotFound,
+                        )) = e
+                        {
+                            Error::not_found_other(
+                                ResourceType::NetworkInterface,
+                                "no available IP addresses".to_string(),
+                            )
+                        } else {
+                            public_error_from_diesel_pool_create(
+                                e,
+                                ResourceType::NetworkInterface,
+                                name.as_str(),
+                            )
+                        }
+                    })
             }
-        };
-        result.map_err(|e| {
-            public_error_from_diesel_pool_create(
-                e,
-                ResourceType::NetworkInterface,
-                name.as_str(),
-            )
-        })
+        }
     }
 
     // Create a record for a new Oximeter instance
@@ -1870,6 +1897,28 @@ impl DataStore {
         Ok(())
     }
 
+    pub async fn subnet_list_network_interfaces(
+        &self,
+        subnet_id: &Uuid,
+        pagparams: &DataPageParams<'_, Name>,
+    ) -> ListResultVec<NetworkInterface> {
+        use db::schema::network_interface::dsl;
+
+        paginated(dsl::network_interface, dsl::name, pagparams)
+            .filter(dsl::time_deleted.is_null())
+            .filter(dsl::subnet_id.eq(*subnet_id))
+            .select(NetworkInterface::as_select())
+            .load_async::<db::model::NetworkInterface>(self.pool())
+            .await
+            .map_err(|e| {
+                public_error_from_diesel_pool(
+                    e,
+                    ResourceType::NetworkInterface,
+                    LookupType::Other("Listing All".to_string()),
+                )
+            })
+    }
+
     pub async fn vpc_list_routers(
         &self,
         vpc_id: &Uuid,
@@ -2183,6 +2232,89 @@ impl DataStore {
                     e
                 ))
             })
+    }
+
+    pub async fn users_builtin_list_by_name(
+        &self,
+        opctx: &OpContext,
+        pagparams: &DataPageParams<'_, Name>,
+    ) -> ListResultVec<UserBuiltin> {
+        use db::schema::user_builtin::dsl;
+        opctx.authorize(authz::Action::ListChildren, authz::FLEET)?;
+        paginated(dsl::user_builtin, dsl::name, pagparams)
+            .select(UserBuiltin::as_select())
+            .load_async::<UserBuiltin>(self.pool_authorized(opctx)?)
+            .await
+            .map_err(|e| {
+                public_error_from_diesel_pool(
+                    e,
+                    ResourceType::User,
+                    LookupType::Other("Listing All".to_string()),
+                )
+            })
+    }
+
+    pub async fn user_builtin_fetch(
+        &self,
+        opctx: &OpContext,
+        name: &Name,
+    ) -> LookupResult<UserBuiltin> {
+        use db::schema::user_builtin::dsl;
+        opctx.authorize(authz::Action::Read, authz::FLEET.child_generic())?;
+        dsl::user_builtin
+            .filter(dsl::name.eq(name.clone()))
+            .select(UserBuiltin::as_select())
+            .first_async::<UserBuiltin>(self.pool_authorized(opctx)?)
+            .await
+            .map_err(|e| {
+                public_error_from_diesel_pool(
+                    e,
+                    ResourceType::User,
+                    LookupType::ByName(name.as_str().to_owned()),
+                )
+            })
+    }
+
+    /// Load built-in users into the database
+    pub async fn load_builtin_users(
+        &self,
+        opctx: &OpContext,
+    ) -> Result<(), Error> {
+        use db::schema::user_builtin::dsl;
+
+        opctx.authorize(authz::Action::Modify, authz::FLEET)?;
+
+        let builtin_users = [
+            // Note: "db_init" is also a builtin user, but that one by necessity
+            // is created with the database.
+            &*authn::USER_SAGA_RECOVERY,
+            &*authn::USER_TEST_PRIVILEGED,
+            &*authn::USER_TEST_UNPRIVILEGED,
+        ]
+        .iter()
+        .map(|u| {
+            UserBuiltin::new(
+                u.id,
+                params::UserBuiltinCreate {
+                    identity: IdentityMetadataCreateParams {
+                        name: u.name.clone(),
+                        description: String::from(u.description),
+                    },
+                },
+            )
+        })
+        .collect::<Vec<UserBuiltin>>();
+
+        debug!(opctx.log, "attempting to create built-in users");
+        let count = diesel::insert_into(dsl::user_builtin)
+            .values(builtin_users)
+            .on_conflict(dsl::id)
+            .do_nothing()
+            .execute_async(self.pool_authorized(opctx)?)
+            .await
+            .map_err(public_error_from_diesel_pool_shouldnt_fail)?;
+        info!(opctx.log, "created {} built-in users", count);
+        Ok(())
     }
 }
 

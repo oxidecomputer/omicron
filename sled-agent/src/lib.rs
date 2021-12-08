@@ -24,8 +24,11 @@ mod illumos;
 mod instance;
 mod instance_manager;
 mod params;
+mod running_zone;
 pub mod server;
 mod sled_agent;
+mod storage_manager;
+mod vnic;
 
 #[cfg(test)]
 mod mocks;
