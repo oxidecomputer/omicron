@@ -89,7 +89,7 @@ dependencies = [
 [[package]]
 name = "async-bb8-diesel"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/async-bb8-diesel?rev=1a5c55d#1a5c55d9e31210fd7dfff944798e89578e3a0dfc"
+source = "git+https://github.com/oxidecomputer/async-bb8-diesel?rev=22c26ef#22c26ef840075a57b18ac2eae3ead989b992773e"
 dependencies = [
  "async-trait",
  "bb8",
@@ -503,7 +503,7 @@ dependencies = [
 [[package]]
 name = "crucible"
 version = "0.0.1"
-source = "git+https://github.com/oxidecomputer/crucible?branch=main#4f02540ab2557ad75e9f170d362dc889eefe1d1b"
+source = "git+https://github.com/oxidecomputer/crucible?branch=main#cda0bf8b0fd8e53566d1918b4d14824103a1d410"
 dependencies = [
  "aes",
  "aes-gcm-siv",
@@ -533,7 +533,7 @@ dependencies = [
 [[package]]
 name = "crucible-common"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/crucible?branch=main#4f02540ab2557ad75e9f170d362dc889eefe1d1b"
+source = "git+https://github.com/oxidecomputer/crucible?branch=main#cda0bf8b0fd8e53566d1918b4d14824103a1d410"
 dependencies = [
  "anyhow",
  "serde",
@@ -547,7 +547,7 @@ dependencies = [
 [[package]]
 name = "crucible-protocol"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/crucible?branch=main#4f02540ab2557ad75e9f170d362dc889eefe1d1b"
+source = "git+https://github.com/oxidecomputer/crucible?branch=main#cda0bf8b0fd8e53566d1918b4d14824103a1d410"
 dependencies = [
  "anyhow",
  "bincode",
@@ -561,7 +561,7 @@ dependencies = [
 [[package]]
 name = "crucible-scope"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/crucible?branch=main#4f02540ab2557ad75e9f170d362dc889eefe1d1b"
+source = "git+https://github.com/oxidecomputer/crucible?branch=main#cda0bf8b0fd8e53566d1918b4d14824103a1d410"
 dependencies = [
  "anyhow",
  "futures",
@@ -647,9 +647,9 @@ dependencies = [
 
 [[package]]
 name = "darling"
-version = "0.13.1"
+version = "0.13.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d0d720b8683f8dd83c65155f0530560cba68cd2bf395f6513a483caee57ff7f4"
+checksum = "757c0ded2af11d8e739c4daea1ac623dd1624b06c844cf3f5a39f1bdbd99bb12"
 dependencies = [
  "darling_core",
  "darling_macro",
@@ -657,9 +657,9 @@ dependencies = [
 
 [[package]]
 name = "darling_core"
-version = "0.13.1"
+version = "0.13.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7a340f241d2ceed1deb47ae36c4144b2707ec7dd0b649f894cb39bb595986324"
+checksum = "2c34d8efb62d0c2d7f60ece80f75e5c63c1588ba68032740494b0b9a996466e3"
 dependencies = [
  "fnv",
  "ident_case",
@@ -671,9 +671,9 @@ dependencies = [
 
 [[package]]
 name = "darling_macro"
-version = "0.13.1"
+version = "0.13.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "72c41b3b7352feb3211a0d743dc5700a4e3b60f51bd2b368892d1e0f9a95f44b"
+checksum = "ade7bff147130fe5e6d39f089c6bd49ec0250f35d70b2eebf72afdfc919f15cc"
 dependencies = [
  "darling_core",
  "quote",
@@ -691,9 +691,9 @@ dependencies = [
 
 [[package]]
 name = "der"
-version = "0.4.5"
+version = "0.4.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "79b71cca7d95d7681a4b3b9cdf63c8dbc3730d0584c2c74e31416d64a90493f4"
+checksum = "28e98c534e9c8a0483aa01d6f6913bc063de254311bd267c9cf535e9b70e15b2"
 dependencies = [
  "const-oid",
 ]
@@ -712,7 +712,7 @@ dependencies = [
 [[package]]
 name = "diesel"
 version = "2.0.0"
-source = "git+https://github.com/diesel-rs/diesel?rev=a39dd2e#a39dd2ebc5acccb8cde73d40b0d81dde3e073170"
+source = "git+https://github.com/diesel-rs/diesel?rev=ce77c382#ce77c382d2836f6b385225991cf58cb2d2dd65d6"
 dependencies = [
  "bitflags",
  "byteorder",
@@ -728,9 +728,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "diesel-dtrace"
+version = "0.1.0"
+source = "git+https://github.com/oxidecomputer/diesel-dtrace?branch=main#dfeff3201eb8180220542b29021f0b5f71e50b46"
+dependencies = [
+ "diesel",
+ "usdt",
+]
+
+[[package]]
 name = "diesel_derives"
 version = "2.0.0"
-source = "git+https://github.com/diesel-rs/diesel?rev=a39dd2e#a39dd2ebc5acccb8cde73d40b0d81dde3e073170"
+source = "git+https://github.com/diesel-rs/diesel?rev=ce77c382#ce77c382d2836f6b385225991cf58cb2d2dd65d6"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -822,7 +831,7 @@ checksum = "4bb454f0228b18c7f4c3b0ebbee346ed9c52e7443b0999cd543ff3571205701d"
 [[package]]
 name = "dropshot"
 version = "0.6.1-dev"
-source = "git+https://github.com/oxidecomputer/dropshot?branch=main#56f60da71be392de46dd576e9564ac1b5428dd5c"
+source = "git+https://github.com/oxidecomputer/dropshot?branch=main#ff33033ad3d7fcf32caa352d76fc243bd20db176"
 dependencies = [
  "async-trait",
  "base64",
@@ -857,7 +866,7 @@ dependencies = [
 [[package]]
 name = "dropshot_endpoint"
 version = "0.6.1-dev"
-source = "git+https://github.com/oxidecomputer/dropshot?branch=main#56f60da71be392de46dd576e9564ac1b5428dd5c"
+source = "git+https://github.com/oxidecomputer/dropshot?branch=main#ff33033ad3d7fcf32caa352d76fc243bd20db176"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -934,9 +943,9 @@ dependencies = [
 
 [[package]]
 name = "encoding_rs"
-version = "0.8.30"
+version = "0.8.29"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7896dc8abb250ffdda33912550faa54c88ec8b998dec0b2c55ab224921ce11df"
+checksum = "a74ea89a0a1b98f6332de42c95baff457ada66d1cb4030f9ff151b2041a1c746"
 dependencies = [
  "cfg-if",
 ]
@@ -1457,9 +1466,9 @@ dependencies = [
 
 [[package]]
 name = "itertools"
-version = "0.10.3"
+version = "0.10.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a9a9d19fa1e79b6215ff29b9d6880b706147f16e9b1dbb1e4e5947b5b02bc5e3"
+checksum = "69ddb889f9d0d08a67338271fa9b62996bc788c7796a5c18cf057420aaed5eaf"
 dependencies = [
  "either",
 ]
@@ -1601,9 +1610,9 @@ checksum = "308cc39be01b73d0d18f82a0e7b2a3df85245f84af96fdddc5d202d27e47b86a"
 
 [[package]]
 name = "memoffset"
-version = "0.6.5"
+version = "0.6.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5aa361d4faea93603064a027415f07bd8e1d5c88c9fbf68bf56a285428fd79ce"
+checksum = "59accc507f1338036a0477ef61afdae33cde60840f4dfe481319ce3ad116ddf9"
 dependencies = [
  "autocfg",
 ]
@@ -1868,6 +1877,7 @@ dependencies = [
  "criterion",
  "db-macros",
  "diesel",
+ "diesel-dtrace",
  "dropshot",
  "expectorate",
  "futures",
@@ -1904,6 +1914,7 @@ dependencies = [
  "serde_with",
  "sled-agent-client",
  "slog",
+ "slog-dtrace",
  "steno",
  "structopt",
  "subprocess",
@@ -1911,6 +1922,7 @@ dependencies = [
  "tokio",
  "tokio-postgres",
  "toml",
+ "usdt",
  "uuid",
 ]
 
@@ -1970,6 +1982,7 @@ dependencies = [
  "serial_test",
  "slog",
  "slog-async",
+ "slog-dtrace",
  "slog-term",
  "smf",
  "socket2",
@@ -2171,6 +2184,7 @@ dependencies = [
  "serde",
  "serde_json",
  "slog",
+ "slog-dtrace",
  "structopt",
  "subprocess",
  "thiserror",
@@ -2239,6 +2253,7 @@ dependencies = [
  "schemars",
  "serde",
  "slog",
+ "slog-dtrace",
  "thiserror",
  "tokio",
  "uuid",
@@ -2452,9 +2467,9 @@ dependencies = [
 
 [[package]]
 name = "pkg-config"
-version = "0.3.23"
+version = "0.3.22"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d1a3ea4f0dd7f1f3e512cf97bf100819aa547f36a6eccac8dbaae839eb92363e"
+checksum = "12295df4f294471248581bc09bef3c38a5e46f1e36d6a37353621a0c6c357e1f"
 
 [[package]]
 name = "plotters"
@@ -3041,9 +3056,9 @@ dependencies = [
 
 [[package]]
 name = "rustversion"
-version = "1.0.6"
+version = "1.0.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f2cc38e8fa666e2de3c4aba7edeb5ffc5246c1c2ed0e3d17e560aeeba736b23f"
+checksum = "61b3909d758bb75c79f23d4736fac9433868679d3ad2ea7a61e3c25cfda9a088"
 
 [[package]]
 name = "ryu"
@@ -3396,9 +3411,9 @@ dependencies = [
 
 [[package]]
 name = "signal-hook"
-version = "0.3.12"
+version = "0.3.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c35dfd12afb7828318348b8c408383cf5071a086c1d4ab1c0f9840ec92dbb922"
+checksum = "9c98891d737e271a2954825ef19e46bd16bdb98e2746f2eec4f7a4ef7946efd1"
 dependencies = [
  "libc",
  "signal-hook-registry",
@@ -3491,6 +3506,19 @@ dependencies = [
  "hostname",
  "slog",
  "slog-json",
+]
+
+[[package]]
+name = "slog-dtrace"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c4ec6883908a7f628be97d107387c45de771d8a2fa8af147337ec38549f93cdd"
+dependencies = [
+ "chrono",
+ "serde",
+ "serde_json",
+ "slog",
+ "usdt",
 ]
 
 [[package]]
@@ -4186,7 +4214,7 @@ checksum = "b63708a265f51345575b27fe43f9500ad611579e764c79edbc2037b1121959ec"
 [[package]]
 name = "typify"
 version = "0.0.6-dev"
-source = "git+https://github.com/oxidecomputer/typify#80b510b02b1db22de463efcf6e7762243bcea67a"
+source = "git+https://github.com/oxidecomputer/typify#5132e748f91311aadd56011b97f51c4f32373985"
 dependencies = [
  "typify-impl",
  "typify-macro",
@@ -4195,7 +4223,7 @@ dependencies = [
 [[package]]
 name = "typify-impl"
 version = "0.0.6-dev"
-source = "git+https://github.com/oxidecomputer/typify#80b510b02b1db22de463efcf6e7762243bcea67a"
+source = "git+https://github.com/oxidecomputer/typify#5132e748f91311aadd56011b97f51c4f32373985"
 dependencies = [
  "convert_case",
  "proc-macro2",
@@ -4210,7 +4238,7 @@ dependencies = [
 [[package]]
 name = "typify-macro"
 version = "0.0.6-dev"
-source = "git+https://github.com/oxidecomputer/typify#80b510b02b1db22de463efcf6e7762243bcea67a"
+source = "git+https://github.com/oxidecomputer/typify#5132e748f91311aadd56011b97f51c4f32373985"
 dependencies = [
  "proc-macro2",
  "quote",
