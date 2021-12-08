@@ -7,9 +7,8 @@ use http::header::HeaderName;
 use http::{header, method::Method, StatusCode};
 use std::env::current_dir;
 
-pub mod common;
-use common::http_testing::{RequestBuilder, TestResponse};
-use common::{load_test_config, test_setup, test_setup_with_config};
+use nexus_test_utils::http_testing::{RequestBuilder, TestResponse};
+use nexus_test_utils::{load_test_config, test_setup, test_setup_with_config};
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_nexus::external_api::console_api::LoginParams;
 use omicron_nexus::external_api::params::OrganizationCreate;

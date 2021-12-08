@@ -3,13 +3,12 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 //! Basic end-to-end tests for authorization
-use common::http_testing::RequestBuilder;
 use dropshot::HttpErrorResponseBody;
+use nexus_test_utils::http_testing::RequestBuilder;
 
-pub mod common;
-use common::test_setup;
 use http::method::Method;
 use http::StatusCode;
+use nexus_test_utils::test_setup;
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_nexus::authn::external::spoof::HTTP_HEADER_OXIDE_AUTHN_SPOOF;
 use omicron_nexus::external_api::params;
