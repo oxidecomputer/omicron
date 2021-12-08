@@ -152,7 +152,7 @@ function do_curl_authn
 		do_curl "$@"
 	else
 		do_curl "$@" \
-			-H "oxide-authn-spoof: 001de000-05e4-0000-0000-000000004007"
+			-H "oxide-authn-spoof: 001de000-05e4-4000-8000-000000004007"
 	fi
 }
 
