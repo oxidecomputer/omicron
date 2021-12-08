@@ -1808,6 +1808,7 @@ dependencies = [
  "serde_with",
  "sled-agent-client",
  "slog",
+ "slog-dtrace",
  "steno",
  "structopt",
  "subprocess",
@@ -1875,6 +1876,7 @@ dependencies = [
  "serial_test",
  "slog",
  "slog-async",
+ "slog-dtrace",
  "slog-term",
  "smf",
  "socket2",
@@ -2070,6 +2072,7 @@ dependencies = [
  "serde",
  "serde_json",
  "slog",
+ "slog-dtrace",
  "structopt",
  "subprocess",
  "thiserror",
@@ -2138,6 +2141,7 @@ dependencies = [
  "schemars",
  "serde",
  "slog",
+ "slog-dtrace",
  "thiserror",
  "tokio",
  "uuid",
@@ -3341,6 +3345,19 @@ dependencies = [
  "hostname",
  "slog",
  "slog-json",
+]
+
+[[package]]
+name = "slog-dtrace"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c4ec6883908a7f628be97d107387c45de771d8a2fa8af147337ec38549f93cdd"
+dependencies = [
+ "chrono",
+ "serde",
+ "serde_json",
+ "slog",
+ "usdt",
 ]
 
 [[package]]
