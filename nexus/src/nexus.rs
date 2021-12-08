@@ -1799,7 +1799,9 @@ impl Nexus {
                     external::VpcFirewallRuleTarget::Vpc(name) => {
                         if *name != vpc.name().0 {
                             return Err(Error::InvalidRequest {
-                                message: "firewall target ".to_string(),
+                                message:
+                                    "cross-vpc firewall target unsupported"
+                                        .to_string(),
                             });
                         }
                         vpcs.insert(name.clone().into());
@@ -1817,19 +1819,23 @@ impl Nexus {
                     }
                     // We don't need to resolve anything for Ip
                     external::VpcFirewallRuleHostFilter::Ip(_) => (),
-                    // TODO: How do we resolve VPC targets?
                     external::VpcFirewallRuleHostFilter::Vpc(name) => {
                         if *name != vpc.name().0 {
                             return Err(Error::InvalidRequest {
-                                message: "firewall target ".to_string(),
+                                message:
+                                    "cross-vpc firewall target unsupported"
+                                        .to_string(),
                             });
                         }
                         vpcs.insert(name.clone().into());
                     }
                     // TODO: How do we resolve InternetGateway targets?
-                    external::VpcFirewallRuleHostFilter::InternetGateway(
-                        name,
-                    ) => (),
+                    external::VpcFirewallRuleHostFilter::InternetGateway(_) => {
+                        return Err(Error::InvalidRequest {
+                            message: "inetgw firewall host filters unsupported"
+                                .to_string(),
+                        });
+                    }
                 }
             }
         }
@@ -1971,9 +1977,7 @@ impl Nexus {
                                 }
                             }
                             // TODO: How do we resolve InternetGateway targets?
-                            external::VpcFirewallRuleHostFilter::InternetGateway(
-                                _name,
-                            ) => (),
+                            external::VpcFirewallRuleHostFilter::InternetGateway(_) => (),
                         }
                     }
                     Some(host_addrs)
