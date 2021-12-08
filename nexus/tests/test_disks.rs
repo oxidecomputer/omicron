@@ -87,9 +87,7 @@ async fn test_disks() {
         snapshot_id: None,
         size: ByteCount::from_gibibytes_u32(1),
     };
-    println!("POSTING A DISK");
     let disk: Disk = objects_post(&client, &url_disks, new_disk.clone()).await;
-    println!("POSTED A DISK");
     assert_eq!(disk.identity.name, "just-rainsticks");
     assert_eq!(disk.identity.description, "sells rainsticks");
     assert_eq!(disk.project_id, project.identity.id);
