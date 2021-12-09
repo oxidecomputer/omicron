@@ -8,6 +8,11 @@ use omicron_test_utils::dev::{test_setup_database_seed, SEED_DB_DIR};
 // Creates a "pre-populated" CockroachDB storage directory, which
 // subsequent tests can copy instead of creating themselves.
 //
+// Is it critical this happens at build-time? No. However, it
+// makes it more convenient for tests to assume this seeded
+// directory exists, rather than all attempting to create it
+// concurrently.
+//
 // Refer to the documentation of [`test_setup_database_seed`] for
 // more context.
 #[tokio::main]
