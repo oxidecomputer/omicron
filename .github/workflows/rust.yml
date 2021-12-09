@@ -117,7 +117,7 @@ jobs:
       #   also gives us a record of which dependencies were used for each CI
       #   run.  Building with `--locked` ensures that the checked-in Cargo.lock
       #   is up to date.
-      run: RUSTFLAGS="-D warnings" RUSTDOCFLAGS="-D warnings" cargo +${{ matrix.toolchain }} build --locked --all-targets --verbose
+      run: PATH="$PATH:$PWD/cockroachdb/bin:$PWD/clickhouse" RUSTFLAGS="-D warnings" RUSTDOCFLAGS="-D warnings" cargo +${{ matrix.toolchain }} build --locked --all-targets --verbose
     - name: Run tests
       # Use the same RUSTFLAGS and RUSTDOCFLAGS as above to avoid having to
       # rebuild here.
