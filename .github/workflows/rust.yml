@@ -32,6 +32,22 @@ jobs:
     - name: Check style
       run: cargo fmt -- --check
 
+  check-omicron-deployment:
+    needs: skip_duplicate_jobs
+    if: ${{ needs.skip_duplicate_jobs.outputs.should_skip != 'true' }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ ubuntu-18.04, macos-11 ]
+    steps:
+    # actions/checkout@v2
+    - uses: actions/checkout@28c7f3d2b5162b5ddd3dfd9a45aa55eaf396478b
+    - name: Report cargo version
+      run: cargo --version
+    - name: Check build of deployed Omicron packages
+      run: cargo run --bin omicron-package -- check
+
   clippy-lint:
     needs: skip_duplicate_jobs
     if: ${{ needs.skip_duplicate_jobs.outputs.should_skip != 'true' }}
@@ -73,19 +89,11 @@ jobs:
       fail-fast: false
       matrix:
         os: [ ubuntu-18.04, macos-11 ]
-        # See rust-toolchain for why we're using nightly here.
-        toolchain: [ nightly-2021-11-24 ]
     steps:
     # actions/checkout@v2
     - uses: actions/checkout@28c7f3d2b5162b5ddd3dfd9a45aa55eaf396478b
-    - name: Install Toolchain
-    # actions-rs/toolchain@v1.0.6
-      uses: actions-rs/toolchain@b2417cde72dcf67f306c0ae8e0828a81bf0b189f
-      with:
-          toolchain: ${{ matrix.toolchain }}
-          override: true
     - name: Report cargo version
-      run: cargo +${{ matrix.toolchain }} --version
+      run: cargo --version
     - name: Configure GitHub cache for CockroachDB binaries
       id: cache-cockroachdb
       # actions/cache@v2.1.4
@@ -117,10 +125,10 @@ jobs:
       #   also gives us a record of which dependencies were used for each CI
       #   run.  Building with `--locked` ensures that the checked-in Cargo.lock
       #   is up to date.
-      run: PATH="$PATH:$PWD/cockroachdb/bin:$PWD/clickhouse" RUSTFLAGS="-D warnings" RUSTDOCFLAGS="-D warnings" cargo +${{ matrix.toolchain }} build --locked --all-targets --verbose
+      run: PATH="$PATH:$PWD/cockroachdb/bin:$PWD/clickhouse" RUSTFLAGS="-D warnings" RUSTDOCFLAGS="-D warnings" cargo build --locked --all-targets --verbose
     - name: Run tests
       # Use the same RUSTFLAGS and RUSTDOCFLAGS as above to avoid having to
       # rebuild here.
       # Put "./cockroachdb/bin" and "./clickhouse" on the PATH for the test
       # suite.
-      run: PATH="$PATH:$PWD/cockroachdb/bin:$PWD/clickhouse" RUSTFLAGS="-D warnings" RUSTDOCFLAGS="-D warnings" cargo +${{ matrix.toolchain }} test --workspace --locked --verbose
+      run: PATH="$PATH:$PWD/cockroachdb/bin:$PWD/clickhouse" RUSTFLAGS="-D warnings" RUSTDOCFLAGS="-D warnings" cargo test --workspace --locked --verbose
