@@ -1,0 +1,42 @@
+# This manifest describes the servers that omicron will be installed to, along
+# with any ancillary information specific to a given server.
+#
+# It is ingested by the `thing-flinger` tool.
+
+# This must be an absolute path
+local_source = "/Users/ajs/oxide/omicron"
+
+[builder]
+# `server` must refer to one of the `servers` in the servers table
+server = "atrium"
+omicron_path = "/home/andrew/oxide/omicron"
+git_treeish = "thing-flinger"
+
+[deployment]
+servers = ["sock", "buskin"]
+rack_secret_threshold = 2
+
+# Location where files to install will be placed before running
+# `omicron-package install`
+#
+# Since usernames may vary per server, this directory is relative to the user's
+# home directory.
+staging_dir = "omicron_staging"
+
+[servers.tarz]
+username = "ajs"
+addr = "tarz.local"
+
+[servers.atrium]
+username = "andrew"
+addr = "atrium.eng.oxide.computer"
+
+[servers.sock]
+username = "andrew"
+addr = "sock.eng.oxide.computer"
+
+[servers.buskin]
+username = "andrew"
+addr = "buskin.eng.oxide.computer"
+
+
