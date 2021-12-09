@@ -17,7 +17,7 @@ use dropshot::ConfigLogging;
 use dropshot::ConfigLoggingIfExists;
 use dropshot::ConfigLoggingLevel;
 use slog::Logger;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 /// Path to the "seed" CockroachDB directory.
 ///
@@ -27,7 +27,9 @@ use std::path::Path;
 /// By creating a "seed" version of the database, we can cut down
 /// on the time spent performing this operation. Instead, we opt
 /// to copy the database from this seed location.
-pub const SEED_DB_DIR: &str = "/tmp/crdb-base";
+fn seed_dir() -> PathBuf {
+    std::env::temp_dir().join("crdb-base")
+}
 
 // Helper for copying all the files in one directory to another.
 fn copy_dir(
@@ -74,10 +76,10 @@ enum StorageSource {
 /// This is intended to optimize subsequent calls to [`test_setup_database`]
 /// by reducing the latency of populating the storage directory.
 pub async fn test_setup_database_seed(log: &Logger) {
-    let _ = std::fs::remove_dir_all(SEED_DB_DIR);
-    std::fs::create_dir_all(SEED_DB_DIR).unwrap();
-    let mut db =
-        setup_database(log, Some(SEED_DB_DIR), StorageSource::Populate).await;
+    let dir = seed_dir();
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let mut db = setup_database(log, Some(&dir), StorageSource::Populate).await;
     db.cleanup().await.unwrap();
 }
 
@@ -88,7 +90,7 @@ pub async fn test_setup_database(log: &Logger) -> db::CockroachInstance {
 
 async fn setup_database(
     log: &Logger,
-    store_dir: Option<&str>,
+    store_dir: Option<&Path>,
     storage_source: StorageSource,
 ) -> db::CockroachInstance {
     let builder = db::CockroachStarterBuilder::new();
@@ -109,7 +111,7 @@ async fn setup_database(
     // it is critical we do so before starting the DB.
     if matches!(storage_source, StorageSource::CopyFromSeed) {
         info!(&log, "cockroach: copying from seed directory");
-        copy_dir(SEED_DB_DIR, starter.store_dir())
+        copy_dir(seed_dir(), starter.store_dir())
             .expect("Cannot copy storage from seed directory");
     }
 
