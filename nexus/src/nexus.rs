@@ -647,7 +647,7 @@ impl Nexus {
     }
 
     pub async fn project_create_disk(
-        &self,
+        self: &Arc<Self>,
         organization_name: &Name,
         project_name: &Name,
         params: &params::DiskCreate,
@@ -666,37 +666,21 @@ impl Nexus {
             });
         }
 
-        let disk_id = Uuid::new_v4();
-        let disk = db::model::Disk::new(
-            disk_id,
-            project.id(),
-            params.clone(),
-            db::model::DiskRuntimeState::new(),
-        );
-        let disk_created = self.db_datastore.project_create_disk(disk).await?;
+        let saga_params = Arc::new(sagas::ParamsDiskCreate {
+            project_id: project.id(),
+            create_params: params.clone(),
+        });
 
-        // TODO: Here, we should ensure the disk is backed by appropriate
-        // regions. This is blocked behind actually having Crucible agents
-        // running in zones for dedicated zpools.
-        //
-        // TODO: Performing this operation, alongside "create" and "update
-        // state from create to detach", should be executed in a Saga.
-
-        /*
-         * This is a little hokey.  We'd like to simulate an asynchronous
-         * transition from "Creating" to "Detached".  For instances, the
-         * simulation lives in a simulated sled agent.  Here, the analog might
-         * be a simulated storage control plane.  But that doesn't exist yet,
-         * and we don't even know what APIs it would provide yet.  So we just
-         * carry out the simplest possible "simulation" here: we'll return to
-         * the client a structure describing a disk in state "Creating", but by
-         * the time we do so, we've already updated the internal representation
-         * to "Created".
-         */
-        self.db_datastore
-            .disk_update_runtime(&disk_id, &disk_created.runtime().detach())
+        let saga_outputs = self
+            .execute_saga(
+                Arc::clone(&sagas::SAGA_DISK_CREATE_TEMPLATE),
+                sagas::SAGA_DISK_CREATE_NAME,
+                saga_params,
+            )
             .await?;
-
+        let disk_created = saga_outputs.lookup_output::<db::model::Disk>("created_disk").map_err(|e| {
+            Error::InternalError { internal_message: e.to_string() }
+        })?;
         Ok(disk_created)
     }
 

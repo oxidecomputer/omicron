@@ -39,9 +39,12 @@ use uuid::Uuid;
  * We'll need a richer mechanism for registering sagas, but this works for now.
  */
 pub const SAGA_INSTANCE_CREATE_NAME: &'static str = "instance-create";
+pub const SAGA_DISK_CREATE_NAME: &'static str = "disk-create";
 lazy_static! {
     pub static ref SAGA_INSTANCE_CREATE_TEMPLATE: Arc<SagaTemplate<SagaInstanceCreate>> =
         Arc::new(saga_instance_create());
+    pub static ref SAGA_DISK_CREATE_TEMPLATE: Arc<SagaTemplate<SagaDiskCreate>> =
+        Arc::new(saga_disk_create());
 }
 
 lazy_static! {
@@ -51,11 +54,18 @@ lazy_static! {
 
 fn all_templates(
 ) -> BTreeMap<&'static str, Arc<dyn SagaTemplateGeneric<Arc<SagaContext>>>> {
-    vec![(
-        SAGA_INSTANCE_CREATE_NAME,
-        Arc::clone(&SAGA_INSTANCE_CREATE_TEMPLATE)
-            as Arc<dyn SagaTemplateGeneric<Arc<SagaContext>>>,
-    )]
+    vec![
+        (
+            SAGA_INSTANCE_CREATE_NAME,
+            Arc::clone(&SAGA_INSTANCE_CREATE_TEMPLATE)
+                as Arc<dyn SagaTemplateGeneric<Arc<SagaContext>>>,
+        ),
+        (
+            SAGA_DISK_CREATE_NAME,
+            Arc::clone(&SAGA_DISK_CREATE_TEMPLATE)
+                as Arc<dyn SagaTemplateGeneric<Arc<SagaContext>>>,
+        ),
+    ]
     .into_iter()
     .collect()
 }
@@ -222,4 +232,124 @@ async fn sic_instance_ensure(
         .await
         .map(|_| ())
         .map_err(ActionError::action_failed)
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+pub struct ParamsDiskCreate {
+    pub project_id: Uuid,
+    pub create_params: params::DiskCreate,
+}
+
+#[derive(Debug)]
+pub struct SagaDiskCreate;
+impl SagaType for SagaDiskCreate {
+    type SagaParamsType = Arc<ParamsDiskCreate>;
+    type ExecContextType = Arc<SagaContext>;
+}
+
+pub fn saga_disk_create() -> SagaTemplate<SagaDiskCreate> {
+    let mut template_builder = SagaTemplateBuilder::new();
+
+    template_builder.append(
+        "disk_id",
+        "GenerateDiskId",
+        new_action_noop_undo(sdc_generate_uuid),
+    );
+
+    template_builder.append(
+        "created_disk",
+        "CreateDiskRecord",
+        // TODO: Needs undo action.
+        new_action_noop_undo(sdc_create_disk_record),
+    );
+
+    template_builder.append(
+        "datasets_and_regions",
+        "AllocRegions",
+        // TODO: Needs undo action.
+        new_action_noop_undo(sdc_alloc_regions),
+    );
+
+    template_builder.append(
+        "regions_ensure",
+        "RegionsEnsure",
+        // TODO: Needs undo action.
+        new_action_noop_undo(sdc_regions_ensure),
+    );
+
+    template_builder.append(
+        "disk_runtime",
+        "FinalizeDiskRecord",
+        // TODO: Needs undo action.
+        new_action_noop_undo(sdc_finalize_disk_record),
+    );
+
+    template_builder.build()
+}
+
+async fn sdc_generate_uuid(
+    _: ActionContext<SagaDiskCreate>,
+) -> Result<Uuid, ActionError> {
+    Ok(Uuid::new_v4())
+}
+
+async fn sdc_create_disk_record(
+    sagactx: ActionContext<SagaDiskCreate>,
+) -> Result<db::model::Disk, ActionError> {
+    let osagactx = sagactx.user_data();
+    let params = sagactx.saga_params();
+
+    let disk_id = sagactx.lookup::<Uuid>("disk_id")?;
+    let disk = db::model::Disk::new(
+        disk_id,
+        params.project_id,
+        params.create_params.clone(),
+        db::model::DiskRuntimeState::new(),
+    );
+    let disk_created = osagactx.datastore()
+        .project_create_disk(disk)
+        .await
+        .map_err(ActionError::action_failed)?;
+    Ok(disk_created)
+}
+
+async fn sdc_alloc_regions(
+    sagactx: ActionContext<SagaDiskCreate>,
+) -> Result<(), ActionError> {
+    let _osagactx = sagactx.user_data();
+    let _params = sagactx.saga_params();
+    // TODO: Here, we should ensure the disk is backed by appropriate
+    // regions. This is blocked behind actually having Crucible agents
+    // running in zones for dedicated zpools.
+    //
+    // TODO: I believe this was a join of dataset + region, group by dataset
+    // sum region sizes, sort by ascending? Something like that?
+    todo!();
+}
+
+async fn sdc_regions_ensure(
+    sagactx: ActionContext<SagaDiskCreate>,
+) -> Result<(), ActionError> {
+    let _osagactx = sagactx.user_data();
+    let _params = sagactx.saga_params();
+
+    // TODO: Make the calls to crucible agents.
+    // TODO: Figure out how we're testing this - setup fake endpoints
+    // in the simulated sled agent, or do something else?
+    todo!();
+}
+
+async fn sdc_finalize_disk_record(
+    sagactx: ActionContext<SagaDiskCreate>,
+) -> Result<(), ActionError> {
+    let osagactx = sagactx.user_data();
+    let _params = sagactx.saga_params();
+
+    let disk_id = sagactx.lookup::<Uuid>("disk_id")?;
+    let disk_created = sagactx.lookup::<db::model::Disk>("disk_created")?;
+    osagactx.datastore()
+        .disk_update_runtime(&disk_id, &disk_created.runtime().detach())
+        .await
+        .map_err(ActionError::action_failed)?;
+    Ok(())
 }

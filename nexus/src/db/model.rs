@@ -26,7 +26,7 @@ use omicron_common::api::internal;
 use parse_display::Display;
 use ref_cast::RefCast;
 use schemars::JsonSchema;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::convert::TryFrom;
 use std::net::SocketAddr;
 use uuid::Uuid;
@@ -105,8 +105,9 @@ macro_rules! impl_enum_type {
     Ord,
     PartialOrd,
     RefCast,
-    Deserialize,
     JsonSchema,
+    Serialize,
+    Deserialize,
 )]
 #[sql_type = "sql_types::Text"]
 #[serde(transparent)]
@@ -141,7 +142,7 @@ where
     }
 }
 
-#[derive(Copy, Clone, Debug, AsExpression, FromSqlRow)]
+#[derive(Copy, Clone, Debug, AsExpression, FromSqlRow, Serialize, Deserialize)]
 #[sql_type = "sql_types::BigInt"]
 pub struct ByteCount(pub external::ByteCount);
 
@@ -175,6 +176,7 @@ where
 
 #[derive(
     Copy, Clone, Debug, Eq, Ord, PartialEq, PartialOrd, AsExpression, FromSqlRow,
+    Serialize, Deserialize
 )]
 #[sql_type = "sql_types::BigInt"]
 #[repr(transparent)]
@@ -829,7 +831,7 @@ where
 }
 
 /// A Disk (network block device).
-#[derive(Queryable, Insertable, Clone, Debug, Selectable, Resource)]
+#[derive(Queryable, Insertable, Clone, Debug, Selectable, Resource, Serialize, Deserialize)]
 #[table_name = "disk"]
 pub struct Disk {
     #[diesel(embed)]
@@ -909,7 +911,7 @@ impl Into<external::Disk> for Disk {
     }
 }
 
-#[derive(AsChangeset, Clone, Debug, Queryable, Insertable, Selectable)]
+#[derive(AsChangeset, Clone, Debug, Queryable, Insertable, Selectable, Serialize, Deserialize)]
 #[table_name = "disk"]
 // When "attach_instance_id" is set to None, we'd like to
 // clear it from the DB, rather than ignore the update.

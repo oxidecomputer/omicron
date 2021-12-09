@@ -301,6 +301,7 @@ table! {
 }
 
 allow_tables_to_appear_in_same_query!(
+    dataset,
     disk,
     instance,
     metric_producer,
@@ -308,6 +309,7 @@ allow_tables_to_appear_in_same_query!(
     organization,
     oximeter,
     project,
+    region,
     saga,
     saga_node_event,
     console_session,
@@ -318,4 +320,5 @@ allow_tables_to_appear_in_same_query!(
     vpc_router,
     vpc_firewall_rule,
     user_builtin,
+    zpool,
 );
