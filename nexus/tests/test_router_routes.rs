@@ -145,7 +145,7 @@ async fn test_router_routes() {
                     "loopback".parse().unwrap(),
                 ),
             }),
-            StatusCode::OK,
+            StatusCode::NO_CONTENT,
         )
         .await
         .unwrap();

@@ -180,7 +180,7 @@ async fn test_vpc_subnets() {
             Method::PUT,
             &subnet_url,
             Some(update_params),
-            StatusCode::OK,
+            StatusCode::NO_CONTENT,
         )
         .await
         .unwrap();

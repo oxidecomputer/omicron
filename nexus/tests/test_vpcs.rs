@@ -148,7 +148,12 @@ async fn vpc_put(
     params: params::VpcUpdate,
 ) {
     client
-        .make_request(Method::PUT, &vpc_url, Some(params), StatusCode::OK)
+        .make_request(
+            Method::PUT,
+            &vpc_url,
+            Some(params),
+            StatusCode::NO_CONTENT,
+        )
         .await
         .unwrap();
 }
