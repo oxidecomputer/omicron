@@ -10,8 +10,6 @@ use dropshot::test_util::objects_list_page;
 use nexus_test_utils::resource_helpers::{create_organization, create_project};
 use nexus_test_utils::test_setup;
 
-extern crate slog;
-
 #[tokio::test]
 async fn test_projects() {
     let cptestctx = test_setup("test_projects").await;

@@ -28,9 +28,6 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use uuid::Uuid;
 
-#[macro_use]
-extern crate slog;
-
 /// Tests authn::external::Authenticator with the "spoof" scheme allowed
 ///
 /// This does not use Nexus or any of the rest of Omicron.  It sets up its own

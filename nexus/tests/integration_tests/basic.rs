@@ -35,9 +35,6 @@ use nexus_test_utils::resource_helpers::create_project;
 use nexus_test_utils::start_sled_agent;
 use nexus_test_utils::test_setup;
 
-#[macro_use]
-extern crate slog;
-
 #[tokio::test]
 async fn test_basic_failures() {
     let testctx = test_setup("basic_failures").await;
