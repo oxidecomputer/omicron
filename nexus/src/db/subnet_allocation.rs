@@ -16,18 +16,26 @@ use std::convert::TryFrom;
 use uuid::Uuid;
 
 /// Used for allocating an IP as part of [`NetworkInterface`] construction.
+///
 /// This is a query equivalent to:
 /// SELECT <id> AS id, <name> AS name, <description> AS description,
 ///        <time_created> AS time_created, <time_modified> AS time_modified,
 ///        <instance_id> AS instance_id, <vpc_id> AS vpc_id,
-///        <subnet_id> AS subnet_id, <mac> AS mac, <block_bASe> + off AS ip
+///        <subnet_id> AS subnet_id, <mac> AS mac, <block_base> + off AS ip
 ///   FROM
-///        generate_series(1, <num_addresses_in_block>) AS off
+///        generate_series(5, <last_address_in_block>) AS off
 ///   LEFT OUTER JOIN
 ///        network_interface
 ///   ON (subnet_id, ip, time_deleted IS NULL) =
 ///      (<subnet_id>, <block_base> + off, TRUE)
 ///   WHERE ip IS NULL LIMIT 1;
+///
+/// Note that generate_series receives a start value of 5 in accordance with
+/// RFD 21's reservation of addresses 0 through 4 in a subnet.
+// TODO-performance: This query scales linearly with the number of IPs
+// allocated, which is highly undesirable. It will also return the same
+// candidate address to two parallel executors, which will cause additional
+// retries.
 pub struct AllocateIpQuery {
     pub interface: IncompleteNetworkInterface,
     pub block: ipnetwork::IpNetwork,
@@ -135,7 +143,7 @@ impl QueryFragment<Pg> for AllocateIpQuery {
         out.push_identifier(dsl::ip::NAME)?;
 
         // Start the offsets from 1 to exclude the network base address.
-        out.push_sql(" FROM generate_series(1, ");
+        out.push_sql(" FROM generate_series(5, ");
         out.push_bind_param::<sql_types::BigInt, _>(
             // Subtract 1 to exclude the broadcast address
             &(last_address_offset - 1),
@@ -286,7 +294,7 @@ mod test {
             $4 AS \"time_created\", $5 AS \"time_modified\", \
                 $6 AS \"instance_id\", $7 AS \"vpc_id\", $8 AS \"subnet_id\", \
                 $9 AS \"mac\", $10 + \"off\" AS \"ip\" \
-            FROM generate_series(1, $11) AS \"off\" LEFT OUTER JOIN \
+            FROM generate_series(5, $11) AS \"off\" LEFT OUTER JOIN \
                 \"network_interface\" ON \
                 (\"subnet_id\", \"ip\", \"time_deleted\" IS NULL) = \
                     ($12, $13 + \"off\", TRUE) \
@@ -314,7 +322,7 @@ mod test {
             $4 AS \"time_created\", $5 AS \"time_modified\", \
                 $6 AS \"instance_id\", $7 AS \"vpc_id\", $8 AS \"subnet_id\", \
                 $9 AS \"mac\", $10 + \"off\" AS \"ip\" \
-            FROM generate_series(1, $11) AS \"off\" LEFT OUTER JOIN \
+            FROM generate_series(5, $11) AS \"off\" LEFT OUTER JOIN \
                 \"network_interface\" ON \
                 (\"subnet_id\", \"ip\", \"time_deleted\" IS NULL) = \
                     ($12, $13 + \"off\", TRUE) \

@@ -1510,7 +1510,7 @@ impl Nexus {
             .vpc_subnet_fetch_by_name(&vpc.id(), subnet_name)
             .await?;
 
-        let mac = self.db_datastore.generate_mac_address()?;
+        let mac = db::model::MacAddr::new()?;
 
         let interface_id = Uuid::new_v4();
         // Request an allocation
@@ -1841,6 +1841,27 @@ impl Nexus {
             .db_datastore
             .vpc_update_subnet(&subnet.id(), params.clone().into())
             .await?)
+    }
+
+    pub async fn subnet_list_network_interfaces(
+        &self,
+        organization_name: &Name,
+        project_name: &Name,
+        vpc_name: &Name,
+        subnet_name: &Name,
+        pagparams: &DataPageParams<'_, Name>,
+    ) -> ListResultVec<db::model::NetworkInterface> {
+        let subnet = self
+            .vpc_lookup_subnet(
+                organization_name,
+                project_name,
+                vpc_name,
+                subnet_name,
+            )
+            .await?;
+        self.db_datastore
+            .subnet_list_network_interfaces(&subnet.id(), pagparams)
+            .await
     }
 
     pub async fn vpc_list_routers(

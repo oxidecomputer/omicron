@@ -185,10 +185,7 @@ async fn sic_create_instance_record(
         .await
         .map_err(ActionError::action_failed)?;
 
-    let mac = osagactx
-        .datastore()
-        .generate_mac_address()
-        .map_err(ActionError::action_failed)?;
+    let mac = db::model::MacAddr::new().map_err(ActionError::action_failed)?;
     let interface_id = Uuid::new_v4();
     // Request an allocation
     let ip = None;
@@ -217,7 +214,6 @@ async fn sic_create_instance_record(
         .await
         .map_err(ActionError::action_failed)?;
 
-    // TODO: Populate this with an appropriate NIC.
     // See also: instance_set_runtime in nexus.rs for a similar construction.
     Ok(InstanceHardware {
         runtime: instance.runtime().clone().into(),
