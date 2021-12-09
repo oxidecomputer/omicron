@@ -3,7 +3,7 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use dropshot::{test_util::LogContext, ConfigLogging, ConfigLoggingLevel};
-use omicron_test_utils::dev::{test_setup_database_seed, SEED_DB_DIR};
+use omicron_test_utils::dev::test_setup_database_seed;
 
 // Creates a "pre-populated" CockroachDB storage directory, which
 // subsequent tests can copy instead of creating themselves.
@@ -17,6 +17,7 @@ use omicron_test_utils::dev::{test_setup_database_seed, SEED_DB_DIR};
 // more context.
 #[tokio::main]
 async fn main() {
+    println!("cargo:rerun-if-changed=build.rs");
     println!("cargo:rerun-if-changed=../../common/src/sql/dbinit.sql");
     println!("cargo:rerun-if-changed=../../tools/cockroachdb_checksums");
     println!("cargo:rerun-if-changed=../../tools/cockroachdb_version");
@@ -27,5 +28,4 @@ async fn main() {
     );
 
     test_setup_database_seed(&logctx.log).await;
-    println!("cargo:warning=Created 'seed' CRDB for tests in {}", SEED_DB_DIR);
 }
