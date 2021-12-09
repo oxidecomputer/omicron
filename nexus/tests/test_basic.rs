@@ -566,7 +566,9 @@ async fn test_projects_list() {
      * increasing order of name.
      */
     let found_projects_by_name =
-        iter_collection::<Project>(&client, projects_url, "", projects_subset).await.0;
+        iter_collection::<Project>(&client, projects_url, "", projects_subset)
+            .await
+            .0;
     assert_eq!(found_projects_by_name.len(), project_names_by_name.len());
     assert_eq!(
         project_names_by_name,
