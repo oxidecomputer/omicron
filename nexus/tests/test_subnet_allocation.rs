@@ -62,7 +62,7 @@ async fn create_instance_expect_failure(
             Method::POST,
             &url_instances,
             new_instance,
-            StatusCode::NOT_FOUND,
+            StatusCode::BAD_REQUEST,
         )
         .await
 }
