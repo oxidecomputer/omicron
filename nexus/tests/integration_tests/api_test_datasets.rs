@@ -14,8 +14,6 @@ use uuid::Uuid;
 use super::common;
 use common::{test_setup, SLED_AGENT_UUID};
 
-extern crate slog;
-
 // Tests the "normal" case of dataset_put: inserting a dataset within a known
 // zpool.
 //

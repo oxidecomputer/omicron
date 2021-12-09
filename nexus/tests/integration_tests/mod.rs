@@ -1,0 +1,20 @@
+use super::common;
+
+mod api_test_authn_http;
+mod api_test_authz;
+mod api_test_basic;
+mod api_test_commands;
+mod api_test_console_api;
+mod api_test_datasets;
+mod api_test_disks;
+mod api_test_instances;
+mod api_test_organizations;
+mod api_test_oximeter;
+mod api_test_projects;
+mod api_test_router_routes;
+mod api_test_users_builtin;
+mod api_test_vpc_firewall;
+mod api_test_vpc_routers;
+mod api_test_vpc_subnets;
+mod api_test_vpcs;
+mod api_test_zpools;

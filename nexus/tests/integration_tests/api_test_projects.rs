@@ -11,8 +11,6 @@ use super::common;
 use common::resource_helpers::{create_organization, create_project};
 use common::test_setup;
 
-extern crate slog;
-
 #[tokio::test]
 async fn test_projects() {
     let cptestctx = test_setup("test_projects").await;

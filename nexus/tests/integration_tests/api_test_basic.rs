@@ -36,9 +36,6 @@ use common::resource_helpers::create_project;
 use common::start_sled_agent;
 use common::test_setup;
 
-#[macro_use]
-extern crate slog;
-
 #[tokio::test]
 async fn test_basic_failures() {
     let testctx = test_setup("basic_failures").await;

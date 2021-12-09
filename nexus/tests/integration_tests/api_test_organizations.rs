@@ -14,8 +14,6 @@ use common::test_setup;
 use http::method::Method;
 use http::StatusCode;
 
-extern crate slog;
-
 #[tokio::test]
 async fn test_organizations() {
     let cptestctx = test_setup("test_organizations").await;

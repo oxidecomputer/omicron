@@ -14,8 +14,6 @@ use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_nexus::external_api::console_api::LoginParams;
 use omicron_nexus::external_api::params::OrganizationCreate;
 
-extern crate slog;
-
 #[tokio::test]
 async fn test_sessions() {
     let cptestctx = test_setup("test_sessions").await;

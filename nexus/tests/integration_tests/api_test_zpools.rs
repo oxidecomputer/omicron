@@ -11,8 +11,6 @@ use uuid::Uuid;
 use super::common;
 use common::{test_setup, SLED_AGENT_UUID};
 
-extern crate slog;
-
 // Tests the "normal" case of zpool_put: inserting a known Zpool.
 //
 // This will typically be invoked by the Sled Agent, after performing inventory.

@@ -13,8 +13,6 @@ use common::test_setup;
 use omicron_nexus::authn;
 use omicron_nexus::external_api::views::User;
 
-extern crate slog;
-
 #[tokio::test]
 async fn test_users_builtin() {
     let cptestctx = test_setup("test_users_builtin").await;

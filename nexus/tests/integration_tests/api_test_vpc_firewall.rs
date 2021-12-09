@@ -22,8 +22,6 @@ use common::resource_helpers::{
 };
 use common::test_setup;
 
-extern crate slog;
-
 #[tokio::test]
 async fn test_vpc_firewall() {
     let cptestctx = test_setup("test_vpc_firewall").await;
