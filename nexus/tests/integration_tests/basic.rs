@@ -27,14 +27,13 @@ use omicron_nexus::external_api::{
 use serde::Serialize;
 use uuid::Uuid;
 
-use super::common;
-use common::http_testing::AuthnMode;
-use common::http_testing::NexusRequest;
-use common::http_testing::RequestBuilder;
-use common::resource_helpers::create_organization;
-use common::resource_helpers::create_project;
-use common::start_sled_agent;
-use common::test_setup;
+use nexus_test_utils::http_testing::AuthnMode;
+use nexus_test_utils::http_testing::NexusRequest;
+use nexus_test_utils::http_testing::RequestBuilder;
+use nexus_test_utils::resource_helpers::create_organization;
+use nexus_test_utils::resource_helpers::create_project;
+use nexus_test_utils::start_sled_agent;
+use nexus_test_utils::test_setup;
 
 #[tokio::test]
 async fn test_basic_failures() {

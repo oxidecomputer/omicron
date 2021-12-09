@@ -12,8 +12,6 @@
 #[macro_use]
 extern crate slog;
 
-pub mod common;
-
 // The individual tests themselves live in the "integration_tests" subdirectory.
 // This extra level of indirection is annoying but we can't put them into the
 // current directory because Cargo would try to build them individually.

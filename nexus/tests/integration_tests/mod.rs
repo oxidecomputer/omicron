@@ -3,8 +3,6 @@
 //! See the driver in the parent directory for how and why this is structured
 //! the way it is.
 
-use super::common;
-
 mod authn_http;
 mod authz;
 mod basic;

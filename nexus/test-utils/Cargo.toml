@@ -1,0 +1,26 @@
+[package]
+name = "nexus-test-utils"
+version = "0.1.0"
+edition = "2018"
+license = "MPL-2.0"
+
+[dependencies]
+anyhow = "1.0"
+bytes = "1.0.1"
+chrono = { version = "0.4",  features = [ "serde" ] }
+dropshot = { git = "https://github.com/oxidecomputer/dropshot", branch = "main" }
+http = "0.2.5"
+hyper = "0.14"
+omicron-common = { path = "../../common" }
+omicron-nexus = { path = ".." }
+omicron-sled-agent = { path = "../../sled-agent" }
+omicron-test-utils = { path = "../../test-utils" }
+oximeter = { version = "0.1.0", path = "../../oximeter/oximeter" }
+oximeter-client = { path = "../../oximeter-client" }
+oximeter-collector = { version = "0.1.0",  path = "../../oximeter/collector" }
+oximeter-producer = { version = "0.1.0",  path = "../../oximeter/producer" }
+parse-display = "0.5.3"
+serde = { version = "1.0",  features = [ "derive" ] }
+serde_json = "1.0"
+slog = { version = "2.7",  features = [ "max_level_trace", "release_max_level_debug" ] }
+uuid = { version = "0.8", features = [ "serde", "v4" ] }
