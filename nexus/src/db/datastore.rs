@@ -62,12 +62,12 @@ use crate::db::{
         public_error_from_diesel_pool_shouldnt_fail,
     },
     model::{
-        ConsoleSession, Dataset, Disk, DiskAttachment, DiskRuntimeState,
+        ConsoleSession, Dataset, DatasetKind, Disk, DiskAttachment, DiskRuntimeState,
         Generation, Instance, InstanceRuntimeState, Name, Organization,
         OrganizationUpdate, OximeterInfo, ProducerEndpoint, Project,
-        ProjectUpdate, RouterRoute, RouterRouteUpdate, Sled, UserBuiltin, Vpc,
-        VpcFirewallRule, VpcRouter, VpcRouterUpdate, VpcSubnet,
-        VpcSubnetUpdate, VpcUpdate, Zpool,
+        ProjectUpdate, Region, RouterRoute, RouterRouteUpdate, Sled,
+        UserBuiltin, Vpc, VpcFirewallRule, VpcRouter, VpcRouterUpdate,
+        VpcSubnet, VpcSubnetUpdate, VpcUpdate, Zpool,
     },
     pagination::paginated,
     update_and_check::{UpdateAndCheck, UpdateStatus},
@@ -228,6 +228,23 @@ impl DataStore {
                 )
             }
         })
+    }
+
+    /// Allocates enough regions to back a disk.
+    ///
+    /// Returns the allocated regions, as well as the datasets to which they
+    /// belong.
+    pub async fn region_allocate(
+        &self,
+        params: &params::DiskCreate,
+    ) -> Result<Vec<(Dataset, Region)>, Error> {
+        use db::schema::region::dsl as region_dsl;
+        use db::schema::dataset::dsl as dataset_dsl;
+
+
+        // TODO: I believe this was a join of dataset + region, group by dataset
+        // sum region sizes, sort by ascending? Something like that
+        todo!();
     }
 
     /// Create a organization
@@ -2030,22 +2047,23 @@ impl DataStore {
 
 #[cfg(test)]
 mod test {
+    use super::*;
     use crate::authz;
     use crate::context::OpContext;
     use crate::db;
     use crate::db::identity::Resource;
     use crate::db::model::{ConsoleSession, Organization, Project};
-    use crate::db::DataStore;
     use crate::external_api::params;
     use chrono::{Duration, Utc};
-    use omicron_common::api::external::{Error, IdentityMetadataCreateParams};
+    use omicron_common::api::external::{ByteCount, Name, Error, IdentityMetadataCreateParams};
     use omicron_test_utils::dev;
     use std::sync::Arc;
+    use std::net::{IpAddr, Ipv4Addr, SocketAddr};
     use uuid::Uuid;
 
     #[tokio::test]
     async fn test_project_creation() {
-        let logctx = dev::test_setup_log("test_collection_not_present");
+        let logctx = dev::test_setup_log("test_project_creation");
         let opctx = OpContext::for_unit_tests(logctx.log.new(o!()));
         let mut db = dev::test_setup_database(&logctx.log).await;
         let cfg = db::Config { url: db.pg_config().clone() };
@@ -2081,7 +2099,7 @@ mod test {
 
     #[tokio::test]
     async fn test_session_methods() {
-        let logctx = dev::test_setup_log("test_collection_not_present");
+        let logctx = dev::test_setup_log("test_session_methods");
         let mut db = dev::test_setup_database(&logctx.log).await;
         let cfg = db::Config { url: db.pg_config().clone() };
         let pool = db::Pool::new(&cfg);
@@ -2131,6 +2149,72 @@ mod test {
         // deleting an already nonexistent is considered a success
         let delete_again = datastore.session_hard_delete(token.clone()).await;
         assert_eq!(delete_again, Ok(()));
+
+        let _ = db.cleanup().await;
+    }
+
+    #[tokio::test]
+    async fn test_region_allocation() {
+        let logctx = dev::test_setup_log("test_region_allocation");
+        let opctx = OpContext::for_unit_tests(logctx.log.new(o!()));
+        let mut db = dev::test_setup_database(&logctx.log).await;
+        let cfg = db::Config { url: db.pg_config().clone() };
+        let pool = db::Pool::new(&cfg);
+        let datastore = DataStore::new(Arc::new(pool));
+
+        // TODO: Refactor org / project creation to a helper.
+        let organization = Organization::new(params::OrganizationCreate {
+            identity: IdentityMetadataCreateParams {
+                name: "org".parse().unwrap(),
+                description: "desc".to_string(),
+            },
+        });
+        let organization =
+            datastore.organization_create(&opctx, organization).await.unwrap();
+        let project = Project::new(
+            organization.id(),
+            params::ProjectCreate {
+                identity: IdentityMetadataCreateParams {
+                    name: "project".parse().unwrap(),
+                    description: "desc".to_string(),
+                },
+            },
+        );
+        let org = authz::FLEET.organization(organization.id());
+        datastore.project_create(&opctx, &org, project).await.unwrap();
+
+        // Create Datasets, from which regions will be allocated.
+
+        // XXX This pool doesn't exist...
+        let pool_id = Uuid::new_v4();
+        let dataset_id = Uuid::new_v4();
+        // XXX This address is a lie, but that doesn't matter - we're here
+        // to test the database interaction, not the networking aspect.
+        let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 8080);
+        let kind = DatasetKind(crate::internal_api::params::DatasetKind::Crucible);
+
+        let dataset_ids: Vec<Uuid> = (0..6).map(|_| Uuid::new_v4()).collect();
+        for id in &dataset_ids {
+            let dataset = Dataset::new(*id, pool_id, addr, kind.clone());
+            datastore.dataset_upsert(dataset).await.unwrap();
+        }
+
+        // Allocate regions from the datasets.
+
+        let disk_create_params = params::DiskCreate {
+            identity: IdentityMetadataCreateParams {
+                name: Name::try_from("disk1".to_string()).unwrap(),
+                description: "my-disk".to_string(),
+            },
+            snapshot_id: None,
+            size: ByteCount::from_mebibytes_u32(500),
+        };
+        let dataset_and_regions = datastore.region_allocate(&disk_create_params).await.unwrap();
+
+        // Verify the allocation we just performed.
+        assert_eq!(3, dataset_and_regions.len());
+        // TODO: verify allocated regions make sense
+
 
         let _ = db.cleanup().await;
     }

@@ -168,6 +168,20 @@ pub struct DiskCreate {
     pub size: ByteCount,
 }
 
+impl DiskCreate {
+    pub fn block_size(&self) -> u64 {
+        512
+    }
+
+    pub fn extent_size(&self) -> u64 {
+        1 << 20
+    }
+
+    pub fn extent_count(&self) -> u64 {
+        (self.size.to_bytes() + self.extent_size() - 1) / self.extent_size()
+    }
+}
+
 /*
  * BUILT-IN USERS
  *

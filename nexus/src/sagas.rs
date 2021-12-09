@@ -300,6 +300,11 @@ async fn sdc_create_disk_record(
     let params = sagactx.saga_params();
 
     let disk_id = sagactx.lookup::<Uuid>("disk_id")?;
+
+    // NOTE: This could be done in a txn with region allocation?
+    //
+    // Unclear if it's a problem to let this disk exist without any backing
+    // regions for a brief period of time.
     let disk = db::model::Disk::new(
         disk_id,
         params.project_id,
@@ -315,16 +320,20 @@ async fn sdc_create_disk_record(
 
 async fn sdc_alloc_regions(
     sagactx: ActionContext<SagaDiskCreate>,
-) -> Result<(), ActionError> {
-    let _osagactx = sagactx.user_data();
-    let _params = sagactx.saga_params();
-    // TODO: Here, we should ensure the disk is backed by appropriate
-    // regions. This is blocked behind actually having Crucible agents
-    // running in zones for dedicated zpools.
+) -> Result<Vec<(db::model::Dataset, db::model::Region)>, ActionError> {
+    let osagactx = sagactx.user_data();
+    let params = sagactx.saga_params();
+    // Ensure the disk is backed by appropriate regions.
     //
-    // TODO: I believe this was a join of dataset + region, group by dataset
-    // sum region sizes, sort by ascending? Something like that?
-    todo!();
+    // This allocates regions in the database, but the disk state is still
+    // "creating" - the respective Crucible Agents must be instructed to
+    // allocate the necessary regions before we can mark the disk as "ready to
+    // be used".
+    let datasets_and_regions = osagactx.datastore()
+        .region_allocate(&params.create_params)
+        .await
+        .map_err(ActionError::action_failed)?;
+    Ok(datasets_and_regions)
 }
 
 async fn sdc_regions_ensure(

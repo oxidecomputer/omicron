@@ -488,7 +488,7 @@ impl_enum_type!(
     #[postgres(type_name = "dataset_kind", type_schema = "public")]
     pub struct DatasetKindEnum;
 
-    #[derive(Clone, Debug, AsExpression, FromSqlRow)]
+    #[derive(Clone, Debug, AsExpression, FromSqlRow, Serialize, Deserialize)]
     #[sql_type = "DatasetKindEnum"]
     pub struct DatasetKind(pub internal_api::params::DatasetKind);
 
@@ -508,7 +508,7 @@ impl From<internal_api::params::DatasetKind> for DatasetKind {
 ///
 /// A dataset represents a portion of a Zpool, which is then made
 /// available to a service on the Sled.
-#[derive(Queryable, Insertable, Debug, Clone, Selectable, Asset)]
+#[derive(Queryable, Insertable, Debug, Clone, Selectable, Asset, Deserialize, Serialize)]
 #[table_name = "dataset"]
 pub struct Dataset {
     #[diesel(embed)]
@@ -568,7 +568,7 @@ impl DatastoreCollection<Region> for Disk {
 ///
 /// A region represents a portion of a Crucible Downstairs dataset
 /// allocated within a volume.
-#[derive(Queryable, Insertable, Debug, Clone, Selectable, Asset)]
+#[derive(Queryable, Insertable, Debug, Clone, Selectable, Asset, Serialize, Deserialize)]
 #[table_name = "region"]
 pub struct Region {
     #[diesel(embed)]
