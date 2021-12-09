@@ -138,7 +138,7 @@ async fn test_vpc_routers() {
             Method::PUT,
             &router_url,
             Some(update_params),
-            StatusCode::OK,
+            StatusCode::NO_CONTENT,
         )
         .await
         .unwrap();
