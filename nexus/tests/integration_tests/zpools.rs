@@ -8,10 +8,8 @@ use omicron_common::api::external::ByteCount;
 use omicron_nexus::internal_api::params::ZpoolPutRequest;
 use uuid::Uuid;
 
-pub mod common;
+use super::common;
 use common::{test_setup, SLED_AGENT_UUID};
-
-extern crate slog;
 
 // Tests the "normal" case of zpool_put: inserting a known Zpool.
 //

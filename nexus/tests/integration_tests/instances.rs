@@ -26,7 +26,7 @@ use dropshot::test_util::objects_post;
 use dropshot::test_util::read_json;
 use dropshot::test_util::ClientTestContext;
 
-pub mod common;
+use super::common;
 use common::identity_eq;
 use common::resource_helpers::{create_organization, create_project};
 use common::test_setup;

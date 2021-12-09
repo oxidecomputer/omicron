@@ -16,13 +16,11 @@ use std::convert::TryFrom;
 
 use dropshot::test_util::{object_delete, objects_list_page};
 
-pub mod common;
+use super::common;
 use common::resource_helpers::{
     create_organization, create_project, create_vpc,
 };
 use common::test_setup;
-
-extern crate slog;
 
 #[tokio::test]
 async fn test_vpc_firewall() {

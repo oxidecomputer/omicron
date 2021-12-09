@@ -27,7 +27,7 @@ use omicron_nexus::external_api::{
 use serde::Serialize;
 use uuid::Uuid;
 
-pub mod common;
+use super::common;
 use common::http_testing::AuthnMode;
 use common::http_testing::NexusRequest;
 use common::http_testing::RequestBuilder;
@@ -35,9 +35,6 @@ use common::resource_helpers::create_organization;
 use common::resource_helpers::create_project;
 use common::start_sled_agent;
 use common::test_setup;
-
-#[macro_use]
-extern crate slog;
 
 #[tokio::test]
 async fn test_basic_failures() {
