@@ -33,6 +33,12 @@ export RUSTFLAGS="-D warnings"
 export RUSTDOCFLAGS="-D warnings"
 ptime -m cargo +'nightly-2021-11-24' build --locked --all-targets --verbose
 
+#
+# Check that building individual packages as when deploying Omicron succeeds
+#
+banner deploy-check
+ptime -m cargo run --bin omicron-package -- check
+
 banner clickhouse
 ptime -m ./tools/ci_download_clickhouse
 
