@@ -11,7 +11,7 @@ use omicron_nexus::internal_api::params::{
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use uuid::Uuid;
 
-pub mod common;
+use super::common;
 use common::{test_setup, SLED_AGENT_UUID};
 
 extern crate slog;

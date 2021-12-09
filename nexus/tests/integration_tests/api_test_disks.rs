@@ -27,7 +27,7 @@ use dropshot::test_util::objects_post;
 use dropshot::test_util::read_json;
 use dropshot::test_util::ClientTestContext;
 
-pub mod common;
+use super::common;
 use common::http_testing::AuthnMode;
 use common::http_testing::NexusRequest;
 use common::http_testing::RequestBuilder;

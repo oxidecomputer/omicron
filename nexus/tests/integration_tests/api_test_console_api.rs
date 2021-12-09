@@ -7,7 +7,7 @@ use http::header::HeaderName;
 use http::{header, method::Method, StatusCode};
 use std::env::current_dir;
 
-pub mod common;
+use super::common;
 use common::http_testing::{RequestBuilder, TestResponse};
 use common::{load_test_config, test_setup, test_setup_with_config};
 use omicron_common::api::external::IdentityMetadataCreateParams;

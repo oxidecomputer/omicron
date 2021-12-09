@@ -5,7 +5,7 @@ use http::Method;
 use http::StatusCode;
 use std::collections::BTreeMap;
 
-pub mod common;
+use super::common;
 use common::http_testing::AuthnMode;
 use common::http_testing::NexusRequest;
 use common::http_testing::RequestBuilder;

@@ -6,7 +6,7 @@
 use common::http_testing::RequestBuilder;
 use dropshot::HttpErrorResponseBody;
 
-pub mod common;
+use super::common;
 use common::test_setup;
 use http::method::Method;
 use http::StatusCode;

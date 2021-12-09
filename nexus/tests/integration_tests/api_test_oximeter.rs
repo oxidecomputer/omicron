@@ -4,7 +4,7 @@
 
 //! Integration tests for oximeter collectors and producers.
 
-pub mod common;
+use super::common;
 
 use omicron_test_utils::dev::poll::{wait_for_condition, CondCheckError};
 use oximeter_db::DbWrite;

@@ -14,7 +14,7 @@ use dropshot::test_util::object_get;
 use dropshot::test_util::objects_list_page;
 use dropshot::test_util::objects_post;
 
-pub mod common;
+use super::common;
 use common::identity_eq;
 use common::resource_helpers::{
     create_organization, create_project, create_vpc,

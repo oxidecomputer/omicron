@@ -7,7 +7,7 @@ use omicron_nexus::external_api::views::Project;
 use dropshot::test_util::object_get;
 use dropshot::test_util::objects_list_page;
 
-pub mod common;
+use super::common;
 use common::resource_helpers::{create_organization, create_project};
 use common::test_setup;
 

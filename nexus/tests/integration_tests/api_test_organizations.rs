@@ -6,7 +6,7 @@ use omicron_nexus::external_api::views::Organization;
 
 use dropshot::test_util::{object_delete, object_get};
 
-pub mod common;
+use super::common;
 use common::resource_helpers::{
     create_organization, create_project, objects_list_page_authz,
 };

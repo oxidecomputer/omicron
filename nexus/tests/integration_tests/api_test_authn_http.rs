@@ -8,7 +8,7 @@
 // a lower-level interface, since our hyper Client will not allow us to send
 // such invalid requests.
 
-pub mod common;
+use super::common;
 
 use async_trait::async_trait;
 use chrono::{DateTime, Duration, Utc};

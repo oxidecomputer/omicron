@@ -27,7 +27,7 @@ use omicron_nexus::external_api::{
 use serde::Serialize;
 use uuid::Uuid;
 
-pub mod common;
+use super::common;
 use common::http_testing::AuthnMode;
 use common::http_testing::NexusRequest;
 use common::http_testing::RequestBuilder;
