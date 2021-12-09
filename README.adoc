@@ -51,6 +51,34 @@ See TODO.adoc for more info.
 
 == Build and run
 
+Briefly, the steps to run each component of the control plane manually are:
+
++
+[source,text]
+----
+$ cargo run --bin omicron-dev -- db-run # Start CockroachDB
+$ cargo run --bin omicron-dev -- ch-run # Start ClickHouse
+$ cargo run --bin nexus -- nexus/examples/config.toml
+$ cargo run --bin oximeter -- oximeter/collector/config.toml
+$ cargo run --bin sled-agent -- $(uuidgen) [::1]:12223 [::1]:12222 127.0.0.1:12221
+----
+
+To run the control plane components as SMF services, first run the two databases
+manually, and then:
+
++
+[source,text]
+----
+$ cargo run --bin omicron-dev -- db-run # Start CockroachDB
+$ cargo run --bin omicron-dev -- ch-run # Start ClickHouse
+$ cargo run --bin omicron-package -- package # Build and package up SMF services
+$ cargo run --bin omicron-package -- install # Install and start SMF services
+----
+
+For more detailed information about the build and development process, read on.
+
+== Building and running, in detail
+
 You can **format the code** using `cargo fmt`.  Make sure to run this before pushing changes.  The CI checks that the code is correctly formatted.
 
 You can **run the https://github.com/rust-lang/rust-clippy[Clippy linter]** using `cargo clippy \-- -D warnings -A clippy::style`.  Make sure to run this before pushing changes.  The CI checks that the code is clippy-clean.
