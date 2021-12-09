@@ -74,7 +74,7 @@ enum StorageSource {
 /// This is intended to optimize subsequent calls to [`test_setup_database`]
 /// by reducing the latency of populating the storage directory.
 pub async fn test_setup_database_seed(log: &Logger) {
-    std::fs::remove_dir_all(SEED_DB_DIR).unwrap();
+    let _ = std::fs::remove_dir_all(SEED_DB_DIR);
     std::fs::create_dir_all(SEED_DB_DIR).unwrap();
     let mut db =
         setup_database(log, Some(SEED_DB_DIR), StorageSource::Populate).await;
