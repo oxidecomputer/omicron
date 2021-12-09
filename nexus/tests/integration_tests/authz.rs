@@ -13,8 +13,6 @@ use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_nexus::authn::external::spoof::HTTP_HEADER_OXIDE_AUTHN_SPOOF;
 use omicron_nexus::external_api::params;
 
-extern crate slog;
-
 // TODO-coverage It would be nice to have tests that attempt to hit every
 // OpenAPI endpoint with valid arguments and:
 // (a) missing credentials (should all fail with 401, 403, or 404)
