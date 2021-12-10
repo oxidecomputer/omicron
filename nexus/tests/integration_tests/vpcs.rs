@@ -17,8 +17,6 @@ use nexus_test_utils::resource_helpers::{
 };
 use nexus_test_utils::test_setup;
 
-extern crate slog;
-
 #[tokio::test]
 async fn test_vpcs() {
     let cptestctx = test_setup("test_vpcs").await;

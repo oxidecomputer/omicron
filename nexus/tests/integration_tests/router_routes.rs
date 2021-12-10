@@ -20,8 +20,6 @@ use nexus_test_utils::resource_helpers::{
     create_organization, create_project, create_router, create_vpc,
 };
 
-extern crate slog;
-
 #[tokio::test]
 async fn test_router_routes() {
     let cptestctx = test_setup("test_vpc_routers").await;

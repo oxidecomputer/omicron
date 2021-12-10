@@ -46,6 +46,12 @@ export RUSTDOCFLAGS="-D warnings"
 ptime -m cargo +'nightly-2021-11-24' build --locked --all-targets --verbose
 
 #
+# Check that building individual packages as when deploying Omicron succeeds
+#
+banner deploy-check
+ptime -m cargo run --bin omicron-package -- check
+
+#
 # NOTE: We're using using the same RUSTFLAGS and RUSTDOCFLAGS as above to avoid
 # having to rebuild here.
 #

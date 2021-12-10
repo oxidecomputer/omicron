@@ -50,6 +50,8 @@ enum SubCommand {
         )]
         release: bool,
     },
+    /// Checks the packages specified in a manifest, without building.
+    Check,
     /// Installs the packages to a target machine.
     Install {
         /// The directory from which artifacts will be pulled.
@@ -98,11 +100,15 @@ struct Args {
     subcommand: SubCommand,
 }
 
-fn build_rust_package(package: &str, release: bool) -> Result<()> {
+fn run_cargo_on_package(
+    subcmd: &str,
+    package: &str,
+    release: bool,
+) -> Result<()> {
     let mut cmd = Command::new("cargo");
     // We rely on the rust-toolchain.toml file for toolchain information,
     // rather than specifying one within the packaging tool.
-    cmd.arg("build").arg("-p").arg(package);
+    cmd.arg(subcmd).arg("-p").arg(package);
     if release {
         cmd.arg("--release");
     }
@@ -173,7 +179,14 @@ impl PackageInfo {
     // Builds the requested package.
     fn build(&self, package_name: &str, release: bool) -> Result<()> {
         match &self.build {
-            Build::Rust => build_rust_package(package_name, release),
+            Build::Rust => run_cargo_on_package("build", package_name, release),
+        }
+    }
+
+    // Checks the requested package.
+    fn check(&self, package_name: &str) -> Result<()> {
+        match &self.build {
+            Build::Rust => run_cargo_on_package("check", package_name, false),
         }
     }
 }
@@ -191,6 +204,14 @@ fn parse<P: AsRef<Path>>(path: P) -> Result<Config, ParseError> {
     let contents = std::fs::read_to_string(path.as_ref())?;
     let cfg = toml::from_str::<Config>(&contents)?;
     Ok(cfg)
+}
+
+async fn do_check(config: &Config) -> Result<()> {
+    for (package_name, package) in &config.packages {
+        println!("Checking {}", package_name);
+        package.check(&package_name)?;
+    }
+    Ok(())
 }
 
 async fn do_package(
@@ -446,6 +467,7 @@ async fn main() -> Result<()> {
         SubCommand::Package { artifact_dir, release } => {
             do_package(&config, &artifact_dir, *release).await?;
         }
+        SubCommand::Check => do_check(&config).await?,
         SubCommand::Install { artifact_dir, install_dir } => {
             do_install(&config, &artifact_dir, &install_dir)?;
         }

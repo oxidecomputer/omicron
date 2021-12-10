@@ -83,7 +83,7 @@ example, on Helios, you'd want `/usr/bin` on your PATH.
 --
 . CockroachDB v21.1.10.
 +
-The test suite expects to be able to start a single-node CockroachDB cluster using the `cockroach` executable on your PATH.
+The build and test suite expects to be able to start a single-node CockroachDB cluster using the `cockroach` executable on your PATH.
 On illumos, MacOS, and Linux, you should be able to use the `tools/ci_download_cockroachdb` script to fetch the official CockroachDB binary.  It will be put into `./cockroachdb/bin/cockroach`.
 Alternatively, you can follow the https://www.cockroachlabs.com/docs/stable/install-cockroachdb.html[official CockroachDB installation instructions for your platform].
 
