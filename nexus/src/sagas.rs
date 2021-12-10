@@ -190,8 +190,7 @@ async fn sic_create_network_interface(
                 description: format!(
                     "default interface for {}",
                     params.create_params.identity.name
-                )
-                .to_string(),
+                ),
             },
         },
     );
