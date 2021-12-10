@@ -241,6 +241,24 @@ impl DataStore {
         use db::schema::region::dsl as region_dsl;
         use db::schema::dataset::dsl as dataset_dsl;
 
+        let datasets = dataset_dsl::dataset
+            // First, we look for valid datasets.
+            .filter(dataset_dsl::time_deleted.is_null())
+            // We tally up the regions within those datasets
+            .inner_join(
+                region_dsl::region.on(
+                    dataset_dsl::id.eq(region_dsl::dataset_id)
+                )
+            )
+//            .group_by(region_dsl::dataset_id)
+//            .select((Dataset::as_select(), diesel::dsl::sum(region_dsl::extent_count)))
+//            .order((region_dsl::extent_size * region_dsl::extent_count).asc())
+//            .select((Dataset::as_select(), diesel::dsl::sum(region_dsl::extent_size * region_dsl::extent_count)))
+            .select(Dataset::as_select())
+            .get_results_async::<Dataset>(self.pool())
+            .await
+            .unwrap(); // TODO: Handle errors
+
 
         // TODO: I believe this was a join of dataset + region, group by dataset
         // sum region sizes, sort by ascending? Something like that
@@ -2183,24 +2201,28 @@ mod test {
         let org = authz::FLEET.organization(organization.id());
         datastore.project_create(&opctx, &org, project).await.unwrap();
 
-        // Create Datasets, from which regions will be allocated.
-
-        // XXX This pool doesn't exist...
-        let pool_id = Uuid::new_v4();
-        let dataset_id = Uuid::new_v4();
-        // XXX This address is a lie, but that doesn't matter - we're here
-        // to test the database interaction, not the networking aspect.
+        // Create a sled...
         let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 8080);
-        let kind = DatasetKind(crate::internal_api::params::DatasetKind::Crucible);
+        let sled_id = Uuid::new_v4();
+        let sled = Sled::new(sled_id, addr.clone());
+        datastore.sled_upsert(sled).await.unwrap();
 
+        // ... and a zpool within that sled...
+        let zpool_id = Uuid::new_v4();
+        let zpool = Zpool::new(zpool_id, sled_id, &crate::internal_api::params::ZpoolPutRequest {
+            size: ByteCount::from_gibibytes_u32(100),
+        });
+        datastore.zpool_upsert(zpool).await.unwrap();
+
+        // ... and datasets within that zpool.
+        let kind = DatasetKind(crate::internal_api::params::DatasetKind::Crucible);
         let dataset_ids: Vec<Uuid> = (0..6).map(|_| Uuid::new_v4()).collect();
         for id in &dataset_ids {
-            let dataset = Dataset::new(*id, pool_id, addr, kind.clone());
+            let dataset = Dataset::new(*id, zpool_id, addr, kind.clone());
             datastore.dataset_upsert(dataset).await.unwrap();
         }
 
         // Allocate regions from the datasets.
-
         let disk_create_params = params::DiskCreate {
             identity: IdentityMetadataCreateParams {
                 name: Name::try_from("disk1".to_string()).unwrap(),
