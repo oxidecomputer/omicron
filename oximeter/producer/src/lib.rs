@@ -14,7 +14,8 @@ use omicron_common::api::internal::nexus::ProducerEndpoint;
 use oximeter::types::{ProducerRegistry, ProducerResults};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use slog::{debug, info, o};
+use slog::Drain;
+use slog::{debug, error, info, o};
 use std::net::SocketAddr;
 use std::sync::Arc;
 use thiserror::Error;
@@ -55,10 +56,20 @@ impl Server {
         // Clone mutably, as we may update the address after the server starts, see below.
         let mut config = config.clone();
 
-        let log = config
-            .logging_config
-            .to_logger("metric-server")
-            .map_err(|msg| Error::Server(msg.to_string()))?;
+        let (drain, registration) = slog_dtrace::with_drain(
+            config
+                .logging_config
+                .to_logger("metric-server")
+                .map_err(|msg| Error::Server(msg.to_string()))?,
+        );
+        let log = slog::Logger::root(drain.fuse(), slog::o!());
+        if let slog_dtrace::ProbeRegistration::Failed(e) = registration {
+            let msg = format!("failed to register DTrace probes: {}", e);
+            error!(log, "failed to register DTrace probes: {}", e);
+            return Err(Error::Server(msg));
+        } else {
+            debug!(log, "registered DTrace probes");
+        }
         let registry = ProducerRegistry::with_id(config.server_info.id);
         let dropshot_log = log.new(o!("component" => "dropshot"));
         let server = HttpServerStarter::new(

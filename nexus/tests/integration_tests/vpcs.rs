@@ -11,14 +11,11 @@ use dropshot::test_util::object_get;
 use dropshot::test_util::objects_list_page;
 use dropshot::test_util::ClientTestContext;
 
-pub mod common;
-use common::identity_eq;
-use common::resource_helpers::{
+use nexus_test_utils::identity_eq;
+use nexus_test_utils::resource_helpers::{
     create_organization, create_project, create_vpc, create_vpc_with_error,
 };
-use common::test_setup;
-
-extern crate slog;
+use nexus_test_utils::test_setup;
 
 #[tokio::test]
 async fn test_vpcs() {
@@ -149,7 +146,12 @@ async fn vpc_put(
     params: params::VpcUpdate,
 ) {
     client
-        .make_request(Method::PUT, &vpc_url, Some(params), StatusCode::OK)
+        .make_request(
+            Method::PUT,
+            &vpc_url,
+            Some(params),
+            StatusCode::NO_CONTENT,
+        )
         .await
         .unwrap();
 }

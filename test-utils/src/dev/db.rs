@@ -204,7 +204,7 @@ impl CockroachStarterBuilder {
             CockroachStarterBuilder::temp_path(&temp_dir, "listen-url");
         let listen_arg = format!("127.0.0.1:{}", self.listen_port);
         self.arg("--store")
-            .arg(store_dir)
+            .arg(&store_dir)
             .arg("--listen-addr")
             .arg(&listen_arg)
             .arg("--listening-url-file")
@@ -222,6 +222,7 @@ impl CockroachStarterBuilder {
 
         Ok(CockroachStarter {
             temp_dir,
+            store_dir: store_dir.into(),
             listen_url_file,
             args: self.args,
             cmd_builder: self.cmd_builder,
@@ -260,6 +261,8 @@ impl CockroachStarterBuilder {
 pub struct CockroachStarter {
     /// temporary directory used for URL file and potentially data storage
     temp_dir: TempDir,
+    /// path to storage directory
+    store_dir: PathBuf,
     /// path to listen URL file (inside temp_dir)
     listen_url_file: PathBuf,
     /// command-line arguments, mirrored here for reporting to the user
@@ -281,6 +284,11 @@ impl CockroachStarter {
      */
     pub fn temp_dir(&self) -> &Path {
         self.temp_dir.path()
+    }
+
+    /// Returns the path to the storage directory created for this execution.
+    pub fn store_dir(&self) -> &Path {
+        self.store_dir.as_path()
     }
 
     /**

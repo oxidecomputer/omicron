@@ -2,9 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-/*!
- * Shared integration testing facilities
- */
+//! Integration testing facilities for Nexus
 
 use dropshot::test_util::ClientTestContext;
 use dropshot::test_util::LogContext;

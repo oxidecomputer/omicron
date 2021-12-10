@@ -6,7 +6,7 @@ license = "MPL-2.0"
 
 [dependencies]
 chrono = { version = "0.4", features = [ "serde" ] }
-dropshot = { git = "https://github.com/oxidecomputer/dropshot", branch = "main" }
+dropshot = { git = "https://github.com/oxidecomputer/dropshot", branch = "main", features = [ "usdt-probes" ] }
 futures = "0.3.18"
 oximeter = { path = "../oximeter" }
 http = { version = "0.2.5", optional = true }

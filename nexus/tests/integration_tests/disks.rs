@@ -27,14 +27,13 @@ use dropshot::test_util::objects_post;
 use dropshot::test_util::read_json;
 use dropshot::test_util::ClientTestContext;
 
-pub mod common;
-use common::http_testing::AuthnMode;
-use common::http_testing::NexusRequest;
-use common::http_testing::RequestBuilder;
-use common::identity_eq;
-use common::resource_helpers::create_organization;
-use common::resource_helpers::create_project;
-use common::test_setup;
+use nexus_test_utils::http_testing::AuthnMode;
+use nexus_test_utils::http_testing::NexusRequest;
+use nexus_test_utils::http_testing::RequestBuilder;
+use nexus_test_utils::identity_eq;
+use nexus_test_utils::resource_helpers::create_organization;
+use nexus_test_utils::resource_helpers::create_project;
+use nexus_test_utils::test_setup;
 
 /*
  * TODO-cleanup the mess of URLs used here and in test_instances.rs ought to

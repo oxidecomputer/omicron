@@ -14,14 +14,11 @@ use dropshot::test_util::object_get;
 use dropshot::test_util::objects_list_page;
 use dropshot::test_util::objects_post;
 
-pub mod common;
-use common::identity_eq;
-use common::resource_helpers::{
+use nexus_test_utils::identity_eq;
+use nexus_test_utils::resource_helpers::{
     create_organization, create_project, create_vpc,
 };
-use common::test_setup;
-
-extern crate slog;
+use nexus_test_utils::test_setup;
 
 #[tokio::test]
 async fn test_vpc_routers() {
@@ -138,7 +135,7 @@ async fn test_vpc_routers() {
             Method::PUT,
             &router_url,
             Some(update_params),
-            StatusCode::OK,
+            StatusCode::NO_CONTENT,
         )
         .await
         .unwrap();

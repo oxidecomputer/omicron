@@ -16,7 +16,7 @@ use omicron_common::backoff;
 use oximeter::types::ProducerResults;
 use oximeter_db::{Client, DbWrite};
 use serde::{Deserialize, Serialize};
-use slog::{debug, info, o, trace, warn, Logger};
+use slog::{debug, error, info, o, trace, warn, Drain, Logger};
 use std::collections::{btree_map::Entry, BTreeMap};
 use std::net::SocketAddr;
 use std::path::Path;
@@ -372,10 +372,20 @@ impl Oximeter {
     /// This starts an HTTP server used to communicate with other agents in Omicron, especially
     /// Nexus. It also registers itself as a new `oximeter` instance with Nexus.
     pub async fn new(config: &Config) -> Result<Self, Error> {
-        let log = config
-            .log
-            .to_logger("oximeter")
-            .map_err(|msg| Error::Server(msg.to_string()))?;
+        let (drain, registration) = slog_dtrace::with_drain(
+            config
+                .log
+                .to_logger("oximeter")
+                .map_err(|msg| Error::Server(msg.to_string()))?,
+        );
+        let log = slog::Logger::root(drain.fuse(), o!());
+        if let slog_dtrace::ProbeRegistration::Failed(e) = registration {
+            let msg = format!("failed to register DTrace probes: {}", e);
+            error!(log, "{}", msg);
+            return Err(Error::Server(msg));
+        } else {
+            debug!(log, "registered DTrace probes");
+        }
         info!(log, "starting oximeter server");
 
         let make_agent = || async {
