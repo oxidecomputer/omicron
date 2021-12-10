@@ -101,7 +101,7 @@ fn run_command_with_arg(arg: &str) -> (String, String) {
      * purpose.  However, it's not clear how to reliably locate it at runtime.
      * But we do know where it is at compile time, so we load it then.
      */
-    let config = include_str!("../examples/config.toml");
+    let config = include_str!("../../examples/config.toml");
     let config_path = write_config(config);
     let exec = Exec::cmd(path_to_nexus()).arg(&config_path).arg(arg);
     let (exit_status, stdout_text, stderr_text) = run_command(exec);

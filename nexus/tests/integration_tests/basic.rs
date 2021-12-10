@@ -27,17 +27,13 @@ use omicron_nexus::external_api::{
 use serde::Serialize;
 use uuid::Uuid;
 
-pub mod common;
-use common::http_testing::AuthnMode;
-use common::http_testing::NexusRequest;
-use common::http_testing::RequestBuilder;
-use common::resource_helpers::create_organization;
-use common::resource_helpers::create_project;
-use common::start_sled_agent;
-use common::test_setup;
-
-#[macro_use]
-extern crate slog;
+use nexus_test_utils::http_testing::AuthnMode;
+use nexus_test_utils::http_testing::NexusRequest;
+use nexus_test_utils::http_testing::RequestBuilder;
+use nexus_test_utils::resource_helpers::create_organization;
+use nexus_test_utils::resource_helpers::create_project;
+use nexus_test_utils::start_sled_agent;
+use nexus_test_utils::test_setup;
 
 #[tokio::test]
 async fn test_basic_failures() {
@@ -531,9 +527,10 @@ async fn test_projects_list() {
     assert_eq!(projects_list(&client, &projects_url).await.len(), 0);
 
     /* Create a large number of projects that we can page through. */
-    let nprojects = 1000;
-    let mut projects_created = Vec::with_capacity(nprojects);
-    for _ in 0..nprojects {
+    let projects_total = 10;
+    let projects_subset = 3;
+    let mut projects_created = Vec::with_capacity(projects_total);
+    for _ in 0..projects_total {
         /*
          * We'll use uuids for the names to make sure that works, and that we
          * can paginate through by _name_ even though the names happen to be
@@ -565,7 +562,9 @@ async fn test_projects_list() {
      * increasing order of name.
      */
     let found_projects_by_name =
-        iter_collection::<Project>(&client, projects_url, "", 99).await.0;
+        iter_collection::<Project>(&client, projects_url, "", projects_subset)
+            .await
+            .0;
     assert_eq!(found_projects_by_name.len(), project_names_by_name.len());
     assert_eq!(
         project_names_by_name,
@@ -583,7 +582,7 @@ async fn test_projects_list() {
         &client,
         projects_url,
         "sort_by=name-ascending",
-        99,
+        projects_subset,
     )
     .await
     .0;
@@ -604,7 +603,7 @@ async fn test_projects_list() {
         &client,
         projects_url,
         "sort_by=name-descending",
-        99,
+        projects_subset,
     )
     .await
     .0;
@@ -625,7 +624,7 @@ async fn test_projects_list() {
         &client,
         projects_url,
         "sort_by=id-ascending",
-        99,
+        projects_subset,
     )
     .await
     .0;

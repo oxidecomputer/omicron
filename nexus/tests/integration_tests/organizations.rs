@@ -6,15 +6,12 @@ use omicron_nexus::external_api::views::Organization;
 
 use dropshot::test_util::{object_delete, object_get};
 
-pub mod common;
-use common::resource_helpers::{
-    create_organization, create_project, objects_list_page_authz,
-};
-use common::test_setup;
 use http::method::Method;
 use http::StatusCode;
-
-extern crate slog;
+use nexus_test_utils::resource_helpers::{
+    create_organization, create_project, objects_list_page_authz,
+};
+use nexus_test_utils::test_setup;
 
 #[tokio::test]
 async fn test_organizations() {

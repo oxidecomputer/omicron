@@ -4,8 +4,6 @@
 
 //! Integration tests for oximeter collectors and producers.
 
-pub mod common;
-
 use omicron_test_utils::dev::poll::{wait_for_condition, CondCheckError};
 use oximeter_db::DbWrite;
 use std::net;
@@ -14,7 +12,8 @@ use uuid::Uuid;
 
 #[tokio::test]
 async fn test_oximeter_database_records() {
-    let context = common::test_setup("test_oximeter_database_records").await;
+    let context =
+        nexus_test_utils::test_setup("test_oximeter_database_records").await;
     let db = &context.database;
 
     // Get a handle to the DB, for various tests
@@ -33,7 +32,7 @@ async fn test_oximeter_database_records() {
     let actual_id = result[0].get::<&str, Uuid>("id");
     assert_eq!(
         actual_id,
-        common::OXIMETER_UUID.parse().unwrap(),
+        nexus_test_utils::OXIMETER_UUID.parse().unwrap(),
         "Oximeter ID does not match the ID returned from the database"
     );
 
@@ -50,13 +49,13 @@ async fn test_oximeter_database_records() {
     let actual_id = result[0].get::<&str, Uuid>("id");
     assert_eq!(
         actual_id,
-        common::PRODUCER_UUID.parse().unwrap(),
+        nexus_test_utils::PRODUCER_UUID.parse().unwrap(),
         "Producer ID does not match the ID returned from the database"
     );
     let actual_oximeter_id = result[0].get::<&str, Uuid>("oximeter_id");
     assert_eq!(
         actual_oximeter_id,
-        common::OXIMETER_UUID.parse().unwrap(),
+        nexus_test_utils::OXIMETER_UUID.parse().unwrap(),
         "Producer's oximeter ID returned from the database does not match the expected ID"
     );
 
@@ -65,10 +64,11 @@ async fn test_oximeter_database_records() {
 
 #[tokio::test]
 async fn test_oximeter_reregistration() {
-    let mut context = common::test_setup("test_oximeter_reregistration").await;
+    let mut context =
+        nexus_test_utils::test_setup("test_oximeter_reregistration").await;
     let db = &context.database;
-    let producer_id = common::PRODUCER_UUID.parse().unwrap();
-    let oximeter_id = common::OXIMETER_UUID.parse().unwrap();
+    let producer_id = nexus_test_utils::PRODUCER_UUID.parse().unwrap();
+    let oximeter_id = nexus_test_utils::OXIMETER_UUID.parse().unwrap();
 
     // Get a handle to the DB, for various tests
     let conn = db.connect().await.unwrap();
@@ -157,9 +157,9 @@ async fn test_oximeter_reregistration() {
 
     // Restart the producer, and verify that we have _more_ data than before
     // Set up a test metric producer server
-    context.producer = common::start_producer_server(
+    context.producer = nexus_test_utils::start_producer_server(
         context.server.http_server_internal.local_addr(),
-        common::PRODUCER_UUID.parse().unwrap(),
+        nexus_test_utils::PRODUCER_UUID.parse().unwrap(),
     )
     .await
     .expect("Failed to restart metric producer server");
@@ -229,7 +229,7 @@ async fn test_oximeter_reregistration() {
     let timeseries = new_timeseries;
 
     // Restart oximeter again, and verify that we have even more new data.
-    context.oximeter = common::start_oximeter(
+    context.oximeter = nexus_test_utils::start_oximeter(
         context.server.http_server_internal.local_addr(),
         context.clickhouse.port(),
         oximeter_id,

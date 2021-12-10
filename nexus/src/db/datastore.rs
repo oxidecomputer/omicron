@@ -27,6 +27,7 @@ use super::collection_insert::{
 };
 use super::error::diesel_pool_result_optional;
 use super::identity::{Asset, Resource};
+use super::pool::DbConnection;
 use super::Pool;
 use crate::authn;
 use crate::authz;
@@ -87,15 +88,14 @@ impl DataStore {
     // the database.  Eventually, this function should only be used for doing
     // authentication in the first place (since we can't do an authz check in
     // that case).
-    fn pool(&self) -> &bb8::Pool<ConnectionManager<diesel::PgConnection>> {
+    fn pool(&self) -> &bb8::Pool<ConnectionManager<DbConnection>> {
         self.pool.pool()
     }
 
     fn pool_authorized(
         &self,
         opctx: &OpContext,
-    ) -> Result<&bb8::Pool<ConnectionManager<diesel::PgConnection>>, Error>
-    {
+    ) -> Result<&bb8::Pool<ConnectionManager<DbConnection>>, Error> {
         opctx.authorize(authz::Action::Query, authz::DATABASE)?;
         Ok(self.pool.pool())
     }

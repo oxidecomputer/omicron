@@ -164,10 +164,21 @@ impl Server {
  * Run an instance of the [Server].
  */
 pub async fn run_server(config: &Config) -> Result<(), String> {
-    let log = config
-        .log
-        .to_logger("nexus")
-        .map_err(|message| format!("initializing logger: {}", message))?;
+    use slog::Drain;
+    let (drain, registration) = slog_dtrace::with_drain(
+        config
+            .log
+            .to_logger("nexus")
+            .map_err(|message| format!("initializing logger: {}", message))?,
+    );
+    let log = slog::Logger::root(drain.fuse(), slog::o!());
+    if let slog_dtrace::ProbeRegistration::Failed(e) = registration {
+        let msg = format!("failed to register DTrace probes: {}", e);
+        error!(log, "{}", msg);
+        return Err(msg);
+    } else {
+        debug!(log, "registered DTrace probes");
+    }
     let rack_id = Uuid::new_v4();
     let server = Server::start(config, &rack_id, &log).await?;
     server.register_as_producer().await;

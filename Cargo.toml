@@ -3,6 +3,7 @@ members = [
     "common",
     "nexus",
     "nexus/src/db/db-macros",
+    "nexus/test-utils",
     "nexus-client",
     "package",
     "rpaths",

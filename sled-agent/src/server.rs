@@ -7,6 +7,7 @@
 use super::config::Config;
 use super::http_entrypoints::api as http_api;
 use super::sled_agent::SledAgent;
+use slog::Drain;
 
 use omicron_common::backoff::{
     internal_service_policy, retry_notify, BackoffError,
@@ -28,11 +29,19 @@ pub struct Server {
 impl Server {
     /// Starts a SledAgent server
     pub async fn start(config: &Config) -> Result<Server, String> {
-        let log = config
-            .log
-            .to_logger("sled-agent")
-            .map_err(|message| format!("initializing logger: {}", message))?;
-
+        let (drain, registration) = slog_dtrace::with_drain(
+            config.log.to_logger("sled-agent").map_err(|message| {
+                format!("initializing logger: {}", message)
+            })?,
+        );
+        let log = slog::Logger::root(drain.fuse(), slog::o!());
+        if let slog_dtrace::ProbeRegistration::Failed(e) = registration {
+            let msg = format!("Failed to register DTrace probes: {}", e);
+            error!(log, "{}", msg);
+            return Err(msg);
+        } else {
+            debug!(log, "registered DTrace probes");
+        }
         info!(log, "setting up sled agent server");
 
         let client_log = log.new(o!("component" => "NexusClient"));

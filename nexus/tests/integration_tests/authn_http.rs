@@ -8,8 +8,6 @@
 // a lower-level interface, since our hyper Client will not allow us to send
 // such invalid requests.
 
-pub mod common;
-
 use async_trait::async_trait;
 use chrono::{DateTime, Duration, Utc};
 use dropshot::endpoint;
@@ -29,9 +27,6 @@ use omicron_nexus::authn::external::HttpAuthnScheme;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use uuid::Uuid;
-
-#[macro_use]
-extern crate slog;
 
 /// Tests authn::external::Authenticator with the "spoof" scheme allowed
 ///
@@ -270,7 +265,7 @@ async fn start_whoami_server(
     authn_schemes_configured: Vec<Box<dyn HttpAuthnScheme<WhoamiServerState>>>,
     sessions: HashMap<String, FakeSession>,
 ) -> TestContext<WhoamiServerState> {
-    let config = common::load_test_config();
+    let config = nexus_test_utils::load_test_config();
     let logctx = LogContext::new(test_name, &config.log);
 
     let whoami_api = {
