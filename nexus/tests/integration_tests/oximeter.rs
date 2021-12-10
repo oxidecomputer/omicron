@@ -268,4 +268,5 @@ async fn test_oximeter_reregistration() {
         timeseries.measurements,
         new_timeseries.measurements[..timeseries.measurements.len()]
     );
+    context.teardown().await;
 }
