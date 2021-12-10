@@ -730,10 +730,12 @@ dependencies = [
 [[package]]
 name = "diesel-dtrace"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/diesel-dtrace?branch=main#dfeff3201eb8180220542b29021f0b5f71e50b46"
+source = "git+https://github.com/oxidecomputer/diesel-dtrace?branch=main#2e586f1424baf02ca6991d8ea63c4dd84c81a0ef"
 dependencies = [
  "diesel",
+ "serde",
  "usdt",
+ "uuid",
 ]
 
 [[package]]
