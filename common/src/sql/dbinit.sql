@@ -736,7 +736,7 @@ CREATE TABLE omicron.public.role_builtin (
     role_name STRING(63),
     description STRING(512),
 
-    PRIMARY KEY(resource_kind, role_name)
+    PRIMARY KEY(resource_type, role_name)
 );
 
 /*******************************************************************/

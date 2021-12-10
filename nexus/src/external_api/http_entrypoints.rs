@@ -2052,7 +2052,7 @@ async fn roles_get(
         Ok(HttpResponseOk(dropshot::ResultsPage::new(
             roles,
             &EmptyScanParams {},
-            |role: &Role, _| RolePage { last_seen: role.full_name.clone() },
+            |role: &Role, _| RolePage { last_seen: role.name.clone() },
         )?))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await

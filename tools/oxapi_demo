@@ -72,6 +72,13 @@ HARDWARE
 
     sleds_list
     sled_get     SLED_ID
+
+IAM
+
+    users_list
+    users_get    USER_NAME
+    roles_list
+    role_get     ROLE_NAME
 EOF
 )"
 
@@ -372,6 +379,30 @@ function cmd_sled_get
 {
 	[[ $# != 1 ]] && usage "expected SLED_ID"
 	do_curl "/hardware/sleds/$1"
+}
+
+function cmd_users_list
+{
+	[[ $# != 0 ]] && usage "expected no arguments"
+	do_curl_authn "/users"
+}
+
+function cmd_user_get
+{
+	[[ $# != 1 ]] && usage "expected USER_NAME"
+	do_curl_authn "/users/$1"
+}
+
+function cmd_roles_list
+{
+	[[ $# != 0 ]] && usage "expected no arguments"
+	do_curl_authn "/roles"
+}
+
+function cmd_role_get
+{
+	[[ $# != 1 ]] && usage "expected ROLE_NAME"
+	do_curl_authn "/roles/$1"
 }
 
 main "$@"
