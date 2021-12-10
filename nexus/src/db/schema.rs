@@ -301,9 +301,10 @@ table! {
 }
 
 table! {
-    role_builtin (name, resource_name) {
-        name -> Text,
-        resource_name -> Text,
+    role_builtin (resource_type, role_name) {
+        resource_type -> Text,
+        role_name -> Text,
+        description -> Text,
     }
 }
 

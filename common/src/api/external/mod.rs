@@ -467,6 +467,7 @@ impl TryFrom<i64> for Generation {
  */
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub enum ResourceType {
+    Fleet,
     Organization,
     Project,
     Dataset,
@@ -483,6 +484,7 @@ pub enum ResourceType {
     RouterRoute,
     Oximeter,
     MetricProducer,
+    Role,
     User,
     Zpool,
 }
@@ -493,6 +495,7 @@ impl Display for ResourceType {
             f,
             "{}",
             match self {
+                ResourceType::Fleet => "fleet",
                 ResourceType::Organization => "organization",
                 ResourceType::Project => "project",
                 ResourceType::Dataset => "dataset",
@@ -509,6 +512,7 @@ impl Display for ResourceType {
                 ResourceType::RouterRoute => "vpc router route",
                 ResourceType::Oximeter => "oximeter",
                 ResourceType::MetricProducer => "metric producer",
+                ResourceType::Role => "role",
                 ResourceType::User => "user",
                 ResourceType::Zpool => "zpool",
             }

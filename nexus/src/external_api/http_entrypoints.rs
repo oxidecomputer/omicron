@@ -12,10 +12,9 @@ use crate::ServerContext;
 
 use super::{
     console_api, params,
-    views::{Organization, Project, Rack, Sled, User, Vpc, VpcSubnet},
+    views::{Organization, Project, Rack, Role, Sled, User, Vpc, VpcSubnet},
 };
 use crate::context::OpContext;
-use dropshot::endpoint;
 use dropshot::ApiDescription;
 use dropshot::HttpError;
 use dropshot::HttpResponseAccepted;
@@ -28,6 +27,8 @@ use dropshot::Query;
 use dropshot::RequestContext;
 use dropshot::ResultsPage;
 use dropshot::TypedBody;
+use dropshot::WhichPage;
+use dropshot::{endpoint, EmptyScanParams, PaginationOrder, PaginationParams};
 use omicron_common::api::external::http_pagination::data_page_params_for;
 use omicron_common::api::external::http_pagination::data_page_params_nameid_id;
 use omicron_common::api::external::http_pagination::data_page_params_nameid_name;
@@ -44,8 +45,8 @@ use omicron_common::api::external::to_list;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Disk;
 use omicron_common::api::external::DiskAttachment;
+use omicron_common::api::external::Error;
 use omicron_common::api::external::Instance;
-use omicron_common::api::external::PaginationOrder;
 use omicron_common::api::external::RouterRoute;
 use omicron_common::api::external::RouterRouteCreateParams;
 use omicron_common::api::external::RouterRouteKind;
@@ -59,6 +60,7 @@ use omicron_common::api::external::VpcRouterKind;
 use ref_cast::RefCast;
 use schemars::JsonSchema;
 use serde::Deserialize;
+use serde::Serialize;
 use std::num::NonZeroU32;
 use std::sync::Arc;
 use uuid::Uuid;
@@ -137,6 +139,8 @@ pub fn external_api() -> NexusApiDescription {
 
         api.register(users_get)?;
         api.register(users_get_user)?;
+
+        api.register(roles_get)?;
 
         api.register(console_api::spoof_login)?;
         api.register(console_api::spoof_login_form)?;
@@ -1992,3 +1996,97 @@ async fn users_get_user(
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
+
+/*
+ * Built-in roles
+ */
+
+/*
+ * Roles have their own pagination scheme because they do not use the usual "id"
+ * or "name" types.  For more, see the comment in dbinit.sql.
+ */
+#[derive(Deserialize, JsonSchema, Serialize)]
+struct RolePage {
+    last_seen: String,
+}
+
+/**
+ * List the built-in roles
+ */
+#[endpoint {
+    method = GET,
+    path = "/roles",
+}]
+async fn roles_get(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    query_params: Query<PaginationParams<EmptyScanParams, RolePage>>,
+) -> Result<HttpResponseOk<ResultsPage<Role>>, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let query = query_params.into_inner();
+    let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let marker = match &query.page {
+            WhichPage::First(..) => None,
+            WhichPage::Next(RolePage { last_seen }) => {
+                Some(last_seen.split_once('.').ok_or_else(|| {
+                    Error::InvalidValue {
+                        label: last_seen.clone(),
+                        message: String::from("bad page token"),
+                    }
+                })?)
+                .map(|(s1, s2)| (s1.to_string(), s2.to_string()))
+            }
+        };
+        let pagparams = DataPageParams {
+            limit: rqctx.page_limit(&query)?,
+            direction: PaginationOrder::Ascending,
+            marker: marker.as_ref(),
+        };
+        let roles = nexus
+            .roles_builtin_list(&opctx, &pagparams)
+            .await?
+            .into_iter()
+            .map(|i| i.into())
+            .collect();
+        Ok(HttpResponseOk(dropshot::ResultsPage::new(
+            roles,
+            &EmptyScanParams {},
+            |role: &Role, _| RolePage { last_seen: role.full_name.clone() },
+        )?))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+// XXX
+// /**
+//  * Path parameters for global (system) role requests
+//  */
+// #[derive(Deserialize, JsonSchema)]
+// struct RolePathParam {
+//     /// The built-in role's unique name.
+//     role_name: Name,
+// }
+//
+// /**
+//  * Fetch a specific built-in role
+//  */
+// #[endpoint {
+//     method = GET,
+//     path = "/roles/{role_name}",
+// }]
+// async fn roles_get_role(
+//     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+//     path_params: Path<RolePathParam>,
+// ) -> Result<HttpResponseOk<Role>, HttpError> {
+//     let apictx = rqctx.context();
+//     let nexus = &apictx.nexus;
+//     let path = path_params.into_inner();
+//     let role_name = &path.role_name;
+//     let handler = async {
+//         let opctx = OpContext::for_external_api(&rqctx).await?;
+//         let role = nexus.role_builtin_fetch(&opctx, &role_name).await?;
+//         Ok(HttpResponseOk(role.into()))
+//     };
+//     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+// }

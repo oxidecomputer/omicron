@@ -5,10 +5,8 @@
 //! Authorization facilities
 
 use crate::authn;
-use anyhow::anyhow;
 use omicron_common::api::external::Error;
 use oso::Oso;
-use std::collections::BTreeMap;
 use std::sync::Arc;
 
 mod oso_types;
@@ -34,48 +32,6 @@ impl Authz {
     pub fn new() -> Authz {
         let oso = oso_types::make_omicron_oso().expect("initializing Oso");
         Authz { oso }
-    }
-
-    pub fn builtin_roles(
-        &self,
-    ) -> Result<BTreeMap<String, Vec<String>>, anyhow::Error> {
-        use polar_core::resource_block::Declaration;
-        let kb = self.oso.inner.kb.read().unwrap();
-        let mut rv = BTreeMap::new();
-
-        for (resource, declarations) in kb.resource_blocks.declarations() {
-            let resource_name = resource
-                .value()
-                .as_symbol()
-                .map_err(|error| {
-                    anyhow!(
-                        "resource {:?}: expected symbol or string: {}",
-                        resource,
-                        error
-                    )
-                })?
-                .to_string();
-            let roles = declarations
-                .iter()
-                .filter(|(_, decl)| matches!(decl, Declaration::Role))
-                .map(|(role_term, _)| {
-                    role_term.value().as_string().map(String::from).map_err(
-                        |error| {
-                            anyhow!(
-                                "resource {:?}: \
-                                expected role name {:?} to be a string: {}",
-                                resource_name,
-                                role_term,
-                                error
-                            )
-                        },
-                    )
-                })
-                .collect::<Result<Vec<String>, anyhow::Error>>()?;
-            rv.insert(resource_name, roles);
-        }
-
-        Ok(rv)
     }
 }
 

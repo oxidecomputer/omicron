@@ -1905,7 +1905,6 @@ dependencies = [
  "oximeter-instruments",
  "oximeter-producer",
  "parse-display",
- "polar-core",
  "pq-sys",
  "rand",
  "ref-cast",

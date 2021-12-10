@@ -33,6 +33,7 @@ use crate::authn;
 use crate::authz;
 use crate::context::OpContext;
 use crate::db::model::RoleBuiltin;
+use crate::db::pagination::paginated_multicolumn;
 use crate::external_api::params;
 use async_bb8_diesel::{AsyncConnection, AsyncRunQueryDsl, ConnectionManager};
 use chrono::Utc;
@@ -2028,33 +2029,55 @@ impl DataStore {
         Ok(())
     }
 
+    /// List built-in roles
+    pub async fn roles_builtin_list_by_name(
+        &self,
+        opctx: &OpContext,
+        pagparams: &DataPageParams<'_, (String, String)>,
+    ) -> ListResultVec<RoleBuiltin> {
+        use db::schema::role_builtin::dsl;
+        opctx.authorize(authz::Action::ListChildren, authz::FLEET)?;
+        paginated_multicolumn(
+            dsl::role_builtin,
+            (dsl::resource_type, dsl::role_name),
+            pagparams,
+        )
+        .select(RoleBuiltin::as_select())
+        .load_async::<RoleBuiltin>(self.pool_authorized(opctx)?)
+        .await
+        .map_err(|e| {
+            public_error_from_diesel_pool(
+                e,
+                ResourceType::Role,
+                LookupType::Other("Listing All".to_string()),
+            )
+        })
+    }
+
     /// Load built-in roles into the database
     pub async fn load_builtin_roles(
         &self,
         opctx: &OpContext,
-        roles: &std::collections::BTreeMap<String, Vec<String>>,
     ) -> Result<(), Error> {
         use db::schema::role_builtin::dsl;
 
         opctx.authorize(authz::Action::Modify, authz::FLEET)?;
 
-        let builtin_roles = roles
+        let builtin_roles = super::fixed_data::role_builtin::BUILTIN_ROLES
             .iter()
-            .map(|(resource_name, role_list)| {
-                role_list
-                    .iter()
-                    .map(move |role_name| (resource_name, role_name))
-            })
-            .flatten()
-            .map(|(resource_name, role_name)| {
-                RoleBuiltin::new(resource_name, role_name)
+            .map(|role_config| {
+                RoleBuiltin::new(
+                    role_config.resource_type,
+                    &role_config.role_name,
+                    &role_config.description,
+                )
             })
             .collect::<Vec<RoleBuiltin>>();
 
         debug!(opctx.log, "attempting to create built-in roles");
         let count = diesel::insert_into(dsl::role_builtin)
             .values(builtin_roles)
-            .on_conflict((dsl::resource_name, dsl::name))
+            .on_conflict((dsl::resource_type, dsl::role_name))
             .do_nothing()
             .execute_async(self.pool_authorized(opctx)?)
             .await

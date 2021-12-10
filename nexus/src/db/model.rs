@@ -1776,7 +1776,7 @@ impl ConsoleSession {
 #[table_name = "user_builtin"]
 pub struct UserBuiltin {
     #[diesel(embed)]
-    identity: UserBuiltinIdentity,
+    pub identity: UserBuiltinIdentity,
 }
 
 impl UserBuiltin {
@@ -1790,16 +1790,22 @@ impl UserBuiltin {
 #[derive(Queryable, Insertable, Debug, Selectable)]
 #[table_name = "role_builtin"]
 pub struct RoleBuiltin {
-    resource_name: String,
-    name: String,
+    pub resource_type: String,
+    pub role_name: String,
+    pub description: String,
 }
 
 impl RoleBuiltin {
     /// Creates a new database UserBuiltin object.
-    pub fn new(resource_name: &str, name: &str) -> Self {
+    pub fn new(
+        resource_type: omicron_common::api::external::ResourceType,
+        role_name: &str,
+        description: &str,
+    ) -> Self {
         Self {
-            resource_name: String::from(resource_name),
-            name: String::from(name),
+            resource_type: resource_type.to_string(),
+            role_name: String::from(role_name),
+            description: String::from(description),
         }
     }
 }

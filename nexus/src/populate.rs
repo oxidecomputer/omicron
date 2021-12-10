@@ -3,7 +3,6 @@
 use crate::context::OpContext;
 use crate::db::DataStore;
 use omicron_common::backoff;
-use std::collections::BTreeMap;
 use std::sync::Arc;
 
 #[derive(Clone, Debug)]
@@ -16,12 +15,11 @@ pub enum PopulateStatus {
 pub fn populate_start(
     opctx: OpContext,
     datastore: Arc<DataStore>,
-    builtin_roles: std::collections::BTreeMap<String, Vec<String>>,
 ) -> tokio::sync::watch::Receiver<PopulateStatus> {
     let (tx, rx) = tokio::sync::watch::channel(PopulateStatus::NotDone);
 
     tokio::spawn(async move {
-        let result = populate(&opctx, &datastore, &builtin_roles).await;
+        let result = populate(&opctx, &datastore).await;
         if let Err(error) = tx.send(match result {
             Ok(()) => PopulateStatus::Done,
             Err(message) => PopulateStatus::Failed(message),
@@ -36,10 +34,9 @@ pub fn populate_start(
 async fn populate(
     opctx: &OpContext,
     datastore: &DataStore,
-    builtin_roles: &std::collections::BTreeMap<String, Vec<String>>,
 ) -> Result<(), String> {
     populate_users(opctx, &datastore).await?;
-    populate_roles(opctx, &datastore, builtin_roles).await
+    populate_roles(opctx, &datastore).await
 }
 
 async fn populate_users(
@@ -84,15 +81,15 @@ async fn populate_users(
     db_result.map_err(|error| error.to_string())
 }
 
+// XXX commonize
 async fn populate_roles(
     opctx: &OpContext,
     datastore: &DataStore,
-    builtin_roles: &BTreeMap<String, Vec<String>>,
 ) -> Result<(), String> {
     let db_result = backoff::retry_notify(
         backoff::internal_service_policy(),
         || async {
-            datastore.load_builtin_roles(&opctx, builtin_roles).await.map_err(
+            datastore.load_builtin_roles(&opctx).await.map_err(
                 |error| {
                     use omicron_common::api::external::Error;
                     match &error {

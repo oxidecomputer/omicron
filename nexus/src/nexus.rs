@@ -186,7 +186,6 @@ impl Nexus {
         let populate_status = populate_start(
             populate_ctx,
             Arc::clone(&db_datastore),
-            authz.builtin_roles().expect("failed to introspect Oso file"),
         );
 
         let nexus = Nexus {
@@ -2117,6 +2116,18 @@ impl Nexus {
         name: &Name,
     ) -> LookupResult<db::model::UserBuiltin> {
         self.db_datastore.user_builtin_fetch(opctx, name).await
+    }
+
+    /*
+     * Built-in roles
+     */
+
+    pub async fn roles_builtin_list(
+        &self,
+        opctx: &OpContext,
+        pagparams: &DataPageParams<'_, (String, String)>,
+    ) -> ListResultVec<db::model::RoleBuiltin> {
+        self.db_datastore.roles_builtin_list_by_name(opctx, pagparams).await
     }
 
     /*

@@ -198,3 +198,22 @@ impl Into<User> for model::UserBuiltin {
         User { identity: self.identity() }
     }
 }
+
+/*
+ * ROLES
+ */
+
+/**
+ * Client view of a [`Role`]
+ */
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct Role {
+    pub full_name: String,
+}
+
+impl Into<Role> for model::RoleBuiltin {
+    fn into(self) -> Role {
+        Role { full_name: format!("{}.{}", self.resource_type, self.role_name) }
+    }
+}
