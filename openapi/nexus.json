@@ -2791,6 +2791,49 @@
         }
       }
     },
+    "/timeseries/schema": {
+      "get": {
+        "description": "List all timeseries schema",
+        "operationId": "timeseries_schema_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "nullable": true,
+              "description": "Maximum number of items returned by a single call",
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 1
+            },
+            "style": "form"
+          },
+          {
+            "in": "query",
+            "name": "page_token",
+            "schema": {
+              "nullable": true,
+              "description": "Token returned by previous call to retreive the subsequent page",
+              "type": "string"
+            },
+            "style": "form"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TimeseriesSchemaResultsPage"
+                }
+              }
+            }
+          }
+        },
+        "x-dropshot-pagination": true
+      }
+    },
     "/users": {
       "get": {
         "description": "List the built-in system users",
@@ -2879,6 +2922,21 @@
         "type": "integer",
         "format": "uint64",
         "minimum": 0
+      },
+      "DatumType": {
+        "description": "The type of an individual datum of a metric.",
+        "type": "string",
+        "enum": [
+          "Bool",
+          "I64",
+          "F64",
+          "String",
+          "Bytes",
+          "CumulativeI64",
+          "CumulativeF64",
+          "HistogramI64",
+          "HistogramF64"
+        ]
       },
       "Disk": {
         "description": "Client view of an [`Disk`]",
@@ -3143,6 +3201,45 @@
               "state"
             ]
           }
+        ]
+      },
+      "FieldSchema": {
+        "description": "The name and type information for a field of a timeseries schema.",
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "source": {
+            "$ref": "#/components/schemas/FieldSource"
+          },
+          "ty": {
+            "$ref": "#/components/schemas/FieldType"
+          }
+        },
+        "required": [
+          "name",
+          "source",
+          "ty"
+        ]
+      },
+      "FieldSource": {
+        "description": "The source from which a field is derived, the target or metric.",
+        "type": "string",
+        "enum": [
+          "Target",
+          "Metric"
+        ]
+      },
+      "FieldType": {
+        "description": "The `FieldType` identifies the data type of a target or metric field.",
+        "type": "string",
+        "enum": [
+          "String",
+          "I64",
+          "IpAddr",
+          "Uuid",
+          "Bool"
         ]
       },
       "IdentityMetadata": {
@@ -4191,6 +4288,59 @@
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/Sled"
+            }
+          },
+          "next_page": {
+            "nullable": true,
+            "description": "token used to fetch the next page of results (if any)",
+            "type": "string"
+          }
+        },
+        "required": [
+          "items"
+        ]
+      },
+      "TimeseriesName": {
+        "description": "A timeseries name.\n\nTimeseries are named by concatenating the names of their target and metric, joined with a colon.",
+        "type": "string"
+      },
+      "TimeseriesSchema": {
+        "description": "The schema for a timeseries.\n\nThis includes the name of the timeseries, as well as the datum type of its metric and the schema for each field.",
+        "type": "object",
+        "properties": {
+          "created": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "datum_type": {
+            "$ref": "#/components/schemas/DatumType"
+          },
+          "field_schema": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/FieldSchema"
+            }
+          },
+          "timeseries_name": {
+            "$ref": "#/components/schemas/TimeseriesName"
+          }
+        },
+        "required": [
+          "created",
+          "datum_type",
+          "field_schema",
+          "timeseries_name"
+        ]
+      },
+      "TimeseriesSchemaResultsPage": {
+        "description": "A single page of results",
+        "type": "object",
+        "properties": {
+          "items": {
+            "description": "list of items on this page of results",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TimeseriesSchema"
             }
           },
           "next_page": {

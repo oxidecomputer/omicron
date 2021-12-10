@@ -46,3 +46,7 @@ level = "trace"
 mode = "file"
 if_exists = "fail"
 path = "UNUSED"
+
+# Configuration for interacting with the timeseries database
+[timeseries_db]
+address = "[::1]:8123"

@@ -135,9 +135,8 @@ enum Subcommand {
 }
 
 async fn make_client(port: u16, log: &Logger) -> Result<Client, anyhow::Error> {
-    let client_log = log.new(o!("component" => "oximeter_client"));
     let address = SocketAddr::new("::1".parse().unwrap(), port);
-    let client = Client::new(address, client_log);
+    let client = Client::new(address, &log);
     client
         .init_db()
         .await

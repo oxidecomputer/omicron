@@ -141,6 +141,8 @@ pub fn external_api() -> NexusApiDescription {
         api.register(users_get)?;
         api.register(users_get_user)?;
 
+        api.register(timeseries_schema_get)?;
+
         api.register(console_api::spoof_login)?;
         api.register(console_api::spoof_login_form)?;
         api.register(console_api::logout)?;
@@ -2030,6 +2032,28 @@ async fn users_get_user(
         let opctx = OpContext::for_external_api(&rqctx).await?;
         let user = nexus.user_builtin_fetch(&opctx, &user_name).await?;
         Ok(HttpResponseOk(user.into()))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/**
+ * List all timeseries schema
+ */
+#[endpoint {
+    method = GET,
+    path = "/timeseries/schema",
+}]
+async fn timeseries_schema_get(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    query_params: Query<oximeter_db::TimeseriesSchemaPaginationParams>,
+) -> Result<HttpResponseOk<ResultsPage<oximeter_db::TimeseriesSchema>>, HttpError>
+{
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let query = query_params.into_inner();
+    let limit = rqctx.page_limit(&query)?;
+    let handler = async {
+        Ok(HttpResponseOk(nexus.timeseries_schema_list(&query, limit).await?))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
