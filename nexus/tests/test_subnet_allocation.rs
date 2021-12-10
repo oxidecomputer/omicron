@@ -120,9 +120,12 @@ async fn test_subnet_allocation() {
 
     // Verify the subnet lists the two addresses as in use
     let url_ips = format!("{}/ips", url_subnet);
-    let network_interfaces =
+    let mut network_interfaces =
         objects_list_page::<NetworkInterface>(client, &url_ips).await.items;
     assert_eq!(network_interfaces.len(), 2);
+
+    // Sort by IP address to simplify the checks
+    network_interfaces.sort_by(|a, b| a.ip.cmp(&b.ip));
     assert_eq!(
         network_interfaces[0].ip,
         "192.168.42.5".parse::<IpAddr>().unwrap()

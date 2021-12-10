@@ -1123,6 +1123,33 @@ impl DataStore {
         }
     }
 
+    pub async fn instance_delete_network_interface(
+        &self,
+        network_interface_id: &Uuid,
+    ) -> DeleteResult {
+        use db::schema::network_interface::dsl;
+
+        // TODO-correctness: Do not allow deleting interfaces on running
+        // instances until we support hotplug
+
+        let now = Utc::now();
+        diesel::update(dsl::network_interface)
+            .filter(dsl::time_deleted.is_null())
+            .filter(dsl::id.eq(*network_interface_id))
+            .set(dsl::time_deleted.eq(now))
+            .returning(NetworkInterface::as_returning())
+            .get_result_async(self.pool())
+            .await
+            .map_err(|e| {
+                public_error_from_diesel_pool(
+                    e,
+                    ResourceType::NetworkInterface,
+                    LookupType::ById(*network_interface_id),
+                )
+            })?;
+        Ok(())
+    }
+
     // Create a record for a new Oximeter instance
     pub async fn oximeter_create(
         &self,
