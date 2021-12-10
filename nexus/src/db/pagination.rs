@@ -4,7 +4,7 @@
 
 //! Interface for paginating database queries.
 
-use diesel::dsl::{Asc, Desc, Gt, GtEq, Lt, LtEq};
+use diesel::dsl::{Asc, Desc, Eq, Gt, Lt};
 use diesel::expression::AsExpression;
 use diesel::pg::Pg;
 use diesel::query_builder::AsQuery;
@@ -91,9 +91,9 @@ where
     BoxedQuery<T>: query_methods::FilterDsl<Gt<C1, M1>, Output = BoxedQuery<T>>,
     BoxedQuery<T>: query_methods::FilterDsl<Lt<C1, M1>, Output = BoxedQuery<T>>,
     BoxedQuery<T>:
-        query_methods::FilterDsl<GtEq<C1, M1>, Output = BoxedQuery<T>>,
+        query_methods::FilterDsl<Eq<C1, M1>, Output = BoxedQuery<T>>,
     BoxedQuery<T>:
-        query_methods::FilterDsl<LtEq<C1, M1>, Output = BoxedQuery<T>>,
+        query_methods::FilterDsl<Eq<C1, M1>, Output = BoxedQuery<T>>,
     BoxedQuery<T>: query_methods::FilterDsl<Gt<C2, M2>, Output = BoxedQuery<T>>,
     BoxedQuery<T>: query_methods::FilterDsl<Lt<C2, M2>, Output = BoxedQuery<T>>,
 {
@@ -102,14 +102,14 @@ where
     match pagparams.direction {
         dropshot::PaginationOrder::Ascending => {
             if let Some((v1, v2)) = marker {
-                query = query.filter((c1.ge(v1).and(c2.gt(v2))).or(c1.gt(v1)))
+                query = query.filter((c1.eq(v1).and(c2.gt(v2))).or(c1.gt(v1)))
             }
 
             query.order((c1.asc(), c2.asc()))
         }
         dropshot::PaginationOrder::Descending => {
             if let Some((v1, v2)) = marker {
-                query = query.filter((c1.le(v1).and(c2.lt(v2))).or(c1.lt(v1)))
+                query = query.filter((c1.eq(v1).and(c2.lt(v2))).or(c1.lt(v1)))
             }
             query.order((c1.desc(), c2.desc()))
         }
