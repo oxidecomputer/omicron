@@ -26,6 +26,10 @@ diesel-db$target:::query-done
 /ts[this->conn_id]/
 {
     this->latency = timestamp - ts[this->conn_id];
+    /* There's only a single value here, so `max` is just used to "convert"
+     * the latency as an integer to an aggregation. `min`, or any other scalar
+     * aggregation function, would be equivalent.
+     */
     @[this->conn_id, query[this->conn_id]] = max(this->latency);
     ts[this->conn_id] = 0;
     query[this->conn_id] = NULL;
