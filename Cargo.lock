@@ -1764,6 +1764,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "nexus-test-utils-macros"
+version = "0.1.0"
+dependencies = [
+ "quote",
+ "syn",
+]
+
+[[package]]
 name = "normalize-line-endings"
 version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1892,6 +1900,7 @@ dependencies = [
  "mime_guess",
  "newtype_derive",
  "nexus-test-utils",
+ "nexus-test-utils-macros",
  "omicron-common",
  "omicron-rpaths",
  "omicron-sled-agent",

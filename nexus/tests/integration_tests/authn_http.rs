@@ -17,6 +17,8 @@ use dropshot::test_util::TestContext;
 use dropshot::ApiDescription;
 use dropshot::HttpErrorResponseBody;
 use http::header::HeaderValue;
+use nexus_test_utils::ControlPlaneTestContext;
+use nexus_test_utils_macros::nexus_test;
 use omicron_nexus::authn::external::session_cookie;
 use omicron_nexus::authn::external::spoof::HttpAuthnSpoof;
 use omicron_nexus::authn::external::spoof::HTTP_HEADER_OXIDE_AUTHN_SPOOF;
@@ -97,8 +99,8 @@ async fn test_authn_spoof_allowed() {
     testctx.teardown().await;
 }
 
-#[tokio::test]
-async fn test_authn_session_cookie() {
+#[nexus_test]
+async fn test_authn_session_cookie(_cptestctx: &ControlPlaneTestContext) {
     let test_name = "test_authn_session_cookie";
     let authn_schemes_configured: Vec<
         Box<dyn HttpAuthnScheme<WhoamiServerState> + 'static>,

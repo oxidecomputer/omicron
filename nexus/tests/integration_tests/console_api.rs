@@ -8,14 +8,17 @@ use http::{header, method::Method, StatusCode};
 use std::env::current_dir;
 
 use nexus_test_utils::http_testing::{RequestBuilder, TestResponse};
-use nexus_test_utils::{load_test_config, test_setup, test_setup_with_config};
+use nexus_test_utils::{
+    load_test_config, test_setup, test_setup_with_config,
+    ControlPlaneTestContext,
+};
+use nexus_test_utils_macros::nexus_test;
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_nexus::external_api::console_api::LoginParams;
 use omicron_nexus::external_api::params::OrganizationCreate;
 
-#[tokio::test]
-async fn test_sessions() {
-    let cptestctx = test_setup("test_sessions").await;
+#[nexus_test]
+async fn test_sessions(cptestctx: &ControlPlaneTestContext) {
     let testctx = &cptestctx.external_client;
 
     // logout always gives the same response whether you have a session or not
@@ -100,8 +103,6 @@ async fn test_sessions() {
         .execute()
         .await
         .expect("failed to get 302 for unauthed console request");
-
-    cptestctx.teardown().await;
 }
 
 #[tokio::test]
@@ -133,8 +134,6 @@ async fn test_console_pages() {
             .expect("failed to get console index");
 
     assert_eq!(console_page.body, "<html></html>".as_bytes());
-
-    cptestctx.teardown().await;
 }
 
 #[tokio::test]
@@ -154,8 +153,6 @@ async fn text_login_form() {
         .expect("failed to get login form");
 
     assert_eq!(console_page.body, "<html></html>".as_bytes());
-
-    cptestctx.teardown().await;
 }
 
 #[tokio::test]
@@ -192,8 +189,6 @@ async fn test_assets() {
         .expect("failed to get existing file");
 
     assert_eq!(resp.body, "hello there".as_bytes());
-
-    cptestctx.teardown().await;
 }
 
 #[tokio::test]
@@ -211,7 +206,6 @@ async fn test_absolute_static_dir() {
         .expect("failed to get existing file");
 
     assert_eq!(resp.body, "hello there".as_bytes());
-    cptestctx.teardown().await;
 }
 
 fn get_header_value(resp: TestResponse, header_name: HeaderName) -> String {

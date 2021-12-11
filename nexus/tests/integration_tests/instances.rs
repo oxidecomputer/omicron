@@ -28,16 +28,16 @@ use dropshot::test_util::ClientTestContext;
 
 use nexus_test_utils::identity_eq;
 use nexus_test_utils::resource_helpers::{create_organization, create_project};
-use nexus_test_utils::test_setup;
+use nexus_test_utils::ControlPlaneTestContext;
+use nexus_test_utils_macros::nexus_test;
 
 static ORGANIZATION_NAME: &str = "test-org";
 static PROJECT_NAME: &str = "springfield-squidport";
 
-#[tokio::test]
-async fn test_instances_access_before_create_returns_not_found() {
-    let cptestctx =
-        test_setup("test_instances_access_before_create_returns_not_found")
-            .await;
+#[nexus_test]
+async fn test_instances_access_before_create_returns_not_found(
+    cptestctx: &ControlPlaneTestContext,
+) {
     let client = &cptestctx.external_client;
 
     /* Create a project that we'll use for testing. */
@@ -74,12 +74,12 @@ async fn test_instances_access_before_create_returns_not_found() {
         error.message,
         "not found: instance with name \"just-rainsticks\""
     );
-    cptestctx.teardown().await;
 }
 
-#[tokio::test]
-async fn test_instances_create_reboot_halt() {
-    let cptestctx = test_setup("test_instances_create_reboot_halt").await;
+#[nexus_test]
+async fn test_instances_create_reboot_halt(
+    cptestctx: &ControlPlaneTestContext,
+) {
     let client = &cptestctx.external_client;
     let apictx = &cptestctx.server.apictx;
     let nexus = &apictx.nexus;
@@ -353,16 +353,12 @@ async fn test_instances_create_reboot_halt() {
             StatusCode::NOT_FOUND,
         )
         .await;
-
-    cptestctx.teardown().await;
 }
 
-#[tokio::test]
-async fn test_instances_delete_fails_when_running_succeeds_when_stopped() {
-    let cptestctx = test_setup(
-        "test_instances_delete_fails_when_running_succeeds_when_stopped",
-    )
-    .await;
+#[nexus_test]
+async fn test_instances_delete_fails_when_running_succeeds_when_stopped(
+    cptestctx: &ControlPlaneTestContext,
+) {
     let client = &cptestctx.external_client;
     let apictx = &cptestctx.server.apictx;
     let nexus = &apictx.nexus;
@@ -417,20 +413,19 @@ async fn test_instances_delete_fails_when_running_succeeds_when_stopped() {
 
     // Now deletion should succeed.
     object_delete(&client, &instance_url).await;
-
-    cptestctx.teardown().await;
 }
 
-#[tokio::test]
-async fn test_instances_invalid_creation_returns_bad_request() {
+#[nexus_test]
+async fn test_instances_invalid_creation_returns_bad_request(
+    cptestctx: &ControlPlaneTestContext,
+) {
     /*
      * The rest of these examples attempt to create invalid instances.  We don't
      * do exhaustive tests of the model here -- those are part of unit tests --
      * but we exercise a few different types of errors to make sure those get
      * passed through properly.
      */
-    let cptestctx =
-        test_setup("test_instances_invalid_creation_returns_bad_request").await;
+
     let client = &cptestctx.external_client;
     let url_instances = format!(
         "/organizations/{}/projects/{}/instances",
@@ -471,8 +466,6 @@ async fn test_instances_invalid_creation_returns_bad_request() {
     assert!(error
         .message
         .starts_with("unable to parse body: invalid value: integer `-3`"));
-
-    cptestctx.teardown().await;
 }
 
 async fn instance_get(

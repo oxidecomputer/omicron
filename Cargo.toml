@@ -4,6 +4,7 @@ members = [
     "nexus",
     "nexus/src/db/db-macros",
     "nexus/test-utils",
+    "nexus/test-utils-macros",
     "nexus-client",
     "package",
     "rpaths",
