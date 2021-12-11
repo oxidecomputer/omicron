@@ -96,7 +96,9 @@ pub async fn logout(
     let token = cookies.get(SESSION_COOKIE_COOKIE_NAME);
 
     if opctx.is_ok() && token.is_some() {
-        nexus.session_hard_delete(token.unwrap().value().to_string()).await?;
+        nexus
+            .session_hard_delete(token.unwrap().value().to_string().into())
+            .await?;
     }
 
     // If user's session was already expired, they failed auth and their session

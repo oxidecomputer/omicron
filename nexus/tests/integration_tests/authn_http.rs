@@ -320,6 +320,7 @@ impl session_cookie::Session for FakeSession {
 
 #[async_trait]
 impl session_cookie::SessionStore for WhoamiServerState {
+    type TokenModel = String;
     type SessionModel = FakeSession;
 
     async fn session_fetch(&self, token: String) -> Option<Self::SessionModel> {

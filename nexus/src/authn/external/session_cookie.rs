@@ -11,6 +11,7 @@ use crate::authn::{Actor, Details};
 use anyhow::anyhow;
 use async_trait::async_trait;
 use chrono::{DateTime, Duration, Utc};
+use std::fmt::Display;
 use uuid::Uuid;
 
 // many parts of the implementation will reference this OWASP guide
@@ -22,24 +23,31 @@ pub trait Session {
     fn time_created(&self) -> DateTime<Utc>;
 }
 
+pub trait SessionToken: From<String> + Clone + Display {}
+impl<T: From<String> + Clone + Display> SessionToken for T {}
+
 #[async_trait]
 pub trait SessionStore {
+    type TokenModel;
     type SessionModel;
 
     // TODO: these should all return results, it was just a lot easier to
     // write the tests with Option. will change it back
 
     /// Retrieve session from store by token
-    async fn session_fetch(&self, token: String) -> Option<Self::SessionModel>;
+    async fn session_fetch(
+        &self,
+        token: Self::TokenModel,
+    ) -> Option<Self::SessionModel>;
 
     /// Extend session by updating time_last_used to now
     async fn session_update_last_used(
         &self,
-        token: String,
+        token: Self::TokenModel,
     ) -> Option<Self::SessionModel>;
 
     /// Mark session expired
-    async fn session_expire(&self, token: String) -> Option<()>;
+    async fn session_expire(&self, token: Self::TokenModel) -> Option<()>;
 
     /// Maximum time session can remain idle before expiring
     fn session_idle_timeout(&self) -> Duration;
@@ -79,6 +87,7 @@ impl<T> HttpAuthnScheme<T> for HttpAuthnSessionCookie
 where
     T: Send + Sync + 'static + SessionStore,
     T::SessionModel: Send + Sync + 'static + Session,
+    T::TokenModel: Send + Sync + 'static + SessionToken,
 {
     fn name(&self) -> authn::SchemeName {
         SESSION_COOKIE_SCHEME_NAME
@@ -91,7 +100,7 @@ where
         request: &http::Request<hyper::Body>,
     ) -> SchemeResult {
         let token = match get_token_from_cookie(request.headers()) {
-            Some(token) => token,
+            Some(token) => T::TokenModel::from(token),
             None => return SchemeResult::NotRequested,
         };
 
@@ -99,7 +108,7 @@ where
             Some(session) => session,
             None => {
                 return SchemeResult::Failed(Reason::UnknownActor {
-                    actor: token.to_owned(),
+                    actor: token.to_string(),
                 });
             }
         };
@@ -206,18 +215,19 @@ mod test {
 
     #[async_trait]
     impl SessionStore for TestServerContext {
+        type TokenModel = String;
         type SessionModel = FakeSession;
 
         async fn session_fetch(
             &self,
-            token: String,
+            token: Self::TokenModel,
         ) -> Option<Self::SessionModel> {
             self.sessions.lock().unwrap().get(&token).map(|s| *s)
         }
 
         async fn session_update_last_used(
             &self,
-            token: String,
+            token: Self::TokenModel,
         ) -> Option<Self::SessionModel> {
             let mut sessions = self.sessions.lock().unwrap();
             let session = *sessions.get(&token).unwrap();
@@ -226,7 +236,7 @@ mod test {
             (*sessions).insert(token, new_session)
         }
 
-        async fn session_expire(&self, token: String) -> Option<()> {
+        async fn session_expire(&self, token: Self::TokenModel) -> Option<()> {
             let mut sessions = self.sessions.lock().unwrap();
             (*sessions).remove(&token);
             Some(())

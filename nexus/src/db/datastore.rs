@@ -65,9 +65,9 @@ use crate::db::{
         ConsoleSession, Dataset, Disk, DiskAttachment, DiskRuntimeState,
         Generation, Instance, InstanceRuntimeState, Name, Organization,
         OrganizationUpdate, OximeterInfo, ProducerEndpoint, Project,
-        ProjectUpdate, RouterRoute, RouterRouteUpdate, Sled, UserBuiltin, Vpc,
-        VpcFirewallRule, VpcRouter, VpcRouterUpdate, VpcSubnet,
-        VpcSubnetUpdate, VpcUpdate, Zpool,
+        ProjectUpdate, RouterRoute, RouterRouteUpdate, SessionToken, Sled,
+        UserBuiltin, Vpc, VpcFirewallRule, VpcRouter, VpcRouterUpdate,
+        VpcSubnet, VpcSubnetUpdate, VpcUpdate, Zpool,
     },
     pagination::paginated,
     update_and_check::{UpdateAndCheck, UpdateStatus},
@@ -1872,7 +1872,7 @@ impl DataStore {
 
     pub async fn session_fetch(
         &self,
-        token: String,
+        token: SessionToken,
     ) -> LookupResult<ConsoleSession> {
         use db::schema::console_session::dsl;
         dsl::console_session
@@ -1909,7 +1909,7 @@ impl DataStore {
 
     pub async fn session_update_last_used(
         &self,
-        token: String,
+        token: SessionToken,
     ) -> UpdateResult<ConsoleSession> {
         use db::schema::console_session::dsl;
 
@@ -1928,7 +1928,10 @@ impl DataStore {
     }
 
     // putting "hard" in the name because we don't do this with any other model
-    pub async fn session_hard_delete(&self, token: String) -> DeleteResult {
+    pub async fn session_hard_delete(
+        &self,
+        token: SessionToken,
+    ) -> DeleteResult {
         use db::schema::console_session::dsl;
 
         diesel::delete(dsl::console_session)
@@ -2034,7 +2037,9 @@ mod test {
     use crate::context::OpContext;
     use crate::db;
     use crate::db::identity::Resource;
-    use crate::db::model::{ConsoleSession, Organization, Project};
+    use crate::db::model::{
+        ConsoleSession, Organization, Project, SessionToken,
+    };
     use crate::db::DataStore;
     use crate::external_api::params;
     use chrono::{Duration, Utc};
@@ -2088,7 +2093,7 @@ mod test {
         let pool = db::Pool::new(&cfg);
         let datastore = DataStore::new(Arc::new(pool));
 
-        let token = "a_token".to_string();
+        let token = SessionToken::from("a_token".to_string());
         let session = ConsoleSession {
             token: token.clone(),
             time_created: Utc::now() - Duration::minutes(5),

@@ -1753,7 +1753,7 @@ pub struct NetworkInterface {
     pub ip: ipnetwork::IpNetwork,
 }
 
-#[derive(Clone, Debug, AsExpression, FromSqlRow)]
+#[derive(Clone, Debug, AsExpression, FromSqlRow, Display)]
 #[sql_type = "sql_types::Text"]
 pub struct SessionToken(String);
 NewtypeDeref! { () pub struct SessionToken(String); }

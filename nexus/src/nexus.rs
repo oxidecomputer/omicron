@@ -2285,7 +2285,7 @@ impl Nexus {
 
     pub async fn session_fetch(
         &self,
-        token: String,
+        token: db::model::SessionToken,
     ) -> LookupResult<db::model::ConsoleSession> {
         self.db_datastore.session_fetch(token).await
     }
@@ -2302,12 +2302,15 @@ impl Nexus {
     // update last_used to now
     pub async fn session_update_last_used(
         &self,
-        token: String,
+        token: db::model::SessionToken,
     ) -> UpdateResult<db::model::ConsoleSession> {
         Ok(self.db_datastore.session_update_last_used(token).await?)
     }
 
-    pub async fn session_hard_delete(&self, token: String) -> DeleteResult {
+    pub async fn session_hard_delete(
+        &self,
+        token: db::model::SessionToken,
+    ) -> DeleteResult {
         self.db_datastore.session_hard_delete(token).await
     }
 }

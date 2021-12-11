@@ -12,7 +12,7 @@ use super::db;
 use super::Nexus;
 use crate::authn::external::session_cookie::{Session, SessionStore};
 use crate::authn::Actor;
-use crate::db::model::ConsoleSession;
+use crate::db::model::{ConsoleSession, SessionToken};
 use async_trait::async_trait;
 use authn::external::session_cookie::HttpAuthnSessionCookie;
 use authn::external::spoof::HttpAuthnSpoof;
@@ -386,20 +386,24 @@ mod test {
 
 #[async_trait]
 impl SessionStore for Arc<ServerContext> {
+    type TokenModel = SessionToken;
     type SessionModel = ConsoleSession;
 
-    async fn session_fetch(&self, token: String) -> Option<Self::SessionModel> {
+    async fn session_fetch(
+        &self,
+        token: Self::TokenModel,
+    ) -> Option<Self::SessionModel> {
         self.nexus.session_fetch(token).await.ok()
     }
 
     async fn session_update_last_used(
         &self,
-        token: String,
+        token: Self::TokenModel,
     ) -> Option<Self::SessionModel> {
         self.nexus.session_update_last_used(token).await.ok()
     }
 
-    async fn session_expire(&self, token: String) -> Option<()> {
+    async fn session_expire(&self, token: Self::TokenModel) -> Option<()> {
         self.nexus.session_hard_delete(token).await.ok()
     }
 
