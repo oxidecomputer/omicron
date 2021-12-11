@@ -2312,7 +2312,7 @@ impl Nexus {
     }
 }
 
-fn generate_session_token() -> String {
+fn generate_session_token() -> db::model::SessionToken {
     // TODO: "If getrandom is unable to provide secure entropy this method will panic."
     // Should we explicitly handle that?
     // TODO: store generator somewhere so we don't reseed every time
@@ -2322,7 +2322,7 @@ fn generate_session_token() -> String {
     // TODO: the size should be a constant somewhere, maybe even in config?
     let mut random_bytes: [u8; 20] = [0; 20];
     rng.fill_bytes(&mut random_bytes);
-    hex::encode(random_bytes)
+    db::model::SessionToken::from(hex::encode(random_bytes))
 }
 
 #[async_trait]

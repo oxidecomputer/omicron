@@ -1753,19 +1753,47 @@ pub struct NetworkInterface {
     pub ip: ipnetwork::IpNetwork,
 }
 
-// TODO: `struct SessionToken(String)` for session token
+#[derive(Clone, Debug, AsExpression, FromSqlRow)]
+#[sql_type = "sql_types::Text"]
+pub struct SessionToken(String);
+NewtypeDeref! { () pub struct SessionToken(String); }
+NewtypeFrom! { () pub struct SessionToken(String); }
+
+impl<DB> ToSql<sql_types::Text, DB> for SessionToken
+where
+    DB: Backend,
+    str: ToSql<sql_types::Text, DB>,
+{
+    fn to_sql<W: std::io::Write>(
+        &self,
+        out: &mut serialize::Output<W, DB>,
+    ) -> serialize::Result {
+        self.as_str().to_sql(out)
+    }
+}
+
+// Deserialize the "SessionToken" object from SQL TEXT.
+impl<DB> FromSql<sql_types::Text, DB> for SessionToken
+where
+    DB: Backend,
+    String: FromSql<sql_types::Text, DB>,
+{
+    fn from_sql(bytes: RawValue<DB>) -> deserialize::Result<Self> {
+        String::from_sql(bytes)?.parse().map(SessionToken).map_err(|e| e.into())
+    }
+}
 
 #[derive(Queryable, Insertable, Clone, Debug, Selectable)]
 #[table_name = "console_session"]
 pub struct ConsoleSession {
-    pub token: String,
+    pub token: SessionToken,
     pub time_created: DateTime<Utc>,
     pub time_last_used: DateTime<Utc>,
     pub user_id: Uuid,
 }
 
 impl ConsoleSession {
-    pub fn new(token: String, user_id: Uuid) -> Self {
+    pub fn new(token: SessionToken, user_id: Uuid) -> Self {
         let now = Utc::now();
         Self { token, user_id, time_last_used: now, time_created: now }
     }
