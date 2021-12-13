@@ -4,16 +4,16 @@
 
 //! Integration tests for oximeter collectors and producers.
 
+use nexus_test_utils::ControlPlaneTestContext;
+use nexus_test_utils_macros::nexus_test;
 use omicron_test_utils::dev::poll::{wait_for_condition, CondCheckError};
 use oximeter_db::DbWrite;
 use std::net;
 use std::time::Duration;
 use uuid::Uuid;
 
-#[tokio::test]
-async fn test_oximeter_database_records() {
-    let context =
-        nexus_test_utils::test_setup("test_oximeter_database_records").await;
+#[nexus_test]
+async fn test_oximeter_database_records(context: &ControlPlaneTestContext) {
     let db = &context.database;
 
     // Get a handle to the DB, for various tests
@@ -58,8 +58,6 @@ async fn test_oximeter_database_records() {
         nexus_test_utils::OXIMETER_UUID.parse().unwrap(),
         "Producer's oximeter ID returned from the database does not match the expected ID"
     );
-
-    context.teardown().await;
 }
 
 #[tokio::test]
