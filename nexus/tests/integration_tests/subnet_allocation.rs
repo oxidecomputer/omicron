@@ -22,7 +22,8 @@ use dropshot::test_util::ClientTestContext;
 use dropshot::HttpErrorResponseBody;
 
 use nexus_test_utils::resource_helpers::{create_organization, create_project};
-use nexus_test_utils::test_setup;
+use nexus_test_utils::ControlPlaneTestContext;
+use nexus_test_utils_macros::nexus_test;
 
 async fn create_instance(
     client: &ClientTestContext,
@@ -66,9 +67,8 @@ async fn create_instance_expect_failure(
         .await
 }
 
-#[tokio::test]
-async fn test_subnet_allocation() {
-    let cptestctx = test_setup("test_subnet_allocation").await;
+#[nexus_test]
+async fn test_subnet_allocation(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
 
     let organization_name = "test-org";
@@ -133,6 +133,4 @@ async fn test_subnet_allocation() {
         network_interfaces[1].ip,
         "192.168.42.6".parse::<IpAddr>().unwrap()
     );
-
-    cptestctx.teardown().await;
 }

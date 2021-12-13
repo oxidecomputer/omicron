@@ -9,8 +9,7 @@ use std::env::current_dir;
 
 use nexus_test_utils::http_testing::{RequestBuilder, TestResponse};
 use nexus_test_utils::{
-    load_test_config, test_setup, test_setup_with_config,
-    ControlPlaneTestContext,
+    load_test_config, test_setup_with_config, ControlPlaneTestContext,
 };
 use nexus_test_utils_macros::nexus_test;
 use omicron_common::api::external::IdentityMetadataCreateParams;
@@ -105,9 +104,8 @@ async fn test_sessions(cptestctx: &ControlPlaneTestContext) {
         .expect("failed to get 302 for unauthed console request");
 }
 
-#[tokio::test]
-async fn test_console_pages() {
-    let cptestctx = test_setup("test_console_pages").await;
+#[nexus_test]
+async fn test_console_pages(cptestctx: &ControlPlaneTestContext) {
     let testctx = &cptestctx.external_client;
 
     // request to console page route without auth should redirect to IdP
@@ -136,9 +134,8 @@ async fn test_console_pages() {
     assert_eq!(console_page.body, "<html></html>".as_bytes());
 }
 
-#[tokio::test]
-async fn text_login_form() {
-    let cptestctx = test_setup("test_login_form").await;
+#[nexus_test]
+async fn text_login_form(cptestctx: &ControlPlaneTestContext) {
     let testctx = &cptestctx.external_client;
 
     // login route returns bundle too, but is not auth gated
@@ -155,9 +152,8 @@ async fn text_login_form() {
     assert_eq!(console_page.body, "<html></html>".as_bytes());
 }
 
-#[tokio::test]
-async fn test_assets() {
-    let cptestctx = test_setup("test_assets").await;
+#[nexus_test]
+async fn test_assets(cptestctx: &ControlPlaneTestContext) {
     let testctx = &cptestctx.external_client;
 
     // nonexistent file 404s
@@ -206,6 +202,8 @@ async fn test_absolute_static_dir() {
         .expect("failed to get existing file");
 
     assert_eq!(resp.body, "hello there".as_bytes());
+
+    cptestctx.teardown().await;
 }
 
 fn get_header_value(resp: TestResponse, header_name: HeaderName) -> String {
