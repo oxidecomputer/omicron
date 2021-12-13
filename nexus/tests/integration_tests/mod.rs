@@ -14,6 +14,7 @@ mod instances;
 mod organizations;
 mod oximeter;
 mod projects;
+mod roles_builtin;
 mod router_routes;
 mod users_builtin;
 mod vpc_firewall;

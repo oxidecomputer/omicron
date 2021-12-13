@@ -69,3 +69,35 @@ lazy_static! {
             "used for testing with no privileges",
         );
 }
+
+#[cfg(test)]
+mod test {
+    use super::UserBuiltinConfig;
+    use super::USER_DB_INIT;
+    use super::USER_SAGA_RECOVERY;
+    use super::USER_TEST_PRIVILEGED;
+    use super::USER_TEST_UNPRIVILEGED;
+
+    #[test]
+    fn test_builtin_ids_are_valid() {
+        assert_user_has_valid_id(&*USER_DB_INIT);
+        assert_user_has_valid_id(&*USER_SAGA_RECOVERY);
+        assert_user_has_valid_id(&*USER_TEST_PRIVILEGED);
+        assert_user_has_valid_id(&*USER_TEST_UNPRIVILEGED);
+    }
+
+    fn assert_user_has_valid_id(user: &UserBuiltinConfig) {
+        match user.id.get_version() {
+            Some(uuid::Version::Random) => (),
+            _ => panic!("built-in user's uuid is not v4: {:?}", user.name),
+        };
+
+        match user.id.get_variant() {
+            Some(uuid::Variant::RFC4122) => (),
+            _ => panic!(
+                "built-in user's uuid has unexpected variant: {:?}",
+                user.name
+            ),
+        };
+    }
+}
