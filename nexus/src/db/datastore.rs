@@ -33,7 +33,6 @@ use crate::authn;
 use crate::authz;
 use crate::context::OpContext;
 use crate::db::model::RoleBuiltin;
-use crate::db::pagination::paginated_multicolumn;
 use crate::external_api::params;
 use async_bb8_diesel::{AsyncConnection, AsyncRunQueryDsl, ConnectionManager};
 use chrono::Utc;
@@ -2037,21 +2036,49 @@ impl DataStore {
     ) -> ListResultVec<RoleBuiltin> {
         use db::schema::role_builtin::dsl;
         opctx.authorize(authz::Action::ListChildren, authz::FLEET)?;
-        paginated_multicolumn(
-            dsl::role_builtin,
-            (dsl::resource_type, dsl::role_name),
-            pagparams,
-        )
-        .select(RoleBuiltin::as_select())
-        .load_async::<RoleBuiltin>(self.pool_authorized(opctx)?)
-        .await
-        .map_err(|e| {
-            public_error_from_diesel_pool(
-                e,
-                ResourceType::Role,
-                LookupType::Other("Listing All".to_string()),
-            )
-        })
+
+        // TODO-column This is essentially a multi-column version of
+        // `paginated`.  It would be better to turn this into a function.  It's
+        // not obvious how to do that.
+        let mut query =
+            dsl::role_builtin.into_boxed().limit(pagparams.limit.get().into());
+        let query = match pagparams.direction {
+            dropshot::PaginationOrder::Ascending => {
+                if let Some((v1, v2)) = &pagparams.marker {
+                    query = query.filter(
+                        (dsl::resource_type
+                            .eq(v1.clone())
+                            .and(dsl::role_name.gt(v2.clone())))
+                        .or(dsl::resource_type.gt(v1.clone())),
+                    )
+                }
+
+                query.order((dsl::resource_type.asc(), dsl::role_name.asc()))
+            }
+            dropshot::PaginationOrder::Descending => {
+                if let Some((v1, v2)) = &pagparams.marker {
+                    query = query.filter(
+                        (dsl::resource_type
+                            .eq(v1.clone())
+                            .and(dsl::role_name.lt(v2.clone())))
+                        .or(dsl::resource_type.lt(v1.clone())),
+                    )
+                }
+                query.order((dsl::resource_type.desc(), dsl::role_name.desc()))
+            }
+        };
+
+        query
+            .select(RoleBuiltin::as_select())
+            .load_async::<RoleBuiltin>(self.pool_authorized(opctx)?)
+            .await
+            .map_err(|e| {
+                public_error_from_diesel_pool(
+                    e,
+                    ResourceType::Role,
+                    LookupType::Other("Listing All".to_string()),
+                )
+            })
     }
 
     /// Load built-in roles into the database
