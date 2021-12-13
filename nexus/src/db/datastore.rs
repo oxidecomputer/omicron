@@ -2113,6 +2113,7 @@ mod test {
         assert!(organization_after_project_create.rcgen > organization.rcgen);
 
         let _ = db.cleanup().await;
+        logctx.cleanup_successful();
     }
 
     #[tokio::test]
@@ -2169,6 +2170,7 @@ mod test {
         assert_eq!(delete_again, Ok(()));
 
         let _ = db.cleanup().await;
+        logctx.cleanup_successful();
     }
 
     #[tokio::test]
