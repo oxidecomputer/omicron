@@ -21,9 +21,8 @@ use dropshot::test_util::objects_post;
 use dropshot::test_util::ClientTestContext;
 use dropshot::HttpErrorResponseBody;
 
-pub mod common;
-use common::resource_helpers::{create_organization, create_project};
-use common::test_setup;
+use nexus_test_utils::resource_helpers::{create_organization, create_project};
+use nexus_test_utils::test_setup;
 
 async fn create_instance(
     client: &ClientTestContext,
@@ -103,7 +102,7 @@ async fn test_subnet_allocation() {
             Method::PUT,
             &url_subnet,
             Some(subnet_update),
-            StatusCode::OK,
+            StatusCode::NO_CONTENT,
         )
         .await
         .unwrap();
