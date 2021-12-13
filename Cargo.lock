@@ -525,7 +525,7 @@ dependencies = [
  "tokio-util",
  "toml",
  "tracing",
- "usdt",
+ "usdt 0.2.1",
  "uuid",
  "xts-mode",
 ]
@@ -730,10 +730,12 @@ dependencies = [
 [[package]]
 name = "diesel-dtrace"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/diesel-dtrace?branch=main#dfeff3201eb8180220542b29021f0b5f71e50b46"
+source = "git+https://github.com/oxidecomputer/diesel-dtrace?branch=main#f74c1db52e86f53d9234969541673d1d9aecb101"
 dependencies = [
  "diesel",
- "usdt",
+ "serde",
+ "usdt 0.3.1",
+ "uuid",
 ]
 
 [[package]]
@@ -859,7 +861,7 @@ dependencies = [
  "syn",
  "tokio",
  "toml",
- "usdt",
+ "usdt 0.2.1",
  "uuid",
 ]
 
@@ -1932,7 +1934,7 @@ dependencies = [
  "tokio",
  "tokio-postgres",
  "toml",
- "usdt",
+ "usdt 0.3.1",
  "uuid",
 ]
 
@@ -2737,7 +2739,7 @@ dependencies = [
  "slog",
  "thiserror",
  "tokio",
- "usdt",
+ "usdt 0.2.1",
  "viona_api",
 ]
 
@@ -3528,7 +3530,7 @@ dependencies = [
  "serde",
  "serde_json",
  "slog",
- "usdt",
+ "usdt 0.2.1",
 ]
 
 [[package]]
@@ -4349,9 +4351,23 @@ dependencies = [
  "dof",
  "dtrace-parser",
  "serde",
- "usdt-attr-macro",
- "usdt-impl",
- "usdt-macro",
+ "usdt-attr-macro 0.2.1",
+ "usdt-impl 0.2.1",
+ "usdt-macro 0.2.1",
+]
+
+[[package]]
+name = "usdt"
+version = "0.3.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3877c300bc107d8d05455e8e2bec271ca9e1d24fbc17e3ef27d18b9b53c684e2"
+dependencies = [
+ "dof",
+ "dtrace-parser",
+ "serde",
+ "usdt-attr-macro 0.3.1",
+ "usdt-impl 0.3.1",
+ "usdt-macro 0.3.1",
 ]
 
 [[package]]
@@ -4365,7 +4381,21 @@ dependencies = [
  "quote",
  "serde_tokenstream",
  "syn",
- "usdt-impl",
+ "usdt-impl 0.2.1",
+]
+
+[[package]]
+name = "usdt-attr-macro"
+version = "0.3.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "dedf62a6eab9c6da23fa64353382ef2b73dce8891eadda8755bfed179cb2103d"
+dependencies = [
+ "dtrace-parser",
+ "proc-macro2",
+ "quote",
+ "serde_tokenstream",
+ "syn",
+ "usdt-impl 0.3.1",
 ]
 
 [[package]]
@@ -4373,6 +4403,25 @@ name = "usdt-impl"
 version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d6e158f113f80db319e54f62c59ea4329a31190a43ed7db07578982021209014"
+dependencies = [
+ "byteorder",
+ "dof",
+ "dtrace-parser",
+ "libc",
+ "proc-macro2",
+ "quote",
+ "serde",
+ "serde_json",
+ "syn",
+ "thiserror",
+ "thread-id",
+]
+
+[[package]]
+name = "usdt-impl"
+version = "0.3.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4dda9311a9f1452ebc752d264e9d1e3c2dac9807219e19471bcef3bd1b7f90cb"
 dependencies = [
  "byteorder",
  "dof",
@@ -4398,7 +4447,21 @@ dependencies = [
  "quote",
  "serde_tokenstream",
  "syn",
- "usdt-impl",
+ "usdt-impl 0.2.1",
+]
+
+[[package]]
+name = "usdt-macro"
+version = "0.3.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e64160eb8f7ee61fcaef542b2f75fa807e8c3ed4b4f075e6ca0b17ea6fcea6f8"
+dependencies = [
+ "dtrace-parser",
+ "proc-macro2",
+ "quote",
+ "serde_tokenstream",
+ "syn",
+ "usdt-impl 0.3.1",
 ]
 
 [[package]]

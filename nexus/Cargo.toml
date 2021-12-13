@@ -41,7 +41,7 @@ slog-dtrace = "0.2"
 structopt = "0.3"
 thiserror = "1.0"
 toml = "0.5.6"
-usdt = "0.2"
+usdt = "0.3.1"
 
 [dependencies.api_identity]
 path = "../api_identity"
