@@ -34,7 +34,7 @@ async fn test_roles_builtin() {
     .await
     .unwrap();
 
-    let mut roles = NexusRequest::object_get(&testctx, "/roles")
+    let roles = NexusRequest::object_get(&testctx, "/roles")
         .authn_as(AuthnMode::PrivilegedUser)
         .execute()
         .await
@@ -43,19 +43,32 @@ async fn test_roles_builtin() {
         .unwrap()
         .items
         .into_iter()
-        .map(|r| (r.name.clone(), r))
-        .collect::<BTreeMap<String, Role>>();
+        .map(|r| (r.name.clone(), r.description.clone()))
+        .collect::<Vec<(String, String)>>();
 
-    // let u = users.remove(&authn::USER_DB_INIT.name.to_string()).unwrap();
-    // assert_eq!(u.identity.id, authn::USER_DB_INIT.id);
-    // let u = users.remove(&authn::USER_SAGA_RECOVERY.name.to_string()).unwrap();
-    // assert_eq!(u.identity.id, authn::USER_SAGA_RECOVERY.id);
-    // let u =
-    //     users.remove(&authn::USER_TEST_PRIVILEGED.name.to_string()).unwrap();
-    // assert_eq!(u.identity.id, authn::USER_TEST_PRIVILEGED.id);
-    // let u =
-    //     users.remove(&authn::USER_TEST_UNPRIVILEGED.name.to_string()).unwrap();
-    // assert_eq!(u.identity.id, authn::USER_TEST_UNPRIVILEGED.id);
-    // assert!(users.is_empty(), "found unexpected built-in users");
+    let role_essentials = roles
+        .iter()
+        .map(|(name, description)| (name.as_str(), description.as_str()))
+        .collect::<Vec<_>>();
+
+    assert_eq!(
+        role_essentials,
+        vec![
+            ("fleet.admin", "Fleet Administrator"),
+            ("fleet.collaborator", "Fleet Collaborator"),
+            ("organization.admin", "Organization Administrator"),
+            ("organization.collaborator", "Organization Collaborator"),
+            ("project.admin", "Project Administrator"),
+            ("project.collaborator", "Project Collaborator"),
+            ("project.viewer", "Project Viewer"),
+        ]
+    );
+
+    // This endpoint uses a custom pagination scheme that is easy to get wrong.
+    // Let's test that all markers do work.
+    let roles_paginated: Vec<Role> =
+        dropshot::test_util::iter_collection(&testctx, "/roles", "", 1);
+    assert_eq!(roles, roles_paginated);
+
     cptestctx.teardown().await;
 }

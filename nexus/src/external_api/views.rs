@@ -206,7 +206,7 @@ impl Into<User> for model::UserBuiltin {
 /**
  * Client view of a [`Role`]
  */
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct Role {
     pub name: String,
