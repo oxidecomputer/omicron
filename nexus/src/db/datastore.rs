@@ -1062,6 +1062,10 @@ impl DataStore {
     ) -> CreateResult<NetworkInterface> {
         use db::schema::network_interface::dsl;
 
+        // TODO: Longer term, it would be nice to decouple the IP allocation
+        // (and MAC allocation) from the NetworkInterface table, so that
+        // retrying from parallel inserts doesn't need to happen here.
+
         let name = interface.identity.name.clone();
         match interface.ip {
             // Attempt an insert with a requested IP address
