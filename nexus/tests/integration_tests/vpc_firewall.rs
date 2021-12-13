@@ -138,6 +138,7 @@ async fn test_vpc_firewall() {
             StatusCode::NOT_FOUND,
         )
         .await;
+    cptestctx.teardown().await;
 }
 
 fn is_default_firewall_rules(rules: &Vec<VpcFirewallRule>) -> bool {

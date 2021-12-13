@@ -211,6 +211,7 @@ async fn test_absolute_static_dir() {
         .expect("failed to get existing file");
 
     assert_eq!(resp.body, "hello there".as_bytes());
+    cptestctx.teardown().await;
 }
 
 fn get_header_value(resp: TestResponse, header_name: HeaderName) -> String {
