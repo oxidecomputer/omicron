@@ -153,7 +153,7 @@ mod tests {
 
     #[tokio::test]
     async fn negotiation() {
-        let log = omicron_test_utils::dev::test_slog_logger("negotiation");
+        let log = omicron_test_utils::dev::test_setup_log("negotiation").log;
         let log2 = log.clone();
         let log3 = log.clone();
 

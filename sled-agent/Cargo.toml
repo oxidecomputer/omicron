@@ -63,7 +63,6 @@ doc = false
 name = "sled-agent"
 doc = false
 
-# TODO: Remove when rack secrets are generated dynamically
 [[bin]]
-name = "gen-trust-quorum-config"
+name = "sled-agent-overlay-files"
 doc = false

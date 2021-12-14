@@ -55,6 +55,7 @@ impl Server {
             // TODO: Track the returned handles in a FuturesUnordered and log any errors?
             // Alternatively, maintain some shared state across all
             // responders that is accessable to the Server.
+            // See https://github.com/oxidecomputer/omicron/issues/517
             let _ = self.accept().await?;
         }
     }
@@ -112,9 +113,9 @@ mod test {
         let (shares, verifier) = secret.split(2, 2).unwrap();
 
         // Start a trust quorum server, but only accept one connection
-        let log = omicron_test_utils::dev::test_slog_logger(
-            "trust_quorum::send_share",
-        );
+        let log =
+            omicron_test_utils::dev::test_setup_log("trust_quorum::send_share")
+                .log;
         let mut server = Server::new(&log, shares[0].clone()).unwrap();
         let join_handle = tokio::spawn(async move { server.accept().await });
 

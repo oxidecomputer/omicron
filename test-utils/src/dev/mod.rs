@@ -16,7 +16,6 @@ use dropshot::test_util::LogContext;
 use dropshot::ConfigLogging;
 use dropshot::ConfigLoggingIfExists;
 use dropshot::ConfigLoggingLevel;
-use slog::Drain;
 use slog::Logger;
 
 /**
@@ -68,12 +67,4 @@ pub fn process_running(pid: u32) -> bool {
      * only checks whether the process is running.
      */
     0 == (unsafe { libc::kill(pid as libc::pid_t, 0) })
-}
-
-/// Return a slog::Logger for use during testing
-pub fn test_slog_logger(test_name: &'static str) -> slog::Logger {
-    let decorator = slog_term::TermDecorator::new().build();
-    let drain = slog_term::FullFormat::new(decorator).build().fuse();
-    let drain = slog_async::Async::new(drain).build().fuse();
-    slog::Logger::root(drain, o!("component" => test_name))
 }

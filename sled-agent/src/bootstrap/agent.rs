@@ -6,7 +6,7 @@
 
 use super::discovery;
 use super::spdm::SpdmError;
-use super::trust_quorum::{self, RackSecret};
+use super::trust_quorum::{self, RackSecret, ShareDistribution};
 use super::views::ShareResponse;
 use omicron_common::api::external::Error as ExternalError;
 use omicron_common::backoff::{
@@ -17,7 +17,7 @@ use omicron_common::packaging::sha256_digest;
 use slog::Logger;
 use std::collections::HashMap;
 use std::fs::File;
-use std::io::{Seek, SeekFrom};
+use std::io::{self, Seek, SeekFrom};
 use std::net::SocketAddr;
 use std::path::Path;
 use tar::Archive;
@@ -63,8 +63,8 @@ pub enum BootstrapError {
     #[error("Invalid message received from {0}")]
     InvalidMsg(SocketAddr),
 
-    #[error("Rack secret construction failed")]
-    RackSecretConstructionFailed,
+    #[error("Rack secret construction failed: {0:?}")]
+    RackSecretConstructionFailed(vsss_rs::Error),
 }
 
 impl From<BootstrapError> for ExternalError {
@@ -73,22 +73,41 @@ impl From<BootstrapError> for ExternalError {
     }
 }
 
+// Attempt to read a key share file. If the file does not exist, we return
+// `Ok(None)`, indicating the sled is operating in a single node cluster. If
+// the file exists, we parse it and return Ok(ShareDistribution). For any
+// other error, we return the error.
+//
+// TODO: Remove after dynamic key generation. See #513.
+fn read_key_share() -> Result<Option<ShareDistribution>, BootstrapError> {
+    let key_share_dir = Path::new("/opt/oxide/sled-agent/pkg");
+
+    match ShareDistribution::read(&key_share_dir) {
+        Ok(share) => Ok(Some(share)),
+        Err(BootstrapError::Io(err)) => {
+            if err.kind() == io::ErrorKind::NotFound {
+                Ok(None)
+            } else {
+                Err(BootstrapError::Io(err))
+            }
+        }
+        Err(e) => Err(e),
+    }
+}
+
 /// The entity responsible for bootstrapping an Oxide rack.
 pub(crate) struct Agent {
     /// Debug log
     log: Logger,
     peer_monitor: discovery::PeerMonitor,
-    trust_quorum_config: trust_quorum::Config,
+    share: Option<ShareDistribution>,
 }
 
 impl Agent {
-    pub fn new(
-        log: Logger,
-        rack_secret_dir: &str,
-    ) -> Result<Self, BootstrapError> {
+    pub fn new(log: Logger) -> Result<Self, BootstrapError> {
         let peer_monitor = discovery::PeerMonitor::new(&log)?;
-        let trust_quorum_config = trust_quorum::Config::read(&rack_secret_dir)?;
-        Ok(Agent { log, peer_monitor, trust_quorum_config })
+        let share = read_key_share()?;
+        Ok(Agent { log, peer_monitor, share })
     }
 
     /// Implements the "request share" API.
@@ -107,9 +126,6 @@ impl Agent {
 
     /// Communicates with peers, sharing secrets, until the rack has been
     /// sufficiently unlocked.
-    ///
-    /// - This method retries until [`UNLOCK_THRESHOLD`] other agents are
-    /// online, and have successfully responded to "share requests".
     async fn establish_sled_quorum(
         &self,
     ) -> Result<RackSecret, BootstrapError> {
@@ -122,8 +138,10 @@ impl Agent {
                     "Bootstrap: Communicating with peers: {:?}", other_agents
                 );
 
+                let share = || self.share.as_ref().unwrap();
+
                 // "-1" to account for ourselves.
-                if other_agents.len() < self.trust_quorum_config.threshold - 1 {
+                if other_agents.len() < share().threshold - 1 {
                     warn!(
                         &self.log,
                         "Not enough peers to start establishing quorum"
@@ -144,20 +162,16 @@ impl Agent {
                         addr.set_port(trust_quorum::PORT);
                         trust_quorum::Client::new(
                             &self.log,
-                            self.trust_quorum_config.verifier.clone(),
+                            share().verifier.clone(),
                             addr,
                         )
                     })
                     .collect();
 
-                // TODO: Parallelize this.
-                // TODO: Keep track of who's shares we've already retrieved and
-                // don't resend.
+                // TODO: Parallelize this and keep track of who's shares we've already retrieved and
+                // don't resend. See https://github.com/oxidecomputer/omicron/issues/514
                 let mut shares = Vec::<Share>::new();
-                let my_share_index = self.trust_quorum_config.sled_index;
-                shares.push(
-                    self.trust_quorum_config.shares[my_share_index].clone(),
-                );
+                shares.push(share().share.clone());
                 for agent in &other_agents {
                     let share = agent.get_share().await
                         .map_err(|e| {
@@ -172,8 +186,8 @@ impl Agent {
                     shares.push(share);
                 }
                 let rack_secret = RackSecret::combine_shares(
-                    self.trust_quorum_config.threshold,
-                    self.trust_quorum_config.total_shares,
+                    share().threshold,
+                    share().total_shares,
                     &shares,
                 )
                 .map_err(|e| {
@@ -184,8 +198,9 @@ impl Agent {
                     // TODO: We probably need to actually write an error
                     // handling routine that gives up in some cases based on
                     // the error returned from `RackSecret::combine_shares`.
+                    // See https://github.com/oxidecomputer/omicron/issues/516
                     BackoffError::Transient(
-                        BootstrapError::RackSecretConstructionFailed,
+                        BootstrapError::RackSecretConstructionFailed(e),
                     )
                 })?;
                 info!(self.log, "RackSecret computed from shares.");
@@ -234,8 +249,7 @@ impl Agent {
     }
 
     async fn run_trust_quorum_server(&self) -> Result<(), BootstrapError> {
-        let my_share_index = self.trust_quorum_config.sled_index;
-        let my_share = self.trust_quorum_config.shares[my_share_index].clone();
+        let my_share = self.share.as_ref().unwrap().share.clone();
         let mut server = trust_quorum::Server::new(&self.log, my_share)?;
         tokio::spawn(async move { server.run().await });
         Ok(())
@@ -243,12 +257,14 @@ impl Agent {
 
     /// Performs device initialization:
     ///
-    /// - Communicates with other sled agents to establish a trust quorum.
+    /// - Communicates with other sled agents to establish a trust quorum if a
+    /// ShareDistribution file exists on the host. Otherwise, the sled operates
+    /// as a single node cluster.
     /// - Verifies, unpacks, and launches other services.
     pub async fn initialize(&self) -> Result<(), BootstrapError> {
         info!(&self.log, "bootstrap service initializing");
 
-        if self.trust_quorum_config.enabled {
+        if self.share.is_some() {
             self.run_trust_quorum_server().await?;
             self.establish_sled_quorum().await?;
         }

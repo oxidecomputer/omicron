@@ -34,11 +34,9 @@ mod client;
 mod msgs;
 mod rack_secret;
 mod server;
-
-// TODO: Get rid of this security hole!
-mod config;
+mod share_distribution;
 
 pub use client::Client;
-pub use config::Config;
 pub use rack_secret::RackSecret;
 pub use server::{Server, PORT};
+pub use share_distribution::ShareDistribution;
