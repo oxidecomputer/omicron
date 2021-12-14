@@ -17,6 +17,7 @@ use omicron_nexus::external_api::views::Role;
 async fn test_roles_builtin(cptestctx: &ControlPlaneTestContext) {
     let testctx = &cptestctx.external_client;
 
+    // Standard authn / authz checks
     RequestBuilder::new(testctx, Method::GET, "/roles")
         .expect_status(Some(StatusCode::UNAUTHORIZED))
         .execute()
@@ -32,6 +33,7 @@ async fn test_roles_builtin(cptestctx: &ControlPlaneTestContext) {
     .await
     .unwrap();
 
+    // Success cases
     let roles = NexusRequest::object_get(&testctx, "/roles")
         .authn_as(AuthnMode::PrivilegedUser)
         .execute()
@@ -67,4 +69,57 @@ async fn test_roles_builtin(cptestctx: &ControlPlaneTestContext) {
             .expect("failed to iterate all roles");
     assert_eq!(roles, roles_paginated.all_items);
     assert_eq!(roles.len() + 1, roles_paginated.npages);
+
+    //
+    // Test GET /roles/$role_name
+    //
+
+    // Success cases
+    for r in &roles {
+        let one_role =
+            NexusRequest::object_get(&testctx, &format!("/roles/{}", r.name))
+                .authn_as(AuthnMode::PrivilegedUser)
+                .execute()
+                .await
+                .unwrap()
+                .parsed_body::<Role>()
+                .unwrap();
+        assert_eq!(one_role, *r);
+    }
+
+    // Standard authnn/authz checks
+    RequestBuilder::new(testctx, Method::GET, "/roles/fleet.admin")
+        .expect_status(Some(StatusCode::UNAUTHORIZED))
+        .execute()
+        .await
+        .unwrap();
+
+    NexusRequest::new(
+        RequestBuilder::new(testctx, Method::GET, "/roles/fleet.admin")
+            .expect_status(Some(StatusCode::FORBIDDEN)),
+    )
+    .authn_as(AuthnMode::UnprivilegedUser)
+    .execute()
+    .await
+    .unwrap();
+
+    // Invalid name: missing "."
+    NexusRequest::new(
+        RequestBuilder::new(testctx, Method::GET, "/roles/fleet_admin")
+            .expect_status(Some(StatusCode::NOT_FOUND)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap();
+
+    // Invalid name: not found
+    NexusRequest::new(
+        RequestBuilder::new(testctx, Method::GET, "/roles/fleet.admiral")
+            .expect_status(Some(StatusCode::NOT_FOUND)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap();
 }

@@ -2753,6 +2753,36 @@
         "x-dropshot-pagination": true
       }
     },
+    "/roles/{role_name}": {
+      "get": {
+        "description": "Fetch a specific built-in role",
+        "operationId": "roles_get_role",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "role_name",
+            "required": true,
+            "schema": {
+              "description": "The built-in role's unique name.",
+              "type": "string"
+            },
+            "style": "simple"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Role"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/sagas": {
       "get": {
         "description": "List all sagas (for debugging)",

@@ -144,6 +144,7 @@ pub fn external_api() -> NexusApiDescription {
         api.register(users_get_user)?;
 
         api.register(roles_get)?;
+        api.register(roles_get_role)?;
 
         api.register(console_api::spoof_login)?;
         api.register(console_api::spoof_login_form)?;
@@ -2099,35 +2100,34 @@ async fn roles_get(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-// XXX
-// /**
-//  * Path parameters for global (system) role requests
-//  */
-// #[derive(Deserialize, JsonSchema)]
-// struct RolePathParam {
-//     /// The built-in role's unique name.
-//     role_name: Name,
-// }
-//
-// /**
-//  * Fetch a specific built-in role
-//  */
-// #[endpoint {
-//     method = GET,
-//     path = "/roles/{role_name}",
-// }]
-// async fn roles_get_role(
-//     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
-//     path_params: Path<RolePathParam>,
-// ) -> Result<HttpResponseOk<Role>, HttpError> {
-//     let apictx = rqctx.context();
-//     let nexus = &apictx.nexus;
-//     let path = path_params.into_inner();
-//     let role_name = &path.role_name;
-//     let handler = async {
-//         let opctx = OpContext::for_external_api(&rqctx).await?;
-//         let role = nexus.role_builtin_fetch(&opctx, &role_name).await?;
-//         Ok(HttpResponseOk(role.into()))
-//     };
-//     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
-// }
+/**
+ * Path parameters for global (system) role requests
+ */
+#[derive(Deserialize, JsonSchema)]
+struct RolePathParam {
+    /// The built-in role's unique name.
+    role_name: String,
+}
+
+/**
+ * Fetch a specific built-in role
+ */
+#[endpoint {
+    method = GET,
+    path = "/roles/{role_name}",
+}]
+async fn roles_get_role(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    path_params: Path<RolePathParam>,
+) -> Result<HttpResponseOk<Role>, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let path = path_params.into_inner();
+    let role_name = &path.role_name;
+    let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let role = nexus.role_builtin_fetch(&opctx, &role_name).await?;
+        Ok(HttpResponseOk(role.into()))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}

@@ -2209,6 +2209,35 @@ impl DataStore {
             })
     }
 
+    pub async fn role_builtin_fetch(
+        &self,
+        opctx: &OpContext,
+        name: &str,
+    ) -> LookupResult<RoleBuiltin> {
+        use db::schema::role_builtin::dsl;
+        opctx.authorize(authz::Action::Read, authz::FLEET.child_generic())?;
+
+        let (resource_type, role_name) =
+            name.split_once(".").ok_or_else(|| Error::ObjectNotFound {
+                type_name: ResourceType::Role,
+                lookup_type: LookupType::ByName(String::from(name)),
+            })?;
+
+        dsl::role_builtin
+            .filter(dsl::resource_type.eq(String::from(resource_type)))
+            .filter(dsl::role_name.eq(String::from(role_name)))
+            .select(RoleBuiltin::as_select())
+            .first_async::<RoleBuiltin>(self.pool_authorized(opctx)?)
+            .await
+            .map_err(|e| {
+                public_error_from_diesel_pool(
+                    e,
+                    ResourceType::Role,
+                    LookupType::ByName(String::from(name)),
+                )
+            })
+    }
+
     /// Load built-in roles into the database
     pub async fn load_builtin_roles(
         &self,
