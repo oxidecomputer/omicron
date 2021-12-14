@@ -693,6 +693,7 @@ mod test {
         assert!(*not_found.lock().unwrap());
 
         db.cleanup().await.unwrap();
+        logctx.cleanup_successful();
     }
 
     #[tokio::test]
@@ -757,5 +758,6 @@ mod test {
         assert_eq!(collection_rcgen, 2);
 
         db.cleanup().await.unwrap();
+        logctx.cleanup_successful();
     }
 }

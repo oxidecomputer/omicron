@@ -61,6 +61,15 @@ VPCS
     vpc_get         ORGANIZATION_NAME PROJECT_NAME VPC_NAME
     vpc_delete      ORGANIZATION_NAME PROJECT_NAME VPC_NAME
 
+VPC SUBNETS
+
+    vpc_subnets_list ORGANIZATION_NAME PROJECT_NAME VPC_NAME
+    vpc_subnet_get ORGANIZATION_NAME PROJECT_NAME VPC_NAME SUBNET_NAME
+
+VPC SUBNETS IPS
+
+    subnet_ips_list ORGANIZATION_NAME PROJECT_NAME VPC_NAME SUBNET_NAME
+
 VPC FIREWALL
 
     vpc_firewall_rules_get ORGANIZATION_NAME PROJECT_NAME VPC_NAME
@@ -347,8 +356,26 @@ function cmd_vpc_get
 
 function cmd_vpc_delete
 {
-	[[ $# != 2 ]] && usage "expected PROJECT_NAME VPC_NAME"
+	[[ $# != 3 ]] && usage "expected ORGANIZATION_NAME PROJECT_NAME VPC_NAME"
 	do_curl "/organizations/$1/projects/$2/vpcs/$3" -X DELETE
+}
+
+function cmd_vpc_subnets_list
+{
+	[[ $# != 3 ]] && usage "expected ORGANIZATION_NAME PROJECT_NAME VPC_NAME"
+	do_curl "/organizations/$1/projects/$2/vpcs/$3/subnets"
+}
+
+function cmd_vpc_subnet_get
+{
+	[[ $# != 4 ]] && usage "expected ORGANIZATION_NAME PROJECT_NAME VPC_NAME SUBNET_NAME"
+	do_curl "/organizations/$1/projects/$2/vpcs/$3/subnets/$4"
+}
+
+function cmd_subnet_ips_list
+{
+	[[ $# != 4 ]] && usage "expected ORGANIZATION_NAME PROJECT_NAME VPC_NAME SUBNET_NAME"
+	do_curl "/organizations/$1/projects/$2/vpcs/$3/subnets/$4/ips"
 }
 
 function cmd_vpc_firewall_rules_get

@@ -63,6 +63,20 @@ pub struct ProjectUpdate {
 }
 
 /*
+ * NETWORK INTERFACES
+ */
+
+/**
+ * Create-time parameters for a [`NetworkInterface`]
+ */
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct NetworkInterfaceCreate {
+    #[serde(flatten)]
+    pub identity: IdentityMetadataCreateParams,
+}
+
+/*
  * INSTANCES
  */
 

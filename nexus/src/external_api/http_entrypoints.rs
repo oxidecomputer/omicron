@@ -47,6 +47,7 @@ use omicron_common::api::external::Disk;
 use omicron_common::api::external::DiskAttachment;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::Instance;
+use omicron_common::api::external::NetworkInterface;
 use omicron_common::api::external::RouterRoute;
 use omicron_common::api::external::RouterRouteCreateParams;
 use omicron_common::api::external::RouterRouteKind;
@@ -113,6 +114,8 @@ pub fn external_api() -> NexusApiDescription {
         api.register(vpc_subnets_post)?;
         api.register(vpc_subnets_delete_subnet)?;
         api.register(vpc_subnets_put_subnet)?;
+
+        api.register(subnets_ips_get)?;
 
         api.register(vpc_routers_get)?;
         api.register(vpc_routers_get_router)?;
@@ -1348,6 +1351,44 @@ async fn vpc_subnets_put_subnet(
             )
             .await?;
         Ok(HttpResponseUpdatedNoContent())
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/**
+ * List IP addresses on a VPC subnet.
+ */
+// TODO-correctness: This API has not actually been specified in an RFD yet, and
+// may not actually be what we want. It is being implemented here to give our
+// testing introspection into network interfaces.
+#[endpoint {
+     method = GET,
+     path = "/organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/subnets/{subnet_name}/ips",
+ }]
+async fn subnets_ips_get(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    query_params: Query<PaginatedByName>,
+    path_params: Path<VpcSubnetPathParam>,
+) -> Result<HttpResponseOk<ResultsPage<NetworkInterface>>, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let query = query_params.into_inner();
+    let path = path_params.into_inner();
+    let handler = async {
+        let interfaces = nexus
+            .subnet_list_network_interfaces(
+                &path.organization_name,
+                &path.project_name,
+                &path.vpc_name,
+                &path.subnet_name,
+                &data_page_params_for(&rqctx, &query)?
+                    .map_name(|n| Name::ref_cast(n)),
+            )
+            .await?
+            .into_iter()
+            .map(|interfaces| interfaces.into())
+            .collect();
+        Ok(HttpResponseOk(ScanByName::results_page(&query, interfaces)?))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }

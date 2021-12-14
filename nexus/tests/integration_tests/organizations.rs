@@ -11,11 +11,11 @@ use http::StatusCode;
 use nexus_test_utils::resource_helpers::{
     create_organization, create_project, objects_list_page_authz,
 };
-use nexus_test_utils::test_setup;
+use nexus_test_utils::ControlPlaneTestContext;
+use nexus_test_utils_macros::nexus_test;
 
-#[tokio::test]
-async fn test_organizations() {
-    let cptestctx = test_setup("test_organizations").await;
+#[nexus_test]
+async fn test_organizations(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
 
     /* Create organizations that we'll use for testing. */
@@ -87,6 +87,4 @@ async fn test_organizations() {
     // Delete the project, then delete the organization
     object_delete(&client, &project_url).await;
     object_delete(&client, &o2_url).await;
-
-    cptestctx.teardown().await;
 }

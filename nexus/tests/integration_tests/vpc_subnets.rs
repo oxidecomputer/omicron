@@ -20,11 +20,11 @@ use nexus_test_utils::identity_eq;
 use nexus_test_utils::resource_helpers::{
     create_organization, create_project, create_vpc,
 };
-use nexus_test_utils::test_setup;
+use nexus_test_utils::ControlPlaneTestContext;
+use nexus_test_utils_macros::nexus_test;
 
-#[tokio::test]
-async fn test_vpc_subnets() {
-    let cptestctx = test_setup("test_vpc_subnets").await;
+#[nexus_test]
+async fn test_vpc_subnets(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
 
     /* Create a project that we'll use for testing. */
@@ -247,8 +247,6 @@ async fn test_vpc_subnets() {
     assert_eq!(subnet_same_name.vpc_id, vpc2.identity.id);
     assert_eq!(subnet_same_name.ipv4_block, None);
     assert_eq!(subnet_same_name.ipv6_block, None);
-
-    cptestctx.teardown().await;
 }
 
 fn subnets_eq(sn1: &VpcSubnet, sn2: &VpcSubnet) {
