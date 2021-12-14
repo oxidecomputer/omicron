@@ -22,7 +22,6 @@ use std::net::SocketAddr;
 use std::path::Path;
 use tar::Archive;
 use thiserror::Error;
-use vsss_rs::Share;
 
 /// Describes errors which may occur while operating the bootstrap service.
 #[derive(Error, Debug)]
@@ -170,8 +169,7 @@ impl Agent {
 
                 // TODO: Parallelize this and keep track of who's shares we've already retrieved and
                 // don't resend. See https://github.com/oxidecomputer/omicron/issues/514
-                let mut shares = Vec::<Share>::new();
-                shares.push(share().share.clone());
+                let mut shares = vec![share().share.clone()];
                 for agent in &other_agents {
                     let share = agent.get_share().await
                         .map_err(|e| {
