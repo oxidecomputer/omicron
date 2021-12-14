@@ -161,9 +161,8 @@ async fn test_disks(cptestctx: &ControlPlaneTestContext) {
         instance.identity.name.as_str(),
         disk.identity.name.as_str(),
     );
-    let attachments =
-        object_get::<Vec<DiskAttachment>>(&client, &url_instance_disks).await;
-    assert_eq!(attachments.len(), 0);
+    let disks = objects_list_page::<Disk>(&client, &url_instance_disks).await;
+    assert_eq!(disks.items.len(), 0);
     let error = client
         .make_request_error(
             Method::GET,
