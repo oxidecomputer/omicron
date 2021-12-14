@@ -490,33 +490,19 @@ impl<'a> NexusRequest<'a> {
     where
         T: Clone + serde::de::DeserializeOwned,
     {
-        // TODO-cleanup XXX could clean this up
-        let url =
-            format!("{}?limit={}&{}", collection_url, limit, initial_params);
-        let mut page = NexusRequest::object_get(testctx, &url)
-            .authn_as(AuthnMode::PrivilegedUser)
-            .execute()
-            .await
-            .context("fetch page 1")?
-            .parsed_body::<ResultsPage<T>>()
-            .context("parse page 1")?;
-        ensure!(
-            page.items.len() <= limit,
-            "server sent more items than expected in page 1 \
-            (limit = {}, found = {})",
-            limit,
-            page.items.len()
-        );
+        let url_base = format!("{}?limit={}&", collection_url, limit);
+        let mut npages = 0;
+        let mut all_items = Vec::new();
+        let mut next_token: Option<String> = None;
 
-        let mut all_items = page.items.clone();
-        let mut npages = 1;
+        loop {
+            let url = if let Some(next_token) = &next_token {
+                format!("{}page_token={}", url_base, next_token)
+            } else {
+                format!("{}{}", url_base, initial_params)
+            };
 
-        while let Some(token) = page.next_page {
-            let url = format!(
-                "{}?limit={}&page_token={}",
-                collection_url, limit, token
-            );
-            page = NexusRequest::object_get(testctx, &url)
+            let page = NexusRequest::object_get(testctx, &url)
                 .authn_as(AuthnMode::PrivilegedUser)
                 .execute()
                 .await
@@ -532,7 +518,12 @@ impl<'a> NexusRequest<'a> {
                 page.items.len()
             );
             all_items.extend_from_slice(&page.items);
-            npages += 1
+            npages += 1;
+            if let Some(token) = page.next_page {
+                next_token = Some(token);
+            } else {
+                break;
+            }
         }
 
         Ok(Collection { all_items, npages })

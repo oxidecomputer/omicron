@@ -64,7 +64,7 @@ async fn test_roles_builtin(cptestctx: &ControlPlaneTestContext) {
     let roles_paginated =
         NexusRequest::iter_collection_authn(&testctx, "/roles", "", 1)
             .await
-            .expect("failed to iterate all roles")
-            .all_items;
-    assert_eq!(roles, roles_paginated);
+            .expect("failed to iterate all roles");
+    assert_eq!(roles, roles_paginated.all_items);
+    assert_eq!(roles.len() + 1, roles_paginated.npages);
 }
