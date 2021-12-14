@@ -142,7 +142,9 @@ where
     }
 }
 
-#[derive(Copy, Clone, Debug, AsExpression, FromSqlRow, Serialize, Deserialize)]
+#[derive(
+    Copy, Clone, Debug, AsExpression, FromSqlRow, Serialize, Deserialize,
+)]
 #[sql_type = "sql_types::BigInt"]
 pub struct ByteCount(pub external::ByteCount);
 
@@ -175,8 +177,17 @@ where
 }
 
 #[derive(
-    Copy, Clone, Debug, Eq, Ord, PartialEq, PartialOrd, AsExpression, FromSqlRow,
-    Serialize, Deserialize
+    Copy,
+    Clone,
+    Debug,
+    Eq,
+    Ord,
+    PartialEq,
+    PartialOrd,
+    AsExpression,
+    FromSqlRow,
+    Serialize,
+    Deserialize,
 )]
 #[sql_type = "sql_types::BigInt"]
 #[repr(transparent)]
@@ -508,7 +519,16 @@ impl From<internal_api::params::DatasetKind> for DatasetKind {
 ///
 /// A dataset represents a portion of a Zpool, which is then made
 /// available to a service on the Sled.
-#[derive(Queryable, Insertable, Debug, Clone, Selectable, Asset, Deserialize, Serialize)]
+#[derive(
+    Queryable,
+    Insertable,
+    Debug,
+    Clone,
+    Selectable,
+    Asset,
+    Deserialize,
+    Serialize,
+)]
 #[table_name = "dataset"]
 pub struct Dataset {
     #[diesel(embed)]
@@ -568,7 +588,16 @@ impl DatastoreCollection<Region> for Disk {
 ///
 /// A region represents a portion of a Crucible Downstairs dataset
 /// allocated within a volume.
-#[derive(Queryable, Insertable, Debug, Clone, Selectable, Asset, Serialize, Deserialize)]
+#[derive(
+    Queryable,
+    Insertable,
+    Debug,
+    Clone,
+    Selectable,
+    Asset,
+    Serialize,
+    Deserialize,
+)]
 #[table_name = "region"]
 pub struct Region {
     #[diesel(embed)]
@@ -583,7 +612,13 @@ pub struct Region {
 }
 
 impl Region {
-    pub fn new(dataset_id: Uuid, disk_id: Uuid, block_size: i64, extent_size: i64, extent_count: i64) -> Self {
+    pub fn new(
+        dataset_id: Uuid,
+        disk_id: Uuid,
+        block_size: i64,
+        extent_size: i64,
+        extent_count: i64,
+    ) -> Self {
         Self {
             identity: RegionIdentity::new(Uuid::new_v4()),
             dataset_id,
@@ -594,11 +629,21 @@ impl Region {
         }
     }
 
-    pub fn disk_id(&self) -> Uuid { self.disk_id }
-    pub fn dataset_id(&self) -> Uuid { self.dataset_id }
-    pub fn block_size(&self) -> u64 { self.block_size as u64 }
-    pub fn extent_size(&self) -> u64 { self.extent_size as u64 }
-    pub fn extent_count(&self) -> u64 { self.extent_count as u64 }
+    pub fn disk_id(&self) -> Uuid {
+        self.disk_id
+    }
+    pub fn dataset_id(&self) -> Uuid {
+        self.dataset_id
+    }
+    pub fn block_size(&self) -> u64 {
+        self.block_size as u64
+    }
+    pub fn extent_size(&self) -> u64 {
+        self.extent_size as u64
+    }
+    pub fn extent_count(&self) -> u64 {
+        self.extent_count as u64
+    }
 }
 
 /// Describes an organization within the database.
@@ -850,7 +895,16 @@ where
 }
 
 /// A Disk (network block device).
-#[derive(Queryable, Insertable, Clone, Debug, Selectable, Resource, Serialize, Deserialize)]
+#[derive(
+    Queryable,
+    Insertable,
+    Clone,
+    Debug,
+    Selectable,
+    Resource,
+    Serialize,
+    Deserialize,
+)]
 #[table_name = "disk"]
 pub struct Disk {
     #[diesel(embed)]
@@ -930,7 +984,16 @@ impl Into<external::Disk> for Disk {
     }
 }
 
-#[derive(AsChangeset, Clone, Debug, Queryable, Insertable, Selectable, Serialize, Deserialize)]
+#[derive(
+    AsChangeset,
+    Clone,
+    Debug,
+    Queryable,
+    Insertable,
+    Selectable,
+    Serialize,
+    Deserialize,
+)]
 #[table_name = "disk"]
 // When "attach_instance_id" is set to None, we'd like to
 // clear it from the DB, rather than ignore the update.

@@ -678,9 +678,11 @@ impl Nexus {
                 saga_params,
             )
             .await?;
-        let disk_created = saga_outputs.lookup_output::<db::model::Disk>("created_disk").map_err(|e| {
-            Error::InternalError { internal_message: e.to_string() }
-        })?;
+        let disk_created = saga_outputs
+            .lookup_output::<db::model::Disk>("created_disk")
+            .map_err(|e| Error::InternalError {
+                internal_message: e.to_string(),
+            })?;
         Ok(disk_created)
     }
 

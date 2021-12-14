@@ -62,16 +62,19 @@ use crate::db::{
         public_error_from_diesel_pool_shouldnt_fail,
     },
     model::{
-        ConsoleSession, Dataset, DatasetKind, Disk, DiskAttachment, DiskRuntimeState,
-        Generation, Instance, InstanceRuntimeState, Name, Organization,
-        OrganizationUpdate, OximeterInfo, ProducerEndpoint, Project,
-        ProjectUpdate, Region, RouterRoute, RouterRouteUpdate, Sled,
+        ConsoleSession, Dataset, DatasetKind, Disk, DiskAttachment,
+        DiskRuntimeState, Generation, Instance, InstanceRuntimeState, Name,
+        Organization, OrganizationUpdate, OximeterInfo, ProducerEndpoint,
+        Project, ProjectUpdate, Region, RouterRoute, RouterRouteUpdate, Sled,
         UserBuiltin, Vpc, VpcFirewallRule, VpcRouter, VpcRouterUpdate,
         VpcSubnet, VpcSubnetUpdate, VpcUpdate, Zpool,
     },
     pagination::paginated,
     update_and_check::{UpdateAndCheck, UpdateStatus},
 };
+
+// Number of unique datasets required to back a region.
+const REGION_REDUNDANCY_THRESHOLD: usize = 3;
 
 pub struct DataStore {
     pool: Arc<Pool>,
@@ -239,8 +242,8 @@ impl DataStore {
         disk_id: Uuid,
         params: &params::DiskCreate,
     ) -> Result<Vec<(Dataset, Region)>, Error> {
-        use db::schema::region::dsl as region_dsl;
         use db::schema::dataset::dsl as dataset_dsl;
+        use db::schema::region::dsl as region_dsl;
 
         // ALLOCATION POLICY
         //
@@ -260,34 +263,39 @@ impl DataStore {
         let datasets: Vec<Dataset> = dataset_dsl::dataset
             // First, we look for valid datasets (non-deleted crucible datasets).
             .filter(dataset_dsl::time_deleted.is_null())
-            .filter(dataset_dsl::kind.eq(DatasetKind(crate::internal_api::params::DatasetKind::Crucible)))
+            .filter(dataset_dsl::kind.eq(DatasetKind(
+                crate::internal_api::params::DatasetKind::Crucible,
+            )))
             // Next, observe all the regions allocated to each dataset, and
             // determine how much space they're using.
             //
             // NOTE: We could store "free/allocated" space per-dataset, and keep
             // them up-to-date, rather than trying to recompute this.
             .left_outer_join(
-                region_dsl::region.on(
-                    dataset_dsl::id.eq(region_dsl::dataset_id)
-                )
+                region_dsl::region
+                    .on(dataset_dsl::id.eq(region_dsl::dataset_id)),
             )
             .group_by(dataset_dsl::id)
             .select(Dataset::as_select())
-            .order(diesel::dsl::sum(region_dsl::extent_size * region_dsl::extent_count).asc())
+            .order(
+                diesel::dsl::sum(
+                    region_dsl::extent_size * region_dsl::extent_count,
+                )
+                .asc(),
+            )
             .get_results_async::<Dataset>(self.pool())
             .await
-            .map_err(|e| {
-                public_error_from_diesel_pool_shouldnt_fail(e)
-            })?;
+            .map_err(|e| public_error_from_diesel_pool_shouldnt_fail(e))?;
 
-        // TODO: magic num
-        let threshold = 3;
-        if datasets.len() < threshold {
-            return Err(Error::internal_error("Not enough datasets for replicated allocation"));
+        if datasets.len() < REGION_REDUNDANCY_THRESHOLD {
+            return Err(Error::internal_error(
+                "Not enough datasets for replicated allocation",
+            ));
         }
 
-        let source_datasets = &datasets[0..threshold];
-        let regions: Vec<Region> = source_datasets.iter()
+        let source_datasets = &datasets[0..REGION_REDUNDANCY_THRESHOLD];
+        let regions: Vec<Region> = source_datasets
+            .iter()
             .map(|dataset| {
                 Region::new(
                     dataset.id(),
@@ -304,12 +312,14 @@ impl DataStore {
             .returning(Region::as_returning())
             .get_results_async(self.pool())
             .await
-            .map_err(|e| {
-                public_error_from_diesel_pool_shouldnt_fail(e)
-            })?;
+            .map_err(|e| public_error_from_diesel_pool_shouldnt_fail(e))?;
 
         // TODO: also, make this concurrency-safe. Txns?
-        Ok(source_datasets.into_iter().map(|d| d.clone()).zip(regions).collect())
+        Ok(source_datasets
+            .into_iter()
+            .map(|d| d.clone())
+            .zip(regions)
+            .collect())
     }
 
     /// Create a organization
@@ -2120,11 +2130,13 @@ mod test {
     use crate::db::model::{ConsoleSession, Organization, Project};
     use crate::external_api::params;
     use chrono::{Duration, Utc};
-    use omicron_common::api::external::{ByteCount, Name, Error, IdentityMetadataCreateParams};
+    use omicron_common::api::external::{
+        ByteCount, Error, IdentityMetadataCreateParams, Name,
+    };
     use omicron_test_utils::dev;
     use std::collections::HashSet;
-    use std::sync::Arc;
     use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+    use std::sync::Arc;
     use uuid::Uuid;
 
     #[tokio::test]
@@ -2223,7 +2235,8 @@ mod test {
 
     // Creates a test sled, returns its UUID.
     async fn create_test_sled(datastore: &DataStore) -> Uuid {
-        let bogus_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 8080);
+        let bogus_addr =
+            SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 8080);
         let sled_id = Uuid::new_v4();
         let sled = Sled::new(sled_id, bogus_addr.clone());
         datastore.sled_upsert(sled).await.unwrap();
@@ -2233,14 +2246,21 @@ mod test {
     // Creates a test zpool, returns its UUID.
     async fn create_test_zpool(datastore: &DataStore, sled_id: Uuid) -> Uuid {
         let zpool_id = Uuid::new_v4();
-        let zpool = Zpool::new(zpool_id, sled_id, &crate::internal_api::params::ZpoolPutRequest {
-            size: ByteCount::from_gibibytes_u32(100),
-        });
+        let zpool = Zpool::new(
+            zpool_id,
+            sled_id,
+            &crate::internal_api::params::ZpoolPutRequest {
+                size: ByteCount::from_gibibytes_u32(100),
+            },
+        );
         datastore.zpool_upsert(zpool).await.unwrap();
         zpool_id
     }
 
-    fn create_test_disk_create_params(name: &str, size: ByteCount) -> params::DiskCreate {
+    fn create_test_disk_create_params(
+        name: &str,
+        size: ByteCount,
+    ) -> params::DiskCreate {
         params::DiskCreate {
             identity: IdentityMetadataCreateParams {
                 name: Name::try_from(name.to_string()).unwrap(),
@@ -2251,8 +2271,6 @@ mod test {
         }
     }
 
-    // TODO: Test region allocation when not enough datasets exist (below
-    // threshold)
     // TODO: Test region allocation when running out of space.
 
     #[tokio::test]
@@ -2270,22 +2288,29 @@ mod test {
         let zpool_id = create_test_zpool(&datastore, sled_id).await;
 
         // ... and datasets within that zpool.
-        let dataset_count = 6;
-        let bogus_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 8080);
-        let kind = DatasetKind(crate::internal_api::params::DatasetKind::Crucible);
-        let dataset_ids: Vec<Uuid> = (0..dataset_count).map(|_| Uuid::new_v4()).collect();
+        let dataset_count = REGION_REDUNDANCY_THRESHOLD * 2;
+        let bogus_addr =
+            SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 8080);
+        let kind =
+            DatasetKind(crate::internal_api::params::DatasetKind::Crucible);
+        let dataset_ids: Vec<Uuid> =
+            (0..dataset_count).map(|_| Uuid::new_v4()).collect();
         for id in &dataset_ids {
             let dataset = Dataset::new(*id, zpool_id, bogus_addr, kind.clone());
             datastore.dataset_upsert(dataset).await.unwrap();
         }
 
         // Allocate regions from the datasets for this disk.
-        let params = create_test_disk_create_params("disk1", ByteCount::from_mebibytes_u32(500));
+        let params = create_test_disk_create_params(
+            "disk1",
+            ByteCount::from_mebibytes_u32(500),
+        );
         let disk1_id = Uuid::new_v4();
-        let dataset_and_regions = datastore.region_allocate(disk1_id, &params).await.unwrap();
+        let dataset_and_regions =
+            datastore.region_allocate(disk1_id, &params).await.unwrap();
 
         // Verify the allocation.
-        assert_eq!(3, dataset_and_regions.len());
+        assert_eq!(REGION_REDUNDANCY_THRESHOLD, dataset_and_regions.len());
         let mut disk1_datasets = HashSet::new();
         for (dataset, region) in dataset_and_regions {
             assert!(disk1_datasets.insert(dataset.id()));
@@ -2297,10 +2322,14 @@ mod test {
 
         // Allocate regions for a second disk. Observe that we allocate from
         // the three previously unused datasets.
-        let params = create_test_disk_create_params("disk2", ByteCount::from_mebibytes_u32(500));
+        let params = create_test_disk_create_params(
+            "disk2",
+            ByteCount::from_mebibytes_u32(500),
+        );
         let disk2_id = Uuid::new_v4();
-        let dataset_and_regions = datastore.region_allocate(disk2_id, &params).await.unwrap();
-        assert_eq!(3, dataset_and_regions.len());
+        let dataset_and_regions =
+            datastore.region_allocate(disk2_id, &params).await.unwrap();
+        assert_eq!(REGION_REDUNDANCY_THRESHOLD, dataset_and_regions.len());
         let mut disk2_datasets = HashSet::new();
         for (dataset, region) in dataset_and_regions {
             assert!(disk2_datasets.insert(dataset.id()));
@@ -2313,6 +2342,49 @@ mod test {
         // Double-check that the datasets used for the first disk weren't
         // used when allocating the second disk.
         assert_eq!(0, disk1_datasets.intersection(&disk2_datasets).count());
+
+        let _ = db.cleanup().await;
+    }
+
+    #[tokio::test]
+    async fn test_region_allocation_not_enough_datasets() {
+        let logctx =
+            dev::test_setup_log("test_region_allocation_not_enough_datasets");
+        let mut db = dev::test_setup_database(&logctx.log).await;
+        let cfg = db::Config { url: db.pg_config().clone() };
+        let pool = db::Pool::new(&cfg);
+        let datastore = DataStore::new(Arc::new(pool));
+
+        // Create a sled...
+        let sled_id = create_test_sled(&datastore).await;
+
+        // ... and a zpool within that sled...
+        let zpool_id = create_test_zpool(&datastore, sled_id).await;
+
+        // ... and datasets within that zpool.
+        let dataset_count = REGION_REDUNDANCY_THRESHOLD - 1;
+        let bogus_addr =
+            SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 8080);
+        let kind =
+            DatasetKind(crate::internal_api::params::DatasetKind::Crucible);
+        let dataset_ids: Vec<Uuid> =
+            (0..dataset_count).map(|_| Uuid::new_v4()).collect();
+        for id in &dataset_ids {
+            let dataset = Dataset::new(*id, zpool_id, bogus_addr, kind.clone());
+            datastore.dataset_upsert(dataset).await.unwrap();
+        }
+
+        // Allocate regions from the datasets for this disk.
+        let params = create_test_disk_create_params(
+            "disk1",
+            ByteCount::from_mebibytes_u32(500),
+        );
+        let disk1_id = Uuid::new_v4();
+        let err =
+            datastore.region_allocate(disk1_id, &params).await.unwrap_err();
+        assert!(err
+            .to_string()
+            .contains("Not enough datasets for replicated allocation"));
 
         let _ = db.cleanup().await;
     }
