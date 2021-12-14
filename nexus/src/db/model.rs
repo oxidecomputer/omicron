@@ -593,6 +593,12 @@ impl Region {
             extent_count,
         }
     }
+
+    pub fn disk_id(&self) -> Uuid { self.disk_id }
+    pub fn dataset_id(&self) -> Uuid { self.dataset_id }
+    pub fn block_size(&self) -> u64 { self.block_size as u64 }
+    pub fn extent_size(&self) -> u64 { self.extent_size as u64 }
+    pub fn extent_count(&self) -> u64 { self.extent_count as u64 }
 }
 
 /// Describes an organization within the database.

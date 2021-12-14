@@ -34,7 +34,6 @@ use crate::authz;
 use crate::context::OpContext;
 use crate::external_api::params;
 use async_bb8_diesel::{AsyncConnection, AsyncRunQueryDsl, ConnectionManager};
-use bigdecimal::ToPrimitive;
 use chrono::Utc;
 use diesel::prelude::*;
 use diesel::upsert::excluded;
@@ -243,9 +242,7 @@ impl DataStore {
         use db::schema::region::dsl as region_dsl;
         use db::schema::dataset::dsl as dataset_dsl;
 
-        println!("region_allocate: Allocating region: {:#?}", params);
-
-        // Allocation Policy
+        // ALLOCATION POLICY
         //
         // NOTE: This policy can - and should! - be changed.
         // It is currently acting as a placeholder, showing a feasible
@@ -253,53 +250,35 @@ impl DataStore {
         //
         // This policy allocates regions to distinct Crucible datasets,
         // favoring datasets with the smallest existing (summed) region
-        // sizes.
+        // sizes. Basically, "pick the datasets with the smallest load first".
         //
-        //
-        //
-        let datasets: Vec<(Dataset, u64)> = dataset_dsl::dataset
+        // Longer-term, we should consider:
+        // - Storage size + remaining free space
+        // - Sled placement of datasets
+        // - What sort of loads we'd like to create (even split across all disks
+        // may not be preferable, especially if maintenance is expected)
+        let datasets: Vec<Dataset> = dataset_dsl::dataset
             // First, we look for valid datasets (non-deleted crucible datasets).
             .filter(dataset_dsl::time_deleted.is_null())
             .filter(dataset_dsl::kind.eq(DatasetKind(crate::internal_api::params::DatasetKind::Crucible)))
             // Next, observe all the regions allocated to each dataset, and
             // determine how much space they're using.
             //
-            // NOTE: We *could* store "free/allocated" space per-dataset, and
-            // work hard to keep them up-to-date, rather than trying to
-            // recompute this.
+            // NOTE: We could store "free/allocated" space per-dataset, and keep
+            // them up-to-date, rather than trying to recompute this.
             .left_outer_join(
                 region_dsl::region.on(
                     dataset_dsl::id.eq(region_dsl::dataset_id)
                 )
             )
             .group_by(dataset_dsl::id)
-            .select(
-                (
-                    Dataset::as_select(),
-                    diesel::dsl::sum(region_dsl::extent_count * region_dsl::extent_size).nullable()
-                )
-            )
+            .select(Dataset::as_select())
             .order(diesel::dsl::sum(region_dsl::extent_size * region_dsl::extent_count).asc())
-            .get_results_async::<(Dataset, Option<bigdecimal::BigDecimal>)>(self.pool())
+            .get_results_async::<Dataset>(self.pool())
             .await
             .map_err(|e| {
                 public_error_from_diesel_pool_shouldnt_fail(e)
-            })?
-            .into_iter()
-            .map(|(dataset, total_allocated)| {
-                // TODO: If there aren't any regions, zero is a reasonable
-                // default. But if the size * count is too big, we probably
-                // want safer handling here.
-                //
-                // Do we need to convert to u64 if this is internal?
-                (dataset, total_allocated.map_or(0, |value| value.to_u64().unwrap()))
-            }).collect();
-
-        println!("region_allocate: Observed datasets: {:#?}", datasets);
-
-        // TODO: We don't actually need to return the allc'd space right now...
-        // maybe we should tho to compare it with a total size or something.
-        let datasets: Vec<Dataset> = datasets.into_iter().map(|(d, _)| d).collect();
+            })?;
 
         // TODO: magic num
         let threshold = 3;
@@ -2143,6 +2122,7 @@ mod test {
     use chrono::{Duration, Utc};
     use omicron_common::api::external::{ByteCount, Name, Error, IdentityMetadataCreateParams};
     use omicron_test_utils::dev;
+    use std::collections::HashSet;
     use std::sync::Arc;
     use std::net::{IpAddr, Ipv4Addr, SocketAddr};
     use uuid::Uuid;
@@ -2260,6 +2240,21 @@ mod test {
         zpool_id
     }
 
+    fn create_test_disk_create_params(name: &str, size: ByteCount) -> params::DiskCreate {
+        params::DiskCreate {
+            identity: IdentityMetadataCreateParams {
+                name: Name::try_from(name.to_string()).unwrap(),
+                description: name.to_string(),
+            },
+            snapshot_id: None,
+            size,
+        }
+    }
+
+    // TODO: Test region allocation when not enough datasets exist (below
+    // threshold)
+    // TODO: Test region allocation when running out of space.
+
     #[tokio::test]
     async fn test_region_allocation() {
         let logctx = dev::test_setup_log("test_region_allocation");
@@ -2275,34 +2270,49 @@ mod test {
         let zpool_id = create_test_zpool(&datastore, sled_id).await;
 
         // ... and datasets within that zpool.
+        let dataset_count = 6;
         let bogus_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 8080);
         let kind = DatasetKind(crate::internal_api::params::DatasetKind::Crucible);
-        let dataset_ids: Vec<Uuid> = (0..6).map(|_| Uuid::new_v4()).collect();
+        let dataset_ids: Vec<Uuid> = (0..dataset_count).map(|_| Uuid::new_v4()).collect();
         for id in &dataset_ids {
             let dataset = Dataset::new(*id, zpool_id, bogus_addr, kind.clone());
-            println!("test: inserting {:#?}", dataset);
             datastore.dataset_upsert(dataset).await.unwrap();
         }
 
-        // Allocate regions from the datasets.
-        let disk_create_params = params::DiskCreate {
-            identity: IdentityMetadataCreateParams {
-                name: Name::try_from("disk1".to_string()).unwrap(),
-                description: "my-disk".to_string(),
-            },
-            snapshot_id: None,
-            size: ByteCount::from_mebibytes_u32(500),
-        };
-
+        // Allocate regions from the datasets for this disk.
+        let params = create_test_disk_create_params("disk1", ByteCount::from_mebibytes_u32(500));
         let disk1_id = Uuid::new_v4();
-        let dataset_and_regions = datastore.region_allocate(disk1_id, &disk_create_params).await.unwrap();
+        let dataset_and_regions = datastore.region_allocate(disk1_id, &params).await.unwrap();
 
-        // Verify the allocation we just performed.
+        // Verify the allocation.
         assert_eq!(3, dataset_and_regions.len());
-        // TODO: verify allocated regions make sense
+        let mut disk1_datasets = HashSet::new();
+        for (dataset, region) in dataset_and_regions {
+            assert!(disk1_datasets.insert(dataset.id()));
+            assert_eq!(disk1_id, region.disk_id());
+            assert_eq!(params.block_size(), region.block_size());
+            assert_eq!(params.extent_size(), region.extent_size());
+            assert_eq!(params.extent_count(), region.extent_count());
+        }
 
+        // Allocate regions for a second disk. Observe that we allocate from
+        // the three previously unused datasets.
+        let params = create_test_disk_create_params("disk2", ByteCount::from_mebibytes_u32(500));
         let disk2_id = Uuid::new_v4();
-        let dataset_and_regions = datastore.region_allocate(disk2_id, &disk_create_params).await.unwrap();
+        let dataset_and_regions = datastore.region_allocate(disk2_id, &params).await.unwrap();
+        assert_eq!(3, dataset_and_regions.len());
+        let mut disk2_datasets = HashSet::new();
+        for (dataset, region) in dataset_and_regions {
+            assert!(disk2_datasets.insert(dataset.id()));
+            assert_eq!(disk2_id, region.disk_id());
+            assert_eq!(params.block_size(), region.block_size());
+            assert_eq!(params.extent_size(), region.extent_size());
+            assert_eq!(params.extent_count(), region.extent_count());
+        }
+
+        // Double-check that the datasets used for the first disk weren't
+        // used when allocating the second disk.
+        assert_eq!(0, disk1_datasets.intersection(&disk2_datasets).count());
 
         let _ = db.cleanup().await;
     }
