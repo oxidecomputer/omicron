@@ -69,3 +69,4 @@ panic = "abort"
 [patch.crates-io.pq-sys]
 git = 'https://github.com/oxidecomputer/pq-sys'
 branch = "oxide/omicron"
+
