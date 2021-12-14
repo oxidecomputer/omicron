@@ -183,10 +183,8 @@ impl Nexus {
             Arc::clone(&authz),
             authn::Context::internal_db_init(),
         );
-        let populate_status = populate_start(
-            populate_ctx,
-            Arc::clone(&db_datastore),
-        );
+        let populate_status =
+            populate_start(populate_ctx, Arc::clone(&db_datastore));
 
         let nexus = Nexus {
             id: config.id,

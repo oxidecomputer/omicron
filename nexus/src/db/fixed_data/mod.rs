@@ -23,5 +23,5 @@
 // uuid as any random uuid is.)
 //
 
-pub mod user_builtin;
 pub mod role_builtin;
+pub mod user_builtin;
