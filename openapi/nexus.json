@@ -975,6 +975,36 @@
         "operationId": "instance_disks_get",
         "parameters": [
           {
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "nullable": true,
+              "description": "Maximum number of items returned by a single call",
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 1
+            },
+            "style": "form"
+          },
+          {
+            "in": "query",
+            "name": "page_token",
+            "schema": {
+              "nullable": true,
+              "description": "Token returned by previous call to retreive the subsequent page",
+              "type": "string"
+            },
+            "style": "form"
+          },
+          {
+            "in": "query",
+            "name": "sort_by",
+            "schema": {
+              "$ref": "#/components/schemas/NameSortMode"
+            },
+            "style": "form"
+          },
+          {
             "in": "path",
             "name": "instance_name",
             "required": true,
@@ -1008,16 +1038,13 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "title": "Array_of_DiskAttachment",
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/components/schemas/DiskAttachment"
-                  }
+                  "$ref": "#/components/schemas/DiskResultsPage"
                 }
               }
             }
           }
-        }
+        },
+        "x-dropshot-pagination": true
       }
     },
     "/organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/disks/{disk_name}": {

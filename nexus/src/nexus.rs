@@ -1174,7 +1174,7 @@ impl Nexus {
         project_name: &Name,
         instance_name: &Name,
         pagparams: &DataPageParams<'_, Name>,
-    ) -> ListResultVec<db::model::DiskAttachment> {
+    ) -> ListResultVec<db::model::Disk> {
         let instance = self
             .project_lookup_instance(
                 organization_name,

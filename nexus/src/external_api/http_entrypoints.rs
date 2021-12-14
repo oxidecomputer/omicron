@@ -41,12 +41,10 @@ use omicron_common::api::external::http_pagination::ScanByName;
 use omicron_common::api::external::http_pagination::ScanByNameOrId;
 use omicron_common::api::external::http_pagination::ScanParams;
 use omicron_common::api::external::to_list;
-use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Disk;
 use omicron_common::api::external::DiskAttachment;
 use omicron_common::api::external::Instance;
 use omicron_common::api::external::NetworkInterface;
-use omicron_common::api::external::PaginationOrder;
 use omicron_common::api::external::RouterRoute;
 use omicron_common::api::external::RouterRouteCreateParams;
 use omicron_common::api::external::RouterRouteKind;
@@ -60,7 +58,6 @@ use omicron_common::api::external::VpcRouterKind;
 use ref_cast::RefCast;
 use schemars::JsonSchema;
 use serde::Deserialize;
-use std::num::NonZeroU32;
 use std::sync::Arc;
 use uuid::Uuid;
 
@@ -892,32 +889,30 @@ async fn project_instances_instance_stop(
 }]
 async fn instance_disks_get(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    query_params: Query<PaginatedByName>,
     path_params: Path<InstancePathParam>,
-) -> Result<HttpResponseOk<Vec<DiskAttachment>>, HttpError> {
+) -> Result<HttpResponseOk<ResultsPage<Disk>>, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
+    let query = query_params.into_inner();
     let path = path_params.into_inner();
     let organization_name = &path.organization_name;
     let project_name = &path.project_name;
     let instance_name = &path.instance_name;
-    let fake_query = DataPageParams {
-        marker: None,
-        direction: PaginationOrder::Ascending,
-        limit: NonZeroU32::new(std::u32::MAX).unwrap(),
-    };
     let handler = async {
         let disks = nexus
             .instance_list_disks(
                 &organization_name,
                 &project_name,
                 &instance_name,
-                &fake_query,
+                &data_page_params_for(&rqctx, &query)?
+                    .map_name(|n| Name::ref_cast(n)),
             )
             .await?
             .into_iter()
             .map(|d| d.into())
             .collect();
-        Ok(HttpResponseOk(disks))
+        Ok(HttpResponseOk(ScanByName::results_page(&query, disks)?))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
