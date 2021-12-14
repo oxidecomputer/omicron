@@ -2,6 +2,8 @@
 
 use crate::context::OpContext;
 use crate::db::DataStore;
+use futures::future::BoxFuture;
+use futures::FutureExt;
 use omicron_common::backoff;
 use std::sync::Arc;
 
@@ -35,93 +37,60 @@ async fn populate(
     opctx: &OpContext,
     datastore: &DataStore,
 ) -> Result<(), String> {
-    populate_users(opctx, &datastore).await?;
-    populate_roles(opctx, &datastore).await
-}
+    use omicron_common::api::external::Error;
+    struct Populator<'a> {
+        name: &'static str,
+        func: &'a (dyn Fn() -> BoxFuture<'a, Result<(), Error>> + Send + Sync),
+    }
 
-async fn populate_users(
-    opctx: &OpContext,
-    datastore: &DataStore,
-) -> Result<(), String> {
-    let db_result = backoff::retry_notify(
-        backoff::internal_service_policy(),
-        || async {
-            datastore.load_builtin_users(&opctx).await.map_err(|error| {
-                use omicron_common::api::external::Error;
-                match &error {
+    let populate_users = || {
+        async { datastore.load_builtin_users(opctx).await.map(|_| ()) }.boxed()
+    };
+    let populate_roles = || {
+        async { datastore.load_builtin_roles(opctx).await.map(|_| ()) }.boxed()
+    };
+    let populators = [
+        Populator { name: "users", func: &populate_users },
+        Populator { name: "roles", func: &populate_roles },
+    ];
+
+    for p in populators {
+        let db_result = backoff::retry_notify(
+            backoff::internal_service_policy(),
+            || async {
+                (p.func)().await.map_err(|error| match &error {
                     Error::ServiceUnavailable { .. } => {
                         backoff::BackoffError::Transient(error)
                     }
                     _ => backoff::BackoffError::Permanent(error),
-                }
-            })
-        },
-        |error, delay| {
-            warn!(
-                opctx.log,
-                "failed to load built-in users; will retry in {:?}", delay;
-                "error_message" => ?error,
-            );
-        },
-    )
-    .await;
+                })
+            },
+            |error, delay| {
+                warn!(
+                    opctx.log,
+                    "failed to populate built-in {}; will retry in {:?}",
+                    p.name,
+                    delay;
+                    "error_message" => ?error,
+                );
+            },
+        )
+        .await;
 
-    if let Err(error) = &db_result {
-        /*
-         * TODO-autonomy this should raise an alert, bump a counter, or raise
-         * some other red flag that something is wrong.  (This should be
-         * unlikely in practice.)
-         */
-        error!(opctx.log,
-            "gave up trying to load built-in users";
-            "error_message" => ?error
-        );
+        if let Err(error) = &db_result {
+            /*
+             * TODO-autonomy this should raise an alert, bump a counter, or raise
+             * some other red flag that something is wrong.  (This should be
+             * unlikely in practice.)
+             */
+            error!(opctx.log,
+                "gave up trying to populate built-in {}", p.name;
+                "error_message" => ?error
+            );
+        }
+
+        db_result.map_err(|error| error.to_string())?;
     }
 
-    db_result.map_err(|error| error.to_string())
-}
-
-// XXX commonize
-async fn populate_roles(
-    opctx: &OpContext,
-    datastore: &DataStore,
-) -> Result<(), String> {
-    let db_result = backoff::retry_notify(
-        backoff::internal_service_policy(),
-        || async {
-            datastore.load_builtin_roles(&opctx).await.map_err(
-                |error| {
-                    use omicron_common::api::external::Error;
-                    match &error {
-                        Error::ServiceUnavailable { .. } => {
-                            backoff::BackoffError::Transient(error)
-                        }
-                        _ => backoff::BackoffError::Permanent(error),
-                    }
-                },
-            )
-        },
-        |error, delay| {
-            warn!(
-                opctx.log,
-                "failed to load built-in roles; will retry in {:?}", delay;
-                "error_message" => ?error,
-            );
-        },
-    )
-    .await;
-
-    if let Err(error) = &db_result {
-        /*
-         * TODO-autonomy this should raise an alert, bump a counter, or raise
-         * some other red flag that something is wrong.  (This should be
-         * unlikely in practice.)
-         */
-        error!(opctx.log,
-            "gave up trying to load built-in roles";
-            "error_message" => ?error
-        );
-    }
-
-    db_result.map_err(|error| error.to_string())
+    Ok(())
 }
