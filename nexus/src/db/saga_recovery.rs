@@ -480,7 +480,7 @@ mod test {
         let (storage, sec_client, uctx) =
             create_storage_sec_and_context(&log, db_datastore.clone(), sec_id);
         let sec_log = log.new(o!("component" => "SEC"));
-        let opctx = OpContext::for_unit_tests(log);
+        let opctx = OpContext::for_unit_tests(log, Arc::clone(&db_datastore));
 
         // Create and start a saga.
         //
@@ -554,7 +554,7 @@ mod test {
         let (storage, sec_client, uctx) =
             create_storage_sec_and_context(&log, db_datastore.clone(), sec_id);
         let sec_log = log.new(o!("component" => "SEC"));
-        let opctx = OpContext::for_unit_tests(log);
+        let opctx = OpContext::for_unit_tests(log, Arc::clone(&db_datastore));
 
         // Create and start a saga, which we expect to complete successfully.
         let saga_id = SagaId(Uuid::new_v4());

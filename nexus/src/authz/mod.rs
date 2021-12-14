@@ -5,8 +5,10 @@
 //! Authorization facilities
 
 use crate::authn;
+use crate::db::DataStore;
 use omicron_common::api::external::Error;
 use oso::Oso;
+use std::collections::BTreeSet;
 use std::sync::Arc;
 
 mod oso_types;
@@ -39,17 +41,23 @@ impl Authz {
 pub struct Context {
     authn: Arc<authn::Context>,
     authz: Arc<Authz>,
+    datastore: Arc<DataStore>,
+    roles: BTreeSet<OpRole>,
 }
 
 impl Context {
-    pub fn new(authn: Arc<authn::Context>, authz: Arc<Authz>) -> Context {
-        Context { authn, authz }
+    pub fn new(
+        authn: Arc<authn::Context>,
+        authz: Arc<Authz>,
+        datastore: Arc<DataStore>,
+    ) -> Context {
+        Context { authn, authz, datastore, roles: BTreeSet::new() }
     }
 
     /// Check whether the actor performing this request is authorized for
     /// `action` on `resource`.
     pub fn authorize<Resource>(
-        &self,
+        self: &Arc<Context>,
         action: Action,
         resource: Resource,
     ) -> Result<(), Error>
@@ -67,7 +75,16 @@ impl Context {
         // Alternatively, we could let the caller produce the appropriate
         // "NotFound", but it would add a lot of boilerplate to a lot of
         // callers if we didn't return api::external::Error here.
-        let actor = oso_types::AnyActor::from(&*self.authn);
+
+        // XXX Next steps:
+        // * AnyActor/AuthenticatedActor should hang onto a reference to *this*
+        //   object
+        // * They should call back into this object in order to fetch roles
+        //   * The impl will call into a datastore to do the work
+        // * This object's ::new() needs access to a datastore
+        //   * That's going to have a big blast radius
+
+        let actor = oso_types::AnyActor::new(Arc::clone(&self));
         let is_authn = self.authn.actor().is_some();
         match self.authz.oso.is_allowed(actor, action, resource) {
             Err(error) => Err(Error::internal_error(&format!(
@@ -87,74 +104,75 @@ impl Context {
     }
 }
 
-#[cfg(test)]
-mod test {
-    /*
-     * These are essentially unit tests for the policy itself.
-     * TODO-coverage This is just a start.  But we need roles to do a more
-     * comprehensive test.
-     * TODO If this gets any more complicated, we could consider automatically
-     * generating the test cases.  We could precreate a bunch of resources and
-     * some users with different roles.  Then we could run through a table that
-     * says exactly which users should be able to do what to each resource.
-     */
-    use super::Action;
-    use super::Authz;
-    use super::Context;
-    use super::DATABASE;
-    use super::FLEET;
-    use crate::authn;
-    use std::sync::Arc;
-
-    fn authz_context_for_actor(authn: authn::Context) -> Context {
-        let authz = Authz::new();
-        Context::new(Arc::new(authn), Arc::new(authz))
-    }
-
-    fn authz_context_noauth() -> Context {
-        let authn = authn::Context::internal_unauthenticated();
-        let authz = Authz::new();
-        Context::new(Arc::new(authn), Arc::new(authz))
-    }
-
-    #[test]
-    fn test_database() {
-        let authz_privileged =
-            authz_context_for_actor(authn::Context::internal_test_user());
-        authz_privileged
-            .authorize(Action::Query, DATABASE)
-            .expect("expected privileged user to be able to query database");
-        let authz_nobody =
-            authz_context_for_actor(authn::Context::test_context_for_actor(
-                authn::USER_TEST_UNPRIVILEGED.id,
-            ));
-        authz_nobody
-            .authorize(Action::Query, DATABASE)
-            .expect("expected unprivileged user to be able to query database");
-        let authz_noauth = authz_context_noauth();
-        authz_noauth.authorize(Action::Query, DATABASE).expect_err(
-            "expected unauthenticated user not to be able to query database",
-        );
-    }
-
-    #[test]
-    fn test_organization() {
-        let authz_privileged =
-            authz_context_for_actor(authn::Context::internal_test_user());
-        authz_privileged.authorize(Action::CreateChild, FLEET).expect(
-            "expected privileged user to be able to create organization",
-        );
-        let authz_nobody =
-            authz_context_for_actor(authn::Context::test_context_for_actor(
-                authn::USER_TEST_UNPRIVILEGED.id,
-            ));
-        authz_nobody.authorize(Action::CreateChild, FLEET).expect_err(
-            "expected unprivileged user not to be able to create organization",
-        );
-        let authz_noauth = authz_context_noauth();
-        authz_noauth.authorize(Action::Query, DATABASE).expect_err(
-            "expected unauthenticated user not to be able \
-            to create organization",
-        );
-    }
-}
+// XXX
+// #[cfg(test)]
+// mod test {
+//     /*
+//      * These are essentially unit tests for the policy itself.
+//      * TODO-coverage This is just a start.  But we need roles to do a more
+//      * comprehensive test.
+//      * TODO If this gets any more complicated, we could consider automatically
+//      * generating the test cases.  We could precreate a bunch of resources and
+//      * some users with different roles.  Then we could run through a table that
+//      * says exactly which users should be able to do what to each resource.
+//      */
+//     use super::Action;
+//     use super::Authz;
+//     use super::Context;
+//     use super::DATABASE;
+//     use super::FLEET;
+//     use crate::authn;
+//     use std::sync::Arc;
+//
+//     fn authz_context_for_actor(authn: authn::Context) -> Context {
+//         let authz = Authz::new();
+//         Context::new(Arc::new(authn), Arc::new(authz))
+//     }
+//
+//     fn authz_context_noauth() -> Context {
+//         let authn = authn::Context::internal_unauthenticated();
+//         let authz = Authz::new();
+//         Context::new(Arc::new(authn), Arc::new(authz))
+//     }
+//
+//     #[test]
+//     fn test_database() {
+//         let authz_privileged =
+//             authz_context_for_actor(authn::Context::internal_test_user());
+//         authz_privileged
+//             .authorize(Action::Query, DATABASE)
+//             .expect("expected privileged user to be able to query database");
+//         let authz_nobody =
+//             authz_context_for_actor(authn::Context::test_context_for_actor(
+//                 authn::USER_TEST_UNPRIVILEGED.id,
+//             ));
+//         authz_nobody
+//             .authorize(Action::Query, DATABASE)
+//             .expect("expected unprivileged user to be able to query database");
+//         let authz_noauth = authz_context_noauth();
+//         authz_noauth.authorize(Action::Query, DATABASE).expect_err(
+//             "expected unauthenticated user not to be able to query database",
+//         );
+//     }
+//
+//     #[test]
+//     fn test_organization() {
+//         let authz_privileged =
+//             authz_context_for_actor(authn::Context::internal_test_user());
+//         authz_privileged.authorize(Action::CreateChild, FLEET).expect(
+//             "expected privileged user to be able to create organization",
+//         );
+//         let authz_nobody =
+//             authz_context_for_actor(authn::Context::test_context_for_actor(
+//                 authn::USER_TEST_UNPRIVILEGED.id,
+//             ));
+//         authz_nobody.authorize(Action::CreateChild, FLEET).expect_err(
+//             "expected unprivileged user not to be able to create organization",
+//         );
+//         let authz_noauth = authz_context_noauth();
+//         authz_noauth.authorize(Action::Query, DATABASE).expect_err(
+//             "expected unauthenticated user not to be able \
+//             to create organization",
+//         );
+//     }
+// }

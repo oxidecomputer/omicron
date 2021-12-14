@@ -20,6 +20,7 @@
 // parts we need for authorization.
 
 use crate::authn;
+use crate::authz;
 use crate::db;
 use crate::db::identity::Resource;
 use anyhow::Context;
@@ -27,6 +28,7 @@ use omicron_common::api::external::ResourceType;
 use oso::Oso;
 use oso::PolarClass;
 use std::fmt;
+use std::sync::Arc;
 use uuid::Uuid;
 
 /// Polar configuration describing control plane authorization rules
@@ -123,10 +125,36 @@ impl fmt::Display for Perm {
 
 /// Represents [`authn::Context`] (which is either an authenticated or
 /// unauthenticated actor) for Polar
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone)]
 pub struct AnyActor {
+    authz: Arc<authz::Context>,
     authenticated: bool,
     actor_id: Option<Uuid>,
+}
+
+impl AnyActor {
+    pub fn new(authz: Arc<authz::Context>) -> Self {
+        let actor = authz.authn.actor();
+        AnyActor {
+            authenticated: actor.is_some(),
+            actor_id: actor.map(|a| a.0),
+            authz,
+        }
+    }
+}
+
+impl PartialEq for AnyActor {
+    fn eq(&self, other: &Self) -> bool {
+        self.actor_id == other.actor_id
+    }
+}
+
+impl Eq for AnyActor {}
+
+impl fmt::Debug for AnyActor {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("AnyActor").field("actor_id", &self.actor_id).finish()
+    }
 }
 
 impl oso::PolarClass for AnyActor {
@@ -137,24 +165,18 @@ impl oso::PolarClass for AnyActor {
                 a.authenticated
             })
             .add_attribute_getter("authn_actor", |a: &AnyActor| {
-                a.actor_id.map(|actor_id| AuthenticatedActor { actor_id })
+                a.actor_id.map(|actor_id| AuthenticatedActor {
+                    authz: Arc::clone(&a.authz),
+                    actor_id,
+                })
             })
     }
 }
 
-impl From<&authn::Context> for AnyActor {
-    fn from(authn: &authn::Context) -> Self {
-        let actor = authn.actor();
-        AnyActor {
-            authenticated: actor.is_some(),
-            actor_id: actor.map(|a| a.0),
-        }
-    }
-}
-
 /// Represents an authenticated [`authn::Context`] for Polar
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone)]
 pub struct AuthenticatedActor {
+    authz: Arc<authz::Context>,
     actor_id: Uuid,
 }
 
@@ -164,10 +186,16 @@ impl AuthenticatedActor {
      */
     fn has_role_resource(
         &self,
-        _resource_type: ResourceType,
-        _resource_id: Uuid,
-        _role: &str,
+        resource_type: ResourceType,
+        resource_id: Uuid,
+        role: &str,
     ) -> bool {
+        self.authz.user_has_role_resource(
+            self.actor_id,
+            resource_type,
+            resource_id,
+            role,
+        )
         /*
          * TODO We will probably want to either pre-load the list of roles that
          * the actor has for this resource or else at this point we will go
@@ -192,6 +220,22 @@ impl AuthenticatedActor {
     }
 }
 
+impl PartialEq for AuthenticatedActor {
+    fn eq(&self, other: &Self) -> bool {
+        self.actor_id == other.actor_id
+    }
+}
+
+impl Eq for AuthenticatedActor {}
+
+impl fmt::Debug for AuthenticatedActor {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("AuthenticatedActor")
+            .field("actor_id", &self.actor_id)
+            .finish()
+    }
+}
+
 impl oso::PolarClass for AuthenticatedActor {
     fn get_polar_class_builder() -> oso::ClassBuilder<Self> {
         oso::Class::builder()
@@ -199,12 +243,6 @@ impl oso::PolarClass for AuthenticatedActor {
             .add_attribute_getter("id", |a: &AuthenticatedActor| {
                 a.actor_id.to_string()
             })
-    }
-}
-
-impl From<&authn::Actor> for AuthenticatedActor {
-    fn from(omicron_actor: &authn::Actor) -> Self {
-        AuthenticatedActor { actor_id: omicron_actor.0 }
     }
 }
 

@@ -182,6 +182,7 @@ impl Nexus {
             log.new(o!("component" => "DataLoader")),
             Arc::clone(&authz),
             authn::Context::internal_db_init(),
+            Arc::clone(&db_datastore),
         );
         let populate_status =
             populate_start(populate_ctx, Arc::clone(&db_datastore));
@@ -203,6 +204,7 @@ impl Nexus {
             log.new(o!("component" => "SagaRecoverer")),
             authz,
             authn::Context::internal_saga_recovery(),
+            Arc::clone(&db_datastore),
         );
         let recovery_task = db::recover(
             opctx,
@@ -401,7 +403,7 @@ impl Nexus {
         self.db_datastore.oximeter_list(page_params).await
     }
 
-    pub fn datastore(&self) -> &db::DataStore {
+    pub fn datastore(&self) -> &Arc<db::DataStore> {
         &self.db_datastore
     }
 

@@ -2318,11 +2318,16 @@ mod test {
     #[tokio::test]
     async fn test_project_creation() {
         let logctx = dev::test_setup_log("test_collection_not_present");
-        let opctx = OpContext::for_unit_tests(logctx.log.new(o!()));
         let mut db = dev::test_setup_database(&logctx.log).await;
         let cfg = db::Config { url: db.pg_config().clone() };
         let pool = db::Pool::new(&cfg);
-        let datastore = DataStore::new(Arc::new(pool));
+        let datastore = Arc::new(DataStore::new(Arc::new(pool)));
+        // XXX this test should fail until/unless we load the builtin users and
+        // roles
+        let opctx = OpContext::for_unit_tests(
+            logctx.log.new(o!()),
+            Arc::clone(&datastore),
+        );
 
         let organization = Organization::new(params::OrganizationCreate {
             identity: IdentityMetadataCreateParams {
