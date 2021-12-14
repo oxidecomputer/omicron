@@ -484,7 +484,7 @@ impl DatastoreCollection<Dataset> for Zpool {
 }
 
 impl_enum_type!(
-    #[derive(SqlType, Debug)]
+    #[derive(SqlType, Debug, QueryId)]
     #[postgres(type_name = "dataset_kind", type_schema = "public")]
     pub struct DatasetKindEnum;
 
@@ -582,6 +582,19 @@ pub struct Region {
     extent_count: i64,
 }
 
+impl Region {
+    pub fn new(dataset_id: Uuid, disk_id: Uuid, block_size: i64, extent_size: i64, extent_count: i64) -> Self {
+        Self {
+            identity: RegionIdentity::new(Uuid::new_v4()),
+            dataset_id,
+            disk_id,
+            block_size,
+            extent_size,
+            extent_count,
+        }
+    }
+}
+
 /// Describes an organization within the database.
 #[derive(Queryable, Insertable, Debug, Resource, Selectable)]
 #[table_name = "organization"]
@@ -645,7 +658,7 @@ impl Project {
     pub fn new(organization_id: Uuid, params: params::ProjectCreate) -> Self {
         Self {
             identity: ProjectIdentity::new(Uuid::new_v4(), params.identity),
-            organization_id: organization_id,
+            organization_id,
         }
     }
 }

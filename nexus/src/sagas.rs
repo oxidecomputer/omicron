@@ -323,6 +323,7 @@ async fn sdc_alloc_regions(
 ) -> Result<Vec<(db::model::Dataset, db::model::Region)>, ActionError> {
     let osagactx = sagactx.user_data();
     let params = sagactx.saga_params();
+    let disk_id = sagactx.lookup::<Uuid>("disk_id")?;
     // Ensure the disk is backed by appropriate regions.
     //
     // This allocates regions in the database, but the disk state is still
@@ -330,7 +331,7 @@ async fn sdc_alloc_regions(
     // allocate the necessary regions before we can mark the disk as "ready to
     // be used".
     let datasets_and_regions = osagactx.datastore()
-        .region_allocate(&params.create_params)
+        .region_allocate(disk_id, &params.create_params)
         .await
         .map_err(ActionError::action_failed)?;
     Ok(datasets_and_regions)

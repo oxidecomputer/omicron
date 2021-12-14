@@ -176,6 +176,9 @@ table! {
     }
 }
 
+// TODO: Free/allocated space here? How do we know we're okay to alloc?
+//
+// Maybe just "total size" of dataset, and we can figure out the rest?
 table! {
     dataset (id) {
         id -> Uuid,

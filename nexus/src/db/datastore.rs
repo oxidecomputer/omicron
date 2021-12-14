@@ -34,6 +34,7 @@ use crate::authz;
 use crate::context::OpContext;
 use crate::external_api::params;
 use async_bb8_diesel::{AsyncConnection, AsyncRunQueryDsl, ConnectionManager};
+use bigdecimal::ToPrimitive;
 use chrono::Utc;
 use diesel::prelude::*;
 use diesel::upsert::excluded;
@@ -51,7 +52,7 @@ use omicron_common::api::external::{
     CreateResult, IdentityMetadataCreateParams,
 };
 use omicron_common::bail_unless;
-use std::convert::TryFrom;
+use std::convert::{TryFrom, TryInto};
 use std::sync::Arc;
 use uuid::Uuid;
 
@@ -236,33 +237,100 @@ impl DataStore {
     /// belong.
     pub async fn region_allocate(
         &self,
+        disk_id: Uuid,
         params: &params::DiskCreate,
     ) -> Result<Vec<(Dataset, Region)>, Error> {
         use db::schema::region::dsl as region_dsl;
         use db::schema::dataset::dsl as dataset_dsl;
 
-        let datasets = dataset_dsl::dataset
-            // First, we look for valid datasets.
+        println!("region_allocate: Allocating region: {:#?}", params);
+
+        // Allocation Policy
+        //
+        // NOTE: This policy can - and should! - be changed.
+        // It is currently acting as a placeholder, showing a feasible
+        // interaction between datasets and regions.
+        //
+        // This policy allocates regions to distinct Crucible datasets,
+        // favoring datasets with the smallest existing (summed) region
+        // sizes.
+        //
+        //
+        //
+        let datasets: Vec<(Dataset, u64)> = dataset_dsl::dataset
+            // First, we look for valid datasets (non-deleted crucible datasets).
             .filter(dataset_dsl::time_deleted.is_null())
-            // We tally up the regions within those datasets
-            .inner_join(
+            .filter(dataset_dsl::kind.eq(DatasetKind(crate::internal_api::params::DatasetKind::Crucible)))
+            // Next, observe all the regions allocated to each dataset, and
+            // determine how much space they're using.
+            //
+            // NOTE: We *could* store "free/allocated" space per-dataset, and
+            // work hard to keep them up-to-date, rather than trying to
+            // recompute this.
+            .left_outer_join(
                 region_dsl::region.on(
                     dataset_dsl::id.eq(region_dsl::dataset_id)
                 )
             )
-//            .group_by(region_dsl::dataset_id)
-//            .select((Dataset::as_select(), diesel::dsl::sum(region_dsl::extent_count)))
-//            .order((region_dsl::extent_size * region_dsl::extent_count).asc())
-//            .select((Dataset::as_select(), diesel::dsl::sum(region_dsl::extent_size * region_dsl::extent_count)))
-            .select(Dataset::as_select())
-            .get_results_async::<Dataset>(self.pool())
+            .group_by(dataset_dsl::id)
+            .select(
+                (
+                    Dataset::as_select(),
+                    diesel::dsl::sum(region_dsl::extent_count * region_dsl::extent_size).nullable()
+                )
+            )
+            .order(diesel::dsl::sum(region_dsl::extent_size * region_dsl::extent_count).asc())
+            .get_results_async::<(Dataset, Option<bigdecimal::BigDecimal>)>(self.pool())
             .await
-            .unwrap(); // TODO: Handle errors
+            .map_err(|e| {
+                public_error_from_diesel_pool_shouldnt_fail(e)
+            })?
+            .into_iter()
+            .map(|(dataset, total_allocated)| {
+                // TODO: If there aren't any regions, zero is a reasonable
+                // default. But if the size * count is too big, we probably
+                // want safer handling here.
+                //
+                // Do we need to convert to u64 if this is internal?
+                (dataset, total_allocated.map_or(0, |value| value.to_u64().unwrap()))
+            }).collect();
 
+        println!("region_allocate: Observed datasets: {:#?}", datasets);
 
-        // TODO: I believe this was a join of dataset + region, group by dataset
-        // sum region sizes, sort by ascending? Something like that
-        todo!();
+        // TODO: We don't actually need to return the allc'd space right now...
+        // maybe we should tho to compare it with a total size or something.
+        let datasets: Vec<Dataset> = datasets.into_iter().map(|(d, _)| d).collect();
+
+        // TODO: magic num
+        let threshold = 3;
+        if datasets.len() < threshold {
+            return Err(Error::internal_error("Not enough datasets for replicated allocation"));
+        }
+
+        let source_datasets = &datasets[0..threshold];
+        let regions: Vec<Region> = source_datasets.iter()
+            .map(|dataset| {
+                Region::new(
+                    dataset.id(),
+                    disk_id,
+                    params.block_size().try_into().unwrap(),
+                    params.extent_size().try_into().unwrap(),
+                    params.extent_count().try_into().unwrap(),
+                )
+            })
+            .collect();
+
+        let regions = diesel::insert_into(region_dsl::region)
+            .values(regions)
+            .returning(Region::as_returning())
+            .get_results_async(self.pool())
+            .await
+            .map_err(|e| {
+                public_error_from_diesel_pool_shouldnt_fail(e)
+            })?;
+
+        // TODO: also, make this concurrency-safe. Txns?
+        Ok(source_datasets.into_iter().map(|d| d.clone()).zip(regions).collect())
     }
 
     /// Create a organization
@@ -2173,54 +2241,46 @@ mod test {
         logctx.cleanup_successful();
     }
 
-    #[tokio::test]
-    async fn test_region_allocation() {
-        let logctx = dev::test_setup_log("test_region_allocation");
-        let opctx = OpContext::for_unit_tests(logctx.log.new(o!()));
-        let mut db = dev::test_setup_database(&logctx.log).await;
-        let cfg = db::Config { url: db.pg_config().clone() };
-        let pool = db::Pool::new(&cfg);
-        let datastore = DataStore::new(Arc::new(pool));
-
-        // TODO: Refactor org / project creation to a helper.
-        let organization = Organization::new(params::OrganizationCreate {
-            identity: IdentityMetadataCreateParams {
-                name: "org".parse().unwrap(),
-                description: "desc".to_string(),
-            },
-        });
-        let organization =
-            datastore.organization_create(&opctx, organization).await.unwrap();
-        let project = Project::new(
-            organization.id(),
-            params::ProjectCreate {
-                identity: IdentityMetadataCreateParams {
-                    name: "project".parse().unwrap(),
-                    description: "desc".to_string(),
-                },
-            },
-        );
-        let org = authz::FLEET.organization(organization.id());
-        datastore.project_create(&opctx, &org, project).await.unwrap();
-
-        // Create a sled...
-        let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 8080);
+    // Creates a test sled, returns its UUID.
+    async fn create_test_sled(datastore: &DataStore) -> Uuid {
+        let bogus_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 8080);
         let sled_id = Uuid::new_v4();
-        let sled = Sled::new(sled_id, addr.clone());
+        let sled = Sled::new(sled_id, bogus_addr.clone());
         datastore.sled_upsert(sled).await.unwrap();
+        sled_id
+    }
 
-        // ... and a zpool within that sled...
+    // Creates a test zpool, returns its UUID.
+    async fn create_test_zpool(datastore: &DataStore, sled_id: Uuid) -> Uuid {
         let zpool_id = Uuid::new_v4();
         let zpool = Zpool::new(zpool_id, sled_id, &crate::internal_api::params::ZpoolPutRequest {
             size: ByteCount::from_gibibytes_u32(100),
         });
         datastore.zpool_upsert(zpool).await.unwrap();
+        zpool_id
+    }
+
+    #[tokio::test]
+    async fn test_region_allocation() {
+        let logctx = dev::test_setup_log("test_region_allocation");
+        let mut db = dev::test_setup_database(&logctx.log).await;
+        let cfg = db::Config { url: db.pg_config().clone() };
+        let pool = db::Pool::new(&cfg);
+        let datastore = DataStore::new(Arc::new(pool));
+
+        // Create a sled...
+        let sled_id = create_test_sled(&datastore).await;
+
+        // ... and a zpool within that sled...
+        let zpool_id = create_test_zpool(&datastore, sled_id).await;
 
         // ... and datasets within that zpool.
+        let bogus_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 8080);
         let kind = DatasetKind(crate::internal_api::params::DatasetKind::Crucible);
         let dataset_ids: Vec<Uuid> = (0..6).map(|_| Uuid::new_v4()).collect();
         for id in &dataset_ids {
-            let dataset = Dataset::new(*id, zpool_id, addr, kind.clone());
+            let dataset = Dataset::new(*id, zpool_id, bogus_addr, kind.clone());
+            println!("test: inserting {:#?}", dataset);
             datastore.dataset_upsert(dataset).await.unwrap();
         }
 
@@ -2233,12 +2293,16 @@ mod test {
             snapshot_id: None,
             size: ByteCount::from_mebibytes_u32(500),
         };
-        let dataset_and_regions = datastore.region_allocate(&disk_create_params).await.unwrap();
+
+        let disk1_id = Uuid::new_v4();
+        let dataset_and_regions = datastore.region_allocate(disk1_id, &disk_create_params).await.unwrap();
 
         // Verify the allocation we just performed.
         assert_eq!(3, dataset_and_regions.len());
         // TODO: verify allocated regions make sense
 
+        let disk2_id = Uuid::new_v4();
+        let dataset_and_regions = datastore.region_allocate(disk2_id, &disk_create_params).await.unwrap();
 
         let _ = db.cleanup().await;
     }
