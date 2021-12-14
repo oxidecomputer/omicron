@@ -8,6 +8,7 @@ use anyhow::anyhow;
 use anyhow::ensure;
 use anyhow::Context;
 use dropshot::test_util::ClientTestContext;
+use dropshot::ResultsPage;
 use std::convert::TryInto;
 use std::fmt::Debug;
 
@@ -477,6 +478,73 @@ impl<'a> NexusRequest<'a> {
                 .expect_status(Some(http::StatusCode::NO_CONTENT)),
         )
     }
+
+    /// Iterates a collection (like `dropshot::test_util::iter_collection`)
+    /// using authenticated requests.
+    pub async fn iter_collection_authn<T>(
+        testctx: &'a ClientTestContext,
+        collection_url: &str,
+        initial_params: &str,
+        limit: usize,
+    ) -> Result<Collection<T>, anyhow::Error>
+    where
+        T: Clone + serde::de::DeserializeOwned,
+    {
+        // TODO-cleanup XXX could clean this up
+        let url =
+            format!("{}?limit={}&{}", collection_url, limit, initial_params);
+        let mut page = NexusRequest::object_get(testctx, &url)
+            .authn_as(AuthnMode::PrivilegedUser)
+            .execute()
+            .await
+            .context("fetch page 1")?
+            .parsed_body::<ResultsPage<T>>()
+            .context("parse page 1")?;
+        ensure!(
+            page.items.len() <= limit,
+            "server sent more items than expected in page 1 \
+            (limit = {}, found = {})",
+            limit,
+            page.items.len()
+        );
+
+        let mut all_items = page.items.clone();
+        let mut npages = 1;
+
+        while let Some(token) = page.next_page {
+            let url = format!(
+                "{}?limit={}&page_token={}",
+                collection_url, limit, token
+            );
+            page = NexusRequest::object_get(testctx, &url)
+                .authn_as(AuthnMode::PrivilegedUser)
+                .execute()
+                .await
+                .with_context(|| format!("fetch page {}", npages + 1))?
+                .parsed_body::<ResultsPage<T>>()
+                .with_context(|| format!("parse page {}", npages + 1))?;
+            ensure!(
+                page.items.len() <= limit,
+                "server sent more items than expected in page {} \
+                (limit = {}, found = {})",
+                npages + 1,
+                limit,
+                page.items.len()
+            );
+            all_items.extend_from_slice(&page.items);
+            npages += 1
+        }
+
+        Ok(Collection { all_items, npages })
+    }
+}
+
+/// Result of iterating an API collection (using multiple requests)
+pub struct Collection<T> {
+    /// all the items found in the collection
+    pub all_items: Vec<T>,
+    /// number of requests made to fetch all the items
+    pub npages: usize,
 }
 
 /// Functions for compatibility with corresponding `dropshot::test_util`

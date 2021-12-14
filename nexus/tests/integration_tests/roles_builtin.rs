@@ -61,8 +61,10 @@ async fn test_roles_builtin(cptestctx: &ControlPlaneTestContext) {
 
     // This endpoint uses a custom pagination scheme that is easy to get wrong.
     // Let's test that all markers do work.
-    // XXX need fix this
-    // let roles_paginated: Vec<Role> =
-    //     dropshot::test_util::iter_collection(&testctx, "/roles", "", 1).await.0;
-    // assert_eq!(roles, roles_paginated);
+    let roles_paginated =
+        NexusRequest::iter_collection_authn(&testctx, "/roles", "", 1)
+            .await
+            .expect("failed to iterate all roles")
+            .all_items;
+    assert_eq!(roles, roles_paginated);
 }
