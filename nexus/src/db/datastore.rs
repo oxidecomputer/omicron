@@ -32,7 +32,8 @@ use super::Pool;
 use crate::authn;
 use crate::authz;
 use crate::context::OpContext;
-use crate::db::model::RoleBuiltin;
+use crate::db::fixed_data::role_assignment_builtin::BUILTIN_ROLE_ASSIGNMENTS;
+use crate::db::fixed_data::role_builtin::BUILTIN_ROLES;
 use crate::external_api::params;
 use async_bb8_diesel::{
     AsyncConnection, AsyncRunQueryDsl, ConnectionError, ConnectionManager,
@@ -69,7 +70,7 @@ use crate::db::{
         ConsoleSession, Dataset, Disk, DiskAttachment, DiskRuntimeState,
         Generation, IncompleteNetworkInterface, Instance, InstanceRuntimeState,
         Name, NetworkInterface, Organization, OrganizationUpdate, OximeterInfo,
-        ProducerEndpoint, Project, ProjectUpdate, RouterRoute,
+        ProducerEndpoint, Project, ProjectUpdate, RoleBuiltin, RouterRoute,
         RouterRouteUpdate, Sled, UserBuiltin, Vpc, VpcFirewallRule, VpcRouter,
         VpcRouterUpdate, VpcSubnet, VpcSubnetUpdate, VpcUpdate, Zpool,
     },
@@ -2247,7 +2248,7 @@ impl DataStore {
 
         opctx.authorize(authz::Action::Modify, authz::FLEET)?;
 
-        let builtin_roles = super::fixed_data::role_builtin::BUILTIN_ROLES
+        let builtin_roles = BUILTIN_ROLES
             .iter()
             .map(|role_config| {
                 RoleBuiltin::new(
@@ -2267,6 +2268,34 @@ impl DataStore {
             .await
             .map_err(public_error_from_diesel_pool_shouldnt_fail)?;
         info!(opctx.log, "created {} built-in roles", count);
+        Ok(())
+    }
+
+    /// Load role assignments for built-in users and built-in roles into the
+    /// database
+    pub async fn load_builtin_role_asgns(
+        &self,
+        opctx: &OpContext,
+    ) -> Result<(), Error> {
+        use db::schema::role_assignment_builtin::dsl;
+
+        opctx.authorize(authz::Action::Modify, authz::FLEET)?;
+
+        // The built-in "test-privileged" user gets the "fleet admin" role.
+        debug!(opctx.log, "attempting to create built-in role assignments");
+        let count = diesel::insert_into(dsl::role_assignment_builtin)
+            .values(&*BUILTIN_ROLE_ASSIGNMENTS)
+            .on_conflict((
+                dsl::user_builtin_id,
+                dsl::resource_type,
+                dsl::resource_id,
+                dsl::role_name,
+            ))
+            .do_nothing()
+            .execute_async(self.pool_authorized(opctx)?)
+            .await
+            .map_err(public_error_from_diesel_pool_shouldnt_fail)?;
+        info!(opctx.log, "created {} built-in role assignments", count);
         Ok(())
     }
 }

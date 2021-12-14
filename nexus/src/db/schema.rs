@@ -309,6 +309,20 @@ table! {
     }
 }
 
+table! {
+    role_assignment_builtin (
+        user_builtin_id,
+        resource_type,
+        resource_id,
+        role_name
+    ) {
+        resource_type -> Text,
+        role_name -> Text,
+        resource_id -> Uuid,
+        user_builtin_id -> Uuid,
+    }
+}
+
 allow_tables_to_appear_in_same_query!(
     disk,
     instance,

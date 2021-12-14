@@ -757,6 +757,33 @@ CREATE TABLE omicron.public.role_builtin (
     PRIMARY KEY(resource_type, role_name)
 );
 
+/*
+ * Assignments between users, roles, and resources
+ *
+ * A built-in user has role on a resource if there's a record in this table that
+ * points to that user, role, and resource.
+ */
+
+CREATE TABLE omicron.public.role_assignment_builtin (
+    /* Composite foreign key into "role_builtin" table */
+    resource_type STRING(63) NOT NULL,
+    role_name STRING(63) NOT NULL,
+
+    /*
+     * Foreign key into some other resource table.  Which table?  This is
+     * identified implicitly by "resource_type" above.
+     */
+    resource_id UUID NOT NULL,
+
+    /*
+     * Foreign key into table of built-in users.
+     */
+    user_builtin_id UUID NOT NULL,
+
+    /* The entire row is the primary key. */
+    PRIMARY KEY(user_builtin_id, resource_type, resource_id, role_name)
+);
+
 /*******************************************************************/
 
 /*

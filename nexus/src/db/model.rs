@@ -9,8 +9,8 @@ use crate::db::identity::{Asset, Resource};
 use crate::db::schema::{
     console_session, dataset, disk, instance, metric_producer,
     network_interface, organization, oximeter, project, rack, region,
-    role_builtin, router_route, sled, user_builtin, vpc, vpc_firewall_rule,
-    vpc_router, vpc_subnet, zpool,
+    role_assignment_builtin, role_builtin, router_route, sled, user_builtin,
+    vpc, vpc_firewall_rule, vpc_router, vpc_subnet, zpool,
 };
 use crate::external_api::params;
 use crate::internal_api;
@@ -1871,6 +1871,33 @@ impl RoleBuiltin {
             resource_type: resource_type.to_string(),
             role_name: String::from(role_name),
             description: String::from(description),
+        }
+    }
+}
+
+/// Describes an assignment of a built-in role for a built-in user
+#[derive(Queryable, Insertable, Debug, Selectable)]
+#[table_name = "role_assignment_builtin"]
+pub struct RoleAssignmentBuiltin {
+    pub user_builtin_id: Uuid,
+    pub resource_type: String,
+    pub resource_id: Uuid,
+    pub role_name: String,
+}
+
+impl RoleAssignmentBuiltin {
+    /// Creates a new database RoleAssignmentBuiltin object.
+    pub fn new(
+        user_builtin_id: Uuid,
+        resource_type: omicron_common::api::external::ResourceType,
+        resource_id: Uuid,
+        role_name: &str,
+    ) -> Self {
+        Self {
+            user_builtin_id,
+            resource_type: resource_type.to_string(),
+            resource_id,
+            role_name: String::from(role_name),
         }
     }
 }
