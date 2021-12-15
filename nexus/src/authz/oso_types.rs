@@ -393,11 +393,6 @@ impl oso::PolarClass for Database {
     }
 }
 
-// XXX consider
-// - right now, we're prefetching all roles we might possibly need, sticking
-//   them onto the Actor, then we impl a Polar method that looks at the data
-//   structure.  We could instead have the Polar method reach out to the
-//   database.  This is tricky because Polar is not async.
 impl AuthzResource for Database {
     fn fetch_all_related_roles_for_user<'a, 'b, 'c, 'd, 'e, 'f>(
         &'a self,

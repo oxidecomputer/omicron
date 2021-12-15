@@ -3,6 +3,10 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 //! Role lookup
+//! XXX TODO-doc document role lookup (in terms of database representation)
+//! XXX TODO-doc document how role lookup actually works in terms of prefetching
+//! all roles we might need first, then handing it to Oso, and why (because Oso
+//! is not async so we can't do this lazily)
 
 use crate::authn;
 use crate::context::OpContext;
