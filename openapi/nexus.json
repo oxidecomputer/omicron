@@ -4301,8 +4301,10 @@
         ]
       },
       "TimeseriesName": {
-        "description": "A timeseries name.\n\nTimeseries are named by concatenating the names of their target and metric, joined with a colon.",
-        "type": "string"
+        "title": "The name of a timeseries",
+        "description": "Names are constructed by concatenating the target and metric names with ':'. Target and metric names must be lowercase alphanumeric characters with '_' separating words.",
+        "type": "string",
+        "pattern": "(([a-z]+[a-z0-9]*)(_([a-z0-9]+))*):(([a-z]+[a-z0-9]*)(_([a-z0-9]+))*)"
       },
       "TimeseriesSchema": {
         "description": "The schema for a timeseries.\n\nThis includes the name of the timeseries, as well as the datum type of its metric and the schema for each field.",

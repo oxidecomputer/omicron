@@ -87,18 +87,56 @@ pub enum Error {
 /// Timeseries are named by concatenating the names of their target and metric, joined with a
 /// colon.
 #[derive(
-    Debug,
-    Clone,
-    PartialEq,
-    PartialOrd,
-    Ord,
-    Eq,
-    Hash,
-    Serialize,
-    Deserialize,
-    JsonSchema,
+    Debug, Clone, PartialEq, PartialOrd, Ord, Eq, Hash, Serialize, Deserialize,
 )]
+#[serde(try_from = "&str")]
 pub struct TimeseriesName(String);
+
+impl JsonSchema for TimeseriesName {
+    fn schema_name() -> String {
+        "TimeseriesName".to_string()
+    }
+
+    fn json_schema(
+        _gen: &mut schemars::gen::SchemaGenerator,
+    ) -> schemars::schema::Schema {
+        schemars::schema::Schema::Object(schemars::schema::SchemaObject {
+            metadata: Some(Box::new(schemars::schema::Metadata {
+                id: None,
+                title: Some("The name of a timeseries".to_string()),
+                description: Some(
+                    "Names are constructed by concatenating the target \
+                     and metric names with ':'. Target and metric \
+                     names must be lowercase alphanumeric characters \
+                     with '_' separating words."
+                        .to_string(),
+                ),
+                default: None,
+                deprecated: false,
+                read_only: false,
+                write_only: false,
+                examples: vec![],
+            })),
+            instance_type: Some(schemars::schema::SingleOrVec::Single(
+                Box::new(schemars::schema::InstanceType::String),
+            )),
+            format: None,
+            enum_values: None,
+            const_value: None,
+            subschemas: None,
+            number: None,
+            string: Some(Box::new(schemars::schema::StringValidation {
+                max_length: None,
+                min_length: None,
+                pattern: Some(TIMESERIES_NAME_REGEX.to_string()),
+            })),
+            array: None,
+            object: None,
+            reference: None,
+            extensions: BTreeMap::new(),
+        })
+    }
+}
 
 impl std::ops::Deref for TimeseriesName {
     type Target = String;
@@ -129,12 +167,7 @@ impl std::convert::TryFrom<String> for TimeseriesName {
 }
 
 fn validate_timeseries_name(s: &str) -> Result<&str, Error> {
-    let re = concat!(
-        "([[:alpha:]])+([[:alnum:]]|_)*",
-        ":",
-        "([[:alpha:]])+([[:alnum:]]|_)*",
-    );
-    if regex::Regex::new(re).unwrap().is_match(s) {
+    if regex::Regex::new(TIMESERIES_NAME_REGEX).unwrap().is_match(s) {
         Ok(s)
     } else {
         Err(Error::InvalidTimeseriesName)
@@ -300,6 +333,19 @@ const DATABASE_NAME: &str = "oximeter";
 // See https://clickhouse.com/docs/en/interfaces/formats/#jsoneachrow for details.
 const DATABASE_SELECT_FORMAT: &str = "JSONEachRow";
 
+// Regular expression describing valid timeseries names.
+//
+// Names are derived from the names of the Rust structs for the target and metric, converted to
+// snake case. So the names must be valid identifiers, and generally:
+//
+//  - Start with lowercase a-z
+//  - Any number of alphanumerics
+//  - Zero or more of the above, delimited by '-'.
+//
+// That describes the target/metric name, and the timeseries is two of those, joined with ':'.
+const TIMESERIES_NAME_REGEX: &str =
+    "(([a-z]+[a-z0-9]*)(_([a-z0-9]+))*):(([a-z]+[a-z0-9]*)(_([a-z0-9]+))*)";
+
 #[cfg(test)]
 mod tests {
     use super::TimeseriesName;
@@ -316,8 +362,10 @@ mod tests {
         assert!(TimeseriesName::try_from("a:b").is_ok());
         assert!(TimeseriesName::try_from("a_a:b_b").is_ok());
         assert!(TimeseriesName::try_from("a0:b0").is_ok());
+        assert!(TimeseriesName::try_from("a_0:b_0").is_ok());
 
         assert!(TimeseriesName::try_from("_:b").is_err());
+        assert!(TimeseriesName::try_from("a_:b").is_err());
         assert!(TimeseriesName::try_from("0:b").is_err());
         assert!(TimeseriesName::try_from(":b").is_err());
         assert!(TimeseriesName::try_from("a:").is_err());

@@ -26,8 +26,9 @@ tokio = { version = "1.14", features = [ "rt-multi-thread", "macros" ] }
 uuid = { version = "0.8.2", features = [ "v4", "serde" ] }
 
 [dev-dependencies]
-omicron-test-utils = { path = "../../test-utils" }
 itertools = "0.10.1"
+omicron-test-utils = { path = "../../test-utils" }
+slog-dtrace = "0.2.0"
 
 [[bin]]
 name = "oxdb"
