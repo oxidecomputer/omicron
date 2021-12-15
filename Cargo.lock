@@ -2267,7 +2267,6 @@ dependencies = [
  "serde_json",
  "slog",
  "slog-async",
- "slog-dtrace",
  "slog-term",
  "structopt",
  "thiserror",
