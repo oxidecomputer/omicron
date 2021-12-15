@@ -33,7 +33,10 @@ use crate::authn;
 use crate::authz;
 use crate::context::OpContext;
 use crate::external_api::params;
-use async_bb8_diesel::{AsyncConnection, AsyncRunQueryDsl, ConnectionManager, PoolError, ConnectionError};
+use async_bb8_diesel::{
+    AsyncConnection, AsyncRunQueryDsl, ConnectionError, ConnectionManager,
+    PoolError,
+};
 use chrono::Utc;
 use diesel::prelude::*;
 use diesel::upsert::excluded;
@@ -84,7 +87,7 @@ enum UpdateFirewallRulesError {
     #[error("Collection not found")]
     CollectionNotFound,
     #[error("Pool error: {0}")]
-    Pool(#[from] async_bb8_diesel::PoolError)
+    Pool(#[from] async_bb8_diesel::PoolError),
 }
 
 // Maps a "diesel error" into a "pool error", which
@@ -1520,26 +1523,22 @@ impl DataStore {
                     match e {
                         SyncInsertError::CollectionNotFound => {
                             UpdateFirewallRulesError::CollectionNotFound
-                        },
-                        SyncInsertError::DatabaseError(e) => {
-                            e.into()
-                        },
+                        }
+                        SyncInsertError::DatabaseError(e) => e.into(),
                     }
                 })
             })
             .await
-            .map_err(|e| {
-                match e {
-                    UpdateFirewallRulesError::CollectionNotFound => {
-                        Error::not_found_by_id(ResourceType::Vpc, vpc_id)
-                    }
-                    UpdateFirewallRulesError::Pool(e) => {
-                        public_error_from_diesel_pool(
-                            e,
-                            ResourceType::VpcFirewallRule,
-                            LookupType::ById(*vpc_id),
-                        )
-                    }
+            .map_err(|e| match e {
+                UpdateFirewallRulesError::CollectionNotFound => {
+                    Error::not_found_by_id(ResourceType::Vpc, vpc_id)
+                }
+                UpdateFirewallRulesError::Pool(e) => {
+                    public_error_from_diesel_pool(
+                        e,
+                        ResourceType::VpcFirewallRule,
+                        LookupType::ById(*vpc_id),
+                    )
                 }
             })
     }
