@@ -669,28 +669,39 @@ mod test {
             )),
         );
 
-        let not_found = std::sync::Arc::new(std::sync::Mutex::new(false));
-        let not_found_ref = not_found.clone();
+        #[derive(Debug, thiserror::Error)]
+        enum TxnError {
+            #[error("Collection not found")]
+            CollectionNotFound,
+            #[error("Pool: {0}")]
+            Pool(#[from] PoolError),
+        }
+
+        impl From<SyncInsertError> for TxnError {
+            fn from(err: SyncInsertError) -> Self {
+                match err {
+                    SyncInsertError::CollectionNotFound => {
+                        Self::CollectionNotFound
+                    }
+                    SyncInsertError::DatabaseError(e) => Self::from(e),
+                }
+            }
+        }
+
+        impl From<diesel::result::Error> for TxnError {
+            fn from(err: diesel::result::Error) -> Self {
+                Self::Pool(PoolError::Connection(ConnectionError::Query(err)))
+            }
+        }
+
         let result = pool
             .pool()
             .transaction(move |conn| {
-                insert_query.insert_and_get_result(conn).map_err(|e| match e {
-                    SyncInsertError::CollectionNotFound => {
-                        *not_found_ref.lock().unwrap() = true;
-                        diesel::result::Error::RollbackTransaction
-                    }
-                    SyncInsertError::DatabaseError(err) => err,
-                })
+                insert_query.insert_and_get_result(conn).map_err(TxnError::from)
             })
             .await;
 
-        assert!(matches!(
-            result,
-            Err(PoolError::Connection(ConnectionError::Query(
-                diesel::result::Error::RollbackTransaction
-            )))
-        ));
-        assert!(*not_found.lock().unwrap());
+        assert!(matches!(result, Err(TxnError::CollectionNotFound)));
 
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();
