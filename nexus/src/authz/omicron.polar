@@ -35,7 +35,7 @@ resource Database {
 }
 
 # All authenticated users have the "user" role on the database.
-# XXX This rule doesn't seem to get used for some reason.
+# TODO This rule doesn't seem to get used for some reason.
 has_role(_actor: AuthenticatedActor, "user", _resource: Database);
 
 #

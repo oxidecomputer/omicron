@@ -4,7 +4,7 @@
 
 //! Authorization facilities
 
-mod oso_types;
+mod oso_generic;
 pub use oso_types::Action;
 pub use oso_types::DATABASE;
 

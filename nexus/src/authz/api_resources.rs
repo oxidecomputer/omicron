@@ -197,7 +197,6 @@ impl Project {
     /// interchangeably by the authz subsystem.  That's because we do not
     /// currently support assigning roles to these resources, so all that
     /// matters for authz is that they are a child of a particular Project.
-    // XXX rename to child_generic
     pub fn child_generic(
         &self,
         resource_type: ResourceType,

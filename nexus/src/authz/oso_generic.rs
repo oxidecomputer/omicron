@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! Types and impls used for integration with Oso
+//! Oso integration
 
 use super::actor::AnyActor;
 use super::actor::AuthenticatedActor;
@@ -31,6 +31,12 @@ pub const OMICRON_AUTHZ_CONFIG: &str = include_str!("omicron.polar");
 /// rules
 pub fn make_omicron_oso() -> Result<Oso, anyhow::Error> {
     let mut oso = Oso::new();
+    // TODO-cleanup There is a lot of boilerplate in the definitions of these
+    // structures as they relate to Polar.  For example, most of them impl Eq
+    // and PartialEq, and the corresponding PolarClass should have an equality
+    // impl as well.  The resources all have a "has_role" Polar method that all
+    // do the same thing.  It'd be nice to find a way to commonize these.  A
+    // macro might help.
     let classes = [
         Action::get_polar_class(),
         AnyActor::get_polar_class(),
@@ -50,11 +56,6 @@ pub fn make_omicron_oso() -> Result<Oso, anyhow::Error> {
     Ok(oso)
 }
 
-//
-// Helper types
-// See the note above about why we don't use derive(PolarClass).
-//
-
 /// Describes an action being authorized
 ///
 /// There's currently just one enum of Actions for all of Omicron.  We expect
@@ -71,7 +72,7 @@ pub enum Action {
 
 impl oso::PolarClass for Action {
     fn get_polar_class_builder() -> oso::ClassBuilder<Self> {
-        oso::Class::builder().set_equality_check(|a1, a2| a1 == a2).add_method(
+        oso::Class::builder().with_equality_check().add_method(
             "to_perm",
             |a: &Action| {
                 match a {
@@ -116,15 +117,11 @@ impl fmt::Display for Perm {
     }
 }
 
-//
-// Newtypes for model types that are exposed to Polar
-// These all impl [`oso::PolarClass`].
-// See the note above about why we use newtypes and why we don't use
-// derive(PolarClass).
-//
+// Non-API resources that we want to protect with authorization
 
-/// Represents the database itself to Polar (so that we can have roles with no
-/// access to the database at all)
+/// Represents the database itself to Polar
+///
+/// This exists so that we can have roles with no access to the database at all.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct Database;
 pub const DATABASE: Database = Database;
@@ -134,6 +131,11 @@ impl oso::PolarClass for Database {
         oso::Class::builder().add_method(
             "has_role",
             |_d: &Database, _actor: AuthenticatedActor, role: String| {
+                // TODO This should not be needed at all because there's an
+                // explicit rule in the Polar file granting this permission to
+                // authenticated users.  It's not clear why this doesn't work.
+
+                // All authenticated users can access the database today.
                 assert_eq!(role, "user");
                 true
             },
@@ -156,7 +158,15 @@ impl AuthzResource for Database {
         'd: 'f,
         'e: 'f,
     {
-        // XXX
+        // We don't use (database) roles to grant access to the database.  The
+        // role assignment is hardcoded for all authenticated users.  See the
+        // "has_role" Polar method above.
+        //
+        // Instead of this, we could modify this function to insert into
+        // `RoleSet` the "database user" role.  However, this doesn't fit into
+        // the type signature of roles supported by RoleSet.  RoleSet is really
+        // for roles on database objects -- it assumes they have a ResourceType
+        // and id, neither of which is true for `Database`.
         futures::future::ready(Ok(())).boxed()
     }
 }
