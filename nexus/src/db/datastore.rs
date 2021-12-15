@@ -89,6 +89,27 @@ impl DataStore {
         DataStore { pool }
     }
 
+    /// Constructs a DataStore for use in test suites that has preloaded the
+    /// built-in users, roles, and role assignments that are needed for basic
+    /// operation
+    #[cfg(test)]
+    pub async fn new_with_builtins(
+        logctx: &dropshot::test_util::LogContext,
+        pool: Arc<db::Pool>,
+    ) -> Arc<DataStore> {
+        let datastore = Arc::new(DataStore::new(pool));
+        let opctx = OpContext::for_background(
+            logctx.log.new(o!()),
+            Arc::new(authz::Authz::new()),
+            authn::Context::internal_db_init(),
+            Arc::clone(&datastore),
+        );
+        datastore.load_builtin_users(&opctx).await.unwrap();
+        datastore.load_builtin_roles(&opctx).await.unwrap();
+        datastore.load_builtin_role_asgns(&opctx).await.unwrap();
+        datastore
+    }
+
     // TODO-security This should be deprecated in favor of pool_authorized(),
     // which gives us the chance to do a minimal security check before hitting
     // the database.  Eventually, this function should only be used for doing
@@ -2335,7 +2356,6 @@ impl DataStore {
 
 #[cfg(test)]
 mod test {
-    use crate::authn;
     use crate::authz;
     use crate::context::OpContext;
     use crate::db;
@@ -2344,36 +2364,19 @@ mod test {
     use crate::db::DataStore;
     use crate::external_api::params;
     use chrono::{Duration, Utc};
-    use dropshot::test_util::LogContext;
     use omicron_common::api::external::{Error, IdentityMetadataCreateParams};
     use omicron_test_utils::dev;
     use std::sync::Arc;
     use uuid::Uuid;
-
-    async fn make_datastore(
-        logctx: &LogContext,
-        pool: db::Pool,
-    ) -> Arc<DataStore> {
-        let datastore = Arc::new(DataStore::new(Arc::new(pool)));
-        let opctx = OpContext::for_background(
-            logctx.log.new(o!()),
-            Arc::new(authz::Authz::new()),
-            authn::Context::internal_db_init(),
-            Arc::clone(&datastore),
-        );
-        datastore.load_builtin_users(&opctx).await.unwrap();
-        datastore.load_builtin_roles(&opctx).await.unwrap();
-        datastore.load_builtin_role_asgns(&opctx).await.unwrap();
-        datastore
-    }
 
     #[tokio::test]
     async fn test_project_creation() {
         let logctx = dev::test_setup_log("test_project_creation");
         let mut db = dev::test_setup_database(&logctx.log).await;
         let cfg = db::Config { url: db.pg_config().clone() };
-        let pool = db::Pool::new(&cfg);
-        let datastore = make_datastore(&logctx, pool).await;
+        let pool = Arc::new(db::Pool::new(&cfg));
+        let datastore =
+            Arc::new(DataStore::new_with_builtins(&logctx, pool).await);
         let opctx = OpContext::for_unit_tests(
             logctx.log.new(o!()),
             Arc::clone(&datastore),
@@ -2411,8 +2414,9 @@ mod test {
         let logctx = dev::test_setup_log("test_session_methods");
         let mut db = dev::test_setup_database(&logctx.log).await;
         let cfg = db::Config { url: db.pg_config().clone() };
-        let pool = db::Pool::new(&cfg);
-        let datastore = make_datastore(&logctx, pool).await;
+        let pool = Arc::new(db::Pool::new(&cfg));
+        let datastore =
+            Arc::new(DataStore::new_with_builtins(&logctx, pool).await);
         let token = "a_token".to_string();
         let session = ConsoleSession {
             token: token.clone(),
