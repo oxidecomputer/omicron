@@ -407,6 +407,8 @@ CREATE TABLE omicron.public.network_interface (
     time_modified TIMESTAMPTZ NOT NULL,
     /* Indicates that the object has been deleted */
     time_deleted TIMESTAMPTZ,
+    /* FK into Instance table. */
+    instance_id UUID NOT NULL,
     /* FK into VPC table */
     vpc_id UUID NOT NULL,
     /* FK into VPCSubnet table. */
@@ -426,6 +428,22 @@ CREATE TABLE omicron.public.network_interface (
 CREATE UNIQUE INDEX ON omicron.public.network_interface (
     vpc_id,
     name
+) WHERE
+    time_deleted IS NULL;
+
+/* Ensure we do not assign the same address twice within a subnet */
+CREATE UNIQUE INDEX ON omicron.public.network_interface (
+    subnet_id,
+    ip
+) WHERE
+    time_deleted IS NULL;
+
+/* Ensure we do not assign the same MAC twice within a VPC
+ * See RFD174's discussion on the scope of virtual MACs
+ */
+CREATE UNIQUE INDEX ON omicron.public.network_interface (
+    vpc_id,
+    mac
 ) WHERE
     time_deleted IS NULL;
 

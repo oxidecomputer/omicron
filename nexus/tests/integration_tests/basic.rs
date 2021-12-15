@@ -33,12 +33,12 @@ use nexus_test_utils::http_testing::RequestBuilder;
 use nexus_test_utils::resource_helpers::create_organization;
 use nexus_test_utils::resource_helpers::create_project;
 use nexus_test_utils::start_sled_agent;
-use nexus_test_utils::test_setup;
+use nexus_test_utils::ControlPlaneTestContext;
+use nexus_test_utils_macros::nexus_test;
 
-#[tokio::test]
-async fn test_basic_failures() {
-    let testctx = test_setup("basic_failures").await;
-    let client = &testctx.external_client;
+#[nexus_test]
+async fn test_basic_failures(cptestctx: &ControlPlaneTestContext) {
+    let client = &cptestctx.external_client;
 
     let org_name = "test-org";
     create_organization(&client, &org_name).await;
@@ -169,14 +169,11 @@ async fn test_basic_failures() {
          (allowed characters are lowercase ASCII, digits, and \"-\")",
         error.message
     );
-
-    testctx.teardown().await;
 }
 
-#[tokio::test]
-async fn test_projects_basic() {
-    let testctx = test_setup("test_projects").await;
-    let client = &testctx.external_client;
+#[nexus_test]
+async fn test_projects_basic(cptestctx: &ControlPlaneTestContext) {
+    let client = &cptestctx.external_client;
 
     let org_name = "test-org";
     create_organization(&client, &org_name).await;
@@ -510,14 +507,11 @@ async fn test_projects_basic() {
     assert_eq!(projects[1].identity.description, "little lightning");
     assert_eq!(projects[2].identity.name, "simproject1");
     assert!(projects[2].identity.description.len() > 0);
-
-    testctx.teardown().await;
 }
 
-#[tokio::test]
-async fn test_projects_list() {
-    let testctx = test_setup("test_projects_list").await;
-    let client = &testctx.external_client;
+#[nexus_test]
+async fn test_projects_list(cptestctx: &ControlPlaneTestContext) {
+    let client = &cptestctx.external_client;
 
     let org_name = "test-org";
     create_organization(&client, &org_name).await;
@@ -636,14 +630,11 @@ async fn test_projects_list() {
             .map(|v| v.identity.id)
             .collect::<Vec<Uuid>>()
     );
-
-    testctx.teardown().await;
 }
 
-#[tokio::test]
-async fn test_sleds_list() {
-    let testctx = test_setup("test_sleds_list").await;
-    let client = &testctx.external_client;
+#[nexus_test]
+async fn test_sleds_list(cptestctx: &ControlPlaneTestContext) {
+    let client = &cptestctx.external_client;
 
     /* Verify that there is one sled to begin with. */
     let sleds_url = "/hardware/sleds";
@@ -654,8 +645,9 @@ async fn test_sleds_list() {
     let mut sas = Vec::with_capacity(nsleds);
     for _ in 0..nsleds {
         let sa_id = Uuid::new_v4();
-        let log = testctx.logctx.log.new(o!( "sled_id" => sa_id.to_string() ));
-        let addr = testctx.server.http_server_internal.local_addr();
+        let log =
+            cptestctx.logctx.log.new(o!( "sled_id" => sa_id.to_string() ));
+        let addr = cptestctx.server.http_server_internal.local_addr();
         sas.push(start_sled_agent(log, addr, sa_id).await.unwrap());
     }
 
@@ -673,8 +665,6 @@ async fn test_sleds_list() {
     for sa in sas {
         sa.http_server.close().await.unwrap();
     }
-
-    testctx.teardown().await;
 }
 
 async fn projects_list(
