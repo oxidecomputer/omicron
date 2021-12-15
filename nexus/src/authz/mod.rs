@@ -5,8 +5,8 @@
 //! Authorization facilities
 
 mod oso_generic;
-pub use oso_types::Action;
-pub use oso_types::DATABASE;
+pub use oso_generic::Action;
+pub use oso_generic::DATABASE;
 
 mod context;
 pub use context::Authz;

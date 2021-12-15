@@ -7,7 +7,7 @@
 use super::actor::AnyActor;
 use super::roles::RoleSet;
 use crate::authn;
-use crate::authz::oso_types;
+use crate::authz::oso_generic;
 use crate::authz::Action;
 use crate::authz::AuthzResource;
 use crate::context::OpContext;
@@ -29,7 +29,7 @@ impl Authz {
     /// This function panics if we could not load the compiled-in Polar
     /// configuration.  That should be impossible outside of development.
     pub fn new() -> Authz {
-        let oso = oso_types::make_omicron_oso().expect("initializing Oso");
+        let oso = oso_generic::make_omicron_oso().expect("initializing Oso");
         Authz { oso }
     }
 }
