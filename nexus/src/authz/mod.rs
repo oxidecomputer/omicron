@@ -6,16 +6,21 @@
 
 mod oso_types;
 pub use oso_types::Action;
-pub use oso_types::Organization;
-pub use oso_types::Project;
-pub use oso_types::ProjectChild;
 pub use oso_types::DATABASE;
-pub use oso_types::FLEET;
 
 mod context;
 pub use context::Authz;
 pub use context::Context;
 
 mod actor;
+
 mod roles;
 pub use roles::AuthzResource;
+
+mod api_resources;
+pub use api_resources::Fleet;
+pub use api_resources::FleetChild;
+pub use api_resources::Organization;
+pub use api_resources::Project;
+pub use api_resources::ProjectChild;
+pub use api_resources::FLEET;

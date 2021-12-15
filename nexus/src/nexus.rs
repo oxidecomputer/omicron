@@ -726,7 +726,7 @@ impl Nexus {
             authz::FLEET
                 .organization(organization_id)
                 .project(project_id)
-                .resource(ResourceType::Disk, disk_id),
+                .child_generic(ResourceType::Disk, disk_id),
         ))
     }
 
