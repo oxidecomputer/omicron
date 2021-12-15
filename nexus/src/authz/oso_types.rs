@@ -22,7 +22,6 @@
 use super::actor::AnyActor;
 use super::actor::AuthenticatedActor;
 use crate::authn;
-use crate::authn::USER_DB_INIT;
 use crate::context::OpContext;
 use crate::db;
 use crate::db::fixed_data::FLEET_ID;
