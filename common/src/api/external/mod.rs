@@ -465,7 +465,9 @@ impl TryFrom<i64> for Generation {
 /**
  * Identifies a type of API resource
  */
-#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[derive(
+    Clone, Copy, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize,
+)]
 pub enum ResourceType {
     Fleet,
     Organization,

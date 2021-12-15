@@ -12,6 +12,7 @@ use super::db;
 use super::Nexus;
 use crate::authn::external::session_cookie::{Session, SessionStore};
 use crate::authn::Actor;
+use crate::authz::AuthzResource;
 use crate::db::model::ConsoleSession;
 use crate::db::DataStore;
 use async_trait::async_trait;
@@ -185,7 +186,7 @@ pub struct OpContext {
     pub log: slog::Logger,
     pub authn: Arc<authn::Context>,
 
-    authz: Arc<authz::Context>,
+    authz: authz::Context,
     created_instant: Instant,
     created_walltime: SystemTime,
     metadata: BTreeMap<String, String>,
@@ -213,11 +214,11 @@ impl OpContext {
         let apictx = rqctx.context();
         let authn = Arc::new(apictx.external_authn.authn_request(rqctx).await?);
         let datastore = Arc::clone(apictx.nexus.datastore());
-        let authz = Arc::new(authz::Context::new(
+        let authz = authz::Context::new(
             Arc::clone(&authn),
             Arc::clone(&apictx.authz),
             datastore,
-        ));
+        );
 
         let request = rqctx.request.lock().await;
         let mut metadata = BTreeMap::new();
@@ -260,11 +261,11 @@ impl OpContext {
         let created_instant = Instant::now();
         let created_walltime = SystemTime::now();
         let authn = Arc::new(authn);
-        let authz = Arc::new(authz::Context::new(
+        let authz = authz::Context::new(
             Arc::clone(&authn),
             Arc::clone(&authz),
             Arc::clone(&datastore),
-        ));
+        );
         OpContext {
             log,
             authz,
@@ -286,11 +287,11 @@ impl OpContext {
         let created_instant = Instant::now();
         let created_walltime = SystemTime::now();
         let authn = Arc::new(authn::Context::internal_test_user());
-        let authz = Arc::new(authz::Context::new(
+        let authz = authz::Context::new(
             Arc::clone(&authn),
             Arc::new(authz::Authz::new()),
             Arc::clone(&datastore),
-        ));
+        );
         OpContext {
             log,
             authz,
@@ -304,13 +305,13 @@ impl OpContext {
 
     /// Check whether the actor performing this request is authorized for
     /// `action` on `resource`.
-    pub fn authorize<Resource>(
+    pub async fn authorize<Resource>(
         &self,
         action: authz::Action,
         resource: Resource,
     ) -> Result<(), Error>
     where
-        Resource: oso::ToPolar + Debug + Clone,
+        Resource: oso::ToPolar + AuthzResource + Debug + Clone,
     {
         /*
          * TODO-cleanup In an ideal world, Oso would consume &Action and
@@ -323,7 +324,7 @@ impl OpContext {
             "action" => ?action,
             "resource" => ?resource
         );
-        let result = self.authz.authorize(action, resource.clone());
+        let result = self.authz.authorize(self, action, resource.clone()).await;
         debug!(self.log, "authorize result";
             "actor" => ?self.authn.actor(),
             "action" => ?action,
@@ -346,7 +347,7 @@ impl OpContext {
 //     use dropshot::ConfigLoggingLevel;
 //     use omicron_common::api::external::Error;
 //     use std::sync::Arc;
-// 
+//
 //     #[test]
 //     fn test_background_context() {
 //         let logctx = LogContext::new(
@@ -360,7 +361,7 @@ impl OpContext {
 //             Arc::new(authz),
 //             authn::Context::internal_unauthenticated(),
 //         );
-// 
+//
 //         // This is partly a test of the authorization policy.  Today, background
 //         // contexts should have no privileges.  That's misleading because in
 //         // fact they do a bunch of privileged things, but we haven't yet added
@@ -377,7 +378,7 @@ impl OpContext {
 //         assert!(matches!(error, Error::Unauthenticated { .. }));
 //         logctx.cleanup_successful();
 //     }
-// 
+//
 //     #[test]
 //     fn test_test_context() {
 //         let logctx = LogContext::new(
@@ -386,7 +387,7 @@ impl OpContext {
 //         );
 //         let log = logctx.log.new(o!());
 //         let opctx = OpContext::for_unit_tests(log);
-// 
+//
 //         // Like in test_background_context(), this is essentially a test of the
 //         // authorization policy.  The unit tests assume this user can do
 //         // basically everything.  We don't need to verify that -- the tests

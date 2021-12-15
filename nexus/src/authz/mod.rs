@@ -5,13 +5,15 @@
 //! Authorization facilities
 
 use crate::authn;
+use crate::context::OpContext;
 use crate::db::DataStore;
 use omicron_common::api::external::Error;
 use oso::Oso;
-use std::collections::BTreeSet;
 use std::sync::Arc;
 
 mod oso_types;
+pub use self::oso_types::AuthzResource; // XXX
+use self::oso_types::RoleSet;
 pub use oso_types::Action;
 pub use oso_types::Organization;
 pub use oso_types::Project;
@@ -42,7 +44,6 @@ pub struct Context {
     authn: Arc<authn::Context>,
     authz: Arc<Authz>,
     datastore: Arc<DataStore>,
-    roles: BTreeSet<OpRole>,
 }
 
 impl Context {
@@ -51,18 +52,19 @@ impl Context {
         authz: Arc<Authz>,
         datastore: Arc<DataStore>,
     ) -> Context {
-        Context { authn, authz, datastore, roles: BTreeSet::new() }
+        Context { authn, authz, datastore }
     }
 
     /// Check whether the actor performing this request is authorized for
     /// `action` on `resource`.
-    pub fn authorize<Resource>(
-        self: &Arc<Context>,
+    pub async fn authorize<Resource>(
+        &self,
+        opctx: &OpContext,
         action: Action,
         resource: Resource,
     ) -> Result<(), Error>
     where
-        Resource: oso::ToPolar,
+        Resource: oso::ToPolar + AuthzResource,
     {
         // TODO-security For Action::Read (and any other "read" action),
         // this should return NotFound rather than Forbidden.  But we cannot
@@ -75,16 +77,17 @@ impl Context {
         // Alternatively, we could let the caller produce the appropriate
         // "NotFound", but it would add a lot of boilerplate to a lot of
         // callers if we didn't return api::external::Error here.
-
-        // XXX Next steps:
-        // * AnyActor/AuthenticatedActor should hang onto a reference to *this*
-        //   object
-        // * They should call back into this object in order to fetch roles
-        //   * The impl will call into a datastore to do the work
-        // * This object's ::new() needs access to a datastore
-        //   * That's going to have a big blast radius
-
-        let actor = oso_types::AnyActor::new(Arc::clone(&self));
+        let mut roles = RoleSet::new();
+        resource
+            .fetch_all_related_roles_for_user(
+                opctx,
+                &self.datastore,
+                &self.authn,
+                &mut roles,
+            )
+            .await?;
+        debug!(opctx.log, "roles"; "roles" => ?roles);
+        let actor = oso_types::AnyActor::new(&self.authn, roles);
         let is_authn = self.authn.actor().is_some();
         match self.authz.oso.is_allowed(actor, action, resource) {
             Err(error) => Err(Error::internal_error(&format!(

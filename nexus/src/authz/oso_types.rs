@@ -20,15 +20,21 @@
 // parts we need for authorization.
 
 use crate::authn;
-use crate::authz;
+use crate::authn::USER_DB_INIT;
+use crate::context::OpContext;
 use crate::db;
+use crate::db::fixed_data::FLEET_ID;
 use crate::db::identity::Resource;
+use crate::db::DataStore;
 use anyhow::Context;
+use futures::future::BoxFuture;
+use futures::FutureExt;
+use omicron_common::api::external::Error;
 use omicron_common::api::external::ResourceType;
 use oso::Oso;
 use oso::PolarClass;
+use std::collections::BTreeSet;
 use std::fmt;
-use std::sync::Arc;
 use uuid::Uuid;
 
 /// Polar configuration describing control plane authorization rules
@@ -125,20 +131,20 @@ impl fmt::Display for Perm {
 
 /// Represents [`authn::Context`] (which is either an authenticated or
 /// unauthenticated actor) for Polar
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct AnyActor {
-    authz: Arc<authz::Context>,
     authenticated: bool,
     actor_id: Option<Uuid>,
+    roles: RoleSet,
 }
 
 impl AnyActor {
-    pub fn new(authz: Arc<authz::Context>) -> Self {
-        let actor = authz.authn.actor();
+    pub fn new(authn: &authn::Context, roles: RoleSet) -> Self {
+        let actor = authn.actor();
         AnyActor {
             authenticated: actor.is_some(),
             actor_id: actor.map(|a| a.0),
-            authz,
+            roles,
         }
     }
 }
@@ -151,12 +157,6 @@ impl PartialEq for AnyActor {
 
 impl Eq for AnyActor {}
 
-impl fmt::Debug for AnyActor {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("AnyActor").field("actor_id", &self.actor_id).finish()
-    }
-}
-
 impl oso::PolarClass for AnyActor {
     fn get_polar_class_builder() -> oso::ClassBuilder<Self> {
         oso::Class::builder()
@@ -166,18 +166,18 @@ impl oso::PolarClass for AnyActor {
             })
             .add_attribute_getter("authn_actor", |a: &AnyActor| {
                 a.actor_id.map(|actor_id| AuthenticatedActor {
-                    authz: Arc::clone(&a.authz),
                     actor_id,
+                    roles: a.roles.clone(),
                 })
             })
     }
 }
 
 /// Represents an authenticated [`authn::Context`] for Polar
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct AuthenticatedActor {
-    authz: Arc<authz::Context>,
     actor_id: Uuid,
+    roles: RoleSet,
 }
 
 impl AuthenticatedActor {
@@ -190,33 +190,13 @@ impl AuthenticatedActor {
         resource_id: Uuid,
         role: &str,
     ) -> bool {
-        self.authz.user_has_role_resource(
-            self.actor_id,
-            resource_type,
-            resource_id,
-            role,
-        )
-        /*
-         * TODO We will probably want to either pre-load the list of roles that
-         * the actor has for this resource or else at this point we will go
-         * fetch them from the database.
-         */
-        self.actor_id == authn::USER_TEST_PRIVILEGED.id
-    }
-
-    /**
-     * Returns whether this actor has the given role for a fleet
-     */
-    /*
-     * This is special-cased because Fleets don't exist in the database and do
-     * not have an id.  It might be a good idea to put them in the database with
-     * their own id.  But it's not needed for anything right now.  (It might
-     * also mean that many authz checks would need to do an extra database query
-     * to load the fleet_id from the Organization.)
-     */
-    fn has_role_fleet(&self, _fleet: &Fleet, _role: &str) -> bool {
-        self.actor_id == authn::USER_TEST_PRIVILEGED.id
-            || self.actor_id == authn::USER_DB_INIT.id
+        // This particular part of the policy needs to be hardcoded because it's
+        // used to bootstrap the rest of the built-in roles.
+        // XXX
+        (resource_type == ResourceType::Fleet
+            && role == "admin"
+            && self.actor_id == USER_DB_INIT.id)
+            || self.roles.has_role(resource_type, resource_id, role)
     }
 }
 
@@ -228,14 +208,6 @@ impl PartialEq for AuthenticatedActor {
 
 impl Eq for AuthenticatedActor {}
 
-impl fmt::Debug for AuthenticatedActor {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("AuthenticatedActor")
-            .field("actor_id", &self.actor_id)
-            .finish()
-    }
-}
-
 impl oso::PolarClass for AuthenticatedActor {
     fn get_polar_class_builder() -> oso::ClassBuilder<Self> {
         oso::Class::builder()
@@ -243,6 +215,132 @@ impl oso::PolarClass for AuthenticatedActor {
             .add_attribute_getter("id", |a: &AuthenticatedActor| {
                 a.actor_id.to_string()
             })
+    }
+}
+
+pub trait AuthzResource: Send + Sync + 'static {
+    fn fetch_all_related_roles_for_user<'a, 'b, 'c, 'd, 'e, 'f>(
+        &'a self,
+        opctx: &'b OpContext,
+        datastore: &'c DataStore,
+        authn: &'d authn::Context,
+        roleset: &'e mut RoleSet,
+    ) -> BoxFuture<'f, Result<(), Error>>
+    where
+        'a: 'f,
+        'b: 'f,
+        'c: 'f,
+        'd: 'f,
+        'e: 'f;
+}
+
+#[derive(Clone, Debug)]
+pub struct RoleSet {
+    roles: BTreeSet<(ResourceType, Uuid, String)>,
+}
+
+impl RoleSet {
+    pub fn new() -> RoleSet {
+        RoleSet { roles: BTreeSet::new() }
+    }
+
+    fn has_role(
+        &self,
+        resource_type: ResourceType,
+        resource_id: Uuid,
+        role_name: &str,
+    ) -> bool {
+        self.roles.contains(&(
+            resource_type,
+            resource_id,
+            role_name.to_string(),
+        ))
+    }
+
+    fn insert(
+        &mut self,
+        resource_type: ResourceType,
+        resource_id: Uuid,
+        role_name: &str,
+    ) {
+        self.roles.insert((
+            resource_type,
+            resource_id,
+            String::from(role_name),
+        ));
+    }
+}
+
+// XXX document
+// XXX should this be part of the Oso policy file?
+pub trait PermTarget: Send + Sync + 'static {
+    fn db_resource(&self) -> Option<(ResourceType, Uuid)>;
+    fn parent(&self) -> Option<Box<dyn AuthzResource>>;
+}
+
+impl<T: PermTarget> AuthzResource for T {
+    fn fetch_all_related_roles_for_user<'a, 'b, 'c, 'd, 'e, 'f>(
+        &'a self,
+        opctx: &'b OpContext,
+        datastore: &'c DataStore,
+        authn: &'d authn::Context,
+        roleset: &'e mut RoleSet,
+    ) -> BoxFuture<'f, Result<(), Error>>
+    where
+        'a: 'f,
+        'b: 'f,
+        'c: 'f,
+        'd: 'f,
+        'e: 'f,
+    {
+        async move {
+            if let Some(actor_id) = authn.actor() {
+                if let Some((resource_type, resource_id)) = self.db_resource() {
+                    trace!(opctx.log, "loading roles";
+                        "actor_id" => actor_id.0.to_string(),
+                        "resource_type" => ?resource_type,
+                        "resource_id" => resource_id.to_string(),
+                    );
+                    let roles = datastore
+                        .role_asgn_builtin_list_for(
+                            opctx,
+                            actor_id.0,
+                            resource_type,
+                            resource_id,
+                        )
+                        .await?;
+                    for role_asgn in roles {
+                        assert_eq!(
+                            resource_type.to_string(),
+                            role_asgn.resource_type
+                        );
+                        trace!(opctx.log, "found role";
+                            "actor_id" => actor_id.0.to_string(),
+                            "resource_type" => ?resource_type,
+                            "resource_id" => resource_id.to_string(),
+                            "role_name" => &role_asgn.role_name
+                        );
+
+                        roleset.insert(
+                            resource_type,
+                            resource_id,
+                            &role_asgn.role_name,
+                        );
+                    }
+                }
+
+                if let Some(parent) = self.parent() {
+                    parent
+                        .fetch_all_related_roles_for_user(
+                            opctx, datastore, authn, roleset,
+                        )
+                        .await?;
+                }
+            }
+
+            Ok(())
+        }
+        .boxed()
     }
 }
 
@@ -272,10 +370,20 @@ impl oso::PolarClass for Fleet {
     fn get_polar_class_builder() -> oso::ClassBuilder<Self> {
         oso::Class::builder().with_equality_check().add_method(
             "has_role",
-            |fleet: &Fleet, actor: AuthenticatedActor, role: String| {
-                actor.has_role_fleet(fleet, &role)
+            |_: &Fleet, actor: AuthenticatedActor, role: String| {
+                actor.has_role_resource(ResourceType::Fleet, *FLEET_ID, &role)
             },
         )
+    }
+}
+
+impl PermTarget for Fleet {
+    fn db_resource(&self) -> Option<(ResourceType, Uuid)> {
+        Some((ResourceType::Fleet, *FLEET_ID))
+    }
+
+    fn parent(&self) -> Option<Box<dyn AuthzResource>> {
+        None
     }
 }
 
@@ -316,6 +424,16 @@ impl oso::PolarClass for Organization {
 impl From<&db::model::Organization> for Organization {
     fn from(omicron_organization: &db::model::Organization) -> Self {
         Organization { organization_id: omicron_organization.id() }
+    }
+}
+
+impl PermTarget for Organization {
+    fn db_resource(&self) -> Option<(ResourceType, Uuid)> {
+        Some((ResourceType::Organization, self.organization_id))
+    }
+
+    fn parent(&self) -> Option<Box<dyn AuthzResource>> {
+        Some(Box::new(Fleet {}))
     }
 }
 
@@ -370,6 +488,16 @@ impl From<&db::model::Project> for Project {
     }
 }
 
+impl PermTarget for Project {
+    fn db_resource(&self) -> Option<(ResourceType, Uuid)> {
+        Some((ResourceType::Project, self.project_id))
+    }
+
+    fn parent(&self) -> Option<Box<dyn AuthzResource>> {
+        Some(Box::new(Organization { organization_id: self.organization_id }))
+    }
+}
+
 /// Wraps any resource that lives inside a Project for Polar
 ///
 /// This would include [`db::model::Instance`], [`db::model::Disk`], etc.
@@ -408,6 +536,22 @@ impl oso::PolarClass for ProjectChild {
     }
 }
 
+impl PermTarget for ProjectChild {
+    fn db_resource(&self) -> Option<(ResourceType, Uuid)> {
+        // TODO This is perhaps surprising.  But the behavior we want from this
+        // function is that it returns a Some value iff it's possible to assign
+        // a _role_ to this resource.  That's not true for these resources.
+        None
+    }
+
+    fn parent(&self) -> Option<Box<dyn AuthzResource>> {
+        Some(Box::new(Project {
+            project_id: self.project_id,
+            organization_id: self.organization_id,
+        }))
+    }
+}
+
 /// Wraps any resource that lives inside a Fleet but outside an Organization
 ///
 /// This includes [`db::model::UserBuiltin`] and future resources describing
@@ -432,6 +576,17 @@ impl oso::PolarClass for FleetChild {
     }
 }
 
+// XXX
+impl PermTarget for FleetChild {
+    fn db_resource(&self) -> Option<(ResourceType, Uuid)> {
+        None
+    }
+
+    fn parent(&self) -> Option<Box<dyn AuthzResource>> {
+        Some(Box::new(Fleet {}))
+    }
+}
+
 /// Represents the database itself to Polar (so that we can have roles with no
 /// access to the database at all)
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -447,5 +602,30 @@ impl oso::PolarClass for Database {
                 true
             },
         )
+    }
+}
+
+// XXX consider
+// - right now, we're prefetching all roles we might possibly need, sticking
+//   them onto the Actor, then we impl a Polar method that looks at the data
+//   structure.  We could instead have the Polar method reach out to the
+//   database.  This is tricky because Polar is not async.
+impl AuthzResource for Database {
+    fn fetch_all_related_roles_for_user<'a, 'b, 'c, 'd, 'e, 'f>(
+        &'a self,
+        _: &'b OpContext,
+        _: &'c DataStore,
+        _: &'d authn::Context,
+        _: &'e mut RoleSet,
+    ) -> BoxFuture<'f, Result<(), Error>>
+    where
+        'a: 'f,
+        'b: 'f,
+        'c: 'f,
+        'd: 'f,
+        'e: 'f,
+    {
+        // XXX
+        futures::future::ready(Ok(())).boxed()
     }
 }
