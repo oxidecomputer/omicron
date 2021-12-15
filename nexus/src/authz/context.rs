@@ -5,11 +5,11 @@
 //! Guts of the authorization subsystem
 
 use super::actor::AnyActor;
+use super::roles::RoleSet;
 use crate::authn;
 use crate::authz::oso_types;
 use crate::authz::Action;
 use crate::authz::AuthzResource;
-use crate::authz::RoleSet;
 use crate::context::OpContext;
 use crate::db::DataStore;
 use omicron_common::api::external::Error;

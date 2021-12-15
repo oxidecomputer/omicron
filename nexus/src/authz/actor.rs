@@ -4,8 +4,8 @@
 
 //! Oso integration for Actor types
 
+use super::roles::RoleSet;
 use crate::authn;
-use crate::authz::RoleSet;
 use omicron_common::api::external::ResourceType;
 use uuid::Uuid;
 

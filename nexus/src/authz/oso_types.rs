@@ -21,6 +21,9 @@
 
 use super::actor::AnyActor;
 use super::actor::AuthenticatedActor;
+use super::roles::AuthzApiResource;
+use super::roles::AuthzResource;
+use super::roles::RoleSet;
 use crate::authn;
 use crate::context::OpContext;
 use crate::db;
@@ -34,7 +37,6 @@ use omicron_common::api::external::Error;
 use omicron_common::api::external::ResourceType;
 use oso::Oso;
 use oso::PolarClass;
-use std::collections::BTreeSet;
 use std::fmt;
 use uuid::Uuid;
 
@@ -130,132 +132,6 @@ impl fmt::Display for Perm {
     }
 }
 
-pub trait AuthzResource: Send + Sync + 'static {
-    fn fetch_all_related_roles_for_user<'a, 'b, 'c, 'd, 'e, 'f>(
-        &'a self,
-        opctx: &'b OpContext,
-        datastore: &'c DataStore,
-        authn: &'d authn::Context,
-        roleset: &'e mut RoleSet,
-    ) -> BoxFuture<'f, Result<(), Error>>
-    where
-        'a: 'f,
-        'b: 'f,
-        'c: 'f,
-        'd: 'f,
-        'e: 'f;
-}
-
-#[derive(Clone, Debug)]
-pub struct RoleSet {
-    roles: BTreeSet<(ResourceType, Uuid, String)>,
-}
-
-impl RoleSet {
-    pub fn new() -> RoleSet {
-        RoleSet { roles: BTreeSet::new() }
-    }
-
-    pub fn has_role(
-        &self,
-        resource_type: ResourceType,
-        resource_id: Uuid,
-        role_name: &str,
-    ) -> bool {
-        self.roles.contains(&(
-            resource_type,
-            resource_id,
-            role_name.to_string(),
-        ))
-    }
-
-    fn insert(
-        &mut self,
-        resource_type: ResourceType,
-        resource_id: Uuid,
-        role_name: &str,
-    ) {
-        self.roles.insert((
-            resource_type,
-            resource_id,
-            String::from(role_name),
-        ));
-    }
-}
-
-// XXX document
-// XXX should this be part of the Oso policy file?
-pub trait PermTarget: Send + Sync + 'static {
-    fn db_resource(&self) -> Option<(ResourceType, Uuid)>;
-    fn parent(&self) -> Option<Box<dyn AuthzResource>>;
-}
-
-impl<T: PermTarget> AuthzResource for T {
-    fn fetch_all_related_roles_for_user<'a, 'b, 'c, 'd, 'e, 'f>(
-        &'a self,
-        opctx: &'b OpContext,
-        datastore: &'c DataStore,
-        authn: &'d authn::Context,
-        roleset: &'e mut RoleSet,
-    ) -> BoxFuture<'f, Result<(), Error>>
-    where
-        'a: 'f,
-        'b: 'f,
-        'c: 'f,
-        'd: 'f,
-        'e: 'f,
-    {
-        async move {
-            if let Some(actor_id) = authn.actor() {
-                if let Some((resource_type, resource_id)) = self.db_resource() {
-                    trace!(opctx.log, "loading roles";
-                        "actor_id" => actor_id.0.to_string(),
-                        "resource_type" => ?resource_type,
-                        "resource_id" => resource_id.to_string(),
-                    );
-                    let roles = datastore
-                        .role_asgn_builtin_list_for(
-                            opctx,
-                            actor_id.0,
-                            resource_type,
-                            resource_id,
-                        )
-                        .await?;
-                    for role_asgn in roles {
-                        assert_eq!(
-                            resource_type.to_string(),
-                            role_asgn.resource_type
-                        );
-                        trace!(opctx.log, "found role";
-                            "actor_id" => actor_id.0.to_string(),
-                            "resource_type" => ?resource_type,
-                            "resource_id" => resource_id.to_string(),
-                            "role_name" => &role_asgn.role_name
-                        );
-
-                        roleset.insert(
-                            resource_type,
-                            resource_id,
-                            &role_asgn.role_name,
-                        );
-                    }
-                }
-
-                if let Some(parent) = self.parent() {
-                    parent
-                        .fetch_all_related_roles_for_user(
-                            opctx, datastore, authn, roleset,
-                        )
-                        .await?;
-                }
-            }
-
-            Ok(())
-        }
-        .boxed()
-    }
-}
-
 //
 // Newtypes for model types that are exposed to Polar
 // These all impl [`oso::PolarClass`].
@@ -289,7 +165,7 @@ impl oso::PolarClass for Fleet {
     }
 }
 
-impl PermTarget for Fleet {
+impl AuthzApiResource for Fleet {
     fn db_resource(&self) -> Option<(ResourceType, Uuid)> {
         Some((ResourceType::Fleet, *FLEET_ID))
     }
@@ -339,7 +215,7 @@ impl From<&db::model::Organization> for Organization {
     }
 }
 
-impl PermTarget for Organization {
+impl AuthzApiResource for Organization {
     fn db_resource(&self) -> Option<(ResourceType, Uuid)> {
         Some((ResourceType::Organization, self.organization_id))
     }
@@ -400,7 +276,7 @@ impl From<&db::model::Project> for Project {
     }
 }
 
-impl PermTarget for Project {
+impl AuthzApiResource for Project {
     fn db_resource(&self) -> Option<(ResourceType, Uuid)> {
         Some((ResourceType::Project, self.project_id))
     }
@@ -448,7 +324,7 @@ impl oso::PolarClass for ProjectChild {
     }
 }
 
-impl PermTarget for ProjectChild {
+impl AuthzApiResource for ProjectChild {
     fn db_resource(&self) -> Option<(ResourceType, Uuid)> {
         // TODO This is perhaps surprising.  But the behavior we want from this
         // function is that it returns a Some value iff it's possible to assign
@@ -489,7 +365,7 @@ impl oso::PolarClass for FleetChild {
 }
 
 // XXX
-impl PermTarget for FleetChild {
+impl AuthzApiResource for FleetChild {
     fn db_resource(&self) -> Option<(ResourceType, Uuid)> {
         None
     }
