@@ -260,66 +260,71 @@ impl DataStore {
         // - Sled placement of datasets
         // - What sort of loads we'd like to create (even split across all disks
         // may not be preferable, especially if maintenance is expected)
-        let datasets: Vec<Dataset> = dataset_dsl::dataset
-            // First, we look for valid datasets (non-deleted crucible datasets).
-            .filter(dataset_dsl::time_deleted.is_null())
-            .filter(dataset_dsl::kind.eq(DatasetKind(
-                crate::internal_api::params::DatasetKind::Crucible,
-            )))
-            // Next, observe all the regions allocated to each dataset, and
-            // determine how much space they're using.
-            //
-            // NOTE: We could store "free/allocated" space per-dataset, and keep
-            // them up-to-date, rather than trying to recompute this.
-            .left_outer_join(
-                region_dsl::region
-                    .on(dataset_dsl::id.eq(region_dsl::dataset_id)),
-            )
-            .group_by(dataset_dsl::id)
-            .select(Dataset::as_select())
-            .order(
-                diesel::dsl::sum(
-                    region_dsl::extent_size * region_dsl::extent_count,
+        let params: params::DiskCreate = params.clone();
+        self.pool().transaction(move |conn| {
+            let datasets: Vec<Dataset> = dataset_dsl::dataset
+                // First, we look for valid datasets (non-deleted crucible datasets).
+                .filter(dataset_dsl::time_deleted.is_null())
+                .filter(dataset_dsl::kind.eq(DatasetKind(
+                    crate::internal_api::params::DatasetKind::Crucible,
+                )))
+                // Next, observe all the regions allocated to each dataset, and
+                // determine how much space they're using.
+                //
+                // NOTE: We could store "free/allocated" space per-dataset, and keep
+                // them up-to-date, rather than trying to recompute this.
+                .left_outer_join(
+                    region_dsl::region
+                        .on(dataset_dsl::id.eq(region_dsl::dataset_id)),
                 )
-                .asc(),
-            )
-            .get_results_async::<Dataset>(self.pool())
-            .await
-            .map_err(|e| public_error_from_diesel_pool_shouldnt_fail(e))?;
-
-        if datasets.len() < REGION_REDUNDANCY_THRESHOLD {
-            return Err(Error::internal_error(
-                "Not enough datasets for replicated allocation",
-            ));
-        }
-
-        let source_datasets = &datasets[0..REGION_REDUNDANCY_THRESHOLD];
-        let regions: Vec<Region> = source_datasets
-            .iter()
-            .map(|dataset| {
-                Region::new(
-                    dataset.id(),
-                    disk_id,
-                    params.block_size().try_into().unwrap(),
-                    params.extent_size().try_into().unwrap(),
-                    params.extent_count().try_into().unwrap(),
+                .group_by(dataset_dsl::id)
+                .select(Dataset::as_select())
+                .order(
+                    diesel::dsl::sum(
+                        region_dsl::extent_size * region_dsl::extent_count,
+                    )
+                    .asc(),
                 )
-            })
-            .collect();
+                .get_results::<Dataset>(conn)?;
+//                .map_err(|e| Error::internal_error(&format!("Database error: {:#}", e)))?;
 
-        let regions = diesel::insert_into(region_dsl::region)
-            .values(regions)
-            .returning(Region::as_returning())
-            .get_results_async(self.pool())
-            .await
-            .map_err(|e| public_error_from_diesel_pool_shouldnt_fail(e))?;
+            if datasets.len() < REGION_REDUNDANCY_THRESHOLD {
+                // TODO: Want a better error type here...
+                return Err(diesel::result::Error::NotFound);
+//                return Err(Error::internal_error(
+//                    "Not enough datasets for replicated allocation",
+//                ));
+            }
 
-        // TODO: also, make this concurrency-safe. Txns?
-        Ok(source_datasets
-            .into_iter()
-            .map(|d| d.clone())
-            .zip(regions)
-            .collect())
+            // Create identical regions on each of the following datasets.
+            let source_datasets = &datasets[0..REGION_REDUNDANCY_THRESHOLD];
+            let regions: Vec<Region> = source_datasets
+                .iter()
+                .map(|dataset| {
+                    Region::new(
+                        dataset.id(),
+                        disk_id,
+                        params.block_size().try_into().unwrap(),
+                        params.extent_size().try_into().unwrap(),
+                        params.extent_count().try_into().unwrap(),
+                    )
+                })
+                .collect();
+            let regions = diesel::insert_into(region_dsl::region)
+                .values(regions)
+                .returning(Region::as_returning())
+                .get_results(conn)?;
+//                .map_err(|e| Error::internal_error(&format!("Database error: {:#}", e)))?;
+
+            // TODO: also, make this concurrency-safe. Txns?
+
+            // Return the regions with the datasets to which they were allocated.
+            Ok(source_datasets
+                .into_iter()
+                .map(|d| d.clone())
+                .zip(regions)
+                .collect())
+        }).await.map_err(|e| Error::internal_error(&format!("Database error: {:#?}", e)))
     }
 
     /// Create a organization
