@@ -10,10 +10,12 @@ pub use oso_types::AuthzResource;
 pub use oso_types::Organization;
 pub use oso_types::Project;
 pub use oso_types::ProjectChild;
-use oso_types::RoleSet;
+pub use oso_types::RoleSet;
 pub use oso_types::DATABASE;
 pub use oso_types::FLEET;
 
 mod context;
 pub use context::Authz;
 pub use context::Context;
+
+mod actor;

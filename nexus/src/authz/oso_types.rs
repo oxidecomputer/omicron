@@ -19,6 +19,8 @@
 // pass them to `is_allowed()`.  Using newtypes is a way to capture just the
 // parts we need for authorization.
 
+use super::actor::AnyActor;
+use super::actor::AuthenticatedActor;
 use crate::authn;
 use crate::authn::USER_DB_INIT;
 use crate::context::OpContext;
@@ -71,7 +73,7 @@ pub fn make_omicron_oso() -> Result<Oso, anyhow::Error> {
 /// Describes an action being authorized
 ///
 /// There's currently just one enum of Actions for all of Omicron.  We expect
-/// most objects to support mosty the same set of actions.
+/// most objects to support mostly the same set of actions.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Action {
     Query, // only used for [`Database`]
@@ -129,95 +131,6 @@ impl fmt::Display for Perm {
     }
 }
 
-/// Represents [`authn::Context`] (which is either an authenticated or
-/// unauthenticated actor) for Polar
-#[derive(Clone, Debug)]
-pub struct AnyActor {
-    authenticated: bool,
-    actor_id: Option<Uuid>,
-    roles: RoleSet,
-}
-
-impl AnyActor {
-    pub fn new(authn: &authn::Context, roles: RoleSet) -> Self {
-        let actor = authn.actor();
-        AnyActor {
-            authenticated: actor.is_some(),
-            actor_id: actor.map(|a| a.0),
-            roles,
-        }
-    }
-}
-
-impl PartialEq for AnyActor {
-    fn eq(&self, other: &Self) -> bool {
-        self.actor_id == other.actor_id
-    }
-}
-
-impl Eq for AnyActor {}
-
-impl oso::PolarClass for AnyActor {
-    fn get_polar_class_builder() -> oso::ClassBuilder<Self> {
-        oso::Class::builder()
-            .with_equality_check()
-            .add_attribute_getter("authenticated", |a: &AnyActor| {
-                a.authenticated
-            })
-            .add_attribute_getter("authn_actor", |a: &AnyActor| {
-                a.actor_id.map(|actor_id| AuthenticatedActor {
-                    actor_id,
-                    roles: a.roles.clone(),
-                })
-            })
-    }
-}
-
-/// Represents an authenticated [`authn::Context`] for Polar
-#[derive(Clone, Debug)]
-pub struct AuthenticatedActor {
-    actor_id: Uuid,
-    roles: RoleSet,
-}
-
-impl AuthenticatedActor {
-    /**
-     * Returns whether this actor has the given role for the given resource
-     */
-    fn has_role_resource(
-        &self,
-        resource_type: ResourceType,
-        resource_id: Uuid,
-        role: &str,
-    ) -> bool {
-        // This particular part of the policy needs to be hardcoded because it's
-        // used to bootstrap the rest of the built-in roles.
-        // XXX
-        (resource_type == ResourceType::Fleet
-            && role == "admin"
-            && self.actor_id == USER_DB_INIT.id)
-            || self.roles.has_role(resource_type, resource_id, role)
-    }
-}
-
-impl PartialEq for AuthenticatedActor {
-    fn eq(&self, other: &Self) -> bool {
-        self.actor_id == other.actor_id
-    }
-}
-
-impl Eq for AuthenticatedActor {}
-
-impl oso::PolarClass for AuthenticatedActor {
-    fn get_polar_class_builder() -> oso::ClassBuilder<Self> {
-        oso::Class::builder()
-            .with_equality_check()
-            .add_attribute_getter("id", |a: &AuthenticatedActor| {
-                a.actor_id.to_string()
-            })
-    }
-}
-
 pub trait AuthzResource: Send + Sync + 'static {
     fn fetch_all_related_roles_for_user<'a, 'b, 'c, 'd, 'e, 'f>(
         &'a self,
@@ -244,7 +157,7 @@ impl RoleSet {
         RoleSet { roles: BTreeSet::new() }
     }
 
-    fn has_role(
+    pub fn has_role(
         &self,
         resource_type: ResourceType,
         resource_id: Uuid,

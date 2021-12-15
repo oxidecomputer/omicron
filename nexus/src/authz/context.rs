@@ -4,6 +4,7 @@
 
 //! Guts of the authorization subsystem
 
+use super::actor::AnyActor;
 use crate::authn;
 use crate::authz::oso_types;
 use crate::authz::Action;
@@ -85,7 +86,7 @@ impl Context {
             )
             .await?;
         debug!(opctx.log, "roles"; "roles" => ?roles);
-        let actor = oso_types::AnyActor::new(&self.authn, roles);
+        let actor = AnyActor::new(&self.authn, roles);
         let is_authn = self.authn.actor().is_some();
         match self.authz.oso.is_allowed(actor, action, resource) {
             Err(error) => Err(Error::internal_error(&format!(
@@ -122,8 +123,6 @@ mod test {
     use crate::authz::Context;
     use crate::authz::DATABASE;
     use crate::authz::FLEET;
-    use crate::context::OpContext;
-    use crate::db;
     use crate::db::DataStore;
     use omicron_test_utils::dev;
     use std::sync::Arc;
@@ -144,16 +143,10 @@ mod test {
 
     #[tokio::test]
     async fn test_database() {
-        // XXX commonize this more code
         let logctx = dev::test_setup_log("test_database");
         let mut db = dev::test_setup_database(&logctx.log).await;
-        let cfg = db::Config { url: db.pg_config().clone() };
-        let pool = Arc::new(db::Pool::new(&cfg));
-        let datastore = DataStore::new_with_builtins(&logctx, pool).await;
-        let opctx = OpContext::for_unit_tests(
-            logctx.log.new(o!()),
-            Arc::clone(&datastore),
-        );
+        let (opctx, datastore) =
+            crate::db::datastore::datastore_test(&logctx, &db).await;
         let authz_privileged = authz_context_for_actor(
             authn::Context::internal_test_user(),
             Arc::clone(&datastore),
@@ -184,16 +177,10 @@ mod test {
 
     #[tokio::test]
     async fn test_organization() {
-        // XXX commonize this more code
         let logctx = dev::test_setup_log("test_database");
         let mut db = dev::test_setup_database(&logctx.log).await;
-        let cfg = db::Config { url: db.pg_config().clone() };
-        let pool = Arc::new(db::Pool::new(&cfg));
-        let datastore = DataStore::new_with_builtins(&logctx, pool).await;
-        let opctx = OpContext::for_unit_tests(
-            logctx.log.new(o!()),
-            Arc::clone(&datastore),
-        );
+        let (opctx, datastore) =
+            crate::db::datastore::datastore_test(&logctx, &db).await;
 
         let authz_privileged = authz_context_for_actor(
             authn::Context::internal_test_user(),
