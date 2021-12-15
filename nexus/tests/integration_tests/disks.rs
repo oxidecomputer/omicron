@@ -10,7 +10,6 @@ use http::method::Method;
 use http::StatusCode;
 use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::Disk;
-use omicron_common::api::external::DiskAttachment;
 use omicron_common::api::external::DiskState;
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::Instance;
@@ -176,63 +175,55 @@ async fn test_disks(cptestctx: &ControlPlaneTestContext) {
         error.message
     );
 
+    let url_instance_attach_disk = format!(
+        "/organizations/{}/projects/{}/instances/{}/disks/attach",
+        org_name,
+        project_name,
+        instance.identity.name.as_str(),
+    );
+    let url_instance_detach_disk = format!(
+        "/organizations/{}/projects/{}/instances/{}/disks/detach",
+        org_name,
+        project_name,
+        instance.identity.name.as_str(),
+    );
+
     /* Start attaching the disk to the instance. */
     let mut response = client
-        .make_request_no_body(
-            Method::PUT,
-            &url_instance_disk,
-            StatusCode::CREATED,
+        .make_request(
+            Method::POST,
+            &url_instance_attach_disk,
+            Some(params::DiskReference { disk: disk.identity.name.clone() }),
+            StatusCode::ACCEPTED,
         )
         .await
         .unwrap();
-    let attachment: DiskAttachment = read_json(&mut response).await;
+    let attached_disk: Disk = read_json(&mut response).await;
     let instance_id = &instance.identity.id;
-    assert_eq!(attachment.instance_id, *instance_id);
-    assert_eq!(attachment.disk_name, disk.identity.name);
-    assert_eq!(attachment.disk_id, disk.identity.id);
-    assert_eq!(
-        attachment.disk_state,
-        DiskState::Attaching(instance_id.clone())
-    );
-
-    let attachment: DiskAttachment =
-        object_get(&client, &url_instance_disk).await;
-    assert_eq!(attachment.instance_id, instance.identity.id);
-    assert_eq!(attachment.disk_name, disk.identity.name);
-    assert_eq!(attachment.disk_id, disk.identity.id);
-    assert_eq!(
-        attachment.disk_state,
-        DiskState::Attaching(instance_id.clone())
-    );
-
-    /* Check the state of the disk, too. */
-    let disk = disk_get(&client, &disk_url).await;
-    assert_eq!(disk.state, DiskState::Attaching(instance_id.clone()));
+    assert_eq!(attached_disk.identity.name, disk.identity.name);
+    assert_eq!(attached_disk.identity.id, disk.identity.id);
+    assert_eq!(attached_disk.state, DiskState::Attaching(instance_id.clone()));
 
     /*
      * Finish simulation of the attachment and verify the new state, both on the
      * attachment and the disk itself.
      */
     disk_simulate(nexus, &disk.identity.id).await;
-    let attachment: DiskAttachment =
-        object_get(&client, &url_instance_disk).await;
-    assert_eq!(attachment.instance_id, instance.identity.id);
-    assert_eq!(attachment.disk_name, disk.identity.name);
-    assert_eq!(attachment.disk_id, disk.identity.id);
-    assert_eq!(attachment.disk_state, DiskState::Attached(instance_id.clone()));
-
-    let disk = disk_get(&client, &disk_url).await;
-    assert_eq!(disk.state, DiskState::Attached(instance_id.clone()));
+    let attached_disk: Disk = object_get(&client, &url_instance_disk).await;
+    assert_eq!(attached_disk.identity.name, disk.identity.name);
+    assert_eq!(attached_disk.identity.id, disk.identity.id);
+    assert_eq!(attached_disk.state, DiskState::Attached(instance_id.clone()));
 
     /*
      * Attach the disk to the same instance.  This should complete immediately
      * with no state change.
      */
     client
-        .make_request_no_body(
-            Method::PUT,
-            &url_instance_disk,
-            StatusCode::CREATED,
+        .make_request(
+            Method::POST,
+            &url_instance_attach_disk,
+            Some(params::DiskReference { disk: disk.identity.name }),
+            StatusCode::ACCEPTED,
         )
         .await
         .unwrap();
@@ -257,18 +248,37 @@ async fn test_disks(cptestctx: &ControlPlaneTestContext) {
         },
     )
     .await;
+    let url_instance2_disks = format!(
+        "/organizations/{}/projects/{}/instances/{}/disks",
+        org_name,
+        project_name,
+        instance2.identity.name.as_str(),
+    );
     let url_instance2_disk = format!(
         "/organizations/{}/projects/{}/instances/{}/disks/{}",
         org_name,
         project_name,
         instance2.identity.name.as_str(),
-        disk.identity.name.as_str()
+        disk.identity.name.as_str(),
+    );
+    let url_instance2_attach_disk = format!(
+        "/organizations/{}/projects/{}/instances/{}/disks/attach",
+        org_name,
+        project_name,
+        instance2.identity.name.as_str(),
+    );
+    let url_instance2_detach_disk = format!(
+        "/organizations/{}/projects/{}/instances/{}/disks/detach",
+        org_name,
+        project_name,
+        instance2.identity.name.as_str(),
     );
     let error = client
-        .make_request_error(
-            Method::PUT,
-            &url_instance2_disk,
-            StatusCode::BAD_REQUEST,
+        .make_request_error_body(
+            Method::POST,
+            &url_instance2_disks,
+            params::DiskReference { disk: disk.identity.name.clone() },
+            StatusCode::CONFLICT,
         )
         .await;
     assert_eq!(
@@ -277,8 +287,8 @@ async fn test_disks(cptestctx: &ControlPlaneTestContext) {
          instance"
     );
 
-    let disk = disk_get(&client, &disk_url).await;
-    assert_eq!(disk.state, DiskState::Attached(instance_id.clone()));
+    let attached_disk = disk_get(&client, &disk_url).await;
+    assert_eq!(attached_disk.state, DiskState::Attached(instance_id.clone()));
 
     let error = client
         .make_request_error(
@@ -296,30 +306,24 @@ async fn test_disks(cptestctx: &ControlPlaneTestContext) {
      * Begin detaching the disk.
      */
     client
-        .make_request_no_body(
-            Method::DELETE,
-            &url_instance_disk,
-            StatusCode::NO_CONTENT,
+        .make_request(
+            Method::POST,
+            &url_instance_detach_disk,
+            Some(params::DiskReference { disk: disk.identity.name.clone() }),
+            StatusCode::ACCEPTED,
         )
         .await
         .unwrap();
-    let attachment: DiskAttachment =
-        object_get(&client, &url_instance_disk).await;
-    assert_eq!(
-        attachment.disk_state,
-        DiskState::Detaching(instance_id.clone())
-    );
-
-    /* Check the state of the disk, too. */
-    let disk = disk_get(&client, &disk_url).await;
-    assert_eq!(disk.state, DiskState::Detaching(instance_id.clone()));
+    let detached_disk: Disk = object_get(&client, &url_instance_disk).await;
+    assert_eq!(detached_disk.state, DiskState::Detaching(instance_id.clone()));
 
     /* It's still illegal to attach this disk elsewhere. */
     let error = client
-        .make_request_error(
-            Method::PUT,
-            &url_instance2_disk,
-            StatusCode::BAD_REQUEST,
+        .make_request_error_body(
+            Method::POST,
+            &url_instance2_attach_disk,
+            Some(params::DiskReference { disk: disk.identity.name.clone() }),
+            StatusCode::CONFLICT,
         )
         .await;
     assert_eq!(
@@ -330,10 +334,11 @@ async fn test_disks(cptestctx: &ControlPlaneTestContext) {
 
     /* It's even illegal to attach this disk back to the same instance. */
     let error = client
-        .make_request_error(
-            Method::PUT,
-            &url_instance_disk,
-            StatusCode::BAD_REQUEST,
+        .make_request_error_body(
+            Method::POST,
+            &url_instance_attach_disk,
+            Some(params::DiskReference { disk: disk.identity.name.clone() }),
+            StatusCode::CONFLICT,
         )
         .await;
     /* TODO-debug the error message here is misleading. */
@@ -345,10 +350,11 @@ async fn test_disks(cptestctx: &ControlPlaneTestContext) {
 
     /* However, there's no problem attempting to detach it again. */
     client
-        .make_request_no_body(
-            Method::DELETE,
-            &url_instance_disk,
-            StatusCode::NO_CONTENT,
+        .make_request(
+            Method::POST,
+            &url_instance_detach_disk,
+            Some(params::DiskReference { disk: disk.identity.name.clone() }),
+            StatusCode::ACCEPTED,
         )
         .await
         .unwrap();
@@ -374,40 +380,39 @@ async fn test_disks(cptestctx: &ControlPlaneTestContext) {
 
     /* Since delete is idempotent, we can detach it again -- from either one. */
     client
-        .make_request_no_body(
-            Method::DELETE,
-            &url_instance_disk,
-            StatusCode::NO_CONTENT,
+        .make_request(
+            Method::POST,
+            &url_instance_detach_disk,
+            Some(params::DiskReference { disk: disk.identity.name.clone() }),
+            StatusCode::ACCEPTED,
         )
         .await
         .unwrap();
     client
-        .make_request_no_body(
-            Method::DELETE,
-            &url_instance2_disk,
-            StatusCode::NO_CONTENT,
+        .make_request(
+            Method::POST,
+            &url_instance2_detach_disk,
+            Some(params::DiskReference { disk: disk.identity.name.clone() }),
+            StatusCode::ACCEPTED,
         )
         .await
         .unwrap();
 
     /* Now, start attaching it again to the second instance. */
     let mut response = client
-        .make_request_no_body(
-            Method::PUT,
-            &url_instance2_disk,
-            StatusCode::CREATED,
+        .make_request(
+            Method::POST,
+            &url_instance2_attach_disk,
+            Some(params::DiskReference { disk: disk.identity.name.clone() }),
+            StatusCode::ACCEPTED,
         )
         .await
         .unwrap();
-    let attachment: DiskAttachment = read_json(&mut response).await;
+    let attached_disk: Disk = read_json(&mut response).await;
     let instance2_id = &instance2.identity.id;
-    assert_eq!(attachment.instance_id, *instance2_id);
-    assert_eq!(attachment.disk_name, disk.identity.name);
-    assert_eq!(attachment.disk_id, disk.identity.id);
-    assert_eq!(
-        attachment.disk_state,
-        DiskState::Attaching(instance2_id.clone())
-    );
+    assert_eq!(attached_disk.identity.name, disk.identity.name);
+    assert_eq!(attached_disk.identity.id, disk.identity.id);
+    assert_eq!(attached_disk.state, DiskState::Attaching(instance2_id.clone()));
 
     let disk = disk_get(&client, &disk_url).await;
     assert_eq!(disk.state, DiskState::Attaching(instance2_id.clone()));
@@ -456,12 +461,9 @@ async fn test_disks(cptestctx: &ControlPlaneTestContext) {
         )
         .await
         .unwrap();
-    let attachment: DiskAttachment =
-        object_get(&client, &url_instance2_disk).await;
-    assert_eq!(
-        attachment.disk_state,
-        DiskState::Detaching(instance2_id.clone())
-    );
+    let detached_disk: Disk = object_get(&client, &url_instance2_disk).await;
+    assert_eq!(detached_disk.state, DiskState::Detaching(instance2_id.clone()));
+
     let disk = disk_get(&client, &disk_url).await;
     assert_eq!(disk.state, DiskState::Detaching(instance2_id.clone()));
 
