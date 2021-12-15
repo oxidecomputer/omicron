@@ -443,6 +443,7 @@ mod test {
             assert!(rx.try_next().is_err());
             rprev = rnext;
         }
+        logctx.cleanup_successful();
     }
 
     /**
@@ -556,6 +557,7 @@ mod test {
         instance.transition_finish();
         let rnext = instance.object.current().clone();
         assert_eq!(rprev.gen, rnext.gen);
+        logctx.cleanup_successful();
     }
 
     #[tokio::test]
@@ -868,6 +870,7 @@ mod test {
             assert_eq!(rnext.disk_state, next);
             rprev = rnext;
         }
+        logctx.cleanup_successful();
     }
 
     #[tokio::test]
@@ -967,6 +970,7 @@ mod test {
         );
         disk.transition_finish();
         assert_eq!(disk.object.current().disk_state, DiskState::Destroyed);
+        logctx.cleanup_successful();
     }
 
     #[tokio::test]

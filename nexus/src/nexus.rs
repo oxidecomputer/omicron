@@ -6,6 +6,7 @@
  * Nexus, the service that operates much of the control plane in an Oxide fleet
  */
 
+use crate::authn;
 use crate::authz;
 use crate::config;
 use crate::context::OpContext;
@@ -15,8 +16,11 @@ use crate::db::model::DatasetKind;
 use crate::db::model::Name;
 use crate::external_api::params;
 use crate::internal_api::params::{OximeterInfo, ZpoolPutRequest};
+use crate::populate::populate_start;
+use crate::populate::PopulateStatus;
 use crate::saga_interface::SagaContext;
 use crate::sagas;
+use anyhow::anyhow;
 use anyhow::Context;
 use async_trait::async_trait;
 use futures::future::ready;
@@ -127,6 +131,9 @@ pub struct Nexus {
 
     /** Task representing completion of recovered Sagas */
     recovery_task: std::sync::Mutex<Option<db::RecoveryTask>>,
+
+    /** Status of background task to populate database */
+    populate_status: tokio::sync::watch::Receiver<PopulateStatus>,
 }
 
 /*
@@ -164,6 +171,21 @@ impl Nexus {
             )),
             sec_store,
         ));
+
+        /*
+         * TODO-cleanup We may want a first-class subsystem for managing startup
+         * background tasks.  It could use a Future for each one, a status enum
+         * for each one, status communication via channels, and a single task to
+         * run them all.
+         */
+        let populate_ctx = OpContext::for_background(
+            log.new(o!("component" => "DataLoader")),
+            Arc::clone(&authz),
+            authn::Context::internal_db_init(),
+        );
+        let populate_status =
+            populate_start(populate_ctx, Arc::clone(&db_datastore));
+
         let nexus = Nexus {
             id: config.id,
             rack_id: *rack_id,
@@ -172,6 +194,7 @@ impl Nexus {
             db_datastore: Arc::clone(&db_datastore),
             sec_client: Arc::clone(&sec_client),
             recovery_task: std::sync::Mutex::new(None),
+            populate_status,
         };
 
         /* TODO-cleanup all the extra Arcs here seems wrong */
@@ -179,6 +202,7 @@ impl Nexus {
         let opctx = OpContext::for_background(
             log.new(o!("component" => "SagaRecoverer")),
             authz,
+            authn::Context::internal_saga_recovery(),
         );
         let recovery_task = db::recover(
             opctx,
@@ -191,6 +215,23 @@ impl Nexus {
 
         *nexus_arc.recovery_task.lock().unwrap() = Some(recovery_task);
         nexus_arc
+    }
+
+    pub async fn wait_for_populate(&self) -> Result<(), anyhow::Error> {
+        let mut my_rx = self.populate_status.clone();
+        loop {
+            my_rx
+                .changed()
+                .await
+                .map_err(|error| anyhow!(error.to_string()))?;
+            match &*my_rx.borrow() {
+                PopulateStatus::NotDone => (),
+                PopulateStatus::Done => return Ok(()),
+                PopulateStatus::Failed(error) => {
+                    return Err(anyhow!(error.clone()))
+                }
+            };
+        }
     }
 
     /*
@@ -1421,6 +1462,54 @@ impl Nexus {
             .map(|_| ())
     }
 
+    /**
+     * Creates a new network interface for this instance
+     */
+    pub async fn instance_create_network_interface(
+        &self,
+        organization_name: &Name,
+        project_name: &Name,
+        instance_name: &Name,
+        vpc_name: &Name,
+        subnet_name: &Name,
+        params: &params::NetworkInterfaceCreate,
+    ) -> CreateResult<db::model::NetworkInterface> {
+        let instance = self
+            .project_lookup_instance(
+                organization_name,
+                project_name,
+                instance_name,
+            )
+            .await?;
+        let vpc = self
+            .db_datastore
+            .vpc_fetch_by_name(&instance.project_id, vpc_name)
+            .await?;
+        let subnet = self
+            .db_datastore
+            .vpc_subnet_fetch_by_name(&vpc.id(), subnet_name)
+            .await?;
+
+        let mac = db::model::MacAddr::new()?;
+
+        let interface_id = Uuid::new_v4();
+        // Request an allocation
+        let ip = None;
+        let interface = db::model::IncompleteNetworkInterface::new(
+            interface_id,
+            instance.id(),
+            // TODO-correctness: vpc_id here is used for name uniqueness. Should
+            // interface names be unique to the subnet's VPC or to the
+            // VPC associated with the instance's default interface?
+            vpc.id(),
+            subnet,
+            mac,
+            ip,
+            params.clone(),
+        );
+        self.db_datastore.instance_create_network_interface(interface).await
+    }
+
     pub async fn project_list_vpcs(
         &self,
         organization_name: &Name,
@@ -1732,6 +1821,27 @@ impl Nexus {
             .db_datastore
             .vpc_update_subnet(&subnet.id(), params.clone().into())
             .await?)
+    }
+
+    pub async fn subnet_list_network_interfaces(
+        &self,
+        organization_name: &Name,
+        project_name: &Name,
+        vpc_name: &Name,
+        subnet_name: &Name,
+        pagparams: &DataPageParams<'_, Name>,
+    ) -> ListResultVec<db::model::NetworkInterface> {
+        let subnet = self
+            .vpc_lookup_subnet(
+                organization_name,
+                project_name,
+                vpc_name,
+                subnet_name,
+            )
+            .await?;
+        self.db_datastore
+            .subnet_list_network_interfaces(&subnet.id(), pagparams)
+            .await
     }
 
     pub async fn vpc_list_routers(
@@ -2053,6 +2163,26 @@ impl Nexus {
             .map_err(|_: ()| {
                 Error::not_found_by_id(ResourceType::SagaDbg, &id)
             })?
+    }
+
+    /*
+     * Built-in users
+     */
+
+    pub async fn users_builtin_list(
+        &self,
+        opctx: &OpContext,
+        pagparams: &DataPageParams<'_, Name>,
+    ) -> ListResultVec<db::model::UserBuiltin> {
+        self.db_datastore.users_builtin_list_by_name(opctx, pagparams).await
+    }
+
+    pub async fn user_builtin_fetch(
+        &self,
+        opctx: &OpContext,
+        name: &Name,
+    ) -> LookupResult<db::model::UserBuiltin> {
+        self.db_datastore.user_builtin_fetch(opctx, name).await
     }
 
     /*

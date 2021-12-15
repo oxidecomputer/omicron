@@ -14,18 +14,15 @@ use dropshot::test_util::object_get;
 use dropshot::test_util::objects_list_page;
 use dropshot::test_util::objects_post;
 
-pub mod common;
-use common::identity_eq;
-use common::resource_helpers::{
+use nexus_test_utils::identity_eq;
+use nexus_test_utils::resource_helpers::{
     create_organization, create_project, create_vpc,
 };
-use common::test_setup;
+use nexus_test_utils::ControlPlaneTestContext;
+use nexus_test_utils_macros::nexus_test;
 
-extern crate slog;
-
-#[tokio::test]
-async fn test_vpc_routers() {
-    let cptestctx = test_setup("test_vpc_routers").await;
+#[nexus_test]
+async fn test_vpc_routers(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
 
     /* Create a project that we'll use for testing. */
@@ -138,7 +135,7 @@ async fn test_vpc_routers() {
             Method::PUT,
             &router_url,
             Some(update_params),
-            StatusCode::OK,
+            StatusCode::NO_CONTENT,
         )
         .await
         .unwrap();
@@ -206,8 +203,6 @@ async fn test_vpc_routers() {
         "it's also not really a router"
     );
     assert_eq!(router_same_name.vpc_id, vpc2.identity.id);
-
-    cptestctx.teardown().await;
 }
 
 fn routers_eq(sn1: &VpcRouter, sn2: &VpcRouter) {

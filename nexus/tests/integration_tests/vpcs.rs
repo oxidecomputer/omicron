@@ -11,18 +11,15 @@ use dropshot::test_util::object_get;
 use dropshot::test_util::objects_list_page;
 use dropshot::test_util::ClientTestContext;
 
-pub mod common;
-use common::identity_eq;
-use common::resource_helpers::{
+use nexus_test_utils::identity_eq;
+use nexus_test_utils::resource_helpers::{
     create_organization, create_project, create_vpc, create_vpc_with_error,
 };
-use common::test_setup;
+use nexus_test_utils::ControlPlaneTestContext;
+use nexus_test_utils_macros::nexus_test;
 
-extern crate slog;
-
-#[tokio::test]
-async fn test_vpcs() {
-    let cptestctx = test_setup("test_vpcs").await;
+#[nexus_test]
+async fn test_vpcs(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
 
     /* Create a project that we'll use for testing. */
@@ -131,8 +128,6 @@ async fn test_vpcs() {
     let vpcs = vpcs_list(&client, &vpcs_url).await;
     assert_eq!(vpcs.len(), 1);
     vpcs_eq(&vpcs[0], &default_vpc);
-
-    cptestctx.teardown().await;
 }
 
 async fn vpcs_list(client: &ClientTestContext, vpcs_url: &str) -> Vec<Vpc> {
@@ -149,7 +144,12 @@ async fn vpc_put(
     params: params::VpcUpdate,
 ) {
     client
-        .make_request(Method::PUT, &vpc_url, Some(params), StatusCode::OK)
+        .make_request(
+            Method::PUT,
+            &vpc_url,
+            Some(params),
+            StatusCode::NO_CONTENT,
+        )
         .await
         .unwrap();
 }

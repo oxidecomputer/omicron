@@ -11,10 +11,10 @@ path = "../rpaths"
 anyhow = "1.0"
 async-trait = "0.1.51"
 bb8 = "0.7.1"
-async-bb8-diesel = { git = "https://github.com/oxidecomputer/async-bb8-diesel", rev = "1a5c55d" }
+async-bb8-diesel = { git = "https://github.com/oxidecomputer/async-bb8-diesel", rev = "22c26ef" }
 cookie = "0.15"
 # Tracking pending 2.0 version.
-diesel = { git = "https://github.com/diesel-rs/diesel", rev = "a39dd2e", features = ["postgres", "r2d2", "chrono", "serde_json", "network-address", "uuid"] }
+diesel = { git = "https://github.com/diesel-rs/diesel", rev = "ce77c382", features = ["postgres", "r2d2", "chrono", "serde_json", "network-address", "uuid"] }
 futures = "0.3.18"
 hex = "0.4.3"
 http = "0.2.5"
@@ -22,7 +22,7 @@ hyper = "0.14"
 db-macros = { path = "src/db/db-macros" }
 ipnetwork = "0.18"
 lazy_static = "1.4.0"
-libc = "0.2.109"
+libc = "0.2.111"
 macaddr = { version = "1.0.1", features = [ "serde_std" ]}
 mime_guess = "2.0.3"
 newtype_derive = "0.1.6"
@@ -37,9 +37,11 @@ reqwest = { version = "0.11.7", features = [ "json" ] }
 serde_json = "1.0"
 serde_with = "1.11.0"
 sled-agent-client = { path = "../sled-agent-client" }
+slog-dtrace = "0.2"
 structopt = "0.3"
 thiserror = "1.0"
 toml = "0.5.6"
+usdt = "0.3.1"
 
 [dependencies.api_identity]
 path = "../api_identity"
@@ -48,9 +50,14 @@ path = "../api_identity"
 version = "0.4"
 features = [ "serde" ]
 
+[dependencies.diesel-dtrace]
+git = "https://github.com/oxidecomputer/diesel-dtrace"
+branch = "main"
+
 [dependencies.dropshot]
 git = "https://github.com/oxidecomputer/dropshot"
 branch = "main"
+features = [ "usdt-probes" ]
 
 [dependencies.omicron-common]
 path = "../common"
@@ -100,8 +107,10 @@ version = "0.8"
 features = [ "serde", "v4" ]
 
 [dev-dependencies]
-bytes = "1.0.1"
+criterion = { version = "0.3", features = [ "async_tokio" ] }
 expectorate = "1.0.4"
+nexus-test-utils-macros = { path = "test-utils-macros" }
+nexus-test-utils = { path = "test-utils" }
 omicron-test-utils = { path = "../test-utils" }
 openapiv3 = "0.5.0"
 oximeter-db = { path = "../oximeter/db" }
@@ -111,9 +120,9 @@ subprocess = "0.2.8"
 git = "https://github.com/oxidecomputer/openapi-lint"
 branch = "main"
 
-[dev-dependencies.oximeter-collector]
-version = "0.1.0"
-path = "../oximeter/collector"
+[[bench]]
+name = "setup_benchmark"
+harness = false
 
 #
 # Disable doc builds by default for our binaries to work around issue

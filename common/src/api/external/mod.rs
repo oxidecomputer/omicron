@@ -473,6 +473,7 @@ pub enum ResourceType {
     Disk,
     DiskAttachment,
     Instance,
+    NetworkInterface,
     Rack,
     Sled,
     SagaDbg,
@@ -483,6 +484,7 @@ pub enum ResourceType {
     RouterRoute,
     Oximeter,
     MetricProducer,
+    User,
     Zpool,
 }
 
@@ -498,6 +500,7 @@ impl Display for ResourceType {
                 ResourceType::Disk => "disk",
                 ResourceType::DiskAttachment => "disk attachment",
                 ResourceType::Instance => "instance",
+                ResourceType::NetworkInterface => "network interface",
                 ResourceType::Rack => "rack",
                 ResourceType::Sled => "sled",
                 ResourceType::SagaDbg => "saga_dbg",
@@ -508,6 +511,7 @@ impl Display for ResourceType {
                 ResourceType::RouterRoute => "vpc router route",
                 ResourceType::Oximeter => "oximeter",
                 ResourceType::MetricProducer => "metric producer",
+                ResourceType::User => "user",
                 ResourceType::Zpool => "zpool",
             }
         )
@@ -1759,14 +1763,24 @@ impl JsonSchema for L4PortRange {
 /// hardware devices on a network.
 // NOTE: We're using the `macaddr` crate for the internal representation. But as with the `ipnet`,
 // this crate does not implement `JsonSchema`.
-#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Serialize)]
+#[derive(
+    Clone, Copy, Debug, DeserializeFromStr, PartialEq, SerializeDisplay,
+)]
 pub struct MacAddr(pub macaddr::MacAddr6);
 
+impl FromStr for MacAddr {
+    type Err = macaddr::ParseError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        s.parse().map(|addr| MacAddr(addr))
+    }
+}
+
 impl TryFrom<String> for MacAddr {
-    type Error = macaddr::ParseError;
+    type Error = <Self as FromStr>::Err;
 
     fn try_from(s: String) -> Result<Self, Self::Error> {
-        s.parse().map(|addr| MacAddr(addr))
+        MacAddr::from_str(s.as_ref())
     }
 }
 
@@ -1817,10 +1831,13 @@ impl JsonSchema for MacAddr {
 }
 
 /// A `NetworkInterface` represents a virtual network interface device.
-#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize)]
+#[derive(ObjectIdentity, Clone, Debug, Deserialize, JsonSchema, Serialize)]
 pub struct NetworkInterface {
     /** common identifying metadata */
     pub identity: IdentityMetadata,
+
+    /** The Instance to which the interface belongs. */
+    pub instance_id: Uuid,
 
     /** The VPC to which the interface belongs. */
     pub vpc_id: Uuid,

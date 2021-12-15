@@ -16,17 +16,14 @@ use std::convert::TryFrom;
 
 use dropshot::test_util::{object_delete, objects_list_page};
 
-pub mod common;
-use common::resource_helpers::{
+use nexus_test_utils::resource_helpers::{
     create_organization, create_project, create_vpc,
 };
-use common::test_setup;
+use nexus_test_utils::ControlPlaneTestContext;
+use nexus_test_utils_macros::nexus_test;
 
-extern crate slog;
-
-#[tokio::test]
-async fn test_vpc_firewall() {
-    let cptestctx = test_setup("test_vpc_firewall").await;
+#[nexus_test]
+async fn test_vpc_firewall(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
 
     /* Create a project that we'll use for testing. */

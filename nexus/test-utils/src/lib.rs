@@ -2,9 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-/*!
- * Shared integration testing facilities
- */
+//! Integration testing facilities for Nexus
 
 use dropshot::test_util::ClientTestContext;
 use dropshot::test_util::LogContext;
@@ -104,6 +102,13 @@ pub async fn test_setup_with_config(
     let server = omicron_nexus::Server::start(&config, &rack_id, &logctx.log)
         .await
         .unwrap();
+    server
+        .apictx
+        .nexus
+        .wait_for_populate()
+        .await
+        .expect("Nexus never loaded users");
+
     let testctx_external = ClientTestContext::new(
         server.http_server_external.local_addr(),
         logctx.log.new(o!("component" => "external client test context")),

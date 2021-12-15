@@ -2,30 +2,27 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-pub mod common;
 use std::net::{IpAddr, Ipv4Addr};
 
-use common::test_setup;
 use dropshot::test_util::{
     object_delete, object_get, objects_list_page, objects_post,
 };
 use dropshot::Method;
 use http::StatusCode;
+use nexus_test_utils::ControlPlaneTestContext;
+use nexus_test_utils_macros::nexus_test;
 use omicron_common::api::external::{
     IdentityMetadataCreateParams, IdentityMetadataUpdateParams, Name,
     RouteDestination, RouteTarget, RouterRoute, RouterRouteCreateParams,
     RouterRouteKind, RouterRouteUpdateParams,
 };
 
-use crate::common::resource_helpers::{
+use nexus_test_utils::resource_helpers::{
     create_organization, create_project, create_router, create_vpc,
 };
 
-extern crate slog;
-
-#[tokio::test]
-async fn test_router_routes() {
-    let cptestctx = test_setup("test_vpc_routers").await;
+#[nexus_test]
+async fn test_router_routes(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
 
     let organization_name = "test-org";
@@ -146,7 +143,7 @@ async fn test_router_routes() {
                     "loopback".parse().unwrap(),
                 ),
             }),
-            StatusCode::OK,
+            StatusCode::NO_CONTENT,
         )
         .await
         .unwrap();
@@ -168,6 +165,4 @@ async fn test_router_routes() {
             StatusCode::NOT_FOUND,
         )
         .await;
-
-    cptestctx.teardown().await;
 }
