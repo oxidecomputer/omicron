@@ -33,7 +33,7 @@ use crate::authn;
 use crate::authz;
 use crate::context::OpContext;
 use crate::external_api::params;
-use async_bb8_diesel::{AsyncConnection, AsyncRunQueryDsl, ConnectionManager};
+use async_bb8_diesel::{AsyncConnection, AsyncRunQueryDsl, ConnectionManager, PoolError, ConnectionError};
 use chrono::Utc;
 use diesel::prelude::*;
 use diesel::upsert::excluded;
@@ -75,6 +75,24 @@ use crate::db::{
 
 pub struct DataStore {
     pool: Arc<Pool>,
+}
+
+// Errors which may be returned from the DB transaction within
+// [`DataStore::vpc_update_firewall_rules`].
+#[derive(Debug, thiserror::Error)]
+enum UpdateFirewallRulesError {
+    #[error("Collection not found")]
+    CollectionNotFound,
+    #[error("Pool error: {0}")]
+    Pool(#[from] async_bb8_diesel::PoolError)
+}
+
+// Maps a "diesel error" into a "pool error", which
+// is already contained within the error type.
+impl From<diesel::result::Error> for UpdateFirewallRulesError {
+    fn from(err: diesel::result::Error) -> Self {
+        Self::Pool(PoolError::Connection(ConnectionError::Query(err)))
+    }
 }
 
 impl DataStore {
@@ -1501,19 +1519,28 @@ impl DataStore {
                 insert_new_query.insert_and_get_results(conn).map_err(|e| {
                     match e {
                         SyncInsertError::CollectionNotFound => {
-                            diesel::result::Error::RollbackTransaction
-                        }
-                        SyncInsertError::DatabaseError(e) => e,
+                            UpdateFirewallRulesError::CollectionNotFound
+                        },
+                        SyncInsertError::DatabaseError(e) => {
+                            e.into()
+                        },
                     }
                 })
             })
             .await
             .map_err(|e| {
-                public_error_from_diesel_pool(
-                    e,
-                    ResourceType::VpcFirewallRule,
-                    LookupType::ById(*vpc_id),
-                )
+                match e {
+                    UpdateFirewallRulesError::CollectionNotFound => {
+                        Error::not_found_by_id(ResourceType::Vpc, vpc_id)
+                    }
+                    UpdateFirewallRulesError::Pool(e) => {
+                        public_error_from_diesel_pool(
+                            e,
+                            ResourceType::VpcFirewallRule,
+                            LookupType::ById(*vpc_id),
+                        )
+                    }
+                }
             })
     }
 
