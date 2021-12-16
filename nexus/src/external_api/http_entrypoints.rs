@@ -968,7 +968,7 @@ async fn instance_disks_detach(
                 &disk_to_detach.into_inner().disk.into(),
             )
             .await?;
-        Ok(HttpResponseAccepted(disk))
+        Ok(HttpResponseAccepted(disk.into()))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
