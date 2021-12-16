@@ -230,6 +230,42 @@ fn do_package(
     ssh_exec(&server, &cmd, false)
 }
 
+fn do_check(config: &Config) -> Result<()> {
+    let server = &config.servers[&config.builder.server];
+    let mut cmd = String::new();
+    let cmd_path = "./target/debug/omicron-package";
+
+    write!(
+        &mut cmd,
+        "cd {} && git checkout {} && {} check",
+        config.builder.omicron_path, config.builder.git_treeish, cmd_path,
+    )?;
+
+    ssh_exec(&server, &cmd, false)
+}
+
+fn do_uninstall(
+    config: &Config,
+    artifact_dir: PathBuf,
+    install_dir: PathBuf,
+) -> Result<()> {
+    let mut deployment_src = PathBuf::from(&config.deployment.staging_dir);
+    deployment_src.push(&artifact_dir);
+    for server_name in &config.deployment.servers {
+        let server = &config.servers[server_name];
+        // Run `omicron-package uninstall` on the deployment server
+        let cmd = format!(
+            "cd ~/{} && pfexec ./omicron-package uninstall --in ~/{} --out {}",
+            config.deployment.staging_dir,
+            deployment_src.to_string_lossy(),
+            install_dir.to_string_lossy()
+        );
+        println!("$ {}", cmd);
+        ssh_exec(&server, &cmd, true)?;
+    }
+    Ok(())
+}
+
 // TODO: Make this parallel
 fn do_install(
     config: &Config,
@@ -277,7 +313,7 @@ fn do_install(
         let mut path = PathBuf::from(&config.builder.omicron_path);
         path.push("package-manifest.toml");
         let cmd = format!(
-            "scp {} {}@{}:~/{}",
+            "rsync {} {}@{}:~/{}",
             path.to_string_lossy(),
             server.username,
             server.addr,
@@ -300,7 +336,7 @@ fn do_install(
 
         // Copy overlay files from builder to deployment_server
         let cmd = format!(
-            "scp -r {}/overlay/{}/ {}@{}:~/{}/overlay/",
+            "rsync -avz {}/overlay/{}/ {}@{}:~/{}/overlay/",
             src_dir,
             server_name,
             server.username,
@@ -441,8 +477,14 @@ fn main() -> Result<()> {
         }) => {
             do_install(&config, artifact_dir, install_dir)?;
         }
+        SubCommand::Package(PackageSubCommand::Uninstall {
+            artifact_dir,
+            install_dir,
+        }) => {
+            do_uninstall(&config, artifact_dir, install_dir)?;
+        }
+        SubCommand::Package(PackageSubCommand::Check) => do_check(&config)?,
         SubCommand::Overlay => do_overlay(&config)?,
-        _ => unimplemented!(),
     }
     Ok(())
 }
