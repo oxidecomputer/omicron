@@ -266,6 +266,121 @@ fn do_uninstall(
     Ok(())
 }
 
+// Copy package artifacts as a result of `omicron-package package` from the
+// builder to the deployment server staging directory.
+fn copy_package_artifacts_to_staging(
+    config: &Config,
+    src_dir: &str,
+    builder: &Server,
+    dest_server: &Server,
+) -> Result<()> {
+    let cmd = format!(
+        "rsync -avz -e 'ssh -o StrictHostKeyChecking=no' \
+                    --exclude overlay/ {} {}@{}:~/{}",
+        src_dir,
+        dest_server.username,
+        dest_server.addr,
+        config.deployment.staging_dir
+    );
+    println!("$ {}", cmd);
+    ssh_exec(builder, &cmd, true)
+}
+
+fn copy_omicron_package_binary_to_staging(
+    config: &Config,
+    builder: &Server,
+    dest_server: &Server,
+) -> Result<()> {
+    let mut bin_path = PathBuf::from(&config.builder.omicron_path);
+    bin_path.push("target/debug/omicron-package");
+    let cmd = format!(
+        "rsync -avz {} {}@{}:~/{}",
+        bin_path.to_string_lossy(),
+        dest_server.username,
+        dest_server.addr,
+        config.deployment.staging_dir
+    );
+    println!("$ {}", cmd);
+    ssh_exec(builder, &cmd, true)
+}
+
+fn copy_package_manifest_to_staging(
+    config: &Config,
+    builder: &Server,
+    dest_server: &Server,
+) -> Result<()> {
+    let mut path = PathBuf::from(&config.builder.omicron_path);
+    path.push("package-manifest.toml");
+    let cmd = format!(
+        "rsync {} {}@{}:~/{}",
+        path.to_string_lossy(),
+        dest_server.username,
+        dest_server.addr,
+        config.deployment.staging_dir
+    );
+    println!("$ {}", cmd);
+    ssh_exec(builder, &cmd, true)
+}
+
+fn run_omicron_package_from_staging(
+    config: &Config,
+    dest_server: &Server,
+    artifact_dir: &Path,
+    install_dir: &Path,
+) -> Result<()> {
+    let mut deployment_src = PathBuf::from(&config.deployment.staging_dir);
+    deployment_src.push(&artifact_dir);
+
+    // Run `omicron-package install` on the deployment server
+    let cmd = format!(
+        "cd ~/{} && pfexec ./omicron-package install --in ~/{} --out {}",
+        config.deployment.staging_dir,
+        deployment_src.to_string_lossy(),
+        install_dir.to_string_lossy()
+    );
+    println!("$ {}", cmd);
+    ssh_exec(dest_server, &cmd, true)
+}
+
+fn copy_overlay_files_to_staging(
+    config: &Config,
+    src_dir: &str,
+    builder: &Server,
+    dest_server: &Server,
+    dest_server_name: &str,
+) -> Result<()> {
+    let cmd = format!(
+        "rsync -avz {}/overlay/{}/ {}@{}:~/{}/overlay/",
+        src_dir,
+        dest_server_name,
+        dest_server.username,
+        dest_server.addr,
+        config.deployment.staging_dir
+    );
+    println!("$ {}", cmd);
+    ssh_exec(builder, &cmd, true)
+}
+
+fn install_overlay_files_from_staging(
+    config: &Config,
+    dest_server: &Server,
+    install_dir: &Path,
+) -> Result<()> {
+    let cmd = format!(
+        "pfexec cp -r ~/{}/overlay/* {}",
+        config.deployment.staging_dir,
+        install_dir.to_string_lossy()
+    );
+    println!("$ {}", cmd);
+    ssh_exec(&dest_server, &cmd, false)
+}
+
+// For now, we just restart sled-agent, as that's the only service with an
+// overlay file.
+fn restart_services(dest_server: &Server) -> Result<()> {
+    ssh_exec(dest_server, "svcadm restart sled-agent", false)
+}
+
 // TODO: Make this parallel
 fn do_install(
     config: &Config,
@@ -280,89 +395,24 @@ fn do_install(
     for server_name in &config.deployment.servers {
         let server = &config.servers[server_name];
 
-        // Don't copy the builder output to itself
-        if server.addr != config.builder.server {
-            // Copy from artifact dir on builder to staging dir on deployment
-            // server
-            let cmd = format!(
-                "rsync -avz -e 'ssh -o StrictHostKeyChecking=no' \
-                    --exclude overlay/ {} {}@{}:~/{}",
-                src_dir,
-                server.username,
-                server.addr,
-                config.deployment.staging_dir
-            );
-            println!("$ {}", cmd);
-            ssh_exec(builder, &cmd, true)?;
-        }
-
-        // Copy omicron-package to the deployment server
-        let mut bin_path = PathBuf::from(&config.builder.omicron_path);
-        bin_path.push("target/debug/omicron-package");
-        let cmd = format!(
-            "rsync -avz {} {}@{}:~/{}",
-            bin_path.to_string_lossy(),
-            server.username,
-            server.addr,
-            config.deployment.staging_dir
-        );
-        println!("$ {}", cmd);
-        ssh_exec(builder, &cmd, true)?;
-
-        // Copy package-manifest.toml to deployment server
-        let mut path = PathBuf::from(&config.builder.omicron_path);
-        path.push("package-manifest.toml");
-        let cmd = format!(
-            "rsync {} {}@{}:~/{}",
-            path.to_string_lossy(),
-            server.username,
-            server.addr,
-            config.deployment.staging_dir
-        );
-        println!("$ {}", cmd);
-        ssh_exec(builder, &cmd, true)?;
-        let mut deployment_src = PathBuf::from(&config.deployment.staging_dir);
-        deployment_src.push(&artifact_dir);
-
-        // Run `omicron-package install` on the deployment server
-        let cmd = format!(
-            "cd ~/{} && pfexec ./omicron-package install --in ~/{} --out {}",
-            config.deployment.staging_dir,
-            deployment_src.to_string_lossy(),
-            install_dir.to_string_lossy()
-        );
-        println!("$ {}", cmd);
-        ssh_exec(&server, &cmd, true)?;
-
-        // Copy overlay files from builder to deployment_server
-        let cmd = format!(
-            "rsync -avz {}/overlay/{}/ {}@{}:~/{}/overlay/",
-            src_dir,
+        copy_package_artifacts_to_staging(config, &src_dir, builder, server)?;
+        copy_omicron_package_binary_to_staging(config, builder, server)?;
+        copy_package_manifest_to_staging(config, builder, server)?;
+        run_omicron_package_from_staging(
+            config,
+            server,
+            &artifact_dir,
+            &install_dir,
+        )?;
+        copy_overlay_files_to_staging(
+            config,
+            &src_dir,
+            builder,
+            server,
             server_name,
-            server.username,
-            server.addr,
-            config.deployment.staging_dir
-        );
-        println!(
-            "Copy overlay files from {} to {}",
-            config.builder.server, server_name
-        );
-        println!("$ {}", cmd);
-        ssh_exec(builder, &cmd, true)?;
-
-        // Copy overlay files to the install dir on the deployment server
-        // This is a separate command because of the `pfexec`
-        let cmd = format!(
-            "pfexec cp -r ~/{}/overlay/* {}",
-            config.deployment.staging_dir,
-            install_dir.to_string_lossy()
-        );
-        println!("Install overlay files on {}", server_name);
-        println!("$ {}", cmd);
-        ssh_exec(&server, &cmd, false)?;
-
-        // Restart all services
-        ssh_exec(server, "svcadm restart sled-agent", false)?;
+        )?;
+        install_overlay_files_from_staging(config, server, &install_dir)?;
+        restart_services(server)?;
     }
     Ok(())
 }
