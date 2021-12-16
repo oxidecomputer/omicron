@@ -72,6 +72,9 @@ where
 // of columns, but that'll either require modifying Diesel (to make "tuples of
 // columns" implement a subsetof  ExpressionMethods) or making a macro to generate
 // all the necessary bounds we need.
+//
+// Remove this attribute when used in https://github.com/oxidecomputer/omicron/pull/512
+#[allow(dead_code)]
 pub fn paginated_multicolumn<T, C1, C2, M1, M2>(
     table: T,
     (c1, c2): (C1, C2),
@@ -96,7 +99,7 @@ where
         query_methods::ThenOrderDsl<Desc<C2>, Output = BoxedQuery<T>>,
     // Necessary for "query.order(c1.asc())"
     BoxedQuery<T>: query_methods::OrderDsl<Asc<C1>, Output = BoxedQuery<T>>,
-    // Necessary for "query.order(...).then_order_by(c1.asc())"
+    // Necessary for "query.order(...).then_order_by(c2.asc())"
     BoxedQuery<T>: query_methods::ThenOrderDsl<Asc<C2>, Output = BoxedQuery<T>>,
 
     // We'd like to be able to call:
