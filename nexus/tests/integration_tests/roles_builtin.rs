@@ -68,6 +68,7 @@ async fn test_roles_builtin(cptestctx: &ControlPlaneTestContext) {
             .await
             .expect("failed to iterate all roles");
     assert_eq!(roles, roles_paginated.all_items);
+    // There's an empty page at the end of each dropshot scan.
     assert_eq!(roles.len() + 1, roles_paginated.npages);
 
     //
