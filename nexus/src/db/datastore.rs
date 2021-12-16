@@ -2319,7 +2319,10 @@ impl DataStore {
         // authenticated users need to be able to list their own roles --
         // otherwise we can't do any authorization checks.
 
-        // XXX needs to be paginated
+        // TODO-scalability TODO-security This needs to be paginated.  It's not
+        // exposed via an external API right now but someone could still put us
+        // into some hurt by assigning loads of roles to someone and having that
+        // person attempt to access anything.
         dsl::role_assignment_builtin
             .filter(dsl::user_builtin_id.eq(user_builtin_id))
             .filter(dsl::resource_type.eq(resource_type.to_string()))
