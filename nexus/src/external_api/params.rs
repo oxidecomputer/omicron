@@ -63,6 +63,20 @@ pub struct ProjectUpdate {
 }
 
 /*
+ * NETWORK INTERFACES
+ */
+
+/**
+ * Create-time parameters for a [`NetworkInterface`]
+ */
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct NetworkInterfaceCreate {
+    #[serde(flatten)]
+    pub identity: IdentityMetadataCreateParams,
+}
+
+/*
  * INSTANCES
  */
 
@@ -166,6 +180,15 @@ pub struct DiskCreate {
     pub snapshot_id: Option<Uuid>, /* TODO should be a name? */
     /** size of the Disk */
     pub size: ByteCount,
+}
+
+/**
+ * Parameters for the [`Disk`] to be attached or detached to an instance
+ */
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct DiskIdentifier {
+    pub disk: Name,
 }
 
 /*

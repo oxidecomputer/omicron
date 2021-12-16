@@ -9,7 +9,8 @@ use dropshot::test_util::{
 };
 use dropshot::Method;
 use http::StatusCode;
-use nexus_test_utils::test_setup;
+use nexus_test_utils::ControlPlaneTestContext;
+use nexus_test_utils_macros::nexus_test;
 use omicron_common::api::external::{
     IdentityMetadataCreateParams, IdentityMetadataUpdateParams, Name,
     RouteDestination, RouteTarget, RouterRoute, RouterRouteCreateParams,
@@ -20,9 +21,8 @@ use nexus_test_utils::resource_helpers::{
     create_organization, create_project, create_router, create_vpc,
 };
 
-#[tokio::test]
-async fn test_router_routes() {
-    let cptestctx = test_setup("test_vpc_routers").await;
+#[nexus_test]
+async fn test_router_routes(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
 
     let organization_name = "test-org";
@@ -165,6 +165,4 @@ async fn test_router_routes() {
             StatusCode::NOT_FOUND,
         )
         .await;
-
-    cptestctx.teardown().await;
 }

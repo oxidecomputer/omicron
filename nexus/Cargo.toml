@@ -22,7 +22,7 @@ hyper = "0.14"
 db-macros = { path = "src/db/db-macros" }
 ipnetwork = "0.18"
 lazy_static = "1.4.0"
-libc = "0.2.109"
+libc = "0.2.111"
 macaddr = { version = "1.0.1", features = [ "serde_std" ]}
 mime_guess = "2.0.3"
 newtype_derive = "0.1.6"
@@ -41,7 +41,7 @@ slog-dtrace = "0.2"
 structopt = "0.3"
 thiserror = "1.0"
 toml = "0.5.6"
-usdt = "0.2"
+usdt = "0.3.1"
 
 [dependencies.api_identity]
 path = "../api_identity"
@@ -109,6 +109,7 @@ features = [ "serde", "v4" ]
 [dev-dependencies]
 criterion = { version = "0.3", features = [ "async_tokio" ] }
 expectorate = "1.0.4"
+nexus-test-utils-macros = { path = "test-utils-macros" }
 nexus-test-utils = { path = "test-utils" }
 omicron-test-utils = { path = "../test-utils" }
 openapiv3 = "0.5.0"

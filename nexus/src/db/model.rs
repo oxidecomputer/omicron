@@ -24,6 +24,7 @@ use ipnetwork::IpNetwork;
 use omicron_common::api::external;
 use omicron_common::api::internal;
 use parse_display::Display;
+use rand::{rngs::StdRng, SeedableRng};
 use ref_cast::RefCast;
 use schemars::JsonSchema;
 use serde::Deserialize;
@@ -359,6 +360,27 @@ where
 #[derive(Clone, Copy, Debug, PartialEq, AsExpression, FromSqlRow)]
 #[sql_type = "sql_types::Text"]
 pub struct MacAddr(pub external::MacAddr);
+
+impl MacAddr {
+    /**
+     * Generate a unique MAC address for an interface
+     */
+    pub fn new() -> Result<Self, external::Error> {
+        use rand::Fill;
+        // Use the Oxide OUI A8 40 25
+        let mut addr = [0xA8, 0x40, 0x25, 0x00, 0x00, 0x00];
+        addr[3..].try_fill(&mut StdRng::from_entropy()).map_err(|_| {
+            external::Error::internal_error("failed to generate MAC")
+        })?;
+        // From RFD 174, Oxide virtual MACs are constrained to have these bits
+        // set.
+        addr[3] |= 0xF0;
+        // TODO-correctness: We should use an explicit allocator for the MACs
+        // given the small address space. Right now creation requests may fail
+        // due to MAC collision, especially given the 20-bit space.
+        Ok(Self(external::MacAddr(macaddr::MacAddr6::from(addr))))
+    }
+}
 
 NewtypeFrom! { () pub struct MacAddr(external::MacAddr); }
 NewtypeDeref! { () pub struct MacAddr(external::MacAddr); }
@@ -879,19 +901,6 @@ impl Disk {
     pub fn runtime(&self) -> DiskRuntimeState {
         self.runtime_state.clone()
     }
-
-    pub fn attachment(&self) -> Option<DiskAttachment> {
-        if let Some(instance_id) = self.runtime_state.attach_instance_id {
-            Some(DiskAttachment {
-                instance_id,
-                disk_id: self.id(),
-                disk_name: self.name().clone(),
-                disk_state: self.state(),
-            })
-        } else {
-            None
-        }
-    }
 }
 
 /// Conversion to the external API type.
@@ -1015,26 +1024,6 @@ impl From<external::DiskState> for DiskState {
 impl Into<external::DiskState> for DiskState {
     fn into(self) -> external::DiskState {
         self.0
-    }
-}
-
-/// Type which describes the attachment status of a disk.
-#[derive(Clone, Debug)]
-pub struct DiskAttachment {
-    pub instance_id: Uuid,
-    pub disk_id: Uuid,
-    pub disk_name: Name,
-    pub disk_state: DiskState,
-}
-
-impl Into<external::DiskAttachment> for DiskAttachment {
-    fn into(self) -> external::DiskAttachment {
-        external::DiskAttachment {
-            instance_id: self.instance_id,
-            disk_id: self.disk_id,
-            disk_name: self.disk_name.0,
-            disk_state: self.disk_state.0,
-        }
     }
 }
 
@@ -1741,16 +1730,59 @@ impl Into<external::VpcFirewallRule> for VpcFirewallRule {
     }
 }
 
-#[derive(Queryable, Insertable, Clone, Debug, Resource)]
+/// A not fully constructed NetworkInterface. It may not yet have an IP
+/// address allocated.
+#[derive(Clone, Debug)]
+pub struct IncompleteNetworkInterface {
+    pub identity: NetworkInterfaceIdentity,
+
+    pub instance_id: Uuid,
+    pub vpc_id: Uuid,
+    pub subnet: VpcSubnet,
+    pub mac: MacAddr,
+    pub ip: Option<std::net::IpAddr>,
+}
+
+impl IncompleteNetworkInterface {
+    pub fn new(
+        interface_id: Uuid,
+        instance_id: Uuid,
+        vpc_id: Uuid,
+        subnet: VpcSubnet,
+        mac: MacAddr,
+        ip: Option<std::net::IpAddr>,
+        params: params::NetworkInterfaceCreate,
+    ) -> Self {
+        let identity =
+            NetworkInterfaceIdentity::new(interface_id, params.identity);
+        Self { identity, instance_id, subnet, vpc_id, mac, ip }
+    }
+}
+
+#[derive(Selectable, Queryable, Insertable, Clone, Debug, Resource)]
 #[table_name = "network_interface"]
 pub struct NetworkInterface {
     #[diesel(embed)]
     pub identity: NetworkInterfaceIdentity,
 
+    pub instance_id: Uuid,
     pub vpc_id: Uuid,
     pub subnet_id: Uuid,
     pub mac: MacAddr,
     pub ip: ipnetwork::IpNetwork,
+}
+
+impl From<NetworkInterface> for external::NetworkInterface {
+    fn from(iface: NetworkInterface) -> Self {
+        Self {
+            identity: iface.identity(),
+            instance_id: iface.instance_id,
+            vpc_id: iface.vpc_id,
+            subnet_id: iface.subnet_id,
+            ip: iface.ip.ip(),
+            mac: *iface.mac,
+        }
+    }
 }
 
 // TODO: `struct SessionToken(String)` for session token

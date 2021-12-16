@@ -11,15 +11,15 @@ use omicron_nexus::internal_api::params::{
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use uuid::Uuid;
 
-use nexus_test_utils::{test_setup, SLED_AGENT_UUID};
+use nexus_test_utils::{ControlPlaneTestContext, SLED_AGENT_UUID};
+use nexus_test_utils_macros::nexus_test;
 
 // Tests the "normal" case of dataset_put: inserting a dataset within a known
 // zpool.
 //
 // This will typically be invoked by the Sled Agent, after performing inventory.
-#[tokio::test]
-async fn test_dataset_put_success() {
-    let cptestctx = test_setup("test_dataset_put_success").await;
+#[nexus_test]
+async fn test_dataset_put_success(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.internal_client;
 
     let zpool_id = Uuid::new_v4();
@@ -53,16 +53,14 @@ async fn test_dataset_put_success() {
         )
         .await
         .unwrap();
-
-    cptestctx.teardown().await;
 }
 
 // Tests a failure case of dataset_put: Inserting a dataset into a zpool that
 // does not exist.
-#[tokio::test]
-async fn test_dataset_put_bad_zpool_returns_not_found() {
-    let cptestctx =
-        test_setup("test_dataset_put_bad_zpool_returns_not_found").await;
+#[nexus_test]
+async fn test_dataset_put_bad_zpool_returns_not_found(
+    cptestctx: &ControlPlaneTestContext,
+) {
     let client = &cptestctx.internal_client;
 
     // A zpool with the "nil" UUID should not exist.
@@ -84,5 +82,4 @@ async fn test_dataset_put_bad_zpool_returns_not_found() {
             StatusCode::NOT_FOUND,
         )
         .await;
-    cptestctx.teardown().await;
 }

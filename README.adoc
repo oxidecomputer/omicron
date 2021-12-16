@@ -83,7 +83,7 @@ example, on Helios, you'd want `/usr/bin` on your PATH.
 --
 . CockroachDB v21.1.10.
 +
-The test suite expects to be able to start a single-node CockroachDB cluster using the `cockroach` executable on your PATH.
+The build and test suite expects to be able to start a single-node CockroachDB cluster using the `cockroach` executable on your PATH.
 On illumos, MacOS, and Linux, you should be able to use the `tools/ci_download_cockroachdb` script to fetch the official CockroachDB binary.  It will be put into `./cockroachdb/bin/cockroach`.
 Alternatively, you can follow the https://www.cockroachlabs.com/docs/stable/install-cockroachdb.html[official CockroachDB installation instructions for your platform].
 
@@ -204,7 +204,7 @@ Jun 02 12:21:50.989 INFO listening, local_addr: 127.0.0.1:12345, component: drop
 +
 [source,text]
 ----
-$ cargo run --bin=nexus -- nexus/examples/config.toml
+$ cargo run --bin=oximeter -- oximeter/collector/config.toml
 Dec 02 18:00:01.062 INFO starting oximeter server
 Dec 02 18:00:01.062 DEBG creating ClickHouse client
 Dec 02 18:00:01.068 DEBG initializing ClickHouse database, component: clickhouse-client, collector_id: 1da65e5b-210c-4859-a7d7-200c1e659972, component: oximeter-agent

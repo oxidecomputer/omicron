@@ -33,7 +33,7 @@ use omicron_common::api::external;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::DeleteResult;
-use omicron_common::api::external::DiskAttachment;
+use omicron_common::api::external::Disk;
 use omicron_common::api::external::DiskState;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::IdentityMetadataCreateParams;
@@ -1174,7 +1174,7 @@ impl Nexus {
         project_name: &Name,
         instance_name: &Name,
         pagparams: &DataPageParams<'_, Name>,
-    ) -> ListResultVec<db::model::DiskAttachment> {
+    ) -> ListResultVec<db::model::Disk> {
         let instance = self
             .project_lookup_instance(
                 organization_name,
@@ -1194,7 +1194,7 @@ impl Nexus {
         project_name: &Name,
         instance_name: &Name,
         disk_name: &Name,
-    ) -> LookupResult<DiskAttachment> {
+    ) -> LookupResult<Disk> {
         let instance = self
             .project_lookup_instance(
                 organization_name,
@@ -1209,17 +1209,12 @@ impl Nexus {
             .await?;
         if let Some(instance_id) = disk.runtime_state.attach_instance_id {
             if instance_id == instance.id() {
-                return Ok(DiskAttachment {
-                    instance_id: instance.id(),
-                    disk_name: disk.name().clone().into(),
-                    disk_id: disk.id(),
-                    disk_state: disk.state().into(),
-                });
+                return Ok(disk.into());
             }
         }
 
         Err(Error::not_found_other(
-            ResourceType::DiskAttachment,
+            ResourceType::Disk,
             format!(
                 "disk \"{}\" is not attached to instance \"{}\"",
                 disk_name.as_str(),
@@ -1237,7 +1232,7 @@ impl Nexus {
         project_name: &Name,
         instance_name: &Name,
         disk_name: &Name,
-    ) -> CreateResult<DiskAttachment> {
+    ) -> UpdateResult<db::model::Disk> {
         let instance = self
             .project_lookup_instance(
                 organization_name,
@@ -1252,25 +1247,9 @@ impl Nexus {
             .await?;
         let instance_id = &instance.id();
 
-        fn disk_attachment_for(
-            instance: &db::model::Instance,
-            disk: &db::model::Disk,
-        ) -> CreateResult<DiskAttachment> {
-            assert_eq!(
-                instance.id(),
-                disk.runtime_state.attach_instance_id.unwrap()
-            );
-            Ok(DiskAttachment {
-                instance_id: instance.id(),
-                disk_id: disk.id(),
-                disk_name: disk.name().clone().into(),
-                disk_state: disk.runtime().state().into(),
-            })
-        }
-
         fn disk_attachment_error(
             disk: &db::model::Disk,
-        ) -> CreateResult<DiskAttachment> {
+        ) -> CreateResult<db::model::Disk> {
             let disk_status = match disk.runtime().state().into() {
                 DiskState::Destroyed => "disk is destroyed",
                 DiskState::Faulted => "disk is faulted",
@@ -1306,9 +1285,7 @@ impl Nexus {
              * If we're already attaching or attached to the requested instance,
              * there's nothing else to do.
              */
-            DiskState::Attached(id) if id == instance_id => {
-                return disk_attachment_for(&instance, &disk);
-            }
+            DiskState::Attached(id) if id == instance_id => return Ok(disk),
 
             /*
              * If the disk is currently attaching or attached to another
@@ -1351,8 +1328,7 @@ impl Nexus {
             ),
         )
         .await?;
-        let disk = self.db_datastore.disk_fetch(&disk.id()).await?;
-        disk_attachment_for(&instance, &disk)
+        self.db_datastore.disk_fetch(&disk.id()).await
     }
 
     /**
@@ -1364,7 +1340,7 @@ impl Nexus {
         project_name: &Name,
         instance_name: &Name,
         disk_name: &Name,
-    ) -> DeleteResult {
+    ) -> UpdateResult<db::model::Disk> {
         let instance = self
             .project_lookup_instance(
                 organization_name,
@@ -1384,11 +1360,11 @@ impl Nexus {
              * This operation is a noop if the disk is not attached or already
              * detaching from the same instance.
              */
-            DiskState::Creating => return Ok(()),
-            DiskState::Detached => return Ok(()),
-            DiskState::Destroyed => return Ok(()),
-            DiskState::Faulted => return Ok(()),
-            DiskState::Detaching(id) if id == instance_id => return Ok(()),
+            DiskState::Creating => return Ok(disk),
+            DiskState::Detached => return Ok(disk),
+            DiskState::Destroyed => return Ok(disk),
+            DiskState::Faulted => return Ok(disk),
+            DiskState::Detaching(id) if id == instance_id => return Ok(disk),
 
             /*
              * This operation is not allowed if the disk is attached to some
@@ -1421,7 +1397,7 @@ impl Nexus {
             sled_agent_client::types::DiskStateRequested::Detached,
         )
         .await?;
-        Ok(())
+        Ok(disk)
     }
 
     /**
@@ -1460,6 +1436,54 @@ impl Nexus {
             .disk_update_runtime(&disk.id(), &new_runtime.into())
             .await
             .map(|_| ())
+    }
+
+    /**
+     * Creates a new network interface for this instance
+     */
+    pub async fn instance_create_network_interface(
+        &self,
+        organization_name: &Name,
+        project_name: &Name,
+        instance_name: &Name,
+        vpc_name: &Name,
+        subnet_name: &Name,
+        params: &params::NetworkInterfaceCreate,
+    ) -> CreateResult<db::model::NetworkInterface> {
+        let instance = self
+            .project_lookup_instance(
+                organization_name,
+                project_name,
+                instance_name,
+            )
+            .await?;
+        let vpc = self
+            .db_datastore
+            .vpc_fetch_by_name(&instance.project_id, vpc_name)
+            .await?;
+        let subnet = self
+            .db_datastore
+            .vpc_subnet_fetch_by_name(&vpc.id(), subnet_name)
+            .await?;
+
+        let mac = db::model::MacAddr::new()?;
+
+        let interface_id = Uuid::new_v4();
+        // Request an allocation
+        let ip = None;
+        let interface = db::model::IncompleteNetworkInterface::new(
+            interface_id,
+            instance.id(),
+            // TODO-correctness: vpc_id here is used for name uniqueness. Should
+            // interface names be unique to the subnet's VPC or to the
+            // VPC associated with the instance's default interface?
+            vpc.id(),
+            subnet,
+            mac,
+            ip,
+            params.clone(),
+        );
+        self.db_datastore.instance_create_network_interface(interface).await
     }
 
     pub async fn project_list_vpcs(
@@ -1773,6 +1797,27 @@ impl Nexus {
             .db_datastore
             .vpc_update_subnet(&subnet.id(), params.clone().into())
             .await?)
+    }
+
+    pub async fn subnet_list_network_interfaces(
+        &self,
+        organization_name: &Name,
+        project_name: &Name,
+        vpc_name: &Name,
+        subnet_name: &Name,
+        pagparams: &DataPageParams<'_, Name>,
+    ) -> ListResultVec<db::model::NetworkInterface> {
+        let subnet = self
+            .vpc_lookup_subnet(
+                organization_name,
+                project_name,
+                vpc_name,
+                subnet_name,
+            )
+            .await?;
+        self.db_datastore
+            .subnet_list_network_interfaces(&subnet.id(), pagparams)
+            .await
     }
 
     pub async fn vpc_list_routers(
