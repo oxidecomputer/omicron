@@ -40,6 +40,7 @@ use uuid::Uuid;
 /// representing those children.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct Fleet;
+/// Singleton representing the [`Fleet`] itself for authz purposes
 pub const FLEET: Fleet = Fleet;
 
 impl Fleet {
@@ -177,7 +178,7 @@ impl AuthzApiResource for Organization {
     }
 }
 
-/// Represents a [`db::model::Project`] for authz purposes
+/// Represents a [`crate::db::model::Project`] for authz purposes
 ///
 /// This object is used for authorization checks on a Project by passing it as
 /// the `resource` argument to [`crate::context::OpContext::authorize()`].  You

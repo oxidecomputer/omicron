@@ -124,6 +124,7 @@ impl fmt::Display for Perm {
 /// This exists so that we can have roles with no access to the database at all.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct Database;
+/// Singleton representing the [`Database`] itself for authz purposes
 pub const DATABASE: Database = Database;
 
 impl oso::PolarClass for Database {
