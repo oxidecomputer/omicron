@@ -2,6 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+// XXX This needs an edit pass -- more examples up front
 //! Authorization subsystem
 //!
 //! # Background
@@ -54,27 +55,27 @@
 //! 2. The authorization subsystem asks Oso whether the action should be
 //!    allowed.  Oso answers this based on the policy we've defined.  As part of
 //!    evaluating this:
-//!        a. The policy determines which permission is required for
-//!           this action.  Currently, actions and permissions are nearly
-//!           identical -- to perform the "modify" action, you need the "modify"
-//!           permission.
-//!        b. The policy says that the actor can perform this action on the
-//!           resource if they have a role granting the corresponding permission
-//!           on the resource.
-//!        c. Oso checks:
-//!               1. whether the user has any role for this resource that grants
-//!                  the permission (e.g., does the user have a "collaborator"
-//!                  role that grants the "modify" permission?)
-//!               2. whether the user has a role for this resource that grants
-//!                  another role that grants the permission (e.g., does the
-//!                  user have an "admin" role that grants the "collaborator"
-//!                  role that grants the "modify" permission?)
-//!               3. for every relationship between this resource and another
-//!                  resource, whether the user has a role on the other resource
-//!                  that grants the permission on this resource (e.g., does
-//!                  the user have an "organization admin" role on the parent
-//!                  organization that grants the "admin" role on the Project
-//!                  that grants the "modify" permission)
+//!    1. The policy determines which permission is required for
+//!       this action.  Currently, actions and permissions are nearly
+//!       identical -- to perform the "modify" action, you need the "modify"
+//!       permission.
+//!    2. The policy says that the actor can perform this action on the
+//!       resource if they have a role granting the corresponding permission
+//!       on the resource.
+//!    3. Oso checks:
+//!       1. whether the user has any role for this resource that grants
+//!          the permission (e.g., does the user have a "collaborator"
+//!          role that grants the "modify" permission?)
+//!       2. whether the user has a role for this resource that grants
+//!          another role that grants the permission (e.g., does the
+//!          user have an "admin" role that grants the "collaborator"
+//!          role that grants the "modify" permission?)
+//!       3. for every relationship between this resource and another
+//!          resource, whether the user has a role on the other resource
+//!          that grants the permission on this resource (e.g., does
+//!          the user have an "organization admin" role on the parent
+//!          organization that grants the "admin" role on the Project
+//!          that grants the "modify" permission)
 //!
 //! If Oso finds a role granting this permission that's associated with this
 //! actor and resource, the action is allowed.  Otherwise, it's not.
@@ -129,9 +130,9 @@
 //!     +----------------------------------------+
 //! ```
 //!
-//! This record means: user 123 has the "admin" role on the "project" with id
-//! 234.  (Note that ids are really uuids, and some of these tables have other
-//! columns.)
+//! This record means that user 123 has the "admin" role on the "project" with
+//! id 234.  (Note that ids are really uuids, and some of these tables have
+//! other columns.)
 //!
 //! See the [`roles`] module for more details on how we check whether an actor
 //! has a particular role on a resource.
