@@ -922,7 +922,7 @@ async fn instance_disks_get(
 async fn instance_disks_attach(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<InstancePathParam>,
-    disk_to_attach: TypedBody<params::DiskReference>,
+    disk_to_attach: TypedBody<params::DiskIdentifier>,
 ) -> Result<HttpResponseAccepted<Disk>, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
@@ -951,7 +951,7 @@ async fn instance_disks_attach(
 async fn instance_disks_detach(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<InstancePathParam>,
-    disk_to_detach: TypedBody<params::DiskReference>,
+    disk_to_detach: TypedBody<params::DiskIdentifier>,
 ) -> Result<HttpResponseAccepted<Disk>, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;

@@ -187,7 +187,7 @@ pub struct DiskCreate {
  */
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
-pub struct DiskReference {
+pub struct DiskIdentifier {
     pub disk: Name,
 }
 

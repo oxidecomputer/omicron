@@ -174,7 +174,7 @@ async fn test_disks(cptestctx: &ControlPlaneTestContext) {
         .make_request(
             Method::POST,
             &url_instance_attach_disk,
-            Some(params::DiskReference { disk: disk.identity.name.clone() }),
+            Some(params::DiskIdentifier { disk: disk.identity.name.clone() }),
             StatusCode::ACCEPTED,
         )
         .await
@@ -203,7 +203,7 @@ async fn test_disks(cptestctx: &ControlPlaneTestContext) {
         .make_request(
             Method::POST,
             &url_instance_attach_disk,
-            Some(params::DiskReference { disk: disk.identity.name }),
+            Some(params::DiskIdentifier { disk: disk.identity.name }),
             StatusCode::ACCEPTED,
         )
         .await
@@ -245,7 +245,7 @@ async fn test_disks(cptestctx: &ControlPlaneTestContext) {
         .make_request_error_body(
             Method::POST,
             &url_instance2_attach_disk,
-            params::DiskReference { disk: disk.identity.name.clone() },
+            params::DiskIdentifier { disk: disk.identity.name.clone() },
             StatusCode::BAD_REQUEST,
         )
         .await;
@@ -265,7 +265,7 @@ async fn test_disks(cptestctx: &ControlPlaneTestContext) {
         .make_request(
             Method::POST,
             &url_instance_detach_disk,
-            Some(params::DiskReference { disk: disk.identity.name.clone() }),
+            Some(params::DiskIdentifier { disk: disk.identity.name.clone() }),
             StatusCode::ACCEPTED,
         )
         .await
@@ -278,7 +278,7 @@ async fn test_disks(cptestctx: &ControlPlaneTestContext) {
         .make_request_error_body(
             Method::POST,
             &url_instance2_attach_disk,
-            Some(params::DiskReference { disk: disk.identity.name.clone() }),
+            Some(params::DiskIdentifier { disk: disk.identity.name.clone() }),
             StatusCode::BAD_REQUEST,
         )
         .await;
@@ -293,7 +293,7 @@ async fn test_disks(cptestctx: &ControlPlaneTestContext) {
         .make_request_error_body(
             Method::POST,
             &url_instance_attach_disk,
-            Some(params::DiskReference { disk: disk.identity.name.clone() }),
+            Some(params::DiskIdentifier { disk: disk.identity.name.clone() }),
             StatusCode::BAD_REQUEST,
         )
         .await;
@@ -309,7 +309,7 @@ async fn test_disks(cptestctx: &ControlPlaneTestContext) {
         .make_request(
             Method::POST,
             &url_instance_detach_disk,
-            Some(params::DiskReference { disk: disk.identity.name.clone() }),
+            Some(params::DiskIdentifier { disk: disk.identity.name.clone() }),
             StatusCode::ACCEPTED,
         )
         .await
@@ -327,7 +327,7 @@ async fn test_disks(cptestctx: &ControlPlaneTestContext) {
         .make_request(
             Method::POST,
             &url_instance_detach_disk,
-            Some(params::DiskReference { disk: disk.identity.name.clone() }),
+            Some(params::DiskIdentifier { disk: disk.identity.name.clone() }),
             StatusCode::ACCEPTED,
         )
         .await
@@ -336,7 +336,7 @@ async fn test_disks(cptestctx: &ControlPlaneTestContext) {
         .make_request(
             Method::POST,
             &url_instance2_detach_disk,
-            Some(params::DiskReference { disk: disk.identity.name.clone() }),
+            Some(params::DiskIdentifier { disk: disk.identity.name.clone() }),
             StatusCode::ACCEPTED,
         )
         .await
@@ -347,7 +347,7 @@ async fn test_disks(cptestctx: &ControlPlaneTestContext) {
         .make_request(
             Method::POST,
             &url_instance2_attach_disk,
-            Some(params::DiskReference { disk: disk.identity.name.clone() }),
+            Some(params::DiskIdentifier { disk: disk.identity.name.clone() }),
             StatusCode::ACCEPTED,
         )
         .await
@@ -369,7 +369,7 @@ async fn test_disks(cptestctx: &ControlPlaneTestContext) {
         .make_request_error_body(
             Method::POST,
             &url_instance_attach_disk,
-            Some(params::DiskReference { disk: disk.identity.name.clone() }),
+            Some(params::DiskIdentifier { disk: disk.identity.name.clone() }),
             StatusCode::BAD_REQUEST,
         )
         .await;
@@ -384,7 +384,7 @@ async fn test_disks(cptestctx: &ControlPlaneTestContext) {
         .make_request(
             Method::POST,
             &url_instance2_attach_disk,
-            Some(params::DiskReference { disk: disk.identity.name.clone() }),
+            Some(params::DiskIdentifier { disk: disk.identity.name.clone() }),
             StatusCode::ACCEPTED,
         )
         .await
@@ -403,7 +403,7 @@ async fn test_disks(cptestctx: &ControlPlaneTestContext) {
         .make_request(
             Method::POST,
             &url_instance2_detach_disk,
-            Some(params::DiskReference { disk: disk.identity.name.clone() }),
+            Some(params::DiskIdentifier { disk: disk.identity.name.clone() }),
             StatusCode::ACCEPTED,
         )
         .await
