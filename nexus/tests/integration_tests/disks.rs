@@ -153,27 +153,8 @@ async fn test_disks(cptestctx: &ControlPlaneTestContext) {
         project_name,
         instance.identity.name.as_str()
     );
-    let url_instance_disk = format!(
-        "/organizations/{}/projects/{}/instances/{}/disks/{}",
-        org_name,
-        project_name,
-        instance.identity.name.as_str(),
-        disk.identity.name.as_str(),
-    );
     let disks = objects_list_page::<Disk>(&client, &url_instance_disks).await;
     assert_eq!(disks.items.len(), 0);
-    let error = client
-        .make_request_error(
-            Method::GET,
-            &url_instance_disk,
-            StatusCode::NOT_FOUND,
-        )
-        .await;
-    assert_eq!(
-        "disk \"just-rainsticks\" is not attached to instance \
-         \"just-rainsticks\"",
-        error.message
-    );
 
     let url_instance_attach_disk = format!(
         "/organizations/{}/projects/{}/instances/{}/disks/attach",
@@ -209,7 +190,7 @@ async fn test_disks(cptestctx: &ControlPlaneTestContext) {
      * attachment and the disk itself.
      */
     disk_simulate(nexus, &disk.identity.id).await;
-    let attached_disk: Disk = object_get(&client, &url_instance_disk).await;
+    let attached_disk: Disk = disk_get(&client, &disk_url).await;
     assert_eq!(attached_disk.identity.name, disk.identity.name);
     assert_eq!(attached_disk.identity.id, disk.identity.id);
     assert_eq!(attached_disk.state, DiskState::Attached(instance_id.clone()));
@@ -254,13 +235,6 @@ async fn test_disks(cptestctx: &ControlPlaneTestContext) {
         project_name,
         instance2.identity.name.as_str(),
     );
-    let url_instance2_disk = format!(
-        "/organizations/{}/projects/{}/instances/{}/disks/{}",
-        org_name,
-        project_name,
-        instance2.identity.name.as_str(),
-        disk.identity.name.as_str(),
-    );
     let url_instance2_attach_disk = format!(
         "/organizations/{}/projects/{}/instances/{}/disks/attach",
         org_name,
@@ -278,7 +252,7 @@ async fn test_disks(cptestctx: &ControlPlaneTestContext) {
             Method::POST,
             &url_instance2_disks,
             params::DiskReference { disk: disk.identity.name.clone() },
-            StatusCode::CONFLICT,
+            StatusCode::BAD_REQUEST,
         )
         .await;
     assert_eq!(
@@ -289,18 +263,6 @@ async fn test_disks(cptestctx: &ControlPlaneTestContext) {
 
     let attached_disk = disk_get(&client, &disk_url).await;
     assert_eq!(attached_disk.state, DiskState::Attached(instance_id.clone()));
-
-    let error = client
-        .make_request_error(
-            Method::GET,
-            &url_instance2_disk,
-            StatusCode::NOT_FOUND,
-        )
-        .await;
-    assert_eq!(
-        error.message,
-        "disk \"just-rainsticks\" is not attached to instance \"instance2\""
-    );
 
     /*
      * Begin detaching the disk.
@@ -314,8 +276,8 @@ async fn test_disks(cptestctx: &ControlPlaneTestContext) {
         )
         .await
         .unwrap();
-    let detached_disk: Disk = object_get(&client, &url_instance_disk).await;
-    assert_eq!(detached_disk.state, DiskState::Detaching(instance_id.clone()));
+    let disk: Disk = disk_get(&client, &disk_url).await;
+    assert_eq!(disk.state, DiskState::Detaching(instance_id.clone()));
 
     /* It's still illegal to attach this disk elsewhere. */
     let error = client
@@ -323,7 +285,7 @@ async fn test_disks(cptestctx: &ControlPlaneTestContext) {
             Method::POST,
             &url_instance2_attach_disk,
             Some(params::DiskReference { disk: disk.identity.name.clone() }),
-            StatusCode::CONFLICT,
+            StatusCode::BAD_REQUEST,
         )
         .await;
     assert_eq!(
@@ -338,7 +300,7 @@ async fn test_disks(cptestctx: &ControlPlaneTestContext) {
             Method::POST,
             &url_instance_attach_disk,
             Some(params::DiskReference { disk: disk.identity.name.clone() }),
-            StatusCode::CONFLICT,
+            StatusCode::BAD_REQUEST,
         )
         .await;
     /* TODO-debug the error message here is misleading. */
@@ -365,18 +327,6 @@ async fn test_disks(cptestctx: &ControlPlaneTestContext) {
     disk_simulate(nexus, &disk.identity.id).await;
     let disk = disk_get(&client, &disk_url).await;
     assert_eq!(disk.state, DiskState::Detached);
-    let error = client
-        .make_request_error(
-            Method::GET,
-            &url_instance_disk,
-            StatusCode::NOT_FOUND,
-        )
-        .await;
-    assert_eq!(
-        error.message,
-        "disk \"just-rainsticks\" is not attached to instance \
-         \"just-rainsticks\""
-    );
 
     /* Since delete is idempotent, we can detach it again -- from either one. */
     client
@@ -422,9 +372,10 @@ async fn test_disks(cptestctx: &ControlPlaneTestContext) {
      * instance (the first one).
      */
     let error = client
-        .make_request_error(
-            Method::PUT,
-            &url_instance_disk,
+        .make_request_error_body(
+            Method::POST,
+            &url_instance_attach_disk,
+            Some(params::DiskReference { disk: disk.identity.name.clone() }),
             StatusCode::BAD_REQUEST,
         )
         .await;
@@ -436,10 +387,11 @@ async fn test_disks(cptestctx: &ControlPlaneTestContext) {
 
     /* It's fine to attempt another attachment to the same instance. */
     client
-        .make_request_no_body(
-            Method::PUT,
-            &url_instance2_disk,
-            StatusCode::CREATED,
+        .make_request(
+            Method::POST,
+            &url_instance2_attach_disk,
+            Some(params::DiskReference { disk: disk.identity.name.clone() }),
+            StatusCode::ACCEPTED,
         )
         .await
         .unwrap();
@@ -454,17 +406,15 @@ async fn test_disks(cptestctx: &ControlPlaneTestContext) {
 
     /* Now, begin a detach while the disk is still being attached. */
     client
-        .make_request_no_body(
-            Method::DELETE,
-            &url_instance2_disk,
-            StatusCode::NO_CONTENT,
+        .make_request(
+            Method::POST,
+            &url_instance2_detach_disk,
+            Some(params::DiskReference { disk: disk.identity.name.clone() }),
+            StatusCode::ACCEPTED,
         )
         .await
         .unwrap();
-    let detached_disk: Disk = object_get(&client, &url_instance2_disk).await;
-    assert_eq!(detached_disk.state, DiskState::Detaching(instance2_id.clone()));
-
-    let disk = disk_get(&client, &disk_url).await;
+    let disk: Disk = disk_get(&client, &disk_url).await;
     assert_eq!(disk.state, DiskState::Detaching(instance2_id.clone()));
 
     /* It's not allowed to delete a disk that's detaching, either. */
@@ -477,31 +427,6 @@ async fn test_disks(cptestctx: &ControlPlaneTestContext) {
     disk_simulate(nexus, &disk.identity.id).await;
     let disk = disk_get(&client, &disk_url).await;
     assert_eq!(disk.state, DiskState::Detached);
-
-    let error = client
-        .make_request_error(
-            Method::GET,
-            &url_instance_disk,
-            StatusCode::NOT_FOUND,
-        )
-        .await;
-    assert_eq!(
-        error.message,
-        "disk \"just-rainsticks\" is not attached to instance \
-         \"just-rainsticks\""
-    );
-
-    let error = client
-        .make_request_error(
-            Method::GET,
-            &url_instance2_disk,
-            StatusCode::NOT_FOUND,
-        )
-        .await;
-    assert_eq!(
-        error.message,
-        "disk \"just-rainsticks\" is not attached to instance \"instance2\""
-    );
 
     /*
      * If we're not authenticated, or authenticated as an unprivileged user, we

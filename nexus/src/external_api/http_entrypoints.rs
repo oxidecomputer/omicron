@@ -95,7 +95,6 @@ pub fn external_api() -> NexusApiDescription {
         api.register(instance_disks_get)?;
         api.register(instance_disks_attach)?;
         api.register(instance_disks_detach)?;
-        api.register(instance_disks_get_disk)?;
 
         api.register(project_vpcs_get)?;
         api.register(project_vpcs_post)?;
@@ -983,38 +982,6 @@ struct InstanceDiskPathParam {
     project_name: Name,
     instance_name: Name,
     disk_name: Name,
-}
-
-/**
- * Fetch a description of the attachment of this disk to this instance.
- */
-#[endpoint {
-    method = GET,
-    path = "/organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/disks/{disk_name}"
-}]
-async fn instance_disks_get_disk(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
-    path_params: Path<InstanceDiskPathParam>,
-) -> Result<HttpResponseOk<Disk>, HttpError> {
-    let apictx = rqctx.context();
-    let nexus = &apictx.nexus;
-    let path = path_params.into_inner();
-    let organization_name = &path.organization_name;
-    let project_name = &path.project_name;
-    let instance_name = &path.instance_name;
-    let disk_name = &path.disk_name;
-    let handler = async {
-        let disk = nexus
-            .instance_get_disk(
-                &organization_name,
-                &project_name,
-                &instance_name,
-                &disk_name,
-            )
-            .await?;
-        Ok(HttpResponseOk(disk))
-    };
-    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
 /*
