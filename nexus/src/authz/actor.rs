@@ -61,22 +61,18 @@ pub struct AuthenticatedActor {
 }
 
 impl AuthenticatedActor {
-    /**
-     * Returns whether this actor has the given role for the given resource
-     */
+    pub fn actor_id(&self) -> Uuid {
+        self.actor_id
+    }
+
+    /// Returns whether this actor has the given role for the given resource
     pub fn has_role_resource(
         &self,
         resource_type: ResourceType,
         resource_id: Uuid,
         role: &str,
     ) -> bool {
-        // This particular part of the policy needs to be hardcoded because it's
-        // used to bootstrap the rest of the built-in roles.
-        // XXX
-        (resource_type == ResourceType::Fleet
-            && role == "admin"
-            && self.actor_id == authn::USER_DB_INIT.id)
-            || self.roles.has_role(resource_type, resource_id, role)
+        self.roles.has_role(resource_type, resource_id, role)
     }
 }
 
@@ -92,8 +88,12 @@ impl oso::PolarClass for AuthenticatedActor {
     fn get_polar_class_builder() -> oso::ClassBuilder<Self> {
         oso::Class::builder()
             .with_equality_check()
-            .add_attribute_getter("id", |a: &AuthenticatedActor| {
-                a.actor_id.to_string()
-            })
+            .add_constant(
+                AuthenticatedActor {
+                    actor_id: authn::USER_DB_INIT.id,
+                    roles: RoleSet::new(),
+                },
+                "USER_DB_INIT",
+            )
     }
 }

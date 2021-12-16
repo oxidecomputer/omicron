@@ -130,14 +130,20 @@ impl oso::PolarClass for Database {
     fn get_polar_class_builder() -> oso::ClassBuilder<Self> {
         oso::Class::builder().add_method(
             "has_role",
-            |_d: &Database, _actor: AuthenticatedActor, role: String| {
+            |_d: &Database, actor: AuthenticatedActor, role: String| {
                 // TODO This should not be needed at all because there's an
                 // explicit rule in the Polar file granting this permission to
                 // authenticated users.  It's not clear why this doesn't work.
 
-                // All authenticated users can access the database today.
-                assert_eq!(role, "user");
-                true
+                if role == "user" {
+                    // All authenticated users can access the database today.
+                    assert_eq!(role, "user");
+                    true
+                } else {
+                    // Only the "db-init" built-in user gets this role.
+                    assert_eq!(role, "init");
+                    actor.actor_id() == authn::USER_DB_INIT.id
+                }
             },
         )
     }

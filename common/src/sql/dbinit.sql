@@ -790,18 +790,6 @@ CREATE TABLE omicron.public.role_assignment_builtin (
     PRIMARY KEY(user_builtin_id, resource_type, resource_id, role_name)
 );
 
-/*
- * The "db-init" user needs to come with a role that allows them to create other
- * users.
- * XXX TODO-security is there something more fine-grained we can give it?  Or
- * should we hardcode this in the policy somehow?
- */
--- INSERT INTO omicron.public.role_assignment_builtin (
---     resource_type STRING(63) NOT NULL,
---     role_name STRING(63) NOT NULL,
---     resource_id UUID NOT NULL,
-
-
 /*******************************************************************/
 
 /*

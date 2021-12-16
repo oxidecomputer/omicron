@@ -2125,7 +2125,7 @@ impl DataStore {
     ) -> Result<(), Error> {
         use db::schema::user_builtin::dsl;
 
-        opctx.authorize(authz::Action::Modify, authz::FLEET).await?;
+        opctx.authorize(authz::Action::Modify, authz::DATABASE).await?;
 
         let builtin_users = [
             // Note: "db_init" is also a builtin user, but that one by necessity
@@ -2251,7 +2251,7 @@ impl DataStore {
     ) -> Result<(), Error> {
         use db::schema::role_builtin::dsl;
 
-        opctx.authorize(authz::Action::Modify, authz::FLEET).await?;
+        opctx.authorize(authz::Action::Modify, authz::DATABASE).await?;
 
         let builtin_roles = BUILTIN_ROLES
             .iter()
@@ -2284,7 +2284,7 @@ impl DataStore {
     ) -> Result<(), Error> {
         use db::schema::role_assignment_builtin::dsl;
 
-        opctx.authorize(authz::Action::Modify, authz::FLEET).await?;
+        opctx.authorize(authz::Action::Modify, authz::DATABASE).await?;
 
         // The built-in "test-privileged" user gets the "fleet admin" role.
         debug!(opctx.log, "attempting to create built-in role assignments");

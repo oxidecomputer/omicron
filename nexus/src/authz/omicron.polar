@@ -28,15 +28,21 @@ allow(actor: AnyActor, action: Action, resource) if
 # The "database" resource allows us to limit what users are allowed to perform
 # operations that query the database (whether those read or write queries).
 resource Database {
-	permissions = [ "query" ];
-	roles = [ "user" ];
+	permissions = [ "query", "modify" ];
+	roles = [ "user", "init" ];
 
 	"query" if "user";
+
+	"modify" if "init";
+	"user" if "init";
 }
 
-# All authenticated users have the "user" role on the database.
-# TODO This rule doesn't seem to get used for some reason.
-has_role(_actor: AuthenticatedActor, "user", _resource: Database);
+# TODO These two rules don't seem to get used for some reason.
+## All authenticated users have the "user" role on the database.
+#has_role(_actor: AuthenticatedActor, "user", _resource: Database);
+## The "db-init" user is the only one with the "init" role.
+#has_role(actor: AuthenticatedActor, "init", _resource: Database)
+#	if actor == AuthenticatedActor::USER_DB_INIT;
 
 #
 # Permissions and predefined roles for resources in the

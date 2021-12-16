@@ -155,6 +155,17 @@ mod test {
             .authorize(&opctx, Action::Query, DATABASE)
             .await
             .expect("expected privileged user to be able to query database");
+        let error = authz_privileged
+            .authorize(&opctx, Action::Modify, DATABASE)
+            .await
+            .expect_err(
+                "expected privileged test user not to be able to modify \
+                database",
+            );
+        assert!(matches!(
+            error,
+            omicron_common::api::external::Error::Forbidden
+        ));
         let authz_nobody = authz_context_for_actor(
             authn::Context::test_context_for_actor(
                 authn::USER_TEST_UNPRIVILEGED.id,
