@@ -8,17 +8,14 @@ use omicron_common::api::external::ByteCount;
 use omicron_nexus::internal_api::params::ZpoolPutRequest;
 use uuid::Uuid;
 
-pub mod common;
-use common::{test_setup, SLED_AGENT_UUID};
-
-extern crate slog;
+use nexus_test_utils::{ControlPlaneTestContext, SLED_AGENT_UUID};
+use nexus_test_utils_macros::nexus_test;
 
 // Tests the "normal" case of zpool_put: inserting a known Zpool.
 //
 // This will typically be invoked by the Sled Agent, after performing inventory.
-#[tokio::test]
-async fn test_zpool_put_success() {
-    let cptestctx = test_setup("test_zpool_put_success").await;
+#[nexus_test]
+async fn test_zpool_put_success(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.internal_client;
 
     let zpool_id = Uuid::new_v4();
@@ -35,16 +32,14 @@ async fn test_zpool_put_success() {
         )
         .await
         .unwrap();
-
-    cptestctx.teardown().await;
 }
 
 // Tests a failure case of zpool_put: Inserting a zpool into a sled agent that
 // does not exist.
-#[tokio::test]
-async fn test_zpool_put_bad_sled_returns_not_found() {
-    let cptestctx =
-        test_setup("test_zpool_put_bad_sled_returns_not_found").await;
+#[nexus_test]
+async fn test_zpool_put_bad_sled_returns_not_found(
+    cptestctx: &ControlPlaneTestContext,
+) {
     let client = &cptestctx.internal_client;
 
     // A sled with the "nil" UUID should not exist.
@@ -61,5 +56,4 @@ async fn test_zpool_put_bad_sled_returns_not_found() {
             StatusCode::NOT_FOUND,
         )
         .await;
-    cptestctx.teardown().await;
 }

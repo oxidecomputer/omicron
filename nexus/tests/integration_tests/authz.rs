@@ -3,18 +3,16 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 //! Basic end-to-end tests for authorization
-use common::http_testing::RequestBuilder;
 use dropshot::HttpErrorResponseBody;
+use nexus_test_utils::http_testing::RequestBuilder;
 
-pub mod common;
-use common::test_setup;
 use http::method::Method;
 use http::StatusCode;
+use nexus_test_utils::ControlPlaneTestContext;
+use nexus_test_utils_macros::nexus_test;
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_nexus::authn::external::spoof::HTTP_HEADER_OXIDE_AUTHN_SPOOF;
 use omicron_nexus::external_api::params;
-
-extern crate slog;
 
 // TODO-coverage It would be nice to have tests that attempt to hit every
 // OpenAPI endpoint with valid arguments and:
@@ -26,9 +24,8 @@ extern crate slog;
 // authz so that we're at least testing the mechanism itself.  Testing this for
 // all endpoints would ensure that we've applied the mechanism consistently and
 // correctly for all endpoints.
-#[tokio::test]
-async fn test_authz_basic() {
-    let cptestctx = test_setup("test_authz_basic").await;
+#[nexus_test]
+async fn test_authz_basic(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
 
     // With no credentials, we should get back a 401 "Unauthorized" response.
@@ -73,8 +70,6 @@ async fn test_authz_basic() {
     .await;
     assert_eq!(error.error_code, Some(String::from("Unauthorized")));
     assert_eq!(error.message.as_str(), "credentials missing or invalid");
-
-    cptestctx.teardown().await;
 }
 
 async fn try_create_organization(

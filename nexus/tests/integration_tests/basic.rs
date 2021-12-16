@@ -27,22 +27,18 @@ use omicron_nexus::external_api::{
 use serde::Serialize;
 use uuid::Uuid;
 
-pub mod common;
-use common::http_testing::AuthnMode;
-use common::http_testing::NexusRequest;
-use common::http_testing::RequestBuilder;
-use common::resource_helpers::create_organization;
-use common::resource_helpers::create_project;
-use common::start_sled_agent;
-use common::test_setup;
+use nexus_test_utils::http_testing::AuthnMode;
+use nexus_test_utils::http_testing::NexusRequest;
+use nexus_test_utils::http_testing::RequestBuilder;
+use nexus_test_utils::resource_helpers::create_organization;
+use nexus_test_utils::resource_helpers::create_project;
+use nexus_test_utils::start_sled_agent;
+use nexus_test_utils::ControlPlaneTestContext;
+use nexus_test_utils_macros::nexus_test;
 
-#[macro_use]
-extern crate slog;
-
-#[tokio::test]
-async fn test_basic_failures() {
-    let testctx = test_setup("basic_failures").await;
-    let client = &testctx.external_client;
+#[nexus_test]
+async fn test_basic_failures(cptestctx: &ControlPlaneTestContext) {
+    let client = &cptestctx.external_client;
 
     let org_name = "test-org";
     create_organization(&client, &org_name).await;
@@ -173,14 +169,11 @@ async fn test_basic_failures() {
          (allowed characters are lowercase ASCII, digits, and \"-\")",
         error.message
     );
-
-    testctx.teardown().await;
 }
 
-#[tokio::test]
-async fn test_projects_basic() {
-    let testctx = test_setup("test_projects").await;
-    let client = &testctx.external_client;
+#[nexus_test]
+async fn test_projects_basic(cptestctx: &ControlPlaneTestContext) {
+    let client = &cptestctx.external_client;
 
     let org_name = "test-org";
     create_organization(&client, &org_name).await;
@@ -514,14 +507,11 @@ async fn test_projects_basic() {
     assert_eq!(projects[1].identity.description, "little lightning");
     assert_eq!(projects[2].identity.name, "simproject1");
     assert!(projects[2].identity.description.len() > 0);
-
-    testctx.teardown().await;
 }
 
-#[tokio::test]
-async fn test_projects_list() {
-    let testctx = test_setup("test_projects_list").await;
-    let client = &testctx.external_client;
+#[nexus_test]
+async fn test_projects_list(cptestctx: &ControlPlaneTestContext) {
+    let client = &cptestctx.external_client;
 
     let org_name = "test-org";
     create_organization(&client, &org_name).await;
@@ -531,9 +521,10 @@ async fn test_projects_list() {
     assert_eq!(projects_list(&client, &projects_url).await.len(), 0);
 
     /* Create a large number of projects that we can page through. */
-    let nprojects = 1000;
-    let mut projects_created = Vec::with_capacity(nprojects);
-    for _ in 0..nprojects {
+    let projects_total = 10;
+    let projects_subset = 3;
+    let mut projects_created = Vec::with_capacity(projects_total);
+    for _ in 0..projects_total {
         /*
          * We'll use uuids for the names to make sure that works, and that we
          * can paginate through by _name_ even though the names happen to be
@@ -565,7 +556,9 @@ async fn test_projects_list() {
      * increasing order of name.
      */
     let found_projects_by_name =
-        iter_collection::<Project>(&client, projects_url, "", 99).await.0;
+        iter_collection::<Project>(&client, projects_url, "", projects_subset)
+            .await
+            .0;
     assert_eq!(found_projects_by_name.len(), project_names_by_name.len());
     assert_eq!(
         project_names_by_name,
@@ -583,7 +576,7 @@ async fn test_projects_list() {
         &client,
         projects_url,
         "sort_by=name-ascending",
-        99,
+        projects_subset,
     )
     .await
     .0;
@@ -604,7 +597,7 @@ async fn test_projects_list() {
         &client,
         projects_url,
         "sort_by=name-descending",
-        99,
+        projects_subset,
     )
     .await
     .0;
@@ -625,7 +618,7 @@ async fn test_projects_list() {
         &client,
         projects_url,
         "sort_by=id-ascending",
-        99,
+        projects_subset,
     )
     .await
     .0;
@@ -637,14 +630,11 @@ async fn test_projects_list() {
             .map(|v| v.identity.id)
             .collect::<Vec<Uuid>>()
     );
-
-    testctx.teardown().await;
 }
 
-#[tokio::test]
-async fn test_sleds_list() {
-    let testctx = test_setup("test_sleds_list").await;
-    let client = &testctx.external_client;
+#[nexus_test]
+async fn test_sleds_list(cptestctx: &ControlPlaneTestContext) {
+    let client = &cptestctx.external_client;
 
     /* Verify that there is one sled to begin with. */
     let sleds_url = "/hardware/sleds";
@@ -655,8 +645,9 @@ async fn test_sleds_list() {
     let mut sas = Vec::with_capacity(nsleds);
     for _ in 0..nsleds {
         let sa_id = Uuid::new_v4();
-        let log = testctx.logctx.log.new(o!( "sled_id" => sa_id.to_string() ));
-        let addr = testctx.server.http_server_internal.local_addr();
+        let log =
+            cptestctx.logctx.log.new(o!( "sled_id" => sa_id.to_string() ));
+        let addr = cptestctx.server.http_server_internal.local_addr();
         sas.push(start_sled_agent(log, addr, sa_id).await.unwrap());
     }
 
@@ -674,8 +665,6 @@ async fn test_sleds_list() {
     for sa in sas {
         sa.http_server.close().await.unwrap();
     }
-
-    testctx.teardown().await;
 }
 
 async fn projects_list(

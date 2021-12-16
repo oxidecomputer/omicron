@@ -6,19 +6,16 @@ use omicron_nexus::external_api::views::Organization;
 
 use dropshot::test_util::{object_delete, object_get};
 
-pub mod common;
-use common::resource_helpers::{
-    create_organization, create_project, objects_list_page_authz,
-};
-use common::test_setup;
 use http::method::Method;
 use http::StatusCode;
+use nexus_test_utils::resource_helpers::{
+    create_organization, create_project, objects_list_page_authz,
+};
+use nexus_test_utils::ControlPlaneTestContext;
+use nexus_test_utils_macros::nexus_test;
 
-extern crate slog;
-
-#[tokio::test]
-async fn test_organizations() {
-    let cptestctx = test_setup("test_organizations").await;
+#[nexus_test]
+async fn test_organizations(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
 
     /* Create organizations that we'll use for testing. */
@@ -90,6 +87,4 @@ async fn test_organizations() {
     // Delete the project, then delete the organization
     object_delete(&client, &project_url).await;
     object_delete(&client, &o2_url).await;
-
-    cptestctx.teardown().await;
 }

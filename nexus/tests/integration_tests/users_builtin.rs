@@ -5,19 +5,16 @@ use http::Method;
 use http::StatusCode;
 use std::collections::BTreeMap;
 
-pub mod common;
-use common::http_testing::AuthnMode;
-use common::http_testing::NexusRequest;
-use common::http_testing::RequestBuilder;
-use common::test_setup;
+use nexus_test_utils::http_testing::AuthnMode;
+use nexus_test_utils::http_testing::NexusRequest;
+use nexus_test_utils::http_testing::RequestBuilder;
+use nexus_test_utils::ControlPlaneTestContext;
+use nexus_test_utils_macros::nexus_test;
 use omicron_nexus::authn;
 use omicron_nexus::external_api::views::User;
 
-extern crate slog;
-
-#[tokio::test]
-async fn test_users_builtin() {
-    let cptestctx = test_setup("test_users_builtin").await;
+#[nexus_test]
+async fn test_users_builtin(cptestctx: &ControlPlaneTestContext) {
     let testctx = &cptestctx.external_client;
 
     RequestBuilder::new(testctx, Method::GET, "/users")
@@ -58,5 +55,4 @@ async fn test_users_builtin() {
         users.remove(&authn::USER_TEST_UNPRIVILEGED.name.to_string()).unwrap();
     assert_eq!(u.identity.id, authn::USER_TEST_UNPRIVILEGED.id);
     assert!(users.is_empty(), "found unexpected built-in users");
-    cptestctx.teardown().await;
 }
