@@ -43,23 +43,21 @@ async fn test_roles_builtin(cptestctx: &ControlPlaneTestContext) {
         .unwrap()
         .items;
 
-    let role_essentials = roles
-        .iter()
-        .map(|r| (r.name.as_str(), r.description.as_str()))
-        .collect::<Vec<_>>();
-
-    assert_eq!(
-        role_essentials,
-        vec![
-            ("fleet.admin", "Fleet Administrator"),
-            ("fleet.collaborator", "Fleet Collaborator"),
-            ("organization.admin", "Organization Administrator"),
-            ("organization.collaborator", "Organization Collaborator"),
-            ("project.admin", "Project Administrator"),
-            ("project.collaborator", "Project Collaborator"),
-            ("project.viewer", "Project Viewer"),
-        ]
-    );
+    let expected = [
+        ("fleet.admin", "Fleet Administrator"),
+        ("fleet.collaborator", "Fleet Collaborator"),
+        ("organization.admin", "Organization Administrator"),
+        ("organization.collaborator", "Organization Collaborator"),
+        ("project.admin", "Project Administrator"),
+        ("project.collaborator", "Project Collaborator"),
+        ("project.viewer", "Project Viewer"),
+    ];
+    for (actual, expected) in roles.iter().zip(expected.iter()) {
+        let (expected_name, expected_description) = expected;
+        assert_eq!(*expected_name, actual.name.to_string());
+        assert_eq!(*expected_description, actual.description.to_string());
+    }
+    assert_eq!(roles.len(), expected.len());
 
     // This endpoint uses a custom pagination scheme that is easy to get wrong.
     // Let's test that all markers do work.

@@ -56,7 +56,7 @@ async fn test_vpc_routers(cptestctx: &ControlPlaneTestContext) {
     let error = client
         .make_request_error(Method::GET, &router_url, StatusCode::NOT_FOUND)
         .await;
-    assert_eq!(error.message, "not found: vpc router with name \"router1\"");
+    assert_eq!(error.message, "not found: vpc_router with name \"router1\"");
 
     /* Create a VPC Router. */
     let new_router = params::VpcRouterCreate {
@@ -91,7 +91,7 @@ async fn test_vpc_routers(cptestctx: &ControlPlaneTestContext) {
             StatusCode::BAD_REQUEST,
         )
         .await;
-    assert_eq!(error.message, "already exists: vpc router \"router1\"");
+    assert_eq!(error.message, "already exists: vpc_router \"router1\"");
 
     let router2_name = "router2";
     let router2_url = format!("{}/{}", routers_url, router2_name);
@@ -100,7 +100,7 @@ async fn test_vpc_routers(cptestctx: &ControlPlaneTestContext) {
     let error = client
         .make_request_error(Method::GET, &router2_url, StatusCode::NOT_FOUND)
         .await;
-    assert_eq!(error.message, "not found: vpc router with name \"router2\"");
+    assert_eq!(error.message, "not found: vpc_router with name \"router2\"");
 
     // create second custom router
     let new_router = params::VpcRouterCreate {
@@ -144,7 +144,7 @@ async fn test_vpc_routers(cptestctx: &ControlPlaneTestContext) {
     let error = client
         .make_request_error(Method::GET, &router_url, StatusCode::NOT_FOUND)
         .await;
-    assert_eq!(error.message, "not found: vpc router with name \"router1\"");
+    assert_eq!(error.message, "not found: vpc_router with name \"router1\"");
 
     let router_url = format!("{}/{}", routers_url, "new-name");
 
@@ -178,13 +178,13 @@ async fn test_vpc_routers(cptestctx: &ControlPlaneTestContext) {
     let error = client
         .make_request_error(Method::GET, &router_url, StatusCode::NOT_FOUND)
         .await;
-    assert_eq!(error.message, "not found: vpc router with name \"new-name\"");
+    assert_eq!(error.message, "not found: vpc_router with name \"new-name\"");
 
     // delete router should 404
     let error = client
         .make_request_error(Method::DELETE, &router_url, StatusCode::NOT_FOUND)
         .await;
-    assert_eq!(error.message, "not found: vpc router with name \"new-name\"");
+    assert_eq!(error.message, "not found: vpc_router with name \"new-name\"");
 
     // Creating a router with the same name in a different VPC is allowed
     let vpc2_name = "vpc2";

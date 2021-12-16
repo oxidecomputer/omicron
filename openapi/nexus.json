@@ -3761,13 +3761,20 @@
             "type": "string"
           },
           "name": {
-            "type": "string"
+            "$ref": "#/components/schemas/RoleName"
           }
         },
         "required": [
           "description",
           "name"
         ]
+      },
+      "RoleName": {
+        "title": "A name for a built-in role",
+        "description": "Role names consist of two string components separated by dot (\".\").",
+        "type": "string",
+        "pattern": "[a-z_]+\\.[a-z_]+",
+        "maxLength": 63
       },
       "RoleResultsPage": {
         "description": "A single page of results",

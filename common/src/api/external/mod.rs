@@ -297,6 +297,76 @@ impl Name {
 }
 
 /**
+ * Name for a built-in role
+ */
+#[derive(
+    Clone,
+    Debug,
+    DeserializeFromStr,
+    Display,
+    Eq,
+    FromStr,
+    Ord,
+    PartialEq,
+    PartialOrd,
+    SerializeDisplay,
+)]
+#[display("{resource_type}.{role_name}")]
+pub struct RoleName {
+    #[from_str(regex = "[a-z_]+")]
+    resource_type: ResourceType,
+    #[from_str(regex = "[a-z_]+")]
+    role_name: String,
+}
+
+/**
+ * Custom JsonSchema implementation to encode the constraints on Name
+ */
+/* TODO see TODOs on Name above */
+impl JsonSchema for RoleName {
+    fn schema_name() -> String {
+        "RoleName".to_string()
+    }
+    fn json_schema(
+        _gen: &mut schemars::gen::SchemaGenerator,
+    ) -> schemars::schema::Schema {
+        schemars::schema::Schema::Object(schemars::schema::SchemaObject {
+            metadata: Some(Box::new(schemars::schema::Metadata {
+                id: None,
+                title: Some("A name for a built-in role".to_string()),
+                description: Some(
+                    "Role names consist of two string components \
+                     separated by dot (\".\")."
+                        .to_string(),
+                ),
+                default: None,
+                deprecated: false,
+                read_only: false,
+                write_only: false,
+                examples: vec![],
+            })),
+            instance_type: Some(schemars::schema::SingleOrVec::Single(
+                Box::new(schemars::schema::InstanceType::String),
+            )),
+            format: None,
+            enum_values: None,
+            const_value: None,
+            subschemas: None,
+            number: None,
+            string: Some(Box::new(schemars::schema::StringValidation {
+                max_length: Some(63),
+                min_length: None,
+                pattern: Some("[a-z_]+\\.[a-z_]+".to_string()),
+            })),
+            array: None,
+            object: None,
+            reference: None,
+            extensions: BTreeMap::new(),
+        })
+    }
+}
+
+/**
  * A count of bytes, typically used either for memory or storage capacity
  *
  * The maximum supported byte count is [`i64::MAX`].  This makes it somewhat
@@ -465,7 +535,20 @@ impl TryFrom<i64> for Generation {
 /**
  * Identifies a type of API resource
  */
-#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    DeserializeFromStr,
+    Display,
+    Eq,
+    FromStr,
+    Ord,
+    PartialEq,
+    PartialOrd,
+    SerializeDisplay,
+)]
+#[display(style = "snake_case")]
 pub enum ResourceType {
     Fleet,
     Organization,
@@ -488,38 +571,6 @@ pub enum ResourceType {
     Role,
     User,
     Zpool,
-}
-
-impl Display for ResourceType {
-    fn fmt(&self, f: &mut Formatter) -> FormatResult {
-        write!(
-            f,
-            "{}",
-            match self {
-                ResourceType::Fleet => "fleet",
-                ResourceType::Organization => "organization",
-                ResourceType::Project => "project",
-                ResourceType::Dataset => "dataset",
-                ResourceType::Disk => "disk",
-                ResourceType::DiskAttachment => "disk attachment",
-                ResourceType::Instance => "instance",
-                ResourceType::NetworkInterface => "network interface",
-                ResourceType::Rack => "rack",
-                ResourceType::Sled => "sled",
-                ResourceType::SagaDbg => "saga_dbg",
-                ResourceType::Vpc => "vpc",
-                ResourceType::VpcFirewallRule => "vpc firewall rule",
-                ResourceType::VpcSubnet => "vpc subnet",
-                ResourceType::VpcRouter => "vpc router",
-                ResourceType::RouterRoute => "vpc router route",
-                ResourceType::Oximeter => "oximeter",
-                ResourceType::MetricProducer => "metric producer",
-                ResourceType::Role => "role",
-                ResourceType::User => "user",
-                ResourceType::Zpool => "zpool",
-            }
-        )
-    }
 }
 
 pub async fn to_list<T, U>(object_stream: ObjectStream<T>) -> Vec<U>
@@ -1859,13 +1910,14 @@ pub struct NetworkInterface {
 #[cfg(test)]
 mod test {
     use super::{
-        ByteCount, L4Port, L4PortRange, Name, NetworkTarget,
+        ByteCount, L4Port, L4PortRange, Name, NetworkTarget, RoleName,
         VpcFirewallRuleAction, VpcFirewallRuleDirection, VpcFirewallRuleFilter,
         VpcFirewallRuleHostFilter, VpcFirewallRulePriority,
         VpcFirewallRuleProtocol, VpcFirewallRuleStatus, VpcFirewallRuleTarget,
         VpcFirewallRuleUpdate, VpcFirewallRuleUpdateParams,
     };
     use crate::api::external::Error;
+    use crate::api::external::ResourceType;
     use std::convert::TryFrom;
     use std::net::IpAddr;
     use std::net::Ipv4Addr;
@@ -1916,6 +1968,77 @@ mod test {
             eprintln!("check name \"{}\" (should be valid)", name);
             assert_eq!(name, name.parse::<Name>().unwrap().as_str());
         }
+    }
+
+    #[test]
+    fn test_role_name_parse() {
+        // Error cases
+        let bad_inputs = vec![
+            // empty string is always worth testing
+            "",
+            // missing dot
+            "project",
+            // extra dot (or, illegal character in the second component)
+            "project.admin.super",
+            // bogus resource type
+            "barf.admin",
+            // missing resource type (or, another bogus resource type)
+            ".admin",
+            // missing role name
+            "project.",
+            // illegal characters in role name
+            "project.not-good",
+        ];
+
+        for input in bad_inputs {
+            eprintln!("check name {:?} (expecting error)", input);
+            let result =
+                input.parse::<RoleName>().expect_err("unexpectedly succeeded");
+            eprintln!("(expected) error: {:?}", result);
+        }
+
+        eprintln!("check name \"project.admin\" (expecting success)");
+        let role_name =
+            "project.admin".parse::<RoleName>().expect("failed to parse");
+        assert_eq!(role_name.to_string(), "project.admin");
+        assert_eq!(role_name.resource_type, ResourceType::Project);
+        assert_eq!(role_name.role_name, "admin");
+
+        eprintln!("check name \"organization.super_user\" (expecting success)");
+        let role_name = "organization.super_user"
+            .parse::<RoleName>()
+            .expect("failed to parse");
+        assert_eq!(role_name.to_string(), "organization.super_user");
+        assert_eq!(role_name.resource_type, ResourceType::Organization);
+        assert_eq!(role_name.role_name, "super_user");
+    }
+
+    #[test]
+    fn test_resource_name_parse() {
+        let bad_inputs = vec![
+            "bogus",
+            "",
+            "Project",
+            "oRgAnIzAtIoN",
+            "organisation",
+            "vpc subnet",
+        ];
+        for input in bad_inputs {
+            eprintln!("check resource type {:?} (expecting error)", input);
+            let result = input
+                .parse::<ResourceType>()
+                .expect_err("unexpectedly succeeded");
+            eprintln!("(expected) error: {:?}", result);
+        }
+
+        assert_eq!(
+            ResourceType::Project,
+            "project".parse::<ResourceType>().unwrap()
+        );
+        assert_eq!(
+            ResourceType::VpcSubnet,
+            "vpc_subnet".parse::<ResourceType>().unwrap()
+        );
     }
 
     #[test]

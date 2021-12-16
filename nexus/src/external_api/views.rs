@@ -10,11 +10,13 @@ use crate::db::identity::{Asset, Resource};
 use crate::db::model;
 use api_identity::ObjectIdentity;
 use omicron_common::api::external::{
-    IdentityMetadata, Ipv4Net, Ipv6Net, Name, ObjectIdentity,
+    IdentityMetadata, Ipv4Net, Ipv6Net, Name, ObjectIdentity, RoleName,
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use std::convert::TryInto;
 use std::net::SocketAddr;
+use std::str::FromStr;
 use uuid::Uuid;
 
 /*
@@ -209,15 +211,18 @@ impl Into<User> for model::UserBuiltin {
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct Role {
-    pub name: String,
+    pub name: RoleName,
     pub description: String,
 }
 
-impl Into<Role> for model::RoleBuiltin {
-    fn into(self) -> Role {
-        Role {
-            name: format!("{}.{}", self.resource_type, self.role_name),
-            description: self.description,
-        }
+impl TryInto<Role> for model::RoleBuiltin {
+    type Error = parse_display::ParseError;
+
+    fn try_into(self) -> Result<Role, Self::Error> {
+        let name = RoleName::from_str(&format!(
+            "{}.{}",
+            self.resource_type, self.role_name
+        ))?;
+        Ok(Role { name, description: self.description })
     }
 }
