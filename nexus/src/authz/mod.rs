@@ -2,24 +2,23 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-// XXX This needs an edit pass -- more examples up front
 //! Authorization subsystem
 //!
-//! # Background
+//! ## Authorization basics
 //!
 //! Most of our external authorization policy is expressed in terms of
 //! role-based access control (RBAC), meaning that an *actor* can perform
 //! an *action* on a *resource* if the actor is associated with a *role* on the
 //! resource that grants *permissions* for the action.  Let's unpack that.
 //!
-//! * **actor** is a built-in user, a service account, or in the future a user
+//! - **actor** is a built-in user, a service account, or in the future a user
 //!   from the customer's Identity Provider (IdP, such as company LDAP or Active
 //!   Directory or the like).
-//! * **resource** is usually an API resource, like a Project or Instance
-//! * **action** is usually one of a handful of things like "modify", "delete",
+//! - **resource** is usually an API resource, like a Project or Instance
+//! - **action** is usually one of a handful of things like "modify", "delete",
 //!   or "create a child resource".  Actions are nearly the same as
 //!   **permissions**.  The set of actions is fixed by the system.
-//! * **role** is just a set of permissions.  Currently, only built-in roles are
+//! - **role** is just a set of permissions.  Currently, only built-in roles are
 //!   supported.
 //!
 //! The Oso **policy** determines what roles grant what permissions.  This is
@@ -31,26 +30,103 @@
 //! - a user can perform an action on a resource if they have a role that grants
 //!   the corresponding permission on that resource
 //! - for Projects, the "viewer" role is granted the "read" permission
+//! - for Projects, the "viewer" role is granted to anyone with the
+//!   "collaborator" role
 //! - Projects have a "parent" relationship with an Organization, such that
 //!   someone with the "admin" role on the parent Organization automatically
 //!   gets the "viewer" role on the Project
 //!
-//! These are just examples.
+//! These are just examples.  To make them more concrete, suppose we have:
 //!
-//! We plug into the Oso policy at various points.  A key integration point is
-//! determining whether an actor has a particular role on a particular resource.
-//! We describe this below and in the [`roles`] submodule docs.  First, let's
-//! walk through the authorization process at a high level.
+//! - an Organization "Hogwarts"
+//! - a Project "quidditch"
+//! - three users:
+//!   - "Harry", who has been explicitly granted the "viewer" role on
+//!     Project "quidditch"
+//!   - "Hooch", who has been explicitly granted the "collaborator" role on
+//!     Project "quidditch"
+//!   - "Albus", who has been explicitly granted the "admin" role on the
+//!     Organization "Hogwarts"
 //!
+//! All three users have the "read" permission on the Project by virtue of their
+//! "viewer" role on the Project.  But the path to determining that varies:
 //!
-//! # Example
+//! - Harry has explicitly been granted the "viewer" role on this Project.
+//! - Hooch has the "collaborator" role on the Project, which the policy says
+//!   implicitly grants the "viewer" role.
+//! - Albus has the "admin" role on the parent Organization, which the policy
+//!   says implicitly grants the "collaborator" role on the Project, which
+//!   (again) is granted the "viewer" role on the Project.
 //!
-//! Suppose we receive a request from user `A` to modify a Project `P`.  How do
-//! we know if the request is authorized?  The project modify code checks
-//! whether the actor (`A`) can perform the "modify" [`crate::authz::Action`]
-//! for a resource of type `Project` with id `P`.  Then:
+//! So to determine if someone has access, we wind up checking for a variety of
+//! roles on several different objects.  Oso does the tricky parts.  We plug
+//! into the Oso policy at various points.  A key integration point is
+//! determining whether an actor has a _particular_ role on a _particular_
+//! resource.
 //!
-//! 1. The authorization subsystem loads all of the user's roles related to this
+//! ## Role lookup
+//!
+//! Users, roles, and API resources are all stored in the database.  Naturally,
+//! so is the relationship that says a particular user has a particular role for
+//! a particular resource.
+//!
+//! Suppose a built-in user "harry" has the "viewer" role for a Project
+//! "quidditch".  It looks like this:
+//!
+//! ```text
+//! +---> table: "project"
+//! |     +-------------------+-----+
+//! |     |  id | name        | ... |
+//! |     +-------------------+-----+
+//! |   +-> 123 | "quidditch" | ... |
+//! |   | +-------------------+-----+
+//! |   |
+//! |   | table: "user_builtin"
+//! |   | +-------------------+-----+
+//! |   | |  id | name        | ... |
+//! |   | +-------------------+-----+
+//! |   | | 234 | "harry"     | ... |
+//! |   | +--^----------------+-----+
+//! |   |    |
+//! |   |    +---------------------------------------------------------------+
+//! |   |                                                                    |
+//! |   | table: "role_builtin"                                              |
+//! |   | primary key: (resource_type, role_name)
+//! |   | +---------------+-----------+-----+                                |
+//! |   | | resource_type | role_name | ... |                                |
+//! |   | +---------------+-----------+-----+                                |
+//! +---|-> "project "    | "viewer"  | ... |                                |
+//! |   | +---------------+--^--------+-----+                                |
+//! |   |                    |
+//! | +-|--------------------+                                               |
+//! | | |                                                                    |
+//! | | | table: "role_assignment_builtin"                                   |
+//! | | | (assigns built-in roles to built-in users on arbitrary resources)  |
+//! | | | +---------------+-----------+-------------+-----------------+      |
+//! | | | | resource_type | role_name | resource_id | user_builtin_id |      |
+//! | | | +---------------+-----------+-------------+-----------------+      |
+//! | | | | "project "    | "viewer"  |         234 |             123 <------+
+//! | | | +--^------------+--^--------+----------^--+-----------------+
+//! | | |    |               |                   |
+//! +-|-|----+               |                   |
+//!   +-|--------------------+                   |
+//!     +----------------------------------------+
+//! ```
+//!
+//! This record means that user "harry" has the "viewer" role on the "project"
+//! with id 123.  (Note that ids are really uuids, and some of these tables have
+//! other columns.)  See the [`roles`] module for more details on how we find
+//! these records and make them available for the authz check.
+//!
+//! ## Authorization control flow
+//!
+//! Suppose we receive a request from Hermione to modify Project "quidditch".
+//! How do we know if the request is authorized?  The project fetch code checks
+//! whether the actor (`hermione`) can perform the "modify"
+//! [`crate::authz::Action`] for a resource of type `Project` with id `234` (the
+//! id of the "quidditch" Project).  Then:
+//!
+//! 1. The authorization subsystem loads all of Hermione's roles related to this
 //!    resource.  Much more on this in the [`roles`] submodule.
 //! 2. The authorization subsystem asks Oso whether the action should be
 //!    allowed.  Oso answers this based on the policy we've defined.  As part of
@@ -77,65 +153,11 @@
 //!          organization that grants the "admin" role on the Project
 //!          that grants the "modify" permission)
 //!
-//! If Oso finds a role granting this permission that's associated with this
-//! actor and resource, the action is allowed.  Otherwise, it's not.
+//! Each of these role lookups uses data that we provide to Oso.  (Again, more
+//! in [`roles`] about how this is set up.)  If Oso finds a role granting this
+//! permission that's associated with this actor and resource, the action is
+//! allowed.  Otherwise, it's not.
 //!
-//!
-//! # Database representations
-//!
-//! Built-in users and built-in roles are stored in the database.  API resources
-//! (e.g., Projects) are also stored in the database.  (Eventually, other kinds
-//! of users and service accounts will live in the database, too.)
-//!
-//! Suppose a built-in user "ursula" has the "modify" permission for a Project
-//! "bear-cubs".
-//!
-//! ```text
-//! +---> table: "project"
-//! |     +-------------------+-----+
-//! |     |  id | name        | ... |
-//! |     +-------------------+-----+
-//! |   +-> 123 | "bear-cubs" | ... |
-//! |   | +-------------------+-----+
-//! |   |
-//! |   | table: "user_builtin"
-//! |   | +-------------------+-----+
-//! |   | |  id | name        | ... |
-//! |   | +-------------------+-----+
-//! |   | | 234 | "ursula"    | ... |
-//! |   | +--^----------------+-----+
-//! |   |    |
-//! |   |    +---------------------------------------------------------------+
-//! |   |                                                                    |
-//! |   | table: "role_builtin"                                              |
-//! |   | primary key: (resource_type, role_name)
-//! |   | +---------------+-----------+-----+                                |
-//! |   | | resource_type | role_name | ... |                                |
-//! |   | +---------------+-----------+-----+                                |
-//! +---|-> "project "    | "admin"   | ... |                                |
-//! |   | +---------------+--^--------+-----+                                |
-//! |   |                    |
-//! | +-|--------------------+                                               |
-//! | | |                                                                    |
-//! | | | table: "role_assignment_builtin"                                   |
-//! | | | (assigns built-in roles to built-in users on arbitrary resources)  |
-//! | | | +---------------+-----------+-------------+-----------------+      |
-//! | | | | resource_type | role_name | resource_id | user_builtin_id |      |
-//! | | | +---------------+-----------+-------------+-----------------+      |
-//! | | | | "project "    | "admin"   |         234 |             123 <------+
-//! | | | +--^------------+--^--------+----------^--+-----------------+
-//! | | |    |               |                   |
-//! +-|-|----+               |                   |
-//!   +-|--------------------+                   |
-//!     +----------------------------------------+
-//! ```
-//!
-//! This record means that user 123 has the "admin" role on the "project" with
-//! id 234.  (Note that ids are really uuids, and some of these tables have
-//! other columns.)
-//!
-//! See the [`roles`] module for more details on how we check whether an actor
-//! has a particular role on a resource.
 
 mod actor;
 

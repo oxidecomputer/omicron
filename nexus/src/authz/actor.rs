@@ -61,10 +61,6 @@ pub struct AuthenticatedActor {
 }
 
 impl AuthenticatedActor {
-    pub fn actor_id(&self) -> Uuid {
-        self.actor_id
-    }
-
     /// Returns whether this actor has the given role for the given resource
     pub fn has_role_resource(
         &self,

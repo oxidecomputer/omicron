@@ -37,12 +37,11 @@ resource Database {
 	"user" if "init";
 }
 
-# TODO These two rules don't seem to get used for some reason.
-## All authenticated users have the "user" role on the database.
-#has_role(_actor: AuthenticatedActor, "user", _resource: Database);
-## The "db-init" user is the only one with the "init" role.
-#has_role(actor: AuthenticatedActor, "init", _resource: Database)
-#	if actor == AuthenticatedActor::USER_DB_INIT;
+# All authenticated users have the "user" role on the database.
+has_role(_actor: AuthenticatedActor, "user", _resource: Database);
+# The "db-init" user is the only one with the "init" role.
+has_role(actor: AuthenticatedActor, "init", _resource: Database)
+	if actor = USER_DB_INIT;
 
 #
 # Permissions and predefined roles for resources in the
