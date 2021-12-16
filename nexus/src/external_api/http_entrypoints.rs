@@ -973,17 +973,6 @@ async fn instance_disks_detach(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/**
- * Path parameters for requests that access Disks attached to an Instance
- */
-#[derive(Deserialize, JsonSchema)]
-struct InstanceDiskPathParam {
-    organization_name: Name,
-    project_name: Name,
-    instance_name: Name,
-    disk_name: Name,
-}
-
 /*
  * VPCs
  */

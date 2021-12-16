@@ -229,12 +229,6 @@ async fn test_disks(cptestctx: &ControlPlaneTestContext) {
         },
     )
     .await;
-    let url_instance2_disks = format!(
-        "/organizations/{}/projects/{}/instances/{}/disks",
-        org_name,
-        project_name,
-        instance2.identity.name.as_str(),
-    );
     let url_instance2_attach_disk = format!(
         "/organizations/{}/projects/{}/instances/{}/disks/attach",
         org_name,
@@ -250,7 +244,7 @@ async fn test_disks(cptestctx: &ControlPlaneTestContext) {
     let error = client
         .make_request_error_body(
             Method::POST,
-            &url_instance2_disks,
+            &url_instance2_attach_disk,
             params::DiskReference { disk: disk.identity.name.clone() },
             StatusCode::BAD_REQUEST,
         )
