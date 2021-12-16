@@ -663,7 +663,10 @@ CREATE INDEX ON omicron.public.console_session (
 /*******************************************************************/
 
 /*
- * IAM
+ * Identity and Access Management (IAM)
+ *
+ * **For more details and a worked example using the tables here, see the
+ * documentation for the omicron_nexus crate, "authz" module.**
  */
 
 /*
@@ -762,6 +765,9 @@ CREATE TABLE omicron.public.role_builtin (
  *
  * A built-in user has role on a resource if there's a record in this table that
  * points to that user, role, and resource.
+ *
+ * For more details and a worked example, see the omicron_nexus::authz
+ * module-level documentation.
  */
 
 CREATE TABLE omicron.public.role_assignment_builtin (
