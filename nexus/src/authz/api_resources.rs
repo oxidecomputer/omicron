@@ -32,8 +32,8 @@ use uuid::Uuid;
 /// Fleets.
 ///
 /// This object is used for authorization checks on a Fleet by passing it as the
-/// `resource` argument to [`OpContext::authorize()`].  You typically don't
-/// construct a `Fleet` yourself -- use the global [`FLEET`].
+/// `resource` argument to [`crate::context::OpContext::authorize()`].  You
+/// typically don't construct a `Fleet` yourself -- use the global [`FLEET`].
 ///
 /// You can perform authorization checks on children of the Fleet (e.g.,
 /// Organizations) using the methods below that return authz objects
@@ -85,12 +85,13 @@ impl AuthzApiResource for Fleet {
 /// Represents any child of a Fleet _except_ for Organizations for authz
 /// purposes
 ///
-/// This includes [`db::model::UserBuiltin`], similar authz-related resources,
-/// and potentially future resources describing hardware.
+/// This includes [`crate::db::model::UserBuiltin`], similar authz-related
+/// resources, and potentially future resources describing hardware.
 ///
 /// This object is used for authorization checks on such resources by passing
-/// this as the `resource` argument to [`OpContext::authorize()`].  You
-/// construct one of these using [`Fleet::child_generic()`].
+/// this as the `resource` argument to
+/// [`crate::context::OpContext::authorize()`].  You construct one of these
+/// using [`Fleet::child_generic()`].
 // We do not currently store any state here because we don't do anything with
 // it, so if callers provided it, we'd have no way to test that it was correct.
 // If we wind up supporting attaching roles to these, then we could add a
@@ -121,14 +122,14 @@ impl AuthzApiResource for FleetChild {
     }
 }
 
-/// Represents a [`db::model::Organization`] for authz purposes
+/// Represents a [`crate::db::model::Organization`] for authz purposes
 ///
 /// This object is used for authorization checks on an Organization by passing
-/// it as the `resource` argument to [`OpContext::authorize()`].  You typically
-/// construct one of these with [`Fleet::organization()`].  You can perform
-/// authorization checks on children of the Organization (e.g., Projects) using
-/// one of the methods below that return authz objects representing those
-/// children.
+/// it as the `resource` argument to [`crate::context::OpContext::authorize()`].
+/// You typically construct one of these with [`Fleet::organization()`].  You
+/// can perform authorization checks on children of the Organization (e.g.,
+/// Projects) using one of the methods below that return authz objects
+/// representing those children.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct Organization {
     organization_id: Uuid,
@@ -179,10 +180,11 @@ impl AuthzApiResource for Organization {
 /// Represents a [`db::model::Project`] for authz purposes
 ///
 /// This object is used for authorization checks on a Project by passing it as
-/// the `resource` argument to [`OpContext::authorize()`].  You typically
-/// construct one of these with [`Organization::project()`].  You can perform
-/// authorization checks on children of the Project (e.g., Instances) using one
-/// of the methods below that return authz objects representing those children.
+/// the `resource` argument to [`crate::context::OpContext::authorize()`].  You
+/// typically construct one of these with [`Organization::project()`].  You can
+/// perform authorization checks on children of the Project (e.g., Instances)
+/// using one of the methods below that return authz objects representing those
+/// children.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct Project {
     organization_id: Uuid,
@@ -243,11 +245,13 @@ impl AuthzApiResource for Project {
 
 /// Represents any child of a Project for authz purposes
 ///
-/// This includes [`db::model::Instance`], [`db::model::Disk`], etc.
+/// This includes [`crate::db::model::Instance`], [`crate::db::model::Disk`],
+/// etc.
 ///
 /// This object is used for authorization checks on such resources by passing
-/// this as the `resource` argument to [`OpContext::authorize()`].  You
-/// construct one of these using [`Project::child_generic()`].
+/// this as the `resource` argument to
+/// [`crate::context::OpContext::authorize()`].  You construct one of these
+/// using [`Project::child_generic()`].
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct ProjectChild {
     organization_id: Uuid,
