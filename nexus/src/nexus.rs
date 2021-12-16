@@ -1232,7 +1232,7 @@ impl Nexus {
         project_name: &Name,
         instance_name: &Name,
         disk_name: &Name,
-    ) -> UpdateResult<Disk> {
+    ) -> UpdateResult<db::model::Disk> {
         let instance = self
             .project_lookup_instance(
                 organization_name,
@@ -1247,7 +1247,9 @@ impl Nexus {
             .await?;
         let instance_id = &instance.id();
 
-        fn disk_attachment_error(disk: &db::model::Disk) -> CreateResult<Disk> {
+        fn disk_attachment_error(
+            disk: &db::model::Disk,
+        ) -> CreateResult<db::model::Disk> {
             let disk_status = match disk.runtime().state().into() {
                 DiskState::Destroyed => "disk is destroyed",
                 DiskState::Faulted => "disk is faulted",
@@ -1283,9 +1285,7 @@ impl Nexus {
              * If we're already attaching or attached to the requested instance,
              * there's nothing else to do.
              */
-            DiskState::Attached(id) if id == instance_id => {
-                return Ok(disk.into());
-            }
+            DiskState::Attached(id) if id == instance_id => return Ok(disk),
 
             /*
              * If the disk is currently attaching or attached to another
@@ -1328,9 +1328,7 @@ impl Nexus {
             ),
         )
         .await?;
-        let disk = self.db_datastore.disk_fetch(&disk.id()).await?;
-        // Should this check to ensure the disk's instance attached id matches?
-        Ok(disk.into())
+        self.db_datastore.disk_fetch(&disk.id()).await
     }
 
     /**
@@ -1342,7 +1340,7 @@ impl Nexus {
         project_name: &Name,
         instance_name: &Name,
         disk_name: &Name,
-    ) -> UpdateResult<Disk> {
+    ) -> UpdateResult<db::model::Disk> {
         let instance = self
             .project_lookup_instance(
                 organization_name,
@@ -1362,13 +1360,11 @@ impl Nexus {
              * This operation is a noop if the disk is not attached or already
              * detaching from the same instance.
              */
-            DiskState::Creating => return Ok(disk.into()),
-            DiskState::Detached => return Ok(disk.into()),
-            DiskState::Destroyed => return Ok(disk.into()),
-            DiskState::Faulted => return Ok(disk.into()),
-            DiskState::Detaching(id) if id == instance_id => {
-                return Ok(disk.into())
-            }
+            DiskState::Creating => return Ok(disk),
+            DiskState::Detached => return Ok(disk),
+            DiskState::Destroyed => return Ok(disk),
+            DiskState::Faulted => return Ok(disk),
+            DiskState::Detaching(id) if id == instance_id => return Ok(disk),
 
             /*
              * This operation is not allowed if the disk is attached to some
@@ -1401,7 +1397,7 @@ impl Nexus {
             sled_agent_client::types::DiskStateRequested::Detached,
         )
         .await?;
-        Ok(disk.into())
+        Ok(disk)
     }
 
     /**
