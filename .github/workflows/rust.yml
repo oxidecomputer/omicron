@@ -44,6 +44,7 @@ jobs:
     # actions/checkout@v2
     - uses: actions/checkout@28c7f3d2b5162b5ddd3dfd9a45aa55eaf396478b
     - uses: Swatinem/rust-cache@v1
+      if: {{ github.ref != 'refs/heads/main' }}
     - name: Report cargo version
       run: cargo --version
     - name: Check build of deployed Omicron packages
@@ -57,6 +58,7 @@ jobs:
     # actions/checkout@v2
     - uses: actions/checkout@28c7f3d2b5162b5ddd3dfd9a45aa55eaf396478b
     - uses: Swatinem/rust-cache@v1
+      if: {{ github.ref != 'refs/heads/main' }}
     - name: Report cargo version
       run: cargo --version
     - name: Report Clippy version
@@ -79,6 +81,7 @@ jobs:
     # actions/checkout@v2
     - uses: actions/checkout@28c7f3d2b5162b5ddd3dfd9a45aa55eaf396478b
     - uses: Swatinem/rust-cache@v1
+      if: {{ github.ref != 'refs/heads/main' }}
     - name: Report cargo version
       run: cargo --version
     - name: Test build documentation
@@ -96,6 +99,7 @@ jobs:
     # actions/checkout@v2
     - uses: actions/checkout@28c7f3d2b5162b5ddd3dfd9a45aa55eaf396478b
     - uses: Swatinem/rust-cache@v1
+      if: {{ github.ref != 'refs/heads/main' }}
     - name: Report cargo version
       run: cargo --version
     - name: Configure GitHub cache for CockroachDB binaries
