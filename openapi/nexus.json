@@ -174,6 +174,28 @@
         }
       }
     },
+    "/login": {
+      "post": {
+        "operationId": "spoof_login",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LoginParams"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {}
+      }
+    },
+    "/logout": {
+      "post": {
+        "operationId": "logout",
+        "responses": {}
+      }
+    },
     "/organizations": {
       "get": {
         "description": "List all organizations.",
@@ -642,7 +664,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/DiskCreateParams"
+                "$ref": "#/components/schemas/DiskCreate"
               }
             }
           },
@@ -842,7 +864,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/InstanceCreateParams"
+                "$ref": "#/components/schemas/InstanceCreate"
               }
             }
           },
@@ -953,6 +975,36 @@
         "operationId": "instance_disks_get",
         "parameters": [
           {
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "nullable": true,
+              "description": "Maximum number of items returned by a single call",
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 1
+            },
+            "style": "form"
+          },
+          {
+            "in": "query",
+            "name": "page_token",
+            "schema": {
+              "nullable": true,
+              "description": "Token returned by previous call to retreive the subsequent page",
+              "type": "string"
+            },
+            "style": "form"
+          },
+          {
+            "in": "query",
+            "name": "sort_by",
+            "schema": {
+              "$ref": "#/components/schemas/NameSortMode"
+            },
+            "style": "form"
+          },
+          {
             "in": "path",
             "name": "instance_name",
             "required": true,
@@ -986,11 +1038,64 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "title": "Array_of_DiskAttachment",
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/components/schemas/DiskAttachment"
-                  }
+                  "$ref": "#/components/schemas/DiskResultsPage"
+                }
+              }
+            }
+          }
+        },
+        "x-dropshot-pagination": true
+      }
+    },
+    "/organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/disks/attach": {
+      "post": {
+        "operationId": "instance_disks_attach",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "instance_name",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Name"
+            },
+            "style": "simple"
+          },
+          {
+            "in": "path",
+            "name": "organization_name",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Name"
+            },
+            "style": "simple"
+          },
+          {
+            "in": "path",
+            "name": "project_name",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Name"
+            },
+            "style": "simple"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DiskIdentifier"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "description": "successfully enqueued operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Disk"
                 }
               }
             }
@@ -998,20 +1103,10 @@
         }
       }
     },
-    "/organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/disks/{disk_name}": {
-      "get": {
-        "description": "Fetch a description of the attachment of this disk to this instance.",
-        "operationId": "instance_disks_get_disk",
+    "/organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/disks/detach": {
+      "post": {
+        "operationId": "instance_disks_detach",
         "parameters": [
-          {
-            "in": "path",
-            "name": "disk_name",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/Name"
-            },
-            "style": "simple"
-          },
           {
             "in": "path",
             "name": "instance_name",
@@ -1040,117 +1135,26 @@
             "style": "simple"
           }
         ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DiskIdentifier"
+              }
+            }
+          },
+          "required": true
+        },
         "responses": {
-          "200": {
-            "description": "successful operation",
+          "202": {
+            "description": "successfully enqueued operation",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/DiskAttachment"
+                  "$ref": "#/components/schemas/Disk"
                 }
               }
             }
-          }
-        }
-      },
-      "put": {
-        "description": "Attach a disk to this instance.",
-        "operationId": "instance_disks_put_disk",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "disk_name",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/Name"
-            },
-            "style": "simple"
-          },
-          {
-            "in": "path",
-            "name": "instance_name",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/Name"
-            },
-            "style": "simple"
-          },
-          {
-            "in": "path",
-            "name": "organization_name",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/Name"
-            },
-            "style": "simple"
-          },
-          {
-            "in": "path",
-            "name": "project_name",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/Name"
-            },
-            "style": "simple"
-          }
-        ],
-        "responses": {
-          "201": {
-            "description": "successful creation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/DiskAttachment"
-                }
-              }
-            }
-          }
-        }
-      },
-      "delete": {
-        "description": "Detach a disk from this instance.",
-        "operationId": "instance_disks_delete_disk",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "disk_name",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/Name"
-            },
-            "style": "simple"
-          },
-          {
-            "in": "path",
-            "name": "instance_name",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/Name"
-            },
-            "style": "simple"
-          },
-          {
-            "in": "path",
-            "name": "organization_name",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/Name"
-            },
-            "style": "simple"
-          },
-          {
-            "in": "path",
-            "name": "project_name",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/Name"
-            },
-            "style": "simple"
-          }
-        ],
-        "responses": {
-          "204": {
-            "description": "successful deletion"
           }
         }
       }
@@ -1391,7 +1395,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/VpcCreateParams"
+                "$ref": "#/components/schemas/VpcCreate"
               }
             }
           },
@@ -1493,15 +1497,15 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/VpcUpdateParams"
+                "$ref": "#/components/schemas/VpcUpdate"
               }
             }
           },
           "required": true
         },
         "responses": {
-          "200": {
-            "description": "successful operation"
+          "204": {
+            "description": "resource updated"
           }
         }
       },
@@ -1540,6 +1544,139 @@
         "responses": {
           "204": {
             "description": "successful deletion"
+          }
+        }
+      }
+    },
+    "/organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/firewall/rules": {
+      "get": {
+        "description": "List firewall rules for a VPC.",
+        "operationId": "vpc_firewall_rules_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "nullable": true,
+              "description": "Maximum number of items returned by a single call",
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 1
+            },
+            "style": "form"
+          },
+          {
+            "in": "query",
+            "name": "page_token",
+            "schema": {
+              "nullable": true,
+              "description": "Token returned by previous call to retreive the subsequent page",
+              "type": "string"
+            },
+            "style": "form"
+          },
+          {
+            "in": "query",
+            "name": "sort_by",
+            "schema": {
+              "$ref": "#/components/schemas/NameSortMode"
+            },
+            "style": "form"
+          },
+          {
+            "in": "path",
+            "name": "organization_name",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Name"
+            },
+            "style": "simple"
+          },
+          {
+            "in": "path",
+            "name": "project_name",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Name"
+            },
+            "style": "simple"
+          },
+          {
+            "in": "path",
+            "name": "vpc_name",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Name"
+            },
+            "style": "simple"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VpcFirewallRuleResultsPage"
+                }
+              }
+            }
+          }
+        },
+        "x-dropshot-pagination": true
+      },
+      "put": {
+        "description": "Replace the firewall rules for a VPC",
+        "operationId": "vpc_firewall_rules_put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "organization_name",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Name"
+            },
+            "style": "simple"
+          },
+          {
+            "in": "path",
+            "name": "project_name",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Name"
+            },
+            "style": "simple"
+          },
+          {
+            "in": "path",
+            "name": "vpc_name",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Name"
+            },
+            "style": "simple"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/VpcFirewallRuleUpdateParams"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VpcFirewallRuleUpdateResult"
+                }
+              }
+            }
           }
         }
       }
@@ -1657,7 +1794,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/VpcRouterCreateParams"
+                "$ref": "#/components/schemas/VpcRouterCreate"
               }
             }
           },
@@ -1777,15 +1914,15 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/VpcRouterUpdateParams"
+                "$ref": "#/components/schemas/VpcRouterUpdate"
               }
             }
           },
           "required": true
         },
         "responses": {
-          "200": {
-            "description": "successful operation"
+          "204": {
+            "description": "resource updated"
           }
         }
       },
@@ -2113,8 +2250,8 @@
           "required": true
         },
         "responses": {
-          "200": {
-            "description": "successful operation"
+          "204": {
+            "description": "resource updated"
           }
         }
       },
@@ -2288,7 +2425,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/VpcSubnetCreateParams"
+                "$ref": "#/components/schemas/VpcSubnetCreate"
               }
             }
           },
@@ -2408,15 +2545,15 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/VpcSubnetUpdateParams"
+                "$ref": "#/components/schemas/VpcSubnetUpdate"
               }
             }
           },
           "required": true
         },
         "responses": {
-          "200": {
-            "description": "successful operation"
+          "204": {
+            "description": "resource updated"
           }
         }
       },
@@ -2466,6 +2603,93 @@
             "description": "successful deletion"
           }
         }
+      }
+    },
+    "/organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/subnets/{subnet_name}/ips": {
+      "get": {
+        "description": "List IP addresses on a VPC subnet.",
+        "operationId": "subnets_ips_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "nullable": true,
+              "description": "Maximum number of items returned by a single call",
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 1
+            },
+            "style": "form"
+          },
+          {
+            "in": "query",
+            "name": "page_token",
+            "schema": {
+              "nullable": true,
+              "description": "Token returned by previous call to retreive the subsequent page",
+              "type": "string"
+            },
+            "style": "form"
+          },
+          {
+            "in": "query",
+            "name": "sort_by",
+            "schema": {
+              "$ref": "#/components/schemas/NameSortMode"
+            },
+            "style": "form"
+          },
+          {
+            "in": "path",
+            "name": "organization_name",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Name"
+            },
+            "style": "simple"
+          },
+          {
+            "in": "path",
+            "name": "project_name",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Name"
+            },
+            "style": "simple"
+          },
+          {
+            "in": "path",
+            "name": "subnet_name",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Name"
+            },
+            "style": "simple"
+          },
+          {
+            "in": "path",
+            "name": "vpc_name",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Name"
+            },
+            "style": "simple"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NetworkInterfaceResultsPage"
+                }
+              }
+            }
+          }
+        },
+        "x-dropshot-pagination": true
       }
     },
     "/sagas": {
@@ -2548,6 +2772,86 @@
           }
         }
       }
+    },
+    "/users": {
+      "get": {
+        "description": "List the built-in system users",
+        "operationId": "users_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "nullable": true,
+              "description": "Maximum number of items returned by a single call",
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 1
+            },
+            "style": "form"
+          },
+          {
+            "in": "query",
+            "name": "page_token",
+            "schema": {
+              "nullable": true,
+              "description": "Token returned by previous call to retreive the subsequent page",
+              "type": "string"
+            },
+            "style": "form"
+          },
+          {
+            "in": "query",
+            "name": "sort_by",
+            "schema": {
+              "$ref": "#/components/schemas/NameSortMode"
+            },
+            "style": "form"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserResultsPage"
+                }
+              }
+            }
+          }
+        },
+        "x-dropshot-pagination": true
+      }
+    },
+    "/users/{user_name}": {
+      "get": {
+        "description": "Fetch a specific built-in system user",
+        "operationId": "users_get_user",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "user_name",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Name"
+            },
+            "style": "simple"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/User"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -2620,34 +2924,8 @@
           "timeModified"
         ]
       },
-      "DiskAttachment": {
-        "description": "Describes a Disk's attachment to an Instance",
-        "type": "object",
-        "properties": {
-          "diskId": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "diskName": {
-            "$ref": "#/components/schemas/Name"
-          },
-          "diskState": {
-            "$ref": "#/components/schemas/DiskState"
-          },
-          "instanceId": {
-            "type": "string",
-            "format": "uuid"
-          }
-        },
-        "required": [
-          "diskId",
-          "diskName",
-          "diskState",
-          "instanceId"
-        ]
-      },
-      "DiskCreateParams": {
-        "description": "Create-time parameters for an [`Disk`]",
+      "DiskCreate": {
+        "description": "Create-time parameters for a [`Disk`]",
         "type": "object",
         "properties": {
           "description": {
@@ -2675,6 +2953,18 @@
           "description",
           "name",
           "size"
+        ]
+      },
+      "DiskIdentifier": {
+        "description": "Parameters for the [`Disk`] to be attached or detached to an instance",
+        "type": "object",
+        "properties": {
+          "disk": {
+            "$ref": "#/components/schemas/Name"
+          }
+        },
+        "required": [
+          "disk"
         ]
       },
       "DiskResultsPage": {
@@ -2947,7 +3237,7 @@
         "format": "uint16",
         "minimum": 0
       },
-      "InstanceCreateParams": {
+      "InstanceCreate": {
         "description": "Create-time parameters for an [`Instance`]",
         "type": "object",
         "properties": {
@@ -3025,12 +3315,110 @@
         "pattern": "^(fd|FD)00:((([0-9a-fA-F]{1,4}\\:){6}[0-9a-fA-F]{1,4})|(([0-9a-fA-F]{1,4}:){1,6}:))/(6[4-9]|[7-9][0-9]|1[0-1][0-9]|12[0-6])$",
         "maxLength": 43
       },
+      "L4PortRange": {
+        "title": "A range of IP ports",
+        "description": "An inclusive-inclusive range of IP ports. The second port may be omitted to represent a single port",
+        "type": "string",
+        "pattern": "^[0-9]{1,5}(-[0-9]{1,5})?$",
+        "minLength": 1,
+        "maxLength": 11
+      },
+      "LoginParams": {
+        "type": "object",
+        "properties": {
+          "username": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "username"
+        ]
+      },
+      "MacAddr": {
+        "title": "A MAC address",
+        "description": "A Media Access Control address, in EUI-48 format",
+        "type": "string",
+        "pattern": "^([0-9a-fA-F]{2}:){5}[0-9a-fA-F]{2}$",
+        "minLength": 17,
+        "maxLength": 17
+      },
       "Name": {
         "title": "A name used in the API",
         "description": "Names must begin with a lower case ASCII letter, be composed exclusively of lowercase ASCII, uppercase ASCII, numbers, and '-', and may not end with a '-'.",
         "type": "string",
         "pattern": "[a-z](|[a-zA-Z0-9-]*[a-zA-Z0-9])",
         "maxLength": 63
+      },
+      "NetworkInterface": {
+        "description": "A `NetworkInterface` represents a virtual network interface device.",
+        "type": "object",
+        "properties": {
+          "identity": {
+            "description": "common identifying metadata",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/IdentityMetadata"
+              }
+            ]
+          },
+          "instance_id": {
+            "description": "The Instance to which the interface belongs.",
+            "type": "string",
+            "format": "uuid"
+          },
+          "ip": {
+            "description": "The IP address assigned to this interface.",
+            "type": "string",
+            "format": "ip"
+          },
+          "mac": {
+            "description": "The MAC address assigned to this interface.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/MacAddr"
+              }
+            ]
+          },
+          "subnet_id": {
+            "description": "The subnet to which the interface belongs.",
+            "type": "string",
+            "format": "uuid"
+          },
+          "vpc_id": {
+            "description": "The VPC to which the interface belongs.",
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "required": [
+          "identity",
+          "instance_id",
+          "ip",
+          "mac",
+          "subnet_id",
+          "vpc_id"
+        ]
+      },
+      "NetworkInterfaceResultsPage": {
+        "description": "A single page of results",
+        "type": "object",
+        "properties": {
+          "items": {
+            "description": "list of items on this page of results",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/NetworkInterface"
+            }
+          },
+          "next_page": {
+            "nullable": true,
+            "description": "token used to fetch the next page of results (if any)",
+            "type": "string"
+          }
+        },
+        "required": [
+          "items"
+        ]
       },
       "Organization": {
         "description": "Client view of an [`Organization`]",
@@ -3128,7 +3516,7 @@
         }
       },
       "Project": {
-        "description": "Client view of an [`Project`]",
+        "description": "Client view of a [`Project`]",
         "type": "object",
         "properties": {
           "description": {
@@ -3173,7 +3561,7 @@
         ]
       },
       "ProjectCreate": {
-        "description": "Create-time parameters for an [`Project`]",
+        "description": "Create-time parameters for a [`Project`]",
         "type": "object",
         "properties": {
           "description": {
@@ -3210,7 +3598,7 @@
         ]
       },
       "ProjectUpdate": {
-        "description": "Updateable properties of an [`Project`]",
+        "description": "Updateable properties of a [`Project`]",
         "type": "object",
         "properties": {
           "description": {
@@ -3783,8 +4171,69 @@
           "items"
         ]
       },
+      "User": {
+        "description": "Client view of a [`User`]",
+        "type": "object",
+        "properties": {
+          "description": {
+            "description": "human-readable free-form text about a resource",
+            "type": "string"
+          },
+          "id": {
+            "description": "unique, immutable, system-controlled identifier for each resource",
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "description": "unique, mutable, user-controlled identifier for each resource",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Name"
+              }
+            ]
+          },
+          "timeCreated": {
+            "description": "timestamp when this resource was created",
+            "type": "string",
+            "format": "date-time"
+          },
+          "timeModified": {
+            "description": "timestamp when this resource was last modified",
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "description",
+          "id",
+          "name",
+          "timeCreated",
+          "timeModified"
+        ]
+      },
+      "UserResultsPage": {
+        "description": "A single page of results",
+        "type": "object",
+        "properties": {
+          "items": {
+            "description": "list of items on this page of results",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/User"
+            }
+          },
+          "next_page": {
+            "nullable": true,
+            "description": "token used to fetch the next page of results (if any)",
+            "type": "string"
+          }
+        },
+        "required": [
+          "items"
+        ]
+      },
       "Vpc": {
-        "description": "Identity-related metadata that's included in nearly all public API objects",
+        "description": "Client view of a [`Vpc`]",
         "type": "object",
         "properties": {
           "description": {
@@ -3844,7 +4293,7 @@
           "timeModified"
         ]
       },
-      "VpcCreateParams": {
+      "VpcCreate": {
         "description": "Create-time parameters for a [`Vpc`]",
         "type": "object",
         "properties": {
@@ -3863,6 +4312,388 @@
           "dnsName",
           "name"
         ]
+      },
+      "VpcFirewallRule": {
+        "description": "A single rule in a VPC firewall",
+        "type": "object",
+        "properties": {
+          "action": {
+            "description": "whether traffic matching the rule should be allowed or dropped",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/VpcFirewallRuleAction"
+              }
+            ]
+          },
+          "direction": {
+            "description": "whether this rule is for incoming or outgoing traffic",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/VpcFirewallRuleDirection"
+              }
+            ]
+          },
+          "filters": {
+            "description": "reductions on the scope of the rule",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/VpcFirewallRuleFilter"
+              }
+            ]
+          },
+          "identity": {
+            "description": "common identifying metadata",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/IdentityMetadata"
+              }
+            ]
+          },
+          "priority": {
+            "description": "the relative priority of this rule",
+            "type": "integer",
+            "format": "uint16",
+            "minimum": 0
+          },
+          "status": {
+            "description": "whether this rule is in effect",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/VpcFirewallRuleStatus"
+              }
+            ]
+          },
+          "targets": {
+            "description": "list of sets of instances that the rule applies to",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/VpcFirewallRuleTarget"
+            }
+          }
+        },
+        "required": [
+          "action",
+          "direction",
+          "filters",
+          "identity",
+          "priority",
+          "status",
+          "targets"
+        ]
+      },
+      "VpcFirewallRuleAction": {
+        "type": "string",
+        "enum": [
+          "allow",
+          "deny"
+        ]
+      },
+      "VpcFirewallRuleDirection": {
+        "type": "string",
+        "enum": [
+          "inbound",
+          "outbound"
+        ]
+      },
+      "VpcFirewallRuleFilter": {
+        "description": "Filter for a firewall rule. A given packet must match every field that is present for the rule to apply to it. A packet matches a field if any entry in that field matches the packet.",
+        "type": "object",
+        "properties": {
+          "hosts": {
+            "nullable": true,
+            "description": "If present, the sources (if incoming) or destinations (if outgoing) this rule applies to.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/VpcFirewallRuleHostFilter"
+            }
+          },
+          "ports": {
+            "nullable": true,
+            "description": "If present, the destination ports this rule applies to.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/L4PortRange"
+            }
+          },
+          "protocols": {
+            "nullable": true,
+            "description": "If present, the networking protocols this rule applies to.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/VpcFirewallRuleProtocol"
+            }
+          }
+        }
+      },
+      "VpcFirewallRuleHostFilter": {
+        "description": "A subset of [`NetworkTarget`], `VpcFirewallRuleHostFilter` specifies all possible targets that a route can forward to.",
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "vpc"
+                ]
+              },
+              "value": {
+                "$ref": "#/components/schemas/Name"
+              }
+            },
+            "required": [
+              "type",
+              "value"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "subnet"
+                ]
+              },
+              "value": {
+                "$ref": "#/components/schemas/Name"
+              }
+            },
+            "required": [
+              "type",
+              "value"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "instance"
+                ]
+              },
+              "value": {
+                "$ref": "#/components/schemas/Name"
+              }
+            },
+            "required": [
+              "type",
+              "value"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "ip"
+                ]
+              },
+              "value": {
+                "type": "string",
+                "format": "ip"
+              }
+            },
+            "required": [
+              "type",
+              "value"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "internetGateway"
+                ]
+              },
+              "value": {
+                "$ref": "#/components/schemas/Name"
+              }
+            },
+            "required": [
+              "type",
+              "value"
+            ]
+          }
+        ]
+      },
+      "VpcFirewallRuleProtocol": {
+        "description": "The protocols that may be specified in a firewall rule's filter",
+        "type": "string",
+        "enum": [
+          "TCP",
+          "UDP",
+          "ICMP"
+        ]
+      },
+      "VpcFirewallRuleResultsPage": {
+        "description": "A single page of results",
+        "type": "object",
+        "properties": {
+          "items": {
+            "description": "list of items on this page of results",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/VpcFirewallRule"
+            }
+          },
+          "next_page": {
+            "nullable": true,
+            "description": "token used to fetch the next page of results (if any)",
+            "type": "string"
+          }
+        },
+        "required": [
+          "items"
+        ]
+      },
+      "VpcFirewallRuleStatus": {
+        "type": "string",
+        "enum": [
+          "disabled",
+          "enabled"
+        ]
+      },
+      "VpcFirewallRuleTarget": {
+        "description": "A subset of [`NetworkTarget`], `VpcFirewallRuleTarget` specifies all possible targets that a firewall rule can be attached to.",
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "vpc"
+                ]
+              },
+              "value": {
+                "$ref": "#/components/schemas/Name"
+              }
+            },
+            "required": [
+              "type",
+              "value"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "subnet"
+                ]
+              },
+              "value": {
+                "$ref": "#/components/schemas/Name"
+              }
+            },
+            "required": [
+              "type",
+              "value"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "instance"
+                ]
+              },
+              "value": {
+                "$ref": "#/components/schemas/Name"
+              }
+            },
+            "required": [
+              "type",
+              "value"
+            ]
+          }
+        ]
+      },
+      "VpcFirewallRuleUpdate": {
+        "description": "A single rule in a VPC firewall",
+        "type": "object",
+        "properties": {
+          "action": {
+            "description": "whether traffic matching the rule should be allowed or dropped",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/VpcFirewallRuleAction"
+              }
+            ]
+          },
+          "description": {
+            "description": "human-readable free-form text about a resource",
+            "type": "string"
+          },
+          "direction": {
+            "description": "whether this rule is for incoming or outgoing traffic",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/VpcFirewallRuleDirection"
+              }
+            ]
+          },
+          "filters": {
+            "description": "reductions on the scope of the rule",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/VpcFirewallRuleFilter"
+              }
+            ]
+          },
+          "priority": {
+            "description": "the relative priority of this rule",
+            "type": "integer",
+            "format": "uint16",
+            "minimum": 0
+          },
+          "status": {
+            "description": "whether this rule is in effect",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/VpcFirewallRuleStatus"
+              }
+            ]
+          },
+          "targets": {
+            "description": "list of sets of instances that the rule applies to",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/VpcFirewallRuleTarget"
+            }
+          }
+        },
+        "required": [
+          "action",
+          "description",
+          "direction",
+          "filters",
+          "priority",
+          "status",
+          "targets"
+        ]
+      },
+      "VpcFirewallRuleUpdateParams": {
+        "description": "Updateable properties of a [`Vpc`]'s firewall Note that VpcFirewallRules are implicitly created along with a Vpc, so there is no explicit creation.",
+        "type": "object",
+        "additionalProperties": {
+          "$ref": "#/components/schemas/VpcFirewallRuleUpdate"
+        }
+      },
+      "VpcFirewallRuleUpdateResult": {
+        "description": "Response to an update replacing [`Vpc`]'s firewall",
+        "type": "object",
+        "additionalProperties": {
+          "$ref": "#/components/schemas/VpcFirewallRule"
+        }
       },
       "VpcResultsPage": {
         "description": "A single page of results",
@@ -3912,7 +4743,7 @@
           "vpc_id"
         ]
       },
-      "VpcRouterCreateParams": {
+      "VpcRouterCreate": {
         "description": "Create-time parameters for a [`VpcRouter`]",
         "type": "object",
         "properties": {
@@ -3956,7 +4787,7 @@
           "items"
         ]
       },
-      "VpcRouterUpdateParams": {
+      "VpcRouterUpdate": {
         "description": "Updateable properties of a [`VpcRouter`]",
         "type": "object",
         "properties": {
@@ -4015,7 +4846,7 @@
           "vpc_id"
         ]
       },
-      "VpcSubnetCreateParams": {
+      "VpcSubnetCreate": {
         "description": "Create-time parameters for a [`VpcSubnet`]",
         "type": "object",
         "properties": {
@@ -4068,7 +4899,7 @@
           "items"
         ]
       },
-      "VpcSubnetUpdateParams": {
+      "VpcSubnetUpdate": {
         "description": "Updateable properties of a [`VpcSubnet`]",
         "type": "object",
         "properties": {
@@ -4102,7 +4933,7 @@
           }
         }
       },
-      "VpcUpdateParams": {
+      "VpcUpdate": {
         "description": "Updateable properties of a [`Vpc`]",
         "type": "object",
         "properties": {

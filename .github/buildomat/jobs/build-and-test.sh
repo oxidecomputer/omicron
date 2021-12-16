@@ -3,7 +3,7 @@
 #: name = "helios / build-and-test"
 #: variety = "basic"
 #: target = "helios"
-#: rust_toolchain = "nightly-2021-09-03"
+#: rust_toolchain = "nightly-2021-11-24"
 #: output_rules = []
 #:
 
@@ -13,6 +13,18 @@ set -o xtrace
 
 cargo --version
 rustc --version
+
+banner clickhouse
+ptime -m ./tools/ci_download_clickhouse
+
+banner cockroach
+ptime -m bash ./tools/ci_download_cockroachdb
+
+#
+# Put "./cockroachdb/bin" and "./clickhouse" on the PATH for the test
+# suite.
+#
+export PATH="$PATH:$PWD/cockroachdb/bin:$PWD/clickhouse"
 
 #
 # We build with:
@@ -28,28 +40,20 @@ rustc --version
 #   run.  Building with `--locked` ensures that the checked-in Cargo.lock
 #   is up to date.
 #
-# - Work-around for cargo#9895 via RUSTDOCFLAGS also.
-#
 banner build
 export RUSTFLAGS="-D warnings"
-export RUSTDOCFLAGS="-D warnings -Clink-args=-Wl,-R$(pg_config --libdir)"
-ptime -m cargo +'nightly-2021-09-03' build --locked --all-targets --verbose
-
-banner clickhouse
-ptime -m ./tools/ci_download_clickhouse
-
-banner cockroach
-ptime -m bash ./tools/ci_download_cockroachdb
+export RUSTDOCFLAGS="-D warnings"
+ptime -m cargo +'nightly-2021-11-24' build --locked --all-targets --verbose
 
 #
-# Put "./cockroachdb/bin" and "./clickhouse" on the PATH for the test
-# suite.
+# Check that building individual packages as when deploying Omicron succeeds
 #
-export PATH="$PATH:$PWD/cockroachdb/bin:$PWD/clickhouse"
+banner deploy-check
+ptime -m cargo run --bin omicron-package -- check
 
 #
 # NOTE: We're using using the same RUSTFLAGS and RUSTDOCFLAGS as above to avoid
 # having to rebuild here.
 #
 banner test
-ptime -m cargo +'nightly-2021-09-03' test --workspace --locked --verbose
+ptime -m cargo +'nightly-2021-11-24' test --workspace --locked --verbose

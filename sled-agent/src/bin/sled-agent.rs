@@ -1,3 +1,7 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
 //! Executable program to run the sled agent
 
 use dropshot::ConfigDropshot;
@@ -50,20 +54,29 @@ enum Args {
     },
     /// Runs the Sled Agent server.
     Run {
+        /// UUID of the Sled Agent.
         #[structopt(name = "SA_UUID", parse(try_from_str))]
         uuid: Uuid,
 
+        /// Socket address of the bootstrap agent.
         #[structopt(name = "BA_IP:PORT", parse(try_from_str))]
         bootstrap_agent_addr: SocketAddr,
 
+        /// Socket address of the sled agent.
         #[structopt(name = "SA_IP:PORT", parse(try_from_str))]
         sled_agent_addr: SocketAddr,
 
+        /// Socket address of Nexus.
         #[structopt(name = "NEXUS_IP:PORT", parse(try_from_str))]
         nexus_addr: SocketAddr,
 
+        /// Optional VLAN, tagged on all guest NICs.
         #[structopt(long = "vlan")]
         vlan: Option<VlanID>,
+
+        /// Optional list of zpools managed by Sled agent.
+        #[structopt(long = "zpools", name = "zpools", parse(try_from_str))]
+        zpools: Option<Vec<String>>,
     },
 }
 
@@ -94,6 +107,7 @@ async fn do_run() -> Result<(), CmdError> {
             sled_agent_addr,
             nexus_addr,
             vlan,
+            zpools,
         } => {
             // Configure and run the Bootstrap server.
             let config = BootstrapConfig {
@@ -123,6 +137,7 @@ async fn do_run() -> Result<(), CmdError> {
                     level: ConfigLoggingLevel::Info,
                 },
                 vlan,
+                zpools,
             };
 
             let sled_server = sled_server::Server::start(&config)

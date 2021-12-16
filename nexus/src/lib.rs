@@ -1,3 +1,7 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
 /*!
  * Library interface to the Nexus, the heart of the control plane
  */
@@ -20,6 +24,7 @@ pub mod db; // Public only for some documentation examples
 pub mod external_api; // public for testing
 pub mod internal_api; // public for testing
 mod nexus;
+mod populate;
 mod saga_interface;
 mod sagas;
 
@@ -91,22 +96,20 @@ impl Server {
 
         let ctxlog = log.new(o!("component" => "ServerContext"));
         let pool = db::Pool::new(&config.database);
-        let apictx = ServerContext::new(rack_id, ctxlog, pool, &config);
+        let apictx = ServerContext::new(rack_id, ctxlog, pool, &config)?;
 
-        let c1 = Arc::clone(&apictx);
         let http_server_starter_external = dropshot::HttpServerStarter::new(
             &config.dropshot_external,
             external_api(),
-            c1,
+            Arc::clone(&apictx),
             &log.new(o!("component" => "dropshot_external")),
         )
         .map_err(|error| format!("initializing external server: {}", error))?;
 
-        let c2 = Arc::clone(&apictx);
         let http_server_starter_internal = dropshot::HttpServerStarter::new(
             &config.dropshot_internal,
             internal_api(),
-            c2,
+            Arc::clone(&apictx),
             &log.new(o!("component" => "dropshot_internal")),
         )
         .map_err(|error| format!("initializing internal server: {}", error))?;
@@ -125,22 +128,24 @@ impl Server {
      * or until something else initiates a graceful shutdown.
      */
     pub async fn wait_for_finish(self) -> Result<(), String> {
-        let result_external = self.http_server_external.await;
-        let result_internal = self.http_server_internal.await;
+        let errors = vec![
+            self.http_server_external
+                .await
+                .map_err(|e| format!("external: {}", e)),
+            self.http_server_internal
+                .await
+                .map_err(|e| format!("internal: {}", e)),
+        ]
+        .into_iter()
+        .filter(Result::is_err)
+        .map(|r| r.unwrap_err())
+        .collect::<Vec<String>>();
 
-        match (result_external, result_internal) {
-            (Ok(()), Ok(())) => Ok(()),
-            (Err(error_external), Err(error_internal)) => Err(format!(
-                "errors from both external and internal HTTP \
-                 servers(external: \"{}\", internal: \"{}\"",
-                error_external, error_internal
-            )),
-            (Err(error_external), Ok(())) => {
-                Err(format!("external server: {}", error_external))
-            }
-            (Ok(()), Err(error_internal)) => {
-                Err(format!("internal server: {}", error_internal))
-            }
+        if errors.len() > 0 {
+            let msg = format!("errors shutting down: ({})", errors.join(", "));
+            Err(msg)
+        } else {
+            Ok(())
         }
     }
 
@@ -159,10 +164,21 @@ impl Server {
  * Run an instance of the [Server].
  */
 pub async fn run_server(config: &Config) -> Result<(), String> {
-    let log = config
-        .log
-        .to_logger("nexus")
-        .map_err(|message| format!("initializing logger: {}", message))?;
+    use slog::Drain;
+    let (drain, registration) = slog_dtrace::with_drain(
+        config
+            .log
+            .to_logger("nexus")
+            .map_err(|message| format!("initializing logger: {}", message))?,
+    );
+    let log = slog::Logger::root(drain.fuse(), slog::o!());
+    if let slog_dtrace::ProbeRegistration::Failed(e) = registration {
+        let msg = format!("failed to register DTrace probes: {}", e);
+        error!(log, "{}", msg);
+        return Err(msg);
+    } else {
+        debug!(log, "registered DTrace probes");
+    }
     let rack_id = Uuid::new_v4();
     let server = Server::start(config, &rack_id, &log).await?;
     server.register_as_producer().await;

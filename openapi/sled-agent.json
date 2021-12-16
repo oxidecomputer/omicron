@@ -475,6 +475,11 @@
               }
             ]
           },
+          "propolis_uuid": {
+            "description": "which propolis-server is running this Instance",
+            "type": "string",
+            "format": "uuid"
+          },
           "run_state": {
             "description": "runtime state of the Instance",
             "allOf": [
@@ -499,6 +504,7 @@
           "hostname",
           "memory",
           "ncpus",
+          "propolis_uuid",
           "run_state",
           "sled_uuid",
           "time_updated"
@@ -568,6 +574,11 @@
               }
             ]
           },
+          "instance_id": {
+            "description": "The Instance to which the interface belongs.",
+            "type": "string",
+            "format": "uuid"
+          },
           "ip": {
             "description": "The IP address assigned to this interface.",
             "type": "string",
@@ -594,6 +605,7 @@
         },
         "required": [
           "identity",
+          "instance_id",
           "ip",
           "mac",
           "subnet_id",

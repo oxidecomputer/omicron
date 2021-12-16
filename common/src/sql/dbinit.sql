@@ -58,9 +58,79 @@ CREATE TABLE omicron.public.sled (
     id UUID PRIMARY KEY,
     time_created TIMESTAMPTZ NOT NULL,
     time_modified TIMESTAMPTZ NOT NULL,
+    time_deleted TIMESTAMPTZ,
+    rcgen INT NOT NULL,
 
     ip INET NOT NULL,
     port INT4 NOT NULL
+);
+
+/*
+ * ZPools of Storage, attached to Sleds.
+ * Typically these are backed by a single physical disk.
+ */
+CREATE TABLE omicron.public.Zpool (
+    /* Identity metadata (asset) */
+    id UUID PRIMARY KEY,
+    time_created TIMESTAMPTZ NOT NULL,
+    time_modified TIMESTAMPTZ NOT NULL,
+    time_deleted TIMESTAMPTZ,
+    rcgen INT NOT NULL,
+
+    /* FK into the Sled table */
+    sled_id UUID NOT NULL,
+
+    /* TODO: Could also store physical disk FK here */
+
+    total_size INT NOT NULL
+);
+
+CREATE TYPE omicron.public.dataset_kind AS ENUM (
+  'crucible',
+  'cockroach',
+  'clickhouse'
+);
+
+/*
+ * A dataset of allocated space within a zpool.
+ */
+CREATE TABLE omicron.public.Dataset (
+    /* Identity metadata (asset) */
+    id UUID PRIMARY KEY,
+    time_created TIMESTAMPTZ NOT NULL,
+    time_modified TIMESTAMPTZ NOT NULL,
+    time_deleted TIMESTAMPTZ,
+    rcgen INT NOT NULL,
+
+    /* FK into the Pool table */
+    pool_id UUID NOT NULL,
+
+    /* Contact information for the downstairs region */
+    ip INET NOT NULL,
+    port INT4 NOT NULL,
+
+    kind omicron.public.dataset_kind NOT NULL
+);
+
+/*
+ * A region of space allocated to Crucible Downstairs, within a dataset.
+ */
+CREATE TABLE omicron.public.Region (
+    /* Identity metadata (asset) */
+    id UUID PRIMARY KEY,
+    time_created TIMESTAMPTZ NOT NULL,
+    time_modified TIMESTAMPTZ NOT NULL,
+
+    /* FK into the Dataset table */
+    dataset_id UUID NOT NULL,
+
+    /* FK into the (Guest-visible, Virtual) Disk table */
+    disk_id UUID NOT NULL,
+
+    /* Metadata describing the region */
+    block_size INT NOT NULL,
+    extent_size INT NOT NULL,
+    extent_count INT NOT NULL
 );
 
 /*
@@ -166,6 +236,8 @@ CREATE TABLE omicron.public.instance (
      * servers involved in the migration.
      */
     active_server_id UUID,
+    /* Identifies the underlying propolis-server backing the instance. */
+    active_propolis_id UUID,
 
     /* Instance configuration */
     ncpus INT NOT NULL,
@@ -181,7 +253,7 @@ CREATE UNIQUE INDEX ON omicron.public.instance (
 
 
 /*
- * Disks
+ * Guest-Visible, Virtual Disks
  */
 
 /*
@@ -207,6 +279,7 @@ CREATE TABLE omicron.public.disk (
     /* Indicates that the object has been deleted */
     /* This is redundant for Disks, but we keep it here for consistency. */
     time_deleted TIMESTAMPTZ,
+    rcgen INT NOT NULL,
 
     /* Every Disk is in exactly one Project at a time. */
     project_id UUID NOT NULL,
@@ -291,7 +364,11 @@ CREATE TABLE omicron.public.vpc (
     time_deleted TIMESTAMPTZ,
     project_id UUID NOT NULL,
     system_router_id UUID NOT NULL,
-    dns_name STRING(63) NOT NULL
+    dns_name STRING(63) NOT NULL,
+
+    /* Used to ensure that two requests do not concurrently modify the
+       VPC's firewall */
+    firewall_gen INT NOT NULL
 );
 
 CREATE UNIQUE INDEX ON omicron.public.vpc (
@@ -330,6 +407,8 @@ CREATE TABLE omicron.public.network_interface (
     time_modified TIMESTAMPTZ NOT NULL,
     /* Indicates that the object has been deleted */
     time_deleted TIMESTAMPTZ,
+    /* FK into Instance table. */
+    instance_id UUID NOT NULL,
     /* FK into VPC table */
     vpc_id UUID NOT NULL,
     /* FK into VPCSubnet table. */
@@ -338,6 +417,35 @@ CREATE TABLE omicron.public.network_interface (
     ip INET NOT NULL
 );
 
+/* TODO-completeness
+
+ * We currently have a NetworkInterface table with the IP and MAC addresses inline.
+ * Eventually, we'll probably want to move these to their own tables, and
+ * refer to them here, most notably to support multiple IPs per NIC, as well
+ * as moving IPs between NICs on different instances, etc.
+ */
+
+CREATE UNIQUE INDEX ON omicron.public.network_interface (
+    vpc_id,
+    name
+) WHERE
+    time_deleted IS NULL;
+
+/* Ensure we do not assign the same address twice within a subnet */
+CREATE UNIQUE INDEX ON omicron.public.network_interface (
+    subnet_id,
+    ip
+) WHERE
+    time_deleted IS NULL;
+
+/* Ensure we do not assign the same MAC twice within a VPC
+ * See RFD174's discussion on the scope of virtual MACs
+ */
+CREATE UNIQUE INDEX ON omicron.public.network_interface (
+    vpc_id,
+    mac
+) WHERE
+    time_deleted IS NULL;
 
 CREATE TYPE omicron.public.vpc_router_kind AS ENUM (
     'system',
@@ -364,15 +472,52 @@ CREATE UNIQUE INDEX ON omicron.public.vpc_router (
 ) WHERE
     time_deleted IS NULL;
 
-/* TODO-completeness
+CREATE TYPE omicron.public.vpc_firewall_rule_status AS ENUM (
+    'disabled',
+    'enabled'
+);
 
- * We currently have a NetworkInterface table with the IP and MAC addresses inline.
- * Eventually, we'll probably want to move these to their own tables, and
- * refer to them here, most notably to support multiple IPs per NIC, as well
- * as moving IPs between NICs on different instances, etc.
- */
+CREATE TYPE omicron.public.vpc_firewall_rule_direction AS ENUM (
+    'inbound',
+    'outbound'
+);
 
-CREATE UNIQUE INDEX ON omicron.public.network_interface (
+CREATE TYPE omicron.public.vpc_firewall_rule_action AS ENUM (
+    'allow',
+    'deny'
+);
+
+CREATE TYPE omicron.public.vpc_firewall_rule_protocol AS ENUM (
+    'TCP',
+    'UDP',
+    'ICMP'
+);
+
+CREATE TABLE omicron.public.vpc_firewall_rule (
+    /* Identity metadata (resource) */
+    id UUID PRIMARY KEY,
+    name STRING(63) NOT NULL,
+    description STRING(512) NOT NULL,
+    time_created TIMESTAMPTZ NOT NULL,
+    time_modified TIMESTAMPTZ NOT NULL,
+    /* Indicates that the object has been deleted */
+    time_deleted TIMESTAMPTZ,
+
+    vpc_id UUID NOT NULL,
+    status omicron.public.vpc_firewall_rule_status NOT NULL,
+    direction omicron.public.vpc_firewall_rule_direction NOT NULL,
+    /* Array of targets. 128 was picked to include plenty of space for
+       a tag, colon, and resource identifier. */
+    targets STRING(128)[] NOT NULL,
+    /* Also an array of targets */
+    filter_hosts STRING(128)[],
+    filter_ports STRING(11)[],
+    filter_protocols omicron.public.vpc_firewall_rule_protocol[],
+    action omicron.public.vpc_firewall_rule_action NOT NULL,
+    priority INT4 CHECK (priority BETWEEN 0 AND 65535) NOT NULL
+);
+
+CREATE UNIQUE INDEX ON omicron.public.vpc_router (
     vpc_id,
     name
 ) WHERE
@@ -514,6 +659,53 @@ CREATE TABLE omicron.public.console_session (
 CREATE INDEX ON omicron.public.console_session (
     time_created
 );
+
+/*******************************************************************/
+
+/*
+ * IAM
+ */
+
+/*
+ * Users built into the system
+ *
+ * The ids and names for these users are well-known (i.e., they are used by
+ * Nexus directly, so changing these would potentially break compatibility).
+ */
+CREATE TABLE omicron.public.user_builtin (
+    /*
+     * Identity metadata
+     *
+     * TODO-cleanup This uses the "resource identity" pattern because we want a
+     * name and description, but it's not valid to support soft-deleting these
+     * records.
+     */
+    id UUID PRIMARY KEY,
+    name STRING(63) NOT NULL,
+    description STRING(512) NOT NULL,
+    time_created TIMESTAMPTZ NOT NULL,
+    time_modified TIMESTAMPTZ NOT NULL,
+    time_deleted TIMESTAMPTZ
+);
+
+CREATE UNIQUE INDEX ON omicron.public.user_builtin (name);
+
+/* User used by Nexus to create other users.  Do NOT add more users here! */
+INSERT INTO omicron.public.user_builtin (
+    id,
+    name,
+    description,
+    time_created,
+    time_modified
+) VALUES (
+    /* NOTE: this uuid and name are duplicated in nexus::authn. */
+    '001de000-05e4-4000-8000-000000000001',
+    'db-init',
+    'user used for database initialization',
+    NOW(),
+    NOW()
+);
+
 
 /*******************************************************************/
 

@@ -1,3 +1,7 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
 //! Tool for developing against the Oximeter timeseries database, populating data and querying.
 // Copyright 2021 Oxide Computer Company
 
@@ -108,24 +112,37 @@ enum Subcommand {
         /// makes any sense.)
         timeseries_name: String,
 
-        /// Filters applied to the timeseries's fields, specificed as `name=value` pairs.
+        /// Filters applied to the timeseries's fields.
         #[structopt(required = true, min_values(1))]
-        filters: Vec<query::Filter>,
+        filters: Vec<String>,
 
-        /// The start time to which the search is constrained. None means the beginning of time.
+        /// The start time to which the search is constrained, inclusive.
         #[structopt(long)]
-        after: Option<DateTime<Utc>>,
+        start: Option<DateTime<Utc>>,
 
-        /// The stop time to which the search is constrained. None means the current time.
+        /// The start time to which the search is constrained, exclusive.
+        #[structopt(long, conflicts_with("start"))]
+        start_exclusive: Option<DateTime<Utc>>,
+
+        /// The stop time to which the search is constrained, inclusive.
         #[structopt(long)]
-        before: Option<DateTime<Utc>>,
+        end: Option<DateTime<Utc>>,
+
+        /// The start time to which the search is constrained, exclusive.
+        #[structopt(long, conflicts_with("end"))]
+        end_exclusive: Option<DateTime<Utc>>,
     },
 }
 
 async fn make_client(port: u16, log: &Logger) -> Result<Client, anyhow::Error> {
     let client_log = log.new(o!("component" => "oximeter_client"));
     let address = SocketAddr::new("::1".parse().unwrap(), port);
-    Client::new(address, client_log).await.context("Failed to connect to DB")
+    let client = Client::new(address, client_log);
+    client
+        .init_db()
+        .await
+        .context("Failed to initialize timeseries database")?;
+    Ok(client)
 }
 
 fn describe_data() {
@@ -243,13 +260,19 @@ async fn query(
     port: u16,
     log: Logger,
     timeseries_name: String,
-    filters: Vec<query::Filter>,
-    after: Option<DateTime<Utc>>,
-    before: Option<DateTime<Utc>>,
+    filters: Vec<String>,
+    start: Option<query::Timestamp>,
+    end: Option<query::Timestamp>,
 ) -> Result<(), anyhow::Error> {
     let client = make_client(port, &log).await?;
+    let filters = filters.iter().map(|s| s.as_str()).collect::<Vec<_>>();
     let timeseries = client
-        .filter_timeseries_with(&timeseries_name, &filters, after, before)
+        .select_timeseries_with(
+            &timeseries_name,
+            filters.as_slice(),
+            start,
+            end,
+        )
         .await?;
     println!("{}", serde_json::to_string(&timeseries).unwrap());
     Ok(())
@@ -271,8 +294,25 @@ async fn main() {
             populate(args.port, log, populate_args).await.unwrap();
         }
         Subcommand::Wipe => wipe_db(args.port, log).await.unwrap(),
-        Subcommand::Query { timeseries_name, filters, after, before } => {
-            query(args.port, log, timeseries_name, filters, after, before)
+        Subcommand::Query {
+            timeseries_name,
+            filters,
+            start,
+            start_exclusive,
+            end,
+            end_exclusive,
+        } => {
+            let start = match (start, start_exclusive) {
+                (Some(start), _) => Some(query::Timestamp::Inclusive(start)),
+                (_, Some(start)) => Some(query::Timestamp::Exclusive(start)),
+                (None, None) => None,
+            };
+            let end = match (end, end_exclusive) {
+                (Some(end), _) => Some(query::Timestamp::Inclusive(end)),
+                (_, Some(end)) => Some(query::Timestamp::Exclusive(end)),
+                (None, None) => None,
+            };
+            query(args.port, log, timeseries_name, filters, start, end)
                 .await
                 .unwrap();
         }

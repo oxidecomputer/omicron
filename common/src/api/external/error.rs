@@ -1,3 +1,7 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
 /*!
  * Error handling facilities for the Oxide control plane
  *
@@ -243,6 +247,22 @@ impl From<Error> for HttpError {
                 )
             }
         }
+    }
+}
+
+impl From<anyhow::Error> for crate::api::external::Error {
+    fn from(e: anyhow::Error) -> Self {
+        // TODO this needs to be updated when progenitor gets better error types.
+        if let Some(ee) = e.downcast_ref::<reqwest::Error>() {
+            if let Some(s) = ee.status() {
+                if s.is_client_error() {
+                    return crate::api::external::Error::InvalidRequest {
+                        message: e.to_string(),
+                    };
+                }
+            }
+        }
+        crate::api::external::Error::internal_error(&e.to_string())
     }
 }
 

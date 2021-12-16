@@ -1,5 +1,10 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
 //! CTE implementation for "UPDATE with extended return status".
 
+use super::pool::DbConnection;
 use async_bb8_diesel::{AsyncRunQueryDsl, ConnectionManager, PoolError};
 use diesel::associations::HasTable;
 use diesel::helper_types::*;
@@ -138,11 +143,11 @@ where
     /// - Error (row doesn't exist, or other diesel error)
     pub async fn execute_and_check(
         self,
-        pool: &bb8::Pool<ConnectionManager<PgConnection>>,
+        pool: &bb8::Pool<ConnectionManager<DbConnection>>,
     ) -> Result<UpdateAndQueryResult<Q>, PoolError>
     where
         // We require this bound to ensure that "Self" is runnable as query.
-        Self: LoadQuery<PgConnection, (Option<K>, Option<K>, Q)>,
+        Self: LoadQuery<DbConnection, (Option<K>, Option<K>, Q)>,
     {
         let (id0, id1, found) =
             self.get_result_async::<(Option<K>, Option<K>, Q)>(pool).await?;
@@ -172,7 +177,7 @@ where
     );
 }
 
-impl<US, K, Q> RunQueryDsl<PgConnection> for UpdateAndQueryStatement<US, K, Q>
+impl<US, K, Q> RunQueryDsl<DbConnection> for UpdateAndQueryStatement<US, K, Q>
 where
     US: UpdateStatementExt,
     US::Table: Table,

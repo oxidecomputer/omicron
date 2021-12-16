@@ -1,3 +1,7 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
 /*!
  * Handles recovery of sagas
  */
@@ -470,7 +474,7 @@ mod test {
         // Test setup
         let logctx =
             dev::test_setup_log("test_failure_during_saga_can_be_recovered");
-        let log = logctx.log;
+        let log = logctx.log.new(o!());
         let (mut db, db_datastore) = new_db(&log).await;
         let sec_id = db::SecId(uuid::Uuid::new_v4());
         let (storage, sec_client, uctx) =
@@ -535,6 +539,7 @@ mod test {
         let sec_client = Arc::try_unwrap(sec_client).unwrap();
         sec_client.shutdown().await;
         db.cleanup().await.unwrap();
+        logctx.cleanup_successful();
     }
 
     #[tokio::test]
@@ -543,7 +548,7 @@ mod test {
         let logctx = dev::test_setup_log(
             "test_successful_saga_does_not_replay_during_recovery",
         );
-        let log = logctx.log;
+        let log = logctx.log.new(o!());
         let (mut db, db_datastore) = new_db(&log).await;
         let sec_id = db::SecId(uuid::Uuid::new_v4());
         let (storage, sec_client, uctx) =
@@ -597,5 +602,6 @@ mod test {
         let sec_client = Arc::try_unwrap(sec_client).unwrap();
         sec_client.shutdown().await;
         db.cleanup().await.unwrap();
+        logctx.cleanup_successful();
     }
 }

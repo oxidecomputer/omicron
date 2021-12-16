@@ -1,3 +1,7 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
 //! Implementation of the `oximeter` metric collection server.
 
 // Copyright 2021 Oxide Computer Company
@@ -9,11 +13,10 @@ use dropshot::{
 };
 use omicron_common::api::internal::nexus::ProducerEndpoint;
 use omicron_common::backoff;
-use omicron_common::nexus_client;
 use oximeter::types::ProducerResults;
 use oximeter_db::{Client, DbWrite};
 use serde::{Deserialize, Serialize};
-use slog::{debug, info, o, trace, warn, Logger};
+use slog::{debug, error, info, o, trace, warn, Drain, Logger};
 use std::collections::{btree_map::Entry, BTreeMap};
 use std::net::SocketAddr;
 use std::path::Path;
@@ -262,8 +265,10 @@ impl OximeterAgent {
         let insertion_log = log.new(o!("component" => "results-sink"));
         let client_log = log.new(o!("component" => "clickhouse-client"));
 
-        // Construct the ClickHouse client first, to propagate an error if needed.
-        let client = Client::new(db_config.address, client_log).await?;
+        // Construct the ClickHouse client first, propagate an error if we can't reach the
+        // database.
+        let client = Client::new(db_config.address, client_log);
+        client.init_db().await?;
 
         // Spawn the task for aggregating and inserting all metrics
         tokio::spawn(async move {
@@ -367,16 +372,42 @@ impl Oximeter {
     /// This starts an HTTP server used to communicate with other agents in Omicron, especially
     /// Nexus. It also registers itself as a new `oximeter` instance with Nexus.
     pub async fn new(config: &Config) -> Result<Self, Error> {
-        let log = config
-            .log
-            .to_logger("oximeter")
-            .map_err(|msg| Error::Server(msg.to_string()))?;
+        let (drain, registration) = slog_dtrace::with_drain(
+            config
+                .log
+                .to_logger("oximeter")
+                .map_err(|msg| Error::Server(msg.to_string()))?,
+        );
+        let log = slog::Logger::root(drain.fuse(), o!());
+        if let slog_dtrace::ProbeRegistration::Failed(e) = registration {
+            let msg = format!("failed to register DTrace probes: {}", e);
+            error!(log, "{}", msg);
+            return Err(Error::Server(msg));
+        } else {
+            debug!(log, "registered DTrace probes");
+        }
         info!(log, "starting oximeter server");
 
-        // TODO-robustness Handle retries if the database is cannot be reached. This likely should
-        // just retry forever, as the system is unusable until a connection is made.
-        let agent =
-            Arc::new(OximeterAgent::with_id(config.id, config.db, &log).await?);
+        let make_agent = || async {
+            debug!(log, "creating ClickHouse client");
+            Ok(Arc::new(
+                OximeterAgent::with_id(config.id, config.db, &log).await?,
+            ))
+        };
+        let log_client_failure = |error, delay| {
+            warn!(
+                log,
+                "failed to initialize ClickHouse database, will retry in {:?}", delay;
+                "error" => ?error,
+            );
+        };
+        let agent = backoff::retry_notify(
+            backoff::internal_service_policy(),
+            make_agent,
+            log_client_failure,
+        )
+        .await
+        .expect("Expected an infinite retry loop initializing the timeseries database");
 
         let dropshot_log = log.new(o!("component" => "dropshot"));
         let server = HttpServerStarter::new(

@@ -1,109 +1,595 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
 //! Functions for querying the timeseries database.
 // Copyright 2021 Oxide Computer Company
 
-use crate::model::DATABASE_NAME;
+use crate::model::{Field, FieldSource, TimeseriesSchema};
 use crate::Error;
+use crate::{TimeseriesKey, DATABASE_NAME, DATABASE_SELECT_FORMAT};
 use chrono::{DateTime, Utc};
-use oximeter::types::{DatumType, FieldValue};
-use serde::{Deserialize, Serialize};
+use oximeter::types::{DatumType, FieldType, FieldValue};
+use oximeter::{Metric, Target};
+use regex::Regex;
+use std::collections::BTreeMap;
+use std::fmt;
 use std::net::IpAddr;
+use std::str::FromStr;
+use uuid::Uuid;
 
-/// Object used to filter timestamps, specifying a start and/or end time.
+/// The `SelectQueryBuilder` is used to build queries that select timeseries by their names, field
+/// values, and time range.
 ///
-/// Note that the endpoints are interpreted as inclusive, so a timestamp matching the endpoints is
-/// also returned.
-#[derive(Debug, Clone, Copy)]
-pub enum TimeFilter {
-    /// Passes timestamps before the contained value
-    Before(DateTime<Utc>),
-    /// Passes timestamps after the contained value
-    After(DateTime<Utc>),
-    /// Passes timestamps between the two contained values
-    Between(DateTime<Utc>, DateTime<Utc>),
+/// The query builder is created from a timeseries schema, at which point filters on the fields may
+/// be added. The start and stop time may also be set, incusively or exclusively. After adding all
+/// the desired filtering criteria, the builder is consumed to generate a [`SelectQuery`], which is
+/// used by the [`oximeter_db::Client`] to query the database for field values and measurements
+/// matching those criteria.
+#[derive(Debug, Clone)]
+pub struct SelectQueryBuilder {
+    timeseries_schema: TimeseriesSchema,
+    field_selectors: BTreeMap<Field, FieldSelector>,
+    time_range: TimeRange,
 }
 
-impl TimeFilter {
-    pub fn start_time(&self) -> Option<&DateTime<Utc>> {
-        match self {
-            TimeFilter::Before(_) => None,
-            TimeFilter::After(t) | TimeFilter::Between(t, _) => Some(t),
+impl SelectQueryBuilder {
+    /// Construct a new builder for a timeseries with the given schema.
+    pub fn new(schema: &TimeseriesSchema) -> Self {
+        Self {
+            timeseries_schema: schema.clone(),
+            field_selectors: BTreeMap::new(),
+            time_range: TimeRange { start: None, end: None },
         }
     }
 
-    pub fn end_time(&self) -> Option<&DateTime<Utc>> {
-        match self {
-            TimeFilter::Before(t) | TimeFilter::Between(_, t) => Some(t),
-            TimeFilter::After(_) => None,
-        }
+    /// Set the start time for measurements selected from the query.
+    pub fn start_time(mut self, start: Option<Timestamp>) -> Self {
+        self.time_range.start = start;
+        self
     }
 
-    fn as_where_fragment(&self) -> String {
-        match self {
-            TimeFilter::Before(end) => {
-                format!("timestamp <= '{}'", end.naive_utc())
-            }
-            TimeFilter::After(start) => {
-                format!("timestamp >= '{}'", start.naive_utc())
-            }
-            TimeFilter::Between(start, end) => format!(
-                "timestamp >= '{}' AND timestamp <= '{}'",
-                start.naive_utc(),
-                end.naive_utc()
-            ),
-        }
+    /// Set the end time for measurements selected from the query.
+    pub fn end_time(mut self, end: Option<Timestamp>) -> Self {
+        self.time_range.end = end;
+        self
     }
 
-    /// Construct a `TimeFilter` which selects timestamps between `after` and `before`.
+    /// Add a filter for a field with the given name, comparison operator, and value.
     ///
-    /// If both `before` and `after` are `None`, then `None` is returned. Otherwise, a variant of
-    /// `TimeFilter` is constructed and returned.
-    pub fn from_timestamps(
-        after: Option<DateTime<Utc>>,
-        before: Option<DateTime<Utc>>,
-    ) -> Result<Option<Self>, Error> {
-        match (after, before) {
-            (None, None) => Ok(None),
-            (Some(after), None) => Ok(Some(TimeFilter::After(after))),
-            (None, Some(before)) => Ok(Some(TimeFilter::Before(before))),
-            (Some(after), Some(before)) => {
-                if after < before {
-                    Ok(Some(TimeFilter::Between(after, before)))
-                } else {
-                    Err(Error::QueryError(String::from("Invalid timestamps, end must be strictly later than start")))
+    /// An error is returned if the field cannot be found or the field value is not of the correct
+    /// type for the field.
+    pub fn filter<S, T>(
+        mut self,
+        field_name: S,
+        op: FieldCmp,
+        field_value: T,
+    ) -> Result<Self, Error>
+    where
+        S: AsRef<str>,
+        T: Into<FieldValue>,
+    {
+        let field_name = field_name.as_ref().to_string();
+        let field =
+            self.timeseries_schema.field(&field_name).ok_or_else(|| {
+                Error::NoSuchField {
+                    timeseries_name: self
+                        .timeseries_schema
+                        .timeseries_name
+                        .to_string(),
+                    field_name: field_name.clone(),
                 }
+            })?;
+        let field_value: FieldValue = field_value.into();
+        let expected_type = field.ty;
+        let found_type = field_value.field_type();
+        if expected_type != found_type {
+            return Err(Error::IncorrectFieldType {
+                field_name: field_name.to_string(),
+                expected_type,
+                found_type,
+            });
+        }
+        if !op.valid_for_type(found_type) {
+            return Err(Error::InvalidFieldCmp {
+                op: format!("{:?}", op),
+                ty: found_type,
+            });
+        }
+        let comparison = FieldComparison { op, value: field_value };
+        let selector = FieldSelector {
+            name: field_name.clone(),
+            comparison: Some(comparison),
+            ty: found_type,
+        };
+        self.field_selectors.insert(field.clone(), selector);
+        Ok(self)
+    }
+
+    /// Add a filter for a field by parsing the given string into a field selector.
+    ///
+    /// Field selectors may be specified by a mini-DSL, where selectors are generally of the form:
+    /// `NAME OP VALUE`. The name should be the name of the field. `OP` specifies the field
+    /// comparison operator (see [`FieldCmp`] for details. `VALUE` should be a string that can be
+    /// parsed into a `FieldValue` of the correct type for the given field.
+    ///
+    /// Whitespace surrounding the `OP` is ignored, but whitespace elsewhere is significant.
+    ///
+    /// An error is returned if the field selector string is not formatted correctly, specifies an
+    /// invalid field name or comparison operator, or a value that cannot be parsed into the right
+    /// type for the given field.
+    pub fn filter_str<S>(mut self, selector: S) -> Result<Self, Error>
+    where
+        S: AsRef<str>,
+    {
+        let selector: StringFieldSelector = selector.as_ref().parse()?;
+        let field =
+            self.timeseries_schema.field(&selector.name).ok_or_else(|| {
+                Error::NoSuchField {
+                    timeseries_name: self
+                        .timeseries_schema
+                        .timeseries_name
+                        .to_string(),
+                    field_name: selector.name.clone(),
+                }
+            })?;
+        if !selector.op.valid_for_type(field.ty) {
+            return Err(Error::InvalidFieldCmp {
+                op: format!("{:?}", selector.op),
+                ty: field.ty,
+            });
+        }
+        let field_value = match field.ty {
+            FieldType::String => FieldValue::from(&selector.value),
+            FieldType::I64 => {
+                parse_selector_field_value::<i64>(&field, &selector.value)?
             }
+            FieldType::IpAddr => {
+                parse_selector_field_value::<IpAddr>(&field, &selector.value)?
+            }
+            FieldType::Uuid => {
+                parse_selector_field_value::<Uuid>(&field, &selector.value)?
+            }
+            FieldType::Bool => {
+                parse_selector_field_value::<bool>(&field, &selector.value)?
+            }
+        };
+        let comparison =
+            FieldComparison { op: selector.op, value: field_value };
+        let selector = FieldSelector {
+            name: field.name.clone(),
+            comparison: Some(comparison),
+            ty: field.ty,
+        };
+        self.field_selectors.insert(field.clone(), selector);
+        Ok(self)
+    }
+
+    /// Create a `SelectQueryBuilder` that selects the exact timeseries indicated by the given
+    /// target and metric.
+    pub fn from_parts<T, M>(target: &T, metric: &M) -> Result<Self, Error>
+    where
+        T: Target,
+        M: Metric,
+    {
+        let schema = crate::model::schema_for_parts(target, metric);
+        let mut builder = Self::new(&schema);
+        let target_fields =
+            target.field_names().iter().zip(target.field_values().into_iter());
+        let metric_fields =
+            metric.field_names().iter().zip(metric.field_values().into_iter());
+        for (name, value) in target_fields.chain(metric_fields) {
+            builder = builder.filter(name, FieldCmp::Eq, value)?;
+        }
+        Ok(builder)
+    }
+
+    /// Return the current field selector, if any, for the given field name and source.
+    pub fn field_selector<S>(
+        &self,
+        source: FieldSource,
+        name: S,
+    ) -> Option<&FieldSelector>
+    where
+        S: AsRef<str>,
+    {
+        find_field_selector(&self.field_selectors, source, name)
+    }
+
+    /// Build a query that can be sent to the ClickHouse database from the given query.
+    pub fn build(self) -> SelectQuery {
+        let timeseries_schema = self.timeseries_schema;
+        let mut field_selectors = self.field_selectors;
+        for field in timeseries_schema.fields.iter() {
+            let key = field.clone();
+            field_selectors.entry(key).or_insert_with(|| FieldSelector {
+                name: field.name.clone(),
+                comparison: None,
+                ty: field.ty,
+            });
+        }
+        SelectQuery {
+            timeseries_schema,
+            field_selectors,
+            time_range: self.time_range,
         }
     }
 }
 
-/// A string-typed filter, used to build filters on timeseries fields from external input.
-#[derive(Debug, Clone, Deserialize, Serialize)]
-pub struct Filter {
-    /// The name of the field.
-    pub name: String,
-
-    /// The value of the field as a string.
-    pub value: String,
+fn measurement_table_name(ty: DatumType) -> String {
+    format!("measurements_{}", ty.to_string().to_lowercase())
 }
 
-impl std::str::FromStr for Filter {
+fn parse_selector_field_value<T>(
+    field: &Field,
+    s: &str,
+) -> Result<FieldValue, Error>
+where
+    T: FromStr,
+    FieldValue: From<T>,
+{
+    Ok(FieldValue::from(s.parse::<T>().map_err(|_| {
+        Error::InvalidFieldValue {
+            field_name: field.name.clone(),
+            field_type: field.ty,
+            value: s.to_string(),
+        }
+    })?))
+}
+
+/// A `FieldComparison` combines a comparison operation and field value.
+#[derive(Debug, Clone, PartialEq)]
+pub struct FieldComparison {
+    op: FieldCmp,
+    value: FieldValue,
+}
+
+/// A strongly-typed selector for finding fields by name and comparsion with a given value.
+///
+/// If the comparison is `None`, then the selector will match any value of the corresponding field
+/// name.
+#[derive(Debug, Clone, PartialEq)]
+pub struct FieldSelector {
+    name: String,
+    ty: FieldType,
+    comparison: Option<FieldComparison>,
+}
+
+fn field_table_name(ty: FieldType) -> String {
+    format!("fields_{}", ty.to_string().to_lowercase())
+}
+
+impl FieldSelector {
+    // Return a query selecting records of the field table where the field name and value match the
+    // current criteria. The timeseries name is always included in the query.
+    fn as_query(&self, timeseries_name: &str) -> String {
+        let base_query = self.base_query(timeseries_name);
+        if let Some(comparison) = &self.comparison {
+            format!(
+                "{base_query} AND field_value {op} {field_value}",
+                base_query = base_query,
+                op = comparison.op.as_db_str(),
+                field_value = field_as_db_str(&comparison.value),
+            )
+        } else {
+            base_query
+        }
+    }
+
+    // Helper to generate the base query that selects from the right table and matches the
+    // timeseries name and field name.
+    fn base_query(&self, timeseries_name: &str) -> String {
+        format!(
+            "SELECT * FROM {db_name}.{table_name} WHERE timeseries_name = '{timeseries_name}' AND field_name = '{field_name}'",
+            db_name = DATABASE_NAME,
+            table_name = field_table_name(self.ty),
+            timeseries_name = timeseries_name,
+            field_name = self.name,
+        )
+    }
+}
+
+// A stringly-typed selector for finding fields by name and comparsion with a given value.
+//
+// This is used internally to parse comparisons written as strings, such as from the `oxdb`
+// command-line tool or from anoter external source (Nexus API, for example).
+#[derive(Debug, Clone, PartialEq)]
+struct StringFieldSelector {
+    name: String,
+    op: FieldCmp,
+    value: String,
+}
+
+impl FromStr for StringFieldSelector {
+    type Err = Error;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let re = Regex::new("\\s*(==|!=|>|>=|<|<=|~=)\\s*").unwrap();
+        if let Some(match_) = re.find(s) {
+            let name = &s[..match_.start()];
+            let op = match_.as_str().parse()?;
+            let value = &s[match_.end()..];
+            if name.is_empty() || value.is_empty() {
+                Err(Error::InvalidFieldSelectorString {
+                    selector: s.to_string(),
+                })
+            } else {
+                Ok(StringFieldSelector {
+                    name: name.to_string(),
+                    op,
+                    value: value.to_string(),
+                })
+            }
+        } else {
+            Err(Error::InvalidFieldSelectorString { selector: s.to_string() })
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum FieldCmp {
+    Eq,
+    Neq,
+    Gt,
+    Ge,
+    Lt,
+    Le,
+    Like,
+}
+
+impl FromStr for FieldCmp {
     type Err = Error;
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let parts = s.split('=').collect::<Vec<_>>();
-        if parts.len() == 2 {
-            Ok(Filter {
-                name: parts[0].to_string(),
-                value: parts[1].to_string(),
-            })
-        } else {
-            Err(Error::QueryError(String::from(
-                "String filters must be specified as `name=value` pairs",
-            )))
+        match s {
+            "==" => Ok(FieldCmp::Eq),
+            "!=" => Ok(FieldCmp::Neq),
+            ">" => Ok(FieldCmp::Gt),
+            ">=" => Ok(FieldCmp::Ge),
+            "<" => Ok(FieldCmp::Lt),
+            "<=" => Ok(FieldCmp::Le),
+            "~=" => Ok(FieldCmp::Like),
+            _ => Err(Error::UnknownFieldComparison),
         }
     }
 }
 
-// Format the value for use in a query to the database, e.g., `... WHERE (field_value = {})`.
+impl FieldCmp {
+    // Return `true` if the given comparison may be applied to fields of the given type.
+    //
+    // All fields may use `Eq` or `Neq`. Strings can use `Like`. All fields by booleans and IP
+    // addresses can use the remaining comparisons (orderings).
+    fn valid_for_type(&self, ty: FieldType) -> bool {
+        match self {
+            FieldCmp::Eq | FieldCmp::Neq => true,
+            FieldCmp::Like => matches!(ty, FieldType::String),
+            _ => !matches!(ty, FieldType::Bool | FieldType::IpAddr),
+        }
+    }
+
+    // Return the representation of the comparison that is used in SQL, for writing in a query to
+    // the database.
+    fn as_db_str(&self) -> String {
+        match self {
+            FieldCmp::Eq => String::from("="),
+            FieldCmp::Like => String::from("LIKE"),
+            other => format!("{}", other),
+        }
+    }
+}
+
+impl fmt::Display for FieldCmp {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            FieldCmp::Eq => write!(f, "=="),
+            FieldCmp::Neq => write!(f, "!="),
+            FieldCmp::Gt => write!(f, ">"),
+            FieldCmp::Ge => write!(f, ">="),
+            FieldCmp::Lt => write!(f, "<"),
+            FieldCmp::Le => write!(f, "<="),
+            FieldCmp::Like => write!(f, "~="),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct TimeRange {
+    pub start: Option<Timestamp>,
+    pub end: Option<Timestamp>,
+}
+
+impl TimeRange {
+    fn as_query(&self) -> String {
+        let format = |direction: &str, timestamp: Timestamp| {
+            let (eq, t) = match timestamp {
+                Timestamp::Inclusive(ts) => {
+                    ("=", ts.format(crate::DATABASE_TIMESTAMP_FORMAT))
+                }
+                Timestamp::Exclusive(ts) => {
+                    ("", ts.format(crate::DATABASE_TIMESTAMP_FORMAT))
+                }
+            };
+            format!("timestamp {}{} '{}'", direction, eq, t)
+        };
+        match (self.start, self.end) {
+            (Some(start), Some(end)) => {
+                format!(" AND {} AND {} ", format(">", start), format("<", end))
+            }
+            (Some(start), None) => {
+                format!(" AND {} ", format(">", start))
+            }
+            (None, Some(end)) => {
+                format!(" AND {} ", format("<", end))
+            }
+            (None, None) => String::new(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum Timestamp {
+    Inclusive(DateTime<Utc>),
+    Exclusive(DateTime<Utc>),
+}
+
+#[derive(Debug, Clone)]
+pub struct SelectQuery {
+    timeseries_schema: TimeseriesSchema,
+    field_selectors: BTreeMap<Field, FieldSelector>,
+    time_range: TimeRange,
+}
+
+fn create_join_on_condition(columns: &[&str], current: usize) -> String {
+    columns
+        .iter()
+        .map(|column| {
+            format!(
+                "filter{j}.{column} = filter{i}.{column}",
+                column = column,
+                j = current - 1,
+                i = current,
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(" AND ")
+}
+
+fn find_field_selector<S>(
+    field_selectors: &BTreeMap<Field, FieldSelector>,
+    source: FieldSource,
+    name: S,
+) -> Option<&FieldSelector>
+where
+    S: AsRef<str>,
+{
+    let name = name.as_ref();
+    field_selectors
+        .iter()
+        .find(|(field, _)| field.source == source && field.name == name)
+        .map(|(_, selector)| selector)
+}
+
+impl SelectQuery {
+    pub fn schema(&self) -> &TimeseriesSchema {
+        &self.timeseries_schema
+    }
+
+    pub fn field_selector<S>(
+        &self,
+        source: FieldSource,
+        name: S,
+    ) -> Option<&FieldSelector>
+    where
+        S: AsRef<str>,
+    {
+        find_field_selector(&self.field_selectors, source, name)
+    }
+
+    /// Construct and return the query used to select the matching field records from the database.
+    ///
+    /// If there are no fields in the associated timeseries, None is returned.
+    pub fn field_query(&self) -> Option<String> {
+        match self.field_selectors.len() {
+            0 => None,
+            n => {
+                // Select timeseries key for first column, plus field name and field value for
+                // all columns.
+                const SELECTED_COLUMNS: &[&str] =
+                    &["field_name", "field_value"];
+                const JOIN_COLUMNS: &[&str] =
+                    &["timeseries_name", "timeseries_key"];
+                let mut top_level_columns =
+                    Vec::with_capacity(1 + SELECTED_COLUMNS.len() * n);
+                top_level_columns.push(String::from(
+                    "filter0.timeseries_key as timeseries_key",
+                ));
+                let mut from_statements = String::new();
+                for (i, subquery) in self
+                    .field_selectors
+                    .iter()
+                    .map(|(_, sel)| {
+                        sel.as_query(&self.timeseries_schema.timeseries_name)
+                    })
+                    .enumerate()
+                {
+                    for column in SELECTED_COLUMNS {
+                        top_level_columns.push(format!(
+                            "filter{i}.{column}",
+                            i = i,
+                            column = column
+                        ));
+                    }
+
+                    if i == 0 {
+                        from_statements.push_str(&format!(
+                            "({subquery}) AS filter{i} ",
+                            subquery = subquery,
+                            i = i
+                        ));
+                    } else {
+                        from_statements.push_str(
+                            &format!(
+                                "INNER JOIN ({subquery}) AS filter{i} ON ({join_on}) ",
+                                subquery = subquery,
+                                join_on = create_join_on_condition(&JOIN_COLUMNS, i),
+                                i = i,
+                        ));
+                    }
+                }
+                let query = format!(
+                    concat!(
+                        "SELECT {top_level_columns} ",
+                        "FROM {from_statements}",
+                        "ORDER BY (filter0.timeseries_name, filter0.timeseries_key) ",
+                        "FORMAT {fmt};",
+                    ),
+                    top_level_columns = top_level_columns.join(", "),
+                    from_statements = from_statements,
+                    fmt = DATABASE_SELECT_FORMAT,
+                );
+                Some(query)
+            }
+        }
+    }
+
+    /// Construct and return the query used to select the measurements, using the associated
+    /// timeseries keys. If no keys are specified, then a query selecting the all timeseries with
+    /// the given name will be returned. (This is probably not what you want.)
+    pub fn measurement_query(&self, keys: &[TimeseriesKey]) -> String {
+        let key_clause = if keys.is_empty() {
+            String::from(" ")
+        } else {
+            format!(
+                " AND timeseries_key IN ({timeseries_keys}) ",
+                timeseries_keys = keys
+                    .iter()
+                    .map(|key| key.to_string())
+                    .collect::<Vec<_>>()
+                    .join(", "),
+            )
+        };
+        format!(
+            concat!(
+                "SELECT * ",
+                "FROM {db_name}.{table_name} ",
+                "WHERE ",
+                "timeseries_name = '{timeseries_name}'",
+                "{key_clause}",
+                "{timestamp_clause}",
+                "ORDER BY (timeseries_name, timeseries_key, timestamp) ",
+                "FORMAT {fmt};",
+            ),
+            db_name = DATABASE_NAME,
+            table_name =
+                measurement_table_name(self.timeseries_schema.datum_type),
+            timeseries_name = self.timeseries_schema.timeseries_name,
+            key_clause = key_clause,
+            timestamp_clause = self.time_range.as_query(),
+            fmt = DATABASE_SELECT_FORMAT,
+        )
+    }
+}
+
+// Format the value for use in a query to the database, e.g., `... WHERE field_value = {}`.
 fn field_as_db_str(value: &FieldValue) -> String {
     match value {
         FieldValue::Bool(ref inner) => {
@@ -122,394 +608,11 @@ fn field_as_db_str(value: &FieldValue) -> String {
     }
 }
 
-// Return the name of the type as it's referred to in the timeseries database. This is used
-// internally to build the table containing samples of the corresponding datum type.
-fn db_type_name_for_datum(ty: &DatumType) -> &str {
-    match ty {
-        DatumType::Bool => "bool",
-        DatumType::I64 => "i64",
-        DatumType::F64 => "f64",
-        DatumType::String => "string",
-        DatumType::Bytes => "bytes",
-        DatumType::CumulativeI64 => "cumulativei64",
-        DatumType::CumulativeF64 => "cumulativef64",
-        DatumType::HistogramI64 => "histogrami64",
-        DatumType::HistogramF64 => "histogramf64",
-    }
-}
-
-/// A `FieldFilter` specifies a field by name and one or more values to compare against by
-/// equality.
-#[derive(Debug, Clone)]
-pub struct FieldFilter {
-    field_name: String,
-    field_values: Vec<FieldValue>,
-}
-
-impl FieldFilter {
-    /// Construct a filter applied to a field of the given name.
-    ///
-    /// `field_values` is a slice of data that can be converted into a `FieldValue`. The filter
-    /// matches any fields with the given name where the value is one of those specified in
-    /// `field_values` (i.e., it matches `field_values[0]` OR `field_values[1]`, etc.).
-    pub fn new<T>(field_name: &str, field_values: &[T]) -> Result<Self, Error>
-    where
-        T: Into<FieldValue> + Clone,
-    {
-        if field_values.is_empty() {
-            return Err(Error::QueryError(String::from(
-                "Field filters may not be empty",
-            )));
-        }
-        let field_values = field_values.iter().map(FieldValue::from).collect();
-        Ok(Self { field_name: field_name.to_string(), field_values })
-    }
-
-    pub fn field_name(&self) -> &String {
-        &self.field_name
-    }
-
-    pub fn field_values(&self) -> &Vec<FieldValue> {
-        &self.field_values
-    }
-
-    fn table_type(&self) -> String {
-        self.field_values[0].field_type().to_string().to_lowercase()
-    }
-
-    fn as_where_fragment(&self) -> String {
-        let field_value_fragment = self
-            .field_values
-            .iter()
-            .map(|field| format!("(field_value = {})", field_as_db_str(field)))
-            .collect::<Vec<_>>()
-            .join(" OR ");
-        format!(
-            "field_name = '{field_name}' AND ({value_filter})",
-            field_name = self.field_name,
-            value_filter = field_value_fragment,
-        )
-    }
-}
-
-/// Object used to filter timeseries.
-///
-/// Timeseries must be selected by name. A list of filters applied to the fields of the timeseries
-/// can be used to further restrict the matching timeseries. The `time_filter` is used to restrict
-/// the data to the specified time window, and is applied to all matching timeseries.
-#[derive(Debug, Clone)]
-pub struct TimeseriesFilter {
-    /// The name of the timeseries to select
-    pub timeseries_name: String,
-    /// Filters applied to the fields of the timeseries
-    pub filters: Vec<FieldFilter>,
-    /// Filter applied to the timestamps of the timeseries
-    pub time_filter: Option<TimeFilter>,
-}
-
-impl TimeseriesFilter {
-    /// Return the name of the each table this filter applies to.
-    fn table_names(&self) -> Vec<String> {
-        let table_name = |filter: &FieldFilter| {
-            format!(
-                "{db_name}.fields_{type_}",
-                db_name = DATABASE_NAME,
-                type_ = filter.table_type()
-            )
-        };
-        self.filters().iter().map(table_name).collect()
-    }
-
-    /// Return the filters applied to each field of this filter
-    fn filters(&self) -> &Vec<FieldFilter> {
-        &self.filters
-    }
-
-    // Return the SELECT clauses used to apply each field filter
-    fn field_select_queries(&self) -> Vec<String> {
-        let select_query = |(table_name, filter): (&String, &FieldFilter)| {
-            format!(
-                concat!(
-                    "SELECT\n",
-                    "{timeseries_name},\n",
-                    "{timeseries_key}\n",
-                    "FROM {table_name}\n",
-                    "WHERE ({where_fragment})",
-                ),
-                timeseries_name = indent("timeseries_name", 4),
-                timeseries_key = indent("timeseries_key", 4),
-                table_name = table_name,
-                where_fragment = filter.as_where_fragment(),
-            )
-        };
-        self.table_names()
-            .iter()
-            .zip(self.filters())
-            .map(select_query)
-            .collect()
-    }
-
-    /// Generate a select query for this filter
-    pub(crate) fn as_select_query(&self, datum_type: DatumType) -> String {
-        let timestamp_filter = self
-            .time_filter
-            .map(|f| format!("AND {}", f.as_where_fragment()))
-            .unwrap_or_else(String::new);
-
-        let select_queries = self.field_select_queries();
-        let (filter_columns, query) = match select_queries.len() {
-            0 => (
-                String::from("timeseries_name"),
-                format!("'{}'", self.timeseries_name),
-            ),
-            1 => {
-                // We only have one subquery, just use it directly
-                (
-                    String::from("timeseries_name, timeseries_key"),
-                    select_queries[0].clone(),
-                )
-            }
-            _ => {
-                // We have a list of subqueries, which must be JOIN'd.
-                // The JOIN occurs using equality between the timeseries keys and timestamps, with the
-                // previous subquery alias.
-                let subqueries = select_queries
-                    .into_iter()
-                    .enumerate()
-                    .map(|(i, subquery)| {
-                        let on_fragment = if i == 0 {
-                            String::new()
-                        } else {
-                            format!(
-                                " ON filter{i}.timeseries_name = filter{j}.timeseries_name \
-                                AND filter{i}.timeseries_key = filter{j}.timeseries_key",
-                                i = i, j = i - 1,
-                            )
-                        };
-                        format!(
-                            "(\n{subquery}\n) AS filter{i}{on_fragment}",
-                            subquery = indent(&subquery, 4),
-                            i = i,
-                            on_fragment = on_fragment,
-                        )
-                    })
-                .collect::<Vec<_>>().join("\nINNER JOIN\n");
-
-                // We also need to write an _additional_ first select statement to extract the columns
-                // from the subquery aliased as filter0.
-                (
-                    String::from("timeseries_name, timeseries_key"),
-                    format!(
-                        "SELECT\n\
-                        {timeseries_name},\n\
-                        {timeseries_key}\n\
-                        FROM\n\
-                        {subqueries}",
-                        timeseries_name = indent("filter0.timeseries_name", 4),
-                        timeseries_key = indent("filter0.timeseries_key", 4),
-                        subqueries = subqueries,
-                    ),
-                )
-            }
-        };
-
-        // Format the top-level query
-        format!(
-            "SELECT *\n\
-            FROM {db_name}.measurements_{data_type}\n\
-            WHERE ({filter_columns}) IN (\n\
-            {query}\n\
-            ){timestamp_filter}\n\
-            ORDER BY (timeseries_key, timestamp)\n\
-            FORMAT JSONEachRow;",
-            db_name = DATABASE_NAME,
-            data_type = db_type_name_for_datum(&datum_type),
-            filter_columns = filter_columns,
-            query = indent(&query, 4),
-            timestamp_filter = timestamp_filter,
-        )
-    }
-}
-
-// Helper to nicely indent lines with the given number of spaces
-fn indent(s: &str, count: usize) -> String {
-    let mut out = String::with_capacity(s.len() * 2);
-    let prefix = " ".repeat(count);
-    for (i, line) in s.split_terminator('\n').enumerate() {
-        if i > 0 {
-            out.push('\n');
-        }
-        if line.trim().is_empty() {
-            continue;
-        }
-        out.push_str(&prefix);
-        out.push_str(line);
-    }
-    if s.ends_with('\n') {
-        out.push('\n');
-    }
-    out
-}
-
 #[cfg(test)]
 mod tests {
-    use uuid::Uuid;
-
     use super::*;
-
-    const PROJECT_IDS: &[&str] = &[
-        "44292322-34ed-4568-8b1a-3b48c58a2801",
-        "4ddf0fdf-850e-44b7-b07a-0e6550d8c41b",
-    ];
-
-    #[test]
-    fn test_time_filter() {
-        use chrono::TimeZone;
-        let start = Utc.ymd(2021, 01, 01).and_hms_micro(01, 01, 01, 123456);
-        let end = Utc.ymd(2021, 01, 02).and_hms_micro(01, 01, 01, 123456);
-
-        let f = TimeFilter::Before(end);
-        assert_eq!(
-            f.as_where_fragment(),
-            "timestamp <= '2021-01-02 01:01:01.123456'"
-        );
-        let f = TimeFilter::After(start);
-        assert_eq!(
-            f.as_where_fragment(),
-            "timestamp >= '2021-01-01 01:01:01.123456'"
-        );
-        let f = TimeFilter::Between(start, end);
-        assert_eq!(
-            f.as_where_fragment(),
-            "timestamp >= '2021-01-01 01:01:01.123456' AND timestamp <= '2021-01-02 01:01:01.123456'"
-        );
-
-        assert!(TimeFilter::from_timestamps(Some(start), Some(end)).is_ok());
-        assert!(TimeFilter::from_timestamps(Some(end), Some(start)).is_err());
-    }
-
-    #[test]
-    fn test_field_filter() {
-        let filter = FieldFilter::new::<Uuid>(
-            &String::from("project_id"),
-            &["44292322-34ed-4568-8b1a-3b48c58a2801".parse().unwrap()],
-        )
-        .unwrap();
-        assert_eq!(
-            filter.as_where_fragment(),
-            "field_name = 'project_id' AND ((field_value = '44292322-34ed-4568-8b1a-3b48c58a2801'))",
-        );
-
-        let filter = FieldFilter::new::<Uuid>(
-            &String::from("project_id"),
-            &PROJECT_IDS
-                .iter()
-                .map(|id| id.parse().unwrap())
-                .collect::<Vec<_>>(),
-        )
-        .unwrap();
-        assert_eq!(
-            filter.as_where_fragment(),
-            "field_name = 'project_id' AND \
-            ((field_value = '44292322-34ed-4568-8b1a-3b48c58a2801') OR (field_value = '4ddf0fdf-850e-44b7-b07a-0e6550d8c41b'))",
-        );
-
-        assert!(matches!(
-            FieldFilter::new::<i64>(&String::from("project_id"), &[]),
-            Err(Error::QueryError(_)),
-        ));
-
-        let filter = FieldFilter::new(&String::from("cpu_id"), &[0]).unwrap();
-        assert_eq!(
-            filter.as_where_fragment(),
-            "field_name = 'cpu_id' AND ((field_value = 0))"
-        );
-    }
-
-    #[test]
-    fn test_timeseries_filter() {
-        let field_filters = vec![
-            FieldFilter::new::<Uuid>(
-                &String::from("project_id"),
-                &PROJECT_IDS
-                    .iter()
-                    .map(|id| id.parse().unwrap())
-                    .collect::<Vec<_>>(),
-            )
-            .unwrap(),
-            FieldFilter::new("cpu_id", &[0i64]).unwrap(),
-        ];
-        let filter = TimeseriesFilter {
-            timeseries_name: String::from("virtual_machine:cpu_busy"),
-            filters: field_filters,
-            time_filter: Some(TimeFilter::Before(Utc::now())),
-        };
-        assert_eq!(filter.table_names()[0], "oximeter.fields_uuid");
-        let query = filter.as_select_query(DatumType::F64);
-        assert!(query.contains("AS filter0"));
-        assert!(query.contains("AS filter1"));
-        assert!(query
-            .contains("ON filter1.timeseries_name = filter0.timeseries_name"));
-        assert!(query
-            .contains("AND filter1.timeseries_key = filter0.timeseries_key"));
-        println!("{}", filter.as_select_query(DatumType::F64));
-    }
-
-    #[test]
-    fn test_timeseries_filter_empty() {
-        let filter = TimeseriesFilter {
-            timeseries_name: String::from("virtual_machine:cpu_busy"),
-            filters: Vec::new(),
-            time_filter: None,
-        };
-        let query = filter.as_select_query(DatumType::F64);
-        let expected = "SELECT * FROM oximeter.measurements_f64 \
-            WHERE (timeseries_name) IN ('virtual_machine:cpu_busy') \
-            ORDER BY (timeseries_key, timestamp) \
-            FORMAT JSONEachRow;"
-            .replace(" ", "");
-        assert_eq!(query.replace(|c| c == '\n' || c == ' ', ""), expected);
-    }
-
-    #[test]
-    fn test_timeseries_filter_empty_field_filters() {
-        let time = TimeFilter::Before(Utc::now());
-        let filter = TimeseriesFilter {
-            timeseries_name: String::from("virtual_machine:cpu_busy"),
-            filters: Vec::new(),
-            time_filter: Some(time),
-        };
-        let query = filter.as_select_query(DatumType::F64);
-        let expected = format!(
-            "SELECT * FROM oximeter.measurements_f64 \
-            WHERE (timeseries_name) IN ('virtual_machine:cpu_busy') \
-            AND {} \
-            ORDER BY (timeseries_key, timestamp) \
-            FORMAT JSONEachRow;",
-            time.as_where_fragment(),
-        )
-        .replace(" ", "");
-        assert_eq!(query.replace(|c| c == '\n' || c == ' ', ""), expected,);
-    }
-
-    #[test]
-    fn test_timeseries_filter_empty_time_filter() {
-        let filter = TimeseriesFilter {
-            timeseries_name: String::from("virtual_machine:cpu_busy"),
-            filters: vec![FieldFilter::new("cpu_id", &[0i64]).unwrap()],
-            time_filter: None,
-        };
-        let query = filter.as_select_query(DatumType::F64);
-        let expected = "SELECT * FROM oximeter.measurements_f64 \
-            WHERE (timeseries_name, timeseries_key) IN ( \
-                SELECT timeseries_name, timeseries_key \
-                FROM oximeter.fields_i64 \
-                WHERE (field_name = 'cpu_id' AND ((field_value = 0)))) \
-            ORDER BY (timeseries_key, timestamp) \
-            FORMAT JSONEachRow;"
-            .replace(" ", "");
-        assert_eq!(query.replace(|c| c == '\n' || c == ' ', ""), expected,);
-    }
+    use crate::model::FieldSource;
+    use chrono::TimeZone;
 
     #[test]
     fn test_field_value_as_db_str() {
@@ -525,6 +628,409 @@ mod tests {
                 "563f0076-2c22-4510-8fd9-bed1ed8c9ae1".parse().unwrap()
             )),
             "'563f0076-2c22-4510-8fd9-bed1ed8c9ae1'"
+        );
+    }
+
+    #[test]
+    fn test_string_field_selector() {
+        assert_eq!(
+            StringFieldSelector {
+                name: "foo".to_string(),
+                op: FieldCmp::Eq,
+                value: "bar".to_string(),
+            },
+            "foo==bar".parse().unwrap(),
+        );
+
+        assert_eq!(
+            StringFieldSelector {
+                name: "foo".to_string(),
+                op: FieldCmp::Neq,
+                value: "bar".to_string(),
+            },
+            "foo!=bar".parse().unwrap(),
+        );
+
+        assert_eq!(
+            StringFieldSelector {
+                name: "foo".to_string(),
+                op: FieldCmp::Like,
+                value: "bar".to_string(),
+            },
+            "foo~=bar".parse().unwrap(),
+        );
+    }
+
+    #[test]
+    fn test_select_query_builder_filter_str() {
+        let schema = TimeseriesSchema {
+            timeseries_name: "foo:bar".to_string(),
+            fields: vec![
+                Field {
+                    name: "f0".to_string(),
+                    ty: FieldType::I64,
+                    source: FieldSource::Target,
+                },
+                Field {
+                    name: "f1".to_string(),
+                    ty: FieldType::Bool,
+                    source: FieldSource::Target,
+                },
+            ],
+            datum_type: DatumType::I64,
+            created: Utc::now(),
+        };
+        let builder = SelectQueryBuilder::new(&schema)
+            .filter_str("f0!=2")
+            .expect("Failed to add field filter from string");
+        assert_eq!(builder.field_selectors.len(), 1);
+        assert_eq!(
+            builder.field_selector(FieldSource::Target, "f0").unwrap(),
+            &FieldSelector {
+                name: "f0".to_string(),
+                comparison: Some(FieldComparison {
+                    op: FieldCmp::Neq,
+                    value: FieldValue::I64(2)
+                }),
+                ty: FieldType::I64,
+            }
+        );
+
+        let builder = builder
+            .filter_str("f1==true")
+            .expect("Failed to add field filter from string");
+        assert_eq!(builder.field_selectors.len(), 2);
+        assert_eq!(
+            builder.field_selector(FieldSource::Target, "f1").unwrap(),
+            &FieldSelector {
+                name: "f1".to_string(),
+                comparison: Some(FieldComparison {
+                    op: FieldCmp::Eq,
+                    value: FieldValue::Bool(true)
+                }),
+                ty: FieldType::Bool,
+            }
+        );
+
+        builder.clone().filter_str("f1>true").expect_err("Expected error adding field comparison which isn't valid for the type");
+
+        builder.filter_str("a=0").expect_err(
+            "Expected to fail adding a selector for an unknown field",
+        );
+    }
+
+    #[test]
+    fn test_field_cmp() {
+        let cases = &[
+            (FieldCmp::Eq, "==", "="),
+            (FieldCmp::Neq, "!=", "!="),
+            (FieldCmp::Gt, ">", ">"),
+            (FieldCmp::Ge, ">=", ">="),
+            (FieldCmp::Lt, "<", "<"),
+            (FieldCmp::Le, "<=", "<="),
+            (FieldCmp::Like, "~=", "LIKE"),
+        ];
+        for (cmp, from_str, db_str) in cases.iter() {
+            assert_eq!(
+                cmp,
+                &from_str.parse().unwrap(),
+                "FromStr implementation failed"
+            );
+            assert_eq!(
+                cmp.as_db_str(),
+                *db_str,
+                "as_db_str implementation failed"
+            );
+        }
+    }
+
+    #[test]
+    fn test_field_selector_as_query() {
+        let mut selector = FieldSelector {
+            name: "foo".to_string(),
+            comparison: Some(FieldComparison {
+                op: FieldCmp::Neq,
+                value: FieldValue::from(100),
+            }),
+            ty: FieldType::I64,
+        };
+        assert_eq!(
+            selector.as_query("target:metric"),
+            "SELECT * FROM oximeter.fields_i64 WHERE timeseries_name = 'target:metric' AND field_name = 'foo' AND field_value != 100"
+        );
+
+        selector.comparison.as_mut().unwrap().op = FieldCmp::Le;
+        assert_eq!(
+            selector.as_query("target:metric"),
+            "SELECT * FROM oximeter.fields_i64 WHERE timeseries_name = 'target:metric' AND field_name = 'foo' AND field_value <= 100"
+        );
+    }
+
+    #[test]
+    fn test_time_range() {
+        let s = "2021-01-01 01:01:01.123456789";
+        let start_time =
+            Utc.datetime_from_str(s, crate::DATABASE_TIMESTAMP_FORMAT).unwrap();
+        let e = "2021-01-01 01:01:02.123456789";
+        let end_time =
+            Utc.datetime_from_str(e, crate::DATABASE_TIMESTAMP_FORMAT).unwrap();
+        let range = TimeRange {
+            start: Some(Timestamp::Inclusive(start_time)),
+            end: Some(Timestamp::Exclusive(end_time)),
+        };
+        assert_eq!(
+            range.as_query(),
+            format!(
+                " AND timestamp >= '{s}' AND timestamp < '{e}' ",
+                s = s,
+                e = e
+            )
+        );
+    }
+
+    #[test]
+    fn test_select_query_builder_no_fields() {
+        let schema = TimeseriesSchema {
+            timeseries_name: "foo:bar".to_string(),
+            fields: vec![],
+            datum_type: DatumType::I64,
+            created: Utc::now(),
+        };
+        let query = SelectQueryBuilder::new(&schema).build();
+        assert!(query.field_query().is_none());
+        assert_eq!(
+            query.measurement_query(&[]),
+            concat!(
+                "SELECT * ",
+                "FROM oximeter.measurements_i64 ",
+                "WHERE timeseries_name = 'foo:bar' ",
+                "ORDER BY (timeseries_name, timeseries_key, timestamp) ",
+                "FORMAT JSONEachRow;"
+            )
+        );
+    }
+
+    #[test]
+    fn test_select_query_builder_from_parts() {
+        #[derive(oximeter::Target)]
+        struct Targ {
+            foo: String,
+        }
+
+        #[derive(oximeter::Metric)]
+        struct Met {
+            baz: i64,
+            datum: f64,
+        }
+        let targ = Targ { foo: String::from("bar") };
+        let met = Met { baz: 0, datum: 0.0 };
+        let builder = SelectQueryBuilder::from_parts(&targ, &met).unwrap();
+
+        assert_eq!(
+            builder.field_selector(FieldSource::Target, "foo").unwrap(),
+            &FieldSelector {
+                name: String::from("foo"),
+                ty: FieldType::String,
+                comparison: Some(FieldComparison {
+                    op: FieldCmp::Eq,
+                    value: FieldValue::from("bar"),
+                }),
+            },
+            "Expected an exact comparison when building a query from parts",
+        );
+
+        assert_eq!(
+            builder.field_selector(FieldSource::Metric, "baz").unwrap(),
+            &FieldSelector {
+                name: String::from("baz"),
+                ty: FieldType::I64,
+                comparison: Some(FieldComparison {
+                    op: FieldCmp::Eq,
+                    value: FieldValue::from(0),
+                }),
+            },
+            "Expected an exact comparison when building a query from parts",
+        );
+    }
+
+    #[test]
+    fn test_select_query_builder_no_selectors() {
+        let schema = TimeseriesSchema {
+            timeseries_name: "foo:bar".to_string(),
+            fields: vec![
+                Field {
+                    name: "f0".to_string(),
+                    ty: FieldType::I64,
+                    source: FieldSource::Target,
+                },
+                Field {
+                    name: "f1".to_string(),
+                    ty: FieldType::Bool,
+                    source: FieldSource::Target,
+                },
+            ],
+            datum_type: DatumType::I64,
+            created: Utc::now(),
+        };
+
+        let query = SelectQueryBuilder::new(&schema).build();
+        let field_query = query.field_query().unwrap();
+        assert_eq!(
+            field_query,
+            concat!(
+                "SELECT ",
+                "filter0.timeseries_key as timeseries_key, ",
+                "filter0.field_name, filter0.field_value, ",
+                "filter1.field_name, filter1.field_value ",
+                "FROM (",
+                "SELECT * FROM oximeter.fields_i64 ",
+                "WHERE timeseries_name = 'foo:bar' ",
+                "AND field_name = 'f0'",
+                ") AS filter0 ",
+                "INNER JOIN (",
+                "SELECT * FROM oximeter.fields_bool ",
+                "WHERE timeseries_name = 'foo:bar' ",
+                "AND field_name = 'f1'",
+                ") AS filter1 ON (",
+                "filter0.timeseries_name = filter1.timeseries_name AND ",
+                "filter0.timeseries_key = filter1.timeseries_key) ",
+                "ORDER BY (filter0.timeseries_name, filter0.timeseries_key) ",
+                "FORMAT JSONEachRow;",
+            )
+        );
+
+        let keys = &[0, 1];
+        let measurement_query = query.measurement_query(keys);
+        assert_eq!(
+            measurement_query,
+            concat!(
+                "SELECT * ",
+                "FROM oximeter.measurements_i64 ",
+                "WHERE timeseries_name = 'foo:bar' AND ",
+                "timeseries_key IN (0, 1) ",
+                "ORDER BY (timeseries_name, timeseries_key, timestamp) ",
+                "FORMAT JSONEachRow;",
+            )
+        );
+    }
+
+    #[test]
+    fn test_select_query_builder_field_selectors() {
+        let schema = TimeseriesSchema {
+            timeseries_name: "foo:bar".to_string(),
+            fields: vec![
+                Field {
+                    name: "f0".to_string(),
+                    ty: FieldType::I64,
+                    source: FieldSource::Target,
+                },
+                Field {
+                    name: "f1".to_string(),
+                    ty: FieldType::Bool,
+                    source: FieldSource::Target,
+                },
+            ],
+            datum_type: DatumType::I64,
+            created: Utc::now(),
+        };
+
+        let query = SelectQueryBuilder::new(&schema)
+            .filter_str("f0==0")
+            .expect("Failed to add first filter")
+            .filter_str("f1==false")
+            .expect("Failed to add second filter")
+            .build();
+        assert_eq!(
+            query.field_query().unwrap(),
+            concat!(
+                "SELECT ",
+                "filter0.timeseries_key as timeseries_key, ",
+                "filter0.field_name, filter0.field_value, ",
+                "filter1.field_name, filter1.field_value ",
+                "FROM (",
+                "SELECT * FROM oximeter.fields_i64 ",
+                "WHERE timeseries_name = 'foo:bar' AND field_name = 'f0' AND field_value = 0",
+                ") AS filter0 ",
+                "INNER JOIN (",
+                "SELECT * FROM oximeter.fields_bool ",
+                "WHERE timeseries_name = 'foo:bar' AND field_name = 'f1' AND field_value = 0",
+                ") AS filter1 ON (",
+                "filter0.timeseries_name = filter1.timeseries_name AND ",
+                "filter0.timeseries_key = filter1.timeseries_key) ",
+                "ORDER BY (filter0.timeseries_name, filter0.timeseries_key) ",
+                "FORMAT JSONEachRow;",
+            )
+        );
+    }
+
+    #[test]
+    fn test_select_query_builder_full() {
+        let schema = TimeseriesSchema {
+            timeseries_name: "foo:bar".to_string(),
+            fields: vec![
+                Field {
+                    name: "f0".to_string(),
+                    ty: FieldType::I64,
+                    source: FieldSource::Target,
+                },
+                Field {
+                    name: "f1".to_string(),
+                    ty: FieldType::Bool,
+                    source: FieldSource::Target,
+                },
+            ],
+            datum_type: DatumType::I64,
+            created: Utc::now(),
+        };
+
+        let start_time = Utc::now();
+        let end_time = start_time + chrono::Duration::seconds(1);
+
+        let query = SelectQueryBuilder::new(&schema)
+            .filter_str("f0==0")
+            .expect("Failed to add first filter")
+            .filter_str("f1==false")
+            .expect("Failed to add second filter")
+            .start_time(Some(Timestamp::Inclusive(start_time)))
+            .end_time(Some(Timestamp::Exclusive(end_time)))
+            .build();
+        assert_eq!(
+            query.field_query().unwrap(),
+            concat!(
+                "SELECT filter0.timeseries_key as timeseries_key, ",
+                "filter0.field_name, filter0.field_value, ",
+                "filter1.field_name, filter1.field_value ",
+                "FROM (",
+                "SELECT * FROM oximeter.fields_i64 ",
+                "WHERE timeseries_name = 'foo:bar' AND field_name = 'f0' AND field_value = 0",
+                ") AS filter0 ",
+                "INNER JOIN (",
+                "SELECT * FROM oximeter.fields_bool ",
+                "WHERE timeseries_name = 'foo:bar' AND field_name = 'f1' AND field_value = 0",
+                ") AS filter1 ON (",
+                "filter0.timeseries_name = filter1.timeseries_name AND ",
+                "filter0.timeseries_key = filter1.timeseries_key) ",
+                "ORDER BY (filter0.timeseries_name, filter0.timeseries_key) ",
+                "FORMAT JSONEachRow;",
+            ));
+        let keys = &[0, 1];
+        assert_eq!(
+            query.measurement_query(keys),
+            format!(
+                concat!(
+                    "SELECT * ",
+                    "FROM oximeter.measurements_i64 ",
+                    "WHERE timeseries_name = 'foo:bar' ",
+                    "AND timeseries_key IN (0, 1) ",
+                    " AND timestamp >= '{start_time}' ",
+                    "AND timestamp < '{end_time}' ",
+                    "ORDER BY (timeseries_name, timeseries_key, timestamp) ",
+                    "FORMAT JSONEachRow;",
+                ),
+                start_time =
+                    start_time.format(crate::DATABASE_TIMESTAMP_FORMAT),
+                end_time = end_time.format(crate::DATABASE_TIMESTAMP_FORMAT),
+            )
         );
     }
 }

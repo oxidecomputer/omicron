@@ -1,19 +1,30 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
 //! Bootstrap-related APIs.
 
 use super::client::types as bootstrap_types;
 use super::client::Client as BootstrapClient;
+use super::discovery;
+use super::spdm::SpdmError;
 use super::views::ShareResponse;
-use omicron_common::api::external::Error;
+use omicron_common::api::external::Error as ExternalError;
+use omicron_common::backoff::{
+    internal_service_policy, retry_notify, BackoffError,
+};
 use omicron_common::packaging::sha256_digest;
 
 use slog::Logger;
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::{Seek, SeekFrom};
-use std::net::SocketAddr;
 use std::path::Path;
 use tar::Archive;
 use thiserror::Error;
+
+const UNLOCK_THRESHOLD: usize = 1;
+const BOOTSTRAP_PORT: u16 = 12346;
 
 /// Describes errors which may occur while operating the bootstrap service.
 #[derive(Error, Debug)]
@@ -35,24 +46,38 @@ pub enum BootstrapError {
 
     #[error("Error making HTTP request")]
     Api(#[from] anyhow::Error),
+
+    #[error("Error running SPDM protocol: {0}")]
+    Spdm(#[from] SpdmError),
+
+    #[error("Not enough peers to unlock storage")]
+    NotEnoughPeers,
+}
+
+impl From<BootstrapError> for ExternalError {
+    fn from(err: BootstrapError) -> Self {
+        Self::internal_error(&err.to_string())
+    }
 }
 
 /// The entity responsible for bootstrapping an Oxide rack.
-pub struct Agent {
+pub(crate) struct Agent {
     /// Debug log
     log: Logger,
+    peer_monitor: discovery::PeerMonitor,
 }
 
 impl Agent {
-    pub fn new(log: Logger) -> Self {
-        Agent { log }
+    pub fn new(log: Logger) -> Result<Self, BootstrapError> {
+        let peer_monitor = discovery::PeerMonitor::new(&log)?;
+        Ok(Agent { log, peer_monitor })
     }
 
     /// Implements the "request share" API.
     pub async fn request_share(
         &self,
         identity: Vec<u8>,
-    ) -> Result<ShareResponse, Error> {
+    ) -> Result<ShareResponse, BootstrapError> {
         // TODO-correctness: Validate identity, return whatever
         // information is necessary to establish trust quorum.
         //
@@ -62,42 +87,92 @@ impl Agent {
         Ok(ShareResponse { shared_secret: vec![] })
     }
 
-    /// Performs device initialization:
+    /// Communicates with peers, sharing secrets, until the rack has been
+    /// sufficiently unlocked.
     ///
-    /// - TODO: Communicates with other sled agents to establish a trust quorum.
-    /// - Verifies, unpacks, and launches other services.
-    pub async fn initialize(
-        &self,
-        other_agents: Vec<SocketAddr>,
-    ) -> Result<(), BootstrapError> {
-        info!(&self.log, "bootstrap service initializing");
-        // TODO-correctness:
-        // - Establish trust quorum.
-        // - Once this is done, "unlock" local storage
-        //
-        // The current implementation sends a stub request to all known
-        // sled agents, but does not actually create a quorum / unlock
-        // anything.
-        let other_agents: Vec<BootstrapClient> = other_agents
-            .into_iter()
-            .map(|addr| {
-                let addr_str = addr.to_string();
-                BootstrapClient::new(
-                    &format!("http://{}", addr_str,),
-                    self.log.new(o!(
-                        "Address" => addr_str,
-                    )),
-                )
-            })
-            .collect();
-        for agent in &other_agents {
-            agent
-                .api_request_share(&bootstrap_types::ShareRequest {
-                    identity: vec![],
-                })
-                .await?;
-        }
+    /// - This method retries until [`UNLOCK_THRESHOLD`] other agents are
+    /// online, and have successfully responded to "share requests".
+    async fn establish_sled_quorum(&self) -> Result<(), BootstrapError> {
+        retry_notify(
+            internal_service_policy(),
+            || async {
+                let other_agents = self.peer_monitor.addrs().await;
+                info!(&self.log, "Bootstrap: Communicating with peers: {:?}", other_agents);
 
+                // "-1" to account for ourselves.
+                //
+                // NOTE: Clippy error exists while the compile-time unlock
+                // threshold is "1", because we basically don't require any
+                // peers to unlock.
+                #[allow(clippy::absurd_extreme_comparisons)]
+                if other_agents.len() < UNLOCK_THRESHOLD - 1 {
+                    warn!(&self.log, "Not enough peers to start establishing quorum");
+                    return Err(BackoffError::Transient(
+                        BootstrapError::NotEnoughPeers,
+                    ));
+                }
+                info!(&self.log, "Bootstrap: Enough peers to start share transfer");
+
+                // TODO-correctness:
+                // - Establish trust quorum.
+                // - Once this is done, "unlock" local storage
+                //
+                // The current implementation sends a stub request to all known sled
+                // agents, but does not actually create a quorum / unlock anything.
+                let other_agents: Vec<BootstrapClient> = other_agents
+                    .into_iter()
+                    .map(|mut addr| {
+                        addr.set_port(BOOTSTRAP_PORT);
+                        // TODO-correctness:
+                        //
+                        // Many rust crates - such as "URL" - really dislike
+                        // using scopes in IPv6 addresses. Using
+                        // "addr.to_string()" results in an IP address format
+                        // that is rejected when embedded into a URL.
+                        //
+                        // Instead, we merely use IP and port for the moment,
+                        // which loses the scope information. Longer-term, if we
+                        // use ULAs (Unique Local Addresses) the scope shouldn't
+                        // be a factor anyway.
+                        let addr_str = format!("[{}]:{}", addr.ip(), addr.port());
+                        info!(&self.log, "bootstrap: Connecting to {}", addr_str);
+                        BootstrapClient::new(
+                            &format!("http://{}", addr_str),
+                            self.log.new(o!(
+                                "Address" => addr_str,
+                            )),
+                        )
+                    })
+                    .collect();
+                for agent in &other_agents {
+                    agent
+                        .api_request_share(&bootstrap_types::ShareRequest {
+                            identity: vec![],
+                        })
+                        .await
+                        .map_err(|e| {
+                            info!(&self.log, "Bootstrap: Failed to share request with peer: {:?}", e);
+                            BackoffError::Transient(BootstrapError::Api(e))
+                        })?;
+                        info!(&self.log, "Bootstrap: Shared request with peer");
+                }
+                Ok(())
+            },
+            |error, duration| {
+                warn!(
+                    self.log,
+                    "Failed to unlock sleds (will retry after {:?}: {:#}",
+                    duration,
+                    error,
+                )
+            },
+        )
+        .await?;
+
+        Ok(())
+    }
+
+    async fn launch_local_services(&self) -> Result<(), BootstrapError> {
         let tar_source = Path::new("/opt/oxide");
         let destination = Path::new("/opt/oxide");
         // TODO-correctness: Validation should come from ROT, not local file.
@@ -121,6 +196,19 @@ impl Agent {
         // This is the responsibility of the sled agent in response to requests
         // from Nexus.
         self.extract(&digests, &tar_source, &destination, "propolis-server")?;
+
+        Ok(())
+    }
+
+    /// Performs device initialization:
+    ///
+    /// - TODO: Communicates with other sled agents to establish a trust quorum.
+    /// - Verifies, unpacks, and launches other services.
+    pub async fn initialize(&self) -> Result<(), BootstrapError> {
+        info!(&self.log, "bootstrap service initializing");
+
+        self.establish_sled_quorum().await?;
+        self.launch_local_services().await?;
 
         Ok(())
     }

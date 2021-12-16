@@ -3,7 +3,7 @@ CREATE DATABASE IF NOT EXISTS oximeter;
 CREATE TABLE IF NOT EXISTS oximeter.measurements_bool
 (
     timeseries_name String,
-    timeseries_key String,
+    timeseries_key UInt64,
     timestamp DateTime64(9, 'UTC'),
     datum UInt8
 )
@@ -13,7 +13,7 @@ ORDER BY (timeseries_name, timeseries_key, timestamp);
 CREATE TABLE IF NOT EXISTS oximeter.measurements_i64
 (
     timeseries_name String,
-    timeseries_key String,
+    timeseries_key UInt64,
     timestamp DateTime64(9, 'UTC'),
     datum Int64
 )
@@ -23,7 +23,7 @@ ORDER BY (timeseries_name, timeseries_key, timestamp);
 CREATE TABLE IF NOT EXISTS oximeter.measurements_f64
 (
     timeseries_name String,
-    timeseries_key String,
+    timeseries_key UInt64,
     timestamp DateTime64(9, 'UTC'),
     datum Float64
 )
@@ -33,7 +33,7 @@ ORDER BY (timeseries_name, timeseries_key, timestamp);
 CREATE TABLE IF NOT EXISTS oximeter.measurements_string
 (
     timeseries_name String,
-    timeseries_key String,
+    timeseries_key UInt64,
     timestamp DateTime64(9, 'UTC'),
     datum String
 )
@@ -43,7 +43,7 @@ ORDER BY (timeseries_name, timeseries_key, timestamp);
 CREATE TABLE IF NOT EXISTS oximeter.measurements_bytes
 (
     timeseries_name String,
-    timeseries_key String,
+    timeseries_key UInt64,
     timestamp DateTime64(9, 'UTC'),
     datum Array(UInt8)
 )
@@ -53,7 +53,7 @@ ORDER BY (timeseries_name, timeseries_key, timestamp);
 CREATE TABLE IF NOT EXISTS oximeter.measurements_cumulativei64
 (
     timeseries_name String,
-    timeseries_key String,
+    timeseries_key UInt64,
     start_time DateTime64(9, 'UTC'),
     timestamp DateTime64(9, 'UTC'),
     datum Int64
@@ -64,7 +64,7 @@ ORDER BY (timeseries_name, timeseries_key, start_time, timestamp);
 CREATE TABLE IF NOT EXISTS oximeter.measurements_cumulativef64
 (
     timeseries_name String,
-    timeseries_key String,
+    timeseries_key UInt64,
     start_time DateTime64(9, 'UTC'),
     timestamp DateTime64(9, 'UTC'),
     datum Float64
@@ -75,7 +75,7 @@ ORDER BY (timeseries_name, timeseries_key, start_time, timestamp);
 CREATE TABLE IF NOT EXISTS oximeter.measurements_histogrami64
 (
     timeseries_name String,
-    timeseries_key String,
+    timeseries_key UInt64,
     start_time DateTime64(9, 'UTC'),
     timestamp DateTime64(9, 'UTC'),
     bins Array(Int64),
@@ -87,7 +87,7 @@ ORDER BY (timeseries_name, timeseries_key, start_time, timestamp);
 CREATE TABLE IF NOT EXISTS oximeter.measurements_histogramf64
 (
     timeseries_name String,
-    timeseries_key String,
+    timeseries_key UInt64,
     start_time DateTime64(9, 'UTC'),
     timestamp DateTime64(9, 'UTC'),
     bins Array(Float64),
@@ -99,7 +99,7 @@ ORDER BY (timeseries_name, timeseries_key, start_time, timestamp);
 CREATE TABLE IF NOT EXISTS oximeter.fields_bool
 (
     timeseries_name String,
-    timeseries_key String,
+    timeseries_key UInt64,
     field_name String,
     field_value UInt8
 )
@@ -109,7 +109,7 @@ ORDER BY (timeseries_name, field_name, field_value, timeseries_key);
 CREATE TABLE IF NOT EXISTS oximeter.fields_i64
 (
     timeseries_name String,
-    timeseries_key String,
+    timeseries_key UInt64,
     field_name String,
     field_value Int64
 )
@@ -119,7 +119,7 @@ ORDER BY (timeseries_name, field_name, field_value, timeseries_key);
 CREATE TABLE IF NOT EXISTS oximeter.fields_ipaddr
 (
     timeseries_name String,
-    timeseries_key String,
+    timeseries_key UInt64,
     field_name String,
     field_value IPv6
 )
@@ -129,7 +129,7 @@ ORDER BY (timeseries_name, field_name, field_value, timeseries_key);
 CREATE TABLE IF NOT EXISTS oximeter.fields_string
 (
     timeseries_name String,
-    timeseries_key String,
+    timeseries_key UInt64,
     field_name String,
     field_value String
 )
@@ -139,7 +139,7 @@ ORDER BY (timeseries_name, field_name, field_value, timeseries_key);
 CREATE TABLE IF NOT EXISTS oximeter.fields_uuid
 (
     timeseries_name String,
-    timeseries_key String,
+    timeseries_key UInt64,
     field_name String,
     field_value UUID
 )

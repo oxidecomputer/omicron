@@ -1,3 +1,7 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
 /*!
 * Library interface to the sled agent
  */
@@ -6,11 +10,11 @@ use super::config::Config;
 use super::http_entrypoints::api as http_api;
 use super::sled_agent::SledAgent;
 
+use nexus_client::Client as NexusClient;
 use omicron_common::backoff::{
     internal_service_policy, retry_notify, BackoffError,
 };
-use omicron_common::NexusClient;
-use slog::Logger;
+use slog::{Drain, Logger};
 use std::sync::Arc;
 
 /**
@@ -76,11 +80,12 @@ impl Server {
             (nexus_client
                 .cpapi_sled_agents_post(
                     &config.id,
-                    &omicron_common::nexus_client::types::SledAgentStartupInfo {
+                    &nexus_client::types::SledAgentStartupInfo {
                         sa_address: sa_address.to_string(),
                     },
                 )
-                .await).map_err(BackoffError::Transient)
+                .await)
+                .map_err(BackoffError::Transient)
         };
         let log_notification_failure = |error, delay| {
             warn!(log, "failed to contact nexus, will retry in {:?}", delay;
@@ -112,10 +117,20 @@ impl Server {
  * Run an instance of the `Server`
  */
 pub async fn run_server(config: &Config) -> Result<(), String> {
-    let log = config
-        .log
-        .to_logger("sled-agent")
-        .map_err(|message| format!("initializing logger: {}", message))?;
+    let (drain, registration) = slog_dtrace::with_drain(
+        config
+            .log
+            .to_logger("sled-agent")
+            .map_err(|message| format!("initializing logger: {}", message))?,
+    );
+    let log = slog::Logger::root(drain.fuse(), slog::o!());
+    if let slog_dtrace::ProbeRegistration::Failed(e) = registration {
+        let msg = format!("failed to register DTrace probes: {}", e);
+        error!(log, "{}", msg);
+        return Err(msg);
+    } else {
+        debug!(log, "registered DTrace probes");
+    }
 
     let server = Server::start(config, &log).await?;
     info!(log, "sled agent started successfully");

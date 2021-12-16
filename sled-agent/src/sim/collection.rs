@@ -1,3 +1,7 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
 /*!
  * Simulated sled agent object collection
  */
@@ -8,8 +12,8 @@ use futures::channel::mpsc::Receiver;
 use futures::channel::mpsc::Sender;
 use futures::lock::Mutex;
 use futures::stream::StreamExt;
+use nexus_client::Client as NexusClient;
 use omicron_common::api::external::Error;
-use omicron_common::NexusClient;
 use slog::Logger;
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -356,6 +360,7 @@ mod test {
             InstanceRuntimeState {
                 run_state: InstanceState::Creating,
                 sled_uuid: uuid::Uuid::new_v4(),
+                propolis_uuid: uuid::Uuid::new_v4(),
                 ncpus: InstanceCpuCount(2),
                 memory: ByteCount::from_mebibytes_u32(512),
                 hostname: "myvm".to_string(),
@@ -438,6 +443,7 @@ mod test {
             assert!(rx.try_next().is_err());
             rprev = rnext;
         }
+        logctx.cleanup_successful();
     }
 
     /**
@@ -551,6 +557,7 @@ mod test {
         instance.transition_finish();
         let rnext = instance.object.current().clone();
         assert_eq!(rprev.gen, rnext.gen);
+        logctx.cleanup_successful();
     }
 
     #[tokio::test]
@@ -863,6 +870,7 @@ mod test {
             assert_eq!(rnext.disk_state, next);
             rprev = rnext;
         }
+        logctx.cleanup_successful();
     }
 
     #[tokio::test]
@@ -962,6 +970,7 @@ mod test {
         );
         disk.transition_finish();
         assert_eq!(disk.object.current().disk_state, DiskState::Destroyed);
+        logctx.cleanup_successful();
     }
 
     #[tokio::test]

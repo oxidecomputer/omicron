@@ -1,3 +1,7 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
 //! CTE implementation for inserting a row representing a child resource of a
 //! collection. This atomically
 //! 1) checks if the collection exists and is not soft deleted, and fails
@@ -5,6 +9,7 @@
 //! 2) updates the collection's child resource generation number
 //! 3) inserts the child resource row
 
+use super::pool::DbConnection;
 use async_bb8_diesel::{
     AsyncRunQueryDsl, ConnectionError, ConnectionManager, PoolError,
 };
@@ -200,11 +205,11 @@ where
     /// - Error(other diesel error)
     pub async fn insert_and_get_result_async(
         self,
-        pool: &bb8::Pool<ConnectionManager<PgConnection>>,
+        pool: &bb8::Pool<ConnectionManager<DbConnection>>,
     ) -> AsyncInsertIntoCollectionResult<ResourceType>
     where
         // We require this bound to ensure that "Self" is runnable as query.
-        Self: query_methods::LoadQuery<PgConnection, ResourceType>,
+        Self: query_methods::LoadQuery<DbConnection, ResourceType>,
     {
         self.get_result_async::<ResourceType>(pool)
             .await
@@ -219,11 +224,11 @@ where
     /// - Error(other diesel error)
     pub async fn insert_and_get_results_async(
         self,
-        pool: &bb8::Pool<ConnectionManager<PgConnection>>,
+        pool: &bb8::Pool<ConnectionManager<DbConnection>>,
     ) -> AsyncInsertIntoCollectionResult<Vec<ResourceType>>
     where
         // We require this bound to ensure that "Self" is runnable as query.
-        Self: query_methods::LoadQuery<PgConnection, ResourceType>,
+        Self: query_methods::LoadQuery<DbConnection, ResourceType>,
     {
         self.get_results_async::<ResourceType>(pool)
             .await
@@ -238,11 +243,11 @@ where
     /// - Error(other diesel error)
     pub fn insert_and_get_result(
         self,
-        conn: &mut PgConnection,
+        conn: &mut DbConnection,
     ) -> SyncInsertIntoCollectionResult<ResourceType>
     where
         // We require this bound to ensure that "Self" is runnable as query.
-        Self: query_methods::LoadQuery<PgConnection, ResourceType>,
+        Self: query_methods::LoadQuery<DbConnection, ResourceType>,
     {
         self.get_result::<ResourceType>(conn)
             .map_err(Self::translate_sync_error)
@@ -256,11 +261,11 @@ where
     /// - Error(other diesel error)
     pub fn insert_and_get_results(
         self,
-        conn: &mut PgConnection,
+        conn: &mut DbConnection,
     ) -> SyncInsertIntoCollectionResult<Vec<ResourceType>>
     where
         // We require this bound to ensure that "Self" is runnable as query.
-        Self: query_methods::LoadQuery<PgConnection, ResourceType>,
+        Self: query_methods::LoadQuery<DbConnection, ResourceType>,
     {
         self.get_results::<ResourceType>(conn)
             .map_err(Self::translate_sync_error)
@@ -319,7 +324,7 @@ where
     type SqlType = SelectableSqlType<ResourceType>;
 }
 
-impl<ResourceType, ISR, C> RunQueryDsl<PgConnection>
+impl<ResourceType, ISR, C> RunQueryDsl<DbConnection>
     for InsertIntoCollectionStatement<ResourceType, ISR, C>
 where
     ResourceTable<ResourceType, C>: Table + Copy + Debug,
@@ -688,6 +693,7 @@ mod test {
         assert!(*not_found.lock().unwrap());
 
         db.cleanup().await.unwrap();
+        logctx.cleanup_successful();
     }
 
     #[tokio::test]
@@ -752,5 +758,6 @@ mod test {
         assert_eq!(collection_rcgen, 2);
 
         db.cleanup().await.unwrap();
+        logctx.cleanup_successful();
     }
 }

@@ -1,3 +1,5 @@
+#!/usr/bin/env bash
+
 #
 # oxapi_demo: wrapper around curl(1) to run basic requests against the Oxide API
 # prototype server.
@@ -13,7 +15,7 @@ GENERAL OPTIONS
 
     -A        do not attempt to authenticate
               (default behavior: use "spoof" authentication for endpoints
-	      that require it)
+               that require it)
 
 ORGANIZATIONS
 
@@ -59,6 +61,19 @@ VPCS
     vpc_get         ORGANIZATION_NAME PROJECT_NAME VPC_NAME
     vpc_delete      ORGANIZATION_NAME PROJECT_NAME VPC_NAME
 
+VPC SUBNETS
+
+    vpc_subnets_list ORGANIZATION_NAME PROJECT_NAME VPC_NAME
+    vpc_subnet_get ORGANIZATION_NAME PROJECT_NAME VPC_NAME SUBNET_NAME
+
+VPC SUBNETS IPS
+
+    subnet_ips_list ORGANIZATION_NAME PROJECT_NAME VPC_NAME SUBNET_NAME
+
+VPC FIREWALL
+
+    vpc_firewall_rules_get ORGANIZATION_NAME PROJECT_NAME VPC_NAME
+
 HARDWARE
 
     racks_list
@@ -78,7 +93,18 @@ function main
 	local cmd
 
 	type curl > /dev/null 2>&1 || fail "curl not found in PATH."
-	type json > /dev/null 2>&1 || fail "json not found in PATH. Install it with npm i -g json."
+
+	if ! type json > /dev/null 2>&1;
+	then
+		if ! type jq > /dev/null 2>&1;
+		then
+			fail "json or jq not found in PATH. Install with 'npm i -g json' or 'apt install jq'"
+		else
+			JSONTOOL="jq ."
+		fi
+	else
+		JSONTOOL="json -ga"
+	fi
 
 	if [[ "$1" == "-A" ]]; then
 		NO_AUTHENTICATE=true
@@ -117,7 +143,7 @@ function do_curl
 
 	path="$1"
 	shift
-	(set -o xtrace; curl -sSi "$OXAPI_URL$path" "$@" | json -ga)
+	(set -o xtrace; curl -sSq "$OXAPI_URL$path" "$@" | ${JSONTOOL})
 }
 
 function do_curl_authn
@@ -126,7 +152,7 @@ function do_curl_authn
 		do_curl "$@"
 	else
 		do_curl "$@" \
-		    -H "oxide-authn-spoof: 001de000-05e4-0000-0000-000000004007"
+			-H "oxide-authn-spoof: 001de000-05e4-4000-8000-000000004007"
 	fi
 }
 
@@ -150,7 +176,7 @@ function mkjson
 		str="$str \"$key\": $value"
 	done
 	str="$str }"
-	echo "$str" | json
+	echo "$str" | ${JSONTOOL}
 }
 
 #
@@ -160,7 +186,7 @@ function mkjson
 function cmd_organizations_list
 {
 	[[ $# != 0 ]] && usage "expected no arguments"
-	do_curl /organizations
+	do_curl_authn /organizations
 }
 
 function cmd_organization_create_demo
@@ -192,7 +218,7 @@ function cmd_project_create_demo
 {
 	[[ $# != 2 ]] && usage "expected ORGANIZATION_NAME PROJECT_NAME"
 	mkjson name="$2" description="a project called $2" |
-		do_curl "/organizations/$1/projects" -X POST -T -
+		do_curl_authn "/organizations/$1/projects" -X POST -T -
 }
 
 function cmd_project_delete
@@ -230,7 +256,7 @@ function cmd_instance_create_demo
 	# memory is 1024 * 1024 * 256
 	[[ $# != 3 ]] && usage "expected ORGANIZATION_NAME PROJECT_NAME INSTANCE_NAME"
 	mkjson name="$3" description="an instance called $3" ncpus=1 \
-	    memory=268435456 bootDiskSize=1 hostname="$2" |
+		memory=268435456 bootDiskSize=1 hostname="$3" |
 		do_curl "/organizations/$1/projects/$2/instances" -X POST -T -
 }
 
@@ -292,7 +318,7 @@ function cmd_disk_create_demo
 {
 	[[ $# != 3 ]] && usage "expected ORGANIZATION_NAME PROJECT_NAME DISK_NAME"
 	mkjson name="$3" description="a disk called $3" size=1024 |
-	    do_curl "/organizations/$1/projects/$2/disks" -X POST -T -
+		do_curl "/organizations/$1/projects/$2/disks" -X POST -T -
 }
 
 function cmd_disk_get
@@ -304,15 +330,16 @@ function cmd_disk_get
 function cmd_disk_delete
 {
 	[[ $# != 3 ]] && usage "expected ORGANIZATION_NAME PROJECT_NAME DISK_NAME"
-	do_curl "/organizations/$1/projects/$2/disks/$3" -X DELETE
+	do_curl_authn "/organizations/$1/projects/$2/disks/$3" -X DELETE
 }
 
 function cmd_vpc_create_demo
 {
 	[[ $# != 4 ]] && usage "expected ORGANIZATION_NAME PROJECT_NAME VPC_NAME DNS_NAME"
 	mkjson name="$3" dnsName="$4" description="a vpc called $3" |
-	    do_curl "/organizations/$1/projects/$2/vpcs" -X POST -T -
+		do_curl "/organizations/$1/projects/$2/vpcs" -X POST -T -
 }
+
 
 function cmd_vpc_get
 {
@@ -322,8 +349,32 @@ function cmd_vpc_get
 
 function cmd_vpc_delete
 {
-	[[ $# != 2 ]] && usage "expected PROJECT_NAME VPC_NAME"
+	[[ $# != 3 ]] && usage "expected ORGANIZATION_NAME PROJECT_NAME VPC_NAME"
 	do_curl "/organizations/$1/projects/$2/vpcs/$3" -X DELETE
+}
+
+function cmd_vpc_subnets_list
+{
+	[[ $# != 3 ]] && usage "expected ORGANIZATION_NAME PROJECT_NAME VPC_NAME"
+	do_curl "/organizations/$1/projects/$2/vpcs/$3/subnets"
+}
+
+function cmd_vpc_subnet_get
+{
+	[[ $# != 4 ]] && usage "expected ORGANIZATION_NAME PROJECT_NAME VPC_NAME SUBNET_NAME"
+	do_curl "/organizations/$1/projects/$2/vpcs/$3/subnets/$4"
+}
+
+function cmd_subnet_ips_list
+{
+	[[ $# != 4 ]] && usage "expected ORGANIZATION_NAME PROJECT_NAME VPC_NAME SUBNET_NAME"
+	do_curl "/organizations/$1/projects/$2/vpcs/$3/subnets/$4/ips"
+}
+
+function cmd_vpc_firewall_rules_get
+{
+	[[ $# != 3 ]] && usage "expected ORGANIZATION_NAME PROJECT_NAME VPC_NAME"
+	do_curl "/organizations/$1/projects/$2/vpcs/$3/firewall/rules"
 }
 
 function cmd_racks_list

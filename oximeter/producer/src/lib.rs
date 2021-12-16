@@ -1,3 +1,7 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
 //! Types for serving produced metric data to an Oximeter collector server.
 
 // Copyright 2021 Oxide Computer Company
@@ -10,7 +14,8 @@ use omicron_common::api::internal::nexus::ProducerEndpoint;
 use oximeter::types::{ProducerRegistry, ProducerResults};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use slog::{debug, info, o};
+use slog::Drain;
+use slog::{debug, error, info, o};
 use std::net::SocketAddr;
 use std::sync::Arc;
 use thiserror::Error;
@@ -51,10 +56,20 @@ impl Server {
         // Clone mutably, as we may update the address after the server starts, see below.
         let mut config = config.clone();
 
-        let log = config
-            .logging_config
-            .to_logger("metric-server")
-            .map_err(|msg| Error::Server(msg.to_string()))?;
+        let (drain, registration) = slog_dtrace::with_drain(
+            config
+                .logging_config
+                .to_logger("metric-server")
+                .map_err(|msg| Error::Server(msg.to_string()))?,
+        );
+        let log = slog::Logger::root(drain.fuse(), slog::o!());
+        if let slog_dtrace::ProbeRegistration::Failed(e) = registration {
+            let msg = format!("failed to register DTrace probes: {}", e);
+            error!(log, "failed to register DTrace probes: {}", e);
+            return Err(Error::Server(msg));
+        } else {
+            debug!(log, "registered DTrace probes");
+        }
         let registry = ProducerRegistry::with_id(config.server_info.id);
         let dropshot_log = log.new(o!("component" => "dropshot"));
         let server = HttpServerStarter::new(
@@ -85,14 +100,8 @@ impl Server {
         }
 
         debug!(log, "registering metric server as a producer");
-        register(
-            config.registration_address,
-            &log,
-            &omicron_common::nexus_client::types::ProducerEndpoint::from(
-                &config.server_info,
-            ),
-        )
-        .await?;
+        register(config.registration_address, &log, &config.server_info)
+            .await?;
         info!(
             log,
             "starting oximeter metric server";
@@ -164,14 +173,12 @@ async fn collect_endpoint(
 pub async fn register(
     address: SocketAddr,
     log: &slog::Logger,
-    server_info: &omicron_common::nexus_client::types::ProducerEndpoint,
+    server_info: &omicron_common::api::internal::nexus::ProducerEndpoint,
 ) -> Result<(), Error> {
-    let client = omicron_common::NexusClient::new(
-        &format!("http://{}", address),
-        log.clone(),
-    );
+    let client =
+        nexus_client::Client::new(&format!("http://{}", address), log.clone());
     client
-        .cpapi_producers_post(server_info)
+        .cpapi_producers_post(&server_info.into())
         .await
         .map_err(|msg| Error::RegistrationError(msg.to_string()))
 }

@@ -1,3 +1,7 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
 /*!
  * Primary control plane interface for database read and write operations
  */
@@ -18,17 +22,26 @@
  * complicated to do safely and generally compared to what we have now.
  */
 
-use super::collection_insert::{AsyncInsertError, DatastoreCollection};
+use super::collection_insert::{
+    AsyncInsertError, DatastoreCollection, SyncInsertError,
+};
 use super::error::diesel_pool_result_optional;
 use super::identity::{Asset, Resource};
+use super::pool::DbConnection;
 use super::Pool;
+use crate::authn;
 use crate::authz;
 use crate::context::OpContext;
-use async_bb8_diesel::{AsyncRunQueryDsl, ConnectionManager};
+use crate::external_api::params;
+use async_bb8_diesel::{
+    AsyncConnection, AsyncRunQueryDsl, ConnectionError, ConnectionManager,
+    PoolError,
+};
 use chrono::Utc;
+use diesel::prelude::*;
+use diesel::upsert::excluded;
 use diesel::{ExpressionMethods, QueryDsl, SelectableHelper};
 use omicron_common::api;
-use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::DeleteResult;
 use omicron_common::api::external::Error;
@@ -37,6 +50,9 @@ use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::LookupType;
 use omicron_common::api::external::ResourceType;
 use omicron_common::api::external::UpdateResult;
+use omicron_common::api::external::{
+    CreateResult, IdentityMetadataCreateParams,
+};
 use omicron_common::bail_unless;
 use std::convert::TryFrom;
 use std::sync::Arc;
@@ -46,15 +62,18 @@ use crate::db::{
     self,
     error::{
         public_error_from_diesel_pool, public_error_from_diesel_pool_create,
+        public_error_from_diesel_pool_shouldnt_fail,
     },
     model::{
-        ConsoleSession, Disk, DiskAttachment, DiskRuntimeState, Generation,
-        Instance, InstanceRuntimeState, Name, Organization, OrganizationUpdate,
-        OximeterInfo, ProducerEndpoint, Project, ProjectUpdate, RouterRoute,
-        RouterRouteUpdate, Sled, Vpc, VpcRouter, VpcRouterUpdate, VpcSubnet,
-        VpcSubnetUpdate, VpcUpdate,
+        ConsoleSession, Dataset, Disk, DiskRuntimeState, Generation,
+        IncompleteNetworkInterface, Instance, InstanceRuntimeState, Name,
+        NetworkInterface, Organization, OrganizationUpdate, OximeterInfo,
+        ProducerEndpoint, Project, ProjectUpdate, RouterRoute,
+        RouterRouteUpdate, Sled, UserBuiltin, Vpc, VpcFirewallRule, VpcRouter,
+        VpcRouterUpdate, VpcSubnet, VpcSubnetUpdate, VpcUpdate, Zpool,
     },
     pagination::paginated,
+    subnet_allocation::AllocateIpQuery,
     update_and_check::{UpdateAndCheck, UpdateStatus},
 };
 
@@ -72,15 +91,14 @@ impl DataStore {
     // the database.  Eventually, this function should only be used for doing
     // authentication in the first place (since we can't do an authz check in
     // that case).
-    fn pool(&self) -> &bb8::Pool<ConnectionManager<diesel::PgConnection>> {
+    fn pool(&self) -> &bb8::Pool<ConnectionManager<DbConnection>> {
         self.pool.pool()
     }
 
     fn pool_authorized(
         &self,
         opctx: &OpContext,
-    ) -> Result<&bb8::Pool<ConnectionManager<diesel::PgConnection>>, Error>
-    {
+    ) -> Result<&bb8::Pool<ConnectionManager<DbConnection>>, Error> {
         opctx.authorize(authz::Action::Query, authz::DATABASE)?;
         Ok(self.pool.pool())
     }
@@ -143,6 +161,79 @@ impl DataStore {
             })
     }
 
+    /// Stores a new zpool in the database.
+    pub async fn zpool_upsert(&self, zpool: Zpool) -> CreateResult<Zpool> {
+        use db::schema::zpool::dsl;
+
+        let sled_id = zpool.sled_id;
+        Sled::insert_resource(
+            sled_id,
+            diesel::insert_into(dsl::zpool)
+                .values(zpool.clone())
+                .on_conflict(dsl::id)
+                .do_update()
+                .set((
+                    dsl::time_modified.eq(Utc::now()),
+                    dsl::sled_id.eq(excluded(dsl::sled_id)),
+                    dsl::total_size.eq(excluded(dsl::total_size)),
+                )),
+        )
+        .insert_and_get_result_async(self.pool())
+        .await
+        .map_err(|e| match e {
+            AsyncInsertError::CollectionNotFound => Error::ObjectNotFound {
+                type_name: ResourceType::Sled,
+                lookup_type: LookupType::ById(sled_id),
+            },
+            AsyncInsertError::DatabaseError(e) => {
+                public_error_from_diesel_pool_create(
+                    e,
+                    ResourceType::Zpool,
+                    &zpool.id().to_string(),
+                )
+            }
+        })
+    }
+
+    /// Stores a new dataset in the database.
+    pub async fn dataset_upsert(
+        &self,
+        dataset: Dataset,
+    ) -> CreateResult<Dataset> {
+        use db::schema::dataset::dsl;
+
+        let zpool_id = dataset.pool_id;
+        Zpool::insert_resource(
+            zpool_id,
+            diesel::insert_into(dsl::dataset)
+                .values(dataset.clone())
+                .on_conflict(dsl::id)
+                .do_update()
+                .set((
+                    dsl::time_modified.eq(Utc::now()),
+                    dsl::pool_id.eq(excluded(dsl::id)),
+                    dsl::ip.eq(excluded(dsl::ip)),
+                    dsl::port.eq(excluded(dsl::port)),
+                    dsl::kind.eq(excluded(dsl::kind)),
+                )),
+        )
+        .insert_and_get_result_async(self.pool())
+        .await
+        .map_err(|e| match e {
+            AsyncInsertError::CollectionNotFound => Error::ObjectNotFound {
+                type_name: ResourceType::Zpool,
+                lookup_type: LookupType::ById(zpool_id),
+            },
+            AsyncInsertError::DatabaseError(e) => {
+                public_error_from_diesel_pool_create(
+                    e,
+                    ResourceType::Dataset,
+                    &dataset.id().to_string(),
+                )
+            }
+        })
+    }
+
     /// Create a organization
     pub async fn organization_create(
         &self,
@@ -151,7 +242,7 @@ impl DataStore {
     ) -> CreateResult<Organization> {
         use db::schema::organization::dsl;
 
-        opctx.authorize(authz::Action::CreateOrganization, authz::FLEET)?;
+        opctx.authorize(authz::Action::CreateChild, authz::FLEET)?;
 
         let name = organization.name().as_str().to_string();
         diesel::insert_into(dsl::organization)
@@ -257,11 +348,11 @@ impl DataStore {
         Ok(())
     }
 
-    /// Look up the id for a organization based on its name
-    pub async fn organization_lookup_id_by_name(
+    /// Look up an organization by name
+    pub async fn organization_lookup(
         &self,
         name: &Name,
-    ) -> Result<Uuid, Error> {
+    ) -> Result<authz::Organization, Error> {
         use db::schema::organization::dsl;
         dsl::organization
             .filter(dsl::time_deleted.is_null())
@@ -276,17 +367,31 @@ impl DataStore {
                     LookupType::ByName(name.as_str().to_owned()),
                 )
             })
+            .map(|o| authz::FLEET.organization(o))
+    }
+
+    /// Look up the id for a organization based on its name
+    ///
+    /// As endpoints move to doing authorization, they should move to
+    /// [`organization_lookup()`] instead of this function.
+    pub async fn organization_lookup_id_by_name(
+        &self,
+        name: &Name,
+    ) -> Result<Uuid, Error> {
+        self.organization_lookup(name).await.map(|o| o.id())
     }
 
     pub async fn organizations_list_by_id(
         &self,
+        opctx: &OpContext,
         pagparams: &DataPageParams<'_, Uuid>,
     ) -> ListResultVec<Organization> {
         use db::schema::organization::dsl;
+        opctx.authorize(authz::Action::ListChildren, authz::FLEET)?;
         paginated(dsl::organization, dsl::id, pagparams)
             .filter(dsl::time_deleted.is_null())
             .select(Organization::as_select())
-            .load_async::<Organization>(self.pool())
+            .load_async::<Organization>(self.pool_authorized(opctx)?)
             .await
             .map_err(|e| {
                 public_error_from_diesel_pool(
@@ -299,13 +404,15 @@ impl DataStore {
 
     pub async fn organizations_list_by_name(
         &self,
+        opctx: &OpContext,
         pagparams: &DataPageParams<'_, Name>,
     ) -> ListResultVec<Organization> {
         use db::schema::organization::dsl;
+        opctx.authorize(authz::Action::ListChildren, authz::FLEET)?;
         paginated(dsl::organization, dsl::name, pagparams)
             .filter(dsl::time_deleted.is_null())
             .select(Organization::as_select())
-            .load_async::<Organization>(self.pool())
+            .load_async::<Organization>(self.pool_authorized(opctx)?)
             .await
             .map_err(|e| {
                 public_error_from_diesel_pool(
@@ -343,9 +450,13 @@ impl DataStore {
     /// Create a project
     pub async fn project_create(
         &self,
+        opctx: &OpContext,
+        org: &authz::Organization,
         project: Project,
     ) -> CreateResult<Project> {
         use db::schema::project::dsl;
+
+        opctx.authorize(authz::Action::CreateChild, *org)?;
 
         let name = project.name().as_str().to_string();
         let organization_id = project.organization_id;
@@ -353,7 +464,7 @@ impl DataStore {
             organization_id,
             diesel::insert_into(dsl::project).values(project),
         )
-        .insert_and_get_result_async(self.pool())
+        .insert_and_get_result_async(self.pool_authorized(opctx)?)
         .await
         .map_err(|e| match e {
             AsyncInsertError::CollectionNotFound => Error::ObjectNotFound {
@@ -747,7 +858,7 @@ impl DataStore {
         &self,
         instance_id: &Uuid,
         pagparams: &DataPageParams<'_, Name>,
-    ) -> ListResultVec<DiskAttachment> {
+    ) -> ListResultVec<Disk> {
         use db::schema::disk::dsl;
 
         paginated(dsl::disk, dsl::name, &pagparams)
@@ -756,13 +867,6 @@ impl DataStore {
             .select(Disk::as_select())
             .load_async::<Disk>(self.pool())
             .await
-            .map(|disks| {
-                disks
-                    .into_iter()
-                    // Unwrap safety: filtered by instance_id in query.
-                    .map(|disk| disk.attachment().unwrap())
-                    .collect()
-            })
             .map_err(|e| {
                 public_error_from_diesel_pool(
                     e,
@@ -899,9 +1003,16 @@ impl DataStore {
             })
     }
 
-    pub async fn project_delete_disk(&self, disk_id: &Uuid) -> DeleteResult {
+    pub async fn project_delete_disk(
+        &self,
+        opctx: &OpContext,
+        disk_authz: authz::ProjectChild,
+    ) -> DeleteResult {
         use db::schema::disk::dsl;
         let now = Utc::now();
+
+        let disk_id = disk_authz.id();
+        opctx.authorize(authz::Action::Delete, disk_authz)?;
 
         let destroyed = api::external::DiskState::Destroyed.label();
         let detached = api::external::DiskState::Detached.label();
@@ -913,7 +1024,7 @@ impl DataStore {
             .filter(dsl::disk_state.eq_any(vec![detached, faulted]))
             .set((dsl::disk_state.eq(destroyed), dsl::time_deleted.eq(now)))
             .check_if_exists::<Disk>(*disk_id)
-            .execute_and_check(self.pool())
+            .execute_and_check(self.pool_authorized(opctx)?)
             .await
             .map_err(|e| {
                 public_error_from_diesel_pool(
@@ -932,6 +1043,108 @@ impl DataStore {
                 ),
             }),
         }
+    }
+
+    /*
+     * Network interfaces
+     */
+
+    pub async fn instance_create_network_interface(
+        &self,
+        interface: IncompleteNetworkInterface,
+    ) -> CreateResult<NetworkInterface> {
+        use db::schema::network_interface::dsl;
+
+        // TODO: Longer term, it would be nice to decouple the IP allocation
+        // (and MAC allocation) from the NetworkInterface table, so that
+        // retrying from parallel inserts doesn't need to happen here.
+
+        let name = interface.identity.name.clone();
+        match interface.ip {
+            // Attempt an insert with a requested IP address
+            Some(ip) => {
+                let row = NetworkInterface {
+                    identity: interface.identity,
+                    instance_id: interface.instance_id,
+                    vpc_id: interface.vpc_id,
+                    subnet_id: interface.subnet.id(),
+                    mac: interface.mac,
+                    ip: ip.into(),
+                };
+                diesel::insert_into(dsl::network_interface)
+                    .values(row)
+                    .returning(NetworkInterface::as_returning())
+                    .get_result_async(self.pool())
+                    .await
+                    .map_err(|e| {
+                        public_error_from_diesel_pool_create(
+                            e,
+                            ResourceType::NetworkInterface,
+                            name.as_str(),
+                        )
+                    })
+            }
+            // Insert and allocate an IP address
+            None => {
+                let block = interface.subnet.ipv4_block.ok_or_else(|| {
+                    Error::internal_error("assuming subnets all have v4 block")
+                })?;
+                let allocation_query = AllocateIpQuery {
+                    block: ipnetwork::IpNetwork::V4(block.0 .0),
+                    interface,
+                    now: Utc::now(),
+                };
+                diesel::insert_into(dsl::network_interface)
+                    .values(allocation_query)
+                    .returning(NetworkInterface::as_returning())
+                    .get_result_async(self.pool())
+                    .await
+                    .map_err(|e| {
+                        if let PoolError::Connection(ConnectionError::Query(
+                            diesel::result::Error::NotFound,
+                        )) = e
+                        {
+                            Error::InvalidRequest {
+                                message: "no available IP addresses"
+                                    .to_string(),
+                            }
+                        } else {
+                            public_error_from_diesel_pool_create(
+                                e,
+                                ResourceType::NetworkInterface,
+                                name.as_str(),
+                            )
+                        }
+                    })
+            }
+        }
+    }
+
+    pub async fn instance_delete_network_interface(
+        &self,
+        network_interface_id: &Uuid,
+    ) -> DeleteResult {
+        use db::schema::network_interface::dsl;
+
+        // TODO-correctness: Do not allow deleting interfaces on running
+        // instances until we support hotplug
+
+        let now = Utc::now();
+        diesel::update(dsl::network_interface)
+            .filter(dsl::time_deleted.is_null())
+            .filter(dsl::id.eq(*network_interface_id))
+            .set(dsl::time_deleted.eq(now))
+            .returning(NetworkInterface::as_returning())
+            .get_result_async(self.pool())
+            .await
+            .map_err(|e| {
+                public_error_from_diesel_pool(
+                    e,
+                    ResourceType::NetworkInterface,
+                    LookupType::ById(*network_interface_id),
+                )
+            })?;
+        Ok(())
     }
 
     // Create a record for a new Oximeter instance
@@ -1284,6 +1497,12 @@ impl DataStore {
     pub async fn project_delete_vpc(&self, vpc_id: &Uuid) -> DeleteResult {
         use db::schema::vpc::dsl;
 
+        // Note that we don't ensure the firewall rules are empty here, because
+        // we allow deleting VPCs with firewall rules present. Inserting new
+        // rules is serialized with respect to the deletion by the row lock
+        // associated with the VPC row, since we use the collection insert CTE
+        // pattern to add firewall rules.
+
         let now = Utc::now();
         diesel::update(dsl::vpc)
             .filter(dsl::time_deleted.is_null())
@@ -1300,6 +1519,101 @@ impl DataStore {
                 )
             })?;
         Ok(())
+    }
+
+    pub async fn vpc_list_firewall_rules(
+        &self,
+        vpc_id: &Uuid,
+        pagparams: &DataPageParams<'_, Name>,
+    ) -> ListResultVec<VpcFirewallRule> {
+        use db::schema::vpc_firewall_rule::dsl;
+
+        paginated(dsl::vpc_firewall_rule, dsl::name, &pagparams)
+            .filter(dsl::time_deleted.is_null())
+            .filter(dsl::vpc_id.eq(*vpc_id))
+            .select(VpcFirewallRule::as_select())
+            .load_async(self.pool())
+            .await
+            .map_err(|e| {
+                public_error_from_diesel_pool(
+                    e,
+                    ResourceType::VpcFirewallRule,
+                    LookupType::Other("Listing All".to_string()),
+                )
+            })
+    }
+
+    pub async fn vpc_delete_all_firewall_rules(
+        &self,
+        vpc_id: &Uuid,
+    ) -> DeleteResult {
+        use db::schema::vpc_firewall_rule::dsl;
+
+        let now = Utc::now();
+        // TODO-performance: Paginate this update to avoid long queries
+        diesel::update(dsl::vpc_firewall_rule)
+            .filter(dsl::time_deleted.is_null())
+            .filter(dsl::vpc_id.eq(*vpc_id))
+            .set(dsl::time_deleted.eq(now))
+            .execute_async(self.pool())
+            .await
+            .map_err(|e| {
+                public_error_from_diesel_pool(
+                    e,
+                    ResourceType::Vpc,
+                    LookupType::ById(*vpc_id),
+                )
+            })?;
+        Ok(())
+    }
+
+    /// Replace all firewall rules with the given rules
+    pub async fn vpc_update_firewall_rules(
+        &self,
+        vpc_id: &Uuid,
+        rules: Vec<VpcFirewallRule>,
+    ) -> UpdateResult<Vec<VpcFirewallRule>> {
+        use db::schema::vpc_firewall_rule::dsl;
+
+        let now = Utc::now();
+        let delete_old_query = diesel::update(dsl::vpc_firewall_rule)
+            .filter(dsl::time_deleted.is_null())
+            .filter(dsl::vpc_id.eq(*vpc_id))
+            .set(dsl::time_deleted.eq(now));
+
+        let insert_new_query = Vpc::insert_resource(
+            *vpc_id,
+            diesel::insert_into(dsl::vpc_firewall_rule).values(rules),
+        );
+
+        // TODO-scalability: Ideally this would be a CTE so we don't need to
+        // hold a transaction open across multiple roundtrips from the database,
+        // but for now we're using a transaction due to the severely decreased
+        // legibility of CTEs via diesel right now.
+        self.pool()
+            .transaction(move |conn| {
+                delete_old_query.execute(conn)?;
+
+                // The generation count update on the vpc table row will take a
+                // write lock on the row, ensuring that the vpc was not deleted
+                // concurently.
+                insert_new_query.insert_and_get_results(conn).map_err(|e| {
+                    match e {
+                        SyncInsertError::CollectionNotFound => {
+                            diesel::result::Error::RollbackTransaction
+                        }
+                        SyncInsertError::DatabaseError(e) => e,
+                    }
+                })
+            })
+            .await
+            .map_err(|e| {
+                public_error_from_diesel_pool(
+                    e,
+                    ResourceType::VpcFirewallRule,
+                    LookupType::ById(*vpc_id),
+                )
+            })
     }
 
     pub async fn vpc_list_subnets(
@@ -1412,6 +1726,28 @@ impl DataStore {
                 )
             })?;
         Ok(())
+    }
+
+    pub async fn subnet_list_network_interfaces(
+        &self,
+        subnet_id: &Uuid,
+        pagparams: &DataPageParams<'_, Name>,
+    ) -> ListResultVec<NetworkInterface> {
+        use db::schema::network_interface::dsl;
+
+        paginated(dsl::network_interface, dsl::name, pagparams)
+            .filter(dsl::time_deleted.is_null())
+            .filter(dsl::subnet_id.eq(*subnet_id))
+            .select(NetworkInterface::as_select())
+            .load_async::<db::model::NetworkInterface>(self.pool())
+            .await
+            .map_err(|e| {
+                public_error_from_diesel_pool(
+                    e,
+                    ResourceType::NetworkInterface,
+                    LookupType::Other("Listing All".to_string()),
+                )
+            })
     }
 
     pub async fn vpc_list_routers(
@@ -1728,10 +2064,94 @@ impl DataStore {
                 ))
             })
     }
+
+    pub async fn users_builtin_list_by_name(
+        &self,
+        opctx: &OpContext,
+        pagparams: &DataPageParams<'_, Name>,
+    ) -> ListResultVec<UserBuiltin> {
+        use db::schema::user_builtin::dsl;
+        opctx.authorize(authz::Action::ListChildren, authz::FLEET)?;
+        paginated(dsl::user_builtin, dsl::name, pagparams)
+            .select(UserBuiltin::as_select())
+            .load_async::<UserBuiltin>(self.pool_authorized(opctx)?)
+            .await
+            .map_err(|e| {
+                public_error_from_diesel_pool(
+                    e,
+                    ResourceType::User,
+                    LookupType::Other("Listing All".to_string()),
+                )
+            })
+    }
+
+    pub async fn user_builtin_fetch(
+        &self,
+        opctx: &OpContext,
+        name: &Name,
+    ) -> LookupResult<UserBuiltin> {
+        use db::schema::user_builtin::dsl;
+        opctx.authorize(authz::Action::Read, authz::FLEET.child_generic())?;
+        dsl::user_builtin
+            .filter(dsl::name.eq(name.clone()))
+            .select(UserBuiltin::as_select())
+            .first_async::<UserBuiltin>(self.pool_authorized(opctx)?)
+            .await
+            .map_err(|e| {
+                public_error_from_diesel_pool(
+                    e,
+                    ResourceType::User,
+                    LookupType::ByName(name.as_str().to_owned()),
+                )
+            })
+    }
+
+    /// Load built-in users into the database
+    pub async fn load_builtin_users(
+        &self,
+        opctx: &OpContext,
+    ) -> Result<(), Error> {
+        use db::schema::user_builtin::dsl;
+
+        opctx.authorize(authz::Action::Modify, authz::FLEET)?;
+
+        let builtin_users = [
+            // Note: "db_init" is also a builtin user, but that one by necessity
+            // is created with the database.
+            &*authn::USER_SAGA_RECOVERY,
+            &*authn::USER_TEST_PRIVILEGED,
+            &*authn::USER_TEST_UNPRIVILEGED,
+        ]
+        .iter()
+        .map(|u| {
+            UserBuiltin::new(
+                u.id,
+                params::UserBuiltinCreate {
+                    identity: IdentityMetadataCreateParams {
+                        name: u.name.clone(),
+                        description: String::from(u.description),
+                    },
+                },
+            )
+        })
+        .collect::<Vec<UserBuiltin>>();
+
+        debug!(opctx.log, "attempting to create built-in users");
+        let count = diesel::insert_into(dsl::user_builtin)
+            .values(builtin_users)
+            .on_conflict(dsl::id)
+            .do_nothing()
+            .execute_async(self.pool_authorized(opctx)?)
+            .await
+            .map_err(public_error_from_diesel_pool_shouldnt_fail)?;
+        info!(opctx.log, "created {} built-in users", count);
+        Ok(())
+    }
 }
 
 #[cfg(test)]
 mod test {
+    use crate::authz;
     use crate::context::OpContext;
     use crate::db;
     use crate::db::identity::Resource;
@@ -1771,12 +2191,14 @@ mod test {
                 },
             },
         );
-        datastore.project_create(project).await.unwrap();
+        let org = authz::FLEET.organization(organization.id());
+        datastore.project_create(&opctx, &org, project).await.unwrap();
         let organization_after_project_create =
             datastore.organization_fetch(organization.name()).await.unwrap();
         assert!(organization_after_project_create.rcgen > organization.rcgen);
 
         let _ = db.cleanup().await;
+        logctx.cleanup_successful();
     }
 
     #[tokio::test]
@@ -1833,5 +2255,6 @@ mod test {
         assert_eq!(delete_again, Ok(()));
 
         let _ = db.cleanup().await;
+        logctx.cleanup_successful();
     }
 }

@@ -1,3 +1,7 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
 /*!
  * Facilities for working with the Omicron database
  */
@@ -15,6 +19,7 @@ mod pool;
 mod saga_recovery;
 mod saga_types;
 mod sec_store;
+mod subnet_allocation;
 mod update_and_check;
 
 #[cfg(test)]
