@@ -86,14 +86,12 @@ impl Eq for AuthenticatedActor {}
 
 impl oso::PolarClass for AuthenticatedActor {
     fn get_polar_class_builder() -> oso::ClassBuilder<Self> {
-        oso::Class::builder()
-            .with_equality_check()
-            .add_constant(
-                AuthenticatedActor {
-                    actor_id: authn::USER_DB_INIT.id,
-                    roles: RoleSet::new(),
-                },
-                "USER_DB_INIT",
-            )
+        oso::Class::builder().with_equality_check().add_constant(
+            AuthenticatedActor {
+                actor_id: authn::USER_DB_INIT.id,
+                roles: RoleSet::new(),
+            },
+            "USER_DB_INIT",
+        )
     }
 }
