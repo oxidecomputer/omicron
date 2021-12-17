@@ -52,11 +52,11 @@ impl Fleet {
     /// Returns an authz resource representing some other kind of child (e.g.,
     /// a built-in user, built-in role, etc. -- but _not_ an Organization)
     ///
-    /// Aside from Organizations (which you create with [`Fleet::organization()`
-    /// instead), all instances of all types of Fleet children are treated
-    /// interchangeably by the authz subsystem.  That's because we do not
-    /// currently support assigning roles to these resources, so all that
-    /// matters for authz is that they are a child of the Fleet.
+    /// Aside from Organizations (which you create with
+    /// [`Fleet::organization()`] instead), all instances of all types of Fleet
+    /// children are treated interchangeably by the authz subsystem.  That's
+    /// because we do not currently support assigning roles to these resources,
+    /// so all that matters for authz is that they are a child of the Fleet.
     pub fn child_generic(&self) -> FleetChild {
         FleetChild {}
     }
@@ -109,7 +109,7 @@ impl oso::PolarClass for FleetChild {
                 /* Roles are not supported on FleetChilds today. */
                 |_: &FleetChild, _: AuthenticatedActor, _: String| false,
             )
-            .add_attribute_getter("fleet", |_: &FleetChild| Fleet {})
+            .add_attribute_getter("fleet", |_: &FleetChild| FLEET)
     }
 }
 
@@ -119,7 +119,7 @@ impl AuthzApiResource for FleetChild {
     }
 
     fn parent(&self) -> Option<Box<dyn AuthzResource>> {
-        Some(Box::new(Fleet {}))
+        Some(Box::new(FLEET))
     }
 }
 
