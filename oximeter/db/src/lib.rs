@@ -166,6 +166,15 @@ impl std::convert::TryFrom<String> for TimeseriesName {
     }
 }
 
+impl<T> PartialEq<T> for TimeseriesName
+where
+    T: AsRef<str>,
+{
+    fn eq(&self, other: &T) -> bool {
+        self.0.eq(other.as_ref())
+    }
+}
+
 fn validate_timeseries_name(s: &str) -> Result<&str, Error> {
     if regex::Regex::new(TIMESERIES_NAME_REGEX).unwrap().is_match(s) {
         Ok(s)

@@ -16,6 +16,7 @@ mod oximeter;
 mod projects;
 mod router_routes;
 mod subnet_allocation;
+mod timeseries;
 mod users_builtin;
 mod vpc_firewall;
 mod vpc_routers;
