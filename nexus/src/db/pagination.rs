@@ -72,9 +72,6 @@ where
 // of columns, but that'll either require modifying Diesel (to make "tuples of
 // columns" implement a subset of ExpressionMethods) or making a macro to generate
 // all the necessary bounds we need.
-//
-// Remove this attribute when used in https://github.com/oxidecomputer/omicron/pull/512
-#[allow(dead_code)]
 pub fn paginated_multicolumn<T, C1, C2, M1, M2>(
     table: T,
     (c1, c2): (C1, C2),
