@@ -279,9 +279,9 @@ async fn organizations_get_organization(
     let nexus = &apictx.nexus;
     let path = path_params.into_inner();
     let organization_id = match &path.organization {
-        Identifier::Id(uuid) => uuid,
+        Identifier::Id(uuid) => *uuid,
         Identifier::Name(name) => {
-            &nexus.organization_lookup_id_by_name(name).await?
+            nexus.organization_lookup_id_by_name(name.into()).await?
         }
     };
     let handler = async {
@@ -296,7 +296,7 @@ async fn organizations_get_organization(
  */
 #[endpoint {
      method = DELETE,
-     path = "/organizations/{organization_name}",
+     path = "/organizations/{organization}",
  }]
 async fn organizations_delete_organization(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
@@ -305,10 +305,10 @@ async fn organizations_delete_organization(
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
     let params = path_params.into_inner();
-    let organization_id = match &path.organization {
-        Identifier::Id(uuid) => uuid,
+    let organization_id = match &params.organization {
+        Identifier::Id(uuid) => *uuid,
         Identifier::Name(name) => {
-            &nexus.organization_lookup_id_by_name(name).await?
+            nexus.organization_lookup_id_by_name(name.into()).await?
         }
     };
     let handler = async {
@@ -329,7 +329,7 @@ async fn organizations_delete_organization(
  */
 #[endpoint {
      method = PUT,
-     path = "/organizations/{organization_name}",
+     path = "/organizations/{organization}",
  }]
 async fn organizations_put_organization(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
@@ -339,11 +339,16 @@ async fn organizations_put_organization(
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
     let path = path_params.into_inner();
-    let organization_name = &path.organization_name;
+    let organization_id = match &path.organization {
+        Identifier::Id(uuid) => *uuid,
+        Identifier::Name(name) => {
+            nexus.organization_lookup_id_by_name(name.into()).await?
+        }
+    };
     let handler = async {
         let new_organization = nexus
             .organization_update(
-                &organization_name,
+                &organization_id,
                 &updated_organization.into_inner(),
             )
             .await?;
@@ -357,7 +362,7 @@ async fn organizations_put_organization(
  */
 #[endpoint {
      method = GET,
-     path = "/organizations/{organization_name}/projects",
+     path = "/organizations/{organization}/projects",
  }]
 async fn organization_projects_get(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
@@ -368,7 +373,12 @@ async fn organization_projects_get(
     let nexus = &apictx.nexus;
     let query = query_params.into_inner();
     let path = path_params.into_inner();
-    let organization_name = &path.organization_name;
+    let organization_id = match &path.organization {
+        Identifier::Id(uuid) => *uuid,
+        Identifier::Name(name) => {
+            nexus.organization_lookup_id_by_name(name.into()).await?
+        }
+    };
 
     let handler = async {
         let params = ScanByNameOrId::from_query(&query)?;
@@ -377,7 +387,7 @@ async fn organization_projects_get(
             PagField::Id => {
                 let page_selector = data_page_params_nameid_id(&rqctx, &query)?;
                 nexus
-                    .projects_list_by_id(&organization_name, &page_selector)
+                    .projects_list_by_id(&organization_id, &page_selector)
                     .await?
             }
 
@@ -386,7 +396,7 @@ async fn organization_projects_get(
                     data_page_params_nameid_name(&rqctx, &query)?
                         .map_name(|n| Name::ref_cast(n));
                 nexus
-                    .projects_list_by_name(&organization_name, &page_selector)
+                    .projects_list_by_name(&organization_id, &page_selector)
                     .await?
             }
         }
@@ -413,13 +423,18 @@ async fn organization_projects_post(
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
     let params = path_params.into_inner();
-    let organization_name = &params.organization_name;
+    let organization_id = match &params.organization {
+        Identifier::Id(uuid) => *uuid,
+        Identifier::Name(name) => {
+            nexus.organization_lookup_id_by_name(name.into()).await?
+        }
+    };
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
         let project = nexus
             .project_create(
                 &opctx,
-                &organization_name,
+                &organization_id,
                 &new_project.into_inner(),
             )
             .await?;

@@ -348,8 +348,29 @@ impl DataStore {
         Ok(())
     }
 
-    /// Look up an organization by name
     pub async fn organization_lookup(
+        &self,
+        id: &Uuid,
+    ) -> Result<authz::Organization, Error> {
+        use db::schema::organization::dsl;
+        dsl::organization
+            .filter(dsl::time_deleted.is_null())
+            .filter(dsl::id.eq(id.clone()))
+            .select(dsl::id)
+            .get_result_async::<Uuid>(self.pool())
+            .await
+            .map_err(|e| {
+                public_error_from_diesel_pool(
+                    e,
+                    ResourceType::Organization,
+                    LookupType::ById(*id),
+                )
+            })
+            .map(|o| authz::FLEET.organization(o))
+    }
+
+    /// Look up an organization by name
+    pub async fn organization_lookup_by_name(
         &self,
         name: &Name,
     ) -> Result<authz::Organization, Error> {
@@ -378,7 +399,7 @@ impl DataStore {
         &self,
         name: &Name,
     ) -> Result<Uuid, Error> {
-        self.organization_lookup(name).await.map(|o| o.id())
+        self.organization_lookup_by_name(name).await.map(|o| o.id())
     }
 
     pub async fn organizations_list_by_id(
@@ -426,14 +447,14 @@ impl DataStore {
     /// Updates a organization by name (clobbering update -- no etag)
     pub async fn organization_update(
         &self,
-        name: &Name,
+        id: &Uuid,
         updates: OrganizationUpdate,
     ) -> UpdateResult<Organization> {
         use db::schema::organization::dsl;
 
         diesel::update(dsl::organization)
             .filter(dsl::time_deleted.is_null())
-            .filter(dsl::name.eq(name.clone()))
+            .filter(dsl::id.eq(id.clone()))
             .set(updates)
             .returning(Organization::as_returning())
             .get_result_async(self.pool())
@@ -442,7 +463,7 @@ impl DataStore {
                 public_error_from_diesel_pool(
                     e,
                     ResourceType::Organization,
-                    LookupType::ByName(name.as_str().to_owned()),
+                    LookupType::ById(*id),
                 )
             })
     }

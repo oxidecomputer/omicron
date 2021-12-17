@@ -512,11 +512,11 @@ impl Nexus {
 
     pub async fn organization_update(
         &self,
-        name: &Name,
+        id: &Uuid,
         new_params: &params::OrganizationUpdate,
     ) -> UpdateResult<db::model::Organization> {
         self.db_datastore
-            .organization_update(name, new_params.clone().into())
+            .organization_update(id, new_params.clone().into())
             .await
     }
 
@@ -527,11 +527,11 @@ impl Nexus {
     pub async fn project_create(
         &self,
         opctx: &OpContext,
-        organization_name: &Name,
+        organization_id: &Uuid,
         new_project: &params::ProjectCreate,
     ) -> CreateResult<db::model::Project> {
         let org =
-            self.db_datastore.organization_lookup(organization_name).await?;
+            self.db_datastore.organization_lookup(organization_id).await?;
 
         // Create a project.
         let db_project = db::model::Project::new(org.id(), new_project.clone());
@@ -546,7 +546,7 @@ impl Nexus {
         // Create a default VPC associated with the project.
         let _ = self
             .project_create_vpc(
-                &organization_name,
+                &organization_id,
                 &new_project.identity.name.clone().into(),
                 &params::VpcCreate {
                     identity: IdentityMetadataCreateParams {
@@ -577,13 +577,9 @@ impl Nexus {
 
     pub async fn projects_list_by_name(
         &self,
-        organization_name: &Name,
+        organization_id: &Uuid,
         pagparams: &DataPageParams<'_, Name>,
     ) -> ListResultVec<db::model::Project> {
-        let organization_id = self
-            .db_datastore
-            .organization_lookup_id_by_name(organization_name)
-            .await?;
         self.db_datastore
             .projects_list_by_name(&organization_id, pagparams)
             .await
@@ -591,13 +587,9 @@ impl Nexus {
 
     pub async fn projects_list_by_id(
         &self,
-        organization_name: &Name,
+        organization_id: &Uuid,
         pagparams: &DataPageParams<'_, Uuid>,
     ) -> ListResultVec<db::model::Project> {
-        let organization_id = self
-            .db_datastore
-            .organization_lookup_id_by_name(organization_name)
-            .await?;
         self.db_datastore.projects_list_by_id(&organization_id, pagparams).await
     }
 
@@ -1518,10 +1510,7 @@ impl Nexus {
         project_name: &Name,
         params: &params::VpcCreate,
     ) -> CreateResult<db::model::Vpc> {
-        let organization_id = self
-            .db_datastore
-            .organization_lookup_id_by_name(organization_name)
-            .await?;
+        let organization_id = self.db_datastore.organization_lookup_id_by_name(&organization_name).await?;
         let project_id = self
             .db_datastore
             .project_lookup_id_by_name(&organization_id, project_name)

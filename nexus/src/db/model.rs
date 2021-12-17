@@ -118,6 +118,12 @@ pub struct Name(pub external::Name);
 NewtypeFrom! { () pub struct Name(external::Name); }
 NewtypeDeref! { () pub struct Name(external::Name); }
 
+impl From<&external::Name> for &Name {
+    fn from(name: &external::Name) -> Self {
+        &Name(*name)
+    }
+}
+
 impl<DB> ToSql<sql_types::Text, DB> for Name
 where
     DB: Backend,
