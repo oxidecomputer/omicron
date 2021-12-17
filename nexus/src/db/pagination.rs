@@ -237,13 +237,7 @@ mod test {
         pool: &db::Pool,
         query: BoxedQuery<schema::test_users::dsl::test_users>,
     ) -> Vec<User> {
-        let r = query
-            .select(User::as_select())
-            .load_async(pool.pool())
-            .await
-            .unwrap();
-        println!("r: {:#?}", r);
-        r
+        query.select(User::as_select()).load_async(pool.pool()).await.unwrap()
     }
 
     #[tokio::test]
