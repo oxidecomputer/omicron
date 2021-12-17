@@ -6,6 +6,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use anyhow::{anyhow, Context, Result};
+use crossbeam::thread::{self, ScopedJoinHandle};
 use serde_derive::Deserialize;
 use structopt::StructOpt;
 use thiserror::Error;
@@ -265,39 +266,56 @@ fn do_uninstall(
     Ok(())
 }
 
-fn do_install(
-    config: &Config,
-    artifact_dir: PathBuf,
-    install_dir: PathBuf,
-) -> Result<()> {
+fn do_install(config: &Config, artifact_dir: &Path, install_dir: &Path) {
     let builder = &config.servers[&config.builder.server];
-    let mut src_dir = PathBuf::from(&config.builder.omicron_path);
-    src_dir.push(artifact_dir.as_path());
-    let src_dir = src_dir.to_string_lossy();
+    let mut pkg_dir = PathBuf::from(&config.builder.omicron_path);
+    pkg_dir.push(artifact_dir);
+    let pkg_dir = pkg_dir.to_string_lossy();
+    let pkg_dir = &pkg_dir;
 
-    for server_name in &config.deployment.servers {
-        let server = &config.servers[server_name];
+    thread::scope(|s| {
+        let mut handles =
+            Vec::<(String, ScopedJoinHandle<'_, Result<()>>)>::new();
 
-        copy_package_artifacts_to_staging(config, &src_dir, builder, server)?;
-        copy_omicron_package_binary_to_staging(config, builder, server)?;
-        copy_package_manifest_to_staging(config, builder, server)?;
-        run_omicron_package_from_staging(
-            config,
-            server,
-            &artifact_dir,
-            &install_dir,
-        )?;
-        copy_overlay_files_to_staging(
-            config,
-            &src_dir,
-            builder,
-            server,
-            server_name,
-        )?;
-        install_overlay_files_from_staging(config, server, &install_dir)?;
-        restart_services(server)?;
-    }
-    Ok(())
+        // Spawn a thread for each server install
+        for server_name in &config.deployment.servers {
+            handles.push((
+                server_name.to_owned(),
+                s.spawn(move |_| -> Result<()> {
+                    single_server_install(
+                        config,
+                        &artifact_dir,
+                        &install_dir,
+                        &pkg_dir,
+                        builder,
+                        server_name,
+                    )
+                }),
+            ));
+        }
+
+        // Join all the handles and print the install status
+        for (server_name, handle) in handles {
+            match handle.join() {
+                Ok(Ok(())) => {
+                    println!("Install completed for server: {}", server_name)
+                }
+                Ok(Err(e)) => {
+                    println!(
+                        "Install failed for server: {} with error: {}",
+                        server_name, e
+                    )
+                }
+                Err(_) => {
+                    println!(
+                        "Install failed for server: {}. Thread panicked.",
+                        server_name
+                    )
+                }
+            }
+        }
+    })
+    .unwrap();
 }
 
 fn do_overlay(config: &Config) -> Result<()> {
@@ -338,20 +356,50 @@ fn overlay_sled_agent(
     ssh_exec(server, &cmd, false)
 }
 
+fn single_server_install(
+    config: &Config,
+    artifact_dir: &Path,
+    install_dir: &Path,
+    pkg_dir: &str,
+    builder: &Server,
+    server_name: &str,
+) -> Result<()> {
+    let server = &config.servers[server_name];
+
+    copy_package_artifacts_to_staging(config, pkg_dir, builder, server)?;
+    copy_omicron_package_binary_to_staging(config, builder, server)?;
+    copy_package_manifest_to_staging(config, builder, server)?;
+    run_omicron_package_from_staging(
+        config,
+        server,
+        &artifact_dir,
+        &install_dir,
+    )?;
+    copy_overlay_files_to_staging(
+        config,
+        pkg_dir,
+        builder,
+        server,
+        server_name,
+    )?;
+    install_overlay_files_from_staging(config, server, &install_dir)?;
+    restart_services(server)
+}
+
 // Copy package artifacts as a result of `omicron-package package` from the
 // builder to the deployment server staging directory.
 fn copy_package_artifacts_to_staging(
     config: &Config,
-    src_dir: &str,
+    pkg_dir: &str,
     builder: &Server,
-    dest_server: &Server,
+    destination: &Server,
 ) -> Result<()> {
     let cmd = format!(
         "rsync -avz -e 'ssh -o StrictHostKeyChecking=no' \
                     --exclude overlay/ {} {}@{}:~/{}",
-        src_dir,
-        dest_server.username,
-        dest_server.addr,
+        pkg_dir,
+        destination.username,
+        destination.addr,
         config.deployment.staging_dir
     );
     println!("$ {}", cmd);
@@ -361,15 +409,15 @@ fn copy_package_artifacts_to_staging(
 fn copy_omicron_package_binary_to_staging(
     config: &Config,
     builder: &Server,
-    dest_server: &Server,
+    destination: &Server,
 ) -> Result<()> {
     let mut bin_path = PathBuf::from(&config.builder.omicron_path);
     bin_path.push("target/debug/omicron-package");
     let cmd = format!(
         "rsync -avz {} {}@{}:~/{}",
         bin_path.to_string_lossy(),
-        dest_server.username,
-        dest_server.addr,
+        destination.username,
+        destination.addr,
         config.deployment.staging_dir
     );
     println!("$ {}", cmd);
@@ -379,15 +427,15 @@ fn copy_omicron_package_binary_to_staging(
 fn copy_package_manifest_to_staging(
     config: &Config,
     builder: &Server,
-    dest_server: &Server,
+    destination: &Server,
 ) -> Result<()> {
     let mut path = PathBuf::from(&config.builder.omicron_path);
     path.push("package-manifest.toml");
     let cmd = format!(
         "rsync {} {}@{}:~/{}",
         path.to_string_lossy(),
-        dest_server.username,
-        dest_server.addr,
+        destination.username,
+        destination.addr,
         config.deployment.staging_dir
     );
     println!("$ {}", cmd);
@@ -396,7 +444,7 @@ fn copy_package_manifest_to_staging(
 
 fn run_omicron_package_from_staging(
     config: &Config,
-    dest_server: &Server,
+    destination: &Server,
     artifact_dir: &Path,
     install_dir: &Path,
 ) -> Result<()> {
@@ -411,22 +459,22 @@ fn run_omicron_package_from_staging(
         install_dir.to_string_lossy()
     );
     println!("$ {}", cmd);
-    ssh_exec(dest_server, &cmd, true)
+    ssh_exec(destination, &cmd, true)
 }
 
 fn copy_overlay_files_to_staging(
     config: &Config,
-    src_dir: &str,
+    pkg_dir: &str,
     builder: &Server,
-    dest_server: &Server,
-    dest_server_name: &str,
+    destination: &Server,
+    destination_name: &str,
 ) -> Result<()> {
     let cmd = format!(
         "rsync -avz {}/overlay/{}/ {}@{}:~/{}/overlay/",
-        src_dir,
-        dest_server_name,
-        dest_server.username,
-        dest_server.addr,
+        pkg_dir,
+        destination_name,
+        destination.username,
+        destination.addr,
         config.deployment.staging_dir
     );
     println!("$ {}", cmd);
@@ -435,7 +483,7 @@ fn copy_overlay_files_to_staging(
 
 fn install_overlay_files_from_staging(
     config: &Config,
-    dest_server: &Server,
+    destination: &Server,
     install_dir: &Path,
 ) -> Result<()> {
     let cmd = format!(
@@ -444,13 +492,13 @@ fn install_overlay_files_from_staging(
         install_dir.to_string_lossy()
     );
     println!("$ {}", cmd);
-    ssh_exec(&dest_server, &cmd, false)
+    ssh_exec(&destination, &cmd, false)
 }
 
 // For now, we just restart sled-agent, as that's the only service with an
 // overlay file.
-fn restart_services(dest_server: &Server) -> Result<()> {
-    ssh_exec(dest_server, "svcadm restart sled-agent", false)
+fn restart_services(destination: &Server) -> Result<()> {
+    ssh_exec(destination, "svcadm restart sled-agent", false)
 }
 
 fn dir_string(dirs: &[PathBuf]) -> String {
@@ -523,7 +571,7 @@ fn main() -> Result<()> {
             artifact_dir,
             install_dir,
         }) => {
-            do_install(&config, artifact_dir, install_dir)?;
+            do_install(&config, &artifact_dir, &install_dir);
         }
         SubCommand::Package(PackageSubCommand::Uninstall {
             artifact_dir,
