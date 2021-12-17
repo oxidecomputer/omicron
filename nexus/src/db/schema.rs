@@ -342,4 +342,5 @@ allow_tables_to_appear_in_same_query!(
     vpc_firewall_rule,
     user_builtin,
     role_builtin,
+    role_assignment_builtin,
 );
