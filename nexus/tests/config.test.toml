@@ -47,6 +47,8 @@ mode = "file"
 if_exists = "fail"
 path = "UNUSED"
 
-# Configuration for interacting with the timeseries database
+# Configuration for interacting with the timeseries database. This is overwritten
+# by the test suite once ClickHouse starts, with the actual address on which it
+# is listening.
 [timeseries_db]
-address = "[::1]:8123"
+address = "[::1]:0"
