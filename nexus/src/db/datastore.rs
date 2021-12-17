@@ -66,9 +66,9 @@ use crate::db::{
         public_error_from_diesel_pool_shouldnt_fail,
     },
     model::{
-        ConsoleSession, Dataset, Disk, DiskAttachment, DiskRuntimeState,
-        Generation, IncompleteNetworkInterface, Instance, InstanceRuntimeState,
-        Name, NetworkInterface, Organization, OrganizationUpdate, OximeterInfo,
+        ConsoleSession, Dataset, Disk, DiskRuntimeState, Generation,
+        IncompleteNetworkInterface, Instance, InstanceRuntimeState, Name,
+        NetworkInterface, Organization, OrganizationUpdate, OximeterInfo,
         ProducerEndpoint, Project, ProjectUpdate, RouterRoute,
         RouterRouteUpdate, Sled, UserBuiltin, Vpc, VpcFirewallRule, VpcRouter,
         VpcRouterUpdate, VpcSubnet, VpcSubnetUpdate, VpcUpdate, Zpool,
@@ -859,7 +859,7 @@ impl DataStore {
         &self,
         instance_id: &Uuid,
         pagparams: &DataPageParams<'_, Name>,
-    ) -> ListResultVec<DiskAttachment> {
+    ) -> ListResultVec<Disk> {
         use db::schema::disk::dsl;
 
         paginated(dsl::disk, dsl::name, &pagparams)
@@ -868,13 +868,6 @@ impl DataStore {
             .select(Disk::as_select())
             .load_async::<Disk>(self.pool())
             .await
-            .map(|disks| {
-                disks
-                    .into_iter()
-                    // Unwrap safety: filtered by instance_id in query.
-                    .map(|disk| disk.attachment().unwrap())
-                    .collect()
-            })
             .map_err(|e| {
                 public_error_from_diesel_pool(
                     e,

@@ -569,7 +569,6 @@ pub enum ResourceType {
     Project,
     Dataset,
     Disk,
-    DiskAttachment,
     Instance,
     NetworkInterface,
     Rack,
@@ -934,18 +933,6 @@ impl DiskState {
             DiskState::Faulted => None,
         }
     }
-}
-
-/**
- * Describes a Disk's attachment to an Instance
- */
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct DiskAttachment {
-    pub instance_id: Uuid,
-    pub disk_id: Uuid,
-    pub disk_name: Name,
-    pub disk_state: DiskState,
 }
 
 /*
