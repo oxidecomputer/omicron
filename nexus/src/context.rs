@@ -182,9 +182,9 @@ impl ServerContext {
 #[allow(dead_code)]
 pub struct OpContext {
     pub log: slog::Logger,
-    pub authz: authz::Context,
     pub authn: Arc<authn::Context>,
 
+    authz: authz::Context,
     created_instant: Instant,
     created_walltime: SystemTime,
     metadata: BTreeMap<String, String>,

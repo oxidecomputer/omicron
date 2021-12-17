@@ -2692,6 +2692,79 @@
         "x-dropshot-pagination": true
       }
     },
+    "/roles": {
+      "get": {
+        "description": "List the built-in roles",
+        "operationId": "roles_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "nullable": true,
+              "description": "Maximum number of items returned by a single call",
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 1
+            },
+            "style": "form"
+          },
+          {
+            "in": "query",
+            "name": "page_token",
+            "schema": {
+              "nullable": true,
+              "description": "Token returned by previous call to retreive the subsequent page",
+              "type": "string"
+            },
+            "style": "form"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RoleResultsPage"
+                }
+              }
+            }
+          }
+        },
+        "x-dropshot-pagination": true
+      }
+    },
+    "/roles/{role_name}": {
+      "get": {
+        "description": "Fetch a specific built-in role",
+        "operationId": "roles_get_role",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "role_name",
+            "required": true,
+            "schema": {
+              "description": "The built-in role's unique name.",
+              "type": "string"
+            },
+            "style": "simple"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Role"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/sagas": {
       "get": {
         "description": "List all sagas (for debugging)",
@@ -3636,6 +3709,50 @@
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/Rack"
+            }
+          },
+          "next_page": {
+            "nullable": true,
+            "description": "token used to fetch the next page of results (if any)",
+            "type": "string"
+          }
+        },
+        "required": [
+          "items"
+        ]
+      },
+      "Role": {
+        "description": "Client view of a [`Role`]",
+        "type": "object",
+        "properties": {
+          "description": {
+            "type": "string"
+          },
+          "name": {
+            "$ref": "#/components/schemas/RoleName"
+          }
+        },
+        "required": [
+          "description",
+          "name"
+        ]
+      },
+      "RoleName": {
+        "title": "A name for a built-in role",
+        "description": "Role names consist of two string components separated by dot (\".\").",
+        "type": "string",
+        "pattern": "[a-z-]+\\.[a-z-]+",
+        "maxLength": 63
+      },
+      "RoleResultsPage": {
+        "description": "A single page of results",
+        "type": "object",
+        "properties": {
+          "items": {
+            "description": "list of items on this page of results",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Role"
             }
           },
           "next_page": {
