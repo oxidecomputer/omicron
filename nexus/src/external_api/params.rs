@@ -182,6 +182,15 @@ pub struct DiskCreate {
     pub size: ByteCount,
 }
 
+/**
+ * Parameters for the [`Disk`] to be attached or detached to an instance
+ */
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct DiskIdentifier {
+    pub disk: Name,
+}
+
 /*
  * BUILT-IN USERS
  *
