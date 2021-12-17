@@ -6,6 +6,7 @@ license = "MPL-2.0"
 
 [dependencies]
 anyhow = "1.0"
+crossbeam = "0.8"
 omicron-common = { path = "../common" }
 
 # We depend on the propolis-server here -- a binary, not a library -- to
@@ -18,7 +19,6 @@ serde = { version = "1.0", features = [ "derive" ] }
 serde_derive = "1.0"
 smf = "0.2"
 structopt = "0.3"
-ssh2 = "0.9"
 tar = "0.4"
 thiserror = "1.0"
 tokio = { version = "1.14", features = [ "full" ] }

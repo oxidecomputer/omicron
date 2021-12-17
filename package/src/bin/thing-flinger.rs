@@ -6,7 +6,6 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use anyhow::{anyhow, Context, Result};
-use rayon::prelude::*;
 use serde_derive::Deserialize;
 use structopt::StructOpt;
 use thiserror::Error;
@@ -266,6 +265,79 @@ fn do_uninstall(
     Ok(())
 }
 
+fn do_install(
+    config: &Config,
+    artifact_dir: PathBuf,
+    install_dir: PathBuf,
+) -> Result<()> {
+    let builder = &config.servers[&config.builder.server];
+    let mut src_dir = PathBuf::from(&config.builder.omicron_path);
+    src_dir.push(artifact_dir.as_path());
+    let src_dir = src_dir.to_string_lossy();
+
+    for server_name in &config.deployment.servers {
+        let server = &config.servers[server_name];
+
+        copy_package_artifacts_to_staging(config, &src_dir, builder, server)?;
+        copy_omicron_package_binary_to_staging(config, builder, server)?;
+        copy_package_manifest_to_staging(config, builder, server)?;
+        run_omicron_package_from_staging(
+            config,
+            server,
+            &artifact_dir,
+            &install_dir,
+        )?;
+        copy_overlay_files_to_staging(
+            config,
+            &src_dir,
+            builder,
+            server,
+            server_name,
+        )?;
+        install_overlay_files_from_staging(config, server, &install_dir)?;
+        restart_services(server)?;
+    }
+    Ok(())
+}
+
+fn do_overlay(config: &Config) -> Result<()> {
+    let mut root_path = PathBuf::from(&config.builder.omicron_path);
+    // TODO: This needs to match the artifact_dir in `package`
+    root_path.push("out/overlay");
+    let server_dirs = dir_per_deploy_server(config, &root_path);
+    let server = &config.servers[&config.builder.server];
+    overlay_sled_agent(&server, config, &server_dirs)
+}
+
+fn overlay_sled_agent(
+    server: &Server,
+    config: &Config,
+    server_dirs: &[PathBuf],
+) -> Result<()> {
+    let sled_agent_dirs: Vec<PathBuf> = server_dirs
+        .iter()
+        .map(|dir| {
+            let mut dir = PathBuf::from(dir);
+            dir.push("sled-agent/pkg");
+            dir
+        })
+        .collect();
+
+    // Create directories on builder
+    let dirs = dir_string(&sled_agent_dirs);
+    let cmd = format!("sh -c 'for dir in {}; do mkdir -p $dir; done'", dirs);
+
+    let cmd = format!(
+        "{} && cd {} && ./target/debug/sled-agent-overlay-files \
+            --threshold {} --directories {}",
+        cmd,
+        config.builder.omicron_path,
+        config.deployment.rack_secret_threshold,
+        dirs
+    );
+    ssh_exec(server, &cmd, false)
+}
+
 // Copy package artifacts as a result of `omicron-package package` from the
 // builder to the deployment server staging directory.
 fn copy_package_artifacts_to_staging(
@@ -379,80 +451,6 @@ fn install_overlay_files_from_staging(
 // overlay file.
 fn restart_services(dest_server: &Server) -> Result<()> {
     ssh_exec(dest_server, "svcadm restart sled-agent", false)
-}
-
-// TODO: Make this parallel
-fn do_install(
-    config: &Config,
-    artifact_dir: PathBuf,
-    install_dir: PathBuf,
-) -> Result<()> {
-    let builder = &config.servers[&config.builder.server];
-    let mut src_dir = PathBuf::from(&config.builder.omicron_path);
-    src_dir.push(artifact_dir.as_path());
-    let src_dir = src_dir.to_string_lossy();
-
-    for server_name in &config.deployment.servers {
-        let server = &config.servers[server_name];
-
-        copy_package_artifacts_to_staging(config, &src_dir, builder, server)?;
-        copy_omicron_package_binary_to_staging(config, builder, server)?;
-        copy_package_manifest_to_staging(config, builder, server)?;
-        run_omicron_package_from_staging(
-            config,
-            server,
-            &artifact_dir,
-            &install_dir,
-        )?;
-        copy_overlay_files_to_staging(
-            config,
-            &src_dir,
-            builder,
-            server,
-            server_name,
-        )?;
-        install_overlay_files_from_staging(config, server, &install_dir)?;
-        restart_services(server)?;
-    }
-    Ok(())
-}
-
-fn do_overlay(config: &Config) -> Result<()> {
-    let mut root_path = PathBuf::from(&config.builder.omicron_path);
-    // TODO: This needs to match the artifact_dir in `package`
-    root_path.push("out/overlay");
-    let server_dirs = dir_per_deploy_server(config, &root_path);
-    let server = &config.servers[&config.builder.server];
-    overlay_sled_agent(&server, config, &server_dirs)
-}
-
-fn overlay_sled_agent(
-    server: &Server,
-    config: &Config,
-    server_dirs: &[PathBuf],
-) -> Result<()> {
-    let sled_agent_dirs: Vec<PathBuf> = server_dirs
-        .iter()
-        .map(|dir| {
-            let mut dir = PathBuf::from(dir);
-            dir.push("sled-agent/pkg");
-            dir
-        })
-        .collect();
-
-    // Create directories on builder
-    let dirs = dir_string(&sled_agent_dirs);
-    let cmd = format!("sh -c 'for dir in {}; do mkdir -p $dir; done'", dirs);
-
-    let cmd = format!(
-        "{} && cd {} && ./target/debug/sled-agent-overlay-files \
-            --threshold {} --directories {}",
-        cmd,
-        config.builder.omicron_path,
-        config.deployment.rack_secret_threshold,
-        dirs
-    );
-    ssh_exec(server, &cmd, false)
 }
 
 fn dir_string(dirs: &[PathBuf]) -> String {
