@@ -9,8 +9,8 @@ use crate::db::identity::{Asset, Resource};
 use crate::db::schema::{
     console_session, dataset, disk, instance, metric_producer,
     network_interface, organization, oximeter, project, rack, region,
-    router_route, sled, user_builtin, vpc, vpc_firewall_rule, vpc_router,
-    vpc_subnet, zpool,
+    role_builtin, router_route, sled, user_builtin, vpc, vpc_firewall_rule,
+    vpc_router, vpc_subnet, zpool,
 };
 use crate::external_api::params;
 use crate::internal_api;
@@ -901,19 +901,6 @@ impl Disk {
     pub fn runtime(&self) -> DiskRuntimeState {
         self.runtime_state.clone()
     }
-
-    pub fn attachment(&self) -> Option<DiskAttachment> {
-        if let Some(instance_id) = self.runtime_state.attach_instance_id {
-            Some(DiskAttachment {
-                instance_id,
-                disk_id: self.id(),
-                disk_name: self.name().clone(),
-                disk_state: self.state(),
-            })
-        } else {
-            None
-        }
-    }
 }
 
 /// Conversion to the external API type.
@@ -1037,26 +1024,6 @@ impl From<external::DiskState> for DiskState {
 impl Into<external::DiskState> for DiskState {
     fn into(self) -> external::DiskState {
         self.0
-    }
-}
-
-/// Type which describes the attachment status of a disk.
-#[derive(Clone, Debug)]
-pub struct DiskAttachment {
-    pub instance_id: Uuid,
-    pub disk_id: Uuid,
-    pub disk_name: Name,
-    pub disk_state: DiskState,
-}
-
-impl Into<external::DiskAttachment> for DiskAttachment {
-    fn into(self) -> external::DiskAttachment {
-        external::DiskAttachment {
-            instance_id: self.instance_id,
-            disk_id: self.disk_id,
-            disk_name: self.disk_name.0,
-            disk_state: self.disk_state.0,
-        }
     }
 }
 
@@ -1841,12 +1808,36 @@ impl ConsoleSession {
 #[table_name = "user_builtin"]
 pub struct UserBuiltin {
     #[diesel(embed)]
-    identity: UserBuiltinIdentity,
+    pub identity: UserBuiltinIdentity,
 }
 
 impl UserBuiltin {
     /// Creates a new database UserBuiltin object.
     pub fn new(id: Uuid, params: params::UserBuiltinCreate) -> Self {
         Self { identity: UserBuiltinIdentity::new(id, params.identity) }
+    }
+}
+
+/// Describes a built-in role, as stored in the database
+#[derive(Queryable, Insertable, Debug, Selectable)]
+#[table_name = "role_builtin"]
+pub struct RoleBuiltin {
+    pub resource_type: String,
+    pub role_name: String,
+    pub description: String,
+}
+
+impl RoleBuiltin {
+    /// Creates a new database UserBuiltin object.
+    pub fn new(
+        resource_type: omicron_common::api::external::ResourceType,
+        role_name: &str,
+        description: &str,
+    ) -> Self {
+        Self {
+            resource_type: resource_type.to_string(),
+            role_name: String::from(role_name),
+            description: String::from(description),
+        }
     }
 }

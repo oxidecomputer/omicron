@@ -8,6 +8,7 @@ use anyhow::anyhow;
 use anyhow::ensure;
 use anyhow::Context;
 use dropshot::test_util::ClientTestContext;
+use dropshot::ResultsPage;
 use std::convert::TryInto;
 use std::fmt::Debug;
 
@@ -477,6 +478,64 @@ impl<'a> NexusRequest<'a> {
                 .expect_status(Some(http::StatusCode::NO_CONTENT)),
         )
     }
+
+    /// Iterates a collection (like `dropshot::test_util::iter_collection`)
+    /// using authenticated requests.
+    pub async fn iter_collection_authn<T>(
+        testctx: &'a ClientTestContext,
+        collection_url: &str,
+        initial_params: &str,
+        limit: usize,
+    ) -> Result<Collection<T>, anyhow::Error>
+    where
+        T: Clone + serde::de::DeserializeOwned,
+    {
+        let url_base = format!("{}?limit={}&", collection_url, limit);
+        let mut npages = 0;
+        let mut all_items = Vec::new();
+        let mut next_token: Option<String> = None;
+
+        loop {
+            let url = if let Some(next_token) = &next_token {
+                format!("{}page_token={}", url_base, next_token)
+            } else {
+                format!("{}{}", url_base, initial_params)
+            };
+
+            let page = NexusRequest::object_get(testctx, &url)
+                .authn_as(AuthnMode::PrivilegedUser)
+                .execute()
+                .await
+                .with_context(|| format!("fetch page {}", npages + 1))?
+                .parsed_body::<ResultsPage<T>>()
+                .with_context(|| format!("parse page {}", npages + 1))?;
+            ensure!(
+                page.items.len() <= limit,
+                "server sent more items than expected in page {} \
+                (limit = {}, found = {})",
+                npages + 1,
+                limit,
+                page.items.len()
+            );
+            all_items.extend_from_slice(&page.items);
+            npages += 1;
+            if let Some(token) = page.next_page {
+                next_token = Some(token);
+            } else {
+                break;
+            }
+        }
+
+        Ok(Collection { all_items, npages })
+    }
+}
+
+/// Result of iterating an API collection (using multiple requests)
+pub struct Collection<T> {
+    /// all the items found in the collection
+    pub all_items: Vec<T>,
+    /// number of requests made to fetch all the items
+    pub npages: usize,
 }
 
 /// Functions for compatibility with corresponding `dropshot::test_util`

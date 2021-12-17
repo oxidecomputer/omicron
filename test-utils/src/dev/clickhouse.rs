@@ -325,7 +325,11 @@ mod tests {
             line: String,
             interval: Duration,
         ) {
-            println!("Writing to log file");
+            println!(
+                "Writing to log file: {:?}, contents: '{}'",
+                file.path(),
+                line
+            );
             writeln!(file, "{}", line).unwrap();
             file.flush().unwrap();
             sleep(interval).await;
@@ -371,12 +375,8 @@ mod tests {
 
         // "Run" the test.
         //
-        // We pause tokio's internal timer and advance it by the writer interval. This simulates
-        // the writer sleeping for a time between the write of each line, without explicitly
-        // sleeping the whole test thread. Note that the futures for the reader/writer tasks must
-        // be pinned to the stack, so that they may be polled on multiple passes through the select
-        // loop without consuming them.
-        tokio::time::pause();
+        // Note that the futures for the reader/writer tasks must be pinned to the stack, so that
+        // they may be polled on multiple passes through the select loop without consuming them.
         tokio::pin!(writer_task);
         tokio::pin!(reader_task);
         let mut poll_writer = true;
@@ -391,13 +391,8 @@ mod tests {
                     let _ = writer_result.unwrap();
                     poll_writer = false;
                 },
-                _ = tokio::time::advance(writer_interval) => {
-                    println!("Advancing time by {:#?}", writer_interval);
-                }
             }
         };
-        // Resume Tokio's timer
-        tokio::time::resume();
         reader_result
     }
 }
