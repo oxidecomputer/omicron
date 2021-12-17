@@ -8,11 +8,11 @@ use dropshot::test_util::object_get;
 use dropshot::test_util::objects_list_page;
 
 use nexus_test_utils::resource_helpers::{create_organization, create_project};
-use nexus_test_utils::test_setup;
+use nexus_test_utils::ControlPlaneTestContext;
+use nexus_test_utils_macros::nexus_test;
 
-#[tokio::test]
-async fn test_projects() {
-    let cptestctx = test_setup("test_projects").await;
+#[nexus_test]
+async fn test_projects(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
 
     let org_name = "test-org";
@@ -62,6 +62,4 @@ async fn test_projects() {
     .items;
     assert_eq!(projects.len(), 1);
     assert_eq!(projects[0].identity.name, p1_name);
-
-    cptestctx.teardown().await;
 }

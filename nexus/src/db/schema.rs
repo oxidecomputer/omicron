@@ -66,6 +66,7 @@ table! {
         time_created -> Timestamptz,
         time_modified -> Timestamptz,
         time_deleted -> Nullable<Timestamptz>,
+        instance_id -> Uuid,
         vpc_id -> Uuid,
         subnet_id -> Uuid,
         mac -> Text,

@@ -47,7 +47,6 @@ INSTANCES
     instance_attach_disk ORGANIZATION_NAME PROJECT_NAME INSTANCE_NAME DISK_NAME
     instance_detach_disk ORGANIZATION_NAME PROJECT_NAME INSTANCE_NAME DISK_NAME
     instance_list_disks  ORGANIZATION_NAME PROJECT_NAME INSTANCE_NAME
-    instance_get_disk    ORGANIZATION_NAME PROJECT_NAME INSTANCE_NAME DISK_NAME
 
 DISKS
 
@@ -60,6 +59,15 @@ VPCS
     vpc_create_demo ORGANIZATION_NAME PROJECT_NAME VPC_NAME DNS_NAME
     vpc_get         ORGANIZATION_NAME PROJECT_NAME VPC_NAME
     vpc_delete      ORGANIZATION_NAME PROJECT_NAME VPC_NAME
+
+VPC SUBNETS
+
+    vpc_subnets_list ORGANIZATION_NAME PROJECT_NAME VPC_NAME
+    vpc_subnet_get ORGANIZATION_NAME PROJECT_NAME VPC_NAME SUBNET_NAME
+
+VPC SUBNETS IPS
+
+    subnet_ips_list ORGANIZATION_NAME PROJECT_NAME VPC_NAME SUBNET_NAME
 
 VPC FIREWALL
 
@@ -284,25 +292,21 @@ function cmd_instance_reboot
 function cmd_instance_attach_disk
 {
 	[[ $# != 4 ]] && usage "expected ORGANIZATION_NAME PROJECT_NAME INSTANCE_NAME DISK_NAME"
-	do_curl "/organizations/$1/projects/$2/instances/$3/disks/$4" -X PUT -T /dev/null
+	mkjson disk="$4" |
+		do_curl "/organizations/$1/projects/$2/instances/$3/disks/attach" -X POST -T -
 }
 
 function cmd_instance_detach_disk
 {
-	[[ $# != 3 ]] && usage "expected ORGANIZATION_NAME PROJECT_NAME INSTANCE_NAME DISK_NAME"
-	do_curl "/organizations/$1/projects/$2/instances/$3/disks/$4" -X DELETE -T /dev/null
+	[[ $# != 4 ]] && usage "expected ORGANIZATION_NAME PROJECT_NAME INSTANCE_NAME DISK_NAME"
+	mkjson disk="$4" |
+		do_curl "/organizations/$1/projects/$2/instances/$3/disks/detach" -X POST -T -
 }
 
 function cmd_instance_list_disks
 {
 	[[ $# != 3 ]] && usage "expected ORGANIZATION_NAME PROJECT_NAME INSTANCE_NAME"
 	do_curl "/organizations/$1/projects/$2/instances/$3/disks"
-}
-
-function cmd_instance_get_disk
-{
-	[[ $# != 4 ]] && usage "expected ORGANIZATION_NAME PROJECT_NAME INSTANCE_NAME DISK_NAME"
-	do_curl "/organizations/$1/projects/$2/instances/$3/disks/$4"
 }
 
 function cmd_disk_create_demo
@@ -340,8 +344,26 @@ function cmd_vpc_get
 
 function cmd_vpc_delete
 {
-	[[ $# != 2 ]] && usage "expected PROJECT_NAME VPC_NAME"
+	[[ $# != 3 ]] && usage "expected ORGANIZATION_NAME PROJECT_NAME VPC_NAME"
 	do_curl "/organizations/$1/projects/$2/vpcs/$3" -X DELETE
+}
+
+function cmd_vpc_subnets_list
+{
+	[[ $# != 3 ]] && usage "expected ORGANIZATION_NAME PROJECT_NAME VPC_NAME"
+	do_curl "/organizations/$1/projects/$2/vpcs/$3/subnets"
+}
+
+function cmd_vpc_subnet_get
+{
+	[[ $# != 4 ]] && usage "expected ORGANIZATION_NAME PROJECT_NAME VPC_NAME SUBNET_NAME"
+	do_curl "/organizations/$1/projects/$2/vpcs/$3/subnets/$4"
+}
+
+function cmd_subnet_ips_list
+{
+	[[ $# != 4 ]] && usage "expected ORGANIZATION_NAME PROJECT_NAME VPC_NAME SUBNET_NAME"
+	do_curl "/organizations/$1/projects/$2/vpcs/$3/subnets/$4/ips"
 }
 
 function cmd_vpc_firewall_rules_get

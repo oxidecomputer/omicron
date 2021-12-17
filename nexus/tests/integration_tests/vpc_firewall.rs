@@ -19,11 +19,11 @@ use dropshot::test_util::{object_delete, objects_list_page};
 use nexus_test_utils::resource_helpers::{
     create_organization, create_project, create_vpc,
 };
-use nexus_test_utils::test_setup;
+use nexus_test_utils::ControlPlaneTestContext;
+use nexus_test_utils_macros::nexus_test;
 
-#[tokio::test]
-async fn test_vpc_firewall() {
-    let cptestctx = test_setup("test_vpc_firewall").await;
+#[nexus_test]
+async fn test_vpc_firewall(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
 
     /* Create a project that we'll use for testing. */
@@ -138,7 +138,6 @@ async fn test_vpc_firewall() {
             StatusCode::NOT_FOUND,
         )
         .await;
-    cptestctx.teardown().await;
 }
 
 fn is_default_firewall_rules(rules: &Vec<VpcFirewallRule>) -> bool {

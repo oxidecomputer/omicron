@@ -63,6 +63,20 @@ pub struct ProjectUpdate {
 }
 
 /*
+ * NETWORK INTERFACES
+ */
+
+/**
+ * Create-time parameters for a [`NetworkInterface`]
+ */
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct NetworkInterfaceCreate {
+    #[serde(flatten)]
+    pub identity: IdentityMetadataCreateParams,
+}
+
+/*
  * INSTANCES
  */
 
@@ -180,6 +194,15 @@ impl DiskCreate {
     pub fn extent_count(&self) -> u64 {
         (self.size.to_bytes() + self.extent_size() - 1) / self.extent_size()
     }
+}
+
+/**
+ * Parameters for the [`Disk`] to be attached or detached to an instance
+ */
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct DiskIdentifier {
+    pub disk: Name,
 }
 
 /*
