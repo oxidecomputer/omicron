@@ -62,8 +62,8 @@ use ref_cast::RefCast;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
+use std::num::NonZeroU32;
 use std::sync::Arc;
-use std::{convert::TryInto, num::NonZeroU32};
 use uuid::Uuid;
 
 type NexusApiDescription = ApiDescription<Arc<ServerContext>>;
@@ -2089,14 +2089,8 @@ async fn roles_get(
             .roles_builtin_list(&opctx, &pagparams)
             .await?
             .into_iter()
-            .map(|i| i.try_into())
-            .collect::<Result<Vec<_>, _>>()
-            .map_err(|error| {
-                Error::internal_error(&format!(
-                    "unexpected error reading built-in role: {:#}",
-                    error
-                ))
-            })?;
+            .map(|i| i.into())
+            .collect();
         Ok(HttpResponseOk(dropshot::ResultsPage::new(
             roles,
             &EmptyScanParams {},
@@ -2133,12 +2127,7 @@ async fn roles_get_role(
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
         let role = nexus.role_builtin_fetch(&opctx, &role_name).await?;
-        Ok(HttpResponseOk(role.try_into().map_err(|error| {
-            Error::internal_error(&format!(
-                "unexpected error reading built-in role: {:#}",
-                error
-            ))
-        })?))
+        Ok(HttpResponseOk(role.into()))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }

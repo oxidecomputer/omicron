@@ -314,9 +314,18 @@ impl Name {
 #[display("{resource_type}.{role_name}")]
 pub struct RoleName {
     #[from_str(regex = "[a-z_]+")]
-    resource_type: ResourceType,
+    resource_type: String,
     #[from_str(regex = "[a-z_]+")]
     role_name: String,
+}
+
+impl RoleName {
+    pub fn new(resource_type: &str, role_name: &str) -> RoleName {
+        RoleName {
+            resource_type: String::from(resource_type),
+            role_name: String::from(role_name),
+        }
+    }
 }
 
 /**
@@ -1980,8 +1989,6 @@ mod test {
             "project",
             // extra dot (or, illegal character in the second component)
             "project.admin.super",
-            // bogus resource type
-            "barf.admin",
             // missing resource type (or, another bogus resource type)
             ".admin",
             // missing role name
@@ -2001,7 +2008,14 @@ mod test {
         let role_name =
             "project.admin".parse::<RoleName>().expect("failed to parse");
         assert_eq!(role_name.to_string(), "project.admin");
-        assert_eq!(role_name.resource_type, ResourceType::Project);
+        assert_eq!(role_name.resource_type, "project");
+        assert_eq!(role_name.role_name, "admin");
+
+        eprintln!("check name \"barf.admin\" (expecting success)");
+        let role_name =
+            "barf.admin".parse::<RoleName>().expect("failed to parse");
+        assert_eq!(role_name.to_string(), "barf.admin");
+        assert_eq!(role_name.resource_type, "barf");
         assert_eq!(role_name.role_name, "admin");
 
         eprintln!("check name \"organization.super_user\" (expecting success)");
@@ -2009,7 +2023,7 @@ mod test {
             .parse::<RoleName>()
             .expect("failed to parse");
         assert_eq!(role_name.to_string(), "organization.super_user");
-        assert_eq!(role_name.resource_type, ResourceType::Organization);
+        assert_eq!(role_name.resource_type, "organization");
         assert_eq!(role_name.role_name, "super_user");
     }
 
