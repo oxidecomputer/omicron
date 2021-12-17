@@ -880,7 +880,6 @@ async fn project_instances_instance_stop(
 /**
  * List disks attached to this instance.
  */
-/* TODO-scalability needs to be paginated */
 #[endpoint {
     method = GET,
     path = "/organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/disks"
@@ -915,6 +914,9 @@ async fn instance_disks_get(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
+/**
+ * Attaches a disk to the instance.
+ */
 #[endpoint {
     method = POST,
     path = "/organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/disks/attach"
@@ -944,6 +946,9 @@ async fn instance_disks_attach(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
+/**
+ * Detaches a disk from the instance.
+ */
 #[endpoint {
     method = POST,
     path = "/organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/disks/detach"
