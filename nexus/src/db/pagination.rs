@@ -70,7 +70,7 @@ where
 /// This is a two-column varaiation of the [`paginated`] function.
 // NOTE: This function could probably be made generic over an arbitrary number
 // of columns, but that'll either require modifying Diesel (to make "tuples of
-// columns" implement a subsetof  ExpressionMethods) or making a macro to generate
+// columns" implement a subset of ExpressionMethods) or making a macro to generate
 // all the necessary bounds we need.
 //
 // Remove this attribute when used in https://github.com/oxidecomputer/omicron/pull/512
@@ -155,5 +155,272 @@ where
             }
             query.order(c1.desc()).then_order_by(c2.desc())
         }
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    use crate::db;
+    use async_bb8_diesel::{AsyncRunQueryDsl, AsyncSimpleConnection};
+    use diesel::SelectableHelper;
+    use dropshot::PaginationOrder;
+    use omicron_common::api::external::DataPageParams;
+    use omicron_test_utils::dev;
+    use std::num::NonZeroU32;
+    use uuid::Uuid;
+
+    mod schema {
+        use diesel::prelude::*;
+
+        table! {
+            test_users {
+                id -> Uuid,
+                age -> Int8,
+                height -> Int8,
+            }
+        }
+    }
+
+    use schema::test_users;
+
+    #[derive(Clone, Debug, Queryable, Insertable, PartialEq, Selectable)]
+    #[table_name = "test_users"]
+    struct User {
+        id: Uuid,
+        age: i64,
+        height: i64,
+    }
+
+    impl PartialEq<(i64, i64)> for User {
+        fn eq(&self, other: &(i64, i64)) -> bool {
+            self.age == other.0 && self.height == other.1
+        }
+    }
+
+    async fn populate_users(pool: &db::Pool, values: &Vec<(i64, i64)>) {
+        use schema::test_users::dsl;
+
+        pool.pool()
+            .get()
+            .await
+            .unwrap()
+            .batch_execute_async(
+                "CREATE TABLE test_users (
+                id UUID PRIMARY KEY,
+                age INT NOT NULL,
+                height INT NOT NULL
+            )",
+            )
+            .await
+            .unwrap();
+
+        let users: Vec<User> = values
+            .iter()
+            .map(|(age, height)| User {
+                id: Uuid::new_v4(),
+                age: *age,
+                height: *height,
+            })
+            .collect();
+
+        diesel::insert_into(dsl::test_users)
+            .values(users)
+            .execute_async(pool.pool())
+            .await
+            .unwrap();
+    }
+
+    // Shorthand for query execution to reduce total LoC.
+    async fn execute_query(
+        pool: &db::Pool,
+        query: BoxedQuery<schema::test_users::dsl::test_users>,
+    ) -> Vec<User> {
+        let r = query
+            .select(User::as_select())
+            .load_async(pool.pool())
+            .await
+            .unwrap();
+        println!("r: {:#?}", r);
+        r
+    }
+
+    #[tokio::test]
+    async fn test_paginated_single_column_ascending() {
+        let logctx =
+            dev::test_setup_log("test_paginated_single_column_ascending");
+        let mut db = dev::test_setup_database(&logctx.log).await;
+        let cfg = db::Config { url: db.pg_config().clone() };
+        let pool = db::Pool::new(&cfg);
+
+        use schema::test_users::dsl;
+
+        populate_users(&pool, &vec![(1, 1), (2, 2), (3, 3)]).await;
+
+        // Get the first paginated result.
+        let mut pagparams = DataPageParams::<i64> {
+            marker: None,
+            direction: PaginationOrder::Ascending,
+            limit: NonZeroU32::new(1).unwrap(),
+        };
+        let query = paginated(dsl::test_users, dsl::age, &pagparams);
+        let observed = execute_query(&pool, query).await;
+        assert_eq!(observed, vec![(1, 1)]);
+
+        // Get the next paginated results, check that they arrived in the order
+        // we expected.
+        let marker = observed[0].age;
+        pagparams.marker = Some(&marker);
+        pagparams.limit = NonZeroU32::new(2).unwrap();
+        let query = paginated(dsl::test_users, dsl::age, &pagparams);
+        let observed = execute_query(&pool, query).await;
+        assert_eq!(observed, vec![(2, 2), (3, 3)]);
+
+        let _ = db.cleanup().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn test_paginated_single_column_descending() {
+        let logctx =
+            dev::test_setup_log("test_paginated_single_column_descending");
+        let mut db = dev::test_setup_database(&logctx.log).await;
+        let cfg = db::Config { url: db.pg_config().clone() };
+        let pool = db::Pool::new(&cfg);
+
+        use schema::test_users::dsl;
+
+        populate_users(&pool, &vec![(1, 1), (2, 2), (3, 3)]).await;
+
+        // Get the first paginated result.
+        let mut pagparams = DataPageParams::<i64> {
+            marker: None,
+            direction: PaginationOrder::Descending,
+            limit: NonZeroU32::new(1).unwrap(),
+        };
+        let query = paginated(dsl::test_users, dsl::age, &pagparams);
+        let observed = execute_query(&pool, query).await;
+        assert_eq!(observed, vec![(3, 3)]);
+
+        // Get the next paginated results, check that they arrived in the order
+        // we expected.
+        let marker = observed[0].age;
+        pagparams.marker = Some(&marker);
+        pagparams.limit = NonZeroU32::new(2).unwrap();
+        let query = paginated(dsl::test_users, dsl::age, &pagparams);
+        let observed = execute_query(&pool, query).await;
+        assert_eq!(observed, vec![(2, 2), (1, 1)]);
+
+        let _ = db.cleanup().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn test_paginated_multicolumn_ascending() {
+        let logctx =
+            dev::test_setup_log("test_paginated_multicolumn_ascending");
+        let mut db = dev::test_setup_database(&logctx.log).await;
+        let cfg = db::Config { url: db.pg_config().clone() };
+        let pool = db::Pool::new(&cfg);
+
+        use schema::test_users::dsl;
+
+        populate_users(&pool, &vec![(1, 1), (1, 2), (2, 1), (2, 3), (3, 1)])
+            .await;
+
+        // Get the first paginated result.
+        let mut pagparams = DataPageParams::<(i64, i64)> {
+            marker: None,
+            direction: PaginationOrder::Ascending,
+            limit: NonZeroU32::new(1).unwrap(),
+        };
+        let query = paginated_multicolumn(
+            dsl::test_users,
+            (dsl::age, dsl::height),
+            &pagparams,
+        );
+        let observed = execute_query(&pool, query).await;
+        assert_eq!(observed, vec![(1, 1)]);
+
+        // Get the next paginated results, check that they arrived in the order
+        // we expected.
+        let marker = (observed[0].age, observed[0].height);
+        pagparams.marker = Some(&marker);
+        pagparams.limit = NonZeroU32::new(10).unwrap();
+        let query = paginated_multicolumn(
+            dsl::test_users,
+            (dsl::age, dsl::height),
+            &pagparams,
+        );
+        let observed = execute_query(&pool, query).await;
+        assert_eq!(observed, vec![(1, 2), (2, 1), (2, 3), (3, 1)]);
+
+        // Switch the order of columns to see height-first results.
+        pagparams.marker = None;
+        let query = paginated_multicolumn(
+            dsl::test_users,
+            (dsl::height, dsl::age),
+            &pagparams,
+        );
+        let observed = execute_query(&pool, query).await;
+        assert_eq!(observed, vec![(1, 1), (2, 1), (3, 1), (1, 2), (2, 3)]);
+
+        let _ = db.cleanup().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn test_paginated_multicolumn_descending() {
+        let logctx =
+            dev::test_setup_log("test_paginated_multicolumn_descending");
+        let mut db = dev::test_setup_database(&logctx.log).await;
+        let cfg = db::Config { url: db.pg_config().clone() };
+        let pool = db::Pool::new(&cfg);
+
+        use schema::test_users::dsl;
+
+        populate_users(&pool, &vec![(1, 1), (1, 2), (2, 1), (2, 3), (3, 1)])
+            .await;
+
+        // Get the first paginated result.
+        let mut pagparams = DataPageParams::<(i64, i64)> {
+            marker: None,
+            direction: PaginationOrder::Descending,
+            limit: NonZeroU32::new(1).unwrap(),
+        };
+        let query = paginated_multicolumn(
+            dsl::test_users,
+            (dsl::age, dsl::height),
+            &pagparams,
+        );
+        let observed = execute_query(&pool, query).await;
+        assert_eq!(observed, vec![(3, 1)]);
+
+        // Get the next paginated results, check that they arrived in the order
+        // we expected.
+        let marker = (observed[0].age, observed[0].height);
+        pagparams.marker = Some(&marker);
+        pagparams.limit = NonZeroU32::new(10).unwrap();
+        let query = paginated_multicolumn(
+            dsl::test_users,
+            (dsl::age, dsl::height),
+            &pagparams,
+        );
+        let observed = execute_query(&pool, query).await;
+        assert_eq!(observed, vec![(2, 3), (2, 1), (1, 2), (1, 1)]);
+
+        // Switch the order of columns to see height-first results.
+        pagparams.marker = None;
+        let query = paginated_multicolumn(
+            dsl::test_users,
+            (dsl::height, dsl::age),
+            &pagparams,
+        );
+        let observed = execute_query(&pool, query).await;
+        assert_eq!(observed, vec![(2, 3), (1, 2), (3, 1), (2, 1), (1, 1)]);
+
+        let _ = db.cleanup().await;
+        logctx.cleanup_successful();
     }
 }
