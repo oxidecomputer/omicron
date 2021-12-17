@@ -44,7 +44,6 @@ use omicron_common::api::external::http_pagination::ScanParams;
 use omicron_common::api::external::to_list;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Disk;
-use omicron_common::api::external::DiskAttachment;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::Instance;
 use omicron_common::api::external::NetworkInterface;
@@ -62,7 +61,6 @@ use ref_cast::RefCast;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
-use std::num::NonZeroU32;
 use std::sync::Arc;
 use uuid::Uuid;
 
@@ -99,9 +97,8 @@ pub fn external_api() -> NexusApiDescription {
         api.register(project_instances_instance_stop)?;
 
         api.register(instance_disks_get)?;
-        api.register(instance_disks_get_disk)?;
-        api.register(instance_disks_put_disk)?;
-        api.register(instance_disks_delete_disk)?;
+        api.register(instance_disks_attach)?;
+        api.register(instance_disks_detach)?;
 
         api.register(project_vpcs_get)?;
         api.register(project_vpcs_post)?;
@@ -897,139 +894,88 @@ async fn project_instances_instance_stop(
 }]
 async fn instance_disks_get(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    query_params: Query<PaginatedByName>,
     path_params: Path<InstancePathParam>,
-) -> Result<HttpResponseOk<Vec<DiskAttachment>>, HttpError> {
+) -> Result<HttpResponseOk<ResultsPage<Disk>>, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
+    let query = query_params.into_inner();
     let path = path_params.into_inner();
     let organization_name = &path.organization_name;
     let project_name = &path.project_name;
     let instance_name = &path.instance_name;
-    let fake_query = DataPageParams {
-        marker: None,
-        direction: PaginationOrder::Ascending,
-        limit: NonZeroU32::new(std::u32::MAX).unwrap(),
-    };
     let handler = async {
         let disks = nexus
             .instance_list_disks(
                 &organization_name,
                 &project_name,
                 &instance_name,
-                &fake_query,
+                &data_page_params_for(&rqctx, &query)?
+                    .map_name(|n| Name::ref_cast(n)),
             )
             .await?
             .into_iter()
             .map(|d| d.into())
             .collect();
-        Ok(HttpResponseOk(disks))
+        Ok(HttpResponseOk(ScanByName::results_page(&query, disks)?))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/**
- * Path parameters for requests that access Disks attached to an Instance
- */
-#[derive(Deserialize, JsonSchema)]
-struct InstanceDiskPathParam {
-    organization_name: Name,
-    project_name: Name,
-    instance_name: Name,
-    disk_name: Name,
-}
-
-/**
- * Fetch a description of the attachment of this disk to this instance.
- */
 #[endpoint {
-    method = GET,
-    path = "/organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/disks/{disk_name}"
+    method = POST,
+    path = "/organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/disks/attach"
 }]
-async fn instance_disks_get_disk(
+async fn instance_disks_attach(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
-    path_params: Path<InstanceDiskPathParam>,
-) -> Result<HttpResponseOk<DiskAttachment>, HttpError> {
+    path_params: Path<InstancePathParam>,
+    disk_to_attach: TypedBody<params::DiskIdentifier>,
+) -> Result<HttpResponseAccepted<Disk>, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
     let path = path_params.into_inner();
     let organization_name = &path.organization_name;
     let project_name = &path.project_name;
     let instance_name = &path.instance_name;
-    let disk_name = &path.disk_name;
     let handler = async {
-        let attachment = nexus
-            .instance_get_disk(
-                &organization_name,
-                &project_name,
-                &instance_name,
-                &disk_name,
-            )
-            .await?;
-        Ok(HttpResponseOk(attachment))
-    };
-    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
-}
-
-/**
- * Attach a disk to this instance.
- */
-#[endpoint {
-    method = PUT,
-    path = "/organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/disks/{disk_name}"
-}]
-async fn instance_disks_put_disk(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
-    path_params: Path<InstanceDiskPathParam>,
-) -> Result<HttpResponseCreated<DiskAttachment>, HttpError> {
-    let apictx = rqctx.context();
-    let nexus = &apictx.nexus;
-    let path = path_params.into_inner();
-    let organization_name = &path.organization_name;
-    let project_name = &path.project_name;
-    let instance_name = &path.instance_name;
-    let disk_name = &path.disk_name;
-    let handler = async {
-        let attachment = nexus
+        let disk = nexus
             .instance_attach_disk(
                 &organization_name,
                 &project_name,
                 &instance_name,
-                &disk_name,
+                &disk_to_attach.into_inner().disk.into(),
             )
             .await?;
-        Ok(HttpResponseCreated(attachment))
+        Ok(HttpResponseAccepted(disk.into()))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/**
- * Detach a disk from this instance.
- */
 #[endpoint {
-    method = DELETE,
-    path = "/organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/disks/{disk_name}"
+    method = POST,
+    path = "/organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/disks/detach"
 }]
-async fn instance_disks_delete_disk(
+async fn instance_disks_detach(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
-    path_params: Path<InstanceDiskPathParam>,
-) -> Result<HttpResponseDeleted, HttpError> {
+    path_params: Path<InstancePathParam>,
+    disk_to_detach: TypedBody<params::DiskIdentifier>,
+) -> Result<HttpResponseAccepted<Disk>, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
     let path = path_params.into_inner();
     let organization_name = &path.organization_name;
     let project_name = &path.project_name;
     let instance_name = &path.instance_name;
-    let disk_name = &path.disk_name;
     let handler = async {
-        nexus
+        let disk = nexus
             .instance_detach_disk(
                 &organization_name,
                 &project_name,
                 &instance_name,
-                &disk_name,
+                &disk_to_detach.into_inner().disk.into(),
             )
             .await?;
-        Ok(HttpResponseDeleted())
+        Ok(HttpResponseAccepted(disk.into()))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
@@ -2094,7 +2040,7 @@ async fn roles_get(
         Ok(HttpResponseOk(dropshot::ResultsPage::new(
             roles,
             &EmptyScanParams {},
-            |role: &Role, _| RolePage { last_seen: role.name.clone() },
+            |role: &Role, _| RolePage { last_seen: role.name.to_string() },
         )?))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await

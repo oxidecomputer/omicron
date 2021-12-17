@@ -67,15 +67,16 @@ use crate::db::{
         public_error_from_diesel_pool_shouldnt_fail,
     },
     model::{
-        ConsoleSession, Dataset, Disk, DiskAttachment, DiskRuntimeState,
-        Generation, IncompleteNetworkInterface, Instance, InstanceRuntimeState,
-        Name, NetworkInterface, Organization, OrganizationUpdate, OximeterInfo,
+        ConsoleSession, Dataset, Disk, DiskRuntimeState, Generation,
+        IncompleteNetworkInterface, Instance, InstanceRuntimeState, Name,
+        NetworkInterface, Organization, OrganizationUpdate, OximeterInfo,
         ProducerEndpoint, Project, ProjectUpdate, RoleAssignmentBuiltin,
         RoleBuiltin, RouterRoute, RouterRouteUpdate, Sled, UserBuiltin, Vpc,
         VpcFirewallRule, VpcRouter, VpcRouterUpdate, VpcSubnet,
         VpcSubnetUpdate, VpcUpdate, Zpool,
     },
     pagination::paginated,
+    pagination::paginated_multicolumn,
     subnet_allocation::AllocateIpQuery,
     update_and_check::{UpdateAndCheck, UpdateStatus},
 };
@@ -861,7 +862,7 @@ impl DataStore {
         &self,
         instance_id: &Uuid,
         pagparams: &DataPageParams<'_, Name>,
-    ) -> ListResultVec<DiskAttachment> {
+    ) -> ListResultVec<Disk> {
         use db::schema::disk::dsl;
 
         paginated(dsl::disk, dsl::name, &pagparams)
@@ -870,13 +871,6 @@ impl DataStore {
             .select(Disk::as_select())
             .load_async::<Disk>(self.pool())
             .await
-            .map(|disks| {
-                disks
-                    .into_iter()
-                    // Unwrap safety: filtered by instance_id in query.
-                    .map(|disk| disk.attachment().unwrap())
-                    .collect()
-            })
             .map_err(|e| {
                 public_error_from_diesel_pool(
                     e,
@@ -2168,49 +2162,21 @@ impl DataStore {
     ) -> ListResultVec<RoleBuiltin> {
         use db::schema::role_builtin::dsl;
         opctx.authorize(authz::Action::ListChildren, authz::FLEET).await?;
-
-        // TODO-column This is essentially a multi-column version of
-        // `paginated`.  It would be better to turn this into a function.  It's
-        // not obvious how to do that.
-        let mut query =
-            dsl::role_builtin.into_boxed().limit(pagparams.limit.get().into());
-        let query = match pagparams.direction {
-            dropshot::PaginationOrder::Ascending => {
-                if let Some((v1, v2)) = &pagparams.marker {
-                    query = query.filter(
-                        (dsl::resource_type
-                            .eq(v1.clone())
-                            .and(dsl::role_name.gt(v2.clone())))
-                        .or(dsl::resource_type.gt(v1.clone())),
-                    )
-                }
-
-                query.order((dsl::resource_type.asc(), dsl::role_name.asc()))
-            }
-            dropshot::PaginationOrder::Descending => {
-                if let Some((v1, v2)) = &pagparams.marker {
-                    query = query.filter(
-                        (dsl::resource_type
-                            .eq(v1.clone())
-                            .and(dsl::role_name.lt(v2.clone())))
-                        .or(dsl::resource_type.lt(v1.clone())),
-                    )
-                }
-                query.order((dsl::resource_type.desc(), dsl::role_name.desc()))
-            }
-        };
-
-        query
-            .select(RoleBuiltin::as_select())
-            .load_async::<RoleBuiltin>(self.pool_authorized(opctx).await?)
-            .await
-            .map_err(|e| {
-                public_error_from_diesel_pool(
-                    e,
-                    ResourceType::Role,
-                    LookupType::Other("Listing All".to_string()),
-                )
-            })
+        paginated_multicolumn(
+            dsl::role_builtin,
+            (dsl::resource_type, dsl::role_name),
+            pagparams,
+        )
+        .select(RoleBuiltin::as_select())
+        .load_async::<RoleBuiltin>(self.pool_authorized(opctx).await?)
+        .await
+        .map_err(|e| {
+            public_error_from_diesel_pool(
+                e,
+                ResourceType::Role,
+                LookupType::Other("Listing All".to_string()),
+            )
+        })
     }
 
     pub async fn role_builtin_fetch(

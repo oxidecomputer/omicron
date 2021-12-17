@@ -901,19 +901,6 @@ impl Disk {
     pub fn runtime(&self) -> DiskRuntimeState {
         self.runtime_state.clone()
     }
-
-    pub fn attachment(&self) -> Option<DiskAttachment> {
-        if let Some(instance_id) = self.runtime_state.attach_instance_id {
-            Some(DiskAttachment {
-                instance_id,
-                disk_id: self.id(),
-                disk_name: self.name().clone(),
-                disk_state: self.state(),
-            })
-        } else {
-            None
-        }
-    }
 }
 
 /// Conversion to the external API type.
@@ -1037,26 +1024,6 @@ impl From<external::DiskState> for DiskState {
 impl Into<external::DiskState> for DiskState {
     fn into(self) -> external::DiskState {
         self.0
-    }
-}
-
-/// Type which describes the attachment status of a disk.
-#[derive(Clone, Debug)]
-pub struct DiskAttachment {
-    pub instance_id: Uuid,
-    pub disk_id: Uuid,
-    pub disk_name: Name,
-    pub disk_state: DiskState,
-}
-
-impl Into<external::DiskAttachment> for DiskAttachment {
-    fn into(self) -> external::DiskAttachment {
-        external::DiskAttachment {
-            instance_id: self.instance_id,
-            disk_id: self.disk_id,
-            disk_name: self.disk_name.0,
-            disk_state: self.disk_state.0,
-        }
     }
 }
 

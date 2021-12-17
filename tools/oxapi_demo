@@ -47,7 +47,6 @@ INSTANCES
     instance_attach_disk ORGANIZATION_NAME PROJECT_NAME INSTANCE_NAME DISK_NAME
     instance_detach_disk ORGANIZATION_NAME PROJECT_NAME INSTANCE_NAME DISK_NAME
     instance_list_disks  ORGANIZATION_NAME PROJECT_NAME INSTANCE_NAME
-    instance_get_disk    ORGANIZATION_NAME PROJECT_NAME INSTANCE_NAME DISK_NAME
 
 DISKS
 
@@ -300,25 +299,21 @@ function cmd_instance_reboot
 function cmd_instance_attach_disk
 {
 	[[ $# != 4 ]] && usage "expected ORGANIZATION_NAME PROJECT_NAME INSTANCE_NAME DISK_NAME"
-	do_curl "/organizations/$1/projects/$2/instances/$3/disks/$4" -X PUT -T /dev/null
+	mkjson disk="$4" |
+		do_curl "/organizations/$1/projects/$2/instances/$3/disks/attach" -X POST -T -
 }
 
 function cmd_instance_detach_disk
 {
-	[[ $# != 3 ]] && usage "expected ORGANIZATION_NAME PROJECT_NAME INSTANCE_NAME DISK_NAME"
-	do_curl "/organizations/$1/projects/$2/instances/$3/disks/$4" -X DELETE -T /dev/null
+	[[ $# != 4 ]] && usage "expected ORGANIZATION_NAME PROJECT_NAME INSTANCE_NAME DISK_NAME"
+	mkjson disk="$4" |
+		do_curl "/organizations/$1/projects/$2/instances/$3/disks/detach" -X POST -T -
 }
 
 function cmd_instance_list_disks
 {
 	[[ $# != 3 ]] && usage "expected ORGANIZATION_NAME PROJECT_NAME INSTANCE_NAME"
 	do_curl "/organizations/$1/projects/$2/instances/$3/disks"
-}
-
-function cmd_instance_get_disk
-{
-	[[ $# != 4 ]] && usage "expected ORGANIZATION_NAME PROJECT_NAME INSTANCE_NAME DISK_NAME"
-	do_curl "/organizations/$1/projects/$2/instances/$3/disks/$4"
 }
 
 function cmd_disk_create_demo

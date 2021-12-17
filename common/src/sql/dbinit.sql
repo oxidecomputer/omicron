@@ -735,7 +735,7 @@ INSERT INTO omicron.public.user_builtin (
  * other tables.  But they're just different enough that we can't use most of
  * the same abstractions:
  *
- * * "id": We have no need for a uuid because the (role_name, full_name) is
+ * * "id": We have no need for a uuid because the (resource_type, role_name) is
  *   already unique and immutable.
  * * "name": What we call "full name" above could instead be called "name",
  *   which would be consistent with other identity metadata.  But it's not a
