@@ -69,7 +69,7 @@ async fn test_vpc_subnets(cptestctx: &ControlPlaneTestContext) {
     let error = client
         .make_request_error(Method::GET, &subnet_url, StatusCode::NOT_FOUND)
         .await;
-    assert_eq!(error.message, "not found: vpc_subnet with name \"subnet1\"");
+    assert_eq!(error.message, "not found: vpc-subnet with name \"subnet1\"");
 
     /* Create a VPC Subnet. */
     let ipv4_block =
@@ -129,7 +129,7 @@ async fn test_vpc_subnets(cptestctx: &ControlPlaneTestContext) {
             StatusCode::BAD_REQUEST,
         )
         .await;
-    assert_eq!(error.message, "already exists: vpc_subnet \"subnet1\"");
+    assert_eq!(error.message, "already exists: vpc-subnet \"subnet1\"");
 
     let subnet2_name = "subnet2";
     let subnet2_url = format!("{}/{}", subnets_url, subnet2_name);
@@ -138,7 +138,7 @@ async fn test_vpc_subnets(cptestctx: &ControlPlaneTestContext) {
     let error = client
         .make_request_error(Method::GET, &subnet2_url, StatusCode::NOT_FOUND)
         .await;
-    assert_eq!(error.message, "not found: vpc_subnet with name \"subnet2\"");
+    assert_eq!(error.message, "not found: vpc-subnet with name \"subnet2\"");
 
     // create second subnet
     let new_subnet = params::VpcSubnetCreate {
@@ -187,7 +187,7 @@ async fn test_vpc_subnets(cptestctx: &ControlPlaneTestContext) {
     let error = client
         .make_request_error(Method::GET, &subnet_url, StatusCode::NOT_FOUND)
         .await;
-    assert_eq!(error.message, "not found: vpc_subnet with name \"subnet1\"");
+    assert_eq!(error.message, "not found: vpc-subnet with name \"subnet1\"");
 
     let subnet_url = format!("{}/{}", subnets_url, "new-name");
 
@@ -221,13 +221,13 @@ async fn test_vpc_subnets(cptestctx: &ControlPlaneTestContext) {
     let error = client
         .make_request_error(Method::GET, &subnet_url, StatusCode::NOT_FOUND)
         .await;
-    assert_eq!(error.message, "not found: vpc_subnet with name \"new-name\"");
+    assert_eq!(error.message, "not found: vpc-subnet with name \"new-name\"");
 
     // delete subnet should 404
     let error = client
         .make_request_error(Method::DELETE, &subnet_url, StatusCode::NOT_FOUND)
         .await;
-    assert_eq!(error.message, "not found: vpc_subnet with name \"new-name\"");
+    assert_eq!(error.message, "not found: vpc-subnet with name \"new-name\"");
 
     // Creating a subnet with the same name in a different VPC is allowed
     let vpc2_name = "vpc2";

@@ -3773,7 +3773,7 @@
         "title": "A name for a built-in role",
         "description": "Role names consist of two string components separated by dot (\".\").",
         "type": "string",
-        "pattern": "[a-z_]+\\.[a-z_]+",
+        "pattern": "[a-z-]+\\.[a-z-]+",
         "maxLength": 63
       },
       "RoleResultsPage": {

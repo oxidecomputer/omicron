@@ -313,9 +313,14 @@ impl Name {
 )]
 #[display("{resource_type}.{role_name}")]
 pub struct RoleName {
-    #[from_str(regex = "[a-z_]+")]
+    // "resource_type" is generally the String value of one of the
+    // `ResourceType` variants.  We could store the parsed `ResourceType`
+    // instead, but it's useful to be able to represent RoleNames for resource
+    // types that we don't know about.  That could happen if we happen to find
+    // them in the database, for example.
+    #[from_str(regex = "[a-z-]+")]
     resource_type: String,
-    #[from_str(regex = "[a-z_]+")]
+    #[from_str(regex = "[a-z-]+")]
     role_name: String,
 }
 
@@ -365,7 +370,7 @@ impl JsonSchema for RoleName {
             string: Some(Box::new(schemars::schema::StringValidation {
                 max_length: Some(63),
                 min_length: None,
-                pattern: Some("[a-z_]+\\.[a-z_]+".to_string()),
+                pattern: Some("[a-z-]+\\.[a-z-]+".to_string()),
             })),
             array: None,
             object: None,
@@ -557,7 +562,7 @@ impl TryFrom<i64> for Generation {
     PartialOrd,
     SerializeDisplay,
 )]
-#[display(style = "snake_case")]
+#[display(style = "kebab-case")]
 pub enum ResourceType {
     Fleet,
     Organization,
@@ -1994,7 +1999,7 @@ mod test {
             // missing role name
             "project.",
             // illegal characters in role name
-            "project.not-good",
+            "project.not_good",
         ];
 
         for input in bad_inputs {
@@ -2018,13 +2023,13 @@ mod test {
         assert_eq!(role_name.resource_type, "barf");
         assert_eq!(role_name.role_name, "admin");
 
-        eprintln!("check name \"organization.super_user\" (expecting success)");
-        let role_name = "organization.super_user"
+        eprintln!("check name \"organization.super-user\" (expecting success)");
+        let role_name = "organization.super-user"
             .parse::<RoleName>()
             .expect("failed to parse");
-        assert_eq!(role_name.to_string(), "organization.super_user");
+        assert_eq!(role_name.to_string(), "organization.super-user");
         assert_eq!(role_name.resource_type, "organization");
-        assert_eq!(role_name.role_name, "super_user");
+        assert_eq!(role_name.role_name, "super-user");
     }
 
     #[test]
@@ -2036,6 +2041,7 @@ mod test {
             "oRgAnIzAtIoN",
             "organisation",
             "vpc subnet",
+            "vpc_subnet",
         ];
         for input in bad_inputs {
             eprintln!("check resource type {:?} (expecting error)", input);
@@ -2051,7 +2057,7 @@ mod test {
         );
         assert_eq!(
             ResourceType::VpcSubnet,
-            "vpc_subnet".parse::<ResourceType>().unwrap()
+            "vpc-subnet".parse::<ResourceType>().unwrap()
         );
     }
 
