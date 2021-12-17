@@ -28,7 +28,6 @@ use dropshot::Query;
 use dropshot::RequestContext;
 use dropshot::ResultsPage;
 use dropshot::TypedBody;
-use omicron_common::api::external::http_pagination::data_page_params_for;
 use omicron_common::api::external::http_pagination::data_page_params_nameid_id;
 use omicron_common::api::external::http_pagination::data_page_params_nameid_name;
 use omicron_common::api::external::http_pagination::pagination_field_for_scan_params;
@@ -54,6 +53,9 @@ use omicron_common::api::external::VpcFirewallRuleUpdateParams;
 use omicron_common::api::external::VpcFirewallRuleUpdateResult;
 use omicron_common::api::external::VpcRouter;
 use omicron_common::api::external::VpcRouterKind;
+use omicron_common::api::external::{
+    http_pagination::data_page_params_for, Identifier,
+};
 use ref_cast::RefCast;
 use schemars::JsonSchema;
 use serde::Deserialize;
@@ -259,7 +261,7 @@ async fn organizations_post(
 #[derive(Deserialize, JsonSchema)]
 struct OrganizationPathParam {
     /// The organization's unique name.
-    organization_name: Name,
+    organization: Identifier,
 }
 
 /**
@@ -267,7 +269,7 @@ struct OrganizationPathParam {
  */
 #[endpoint {
     method = GET,
-    path = "/organizations/{organization_name}",
+    path = "/organizations/{organization}",
 }]
 async fn organizations_get_organization(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
@@ -276,9 +278,14 @@ async fn organizations_get_organization(
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
     let path = path_params.into_inner();
-    let organization_name = &path.organization_name;
+    let organization_id = match &path.organization {
+        Identifier::Id(uuid) => uuid,
+        Identifier::Name(name) => {
+            &nexus.organization_lookup_id_by_name(name).await?
+        }
+    };
     let handler = async {
-        let organization = nexus.organization_fetch(&organization_name).await?;
+        let organization = nexus.organization_fetch(&organization_id).await?;
         Ok(HttpResponseOk(organization.into()))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
@@ -298,9 +305,14 @@ async fn organizations_delete_organization(
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
     let params = path_params.into_inner();
-    let organization_name = &params.organization_name;
+    let organization_id = match &path.organization {
+        Identifier::Id(uuid) => uuid,
+        Identifier::Name(name) => {
+            &nexus.organization_lookup_id_by_name(name).await?
+        }
+    };
     let handler = async {
-        nexus.organization_delete(&organization_name).await?;
+        nexus.organization_delete(&organization_id).await?;
         Ok(HttpResponseDeleted())
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await

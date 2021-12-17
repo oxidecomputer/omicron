@@ -29,6 +29,9 @@ use parse_display::FromStr;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
+use serde_with::DeserializeFromStr;
+use serde_with::SerializeDisplay;
+use std::collections::HashMap;
 use std::convert::TryFrom;
 use std::fmt::Debug;
 use std::fmt::Display;
@@ -1712,11 +1715,18 @@ mod test {
                 "name contains invalid character: \"\u{00e9}\" (allowed \
                  characters are lowercase ASCII, digits, and \"-\")",
             ),
+            (
+                "d139cf3f-ee91-4a24-ad1e-8b409542219b",
+                "name cannot be a valid UUID to avoid conflicts",
+            ),
         ];
 
         for (input, expected_message) in error_cases {
             eprintln!("check name \"{}\" (expecting error)", input);
-            assert_eq!(input.parse::<Name>().unwrap_err(), expected_message);
+            assert_eq!(
+                input.parse::<Name>().unwrap_err().to_string(),
+                expected_message
+            );
         }
 
         /*

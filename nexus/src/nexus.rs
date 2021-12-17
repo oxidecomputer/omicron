@@ -476,11 +476,18 @@ impl Nexus {
         self.db_datastore.organization_create(opctx, db_org).await
     }
 
-    pub async fn organization_fetch(
+    pub async fn organization_lookup_id_by_name(
         &self,
         name: &Name,
+    ) -> LookupResult<Uuid> {
+        self.db_datastore.organization_lookup_id_by_name(name).await
+    }
+
+    pub async fn organization_fetch(
+        &self,
+        id: &Uuid,
     ) -> LookupResult<db::model::Organization> {
-        self.db_datastore.organization_fetch(name).await
+        self.db_datastore.organization_fetch(id).await
     }
 
     pub async fn organizations_list_by_name(
@@ -499,8 +506,8 @@ impl Nexus {
         self.db_datastore.organizations_list_by_id(opctx, pagparams).await
     }
 
-    pub async fn organization_delete(&self, name: &Name) -> DeleteResult {
-        self.db_datastore.organization_delete(name).await
+    pub async fn organization_delete(&self, id: &Uuid) -> DeleteResult {
+        self.db_datastore.organization_delete(id).await
     }
 
     pub async fn organization_update(

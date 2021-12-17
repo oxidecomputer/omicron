@@ -42,7 +42,6 @@ use diesel::prelude::*;
 use diesel::upsert::excluded;
 use diesel::{ExpressionMethods, QueryDsl, SelectableHelper};
 use omicron_common::api;
-use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::DeleteResult;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::ListResultVec;
@@ -53,6 +52,7 @@ use omicron_common::api::external::UpdateResult;
 use omicron_common::api::external::{
     CreateResult, IdentityMetadataCreateParams,
 };
+use omicron_common::api::external::{DataPageParams, Identifier};
 use omicron_common::bail_unless;
 use std::convert::TryFrom;
 use std::sync::Arc;
@@ -259,15 +259,15 @@ impl DataStore {
             })
     }
 
-    /// Lookup a organization by name.
+    /// Lookup a organization by name or id.
     pub async fn organization_fetch(
         &self,
-        name: &Name,
+        id: &Uuid,
     ) -> LookupResult<Organization> {
         use db::schema::organization::dsl;
         dsl::organization
             .filter(dsl::time_deleted.is_null())
-            .filter(dsl::name.eq(name.clone()))
+            .filter(dsl::id.eq(id.clone()))
             .select(Organization::as_select())
             .first_async::<Organization>(self.pool())
             .await
@@ -275,19 +275,19 @@ impl DataStore {
                 public_error_from_diesel_pool(
                     e,
                     ResourceType::Organization,
-                    LookupType::ByName(name.as_str().to_owned()),
+                    LookupType::ById(*id),
                 )
             })
     }
 
     /// Delete a organization
-    pub async fn organization_delete(&self, name: &Name) -> DeleteResult {
+    pub async fn organization_delete(&self, id: &Uuid) -> DeleteResult {
         use db::schema::organization::dsl;
         use db::schema::project;
 
         let (id, rcgen) = dsl::organization
             .filter(dsl::time_deleted.is_null())
-            .filter(dsl::name.eq(name.clone()))
+            .filter(dsl::id.eq(id.clone()))
             .select((dsl::id, dsl::rcgen))
             .get_result_async::<(Uuid, Generation)>(self.pool())
             .await
@@ -295,7 +295,7 @@ impl DataStore {
                 public_error_from_diesel_pool(
                     e,
                     ResourceType::Organization,
-                    LookupType::ByName(name.as_str().to_owned()),
+                    LookupType::ById(*id),
                 )
             })?;
 

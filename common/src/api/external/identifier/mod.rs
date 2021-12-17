@@ -6,14 +6,15 @@ use std::{convert::TryFrom, str::FromStr};
 pub use id::*;
 pub use name::*;
 use parse_display::Display;
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-#[derive(Debug, Display, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Display, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[display("{0}")]
 #[serde(try_from = "String")]
 pub enum Identifier {
-    Id(Id),
+    Id(Uuid),
     Name(Name),
 }
 

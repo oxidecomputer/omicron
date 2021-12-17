@@ -1,5 +1,8 @@
 use std::{collections::BTreeMap, convert::TryFrom, str::FromStr};
 
+// TODO: Is there a better way to specify this?
+use super::super::error::*;
+
 use parse_display::Display;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -10,17 +13,17 @@ const NAME_PATTERN: &str = r"^[a-z][a-zA-Z0-9-]{1,62}[a-zA-Z0-9]$";
 
 #[derive(Error, Debug)]
 pub enum NameError {
-    #[error("Name {0} is a UUID which is disallowed to avoid conflicts. Add a prefix or postfix to differentiate it.")]
+    #[error("name cannot be a valid UUID to avoid conflicts")]
     UuidConflict(String),
-    #[error("Name may contain at most 63 characters, `{0}` has {}", .0.len())]
+    #[error("name may contain at most 63 characters")]
     TooLong(String),
-    #[error("Name requires at least one character")]
+    #[error("name requires at least one character")]
     Empty,
-    #[error("Expected name `{0}` to begin with an ASCII lowercase character but got `{1}`")]
+    #[error("name must begin with an ASCII lowercase character")]
     InvalidFirstCharacter(String, char),
-    #[error("Name `{0}` contains invalid character `{1}` (only lowercase ASCII, digits, and \"-\" are allowed)")]
+    #[error("name contains invalid character: \"{1}\" (allowed characters are lowercase ASCII, digits, and \"-\")")]
     InvalidCharacter(String, char),
-    #[error("Name `{0}` ends with `{1}` which is invalid")]
+    #[error("name cannot end with \"{1}\"")]
     InvalidLastCharacter(String, char),
 }
 
@@ -34,13 +37,14 @@ pub enum NameError {
 #[derive(
     Clone,
     Debug,
+    Deserialize,
+    Display,
     Eq,
+    Hash,
     Ord,
     PartialEq,
     PartialOrd,
-    Display,
     Serialize,
-    Deserialize,
 )]
 #[display("{0}")]
 #[serde(try_from = "String")]
@@ -172,9 +176,9 @@ impl Name {
      * `Error`.
      */
     pub fn from_param(value: String, label: &str) -> Result<Name, Error> {
-        value.parse().map_err(|e| Error::InvalidValue {
+        value.parse::<Name>().map_err(|e| Error::InvalidValue {
             label: String::from(label),
-            message: e,
+            message: e.to_string(),
         })
     }
     /**
