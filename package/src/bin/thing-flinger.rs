@@ -217,9 +217,14 @@ fn do_package(
         .to_str()
         .ok_or_else(|| FlingError::BadString("artifact_dir".to_string()))?;
 
+    // We use a bash login shell to get a proper environment, so we have a path to
+    // postgres, and $DEP_PQ_LIBDIRS is filled in. This is required for building
+    // nexus.
+    //
+    // See https://github.com/oxidecomputer/omicron/blob/8757ec542ea4ffbadd6f26094ed4ba357715d70d/rpaths/src/lib.rs
     write!(
         &mut cmd,
-        "cd {} && git checkout {} && {} package --out {} {}",
+        "bash -lc 'cd {} && git checkout {} && {} package --out {} {}'",
         config.builder.omicron_path,
         config.builder.git_treeish,
         cmd_path,
@@ -237,7 +242,7 @@ fn do_check(config: &Config) -> Result<()> {
 
     write!(
         &mut cmd,
-        "cd {} && git checkout {} && {} check",
+        "bash -lc 'cd {} && git checkout {} && {} check'",
         config.builder.omicron_path, config.builder.git_treeish, cmd_path,
     )?;
 
