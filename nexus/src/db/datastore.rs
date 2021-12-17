@@ -2158,10 +2158,6 @@ impl DataStore {
     ) -> ListResultVec<RoleBuiltin> {
         use db::schema::role_builtin::dsl;
         opctx.authorize(authz::Action::ListChildren, authz::FLEET)?;
-
-        // TODO-column This is essentially a multi-column version of
-        // `paginated`.  It would be better to turn this into a function.  It's
-        // not obvious how to do that.
         paginated_multicolumn(
             dsl::role_builtin,
             (dsl::resource_type, dsl::role_name),
