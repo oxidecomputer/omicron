@@ -25,16 +25,21 @@ pub struct ShareDistribution {
 }
 
 impl ShareDistribution {
-    pub fn write(&self, dir: &Path) -> Result<(), TrustQuorumError> {
-        let mut path = PathBuf::from(dir);
+    pub fn write<P: AsRef<Path>>(
+        &self,
+        dir: P,
+    ) -> Result<(), TrustQuorumError> {
+        let mut path = PathBuf::from(dir.as_ref());
         path.push(FILENAME);
         let json = serde_json::to_string(&self)?;
         fs::write(path, &json)?;
         Ok(())
     }
 
-    pub fn read(dir: &Path) -> Result<ShareDistribution, TrustQuorumError> {
-        let mut path = PathBuf::from(dir);
+    pub fn read<P: AsRef<Path>>(
+        dir: P,
+    ) -> Result<ShareDistribution, TrustQuorumError> {
+        let mut path = PathBuf::from(dir.as_ref());
         path.push(FILENAME);
         let json = fs::read_to_string(path.to_str().unwrap())?;
         serde_json::from_str(&json).map_err(|e| e.into())
