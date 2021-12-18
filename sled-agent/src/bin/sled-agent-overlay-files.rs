@@ -2,6 +2,11 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+//! This binary is used to generate files unique to the sled agent running on
+//! each server. Specifically, the unique files we care about are key shares
+//! used for the trust quourm here. We generate a shared secret then split it,
+//! distributing each share to the appropriate server.
+
 use omicron_sled_agent::bootstrap::trust_quorum::{
     RackSecret, ShareDistribution,
 };
@@ -16,11 +21,11 @@ use structopt::StructOpt;
     about = "Generate server unique files for deployment"
 )]
 struct Args {
-    /// The rack secret threshold
+    //// The rack secret threshold
     #[structopt(short, long)]
     threshold: usize,
 
-    // A directory per server where the files are output
+    /// A directory per server where the files are output
     #[structopt(short, long)]
     directories: Vec<PathBuf>,
 }

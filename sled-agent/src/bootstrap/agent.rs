@@ -5,8 +5,9 @@
 //! Bootstrap-related APIs.
 
 use super::discovery;
-use super::spdm::SpdmError;
-use super::trust_quorum::{self, RackSecret, ShareDistribution};
+use super::trust_quorum::{
+    self, RackSecret, ShareDistribution, TrustQuorumError,
+};
 use super::views::ShareResponse;
 use omicron_common::api::external::Error as ExternalError;
 use omicron_common::backoff::{
@@ -18,7 +19,6 @@ use slog::Logger;
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::{self, Seek, SeekFrom};
-use std::net::SocketAddr;
 use std::path::Path;
 use tar::Archive;
 use thiserror::Error;
@@ -44,26 +44,8 @@ pub enum BootstrapError {
     #[error("Error making HTTP request")]
     Api(#[from] anyhow::Error),
 
-    #[error("Error running SPDM protocol: {0}")]
-    Spdm(#[from] SpdmError),
-
-    #[error("Not enough peers to unlock storage")]
-    NotEnoughPeers,
-
-    #[error("Bincode (de)serialization error: {0}")]
-    Bincode(#[from] Box<bincode::ErrorKind>),
-
-    #[error("JSON (de)serialization error: {0}")]
-    Json(#[from] serde_json::Error),
-
-    #[error("Invalid secret share received from {0}")]
-    InvalidShare(SocketAddr),
-
-    #[error("Invalid message received from {0}")]
-    InvalidMsg(SocketAddr),
-
-    #[error("Rack secret construction failed: {0:?}")]
-    RackSecretConstructionFailed(vsss_rs::Error),
+    #[error(transparent)]
+    TrustQuorum(#[from] TrustQuorumError),
 }
 
 impl From<BootstrapError> for ExternalError {
@@ -83,14 +65,14 @@ fn read_key_share() -> Result<Option<ShareDistribution>, BootstrapError> {
 
     match ShareDistribution::read(&key_share_dir) {
         Ok(share) => Ok(Some(share)),
-        Err(BootstrapError::Io(err)) => {
+        Err(TrustQuorumError::Io(err)) => {
             if err.kind() == io::ErrorKind::NotFound {
                 Ok(None)
             } else {
                 Err(BootstrapError::Io(err))
             }
         }
-        Err(e) => Err(e),
+        Err(e) => Err(e.into()),
     }
 }
 
@@ -137,16 +119,16 @@ impl Agent {
                     "Bootstrap: Communicating with peers: {:?}", other_agents
                 );
 
-                let share = || self.share.as_ref().unwrap();
+                let share = self.share.as_ref().unwrap();
 
                 // "-1" to account for ourselves.
-                if other_agents.len() < share().threshold - 1 {
+                if other_agents.len() < share.threshold - 1 {
                     warn!(
                         &self.log,
                         "Not enough peers to start establishing quorum"
                     );
                     return Err(BackoffError::Transient(
-                        BootstrapError::NotEnoughPeers,
+                        TrustQuorumError::NotEnoughPeers,
                     ));
                 }
                 info!(
@@ -161,15 +143,15 @@ impl Agent {
                         addr.set_port(trust_quorum::PORT);
                         trust_quorum::Client::new(
                             &self.log,
-                            share().verifier.clone(),
+                            share.verifier.clone(),
                             addr,
                         )
                     })
                     .collect();
 
-                // TODO: Parallelize this and keep track of who's shares we've already retrieved and
+                // TODO: Parallelize this and keep track of whose shares we've already retrieved and
                 // don't resend. See https://github.com/oxidecomputer/omicron/issues/514
-                let mut shares = vec![share().share.clone()];
+                let mut shares = vec![share.share.clone()];
                 for agent in &other_agents {
                     let share = agent.get_share().await
                         .map_err(|e| {
@@ -184,8 +166,8 @@ impl Agent {
                     shares.push(share);
                 }
                 let rack_secret = RackSecret::combine_shares(
-                    share().threshold,
-                    share().total_shares,
+                    share.threshold,
+                    share.total_shares,
                     &shares,
                 )
                 .map_err(|e| {
@@ -198,7 +180,7 @@ impl Agent {
                     // the error returned from `RackSecret::combine_shares`.
                     // See https://github.com/oxidecomputer/omicron/issues/516
                     BackoffError::Transient(
-                        BootstrapError::RackSecretConstructionFailed(e),
+                        TrustQuorumError::RackSecretConstructionFailed(e),
                     )
                 })?;
                 info!(self.log, "RackSecret computed from shares.");

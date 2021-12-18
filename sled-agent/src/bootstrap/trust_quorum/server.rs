@@ -11,7 +11,8 @@ use tokio::task::JoinHandle;
 use vsss_rs::Share;
 
 use super::msgs::Response;
-use crate::bootstrap::{agent::BootstrapError, spdm};
+use super::TrustQuorumError;
+use crate::bootstrap::spdm;
 
 // TODO: Get port from config
 // TODO: Get IpAddr from local router:
@@ -50,7 +51,7 @@ impl Server {
         })
     }
 
-    pub async fn run(&mut self) -> Result<(), BootstrapError> {
+    pub async fn run(&mut self) -> Result<(), TrustQuorumError> {
         loop {
             // TODO: Track the returned handles in a FuturesUnordered and log any errors?
             // Alternatively, maintain some shared state across all
@@ -62,7 +63,8 @@ impl Server {
 
     async fn accept(
         &mut self,
-    ) -> Result<JoinHandle<Result<(), BootstrapError>>, BootstrapError> {
+    ) -> Result<JoinHandle<Result<(), TrustQuorumError>>, TrustQuorumError>
+    {
         let (sock, addr) = self.listener.accept().await?;
         debug!(self.log, "Accepted connection from {}", addr);
         let share = self.share.clone();
@@ -79,7 +81,7 @@ async fn run_responder(
     addr: SocketAddr,
     sock: TcpStream,
     share: Share,
-) -> Result<(), BootstrapError> {
+) -> Result<(), TrustQuorumError> {
     let transport = spdm::Transport::new(sock, log.clone());
 
     // TODO: Future code will return a secure SPDM session. For now, we just

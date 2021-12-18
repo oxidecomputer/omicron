@@ -10,7 +10,8 @@ use vsss_rs::Share;
 
 use super::msgs::{Request, Response};
 use super::rack_secret::Verifier;
-use crate::bootstrap::{agent::BootstrapError, spdm};
+use super::TrustQuorumError;
+use crate::bootstrap::spdm;
 
 pub struct Client {
     log: Logger,
@@ -29,7 +30,7 @@ impl Client {
 
     // Connect to a trust quorum server, establish an SPDM channel, and retrieve
     // a share.
-    pub async fn get_share(&self) -> Result<Share, BootstrapError> {
+    pub async fn get_share(&self) -> Result<Share, TrustQuorumError> {
         let sock = TcpStream::connect(&self.addr).await?;
         let transport = spdm::Transport::new(sock, self.log.clone());
 
@@ -48,7 +49,7 @@ impl Client {
         if self.verifier.verify(&share) {
             Ok(share)
         } else {
-            Err(BootstrapError::InvalidShare(self.addr))
+            Err(TrustQuorumError::InvalidShare(self.addr))
         }
     }
 }

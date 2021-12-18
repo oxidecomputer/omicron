@@ -31,12 +31,14 @@
 //!
 
 mod client;
+mod error;
 mod msgs;
 mod rack_secret;
 mod server;
 mod share_distribution;
 
 pub use client::Client;
+pub use error::TrustQuorumError;
 pub use rack_secret::RackSecret;
 pub use server::{Server, PORT};
 pub use share_distribution::ShareDistribution;

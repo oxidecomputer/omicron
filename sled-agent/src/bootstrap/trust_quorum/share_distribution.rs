@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 use vsss_rs::Share;
 
 use super::rack_secret::Verifier;
-use crate::bootstrap::agent::BootstrapError;
+use super::TrustQuorumError;
 
 const FILENAME: &'static str = "share.json";
 
@@ -25,7 +25,7 @@ pub struct ShareDistribution {
 }
 
 impl ShareDistribution {
-    pub fn write(&self, dir: &Path) -> Result<(), BootstrapError> {
+    pub fn write(&self, dir: &Path) -> Result<(), TrustQuorumError> {
         let mut path = PathBuf::from(dir);
         path.push(FILENAME);
         let json = serde_json::to_string(&self)?;
@@ -33,7 +33,7 @@ impl ShareDistribution {
         Ok(())
     }
 
-    pub fn read(dir: &Path) -> Result<ShareDistribution, BootstrapError> {
+    pub fn read(dir: &Path) -> Result<ShareDistribution, TrustQuorumError> {
         let mut path = PathBuf::from(dir);
         path.push(FILENAME);
         let json = fs::read_to_string(path.to_str().unwrap())?;
