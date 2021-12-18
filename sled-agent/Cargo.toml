@@ -63,3 +63,7 @@ doc = false
 [[bin]]
 name = "sled-agent"
 doc = false
+
+[[bin]]
+name = "sled-agent-overlay-files"
+doc = false
