@@ -6,8 +6,7 @@
 
 // Most of the types here are used in the Polar configuration, which means they
 // must impl [`oso::PolarClass`].  There is a derive(PolarClass), but it's
-// pretty limited: it doesn't define an equality operator even when the type
-// itself impls PartialEq and Eq.  It also doesn't let you define methods.  We
+// pretty limited: It also doesn't let you define methods.  We
 // may want to define our own macro(s) to avoid having to impl this by hand
 // everywhere.
 //
@@ -46,6 +45,7 @@ pub fn make_omicron_oso() -> Result<Oso, anyhow::Error> {
         Organization::get_polar_class(),
         Project::get_polar_class(),
         ProjectChild::get_polar_class(),
+        FleetChild::get_polar_class(),
     ];
     for c in classes {
         oso.register_class(c).context("registering class")?;
@@ -76,10 +76,9 @@ pub enum Action {
 
 impl oso::PolarClass for Action {
     fn get_polar_class_builder() -> oso::ClassBuilder<Self> {
-        oso::Class::builder()
-            .name("Action")
-            .set_equality_check(|a1, a2| a1 == a2)
-            .add_method("to_perm", |a: &Action| {
+        oso::Class::builder().set_equality_check(|a1, a2| a1 == a2).add_method(
+            "to_perm",
+            |a: &Action| {
                 match a {
                     Action::Query => Perm::Query,
                     Action::Read => Perm::Read,
@@ -89,7 +88,8 @@ impl oso::PolarClass for Action {
                     Action::CreateChild => Perm::CreateChild,
                 }
                 .to_string()
-            })
+            },
+        )
     }
 }
 
@@ -132,8 +132,7 @@ pub struct AnyActor {
 impl oso::PolarClass for AnyActor {
     fn get_polar_class_builder() -> oso::ClassBuilder<Self> {
         oso::Class::builder()
-            .name("AnyActor")
-            .set_equality_check(|a1: &AnyActor, a2: &AnyActor| a1 == a2)
+            .with_equality_check()
             .add_attribute_getter("authenticated", |a: &AnyActor| {
                 a.authenticated
             })
@@ -174,7 +173,7 @@ impl AuthenticatedActor {
          * the actor has for this resource or else at this point we will go
          * fetch them from the database.
          */
-        self.actor_id.to_string() == authn::TEST_USER_UUID_PRIVILEGED
+        self.actor_id == authn::USER_TEST_PRIVILEGED.id
     }
 
     /**
@@ -188,16 +187,15 @@ impl AuthenticatedActor {
      * to load the fleet_id from the Organization.)
      */
     fn has_role_fleet(&self, _fleet: &Fleet, _role: &str) -> bool {
-        self.actor_id.to_string() == authn::TEST_USER_UUID_PRIVILEGED
+        self.actor_id == authn::USER_TEST_PRIVILEGED.id
+            || self.actor_id == authn::USER_DB_INIT.id
     }
 }
 
 impl oso::PolarClass for AuthenticatedActor {
     fn get_polar_class_builder() -> oso::ClassBuilder<Self> {
         oso::Class::builder()
-            .set_equality_check(
-                |a1: &AuthenticatedActor, a2: &AuthenticatedActor| a1 == a2,
-            )
+            .with_equality_check()
             .add_attribute_getter("id", |a: &AuthenticatedActor| {
                 a.actor_id.to_string()
             })
@@ -226,11 +224,15 @@ impl Fleet {
     pub fn organization(&self, organization_id: Uuid) -> Organization {
         Organization { organization_id }
     }
+
+    pub fn child_generic(&self) -> FleetChild {
+        FleetChild {}
+    }
 }
 
 impl oso::PolarClass for Fleet {
     fn get_polar_class_builder() -> oso::ClassBuilder<Self> {
-        oso::Class::builder().set_equality_check(|a1, a2| a1 == a2).add_method(
+        oso::Class::builder().with_equality_check().add_method(
             "has_role",
             |fleet: &Fleet, actor: AuthenticatedActor, role: String| {
                 actor.has_role_fleet(fleet, &role)
@@ -258,7 +260,7 @@ impl Organization {
 impl oso::PolarClass for Organization {
     fn get_polar_class_builder() -> oso::ClassBuilder<Self> {
         oso::Class::builder()
-            .set_equality_check(|a1, a2| a1 == a2)
+            .with_equality_check()
             .add_method(
                 "has_role",
                 |o: &Organization, actor: AuthenticatedActor, role: String| {
@@ -304,7 +306,7 @@ impl Project {
 impl oso::PolarClass for Project {
     fn get_polar_class_builder() -> oso::ClassBuilder<Self> {
         oso::Class::builder()
-            .set_equality_check(|a1, a2| a1 == a2)
+            .with_equality_check()
             .add_method(
                 "has_role",
                 |p: &Project, actor: AuthenticatedActor, role: String| {
@@ -350,7 +352,7 @@ impl ProjectChild {
 impl oso::PolarClass for ProjectChild {
     fn get_polar_class_builder() -> oso::ClassBuilder<Self> {
         oso::Class::builder()
-            .set_equality_check(|a1, a2| a1 == a2)
+            .with_equality_check()
             .add_method(
                 "has_role",
                 |pr: &ProjectChild, actor: AuthenticatedActor, role: String| {
@@ -365,6 +367,30 @@ impl oso::PolarClass for ProjectChild {
                 organization_id: pr.organization_id,
                 project_id: pr.project_id,
             })
+    }
+}
+
+/// Wraps any resource that lives inside a Fleet but outside an Organization
+///
+/// This includes [`db::model::UserBuiltin`] and future resources describing
+/// hardware.
+// We do not currently store any state here because we don't do anything with
+// it, so if callers provided it, we'd have no way to test that it was correct.
+// If we wind up supporting attaching roles to these, then we could add a
+// resource type and id like we have with ProjectChild.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct FleetChild {}
+
+impl oso::PolarClass for FleetChild {
+    fn get_polar_class_builder() -> oso::ClassBuilder<Self> {
+        oso::Class::builder()
+            .with_equality_check()
+            .add_method(
+                "has_role",
+                /* Roles are not supported on FleetChilds today. */
+                |_: &FleetChild, _: AuthenticatedActor, _: String| false,
+            )
+            .add_attribute_getter("fleet", |_: &FleetChild| Fleet {})
     }
 }
 

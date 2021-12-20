@@ -182,9 +182,9 @@ impl ServerContext {
 #[allow(dead_code)]
 pub struct OpContext {
     pub log: slog::Logger,
-    pub authz: authz::Context,
     pub authn: Arc<authn::Context>,
 
+    authz: authz::Context,
     created_instant: Instant,
     created_walltime: SystemTime,
     metadata: BTreeMap<String, String>,
@@ -249,10 +249,11 @@ impl OpContext {
     pub fn for_background(
         log: slog::Logger,
         authz: Arc<authz::Authz>,
+        authn: authn::Context,
     ) -> OpContext {
         let created_instant = Instant::now();
         let created_walltime = SystemTime::now();
-        let authn = Arc::new(authn::Context::internal_unauthenticated());
+        let authn = Arc::new(authn);
         let authz = authz::Context::new(Arc::clone(&authn), Arc::clone(&authz));
         OpContext {
             log,
@@ -322,6 +323,7 @@ impl OpContext {
 #[cfg(test)]
 mod test {
     use super::OpContext;
+    use crate::authn;
     use crate::authz;
     use authz::Action;
     use dropshot::test_util::LogContext;
@@ -338,7 +340,11 @@ mod test {
         );
         let log = logctx.log.new(o!());
         let authz = authz::Authz::new();
-        let opctx = OpContext::for_background(log, Arc::new(authz));
+        let opctx = OpContext::for_background(
+            log,
+            Arc::new(authz),
+            authn::Context::internal_unauthenticated(),
+        );
 
         // This is partly a test of the authorization policy.  Today, background
         // contexts should have no privileges.  That's misleading because in

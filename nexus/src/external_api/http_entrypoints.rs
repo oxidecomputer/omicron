@@ -12,21 +12,23 @@ use crate::ServerContext;
 
 use super::{
     console_api, params,
-    views::{Organization, Project, Rack, Sled, Vpc, VpcSubnet},
+    views::{Organization, Project, Rack, Role, Sled, User, Vpc, VpcSubnet},
 };
 use crate::context::OpContext;
-use dropshot::endpoint;
 use dropshot::ApiDescription;
 use dropshot::HttpError;
 use dropshot::HttpResponseAccepted;
 use dropshot::HttpResponseCreated;
 use dropshot::HttpResponseDeleted;
 use dropshot::HttpResponseOk;
+use dropshot::HttpResponseUpdatedNoContent;
 use dropshot::Path;
 use dropshot::Query;
 use dropshot::RequestContext;
 use dropshot::ResultsPage;
 use dropshot::TypedBody;
+use dropshot::WhichPage;
+use dropshot::{endpoint, EmptyScanParams, PaginationOrder, PaginationParams};
 use omicron_common::api::external::http_pagination::data_page_params_for;
 use omicron_common::api::external::http_pagination::data_page_params_nameid_id;
 use omicron_common::api::external::http_pagination::data_page_params_nameid_name;
@@ -42,9 +44,9 @@ use omicron_common::api::external::http_pagination::ScanParams;
 use omicron_common::api::external::to_list;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Disk;
-use omicron_common::api::external::DiskAttachment;
+use omicron_common::api::external::Error;
 use omicron_common::api::external::Instance;
-use omicron_common::api::external::PaginationOrder;
+use omicron_common::api::external::NetworkInterface;
 use omicron_common::api::external::RouterRoute;
 use omicron_common::api::external::RouterRouteCreateParams;
 use omicron_common::api::external::RouterRouteKind;
@@ -58,7 +60,7 @@ use omicron_common::api::external::VpcRouterKind;
 use ref_cast::RefCast;
 use schemars::JsonSchema;
 use serde::Deserialize;
-use std::num::NonZeroU32;
+use serde::Serialize;
 use std::sync::Arc;
 use uuid::Uuid;
 
@@ -95,9 +97,8 @@ pub fn external_api() -> NexusApiDescription {
         api.register(project_instances_instance_stop)?;
 
         api.register(instance_disks_get)?;
-        api.register(instance_disks_get_disk)?;
-        api.register(instance_disks_put_disk)?;
-        api.register(instance_disks_delete_disk)?;
+        api.register(instance_disks_attach)?;
+        api.register(instance_disks_detach)?;
 
         api.register(project_vpcs_get)?;
         api.register(project_vpcs_post)?;
@@ -110,6 +111,8 @@ pub fn external_api() -> NexusApiDescription {
         api.register(vpc_subnets_post)?;
         api.register(vpc_subnets_delete_subnet)?;
         api.register(vpc_subnets_put_subnet)?;
+
+        api.register(subnets_ips_get)?;
 
         api.register(vpc_routers_get)?;
         api.register(vpc_routers_get_router)?;
@@ -133,6 +136,12 @@ pub fn external_api() -> NexusApiDescription {
 
         api.register(sagas_get)?;
         api.register(sagas_get_saga)?;
+
+        api.register(users_get)?;
+        api.register(users_get_user)?;
+
+        api.register(roles_get)?;
+        api.register(roles_get_role)?;
 
         api.register(console_api::spoof_login)?;
         api.register(console_api::spoof_login_form)?;
@@ -885,139 +894,88 @@ async fn project_instances_instance_stop(
 }]
 async fn instance_disks_get(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    query_params: Query<PaginatedByName>,
     path_params: Path<InstancePathParam>,
-) -> Result<HttpResponseOk<Vec<DiskAttachment>>, HttpError> {
+) -> Result<HttpResponseOk<ResultsPage<Disk>>, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
+    let query = query_params.into_inner();
     let path = path_params.into_inner();
     let organization_name = &path.organization_name;
     let project_name = &path.project_name;
     let instance_name = &path.instance_name;
-    let fake_query = DataPageParams {
-        marker: None,
-        direction: PaginationOrder::Ascending,
-        limit: NonZeroU32::new(std::u32::MAX).unwrap(),
-    };
     let handler = async {
         let disks = nexus
             .instance_list_disks(
                 &organization_name,
                 &project_name,
                 &instance_name,
-                &fake_query,
+                &data_page_params_for(&rqctx, &query)?
+                    .map_name(|n| Name::ref_cast(n)),
             )
             .await?
             .into_iter()
             .map(|d| d.into())
             .collect();
-        Ok(HttpResponseOk(disks))
+        Ok(HttpResponseOk(ScanByName::results_page(&query, disks)?))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/**
- * Path parameters for requests that access Disks attached to an Instance
- */
-#[derive(Deserialize, JsonSchema)]
-struct InstanceDiskPathParam {
-    organization_name: Name,
-    project_name: Name,
-    instance_name: Name,
-    disk_name: Name,
-}
-
-/**
- * Fetch a description of the attachment of this disk to this instance.
- */
 #[endpoint {
-    method = GET,
-    path = "/organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/disks/{disk_name}"
+    method = POST,
+    path = "/organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/disks/attach"
 }]
-async fn instance_disks_get_disk(
+async fn instance_disks_attach(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
-    path_params: Path<InstanceDiskPathParam>,
-) -> Result<HttpResponseOk<DiskAttachment>, HttpError> {
+    path_params: Path<InstancePathParam>,
+    disk_to_attach: TypedBody<params::DiskIdentifier>,
+) -> Result<HttpResponseAccepted<Disk>, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
     let path = path_params.into_inner();
     let organization_name = &path.organization_name;
     let project_name = &path.project_name;
     let instance_name = &path.instance_name;
-    let disk_name = &path.disk_name;
     let handler = async {
-        let attachment = nexus
-            .instance_get_disk(
-                &organization_name,
-                &project_name,
-                &instance_name,
-                &disk_name,
-            )
-            .await?;
-        Ok(HttpResponseOk(attachment))
-    };
-    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
-}
-
-/**
- * Attach a disk to this instance.
- */
-#[endpoint {
-    method = PUT,
-    path = "/organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/disks/{disk_name}"
-}]
-async fn instance_disks_put_disk(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
-    path_params: Path<InstanceDiskPathParam>,
-) -> Result<HttpResponseCreated<DiskAttachment>, HttpError> {
-    let apictx = rqctx.context();
-    let nexus = &apictx.nexus;
-    let path = path_params.into_inner();
-    let organization_name = &path.organization_name;
-    let project_name = &path.project_name;
-    let instance_name = &path.instance_name;
-    let disk_name = &path.disk_name;
-    let handler = async {
-        let attachment = nexus
+        let disk = nexus
             .instance_attach_disk(
                 &organization_name,
                 &project_name,
                 &instance_name,
-                &disk_name,
+                &disk_to_attach.into_inner().disk.into(),
             )
             .await?;
-        Ok(HttpResponseCreated(attachment))
+        Ok(HttpResponseAccepted(disk.into()))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/**
- * Detach a disk from this instance.
- */
 #[endpoint {
-    method = DELETE,
-    path = "/organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/disks/{disk_name}"
+    method = POST,
+    path = "/organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/disks/detach"
 }]
-async fn instance_disks_delete_disk(
+async fn instance_disks_detach(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
-    path_params: Path<InstanceDiskPathParam>,
-) -> Result<HttpResponseDeleted, HttpError> {
+    path_params: Path<InstancePathParam>,
+    disk_to_detach: TypedBody<params::DiskIdentifier>,
+) -> Result<HttpResponseAccepted<Disk>, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
     let path = path_params.into_inner();
     let organization_name = &path.organization_name;
     let project_name = &path.project_name;
     let instance_name = &path.instance_name;
-    let disk_name = &path.disk_name;
     let handler = async {
-        nexus
+        let disk = nexus
             .instance_detach_disk(
                 &organization_name,
                 &project_name,
                 &instance_name,
-                &disk_name,
+                &disk_to_detach.into_inner().disk.into(),
             )
             .await?;
-        Ok(HttpResponseDeleted())
+        Ok(HttpResponseAccepted(disk.into()))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
@@ -1140,7 +1098,7 @@ async fn project_vpcs_put_vpc(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<VpcPathParam>,
     updated_vpc: TypedBody<params::VpcUpdate>,
-) -> Result<HttpResponseOk<()>, HttpError> {
+) -> Result<HttpResponseUpdatedNoContent, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
     let path = path_params.into_inner();
@@ -1153,7 +1111,7 @@ async fn project_vpcs_put_vpc(
                 &updated_vpc.into_inner(),
             )
             .await?;
-        Ok(HttpResponseOk(()))
+        Ok(HttpResponseUpdatedNoContent())
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
@@ -1325,7 +1283,7 @@ async fn vpc_subnets_put_subnet(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<VpcSubnetPathParam>,
     subnet_params: TypedBody<params::VpcSubnetUpdate>,
-) -> Result<HttpResponseOk<()>, HttpError> {
+) -> Result<HttpResponseUpdatedNoContent, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
     let path = path_params.into_inner();
@@ -1339,7 +1297,45 @@ async fn vpc_subnets_put_subnet(
                 &subnet_params.into_inner(),
             )
             .await?;
-        Ok(HttpResponseOk(()))
+        Ok(HttpResponseUpdatedNoContent())
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/**
+ * List IP addresses on a VPC subnet.
+ */
+// TODO-correctness: This API has not actually been specified in an RFD yet, and
+// may not actually be what we want. It is being implemented here to give our
+// testing introspection into network interfaces.
+#[endpoint {
+     method = GET,
+     path = "/organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/subnets/{subnet_name}/ips",
+ }]
+async fn subnets_ips_get(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    query_params: Query<PaginatedByName>,
+    path_params: Path<VpcSubnetPathParam>,
+) -> Result<HttpResponseOk<ResultsPage<NetworkInterface>>, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let query = query_params.into_inner();
+    let path = path_params.into_inner();
+    let handler = async {
+        let interfaces = nexus
+            .subnet_list_network_interfaces(
+                &path.organization_name,
+                &path.project_name,
+                &path.vpc_name,
+                &path.subnet_name,
+                &data_page_params_for(&rqctx, &query)?
+                    .map_name(|n| Name::ref_cast(n)),
+            )
+            .await?
+            .into_iter()
+            .map(|interfaces| interfaces.into())
+            .collect();
+        Ok(HttpResponseOk(ScanByName::results_page(&query, interfaces)?))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
@@ -1561,7 +1557,7 @@ async fn vpc_routers_put_router(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<VpcRouterPathParam>,
     router_params: TypedBody<params::VpcRouterUpdate>,
-) -> Result<HttpResponseOk<()>, HttpError> {
+) -> Result<HttpResponseUpdatedNoContent, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
     let path = path_params.into_inner();
@@ -1575,7 +1571,7 @@ async fn vpc_routers_put_router(
                 &router_params.into_inner(),
             )
             .await?;
-        Ok(HttpResponseOk(()))
+        Ok(HttpResponseUpdatedNoContent())
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
@@ -1731,7 +1727,7 @@ async fn routers_routes_put_route(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<RouterRoutePathParam>,
     router_params: TypedBody<RouterRouteUpdateParams>,
-) -> Result<HttpResponseOk<()>, HttpError> {
+) -> Result<HttpResponseUpdatedNoContent, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
     let path = path_params.into_inner();
@@ -1746,7 +1742,7 @@ async fn routers_routes_put_route(
                 &router_params.into_inner(),
             )
             .await?;
-        Ok(HttpResponseOk(()))
+        Ok(HttpResponseUpdatedNoContent())
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
@@ -1920,6 +1916,164 @@ async fn sagas_get_saga(
     let handler = async {
         let saga = nexus.saga_get(path.saga_id).await?;
         Ok(HttpResponseOk(saga))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/*
+ * Built-in (system) users
+ */
+
+/**
+ * List the built-in system users
+ */
+#[endpoint {
+    method = GET,
+    path = "/users",
+}]
+async fn users_get(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    query_params: Query<PaginatedByName>,
+) -> Result<HttpResponseOk<ResultsPage<User>>, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let query = query_params.into_inner();
+    let pagparams =
+        data_page_params_for(&rqctx, &query)?.map_name(|n| Name::ref_cast(n));
+    let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let users = nexus
+            .users_builtin_list(&opctx, &pagparams)
+            .await?
+            .into_iter()
+            .map(|i| i.into())
+            .collect();
+        Ok(HttpResponseOk(ScanByName::results_page(&query, users)?))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/**
+ * Path parameters for global (system) user requests
+ */
+#[derive(Deserialize, JsonSchema)]
+struct UserPathParam {
+    /// The built-in user's unique name.
+    user_name: Name,
+}
+
+/**
+ * Fetch a specific built-in system user
+ */
+#[endpoint {
+    method = GET,
+    path = "/users/{user_name}",
+}]
+async fn users_get_user(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    path_params: Path<UserPathParam>,
+) -> Result<HttpResponseOk<User>, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let path = path_params.into_inner();
+    let user_name = &path.user_name;
+    let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let user = nexus.user_builtin_fetch(&opctx, &user_name).await?;
+        Ok(HttpResponseOk(user.into()))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/*
+ * Built-in roles
+ */
+
+/*
+ * Roles have their own pagination scheme because they do not use the usual "id"
+ * or "name" types.  For more, see the comment in dbinit.sql.
+ */
+#[derive(Deserialize, JsonSchema, Serialize)]
+struct RolePage {
+    last_seen: String,
+}
+
+/**
+ * List the built-in roles
+ */
+#[endpoint {
+    method = GET,
+    path = "/roles",
+}]
+async fn roles_get(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    query_params: Query<PaginationParams<EmptyScanParams, RolePage>>,
+) -> Result<HttpResponseOk<ResultsPage<Role>>, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let query = query_params.into_inner();
+    let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let marker = match &query.page {
+            WhichPage::First(..) => None,
+            WhichPage::Next(RolePage { last_seen }) => {
+                Some(last_seen.split_once('.').ok_or_else(|| {
+                    Error::InvalidValue {
+                        label: last_seen.clone(),
+                        message: String::from("bad page token"),
+                    }
+                })?)
+                .map(|(s1, s2)| (s1.to_string(), s2.to_string()))
+            }
+        };
+        let pagparams = DataPageParams {
+            limit: rqctx.page_limit(&query)?,
+            direction: PaginationOrder::Ascending,
+            marker: marker.as_ref(),
+        };
+        let roles = nexus
+            .roles_builtin_list(&opctx, &pagparams)
+            .await?
+            .into_iter()
+            .map(|i| i.into())
+            .collect();
+        Ok(HttpResponseOk(dropshot::ResultsPage::new(
+            roles,
+            &EmptyScanParams {},
+            |role: &Role, _| RolePage { last_seen: role.name.to_string() },
+        )?))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/**
+ * Path parameters for global (system) role requests
+ */
+#[derive(Deserialize, JsonSchema)]
+struct RolePathParam {
+    /// The built-in role's unique name.
+    role_name: String,
+}
+
+/**
+ * Fetch a specific built-in role
+ */
+#[endpoint {
+    method = GET,
+    path = "/roles/{role_name}",
+}]
+async fn roles_get_role(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    path_params: Path<RolePathParam>,
+) -> Result<HttpResponseOk<Role>, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let path = path_params.into_inner();
+    let role_name = &path.role_name;
+    let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let role = nexus.role_builtin_fetch(&opctx, &role_name).await?;
+        Ok(HttpResponseOk(role.into()))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }

@@ -14,7 +14,7 @@ use nexus_client::Client as NexusClient;
 use omicron_common::backoff::{
     internal_service_policy, retry_notify, BackoffError,
 };
-use slog::Logger;
+use slog::{Drain, Logger};
 use std::sync::Arc;
 
 /**
@@ -117,10 +117,20 @@ impl Server {
  * Run an instance of the `Server`
  */
 pub async fn run_server(config: &Config) -> Result<(), String> {
-    let log = config
-        .log
-        .to_logger("sled-agent")
-        .map_err(|message| format!("initializing logger: {}", message))?;
+    let (drain, registration) = slog_dtrace::with_drain(
+        config
+            .log
+            .to_logger("sled-agent")
+            .map_err(|message| format!("initializing logger: {}", message))?,
+    );
+    let log = slog::Logger::root(drain.fuse(), slog::o!());
+    if let slog_dtrace::ProbeRegistration::Failed(e) = registration {
+        let msg = format!("failed to register DTrace probes: {}", e);
+        error!(log, "{}", msg);
+        return Err(msg);
+    } else {
+        debug!(log, "registered DTrace probes");
+    }
 
     let server = Server::start(config, &log).await?;
     info!(log, "sled agent started successfully");

@@ -297,6 +297,90 @@ impl Name {
 }
 
 /**
+ * Name for a built-in role
+ */
+#[derive(
+    Clone,
+    Debug,
+    DeserializeFromStr,
+    Display,
+    Eq,
+    FromStr,
+    Ord,
+    PartialEq,
+    PartialOrd,
+    SerializeDisplay,
+)]
+#[display("{resource_type}.{role_name}")]
+pub struct RoleName {
+    // "resource_type" is generally the String value of one of the
+    // `ResourceType` variants.  We could store the parsed `ResourceType`
+    // instead, but it's useful to be able to represent RoleNames for resource
+    // types that we don't know about.  That could happen if we happen to find
+    // them in the database, for example.
+    #[from_str(regex = "[a-z-]+")]
+    resource_type: String,
+    #[from_str(regex = "[a-z-]+")]
+    role_name: String,
+}
+
+impl RoleName {
+    pub fn new(resource_type: &str, role_name: &str) -> RoleName {
+        RoleName {
+            resource_type: String::from(resource_type),
+            role_name: String::from(role_name),
+        }
+    }
+}
+
+/**
+ * Custom JsonSchema implementation to encode the constraints on Name
+ */
+/* TODO see TODOs on Name above */
+impl JsonSchema for RoleName {
+    fn schema_name() -> String {
+        "RoleName".to_string()
+    }
+    fn json_schema(
+        _gen: &mut schemars::gen::SchemaGenerator,
+    ) -> schemars::schema::Schema {
+        schemars::schema::Schema::Object(schemars::schema::SchemaObject {
+            metadata: Some(Box::new(schemars::schema::Metadata {
+                id: None,
+                title: Some("A name for a built-in role".to_string()),
+                description: Some(
+                    "Role names consist of two string components \
+                     separated by dot (\".\")."
+                        .to_string(),
+                ),
+                default: None,
+                deprecated: false,
+                read_only: false,
+                write_only: false,
+                examples: vec![],
+            })),
+            instance_type: Some(schemars::schema::SingleOrVec::Single(
+                Box::new(schemars::schema::InstanceType::String),
+            )),
+            format: None,
+            enum_values: None,
+            const_value: None,
+            subschemas: None,
+            number: None,
+            string: Some(Box::new(schemars::schema::StringValidation {
+                max_length: Some(63),
+                min_length: None,
+                pattern: Some("[a-z-]+\\.[a-z-]+".to_string()),
+            })),
+            array: None,
+            object: None,
+            reference: None,
+            extensions: BTreeMap::new(),
+        })
+    }
+}
+
+/**
  * A count of bytes, typically used either for memory or storage capacity
  *
  * The maximum supported byte count is [`i64::MAX`].  This makes it somewhat
@@ -465,15 +549,28 @@ impl TryFrom<i64> for Generation {
 /**
  * Identifies a type of API resource
  */
-#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    DeserializeFromStr,
+    Display,
+    Eq,
+    FromStr,
+    Ord,
+    PartialEq,
+    PartialOrd,
+    SerializeDisplay,
+)]
+#[display(style = "kebab-case")]
 pub enum ResourceType {
+    Fleet,
     Organization,
     Project,
     Dataset,
     Disk,
-    DiskAttachment,
-    DownloadArtifact,
     Instance,
+    NetworkInterface,
     Rack,
     Sled,
     SagaDbg,
@@ -484,36 +581,9 @@ pub enum ResourceType {
     RouterRoute,
     Oximeter,
     MetricProducer,
+    Role,
+    User,
     Zpool,
-}
-
-impl Display for ResourceType {
-    fn fmt(&self, f: &mut Formatter) -> FormatResult {
-        write!(
-            f,
-            "{}",
-            match self {
-                ResourceType::Organization => "organization",
-                ResourceType::Project => "project",
-                ResourceType::Dataset => "dataset",
-                ResourceType::Disk => "disk",
-                ResourceType::DiskAttachment => "disk attachment",
-                ResourceType::DownloadArtifact => "download artifact",
-                ResourceType::Instance => "instance",
-                ResourceType::Rack => "rack",
-                ResourceType::Sled => "sled",
-                ResourceType::SagaDbg => "saga_dbg",
-                ResourceType::Vpc => "vpc",
-                ResourceType::VpcFirewallRule => "vpc firewall rule",
-                ResourceType::VpcSubnet => "vpc subnet",
-                ResourceType::VpcRouter => "vpc router",
-                ResourceType::RouterRoute => "vpc router route",
-                ResourceType::Oximeter => "oximeter",
-                ResourceType::MetricProducer => "metric producer",
-                ResourceType::Zpool => "zpool",
-            }
-        )
-    }
 }
 
 pub async fn to_list<T, U>(object_stream: ObjectStream<T>) -> Vec<U>
@@ -863,18 +933,6 @@ impl DiskState {
             DiskState::Faulted => None,
         }
     }
-}
-
-/**
- * Describes a Disk's attachment to an Instance
- */
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct DiskAttachment {
-    pub instance_id: Uuid,
-    pub disk_id: Uuid,
-    pub disk_name: Name,
-    pub disk_state: DiskState,
 }
 
 /*
@@ -1761,14 +1819,24 @@ impl JsonSchema for L4PortRange {
 /// hardware devices on a network.
 // NOTE: We're using the `macaddr` crate for the internal representation. But as with the `ipnet`,
 // this crate does not implement `JsonSchema`.
-#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Serialize)]
+#[derive(
+    Clone, Copy, Debug, DeserializeFromStr, PartialEq, SerializeDisplay,
+)]
 pub struct MacAddr(pub macaddr::MacAddr6);
 
+impl FromStr for MacAddr {
+    type Err = macaddr::ParseError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        s.parse().map(|addr| MacAddr(addr))
+    }
+}
+
 impl TryFrom<String> for MacAddr {
-    type Error = macaddr::ParseError;
+    type Error = <Self as FromStr>::Err;
 
     fn try_from(s: String) -> Result<Self, Self::Error> {
-        s.parse().map(|addr| MacAddr(addr))
+        MacAddr::from_str(s.as_ref())
     }
 }
 
@@ -1819,10 +1887,13 @@ impl JsonSchema for MacAddr {
 }
 
 /// A `NetworkInterface` represents a virtual network interface device.
-#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize)]
+#[derive(ObjectIdentity, Clone, Debug, Deserialize, JsonSchema, Serialize)]
 pub struct NetworkInterface {
     /** common identifying metadata */
     pub identity: IdentityMetadata,
+
+    /** The Instance to which the interface belongs. */
+    pub instance_id: Uuid,
 
     /** The VPC to which the interface belongs. */
     pub vpc_id: Uuid,
@@ -1840,13 +1911,14 @@ pub struct NetworkInterface {
 #[cfg(test)]
 mod test {
     use super::{
-        ByteCount, L4Port, L4PortRange, Name, NetworkTarget,
+        ByteCount, L4Port, L4PortRange, Name, NetworkTarget, RoleName,
         VpcFirewallRuleAction, VpcFirewallRuleDirection, VpcFirewallRuleFilter,
         VpcFirewallRuleHostFilter, VpcFirewallRulePriority,
         VpcFirewallRuleProtocol, VpcFirewallRuleStatus, VpcFirewallRuleTarget,
         VpcFirewallRuleUpdate, VpcFirewallRuleUpdateParams,
     };
     use crate::api::external::Error;
+    use crate::api::external::ResourceType;
     use std::convert::TryFrom;
     use std::net::IpAddr;
     use std::net::Ipv4Addr;
@@ -1897,6 +1969,83 @@ mod test {
             eprintln!("check name \"{}\" (should be valid)", name);
             assert_eq!(name, name.parse::<Name>().unwrap().as_str());
         }
+    }
+
+    #[test]
+    fn test_role_name_parse() {
+        // Error cases
+        let bad_inputs = vec![
+            // empty string is always worth testing
+            "",
+            // missing dot
+            "project",
+            // extra dot (or, illegal character in the second component)
+            "project.admin.super",
+            // missing resource type (or, another bogus resource type)
+            ".admin",
+            // missing role name
+            "project.",
+            // illegal characters in role name
+            "project.not_good",
+        ];
+
+        for input in bad_inputs {
+            eprintln!("check name {:?} (expecting error)", input);
+            let result =
+                input.parse::<RoleName>().expect_err("unexpectedly succeeded");
+            eprintln!("(expected) error: {:?}", result);
+        }
+
+        eprintln!("check name \"project.admin\" (expecting success)");
+        let role_name =
+            "project.admin".parse::<RoleName>().expect("failed to parse");
+        assert_eq!(role_name.to_string(), "project.admin");
+        assert_eq!(role_name.resource_type, "project");
+        assert_eq!(role_name.role_name, "admin");
+
+        eprintln!("check name \"barf.admin\" (expecting success)");
+        let role_name =
+            "barf.admin".parse::<RoleName>().expect("failed to parse");
+        assert_eq!(role_name.to_string(), "barf.admin");
+        assert_eq!(role_name.resource_type, "barf");
+        assert_eq!(role_name.role_name, "admin");
+
+        eprintln!("check name \"organization.super-user\" (expecting success)");
+        let role_name = "organization.super-user"
+            .parse::<RoleName>()
+            .expect("failed to parse");
+        assert_eq!(role_name.to_string(), "organization.super-user");
+        assert_eq!(role_name.resource_type, "organization");
+        assert_eq!(role_name.role_name, "super-user");
+    }
+
+    #[test]
+    fn test_resource_name_parse() {
+        let bad_inputs = vec![
+            "bogus",
+            "",
+            "Project",
+            "oRgAnIzAtIoN",
+            "organisation",
+            "vpc subnet",
+            "vpc_subnet",
+        ];
+        for input in bad_inputs {
+            eprintln!("check resource type {:?} (expecting error)", input);
+            let result = input
+                .parse::<ResourceType>()
+                .expect_err("unexpectedly succeeded");
+            eprintln!("(expected) error: {:?}", result);
+        }
+
+        assert_eq!(
+            ResourceType::Project,
+            "project".parse::<ResourceType>().unwrap()
+        );
+        assert_eq!(
+            ResourceType::VpcSubnet,
+            "vpc-subnet".parse::<ResourceType>().unwrap()
+        );
     }
 
     #[test]

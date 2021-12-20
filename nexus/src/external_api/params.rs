@@ -43,7 +43,7 @@ pub struct OrganizationUpdate {
  */
 
 /**
- * Create-time parameters for an [`Project`]
+ * Create-time parameters for a [`Project`]
  */
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
@@ -53,13 +53,27 @@ pub struct ProjectCreate {
 }
 
 /**
- * Updateable properties of an [`Project`]
+ * Updateable properties of a [`Project`]
  */
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct ProjectUpdate {
     #[serde(flatten)]
     pub identity: IdentityMetadataUpdateParams,
+}
+
+/*
+ * NETWORK INTERFACES
+ */
+
+/**
+ * Create-time parameters for a [`NetworkInterface`]
+ */
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct NetworkInterfaceCreate {
+    #[serde(flatten)]
+    pub identity: IdentityMetadataCreateParams,
 }
 
 /*
@@ -166,4 +180,31 @@ pub struct DiskCreate {
     pub snapshot_id: Option<Uuid>, /* TODO should be a name? */
     /** size of the Disk */
     pub size: ByteCount,
+}
+
+/**
+ * Parameters for the [`Disk`] to be attached or detached to an instance
+ */
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct DiskIdentifier {
+    pub disk: Name,
+}
+
+/*
+ * BUILT-IN USERS
+ *
+ * These cannot be created via the external API, but we use the same interfaces
+ * for creating them internally as we use for types that can be created in the
+ * external API.
+ */
+
+/**
+ * Create-time parameters for a [`UserBuiltin`]
+ */
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct UserBuiltinCreate {
+    #[serde(flatten)]
+    pub identity: IdentityMetadataCreateParams,
 }

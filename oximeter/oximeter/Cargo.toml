@@ -16,4 +16,4 @@ thiserror = "1.0.30"
 uuid = { version = "0.8.2", features = [ "v4", "serde" ] }
 
 [dev-dependencies]
-trybuild = "1.0.52"
+trybuild = "1.0.53"

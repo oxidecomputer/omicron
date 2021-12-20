@@ -594,6 +594,11 @@
               }
             ]
           },
+          "instance_id": {
+            "description": "The Instance to which the interface belongs.",
+            "type": "string",
+            "format": "uuid"
+          },
           "ip": {
             "description": "The IP address assigned to this interface.",
             "type": "string",
@@ -620,6 +625,7 @@
         },
         "required": [
           "identity",
+          "instance_id",
           "ip",
           "mac",
           "subnet_id",
