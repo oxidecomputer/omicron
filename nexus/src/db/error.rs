@@ -12,6 +12,31 @@ use omicron_common::api::external::{
     Error as PublicError, LookupType, ResourceType,
 };
 
+/// Wrapper around an error which may be returned from a Diesel transaction.
+#[derive(Debug, thiserror::Error)]
+pub enum TransactionError<T> {
+    /// The customizable error type.
+    ///
+    /// This error should be used for all non-Diesel transaction failures.
+    #[error("Custom transaction error; {0}")]
+    CustomError(T),
+
+    /// The Diesel error type.
+    ///
+    /// This error covers failure due to accessing the DB pool or errors
+    /// propagated from the DB itself.
+    #[error("Pool error: {0}")]
+    Pool(#[from] async_bb8_diesel::PoolError),
+}
+
+// Maps a "diesel error" into a "pool error", which
+// is already contained within the error type.
+impl<T> From<DieselError> for TransactionError<T> {
+    fn from(err: DieselError) -> Self {
+        Self::Pool(PoolError::Connection(ConnectionError::Query(err)))
+    }
+}
+
 /// Summarizes details provided with a database error.
 fn format_database_error(
     kind: DieselErrorKind,
