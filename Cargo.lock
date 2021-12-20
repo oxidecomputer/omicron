@@ -89,7 +89,7 @@ dependencies = [
 [[package]]
 name = "async-bb8-diesel"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/async-bb8-diesel?branch=errors#9b361fa6b3886c2b642f638a9887b343866c318b"
+source = "git+https://github.com/oxidecomputer/async-bb8-diesel?rev=c849b717be#c849b717be1e33528c7c3950fefcb431a65ef469"
 dependencies = [
  "async-trait",
  "bb8",

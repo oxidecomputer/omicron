@@ -481,11 +481,11 @@ where
 #[cfg(test)]
 mod test {
     use super::{AsyncInsertError, DatastoreCollection, SyncInsertError};
-    use crate::db;
-    use crate::db::identity::Resource as IdentityResource;
+    use crate::db::{
+        self, error::TransactionError, identity::Resource as IdentityResource,
+    };
     use async_bb8_diesel::{
         AsyncConnection, AsyncRunQueryDsl, AsyncSimpleConnection,
-        ConnectionError, PoolError,
     };
     use chrono::{DateTime, NaiveDateTime, Utc};
     use db_macros::Resource;
@@ -669,39 +669,28 @@ mod test {
             )),
         );
 
-        #[derive(Debug, thiserror::Error)]
-        enum TxnError {
-            #[error("Collection not found")]
-            CollectionNotFound,
-            #[error("Pool: {0}")]
-            Pool(#[from] PoolError),
+        #[derive(Debug)]
+        enum CollectionError {
+            NotFound,
         }
-
-        impl From<SyncInsertError> for TxnError {
-            fn from(err: SyncInsertError) -> Self {
-                match err {
-                    SyncInsertError::CollectionNotFound => {
-                        Self::CollectionNotFound
-                    }
-                    SyncInsertError::DatabaseError(e) => Self::from(e),
-                }
-            }
-        }
-
-        impl From<diesel::result::Error> for TxnError {
-            fn from(err: diesel::result::Error) -> Self {
-                Self::Pool(PoolError::Connection(ConnectionError::Query(err)))
-            }
-        }
+        type TxnError = TransactionError<CollectionError>;
 
         let result = pool
             .pool()
             .transaction(move |conn| {
-                insert_query.insert_and_get_result(conn).map_err(TxnError::from)
+                insert_query.insert_and_get_result(conn).map_err(|e| match e {
+                    SyncInsertError::CollectionNotFound => {
+                        TxnError::CustomError(CollectionError::NotFound)
+                    }
+                    SyncInsertError::DatabaseError(e) => TxnError::from(e),
+                })
             })
             .await;
 
-        assert!(matches!(result, Err(TxnError::CollectionNotFound)));
+        assert!(matches!(
+            result,
+            Err(TxnError::CustomError(CollectionError::NotFound))
+        ));
 
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();

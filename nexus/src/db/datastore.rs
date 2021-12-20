@@ -63,7 +63,7 @@ use crate::db::{
     self,
     error::{
         public_error_from_diesel_pool, public_error_from_diesel_pool_create,
-        public_error_from_diesel_pool_shouldnt_fail,
+        public_error_from_diesel_pool_shouldnt_fail, TransactionError,
     },
     model::{
         ConsoleSession, Dataset, Disk, DiskRuntimeState, Generation,
@@ -81,24 +81,6 @@ use crate::db::{
 
 pub struct DataStore {
     pool: Arc<Pool>,
-}
-
-// Errors which may be returned from the DB transaction within
-// [`DataStore::vpc_update_firewall_rules`].
-#[derive(Debug, thiserror::Error)]
-enum UpdateFirewallRulesError {
-    #[error("Collection not found")]
-    CollectionNotFound,
-    #[error("Pool error: {0}")]
-    Pool(#[from] async_bb8_diesel::PoolError),
-}
-
-// Maps a "diesel error" into a "pool error", which
-// is already contained within the error type.
-impl From<diesel::result::Error> for UpdateFirewallRulesError {
-    fn from(err: diesel::result::Error) -> Self {
-        Self::Pool(PoolError::Connection(ConnectionError::Query(err)))
-    }
 }
 
 impl DataStore {
@@ -1606,6 +1588,12 @@ impl DataStore {
             diesel::insert_into(dsl::vpc_firewall_rule).values(rules),
         );
 
+        #[derive(Debug)]
+        enum FirewallUpdateError {
+            CollectionNotFound,
+        }
+        type TxnError = TransactionError<FirewallUpdateError>;
+
         // TODO-scalability: Ideally this would be a CTE so we don't need to
         // hold a transaction open across multiple roundtrips from the database,
         // but for now we're using a transaction due to the severely decreased
@@ -1620,7 +1608,9 @@ impl DataStore {
                 insert_new_query.insert_and_get_results(conn).map_err(|e| {
                     match e {
                         SyncInsertError::CollectionNotFound => {
-                            UpdateFirewallRulesError::CollectionNotFound
+                            TxnError::CustomError(
+                                FirewallUpdateError::CollectionNotFound,
+                            )
                         }
                         SyncInsertError::DatabaseError(e) => e.into(),
                     }
@@ -1628,16 +1618,14 @@ impl DataStore {
             })
             .await
             .map_err(|e| match e {
-                UpdateFirewallRulesError::CollectionNotFound => {
-                    Error::not_found_by_id(ResourceType::Vpc, vpc_id)
-                }
-                UpdateFirewallRulesError::Pool(e) => {
-                    public_error_from_diesel_pool(
-                        e,
-                        ResourceType::VpcFirewallRule,
-                        LookupType::ById(*vpc_id),
-                    )
-                }
+                TxnError::CustomError(
+                    FirewallUpdateError::CollectionNotFound,
+                ) => Error::not_found_by_id(ResourceType::Vpc, vpc_id),
+                TxnError::Pool(e) => public_error_from_diesel_pool(
+                    e,
+                    ResourceType::VpcFirewallRule,
+                    LookupType::ById(*vpc_id),
+                ),
             })
     }
 
