@@ -569,6 +569,7 @@ pub enum ResourceType {
     Project,
     Dataset,
     Disk,
+    DownloadArtifact,
     Instance,
     NetworkInterface,
     Rack,

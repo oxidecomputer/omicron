@@ -4,11 +4,7 @@
 
 use http::method::Method;
 use http::StatusCode;
-
-pub mod common;
-use common::test_setup;
-
-extern crate slog;
+use nexus_test_utils::test_setup;
 
 // Tests the "normal" case of downloading an artifact.
 //
