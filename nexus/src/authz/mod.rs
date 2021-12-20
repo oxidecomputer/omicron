@@ -38,23 +38,24 @@
 //!
 //! These are just examples.  To make them more concrete, suppose we have:
 //!
-//! - an Organization "Hogwarts"
-//! - a Project "quidditch"
+//! - an Organization "Sesame-Street"
+//! - a Project "monster-foodies"
 //! - three users:
-//!   - "Harry", who has been explicitly granted the "viewer" role on
-//!     Project "quidditch"
-//!   - "Hooch", who has been explicitly granted the "collaborator" role on
-//!     Project "quidditch"
-//!   - "Albus", who has been explicitly granted the "admin" role on the
-//!     Organization "Hogwarts"
+//!   - "cookie-monster", who has been explicitly granted the "viewer" role on
+//!     Project "monster-foodies"
+//!   - "Gonger", who has been explicitly granted the "collaborator" role on
+//!     Project "monster-foodies"
+//!   - "big-bird", who has been explicitly granted the "admin" role on the
+//!     Organization "Sesame-Street"
 //!
 //! All three users have the "read" permission on the Project by virtue of their
 //! "viewer" role on the Project.  But the path to determining that varies:
 //!
-//! - Harry has explicitly been granted the "viewer" role on this Project.
-//! - Hooch has the "collaborator" role on the Project, which the policy says
+//! - Cookie Monster has explicitly been granted the "viewer" role on this
+//!   Project.
+//! - Gonger has the "collaborator" role on the Project, which the policy says
 //!   implicitly grants the "viewer" role.
-//! - Albus has the "admin" role on the parent Organization, which the policy
+//! - Big Bird has the "admin" role on the parent Organization, which the policy
 //!   says implicitly grants the "collaborator" role on the Project, which
 //!   (again) is granted the "viewer" role on the Project.
 //!
@@ -70,23 +71,23 @@
 //! so is the relationship that says a particular user has a particular role for
 //! a particular resource.
 //!
-//! Suppose a built-in user "harry" has the "viewer" role for a Project
-//! "quidditch".  It looks like this:
+//! Suppose a built-in user "cookie-monster" has the "viewer" role for a Project
+//! "monster-foodies".  It looks like this:
 //!
 //! ```text
 //! +---> table: "project"
-//! |     +-------------------+-----+
-//! |     |  id | name        | ... |
-//! |     +-------------------+-----+
-//! |   +-> 123 | "quidditch" | ... |
-//! |   | +-------------------+-----+
+//! |     +-------------------------+-----+
+//! |     |  id | name              | ... |
+//! |     +-------------------------------+
+//! |   +-> 123 | "monster-foodies" | ... |
+//! |   | +-------------------------+-----+
 //! |   |
 //! |   | table: "user_builtin"
-//! |   | +-------------------+-----+
-//! |   | |  id | name        | ... |
-//! |   | +-------------------+-----+
-//! |   | | 234 | "harry"     | ... |
-//! |   | +--^----------------+-----+
+//! |   | +------------------------------+
+//! |   | |  id | name             | ... |
+//! |   | +------------------------------|
+//! |   | | 234 | "cookie-monster" | ... |
+//! |   | +--^---------------------------+
 //! |   |    |
 //! |   |    +---------------------------------------------------------------+
 //! |   |                                                                    |
@@ -113,20 +114,20 @@
 //!     +----------------------------------------+
 //! ```
 //!
-//! This record means that user "harry" has the "viewer" role on the "project"
-//! with id 123.  (Note that ids are really uuids, and some of these tables have
-//! other columns.)  See the [`roles`] module for more details on how we find
-//! these records and make them available for the authz check.
+//! This record means that user "cookie-monster" has the "viewer" role on the
+//! "project" with id 123.  (Note that ids are really uuids, and some of these
+//! tables have other columns.)  See the [`roles`] module for more details on
+//! how we find these records and make them available for the authz check.
 //!
 //! ## Authorization control flow
 //!
-//! Suppose we receive a request from Hermione to modify Project "quidditch".
+//! Suppose we receive a request from Abby to modify Project "monster-foodies".
 //! How do we know if the request is authorized?  The project fetch code checks
-//! whether the actor (`hermione`) can perform the "modify"
-//! [`crate::authz::Action`] for a resource of type `Project` with id `234` (the
-//! id of the "quidditch" Project).  Then:
+//! whether the actor (`Abby`) can perform the "modify" [`crate::authz::Action`]
+//! for a resource of type `Project` with id `234` (the id of the
+//! "monster-foodies" Project).  Then:
 //!
-//! 1. The authorization subsystem loads all of Hermione's roles related to this
+//! 1. The authorization subsystem loads all of Abby's roles related to this
 //!    resource.  Much more on this in the [`roles`] submodule.
 //! 2. The authorization subsystem asks Oso whether the action should be
 //!    allowed.  Oso answers this based on the policy we've defined.  As part of
