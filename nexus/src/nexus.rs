@@ -2162,6 +2162,26 @@ impl Nexus {
     }
 
     /*
+     * Built-in roles
+     */
+
+    pub async fn roles_builtin_list(
+        &self,
+        opctx: &OpContext,
+        pagparams: &DataPageParams<'_, (String, String)>,
+    ) -> ListResultVec<db::model::RoleBuiltin> {
+        self.db_datastore.roles_builtin_list_by_name(opctx, pagparams).await
+    }
+
+    pub async fn role_builtin_fetch(
+        &self,
+        opctx: &OpContext,
+        name: &str,
+    ) -> LookupResult<db::model::RoleBuiltin> {
+        self.db_datastore.role_builtin_fetch(opctx, name).await
+    }
+
+    /*
      * Internal control plane interfaces.
      */
 
