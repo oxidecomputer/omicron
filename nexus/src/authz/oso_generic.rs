@@ -72,28 +72,23 @@ pub enum Action {
 
 impl oso::PolarClass for Action {
     fn get_polar_class_builder() -> oso::ClassBuilder<Self> {
-        oso::Class::builder().with_equality_check().add_method(
-            "to_perm",
-            |a: &Action| {
-                match a {
-                    Action::Query => Perm::Query,
-                    Action::Read => Perm::Read,
-                    Action::Modify => Perm::Modify,
-                    Action::Delete => Perm::Modify,
-                    Action::ListChildren => Perm::ListChildren,
-                    Action::CreateChild => Perm::CreateChild,
-                }
-                .to_string()
-            },
-        )
+        oso::Class::builder()
+            .with_equality_check()
+            .add_method("to_perm", |a: &Action| Perm::from(a).to_string())
     }
 }
 
-/// Describes a permission used in the Polar configuration
+/// A permission used in the Polar configuration
 ///
-/// Note that Polar (appears to) require that all permissions actually be
-/// strings in the configuration.  This type is used only in Rust.  It doesn't
-/// even impl [`PolarClass`].
+/// An authorization request starts by asking whether an actor can take some
+/// _action_ on a resource.  Most of the policy is written in terms of
+/// traditional RBAC-style _permissions_.  This type is used to help translate
+/// from [`Action`] to permission.
+///
+/// Note that Polar appears to require that all permissions be strings.  So in
+/// practice, the [`Action`] is converted to a [`Perm`] only for long enough to
+/// convert that to a string.  Still, having a separate type here ensures that
+/// not _any_ old string can be used as a permission.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Perm {
     Query, // Only for [`Database`]
@@ -101,6 +96,19 @@ pub enum Perm {
     Modify,
     ListChildren,
     CreateChild,
+}
+
+impl From<&Action> for Perm {
+    fn from(a: &Action) -> Self {
+        match a {
+            Action::Query => Perm::Query,
+            Action::Read => Perm::Read,
+            Action::Modify => Perm::Modify,
+            Action::Delete => Perm::Modify,
+            Action::ListChildren => Perm::ListChildren,
+            Action::CreateChild => Perm::CreateChild,
+        }
+    }
 }
 
 impl fmt::Display for Perm {
