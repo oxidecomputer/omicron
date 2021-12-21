@@ -9,7 +9,7 @@ path = "../rpaths"
 
 [dependencies]
 anyhow = "1.0"
-async-bb8-diesel = { git = "https://github.com/oxidecomputer/async-bb8-diesel", rev = "22c26ef" }
+async-bb8-diesel = { git = "https://github.com/oxidecomputer/async-bb8-diesel", rev = "c849b717be" }
 async-trait = "0.1.51"
 bb8 = "0.7.1"
 cookie = "0.15"
@@ -28,6 +28,7 @@ mime_guess = "2.0.3"
 newtype_derive = "0.1.6"
 oso = "0.24"
 oximeter-client = { path = "../oximeter-client" }
+oximeter-db = { path = "../oximeter/db/" }
 parse-display = "0.5.3"
 # See omicron-rpaths for more about the "pq-sys" dependency.
 pq-sys = "*"
@@ -113,7 +114,6 @@ nexus-test-utils-macros = { path = "test-utils-macros" }
 nexus-test-utils = { path = "test-utils" }
 omicron-test-utils = { path = "../test-utils" }
 openapiv3 = "0.5.0"
-oximeter-db = { path = "../oximeter/db" }
 subprocess = "0.2.8"
 
 [dev-dependencies.openapi-lint]

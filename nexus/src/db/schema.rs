@@ -304,6 +304,14 @@ table! {
     }
 }
 
+table! {
+    role_builtin (resource_type, role_name) {
+        resource_type -> Text,
+        role_name -> Text,
+        description -> Text,
+    }
+}
+
 allow_tables_to_appear_in_same_query!(
     dataset,
     disk,
@@ -314,6 +322,7 @@ allow_tables_to_appear_in_same_query!(
     oximeter,
     project,
     region,
+    role_builtin,
     saga,
     saga_node_event,
     console_session,

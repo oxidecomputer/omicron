@@ -16,6 +16,7 @@ use serde::Serialize;
 use serde_with::DeserializeFromStr;
 use serde_with::SerializeDisplay;
 use std::fmt;
+use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 
 /*
@@ -41,6 +42,14 @@ pub struct ConsoleConfig {
 }
 
 /**
+ * Configuration for the timeseries database.
+ */
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+pub struct TimeseriesDbConfig {
+    pub address: SocketAddr,
+}
+
+/**
  * Configuration for a nexus server
  */
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
@@ -59,6 +68,8 @@ pub struct Config {
     pub database: db::Config,
     /** Authentication-related configuration */
     pub authn: AuthnConfig,
+    /** Timeseries database configuration. */
+    pub timeseries_db: TimeseriesDbConfig,
 }
 
 #[derive(Debug)]
@@ -164,7 +175,7 @@ impl Config {
 mod test {
     use super::{
         AuthnConfig, Config, ConsoleConfig, LoadError, LoadErrorKind,
-        SchemeName,
+        SchemeName, TimeseriesDbConfig,
     };
     use crate::db;
     use dropshot::ConfigDropshot;
@@ -293,6 +304,8 @@ mod test {
             level = "debug"
             path = "/nonexistent/path"
             if_exists = "fail"
+            [timeseries_db]
+            address = "[::1]:8123"
             "##,
         )
         .unwrap();
@@ -330,6 +343,9 @@ mod test {
                         .parse()
                         .unwrap()
                 },
+                timeseries_db: TimeseriesDbConfig {
+                    address: "[::1]:8123".parse().unwrap()
+                },
             }
         );
 
@@ -360,6 +376,8 @@ mod test {
             [insecure]
             allow_any_request_to_spoof_authn_header = true
             if_exists = "fail"
+            [timeseries_db]
+            address = "[::1]:8123"
             "##,
         )
         .unwrap();
@@ -396,6 +414,8 @@ mod test {
             level = "debug"
             path = "/nonexistent/path"
             if_exists = "fail"
+            [timeseries_db]
+            address = "[::1]:8123"
             "##,
         )
         .expect_err("expected failure");

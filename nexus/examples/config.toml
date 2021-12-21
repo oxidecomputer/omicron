@@ -47,3 +47,7 @@ mode = "stderr-terminal"
 #mode = "file"
 #path = "logs/server.log"
 #if_exists = "append"
+
+# Configuration for interacting with the timeseries database
+[timeseries_db]
+address = "[::1]:8123"

@@ -32,6 +32,7 @@ use super::Pool;
 use crate::authn;
 use crate::authz;
 use crate::context::OpContext;
+use crate::db::model::RoleBuiltin;
 use crate::external_api::params;
 use async_bb8_diesel::{
     AsyncConnection, AsyncRunQueryDsl, ConnectionError, ConnectionManager,
@@ -62,7 +63,7 @@ use crate::db::{
     self,
     error::{
         public_error_from_diesel_pool, public_error_from_diesel_pool_create,
-        public_error_from_diesel_pool_shouldnt_fail,
+        public_error_from_diesel_pool_shouldnt_fail, TransactionError,
     },
     model::{
         ConsoleSession, Dataset, DatasetKind, Disk, DiskRuntimeState, Generation,
@@ -73,6 +74,7 @@ use crate::db::{
         VpcRouterUpdate, VpcSubnet, VpcSubnetUpdate, VpcUpdate, Zpool,
     },
     pagination::paginated,
+    pagination::paginated_multicolumn,
     subnet_allocation::AllocateIpQuery,
     update_and_check::{UpdateAndCheck, UpdateStatus},
 };
@@ -1683,6 +1685,12 @@ impl DataStore {
             diesel::insert_into(dsl::vpc_firewall_rule).values(rules),
         );
 
+        #[derive(Debug)]
+        enum FirewallUpdateError {
+            CollectionNotFound,
+        }
+        type TxnError = TransactionError<FirewallUpdateError>;
+
         // TODO-scalability: Ideally this would be a CTE so we don't need to
         // hold a transaction open across multiple roundtrips from the database,
         // but for now we're using a transaction due to the severely decreased
@@ -1697,19 +1705,24 @@ impl DataStore {
                 insert_new_query.insert_and_get_results(conn).map_err(|e| {
                     match e {
                         SyncInsertError::CollectionNotFound => {
-                            diesel::result::Error::RollbackTransaction
+                            TxnError::CustomError(
+                                FirewallUpdateError::CollectionNotFound,
+                            )
                         }
-                        SyncInsertError::DatabaseError(e) => e,
+                        SyncInsertError::DatabaseError(e) => e.into(),
                     }
                 })
             })
             .await
-            .map_err(|e| {
-                public_error_from_diesel_pool(
+            .map_err(|e| match e {
+                TxnError::CustomError(
+                    FirewallUpdateError::CollectionNotFound,
+                ) => Error::not_found_by_id(ResourceType::Vpc, vpc_id),
+                TxnError::Pool(e) => public_error_from_diesel_pool(
                     e,
                     ResourceType::VpcFirewallRule,
                     LookupType::ById(*vpc_id),
-                )
+                ),
             })
     }
 
@@ -2242,6 +2255,92 @@ impl DataStore {
             .await
             .map_err(public_error_from_diesel_pool_shouldnt_fail)?;
         info!(opctx.log, "created {} built-in users", count);
+        Ok(())
+    }
+
+    /// List built-in roles
+    pub async fn roles_builtin_list_by_name(
+        &self,
+        opctx: &OpContext,
+        pagparams: &DataPageParams<'_, (String, String)>,
+    ) -> ListResultVec<RoleBuiltin> {
+        use db::schema::role_builtin::dsl;
+        opctx.authorize(authz::Action::ListChildren, authz::FLEET)?;
+        paginated_multicolumn(
+            dsl::role_builtin,
+            (dsl::resource_type, dsl::role_name),
+            pagparams,
+        )
+        .select(RoleBuiltin::as_select())
+        .load_async::<RoleBuiltin>(self.pool_authorized(opctx)?)
+        .await
+        .map_err(|e| {
+            public_error_from_diesel_pool(
+                e,
+                ResourceType::Role,
+                LookupType::Other("Listing All".to_string()),
+            )
+        })
+    }
+
+    pub async fn role_builtin_fetch(
+        &self,
+        opctx: &OpContext,
+        name: &str,
+    ) -> LookupResult<RoleBuiltin> {
+        use db::schema::role_builtin::dsl;
+        opctx.authorize(authz::Action::Read, authz::FLEET.child_generic())?;
+
+        let (resource_type, role_name) =
+            name.split_once(".").ok_or_else(|| Error::ObjectNotFound {
+                type_name: ResourceType::Role,
+                lookup_type: LookupType::ByName(String::from(name)),
+            })?;
+
+        dsl::role_builtin
+            .filter(dsl::resource_type.eq(String::from(resource_type)))
+            .filter(dsl::role_name.eq(String::from(role_name)))
+            .select(RoleBuiltin::as_select())
+            .first_async::<RoleBuiltin>(self.pool_authorized(opctx)?)
+            .await
+            .map_err(|e| {
+                public_error_from_diesel_pool(
+                    e,
+                    ResourceType::Role,
+                    LookupType::ByName(String::from(name)),
+                )
+            })
+    }
+
+    /// Load built-in roles into the database
+    pub async fn load_builtin_roles(
+        &self,
+        opctx: &OpContext,
+    ) -> Result<(), Error> {
+        use db::schema::role_builtin::dsl;
+
+        opctx.authorize(authz::Action::Modify, authz::FLEET)?;
+
+        let builtin_roles = super::fixed_data::role_builtin::BUILTIN_ROLES
+            .iter()
+            .map(|role_config| {
+                RoleBuiltin::new(
+                    role_config.resource_type,
+                    &role_config.role_name,
+                    &role_config.description,
+                )
+            })
+            .collect::<Vec<RoleBuiltin>>();
+
+        debug!(opctx.log, "attempting to create built-in roles");
+        let count = diesel::insert_into(dsl::role_builtin)
+            .values(builtin_roles)
+            .on_conflict((dsl::resource_type, dsl::role_name))
+            .do_nothing()
+            .execute_async(self.pool_authorized(opctx)?)
+            .await
+            .map_err(public_error_from_diesel_pool_shouldnt_fail)?;
+        info!(opctx.log, "created {} built-in roles", count);
         Ok(())
     }
 }
