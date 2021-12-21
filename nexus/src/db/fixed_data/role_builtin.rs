@@ -1,11 +1,12 @@
 // This Source Code Form is subject to the terms of the Mozilla Public
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
-//! Built-in users
+//! Built-in roles
 
 use lazy_static::lazy_static;
 use omicron_common::api;
 
+#[derive(Clone)]
 pub struct RoleBuiltinConfig {
     pub resource_type: api::external::ResourceType,
     pub role_name: &'static str,
@@ -13,12 +14,13 @@ pub struct RoleBuiltinConfig {
 }
 
 lazy_static! {
+    pub static ref FLEET_ADMIN: RoleBuiltinConfig = RoleBuiltinConfig {
+        resource_type: api::external::ResourceType::Fleet,
+        role_name: "admin",
+        description: "Fleet Administrator",
+    };
     pub static ref BUILTIN_ROLES: Vec<RoleBuiltinConfig> = vec![
-        RoleBuiltinConfig {
-            resource_type: api::external::ResourceType::Fleet,
-            role_name: "admin",
-            description: "Fleet Administrator",
-        },
+        FLEET_ADMIN.clone(),
         RoleBuiltinConfig {
             resource_type: api::external::ResourceType::Fleet,
             role_name: "collaborator",
