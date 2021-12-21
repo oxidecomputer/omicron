@@ -7,7 +7,9 @@ use http::header::HeaderName;
 use http::{header, method::Method, StatusCode};
 use std::env::current_dir;
 
-use nexus_test_utils::http_testing::{RequestBuilder, TestResponse};
+use nexus_test_utils::http_testing::{
+    AuthnMode, NexusRequest, RequestBuilder, TestResponse,
+};
 use nexus_test_utils::{
     load_test_config, test_setup_with_config, ControlPlaneTestContext,
 };
@@ -15,6 +17,7 @@ use nexus_test_utils_macros::nexus_test;
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_nexus::external_api::console_api::LoginParams;
 use omicron_nexus::external_api::params::OrganizationCreate;
+use omicron_nexus::external_api::views;
 
 #[nexus_test]
 async fn test_sessions(cptestctx: &ControlPlaneTestContext) {
@@ -204,6 +207,40 @@ async fn test_absolute_static_dir() {
     assert_eq!(resp.body, "hello there".as_bytes());
 
     cptestctx.teardown().await;
+}
+
+#[nexus_test]
+async fn test_session_me(cptestctx: &ControlPlaneTestContext) {
+    let testctx = &cptestctx.external_client;
+
+    // hitting /session/me without being logged in is a 401
+    RequestBuilder::new(&testctx, Method::GET, "/session/me")
+        .expect_status(Some(StatusCode::UNAUTHORIZED))
+        .execute()
+        .await
+        .expect("failed to 401 on unauthed request");
+
+    // now make same request with auth
+    let priv_user = NexusRequest::object_get(testctx, "/session/me")
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .expect("failed to get current user")
+        .parsed_body::<views::User>()
+        .unwrap();
+
+    assert_eq!(priv_user.identity.name.as_str(), "test-privileged");
+
+    // same request as unprivileged user 403s because unprivileged user
+    // is so unprivileged they can't even see themselves
+    NexusRequest::new(
+        RequestBuilder::new(&testctx, Method::GET, "/session/me")
+            .expect_status(Some(StatusCode::FORBIDDEN)),
+    )
+    .authn_as(AuthnMode::UnprivilegedUser)
+    .execute()
+    .await
+    .expect("failed to 403 getting current user");
 }
 
 fn get_header_value(resp: TestResponse, header_name: HeaderName) -> String {

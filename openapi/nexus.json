@@ -2846,6 +2846,24 @@
         }
       }
     },
+    "/session/me": {
+      "get": {
+        "description": "Fetch the user associated with the current session",
+        "operationId": "session_me",
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/User"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/timeseries/schema": {
       "get": {
         "description": "List all timeseries schema",

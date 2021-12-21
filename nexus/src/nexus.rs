@@ -2170,6 +2170,14 @@ impl Nexus {
         self.db_datastore.user_builtin_fetch(opctx, name).await
     }
 
+    pub async fn user_builtin_fetch_by_id(
+        &self,
+        opctx: &OpContext,
+        id: &Uuid,
+    ) -> LookupResult<db::model::UserBuiltin> {
+        self.db_datastore.user_builtin_fetch_by_id(opctx, id).await
+    }
+
     /*
      * Built-in roles
      */

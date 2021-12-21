@@ -151,6 +151,14 @@ impl Error {
     pub fn unavail(message: &str) -> Error {
         Error::ServiceUnavailable { internal_message: message.to_owned() }
     }
+
+    /**
+     * Generates an [`Error::Unauthenticated`] error with the specific
+     * message
+     */
+    pub fn unauthenticated(message: &str) -> Error {
+        Error::Unauthenticated { internal_message: message.to_owned() }
+    }
 }
 
 impl From<Error> for HttpError {

@@ -9,6 +9,7 @@
  * but in order to avoid CORS issues for now, we are serving these routes directly
  * from the external API.
  */
+use super::views;
 use crate::authn::external::{
     cookies::Cookies,
     session_cookie::{
@@ -19,11 +20,14 @@ use crate::authn::external::{
 use crate::authn::{USER_TEST_PRIVILEGED, USER_TEST_UNPRIVILEGED};
 use crate::context::OpContext;
 use crate::ServerContext;
-use dropshot::{endpoint, HttpError, Path, RequestContext, TypedBody};
+use dropshot::{
+    endpoint, HttpError, HttpResponseOk, Path, RequestContext, TypedBody,
+};
 use http::{header, Response, StatusCode};
 use hyper::Body;
 use lazy_static::lazy_static;
 use mime_guess;
+use omicron_common::api::external::Error;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::{collections::HashSet, ffi::OsString, path::PathBuf, sync::Arc};
@@ -133,6 +137,35 @@ pub async fn spoof_login_form(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
 ) -> Result<Response<Body>, HttpError> {
     serve_console_index(rqctx.context()).await
+}
+
+/// Fetch the user associated with the current session
+#[endpoint {
+   method = GET,
+   path = "/session/me",
+}]
+pub async fn session_me(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+) -> Result<HttpResponseOk<views::User>, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        // TODO: we don't care about authentication method, as long as they are
+        // authed as _somebody_. We could restrict this to session auth only,
+        // but it's not clear what the advantage would be.
+        match opctx.authn.actor() {
+            Some(actor) => {
+                let user =
+                    nexus.user_builtin_fetch_by_id(&opctx, &actor.0).await?;
+                Ok(HttpResponseOk(user.into()))
+            }
+            None => {
+                Err(Error::unauthenticated("Cannot get current user").into())
+            }
+        }
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
 // Dropshot does not have route match ranking and does not allow overlapping
