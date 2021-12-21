@@ -869,7 +869,7 @@ checksum = "1435fa1053d8b2fbbe9be7e97eca7f33d37b28409959813daefc1446a14247f1"
 [[package]]
 name = "dropshot"
 version = "0.6.1-dev"
-source = "git+https://github.com/oxidecomputer/dropshot?branch=main#5a80ca53df78b5ee11dc97a252864c6c86046a0b"
+source = "git+https://github.com/oxidecomputer/dropshot?branch=main#72583242d80b88561602a37013595e9f75f4f394"
 dependencies = [
  "async-trait",
  "base64",
@@ -897,14 +897,14 @@ dependencies = [
  "syn",
  "tokio",
  "toml",
- "usdt 0.2.1",
+ "usdt 0.3.1",
  "uuid",
 ]
 
 [[package]]
 name = "dropshot_endpoint"
 version = "0.6.1-dev"
-source = "git+https://github.com/oxidecomputer/dropshot?branch=main#5a80ca53df78b5ee11dc97a252864c6c86046a0b"
+source = "git+https://github.com/oxidecomputer/dropshot?branch=main#72583242d80b88561602a37013595e9f75f4f394"
 dependencies = [
  "proc-macro2",
  "quote",
