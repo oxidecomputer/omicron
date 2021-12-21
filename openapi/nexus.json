@@ -187,13 +187,21 @@
           },
           "required": true
         },
-        "responses": {}
+        "responses": {
+          "default": {
+            "description": ""
+          }
+        }
       }
     },
     "/logout": {
       "post": {
         "operationId": "logout",
-        "responses": {}
+        "responses": {
+          "default": {
+            "description": ""
+          }
+        }
       }
     },
     "/organizations": {
