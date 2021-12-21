@@ -5,16 +5,20 @@
 //! Functions for querying the timeseries database.
 // Copyright 2021 Oxide Computer Company
 
-use crate::model::{Field, FieldSource, TimeseriesSchema};
-use crate::Error;
-use crate::{TimeseriesKey, DATABASE_NAME, DATABASE_SELECT_FORMAT};
+use crate::{
+    Error, FieldSchema, FieldSource, TimeseriesKey, TimeseriesSchema,
+    DATABASE_NAME, DATABASE_SELECT_FORMAT,
+};
 use chrono::{DateTime, Utc};
 use oximeter::types::{DatumType, FieldType, FieldValue};
 use oximeter::{Metric, Target};
 use regex::Regex;
+use schemars::JsonSchema;
+use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::fmt;
 use std::net::IpAddr;
+use std::num::NonZeroU32;
 use std::str::FromStr;
 use uuid::Uuid;
 
@@ -29,8 +33,10 @@ use uuid::Uuid;
 #[derive(Debug, Clone)]
 pub struct SelectQueryBuilder {
     timeseries_schema: TimeseriesSchema,
-    field_selectors: BTreeMap<Field, FieldSelector>,
+    field_selectors: BTreeMap<FieldSchema, FieldSelector>,
     time_range: TimeRange,
+    limit: Option<NonZeroU32>,
+    offset: Option<u32>,
 }
 
 impl SelectQueryBuilder {
@@ -40,6 +46,8 @@ impl SelectQueryBuilder {
             timeseries_schema: schema.clone(),
             field_selectors: BTreeMap::new(),
             time_range: TimeRange { start: None, end: None },
+            limit: None,
+            offset: None,
         }
     }
 
@@ -52,6 +60,18 @@ impl SelectQueryBuilder {
     /// Set the end time for measurements selected from the query.
     pub fn end_time(mut self, end: Option<Timestamp>) -> Self {
         self.time_range.end = end;
+        self
+    }
+
+    /// Set the limit on the number of returned results.
+    pub fn limit(mut self, limit: NonZeroU32) -> Self {
+        self.limit.replace(limit);
+        self
+    }
+
+    /// Set the number of rows to skip in the result set.
+    pub fn offset(mut self, offset: u32) -> Self {
+        self.offset.replace(offset);
         self
     }
 
@@ -70,18 +90,18 @@ impl SelectQueryBuilder {
         T: Into<FieldValue>,
     {
         let field_name = field_name.as_ref().to_string();
-        let field =
-            self.timeseries_schema.field(&field_name).ok_or_else(|| {
-                Error::NoSuchField {
-                    timeseries_name: self
-                        .timeseries_schema
-                        .timeseries_name
-                        .to_string(),
-                    field_name: field_name.clone(),
-                }
+        let field_schema = self
+            .timeseries_schema
+            .field_schema(&field_name)
+            .ok_or_else(|| Error::NoSuchField {
+                timeseries_name: self
+                    .timeseries_schema
+                    .timeseries_name
+                    .to_string(),
+                field_name: field_name.clone(),
             })?;
         let field_value: FieldValue = field_value.into();
-        let expected_type = field.ty;
+        let expected_type = field_schema.ty;
         let found_type = field_value.field_type();
         if expected_type != found_type {
             return Err(Error::IncorrectFieldType {
@@ -102,7 +122,66 @@ impl SelectQueryBuilder {
             comparison: Some(comparison),
             ty: found_type,
         };
-        self.field_selectors.insert(field.clone(), selector);
+        self.field_selectors.insert(field_schema.clone(), selector);
+        Ok(self)
+    }
+
+    /// Add a filter for a field by parsing the given string selector into a strongly typed field
+    /// selector.
+    ///
+    /// Field selectors may be specified by a mini-DSL, where selectors are generally of the form:
+    /// `NAME OP VALUE`. The name should be the name of the field. `OP` specifies the field
+    /// comparison operator (see [`FieldCmp`] for details. `VALUE` should be a string that can be
+    /// parsed into a `FieldValue` of the correct type for the given field.
+    ///
+    /// Whitespace surrounding the `OP` is ignored, but whitespace elsewhere is significant.
+    pub fn filter_str(
+        mut self,
+        selector: &StringFieldSelector,
+    ) -> Result<Self, Error> {
+        let field_schema = self
+            .timeseries_schema
+            .field_schema(&selector.name)
+            .ok_or_else(|| Error::NoSuchField {
+                timeseries_name: self
+                    .timeseries_schema
+                    .timeseries_name
+                    .to_string(),
+                field_name: selector.name.clone(),
+            })?;
+        if !selector.op.valid_for_type(field_schema.ty) {
+            return Err(Error::InvalidFieldCmp {
+                op: format!("{:?}", selector.op),
+                ty: field_schema.ty,
+            });
+        }
+        let field_value = match field_schema.ty {
+            FieldType::String => FieldValue::from(&selector.value),
+            FieldType::I64 => parse_selector_field_value::<i64>(
+                &field_schema,
+                &selector.value,
+            )?,
+            FieldType::IpAddr => parse_selector_field_value::<IpAddr>(
+                &field_schema,
+                &selector.value,
+            )?,
+            FieldType::Uuid => parse_selector_field_value::<Uuid>(
+                &field_schema,
+                &selector.value,
+            )?,
+            FieldType::Bool => parse_selector_field_value::<bool>(
+                &field_schema,
+                &selector.value,
+            )?,
+        };
+        let comparison =
+            FieldComparison { op: selector.op, value: field_value };
+        let selector = FieldSelector {
+            name: field_schema.name.clone(),
+            comparison: Some(comparison),
+            ty: field_schema.ty,
+        };
+        self.field_selectors.insert(field_schema.clone(), selector);
         Ok(self)
     }
 
@@ -118,51 +197,11 @@ impl SelectQueryBuilder {
     /// An error is returned if the field selector string is not formatted correctly, specifies an
     /// invalid field name or comparison operator, or a value that cannot be parsed into the right
     /// type for the given field.
-    pub fn filter_str<S>(mut self, selector: S) -> Result<Self, Error>
+    pub fn filter_raw<S>(self, selector: S) -> Result<Self, Error>
     where
         S: AsRef<str>,
     {
-        let selector: StringFieldSelector = selector.as_ref().parse()?;
-        let field =
-            self.timeseries_schema.field(&selector.name).ok_or_else(|| {
-                Error::NoSuchField {
-                    timeseries_name: self
-                        .timeseries_schema
-                        .timeseries_name
-                        .to_string(),
-                    field_name: selector.name.clone(),
-                }
-            })?;
-        if !selector.op.valid_for_type(field.ty) {
-            return Err(Error::InvalidFieldCmp {
-                op: format!("{:?}", selector.op),
-                ty: field.ty,
-            });
-        }
-        let field_value = match field.ty {
-            FieldType::String => FieldValue::from(&selector.value),
-            FieldType::I64 => {
-                parse_selector_field_value::<i64>(&field, &selector.value)?
-            }
-            FieldType::IpAddr => {
-                parse_selector_field_value::<IpAddr>(&field, &selector.value)?
-            }
-            FieldType::Uuid => {
-                parse_selector_field_value::<Uuid>(&field, &selector.value)?
-            }
-            FieldType::Bool => {
-                parse_selector_field_value::<bool>(&field, &selector.value)?
-            }
-        };
-        let comparison =
-            FieldComparison { op: selector.op, value: field_value };
-        let selector = FieldSelector {
-            name: field.name.clone(),
-            comparison: Some(comparison),
-            ty: field.ty,
-        };
-        self.field_selectors.insert(field.clone(), selector);
-        Ok(self)
+        self.filter_str(&selector.as_ref().parse()?)
     }
 
     /// Create a `SelectQueryBuilder` that selects the exact timeseries indicated by the given
@@ -200,7 +239,7 @@ impl SelectQueryBuilder {
     pub fn build(self) -> SelectQuery {
         let timeseries_schema = self.timeseries_schema;
         let mut field_selectors = self.field_selectors;
-        for field in timeseries_schema.fields.iter() {
+        for field in timeseries_schema.field_schema.iter() {
             let key = field.clone();
             field_selectors.entry(key).or_insert_with(|| FieldSelector {
                 name: field.name.clone(),
@@ -212,6 +251,8 @@ impl SelectQueryBuilder {
             timeseries_schema,
             field_selectors,
             time_range: self.time_range,
+            limit: self.limit,
+            offset: self.offset,
         }
     }
 }
@@ -221,7 +262,7 @@ fn measurement_table_name(ty: DatumType) -> String {
 }
 
 fn parse_selector_field_value<T>(
-    field: &Field,
+    field: &FieldSchema,
     s: &str,
 ) -> Result<FieldValue, Error>
 where
@@ -289,12 +330,12 @@ impl FieldSelector {
     }
 }
 
-// A stringly-typed selector for finding fields by name and comparsion with a given value.
-//
-// This is used internally to parse comparisons written as strings, such as from the `oxdb`
-// command-line tool or from anoter external source (Nexus API, for example).
-#[derive(Debug, Clone, PartialEq)]
-struct StringFieldSelector {
+/// A stringly-typed selector for finding fields by name and comparsion with a given value.
+///
+/// This is used internally to parse comparisons written as strings, such as from the `oxdb`
+/// command-line tool or from another external source (Nexus API, for example).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct StringFieldSelector {
     name: String,
     op: FieldCmp,
     value: String,
@@ -326,7 +367,7 @@ impl FromStr for StringFieldSelector {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub enum FieldCmp {
     Eq,
     Neq,
@@ -434,8 +475,10 @@ pub enum Timestamp {
 #[derive(Debug, Clone)]
 pub struct SelectQuery {
     timeseries_schema: TimeseriesSchema,
-    field_selectors: BTreeMap<Field, FieldSelector>,
+    field_selectors: BTreeMap<FieldSchema, FieldSelector>,
     time_range: TimeRange,
+    limit: Option<NonZeroU32>,
+    offset: Option<u32>,
 }
 
 fn create_join_on_condition(columns: &[&str], current: usize) -> String {
@@ -454,7 +497,7 @@ fn create_join_on_condition(columns: &[&str], current: usize) -> String {
 }
 
 fn find_field_selector<S>(
-    field_selectors: &BTreeMap<Field, FieldSelector>,
+    field_selectors: &BTreeMap<FieldSchema, FieldSelector>,
     source: FieldSource,
     name: S,
 ) -> Option<&FieldSelector>
@@ -567,6 +610,16 @@ impl SelectQuery {
                     .join(", "),
             )
         };
+        let pagination_clause = {
+            let mut clause = String::new();
+            if let Some(limit) = self.limit {
+                clause.push_str(&format!("LIMIT {} ", limit));
+            }
+            if let Some(offset) = self.offset {
+                clause.push_str(&format!("OFFSET {} ", offset));
+            };
+            clause
+        };
         format!(
             concat!(
                 "SELECT * ",
@@ -576,6 +629,7 @@ impl SelectQuery {
                 "{key_clause}",
                 "{timestamp_clause}",
                 "ORDER BY (timeseries_name, timeseries_key, timestamp) ",
+                "{pagination_clause}",
                 "FORMAT {fmt};",
             ),
             db_name = DATABASE_NAME,
@@ -584,6 +638,7 @@ impl SelectQuery {
             timeseries_name = self.timeseries_schema.timeseries_name,
             key_clause = key_clause,
             timestamp_clause = self.time_range.as_query(),
+            pagination_clause = pagination_clause,
             fmt = DATABASE_SELECT_FORMAT,
         )
     }
@@ -611,8 +666,11 @@ fn field_as_db_str(value: &FieldValue) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::model::FieldSource;
+    use crate::FieldSchema;
+    use crate::FieldSource;
+    use crate::TimeseriesName;
     use chrono::TimeZone;
+    use std::convert::TryFrom;
 
     #[test]
     fn test_field_value_as_db_str() {
@@ -662,16 +720,16 @@ mod tests {
     }
 
     #[test]
-    fn test_select_query_builder_filter_str() {
+    fn test_select_query_builder_filter_raw() {
         let schema = TimeseriesSchema {
-            timeseries_name: "foo:bar".to_string(),
-            fields: vec![
-                Field {
+            timeseries_name: TimeseriesName::try_from("foo:bar").unwrap(),
+            field_schema: vec![
+                FieldSchema {
                     name: "f0".to_string(),
                     ty: FieldType::I64,
                     source: FieldSource::Target,
                 },
-                Field {
+                FieldSchema {
                     name: "f1".to_string(),
                     ty: FieldType::Bool,
                     source: FieldSource::Target,
@@ -681,7 +739,7 @@ mod tests {
             created: Utc::now(),
         };
         let builder = SelectQueryBuilder::new(&schema)
-            .filter_str("f0!=2")
+            .filter_raw("f0!=2")
             .expect("Failed to add field filter from string");
         assert_eq!(builder.field_selectors.len(), 1);
         assert_eq!(
@@ -697,7 +755,7 @@ mod tests {
         );
 
         let builder = builder
-            .filter_str("f1==true")
+            .filter_raw("f1==true")
             .expect("Failed to add field filter from string");
         assert_eq!(builder.field_selectors.len(), 2);
         assert_eq!(
@@ -712,9 +770,9 @@ mod tests {
             }
         );
 
-        builder.clone().filter_str("f1>true").expect_err("Expected error adding field comparison which isn't valid for the type");
+        builder.clone().filter_raw("f1>true").expect_err("Expected error adding field comparison which isn't valid for the type");
 
-        builder.filter_str("a=0").expect_err(
+        builder.filter_raw("a=0").expect_err(
             "Expected to fail adding a selector for an unknown field",
         );
     }
@@ -791,8 +849,8 @@ mod tests {
     #[test]
     fn test_select_query_builder_no_fields() {
         let schema = TimeseriesSchema {
-            timeseries_name: "foo:bar".to_string(),
-            fields: vec![],
+            timeseries_name: TimeseriesName::try_from("foo:bar").unwrap(),
+            field_schema: vec![],
             datum_type: DatumType::I64,
             created: Utc::now(),
         };
@@ -805,6 +863,32 @@ mod tests {
                 "FROM oximeter.measurements_i64 ",
                 "WHERE timeseries_name = 'foo:bar' ",
                 "ORDER BY (timeseries_name, timeseries_key, timestamp) ",
+                "FORMAT JSONEachRow;"
+            )
+        );
+    }
+
+    #[test]
+    fn test_select_query_builder_limit_offset() {
+        let schema = TimeseriesSchema {
+            timeseries_name: TimeseriesName::try_from("foo:bar").unwrap(),
+            field_schema: vec![],
+            datum_type: DatumType::I64,
+            created: Utc::now(),
+        };
+        let query = SelectQueryBuilder::new(&schema)
+            .limit(NonZeroU32::try_from(10).unwrap())
+            .offset(5)
+            .build();
+        assert!(query.field_query().is_none());
+        assert_eq!(
+            query.measurement_query(&[]),
+            concat!(
+                "SELECT * ",
+                "FROM oximeter.measurements_i64 ",
+                "WHERE timeseries_name = 'foo:bar' ",
+                "ORDER BY (timeseries_name, timeseries_key, timestamp) ",
+                "LIMIT 10 OFFSET 5 ",
                 "FORMAT JSONEachRow;"
             )
         );
@@ -856,14 +940,14 @@ mod tests {
     #[test]
     fn test_select_query_builder_no_selectors() {
         let schema = TimeseriesSchema {
-            timeseries_name: "foo:bar".to_string(),
-            fields: vec![
-                Field {
+            timeseries_name: TimeseriesName::try_from("foo:bar").unwrap(),
+            field_schema: vec![
+                FieldSchema {
                     name: "f0".to_string(),
                     ty: FieldType::I64,
                     source: FieldSource::Target,
                 },
-                Field {
+                FieldSchema {
                     name: "f1".to_string(),
                     ty: FieldType::Bool,
                     source: FieldSource::Target,
@@ -917,14 +1001,14 @@ mod tests {
     #[test]
     fn test_select_query_builder_field_selectors() {
         let schema = TimeseriesSchema {
-            timeseries_name: "foo:bar".to_string(),
-            fields: vec![
-                Field {
+            timeseries_name: TimeseriesName::try_from("foo:bar").unwrap(),
+            field_schema: vec![
+                FieldSchema {
                     name: "f0".to_string(),
                     ty: FieldType::I64,
                     source: FieldSource::Target,
                 },
-                Field {
+                FieldSchema {
                     name: "f1".to_string(),
                     ty: FieldType::Bool,
                     source: FieldSource::Target,
@@ -935,9 +1019,9 @@ mod tests {
         };
 
         let query = SelectQueryBuilder::new(&schema)
-            .filter_str("f0==0")
+            .filter_raw("f0==0")
             .expect("Failed to add first filter")
-            .filter_str("f1==false")
+            .filter_raw("f1==false")
             .expect("Failed to add second filter")
             .build();
         assert_eq!(
@@ -966,14 +1050,14 @@ mod tests {
     #[test]
     fn test_select_query_builder_full() {
         let schema = TimeseriesSchema {
-            timeseries_name: "foo:bar".to_string(),
-            fields: vec![
-                Field {
+            timeseries_name: TimeseriesName::try_from("foo:bar").unwrap(),
+            field_schema: vec![
+                FieldSchema {
                     name: "f0".to_string(),
                     ty: FieldType::I64,
                     source: FieldSource::Target,
                 },
-                Field {
+                FieldSchema {
                     name: "f1".to_string(),
                     ty: FieldType::Bool,
                     source: FieldSource::Target,
@@ -987,12 +1071,14 @@ mod tests {
         let end_time = start_time + chrono::Duration::seconds(1);
 
         let query = SelectQueryBuilder::new(&schema)
-            .filter_str("f0==0")
+            .filter_raw("f0==0")
             .expect("Failed to add first filter")
-            .filter_str("f1==false")
+            .filter_raw("f1==false")
             .expect("Failed to add second filter")
             .start_time(Some(Timestamp::Inclusive(start_time)))
             .end_time(Some(Timestamp::Exclusive(end_time)))
+            .limit(NonZeroU32::try_from(10).unwrap())
+            .offset(5)
             .build();
         assert_eq!(
             query.field_query().unwrap(),
@@ -1025,6 +1111,7 @@ mod tests {
                     " AND timestamp >= '{start_time}' ",
                     "AND timestamp < '{end_time}' ",
                     "ORDER BY (timeseries_name, timeseries_key, timestamp) ",
+                    "LIMIT 10 OFFSET 5 ",
                     "FORMAT JSONEachRow;",
                 ),
                 start_time =

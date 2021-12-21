@@ -61,12 +61,15 @@ use omicron_common::api::internal::sled_agent::InstanceStateRequested;
 use omicron_common::backoff;
 use omicron_common::bail_unless;
 use oximeter_client::Client as OximeterClient;
+use oximeter_db::TimeseriesSchema;
+use oximeter_db::TimeseriesSchemaPaginationParams;
 use oximeter_producer::register;
 use rand::{rngs::StdRng, RngCore, SeedableRng};
 use sled_agent_client::Client as SledAgentClient;
 use slog::Logger;
 use std::convert::TryInto;
 use std::net::SocketAddr;
+use std::num::NonZeroU32;
 use std::sync::Arc;
 use std::time::Duration;
 use steno::SagaId;
@@ -134,6 +137,9 @@ pub struct Nexus {
 
     /** Status of background task to populate database */
     populate_status: tokio::sync::watch::Receiver<PopulateStatus>,
+
+    /** Client to the timeseries database. */
+    timeseries_client: oximeter_db::Client,
 }
 
 /*
@@ -171,6 +177,8 @@ impl Nexus {
             )),
             sec_store,
         ));
+        let timeseries_client =
+            oximeter_db::Client::new(config.timeseries_db.address, &log);
 
         /*
          * TODO-cleanup We may want a first-class subsystem for managing startup
@@ -195,6 +203,7 @@ impl Nexus {
             sec_client: Arc::clone(&sec_client),
             recovery_task: std::sync::Mutex::new(None),
             populate_status,
+            timeseries_client,
         };
 
         /* TODO-cleanup all the extra Arcs here seems wrong */
@@ -2301,6 +2310,31 @@ impl Nexus {
                 Err(error)
             }
         }
+    }
+
+    /*
+     * Timeseries
+     */
+
+    /**
+     * List existing timeseries schema.
+     */
+    pub async fn timeseries_schema_list(
+        &self,
+        pag_params: &TimeseriesSchemaPaginationParams,
+        limit: NonZeroU32,
+    ) -> Result<dropshot::ResultsPage<TimeseriesSchema>, Error> {
+        self.timeseries_client
+            .timeseries_schema_list(&pag_params.page, limit)
+            .await
+            .map_err(|e| match e {
+                oximeter_db::Error::DatabaseUnavailable(_) => {
+                    Error::ServiceUnavailable {
+                        internal_message: e.to_string(),
+                    }
+                }
+                _ => Error::InternalError { internal_message: e.to_string() },
+            })
     }
 
     /**
