@@ -29,18 +29,9 @@ impl AnyActor {
     }
 }
 
-impl PartialEq for AnyActor {
-    fn eq(&self, other: &Self) -> bool {
-        self.actor_id == other.actor_id
-    }
-}
-
-impl Eq for AnyActor {}
-
 impl oso::PolarClass for AnyActor {
     fn get_polar_class_builder() -> oso::ClassBuilder<Self> {
         oso::Class::builder()
-            .with_equality_check()
             .add_attribute_getter("authenticated", |a: &AnyActor| {
                 a.authenticated
             })
