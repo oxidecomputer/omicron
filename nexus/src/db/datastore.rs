@@ -266,6 +266,11 @@ impl DataStore {
         // - Sled placement of datasets
         // - What sort of loads we'd like to create (even split across all disks
         // may not be preferable, especially if maintenance is expected)
+        #[derive(Debug)]
+        enum RegionAllocateError {
+            NotEnoughDatasets(usize),
+        }
+        type TxnError = TransactionError<RegionAllocateError>;
         let params: params::DiskCreate = params.clone();
         self.pool().transaction(move |conn| {
             let datasets: Vec<Dataset> = dataset_dsl::dataset
@@ -292,14 +297,9 @@ impl DataStore {
                     .asc(),
                 )
                 .get_results::<Dataset>(conn)?;
-//                .map_err(|e| Error::internal_error(&format!("Database error: {:#}", e)))?;
 
             if datasets.len() < REGION_REDUNDANCY_THRESHOLD {
-                // TODO: Want a better error type here...
-                return Err(diesel::result::Error::NotFound);
-//                return Err(Error::internal_error(
-//                    "Not enough datasets for replicated allocation",
-//                ));
+                return Err(TxnError::CustomError(RegionAllocateError::NotEnoughDatasets(datasets.len())));
             }
 
             // Create identical regions on each of the following datasets.
@@ -320,9 +320,6 @@ impl DataStore {
                 .values(regions)
                 .returning(Region::as_returning())
                 .get_results(conn)?;
-//                .map_err(|e| Error::internal_error(&format!("Database error: {:#}", e)))?;
-
-            // TODO: also, make this concurrency-safe. Txns?
 
             // Return the regions with the datasets to which they were allocated.
             Ok(source_datasets
@@ -330,7 +327,7 @@ impl DataStore {
                 .map(|d| d.clone())
                 .zip(regions)
                 .collect())
-        }).await.map_err(|e| Error::internal_error(&format!("Database error: {:#?}", e)))
+        }).await.map_err(|e| Error::internal_error(&format!("Transaction error: {:#?}", e)))
     }
 
     /// Create a organization
