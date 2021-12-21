@@ -64,7 +64,7 @@ use crate::db::{
     self,
     error::{
         public_error_from_diesel_pool, public_error_from_diesel_pool_create,
-        public_error_from_diesel_pool_shouldnt_fail,
+        public_error_from_diesel_pool_shouldnt_fail, TransactionError,
     },
     model::{
         ConsoleSession, Dataset, Disk, DiskRuntimeState, Generation,
@@ -1590,6 +1590,12 @@ impl DataStore {
             diesel::insert_into(dsl::vpc_firewall_rule).values(rules),
         );
 
+        #[derive(Debug)]
+        enum FirewallUpdateError {
+            CollectionNotFound,
+        }
+        type TxnError = TransactionError<FirewallUpdateError>;
+
         // TODO-scalability: Ideally this would be a CTE so we don't need to
         // hold a transaction open across multiple roundtrips from the database,
         // but for now we're using a transaction due to the severely decreased
@@ -1604,19 +1610,24 @@ impl DataStore {
                 insert_new_query.insert_and_get_results(conn).map_err(|e| {
                     match e {
                         SyncInsertError::CollectionNotFound => {
-                            diesel::result::Error::RollbackTransaction
+                            TxnError::CustomError(
+                                FirewallUpdateError::CollectionNotFound,
+                            )
                         }
-                        SyncInsertError::DatabaseError(e) => e,
+                        SyncInsertError::DatabaseError(e) => e.into(),
                     }
                 })
             })
             .await
-            .map_err(|e| {
-                public_error_from_diesel_pool(
+            .map_err(|e| match e {
+                TxnError::CustomError(
+                    FirewallUpdateError::CollectionNotFound,
+                ) => Error::not_found_by_id(ResourceType::Vpc, vpc_id),
+                TxnError::Pool(e) => public_error_from_diesel_pool(
                     e,
                     ResourceType::VpcFirewallRule,
                     LookupType::ById(*vpc_id),
-                )
+                ),
             })
     }
 

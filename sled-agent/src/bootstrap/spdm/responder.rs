@@ -1,3 +1,7 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
 use slog::Logger;
 
 use spdm::msgs::capabilities::{Capabilities, RspFlags};
@@ -28,7 +32,7 @@ impl Ctx {
         &mut self,
     ) -> Result<capabilities::State, SpdmError> {
         let state = responder::start();
-        let req = self.transport.recv(&self.log).await?;
+        let req = self.transport.recv().await?;
 
         let (data, state) =
             state.handle_msg(&req[..], &mut self.buf, &mut self.transcript)?;
@@ -56,7 +60,7 @@ impl Ctx {
                 | RspFlags::KEY_UPD_CAP,
         };
 
-        let req = self.transport.recv(&self.log).await?;
+        let req = self.transport.recv().await?;
         let (data, transition) = state.handle_msg(
             supported,
             &req[..],
@@ -87,7 +91,7 @@ impl Ctx {
         &mut self,
         state: algorithms::State,
     ) -> Result<id_auth::State, SpdmError> {
-        let req = self.transport.recv(&self.log).await?;
+        let req = self.transport.recv().await?;
         let (data, transition) =
             state.handle_msg(&req[..], &mut self.buf, &mut self.transcript)?;
         debug!(self.log, "Responder received NEGOTIATE_ALGORITHMS");
@@ -117,7 +121,10 @@ impl Ctx {
 /// header. Requesters and Responders are decoupled from whether the endpoint of
 /// a socket is a TCP client or server.
 #[allow(dead_code)]
-pub async fn run(log: Logger, transport: Transport) -> Result<(), SpdmError> {
+pub async fn run(
+    log: Logger,
+    transport: Transport,
+) -> Result<Transport, SpdmError> {
     let mut ctx = Ctx::new(log, transport);
 
     info!(ctx.log, "Responder starting version negotiation");
@@ -131,5 +138,5 @@ pub async fn run(log: Logger, transport: Transport) -> Result<(), SpdmError> {
 
     info!(ctx.log, "Responder completed negotiation phase");
     debug!(ctx.log, "Responder transcript: {:x?}\n", ctx.transcript.get());
-    Ok(())
+    Ok(ctx.transport)
 }

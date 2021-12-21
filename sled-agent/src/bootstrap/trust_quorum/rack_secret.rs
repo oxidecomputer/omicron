@@ -60,7 +60,7 @@ impl Eq for RackSecret {}
 /// before the secret is reconstructed.
 //
 // This is just a wrapper around a FeldmanVerifier from the vsss-rs crate.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Verifier {
     verifier: FeldmanVerifier<Scalar, ProjectivePoint>,
 }

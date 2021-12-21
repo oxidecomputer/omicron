@@ -481,11 +481,11 @@ where
 #[cfg(test)]
 mod test {
     use super::{AsyncInsertError, DatastoreCollection, SyncInsertError};
-    use crate::db;
-    use crate::db::identity::Resource as IdentityResource;
+    use crate::db::{
+        self, error::TransactionError, identity::Resource as IdentityResource,
+    };
     use async_bb8_diesel::{
         AsyncConnection, AsyncRunQueryDsl, AsyncSimpleConnection,
-        ConnectionError, PoolError,
     };
     use chrono::{DateTime, NaiveDateTime, Utc};
     use db_macros::Resource;
@@ -669,28 +669,28 @@ mod test {
             )),
         );
 
-        let not_found = std::sync::Arc::new(std::sync::Mutex::new(false));
-        let not_found_ref = not_found.clone();
+        #[derive(Debug)]
+        enum CollectionError {
+            NotFound,
+        }
+        type TxnError = TransactionError<CollectionError>;
+
         let result = pool
             .pool()
             .transaction(move |conn| {
                 insert_query.insert_and_get_result(conn).map_err(|e| match e {
                     SyncInsertError::CollectionNotFound => {
-                        *not_found_ref.lock().unwrap() = true;
-                        diesel::result::Error::RollbackTransaction
+                        TxnError::CustomError(CollectionError::NotFound)
                     }
-                    SyncInsertError::DatabaseError(err) => err,
+                    SyncInsertError::DatabaseError(e) => TxnError::from(e),
                 })
             })
             .await;
 
         assert!(matches!(
             result,
-            Err(PoolError::Connection(ConnectionError::Query(
-                diesel::result::Error::RollbackTransaction
-            )))
+            Err(TxnError::CustomError(CollectionError::NotFound))
         ));
-        assert!(*not_found.lock().unwrap());
 
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();
