@@ -56,7 +56,7 @@ pub const SESSION_COOKIE_SCHEME_NAME: authn::SchemeName =
 /// Generate session cookie header
 pub fn session_cookie_header_value(token: &str, max_age: Duration) -> String {
     format!(
-        "{}={}; Secure; HttpOnly; SameSite=Lax; Max-Age={}",
+        "{}={}; Path=/; Secure; HttpOnly; SameSite=Lax; Max-Age={}",
         SESSION_COOKIE_COOKIE_NAME,
         token,
         max_age.num_seconds()
@@ -380,17 +380,17 @@ mod test {
     fn test_session_cookie_value() {
         assert_eq!(
             session_cookie_header_value("abc", Duration::seconds(5)),
-            "session=abc; Secure; HttpOnly; SameSite=Lax; Max-Age=5"
+            "session=abc; Path=/; Secure; HttpOnly; SameSite=Lax; Max-Age=5"
         );
 
         assert_eq!(
             session_cookie_header_value("abc", Duration::seconds(-5)),
-            "session=abc; Secure; HttpOnly; SameSite=Lax; Max-Age=-5"
+            "session=abc; Path=/; Secure; HttpOnly; SameSite=Lax; Max-Age=-5"
         );
 
         assert_eq!(
             session_cookie_header_value("", Duration::zero()),
-            "session=; Secure; HttpOnly; SameSite=Lax; Max-Age=0"
+            "session=; Path=/; Secure; HttpOnly; SameSite=Lax; Max-Age=0"
         );
     }
 }

@@ -25,7 +25,7 @@ async fn test_sessions(cptestctx: &ControlPlaneTestContext) {
         .expect_status(Some(StatusCode::NO_CONTENT))
         .expect_response_header(
             header::SET_COOKIE,
-            "session=; Secure; HttpOnly; SameSite=Lax; Max-Age=0",
+            "session=; Path=/; Secure; HttpOnly; SameSite=Lax; Max-Age=0",
         )
         .execute()
         .await
@@ -80,7 +80,7 @@ async fn test_sessions(cptestctx: &ControlPlaneTestContext) {
         // logout also clears the cookie client-side
         .expect_response_header(
             header::SET_COOKIE,
-            "session=; Secure; HttpOnly; SameSite=Lax; Max-Age=0",
+            "session=; Path=/; Secure; HttpOnly; SameSite=Lax; Max-Age=0",
         )
         .execute()
         .await
@@ -222,7 +222,7 @@ async fn log_in_and_extract_token(testctx: &ClientTestContext) -> String {
     let (session_token, rest) = session_cookie.split_once("; ").unwrap();
 
     assert!(session_token.starts_with("session="));
-    assert_eq!(rest, "Secure; HttpOnly; SameSite=Lax; Max-Age=3600");
+    assert_eq!(rest, "Path=/; Secure; HttpOnly; SameSite=Lax; Max-Age=3600");
 
     session_token.to_string()
 }
