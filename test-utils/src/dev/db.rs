@@ -895,6 +895,7 @@ mod test {
     use crate::dev::process_running;
     use std::env;
     use std::path::Path;
+    use std::path::PathBuf;
     use std::time::Duration;
     use tempfile::tempdir;
     use tokio::fs;
@@ -937,7 +938,7 @@ mod test {
     #[tokio::test]
     async fn test_bad_cmd() {
         let builder = CockroachStarterBuilder::new_with_cmd("/nonexistent");
-        test_database_start_failure(builder).await;
+        let _ = test_database_start_failure(builder).await;
     }
 
     /*
@@ -949,20 +950,26 @@ mod test {
     async fn test_cmd_fails() {
         let mut builder = new_builder();
         builder.arg("not-a-valid-argument");
-        test_database_start_failure(builder).await;
+        let temp_dir = test_database_start_failure(builder).await;
+        fs::metadata(temp_dir).await.expect("temporary directory was deleted");
     }
 
     /*
      * Helper function for testing cases where the database fails to start.
+     * Returns the temporary directory used by the failed attempt so that the
+     * caller can decide whether to check if it was cleaned up or not.  The
+     * expected behavior depends on the failure mode.
      */
-    async fn test_database_start_failure(builder: CockroachStarterBuilder) {
+    async fn test_database_start_failure(
+        builder: CockroachStarterBuilder,
+    ) -> PathBuf {
         let starter = builder.build().unwrap();
         let temp_dir = starter.temp_dir().to_owned();
         eprintln!("will run: {}", starter.cmdline());
         let error =
             starter.start().await.expect_err("unexpectedly started database");
         eprintln!("error: {:?}", error);
-        fs::metadata(temp_dir).await.expect("temporary directory was deleted");
+        temp_dir
     }
 
     /*
