@@ -28,4 +28,5 @@ async fn main() {
     );
 
     test_setup_database_seed(&logctx.log).await;
+    logctx.cleanup_successful();
 }
