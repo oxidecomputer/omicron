@@ -75,8 +75,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_recv_timeout() {
-        let log =
-            omicron_test_utils::dev::test_setup_log("test_recv_timeout").log;
+        let logctx =
+            omicron_test_utils::dev::test_setup_log("test_recv_timeout");
+        let log = logctx.log.clone();
         let addr: SocketAddr = "127.0.0.1:9898".parse().unwrap();
         let listener = TcpListener::bind(addr.clone()).await.unwrap();
 
@@ -89,5 +90,6 @@ mod tests {
         let _ = TcpStream::connect(addr).await.unwrap();
 
         assert!(handle.await.unwrap().is_err());
+        logctx.cleanup_successful();
     }
 }
