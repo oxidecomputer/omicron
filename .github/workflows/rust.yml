@@ -83,7 +83,7 @@ jobs:
 
   build-and-test:
     env:
-      OMICRON_TMP=/tmp/omicron_tmp
+      OMICRON_TMP: /tmp/omicron_tmp
     needs: skip_duplicate_jobs
     if: ${{ needs.skip_duplicate_jobs.outputs.should_skip != 'true' }}
     runs-on: ${{ matrix.os }}
