@@ -951,7 +951,24 @@ mod test {
         let mut builder = new_builder();
         builder.arg("not-a-valid-argument");
         let temp_dir = test_database_start_failure(builder).await;
-        fs::metadata(temp_dir).await.expect("temporary directory was deleted");
+        fs::metadata(&temp_dir).await.expect("temporary directory was deleted");
+        // The temporary directory is preserved in this case so that we can
+        // debug the failure.  In this case, we injected the failure.  Remove
+        // the directory to avoid leaking it.
+        //
+        // We could use `fs::remove_dir_all`, but if somehow `temp_dir` was
+        // incorrect, we could accidentally do a lot of damage.  Instead, remove
+        // just the files we expect to be present, and then remove the
+        // (now-empty) directory.
+        fs::remove_file(temp_dir.join("cockroachdb_stdout"))
+            .await
+            .expect("failed to remove cockroachdb stdout file");
+        fs::remove_file(temp_dir.join("cockroachdb_stderr"))
+            .await
+            .expect("failed to remove cockroachdb stderr file");
+        fs::remove_dir(temp_dir)
+            .await
+            .expect("failed to remove cockroachdb temp directory");
     }
 
     /*
