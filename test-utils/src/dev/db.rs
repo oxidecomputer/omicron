@@ -376,8 +376,7 @@ impl CockroachStarter {
                 temp_dir: Some(self.temp_dir),
                 child_process: Some(child_process),
             }),
-            Err(poll::Error::PermanentError(e)) => Err(e),
-            Err(poll::Error::TimedOut(time_waited)) => {
+            Err(poll_error) => {
                 /*
                  * Abort and tell the user.  We'll leave CockroachDB running so
                  * the user can debug if they want.  We'll skip cleanup of the
@@ -385,7 +384,13 @@ impl CockroachStarter {
                  * CockroachDB doesn't trip over its files being gone.
                  */
                 self.temp_dir.into_path();
-                Err(CockroachStartError::TimedOut { pid, time_waited })
+
+                Err(match poll_error {
+                    poll::Error::PermanentError(e) => e,
+                    poll::Error::TimedOut(time_waited) => {
+                        CockroachStartError::TimedOut { pid, time_waited }
+                    }
+                })
             }
         }
     }
@@ -957,14 +962,7 @@ mod test {
         let error =
             starter.start().await.expect_err("unexpectedly started database");
         eprintln!("error: {:?}", error);
-        assert_eq!(
-            libc::ENOENT,
-            fs::metadata(temp_dir)
-                .await
-                .expect_err("temporary directory still exists")
-                .raw_os_error()
-                .unwrap()
-        );
+        fs::metadata(temp_dir).await.expect("temporary directory was deleted");
     }
 
     /*
