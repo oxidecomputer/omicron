@@ -224,6 +224,7 @@ mod test {
                 "expected unauthenticated user not to be able \
             to create organization",
             );
+        #[allow(unreachable_code)]
         panic!("injected error (dap)");
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();
