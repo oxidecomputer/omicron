@@ -145,8 +145,8 @@ jobs:
       uses: actions/upload-artifact@82c141cc518b40d92cc801eee768e7aafc9c2fa2
       with:
         name: test_outputs
+        retention-days: 7
         path: |
           ${{ env.OMICRON_TMP }}
           !${{ env.OMICRON_TMP }}/crdb-base
           !${{ env.OMICRON_TMP }}/rustc*
-          retention-days: 7
