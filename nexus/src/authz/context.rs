@@ -184,6 +184,7 @@ mod test {
             "expected unauthenticated user not to be able to query database",
         );
         db.cleanup().await.unwrap();
+        logctx.cleanup_successful();
     }
 
     #[tokio::test]
@@ -224,5 +225,6 @@ mod test {
             to create organization",
             );
         db.cleanup().await.unwrap();
+        logctx.cleanup_successful();
     }
 }

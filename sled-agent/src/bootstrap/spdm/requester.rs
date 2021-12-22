@@ -153,7 +153,8 @@ mod tests {
 
     #[tokio::test]
     async fn negotiation() {
-        let log = omicron_test_utils::dev::test_setup_log("negotiation").log;
+        let logctx = omicron_test_utils::dev::test_setup_log("negotiation");
+        let log = logctx.log.clone();
         let log2 = log.clone();
         let log3 = log.clone();
 
@@ -172,5 +173,6 @@ mod tests {
         run(log3, transport).await.unwrap();
 
         handle.await.unwrap();
+        logctx.cleanup_successful();
     }
 }
