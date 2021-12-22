@@ -140,6 +140,7 @@ jobs:
       # suite.
       run: TMPDIR=$OMICRON_TMP PATH="$PATH:$PWD/cockroachdb/bin:$PWD/clickhouse" RUSTFLAGS="-D warnings" RUSTDOCFLAGS="-D warnings" cargo test --workspace --locked --verbose
     - name: Archive any failed test results
+      if: ${{ failure() }}
       # actions/upload-artifact@v2.3.1
       uses: actions/upload-artifact@82c141cc518b40d92cc801eee768e7aafc9c2fa2
       with:
