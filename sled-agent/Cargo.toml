@@ -12,7 +12,7 @@ bytes = "1.1"
 cfg-if = "1.0"
 chrono = { version = "0.4", features = [ "serde" ] }
 dropshot = { git = "https://github.com/oxidecomputer/dropshot", branch = "main", features = [ "usdt-probes" ] }
-futures = "0.3.18"
+futures = "0.3.19"
 ipnetwork = "0.18"
 nexus-client = { path = "../nexus-client" }
 omicron-common = { path = "../common" }
