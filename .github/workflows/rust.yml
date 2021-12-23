@@ -108,12 +108,6 @@ jobs:
       with:
         key: ${{ runner.os }}-clickhouse-binary-${{ hashFiles('tools/clickhouse_checksums') }}
         path: "clickhouse"
-    - name: Download ClickHouse
-      if: steps.cache-clickhouse.outputs.cache-hit != 'true'
-      run: ./tools/ci_download_clickhouse
-    - name: Download CockroachDB binary
-      if: steps.cache-cockroachdb.outputs.cache-hit != 'true'
-      run: bash ./tools/ci_download_cockroachdb
     - name: Build
       # We build with:
       # - RUSTFLAGS="-D warnings" RUSTDOCFLAGS="-D warnings": disallow warnings
@@ -125,7 +119,13 @@ jobs:
       #   also gives us a record of which dependencies were used for each CI
       #   run.  Building with `--locked` ensures that the checked-in Cargo.lock
       #   is up to date.
-      run: PATH="$PATH:$PWD/cockroachdb/bin:$PWD/clickhouse" RUSTFLAGS="-D warnings" RUSTDOCFLAGS="-D warnings" cargo build --locked --all-targets --verbose
+      run: RUSTFLAGS="-D warnings" RUSTDOCFLAGS="-D warnings" cargo build --locked --all-targets --verbose
+    - name: Download ClickHouse
+      if: steps.cache-clickhouse.outputs.cache-hit != 'true'
+      run: ./tools/ci_download_clickhouse
+    - name: Download CockroachDB binary
+      if: steps.cache-cockroachdb.outputs.cache-hit != 'true'
+      run: bash ./tools/ci_download_cockroachdb
     - name: Run tests
       # Use the same RUSTFLAGS and RUSTDOCFLAGS as above to avoid having to
       # rebuild here.

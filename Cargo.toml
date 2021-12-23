@@ -24,6 +24,7 @@ default-members = [
     "common",
     "nexus",
     "nexus/src/db/db-macros",
+    "nexus/test-utils",
     "package",
     "rpaths",
     "sled-agent",

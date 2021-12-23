@@ -24,8 +24,3 @@ serde = { version = "1.0",  features = [ "derive" ] }
 serde_json = "1.0"
 slog = { version = "2.7",  features = [ "max_level_trace", "release_max_level_debug" ] }
 uuid = { version = "0.8", features = [ "serde", "v4" ] }
-
-[build-dependencies]
-dropshot = { git = "https://github.com/oxidecomputer/dropshot", branch = "main", features = [ "usdt-probes" ] }
-omicron-test-utils = { path = "../../test-utils" }
-tokio = { version = "1.14" }

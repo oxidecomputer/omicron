@@ -14,18 +14,6 @@ set -o xtrace
 cargo --version
 rustc --version
 
-banner clickhouse
-ptime -m ./tools/ci_download_clickhouse
-
-banner cockroach
-ptime -m bash ./tools/ci_download_cockroachdb
-
-#
-# Put "./cockroachdb/bin" and "./clickhouse" on the PATH for the test
-# suite.
-#
-export PATH="$PATH:$PWD/cockroachdb/bin:$PWD/clickhouse"
-
 #
 # We build with:
 #
@@ -50,6 +38,18 @@ ptime -m cargo +'nightly-2021-11-24' build --locked --all-targets --verbose
 #
 banner deploy-check
 ptime -m cargo run --bin omicron-package -- check
+
+banner clickhouse
+ptime -m ./tools/ci_download_clickhouse
+
+banner cockroach
+ptime -m bash ./tools/ci_download_cockroachdb
+
+#
+# Put "./cockroachdb/bin" and "./clickhouse" on the PATH for the test
+# suite.
+#
+export PATH="$PATH:$PWD/cockroachdb/bin:$PWD/clickhouse"
 
 #
 # NOTE: We're using using the same RUSTFLAGS and RUSTDOCFLAGS as above to avoid
