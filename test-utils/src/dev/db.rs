@@ -572,7 +572,14 @@ impl Drop for CockroachInstance {
             }
             #[allow(unused_must_use)]
             if let Some(temp_dir) = self.temp_dir.take() {
-                temp_dir.close();
+                /*
+                 * Do NOT clean up the temporary directory in this case.
+                 */
+                let path = temp_dir.into_path();
+                eprintln!(
+                    "WARN: temporary directory leaked: {}",
+                    path.display()
+                );
             }
         }
     }
@@ -1239,13 +1246,13 @@ mod test {
      */
     #[tokio::test]
     async fn test_database_concurrent() {
-        let db1 = new_builder()
+        let mut db1 = new_builder()
             .build()
             .expect("failed to create starter for the first database")
             .start()
             .await
             .expect("failed to start first database");
-        let db2 = new_builder()
+        let mut db2 = new_builder()
             .build()
             .expect("failed to create starter for the second database")
             .start()
@@ -1274,6 +1281,9 @@ mod test {
             client2.query("SELECT v FROM foo", &[]).await.expect("list rows");
         assert_eq!(rows.len(), 0);
         client2.cleanup().await.expect("second connection closed ungracefully");
+
+        db1.cleanup().await.expect("failed to clean up first database");
+        db2.cleanup().await.expect("failed to clean up second database");
     }
 
     /* Success case for make_pg_config() */
