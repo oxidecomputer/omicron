@@ -243,6 +243,33 @@ async fn test_session_me(cptestctx: &ControlPlaneTestContext) {
     .expect("failed to 403 getting current user");
 }
 
+#[nexus_test]
+async fn test_login_redirect(cptestctx: &ControlPlaneTestContext) {
+    let testctx = &cptestctx.external_client;
+
+    expect_redirect(testctx, "/login", "/spoof_login").await;
+
+    // pass through state param to login redirect URL. keep it URL encoded, don't double encode
+    // encoded path is /abc/def
+    expect_redirect(
+        testctx,
+        "/login?state=%2Fabc%2Fdef",
+        "/spoof_login?state=%2Fabc%2Fdef",
+    )
+    .await;
+
+    // if state param comes in not URL encoded, we should still URL encode it
+    expect_redirect(
+        testctx,
+        "/login?state=/abc/def",
+        "/spoof_login?state=%2Fabc%2Fdef",
+    )
+    .await;
+
+    // empty state param gets dropped
+    expect_redirect(testctx, "/login?state=", "/spoof_login").await;
+}
+
 fn get_header_value(resp: TestResponse, header_name: HeaderName) -> String {
     resp.headers.get(header_name).unwrap().to_str().unwrap().to_string()
 }
@@ -262,4 +289,13 @@ async fn log_in_and_extract_token(testctx: &ClientTestContext) -> String {
     assert_eq!(rest, "Path=/; Secure; HttpOnly; SameSite=Lax; Max-Age=3600");
 
     session_token.to_string()
+}
+
+async fn expect_redirect(testctx: &ClientTestContext, from: &str, to: &str) {
+    let _ = RequestBuilder::new(&testctx, Method::GET, from)
+        .expect_status(Some(StatusCode::FOUND))
+        .expect_response_header(header::LOCATION, to)
+        .execute()
+        .await
+        .expect("did not find expected redirect");
 }
