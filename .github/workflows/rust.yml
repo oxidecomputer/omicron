@@ -144,7 +144,7 @@ jobs:
       # actions/upload-artifact@v2.3.1
       uses: actions/upload-artifact@82c141cc518b40d92cc801eee768e7aafc9c2fa2
       with:
-        name: test_outputs
+        name: failed_test_outputs_${{ runner.os }}
         retention-days: 7
         path: |
           ${{ env.OMICRON_TMP }}
