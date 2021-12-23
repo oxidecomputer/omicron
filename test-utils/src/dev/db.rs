@@ -8,6 +8,7 @@ use crate::dev::poll;
 use anyhow::anyhow;
 use anyhow::bail;
 use anyhow::Context;
+use nix::{sys::signal, unistd::Pid};
 use omicron_common::config::PostgresConfigWithUrl;
 use std::ffi::{OsStr, OsString};
 use std::fmt;
@@ -527,14 +528,14 @@ impl CockroachInstance {
      */
     pub async fn cleanup(&mut self) -> Result<(), anyhow::Error> {
         /*
-         * Kill the process and wait for it to exit so that we can remove the
+         * SIGTERM the process and wait for it to exit so that we can remove the
          * temporary directory that we may have used to store its data.  We
          * don't care what the result of the process was.
          */
         if let Some(child_process) = self.child_process.as_mut() {
-            child_process
-                .start_kill()
-                .context("sending SIGKILL to child process")?;
+            let pid = Pid::from_raw(child_process.id().expect("Missing child PID") as i32);
+
+            signal::kill(pid, signal::SIGTERM).context("Failed to send sigterm to process")?;
             child_process.wait().await.context("waiting for child process")?;
             self.child_process = None;
         }

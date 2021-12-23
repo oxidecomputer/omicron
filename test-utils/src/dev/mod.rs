@@ -102,6 +102,15 @@ pub async fn test_setup_database_seed(log: &Logger) {
     std::fs::create_dir_all(&dir).unwrap();
     let mut db = setup_database(log, Some(&dir), StorageSource::Populate).await;
     db.cleanup().await.unwrap();
+
+    // See https://github.com/cockroachdb/cockroach/issues/74231 for context on
+    // this. We use this assertion to check that our seed directory won't point
+    // back to itself, even if it is copied elsewhere.
+    assert_eq!(
+        0,
+        dir.join("temp-dirs-record.txt").metadata().expect("Cannot access metadata").len(),
+        "Temporary directory record should be empty after graceful shutdown",
+    );
 }
 
 /// Set up a [`db::CockroachInstance`] for running tests.
@@ -131,11 +140,12 @@ async fn setup_database(
     // If we're going to copy the storage directory from the seed,
     // it is critical we do so before starting the DB.
     if matches!(storage_source, StorageSource::CopyFromSeed) {
+        let seed = seed_dir();
         info!(&log,
             "cockroach: copying from seed directory ({}) to storage directory ({})",
-            seed_dir().to_string_lossy(), starter.store_dir().to_string_lossy(),
+            seed.to_string_lossy(), starter.store_dir().to_string_lossy(),
         );
-        copy_dir(seed_dir(), starter.store_dir())
+        copy_dir(seed, starter.store_dir())
             .expect("Cannot copy storage from seed directory");
     }
 
