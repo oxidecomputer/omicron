@@ -115,7 +115,7 @@ async fn test_console_pages(cptestctx: &ControlPlaneTestContext) {
     // request to console page route without auth should redirect to IdP
     let _ = RequestBuilder::new(&testctx, Method::GET, "/orgs/irrelevant-path")
         .expect_status(Some(StatusCode::FOUND))
-        .expect_response_header(header::LOCATION, "/login")
+        .expect_response_header(header::LOCATION, "/spoof_login")
         .execute()
         .await
         .expect("failed to redirect to IdP on auth failure");
@@ -143,15 +143,16 @@ async fn test_login_form(cptestctx: &ControlPlaneTestContext) {
     let testctx = &cptestctx.external_client;
 
     // login route returns bundle too, but is not auth gated
-    let console_page = RequestBuilder::new(&testctx, Method::GET, "/login")
-        .expect_status(Some(StatusCode::OK))
-        .expect_response_header(
-            http::header::CONTENT_TYPE,
-            "text/html; charset=UTF-8",
-        )
-        .execute()
-        .await
-        .expect("failed to get login form");
+    let console_page =
+        RequestBuilder::new(&testctx, Method::GET, "/spoof_login")
+            .expect_status(Some(StatusCode::OK))
+            .expect_response_header(
+                http::header::CONTENT_TYPE,
+                "text/html; charset=UTF-8",
+            )
+            .execute()
+            .await
+            .expect("failed to get login form");
 
     assert_eq!(console_page.body, "<html></html>".as_bytes());
 }
