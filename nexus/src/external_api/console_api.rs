@@ -27,7 +27,6 @@ use http::{header, Response, StatusCode};
 use hyper::Body;
 use lazy_static::lazy_static;
 use mime_guess;
-use omicron_common::api::external::Error;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_urlencoded;
@@ -209,16 +208,12 @@ pub async fn session_me(
 ) -> Result<HttpResponseOk<views::SessionUser>, HttpError> {
     let apictx = rqctx.context();
     let handler = async {
-        let opctx = OpContext::for_external_api(&rqctx).await?;
         // TODO: we don't care about authentication method, as long as they are
         // authed as _somebody_. We could restrict this to session auth only,
         // but it's not clear what the advantage would be.
-        match opctx.authn.actor() {
-            Some(&actor) => Ok(HttpResponseOk(actor.into())),
-            None => {
-                Err(Error::unauthenticated("Cannot get current user").into())
-            }
-        }
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let &actor = opctx.authn.actor_required()?;
+        Ok(HttpResponseOk(actor.into()))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }

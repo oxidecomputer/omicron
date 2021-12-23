@@ -2856,7 +2856,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/User"
+                  "$ref": "#/components/schemas/SessionUser"
                 }
               }
             }
@@ -4336,6 +4336,19 @@
               "state"
             ]
           }
+        ]
+      },
+      "SessionUser": {
+        "description": "Client view of currently authed user.",
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "required": [
+          "id"
         ]
       },
       "Sled": {
