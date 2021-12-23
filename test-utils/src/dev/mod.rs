@@ -108,7 +108,10 @@ pub async fn test_setup_database_seed(log: &Logger) {
     // back to itself, even if it is copied elsewhere.
     assert_eq!(
         0,
-        dir.join("temp-dirs-record.txt").metadata().expect("Cannot access metadata").len(),
+        dir.join("temp-dirs-record.txt")
+            .metadata()
+            .expect("Cannot access metadata")
+            .len(),
         "Temporary directory record should be empty after graceful shutdown",
     );
 }

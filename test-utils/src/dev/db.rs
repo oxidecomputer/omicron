@@ -533,9 +533,12 @@ impl CockroachInstance {
          * don't care what the result of the process was.
          */
         if let Some(child_process) = self.child_process.as_mut() {
-            let pid = Pid::from_raw(child_process.id().expect("Missing child PID") as i32);
+            let pid = Pid::from_raw(
+                child_process.id().expect("Missing child PID") as i32,
+            );
 
-            signal::kill(pid, signal::SIGTERM).context("Failed to send sigterm to process")?;
+            signal::kill(pid, signal::SIGTERM)
+                .context("Failed to send sigterm to process")?;
             child_process.wait().await.context("waiting for child process")?;
             self.child_process = None;
         }
