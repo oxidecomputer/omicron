@@ -572,7 +572,14 @@ impl Drop for CockroachInstance {
             }
             #[allow(unused_must_use)]
             if let Some(temp_dir) = self.temp_dir.take() {
-                temp_dir.close();
+                /*
+                 * Do NOT clean up the temporary directory in this case.
+                 */
+                let path = temp_dir.into_path();
+                eprintln!(
+                    "WARN: temporary directory leaked: {}",
+                    path.display()
+                );
             }
         }
     }
