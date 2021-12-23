@@ -130,13 +130,30 @@ pub struct RestPathParam {
 // otherwise the user is downloading a bunch of JS for nothing.
 #[endpoint {
    method = GET,
-   path = "/login",
+   path = "/spoof_login",
    unpublished = true,
 }]
 pub async fn spoof_login_form(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
 ) -> Result<Response<Body>, HttpError> {
     serve_console_index(rqctx.context()).await
+}
+
+/// Redirect to IdP login URL
+//
+// Currently hard-coded to redirect to our own fake login form.
+#[endpoint {
+   method = GET,
+   path = "/login",
+   unpublished = true,
+}]
+pub async fn login_redirect(
+    _rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+) -> Result<Response<Body>, HttpError> {
+    Ok(Response::builder()
+        .status(StatusCode::FOUND)
+        .header(http::header::LOCATION, "/spoof_login") // TODO: placeholder
+        .body("".into())?)
 }
 
 /// Fetch the user associated with the current session
