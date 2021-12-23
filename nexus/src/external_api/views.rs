@@ -200,6 +200,11 @@ impl Into<User> for model::UserBuiltin {
     }
 }
 
+/**
+ * Client view of currently authed user.
+ */
+// TODO: this may end up merged with User once more details about the user are
+// stored in the auth context. Right now there is only the ID.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct SessionUser {
