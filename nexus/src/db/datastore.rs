@@ -2119,27 +2119,6 @@ impl DataStore {
             })
     }
 
-    pub async fn user_builtin_fetch_by_id(
-        &self,
-        opctx: &OpContext,
-        id: &Uuid,
-    ) -> LookupResult<UserBuiltin> {
-        use db::schema::user_builtin::dsl;
-        opctx.authorize(authz::Action::Read, authz::FLEET.child_generic())?;
-        dsl::user_builtin
-            .filter(dsl::id.eq(*id))
-            .select(UserBuiltin::as_select())
-            .first_async::<UserBuiltin>(self.pool_authorized(opctx)?)
-            .await
-            .map_err(|e| {
-                public_error_from_diesel_pool(
-                    e,
-                    ResourceType::User,
-                    LookupType::ById(id.to_owned()),
-                )
-            })
-    }
-
     /// Load built-in users into the database
     pub async fn load_builtin_users(
         &self,

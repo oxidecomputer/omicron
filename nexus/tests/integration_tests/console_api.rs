@@ -15,6 +15,7 @@ use nexus_test_utils::{
 };
 use nexus_test_utils_macros::nexus_test;
 use omicron_common::api::external::IdentityMetadataCreateParams;
+use omicron_nexus::authn::{USER_TEST_PRIVILEGED, USER_TEST_UNPRIVILEGED};
 use omicron_nexus::external_api::console_api::LoginParams;
 use omicron_nexus::external_api::params::OrganizationCreate;
 use omicron_nexus::external_api::views;
@@ -138,7 +139,7 @@ async fn test_console_pages(cptestctx: &ControlPlaneTestContext) {
 }
 
 #[nexus_test]
-async fn text_login_form(cptestctx: &ControlPlaneTestContext) {
+async fn test_login_form(cptestctx: &ControlPlaneTestContext) {
     let testctx = &cptestctx.external_client;
 
     // login route returns bundle too, but is not auth gated
@@ -226,21 +227,24 @@ async fn test_session_me(cptestctx: &ControlPlaneTestContext) {
         .execute()
         .await
         .expect("failed to get current user")
-        .parsed_body::<views::User>()
+        .parsed_body::<views::SessionUser>()
         .unwrap();
 
-    assert_eq!(priv_user.identity.name.as_str(), "test-privileged");
+    assert_eq!(priv_user, views::SessionUser { id: USER_TEST_PRIVILEGED.id });
 
-    // same request as unprivileged user 403s because unprivileged user
-    // is so unprivileged they can't even see themselves
-    NexusRequest::new(
-        RequestBuilder::new(&testctx, Method::GET, "/session/me")
-            .expect_status(Some(StatusCode::FORBIDDEN)),
-    )
-    .authn_as(AuthnMode::UnprivilegedUser)
-    .execute()
-    .await
-    .expect("failed to 403 getting current user");
+    // make sure it returns different things for different users
+    let unpriv_user = NexusRequest::object_get(testctx, "/session/me")
+        .authn_as(AuthnMode::UnprivilegedUser)
+        .execute()
+        .await
+        .expect("failed to get current user")
+        .parsed_body::<views::SessionUser>()
+        .unwrap();
+
+    assert_eq!(
+        unpriv_user,
+        views::SessionUser { id: USER_TEST_UNPRIVILEGED.id }
+    );
 }
 
 #[nexus_test]

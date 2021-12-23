@@ -6,6 +6,7 @@
  * Views are response bodies, most of which are public lenses onto DB models.
  */
 
+use crate::authn;
 use crate::db::identity::{Asset, Resource};
 use crate::db::model;
 use api_identity::ObjectIdentity;
@@ -196,6 +197,18 @@ pub struct User {
 impl Into<User> for model::UserBuiltin {
     fn into(self) -> User {
         User { identity: self.identity() }
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionUser {
+    pub id: Uuid,
+}
+
+impl Into<SessionUser> for authn::Actor {
+    fn into(self) -> SessionUser {
+        SessionUser { id: self.0 }
     }
 }
 

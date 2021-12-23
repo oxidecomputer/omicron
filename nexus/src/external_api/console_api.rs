@@ -160,7 +160,7 @@ pub struct LoginUrlQuery {
 fn get_login_url(state: Option<String>) -> String {
     // assume state is not URL encoded, so no risk of double encoding (dropshot
     // decodes it on the way in)
-    let login_query = match state {
+    let query = match state {
         Some(state) if state.is_empty() => None,
         Some(state) => Some(
             serde_urlencoded::to_string(LoginUrlQuery { state: Some(state) })
@@ -173,9 +173,9 @@ fn get_login_url(state: Option<String>) -> String {
     // Once we have IdP integration, this will be a URL for the IdP login page. For now
     // we point to our own placeholder login page.
     let mut url = "/spoof_login".to_string();
-    if login_query.is_some() {
+    if let Some(query) = query {
         url.push('?');
-        url.push_str(login_query.unwrap().as_str());
+        url.push_str(query.as_str());
     }
     url
 }
@@ -206,20 +206,15 @@ pub async fn login_redirect(
 }]
 pub async fn session_me(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
-) -> Result<HttpResponseOk<views::User>, HttpError> {
+) -> Result<HttpResponseOk<views::SessionUser>, HttpError> {
     let apictx = rqctx.context();
-    let nexus = &apictx.nexus;
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
         // TODO: we don't care about authentication method, as long as they are
         // authed as _somebody_. We could restrict this to session auth only,
         // but it's not clear what the advantage would be.
         match opctx.authn.actor() {
-            Some(actor) => {
-                let user =
-                    nexus.user_builtin_fetch_by_id(&opctx, &actor.0).await?;
-                Ok(HttpResponseOk(user.into()))
-            }
+            Some(&actor) => Ok(HttpResponseOk(actor.into())),
             None => {
                 Err(Error::unauthenticated("Cannot get current user").into())
             }
