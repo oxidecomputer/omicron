@@ -881,7 +881,7 @@ dependencies = [
  "http",
  "hyper",
  "indexmap",
- "openapiv3 1.0.0-beta.5",
+ "openapiv3",
  "paste",
  "percent-encoding",
  "proc-macro2",
@@ -912,12 +912,6 @@ dependencies = [
  "serde_tokenstream",
  "syn",
 ]
-
-[[package]]
-name = "dtoa"
-version = "0.4.8"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "56899898ce76aaf4a0f24d914c97ea6ed976d42fec6ad33fcbb0a1103e07b2b0"
 
 [[package]]
 name = "dtrace-parser"
@@ -1594,12 +1588,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1b03d17f364a3a042d5e5d46b053bbbf82c92c9430c592dd4c064dc6ee997125"
 
 [[package]]
-name = "linked-hash-map"
-version = "0.5.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7fb9b38af92608140b86b693604b9ffcc5824240a484d1ecd4795bacb2fe88f3"
-
-[[package]]
 name = "lock_api"
 version = "0.4.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1957,7 +1945,7 @@ dependencies = [
  "omicron-sled-agent",
  "omicron-test-utils",
  "openapi-lint",
- "openapiv3 0.5.0",
+ "openapiv3",
  "oso",
  "oximeter",
  "oximeter-client",
@@ -2030,7 +2018,7 @@ dependencies = [
  "omicron-common",
  "omicron-test-utils",
  "openapi-lint",
- "openapiv3 0.5.0",
+ "openapiv3",
  "p256",
  "percent-encoding",
  "progenitor",
@@ -2110,22 +2098,10 @@ checksum = "624a8340c38c1b80fd549087862da4ba43e08858af025b236e509b6649fc13d5"
 [[package]]
 name = "openapi-lint"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/openapi-lint?branch=main#ca2947b52139b58a3f07cfb17f2257b3ebd50b63"
+source = "git+https://github.com/oxidecomputer/openapi-lint?branch=main#5ee546f7d5cdaf33fc355957b4decb792444292b"
 dependencies = [
  "indexmap",
- "openapiv3 0.5.0",
-]
-
-[[package]]
-name = "openapiv3"
-version = "0.5.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "90228d34f20d9fff3174d19b0d41e67f52711045270b540a2a2c2dc41ccb4085"
-dependencies = [
- "indexmap",
- "serde",
- "serde_json",
- "serde_yaml",
+ "openapiv3",
 ]
 
 [[package]]
@@ -2238,7 +2214,7 @@ dependencies = [
  "omicron-common",
  "omicron-test-utils",
  "openapi-lint",
- "openapiv3 0.5.0",
+ "openapiv3",
  "oximeter",
  "oximeter-db",
  "reqwest",
@@ -2728,7 +2704,7 @@ source = "git+https://github.com/oxidecomputer/progenitor#66b41ba301793b8d720770
 dependencies = [
  "anyhow",
  "getopts",
- "openapiv3 1.0.0-beta.5",
+ "openapiv3",
  "progenitor-impl",
  "progenitor-macro",
  "serde",
@@ -2744,7 +2720,7 @@ dependencies = [
  "convert_case",
  "getopts",
  "indexmap",
- "openapiv3 1.0.0-beta.5",
+ "openapiv3",
  "proc-macro2",
  "quote",
  "regex",
@@ -2761,7 +2737,7 @@ name = "progenitor-macro"
 version = "0.0.0"
 source = "git+https://github.com/oxidecomputer/progenitor#66b41ba301793b8d720770b2210bee8884446d3f"
 dependencies = [
- "openapiv3 1.0.0-beta.5",
+ "openapiv3",
  "proc-macro2",
  "progenitor-impl",
  "quote",
@@ -3384,18 +3360,6 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn",
-]
-
-[[package]]
-name = "serde_yaml"
-version = "0.8.21"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d8c608a35705a5d3cdc9fbe403147647ff34b921f8e833e49306df898f9b20af"
-dependencies = [
- "dtoa",
- "indexmap",
- "serde",
- "yaml-rust",
 ]
 
 [[package]]
@@ -4774,15 +4738,6 @@ checksum = "75a099a2f21d48275314733f85bc43b6c6213b66394233aaea573fc7a520dcd9"
 dependencies = [
  "byteorder",
  "cipher",
-]
-
-[[package]]
-name = "yaml-rust"
-version = "0.4.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "56c1936c4cc7a1c9ab21a1ebb602eb942ba868cbd44a99cb7cdc5892335e1c85"
-dependencies = [
- "linked-hash-map",
 ]
 
 [[package]]
