@@ -34,7 +34,7 @@ parse-display = "0.5.3"
 pq-sys = "*"
 rand = "0.8.4"
 ref-cast = "1.0"
-reqwest = { version = "0.11.7", features = [ "json" ] }
+reqwest = { version = "0.11.8", features = [ "json" ] }
 serde_json = "1.0"
 serde_with = "1.11.0"
 sled-agent-client = { path = "../sled-agent-client" }
