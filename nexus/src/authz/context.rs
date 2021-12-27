@@ -124,6 +124,7 @@ mod test {
     use crate::authz::DATABASE;
     use crate::authz::FLEET;
     use crate::db::DataStore;
+    use nexus_test_utils::db::test_setup_database;
     use omicron_test_utils::dev;
     use std::sync::Arc;
 
@@ -144,7 +145,7 @@ mod test {
     #[tokio::test]
     async fn test_database() {
         let logctx = dev::test_setup_log("test_database");
-        let mut db = dev::test_setup_database(&logctx.log).await;
+        let mut db = test_setup_database(&logctx.log).await;
         let (opctx, datastore) =
             crate::db::datastore::datastore_test(&logctx, &db).await;
         let authz_privileged = authz_context_for_actor(
@@ -190,7 +191,7 @@ mod test {
     #[tokio::test]
     async fn test_organization() {
         let logctx = dev::test_setup_log("test_database");
-        let mut db = dev::test_setup_database(&logctx.log).await;
+        let mut db = test_setup_database(&logctx.log).await;
         let (opctx, datastore) =
             crate::db::datastore::datastore_test(&logctx, &db).await;
 

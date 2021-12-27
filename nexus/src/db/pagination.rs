@@ -163,6 +163,7 @@ mod test {
     use async_bb8_diesel::{AsyncRunQueryDsl, AsyncSimpleConnection};
     use diesel::SelectableHelper;
     use dropshot::PaginationOrder;
+    use nexus_test_utils::db::test_setup_database;
     use omicron_common::api::external::DataPageParams;
     use omicron_test_utils::dev;
     use std::num::NonZeroU32;
@@ -241,7 +242,7 @@ mod test {
     async fn test_paginated_single_column_ascending() {
         let logctx =
             dev::test_setup_log("test_paginated_single_column_ascending");
-        let mut db = dev::test_setup_database(&logctx.log).await;
+        let mut db = test_setup_database(&logctx.log).await;
         let cfg = db::Config { url: db.pg_config().clone() };
         let pool = db::Pool::new(&cfg);
 
@@ -276,7 +277,7 @@ mod test {
     async fn test_paginated_single_column_descending() {
         let logctx =
             dev::test_setup_log("test_paginated_single_column_descending");
-        let mut db = dev::test_setup_database(&logctx.log).await;
+        let mut db = test_setup_database(&logctx.log).await;
         let cfg = db::Config { url: db.pg_config().clone() };
         let pool = db::Pool::new(&cfg);
 
@@ -311,7 +312,7 @@ mod test {
     async fn test_paginated_multicolumn_ascending() {
         let logctx =
             dev::test_setup_log("test_paginated_multicolumn_ascending");
-        let mut db = dev::test_setup_database(&logctx.log).await;
+        let mut db = test_setup_database(&logctx.log).await;
         let cfg = db::Config { url: db.pg_config().clone() };
         let pool = db::Pool::new(&cfg);
 
@@ -365,7 +366,7 @@ mod test {
     async fn test_paginated_multicolumn_descending() {
         let logctx =
             dev::test_setup_log("test_paginated_multicolumn_descending");
-        let mut db = dev::test_setup_database(&logctx.log).await;
+        let mut db = test_setup_database(&logctx.log).await;
         let cfg = db::Config { url: db.pg_config().clone() };
         let pool = db::Pool::new(&cfg);
 

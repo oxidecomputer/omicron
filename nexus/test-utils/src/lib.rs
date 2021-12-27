@@ -21,6 +21,7 @@ use std::path::Path;
 use std::time::Duration;
 use uuid::Uuid;
 
+pub mod db;
 pub mod http_testing;
 pub mod resource_helpers;
 
@@ -93,7 +94,7 @@ pub async fn test_setup_with_config(
     let log = &logctx.log;
 
     /* Start up CockroachDB. */
-    let database = dev::test_setup_database(log).await;
+    let database = db::test_setup_database(log).await;
 
     /* Start ClickHouse database server. */
     let clickhouse = dev::clickhouse::ClickHouseInstance::new(0).await.unwrap();
