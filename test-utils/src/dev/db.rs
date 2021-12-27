@@ -8,7 +8,6 @@ use crate::dev::poll;
 use anyhow::anyhow;
 use anyhow::bail;
 use anyhow::Context;
-use nix::{sys::signal, unistd::Pid};
 use omicron_common::config::PostgresConfigWithUrl;
 use std::ffi::{OsStr, OsString};
 use std::fmt;
@@ -533,12 +532,12 @@ impl CockroachInstance {
          * don't care what the result of the process was.
          */
         if let Some(child_process) = self.child_process.as_mut() {
-            let pid = Pid::from_raw(
-                child_process.id().expect("Missing child PID") as i32,
-            );
-
-            signal::kill(pid, signal::SIGTERM)
-                .context("Failed to send sigterm to process")?;
+            let pid = child_process.id().expect("Missing child PID") as i32;
+            let success =
+                0 == unsafe { libc::kill(pid as libc::pid_t, libc::SIGTERM) };
+            if !success {
+                anyhow!("Failed to send SIGTERM to DB");
+            }
             child_process.wait().await.context("waiting for child process")?;
             self.child_process = None;
         }
