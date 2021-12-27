@@ -527,14 +527,17 @@ impl CockroachInstance {
      */
     pub async fn cleanup(&mut self) -> Result<(), anyhow::Error> {
         /*
-         * Kill the process and wait for it to exit so that we can remove the
+         * SIGTERM the process and wait for it to exit so that we can remove the
          * temporary directory that we may have used to store its data.  We
          * don't care what the result of the process was.
          */
         if let Some(child_process) = self.child_process.as_mut() {
-            child_process
-                .start_kill()
-                .context("sending SIGKILL to child process")?;
+            let pid = child_process.id().expect("Missing child PID") as i32;
+            let success =
+                0 == unsafe { libc::kill(pid as libc::pid_t, libc::SIGTERM) };
+            if !success {
+                anyhow!("Failed to send SIGTERM to DB");
+            }
             child_process.wait().await.context("waiting for child process")?;
             self.child_process = None;
         }
