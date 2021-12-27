@@ -49,9 +49,14 @@ async fn populate(
     let populate_roles = || {
         async { datastore.load_builtin_roles(opctx).await.map(|_| ()) }.boxed()
     };
+    let populate_role_asgns = || {
+        async { datastore.load_builtin_role_asgns(opctx).await.map(|_| ()) }
+            .boxed()
+    };
     let populators = [
         Populator { name: "users", func: &populate_users },
         Populator { name: "roles", func: &populate_roles },
+        Populator { name: "role assignments", func: &populate_role_asgns },
     ];
 
     for p in populators {
