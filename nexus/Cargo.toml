@@ -13,6 +13,7 @@ async-bb8-diesel = { git = "https://github.com/oxidecomputer/async-bb8-diesel", 
 async-trait = "0.1.51"
 bb8 = "0.7.1"
 cookie = "0.15"
+crucible-agent-client = { git = "https://github.com/oxidecomputer/crucible", rev = "de022b8a" }
 # Tracking pending 2.0 version.
 diesel = { git = "https://github.com/diesel-rs/diesel", rev = "ce77c382", features = ["postgres", "r2d2", "chrono", "serde_json", "network-address", "uuid"] }
 futures = "0.3.18"

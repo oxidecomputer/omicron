@@ -13,10 +13,15 @@
  * easier it will be to test, version, and update in deployed systems.
  */
 
+use anyhow::anyhow;
 use crate::db;
-use crate::db::identity::Resource;
+use crate::db::identity::{Asset, Resource};
 use crate::external_api::params;
 use crate::saga_interface::SagaContext;
+use crucible_agent_client::{
+    Client as CrucibleAgentClient,
+    types::{CreateRegion, RegionId, State as RegionState}
+};
 use chrono::Utc;
 use lazy_static::lazy_static;
 use omicron_common::api::external::Generation;
@@ -26,6 +31,7 @@ use omicron_common::api::external::Name;
 use omicron_common::api::external::NetworkInterface;
 use omicron_common::api::internal::nexus::InstanceRuntimeState;
 use omicron_common::api::internal::sled_agent::InstanceHardware;
+use omicron_common::backoff::{self, BackoffError};
 use serde::Deserialize;
 use serde::Serialize;
 use std::collections::BTreeMap;
@@ -424,16 +430,60 @@ async fn sdc_alloc_regions(
     Ok(datasets_and_regions)
 }
 
+async fn allocate_region_from_dataset(dataset: &db::model::Dataset, region: &db::model::Region)
+    -> Result<crucible_agent_client::types::Region, ActionError>
+{
+    let url = format!("http://{}", dataset.address());
+    let client = CrucibleAgentClient::new(&url);
+
+    let region_request = CreateRegion {
+        block_size: region.block_size(),
+        extent_count: region.extent_count(),
+        extent_size: region.extent_size(),
+        // TODO: Can we avoid casting from UUID to string?
+        // NOTE: This'll require updating the crucible agent client.
+        id: RegionId(region.id().to_string()),
+        volume_id: region.disk_id().to_string(),
+    };
+
+    let create_region = || async {
+        let region = client.region_create(&region_request)
+            .await
+            .map_err(|e| {
+                BackoffError::Permanent(e)
+            })?;
+        match region.state {
+            RegionState::Requested => Err(BackoffError::Transient(anyhow!("Region creation in progress"))),
+            RegionState::Created => Ok(region),
+            _ => Err(BackoffError::Permanent(anyhow!("Failed to create region, unexpected state: {:?}", region.state))),
+        }
+    };
+
+    let log_create_failure = |_, delay| {
+        // TODO: Log pls
+        eprintln!("Region requested, not yet created. Retrying in {:?}", delay);
+    };
+
+    let region = backoff::retry_notify(
+        backoff::internal_service_policy(),
+        create_region,
+        log_create_failure,
+    ).await.map_err(|e| ActionError::action_failed(e.to_string()))?;
+
+    Ok(region)
+}
+
 async fn sdc_regions_ensure(
     sagactx: ActionContext<SagaDiskCreate>,
 ) -> Result<(), ActionError> {
-    let _osagactx = sagactx.user_data();
-    let _params = sagactx.saga_params();
+    let datasets_and_regions = sagactx.lookup::<Vec<(db::model::Dataset, db::model::Region)>>("datasets_and_regions")?;
+    // TODO: parallelize these requests
+    for (dataset, region) in &datasets_and_regions {
+        let _ = allocate_region_from_dataset(dataset, region).await?;
+        // TODO: Region has a port value, we could store this in the DB?
+    }
 
-    // TODO: Make the calls to crucible agents.
-    // TODO: Figure out how we're testing this - setup fake endpoints
-    // in the simulated sled agent, or do something else?
-    todo!();
+    Ok(())
 }
 
 async fn sdc_finalize_disk_record(
