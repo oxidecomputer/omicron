@@ -13,16 +13,16 @@
  * easier it will be to test, version, and update in deployed systems.
  */
 
-use anyhow::anyhow;
 use crate::db;
 use crate::db::identity::{Asset, Resource};
 use crate::external_api::params;
 use crate::saga_interface::SagaContext;
-use crucible_agent_client::{
-    Client as CrucibleAgentClient,
-    types::{CreateRegion, RegionId, State as RegionState}
-};
+use anyhow::anyhow;
 use chrono::Utc;
+use crucible_agent_client::{
+    types::{CreateRegion, RegionId, State as RegionState},
+    Client as CrucibleAgentClient,
+};
 use futures::StreamExt;
 use lazy_static::lazy_static;
 use omicron_common::api::external::Generation;
@@ -431,9 +431,10 @@ async fn sdc_alloc_regions(
     Ok(datasets_and_regions)
 }
 
-async fn allocate_region_from_dataset(dataset: &db::model::Dataset, region: &db::model::Region)
-    -> Result<crucible_agent_client::types::Region, ActionError>
-{
+async fn allocate_region_from_dataset(
+    dataset: &db::model::Dataset,
+    region: &db::model::Region,
+) -> Result<crucible_agent_client::types::Region, ActionError> {
     let url = format!("http://{}", dataset.address());
     let client = CrucibleAgentClient::new(&url);
 
@@ -448,15 +449,19 @@ async fn allocate_region_from_dataset(dataset: &db::model::Dataset, region: &db:
     };
 
     let create_region = || async {
-        let region = client.region_create(&region_request)
+        let region = client
+            .region_create(&region_request)
             .await
-            .map_err(|e| {
-                BackoffError::Permanent(e)
-            })?;
+            .map_err(|e| BackoffError::Permanent(e))?;
         match region.state {
-            RegionState::Requested => Err(BackoffError::Transient(anyhow!("Region creation in progress"))),
+            RegionState::Requested => Err(BackoffError::Transient(anyhow!(
+                "Region creation in progress"
+            ))),
             RegionState::Created => Ok(region),
-            _ => Err(BackoffError::Permanent(anyhow!("Failed to create region, unexpected state: {:?}", region.state))),
+            _ => Err(BackoffError::Permanent(anyhow!(
+                "Failed to create region, unexpected state: {:?}",
+                region.state
+            ))),
         }
     };
 
@@ -469,7 +474,9 @@ async fn allocate_region_from_dataset(dataset: &db::model::Dataset, region: &db:
         backoff::internal_service_policy(),
         create_region,
         log_create_failure,
-    ).await.map_err(|e| ActionError::action_failed(e.to_string()))?;
+    )
+    .await
+    .map_err(|e| ActionError::action_failed(e.to_string()))?;
 
     Ok(region)
 }
@@ -477,7 +484,10 @@ async fn allocate_region_from_dataset(dataset: &db::model::Dataset, region: &db:
 async fn sdc_regions_ensure(
     sagactx: ActionContext<SagaDiskCreate>,
 ) -> Result<(), ActionError> {
-    let datasets_and_regions = sagactx.lookup::<Vec<(db::model::Dataset, db::model::Region)>>("datasets_and_regions")?;
+    let datasets_and_regions = sagactx
+        .lookup::<Vec<(db::model::Dataset, db::model::Region)>>(
+            "datasets_and_regions",
+        )?;
     let request_count = datasets_and_regions.len();
     futures::stream::iter(datasets_and_regions)
         .map(|(dataset, region)| async move {
