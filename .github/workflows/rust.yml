@@ -108,7 +108,7 @@ jobs:
       # actions/cache@v2.1.4
       uses: actions/cache@26968a09c0ea4f3e233fdddbafd1166051a095f6
       with:
-        key: ${{ runner.os }}-clickhouse-binary-${{ hashFiles('tools/clickhouse_checksums') }}
+        key: ${{ runner.os }}-clickhouse-binary-${{ hashFiles('tools/clickhouse_versions') }}
         path: "clickhouse"
     - name: Download ClickHouse
       if: steps.cache-clickhouse.outputs.cache-hit != 'true'

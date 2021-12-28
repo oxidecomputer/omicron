@@ -13,13 +13,29 @@ set -o errexit
 SOURCE_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
 ARG0="$(basename ${BASH_SOURCE[0]})"
 
-# If you change this, you must also update the md5sums below
-CIDL_VERSION="v21.7"
-source "$SOURCE_DIR/clickhouse_checksums"
+CIDL_VERSION_FILE="$SOURCE_DIR/clickhouse_versions"
+source "$CIDL_VERSION_FILE"
 CIDL_ASSEMBLE_DIR="./clickhouse"
 
 # Download from manually-populated S3 bucket for now
 CIDL_URL_BASE="https://oxide-clickhouse-build.s3.us-west-2.amazonaws.com"
+
+function per_platform
+{
+	#
+	# We should use "${1^^}" here instead of tr(1), except that Apple, in a
+	# thoroughly characteristic fit of user hostility, ship a flagrantly
+	# obsolete version of bash that has no features.
+	#
+	local pp_key="$(tr '[:lower:]' '[:upper:]' <<< "$1")"
+	local pp_platform="$(tr '[:lower:]' '[:upper:]' <<< "$2")"
+	local pp_varname="CIDL_${pp_key}_${pp_platform}"
+	local pp_val="${!pp_varname}"
+	if [[ -z "$pp_val" ]]; then
+		fail "missing \"$pp_varname\" in \"$CIDL_VERSION_FILE\""
+	fi
+	printf '%s' "$pp_val"
+}
 
 function main
 {
@@ -44,18 +60,42 @@ function main
 	configure_os "$CIDL_OS"
 	CIDL_URL="$CIDL_URL_BASE/$CIDL_FILE"
 
-	# Download the file.
 	echo "URL: $CIDL_URL"
 	echo "Local file: $CIDL_FILE"
-	do_download_curl "$CIDL_URL" "$CIDL_FILE" || \
-	    fail "failed to download file"
 
-	# Verify the md5sum.
-	calculated_md5="$($CIDL_MD5FUNC "$CIDL_FILE")" || \
-	    fail "failed to calculate md5sum"
-	if [[ "$calculated_md5" != "$CIDL_MD5" ]]; then
-		fail "md5sum mismatch \
-		    (expected $CIDL_MD5, found $calculated_md5)"
+	#
+	# If the file exists already, check to see if the hash matches so that
+	# we can avoid a second download.
+	#
+	if [[ -f "$CIDL_FILE" ]]; then
+		calculated_md5="$($CIDL_MD5FUNC "$CIDL_FILE")" || \
+		    fail "failed to calculate md5sum"
+		if [[ "$calculated_md5" == "$CIDL_MD5" ]]; then
+			download=no
+		else
+			rm -f "$CIDL_FILE"
+			download=yes
+		fi
+	else
+		download=yes
+	fi
+
+	if [[ "$download" == yes ]]; then
+		#
+		# Download the file.
+		#
+		do_download_curl "$CIDL_URL" "$CIDL_FILE" || \
+		    fail "failed to download file"
+
+		#
+		# Verify the md5sum.
+		#
+		calculated_md5="$($CIDL_MD5FUNC "$CIDL_FILE")" || \
+		    fail "failed to calculate md5sum"
+		if [[ "$calculated_md5" != "$CIDL_MD5" ]]; then
+			fail "md5sum mismatch \
+			    (expected $CIDL_MD5, found $calculated_md5)"
+		fi
 	fi
 
 	# Unpack the tarball into a local directory
@@ -76,27 +116,29 @@ function configure_os
 	echo "current directory: $PWD"
 	echo "configuring based on OS: \"$1\""
 	case "$1" in
-		darwin*)
-            CIDL_PLATFORM="macos"
-			CIDL_MD5="$CIDL_MD5_DARWIN"
-			CIDL_MD5FUNC="do_md5"
-			;;
-		linux-gnu*) 
-            CIDL_PLATFORM="linux"
-			CIDL_MD5="$CIDL_MD5_LINUX"
-			CIDL_MD5FUNC="do_md5sum"
-			;;
-		solaris*)
-            CIDL_PLATFORM="illumos"
-			CIDL_MD5="$CIDL_MD5_ILLUMOS"
-			CIDL_MD5FUNC="do_md5sum"
-			;;
-		*)
-			fail "unsupported OS: $1"
-			;;
+	darwin*)
+		CIDL_PLATFORM="macos"
+		CIDL_MD5FUNC="do_md5"
+		;;
+	linux-gnu*)
+		CIDL_PLATFORM="linux"
+		CIDL_MD5FUNC="do_md5sum"
+		;;
+	solaris*)
+		CIDL_PLATFORM="illumos"
+		CIDL_MD5FUNC="do_md5sum"
+		;;
+	*)
+		fail "unsupported OS: $1"
+		;;
 	esac
 
-	CIDL_DIR="clickhouse-$CIDL_VERSION"
+	if ! CIDL_VERSION=$(per_platform version "$CIDL_PLATFORM") ||
+	    ! CIDL_MD5=$(per_platform md5 "$CIDL_PLATFORM"); then
+		fail "could not configure platform $CIDL_PLATFORM"
+	fi
+
+	CIDL_DIR="clickhouse-v$CIDL_VERSION"
 	CIDL_FILE="$CIDL_DIR.$CIDL_PLATFORM.tar.gz"
 }
 
