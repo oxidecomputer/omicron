@@ -46,6 +46,7 @@ use steno::SagaTemplate;
 use steno::SagaTemplateBuilder;
 use steno::SagaTemplateGeneric;
 use steno::SagaType;
+use slog::Logger;
 use uuid::Uuid;
 
 /*
@@ -432,6 +433,7 @@ async fn sdc_alloc_regions(
 }
 
 async fn allocate_region_from_dataset(
+    log: &Logger,
     dataset: &db::model::Dataset,
     region: &db::model::Region,
 ) -> Result<crucible_agent_client::types::Region, ActionError> {
@@ -466,8 +468,7 @@ async fn allocate_region_from_dataset(
     };
 
     let log_create_failure = |_, delay| {
-        // TODO: Log pls
-        eprintln!("Region requested, not yet created. Retrying in {:?}", delay);
+        warn!(log, "Region requested, not yet created. Retrying in {:?}", delay);
     };
 
     let region = backoff::retry_notify(
@@ -484,6 +485,7 @@ async fn allocate_region_from_dataset(
 async fn sdc_regions_ensure(
     sagactx: ActionContext<SagaDiskCreate>,
 ) -> Result<(), ActionError> {
+    let log = sagactx.user_data().log();
     let datasets_and_regions = sagactx
         .lookup::<Vec<(db::model::Dataset, db::model::Region)>>(
             "datasets_and_regions",
@@ -491,7 +493,7 @@ async fn sdc_regions_ensure(
     let request_count = datasets_and_regions.len();
     futures::stream::iter(datasets_and_regions)
         .map(|(dataset, region)| async move {
-            allocate_region_from_dataset(&dataset, &region).await
+            allocate_region_from_dataset(log, &dataset, &region).await
         })
         // Execute the allocation requests concurrently.
         .buffer_unordered(request_count)

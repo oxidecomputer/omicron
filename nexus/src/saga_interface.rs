@@ -11,6 +11,7 @@ use crate::external_api::params;
 use crate::Nexus;
 use omicron_common::api::external::Error;
 use sled_agent_client::Client as SledAgentClient;
+use slog::Logger;
 use std::fmt;
 use std::sync::Arc;
 use uuid::Uuid;
@@ -33,6 +34,10 @@ impl fmt::Debug for SagaContext {
 impl SagaContext {
     pub fn new(nexus: Arc<Nexus>) -> SagaContext {
         SagaContext { nexus }
+    }
+
+    pub fn log(&self) -> &Logger {
+        self.nexus.log()
     }
 
     /*

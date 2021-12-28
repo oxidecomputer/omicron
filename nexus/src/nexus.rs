@@ -228,6 +228,10 @@ impl Nexus {
         nexus_arc
     }
 
+    pub fn log(&self) -> &Logger {
+        &self.log
+    }
+
     pub async fn wait_for_populate(&self) -> Result<(), anyhow::Error> {
         let mut my_rx = self.populate_status.clone();
         loop {
