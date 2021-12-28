@@ -23,6 +23,7 @@ use crucible_agent_client::{
     types::{CreateRegion, RegionId, State as RegionState}
 };
 use chrono::Utc;
+use futures::StreamExt;
 use lazy_static::lazy_static;
 use omicron_common::api::external::Generation;
 use omicron_common::api::external::IdentityMetadataCreateParams;
@@ -477,11 +478,19 @@ async fn sdc_regions_ensure(
     sagactx: ActionContext<SagaDiskCreate>,
 ) -> Result<(), ActionError> {
     let datasets_and_regions = sagactx.lookup::<Vec<(db::model::Dataset, db::model::Region)>>("datasets_and_regions")?;
-    // TODO: parallelize these requests
-    for (dataset, region) in &datasets_and_regions {
-        let _ = allocate_region_from_dataset(dataset, region).await?;
-        // TODO: Region has a port value, we could store this in the DB?
-    }
+    let request_count = datasets_and_regions.len();
+    futures::stream::iter(datasets_and_regions)
+        .map(|(dataset, region)| async move {
+            allocate_region_from_dataset(&dataset, &region).await
+        })
+        // Execute the allocation requests concurrently.
+        .buffer_unordered(request_count)
+        .collect::<Vec<Result<_, _>>>()
+        .await
+        .into_iter()
+        .collect::<Result<Vec<_>, _>>()?;
+
+    // TODO: Region has a port value, we could store this in the DB?
 
     Ok(())
 }
