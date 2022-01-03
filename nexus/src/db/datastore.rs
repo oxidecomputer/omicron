@@ -268,8 +268,9 @@ impl DataStore {
         // - Sled placement of datasets
         // - What sort of loads we'd like to create (even split across all disks
         // may not be preferable, especially if maintenance is expected)
-        #[derive(Debug)]
+        #[derive(Debug, thiserror::Error)]
         enum RegionAllocateError {
+            #[error("Not enough datasets for replicated allocation: {0}")]
             NotEnoughDatasets(usize),
         }
         type TxnError = TransactionError<RegionAllocateError>;
@@ -335,7 +336,7 @@ impl DataStore {
             })
             .await
             .map_err(|e| {
-                Error::internal_error(&format!("Transaction error: {:#?}", e))
+                Error::internal_error(&format!("Transaction error: {}", e))
             })
     }
 
