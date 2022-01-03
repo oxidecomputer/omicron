@@ -19,5 +19,5 @@ version = "1.0.33"
 version = "1.0.10"
 
 [dependencies.syn]
-version = "1.0.83"
+version = "1.0.84"
 features = [ "full", "derive", "extra-traits" ]
