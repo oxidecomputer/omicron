@@ -7,6 +7,7 @@
  */
 
 use crate::params::DiskStateRequested;
+use futures::lock::Mutex;
 use nexus_client::Client as NexusClient;
 use omicron_common::api::external::Error;
 use omicron_common::api::internal::nexus::DiskRuntimeState;
@@ -21,6 +22,7 @@ use super::collection::SimCollection;
 use super::config::SimMode;
 use super::disk::SimDisk;
 use super::instance::SimInstance;
+use super::storage::Storage;
 
 /**
  * Simulates management of the control plane on a sled
@@ -33,12 +35,13 @@ use super::instance::SimInstance;
  */
 pub struct SledAgent {
     /** unique id for this server */
-    pub id: Uuid,
+    _id: Uuid,
 
     /** collection of simulated instances, indexed by instance uuid */
     instances: Arc<SimCollection<SimInstance>>,
     /** collection of simulated disks, indexed by disk uuid */
     disks: Arc<SimCollection<SimDisk>>,
+    storage: Mutex<Storage>,
 }
 
 impl SledAgent {
@@ -57,9 +60,10 @@ impl SledAgent {
 
         let instance_log = log.new(o!("kind" => "instances"));
         let disk_log = log.new(o!("kind" => "disks"));
+        let storage_log = log.new(o!("kind" => "storage"));
 
         SledAgent {
-            id: *id,
+            _id: *id,
             instances: Arc::new(SimCollection::new(
                 Arc::clone(&ctlsc),
                 instance_log,
@@ -70,6 +74,7 @@ impl SledAgent {
                 disk_log,
                 sim_mode,
             )),
+            storage: Mutex::new(Storage::new(storage_log)),
         }
     }
 
@@ -110,5 +115,21 @@ impl SledAgent {
 
     pub async fn disk_poke(&self, id: Uuid) {
         self.disks.sim_poke(id).await;
+    }
+
+    /// Adds a Zpool to the simulated sled agent.
+    pub async fn create_zpool(&self, id: Uuid) {
+        self.storage.lock()
+            .await
+            .insert_zpool(id);
+    }
+
+    /// Adds a Crucible Dataset within a zpool.
+    pub async fn create_crucible_dataset(&self, zpool_id: Uuid, dataset_id: Uuid) {
+        let mut storage = self.storage.lock().await;
+        let log = storage.log().clone();
+        storage
+            .get_zpool_mut(zpool_id)
+            .insert_dataset(&log, dataset_id);
     }
 }
