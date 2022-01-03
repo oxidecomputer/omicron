@@ -5,6 +5,8 @@
 //! Simulated sled agent storage implementation
 
 use futures::lock::Mutex;
+use nexus_client::Client as NexusClient;
+use nexus_client::types::{ByteCount, DatasetKind, DatasetPutRequest, ZpoolPutRequest};
 use slog::Logger;
 use std::collections::HashMap;
 use std::net::SocketAddr;
@@ -39,9 +41,13 @@ impl CrucibleDataInner {
             block_size: params.block_size,
             extent_size: params.extent_size,
             extent_count: params.extent_count,
-            // NOTE: This is a lie, obviously. No server is running.
+            // NOTE: This is a lie - no server is running.
             port_number: 0,
-            state: State::Requested,
+
+            // TODO: This should be "Started", we should control state
+            // transitions.
+//            state: State::Requested,
+            state: State::Created,
         };
         self.regions.insert(id, region.clone());
         region
@@ -88,7 +94,7 @@ impl CrucibleData {
 ///
 /// Contains both the data and the HTTP server.
 pub struct CrucibleDataset {
-    _server: dropshot::HttpServer<Arc<CrucibleData>>,
+    server: dropshot::HttpServer<Arc<CrucibleData>>,
     _data: Arc<CrucibleData>,
 }
 
@@ -110,7 +116,11 @@ impl CrucibleDataset {
         .expect("Could not initialize server")
         .start();
 
-        CrucibleDataset { _server: server, _data: data }
+        CrucibleDataset { server, _data: data }
+    }
+
+    fn address(&self) -> SocketAddr {
+        self.server.local_addr()
     }
 }
 
@@ -123,34 +133,53 @@ impl Zpool {
         Zpool { datasets: HashMap::new() }
     }
 
-    pub fn insert_dataset(&mut self, log: &Logger, id: Uuid) {
+    pub fn insert_dataset(&mut self, log: &Logger, id: Uuid) -> &CrucibleDataset {
         self.datasets.insert(id, CrucibleDataset::new(log));
+        self.datasets.get(&id).expect("Failed to get the dataset we just inserted")
     }
 }
 
 /// Simulated representation of all storage on a sled.
 pub struct Storage {
+    sled_id: Uuid,
+    nexus_client: Arc<NexusClient>,
     log: Logger,
     zpools: HashMap<Uuid, Zpool>,
 }
 
 impl Storage {
-    pub fn new(log: Logger) -> Self {
-        Self { log, zpools: HashMap::new() }
+    pub fn new(sled_id: Uuid, nexus_client: Arc<NexusClient>, log: Logger) -> Self {
+        Self { sled_id, nexus_client, log, zpools: HashMap::new() }
     }
 
-    pub fn log(&self) -> &Logger {
-        &self.log
+    /// Adds a Zpool to the sled's simulated storage and notifies Nexus.
+    pub async fn insert_zpool(&mut self, zpool_id: Uuid, size: u64) {
+        // Update our local data
+        self.zpools.insert(zpool_id, Zpool::new());
+
+        // Notify Nexus
+        let request = ZpoolPutRequest {
+            size: ByteCount(size),
+        };
+        self.nexus_client.zpool_put(&self.sled_id, &zpool_id, &request)
+            .await
+            .expect("Failed to notify Nexus about new Zpool");
     }
 
-    /// Adds a Zpool to the sled's simulated storage.
-    ///
-    /// The Zpool is originally empty.
-    pub fn insert_zpool(&mut self, id: Uuid) {
-        self.zpools.insert(id, Zpool::new());
-    }
+    /// Adds a Dataset to the sled's simulated storage and notifies Nexus.
+    pub async fn insert_dataset(&mut self, zpool_id: Uuid, dataset_id: Uuid) {
+        // Update our local data
+        let dataset = self.zpools.get_mut(&zpool_id)
+            .expect("Zpool does not exist")
+            .insert_dataset(&self.log, dataset_id);
 
-    pub fn get_zpool_mut(&mut self, id: Uuid) -> &mut Zpool {
-        self.zpools.get_mut(&id).expect("Zpool does not exist")
+        // Notify Nexus
+        let request = DatasetPutRequest {
+            address: dataset.address().to_string(),
+            kind: DatasetKind::Crucible,
+        };
+        self.nexus_client.dataset_put(&zpool_id, &dataset_id, &request)
+            .await
+            .expect("Failed to notify Nexus about new Dataset");
     }
 }

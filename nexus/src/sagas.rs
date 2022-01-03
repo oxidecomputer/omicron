@@ -340,7 +340,7 @@ impl SagaType for SagaDiskCreate {
     type ExecContextType = Arc<SagaContext>;
 }
 
-pub fn saga_disk_create() -> SagaTemplate<SagaDiskCreate> {
+fn saga_disk_create() -> SagaTemplate<SagaDiskCreate> {
     let mut template_builder = SagaTemplateBuilder::new();
 
     template_builder.append(
@@ -424,11 +424,13 @@ async fn sdc_alloc_regions(
     // "creating" - the respective Crucible Agents must be instructed to
     // allocate the necessary regions before we can mark the disk as "ready to
     // be used".
+    eprintln!("SAGA: Allocating datasets + regions...");
     let datasets_and_regions = osagactx
         .datastore()
         .region_allocate(disk_id, &params.create_params)
         .await
         .map_err(ActionError::action_failed)?;
+    eprintln!("SAGA: Allocating datasets + regions... {:?}", datasets_and_regions);
     Ok(datasets_and_regions)
 }
 
@@ -437,6 +439,8 @@ async fn allocate_region_from_dataset(
     dataset: &db::model::Dataset,
     region: &db::model::Region,
 ) -> Result<crucible_agent_client::types::Region, ActionError> {
+    eprintln!("SAGA: Allocating region from dataset");
+
     let url = format!("http://{}", dataset.address());
     let client = CrucibleAgentClient::new(&url);
 
@@ -485,6 +489,8 @@ async fn allocate_region_from_dataset(
 async fn sdc_regions_ensure(
     sagactx: ActionContext<SagaDiskCreate>,
 ) -> Result<(), ActionError> {
+    eprintln!("SAGA: Ensuring regions exist");
+
     let log = sagactx.user_data().log();
     let datasets_and_regions = sagactx
         .lookup::<Vec<(db::model::Dataset, db::model::Region)>>(
@@ -504,6 +510,7 @@ async fn sdc_regions_ensure(
 
     // TODO: Region has a port value, we could store this in the DB?
 
+    eprintln!("SAGA: Ensuring regions exist - OK");
     Ok(())
 }
 
@@ -514,7 +521,7 @@ async fn sdc_finalize_disk_record(
     let _params = sagactx.saga_params();
 
     let disk_id = sagactx.lookup::<Uuid>("disk_id")?;
-    let disk_created = sagactx.lookup::<db::model::Disk>("disk_created")?;
+    let disk_created = sagactx.lookup::<db::model::Disk>("created_disk")?;
     osagactx
         .datastore()
         .disk_update_runtime(&disk_id, &disk_created.runtime().detach())

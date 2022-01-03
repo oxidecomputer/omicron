@@ -256,6 +256,10 @@ impl DataStore {
         // ALLOCATION POLICY
         //
         // NOTE: This policy can - and should! - be changed.
+        //
+        // See https://rfd.shared.oxide.computer/rfd/0205 for a more
+        // complete discussion.
+        //
         // It is currently acting as a placeholder, showing a feasible
         // interaction between datasets and regions.
         //

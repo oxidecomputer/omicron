@@ -34,9 +34,6 @@ use super::storage::Storage;
  * move later.
  */
 pub struct SledAgent {
-    /** unique id for this server */
-    _id: Uuid,
-
     /** collection of simulated instances, indexed by instance uuid */
     instances: Arc<SimCollection<SimInstance>>,
     /** collection of simulated disks, indexed by disk uuid */
@@ -54,7 +51,7 @@ impl SledAgent {
         id: &Uuid,
         sim_mode: SimMode,
         log: Logger,
-        ctlsc: Arc<NexusClient>,
+        nexus_client: Arc<NexusClient>,
     ) -> SledAgent {
         info!(&log, "created simulated sled agent"; "sim_mode" => ?sim_mode);
 
@@ -63,18 +60,21 @@ impl SledAgent {
         let storage_log = log.new(o!("kind" => "storage"));
 
         SledAgent {
-            _id: *id,
             instances: Arc::new(SimCollection::new(
-                Arc::clone(&ctlsc),
+                Arc::clone(&nexus_client),
                 instance_log,
                 sim_mode,
             )),
             disks: Arc::new(SimCollection::new(
-                Arc::clone(&ctlsc),
+                Arc::clone(&nexus_client),
                 disk_log,
                 sim_mode,
             )),
-            storage: Mutex::new(Storage::new(storage_log)),
+            storage: Mutex::new(Storage::new(
+                *id,
+                Arc::clone(&nexus_client),
+                storage_log,
+            )),
         }
     }
 
@@ -118,8 +118,8 @@ impl SledAgent {
     }
 
     /// Adds a Zpool to the simulated sled agent.
-    pub async fn create_zpool(&self, id: Uuid) {
-        self.storage.lock().await.insert_zpool(id);
+    pub async fn create_zpool(&self, id: Uuid, size: u64) {
+        self.storage.lock().await.insert_zpool(id, size).await;
     }
 
     /// Adds a Crucible Dataset within a zpool.
@@ -128,8 +128,6 @@ impl SledAgent {
         zpool_id: Uuid,
         dataset_id: Uuid,
     ) {
-        let mut storage = self.storage.lock().await;
-        let log = storage.log().clone();
-        storage.get_zpool_mut(zpool_id).insert_dataset(&log, dataset_id);
+        self.storage.lock().await.insert_dataset(zpool_id, dataset_id).await;
     }
 }

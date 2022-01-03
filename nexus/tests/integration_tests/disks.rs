@@ -35,30 +35,58 @@ use nexus_test_utils::resource_helpers::create_project;
 use nexus_test_utils::ControlPlaneTestContext;
 use nexus_test_utils_macros::nexus_test;
 
+const ORG_NAME: &str = "test-org";
+const PROJECT_NAME: &str = "springfield-squidport-disks";
+
+fn get_project_url() -> String {
+    format!("/organizations/{}/projects/{}", ORG_NAME, PROJECT_NAME)
+}
+
+fn get_disks_url() -> String {
+    format!("{}/disks", get_project_url())
+}
+
+fn get_instances_url() -> String {
+    format!("{}/instances", get_project_url())
+}
+
+fn get_instance_disks_url(instance_name: &str) -> String {
+    format!("{}/{}/disks", get_instances_url(), instance_name)
+}
+
+fn get_disk_attach_url(instance_name: &str) -> String {
+    format!("{}/attach", get_instance_disks_url(instance_name))
+}
+
+fn get_disk_detach_url(instance_name: &str) -> String {
+    format!("{}/detach", get_instance_disks_url(instance_name))
+}
+
+async fn create_org_and_project(client: &ClientTestContext) -> Uuid {
+    create_organization(&client, ORG_NAME).await;
+    let project = create_project(client, ORG_NAME, PROJECT_NAME).await;
+    project.identity.id
+}
+
 /*
  * TODO-cleanup the mess of URLs used here and in test_instances.rs ought to
  * come from common code.
  */
+
 #[nexus_test]
-async fn test_disks(cptestctx: &ControlPlaneTestContext) {
+async fn test_disks_not_found_before_creation(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
-    let apictx = &cptestctx.server.apictx;
-    let nexus = &apictx.nexus;
 
     /* Create a project for testing. */
-    let org_name = "test-org";
-    create_organization(&client, &org_name).await;
-    let project_name = "springfield-squidport-disks";
-    let url_disks =
-        format!("/organizations/{}/projects/{}/disks", org_name, project_name);
-    let project = create_project(client, &org_name, &project_name).await;
+    create_org_and_project(&client).await;
+    let disks_url = get_disks_url();
 
     /* List disks.  There aren't any yet. */
-    let disks = disks_list(&client, &url_disks).await;
+    let disks = disks_list(&client, &disks_url).await;
     assert_eq!(disks.len(), 0);
 
     /* Make sure we get a 404 if we fetch one. */
-    let disk_url = format!("{}/just-rainsticks", url_disks);
+    let disk_url = format!("{}/just-rainsticks", disks_url);
     let error = client
         .make_request_error(Method::GET, &disk_url, StatusCode::NOT_FOUND)
         .await;
@@ -76,8 +104,33 @@ async fn test_disks(cptestctx: &ControlPlaneTestContext) {
     .parsed_body::<dropshot::HttpErrorResponseBody>()
     .unwrap();
     assert_eq!(error.message, "not found: disk with name \"just-rainsticks\"");
+}
+
+#[nexus_test]
+async fn test_disks(cptestctx: &ControlPlaneTestContext) {
+    let client = &cptestctx.external_client;
+    let apictx = &cptestctx.server.apictx;
+    let nexus = &apictx.nexus;
+    let sled_agent = &cptestctx.sled_agent.sled_agent;
+
+    // Create a Zpool.
+    let zpool_id = Uuid::new_v4();
+    let zpool_size = 10 * 1024 * 1024 * 1024;
+    sled_agent.create_zpool(zpool_id, zpool_size).await;
+
+    // Create multiple Datasets within that Zpool.
+    let dataset_count = 3;
+    let dataset_ids: Vec<_> = (0..dataset_count).map(|_| Uuid::new_v4()).collect();
+    for id in &dataset_ids {
+        sled_agent.create_crucible_dataset(zpool_id, *id).await;
+    }
+
+    /* Create a project for testing. */
+    let project_id = create_org_and_project(&client).await;
+    let disks_url = get_disks_url();
 
     /* Create a disk. */
+    let disk_url = format!("{}/just-rainsticks", disks_url);
     let new_disk = params::DiskCreate {
         identity: IdentityMetadataCreateParams {
             name: "just-rainsticks".parse().unwrap(),
@@ -86,10 +139,10 @@ async fn test_disks(cptestctx: &ControlPlaneTestContext) {
         snapshot_id: None,
         size: ByteCount::from_gibibytes_u32(1),
     };
-    let disk: Disk = objects_post(&client, &url_disks, new_disk.clone()).await;
+    let disk: Disk = objects_post(&client, &disks_url, new_disk.clone()).await;
     assert_eq!(disk.identity.name, "just-rainsticks");
     assert_eq!(disk.identity.description, "sells rainsticks");
-    assert_eq!(disk.project_id, project.identity.id);
+    assert_eq!(disk.project_id, project_id);
     assert_eq!(disk.snapshot_id, None);
     assert_eq!(disk.size.to_whole_mebibytes(), 1024);
     assert_eq!(disk.state, DiskState::Creating);
@@ -102,7 +155,7 @@ async fn test_disks(cptestctx: &ControlPlaneTestContext) {
     let disk = disk_get(&client, &disk_url).await;
     assert_eq!(disk.identity.name, "just-rainsticks");
     assert_eq!(disk.identity.description, "sells rainsticks");
-    assert_eq!(disk.project_id, project.identity.id);
+    assert_eq!(disk.project_id, project_id);
     assert_eq!(disk.snapshot_id, None);
     assert_eq!(disk.size.to_whole_mebibytes(), 1024);
     assert_eq!(disk.state, DiskState::Detached);
@@ -111,7 +164,7 @@ async fn test_disks(cptestctx: &ControlPlaneTestContext) {
     let error = client
         .make_request_error_body(
             Method::POST,
-            &url_disks,
+            &disks_url,
             new_disk,
             StatusCode::BAD_REQUEST,
         )
@@ -119,15 +172,12 @@ async fn test_disks(cptestctx: &ControlPlaneTestContext) {
     assert_eq!(error.message, "already exists: disk \"just-rainsticks\"");
 
     /* List disks again and expect to find the one we just created. */
-    let disks = disks_list(&client, &url_disks).await;
+    let disks = disks_list(&client, &disks_url).await;
     assert_eq!(disks.len(), 1);
     disks_eq(&disks[0], &disk);
 
     /* Create an instance to attach the disk. */
-    let url_instances = format!(
-        "/organizations/{}/projects/{}/instances",
-        org_name, project_name
-    );
+    let url_instances = get_instances_url();
     let instance: Instance = objects_post(
         &client,
         &url_instances,
@@ -147,25 +197,16 @@ async fn test_disks(cptestctx: &ControlPlaneTestContext) {
      * Verify that there are no disks attached to the instance, and specifically
      * that our disk is not attached to this instance.
      */
-    let url_instance_disks = format!(
-        "/organizations/{}/projects/{}/instances/{}/disks",
-        org_name,
-        project_name,
+    let url_instance_disks = get_instance_disks_url(
         instance.identity.name.as_str()
     );
     let disks = objects_list_page::<Disk>(&client, &url_instance_disks).await;
     assert_eq!(disks.items.len(), 0);
 
-    let url_instance_attach_disk = format!(
-        "/organizations/{}/projects/{}/instances/{}/disks/attach",
-        org_name,
-        project_name,
+    let url_instance_attach_disk = get_disk_attach_url(
         instance.identity.name.as_str(),
     );
-    let url_instance_detach_disk = format!(
-        "/organizations/{}/projects/{}/instances/{}/disks/detach",
-        org_name,
-        project_name,
+    let url_instance_detach_disk = get_disk_detach_url(
         instance.identity.name.as_str(),
     );
 
@@ -229,16 +270,10 @@ async fn test_disks(cptestctx: &ControlPlaneTestContext) {
         },
     )
     .await;
-    let url_instance2_attach_disk = format!(
-        "/organizations/{}/projects/{}/instances/{}/disks/attach",
-        org_name,
-        project_name,
+    let url_instance2_attach_disk = get_disk_attach_url(
         instance2.identity.name.as_str(),
     );
-    let url_instance2_detach_disk = format!(
-        "/organizations/{}/projects/{}/instances/{}/disks/detach",
-        org_name,
-        project_name,
+    let url_instance2_detach_disk = get_disk_detach_url(
         instance2.identity.name.as_str(),
     );
     let error = client
@@ -448,7 +483,7 @@ async fn test_disks(cptestctx: &ControlPlaneTestContext) {
         .expect("failed to delete disk");
 
     /* It should no longer be present in our list of disks. */
-    assert_eq!(disks_list(&client, &url_disks).await.len(), 0);
+    assert_eq!(disks_list(&client, &disks_url).await.len(), 0);
     /* We shouldn't find it if we request it explicitly. */
     let error = client
         .make_request_error(Method::GET, &disk_url, StatusCode::NOT_FOUND)
