@@ -12,7 +12,7 @@ anyhow = "1.0"
 async-trait = "0.1.51"
 bb8 = "0.7.1"
 async-bb8-diesel = { git = "https://github.com/oxidecomputer/async-bb8-diesel", rev = "c849b717be" }
-cookie = "0.15"
+cookie = "0.16"
 # Tracking pending 2.0 version.
 diesel = { git = "https://github.com/diesel-rs/diesel", rev = "ce77c382", features = ["postgres", "r2d2", "chrono", "serde_json", "network-address", "uuid"] }
 futures = "0.3.18"
