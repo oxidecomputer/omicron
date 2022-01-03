@@ -6,17 +6,11 @@
 
 // use crucible_agent_client::types::{CreateRegion, RegionId};
 use dropshot::{
-    endpoint,
-    ApiDescription,
-    HttpError,
-    HttpResponseDeleted,
-    HttpResponseOk,
-    Path as TypedPath,
-    RequestContext,
-    TypedBody,
+    endpoint, ApiDescription, HttpError, HttpResponseDeleted, HttpResponseOk,
+    Path as TypedPath, RequestContext, TypedBody,
 };
 use schemars::JsonSchema;
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
 use super::storage::CrucibleData;
@@ -27,7 +21,9 @@ type CrucibleAgentApiDescription = ApiDescription<Arc<CrucibleData>>;
  * Returns a description of the sled agent API
  */
 pub fn api() -> CrucibleAgentApiDescription {
-    fn register_endpoints(api: &mut CrucibleAgentApiDescription) -> Result<(), String> {
+    fn register_endpoints(
+        api: &mut CrucibleAgentApiDescription,
+    ) -> Result<(), String> {
         api.register(region_list)?;
         api.register(region_create)?;
         api.register(region_get)?;
@@ -142,7 +138,9 @@ async fn region_get(
     let crucible = rc.context();
     match crucible.get(id).await {
         Some(region) => Ok(HttpResponseOk(region)),
-        None => Err(HttpError::for_not_found(None, "Region not found".to_string())),
+        None => {
+            Err(HttpError::for_not_found(None, "Region not found".to_string()))
+        }
     }
 }
 
@@ -159,6 +157,8 @@ async fn region_delete(
 
     match crucible.delete(id).await {
         Some(_) => Ok(HttpResponseDeleted()),
-        None => Err(HttpError::for_not_found(None, "Region not found".to_string())),
+        None => {
+            Err(HttpError::for_not_found(None, "Region not found".to_string()))
+        }
     }
 }

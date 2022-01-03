@@ -119,17 +119,17 @@ impl SledAgent {
 
     /// Adds a Zpool to the simulated sled agent.
     pub async fn create_zpool(&self, id: Uuid) {
-        self.storage.lock()
-            .await
-            .insert_zpool(id);
+        self.storage.lock().await.insert_zpool(id);
     }
 
     /// Adds a Crucible Dataset within a zpool.
-    pub async fn create_crucible_dataset(&self, zpool_id: Uuid, dataset_id: Uuid) {
+    pub async fn create_crucible_dataset(
+        &self,
+        zpool_id: Uuid,
+        dataset_id: Uuid,
+    ) {
         let mut storage = self.storage.lock().await;
         let log = storage.log().clone();
-        storage
-            .get_zpool_mut(zpool_id)
-            .insert_dataset(&log, dataset_id);
+        storage.get_zpool_mut(zpool_id).insert_dataset(&log, dataset_id);
     }
 }

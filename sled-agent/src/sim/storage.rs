@@ -16,7 +16,7 @@ use uuid::Uuid;
 //
 // Maybe refactor the "types" used by the HTTP
 // service to a separate file.
-use super::http_entrypoints_storage::{CreateRegion, State, RegionId, Region};
+use super::http_entrypoints_storage::{CreateRegion, Region, RegionId, State};
 
 pub struct CrucibleDataInner {
     regions: HashMap<Uuid, Region>,
@@ -24,9 +24,7 @@ pub struct CrucibleDataInner {
 
 impl CrucibleDataInner {
     fn new() -> Self {
-        Self {
-            regions: HashMap::new(),
-        }
+        Self { regions: HashMap::new() }
     }
 
     fn list(&self) -> Vec<Region> {
@@ -66,9 +64,7 @@ pub struct CrucibleData {
 
 impl CrucibleData {
     fn new() -> Self {
-        Self {
-            inner: Mutex::new(CrucibleDataInner::new()),
-        }
+        Self { inner: Mutex::new(CrucibleDataInner::new()) }
     }
 
     pub async fn list(&self) -> Vec<Region> {
@@ -83,7 +79,7 @@ impl CrucibleData {
         self.inner.lock().await.get(id)
     }
 
-    pub async fn delete(&self, id: RegionId) -> Option<Region>{
+    pub async fn delete(&self, id: RegionId) -> Option<Region> {
         self.inner.lock().await.delete(id)
     }
 }
@@ -103,7 +99,8 @@ impl CrucibleDataset {
             bind_address: SocketAddr::new("127.0.0.1".parse().unwrap(), 0),
             ..Default::default()
         };
-        let dropshot_log = log.new(o!("component" => "Simulated CrucibleAgent Dropshot Server"));
+        let dropshot_log = log
+            .new(o!("component" => "Simulated CrucibleAgent Dropshot Server"));
         let server = dropshot::HttpServerStarter::new(
             &config,
             super::http_entrypoints_storage::api(),
@@ -113,10 +110,7 @@ impl CrucibleDataset {
         .expect("Could not initialize server")
         .start();
 
-        CrucibleDataset {
-            _server: server,
-            _data: data,
-        }
+        CrucibleDataset { _server: server, _data: data }
     }
 }
 
@@ -126,9 +120,7 @@ pub struct Zpool {
 
 impl Zpool {
     pub fn new() -> Self {
-        Zpool {
-            datasets: HashMap::new(),
-        }
+        Zpool { datasets: HashMap::new() }
     }
 
     pub fn insert_dataset(&mut self, log: &Logger, id: Uuid) {
@@ -144,10 +136,7 @@ pub struct Storage {
 
 impl Storage {
     pub fn new(log: Logger) -> Self {
-        Self {
-            log,
-            zpools: HashMap::new(),
-        }
+        Self { log, zpools: HashMap::new() }
     }
 
     pub fn log(&self) -> &Logger {
