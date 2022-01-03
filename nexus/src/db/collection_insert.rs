@@ -492,6 +492,7 @@ mod test {
     use diesel::expression_methods::ExpressionMethods;
     use diesel::pg::Pg;
     use diesel::QueryDsl;
+    use nexus_test_utils::db::test_setup_database;
     use omicron_test_utils::dev;
 
     table! {
@@ -634,7 +635,7 @@ mod test {
     #[tokio::test]
     async fn test_collection_not_present() {
         let logctx = dev::test_setup_log("test_collection_not_present");
-        let mut db = dev::test_setup_database(&logctx.log).await;
+        let mut db = test_setup_database(&logctx.log).await;
         let cfg = db::Config { url: db.pg_config().clone() };
         let pool = db::Pool::new(&cfg);
 
@@ -699,7 +700,7 @@ mod test {
     #[tokio::test]
     async fn test_collection_present() {
         let logctx = dev::test_setup_log("test_collection_present");
-        let mut db = dev::test_setup_database(&logctx.log).await;
+        let mut db = test_setup_database(&logctx.log).await;
         let cfg = db::Config { url: db.pg_config().clone() };
         let pool = db::Pool::new(&cfg);
 

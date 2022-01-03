@@ -341,6 +341,7 @@ mod test {
     use crate::authn;
     use crate::authz;
     use authz::Action;
+    use nexus_test_utils::db::test_setup_database;
     use omicron_common::api::external::Error;
     use omicron_test_utils::dev;
     use std::sync::Arc;
@@ -348,7 +349,7 @@ mod test {
     #[tokio::test]
     async fn test_background_context() {
         let logctx = dev::test_setup_log("test_background_context");
-        let mut db = dev::test_setup_database(&logctx.log).await;
+        let mut db = test_setup_database(&logctx.log).await;
         let (_, datastore) =
             crate::db::datastore::datastore_test(&logctx, &db).await;
         let opctx = OpContext::for_background(
@@ -380,7 +381,7 @@ mod test {
     #[tokio::test]
     async fn test_test_context() {
         let logctx = dev::test_setup_log("test_background_context");
-        let mut db = dev::test_setup_database(&logctx.log).await;
+        let mut db = test_setup_database(&logctx.log).await;
         let (_, datastore) =
             crate::db::datastore::datastore_test(&logctx, &db).await;
         let opctx = OpContext::for_unit_tests(logctx.log.new(o!()), datastore);

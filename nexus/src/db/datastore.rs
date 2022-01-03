@@ -2353,6 +2353,7 @@ mod test {
     use crate::db::model::{ConsoleSession, Organization, Project};
     use crate::external_api::params;
     use chrono::{Duration, Utc};
+    use nexus_test_utils::db::test_setup_database;
     use omicron_common::api::external::{Error, IdentityMetadataCreateParams};
     use omicron_test_utils::dev;
     use uuid::Uuid;
@@ -2360,7 +2361,7 @@ mod test {
     #[tokio::test]
     async fn test_project_creation() {
         let logctx = dev::test_setup_log("test_project_creation");
-        let mut db = dev::test_setup_database(&logctx.log).await;
+        let mut db = test_setup_database(&logctx.log).await;
         let (opctx, datastore) = datastore_test(&logctx, &db).await;
         let organization = Organization::new(params::OrganizationCreate {
             identity: IdentityMetadataCreateParams {
@@ -2393,7 +2394,7 @@ mod test {
     #[tokio::test]
     async fn test_session_methods() {
         let logctx = dev::test_setup_log("test_session_methods");
-        let mut db = dev::test_setup_database(&logctx.log).await;
+        let mut db = test_setup_database(&logctx.log).await;
         let (_, datastore) = datastore_test(&logctx, &db).await;
         let token = "a_token".to_string();
         let session = ConsoleSession {
