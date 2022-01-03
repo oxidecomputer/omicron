@@ -9,6 +9,7 @@
  * but in order to avoid CORS issues for now, we are serving these routes directly
  * from the external API.
  */
+use super::views;
 use crate::authn::external::{
     cookies::Cookies,
     session_cookie::{
@@ -19,13 +20,16 @@ use crate::authn::external::{
 use crate::authn::{USER_TEST_PRIVILEGED, USER_TEST_UNPRIVILEGED};
 use crate::context::OpContext;
 use crate::ServerContext;
-use dropshot::{endpoint, HttpError, Path, RequestContext, TypedBody};
+use dropshot::{
+    endpoint, HttpError, HttpResponseOk, Path, Query, RequestContext, TypedBody,
+};
 use http::{header, Response, StatusCode};
 use hyper::Body;
 use lazy_static::lazy_static;
 use mime_guess;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use serde_urlencoded;
 use std::{collections::HashSet, ffi::OsString, path::PathBuf, sync::Arc};
 use uuid::Uuid;
 
@@ -126,13 +130,92 @@ pub struct RestPathParam {
 // otherwise the user is downloading a bunch of JS for nothing.
 #[endpoint {
    method = GET,
-   path = "/login",
+   path = "/spoof_login",
    unpublished = true,
 }]
 pub async fn spoof_login_form(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
 ) -> Result<Response<Body>, HttpError> {
     serve_console_index(rqctx.context()).await
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub struct StateParam {
+    state: Option<String>,
+}
+
+// this happens to be the same as StateParam, but it may include other things later
+#[derive(Serialize)]
+pub struct LoginUrlQuery {
+    // TODO: give state param the correct name. In SAML it's called RelayState.
+    // If/when we support auth protocols other than SAML, we will need to have
+    // separate implementations here for each one
+    state: Option<String>,
+}
+
+/// Generate URL to IdP login form. Optional `state` param is included in query
+/// string if present, and will typically represent the URL to send the user
+/// back to after successful login.
+fn get_login_url(state: Option<String>) -> String {
+    // assume state is not URL encoded, so no risk of double encoding (dropshot
+    // decodes it on the way in)
+    let query = match state {
+        Some(state) if state.is_empty() => None,
+        Some(state) => Some(
+            serde_urlencoded::to_string(LoginUrlQuery { state: Some(state) })
+                // unwrap is safe because query.state was just deserialized out of a
+                // query param, so we know it's serializable
+                .unwrap(),
+        ),
+        None => None,
+    };
+    // Once we have IdP integration, this will be a URL for the IdP login page. For now
+    // we point to our own placeholder login page.
+    let mut url = "/spoof_login".to_string();
+    if let Some(query) = query {
+        url.push('?');
+        url.push_str(query.as_str());
+    }
+    url
+}
+
+/// Redirect to IdP login URL
+//
+// Currently hard-coded to redirect to our own fake login form.
+#[endpoint {
+   method = GET,
+   path = "/login",
+   unpublished = true,
+}]
+pub async fn login_redirect(
+    _rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    query_params: Query<StateParam>,
+) -> Result<Response<Body>, HttpError> {
+    let query = query_params.into_inner();
+    Ok(Response::builder()
+        .status(StatusCode::FOUND)
+        .header(http::header::LOCATION, get_login_url(query.state))
+        .body("".into())?)
+}
+
+/// Fetch the user associated with the current session
+#[endpoint {
+   method = GET,
+   path = "/session/me",
+}]
+pub async fn session_me(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+) -> Result<HttpResponseOk<views::SessionUser>, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        // TODO: we don't care about authentication method, as long as they are
+        // authed as _somebody_. We could restrict this to session auth only,
+        // but it's not clear what the advantage would be.
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let &actor = opctx.authn.actor_required()?;
+        Ok(HttpResponseOk(actor.into()))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
 // Dropshot does not have route match ranking and does not allow overlapping
@@ -172,7 +255,7 @@ pub async fn console_page(
     // otherwise redirect to idp
     Ok(Response::builder()
         .status(StatusCode::FOUND)
-        .header(http::header::LOCATION, "/login")
+        .header(http::header::LOCATION, get_login_url(None))
         .body("".into())?)
 }
 
