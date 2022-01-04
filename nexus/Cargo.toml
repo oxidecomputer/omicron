@@ -17,7 +17,7 @@ cookie = "0.16"
 diesel = { git = "https://github.com/diesel-rs/diesel", rev = "ce77c382", features = ["postgres", "r2d2", "chrono", "serde_json", "network-address", "uuid"] }
 futures = "0.3.18"
 hex = "0.4.3"
-http = "0.2.5"
+http = "0.2.6"
 hyper = "0.14"
 db-macros = { path = "src/db/db-macros" }
 ipnetwork = "0.18"
