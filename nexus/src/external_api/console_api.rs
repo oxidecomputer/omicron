@@ -156,6 +156,9 @@ pub struct LoginUrlQuery {
 /// Generate URL to IdP login form. Optional `state` param is included in query
 /// string if present, and will typically represent the URL to send the user
 /// back to after successful login.
+// TODO-correctness: we are passing the URL-encoded target URL directly as the
+// state param for now, but we will need to do something a bit more
+// sophisticated. The state param is intended to be used to mitigate CSRF.
 fn get_login_url(state: Option<String>) -> String {
     // assume state is not URL encoded, so no risk of double encoding (dropshot
     // decodes it on the way in)
@@ -252,10 +255,15 @@ pub async fn console_page(
         }
     }
 
+    let request = rqctx.request.lock().await;
+
     // otherwise redirect to idp
     Ok(Response::builder()
         .status(StatusCode::FOUND)
-        .header(http::header::LOCATION, get_login_url(None))
+        .header(
+            http::header::LOCATION,
+            get_login_url(Some(request.uri().to_string())),
+        )
         .body("".into())?)
 }
 

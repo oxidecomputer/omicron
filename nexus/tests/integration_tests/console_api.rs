@@ -112,19 +112,24 @@ async fn test_sessions(cptestctx: &ControlPlaneTestContext) {
 async fn test_console_pages(cptestctx: &ControlPlaneTestContext) {
     let testctx = &cptestctx.external_client;
 
-    // request to console page route without auth should redirect to IdP
-    let _ = RequestBuilder::new(&testctx, Method::GET, "/orgs/irrelevant-path")
-        .expect_status(Some(StatusCode::FOUND))
-        .expect_response_header(header::LOCATION, "/spoof_login")
-        .execute()
-        .await
-        .expect("failed to redirect to IdP on auth failure");
+    // request to console page route without auth should redirect to IdP with
+    // target URL in state param
+    let _ =
+        RequestBuilder::new(&testctx, Method::GET, "/orgs/some-path?abc=def")
+            .expect_status(Some(StatusCode::FOUND))
+            .expect_response_header(
+                header::LOCATION,
+                "/spoof_login?state=%2Forgs%2Fsome-path%3Fabc%3Ddef",
+            )
+            .execute()
+            .await
+            .expect("failed to redirect to IdP on auth failure");
 
     let session_token = log_in_and_extract_token(&testctx).await;
 
     // hit console page with session, should get back HTML response
     let console_page =
-        RequestBuilder::new(&testctx, Method::GET, "/orgs/irrelevant-path")
+        RequestBuilder::new(&testctx, Method::GET, "/orgs/some-path")
             .header(http::header::COOKIE, session_token)
             .expect_status(Some(StatusCode::OK))
             .expect_response_header(
