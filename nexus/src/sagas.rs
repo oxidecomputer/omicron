@@ -55,11 +55,14 @@ use uuid::Uuid;
  */
 pub const SAGA_INSTANCE_CREATE_NAME: &'static str = "instance-create";
 pub const SAGA_DISK_CREATE_NAME: &'static str = "disk-create";
+pub const SAGA_DISK_DELETE_NAME: &'static str = "disk-delete";
 lazy_static! {
     pub static ref SAGA_INSTANCE_CREATE_TEMPLATE: Arc<SagaTemplate<SagaInstanceCreate>> =
         Arc::new(saga_instance_create());
     pub static ref SAGA_DISK_CREATE_TEMPLATE: Arc<SagaTemplate<SagaDiskCreate>> =
         Arc::new(saga_disk_create());
+    pub static ref SAGA_DISK_DELETE_TEMPLATE: Arc<SagaTemplate<SagaDiskDelete>> =
+        Arc::new(saga_disk_delete());
 }
 
 lazy_static! {
@@ -78,6 +81,11 @@ fn all_templates(
         (
             SAGA_DISK_CREATE_NAME,
             Arc::clone(&SAGA_DISK_CREATE_TEMPLATE)
+                as Arc<dyn SagaTemplateGeneric<Arc<SagaContext>>>,
+        ),
+        (
+            SAGA_DISK_DELETE_NAME,
+            Arc::clone(&SAGA_DISK_DELETE_TEMPLATE)
                 as Arc<dyn SagaTemplateGeneric<Arc<SagaContext>>>,
         ),
     ]
@@ -400,10 +408,11 @@ async fn sdc_create_disk_record(
 
     let disk_id = sagactx.lookup::<Uuid>("disk_id")?;
 
-    // NOTE: This could be done in a txn with region allocation?
+    // NOTE: This could be done in a transaction alongside region allocation?
     //
     // Unclear if it's a problem to let this disk exist without any backing
-    // regions for a brief period of time.
+    // regions for a brief period of time, or if that's under the valid
+    // jurisdiction of "Creating".
     let disk = db::model::Disk::new(
         disk_id,
         params.project_id,
@@ -537,14 +546,9 @@ async fn sdc_regions_ensure(
     Ok(())
 }
 
-async fn sdc_regions_ensure_undo(
-    sagactx: ActionContext<SagaDiskCreate>,
-) -> Result<(), anyhow::Error> {
-    let datasets_and_regions = sagactx
-        .lookup::<Vec<(db::model::Dataset, db::model::Region)>>(
-            "datasets_and_regions",
-        )?;
-
+async fn delete_regions(
+    datasets_and_regions: Vec<(db::model::Dataset, db::model::Region)>,
+) -> Result<(), Error> {
     let request_count = datasets_and_regions.len();
     futures::stream::iter(datasets_and_regions)
         .map(|(dataset, region)| async move {
@@ -562,6 +566,17 @@ async fn sdc_regions_ensure_undo(
     Ok(())
 }
 
+async fn sdc_regions_ensure_undo(
+    sagactx: ActionContext<SagaDiskCreate>,
+) -> Result<(), anyhow::Error> {
+    let datasets_and_regions = sagactx
+        .lookup::<Vec<(db::model::Dataset, db::model::Region)>>(
+            "datasets_and_regions",
+        )?;
+    delete_regions(datasets_and_regions).await?;
+    Ok(())
+}
+
 async fn sdc_finalize_disk_record(
     sagactx: ActionContext<SagaDiskCreate>,
 ) -> Result<(), ActionError> {
@@ -573,6 +588,84 @@ async fn sdc_finalize_disk_record(
     osagactx
         .datastore()
         .disk_update_runtime(&disk_id, &disk_created.runtime().detach())
+        .await
+        .map_err(ActionError::action_failed)?;
+    Ok(())
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+pub struct ParamsDiskDelete {
+    pub disk_id: Uuid,
+}
+
+#[derive(Debug)]
+pub struct SagaDiskDelete;
+impl SagaType for SagaDiskDelete {
+    type SagaParamsType = Arc<ParamsDiskDelete>;
+    type ExecContextType = Arc<SagaContext>;
+}
+
+
+fn saga_disk_delete() -> SagaTemplate<SagaDiskDelete> {
+    let mut template_builder = SagaTemplateBuilder::new();
+
+    template_builder.append(
+        "no_result",
+        "DeleteDiskRecord",
+        new_action_noop_undo(sdd_delete_disk_record),
+    );
+
+    template_builder.append(
+        "no_result",
+        "DeleteRegions",
+        new_action_noop_undo(sdd_delete_regions),
+    );
+
+    template_builder.append(
+        "no_result",
+        "DeleteRegionRecords",
+        new_action_noop_undo(sdd_delete_region_records),
+    );
+
+    template_builder.build()
+}
+
+async fn sdd_delete_disk_record(
+    sagactx: ActionContext<SagaDiskDelete>,
+) -> Result<(), ActionError> {
+    let osagactx = sagactx.user_data();
+    let params = sagactx.saga_params();
+
+    osagactx.datastore()
+        .project_delete_disk_no_auth(&params.disk_id)
+        .await
+        .map_err(ActionError::action_failed)?;
+    Ok(())
+}
+
+async fn sdd_delete_regions(
+    sagactx: ActionContext<SagaDiskDelete>,
+) -> Result<(), ActionError> {
+    let osagactx = sagactx.user_data();
+    let params = sagactx.saga_params();
+
+    let datasets_and_regions = osagactx.datastore()
+        .get_allocated_regions(params.disk_id)
+        .await
+        .map_err(ActionError::action_failed)?;
+    delete_regions(datasets_and_regions)
+        .await
+        .map_err(ActionError::action_failed)?;
+    Ok(())
+}
+
+async fn sdd_delete_region_records(
+    sagactx: ActionContext<SagaDiskDelete>,
+) -> Result<(), ActionError> {
+    let osagactx = sagactx.user_data();
+    let params = sagactx.saga_params();
+    osagactx.datastore()
+        .regions_hard_delete(params.disk_id)
         .await
         .map_err(ActionError::action_failed)?;
     Ok(())

@@ -71,6 +71,7 @@ async fn create_org_and_project(client: &ClientTestContext) -> Uuid {
 struct DiskTest {
     sled_agent: Arc<SledAgent>,
     zpool_id: Uuid,
+    zpool_size: ByteCount,
     dataset_ids: Vec<Uuid>,
     project_id: Uuid,
 }
@@ -83,8 +84,8 @@ impl DiskTest {
 
         // Create a Zpool.
         let zpool_id = Uuid::new_v4();
-        let zpool_size = 10 * 1024 * 1024 * 1024;
-        sled_agent.create_zpool(zpool_id, zpool_size).await;
+        let zpool_size = ByteCount::from_gibibytes_u32(10);
+        sled_agent.create_zpool(zpool_id, zpool_size.to_bytes()).await;
 
         // Create multiple Datasets within that Zpool.
         let dataset_count = 3;
@@ -105,24 +106,11 @@ impl DiskTest {
         Self {
             sled_agent,
             zpool_id,
+            zpool_size,
             dataset_ids,
             project_id,
         }
     }
-
-    async fn finish_region_allocation(
-        &self,
-    ) {
-        for dataset_id in &self.dataset_ids {
-            let dataset = self.sled_agent.get_crucible_dataset(self.zpool_id, *dataset_id).await;
-            let regions = dataset.list().await;
-
-            for region in &regions {
-                dataset.set_state(&region.id, RegionState::Created).await;
-            }
-        }
-    }
-
 }
 
 #[nexus_test]
@@ -608,10 +596,17 @@ async fn test_disk_move_between_instances(cptestctx: &ControlPlaneTestContext) {
     assert_eq!(disk.state, DiskState::Attaching(instance2_id.clone()));
 
     // It's not allowed to delete a disk that's attaching.
-    let error = client
-        .make_request_error(Method::DELETE, &disk_url, StatusCode::BAD_REQUEST)
-        .await;
-    assert_eq!(error.message, "disk is attached");
+    let error = NexusRequest::new(
+        RequestBuilder::new(client, Method::DELETE, &disk_url)
+            .expect_status(Some(StatusCode::BAD_REQUEST)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .expect("expected request to fail")
+    .parsed_body::<dropshot::HttpErrorResponseBody>()
+    .expect("cannot parse");
+    assert_eq!(error.message, "disk cannot be deleted in state \"attaching\"");
 
     // Now, begin a detach while the disk is still being attached.
     client
@@ -627,10 +622,17 @@ async fn test_disk_move_between_instances(cptestctx: &ControlPlaneTestContext) {
     assert_eq!(disk.state, DiskState::Detaching(instance2_id.clone()));
 
     // It's not allowed to delete a disk that's detaching, either.
-    let error = client
-        .make_request_error(Method::DELETE, &disk_url, StatusCode::BAD_REQUEST)
-        .await;
-    assert_eq!(error.message, "disk is attached");
+    let error = NexusRequest::new(
+        RequestBuilder::new(client, Method::DELETE, &disk_url)
+            .expect_status(Some(StatusCode::BAD_REQUEST)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .expect("expected request to fail")
+    .parsed_body::<dropshot::HttpErrorResponseBody>()
+    .expect("cannot parse");
+    assert_eq!(error.message, "disk cannot be deleted in state \"detaching\"");
 
     // Finish detachment.
     disk_simulate(nexus, &disk.identity.id).await;
@@ -695,18 +697,39 @@ async fn test_disk_deletion_requires_authentication(cptestctx: &ControlPlaneTest
         .expect("failed to delete disk");
 }
 
-// Nexus-side allocation:
-// TODO: Disk allocation failure (not enough space!)
-// TODO: Transition from Requested -> Started in simulated storage.
-
 #[nexus_test]
 async fn test_disk_creation_region_requested_then_started(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
     let test = DiskTest::new(&cptestctx).await;
-    let nexus = &cptestctx.server.apictx.nexus;
     let disks_url = get_disks_url();
 
-    // TODO: TODO: TODO
+    // Before we create a disk, set the response from the Crucible Agent:
+    // no matter what regions get requested, they'll always *start* as
+    // "Requested", and transition to "Created" on the second call.
+    for id in &test.dataset_ids {
+        let crucible = test.sled_agent.get_crucible_dataset(test.zpool_id, *id).await;
+        let called = std::sync::atomic::AtomicBool::new(false);
+        crucible.set_create_callback(Box::new(move |_| {
+            if !called.load(std::sync::atomic::Ordering::SeqCst) {
+                called.store(true, std::sync::atomic::Ordering::SeqCst);
+                RegionState::Requested
+            } else {
+                RegionState::Created
+            }
+        })).await;
+    }
+
+    // The disk is created successfully, even when this "requested" -> "started"
+    // transition occurs.
+    let new_disk = params::DiskCreate {
+        identity: IdentityMetadataCreateParams {
+            name: DISK_NAME.parse().unwrap(),
+            description: String::from("sells rainsticks"),
+        },
+        snapshot_id: None,
+        size: ByteCount::from_gibibytes_u32(1),
+    };
+    let _: Disk = objects_post(&client, &disks_url, new_disk.clone()).await;
 }
 
 
@@ -725,6 +748,17 @@ async fn test_disk_region_creation_failure(cptestctx: &ControlPlaneTestContext) 
         })).await;
     }
 
+    let disk_size = ByteCount::from_gibibytes_u32(3);
+    let dataset_count = test.dataset_ids.len() as u64;
+    assert!(
+        disk_size.to_bytes() * dataset_count < test.zpool_size.to_bytes(),
+        "Disk size too big for Zpool size"
+    );
+    assert!(
+        2 * disk_size.to_bytes() * dataset_count > test.zpool_size.to_bytes(),
+        "(test constraint) Zpool needs to be smaller (to store only one disk)",
+    );
+
     // Attempt to allocate the disk, observe a server error.
     let disks_url = get_disks_url();
     let new_disk = params::DiskCreate {
@@ -733,19 +767,19 @@ async fn test_disk_region_creation_failure(cptestctx: &ControlPlaneTestContext) 
             description: String::from("sells rainsticks"),
         },
         snapshot_id: None,
-        size: ByteCount::from_gibibytes_u32(1),
+        size: disk_size,
     };
 
     // Unfortunately, the error message is only posted internally to the
     // logs, and it not returned to the client.
     //
     // TODO: Maybe consider making this a more informative error?
-    // Should we propagate this to the client?
+    // How should we propagate this to the client?
     client
         .make_request_error_body(
             Method::POST,
             &disks_url,
-            new_disk,
+            new_disk.clone(),
             StatusCode::INTERNAL_SERVER_ERROR,
         )
         .await;
@@ -754,15 +788,24 @@ async fn test_disk_region_creation_failure(cptestctx: &ControlPlaneTestContext) 
     let disks = disks_list(&client, &disks_url).await;
     assert_eq!(disks.len(), 0);
 
-    // After the failed allocation, regions will exist, but be destroyed.
-    //
-    // TODO: Query DB? Maybe allocate when *almost* full?
+    // After the failed allocation, regions will exist, but be "Failed".
     for id in &test.dataset_ids {
         let crucible = test.sled_agent.get_crucible_dataset(test.zpool_id, *id).await;
         let regions = crucible.list().await;
         assert_eq!(regions.len(), 1);
-        assert_eq!(regions[0].state, RegionState::Destroyed);
+        assert_eq!(regions[0].state, RegionState::Failed);
     }
+
+    // Validate that the underlying regions were released as a part of
+    // unwinding the failed disk allocation, by performing another disk
+    // allocation that should succeed.
+    for id in &test.dataset_ids {
+        let crucible = test.sled_agent.get_crucible_dataset(test.zpool_id, *id).await;
+        crucible.set_create_callback(Box::new(|_| {
+            RegionState::Created
+        })).await;
+    }
+    let _: Disk = objects_post(&client, &disks_url, new_disk.clone()).await;
 }
 
 async fn disk_get(client: &ClientTestContext, disk_url: &str) -> Disk {

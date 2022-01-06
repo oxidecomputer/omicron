@@ -241,6 +241,31 @@ impl DataStore {
         })
     }
 
+    /// Gets allocated regions for a disk, and the datasets to which those
+    /// regions belong.
+    ///
+    /// Note that this function does not validate liveness of the Disk, so it
+    /// may be used in a context where the disk is being deleted.
+    pub async fn get_allocated_regions(
+        &self,
+        disk_id: Uuid,
+    ) -> Result<Vec<(Dataset, Region)>, Error> {
+        use db::schema::dataset::dsl as dataset_dsl;
+        use db::schema::region::dsl as region_dsl;
+        region_dsl::region
+            .filter(region_dsl::disk_id.eq(disk_id))
+            .inner_join(
+                dataset_dsl::dataset
+                    .on(region_dsl::dataset_id.eq(dataset_dsl::id))
+            )
+            .select((Dataset::as_select(), Region::as_select()))
+            .get_results_async::<(Dataset, Region)>(self.pool())
+            .await
+            .map_err(|e| {
+                public_error_from_diesel_pool_shouldnt_fail(e)
+            })
+    }
+
     /// Idempotently allocates enough regions to back a disk.
     ///
     /// Returns the allocated regions, as well as the datasets to which they
@@ -1192,15 +1217,20 @@ impl DataStore {
         use db::schema::disk::dsl;
         let now = Utc::now();
 
+        let ok_to_delete_states = vec![
+            api::external::DiskState::Detached,
+            api::external::DiskState::Faulted,
+            api::external::DiskState::Creating,
+        ];
+
+        let ok_to_delete_state_labels: Vec<_> = ok_to_delete_states.iter().map(|s| s.label()).collect();
         let destroyed = api::external::DiskState::Destroyed.label();
-        let detached = api::external::DiskState::Detached.label();
-        let faulted = api::external::DiskState::Faulted.label();
-        let creating = api::external::DiskState::Creating.label();
 
         let result = diesel::update(dsl::disk)
             .filter(dsl::time_deleted.is_null())
             .filter(dsl::id.eq(*disk_id))
-            .filter(dsl::disk_state.eq_any(vec![detached, faulted, creating]))
+            .filter(dsl::disk_state.eq_any(ok_to_delete_state_labels))
+            .filter(dsl::attach_instance_id.is_null())
             .set((dsl::disk_state.eq(destroyed), dsl::time_deleted.eq(now)))
             .check_if_exists::<Disk>(*disk_id)
             .execute_and_check(pool)
@@ -1213,22 +1243,29 @@ impl DataStore {
                 )
             })?;
 
-        // TODO: We need to also de-allocate the regions associated
-        // with a disk - see `regions_hard_delete` - but this should only
-        // happen when undoing deletion is no longer possible.
-        //
-        // This will be necessary - in addition to actually sending
-        // requests to the Crucible Agents, requesting that the regions
-        // be destroyed - 
-
         match result.status {
             UpdateStatus::Updated => Ok(()),
-            UpdateStatus::NotUpdatedButExists => Err(Error::InvalidRequest {
-                message: format!(
-                    "disk cannot be deleted in state \"{}\"",
-                    result.found.runtime_state.disk_state
-                ),
-            }),
+            UpdateStatus::NotUpdatedButExists => {
+                let disk_state = result.found.state();
+                if !ok_to_delete_states.contains(disk_state.state()) {
+                    return Err(Error::InvalidRequest {
+                        message: format!(
+                            "disk cannot be deleted in state \"{}\"",
+                            result.found.runtime_state.disk_state
+                        ),
+                    });
+                } else if disk_state.is_attached() {
+                    return Err(Error::InvalidRequest {
+                        message: String::from("disk is attached"),
+                    });
+                } else {
+                    // NOTE: This is a "catch-all" error case, more specific
+                    // errors should be preferred as they're more actionable.
+                    return Err(Error::InvalidRequest {
+                        message: String::from("disk exists, but cannot be deleted"),
+                    });
+                }
+            }
         }
     }
 

@@ -730,7 +730,7 @@ impl Nexus {
     }
 
     pub async fn project_delete_disk(
-        &self,
+        self: &Arc<Self>,
         opctx: &OpContext,
         organization_name: &Name,
         project_name: &Name,
@@ -739,37 +739,28 @@ impl Nexus {
         let (disk, authz_disk) = self
             .project_lookup_disk(organization_name, project_name, disk_name)
             .await?;
-        let runtime = disk.runtime();
-        bail_unless!(runtime.state().state() != &DiskState::Destroyed);
 
-        if runtime.state().is_attached() {
-            return Err(Error::InvalidRequest {
-                message: String::from("disk is attached"),
-            });
-        }
+        // TODO: We need to sort out the authorization checks.
+        //
+        // Normally, this would be coupled alongside access to the
+        // datastore, but now that disk deletion exists within a Saga,
+        // this would require OpContext to be serialized (which is
+        // not trivial).
+        opctx.authorize(authz::Action::Query, authz::DATABASE).await?;
+        opctx.authorize(authz::Action::Delete, authz_disk).await?;
 
-        /*
-         * TODO-correctness It's not clear how this handles the case where we
-         * begin this delete operation while some other request is ongoing to
-         * attach the disk.  We won't be able to see that in the state here.  We
-         * might be able to detect this when we go update the disk's state to
-         * Attaching (because a SQL UPDATE will update 0 rows), but we'd sort of
-         * already be in a bad state because the destroyed disk will be
-         * attaching (and eventually attached) on some sled, and if the wrong
-         * combination of components crash at this point, we could wind up not
-         * fixing that state.
-         *
-         * This is a consequence of the choice _not_ to record the Attaching
-         * state in the database before beginning the attach process.  If we did
-         * that, we wouldn't have this problem, but we'd have a similar problem
-         * of dealing with the case of a crash after recording this state and
-         * before actually beginning the attach process.  Sagas can maybe
-         * address that.
-         */
-        self.db_datastore.project_delete_disk(opctx, authz_disk).await
+        let saga_params = Arc::new(sagas::ParamsDiskDelete {
+            disk_id: disk.id()
+        });
+        self
+            .execute_saga(
+                Arc::clone(&sagas::SAGA_DISK_DELETE_TEMPLATE),
+                sagas::SAGA_DISK_DELETE_NAME,
+                saga_params,
+            )
+            .await?;
 
-        // TODO: Call to crucible agents, requesting deletion.
-        // TODO: self.db_datastore.regions_hard_delete(disk.id)
+        Ok(())
     }
 
     /*
