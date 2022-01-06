@@ -22,7 +22,7 @@ use super::collection::SimCollection;
 use super::config::SimMode;
 use super::disk::SimDisk;
 use super::instance::SimInstance;
-use super::storage::Storage;
+use super::storage::{CrucibleData, Storage};
 
 /**
  * Simulates management of the control plane on a sled
@@ -129,5 +129,14 @@ impl SledAgent {
         dataset_id: Uuid,
     ) {
         self.storage.lock().await.insert_dataset(zpool_id, dataset_id).await;
+    }
+
+    /// Returns a crucible dataset within a particular zpool.
+    pub async fn get_crucible_dataset(
+        &self,
+        zpool_id: Uuid,
+        dataset_id: Uuid,
+    ) -> Arc<CrucibleData> {
+        self.storage.lock().await.get_dataset(zpool_id, dataset_id).await
     }
 }

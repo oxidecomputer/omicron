@@ -186,7 +186,7 @@ fn build_resource_identity(
     let identity_name = format_ident!("{}Identity", struct_name);
     quote! {
         #[doc = #identity_doc]
-        #[derive(Clone, Debug, Selectable, Queryable, Insertable, serde::Serialize, serde::Deserialize)]
+        #[derive(Clone, Debug, PartialEq, Selectable, Queryable, Insertable, serde::Serialize, serde::Deserialize)]
         #[table_name = #table_name ]
         pub struct #identity_name {
             pub id: ::uuid::Uuid,
@@ -225,7 +225,7 @@ fn build_asset_identity(struct_name: &Ident, table_name: &Lit) -> TokenStream {
     let identity_name = format_ident!("{}Identity", struct_name);
     quote! {
         #[doc = #identity_doc]
-        #[derive(Clone, Debug, Selectable, Queryable, Insertable, serde::Serialize, serde::Deserialize)]
+        #[derive(Clone, Debug, PartialEq, Selectable, Queryable, Insertable, serde::Serialize, serde::Deserialize)]
         #[table_name = #table_name ]
         pub struct #identity_name {
             pub id: ::uuid::Uuid,

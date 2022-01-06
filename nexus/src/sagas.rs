@@ -25,6 +25,7 @@ use crucible_agent_client::{
 };
 use futures::StreamExt;
 use lazy_static::lazy_static;
+use omicron_common::api::external::Error;
 use omicron_common::api::external::Generation;
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::InstanceState;
@@ -352,28 +353,33 @@ fn saga_disk_create() -> SagaTemplate<SagaDiskCreate> {
     template_builder.append(
         "created_disk",
         "CreateDiskRecord",
-        // TODO: Needs undo action.
-        new_action_noop_undo(sdc_create_disk_record),
+        ActionFunc::new_action(
+            sdc_create_disk_record,
+            sdc_create_disk_record_undo,
+        ),
     );
 
     template_builder.append(
         "datasets_and_regions",
         "AllocRegions",
-        // TODO: Needs undo action.
-        new_action_noop_undo(sdc_alloc_regions),
+        ActionFunc::new_action(
+            sdc_alloc_regions,
+            sdc_alloc_regions_undo,
+        ),
     );
 
     template_builder.append(
         "regions_ensure",
         "RegionsEnsure",
-        // TODO: Needs undo action.
-        new_action_noop_undo(sdc_regions_ensure),
+        ActionFunc::new_action(
+            sdc_regions_ensure,
+            sdc_regions_ensure_undo,
+        ),
     );
 
     template_builder.append(
         "disk_runtime",
         "FinalizeDiskRecord",
-        // TODO: Needs undo action.
         new_action_noop_undo(sdc_finalize_disk_record),
     );
 
@@ -412,6 +418,19 @@ async fn sdc_create_disk_record(
     Ok(disk_created)
 }
 
+async fn sdc_create_disk_record_undo(
+    sagactx: ActionContext<SagaDiskCreate>,
+) -> Result<(), anyhow::Error> {
+    let osagactx = sagactx.user_data();
+
+    let disk_id = sagactx.lookup::<Uuid>("disk_id")?;
+    osagactx
+        .datastore()
+        .project_delete_disk_no_auth(&disk_id)
+        .await?;
+    Ok(())
+}
+
 async fn sdc_alloc_regions(
     sagactx: ActionContext<SagaDiskCreate>,
 ) -> Result<Vec<(db::model::Dataset, db::model::Region)>, ActionError> {
@@ -424,23 +443,31 @@ async fn sdc_alloc_regions(
     // "creating" - the respective Crucible Agents must be instructed to
     // allocate the necessary regions before we can mark the disk as "ready to
     // be used".
-    eprintln!("SAGA: Allocating datasets + regions...");
     let datasets_and_regions = osagactx
         .datastore()
         .region_allocate(disk_id, &params.create_params)
         .await
         .map_err(ActionError::action_failed)?;
-    eprintln!("SAGA: Allocating datasets + regions... {:?}", datasets_and_regions);
     Ok(datasets_and_regions)
 }
 
-async fn allocate_region_from_dataset(
+async fn sdc_alloc_regions_undo(
+    sagactx: ActionContext<SagaDiskCreate>,
+) -> Result<(), anyhow::Error> {
+    let osagactx = sagactx.user_data();
+
+    let disk_id = sagactx.lookup::<Uuid>("disk_id")?;
+    osagactx.datastore()
+        .regions_hard_delete(disk_id)
+        .await?;
+    Ok(())
+}
+
+async fn ensure_region_in_dataset(
     log: &Logger,
     dataset: &db::model::Dataset,
     region: &db::model::Region,
-) -> Result<crucible_agent_client::types::Region, ActionError> {
-    eprintln!("SAGA: Allocating region from dataset");
-
+) -> Result<crucible_agent_client::types::Region, Error> {
     let url = format!("http://{}", dataset.address());
     let client = CrucibleAgentClient::new(&url);
 
@@ -480,8 +507,7 @@ async fn allocate_region_from_dataset(
         create_region,
         log_create_failure,
     )
-    .await
-    .map_err(|e| ActionError::action_failed(e.to_string()))?;
+    .await?;
 
     Ok(region)
 }
@@ -489,8 +515,6 @@ async fn allocate_region_from_dataset(
 async fn sdc_regions_ensure(
     sagactx: ActionContext<SagaDiskCreate>,
 ) -> Result<(), ActionError> {
-    eprintln!("SAGA: Ensuring regions exist");
-
     let log = sagactx.user_data().log();
     let datasets_and_regions = sagactx
         .lookup::<Vec<(db::model::Dataset, db::model::Region)>>(
@@ -499,7 +523,35 @@ async fn sdc_regions_ensure(
     let request_count = datasets_and_regions.len();
     futures::stream::iter(datasets_and_regions)
         .map(|(dataset, region)| async move {
-            allocate_region_from_dataset(log, &dataset, &region).await
+            ensure_region_in_dataset(log, &dataset, &region).await
+        })
+        // Execute the allocation requests concurrently.
+        .buffer_unordered(request_count)
+        .collect::<Vec<Result<_, _>>>()
+        .await
+        .into_iter()
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(ActionError::action_failed)?;
+
+    // TODO: Region has a port value, we could store this in the DB?
+    Ok(())
+}
+
+async fn sdc_regions_ensure_undo(
+    sagactx: ActionContext<SagaDiskCreate>,
+) -> Result<(), anyhow::Error> {
+    let datasets_and_regions = sagactx
+        .lookup::<Vec<(db::model::Dataset, db::model::Region)>>(
+            "datasets_and_regions",
+        )?;
+
+    let request_count = datasets_and_regions.len();
+    futures::stream::iter(datasets_and_regions)
+        .map(|(dataset, region)| async move {
+            let url = format!("http://{}", dataset.address());
+            let client = CrucibleAgentClient::new(&url);
+            let id = RegionId(region.id().to_string());
+            client.region_delete(&id).await
         })
         // Execute the allocation requests concurrently.
         .buffer_unordered(request_count)
@@ -507,10 +559,6 @@ async fn sdc_regions_ensure(
         .await
         .into_iter()
         .collect::<Result<Vec<_>, _>>()?;
-
-    // TODO: Region has a port value, we could store this in the DB?
-
-    eprintln!("SAGA: Ensuring regions exist - OK");
     Ok(())
 }
 

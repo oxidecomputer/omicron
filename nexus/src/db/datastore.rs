@@ -241,7 +241,7 @@ impl DataStore {
         })
     }
 
-    /// Allocates enough regions to back a disk.
+    /// Idempotently allocates enough regions to back a disk.
     ///
     /// Returns the allocated regions, as well as the datasets to which they
     /// belong.
@@ -281,8 +281,25 @@ impl DataStore {
         let params: params::DiskCreate = params.clone();
         self.pool()
             .transaction(move |conn| {
+                // First, for idempotency, check if regions are already
+                // allocated to this disk.
+                //
+                // If they are, return those regions and the associated
+                // datasets.
+                let datasets_and_regions = region_dsl::region
+                    .filter(region_dsl::disk_id.eq(disk_id))
+                    .inner_join(
+                        dataset_dsl::dataset
+                            .on(region_dsl::dataset_id.eq(dataset_dsl::id))
+                    )
+                    .select((Dataset::as_select(), Region::as_select()))
+                    .get_results::<(Dataset, Region)>(conn)?;
+                if !datasets_and_regions.is_empty() {
+                    return Ok(datasets_and_regions);
+                }
+
                 let datasets: Vec<Dataset> = dataset_dsl::dataset
-                    // First, we look for valid datasets (non-deleted crucible datasets).
+                    // We look for valid datasets (non-deleted crucible datasets).
                     .filter(dataset_dsl::time_deleted.is_null())
                     .filter(dataset_dsl::kind.eq(DatasetKind(
                         crate::internal_api::params::DatasetKind::Crucible,
@@ -341,6 +358,26 @@ impl DataStore {
             .await
             .map_err(|e| {
                 Error::internal_error(&format!("Transaction error: {}", e))
+            })
+    }
+
+    /// Deletes all regions backing a disk.
+    pub async fn regions_hard_delete(
+        &self,
+        disk_id: Uuid,
+    ) -> DeleteResult {
+        use db::schema::region::dsl as dsl;
+
+        diesel::delete(dsl::region)
+            .filter(dsl::disk_id.eq(disk_id))
+            .execute_async(self.pool())
+            .await
+            .map(|_| ())
+            .map_err(|e| {
+                Error::internal_error(&format!(
+                    "error deleting regions: {:?}",
+                    e
+                ))
             })
     }
 
@@ -1118,23 +1155,55 @@ impl DataStore {
         opctx: &OpContext,
         disk_authz: authz::ProjectChild,
     ) -> DeleteResult {
-        use db::schema::disk::dsl;
-        let now = Utc::now();
-
         let disk_id = disk_authz.id();
         opctx.authorize(authz::Action::Delete, disk_authz).await?;
+        self.project_delete_disk_internal(disk_id, self.pool_authorized(opctx).await?).await
+    }
+
+    // TODO: Delete me (this function, not the disk!), ensure all datastore
+    // access is auth-checked.
+    //
+    // Here's the deal: We have auth checks on access to the database - at the
+    // time of writing this comment, only a subset of access is protected, and
+    // "Delete Disk" is actually one of the first targets of this auth check.
+    //
+    // However, there are contexts where we want to delete disks *outside* of
+    // calling the HTTP API-layer "delete disk" endpoint. As one example, during
+    // the "undo" part of the disk creation saga, we want to allow users to
+    // delete the disk they (partially) created.
+    //
+    // This gets a little tricky mapping back to user permissions - a user
+    // SHOULD be able to create a disk with the "create" permission, without the
+    // "delete" permission. To still make the call internally, we'd basically
+    // need to manufacture a token that identifies the ability to "create a
+    // disk, or delete a very specific disk with ID = ...".
+    pub async fn project_delete_disk_no_auth(
+        &self,
+        disk_id: &Uuid,
+    ) -> DeleteResult {
+        self.project_delete_disk_internal(disk_id, self.pool()).await
+    }
+
+    async fn project_delete_disk_internal(
+        &self,
+        disk_id: &Uuid,
+        pool: &bb8::Pool<ConnectionManager<DbConnection>>,
+    ) -> DeleteResult {
+        use db::schema::disk::dsl;
+        let now = Utc::now();
 
         let destroyed = api::external::DiskState::Destroyed.label();
         let detached = api::external::DiskState::Detached.label();
         let faulted = api::external::DiskState::Faulted.label();
+        let creating = api::external::DiskState::Creating.label();
 
         let result = diesel::update(dsl::disk)
             .filter(dsl::time_deleted.is_null())
             .filter(dsl::id.eq(*disk_id))
-            .filter(dsl::disk_state.eq_any(vec![detached, faulted]))
+            .filter(dsl::disk_state.eq_any(vec![detached, faulted, creating]))
             .set((dsl::disk_state.eq(destroyed), dsl::time_deleted.eq(now)))
             .check_if_exists::<Disk>(*disk_id)
-            .execute_and_check(self.pool_authorized(opctx).await?)
+            .execute_and_check(pool)
             .await
             .map_err(|e| {
                 public_error_from_diesel_pool(
@@ -1143,6 +1212,14 @@ impl DataStore {
                     LookupType::ById(*disk_id),
                 )
             })?;
+
+        // TODO: We need to also de-allocate the regions associated
+        // with a disk - see `regions_hard_delete` - but this should only
+        // happen when undoing deletion is no longer possible.
+        //
+        // This will be necessary - in addition to actually sending
+        // requests to the Crucible Agents, requesting that the regions
+        // be destroyed - 
 
         match result.status {
             UpdateStatus::Updated => Ok(()),
@@ -2664,6 +2741,72 @@ mod test {
         // Double-check that the datasets used for the first disk weren't
         // used when allocating the second disk.
         assert_eq!(0, disk1_datasets.intersection(&disk2_datasets).count());
+
+        let _ = db.cleanup().await;
+    }
+
+    #[tokio::test]
+    async fn test_region_allocation_is_idempotent() {
+        let logctx =
+            dev::test_setup_log("test_region_allocation_is_idempotent");
+        let mut db = dev::test_setup_database(&logctx.log).await;
+        let cfg = db::Config { url: db.pg_config().clone() };
+        let pool = db::Pool::new(&cfg);
+        let datastore = DataStore::new(Arc::new(pool));
+
+        // Create a sled...
+        let sled_id = create_test_sled(&datastore).await;
+
+        // ... and a zpool within that sled...
+        let zpool_id = create_test_zpool(&datastore, sled_id).await;
+
+        // ... and datasets within that zpool.
+        let dataset_count = REGION_REDUNDANCY_THRESHOLD;
+        let bogus_addr =
+            SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 8080);
+        let kind =
+            DatasetKind(crate::internal_api::params::DatasetKind::Crucible);
+        let dataset_ids: Vec<Uuid> =
+            (0..dataset_count).map(|_| Uuid::new_v4()).collect();
+        for id in &dataset_ids {
+            let dataset = Dataset::new(*id, zpool_id, bogus_addr, kind.clone());
+            datastore.dataset_upsert(dataset).await.unwrap();
+        }
+
+        // Allocate regions from the datasets for this disk.
+        let params = create_test_disk_create_params(
+            "disk",
+            ByteCount::from_mebibytes_u32(500),
+        );
+        let disk_id = Uuid::new_v4();
+        let mut dataset_and_regions1 = datastore.region_allocate(disk_id, &params)
+            .await
+            .unwrap();
+        let mut dataset_and_regions2 = datastore.region_allocate(disk_id, &params)
+            .await
+            .unwrap();
+
+        // Give them a consistent order so we can easily compare them.
+        let sort_vec = |v: &mut Vec<(Dataset, Region)>| {
+            v.sort_by(|(d1, r1), (d2, r2)| {
+                let order = d1.id().cmp(&d2.id());
+                match order {
+                    std::cmp::Ordering::Equal => r1.id().cmp(&r2.id()),
+                    _ => order
+                }
+            });
+        };
+        sort_vec(&mut dataset_and_regions1);
+        sort_vec(&mut dataset_and_regions2);
+
+        // Validate that the two calls to allocate return the same data.
+        assert_eq!(dataset_and_regions1.len(), dataset_and_regions2.len());
+        for i in 0..dataset_and_regions1.len() {
+            assert_eq!(
+                dataset_and_regions1[i],
+                dataset_and_regions2[i],
+            );
+        }
 
         let _ = db.cleanup().await;
     }

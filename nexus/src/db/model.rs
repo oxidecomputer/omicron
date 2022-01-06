@@ -521,7 +521,7 @@ impl_enum_type!(
     #[postgres(type_name = "dataset_kind", type_schema = "public")]
     pub struct DatasetKindEnum;
 
-    #[derive(Clone, Debug, AsExpression, FromSqlRow, Serialize, Deserialize)]
+    #[derive(Clone, Debug, AsExpression, FromSqlRow, Serialize, Deserialize, PartialEq)]
     #[sql_type = "DatasetKindEnum"]
     pub struct DatasetKind(pub internal_api::params::DatasetKind);
 
@@ -550,6 +550,7 @@ impl From<internal_api::params::DatasetKind> for DatasetKind {
     Asset,
     Deserialize,
     Serialize,
+    PartialEq,
 )]
 #[table_name = "dataset"]
 pub struct Dataset {
@@ -619,6 +620,7 @@ impl DatastoreCollection<Region> for Disk {
     Asset,
     Serialize,
     Deserialize,
+    PartialEq,
 )]
 #[table_name = "region"]
 pub struct Region {

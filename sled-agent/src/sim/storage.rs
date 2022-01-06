@@ -20,13 +20,23 @@ use uuid::Uuid;
 // service to a separate file.
 use super::http_entrypoints_storage::{CreateRegion, Region, RegionId, State};
 
-pub struct CrucibleDataInner {
+type CreateCallback = Box<dyn Fn(&CreateRegion) -> State + Send + 'static>;
+
+struct CrucibleDataInner {
     regions: HashMap<Uuid, Region>,
+    on_create: Option<CreateCallback>,
 }
 
 impl CrucibleDataInner {
     fn new() -> Self {
-        Self { regions: HashMap::new() }
+        Self {
+            regions: HashMap::new(),
+            on_create: None,
+        }
+    }
+
+    fn set_create_callback(&mut self, callback: CreateCallback) {
+        self.on_create = Some(callback);
     }
 
     fn list(&self) -> Vec<Region> {
@@ -35,6 +45,13 @@ impl CrucibleDataInner {
 
     fn create(&mut self, params: CreateRegion) -> Region {
         let id = Uuid::from_str(&params.id.0).unwrap();
+
+        let state = if let Some(on_create) = &self.on_create {
+            on_create(&params)
+        } else {
+            State::Requested
+        };
+
         let region = Region {
             id: params.id,
             volume_id: params.volume_id,
@@ -43,13 +60,12 @@ impl CrucibleDataInner {
             extent_count: params.extent_count,
             // NOTE: This is a lie - no server is running.
             port_number: 0,
-
-            // TODO: This should be "Started", we should control state
-            // transitions.
-//            state: State::Requested,
-            state: State::Created,
+            state,
         };
-        self.regions.insert(id, region.clone());
+        let old = self.regions.insert(id, region.clone());
+        if let Some(old) = old {
+            assert_eq!(old.id, region.id, "Region already exists, but with a different ID");
+        }
         region
     }
 
@@ -58,19 +74,33 @@ impl CrucibleDataInner {
         self.regions.get(&id).cloned()
     }
 
+    fn get_mut(&mut self, id: &RegionId) -> Option<&mut Region> {
+        let id = Uuid::from_str(&id.0).unwrap();
+        self.regions.get_mut(&id)
+    }
+
     fn delete(&mut self, id: RegionId) -> Option<Region> {
         let id = Uuid::from_str(&id.0).unwrap();
-        self.regions.remove(&id)
+        let mut region = self.regions.get_mut(&id)?;
+        region.state = State::Destroyed;
+        Some(region.clone())
     }
 }
 
+/// Represents a running Crucible Agent. Contains regions.
 pub struct CrucibleData {
     inner: Mutex<CrucibleDataInner>,
 }
 
 impl CrucibleData {
     fn new() -> Self {
-        Self { inner: Mutex::new(CrucibleDataInner::new()) }
+        Self {
+            inner: Mutex::new(CrucibleDataInner::new())
+        }
+    }
+
+    pub async fn set_create_callback(&self, callback: CreateCallback) {
+        self.inner.lock().await.set_create_callback(callback);
     }
 
     pub async fn list(&self) -> Vec<Region> {
@@ -88,17 +118,21 @@ impl CrucibleData {
     pub async fn delete(&self, id: RegionId) -> Option<Region> {
         self.inner.lock().await.delete(id)
     }
+
+    pub async fn set_state(&self, id: &RegionId, state: State) {
+        self.inner.lock().await.get_mut(id).expect("region does not exist").state = state;
+    }
 }
 
 /// A simulated Crucible Dataset.
 ///
 /// Contains both the data and the HTTP server.
-pub struct CrucibleDataset {
+pub struct CrucibleServer {
     server: dropshot::HttpServer<Arc<CrucibleData>>,
-    _data: Arc<CrucibleData>,
+    data: Arc<CrucibleData>,
 }
 
-impl CrucibleDataset {
+impl CrucibleServer {
     fn new(log: &Logger) -> Self {
         let data = Arc::new(CrucibleData::new());
         let config = dropshot::ConfigDropshot {
@@ -116,7 +150,7 @@ impl CrucibleDataset {
         .expect("Could not initialize server")
         .start();
 
-        CrucibleDataset { server, _data: data }
+        CrucibleServer { server, data }
     }
 
     fn address(&self) -> SocketAddr {
@@ -125,7 +159,7 @@ impl CrucibleDataset {
 }
 
 pub struct Zpool {
-    datasets: HashMap<Uuid, CrucibleDataset>,
+    datasets: HashMap<Uuid, CrucibleServer>,
 }
 
 impl Zpool {
@@ -133,8 +167,8 @@ impl Zpool {
         Zpool { datasets: HashMap::new() }
     }
 
-    pub fn insert_dataset(&mut self, log: &Logger, id: Uuid) -> &CrucibleDataset {
-        self.datasets.insert(id, CrucibleDataset::new(log));
+    pub fn insert_dataset(&mut self, log: &Logger, id: Uuid) -> &CrucibleServer {
+        self.datasets.insert(id, CrucibleServer::new(log));
         self.datasets.get(&id).expect("Failed to get the dataset we just inserted")
     }
 }
@@ -181,5 +215,19 @@ impl Storage {
         self.nexus_client.dataset_put(&zpool_id, &dataset_id, &request)
             .await
             .expect("Failed to notify Nexus about new Dataset");
+    }
+
+    pub async fn get_dataset(
+        &self,
+        zpool_id: Uuid,
+        dataset_id: Uuid
+    ) -> Arc<CrucibleData> {
+        self.zpools.get(&zpool_id)
+            .expect("Zpool does not exist")
+            .datasets
+            .get(&dataset_id)
+            .expect("Dataset does not exist")
+            .data
+            .clone()
     }
 }

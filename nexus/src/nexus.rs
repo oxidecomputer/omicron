@@ -767,6 +767,9 @@ impl Nexus {
          * address that.
          */
         self.db_datastore.project_delete_disk(opctx, authz_disk).await
+
+        // TODO: Call to crucible agents, requesting deletion.
+        // TODO: self.db_datastore.regions_hard_delete(disk.id)
     }
 
     /*

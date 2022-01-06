@@ -17,9 +17,7 @@ use super::storage::CrucibleData;
 
 type CrucibleAgentApiDescription = ApiDescription<Arc<CrucibleData>>;
 
-/**
- * Returns a description of the sled agent API
- */
+/// Returns a description of the Crucible Agent API.
 pub fn api() -> CrucibleAgentApiDescription {
     fn register_endpoints(
         api: &mut CrucibleAgentApiDescription,
