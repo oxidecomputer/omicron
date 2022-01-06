@@ -55,9 +55,18 @@ pub struct Context {
 impl Context {
     /// Returns the authenticated actor, if any
     pub fn actor(&self) -> Option<&Actor> {
+        self.actor_required().ok()
+    }
+
+    /// Returns the authenticated actor if present, Unauthenticated error otherwise
+    pub fn actor_required(&self) -> Result<&Actor, dropshot::HttpError> {
         match &self.kind {
-            Kind::Unauthenticated => None,
-            Kind::Authenticated(Details { actor }) => Some(actor),
+            Kind::Authenticated(Details { actor }) => Ok(actor),
+            Kind::Unauthenticated => Err(dropshot::HttpError::from(
+                omicron_common::api::external::Error::Unauthenticated {
+                    internal_message: "Actor required".to_string(),
+                },
+            )),
         }
     }
 

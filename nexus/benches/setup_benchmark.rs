@@ -6,6 +6,7 @@
 
 use criterion::{criterion_group, criterion_main, Criterion};
 use dropshot::test_util::LogContext;
+use nexus_test_utils::db::test_setup_database;
 use omicron_test_utils::dev;
 
 // This is the default wrapper around most Nexus integration tests.
@@ -19,7 +20,7 @@ async fn do_full_setup() {
 async fn do_crdb_setup() {
     let cfg = nexus_test_utils::load_test_config();
     let logctx = LogContext::new("crdb_setup", &cfg.log);
-    let mut db = dev::test_setup_database(&logctx.log).await;
+    let mut db = test_setup_database(&logctx.log).await;
     db.cleanup().await.unwrap();
 }
 

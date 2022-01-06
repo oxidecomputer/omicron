@@ -18,19 +18,7 @@ use dropshot::ConfigLogging;
 use dropshot::ConfigLoggingIfExists;
 use dropshot::ConfigLoggingLevel;
 use slog::Logger;
-use std::path::{Path, PathBuf};
-
-/// Path to the "seed" CockroachDB directory.
-///
-/// Populating CockroachDB unfortunately isn't free - creation of
-/// tables, indices, and users takes several seconds to complete.
-///
-/// By creating a "seed" version of the database, we can cut down
-/// on the time spent performing this operation. Instead, we opt
-/// to copy the database from this seed location.
-fn seed_dir() -> PathBuf {
-    std::env::temp_dir().join("crdb-base")
-}
+use std::path::Path;
 
 // Helper for copying all the files in one directory to another.
 fn copy_dir(
@@ -96,11 +84,10 @@ enum StorageSource {
 ///
 /// This is intended to optimize subsequent calls to [`test_setup_database`]
 /// by reducing the latency of populating the storage directory.
-pub async fn test_setup_database_seed(log: &Logger) {
-    let dir = seed_dir();
+pub async fn test_setup_database_seed(log: &Logger, dir: &Path) {
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
-    let mut db = setup_database(log, Some(&dir), StorageSource::Populate).await;
+    let mut db = setup_database(log, dir, StorageSource::Populate).await;
     db.cleanup().await.unwrap();
 
     // See https://github.com/cockroachdb/cockroach/issues/74231 for context on
@@ -117,18 +104,21 @@ pub async fn test_setup_database_seed(log: &Logger) {
 }
 
 /// Set up a [`db::CockroachInstance`] for running tests.
-pub async fn test_setup_database(log: &Logger) -> db::CockroachInstance {
-    setup_database(log, None, StorageSource::CopyFromSeed).await
+pub async fn test_setup_database(
+    log: &Logger,
+    dir: &Path,
+) -> db::CockroachInstance {
+    setup_database(log, dir, StorageSource::CopyFromSeed).await
 }
 
 async fn setup_database(
     log: &Logger,
-    store_dir: Option<&Path>,
+    seed_dir: &Path,
     storage_source: StorageSource,
 ) -> db::CockroachInstance {
     let builder = db::CockroachStarterBuilder::new();
-    let mut builder = if let Some(store_dir) = store_dir {
-        builder.store_dir(store_dir)
+    let mut builder = if matches!(storage_source, StorageSource::Populate) {
+        builder.store_dir(seed_dir)
     } else {
         builder
     };
@@ -143,12 +133,11 @@ async fn setup_database(
     // If we're going to copy the storage directory from the seed,
     // it is critical we do so before starting the DB.
     if matches!(storage_source, StorageSource::CopyFromSeed) {
-        let seed = seed_dir();
         info!(&log,
             "cockroach: copying from seed directory ({}) to storage directory ({})",
-            seed.to_string_lossy(), starter.store_dir().to_string_lossy(),
+            seed_dir.to_string_lossy(), starter.store_dir().to_string_lossy(),
         );
-        copy_dir(seed, starter.store_dir())
+        copy_dir(seed_dir, starter.store_dir())
             .expect("Cannot copy storage from seed directory");
     }
 

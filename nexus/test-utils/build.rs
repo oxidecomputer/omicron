@@ -4,6 +4,8 @@
 
 use dropshot::{test_util::LogContext, ConfigLogging, ConfigLoggingLevel};
 use omicron_test_utils::dev::test_setup_database_seed;
+use std::env;
+use std::path::Path;
 
 // Creates a "pre-populated" CockroachDB storage directory, which
 // subsequent tests can copy instead of creating themselves.
@@ -27,6 +29,9 @@ async fn main() {
         &ConfigLogging::StderrTerminal { level: ConfigLoggingLevel::Info },
     );
 
-    test_setup_database_seed(&logctx.log).await;
+    let seed =
+        Path::new(&env::var("OUT_DIR").expect("Missing output directory"))
+            .join("crdb-base");
+    test_setup_database_seed(&logctx.log, &seed).await;
     logctx.cleanup_successful();
 }

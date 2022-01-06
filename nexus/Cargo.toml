@@ -12,7 +12,7 @@ anyhow = "1.0"
 async-bb8-diesel = { git = "https://github.com/oxidecomputer/async-bb8-diesel", rev = "c849b717be" }
 async-trait = "0.1.51"
 bb8 = "0.7.1"
-cookie = "0.15"
+cookie = "0.16"
 crucible-agent-client = { git = "https://github.com/oxidecomputer/crucible", rev = "de022b8a" }
 # Tracking pending 2.0 version.
 diesel = { git = "https://github.com/diesel-rs/diesel", rev = "ce77c382", features = ["postgres", "r2d2", "chrono", "serde_json", "network-address", "uuid"] }
@@ -37,6 +37,7 @@ rand = "0.8.4"
 ref-cast = "1.0"
 reqwest = { version = "0.11.8", features = [ "json" ] }
 serde_json = "1.0"
+serde_urlencoded = "0.7.0"
 serde_with = "1.11.0"
 sled-agent-client = { path = "../sled-agent-client" }
 slog-dtrace = "0.2"
