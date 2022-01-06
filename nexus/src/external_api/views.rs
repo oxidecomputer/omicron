@@ -119,10 +119,10 @@ pub struct VpcSubnet {
     // how to do the validation of user-specified CIDR blocks, or how to create a block if one is
     // not given.
     /** The IPv4 subnet CIDR block. */
-    pub ipv4_block: Option<Ipv4Net>,
+    pub ipv4_block: Ipv4Net,
 
     /** The IPv6 subnet CIDR block. */
-    pub ipv6_block: Option<Ipv6Net>,
+    pub ipv6_block: Ipv6Net,
 }
 
 impl Into<VpcSubnet> for model::VpcSubnet {
@@ -130,8 +130,8 @@ impl Into<VpcSubnet> for model::VpcSubnet {
         VpcSubnet {
             identity: self.identity(),
             vpc_id: self.vpc_id,
-            ipv4_block: self.ipv4_block.map(|ip| ip.into()),
-            ipv6_block: self.ipv6_block.map(|ip| ip.into()),
+            ipv4_block: self.ipv4_block.into(),
+            ipv6_block: self.ipv6_block.into(),
         }
     }
 }

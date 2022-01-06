@@ -11,7 +11,7 @@ use http::method::Method;
 use http::StatusCode;
 use omicron_common::api::external::{
     ByteCount, IdentityMetadataCreateParams, IdentityMetadataUpdateParams,
-    Instance, InstanceCpuCount, Ipv4Net, NetworkInterface,
+    Instance, InstanceCpuCount, Ipv4Net, Ipv6Net, NetworkInterface,
 };
 use omicron_nexus::external_api::params;
 use std::net::IpAddr;
@@ -88,14 +88,15 @@ async fn test_subnet_allocation(cptestctx: &ControlPlaneTestContext) {
         "/organizations/{}/projects/{}/vpcs/default/subnets/default",
         organization_name, project_name
     );
-    let subnet = "192.168.42.0/29".parse().unwrap();
+    let ipv4_block = "192.168.42.0/29".parse().unwrap();
+    let ipv6_block = "fd12:3456::/64".parse().unwrap();
     let subnet_update = params::VpcSubnetUpdate {
         identity: IdentityMetadataUpdateParams {
             name: Some("default".parse().unwrap()),
             description: None,
         },
-        ipv4_block: Some(Ipv4Net(subnet)),
-        ipv6_block: None,
+        ipv4_block: Ipv4Net(ipv4_block),
+        ipv6_block: Ipv6Net(ipv6_block),
     };
     client
         .make_request(

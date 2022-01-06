@@ -233,8 +233,8 @@ table! {
         time_modified -> Timestamptz,
         time_deleted -> Nullable<Timestamptz>,
         vpc_id -> Uuid,
-        ipv4_block -> Nullable<Inet>,
-        ipv6_block -> Nullable<Inet>,
+        ipv4_block -> Inet,
+        ipv6_block -> Inet,
     }
 }
 

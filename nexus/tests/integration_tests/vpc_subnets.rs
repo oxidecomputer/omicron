@@ -72,10 +72,8 @@ async fn test_vpc_subnets(cptestctx: &ControlPlaneTestContext) {
     assert_eq!(error.message, "not found: vpc-subnet with name \"subnet1\"");
 
     /* Create a VPC Subnet. */
-    let ipv4_block =
-        Some(Ipv4Net("10.1.9.32/16".parse::<Ipv4Network>().unwrap()));
-    let ipv6_block =
-        Some(Ipv6Net("2001:db8::0/96".parse::<Ipv6Network>().unwrap()));
+    let ipv4_block = Ipv4Net("10.1.9.32/16".parse::<Ipv4Network>().unwrap());
+    let ipv6_block = Ipv6Net("2001:db8::0/96".parse::<Ipv6Network>().unwrap());
     let new_subnet = params::VpcSubnetCreate {
         identity: IdentityMetadataCreateParams {
             name: subnet_name.parse().unwrap(),
@@ -146,16 +144,16 @@ async fn test_vpc_subnets(cptestctx: &ControlPlaneTestContext) {
             name: subnet2_name.parse().unwrap(),
             description: "it's also below the net".to_string(),
         },
-        ipv4_block: None,
-        ipv6_block: None,
+        ipv4_block,
+        ipv6_block,
     };
     let subnet2: VpcSubnet =
         objects_post(&client, &subnets_url, new_subnet.clone()).await;
     assert_eq!(subnet2.identity.name, subnet2_name);
     assert_eq!(subnet2.identity.description, "it's also below the net");
     assert_eq!(subnet2.vpc_id, vpc.identity.id);
-    assert_eq!(subnet2.ipv4_block, None);
-    assert_eq!(subnet2.ipv6_block, None);
+    assert_eq!(subnet2.ipv4_block, ipv4_block);
+    assert_eq!(subnet2.ipv6_block, ipv6_block);
 
     // subnets list should now have two in it
     let subnets =
@@ -165,13 +163,17 @@ async fn test_vpc_subnets(cptestctx: &ControlPlaneTestContext) {
     subnets_eq(&subnets[1], &subnet2);
 
     // update first subnet
+    let new_ipv4_block =
+        Ipv4Net("10.1.9.33/16".parse::<Ipv4Network>().unwrap());
+    let new_ipv6_block =
+        Ipv6Net("2001:db9::0/96".parse::<Ipv6Network>().unwrap());
     let update_params = params::VpcSubnetUpdate {
         identity: IdentityMetadataUpdateParams {
             name: Some("new-name".parse().unwrap()),
             description: Some("another description".to_string()),
         },
-        ipv4_block: None,
-        ipv6_block: None,
+        ipv4_block: new_ipv4_block,
+        ipv6_block: new_ipv6_block,
     };
     client
         .make_request(
@@ -245,8 +247,8 @@ async fn test_vpc_subnets(cptestctx: &ControlPlaneTestContext) {
         "it's also below the net"
     );
     assert_eq!(subnet_same_name.vpc_id, vpc2.identity.id);
-    assert_eq!(subnet_same_name.ipv4_block, None);
-    assert_eq!(subnet_same_name.ipv6_block, None);
+    assert_eq!(subnet_same_name.ipv4_block, ipv4_block);
+    assert_eq!(subnet_same_name.ipv6_block, ipv6_block);
 }
 
 fn subnets_eq(sn1: &VpcSubnet, sn2: &VpcSubnet) {

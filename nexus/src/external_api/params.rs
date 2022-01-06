@@ -127,8 +127,8 @@ pub struct VpcUpdate {
 pub struct VpcSubnetCreate {
     #[serde(flatten)]
     pub identity: IdentityMetadataCreateParams,
-    pub ipv4_block: Option<Ipv4Net>,
-    pub ipv6_block: Option<Ipv6Net>,
+    pub ipv4_block: Ipv4Net,
+    pub ipv6_block: Ipv6Net,
 }
 
 /**
@@ -139,8 +139,8 @@ pub struct VpcSubnetCreate {
 pub struct VpcSubnetUpdate {
     #[serde(flatten)]
     pub identity: IdentityMetadataUpdateParams,
-    pub ipv4_block: Option<Ipv4Net>,
-    pub ipv6_block: Option<Ipv6Net>,
+    pub ipv4_block: Ipv4Net,
+    pub ipv6_block: Ipv6Net,
 }
 
 /*

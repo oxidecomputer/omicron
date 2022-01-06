@@ -231,7 +231,7 @@ mod test {
     use diesel::pg::Pg;
     use diesel::prelude::*;
     use omicron_common::api::external::{
-        IdentityMetadataCreateParams, Ipv4Net, MacAddr,
+        IdentityMetadataCreateParams, Ipv4Net, Ipv6Net, MacAddr,
     };
     use std::convert::TryInto;
 
@@ -249,7 +249,8 @@ mod test {
         let subnet_id =
             uuid::Uuid::parse_str("223cb7f7-0d3a-4a4e-a5e1-ad38ecb785d3")
                 .unwrap();
-        let block: ipnetwork::Ipv4Network = "192.168.1.0/24".parse().unwrap();
+        let ipv4_block = "192.168.1.0/24".parse().unwrap();
+        let ipv6_block = "fd12:3456::/64".parse().unwrap();
         let subnet = VpcSubnet::new(
             subnet_id,
             vpc_id,
@@ -258,8 +259,8 @@ mod test {
                     name: "test-subnet".to_string().try_into().unwrap(),
                     description: "subnet description".to_string(),
                 },
-                ipv4_block: Some(Ipv4Net(block.clone()).into()),
-                ipv6_block: None,
+                ipv4_block: Ipv4Net(ipv4_block),
+                ipv6_block: Ipv6Net(ipv6_block),
             },
         );
         let mac =
@@ -281,7 +282,7 @@ mod test {
         );
         let select = AllocateIpQuery {
             interface,
-            block: block.into(),
+            block: ipv4_block.into(),
             now: DateTime::<Utc>::from_utc(
                 NaiveDateTime::from_timestamp(0, 0),
                 Utc,

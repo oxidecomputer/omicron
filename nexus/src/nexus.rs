@@ -1592,14 +1592,14 @@ impl Nexus {
                         params.identity.name
                     ),
                 },
-                ipv4_block: Some(Ipv4Net(
+                ipv4_block: Ipv4Net(
                     // TODO: This value should be replaced with the correct ipv4 range for a default subnet
                     "10.1.9.32/16".parse::<Ipv4Network>().unwrap(),
-                )),
-                ipv6_block: Some(Ipv6Net(
+                ),
+                ipv6_block: Ipv6Net(
                     // TODO: This value should be replaced w/ the first `/64` ipv6 from the address block
                     "2001:db8::0/64".parse::<Ipv6Network>().unwrap(),
-                )),
+                ),
             },
         );
         self.db_datastore.vpc_create_subnet(subnet).await?;

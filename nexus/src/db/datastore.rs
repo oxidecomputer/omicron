@@ -1090,9 +1090,7 @@ impl DataStore {
             }
             // Insert and allocate an IP address
             None => {
-                let block = interface.subnet.ipv4_block.ok_or_else(|| {
-                    Error::internal_error("assuming subnets all have v4 block")
-                })?;
+                let block = interface.subnet.ipv4_block;
                 let allocation_query = AllocateIpQuery {
                     block: ipnetwork::IpNetwork::V4(block.0 .0),
                     interface,

@@ -1162,8 +1162,8 @@ pub struct VpcSubnet {
     identity: VpcSubnetIdentity,
 
     pub vpc_id: Uuid,
-    pub ipv4_block: Option<Ipv4Net>,
-    pub ipv6_block: Option<Ipv6Net>,
+    pub ipv4_block: Ipv4Net,
+    pub ipv6_block: Ipv6Net,
 }
 
 impl VpcSubnet {
@@ -1176,8 +1176,8 @@ impl VpcSubnet {
         Self {
             identity,
             vpc_id,
-            ipv4_block: params.ipv4_block.map(Ipv4Net),
-            ipv6_block: params.ipv6_block.map(Ipv6Net),
+            ipv4_block: Ipv4Net(params.ipv4_block),
+            ipv6_block: Ipv6Net(params.ipv6_block),
         }
     }
 }
@@ -1198,8 +1198,8 @@ impl From<params::VpcSubnetUpdate> for VpcSubnetUpdate {
             name: params.identity.name.map(Name),
             description: params.identity.description,
             time_modified: Utc::now(),
-            ipv4_block: params.ipv4_block.map(Ipv4Net),
-            ipv6_block: params.ipv6_block.map(Ipv6Net),
+            ipv4_block: Some(Ipv4Net(params.ipv4_block)),
+            ipv6_block: Some(Ipv6Net(params.ipv6_block)),
         }
     }
 }
