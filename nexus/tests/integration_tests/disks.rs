@@ -89,32 +89,29 @@ impl DiskTest {
 
         // Create multiple Datasets within that Zpool.
         let dataset_count = 3;
-        let dataset_ids: Vec<_> = (0..dataset_count).map(|_| Uuid::new_v4()).collect();
+        let dataset_ids: Vec<_> =
+            (0..dataset_count).map(|_| Uuid::new_v4()).collect();
         for id in &dataset_ids {
             sled_agent.create_crucible_dataset(zpool_id, *id).await;
 
             // By default, regions are created immediately.
             let crucible = sled_agent.get_crucible_dataset(zpool_id, *id).await;
-            crucible.set_create_callback(Box::new(|_| {
-                RegionState::Created
-            })).await;
+            crucible
+                .set_create_callback(Box::new(|_| RegionState::Created))
+                .await;
         }
 
         // Create a project for testing.
         let project_id = create_org_and_project(&client).await;
 
-        Self {
-            sled_agent,
-            zpool_id,
-            zpool_size,
-            dataset_ids,
-            project_id,
-        }
+        Self { sled_agent, zpool_id, zpool_size, dataset_ids, project_id }
     }
 }
 
 #[nexus_test]
-async fn test_disk_not_found_before_creation(cptestctx: &ControlPlaneTestContext) {
+async fn test_disk_not_found_before_creation(
+    cptestctx: &ControlPlaneTestContext,
+) {
     let client = &cptestctx.external_client;
     DiskTest::new(&cptestctx).await;
     let disks_url = get_disks_url();
@@ -128,7 +125,10 @@ async fn test_disk_not_found_before_creation(cptestctx: &ControlPlaneTestContext
     let error = client
         .make_request_error(Method::GET, &disk_url, StatusCode::NOT_FOUND)
         .await;
-    assert_eq!(error.message, format!("not found: disk with name \"{}\"", DISK_NAME));
+    assert_eq!(
+        error.message,
+        format!("not found: disk with name \"{}\"", DISK_NAME)
+    );
 
     // We should also get a 404 if we delete one.
     let error = NexusRequest::new(
@@ -141,11 +141,16 @@ async fn test_disk_not_found_before_creation(cptestctx: &ControlPlaneTestContext
     .expect("unexpected success")
     .parsed_body::<dropshot::HttpErrorResponseBody>()
     .unwrap();
-    assert_eq!(error.message, format!("not found: disk with name \"{}\"", DISK_NAME));
+    assert_eq!(
+        error.message,
+        format!("not found: disk with name \"{}\"", DISK_NAME)
+    );
 }
 
 #[nexus_test]
-async fn test_disk_create_attach_detach_delete(cptestctx: &ControlPlaneTestContext) {
+async fn test_disk_create_attach_detach_delete(
+    cptestctx: &ControlPlaneTestContext,
+) {
     let client = &cptestctx.external_client;
     let test = DiskTest::new(&cptestctx).await;
     let nexus = &cptestctx.server.apictx.nexus;
@@ -204,18 +209,15 @@ async fn test_disk_create_attach_detach_delete(cptestctx: &ControlPlaneTestConte
 
     // Verify that there are no disks attached to the instance, and specifically
     // that our disk is not attached to this instance.
-    let url_instance_disks = get_instance_disks_url(
-        instance.identity.name.as_str()
-    );
+    let url_instance_disks =
+        get_instance_disks_url(instance.identity.name.as_str());
     let disks = objects_list_page::<Disk>(&client, &url_instance_disks).await;
     assert_eq!(disks.items.len(), 0);
 
-    let url_instance_attach_disk = get_disk_attach_url(
-        instance.identity.name.as_str(),
-    );
-    let url_instance_detach_disk = get_disk_detach_url(
-        instance.identity.name.as_str(),
-    );
+    let url_instance_attach_disk =
+        get_disk_attach_url(instance.identity.name.as_str());
+    let url_instance_detach_disk =
+        get_disk_detach_url(instance.identity.name.as_str());
 
     // Start attaching the disk to the instance.
     let mut response = client
@@ -298,11 +300,16 @@ async fn test_disk_create_attach_detach_delete(cptestctx: &ControlPlaneTestConte
     let error = client
         .make_request_error(Method::GET, &disk_url, StatusCode::NOT_FOUND)
         .await;
-    assert_eq!(error.message, format!("not found: disk with name \"{}\"", DISK_NAME));
+    assert_eq!(
+        error.message,
+        format!("not found: disk with name \"{}\"", DISK_NAME)
+    );
 }
 
 #[nexus_test]
-async fn test_disk_create_disk_that_already_exists_fails(cptestctx: &ControlPlaneTestContext) {
+async fn test_disk_create_disk_that_already_exists_fails(
+    cptestctx: &ControlPlaneTestContext,
+) {
     let client = &cptestctx.external_client;
     DiskTest::new(&cptestctx).await;
     let disks_url = get_disks_url();
@@ -329,7 +336,10 @@ async fn test_disk_create_disk_that_already_exists_fails(cptestctx: &ControlPlan
             StatusCode::BAD_REQUEST,
         )
         .await;
-    assert_eq!(error.message, format!("already exists: disk \"{}\"", DISK_NAME));
+    assert_eq!(
+        error.message,
+        format!("already exists: disk \"{}\"", DISK_NAME)
+    );
 
     // List disks again and expect to find the one we just created.
     let disks = disks_list(&client, &disks_url).await;
@@ -375,18 +385,15 @@ async fn test_disk_move_between_instances(cptestctx: &ControlPlaneTestContext) {
 
     // Verify that there are no disks attached to the instance, and specifically
     // that our disk is not attached to this instance.
-    let url_instance_disks = get_instance_disks_url(
-        instance.identity.name.as_str()
-    );
+    let url_instance_disks =
+        get_instance_disks_url(instance.identity.name.as_str());
     let disks = objects_list_page::<Disk>(&client, &url_instance_disks).await;
     assert_eq!(disks.items.len(), 0);
 
-    let url_instance_attach_disk = get_disk_attach_url(
-        instance.identity.name.as_str(),
-    );
-    let url_instance_detach_disk = get_disk_detach_url(
-        instance.identity.name.as_str(),
-    );
+    let url_instance_attach_disk =
+        get_disk_attach_url(instance.identity.name.as_str());
+    let url_instance_detach_disk =
+        get_disk_detach_url(instance.identity.name.as_str());
 
     // Start attaching the disk to the instance.
     let mut response = client
@@ -442,12 +449,10 @@ async fn test_disk_move_between_instances(cptestctx: &ControlPlaneTestContext) {
         },
     )
     .await;
-    let url_instance2_attach_disk = get_disk_attach_url(
-        instance2.identity.name.as_str(),
-    );
-    let url_instance2_detach_disk = get_disk_detach_url(
-        instance2.identity.name.as_str(),
-    );
+    let url_instance2_attach_disk =
+        get_disk_attach_url(instance2.identity.name.as_str());
+    let url_instance2_detach_disk =
+        get_disk_detach_url(instance2.identity.name.as_str());
     let error = client
         .make_request_error_body(
             Method::POST,
@@ -458,8 +463,11 @@ async fn test_disk_move_between_instances(cptestctx: &ControlPlaneTestContext) {
         .await;
     assert_eq!(
         error.message,
-        format!("cannot attach disk \"{}\": disk is attached to another \
-         instance", DISK_NAME)
+        format!(
+            "cannot attach disk \"{}\": disk is attached to another \
+         instance",
+            DISK_NAME
+        )
     );
 
     let attached_disk = disk_get(&client, &disk_url).await;
@@ -489,8 +497,11 @@ async fn test_disk_move_between_instances(cptestctx: &ControlPlaneTestContext) {
         .await;
     assert_eq!(
         error.message,
-        format!("cannot attach disk \"{}\": disk is attached to another \
-         instance", DISK_NAME)
+        format!(
+            "cannot attach disk \"{}\": disk is attached to another \
+         instance",
+            DISK_NAME
+        )
     );
 
     // It's even illegal to attach this disk back to the same instance.
@@ -505,8 +516,11 @@ async fn test_disk_move_between_instances(cptestctx: &ControlPlaneTestContext) {
     // TODO-debug the error message here is misleading.
     assert_eq!(
         error.message,
-        format!("cannot attach disk \"{}\": disk is attached to another \
-         instance", DISK_NAME)
+        format!(
+            "cannot attach disk \"{}\": disk is attached to another \
+         instance",
+            DISK_NAME
+        )
     );
 
     // However, there's no problem attempting to detach it again.
@@ -578,8 +592,11 @@ async fn test_disk_move_between_instances(cptestctx: &ControlPlaneTestContext) {
         .await;
     assert_eq!(
         error.message,
-        format!("cannot attach disk \"{}\": disk is attached to another \
-         instance", DISK_NAME)
+        format!(
+            "cannot attach disk \"{}\": disk is attached to another \
+         instance",
+            DISK_NAME
+        )
     );
 
     // It's fine to attempt another attachment to the same instance.
@@ -652,11 +669,16 @@ async fn test_disk_move_between_instances(cptestctx: &ControlPlaneTestContext) {
     let error = client
         .make_request_error(Method::GET, &disk_url, StatusCode::NOT_FOUND)
         .await;
-    assert_eq!(error.message, format!("not found: disk with name \"{}\"", DISK_NAME));
+    assert_eq!(
+        error.message,
+        format!("not found: disk with name \"{}\"", DISK_NAME)
+    );
 }
 
 #[nexus_test]
-async fn test_disk_deletion_requires_authentication(cptestctx: &ControlPlaneTestContext) {
+async fn test_disk_deletion_requires_authentication(
+    cptestctx: &ControlPlaneTestContext,
+) {
     let client = &cptestctx.external_client;
     DiskTest::new(&cptestctx).await;
     let disks_url = get_disks_url();
@@ -698,7 +720,9 @@ async fn test_disk_deletion_requires_authentication(cptestctx: &ControlPlaneTest
 }
 
 #[nexus_test]
-async fn test_disk_creation_region_requested_then_started(cptestctx: &ControlPlaneTestContext) {
+async fn test_disk_creation_region_requested_then_started(
+    cptestctx: &ControlPlaneTestContext,
+) {
     let client = &cptestctx.external_client;
     let test = DiskTest::new(&cptestctx).await;
     let disks_url = get_disks_url();
@@ -707,16 +731,19 @@ async fn test_disk_creation_region_requested_then_started(cptestctx: &ControlPla
     // no matter what regions get requested, they'll always *start* as
     // "Requested", and transition to "Created" on the second call.
     for id in &test.dataset_ids {
-        let crucible = test.sled_agent.get_crucible_dataset(test.zpool_id, *id).await;
+        let crucible =
+            test.sled_agent.get_crucible_dataset(test.zpool_id, *id).await;
         let called = std::sync::atomic::AtomicBool::new(false);
-        crucible.set_create_callback(Box::new(move |_| {
-            if !called.load(std::sync::atomic::Ordering::SeqCst) {
-                called.store(true, std::sync::atomic::Ordering::SeqCst);
-                RegionState::Requested
-            } else {
-                RegionState::Created
-            }
-        })).await;
+        crucible
+            .set_create_callback(Box::new(move |_| {
+                if !called.load(std::sync::atomic::Ordering::SeqCst) {
+                    called.store(true, std::sync::atomic::Ordering::SeqCst);
+                    RegionState::Requested
+                } else {
+                    RegionState::Created
+                }
+            }))
+            .await;
     }
 
     // The disk is created successfully, even when this "requested" -> "started"
@@ -732,20 +759,20 @@ async fn test_disk_creation_region_requested_then_started(cptestctx: &ControlPla
     let _: Disk = objects_post(&client, &disks_url, new_disk.clone()).await;
 }
 
-
 // Tests that region allocation failure causes disk allocation to fail.
 #[nexus_test]
-async fn test_disk_region_creation_failure(cptestctx: &ControlPlaneTestContext) {
+async fn test_disk_region_creation_failure(
+    cptestctx: &ControlPlaneTestContext,
+) {
     let client = &cptestctx.external_client;
     let test = DiskTest::new(&cptestctx).await;
 
     // Before we create a disk, set the response from the Crucible Agent:
     // no matter what regions get requested, they'll always fail.
     for id in &test.dataset_ids {
-        let crucible = test.sled_agent.get_crucible_dataset(test.zpool_id, *id).await;
-        crucible.set_create_callback(Box::new(|_| {
-            RegionState::Failed
-        })).await;
+        let crucible =
+            test.sled_agent.get_crucible_dataset(test.zpool_id, *id).await;
+        crucible.set_create_callback(Box::new(|_| RegionState::Failed)).await;
     }
 
     let disk_size = ByteCount::from_gibibytes_u32(3);
@@ -790,7 +817,8 @@ async fn test_disk_region_creation_failure(cptestctx: &ControlPlaneTestContext) 
 
     // After the failed allocation, regions will exist, but be "Failed".
     for id in &test.dataset_ids {
-        let crucible = test.sled_agent.get_crucible_dataset(test.zpool_id, *id).await;
+        let crucible =
+            test.sled_agent.get_crucible_dataset(test.zpool_id, *id).await;
         let regions = crucible.list().await;
         assert_eq!(regions.len(), 1);
         assert_eq!(regions[0].state, RegionState::Failed);
@@ -800,10 +828,9 @@ async fn test_disk_region_creation_failure(cptestctx: &ControlPlaneTestContext) 
     // unwinding the failed disk allocation, by performing another disk
     // allocation that should succeed.
     for id in &test.dataset_ids {
-        let crucible = test.sled_agent.get_crucible_dataset(test.zpool_id, *id).await;
-        crucible.set_create_callback(Box::new(|_| {
-            RegionState::Created
-        })).await;
+        let crucible =
+            test.sled_agent.get_crucible_dataset(test.zpool_id, *id).await;
+        crucible.set_create_callback(Box::new(|_| RegionState::Created)).await;
     }
     let _: Disk = objects_post(&client, &disks_url, new_disk.clone()).await;
 }

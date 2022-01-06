@@ -749,16 +749,14 @@ impl Nexus {
         opctx.authorize(authz::Action::Query, authz::DATABASE).await?;
         opctx.authorize(authz::Action::Delete, authz_disk).await?;
 
-        let saga_params = Arc::new(sagas::ParamsDiskDelete {
-            disk_id: disk.id()
-        });
-        self
-            .execute_saga(
-                Arc::clone(&sagas::SAGA_DISK_DELETE_TEMPLATE),
-                sagas::SAGA_DISK_DELETE_NAME,
-                saga_params,
-            )
-            .await?;
+        let saga_params =
+            Arc::new(sagas::ParamsDiskDelete { disk_id: disk.id() });
+        self.execute_saga(
+            Arc::clone(&sagas::SAGA_DISK_DELETE_TEMPLATE),
+            sagas::SAGA_DISK_DELETE_NAME,
+            saga_params,
+        )
+        .await?;
 
         Ok(())
     }

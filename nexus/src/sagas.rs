@@ -36,6 +36,7 @@ use omicron_common::api::internal::sled_agent::InstanceHardware;
 use omicron_common::backoff::{self, BackoffError};
 use serde::Deserialize;
 use serde::Serialize;
+use slog::Logger;
 use std::collections::BTreeMap;
 use std::convert::TryFrom;
 use std::sync::Arc;
@@ -47,7 +48,6 @@ use steno::SagaTemplate;
 use steno::SagaTemplateBuilder;
 use steno::SagaTemplateGeneric;
 use steno::SagaType;
-use slog::Logger;
 use uuid::Uuid;
 
 /*
@@ -370,19 +370,13 @@ fn saga_disk_create() -> SagaTemplate<SagaDiskCreate> {
     template_builder.append(
         "datasets_and_regions",
         "AllocRegions",
-        ActionFunc::new_action(
-            sdc_alloc_regions,
-            sdc_alloc_regions_undo,
-        ),
+        ActionFunc::new_action(sdc_alloc_regions, sdc_alloc_regions_undo),
     );
 
     template_builder.append(
         "regions_ensure",
         "RegionsEnsure",
-        ActionFunc::new_action(
-            sdc_regions_ensure,
-            sdc_regions_ensure_undo,
-        ),
+        ActionFunc::new_action(sdc_regions_ensure, sdc_regions_ensure_undo),
     );
 
     template_builder.append(
@@ -433,10 +427,7 @@ async fn sdc_create_disk_record_undo(
     let osagactx = sagactx.user_data();
 
     let disk_id = sagactx.lookup::<Uuid>("disk_id")?;
-    osagactx
-        .datastore()
-        .project_delete_disk_no_auth(&disk_id)
-        .await?;
+    osagactx.datastore().project_delete_disk_no_auth(&disk_id).await?;
     Ok(())
 }
 
@@ -466,9 +457,7 @@ async fn sdc_alloc_regions_undo(
     let osagactx = sagactx.user_data();
 
     let disk_id = sagactx.lookup::<Uuid>("disk_id")?;
-    osagactx.datastore()
-        .regions_hard_delete(disk_id)
-        .await?;
+    osagactx.datastore().regions_hard_delete(disk_id).await?;
     Ok(())
 }
 
@@ -508,7 +497,10 @@ async fn ensure_region_in_dataset(
     };
 
     let log_create_failure = |_, delay| {
-        warn!(log, "Region requested, not yet created. Retrying in {:?}", delay);
+        warn!(
+            log,
+            "Region requested, not yet created. Retrying in {:?}", delay
+        );
     };
 
     let region = backoff::retry_notify(
@@ -605,7 +597,6 @@ impl SagaType for SagaDiskDelete {
     type ExecContextType = Arc<SagaContext>;
 }
 
-
 fn saga_disk_delete() -> SagaTemplate<SagaDiskDelete> {
     let mut template_builder = SagaTemplateBuilder::new();
 
@@ -636,7 +627,8 @@ async fn sdd_delete_disk_record(
     let osagactx = sagactx.user_data();
     let params = sagactx.saga_params();
 
-    osagactx.datastore()
+    osagactx
+        .datastore()
         .project_delete_disk_no_auth(&params.disk_id)
         .await
         .map_err(ActionError::action_failed)?;
@@ -649,7 +641,8 @@ async fn sdd_delete_regions(
     let osagactx = sagactx.user_data();
     let params = sagactx.saga_params();
 
-    let datasets_and_regions = osagactx.datastore()
+    let datasets_and_regions = osagactx
+        .datastore()
         .get_allocated_regions(params.disk_id)
         .await
         .map_err(ActionError::action_failed)?;
@@ -664,7 +657,8 @@ async fn sdd_delete_region_records(
 ) -> Result<(), ActionError> {
     let osagactx = sagactx.user_data();
     let params = sagactx.saga_params();
-    osagactx.datastore()
+    osagactx
+        .datastore()
         .regions_hard_delete(params.disk_id)
         .await
         .map_err(ActionError::action_failed)?;

@@ -5,8 +5,10 @@
 //! Simulated sled agent storage implementation
 
 use futures::lock::Mutex;
+use nexus_client::types::{
+    ByteCount, DatasetKind, DatasetPutRequest, ZpoolPutRequest,
+};
 use nexus_client::Client as NexusClient;
-use nexus_client::types::{ByteCount, DatasetKind, DatasetPutRequest, ZpoolPutRequest};
 use slog::Logger;
 use std::collections::HashMap;
 use std::net::SocketAddr;
@@ -29,10 +31,7 @@ struct CrucibleDataInner {
 
 impl CrucibleDataInner {
     fn new() -> Self {
-        Self {
-            regions: HashMap::new(),
-            on_create: None,
-        }
+        Self { regions: HashMap::new(), on_create: None }
     }
 
     fn set_create_callback(&mut self, callback: CreateCallback) {
@@ -64,7 +63,10 @@ impl CrucibleDataInner {
         };
         let old = self.regions.insert(id, region.clone());
         if let Some(old) = old {
-            assert_eq!(old.id, region.id, "Region already exists, but with a different ID");
+            assert_eq!(
+                old.id, region.id,
+                "Region already exists, but with a different ID"
+            );
         }
         region
     }
@@ -94,9 +96,7 @@ pub struct CrucibleData {
 
 impl CrucibleData {
     fn new() -> Self {
-        Self {
-            inner: Mutex::new(CrucibleDataInner::new())
-        }
+        Self { inner: Mutex::new(CrucibleDataInner::new()) }
     }
 
     pub async fn set_create_callback(&self, callback: CreateCallback) {
@@ -120,7 +120,12 @@ impl CrucibleData {
     }
 
     pub async fn set_state(&self, id: &RegionId, state: State) {
-        self.inner.lock().await.get_mut(id).expect("region does not exist").state = state;
+        self.inner
+            .lock()
+            .await
+            .get_mut(id)
+            .expect("region does not exist")
+            .state = state;
     }
 }
 
@@ -167,9 +172,15 @@ impl Zpool {
         Zpool { datasets: HashMap::new() }
     }
 
-    pub fn insert_dataset(&mut self, log: &Logger, id: Uuid) -> &CrucibleServer {
+    pub fn insert_dataset(
+        &mut self,
+        log: &Logger,
+        id: Uuid,
+    ) -> &CrucibleServer {
         self.datasets.insert(id, CrucibleServer::new(log));
-        self.datasets.get(&id).expect("Failed to get the dataset we just inserted")
+        self.datasets
+            .get(&id)
+            .expect("Failed to get the dataset we just inserted")
     }
 }
 
@@ -182,7 +193,11 @@ pub struct Storage {
 }
 
 impl Storage {
-    pub fn new(sled_id: Uuid, nexus_client: Arc<NexusClient>, log: Logger) -> Self {
+    pub fn new(
+        sled_id: Uuid,
+        nexus_client: Arc<NexusClient>,
+        log: Logger,
+    ) -> Self {
         Self { sled_id, nexus_client, log, zpools: HashMap::new() }
     }
 
@@ -192,10 +207,9 @@ impl Storage {
         self.zpools.insert(zpool_id, Zpool::new());
 
         // Notify Nexus
-        let request = ZpoolPutRequest {
-            size: ByteCount(size),
-        };
-        self.nexus_client.zpool_put(&self.sled_id, &zpool_id, &request)
+        let request = ZpoolPutRequest { size: ByteCount(size) };
+        self.nexus_client
+            .zpool_put(&self.sled_id, &zpool_id, &request)
             .await
             .expect("Failed to notify Nexus about new Zpool");
     }
@@ -203,7 +217,9 @@ impl Storage {
     /// Adds a Dataset to the sled's simulated storage and notifies Nexus.
     pub async fn insert_dataset(&mut self, zpool_id: Uuid, dataset_id: Uuid) {
         // Update our local data
-        let dataset = self.zpools.get_mut(&zpool_id)
+        let dataset = self
+            .zpools
+            .get_mut(&zpool_id)
             .expect("Zpool does not exist")
             .insert_dataset(&self.log, dataset_id);
 
@@ -212,7 +228,8 @@ impl Storage {
             address: dataset.address().to_string(),
             kind: DatasetKind::Crucible,
         };
-        self.nexus_client.dataset_put(&zpool_id, &dataset_id, &request)
+        self.nexus_client
+            .dataset_put(&zpool_id, &dataset_id, &request)
             .await
             .expect("Failed to notify Nexus about new Dataset");
     }
@@ -220,9 +237,10 @@ impl Storage {
     pub async fn get_dataset(
         &self,
         zpool_id: Uuid,
-        dataset_id: Uuid
+        dataset_id: Uuid,
     ) -> Arc<CrucibleData> {
-        self.zpools.get(&zpool_id)
+        self.zpools
+            .get(&zpool_id)
             .expect("Zpool does not exist")
             .datasets
             .get(&dataset_id)

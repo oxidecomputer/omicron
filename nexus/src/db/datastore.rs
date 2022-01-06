@@ -256,14 +256,12 @@ impl DataStore {
             .filter(region_dsl::disk_id.eq(disk_id))
             .inner_join(
                 dataset_dsl::dataset
-                    .on(region_dsl::dataset_id.eq(dataset_dsl::id))
+                    .on(region_dsl::dataset_id.eq(dataset_dsl::id)),
             )
             .select((Dataset::as_select(), Region::as_select()))
             .get_results_async::<(Dataset, Region)>(self.pool())
             .await
-            .map_err(|e| {
-                public_error_from_diesel_pool_shouldnt_fail(e)
-            })
+            .map_err(|e| public_error_from_diesel_pool_shouldnt_fail(e))
     }
 
     /// Idempotently allocates enough regions to back a disk.
@@ -315,7 +313,7 @@ impl DataStore {
                     .filter(region_dsl::disk_id.eq(disk_id))
                     .inner_join(
                         dataset_dsl::dataset
-                            .on(region_dsl::dataset_id.eq(dataset_dsl::id))
+                            .on(region_dsl::dataset_id.eq(dataset_dsl::id)),
                     )
                     .select((Dataset::as_select(), Region::as_select()))
                     .get_results::<(Dataset, Region)>(conn)?;
@@ -387,11 +385,8 @@ impl DataStore {
     }
 
     /// Deletes all regions backing a disk.
-    pub async fn regions_hard_delete(
-        &self,
-        disk_id: Uuid,
-    ) -> DeleteResult {
-        use db::schema::region::dsl as dsl;
+    pub async fn regions_hard_delete(&self, disk_id: Uuid) -> DeleteResult {
+        use db::schema::region::dsl;
 
         diesel::delete(dsl::region)
             .filter(dsl::disk_id.eq(disk_id))
@@ -1182,7 +1177,11 @@ impl DataStore {
     ) -> DeleteResult {
         let disk_id = disk_authz.id();
         opctx.authorize(authz::Action::Delete, disk_authz).await?;
-        self.project_delete_disk_internal(disk_id, self.pool_authorized(opctx).await?).await
+        self.project_delete_disk_internal(
+            disk_id,
+            self.pool_authorized(opctx).await?,
+        )
+        .await
     }
 
     // TODO: Delete me (this function, not the disk!), ensure all datastore
@@ -1223,7 +1222,8 @@ impl DataStore {
             api::external::DiskState::Creating,
         ];
 
-        let ok_to_delete_state_labels: Vec<_> = ok_to_delete_states.iter().map(|s| s.label()).collect();
+        let ok_to_delete_state_labels: Vec<_> =
+            ok_to_delete_states.iter().map(|s| s.label()).collect();
         let destroyed = api::external::DiskState::Destroyed.label();
 
         let result = diesel::update(dsl::disk)
@@ -1262,7 +1262,9 @@ impl DataStore {
                     // NOTE: This is a "catch-all" error case, more specific
                     // errors should be preferred as they're more actionable.
                     return Err(Error::InvalidRequest {
-                        message: String::from("disk exists, but cannot be deleted"),
+                        message: String::from(
+                            "disk exists, but cannot be deleted",
+                        ),
                     });
                 }
             }
@@ -2817,12 +2819,10 @@ mod test {
             ByteCount::from_mebibytes_u32(500),
         );
         let disk_id = Uuid::new_v4();
-        let mut dataset_and_regions1 = datastore.region_allocate(disk_id, &params)
-            .await
-            .unwrap();
-        let mut dataset_and_regions2 = datastore.region_allocate(disk_id, &params)
-            .await
-            .unwrap();
+        let mut dataset_and_regions1 =
+            datastore.region_allocate(disk_id, &params).await.unwrap();
+        let mut dataset_and_regions2 =
+            datastore.region_allocate(disk_id, &params).await.unwrap();
 
         // Give them a consistent order so we can easily compare them.
         let sort_vec = |v: &mut Vec<(Dataset, Region)>| {
@@ -2830,7 +2830,7 @@ mod test {
                 let order = d1.id().cmp(&d2.id());
                 match order {
                     std::cmp::Ordering::Equal => r1.id().cmp(&r2.id()),
-                    _ => order
+                    _ => order,
                 }
             });
         };
@@ -2840,10 +2840,7 @@ mod test {
         // Validate that the two calls to allocate return the same data.
         assert_eq!(dataset_and_regions1.len(), dataset_and_regions2.len());
         for i in 0..dataset_and_regions1.len() {
-            assert_eq!(
-                dataset_and_regions1[i],
-                dataset_and_regions2[i],
-            );
+            assert_eq!(dataset_and_regions1[i], dataset_and_regions2[i],);
         }
 
         let _ = db.cleanup().await;

@@ -18,6 +18,6 @@ mod sled_agent;
 mod storage;
 
 pub use config::{Config, SimMode};
+pub use http_entrypoints_storage::State as RegionState;
 pub use server::{run_server, Server};
 pub use sled_agent::SledAgent;
-pub use http_entrypoints_storage::State as RegionState;
