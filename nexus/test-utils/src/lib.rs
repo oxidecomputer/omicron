@@ -167,7 +167,6 @@ pub async fn test_setup_with_config(
     }
 }
 
-// TODO: We probably want to have the ability to expand this config.
 pub async fn start_sled_agent(
     log: Logger,
     nexus_address: SocketAddr,

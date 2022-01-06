@@ -16,10 +16,6 @@ use std::str::FromStr;
 use std::sync::Arc;
 use uuid::Uuid;
 
-// XXX Don't really like this import.
-//
-// Maybe refactor the "types" used by the HTTP
-// service to a separate file.
 use super::http_entrypoints_storage::{CreateRegion, Region, RegionId, State};
 
 type CreateCallback = Box<dyn Fn(&CreateRegion) -> State + Send + 'static>;

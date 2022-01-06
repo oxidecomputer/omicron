@@ -82,6 +82,7 @@ use crate::db::{
 };
 
 // Number of unique datasets required to back a region.
+// TODO: This should likely turn into a configuration option.
 const REGION_REDUNDANCY_THRESHOLD: usize = 3;
 
 pub struct DataStore {
@@ -330,8 +331,15 @@ impl DataStore {
                     // Next, observe all the regions allocated to each dataset, and
                     // determine how much space they're using.
                     //
-                    // NOTE: We could store "free/allocated" space per-dataset, and keep
-                    // them up-to-date, rather than trying to recompute this.
+                    // TODO: We could store "free/allocated" space per-dataset,
+                    // and keep them up-to-date, rather than trying to recompute
+                    // this.
+                    //
+                    // TODO: We admittedly don't actually *fail* any request for
+                    // running out of space - we try to send the request down to
+                    // crucible agents, and expect them to fail on our behalf in
+                    // out-of-storage conditions. This should undoubtedly be
+                    // handled more explicitly.
                     .left_outer_join(
                         region_dsl::region
                             .on(dataset_dsl::id.eq(region_dsl::dataset_id)),
@@ -2709,8 +2717,6 @@ mod test {
             size,
         }
     }
-
-    // TODO: Test region allocation when running out of space.
 
     #[tokio::test]
     async fn test_region_allocation() {

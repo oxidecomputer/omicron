@@ -4,7 +4,6 @@
 
 //! HTTP entrypoint functions for simulating the storage agent API.
 
-// use crucible_agent_client::types::{CreateRegion, RegionId};
 use dropshot::{
     endpoint, ApiDescription, HttpError, HttpResponseDeleted, HttpResponseOk,
     Path as TypedPath, RequestContext, TypedBody,
@@ -41,12 +40,20 @@ pub fn api() -> CrucibleAgentApiDescription {
 // I need to re-define all structs used in the crucible agent
 // API to ensure they have the traits I need. The ones re-exported
 // through the client bindings, i.e., crucible_agent_client::types,
-// don't implement what I need.
+// don't implement the "JsonSchema" trait, and cannot be used as
+// parameters to these Dropshot endpoints.
 //
 // I'd like them to! If we could ensure the generated client
 // also implemented e.g. JsonSchema, this might work?
-//
-// TODO: Try w/RegionId or State first?
+
+// To quickly test the type compatibility, uncomment the lines below,
+// and remove the hand-rolled implementations.
+
+// pub type RegionId = crucible_agent_client::types::RegionId;
+// pub type State = crucible_agent_client::types::State;
+// pub type CreateRegion = crucible_agent_client::types::CreateRegion;
+// pub type Region = crucible_agent_client::types::Region;
+// pub type RegionPath = crucible_agent_client::types::RegionPath;
 
 #[derive(
     Serialize,
@@ -94,6 +101,11 @@ pub struct Region {
     pub state: State,
 }
 
+#[derive(Deserialize, JsonSchema)]
+struct RegionPath {
+    id: RegionId,
+}
+
 #[endpoint {
     method = GET,
     path = "/crucible/0/regions",
@@ -117,11 +129,6 @@ async fn region_create(
     let crucible = rc.context();
 
     Ok(HttpResponseOk(crucible.create(params).await))
-}
-
-#[derive(Deserialize, JsonSchema)]
-struct RegionPath {
-    id: RegionId,
 }
 
 #[endpoint {
