@@ -530,12 +530,12 @@ dependencies = [
 [[package]]
 name = "crucible-agent-client"
 version = "0.0.1"
-source = "git+https://github.com/oxidecomputer/crucible?rev=de022b8a#de022b8ae24fb10cec6b024437aabc3acf249e43"
 dependencies = [
  "anyhow",
  "percent-encoding",
  "progenitor",
  "reqwest",
+ "schemars",
  "serde",
  "serde_json",
 ]
@@ -1765,6 +1765,7 @@ dependencies = [
  "percent-encoding",
  "progenitor",
  "reqwest",
+ "schemars",
  "serde",
  "serde_json",
  "slog",
@@ -2197,6 +2198,7 @@ dependencies = [
  "percent-encoding",
  "progenitor",
  "reqwest",
+ "schemars",
  "serde",
  "slog",
  "uuid",
@@ -2692,7 +2694,6 @@ dependencies = [
 [[package]]
 name = "progenitor"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/progenitor#66b41ba301793b8d720770b2210bee8884446d3f"
 dependencies = [
  "anyhow",
  "getopts",
@@ -2706,7 +2707,6 @@ dependencies = [
 [[package]]
 name = "progenitor-impl"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/progenitor#66b41ba301793b8d720770b2210bee8884446d3f"
 dependencies = [
  "anyhow",
  "convert_case",
@@ -2727,7 +2727,6 @@ dependencies = [
 [[package]]
 name = "progenitor-macro"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/progenitor#66b41ba301793b8d720770b2210bee8884446d3f"
 dependencies = [
  "openapiv3",
  "proc-macro2",
@@ -3474,6 +3473,7 @@ dependencies = [
  "percent-encoding",
  "progenitor",
  "reqwest",
+ "schemars",
  "serde",
  "slog",
  "uuid",
@@ -4135,7 +4135,7 @@ checksum = "b63708a265f51345575b27fe43f9500ad611579e764c79edbc2037b1121959ec"
 [[package]]
 name = "typify"
 version = "0.0.6-dev"
-source = "git+https://github.com/oxidecomputer/typify#80b510b02b1db22de463efcf6e7762243bcea67a"
+source = "git+https://github.com/oxidecomputer/typify?branch=json-schema#0be9b35a5007e3f797e43ce41eba03dcee63e503"
 dependencies = [
  "typify-impl",
  "typify-macro",
@@ -4144,9 +4144,10 @@ dependencies = [
 [[package]]
 name = "typify-impl"
 version = "0.0.6-dev"
-source = "git+https://github.com/oxidecomputer/typify#80b510b02b1db22de463efcf6e7762243bcea67a"
+source = "git+https://github.com/oxidecomputer/typify?branch=json-schema#0be9b35a5007e3f797e43ce41eba03dcee63e503"
 dependencies = [
  "convert_case",
+ "log",
  "proc-macro2",
  "quote",
  "rustfmt-wrapper",
@@ -4159,7 +4160,7 @@ dependencies = [
 [[package]]
 name = "typify-macro"
 version = "0.0.6-dev"
-source = "git+https://github.com/oxidecomputer/typify#80b510b02b1db22de463efcf6e7762243bcea67a"
+source = "git+https://github.com/oxidecomputer/typify?branch=json-schema#0be9b35a5007e3f797e43ce41eba03dcee63e503"
 dependencies = [
  "proc-macro2",
  "quote",

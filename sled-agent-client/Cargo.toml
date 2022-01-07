@@ -9,6 +9,7 @@ anyhow = "1.0"
 async-trait = "0.1"
 progenitor = { git = "https://github.com/oxidecomputer/progenitor" }
 reqwest = { version = "0.11", default-features = false, features = ["rustls-tls"] }
+schemars = { version = "0.8" }
 percent-encoding = "2.1.0"
 
 [dependencies.chrono]

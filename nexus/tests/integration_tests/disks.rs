@@ -4,6 +4,7 @@
 
 //! Tests basic disk support in the API
 
+use crucible_agent_client::types::State as RegionState;
 use http::method::Method;
 use http::StatusCode;
 use omicron_common::api::external::ByteCount;
@@ -14,7 +15,7 @@ use omicron_common::api::external::Instance;
 use omicron_common::api::external::InstanceCpuCount;
 use omicron_nexus::TestInterfaces as _;
 use omicron_nexus::{external_api::params, Nexus};
-use omicron_sled_agent::sim::{RegionState, SledAgent};
+use omicron_sled_agent::sim::SledAgent;
 use sled_agent_client::TestInterfaces as _;
 use std::sync::Arc;
 use uuid::Uuid;

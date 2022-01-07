@@ -4,12 +4,13 @@
 
 //! HTTP entrypoint functions for simulating the storage agent API.
 
+use crucible_agent_client::types::{CreateRegion, Region, RegionId};
 use dropshot::{
     endpoint, ApiDescription, HttpError, HttpResponseDeleted, HttpResponseOk,
     Path as TypedPath, RequestContext, TypedBody,
 };
 use schemars::JsonSchema;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use std::sync::Arc;
 
 use super::storage::CrucibleData;
@@ -35,71 +36,8 @@ pub fn api() -> CrucibleAgentApiDescription {
     api
 }
 
-// XXX XXX XXX THIS SUCKS XXX XXX XXX
-//
-// I need to re-define all structs used in the crucible agent
-// API to ensure they have the traits I need. The ones re-exported
-// through the client bindings, i.e., crucible_agent_client::types,
-// don't implement the "JsonSchema" trait, and cannot be used as
-// parameters to these Dropshot endpoints.
-//
-// I'd like them to! If we could ensure the generated client
-// also implemented e.g. JsonSchema, this might work?
-
-// To quickly test the type compatibility, uncomment the lines below,
-// and remove the hand-rolled implementations.
-
-// pub type RegionId = crucible_agent_client::types::RegionId;
-// pub type State = crucible_agent_client::types::State;
-// pub type CreateRegion = crucible_agent_client::types::CreateRegion;
-// pub type Region = crucible_agent_client::types::Region;
-// pub type RegionPath = crucible_agent_client::types::RegionPath;
-
-#[derive(
-    Serialize,
-    Deserialize,
-    JsonSchema,
-    Debug,
-    PartialEq,
-    Eq,
-    Clone,
-    PartialOrd,
-    Ord,
-)]
-pub struct RegionId(pub String);
-
-#[derive(Serialize, Deserialize, JsonSchema, Debug, PartialEq, Clone)]
-#[serde(rename_all = "lowercase")]
-pub enum State {
-    Requested,
-    Created,
-    Tombstoned,
-    Destroyed,
-    Failed,
-}
-
-#[derive(Serialize, Deserialize, JsonSchema, Debug, PartialEq, Clone)]
-pub struct CreateRegion {
-    pub id: RegionId,
-    pub volume_id: String,
-
-    pub block_size: u64,
-    pub extent_size: u64,
-    pub extent_count: u64,
-}
-
-#[derive(Serialize, Deserialize, JsonSchema, Debug, PartialEq, Clone)]
-pub struct Region {
-    pub id: RegionId,
-    pub volume_id: String,
-
-    pub block_size: u64,
-    pub extent_size: u64,
-    pub extent_count: u64,
-
-    pub port_number: u16,
-    pub state: State,
-}
+// TODO: We'd like to de-duplicate as much as possible with the
+// real crucible agent here, to avoid skew.
 
 #[derive(Deserialize, JsonSchema)]
 struct RegionPath {

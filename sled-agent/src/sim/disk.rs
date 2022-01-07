@@ -95,6 +95,7 @@ impl Simulatable for SimDisk {
                 &nexus_client::types::DiskRuntimeState::from(current),
             )
             .await
-            .map_err(Error::from)
+            .map_err(Error::from)?;
+        Ok(())
     }
 }
