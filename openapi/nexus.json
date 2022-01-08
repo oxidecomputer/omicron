@@ -188,6 +188,9 @@
     },
     "/login": {
       "post": {
+        "tags": [
+          "hidden"
+        ],
         "operationId": "spoof_login",
         "requestBody": {
           "content": {
@@ -208,6 +211,9 @@
     },
     "/logout": {
       "post": {
+        "tags": [
+          "hidden"
+        ],
         "operationId": "logout",
         "responses": {
           "default": {
@@ -3021,6 +3027,9 @@
     },
     "/session/me": {
       "get": {
+        "tags": [
+          "hidden"
+        ],
         "description": "Fetch the user associated with the current session",
         "operationId": "session_me",
         "responses": {
