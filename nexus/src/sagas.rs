@@ -351,9 +351,6 @@ async fn sic_instance_ensure(
  */
 #[derive(Debug, Deserialize, Serialize)]
 pub struct ParamsInstanceMigrate {
-    // TODO design: We can't just use db::model::Instance here as it doesn't impl
-    // Serialize so instead we need the project_id/instance_name to look it up
-    // in the saga.
     pub project_id: Uuid,
     pub instance_name: Name,
     pub migrate_params: params::InstanceMigrate,
