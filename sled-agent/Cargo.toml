@@ -32,7 +32,7 @@ spdm = { git = "https://github.com/oxidecomputer/spdm", rev = "9742f6e" }
 socket2 = { version = "0.4", features = [ "all" ] }
 structopt = "0.3"
 tar = "0.4"
-tempfile = "3.2"
+tempfile = "3.3"
 thiserror = "1.0"
 tokio = { version = "1.15", features = [ "full" ] }
 tokio-util = { version = "0.6", features = ["codec"] }
