@@ -1893,6 +1893,7 @@ impl JsonSchema for MacAddr {
 #[derive(ObjectIdentity, Clone, Debug, Deserialize, JsonSchema, Serialize)]
 pub struct NetworkInterface {
     /** common identifying metadata */
+    #[serde(flatten)]
     pub identity: IdentityMetadata,
 
     /** The Instance to which the interface belongs. */
