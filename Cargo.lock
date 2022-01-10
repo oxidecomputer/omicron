@@ -2142,9 +2142,9 @@ dependencies = [
 
 [[package]]
 name = "oso"
-version = "0.25.0"
+version = "0.25.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2f6d23c9848b60f502ed85dc86cf162bbec435b68f440fbbd2c04f013ba1d70b"
+checksum = "3130188f8467dd6d904e692f3d31a3aa6e63902449a1b02d056e8e2633b863d1"
 dependencies = [
  "impl-trait-for-tuples",
  "lazy_static",
@@ -2158,9 +2158,9 @@ dependencies = [
 
 [[package]]
 name = "oso-derive"
-version = "0.25.0"
+version = "0.25.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c875779de4384fbe7489a1fea9cfdc70ce96a1b0fd98d87217636d0e7702ba3a"
+checksum = "b03f10ad1ba555f82c0ccfe497010beccd873651604cb69999ba8c570d312fda"
 dependencies = [
  "quote",
  "syn",
@@ -2532,9 +2532,9 @@ dependencies = [
 
 [[package]]
 name = "polar-core"
-version = "0.25.0"
+version = "0.25.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "02cdbb4ef2e2f59432c82adf33d542703e850b2ee0addc19d7e655bd0448b23d"
+checksum = "b469dacc2c69faed6b71972dac8fb9fbddf18ae22ecce48f97a4643e58860fa3"
 dependencies = [
  "indoc",
  "js-sys",
