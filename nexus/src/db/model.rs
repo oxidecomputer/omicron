@@ -23,6 +23,7 @@ use diesel::sql_types;
 use ipnetwork::IpNetwork;
 use omicron_common::api::external;
 use omicron_common::api::internal;
+use omicron_sled_agent::common::instance::PROPOLIS_PORT;
 use parse_display::Display;
 use rand::{rngs::StdRng, SeedableRng};
 use ref_cast::RefCast;
@@ -884,10 +885,9 @@ impl Into<internal::nexus::InstanceRuntimeState> for InstanceRuntimeState {
             run_state: *self.state.state(),
             sled_uuid: self.sled_uuid,
             propolis_uuid: self.propolis_uuid,
-            // TODO: use constant for propolis port
             propolis_addr: self
                 .propolis_ip
-                .map(|ip| SocketAddr::new(ip.ip(), 12400)),
+                .map(|ip| SocketAddr::new(ip.ip(), PROPOLIS_PORT)),
             ncpus: self.ncpus.into(),
             memory: self.memory.into(),
             hostname: self.hostname,

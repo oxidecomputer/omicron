@@ -5,7 +5,7 @@
 //! API for controlling a single instance.
 
 use crate::common::{
-    instance::{Action as InstanceAction, InstanceStates},
+    instance::{Action as InstanceAction, InstanceStates, PROPOLIS_PORT},
     vlan::VlanID,
 };
 use crate::illumos::svc::wait_for_service;
@@ -493,8 +493,7 @@ impl Instance {
         info!(inner.log, "Created address {} for zone: {}", network, zname);
 
         // Run Propolis in the Zone.
-        let port = 12400;
-        let server_addr = SocketAddr::new(network.ip(), port);
+        let server_addr = SocketAddr::new(network.ip(), PROPOLIS_PORT);
         Zones::run_propolis(&zname, inner.propolis_id(), &server_addr)?;
         info!(inner.log, "Started propolis in zone: {}", zname);
 
