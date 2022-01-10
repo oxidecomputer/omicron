@@ -985,7 +985,7 @@ impl Nexus {
          * already in the desired state (or moving to it), and we will issue a
          * request to the SA to make the state change in these cases in case the
          * runtime state we saw here was stale.  However, users are not allowed
-         * to change the state of an instance that's failed or destroyed.
+         * to change the state of an instance that's migrating, failed or destroyed.
          */
         let allowed = match runtime.run_state {
             InstanceState::Creating => true,
@@ -995,6 +995,7 @@ impl Nexus {
             InstanceState::Stopped => true,
             InstanceState::Rebooting => true,
 
+            InstanceState::Migrating => false,
             InstanceState::Repairing => false,
             InstanceState::Failed => false,
             InstanceState::Destroyed => false,

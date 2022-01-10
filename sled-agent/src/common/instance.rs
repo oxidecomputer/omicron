@@ -167,7 +167,8 @@ impl InstanceStates {
             // Early exit: Running request is no-op
             InstanceState::Running
             | InstanceState::Starting
-            | InstanceState::Rebooting => return Ok(None),
+            | InstanceState::Rebooting
+            | InstanceState::Migrating => return Ok(None),
             // Valid states for a running request
             InstanceState::Creating
             | InstanceState::Stopping
@@ -215,7 +216,8 @@ impl InstanceStates {
                 return Ok(Some(Action::Stop));
             }
             // Invalid states for a stop request
-            InstanceState::Repairing
+            InstanceState::Migrating
+            | InstanceState::Repairing
             | InstanceState::Failed
             | InstanceState::Destroyed => {
                 return Err(Error::InvalidRequest {

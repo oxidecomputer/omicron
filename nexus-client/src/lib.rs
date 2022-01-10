@@ -50,6 +50,7 @@ impl From<types::InstanceState>
             types::InstanceState::Stopping => Self::Stopping,
             types::InstanceState::Stopped => Self::Stopped,
             types::InstanceState::Rebooting => Self::Rebooting,
+            types::InstanceState::Migrating => Self::Migrating,
             types::InstanceState::Repairing => Self::Repairing,
             types::InstanceState::Failed => Self::Failed,
             types::InstanceState::Destroyed => Self::Destroyed,
@@ -119,6 +120,9 @@ impl From<omicron_common::api::external::InstanceState>
             }
             omicron_common::api::external::InstanceState::Rebooting => {
                 Self::Rebooting
+            }
+            omicron_common::api::external::InstanceState::Migrating => {
+                Self::Migrating
             }
             omicron_common::api::external::InstanceState::Repairing => {
                 Self::Repairing
@@ -196,6 +200,7 @@ impl From<&types::InstanceState>
             types::InstanceState::Stopping => Self::Stopping,
             types::InstanceState::Stopped => Self::Stopped,
             types::InstanceState::Rebooting => Self::Rebooting,
+            types::InstanceState::Migrating => Self::Migrating,
             types::InstanceState::Repairing => Self::Repairing,
             types::InstanceState::Failed => Self::Failed,
             types::InstanceState::Destroyed => Self::Destroyed,

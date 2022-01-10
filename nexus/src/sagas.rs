@@ -367,6 +367,12 @@ pub fn saga_instance_migrate() -> SagaTemplate<SagaInstanceMigrate> {
     let mut template_builder = SagaTemplateBuilder::new();
 
     template_builder.append(
+        "migrate_prep",
+        "MigratePrep",
+        new_action_noop_undo(sim_migrate_prep),
+    );
+
+    template_builder.append(
         "dst_propolis_id",
         "GeneratePropolisId",
         new_action_noop_undo(saga_generate_uuid),
@@ -388,6 +394,47 @@ pub fn saga_instance_migrate() -> SagaTemplate<SagaInstanceMigrate> {
     );
 
     template_builder.build()
+}
+
+async fn sim_migrate_prep(
+    sagactx: ActionContext<SagaInstanceMigrate>,
+) -> Result<(), ActionError> {
+    let osagactx = sagactx.user_data();
+    let params = sagactx.saga_params();
+
+    let instance = osagactx
+        .datastore()
+        .instance_fetch_by_name(
+            &params.project_id,
+            &params.instance_name.clone().into(),
+        )
+        .await
+        .map_err(ActionError::action_failed)?;
+
+    let instance_id = instance.id();
+
+    let runtime: InstanceRuntimeState = instance.runtime_state.into();
+
+    // First make sure we're already migrating the instance
+    if runtime.run_state == InstanceState::Migrating {
+        return Err(ActionError::action_failed(
+            "migration already in progress".to_string(),
+        ));
+    }
+
+    // Update the Instance's runtime state to indicate it's currently migrating.
+    // This also acts as a lock somewhat to prevent any further state changes
+    // from being performed on the instance in the meantime.
+    // See `check_runtime_change_allowed`.
+    let runtime =
+        InstanceRuntimeState { run_state: InstanceState::Migrating, ..runtime };
+    osagactx
+        .datastore()
+        .instance_update_runtime(&instance_id, &runtime.into())
+        .await
+        .map_err(ActionError::action_failed)?;
+
+    Ok(())
 }
 
 async fn sim_instance_migrate(
@@ -423,7 +470,6 @@ async fn sim_instance_migrate(
         nics: vec![],
     };
     let target = sled_agent_client::types::InstanceRuntimeStateRequested {
-        // TODO: is this the appropriate state?
         run_state: sled_agent_client::types::InstanceStateRequested::Running,
     };
 
