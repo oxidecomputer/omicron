@@ -106,6 +106,7 @@ impl Into<Vpc> for model::Vpc {
 #[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct VpcSubnet {
     /** common identifying metadata */
+    #[serde(flatten)]
     pub identity: IdentityMetadata,
 
     /** The VPC to which the subnet belongs. */
@@ -146,6 +147,7 @@ impl Into<VpcSubnet> for model::VpcSubnet {
 #[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct Rack {
+    #[serde(flatten)]
     pub identity: IdentityMetadata,
 }
 

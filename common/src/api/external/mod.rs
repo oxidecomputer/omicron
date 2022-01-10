@@ -1161,6 +1161,7 @@ pub enum VpcRouterKind {
 #[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct VpcRouter {
     /// common identifying metadata
+    #[serde(flatten)]
     pub identity: IdentityMetadata,
 
     pub kind: VpcRouterKind,
@@ -1364,6 +1365,7 @@ pub enum RouterRouteKind {
 #[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct RouterRoute {
     /// common identifying metadata
+    #[serde(flatten)]
     pub identity: IdentityMetadata,
 
     /// The VPC Router to which the route belongs.
@@ -1400,6 +1402,7 @@ pub struct RouterRouteUpdateParams {
 #[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct VpcFirewallRule {
     /// common identifying metadata
+    #[serde(flatten)]
     pub identity: IdentityMetadata,
     /// whether this rule is in effect
     pub status: VpcFirewallRuleStatus,
