@@ -132,10 +132,10 @@ fn do_exec(
     cmd: String,
     servers: Option<BTreeSet<String>>,
 ) -> Result<()> {
-    if servers.is_some() {
-        validate_servers(&servers.as_ref().unwrap(), &config.servers)?;
+    if let Some(ref servers) = servers {
+        validate_servers(servers, &config.servers)?;
 
-        for name in &servers.unwrap() {
+        for name in servers {
             let server = &config.servers[name];
             ssh_exec(&server, &cmd, false)?;
         }
