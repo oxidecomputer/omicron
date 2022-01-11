@@ -265,7 +265,7 @@ fn do_uninstall(
         let server = &config.servers[server_name];
         // Run `omicron-package uninstall` on the deployment server
         let cmd = format!(
-            "cd ~/{} && pfexec ./omicron-package uninstall --in ~/{} --out {}",
+            "cd $HOME/{} && pfexec ./omicron-package uninstall --in $HOME/{} --out {}",
             config.deployment.staging_dir.to_string_lossy(),
             deployment_src.to_string_lossy(),
             install_dir.to_string_lossy()
@@ -406,7 +406,7 @@ fn copy_package_artifacts_to_staging(
 ) -> Result<()> {
     let cmd = format!(
         "rsync -avz -e 'ssh -o StrictHostKeyChecking=no' \
-                    --exclude overlay/ {} {}@{}:~/{}",
+                    --exclude overlay/ {} {}@{}:$HOME/{}",
         pkg_dir,
         destination.username,
         destination.addr,
@@ -424,7 +424,7 @@ fn copy_omicron_package_binary_to_staging(
     let mut bin_path = PathBuf::from(&config.builder.omicron_path);
     bin_path.push("target/debug/omicron-package");
     let cmd = format!(
-        "rsync -avz {} {}@{}:~/{}",
+        "rsync -avz {} {}@{}:$HOME/{}",
         bin_path.to_string_lossy(),
         destination.username,
         destination.addr,
@@ -442,7 +442,7 @@ fn copy_package_manifest_to_staging(
     let mut path = PathBuf::from(&config.builder.omicron_path);
     path.push("package-manifest.toml");
     let cmd = format!(
-        "rsync {} {}@{}:~/{}",
+        "rsync {} {}@{}:$HOME/{}",
         path.to_string_lossy(),
         destination.username,
         destination.addr,
@@ -463,7 +463,7 @@ fn run_omicron_package_from_staging(
 
     // Run `omicron-package install` on the deployment server
     let cmd = format!(
-        "cd ~/{} && pfexec ./omicron-package install --in ~/{} --out {}",
+        "cd $HOME/{} && pfexec ./omicron-package install --in $HOME/{} --out {}",
         config.deployment.staging_dir.to_string_lossy(),
         deployment_src.to_string_lossy(),
         install_dir.to_string_lossy()
@@ -480,7 +480,7 @@ fn copy_overlay_files_to_staging(
     destination_name: &str,
 ) -> Result<()> {
     let cmd = format!(
-        "rsync -avz {}/overlay/{}/ {}@{}:~/{}/overlay/",
+        "rsync -avz {}/overlay/{}/ {}@{}:$HOME/{}/overlay/",
         pkg_dir,
         destination_name,
         destination.username,
@@ -497,7 +497,7 @@ fn install_overlay_files_from_staging(
     install_dir: &Path,
 ) -> Result<()> {
     let cmd = format!(
-        "pfexec cp -r ~/{}/overlay/* {}",
+        "pfexec cp -r $HOME/{}/overlay/* {}",
         config.deployment.staging_dir.to_string_lossy(),
         install_dir.to_string_lossy()
     );
@@ -535,7 +535,7 @@ fn ssh_exec(
 ) -> Result<()> {
     // Source .profile, so we have access to cargo. Rustup installs knowledge
     // about the cargo path here.
-    let remote_cmd = String::from(". ~/.profile && ") + remote_cmd;
+    let remote_cmd = String::from(". $HOME/.profile && ") + remote_cmd;
     let auth_sock = std::env::var("SSH_AUTH_SOCK")?;
     let mut cmd = Command::new("ssh");
     if forward_agent {
