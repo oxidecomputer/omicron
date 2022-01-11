@@ -171,7 +171,7 @@ fn test_nexus_openapi() {
     for (tag, mut ops) in ops_by_tag {
         ops.sort();
         tags.push_str(&format!(r#"API operations found with tag "{}""#, tag));
-        tags.push('\n');
+        tags.push_str(&format!("\n{:40} {}\n", "OPERATION ID", "URL PATH"));
         for (operation_id, path) in ops {
             tags.push_str(&format!("{:40} {}\n", operation_id, path));
         }
