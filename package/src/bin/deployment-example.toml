@@ -10,6 +10,8 @@ local_source = "/Users/ajs/oxide/omicron"
 # `server` must refer to one of the `servers` in the servers table
 server = "atrium"
 omicron_path = "/home/andrew/oxide/omicron"
+
+# Git branch, sha, etc...
 git_treeish = "thing-flinger"
 
 [deployment]

@@ -1,3 +1,9 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
+//! Utility for deploying Omicron to remote machines
+
 use omicron_package::{parse, SubCommand as PackageSubCommand};
 
 use std::collections::{BTreeMap, BTreeSet};
@@ -14,7 +20,7 @@ use thiserror::Error;
 #[derive(Deserialize, Debug)]
 struct Builder {
     pub server: String,
-    pub omicron_path: String,
+    pub omicron_path: PathBuf,
     pub git_treeish: String,
 }
 
@@ -29,12 +35,12 @@ struct Server {
 struct Deployment {
     pub servers: BTreeSet<String>,
     pub rack_secret_threshold: usize,
-    pub staging_dir: String,
+    pub staging_dir: PathBuf,
 }
 
 #[derive(Debug, Deserialize)]
 struct Config {
-    pub local_source: String,
+    pub local_source: PathBuf,
     pub builder: Builder,
     pub servers: BTreeMap<String, Server>,
     pub deployment: Deployment,
@@ -111,19 +117,10 @@ enum FlingError {
     /// Failed to rsync omicron to build host
     #[error("Failed to sync {src} with {dst}")]
     FailedSync { src: String, dst: String },
-}
 
-fn validate_servers(
-    chosen: &BTreeSet<String>,
-    all: &BTreeMap<String, Server>,
-) -> Result<(), FlingError> {
-    let all = all.keys().cloned().collect();
-    let diff: Vec<String> = chosen.difference(&all).cloned().collect();
-    if !diff.is_empty() {
-        Err(FlingError::InvalidServers(diff))
-    } else {
-        Ok(())
-    }
+    /// The given path must be absolute
+    #[error("Path for {field} must be absolute")]
+    NotAbsolutePath { field: &'static str },
 }
 
 // TODO: run in parallel when that option is given
@@ -152,10 +149,16 @@ fn do_sync(config: &Config) -> Result<()> {
         config.servers.get(&config.builder.server).ok_or_else(|| {
             FlingError::InvalidServers(vec![config.builder.server.clone()])
         })?;
-    let src = config.local_source.clone() + "/";
+
+    // For rsync to copy from the source appropriately we must guarantee a
+    // trailing slash.
+    let src =
+        format!("{}/", config.local_source.canonicalize()?.to_string_lossy());
     let dst = format!(
         "{}@{}:{}",
-        server.username, server.addr, config.builder.omicron_path
+        server.username,
+        server.addr,
+        config.builder.omicron_path.to_str().unwrap()
     );
     let mut cmd = Command::new("rsync");
     cmd.arg("-az")
@@ -193,7 +196,7 @@ fn do_build_minimal(config: &Config) -> Result<()> {
     let server = &config.servers[&config.builder.server];
     let cmd = format!(
         "cd {} && git checkout {} && cargo build -p {} -p {}",
-        config.builder.omicron_path,
+        config.builder.omicron_path.to_string_lossy(),
         config.builder.git_treeish,
         "omicron-package",
         "omicron-sled-agent"
@@ -225,7 +228,7 @@ fn do_package(
     write!(
         &mut cmd,
         "bash -lc 'cd {} && git checkout {} && {} package --out {} {}'",
-        config.builder.omicron_path,
+        config.builder.omicron_path.to_string_lossy(),
         config.builder.git_treeish,
         cmd_path,
         &artifact_dir,
@@ -243,7 +246,9 @@ fn do_check(config: &Config) -> Result<()> {
     write!(
         &mut cmd,
         "bash -lc 'cd {} && git checkout {} && {} check'",
-        config.builder.omicron_path, config.builder.git_treeish, cmd_path,
+        config.builder.omicron_path.to_string_lossy(),
+        config.builder.git_treeish,
+        cmd_path,
     )?;
 
     ssh_exec(&server, &cmd, false)
@@ -261,7 +266,7 @@ fn do_uninstall(
         // Run `omicron-package uninstall` on the deployment server
         let cmd = format!(
             "cd ~/{} && pfexec ./omicron-package uninstall --in ~/{} --out {}",
-            config.deployment.staging_dir,
+            config.deployment.staging_dir.to_string_lossy(),
             deployment_src.to_string_lossy(),
             install_dir.to_string_lossy()
         );
@@ -354,7 +359,7 @@ fn overlay_sled_agent(
         "{} && cd {} && ./target/debug/sled-agent-overlay-files \
             --threshold {} --directories {}",
         cmd,
-        config.builder.omicron_path,
+        config.builder.omicron_path.to_string_lossy(),
         config.deployment.rack_secret_threshold,
         dirs
     );
@@ -405,7 +410,7 @@ fn copy_package_artifacts_to_staging(
         pkg_dir,
         destination.username,
         destination.addr,
-        config.deployment.staging_dir
+        config.deployment.staging_dir.to_string_lossy()
     );
     println!("$ {}", cmd);
     ssh_exec(builder, &cmd, true)
@@ -423,7 +428,7 @@ fn copy_omicron_package_binary_to_staging(
         bin_path.to_string_lossy(),
         destination.username,
         destination.addr,
-        config.deployment.staging_dir
+        config.deployment.staging_dir.to_string_lossy()
     );
     println!("$ {}", cmd);
     ssh_exec(builder, &cmd, true)
@@ -441,7 +446,7 @@ fn copy_package_manifest_to_staging(
         path.to_string_lossy(),
         destination.username,
         destination.addr,
-        config.deployment.staging_dir
+        config.deployment.staging_dir.to_string_lossy()
     );
     println!("$ {}", cmd);
     ssh_exec(builder, &cmd, true)
@@ -459,7 +464,7 @@ fn run_omicron_package_from_staging(
     // Run `omicron-package install` on the deployment server
     let cmd = format!(
         "cd ~/{} && pfexec ./omicron-package install --in ~/{} --out {}",
-        config.deployment.staging_dir,
+        config.deployment.staging_dir.to_string_lossy(),
         deployment_src.to_string_lossy(),
         install_dir.to_string_lossy()
     );
@@ -480,7 +485,7 @@ fn copy_overlay_files_to_staging(
         destination_name,
         destination.username,
         destination.addr,
-        config.deployment.staging_dir
+        config.deployment.staging_dir.to_string_lossy()
     );
     println!("$ {}", cmd);
     ssh_exec(builder, &cmd, true)
@@ -493,7 +498,7 @@ fn install_overlay_files_from_staging(
 ) -> Result<()> {
     let cmd = format!(
         "pfexec cp -r ~/{}/overlay/* {}",
-        config.deployment.staging_dir,
+        config.deployment.staging_dir.to_string_lossy(),
         install_dir.to_string_lossy()
     );
     println!("$ {}", cmd);
@@ -549,15 +554,41 @@ fn ssh_exec(
     Ok(())
 }
 
+fn validate_servers(
+    chosen: &BTreeSet<String>,
+    all: &BTreeMap<String, Server>,
+) -> Result<(), FlingError> {
+    let all = all.keys().cloned().collect();
+    let diff: Vec<String> = chosen.difference(&all).cloned().collect();
+    if !diff.is_empty() {
+        Err(FlingError::InvalidServers(diff))
+    } else {
+        Ok(())
+    }
+}
+
+fn validate(config: &Config) -> Result<(), FlingError> {
+    if !config.local_source.is_absolute() {
+        return Err(FlingError::NotAbsolutePath { field: "local_source" });
+    }
+    if !config.builder.omicron_path.is_absolute() {
+        return Err(FlingError::NotAbsolutePath {
+            field: "builder.omicron_path",
+        });
+    }
+    validate_servers(&config.deployment.servers, &config.servers)?;
+
+    validate_servers(
+        &BTreeSet::from([config.builder.server.clone()]),
+        &config.servers,
+    )
+}
+
 fn main() -> Result<()> {
     let args = Args::from_args_safe().map_err(|err| anyhow!(err))?;
     let config = parse::<_, Config>(args.config)?;
 
-    validate_servers(&config.deployment.servers, &config.servers)?;
-    validate_servers(
-        &BTreeSet::from([config.builder.server.clone()]),
-        &config.servers,
-    )?;
+    validate(&config)?;
 
     match args.subcommand {
         SubCommand::Exec { cmd, servers } => {
