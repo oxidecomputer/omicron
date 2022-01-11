@@ -1,15 +1,15 @@
-hardware
+API operations found with tag "hardware"
 hardware_racks_get                       /hardware/racks
 hardware_racks_get_rack                  /hardware/racks/{rack_id}
 hardware_sleds_get                       /hardware/sleds
 hardware_sleds_get_sled                  /hardware/sleds/{sled_id}
 
-hidden
+API operations found with tag "hidden"
 logout                                   /logout
 session_me                               /session/me
 spoof_login                              /login
 
-instances
+API operations found with tag "instances"
 instance_disks_attach                    /organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/disks/attach
 instance_disks_detach                    /organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/disks/detach
 instance_disks_get                       /organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/disks
@@ -21,10 +21,10 @@ project_instances_instance_start         /organizations/{organization_name}/proj
 project_instances_instance_stop          /organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/stop
 project_instances_post                   /organizations/{organization_name}/projects/{project_name}/instances
 
-metrics
+API operations found with tag "metrics"
 timeseries_schema_get                    /timeseries/schema
 
-networking
+API operations found with tag "networking"
 project_vpcs_delete_vpc                  /organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}
 project_vpcs_get                         /organizations/{organization_name}/projects/{project_name}/vpcs
 project_vpcs_get_vpc                     /organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}
@@ -49,7 +49,7 @@ vpc_subnets_get_subnet                   /organizations/{organization_name}/proj
 vpc_subnets_post                         /organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/subnets
 vpc_subnets_put_subnet                   /organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/subnets/{subnet_name}
 
-organizations
+API operations found with tag "organizations"
 organization_projects_put_project        /organizations/{organization_name}/projects/{project_name}
 organizations_delete_organization        /organizations/{organization_name}
 organizations_get                        /organizations
@@ -57,7 +57,7 @@ organizations_get_organization           /organizations/{organization_name}
 organizations_post                       /organizations
 organizations_put_organization           /organizations/{organization_name}
 
-projects
+API operations found with tag "projects"
 organization_projects_delete_project     /organizations/{organization_name}/projects/{project_name}
 organization_projects_get                /organizations/{organization_name}/projects
 organization_projects_get_project        /organizations/{organization_name}/projects/{project_name}
@@ -67,15 +67,15 @@ project_disks_get                        /organizations/{organization_name}/proj
 project_disks_get_disk                   /organizations/{organization_name}/projects/{project_name}/disks/{disk_name}
 project_disks_post                       /organizations/{organization_name}/projects/{project_name}/disks
 
-roles
+API operations found with tag "roles"
 roles_get                                /roles
 roles_get_role                           /roles/{role_name}
 
-sagas
+API operations found with tag "sagas"
 sagas_get                                /sagas
 sagas_get_saga                           /sagas/{saga_id}
 
-users
+API operations found with tag "users"
 users_get                                /users
 users_get_user                           /users/{user_name}
 
