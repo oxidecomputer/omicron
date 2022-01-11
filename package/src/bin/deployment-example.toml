@@ -12,7 +12,7 @@ server = "atrium"
 omicron_path = "/home/andrew/oxide/omicron"
 
 # Git branch, sha, etc...
-git_treeish = "thing-flinger"
+git_treeish = "thing-flinger2"
 
 [deployment]
 servers = ["sock", "buskin"]
