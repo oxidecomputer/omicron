@@ -1892,7 +1892,7 @@ impl JsonSchema for MacAddr {
 /// A `NetworkInterface` represents a virtual network interface device.
 #[derive(ObjectIdentity, Clone, Debug, Deserialize, JsonSchema, Serialize)]
 pub struct NetworkInterface {
-    /** common identifying metadata */
+    /// common identifying metadata
     #[serde(flatten)]
     pub identity: IdentityMetadata,
 
