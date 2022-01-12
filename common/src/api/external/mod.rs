@@ -1159,6 +1159,7 @@ pub enum VpcRouterKind {
 /// A VPC router defines a series of rules that indicate where traffic
 /// should be sent depending on its destination.
 #[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
 pub struct VpcRouter {
     /// common identifying metadata
     #[serde(flatten)]
@@ -1363,6 +1364,7 @@ pub enum RouterRouteKind {
 
 ///  A route defines a rule that governs where traffic should be sent based on its destination.
 #[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
 pub struct RouterRoute {
     /// common identifying metadata
     #[serde(flatten)]
@@ -1891,6 +1893,7 @@ impl JsonSchema for MacAddr {
 
 /// A `NetworkInterface` represents a virtual network interface device.
 #[derive(ObjectIdentity, Clone, Debug, Deserialize, JsonSchema, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct NetworkInterface {
     /// common identifying metadata
     #[serde(flatten)]

@@ -535,7 +535,7 @@
             "type": "string",
             "format": "uuid"
           },
-          "instance_id": {
+          "instanceId": {
             "description": "The Instance to which the interface belongs.",
             "type": "string",
             "format": "uuid"
@@ -561,7 +561,7 @@
               }
             ]
           },
-          "subnet_id": {
+          "subnetId": {
             "description": "The subnet to which the interface belongs.",
             "type": "string",
             "format": "uuid"
@@ -576,7 +576,7 @@
             "type": "string",
             "format": "date-time"
           },
-          "vpc_id": {
+          "vpcId": {
             "description": "The VPC to which the interface belongs.",
             "type": "string",
             "format": "uuid"
@@ -585,14 +585,14 @@
         "required": [
           "description",
           "id",
-          "instance_id",
+          "instanceId",
           "ip",
           "mac",
           "name",
-          "subnet_id",
+          "subnetId",
           "timeCreated",
           "timeModified",
-          "vpc_id"
+          "vpcId"
         ]
       }
     }
