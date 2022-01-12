@@ -25,8 +25,6 @@ async fn test_organizations(cptestctx: &ControlPlaneTestContext) {
     create_organization(&client, &o1_name).await;
     create_organization(&client, &o2_name).await;
 
-    // XXX test 401 if not authenticated?
-
     // Verify GET /organizations/{org} works
     let o1_url = format!("/organizations/{}", o1_name);
     let organization: Organization = NexusRequest::object_get(&client, &o1_url)

@@ -263,7 +263,9 @@ impl DataStore {
             })
     }
 
-    // XXX Do not make public
+    // TODO-security This should not be marked "pub" because it returns database
+    // data without an authz check.  We should refactor the lookup code so
+    // this is harder to mess up by accident.
     async fn organization_lookup_noauthz(
         &self,
         name: &Name,
@@ -300,13 +302,9 @@ impl DataStore {
     ) -> LookupResult<Organization> {
         let (authz_org, db_org) =
             self.organization_lookup_noauthz(name).await?;
-        opctx
-            .authorize_read(
-                authz_org,
-                ResourceType::Organization,
-                LookupType::ByName(name.as_str().to_owned()),
-            )
-            .await?;
+        // TODO-security See the note in authz::authorize().  This needs to
+        // return a 404, not a 403.
+        opctx.authorize(authz::Action::Read, authz_org).await?;
         Ok(db_org)
     }
 

@@ -21,8 +21,6 @@ use authn::external::spoof::HttpAuthnSpoof;
 use authn::external::HttpAuthnScheme;
 use chrono::{DateTime, Duration, Utc};
 use omicron_common::api::external::Error;
-use omicron_common::api::external::LookupType;
-use omicron_common::api::external::ResourceType;
 use oximeter::types::ProducerRegistry;
 use oximeter_instruments::http::{HttpService, LatencyTracker};
 use slog::Logger;
@@ -335,36 +333,6 @@ impl OpContext {
         );
         result
     }
-
-    /// Check whether the actor performing this request is authorized for a read
-    /// operation on this resource.  This is similar to `authorize()`, but
-    /// produces a "NotFound" error when authorization fails.
-    // TODO It would be nice if authorize() only accepted non-read operations so
-    // that people couldn't accidentally call the wrong function without
-    // realizing it.
-    // TODO Alternatively, and maybe better: each authz struct could contain the
-    // the LookupType that produced it, plus its ResourceType.  Then authorize()
-    // could do the logic that we really want, which is on failure, re-check the
-    // Read action and generate an error if that doesn't work.
-    pub async fn authorize_read<Resource>(
-        &self,
-        resource: Resource,
-        type_name: ResourceType,
-        lookup_type: LookupType,
-    ) -> Result<(), Error>
-    where
-        Resource: oso::ToPolar + AuthzResource + Debug + Clone,
-    {
-        self.authorize(authz::Action::Read, resource).await.map_err(|e| {
-            // XXX TODO-security Should we replace 401 as well?
-            if let Error::Forbidden = e {
-                Error::ObjectNotFound { type_name, lookup_type }
-            } else {
-                e
-            }
-        })
-    }
-
 }
 
 #[cfg(test)]
