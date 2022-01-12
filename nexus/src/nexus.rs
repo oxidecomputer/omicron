@@ -489,9 +489,10 @@ impl Nexus {
 
     pub async fn organization_fetch(
         &self,
+        opctx: &OpContext,
         name: &Name,
     ) -> LookupResult<db::model::Organization> {
-        self.db_datastore.organization_fetch(name).await
+        self.db_datastore.organization_fetch(opctx, name).await
     }
 
     pub async fn organizations_list_by_name(
@@ -510,17 +511,22 @@ impl Nexus {
         self.db_datastore.organizations_list_by_id(opctx, pagparams).await
     }
 
-    pub async fn organization_delete(&self, name: &Name) -> DeleteResult {
-        self.db_datastore.organization_delete(name).await
+    pub async fn organization_delete(
+        &self,
+        opctx: &OpContext,
+        name: &Name,
+    ) -> DeleteResult {
+        self.db_datastore.organization_delete(opctx, name).await
     }
 
     pub async fn organization_update(
         &self,
+        opctx: &OpContext,
         name: &Name,
         new_params: &params::OrganizationUpdate,
     ) -> UpdateResult<db::model::Organization> {
         self.db_datastore
-            .organization_update(name, new_params.clone().into())
+            .organization_update(opctx, name, new_params.clone().into())
             .await
     }
 
@@ -534,8 +540,10 @@ impl Nexus {
         organization_name: &Name,
         new_project: &params::ProjectCreate,
     ) -> CreateResult<db::model::Project> {
-        let org =
-            self.db_datastore.organization_lookup(organization_name).await?;
+        let org = self
+            .db_datastore
+            .organization_lookup_id_authz(organization_name)
+            .await?;
 
         // Create a project.
         let db_project = db::model::Project::new(org.id(), new_project.clone());
