@@ -263,9 +263,35 @@ impl DataStore {
             })
     }
 
-    // TODO-security This should not be marked "pub" because it returns database
-    // data without an authz check.  We should refactor the lookup code so
-    // this is harder to mess up by accident.
+    /// Fetches an Organization from the database and returns both the database
+    /// row and an authz::Organization for doing authz checks
+    ///
+    /// There are a few different ways this can be used:
+    ///
+    /// * If a code path wants to use anything in the database row _aside_ from
+    ///   the id, it should do an authz check for `authz::Action::Read` on the
+    ///   returned [`authz::Organization`].  `organization_fetch()` does this,
+    ///   for example.
+    /// * If a code path is only doing this lookup to get the id so that it can
+    ///   look up something else inside the Organization, then the database
+    ///   record is not record -- and neither is an authz check on the
+    ///   Organization.  Callers usually use `organization_lookup_id()` for
+    ///   this.  That function does not expose the database row to the caller.
+    ///
+    ///   Callers in this bucket should still do _some_ authz check.  Clients
+    ///   must not be able to discover whether an Organization exists with a
+    ///   particular name.  It's just that we don't know at this point whether
+    ///   they're allowed to see the Organization.  It depends on whether, as we
+    ///   look up things inside the Organization, we find something that they
+    ///   _are_ able to see.
+    ///
+    /// **This is an internal-only function.** This function cannot know what
+    /// authz checks are required.  As a result, it should not be made
+    /// accessible outside the DataStore.  It should always be wrapped by
+    /// something that does the appropriate authz check.
+    // TODO-security We should refactor things so that it's harder to
+    // accidentally mark this "pub" or otherwise expose database data without
+    // doing an authz check.
     async fn organization_lookup_noauthz(
         &self,
         name: &Name,
@@ -287,7 +313,13 @@ impl DataStore {
             .map(|o| (authz::FLEET.organization(o.id()), o))
     }
 
-    pub async fn organization_lookup_id_authz(
+    /// Look up the id for an organization based on its name
+    ///
+    /// Returns an [`authz::Organization`] (which makes the id available).
+    ///
+    /// This function does no authz checks because it is not possible to know
+    /// just by looking up an Organization's id what privileges are required.
+    pub async fn organization_lookup_id(
         &self,
         name: &Name,
     ) -> LookupResult<authz::Organization> {
@@ -383,17 +415,6 @@ impl DataStore {
             });
         }
         Ok(())
-    }
-
-    /// Look up the id for a organization based on its name
-    ///
-    /// As endpoints move to doing authorization, they should move to
-    /// [`organization_lookup()`] instead of this function.
-    pub async fn organization_lookup_id_by_name(
-        &self,
-        name: &Name,
-    ) -> Result<Uuid, Error> {
-        self.organization_lookup_noauthz(name).await.map(|(_, o)| o.id())
     }
 
     pub async fn organizations_list_by_id(

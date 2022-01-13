@@ -540,10 +540,8 @@ impl Nexus {
         organization_name: &Name,
         new_project: &params::ProjectCreate,
     ) -> CreateResult<db::model::Project> {
-        let org = self
-            .db_datastore
-            .organization_lookup_id_authz(organization_name)
-            .await?;
+        let org =
+            self.db_datastore.organization_lookup_id(organization_name).await?;
 
         // Create a project.
         let db_project = db::model::Project::new(org.id(), new_project.clone());
@@ -565,8 +563,9 @@ impl Nexus {
                         name: "default".parse().unwrap(),
                         description: "Default VPC".to_string(),
                     },
-                    // TODO-robustness this will need to be None if we decide to handle
-                    // the logic around name and dns_name by making dns_name optional
+                    // TODO-robustness this will need to be None if we decide to
+                    // handle the logic around name and dns_name by making
+                    // dns_name optional
                     dns_name: "default".parse().unwrap(),
                 },
             )
@@ -582,8 +581,9 @@ impl Nexus {
     ) -> LookupResult<db::model::Project> {
         let organization_id = self
             .db_datastore
-            .organization_lookup_id_by_name(organization_name)
-            .await?;
+            .organization_lookup_id(organization_name)
+            .await?
+            .id();
         self.db_datastore.project_fetch(&organization_id, project_name).await
     }
 
@@ -594,8 +594,9 @@ impl Nexus {
     ) -> ListResultVec<db::model::Project> {
         let organization_id = self
             .db_datastore
-            .organization_lookup_id_by_name(organization_name)
-            .await?;
+            .organization_lookup_id(organization_name)
+            .await?
+            .id();
         self.db_datastore
             .projects_list_by_name(&organization_id, pagparams)
             .await
@@ -608,8 +609,9 @@ impl Nexus {
     ) -> ListResultVec<db::model::Project> {
         let organization_id = self
             .db_datastore
-            .organization_lookup_id_by_name(organization_name)
-            .await?;
+            .organization_lookup_id(organization_name)
+            .await?
+            .id();
         self.db_datastore.projects_list_by_id(&organization_id, pagparams).await
     }
 
@@ -620,8 +622,9 @@ impl Nexus {
     ) -> DeleteResult {
         let organization_id = self
             .db_datastore
-            .organization_lookup_id_by_name(organization_name)
-            .await?;
+            .organization_lookup_id(organization_name)
+            .await?
+            .id();
         self.db_datastore.project_delete(&organization_id, project_name).await
     }
 
@@ -633,8 +636,9 @@ impl Nexus {
     ) -> UpdateResult<db::model::Project> {
         let organization_id = self
             .db_datastore
-            .organization_lookup_id_by_name(organization_name)
-            .await?;
+            .organization_lookup_id(organization_name)
+            .await?
+            .id();
         self.db_datastore
             .project_update(
                 &organization_id,
@@ -656,8 +660,9 @@ impl Nexus {
     ) -> ListResultVec<db::model::Disk> {
         let organization_id = self
             .db_datastore
-            .organization_lookup_id_by_name(organization_name)
-            .await?;
+            .organization_lookup_id(organization_name)
+            .await?
+            .id();
         let project_id = self
             .db_datastore
             .project_lookup_id_by_name(&organization_id, project_name)
@@ -727,8 +732,9 @@ impl Nexus {
     ) -> LookupResult<(db::model::Disk, authz::ProjectChild)> {
         let organization_id = self
             .db_datastore
-            .organization_lookup_id_by_name(organization_name)
-            .await?;
+            .organization_lookup_id(organization_name)
+            .await?
+            .id();
         let project_id = self
             .db_datastore
             .project_lookup_id_by_name(&organization_id, project_name)
@@ -824,8 +830,9 @@ impl Nexus {
     ) -> ListResultVec<db::model::Instance> {
         let organization_id = self
             .db_datastore
-            .organization_lookup_id_by_name(organization_name)
-            .await?;
+            .organization_lookup_id(organization_name)
+            .await?
+            .id();
         let project_id = self
             .db_datastore
             .project_lookup_id_by_name(&organization_id, project_name)
@@ -841,8 +848,9 @@ impl Nexus {
     ) -> CreateResult<db::model::Instance> {
         let organization_id = self
             .db_datastore
-            .organization_lookup_id_by_name(organization_name)
-            .await?;
+            .organization_lookup_id(organization_name)
+            .await?
+            .id();
         let project_id = self
             .db_datastore
             .project_lookup_id_by_name(&organization_id, project_name)
@@ -929,8 +937,9 @@ impl Nexus {
          */
         let organization_id = self
             .db_datastore
-            .organization_lookup_id_by_name(organization_name)
-            .await?;
+            .organization_lookup_id(organization_name)
+            .await?
+            .id();
         let project_id = self
             .db_datastore
             .project_lookup_id_by_name(&organization_id, project_name)
@@ -950,8 +959,9 @@ impl Nexus {
     ) -> LookupResult<db::model::Instance> {
         let organization_id = self
             .db_datastore
-            .organization_lookup_id_by_name(organization_name)
-            .await?;
+            .organization_lookup_id(organization_name)
+            .await?
+            .id();
         let project_id = self
             .db_datastore
             .project_lookup_id_by_name(&organization_id, project_name)
@@ -1513,8 +1523,9 @@ impl Nexus {
     ) -> ListResultVec<db::model::Vpc> {
         let organization_id = self
             .db_datastore
-            .organization_lookup_id_by_name(organization_name)
-            .await?;
+            .organization_lookup_id(organization_name)
+            .await?
+            .id();
         let project_id = self
             .db_datastore
             .project_lookup_id_by_name(&organization_id, project_name)
@@ -1532,8 +1543,9 @@ impl Nexus {
     ) -> CreateResult<db::model::Vpc> {
         let organization_id = self
             .db_datastore
-            .organization_lookup_id_by_name(organization_name)
-            .await?;
+            .organization_lookup_id(organization_name)
+            .await?
+            .id();
         let project_id = self
             .db_datastore
             .project_lookup_id_by_name(&organization_id, project_name)
@@ -1636,8 +1648,9 @@ impl Nexus {
     ) -> LookupResult<db::model::Vpc> {
         let organization_id = self
             .db_datastore
-            .organization_lookup_id_by_name(organization_name)
-            .await?;
+            .organization_lookup_id(organization_name)
+            .await?
+            .id();
         let project_id = self
             .db_datastore
             .project_lookup_id_by_name(&organization_id, project_name)
@@ -1654,8 +1667,9 @@ impl Nexus {
     ) -> UpdateResult<()> {
         let organization_id = self
             .db_datastore
-            .organization_lookup_id_by_name(organization_name)
-            .await?;
+            .organization_lookup_id(organization_name)
+            .await?
+            .id();
         let project_id = self
             .db_datastore
             .project_lookup_id_by_name(&organization_id, project_name)
