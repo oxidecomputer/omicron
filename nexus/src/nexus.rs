@@ -492,7 +492,7 @@ impl Nexus {
         opctx: &OpContext,
         name: &Name,
     ) -> LookupResult<db::model::Organization> {
-        self.db_datastore.organization_fetch(opctx, name).await
+        Ok(self.db_datastore.organization_fetch(opctx, name).await?.1)
     }
 
     pub async fn organizations_list_by_name(

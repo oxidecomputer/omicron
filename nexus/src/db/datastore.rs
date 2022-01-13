@@ -331,13 +331,13 @@ impl DataStore {
         &self,
         opctx: &OpContext,
         name: &Name,
-    ) -> LookupResult<Organization> {
+    ) -> LookupResult<(authz::Organization, Organization)> {
         let (authz_org, db_org) =
             self.organization_lookup_noauthz(name).await?;
         // TODO-security See the note in authz::authorize().  This needs to
         // return a 404, not a 403.
         opctx.authorize(authz::Action::Read, authz_org).await?;
-        Ok(db_org)
+        Ok((authz_org, db_org))
     }
 
     /// Delete a organization
@@ -2419,7 +2419,7 @@ mod test {
         );
         let org = authz::FLEET.organization(organization.id());
         datastore.project_create(&opctx, &org, project).await.unwrap();
-        let organization_after_project_create = datastore
+        let (_, organization_after_project_create) = datastore
             .organization_fetch(&opctx, organization.name())
             .await
             .unwrap();
