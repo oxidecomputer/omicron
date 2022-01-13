@@ -326,7 +326,7 @@ impl DataStore {
         self.organization_lookup_noauthz(name).await.map(|(o, _)| o)
     }
 
-    /// Lookup a organization by name.
+    /// Lookup an organization by name.
     pub async fn organization_fetch(
         &self,
         opctx: &OpContext,
