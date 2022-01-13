@@ -352,46 +352,6 @@
         "format": "uint64",
         "minimum": 0
       },
-      "IdentityMetadata": {
-        "description": "Identity-related metadata that's included in nearly all public API objects",
-        "type": "object",
-        "properties": {
-          "description": {
-            "description": "human-readable free-form text about a resource",
-            "type": "string"
-          },
-          "id": {
-            "description": "unique, immutable, system-controlled identifier for each resource",
-            "type": "string",
-            "format": "uuid"
-          },
-          "name": {
-            "description": "unique, mutable, user-controlled identifier for each resource",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/Name"
-              }
-            ]
-          },
-          "timeCreated": {
-            "description": "timestamp when this resource was created",
-            "type": "string",
-            "format": "date-time"
-          },
-          "timeModified": {
-            "description": "timestamp when this resource was last modified",
-            "type": "string",
-            "format": "date-time"
-          }
-        },
-        "required": [
-          "description",
-          "id",
-          "name",
-          "timeCreated",
-          "timeModified"
-        ]
-      },
       "InstanceCpuCount": {
         "description": "The number of CPUs in an Instance",
         "type": "integer",
@@ -566,15 +526,16 @@
         "description": "A `NetworkInterface` represents a virtual network interface device.",
         "type": "object",
         "properties": {
-          "identity": {
-            "description": "common identifying metadata",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/IdentityMetadata"
-              }
-            ]
+          "description": {
+            "description": "human-readable free-form text about a resource",
+            "type": "string"
           },
-          "instance_id": {
+          "id": {
+            "description": "unique, immutable, system-controlled identifier for each resource",
+            "type": "string",
+            "format": "uuid"
+          },
+          "instanceId": {
             "description": "The Instance to which the interface belongs.",
             "type": "string",
             "format": "uuid"
@@ -592,24 +553,46 @@
               }
             ]
           },
-          "subnet_id": {
+          "name": {
+            "description": "unique, mutable, user-controlled identifier for each resource",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Name"
+              }
+            ]
+          },
+          "subnetId": {
             "description": "The subnet to which the interface belongs.",
             "type": "string",
             "format": "uuid"
           },
-          "vpc_id": {
+          "timeCreated": {
+            "description": "timestamp when this resource was created",
+            "type": "string",
+            "format": "date-time"
+          },
+          "timeModified": {
+            "description": "timestamp when this resource was last modified",
+            "type": "string",
+            "format": "date-time"
+          },
+          "vpcId": {
             "description": "The VPC to which the interface belongs.",
             "type": "string",
             "format": "uuid"
           }
         },
         "required": [
-          "identity",
-          "instance_id",
+          "description",
+          "id",
+          "instanceId",
           "ip",
           "mac",
-          "subnet_id",
-          "vpc_id"
+          "name",
+          "subnetId",
+          "timeCreated",
+          "timeModified",
+          "vpcId"
         ]
       }
     }

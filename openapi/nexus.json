@@ -12,6 +12,9 @@
   "paths": {
     "/hardware/racks": {
       "get": {
+        "tags": [
+          "hardware"
+        ],
         "description": "List racks in the system.",
         "operationId": "hardware_racks_get",
         "parameters": [
@@ -63,6 +66,9 @@
     },
     "/hardware/racks/{rack_id}": {
       "get": {
+        "tags": [
+          "hardware"
+        ],
         "description": "Fetch information about a particular rack.",
         "operationId": "hardware_racks_get_rack",
         "parameters": [
@@ -94,6 +100,9 @@
     },
     "/hardware/sleds": {
       "get": {
+        "tags": [
+          "hardware"
+        ],
         "description": "List sleds in the system.",
         "operationId": "hardware_sleds_get",
         "parameters": [
@@ -145,6 +154,9 @@
     },
     "/hardware/sleds/{sled_id}": {
       "get": {
+        "tags": [
+          "hardware"
+        ],
         "description": "Fetch information about a sled in the system.",
         "operationId": "hardware_sleds_get_sled",
         "parameters": [
@@ -176,6 +188,9 @@
     },
     "/login": {
       "post": {
+        "tags": [
+          "hidden"
+        ],
         "operationId": "spoof_login",
         "requestBody": {
           "content": {
@@ -196,6 +211,9 @@
     },
     "/logout": {
       "post": {
+        "tags": [
+          "hidden"
+        ],
         "operationId": "logout",
         "responses": {
           "default": {
@@ -206,6 +224,9 @@
     },
     "/organizations": {
       "get": {
+        "tags": [
+          "organizations"
+        ],
         "description": "List all organizations.",
         "operationId": "organizations_get",
         "parameters": [
@@ -255,6 +276,9 @@
         "x-dropshot-pagination": true
       },
       "post": {
+        "tags": [
+          "organizations"
+        ],
         "description": "Create a new organization.",
         "operationId": "organizations_post",
         "requestBody": {
@@ -283,6 +307,9 @@
     },
     "/organizations/{organization_name}": {
       "get": {
+        "tags": [
+          "organizations"
+        ],
         "description": "Fetch a specific organization",
         "operationId": "organizations_get_organization",
         "parameters": [
@@ -310,6 +337,9 @@
         }
       },
       "put": {
+        "tags": [
+          "organizations"
+        ],
         "description": "Update a specific organization.\n * TODO-correctness: Is it valid for PUT to accept application/json that's a subset of what the resource actually represents?  If not, is that a problem? (HTTP may require that this be idempotent.)  If so, can we get around that having this be a slightly different content-type (e.g., \"application/json-patch\")?  We should see what other APIs do.",
         "operationId": "organizations_put_organization",
         "parameters": [
@@ -347,6 +377,9 @@
         }
       },
       "delete": {
+        "tags": [
+          "organizations"
+        ],
         "description": "Delete a specific organization.",
         "operationId": "organizations_delete_organization",
         "parameters": [
@@ -369,6 +402,9 @@
     },
     "/organizations/{organization_name}/projects": {
       "get": {
+        "tags": [
+          "projects"
+        ],
         "description": "List all projects.",
         "operationId": "organization_projects_get",
         "parameters": [
@@ -427,6 +463,9 @@
         "x-dropshot-pagination": true
       },
       "post": {
+        "tags": [
+          "projects"
+        ],
         "description": "Create a new project.",
         "operationId": "organization_projects_post",
         "parameters": [
@@ -466,6 +505,9 @@
     },
     "/organizations/{organization_name}/projects/{project_name}": {
       "get": {
+        "tags": [
+          "projects"
+        ],
         "description": "Fetch a specific project",
         "operationId": "organization_projects_get_project",
         "parameters": [
@@ -502,6 +544,9 @@
         }
       },
       "put": {
+        "tags": [
+          "organizations"
+        ],
         "description": "Update a specific project.\n * TODO-correctness: Is it valid for PUT to accept application/json that's a subset of what the resource actually represents?  If not, is that a problem? (HTTP may require that this be idempotent.)  If so, can we get around that having this be a slightly different content-type (e.g., \"application/json-patch\")?  We should see what other APIs do.",
         "operationId": "organization_projects_put_project",
         "parameters": [
@@ -548,6 +593,9 @@
         }
       },
       "delete": {
+        "tags": [
+          "projects"
+        ],
         "description": "Delete a specific project.",
         "operationId": "organization_projects_delete_project",
         "parameters": [
@@ -579,6 +627,9 @@
     },
     "/organizations/{organization_name}/projects/{project_name}/disks": {
       "get": {
+        "tags": [
+          "projects"
+        ],
         "description": "List disks in a project.",
         "operationId": "project_disks_get",
         "parameters": [
@@ -646,6 +697,9 @@
         "x-dropshot-pagination": true
       },
       "post": {
+        "tags": [
+          "projects"
+        ],
         "description": "Create a disk in a project.\n * TODO-correctness See note about instance create.  This should be async.",
         "operationId": "project_disks_post",
         "parameters": [
@@ -694,6 +748,9 @@
     },
     "/organizations/{organization_name}/projects/{project_name}/disks/{disk_name}": {
       "get": {
+        "tags": [
+          "projects"
+        ],
         "description": "Fetch a single disk in a project.",
         "operationId": "project_disks_get_disk",
         "parameters": [
@@ -739,6 +796,9 @@
         }
       },
       "delete": {
+        "tags": [
+          "projects"
+        ],
         "description": "Delete a disk from a project.",
         "operationId": "project_disks_delete_disk",
         "parameters": [
@@ -779,6 +839,9 @@
     },
     "/organizations/{organization_name}/projects/{project_name}/instances": {
       "get": {
+        "tags": [
+          "instances"
+        ],
         "description": "List instances in a project.",
         "operationId": "project_instances_get",
         "parameters": [
@@ -846,6 +909,9 @@
         "x-dropshot-pagination": true
       },
       "post": {
+        "tags": [
+          "instances"
+        ],
         "description": "Create an instance in a project.\n * TODO-correctness This is supposed to be async.  Is that right?  We can create the instance immediately -- it's just not booted yet.  Maybe the boot operation is what's a separate operation_id.  What about the response code (201 Created vs 202 Accepted)?  Is that orthogonal?  Things can return a useful response, including an operation id, with either response code.  Maybe a \"reboot\" operation would return a 202 Accepted because there's no actual resource created?",
         "operationId": "project_instances_post",
         "parameters": [
@@ -894,6 +960,9 @@
     },
     "/organizations/{organization_name}/projects/{project_name}/instances/{instance_name}": {
       "get": {
+        "tags": [
+          "instances"
+        ],
         "description": "Get an instance in a project.",
         "operationId": "project_instances_get_instance",
         "parameters": [
@@ -939,6 +1008,9 @@
         }
       },
       "delete": {
+        "tags": [
+          "instances"
+        ],
         "description": "Delete an instance from a project.",
         "operationId": "project_instances_delete_instance",
         "parameters": [
@@ -979,6 +1051,9 @@
     },
     "/organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/disks": {
       "get": {
+        "tags": [
+          "instances"
+        ],
         "description": "List disks attached to this instance.",
         "operationId": "instance_disks_get",
         "parameters": [
@@ -1057,6 +1132,9 @@
     },
     "/organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/disks/attach": {
       "post": {
+        "tags": [
+          "instances"
+        ],
         "operationId": "instance_disks_attach",
         "parameters": [
           {
@@ -1113,6 +1191,9 @@
     },
     "/organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/disks/detach": {
       "post": {
+        "tags": [
+          "instances"
+        ],
         "operationId": "instance_disks_detach",
         "parameters": [
           {
@@ -1169,6 +1250,9 @@
     },
     "/organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/reboot": {
       "post": {
+        "tags": [
+          "instances"
+        ],
         "description": "Reboot an instance.",
         "operationId": "project_instances_instance_reboot",
         "parameters": [
@@ -1216,6 +1300,9 @@
     },
     "/organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/start": {
       "post": {
+        "tags": [
+          "instances"
+        ],
         "description": "Boot an instance.",
         "operationId": "project_instances_instance_start",
         "parameters": [
@@ -1263,6 +1350,9 @@
     },
     "/organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/stop": {
       "post": {
+        "tags": [
+          "instances"
+        ],
         "description": "Halt an instance.",
         "operationId": "project_instances_instance_stop",
         "parameters": [
@@ -1310,6 +1400,9 @@
     },
     "/organizations/{organization_name}/projects/{project_name}/vpcs": {
       "get": {
+        "tags": [
+          "networking"
+        ],
         "description": "List VPCs in a project.",
         "operationId": "project_vpcs_get",
         "parameters": [
@@ -1377,6 +1470,9 @@
         "x-dropshot-pagination": true
       },
       "post": {
+        "tags": [
+          "networking"
+        ],
         "description": "Create a VPC in a project.",
         "operationId": "project_vpcs_post",
         "parameters": [
@@ -1425,6 +1521,9 @@
     },
     "/organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}": {
       "get": {
+        "tags": [
+          "networking"
+        ],
         "description": "Get a VPC in a project.",
         "operationId": "project_vpcs_get_vpc",
         "parameters": [
@@ -1470,6 +1569,9 @@
         }
       },
       "put": {
+        "tags": [
+          "networking"
+        ],
         "description": "Update a VPC.",
         "operationId": "project_vpcs_put_vpc",
         "parameters": [
@@ -1518,6 +1620,9 @@
         }
       },
       "delete": {
+        "tags": [
+          "networking"
+        ],
         "description": "Delete a vpc from a project.",
         "operationId": "project_vpcs_delete_vpc",
         "parameters": [
@@ -1558,6 +1663,9 @@
     },
     "/organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/firewall/rules": {
       "get": {
+        "tags": [
+          "networking"
+        ],
         "description": "List firewall rules for a VPC.",
         "operationId": "vpc_firewall_rules_get",
         "parameters": [
@@ -1634,6 +1742,9 @@
         "x-dropshot-pagination": true
       },
       "put": {
+        "tags": [
+          "networking"
+        ],
         "description": "Replace the firewall rules for a VPC",
         "operationId": "vpc_firewall_rules_put",
         "parameters": [
@@ -1691,6 +1802,9 @@
     },
     "/organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/routers": {
       "get": {
+        "tags": [
+          "networking"
+        ],
         "description": "List VPC Custom and System Routers",
         "operationId": "vpc_routers_get",
         "parameters": [
@@ -1767,6 +1881,9 @@
         "x-dropshot-pagination": true
       },
       "post": {
+        "tags": [
+          "networking"
+        ],
         "description": "Create a VPC Router",
         "operationId": "vpc_routers_post",
         "parameters": [
@@ -1824,6 +1941,9 @@
     },
     "/organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/routers/{router_name}": {
       "get": {
+        "tags": [
+          "networking"
+        ],
         "description": "Get a VPC Router",
         "operationId": "vpc_routers_get_router",
         "parameters": [
@@ -1878,6 +1998,9 @@
         }
       },
       "put": {
+        "tags": [
+          "networking"
+        ],
         "description": "Update a VPC Router",
         "operationId": "vpc_routers_put_router",
         "parameters": [
@@ -1935,6 +2058,9 @@
         }
       },
       "delete": {
+        "tags": [
+          "networking"
+        ],
         "description": "Delete a router from its VPC",
         "operationId": "vpc_routers_delete_router",
         "parameters": [
@@ -1984,6 +2110,9 @@
     },
     "/organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/routers/{router_name}/routes": {
       "get": {
+        "tags": [
+          "networking"
+        ],
         "description": "List a Router's routes",
         "operationId": "routers_routes_get",
         "parameters": [
@@ -2069,6 +2198,9 @@
         "x-dropshot-pagination": true
       },
       "post": {
+        "tags": [
+          "networking"
+        ],
         "description": "Create a VPC Router",
         "operationId": "routers_routes_post",
         "parameters": [
@@ -2135,6 +2267,9 @@
     },
     "/organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/routers/{router_name}/routes/{route_name}": {
       "get": {
+        "tags": [
+          "networking"
+        ],
         "description": "Get a VPC Router route",
         "operationId": "routers_routes_get_route",
         "parameters": [
@@ -2198,6 +2333,9 @@
         }
       },
       "put": {
+        "tags": [
+          "networking"
+        ],
         "description": "Update a Router route",
         "operationId": "routers_routes_put_route",
         "parameters": [
@@ -2264,6 +2402,9 @@
         }
       },
       "delete": {
+        "tags": [
+          "networking"
+        ],
         "description": "Delete a route from its router",
         "operationId": "routers_routes_delete_route",
         "parameters": [
@@ -2322,6 +2463,9 @@
     },
     "/organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/subnets": {
       "get": {
+        "tags": [
+          "networking"
+        ],
         "description": "List subnets in a VPC.",
         "operationId": "vpc_subnets_get",
         "parameters": [
@@ -2398,6 +2542,9 @@
         "x-dropshot-pagination": true
       },
       "post": {
+        "tags": [
+          "networking"
+        ],
         "description": "Create a subnet in a VPC.",
         "operationId": "vpc_subnets_post",
         "parameters": [
@@ -2455,6 +2602,9 @@
     },
     "/organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/subnets/{subnet_name}": {
       "get": {
+        "tags": [
+          "networking"
+        ],
         "description": "Get subnet in a VPC.",
         "operationId": "vpc_subnets_get_subnet",
         "parameters": [
@@ -2509,6 +2659,9 @@
         }
       },
       "put": {
+        "tags": [
+          "networking"
+        ],
         "description": "Update a VPC Subnet.",
         "operationId": "vpc_subnets_put_subnet",
         "parameters": [
@@ -2566,6 +2719,9 @@
         }
       },
       "delete": {
+        "tags": [
+          "networking"
+        ],
         "description": "Delete a subnet from a VPC.",
         "operationId": "vpc_subnets_delete_subnet",
         "parameters": [
@@ -2615,6 +2771,9 @@
     },
     "/organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/subnets/{subnet_name}/ips": {
       "get": {
+        "tags": [
+          "networking"
+        ],
         "description": "List IP addresses on a VPC subnet.",
         "operationId": "subnets_ips_get",
         "parameters": [
@@ -2702,6 +2861,9 @@
     },
     "/roles": {
       "get": {
+        "tags": [
+          "roles"
+        ],
         "description": "List the built-in roles",
         "operationId": "roles_get",
         "parameters": [
@@ -2745,6 +2907,9 @@
     },
     "/roles/{role_name}": {
       "get": {
+        "tags": [
+          "roles"
+        ],
         "description": "Fetch a specific built-in role",
         "operationId": "roles_get_role",
         "parameters": [
@@ -2775,6 +2940,9 @@
     },
     "/sagas": {
       "get": {
+        "tags": [
+          "sagas"
+        ],
         "description": "List all sagas (for debugging)",
         "operationId": "sagas_get",
         "parameters": [
@@ -2826,6 +2994,9 @@
     },
     "/sagas/{saga_id}": {
       "get": {
+        "tags": [
+          "sagas"
+        ],
         "description": "Fetch information about a single saga (for debugging)",
         "operationId": "sagas_get_saga",
         "parameters": [
@@ -2856,6 +3027,9 @@
     },
     "/session/me": {
       "get": {
+        "tags": [
+          "hidden"
+        ],
         "description": "Fetch the user associated with the current session",
         "operationId": "session_me",
         "responses": {
@@ -2874,6 +3048,9 @@
     },
     "/timeseries/schema": {
       "get": {
+        "tags": [
+          "metrics"
+        ],
         "description": "List all timeseries schema",
         "operationId": "timeseries_schema_get",
         "parameters": [
@@ -2917,6 +3094,9 @@
     },
     "/users": {
       "get": {
+        "tags": [
+          "users"
+        ],
         "description": "List the built-in system users",
         "operationId": "users_get",
         "parameters": [
@@ -2968,6 +3148,9 @@
     },
     "/users/{user_name}": {
       "get": {
+        "tags": [
+          "users"
+        ],
         "description": "Fetch a specific built-in system user",
         "operationId": "users_get_user",
         "parameters": [
@@ -3309,46 +3492,6 @@
           "Bool"
         ]
       },
-      "IdentityMetadata": {
-        "description": "Identity-related metadata that's included in nearly all public API objects",
-        "type": "object",
-        "properties": {
-          "description": {
-            "description": "human-readable free-form text about a resource",
-            "type": "string"
-          },
-          "id": {
-            "description": "unique, immutable, system-controlled identifier for each resource",
-            "type": "string",
-            "format": "uuid"
-          },
-          "name": {
-            "description": "unique, mutable, user-controlled identifier for each resource",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/Name"
-              }
-            ]
-          },
-          "timeCreated": {
-            "description": "timestamp when this resource was created",
-            "type": "string",
-            "format": "date-time"
-          },
-          "timeModified": {
-            "description": "timestamp when this resource was last modified",
-            "type": "string",
-            "format": "date-time"
-          }
-        },
-        "required": [
-          "description",
-          "id",
-          "name",
-          "timeCreated",
-          "timeModified"
-        ]
-      },
       "Instance": {
         "description": "Client view of an [`Instance`]",
         "type": "object",
@@ -3549,15 +3692,16 @@
         "description": "A `NetworkInterface` represents a virtual network interface device.",
         "type": "object",
         "properties": {
-          "identity": {
-            "description": "common identifying metadata",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/IdentityMetadata"
-              }
-            ]
+          "description": {
+            "description": "human-readable free-form text about a resource",
+            "type": "string"
           },
-          "instance_id": {
+          "id": {
+            "description": "unique, immutable, system-controlled identifier for each resource",
+            "type": "string",
+            "format": "uuid"
+          },
+          "instanceId": {
             "description": "The Instance to which the interface belongs.",
             "type": "string",
             "format": "uuid"
@@ -3575,24 +3719,46 @@
               }
             ]
           },
-          "subnet_id": {
+          "name": {
+            "description": "unique, mutable, user-controlled identifier for each resource",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Name"
+              }
+            ]
+          },
+          "subnetId": {
             "description": "The subnet to which the interface belongs.",
             "type": "string",
             "format": "uuid"
           },
-          "vpc_id": {
+          "timeCreated": {
+            "description": "timestamp when this resource was created",
+            "type": "string",
+            "format": "date-time"
+          },
+          "timeModified": {
+            "description": "timestamp when this resource was last modified",
+            "type": "string",
+            "format": "date-time"
+          },
+          "vpcId": {
             "description": "The VPC to which the interface belongs.",
             "type": "string",
             "format": "uuid"
           }
         },
         "required": [
-          "identity",
-          "instance_id",
+          "description",
+          "id",
+          "instanceId",
           "ip",
           "mac",
-          "subnet_id",
-          "vpc_id"
+          "name",
+          "subnetId",
+          "timeCreated",
+          "timeModified",
+          "vpcId"
         ]
       },
       "NetworkInterfaceResultsPage": {
@@ -3815,12 +3981,40 @@
         "description": "Client view of an [`Rack`]",
         "type": "object",
         "properties": {
-          "identity": {
-            "$ref": "#/components/schemas/IdentityMetadata"
+          "description": {
+            "description": "human-readable free-form text about a resource",
+            "type": "string"
+          },
+          "id": {
+            "description": "unique, immutable, system-controlled identifier for each resource",
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "description": "unique, mutable, user-controlled identifier for each resource",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Name"
+              }
+            ]
+          },
+          "timeCreated": {
+            "description": "timestamp when this resource was created",
+            "type": "string",
+            "format": "date-time"
+          },
+          "timeModified": {
+            "description": "timestamp when this resource was last modified",
+            "type": "string",
+            "format": "date-time"
           }
         },
         "required": [
-          "identity"
+          "description",
+          "id",
+          "name",
+          "timeCreated",
+          "timeModified"
         ]
       },
       "RackResultsPage": {
@@ -4048,16 +4242,17 @@
         "description": "A route defines a rule that governs where traffic should be sent based on its destination.",
         "type": "object",
         "properties": {
+          "description": {
+            "description": "human-readable free-form text about a resource",
+            "type": "string"
+          },
           "destination": {
             "$ref": "#/components/schemas/RouteDestination"
           },
-          "identity": {
-            "description": "common identifying metadata",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/IdentityMetadata"
-              }
-            ]
+          "id": {
+            "description": "unique, immutable, system-controlled identifier for each resource",
+            "type": "string",
+            "format": "uuid"
           },
           "kind": {
             "description": "Describes the kind of router. Set at creation. `read-only`",
@@ -4067,21 +4262,43 @@
               }
             ]
           },
-          "router_id": {
+          "name": {
+            "description": "unique, mutable, user-controlled identifier for each resource",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Name"
+              }
+            ]
+          },
+          "routerId": {
             "description": "The VPC Router to which the route belongs.",
             "type": "string",
             "format": "uuid"
           },
           "target": {
             "$ref": "#/components/schemas/RouteTarget"
+          },
+          "timeCreated": {
+            "description": "timestamp when this resource was created",
+            "type": "string",
+            "format": "date-time"
+          },
+          "timeModified": {
+            "description": "timestamp when this resource was last modified",
+            "type": "string",
+            "format": "date-time"
           }
         },
         "required": [
+          "description",
           "destination",
-          "identity",
+          "id",
           "kind",
-          "router_id",
-          "target"
+          "name",
+          "routerId",
+          "target",
+          "timeCreated",
+          "timeModified"
         ]
       },
       "RouterRouteCreateParams": {
@@ -4633,6 +4850,10 @@
               }
             ]
           },
+          "description": {
+            "description": "human-readable free-form text about a resource",
+            "type": "string"
+          },
           "direction": {
             "description": "whether this rule is for incoming or outgoing traffic",
             "allOf": [
@@ -4649,11 +4870,16 @@
               }
             ]
           },
-          "identity": {
-            "description": "common identifying metadata",
+          "id": {
+            "description": "unique, immutable, system-controlled identifier for each resource",
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "description": "unique, mutable, user-controlled identifier for each resource",
             "allOf": [
               {
-                "$ref": "#/components/schemas/IdentityMetadata"
+                "$ref": "#/components/schemas/Name"
               }
             ]
           },
@@ -4677,16 +4903,30 @@
             "items": {
               "$ref": "#/components/schemas/VpcFirewallRuleTarget"
             }
+          },
+          "timeCreated": {
+            "description": "timestamp when this resource was created",
+            "type": "string",
+            "format": "date-time"
+          },
+          "timeModified": {
+            "description": "timestamp when this resource was last modified",
+            "type": "string",
+            "format": "date-time"
           }
         },
         "required": [
           "action",
+          "description",
           "direction",
           "filters",
-          "identity",
+          "id",
+          "name",
           "priority",
           "status",
-          "targets"
+          "targets",
+          "timeCreated",
+          "timeModified"
         ]
       },
       "VpcFirewallRuleAction": {
@@ -5028,27 +5268,50 @@
         "description": "A VPC router defines a series of rules that indicate where traffic should be sent depending on its destination.",
         "type": "object",
         "properties": {
-          "identity": {
-            "description": "common identifying metadata",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/IdentityMetadata"
-              }
-            ]
+          "description": {
+            "description": "human-readable free-form text about a resource",
+            "type": "string"
+          },
+          "id": {
+            "description": "unique, immutable, system-controlled identifier for each resource",
+            "type": "string",
+            "format": "uuid"
           },
           "kind": {
             "$ref": "#/components/schemas/VpcRouterKind"
           },
-          "vpc_id": {
+          "name": {
+            "description": "unique, mutable, user-controlled identifier for each resource",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Name"
+              }
+            ]
+          },
+          "timeCreated": {
+            "description": "timestamp when this resource was created",
+            "type": "string",
+            "format": "date-time"
+          },
+          "timeModified": {
+            "description": "timestamp when this resource was last modified",
+            "type": "string",
+            "format": "date-time"
+          },
+          "vpcId": {
             "description": "The VPC to which the router belongs.",
             "type": "string",
             "format": "uuid"
           }
         },
         "required": [
-          "identity",
+          "description",
+          "id",
           "kind",
-          "vpc_id"
+          "name",
+          "timeCreated",
+          "timeModified",
+          "vpcId"
         ]
       },
       "VpcRouterCreate": {
@@ -5117,15 +5380,16 @@
         "description": "A VPC subnet represents a logical grouping for instances that allows network traffic between them, within a IPv4 subnetwork or optionall an IPv6 subnetwork.",
         "type": "object",
         "properties": {
-          "identity": {
-            "description": "common identifying metadata",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/IdentityMetadata"
-              }
-            ]
+          "description": {
+            "description": "human-readable free-form text about a resource",
+            "type": "string"
           },
-          "ipv4_block": {
+          "id": {
+            "description": "unique, immutable, system-controlled identifier for each resource",
+            "type": "string",
+            "format": "uuid"
+          },
+          "ipv4Block": {
             "nullable": true,
             "description": "The IPv4 subnet CIDR block.",
             "allOf": [
@@ -5134,7 +5398,7 @@
               }
             ]
           },
-          "ipv6_block": {
+          "ipv6Block": {
             "nullable": true,
             "description": "The IPv6 subnet CIDR block.",
             "allOf": [
@@ -5143,15 +5407,37 @@
               }
             ]
           },
-          "vpc_id": {
+          "name": {
+            "description": "unique, mutable, user-controlled identifier for each resource",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Name"
+              }
+            ]
+          },
+          "timeCreated": {
+            "description": "timestamp when this resource was created",
+            "type": "string",
+            "format": "date-time"
+          },
+          "timeModified": {
+            "description": "timestamp when this resource was last modified",
+            "type": "string",
+            "format": "date-time"
+          },
+          "vpcId": {
             "description": "The VPC to which the subnet belongs.",
             "type": "string",
             "format": "uuid"
           }
         },
         "required": [
-          "identity",
-          "vpc_id"
+          "description",
+          "id",
+          "name",
+          "timeCreated",
+          "timeModified",
+          "vpcId"
         ]
       },
       "VpcSubnetCreate": {

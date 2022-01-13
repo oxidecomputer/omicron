@@ -1159,8 +1159,10 @@ pub enum VpcRouterKind {
 /// A VPC router defines a series of rules that indicate where traffic
 /// should be sent depending on its destination.
 #[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
 pub struct VpcRouter {
     /// common identifying metadata
+    #[serde(flatten)]
     pub identity: IdentityMetadata,
 
     pub kind: VpcRouterKind,
@@ -1362,8 +1364,10 @@ pub enum RouterRouteKind {
 
 ///  A route defines a rule that governs where traffic should be sent based on its destination.
 #[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
 pub struct RouterRoute {
     /// common identifying metadata
+    #[serde(flatten)]
     pub identity: IdentityMetadata,
 
     /// The VPC Router to which the route belongs.
@@ -1400,6 +1404,7 @@ pub struct RouterRouteUpdateParams {
 #[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct VpcFirewallRule {
     /// common identifying metadata
+    #[serde(flatten)]
     pub identity: IdentityMetadata,
     /// whether this rule is in effect
     pub status: VpcFirewallRuleStatus,
@@ -1888,8 +1893,10 @@ impl JsonSchema for MacAddr {
 
 /// A `NetworkInterface` represents a virtual network interface device.
 #[derive(ObjectIdentity, Clone, Debug, Deserialize, JsonSchema, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct NetworkInterface {
-    /** common identifying metadata */
+    /// common identifying metadata
+    #[serde(flatten)]
     pub identity: IdentityMetadata,
 
     /** The Instance to which the interface belongs. */

@@ -104,8 +104,10 @@ impl Into<Vpc> for model::Vpc {
 /// A VPC subnet represents a logical grouping for instances that allows network traffic between
 /// them, within a IPv4 subnetwork or optionall an IPv6 subnetwork.
 #[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
 pub struct VpcSubnet {
     /** common identifying metadata */
+    #[serde(flatten)]
     pub identity: IdentityMetadata,
 
     /** The VPC to which the subnet belongs. */
@@ -146,6 +148,7 @@ impl Into<VpcSubnet> for model::VpcSubnet {
 #[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct Rack {
+    #[serde(flatten)]
     pub identity: IdentityMetadata,
 }
 

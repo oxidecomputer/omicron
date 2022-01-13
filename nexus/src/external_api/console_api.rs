@@ -46,6 +46,7 @@ pub struct LoginParams {
    path = "/login",
    // TODO: this should be unpublished, but for now it's convenient for the
    // console to use the generated client for this request
+   tags = ["hidden"],
 }]
 pub async fn spoof_login(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
@@ -90,6 +91,7 @@ pub async fn spoof_login(
    path = "/logout",
    // TODO: this should be unpublished, but for now it's convenient for the
    // console to use the generated client for this request
+   tags = ["hidden"],
 }]
 pub async fn logout(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
@@ -202,6 +204,7 @@ pub async fn login_redirect(
 #[endpoint {
    method = GET,
    path = "/session/me",
+   tags = ["hidden"],
 }]
 pub async fn session_me(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
