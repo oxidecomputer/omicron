@@ -1252,6 +1252,12 @@
               }
             ]
           },
+          "migration_uuid": {
+            "nullable": true,
+            "description": "migration id (if one in process)",
+            "type": "string",
+            "format": "uuid"
+          },
           "ncpus": {
             "description": "number of CPUs allocated for this Instance",
             "allOf": [

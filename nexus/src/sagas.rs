@@ -268,6 +268,7 @@ async fn sic_create_instance_record(
         sled_uuid: sled_uuid?,
         propolis_uuid: propolis_uuid?,
         propolis_addr: None,
+        migration_uuid: None,
         hostname: params.create_params.hostname.clone(),
         memory: params.create_params.memory,
         ncpus: params.create_params.ncpus,

@@ -997,6 +997,7 @@ mod test {
                 sled_uuid: Uuid::new_v4(),
                 propolis_uuid: test_propolis_uuid(),
                 propolis_addr: None,
+                migration_uuid: None,
                 ncpus: InstanceCpuCount(2),
                 memory: ByteCount::from_mebibytes_u32(512),
                 hostname: "myvm".to_string(),
