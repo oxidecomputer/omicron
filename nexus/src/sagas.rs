@@ -374,7 +374,7 @@ pub fn saga_instance_migrate() -> SagaTemplate<SagaInstanceMigrate> {
     );
 
     template_builder.append(
-        "migrate_prep",
+        "migrate_instance",
         "MigratePrep",
         new_action_noop_undo(sim_migrate_prep),
     );
@@ -405,7 +405,7 @@ pub fn saga_instance_migrate() -> SagaTemplate<SagaInstanceMigrate> {
 
 async fn sim_migrate_prep(
     sagactx: ActionContext<SagaInstanceMigrate>,
-) -> Result<(), ActionError> {
+) -> Result<(Uuid, InstanceRuntimeState), ActionError> {
     let osagactx = sagactx.user_data();
     let params = sagactx.saga_params();
 
@@ -429,7 +429,7 @@ async fn sim_migrate_prep(
         match runtime.migration_uuid {
             // This is the same migration, nothing else to do
             Some(id) if id == migrate_uuid => {
-                return Ok(());
+                return Ok((instance_id, runtime.clone()));
             }
             // Encountered a different ongoing migration, bail
             Some(_) => {
@@ -452,13 +452,19 @@ async fn sim_migrate_prep(
         migration_uuid: Some(migrate_uuid),
         ..runtime
     };
-    osagactx
+
+    let updated = osagactx
         .datastore()
-        .instance_update_runtime(&instance_id, &runtime.into())
+        .instance_update_runtime(&instance_id, &runtime.clone().into())
         .await
         .map_err(ActionError::action_failed)?;
+    if !updated {
+        return Err(ActionError::action_failed(
+            "failed to update instance state".to_string(),
+        ));
+    }
 
-    Ok(())
+    Ok((instance_id, runtime))
 }
 
 async fn sim_instance_migrate(
@@ -469,19 +475,9 @@ async fn sim_instance_migrate(
 
     let dst_sled_uuid = params.migrate_params.dst_sled_uuid;
     let dst_propolis_uuid = sagactx.lookup::<Uuid>("dst_propolis_id")?;
+    let (instance_id, old_runtime) =
+        sagactx.lookup::<(Uuid, InstanceRuntimeState)>("migrate_instance")?;
 
-    let instance = osagactx
-        .datastore()
-        .instance_fetch_by_name(
-            &params.project_id,
-            &params.instance_name.clone().into(),
-        )
-        .await
-        .map_err(ActionError::action_failed)?;
-
-    let instance_id = instance.id();
-
-    let old_runtime: InstanceRuntimeState = instance.runtime_state.into();
     let runtime = InstanceRuntimeState {
         sled_uuid: dst_sled_uuid,
         propolis_uuid: dst_propolis_uuid,
