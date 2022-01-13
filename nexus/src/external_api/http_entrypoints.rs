@@ -848,7 +848,7 @@ async fn project_instances_delete_instance(
  * Migrate an instance to a different propolis-server, possibly on a different sled.
  */
 #[endpoint {
-    method = PUT,
+    method = POST,
     path = "/organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/migrate",
 }]
 async fn project_instances_migrate_instance(
