@@ -368,6 +368,12 @@ pub fn saga_instance_migrate() -> SagaTemplate<SagaInstanceMigrate> {
     let mut template_builder = SagaTemplateBuilder::new();
 
     template_builder.append(
+        "migrate_id",
+        "GenerateMigrateId",
+        new_action_noop_undo(saga_generate_uuid),
+    );
+
+    template_builder.append(
         "migrate_prep",
         "MigratePrep",
         new_action_noop_undo(sim_migrate_prep),
@@ -403,6 +409,8 @@ async fn sim_migrate_prep(
     let osagactx = sagactx.user_data();
     let params = sagactx.saga_params();
 
+    let migrate_uuid = sagactx.lookup::<Uuid>("migrate_id")?;
+
     let instance = osagactx
         .datastore()
         .instance_fetch_by_name(
@@ -416,19 +424,34 @@ async fn sim_migrate_prep(
 
     let runtime: InstanceRuntimeState = instance.runtime_state.into();
 
-    // First make sure we're already migrating the instance
+    // Is an existing migration ongoing?
     if runtime.run_state == InstanceState::Migrating {
-        return Err(ActionError::action_failed(
-            "migration already in progress".to_string(),
-        ));
+        match runtime.migration_uuid {
+            // This is the same migration, nothing else to do
+            Some(id) if id == migrate_uuid => {
+                return Ok(());
+            }
+            // Encountered a different ongoing migration, bail
+            Some(_) => {
+                return Err(ActionError::action_failed(
+                    "unexpected migration already in progress".to_string(),
+                ));
+            }
+            // Marked as migrating but no ID yet?
+            // Treat as new migration
+            None => {}
+        }
     }
 
     // Update the Instance's runtime state to indicate it's currently migrating.
     // This also acts as a lock somewhat to prevent any further state changes
     // from being performed on the instance in the meantime.
     // See `check_runtime_change_allowed`.
-    let runtime =
-        InstanceRuntimeState { run_state: InstanceState::Migrating, ..runtime };
+    let runtime = InstanceRuntimeState {
+        run_state: InstanceState::Migrating,
+        migration_uuid: Some(migrate_uuid),
+        ..runtime
+    };
     osagactx
         .datastore()
         .instance_update_runtime(&instance_id, &runtime.into())
