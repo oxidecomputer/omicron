@@ -54,7 +54,7 @@ impl SagaContext {
     }
 
     pub fn datastore(&self) -> &db::DataStore {
-        self.nexus.datastore()
+        &*self.nexus.datastore()
     }
 
     pub async fn sled_client(

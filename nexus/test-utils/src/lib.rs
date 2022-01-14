@@ -21,6 +21,7 @@ use std::path::Path;
 use std::time::Duration;
 use uuid::Uuid;
 
+pub mod db;
 pub mod http_testing;
 pub mod resource_helpers;
 
@@ -93,12 +94,15 @@ pub async fn test_setup_with_config(
     let log = &logctx.log;
 
     /* Start up CockroachDB. */
-    let database = dev::test_setup_database(log).await;
+    let database = db::test_setup_database(log).await;
 
     /* Start ClickHouse database server. */
     let clickhouse = dev::clickhouse::ClickHouseInstance::new(0).await.unwrap();
 
+    /* Store actual address/port information for the databases after they start. */
     config.database.url = database.pg_config().clone();
+    config.timeseries_db.address.set_port(clickhouse.port());
+
     let server = omicron_nexus::Server::start(&config, &rack_id, &logctx.log)
         .await
         .unwrap();

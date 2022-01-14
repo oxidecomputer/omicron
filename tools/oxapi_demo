@@ -205,13 +205,13 @@ function cmd_organization_create_demo
 function cmd_organization_delete
 {
 	[[ $# != 1 ]] && usage "expected ORGANIZATION_NAME"
-	do_curl "/organizations/$1" -X DELETE
+	do_curl_authn "/organizations/$1" -X DELETE
 }
 
 function cmd_organization_get
 {
 	[[ $# != 1 ]] && usage "expected ORGANIZATION_NAME"
-	do_curl "/organizations/$1"
+	do_curl_authn "/organizations/$1"
 }
 
 function cmd_projects_list

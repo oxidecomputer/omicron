@@ -11,8 +11,8 @@ path = "../rpaths"
 anyhow = "1.0"
 async-trait = "0.1.51"
 bb8 = "0.7.1"
-async-bb8-diesel = { git = "https://github.com/oxidecomputer/async-bb8-diesel", rev = "22c26ef" }
-cookie = "0.15"
+async-bb8-diesel = { git = "https://github.com/oxidecomputer/async-bb8-diesel", rev = "c849b717be" }
+cookie = "0.16"
 # Tracking pending 2.0 version.
 diesel = { git = "https://github.com/diesel-rs/diesel", rev = "ce77c382", features = ["postgres", "r2d2", "chrono", "serde_json", "network-address", "uuid"] }
 futures = "0.3.18"
@@ -26,15 +26,17 @@ libc = "0.2.111"
 macaddr = { version = "1.0.1", features = [ "serde_std" ]}
 mime_guess = "2.0.3"
 newtype_derive = "0.1.6"
-oso = "0.24"
+oso = "0.25"
 oximeter-client = { path = "../oximeter-client" }
+oximeter-db = { path = "../oximeter/db/" }
 parse-display = "0.5.3"
 # See omicron-rpaths for more about the "pq-sys" dependency.
 pq-sys = "*"
 rand = "0.8.4"
 ref-cast = "1.0"
-reqwest = { version = "0.11.7", features = [ "json" ] }
+reqwest = { version = "0.11.8", features = [ "json" ] }
 serde_json = "1.0"
+serde_urlencoded = "0.7.0"
 serde_with = "1.11.0"
 sled-agent-client = { path = "../sled-agent-client" }
 slog-dtrace = "0.2"
@@ -95,7 +97,7 @@ git = "https://github.com/oxidecomputer/steno"
 branch = "main"
 
 [dependencies.tokio]
-version = "1.14"
+version = "1.15"
 features = [ "full" ]
 
 [dependencies.tokio-postgres]
@@ -112,8 +114,7 @@ expectorate = "1.0.4"
 nexus-test-utils-macros = { path = "test-utils-macros" }
 nexus-test-utils = { path = "test-utils" }
 omicron-test-utils = { path = "../test-utils" }
-openapiv3 = "0.5.0"
-oximeter-db = { path = "../oximeter/db" }
+openapiv3 = "1.0.0-beta.5"
 subprocess = "0.2.8"
 
 [dev-dependencies.openapi-lint]

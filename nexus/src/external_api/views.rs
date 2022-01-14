@@ -6,6 +6,7 @@
  * Views are response bodies, most of which are public lenses onto DB models.
  */
 
+use crate::authn;
 use crate::db::identity::{Asset, Resource};
 use crate::db::model;
 use api_identity::ObjectIdentity;
@@ -103,8 +104,10 @@ impl Into<Vpc> for model::Vpc {
 /// A VPC subnet represents a logical grouping for instances that allows network traffic between
 /// them, within a IPv4 subnetwork or optionall an IPv6 subnetwork.
 #[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
 pub struct VpcSubnet {
     /** common identifying metadata */
+    #[serde(flatten)]
     pub identity: IdentityMetadata,
 
     /** The VPC to which the subnet belongs. */
@@ -145,6 +148,7 @@ impl Into<VpcSubnet> for model::VpcSubnet {
 #[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct Rack {
+    #[serde(flatten)]
     pub identity: IdentityMetadata,
 }
 
@@ -196,6 +200,23 @@ pub struct User {
 impl Into<User> for model::UserBuiltin {
     fn into(self) -> User {
         User { identity: self.identity() }
+    }
+}
+
+/**
+ * Client view of currently authed user.
+ */
+// TODO: this may end up merged with User once more details about the user are
+// stored in the auth context. Right now there is only the ID.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionUser {
+    pub id: Uuid,
+}
+
+impl Into<SessionUser> for authn::Actor {
+    fn into(self) -> SessionUser {
+        SessionUser { id: self.0 }
     }
 }
 

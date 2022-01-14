@@ -479,6 +479,19 @@ impl<'a> NexusRequest<'a> {
         )
     }
 
+    /// Convenience constructor for failure cases
+    pub fn expect_failure(
+        testctx: &'a ClientTestContext,
+        expected_status: http::StatusCode,
+        method: http::Method,
+        uri: &str,
+    ) -> Self {
+        NexusRequest::new(
+            RequestBuilder::new(testctx, method, uri)
+                .expect_status(Some(expected_status)),
+        )
+    }
+
     /// Iterates a collection (like `dropshot::test_util::iter_collection`)
     /// using authenticated requests.
     pub async fn iter_collection_authn<T>(

@@ -12,38 +12,47 @@ pub mod db;
 pub mod poll;
 pub mod test_cmds;
 
+use anyhow::Context;
 use dropshot::test_util::LogContext;
 use dropshot::ConfigLogging;
 use dropshot::ConfigLoggingIfExists;
 use dropshot::ConfigLoggingLevel;
 use slog::Logger;
-use std::path::{Path, PathBuf};
-
-/// Path to the "seed" CockroachDB directory.
-///
-/// Populating CockroachDB unfortunately isn't free - creation of
-/// tables, indices, and users takes several seconds to complete.
-///
-/// By creating a "seed" version of the database, we can cut down
-/// on the time spent performing this operation. Instead, we opt
-/// to copy the database from this seed location.
-fn seed_dir() -> PathBuf {
-    std::env::temp_dir().join("crdb-base")
-}
+use std::path::Path;
 
 // Helper for copying all the files in one directory to another.
 fn copy_dir(
     src: impl AsRef<Path>,
     dst: impl AsRef<Path>,
-) -> std::io::Result<()> {
-    std::fs::create_dir_all(&dst)?;
-    for entry in std::fs::read_dir(src)? {
-        let entry = entry?;
-        let ty = entry.file_type()?;
+) -> Result<(), anyhow::Error> {
+    let src = src.as_ref();
+    let dst = dst.as_ref();
+    std::fs::create_dir_all(&dst)
+        .with_context(|| format!("Failed to create dst {}", dst.display()))?;
+    for entry in std::fs::read_dir(src)
+        .with_context(|| format!("Failed to read_dir {}", src.display()))?
+    {
+        let entry = entry.with_context(|| {
+            format!("Failed to read entry in {}", src.display())
+        })?;
+        let ty = entry.file_type().context("Failed to access file type")?;
+        let target = dst.join(entry.file_name());
         if ty.is_dir() {
-            copy_dir(entry.path(), dst.as_ref().join(entry.file_name()))?;
+            copy_dir(entry.path(), &target).with_context(|| {
+                format!(
+                    "Failed to copy subdirectory {} to {}",
+                    entry.path().display(),
+                    target.display()
+                )
+            })?;
         } else {
-            std::fs::copy(entry.path(), dst.as_ref().join(entry.file_name()))?;
+            std::fs::copy(entry.path(), &target).with_context(|| {
+                format!(
+                    "Failed to copy file at {} to {}",
+                    entry.path().display(),
+                    target.display()
+                )
+            })?;
         }
     }
     Ok(())
@@ -75,27 +84,41 @@ enum StorageSource {
 ///
 /// This is intended to optimize subsequent calls to [`test_setup_database`]
 /// by reducing the latency of populating the storage directory.
-pub async fn test_setup_database_seed(log: &Logger) {
-    let dir = seed_dir();
+pub async fn test_setup_database_seed(log: &Logger, dir: &Path) {
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
-    let mut db = setup_database(log, Some(&dir), StorageSource::Populate).await;
+    let mut db = setup_database(log, dir, StorageSource::Populate).await;
     db.cleanup().await.unwrap();
+
+    // See https://github.com/cockroachdb/cockroach/issues/74231 for context on
+    // this. We use this assertion to check that our seed directory won't point
+    // back to itself, even if it is copied elsewhere.
+    assert_eq!(
+        0,
+        dir.join("temp-dirs-record.txt")
+            .metadata()
+            .expect("Cannot access metadata")
+            .len(),
+        "Temporary directory record should be empty after graceful shutdown",
+    );
 }
 
 /// Set up a [`db::CockroachInstance`] for running tests.
-pub async fn test_setup_database(log: &Logger) -> db::CockroachInstance {
-    setup_database(log, None, StorageSource::CopyFromSeed).await
+pub async fn test_setup_database(
+    log: &Logger,
+    dir: &Path,
+) -> db::CockroachInstance {
+    setup_database(log, dir, StorageSource::CopyFromSeed).await
 }
 
 async fn setup_database(
     log: &Logger,
-    store_dir: Option<&Path>,
+    seed_dir: &Path,
     storage_source: StorageSource,
 ) -> db::CockroachInstance {
     let builder = db::CockroachStarterBuilder::new();
-    let mut builder = if let Some(store_dir) = store_dir {
-        builder.store_dir(store_dir)
+    let mut builder = if matches!(storage_source, StorageSource::Populate) {
+        builder.store_dir(seed_dir)
     } else {
         builder
     };
@@ -110,8 +133,11 @@ async fn setup_database(
     // If we're going to copy the storage directory from the seed,
     // it is critical we do so before starting the DB.
     if matches!(storage_source, StorageSource::CopyFromSeed) {
-        info!(&log, "cockroach: copying from seed directory");
-        copy_dir(seed_dir(), starter.store_dir())
+        info!(&log,
+            "cockroach: copying from seed directory ({}) to storage directory ({})",
+            seed_dir.to_string_lossy(), starter.store_dir().to_string_lossy(),
+        );
+        copy_dir(seed_dir, starter.store_dir())
             .expect("Cannot copy storage from seed directory");
     }
 

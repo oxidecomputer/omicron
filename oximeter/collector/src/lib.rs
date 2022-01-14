@@ -263,11 +263,10 @@ impl OximeterAgent {
         let (result_sender, result_receiver) = mpsc::channel(8);
         let log = log.new(o!("component" => "oximeter-agent", "collector_id" => id.to_string()));
         let insertion_log = log.new(o!("component" => "results-sink"));
-        let client_log = log.new(o!("component" => "clickhouse-client"));
 
         // Construct the ClickHouse client first, propagate an error if we can't reach the
         // database.
-        let client = Client::new(db_config.address, client_log);
+        let client = Client::new(db_config.address, &log);
         client.init_db().await?;
 
         // Spawn the task for aggregating and inserting all metrics

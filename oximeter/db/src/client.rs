@@ -5,30 +5,44 @@
 //! Rust client to ClickHouse database
 // Copyright 2021 Oxide Computer Company
 
-use crate::TimeseriesKey;
-use crate::{model, query, Error};
+use crate::{
+    model, query, Error, Metric, Target, Timeseries, TimeseriesPageSelector,
+    TimeseriesScanParams, TimeseriesSchema,
+};
+use crate::{TimeseriesKey, TimeseriesName};
 use async_trait::async_trait;
+use dropshot::{EmptyScanParams, ResultsPage, WhichPage};
 use oximeter::types::Sample;
 use slog::{debug, error, trace, Logger};
 use std::collections::{btree_map::Entry, BTreeMap, BTreeSet};
+use std::convert::TryFrom;
 use std::net::SocketAddr;
+use std::num::NonZeroU32;
 use std::sync::Mutex;
+use uuid::Uuid;
 
 /// A `Client` to the ClickHouse metrics database.
 #[derive(Debug)]
 pub struct Client {
+    _id: Uuid,
     log: Logger,
     url: String,
     client: reqwest::Client,
-    schema: Mutex<BTreeMap<String, model::TimeseriesSchema>>,
+    schema: Mutex<BTreeMap<TimeseriesName, TimeseriesSchema>>,
 }
 
 impl Client {
     /// Construct a new ClickHouse client of the database at `address`.
-    pub fn new(address: SocketAddr, log: Logger) -> Self {
+    pub fn new(address: SocketAddr, log: &Logger) -> Self {
+        let id = Uuid::new_v4();
+        let log = log.new(slog::o!(
+            "component" => "clickhouse-client",
+            "id" => id.to_string(),
+        ));
         let client = reqwest::Client::new();
         let url = format!("http://{}", address);
-        Self { log, url, client, schema: Mutex::new(BTreeMap::new()) }
+        let schema = Mutex::new(BTreeMap::new());
+        Self { _id: id, log, url, client, schema }
     }
 
     /// Ping the ClickHouse server to verify connectivitiy.
@@ -52,7 +66,7 @@ impl Client {
         criteria: &[&str],
         start_time: Option<query::Timestamp>,
         end_time: Option<query::Timestamp>,
-    ) -> Result<Vec<model::Timeseries>, Error> {
+    ) -> Result<Vec<Timeseries>, Error> {
         // Querying uses up to three queries to the database:
         //  1. Retrieve the schema
         //  2. Retrieve the keys and field names/values for matching timeseries
@@ -64,6 +78,7 @@ impl Client {
         //  values from the measurement rows, we avoid transferring the data from those columns
         //  to/from the database, as well as the cost of parsing them for each measurement, only to
         //  promptly throw away almost all of them (except for the first).
+        let timeseries_name = TimeseriesName::try_from(timeseries_name)?;
         let schema = self
             .schema_for_timeseries(&timeseries_name)
             .await?
@@ -77,7 +92,7 @@ impl Client {
             .start_time(start_time)
             .end_time(end_time);
         for criterion in criteria.iter() {
-            query_builder = query_builder.filter_str(criterion)?;
+            query_builder = query_builder.filter_raw(criterion)?;
         }
 
         let query = query_builder.build();
@@ -95,44 +110,143 @@ impl Client {
         }
     }
 
+    pub async fn list_timeseries(
+        &self,
+        page: &WhichPage<TimeseriesScanParams, TimeseriesPageSelector>,
+        limit: NonZeroU32,
+    ) -> Result<ResultsPage<Timeseries>, Error> {
+        let (params, offset) = match page {
+            WhichPage::First(ref params) => (params, 0),
+            WhichPage::Next(ref sel) => (&sel.params, sel.offset.get()),
+        };
+        let schema = self
+            .schema_for_timeseries(&params.timeseries_name)
+            .await?
+            .ok_or_else(|| {
+                Error::QueryError(format!(
+                    "No such timeseries: '{}'",
+                    params.timeseries_name
+                ))
+            })?;
+        // TODO: Handle inclusive/exclusive timestamps in general.
+        //
+        // These come from a query parameter, so it's not obvious what format they should have.
+        let mut query_builder = query::SelectQueryBuilder::new(&schema)
+            .start_time(
+                params.start_time.map(|t| query::Timestamp::Inclusive(t)),
+            )
+            .end_time(params.end_time.map(|t| query::Timestamp::Exclusive(t)))
+            .limit(limit)
+            .offset(offset);
+        for criterion in params.criteria.iter() {
+            query_builder = query_builder.filter_str(criterion)?;
+        }
+
+        let query = query_builder.build();
+        let info = match query.field_query() {
+            Some(field_query) => {
+                self.select_matching_timeseries_info(&field_query, &schema)
+                    .await?
+            }
+            None => BTreeMap::new(),
+        };
+        let results = if info.is_empty() {
+            vec![]
+        } else {
+            self.select_timeseries_with_keys(&query, &info, &schema).await?
+        };
+        Ok(ResultsPage::new(results, &params, |_, _| {
+            NonZeroU32::try_from(limit.get() + offset).unwrap()
+        })
+        .unwrap())
+    }
+
     /// Return the schema for a timeseries by name.
     ///
     /// Note
     /// ----
     /// This method may translate into a call to the database, if the requested metric cannot be
     /// found in an internal cache.
-    pub async fn schema_for_timeseries<S: AsRef<str>>(
+    pub async fn schema_for_timeseries(
         &self,
-        name: S,
-    ) -> Result<Option<model::TimeseriesSchema>, Error> {
+        name: &TimeseriesName,
+    ) -> Result<Option<TimeseriesSchema>, Error> {
         {
             let map = self.schema.lock().unwrap();
-            if let Some(s) = map.get(name.as_ref()) {
+            if let Some(s) = map.get(name) {
                 return Ok(Some(s.clone()));
             }
         }
         // `get_schema` acquires the lock internally, so the above scope is required to avoid
         // deadlock.
         self.get_schema().await?;
-        Ok(self.schema.lock().unwrap().get(name.as_ref()).map(Clone::clone))
+        Ok(self.schema.lock().unwrap().get(name).map(Clone::clone))
+    }
+
+    /// List timeseries schema, paginated.
+    pub async fn timeseries_schema_list(
+        &self,
+        page: &WhichPage<EmptyScanParams, TimeseriesName>,
+        limit: NonZeroU32,
+    ) -> Result<ResultsPage<TimeseriesSchema>, Error> {
+        let sql = match page {
+            WhichPage::First(_) => {
+                format!(
+                    concat!(
+                        "SELECT * ",
+                        "FROM {}.timeseries_schema ",
+                        "LIMIT {} ",
+                        "FORMAT JSONEachRow;",
+                    ),
+                    crate::DATABASE_NAME,
+                    limit.get(),
+                )
+            }
+            WhichPage::Next(ref last_timeseries) => {
+                format!(
+                    concat!(
+                        "SELECT * FROM {}.timeseries_schema ",
+                        "WHERE timeseries_name > '{}' ",
+                        "LIMIT {} ",
+                        "FORMAT JSONEachRow;",
+                    ),
+                    crate::DATABASE_NAME,
+                    last_timeseries,
+                    limit.get(),
+                )
+            }
+        };
+        let body = self.execute_with_body(sql).await?;
+        let schema = body
+            .lines()
+            .map(|line| {
+                TimeseriesSchema::from(
+                    serde_json::from_str::<model::DbTimeseriesSchema>(line)
+                        .expect(
+                        "Failed to deserialize TimeseriesSchema from database",
+                    ),
+                )
+            })
+            .collect::<Vec<_>>();
+        ResultsPage::new(schema, &dropshot::EmptyScanParams {}, |schema, _| {
+            schema.timeseries_name.clone()
+        })
+        .map_err(|e| Error::Database(e.to_string()))
     }
 
     // Verifies that the schema for a sample matches the schema in the database.
     //
-    // If the schema does not match, an Err is returned (the caller skips the sample in this case).
-    // If the schema does not _exist_ in the cached map of schema, its value as a row of JSON is
-    // returned, so that the caller may insert them into the database at an appropriate time.
-    fn verify_sample_schema(
+    // If the schema exists in the database, and the sample matches that schema, `None` is
+    // returned. If the schema does not match, an Err is returned (the caller skips the sample in
+    // this case). If the schema does not _exist_ in the database, Some(schema) is returned, so
+    // that the caller can insert it into the database at the appropriate time.
+    async fn verify_sample_schema(
         &self,
         sample: &Sample,
     ) -> Result<Option<String>, Error> {
         let schema = model::schema_for(sample);
-        let maybe_new_schema = match self
-            .schema
-            .lock()
-            .unwrap()
-            .entry(schema.timeseries_name.clone())
-        {
+        let name = schema.timeseries_name.clone();
+        let maybe_new_schema = match self.schema.lock().unwrap().entry(name) {
             Entry::Vacant(entry) => Ok(Some(entry.insert(schema).clone())),
             Entry::Occupied(entry) => {
                 let existing_schema = entry.get();
@@ -152,7 +266,7 @@ impl Client {
         }?;
         Ok(maybe_new_schema.map(|schema| {
             serde_json::to_string(&model::DbTimeseriesSchema::from(schema))
-                .unwrap()
+                .expect("Failed to convert schema to DB model")
         }))
     }
 
@@ -161,9 +275,8 @@ impl Client {
     async fn select_matching_timeseries_info(
         &self,
         field_query: &str,
-        schema: &model::TimeseriesSchema,
-    ) -> Result<BTreeMap<TimeseriesKey, (model::Target, model::Metric)>, Error>
-    {
+        schema: &TimeseriesSchema,
+    ) -> Result<BTreeMap<TimeseriesKey, (Target, Metric)>, Error> {
         let body = self.execute_with_body(field_query).await?;
         let mut results = BTreeMap::new();
         for line in body.lines() {
@@ -181,9 +294,9 @@ impl Client {
     async fn select_timeseries_with_keys(
         &self,
         query: &query::SelectQuery,
-        info: &BTreeMap<TimeseriesKey, (model::Target, model::Metric)>,
-        schema: &model::TimeseriesSchema,
-    ) -> Result<Vec<model::Timeseries>, Error> {
+        info: &BTreeMap<TimeseriesKey, (Target, Metric)>,
+        schema: &TimeseriesSchema,
+    ) -> Result<Vec<Timeseries>, Error> {
         let mut timeseries_by_key = BTreeMap::new();
         let keys = info.keys().copied().collect::<Vec<_>>();
         let measurement_query = query.measurement_query(&keys);
@@ -196,7 +309,7 @@ impl Client {
                         .get(&key)
                         .expect("Timeseries key in measurement query but not field query")
                         .clone();
-                    model::Timeseries {
+                    Timeseries {
                         timeseries_name: schema.timeseries_name.to_string(),
                         target,
                         metric,
@@ -246,21 +359,45 @@ impl Client {
         .map_err(|err| Error::Database(err.to_string()))
     }
 
-    pub(crate) async fn get_schema(&self) -> Result<(), Error> {
+    async fn get_schema(&self) -> Result<(), Error> {
         debug!(self.log, "retrieving timeseries schema from database");
-        let sql = format!(
-            "SELECT * FROM {}.timeseries_schema FORMAT JSONEachRow;",
-            crate::DATABASE_NAME,
-        );
+        let sql = {
+            let schema = self.schema.lock().unwrap();
+            if schema.is_empty() {
+                format!(
+                    "SELECT * FROM {db_name}.timeseries_schema FORMAT JSONEachRow;",
+                    db_name = crate::DATABASE_NAME,
+                )
+            } else {
+                // Only collect schema that we've not already cached.
+                format!(
+                    concat!(
+                        "SELECT * ",
+                        "FROM {db_name}.timeseries_schema ",
+                        "WHERE timeseries_name NOT IN ",
+                        "({current_keys}) ",
+                        "FORMAT JSONEachRow;",
+                    ),
+                    db_name = crate::DATABASE_NAME,
+                    current_keys = schema
+                        .keys()
+                        .map(|key| format!("'{}'", key))
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                )
+            }
+        };
         let body = self.execute_with_body(sql).await?;
         if body.is_empty() {
-            trace!(self.log, "no timeseries schema in database");
+            trace!(self.log, "no new timeseries schema in database");
         } else {
             trace!(self.log, "extracting new timeseries schema");
             let new = body.lines().map(|line| {
-                let schema = model::TimeseriesSchema::from(
+                let schema = TimeseriesSchema::from(
                     serde_json::from_str::<model::DbTimeseriesSchema>(line)
-                        .unwrap(),
+                        .expect(
+                        "Failed to deserialize TimeseriesSchema from database",
+                    ),
                 );
                 (schema.timeseries_name.clone(), schema)
             });
@@ -298,7 +435,7 @@ impl DbWrite for Client {
         let mut new_schema = Vec::new();
 
         for sample in samples.iter() {
-            match self.verify_sample_schema(sample) {
+            match self.verify_sample_schema(sample).await {
                 Err(_) => {
                     // Skip the sample, but otherwise do nothing. The error is logged in the above
                     // call.
@@ -306,7 +443,7 @@ impl DbWrite for Client {
                 }
                 Ok(schema) => {
                     if let Some(schema) = schema {
-                        debug!(self.log, "new timeseries schema: {}", schema);
+                        debug!(self.log, "new timeseries schema: {:?}", schema);
                         new_schema.push(schema);
                     }
                 }
@@ -358,7 +495,7 @@ impl DbWrite for Client {
             let body = format!(
                 "INSERT INTO {db_name}.timeseries_schema FORMAT JSONEachRow\n{row_data}\n",
                 db_name = crate::DATABASE_NAME,
-                row_data = new_schema.join("\n")
+                row_data = new_schema.join("\n"),
             );
             self.execute(body).await?;
         }
@@ -426,21 +563,21 @@ async fn handle_db_response(
 
 // Generate an error describing a schema mismatch
 fn error_for_schema_mismatch(
-    schema: &model::TimeseriesSchema,
-    existing_schema: &model::TimeseriesSchema,
+    schema: &TimeseriesSchema,
+    existing_schema: &TimeseriesSchema,
 ) -> Error {
     let expected = existing_schema
-        .fields
+        .field_schema
         .iter()
         .map(|field| (field.name.clone(), field.ty))
         .collect();
     let actual = schema
-        .fields
+        .field_schema
         .iter()
         .map(|field| (field.name.clone(), field.ty))
         .collect();
     Error::SchemaMismatch {
-        name: schema.timeseries_name.clone(),
+        name: schema.timeseries_name.to_string(),
         expected,
         actual,
     }
@@ -475,7 +612,7 @@ mod tests {
             .expect("Failed to start ClickHouse");
         let address = SocketAddr::new("::1".parse().unwrap(), db.port());
 
-        Client::new(address, log).wipe_db().await.unwrap();
+        Client::new(address, &log).wipe_db().await.unwrap();
         db.cleanup().await.expect("Failed to cleanup ClickHouse server");
     }
 
@@ -489,7 +626,7 @@ mod tests {
             .expect("Failed to start ClickHouse");
         let address = SocketAddr::new("::1".parse().unwrap(), db.port());
 
-        let client = Client::new(address, log);
+        let client = Client::new(address, &log);
         client
             .init_db()
             .await
@@ -535,7 +672,7 @@ mod tests {
             .expect("Failed to start ClickHouse");
         let address = SocketAddr::new("::1".parse().unwrap(), db.port());
 
-        let client = Client::new(address, log);
+        let client = Client::new(address, &log);
         client
             .init_db()
             .await
@@ -554,7 +691,7 @@ mod tests {
             datum: 1,
         };
         let sample = Sample::new(&bad_name, &metric);
-        let result = client.verify_sample_schema(&sample);
+        let result = client.verify_sample_schema(&sample).await;
         assert!(matches!(result, Err(Error::SchemaMismatch { .. })));
         db.cleanup().await.expect("Failed to cleanup ClickHouse server");
     }
@@ -569,7 +706,7 @@ mod tests {
             .expect("Failed to start ClickHouse");
         let address = SocketAddr::new("::1".parse().unwrap(), db.port());
 
-        let client = Client::new(address, log);
+        let client = Client::new(address, &log);
         client
             .init_db()
             .await
@@ -578,7 +715,7 @@ mod tests {
 
         // Verify that this sample is considered new, i.e., we return rows to update the timeseries
         // schema table.
-        let result = client.verify_sample_schema(&sample).unwrap();
+        let result = client.verify_sample_schema(&sample).await.unwrap();
         assert!(
             matches!(result, Some(_)),
             "When verifying a new sample, the rows to be inserted should be returned"
@@ -592,11 +729,13 @@ mod tests {
 
         // The internal map should now contain both the new timeseries schema
         let actual_schema = model::schema_for(&sample);
+        let timeseries_name =
+            TimeseriesName::try_from(sample.timeseries_name.as_str()).unwrap();
         let expected_schema = client
             .schema
             .lock()
             .unwrap()
-            .get(&sample.timeseries_name)
+            .get(&timeseries_name)
             .expect(
                 "After inserting a new sample, its schema should be included",
             )
@@ -609,7 +748,7 @@ mod tests {
 
         // This should no longer return a new row to be inserted for the schema of this sample, as
         // any schema have been included above.
-        let result = client.verify_sample_schema(&sample).unwrap();
+        let result = client.verify_sample_schema(&sample).await.unwrap();
         assert!(
             matches!(result, None),
             "After inserting new schema, it should no longer be considered new"
@@ -623,7 +762,7 @@ mod tests {
         let schema = result
             .lines()
             .map(|line| {
-                model::TimeseriesSchema::from(
+                TimeseriesSchema::from(
                     serde_json::from_str::<model::DbTimeseriesSchema>(&line)
                         .unwrap(),
                 )
@@ -637,7 +776,7 @@ mod tests {
 
     async fn setup_filter_testcase() -> (ClickHouseInstance, Client, Vec<Sample>)
     {
-        let log = slog::Logger::root(slog::Discard, o!());
+        let log = slog::Logger::root(slog_dtrace::Dtrace::new().0, o!());
 
         // Let the OS assign a port and discover it after ClickHouse starts
         let db = ClickHouseInstance::new(0)
@@ -645,7 +784,7 @@ mod tests {
             .expect("Failed to start ClickHouse");
         let address = SocketAddr::new("::1".parse().unwrap(), db.port());
 
-        let client = Client::new(address, log);
+        let client = Client::new(address, &log);
         client
             .init_db()
             .await
@@ -719,8 +858,7 @@ mod tests {
             .all(|(first, second)| first == second));
         assert_eq!(timeseries.target.name, "virtual_machine");
         // Compare fields, but order might be different.
-        let field_cmp = |needle: &oximeter::Field,
-                         haystack: &[oximeter::Field]| {
+        let field_cmp = |needle: &crate::Field, haystack: &[crate::Field]| {
             needle == haystack.iter().find(|f| f.name == needle.name).unwrap()
         };
         timeseries
@@ -804,7 +942,7 @@ mod tests {
     #[tokio::test]
     async fn test_bad_database_connection() {
         let log = slog::Logger::root(slog::Discard, o!());
-        let client = Client::new("127.0.0.1:443".parse().unwrap(), log);
+        let client = Client::new("127.0.0.1:443".parse().unwrap(), &log);
         assert!(matches!(
             client.ping().await,
             Err(Error::DatabaseUnavailable(_))
@@ -839,7 +977,7 @@ mod tests {
             .expect("Failed to start ClickHouse");
         let address = SocketAddr::new("::1".parse().unwrap(), db.port());
 
-        let client = Client::new(address, log);
+        let client = Client::new(address, &log);
         client
             .init_db()
             .await
@@ -928,12 +1066,7 @@ mod tests {
         criteria: &[&str],
         start_time: Option<query::Timestamp>,
         end_time: Option<query::Timestamp>,
-        test_fn: impl Fn(
-            &Service,
-            &[RequestLatency],
-            &[Sample],
-            &[model::Timeseries],
-        ),
+        test_fn: impl Fn(&Service, &[RequestLatency], &[Sample], &[Timeseries]),
     ) {
         let (target, metrics, samples) = setup_select_test();
         let mut db = ClickHouseInstance::new(0)
@@ -941,7 +1074,7 @@ mod tests {
             .expect("Failed to start ClickHouse");
         let address = SocketAddr::new("::1".parse().unwrap(), db.port());
         let log = Logger::root(slog::Discard, o!());
-        let client = Client::new(address, log);
+        let client = Client::new(address, &log);
         client
             .init_db()
             .await
@@ -1008,7 +1141,7 @@ mod tests {
         }
     }
 
-    fn verify_target(actual: &model::Target, expected: &Service) {
+    fn verify_target(actual: &crate::Target, expected: &Service) {
         assert_eq!(actual.name, expected.name());
         for (field_name, field_value) in expected
             .field_names()
@@ -1027,7 +1160,7 @@ mod tests {
         }
     }
 
-    fn verify_metric(actual: &model::Metric, expected: &RequestLatency) {
+    fn verify_metric(actual: &crate::Metric, expected: &RequestLatency) {
         assert_eq!(actual.name, expected.name());
         for (field_name, field_value) in expected
             .field_names()
@@ -1057,7 +1190,7 @@ mod tests {
             target: &Service,
             metrics: &[RequestLatency],
             samples: &[Sample],
-            timeseries: &[model::Timeseries],
+            timeseries: &[Timeseries],
         ) {
             assert_eq!(timeseries.len(), 1, "Expected one timeseries");
             let timeseries = timeseries.get(0).unwrap();
@@ -1084,7 +1217,7 @@ mod tests {
             target: &Service,
             metrics: &[RequestLatency],
             samples: &[Sample],
-            timeseries: &[model::Timeseries],
+            timeseries: &[Timeseries],
         ) {
             assert_eq!(timeseries.len(), 2, "Expected two timeseries");
             for (i, ts) in timeseries.iter().enumerate() {
@@ -1122,7 +1255,7 @@ mod tests {
             target: &Service,
             metrics: &[RequestLatency],
             samples: &[Sample],
-            timeseries: &[model::Timeseries],
+            timeseries: &[Timeseries],
         ) {
             assert_eq!(timeseries.len(), 4, "Expected four timeseries");
             let indices = &[(0, 1), (0, 2), (1, 1), (1, 2)];
@@ -1165,7 +1298,7 @@ mod tests {
             target: &Service,
             metrics: &[RequestLatency],
             samples: &[Sample],
-            timeseries: &[model::Timeseries],
+            timeseries: &[Timeseries],
         ) {
             assert_eq!(timeseries.len(), 12, "Expected 12 timeseries");
             for (i, ts) in timeseries.iter().enumerate() {
@@ -1196,7 +1329,7 @@ mod tests {
             .expect("Failed to start ClickHouse");
         let address = SocketAddr::new("::1".parse().unwrap(), db.port());
         let log = Logger::root(slog::Discard, o!());
-        let client = Client::new(address, log);
+        let client = Client::new(address, &log);
         client
             .init_db()
             .await
@@ -1227,6 +1360,111 @@ mod tests {
                 assert!(meas.timestamp() > start_time);
             }
         }
+        db.cleanup().await.expect("Failed to cleanup database");
+    }
+
+    #[tokio::test]
+    async fn test_get_schema_no_new_values() {
+        let (mut db, client, _) = setup_filter_testcase().await;
+        let schema = &client.schema.lock().unwrap().clone();
+        client.get_schema().await.expect("Failed to get timeseries schema");
+        assert_eq!(
+            schema,
+            &*client.schema.lock().unwrap(),
+            "Schema shouldn't change"
+        );
+        db.cleanup().await.expect("Failed to cleanup database");
+    }
+
+    #[tokio::test]
+    async fn test_timeseries_schema_list() {
+        use std::convert::TryInto;
+
+        let (mut db, client, _) = setup_filter_testcase().await;
+        let limit = 100u32.try_into().unwrap();
+        let page = dropshot::WhichPage::First(dropshot::EmptyScanParams {});
+        let result = client.timeseries_schema_list(&page, limit).await.unwrap();
+        assert!(
+            result.items.len() == 1,
+            "Expected exactly 1 timeseries schema"
+        );
+        let last_seen = result.items.last().unwrap().timeseries_name.clone();
+        let page = dropshot::WhichPage::Next(last_seen);
+        let result = client.timeseries_schema_list(&page, limit).await.unwrap();
+        assert!(
+            result.items.is_empty(),
+            "Expected the next page of schema to be empty"
+        );
+        assert!(
+            result.next_page.is_none(),
+            "Expected the next page token to be None"
+        );
+        db.cleanup().await.expect("Failed to cleanup database");
+    }
+
+    #[tokio::test]
+    async fn test_list_timeseries() {
+        use std::convert::TryInto;
+
+        let (mut db, client, _) = setup_filter_testcase().await;
+        let limit = 7u32.try_into().unwrap();
+        let params = crate::TimeseriesScanParams {
+            timeseries_name: TimeseriesName::try_from(
+                "virtual_machine:cpu_busy",
+            )
+            .unwrap(),
+            criteria: vec!["cpu_id==0".parse().unwrap()],
+            start_time: None,
+            end_time: None,
+        };
+        let page = dropshot::WhichPage::First(params.clone());
+        let result = client.list_timeseries(&page, limit).await.unwrap();
+
+        // We should have 4 timeseries, with 2 samples from each of the first 3 and 1 from the last
+        // timeseries.
+        assert_eq!(result.items.len(), 4, "Expected 4 timeseries");
+        assert_eq!(
+            result.items.last().unwrap().measurements.len(),
+            1,
+            "Expected 1 sample from the last timeseries"
+        );
+        assert!(
+            result.items.iter().take(3).all(|ts| ts.measurements.len() == 2),
+            "Expected 2 samples from the first 3 timeseries"
+        );
+        let last_timeseries = result.items.last().unwrap();
+
+        // Get the next page.
+        //
+        // We have to recreate this as dropshot would, since we cannot build the pagination params
+        // ourselves.
+        let next_page = crate::TimeseriesPageSelector { params, offset: limit };
+        let page = dropshot::WhichPage::Next(next_page);
+        let result = client.list_timeseries(&page, limit).await.unwrap();
+
+        // We should now have the one remaining sample
+        assert_eq!(
+            result.items.len(),
+            1,
+            "Expected only 1 timeseries after paginating"
+        );
+        assert_eq!(
+            result.items[0].measurements.len(),
+            1,
+            "Expected only the last sample after paginating"
+        );
+        assert_eq!(
+            result.items[0].timeseries_name, last_timeseries.timeseries_name,
+            "Paginating should pick up where it left off"
+        );
+        assert_eq!(
+            result.items[0].target, last_timeseries.target,
+            "Paginating should pick up where it left off"
+        );
+        assert_eq!(
+            result.items[0].metric, last_timeseries.metric,
+            "Paginating should pick up where it left off"
+        );
         db.cleanup().await.expect("Failed to cleanup database");
     }
 }

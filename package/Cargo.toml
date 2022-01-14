@@ -21,7 +21,7 @@ smf = "0.2"
 structopt = "0.3"
 tar = "0.4"
 thiserror = "1.0"
-tokio = { version = "1.14", features = [ "full" ] }
+tokio = { version = "1.15", features = [ "full" ] }
 toml = "0.5.6"
 walkdir = "2.3"
 
