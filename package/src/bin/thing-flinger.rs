@@ -265,7 +265,7 @@ fn do_uninstall(
         let server = &config.servers[server_name];
         // Run `omicron-package uninstall` on the deployment server
         let cmd = format!(
-            "cd $HOME/{} && pfexec ./omicron-package uninstall --in $HOME/{} --out {}",
+            "cd {} && pfexec ./omicron-package uninstall --in {} --out {}",
             config.deployment.staging_dir.to_string_lossy(),
             deployment_src.to_string_lossy(),
             install_dir.to_string_lossy()
@@ -406,7 +406,7 @@ fn copy_package_artifacts_to_staging(
 ) -> Result<()> {
     let cmd = format!(
         "rsync -avz -e 'ssh -o StrictHostKeyChecking=no' \
-                    --exclude overlay/ {} {}@{}:$HOME/{}",
+                    --exclude overlay/ {} {}@{}:{}",
         pkg_dir,
         destination.username,
         destination.addr,
@@ -424,7 +424,7 @@ fn copy_omicron_package_binary_to_staging(
     let mut bin_path = PathBuf::from(&config.builder.omicron_path);
     bin_path.push("target/debug/omicron-package");
     let cmd = format!(
-        "rsync -avz {} {}@{}:$HOME/{}",
+        "rsync -avz {} {}@{}:{}",
         bin_path.to_string_lossy(),
         destination.username,
         destination.addr,
@@ -442,7 +442,7 @@ fn copy_package_manifest_to_staging(
     let mut path = PathBuf::from(&config.builder.omicron_path);
     path.push("package-manifest.toml");
     let cmd = format!(
-        "rsync {} {}@{}:$HOME/{}",
+        "rsync {} {}@{}:{}",
         path.to_string_lossy(),
         destination.username,
         destination.addr,
@@ -463,7 +463,7 @@ fn run_omicron_package_from_staging(
 
     // Run `omicron-package install` on the deployment server
     let cmd = format!(
-        "cd $HOME/{} && pfexec ./omicron-package install --in $HOME/{} --out {}",
+        "cd {} && pfexec ./omicron-package install --in {} --out {}",
         config.deployment.staging_dir.to_string_lossy(),
         deployment_src.to_string_lossy(),
         install_dir.to_string_lossy()
@@ -480,7 +480,7 @@ fn copy_overlay_files_to_staging(
     destination_name: &str,
 ) -> Result<()> {
     let cmd = format!(
-        "rsync -avz {}/overlay/{}/ {}@{}:$HOME/{}/overlay/",
+        "rsync -avz {}/overlay/{}/ {}@{}:{}/overlay/",
         pkg_dir,
         destination_name,
         destination.username,
@@ -497,7 +497,7 @@ fn install_overlay_files_from_staging(
     install_dir: &Path,
 ) -> Result<()> {
     let cmd = format!(
-        "pfexec cp -r $HOME/{}/overlay/* {}",
+        "pfexec cp -r {}/overlay/* {}",
         config.deployment.staging_dir.to_string_lossy(),
         install_dir.to_string_lossy()
     );
@@ -567,15 +567,28 @@ fn validate_servers(
     }
 }
 
+fn validate_absolute_path(
+    path: &Path,
+    field: &'static str,
+) -> Result<(), FlingError> {
+    if path.is_absolute() || path.starts_with("$HOME") {
+        Ok(())
+    } else {
+        Err(FlingError::NotAbsolutePath { field })
+    }
+}
+
 fn validate(config: &Config) -> Result<(), FlingError> {
-    if !config.local_source.is_absolute() {
-        return Err(FlingError::NotAbsolutePath { field: "local_source" });
-    }
-    if !config.builder.omicron_path.is_absolute() {
-        return Err(FlingError::NotAbsolutePath {
-            field: "builder.omicron_path",
-        });
-    }
+    validate_absolute_path(&config.local_source, "local_source")?;
+    validate_absolute_path(
+        &config.builder.omicron_path,
+        "builder.omicron_path",
+    )?;
+    validate_absolute_path(
+        &config.deployment.staging_dir,
+        "deployment.staging_dir",
+    )?;
+
     validate_servers(&config.deployment.servers, &config.servers)?;
 
     validate_servers(

@@ -53,6 +53,7 @@ thing-flinger, pointing out room for improvement.
 
 
 `thing-flinger` defines three types of nodes:
+
  * Client - Where a user typically edits their code and runs thing-flinger. This can run any OS.
  * Builder - A Helios box where Omicron is built and packaged
  * Deployed Server - Helios machines where Omicron will be installed and run
@@ -63,7 +64,7 @@ benefit of this separation though, is that it allows editing on something like a
 having to worry about setting up a development environment on an illumos based host.
 
 Machine topology is configured in a `TOML` file that is passed on the command line. All illumos
-machines are listed under `servers`, and just the names are used to for configuring a builder and
+machines are listed under `servers`, and just the names are used for configuring a builder and
 deployment servers. An link:src/bin/deployment-example.toml[example] is provided.
 
 Thing flinger works over SSH, and so the user must have the public key of their client configured
@@ -84,7 +85,8 @@ README is probably a good idea.
 
 === Command Based Workflow
 
-==== Build omicron-package on client. 
+==== Build thing-flinger on client
+`thing-flinger` is part of the `omicron-package` crate.
 
 `cargo build -p omicron-package`
 
@@ -130,7 +132,7 @@ configs for this.
 
 === Design rationale
 
-`thing-flinger` is a command line program written in rust. It was written this way to build upon and
+`thing-flinger` is a command line program written in rust. It was written this way to build upon
 `omicron-package`, which is also in rust, as that is our default language of choice at Oxide.
 `thing-flinger` is based around SSH, as that is the minimal viable requirement for a test tool such
 as this. Additionally, it provides for the most straightforward implementation, and takes the least

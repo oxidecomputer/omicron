@@ -9,6 +9,8 @@ local_source = "/Users/ajs/oxide/omicron"
 [builder]
 # `server` must refer to one of the `servers` in the servers table
 server = "atrium"
+
+# This must be an absolute path
 omicron_path = "/home/andrew/oxide/omicron"
 
 # Git branch, sha, etc...
@@ -21,9 +23,8 @@ rack_secret_threshold = 2
 # Location where files to install will be placed before running
 # `omicron-package install`
 #
-# Since usernames may vary per server, this directory is relative to the user's
-# home directory.
-staging_dir = "omicron_staging"
+# This must be an absolute path
+staging_dir = "$HOME/omicron_staging"
 
 [servers.tarz]
 username = "ajs"
