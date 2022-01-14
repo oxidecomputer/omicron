@@ -134,6 +134,13 @@ CREATE TABLE omicron.public.Region (
 );
 
 /*
+ * Allow all regions within one disk to be accessed quickly.
+ */
+CREATE INDEX on omicron.public.Region (
+    disk_id
+);
+
+/*
  * Organizations
  */
 
