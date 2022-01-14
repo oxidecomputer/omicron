@@ -14,6 +14,7 @@ mod config;
 // This is marked public for use by the integration tests
 pub mod datastore;
 mod error;
+mod explain;
 pub mod fixed_data;
 mod pagination;
 mod pool;
