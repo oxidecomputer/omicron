@@ -103,7 +103,7 @@ impl DataStore {
         &self,
         opctx: &OpContext,
     ) -> Result<&bb8::Pool<ConnectionManager<DbConnection>>, Error> {
-        opctx.authorize(authz::Action::Query, authz::DATABASE).await?;
+        opctx.authorize(authz::Action::Query, &authz::DATABASE).await?;
         Ok(self.pool.pool())
     }
 
@@ -246,7 +246,7 @@ impl DataStore {
     ) -> CreateResult<Organization> {
         use db::schema::organization::dsl;
 
-        opctx.authorize(authz::Action::CreateChild, authz::FLEET).await?;
+        opctx.authorize(authz::Action::CreateChild, &authz::FLEET).await?;
 
         let name = organization.name().as_str().to_string();
         diesel::insert_into(dsl::organization)
@@ -310,7 +310,13 @@ impl DataStore {
                     LookupType::ByName(name.as_str().to_owned()),
                 )
             })
-            .map(|o| (authz::FLEET.organization(o.id()), o))
+            .map(|o| {
+                (
+                    authz::FLEET
+                        .organization(o.id(), LookupType::from(&name.0)),
+                    o,
+                )
+            })
     }
 
     /// Look up the id for an organization based on its name
@@ -336,7 +342,7 @@ impl DataStore {
             self.organization_lookup_noauthz(name).await?;
         // TODO-security See the note in authz::authorize().  This needs to
         // return a 404, not a 403.
-        opctx.authorize(authz::Action::Read, authz_org).await?;
+        opctx.authorize(authz::Action::Read, &authz_org).await?;
         Ok((authz_org, db_org))
     }
 
@@ -365,8 +371,9 @@ impl DataStore {
 
         // TODO-cleanup TODO-security This should use a more common lookup
         // function.
-        let authz_org = authz::FLEET.organization(id);
-        opctx.authorize(authz::Action::Delete, authz_org).await?;
+        let authz_org =
+            authz::FLEET.organization(id, LookupType::from(&name.0));
+        opctx.authorize(authz::Action::Delete, &authz_org).await?;
 
         // Make sure there are no projects present within this organization.
         let project_found = diesel_pool_result_optional(
@@ -423,7 +430,7 @@ impl DataStore {
         pagparams: &DataPageParams<'_, Uuid>,
     ) -> ListResultVec<Organization> {
         use db::schema::organization::dsl;
-        opctx.authorize(authz::Action::ListChildren, authz::FLEET).await?;
+        opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
         paginated(dsl::organization, dsl::id, pagparams)
             .filter(dsl::time_deleted.is_null())
             .select(Organization::as_select())
@@ -444,7 +451,7 @@ impl DataStore {
         pagparams: &DataPageParams<'_, Name>,
     ) -> ListResultVec<Organization> {
         use db::schema::organization::dsl;
-        opctx.authorize(authz::Action::ListChildren, authz::FLEET).await?;
+        opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
         paginated(dsl::organization, dsl::name, pagparams)
             .filter(dsl::time_deleted.is_null())
             .select(Organization::as_select())
@@ -469,7 +476,7 @@ impl DataStore {
         use db::schema::organization::dsl;
 
         let (authz_org, _) = self.organization_lookup_noauthz(name).await?;
-        opctx.authorize(authz::Action::Modify, authz_org).await?;
+        opctx.authorize(authz::Action::Modify, &authz_org).await?;
 
         diesel::update(dsl::organization)
             .filter(dsl::time_deleted.is_null())
@@ -496,7 +503,7 @@ impl DataStore {
     ) -> CreateResult<Project> {
         use db::schema::project::dsl;
 
-        opctx.authorize(authz::Action::CreateChild, *org).await?;
+        opctx.authorize(authz::Action::CreateChild, org).await?;
 
         let name = project.name().as_str().to_string();
         let organization_id = project.organization_id;
@@ -1046,7 +1053,7 @@ impl DataStore {
     pub async fn project_delete_disk(
         &self,
         opctx: &OpContext,
-        disk_authz: authz::ProjectChild,
+        disk_authz: &authz::ProjectChild,
     ) -> DeleteResult {
         use db::schema::disk::dsl;
         let now = Utc::now();
@@ -2122,7 +2129,7 @@ impl DataStore {
         pagparams: &DataPageParams<'_, Name>,
     ) -> ListResultVec<UserBuiltin> {
         use db::schema::user_builtin::dsl;
-        opctx.authorize(authz::Action::ListChildren, authz::FLEET).await?;
+        opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
         paginated(dsl::user_builtin, dsl::name, pagparams)
             .select(UserBuiltin::as_select())
             .load_async::<UserBuiltin>(self.pool_authorized(opctx).await?)
@@ -2143,7 +2150,13 @@ impl DataStore {
     ) -> LookupResult<UserBuiltin> {
         use db::schema::user_builtin::dsl;
         opctx
-            .authorize(authz::Action::Read, authz::FLEET.child_generic())
+            .authorize(
+                authz::Action::Read,
+                &authz::FLEET.child_generic(
+                    ResourceType::User,
+                    LookupType::from(&name.0),
+                ),
+            )
             .await?;
         dsl::user_builtin
             .filter(dsl::name.eq(name.clone()))
@@ -2166,7 +2179,7 @@ impl DataStore {
     ) -> Result<(), Error> {
         use db::schema::user_builtin::dsl;
 
-        opctx.authorize(authz::Action::Modify, authz::DATABASE).await?;
+        opctx.authorize(authz::Action::Modify, &authz::DATABASE).await?;
 
         let builtin_users = [
             // Note: "db_init" is also a builtin user, but that one by necessity
@@ -2208,7 +2221,7 @@ impl DataStore {
         pagparams: &DataPageParams<'_, (String, String)>,
     ) -> ListResultVec<RoleBuiltin> {
         use db::schema::role_builtin::dsl;
-        opctx.authorize(authz::Action::ListChildren, authz::FLEET).await?;
+        opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
         paginated_multicolumn(
             dsl::role_builtin,
             (dsl::resource_type, dsl::role_name),
@@ -2233,7 +2246,11 @@ impl DataStore {
     ) -> LookupResult<RoleBuiltin> {
         use db::schema::role_builtin::dsl;
         opctx
-            .authorize(authz::Action::Read, authz::FLEET.child_generic())
+            .authorize(
+                authz::Action::Read,
+                &authz::FLEET
+                    .child_generic(ResourceType::Role, LookupType::from(name)),
+            )
             .await?;
 
         let (resource_type, role_name) =
@@ -2264,7 +2281,7 @@ impl DataStore {
     ) -> Result<(), Error> {
         use db::schema::role_builtin::dsl;
 
-        opctx.authorize(authz::Action::Modify, authz::DATABASE).await?;
+        opctx.authorize(authz::Action::Modify, &authz::DATABASE).await?;
 
         let builtin_roles = BUILTIN_ROLES
             .iter()
@@ -2297,7 +2314,7 @@ impl DataStore {
     ) -> Result<(), Error> {
         use db::schema::role_assignment_builtin::dsl;
 
-        opctx.authorize(authz::Action::Modify, authz::DATABASE).await?;
+        opctx.authorize(authz::Action::Modify, &authz::DATABASE).await?;
 
         // The built-in "test-privileged" user gets the "fleet admin" role.
         debug!(opctx.log, "attempting to create built-in role assignments");
@@ -2390,7 +2407,9 @@ mod test {
     use crate::external_api::params;
     use chrono::{Duration, Utc};
     use nexus_test_utils::db::test_setup_database;
-    use omicron_common::api::external::{Error, IdentityMetadataCreateParams};
+    use omicron_common::api::external::{
+        Error, IdentityMetadataCreateParams, LookupType,
+    };
     use omicron_test_utils::dev;
     use uuid::Uuid;
 
@@ -2417,7 +2436,10 @@ mod test {
                 },
             },
         );
-        let org = authz::FLEET.organization(organization.id());
+        let org = authz::FLEET.organization(
+            organization.id(),
+            LookupType::ById(organization.id()),
+        );
         datastore.project_create(&opctx, &org, project).await.unwrap();
         let (_, organization_after_project_create) = datastore
             .organization_fetch(&opctx, organization.name())

@@ -424,18 +424,23 @@ async fn test_disks(cptestctx: &ControlPlaneTestContext) {
 
     /*
      * If we're not authenticated, or authenticated as an unprivileged user, we
-     * shouldn't be able to delete this disk.
+     * shouldn't be able to delete this disk.  (We shouldn't be able to even see
+     * it if we try.)
      */
-    NexusRequest::new(
-        RequestBuilder::new(client, Method::DELETE, &disk_url)
-            .expect_status(Some(StatusCode::UNAUTHORIZED)),
+    NexusRequest::expect_failure(
+        client,
+        StatusCode::NOT_FOUND,
+        Method::DELETE,
+        &disk_url,
     )
     .execute()
     .await
     .expect("expected request to fail");
-    NexusRequest::new(
-        RequestBuilder::new(client, Method::DELETE, &disk_url)
-            .expect_status(Some(StatusCode::FORBIDDEN)),
+    NexusRequest::expect_failure(
+        client,
+        StatusCode::NOT_FOUND,
+        Method::DELETE,
+        &disk_url,
     )
     .authn_as(AuthnMode::UnprivilegedUser)
     .execute()

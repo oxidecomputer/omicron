@@ -9,16 +9,17 @@ use super::roles::RoleSet;
 use crate::authn;
 use crate::authz::oso_generic;
 use crate::authz::Action;
-use crate::authz::AuthzResource;
 use crate::context::OpContext;
 use crate::db::DataStore;
+use futures::future::BoxFuture;
 use omicron_common::api::external::Error;
 use oso::Oso;
 use std::sync::Arc;
 
 /// Server-wide authorization context
 pub struct Authz {
-    oso: Oso,
+    // XXX XXX pub
+    pub oso: Oso,
 }
 
 impl Authz {
@@ -63,47 +64,79 @@ impl Context {
         resource: Resource,
     ) -> Result<(), Error>
     where
-        Resource: oso::ToPolar + AuthzResource,
+        Resource: oso::ToPolar + Authorize + Clone,
     {
-        // TODO-security For Action::Read (and any other "read" action),
-        // this should return NotFound rather than Forbidden.  But we cannot
-        // construct the appropriate NotFound here without more information:
-        // the resource type and how it was looked up.  In practice, it's
-        // quite possible that all such cases should really use query
-        // filtering instead of an explicit is_allowed() check, in which
-        // case we could safely assume Forbidden here.
-        //
-        // Alternatively, we could let the caller produce the appropriate
-        // "NotFound", but it would add a lot of boilerplate to a lot of
-        // callers if we didn't return api::external::Error here.
         let mut roles = RoleSet::new();
         resource
-            .fetch_all_related_roles_for_user(
-                opctx,
-                &self.datastore,
-                &self.authn,
-                &mut roles,
-            )
+            .load_roles(opctx, &self.datastore, &self.authn, &mut roles)
             .await?;
         debug!(opctx.log, "roles"; "roles" => ?roles);
         let actor = AnyActor::new(&self.authn, roles);
         let is_authn = self.authn.actor().is_some();
-        match self.authz.oso.is_allowed(actor, action, resource) {
+        match self.authz.oso.is_allowed(actor.clone(), action, resource.clone())
+        {
+            Ok(true) => Ok(()),
             Err(error) => Err(Error::internal_error(&format!(
                 "failed to compute authorization: {:#}",
                 error
             ))),
-            // If the user did not authenticate successfully, this will become a
-            // 401 rather than a 403.
-            Ok(false) if !is_authn => Err(Error::Unauthenticated {
-                internal_message: String::from(
-                    "authorization failed for unauthenticated request",
-                ),
-            }),
-            Ok(false) => Err(Error::Forbidden),
-            Ok(true) => Ok(()),
+            Ok(false) => {
+                let error = if is_authn {
+                    Error::Forbidden
+                } else {
+                    // If the user did not authenticate successfully, this will
+                    // become a 401 rather than a 403.
+                    Error::Unauthenticated {
+                        internal_message: String::from(
+                            "authorization failed for unauthenticated request",
+                        ),
+                    }
+                };
+
+                resource.on_unauthorized(&self.authz, error, actor, action)
+            }
         }
     }
+}
+
+pub trait Authorize: Send + Sync + 'static {
+    /// Find all roles for the user described in `authn` that might be used to
+    /// make an authorization decision on `self` (a resource)
+    ///
+    /// You can imagine that this function would first find roles that are
+    /// explicitly associated with this resource in the database.  Then it would
+    /// also find roles associated with its parent, since, for example, an
+    /// Organization Administrator can access things within Projects in the
+    /// organization.  This process continues up the hierarchy.
+    ///
+    /// That's how this works for most resources.  There are other kinds of
+    /// resources (like the Database itself) that aren't stored in the database
+    /// and for which a different mechanism might be used.
+    fn load_roles<'a, 'b, 'c, 'd, 'e, 'f>(
+        &'a self,
+        opctx: &'b OpContext,
+        datastore: &'c DataStore,
+        authn: &'d authn::Context,
+        roleset: &'e mut RoleSet,
+    ) -> BoxFuture<'f, Result<(), Error>>
+    where
+        'a: 'f,
+        'b: 'f,
+        'c: 'f,
+        'd: 'f,
+        'e: 'f;
+
+    /// Invoked on authz failure to determine the final authz result
+    ///
+    /// This is used for some resources to check if the actor should be able to
+    /// even see them and produce an appropriate error if not
+    fn on_unauthorized(
+        &self,
+        authz: &Authz,
+        error: Error,
+        actor: AnyActor,
+        action: Action,
+    ) -> Result<(), Error>;
 }
 
 #[cfg(test)]
