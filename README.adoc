@@ -34,7 +34,7 @@ The code here is still rough, but the following are implemented:
 
 * actual API:
 ** projects: CRUD
-** instances: CRUD + boot/halt/reboot
+** instances: CRUD + boot/halt/reboot.
 ** disks: CRD + attach/detach (simulated)
 ** racks: list + get
 ** sleds: list + get
