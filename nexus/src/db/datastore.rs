@@ -43,6 +43,9 @@ use chrono::Utc;
 use diesel::prelude::*;
 use diesel::upsert::excluded;
 use diesel::{ExpressionMethods, QueryDsl, SelectableHelper};
+use diesel::query_builder::QueryFragment;
+use diesel::query_dsl::methods::LoadQuery;
+use diesel::pg::Pg;
 use omicron_common::api;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::DeleteResult;
@@ -84,6 +87,18 @@ use crate::db::{
 // Number of unique datasets required to back a region.
 // TODO: This should likely turn into a configuration option.
 const REGION_REDUNDANCY_THRESHOLD: usize = 3;
+
+// Represents a query that is ready to be executed.
+//
+// This is a helper trait which lets the statement
+// either be executed or explained.
+//
+// U: The output type of executing the statement.
+trait RunnableQuery<U>: RunQueryDsl<DbConnection> + QueryFragment<Pg> + LoadQuery<DbConnection, U> {}
+
+impl<U, T> RunnableQuery<U> for T
+where T: RunQueryDsl<DbConnection> + QueryFragment<Pg> + LoadQuery<DbConnection, U>
+    {}
 
 pub struct DataStore {
     pool: Arc<Pool>,
@@ -242,15 +257,9 @@ impl DataStore {
         })
     }
 
-    /// Gets allocated regions for a disk, and the datasets to which those
-    /// regions belong.
-    ///
-    /// Note that this function does not validate liveness of the Disk, so it
-    /// may be used in a context where the disk is being deleted.
-    pub async fn get_allocated_regions(
-        &self,
+    fn get_allocated_regions_query(
         disk_id: Uuid,
-    ) -> Result<Vec<(Dataset, Region)>, Error> {
+    ) -> impl RunnableQuery<(Dataset, Region)> {
         use db::schema::dataset::dsl as dataset_dsl;
         use db::schema::region::dsl as region_dsl;
         region_dsl::region
@@ -260,9 +269,58 @@ impl DataStore {
                     .on(region_dsl::dataset_id.eq(dataset_dsl::id)),
             )
             .select((Dataset::as_select(), Region::as_select()))
+    }
+
+    /// Gets allocated regions for a disk, and the datasets to which those
+    /// regions belong.
+    ///
+    /// Note that this function does not validate liveness of the Disk, so it
+    /// may be used in a context where the disk is being deleted.
+    pub async fn get_allocated_regions(
+        &self,
+        disk_id: Uuid,
+    ) -> Result<Vec<(Dataset, Region)>, Error> {
+        Self::get_allocated_regions_query(disk_id)
             .get_results_async::<(Dataset, Region)>(self.pool())
             .await
             .map_err(|e| public_error_from_diesel_pool_shouldnt_fail(e))
+    }
+
+    fn get_allocatable_datasets_query(
+    ) -> impl RunnableQuery<Dataset> {
+        use db::schema::dataset::dsl as dataset_dsl;
+        use db::schema::region::dsl as region_dsl;
+
+        dataset_dsl::dataset
+            // We look for valid datasets (non-deleted crucible datasets).
+            .filter(dataset_dsl::time_deleted.is_null())
+            .filter(dataset_dsl::kind.eq(DatasetKind(
+                crate::internal_api::params::DatasetKind::Crucible,
+            )))
+            // Next, observe all the regions allocated to each dataset, and
+            // determine how much space they're using.
+            //
+            // TODO: We could store "free/allocated" space per-dataset,
+            // and keep them up-to-date, rather than trying to recompute
+            // this.
+            //
+            // TODO: We admittedly don't actually *fail* any request for
+            // running out of space - we try to send the request down to
+            // crucible agents, and expect them to fail on our behalf in
+            // out-of-storage conditions. This should undoubtedly be
+            // handled more explicitly.
+            .left_outer_join(
+                region_dsl::region
+                    .on(dataset_dsl::id.eq(region_dsl::dataset_id)),
+            )
+            .group_by(dataset_dsl::id)
+            .select(Dataset::as_select())
+            .order(
+                diesel::dsl::sum(
+                    region_dsl::extent_size * region_dsl::extent_count,
+                )
+                .asc(),
+            )
     }
 
     /// Idempotently allocates enough regions to back a disk.
@@ -310,48 +368,13 @@ impl DataStore {
                 //
                 // If they are, return those regions and the associated
                 // datasets.
-                let datasets_and_regions = region_dsl::region
-                    .filter(region_dsl::disk_id.eq(disk_id))
-                    .inner_join(
-                        dataset_dsl::dataset
-                            .on(region_dsl::dataset_id.eq(dataset_dsl::id)),
-                    )
-                    .select((Dataset::as_select(), Region::as_select()))
+                let datasets_and_regions = Self::get_allocated_regions_query(disk_id)
                     .get_results::<(Dataset, Region)>(conn)?;
                 if !datasets_and_regions.is_empty() {
                     return Ok(datasets_and_regions);
                 }
 
-                let datasets: Vec<Dataset> = dataset_dsl::dataset
-                    // We look for valid datasets (non-deleted crucible datasets).
-                    .filter(dataset_dsl::time_deleted.is_null())
-                    .filter(dataset_dsl::kind.eq(DatasetKind(
-                        crate::internal_api::params::DatasetKind::Crucible,
-                    )))
-                    // Next, observe all the regions allocated to each dataset, and
-                    // determine how much space they're using.
-                    //
-                    // TODO: We could store "free/allocated" space per-dataset,
-                    // and keep them up-to-date, rather than trying to recompute
-                    // this.
-                    //
-                    // TODO: We admittedly don't actually *fail* any request for
-                    // running out of space - we try to send the request down to
-                    // crucible agents, and expect them to fail on our behalf in
-                    // out-of-storage conditions. This should undoubtedly be
-                    // handled more explicitly.
-                    .left_outer_join(
-                        region_dsl::region
-                            .on(dataset_dsl::id.eq(region_dsl::dataset_id)),
-                    )
-                    .group_by(dataset_dsl::id)
-                    .select(Dataset::as_select())
-                    .order(
-                        diesel::dsl::sum(
-                            region_dsl::extent_size * region_dsl::extent_count,
-                        )
-                        .asc(),
-                    )
+                let datasets: Vec<Dataset> = Self::get_allocatable_datasets_query()
                     .get_results::<Dataset>(conn)?;
 
                 if datasets.len() < REGION_REDUNDANCY_THRESHOLD {
@@ -2615,6 +2638,7 @@ pub async fn datastore_test(
 mod test {
     use super::*;
     use crate::authz;
+    use crate::db::explain::ExplainableAsync;
     use crate::db::identity::Resource;
     use crate::db::model::{ConsoleSession, Organization, Project};
     use crate::external_api::params;
@@ -2929,6 +2953,53 @@ mod test {
         assert!(err
             .to_string()
             .contains("Not enough datasets for replicated allocation"));
+
+        let _ = db.cleanup().await;
+    }
+
+    // Validate that queries which should be executable without a full table
+    // scan are, in fact, runnable without a FULL SCAN.
+    #[tokio::test]
+    async fn test_queries_do_not_require_full_table_scan() {
+        let logctx =
+            dev::test_setup_log("test_queries_do_not_require_full_table_scan");
+        let mut db = test_setup_database(&logctx.log).await;
+        let cfg = db::Config { url: db.pg_config().clone() };
+        let pool = db::Pool::new(&cfg);
+        let datastore = DataStore::new(Arc::new(pool));
+
+        let explanation = DataStore::get_allocated_regions_query(Uuid::nil())
+            .explain_async(datastore.pool())
+            .await
+            .unwrap();
+        assert!(!explanation.contains("FULL SCAN"), "Found an unexpected FULL SCAN: {}", explanation);
+
+        let _ = db.cleanup().await;
+    }
+
+    // Welp, life isn't perfect - sometimes, we take shortcuts, and implement
+    // queries that DO require FULL SCAN.
+    //
+    // These are problematic scans from a performance point-of-view, but we can
+    // keep track of which queries do so with this test!
+    //
+    // NOTE: If this test is failing because a table scan is no longer required,
+    // congratulations, move that query into the more appropriate test:
+    //      `test_queries_do_not_require_full_table_scan`.
+    #[tokio::test]
+    async fn test_queries_that_do_require_full_table_scan() {
+        let logctx =
+            dev::test_setup_log("test_queries_that_do_require_full_table_scan");
+        let mut db = test_setup_database(&logctx.log).await;
+        let cfg = db::Config { url: db.pg_config().clone() };
+        let pool = db::Pool::new(&cfg);
+        let datastore = DataStore::new(Arc::new(pool));
+
+        let explanation = DataStore::get_allocatable_datasets_query()
+            .explain_async(datastore.pool())
+            .await
+            .unwrap();
+        assert!(explanation.contains("FULL SCAN"), "Found an unexpected FULL SCAN: {}", explanation);
 
         let _ = db.cleanup().await;
     }
