@@ -5,9 +5,7 @@
 //! Utility allowing Diesel to EXPLAIN queries.
 
 use super::pool::DbConnection;
-use async_bb8_diesel::{
-    AsyncRunQueryDsl, ConnectionManager, PoolError,
-};
+use async_bb8_diesel::{AsyncRunQueryDsl, ConnectionManager, PoolError};
 use async_trait::async_trait;
 use diesel::pg::Pg;
 use diesel::prelude::*;
@@ -30,12 +28,13 @@ impl<Q> Explainable<Q> for Q
 where
     Q: QueryFragment<Pg> + RunQueryDsl<DbConnection> + Sized,
 {
-    fn explain(self, conn: &mut DbConnection) -> Result<String, diesel::result::Error> {
-        Ok(
-            ExplainStatement {
-                query: self,
-            }.get_results::<String>(conn)?.join("\n")
-        )
+    fn explain(
+        self,
+        conn: &mut DbConnection,
+    ) -> Result<String, diesel::result::Error> {
+        Ok(ExplainStatement { query: self }
+            .get_results::<String>(conn)?
+            .join("\n"))
     }
 }
 
@@ -58,11 +57,10 @@ where
         self,
         pool: &bb8::Pool<ConnectionManager<DbConnection>>,
     ) -> Result<String, PoolError> {
-        Ok(
-            ExplainStatement {
-                query: self,
-            }.get_results_async::<String>(pool).await?.join("\n")
-        )
+        Ok(ExplainStatement { query: self }
+            .get_results_async::<String>(pool)
+            .await?
+            .join("\n"))
     }
 }
 
@@ -91,7 +89,7 @@ impl<Q> RunQueryDsl<DbConnection> for ExplainStatement<Q> {}
 
 impl<Q> QueryFragment<Pg> for ExplainStatement<Q>
 where
-    Q: QueryFragment<Pg>
+    Q: QueryFragment<Pg>,
 {
     fn walk_ast(&self, mut out: AstPass<Pg>) -> QueryResult<()> {
         out.push_sql("EXPLAIN (");
