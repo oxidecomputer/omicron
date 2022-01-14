@@ -98,3 +98,142 @@ where
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    use crate::db;
+    use async_bb8_diesel::{AsyncConnection, AsyncSimpleConnection};
+    use diesel::SelectableHelper;
+    use nexus_test_utils::db::test_setup_database;
+    use omicron_test_utils::dev;
+    use uuid::Uuid;
+
+    mod schema {
+        use diesel::prelude::*;
+
+        table! {
+            test_users {
+                id -> Uuid,
+                age -> Int8,
+                height -> Int8,
+            }
+        }
+    }
+
+    use schema::test_users;
+
+    #[derive(Clone, Debug, Queryable, Insertable, PartialEq, Selectable)]
+    #[table_name = "test_users"]
+    struct User {
+        id: Uuid,
+        age: i64,
+        height: i64,
+    }
+
+    async fn create_schema(pool: &db::Pool) {
+        pool.pool()
+            .get()
+            .await
+            .unwrap()
+            .batch_execute_async(
+                "CREATE TABLE test_users (
+                id UUID PRIMARY KEY,
+                age INT NOT NULL,
+                height INT NOT NULL
+            )",
+            )
+            .await
+            .unwrap();
+    }
+
+    // Tests the ".explain()" method in a synchronous context.
+    //
+    // This is often done when calling from transactions, which we demonstrate.
+    #[tokio::test]
+    async fn test_explain() {
+        let logctx = dev::test_setup_log("test_explain");
+        let db = test_setup_database(&logctx.log).await;
+        let cfg = db::Config { url: db.pg_config().clone() };
+        let pool = db::Pool::new(&cfg);
+
+        create_schema(&pool).await;
+
+        use schema::test_users::dsl;
+        pool.pool()
+            .transaction(move |conn| -> Result<(), db::error::TransactionError<()>> {
+                let explanation = dsl::test_users
+                    .filter(dsl::id.eq(Uuid::nil()))
+                    .select(User::as_select())
+                    .explain(conn)
+                    .unwrap();
+                assert_eq!(r#"distribution: local
+vectorized: true
+
+• scan
+  missing stats
+  table: test_users@primary
+  spans: [/'00000000-0000-0000-0000-000000000000' - /'00000000-0000-0000-0000-000000000000']"#,
+                  explanation);
+                Ok(())
+            })
+            .await
+            .unwrap();
+    }
+
+    // Tests the ".explain_async()" method in an asynchronous context.
+    #[tokio::test]
+    async fn test_explain_async() {
+        let logctx = dev::test_setup_log("test_explain_async");
+        let db = test_setup_database(&logctx.log).await;
+        let cfg = db::Config { url: db.pg_config().clone() };
+        let pool = db::Pool::new(&cfg);
+
+        create_schema(&pool).await;
+
+        use schema::test_users::dsl;
+        let explanation = dsl::test_users
+            .filter(dsl::id.eq(Uuid::nil()))
+            .select(User::as_select())
+            .explain_async(pool.pool())
+            .await
+            .unwrap();
+
+        assert_eq!(
+            r#"distribution: local
+vectorized: true
+
+• scan
+  missing stats
+  table: test_users@primary
+  spans: [/'00000000-0000-0000-0000-000000000000' - /'00000000-0000-0000-0000-000000000000']"#,
+            explanation
+        );
+    }
+
+    // Tests that ".explain()" can tell us when we're doing full table scans.
+    #[tokio::test]
+    async fn test_explain_full_table_scan() {
+        let logctx = dev::test_setup_log("test_explain_full_table_scan");
+        let db = test_setup_database(&logctx.log).await;
+        let cfg = db::Config { url: db.pg_config().clone() };
+        let pool = db::Pool::new(&cfg);
+
+        create_schema(&pool).await;
+
+        use schema::test_users::dsl;
+        let explanation = dsl::test_users
+            .filter(dsl::age.eq(2))
+            .select(User::as_select())
+            .explain_async(pool.pool())
+            .await
+            .unwrap();
+
+        assert!(
+            explanation.contains("FULL SCAN"),
+            "Expected [{}] to contain 'FULL SCAN'",
+            explanation
+        );
+    }
+}
