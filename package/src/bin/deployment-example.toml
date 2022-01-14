@@ -24,6 +24,7 @@ rack_secret_threshold = 2
 # `omicron-package install`
 #
 # This must be an absolute path
+# We specifically allow for $HOME in validating the absolute path
 staging_dir = "$HOME/omicron_staging"
 
 [servers.tarz]
