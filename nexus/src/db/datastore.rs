@@ -263,17 +263,45 @@ impl DataStore {
             })
     }
 
-    /// Lookup a organization by name.
-    pub async fn organization_fetch(
+    /// Fetches an Organization from the database and returns both the database
+    /// row and an authz::Organization for doing authz checks
+    ///
+    /// There are a few different ways this can be used:
+    ///
+    /// * If a code path wants to use anything in the database row _aside_ from
+    ///   the id, it should do an authz check for `authz::Action::Read` on the
+    ///   returned [`authz::Organization`].  `organization_fetch()` does this,
+    ///   for example.
+    /// * If a code path is only doing this lookup to get the id so that it can
+    ///   look up something else inside the Organization, then the database
+    ///   record is not record -- and neither is an authz check on the
+    ///   Organization.  Callers usually use `organization_lookup_id()` for
+    ///   this.  That function does not expose the database row to the caller.
+    ///
+    ///   Callers in this bucket should still do _some_ authz check.  Clients
+    ///   must not be able to discover whether an Organization exists with a
+    ///   particular name.  It's just that we don't know at this point whether
+    ///   they're allowed to see the Organization.  It depends on whether, as we
+    ///   look up things inside the Organization, we find something that they
+    ///   _are_ able to see.
+    ///
+    /// **This is an internal-only function.** This function cannot know what
+    /// authz checks are required.  As a result, it should not be made
+    /// accessible outside the DataStore.  It should always be wrapped by
+    /// something that does the appropriate authz check.
+    // TODO-security We should refactor things so that it's harder to
+    // accidentally mark this "pub" or otherwise expose database data without
+    // doing an authz check.
+    async fn organization_lookup_noauthz(
         &self,
         name: &Name,
-    ) -> LookupResult<Organization> {
+    ) -> LookupResult<(authz::Organization, Organization)> {
         use db::schema::organization::dsl;
         dsl::organization
             .filter(dsl::time_deleted.is_null())
             .filter(dsl::name.eq(name.clone()))
             .select(Organization::as_select())
-            .first_async::<Organization>(self.pool())
+            .get_result_async::<Organization>(self.pool())
             .await
             .map_err(|e| {
                 public_error_from_diesel_pool(
@@ -282,10 +310,42 @@ impl DataStore {
                     LookupType::ByName(name.as_str().to_owned()),
                 )
             })
+            .map(|o| (authz::FLEET.organization(o.id()), o))
+    }
+
+    /// Look up the id for an organization based on its name
+    ///
+    /// Returns an [`authz::Organization`] (which makes the id available).
+    ///
+    /// This function does no authz checks because it is not possible to know
+    /// just by looking up an Organization's id what privileges are required.
+    pub async fn organization_lookup_id(
+        &self,
+        name: &Name,
+    ) -> LookupResult<authz::Organization> {
+        self.organization_lookup_noauthz(name).await.map(|(o, _)| o)
+    }
+
+    /// Lookup an organization by name.
+    pub async fn organization_fetch(
+        &self,
+        opctx: &OpContext,
+        name: &Name,
+    ) -> LookupResult<(authz::Organization, Organization)> {
+        let (authz_org, db_org) =
+            self.organization_lookup_noauthz(name).await?;
+        // TODO-security See the note in authz::authorize().  This needs to
+        // return a 404, not a 403.
+        opctx.authorize(authz::Action::Read, authz_org).await?;
+        Ok((authz_org, db_org))
     }
 
     /// Delete a organization
-    pub async fn organization_delete(&self, name: &Name) -> DeleteResult {
+    pub async fn organization_delete(
+        &self,
+        opctx: &OpContext,
+        name: &Name,
+    ) -> DeleteResult {
         use db::schema::organization::dsl;
         use db::schema::project;
 
@@ -302,6 +362,11 @@ impl DataStore {
                     LookupType::ByName(name.as_str().to_owned()),
                 )
             })?;
+
+        // TODO-cleanup TODO-security This should use a more common lookup
+        // function.
+        let authz_org = authz::FLEET.organization(id);
+        opctx.authorize(authz::Action::Delete, authz_org).await?;
 
         // Make sure there are no projects present within this organization.
         let project_found = diesel_pool_result_optional(
@@ -352,39 +417,6 @@ impl DataStore {
         Ok(())
     }
 
-    /// Look up an organization by name
-    pub async fn organization_lookup(
-        &self,
-        name: &Name,
-    ) -> Result<authz::Organization, Error> {
-        use db::schema::organization::dsl;
-        dsl::organization
-            .filter(dsl::time_deleted.is_null())
-            .filter(dsl::name.eq(name.clone()))
-            .select(dsl::id)
-            .get_result_async::<Uuid>(self.pool())
-            .await
-            .map_err(|e| {
-                public_error_from_diesel_pool(
-                    e,
-                    ResourceType::Organization,
-                    LookupType::ByName(name.as_str().to_owned()),
-                )
-            })
-            .map(|o| authz::FLEET.organization(o))
-    }
-
-    /// Look up the id for a organization based on its name
-    ///
-    /// As endpoints move to doing authorization, they should move to
-    /// [`organization_lookup()`] instead of this function.
-    pub async fn organization_lookup_id_by_name(
-        &self,
-        name: &Name,
-    ) -> Result<Uuid, Error> {
-        self.organization_lookup(name).await.map(|o| o.id())
-    }
-
     pub async fn organizations_list_by_id(
         &self,
         opctx: &OpContext,
@@ -430,17 +462,21 @@ impl DataStore {
     /// Updates a organization by name (clobbering update -- no etag)
     pub async fn organization_update(
         &self,
+        opctx: &OpContext,
         name: &Name,
         updates: OrganizationUpdate,
     ) -> UpdateResult<Organization> {
         use db::schema::organization::dsl;
 
+        let (authz_org, _) = self.organization_lookup_noauthz(name).await?;
+        opctx.authorize(authz::Action::Modify, authz_org).await?;
+
         diesel::update(dsl::organization)
             .filter(dsl::time_deleted.is_null())
-            .filter(dsl::name.eq(name.clone()))
+            .filter(dsl::id.eq(authz_org.id()))
             .set(updates)
             .returning(Organization::as_returning())
-            .get_result_async(self.pool())
+            .get_result_async(self.pool_authorized(opctx).await?)
             .await
             .map_err(|e| {
                 public_error_from_diesel_pool(
@@ -2383,8 +2419,10 @@ mod test {
         );
         let org = authz::FLEET.organization(organization.id());
         datastore.project_create(&opctx, &org, project).await.unwrap();
-        let organization_after_project_create =
-            datastore.organization_fetch(organization.name()).await.unwrap();
+        let (_, organization_after_project_create) = datastore
+            .organization_fetch(&opctx, organization.name())
+            .await
+            .unwrap();
         assert!(organization_after_project_create.rcgen > organization.rcgen);
 
         db.cleanup().await.unwrap();
