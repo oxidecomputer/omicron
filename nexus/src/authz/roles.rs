@@ -35,20 +35,14 @@
 //! request, and we don't want that thread to block while we hit the database.
 //! Both of these issues could be addressed with considerably more work.
 
+use super::api_resources::AuthzApiResource;
 use crate::authn;
 use crate::context::OpContext;
 use crate::db::DataStore;
-use futures::future::BoxFuture;
-use futures::FutureExt;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::ResourceType;
 use std::collections::BTreeSet;
 use uuid::Uuid;
-
-use super::actor::AnyActor;
-use super::context::Authorize;
-use super::Action;
-use super::Authz;
 
 /// A set of built-in roles, used for quickly checking whether a particular role
 /// is contained within the set
@@ -91,143 +85,78 @@ impl RoleSet {
     }
 }
 
-/// XXX consider moving this to authz/context.rs
-/// Describes an authz resource that corresponds to an API resource that has a
-/// corresponding ResourceType and is stored in the database
-///
-/// This is a helper trait used to impl [`AuthzResource`].
-pub trait AuthzApiResource: Clone + Send + Sync + 'static {
-    /// If roles can be assigned to this resource, return the type and id of the
-    /// database record describing this resource
-    ///
-    /// If roles cannot be assigned to this resource, returns `None`.
-    fn db_resource(&self) -> Option<(ResourceType, Uuid)>;
-
-    /// If this resource has a parent in the API hierarchy whose assigned roles
-    /// can affect access to this resource, return the parent resource.
-    /// Otherwise, returns `None`.
-    fn parent(&self) -> Option<Box<dyn Authorize>>;
-
-    /// Returns an error as though this resource were not found, suitable for
-    /// use when an actor should not be able to see that this resource exists
-    fn not_found(&self) -> Error;
-}
-
-impl<T: AuthzApiResource + oso::PolarClass> Authorize for T {
-    fn load_roles<'a, 'b, 'c, 'd, 'e, 'f>(
-        &'a self,
-        opctx: &'b OpContext,
-        datastore: &'c DataStore,
-        authn: &'d authn::Context,
-        roleset: &'e mut RoleSet,
-    ) -> BoxFuture<'f, Result<(), Error>>
-    where
-        'a: 'f,
-        'b: 'f,
-        'c: 'f,
-        'd: 'f,
-        'e: 'f,
-    {
-        async move {
-            // If roles can be assigned directly on this resource, load them.
-            if let Some((resource_type, resource_id)) = self.db_resource() {
-                load_roles_for_resource(
-                    opctx,
-                    datastore,
-                    authn,
-                    resource_type,
-                    resource_id,
-                    roleset,
-                )
-                .await?;
-            }
-
-            // If this resource has a parent, the user's roles on the parent
-            // might grant them access to this resource.  We have to fetch
-            // those, too.  This process is recursive up to the root.
-            //
-            // (In general, there could be another resource with _any_ kind of
-            // relationship to this one that grants them a role that grants
-            // access to this resource.  In practice, we only use "parent", and
-            // it's clearer to just call this "parent" than
-            // "related_resources_whose_roles_might_grant_access_to_this".)
-            if let Some(parent) = self.parent() {
-                parent.load_roles(opctx, datastore, authn, roleset).await?;
-            }
-
-            Ok(())
-        }
-        .boxed()
+pub async fn load_roles_for_resource_tree<R>(
+    resource: &R,
+    opctx: &OpContext,
+    datastore: &DataStore,
+    authn: &authn::Context,
+    roleset: &mut RoleSet,
+) -> Result<(), Error>
+where
+    R: AuthzApiResource,
+{
+    // If roles can be assigned directly on this resource, load them.
+    if let Some((resource_type, resource_id)) = resource.db_resource() {
+        load_roles_for_resource(
+            opctx,
+            datastore,
+            authn,
+            resource_type,
+            resource_id,
+            roleset,
+        )
+        .await?;
     }
 
-    // XXX this is no longer really part of roles
-    fn on_unauthorized(
-        &self,
-        authz: &Authz,
-        error: Error,
-        actor: AnyActor,
-        action: Action,
-    ) -> Result<(), Error> {
-        if action == Action::Read {
-            return Err(self.not_found());
-        }
-        let can_read = authz.oso.is_allowed(actor, Action::Read, self.clone());
-        match can_read {
-            Err(error) => Err(Error::internal_error(&format!(
-                "failed to compute read authorization to determine visibility: \
-                {:#}",
-                error
-            ))),
-            Ok(false) => Err(self.not_found()),
-            Ok(true) => Err(error),
-        }
+    // If this resource has a parent, the user's roles on the parent
+    // might grant them access to this resource.  We have to fetch
+    // those, too.  This process is recursive up to the root.
+    //
+    // (In general, there could be another resource with _any_ kind of
+    // relationship to this one that grants them a role that grants
+    // access to this resource.  In practice, we only use "parent", and
+    // it's clearer to just call this "parent" than
+    // "related_resources_whose_roles_might_grant_access_to_this".)
+    if let Some(parent) = resource.parent() {
+        parent.load_roles(opctx, datastore, authn, roleset).await?;
     }
+
+    Ok(())
 }
 
-pub fn load_roles_for_resource<'a, 'b, 'c, 'd, 'e, 'f>(
-    opctx: &'b OpContext,
-    datastore: &'c DataStore,
-    authn: &'d authn::Context,
+pub async fn load_roles_for_resource(
+    opctx: &OpContext,
+    datastore: &DataStore,
+    authn: &authn::Context,
     resource_type: ResourceType,
     resource_id: Uuid,
-    roleset: &'e mut RoleSet,
-) -> BoxFuture<'f, Result<(), Error>>
-where
-    'a: 'f,
-    'b: 'f,
-    'c: 'f,
-    'd: 'f,
-    'e: 'f,
-{
-    async move {
-        // If the user is authenticated ...
-        if let Some(actor_id) = authn.actor() {
-            // ... then start by fetching all the roles for this user
-            // that are associated with this resource.
-            trace!(opctx.log, "loading roles";
-                "actor_id" => actor_id.0.to_string(),
-                "resource_type" => ?resource_type,
-                "resource_id" => resource_id.to_string(),
-            );
-            let roles = datastore
-                .role_asgn_builtin_list_for(
-                    opctx,
-                    actor_id.0,
-                    resource_type,
-                    resource_id,
-                )
-                .await?;
-            // Add each role to the output roleset.
-            for role_asgn in roles {
-                assert_eq!(resource_type.to_string(), role_asgn.resource_type);
-                roleset.insert(
-                    resource_type,
-                    resource_id,
-                    &role_asgn.role_name,
-                );
-            }
+    roleset: &mut RoleSet,
+) -> Result<(), Error> {
+    // If the user is authenticated ...
+    if let Some(actor_id) = authn.actor() {
+        // ... then fetch all the roles for this user that are associated with
+        // this resource.
+        trace!(opctx.log, "loading roles";
+            "actor_id" => actor_id.0.to_string(),
+            "resource_type" => ?resource_type,
+            "resource_id" => resource_id.to_string(),
+        );
+
+        let roles = datastore
+            .role_asgn_builtin_list_for(
+                opctx,
+                actor_id.0,
+                resource_type,
+                resource_id,
+            )
+            .await?;
+
+        // Add each role to the output roleset.
+        for role_asgn in roles {
+            assert_eq!(resource_type.to_string(), role_asgn.resource_type);
+            roleset.insert(resource_type, resource_id, &role_asgn.role_name);
         }
-        Ok(())
     }
-    .boxed()
+
+    Ok(())
 }

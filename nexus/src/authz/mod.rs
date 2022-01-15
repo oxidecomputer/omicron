@@ -180,4 +180,3 @@ pub use oso_generic::Action;
 pub use oso_generic::DATABASE;
 
 mod roles;
-pub use roles::AuthzApiResource;

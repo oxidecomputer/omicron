@@ -21,12 +21,85 @@
 
 use super::actor::AnyActor;
 use super::context::Authorize;
-use super::roles::{load_roles_for_resource, AuthzApiResource};
+use super::roles::{
+    load_roles_for_resource, load_roles_for_resource_tree, RoleSet,
+};
 use super::Action;
 use super::{actor::AuthenticatedActor, Authz};
+use crate::authn;
+use crate::context::OpContext;
 use crate::db::fixed_data::FLEET_ID;
+use crate::db::DataStore;
+use futures::future::BoxFuture;
+use futures::FutureExt;
 use omicron_common::api::external::{Error, LookupType, ResourceType};
 use uuid::Uuid;
+
+/// Describes an authz resource that corresponds to an API resource that has a
+/// corresponding ResourceType and is stored in the database
+///
+/// This is a helper trait used to impl [`AuthzResource`].
+pub trait AuthzApiResource: Clone + Send + Sync + 'static {
+    /// If roles can be assigned to this resource, return the type and id of the
+    /// database record describing this resource
+    ///
+    /// If roles cannot be assigned to this resource, returns `None`.
+    fn db_resource(&self) -> Option<(ResourceType, Uuid)>;
+
+    /// If this resource has a parent in the API hierarchy whose assigned roles
+    /// can affect access to this resource, return the parent resource.
+    /// Otherwise, returns `None`.
+    fn parent(&self) -> Option<&dyn Authorize>;
+
+    /// Returns an error as though this resource were not found, suitable for
+    /// use when an actor should not be able to see that this resource exists
+    fn not_found(&self) -> Error;
+}
+
+impl<T: AuthzApiResource + oso::PolarClass> Authorize for T {
+    fn load_roles<'a, 'b, 'c, 'd, 'e, 'f>(
+        &'a self,
+        opctx: &'b OpContext,
+        datastore: &'c DataStore,
+        authn: &'d authn::Context,
+        roleset: &'e mut RoleSet,
+    ) -> BoxFuture<'f, Result<(), Error>>
+    where
+        'a: 'f,
+        'b: 'f,
+        'c: 'f,
+        'd: 'f,
+        'e: 'f,
+    {
+        load_roles_for_resource_tree(self, opctx, datastore, authn, roleset)
+            .boxed()
+    }
+
+    fn on_unauthorized(
+        &self,
+        authz: &Authz,
+        error: Error,
+        actor: AnyActor,
+        action: Action,
+    ) -> Result<(), Error> {
+        if action == Action::Read {
+            return Err(self.not_found());
+        }
+
+        // If the user failed an authz check, and they can't even read this
+        // resource, then we should produce a 404 rather than a 401/403.
+        let can_read = authz.oso.is_allowed(actor, Action::Read, self.clone());
+        match can_read {
+            Err(error) => Err(Error::internal_error(&format!(
+                "failed to compute read authorization to determine visibility: \
+                {:#}",
+                error
+            ))),
+            Ok(false) => Err(self.not_found()),
+            Ok(true) => Err(error),
+        }
+    }
+}
 
 /// Represents the Oxide fleet for authz purposes
 ///
@@ -114,6 +187,7 @@ impl Authorize for Fleet {
             *FLEET_ID,
             roleset,
         )
+        .boxed()
     }
 
     fn on_unauthorized(
@@ -164,9 +238,8 @@ impl AuthzApiResource for FleetChild {
         None
     }
 
-    fn parent(&self) -> Option<Box<dyn Authorize>> {
-        // XXX Could this return a reference instead?  See also: Organization
-        Some(Box::new(FLEET.clone()))
+    fn parent(&self) -> Option<&dyn Authorize> {
+        Some(&FLEET)
     }
 
     fn not_found(&self) -> Error {
@@ -236,8 +309,8 @@ impl AuthzApiResource for Organization {
         Some((ResourceType::Organization, self.organization_id))
     }
 
-    fn parent(&self) -> Option<Box<dyn Authorize>> {
-        Some(Box::new(FLEET.clone()))
+    fn parent(&self) -> Option<&dyn Authorize> {
+        Some(&FLEET)
     }
 
     fn not_found(&self) -> Error {
@@ -255,7 +328,7 @@ impl AuthzApiResource for Organization {
 /// children.
 #[derive(Clone, Debug)]
 pub struct Project {
-    parent: Organization, // XXX
+    parent: Organization,
     project_id: Uuid,
     lookup_type: LookupType,
 }
@@ -315,8 +388,8 @@ impl AuthzApiResource for Project {
         Some((ResourceType::Project, self.project_id))
     }
 
-    fn parent(&self) -> Option<Box<dyn Authorize>> {
-        Some(Box::new(self.parent.clone()))
+    fn parent(&self) -> Option<&dyn Authorize> {
+        Some(&self.parent)
     }
 
     fn not_found(&self) -> Error {
@@ -372,8 +445,8 @@ impl AuthzApiResource for ProjectChild {
         None
     }
 
-    fn parent(&self) -> Option<Box<dyn Authorize>> {
-        Some(Box::new(self.parent.clone()))
+    fn parent(&self) -> Option<&dyn Authorize> {
+        Some(&self.parent)
     }
 
     fn not_found(&self) -> Error {
