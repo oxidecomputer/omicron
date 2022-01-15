@@ -14,12 +14,12 @@ use crate::db::DataStore;
 use futures::future::BoxFuture;
 use omicron_common::api::external::Error;
 use oso::Oso;
+use oso::OsoError;
 use std::sync::Arc;
 
 /// Server-wide authorization context
 pub struct Authz {
-    // XXX XXX pub
-    pub oso: Oso,
+    oso: Oso,
 }
 
 impl Authz {
@@ -32,6 +32,22 @@ impl Authz {
     pub fn new() -> Authz {
         let oso = oso_generic::make_omicron_oso().expect("initializing Oso");
         Authz { oso }
+    }
+
+    // TODO-cleanup This should not be exposed outside the `authz` module.
+    // One way might be if `Authz` itself weren't exposed.  We'd just have
+    // `Context::new()` create one.  (There's only one way to create one
+    // anyway.)
+    pub fn is_allowed<R>(
+        &self,
+        actor: &AnyActor,
+        action: Action,
+        resource: &R,
+    ) -> Result<bool, OsoError>
+    where
+        R: oso::ToPolar + Clone,
+    {
+        self.oso.is_allowed(actor.clone(), action, resource.clone())
     }
 }
 
@@ -73,8 +89,7 @@ impl Context {
         debug!(opctx.log, "roles"; "roles" => ?roles);
         let actor = AnyActor::new(&self.authn, roles);
         let is_authn = self.authn.actor().is_some();
-        match self.authz.oso.is_allowed(actor.clone(), action, resource.clone())
-        {
+        match self.authz.is_allowed(&actor, action, &resource) {
             Ok(true) => Ok(()),
             Err(error) => Err(Error::internal_error(&format!(
                 "failed to compute authorization: {:#}",

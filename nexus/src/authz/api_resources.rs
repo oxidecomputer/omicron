@@ -88,8 +88,7 @@ impl<T: AuthzApiResource + oso::PolarClass> Authorize for T {
 
         // If the user failed an authz check, and they can't even read this
         // resource, then we should produce a 404 rather than a 401/403.
-        let can_read = authz.oso.is_allowed(actor, Action::Read, self.clone());
-        match can_read {
+        match authz.is_allowed(&actor, Action::Read, self) {
             Err(error) => Err(Error::internal_error(&format!(
                 "failed to compute read authorization to determine visibility: \
                 {:#}",
