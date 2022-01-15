@@ -35,9 +35,6 @@ impl Authz {
     }
 
     // TODO-cleanup This should not be exposed outside the `authz` module.
-    // One way might be if `Authz` itself weren't exposed.  We'd just have
-    // `Context::new()` create one.  (There's only one way to create one
-    // anyway.)
     pub fn is_allowed<R>(
         &self,
         actor: &AnyActor,
