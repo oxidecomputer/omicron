@@ -4,7 +4,6 @@
 
 //! Oso integration
 
-use super::Authz;
 use super::actor::AnyActor;
 use super::actor::AuthenticatedActor;
 use super::api_resources::Fleet;
@@ -14,6 +13,7 @@ use super::api_resources::Project;
 use super::api_resources::ProjectChild;
 use super::context::Authorize;
 use super::roles::RoleSet;
+use super::Authz;
 use crate::authn;
 use crate::context::OpContext;
 use crate::db::DataStore;
