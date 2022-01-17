@@ -38,7 +38,7 @@ use serde::Deserialize;
 use serde::Serialize;
 use slog::Logger;
 use std::collections::BTreeMap;
-use std::convert::TryFrom;
+use std::convert::{TryInto, TryFrom};
 use std::sync::Arc;
 use steno::new_action_noop_undo;
 use steno::ActionContext;
@@ -470,9 +470,9 @@ async fn ensure_region_in_dataset(
     let client = CrucibleAgentClient::new(&url);
 
     let region_request = CreateRegion {
-        block_size: region.block_size(),
-        extent_count: region.extent_count(),
-        extent_size: region.extent_size(),
+        block_size: region.block_size().to_bytes(),
+        extent_count: region.extent_count().try_into().unwrap(),
+        extent_size: region.extent_size().to_bytes(),
         // TODO: Can we avoid casting from UUID to string?
         // NOTE: This'll require updating the crucible agent client.
         id: RegionId(region.id().to_string()),

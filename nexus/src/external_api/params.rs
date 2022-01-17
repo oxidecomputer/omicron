@@ -12,6 +12,7 @@ use omicron_common::api::external::{
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use std::convert::TryFrom;
 use uuid::Uuid;
 
 /*
@@ -182,17 +183,21 @@ pub struct DiskCreate {
     pub size: ByteCount,
 }
 
+const BLOCK_SIZE: u32 = 512_u32;
+const EXTENT_SIZE: u32 = 1_u32 << 20;
+
 impl DiskCreate {
-    pub fn block_size(&self) -> u64 {
-        512
+    pub fn block_size(&self) -> ByteCount {
+        ByteCount::from(BLOCK_SIZE)
     }
 
-    pub fn extent_size(&self) -> u64 {
-        1 << 20
+    pub fn extent_size(&self) -> ByteCount {
+        ByteCount::from(EXTENT_SIZE)
     }
 
-    pub fn extent_count(&self) -> u64 {
-        (self.size.to_bytes() + self.extent_size() - 1) / self.extent_size()
+    pub fn extent_count(&self) -> i64 {
+        let extent_size = self.extent_size().to_bytes();
+        i64::try_from((self.size.to_bytes() + extent_size - 1) / extent_size).unwrap()
     }
 }
 
@@ -222,3 +227,40 @@ pub struct UserBuiltinCreate {
     #[serde(flatten)]
     pub identity: IdentityMetadataCreateParams,
 }
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    fn new_disk_create_params(size: ByteCount) -> DiskCreate {
+        DiskCreate {
+            identity: IdentityMetadataCreateParams {
+                name: Name::try_from("myobject".to_string()).unwrap(),
+                description: "desc".to_string(),
+            },
+            snapshot_id: None,
+            size,
+        }
+    }
+
+    #[test]
+    fn test_extent_count() {
+        let params = new_disk_create_params(ByteCount::try_from(0u64).unwrap());
+        assert_eq!(0, params.extent_count());
+
+        let params = new_disk_create_params(ByteCount::try_from(1u64).unwrap());
+        assert_eq!(1, params.extent_count());
+        let params = new_disk_create_params(ByteCount::try_from(EXTENT_SIZE - 1).unwrap());
+        assert_eq!(1, params.extent_count());
+        let params = new_disk_create_params(ByteCount::try_from(EXTENT_SIZE).unwrap());
+        assert_eq!(1, params.extent_count());
+
+        let params = new_disk_create_params(ByteCount::try_from(EXTENT_SIZE + 1).unwrap());
+        assert_eq!(2, params.extent_count());
+
+        // Mostly just checking we don't blow up on an unwrap here.
+        let params = new_disk_create_params(ByteCount::try_from(i64::MAX).unwrap());
+        assert!(params.size.to_bytes() < (params.extent_count() as u64) * params.extent_size().to_bytes());
+    }
+}
+

@@ -144,7 +144,7 @@ where
 }
 
 #[derive(
-    Copy, Clone, Debug, AsExpression, FromSqlRow, Serialize, Deserialize,
+    Copy, Clone, Debug, AsExpression, FromSqlRow, Serialize, Deserialize, PartialEq,
 )]
 #[sql_type = "sql_types::BigInt"]
 pub struct ByteCount(pub external::ByteCount);
@@ -161,7 +161,7 @@ where
         &self,
         out: &mut serialize::Output<W, DB>,
     ) -> serialize::Result {
-        i64::from(&self.0).to_sql(out)
+        i64::from(self.0).to_sql(out)
     }
 }
 
@@ -630,8 +630,8 @@ pub struct Region {
     dataset_id: Uuid,
     disk_id: Uuid,
 
-    block_size: i64,
-    extent_size: i64,
+    block_size: ByteCount,
+    extent_size: ByteCount,
     extent_count: i64,
 }
 
@@ -639,8 +639,8 @@ impl Region {
     pub fn new(
         dataset_id: Uuid,
         disk_id: Uuid,
-        block_size: i64,
-        extent_size: i64,
+        block_size: ByteCount,
+        extent_size: ByteCount,
         extent_count: i64,
     ) -> Self {
         Self {
@@ -659,14 +659,14 @@ impl Region {
     pub fn dataset_id(&self) -> Uuid {
         self.dataset_id
     }
-    pub fn block_size(&self) -> u64 {
-        self.block_size as u64
+    pub fn block_size(&self) -> external::ByteCount {
+        self.block_size.0
     }
-    pub fn extent_size(&self) -> u64 {
-        self.extent_size as u64
+    pub fn extent_size(&self) -> external::ByteCount {
+        self.extent_size.0
     }
-    pub fn extent_count(&self) -> u64 {
-        self.extent_count as u64
+    pub fn extent_count(&self) -> i64 {
+        self.extent_count
     }
 }
 

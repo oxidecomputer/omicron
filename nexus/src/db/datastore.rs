@@ -321,6 +321,7 @@ impl DataStore {
                 )
                 .asc(),
             )
+            .limit(REGION_REDUNDANCY_THRESHOLD.try_into().unwrap())
     }
 
     /// Idempotently allocates enough regions to back a disk.
@@ -332,7 +333,6 @@ impl DataStore {
         disk_id: Uuid,
         params: &params::DiskCreate,
     ) -> Result<Vec<(Dataset, Region)>, Error> {
-        use db::schema::dataset::dsl as dataset_dsl;
         use db::schema::region::dsl as region_dsl;
 
         // ALLOCATION POLICY
@@ -391,9 +391,9 @@ impl DataStore {
                         Region::new(
                             dataset.id(),
                             disk_id,
-                            params.block_size().try_into().unwrap(),
-                            params.extent_size().try_into().unwrap(),
-                            params.extent_count().try_into().unwrap(),
+                            params.block_size().into(),
+                            params.extent_size().into(),
+                            params.extent_count(),
                         )
                     })
                     .collect();
@@ -1237,20 +1237,6 @@ impl DataStore {
             })
     }
 
-    pub async fn project_delete_disk(
-        &self,
-        opctx: &OpContext,
-        disk_authz: authz::ProjectChild,
-    ) -> DeleteResult {
-        let disk_id = disk_authz.id();
-        opctx.authorize(authz::Action::Delete, disk_authz).await?;
-        self.project_delete_disk_internal(
-            disk_id,
-            self.pool_authorized(opctx).await?,
-        )
-        .await
-    }
-
     // TODO: Delete me (this function, not the disk!), ensure all datastore
     // access is auth-checked.
     //
@@ -1272,15 +1258,8 @@ impl DataStore {
         &self,
         disk_id: &Uuid,
     ) -> DeleteResult {
-        self.project_delete_disk_internal(disk_id, self.pool()).await
-    }
-
-    async fn project_delete_disk_internal(
-        &self,
-        disk_id: &Uuid,
-        pool: &bb8::Pool<ConnectionManager<DbConnection>>,
-    ) -> DeleteResult {
         use db::schema::disk::dsl;
+        let pool = self.pool();
         let now = Utc::now();
 
         let ok_to_delete_states = vec![
@@ -1328,8 +1307,8 @@ impl DataStore {
                 } else {
                     // NOTE: This is a "catch-all" error case, more specific
                     // errors should be preferred as they're more actionable.
-                    return Err(Error::InvalidRequest {
-                        message: String::from(
+                    return Err(Error::InternalError{
+                        internal_message: String::from(
                             "disk exists, but cannot be deleted",
                         ),
                     });
@@ -2999,7 +2978,7 @@ mod test {
             .explain_async(datastore.pool())
             .await
             .unwrap();
-        assert!(explanation.contains("FULL SCAN"), "Found an unexpected FULL SCAN: {}", explanation);
+        assert!(explanation.contains("FULL SCAN"), "Expected FULL SCAN: {}", explanation);
 
         let _ = db.cleanup().await;
     }
