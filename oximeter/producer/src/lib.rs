@@ -180,6 +180,7 @@ pub async fn register(
     client
         .cpapi_producers_post(&server_info.into())
         .await
+        .map(|_| ())
         .map_err(|msg| Error::RegistrationError(msg.to_string()))
 }
 
