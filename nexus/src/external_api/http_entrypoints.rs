@@ -511,7 +511,7 @@ async fn organization_projects_delete_project(
 #[endpoint {
     method = PUT,
     path = "/organizations/{organization_name}/projects/{project_name}",
-    tags = ["organizations"],
+    tags = ["projects"],
 }]
 async fn organization_projects_put_project(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
@@ -546,7 +546,7 @@ async fn organization_projects_put_project(
 #[endpoint {
     method = GET,
     path = "/organizations/{organization_name}/projects/{project_name}/disks",
-    tags = ["projects"]
+    tags = ["disks"]
 }]
 async fn project_disks_get(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
@@ -584,7 +584,7 @@ async fn project_disks_get(
 #[endpoint {
     method = POST,
     path = "/organizations/{organization_name}/projects/{project_name}/disks",
-    tags = ["projects"]
+    tags = ["disks"]
 }]
 async fn project_disks_post(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
@@ -626,7 +626,7 @@ struct DiskPathParam {
 #[endpoint {
     method = GET,
     path = "/organizations/{organization_name}/projects/{project_name}/disks/{disk_name}",
-    tags = ["projects"],
+    tags = ["disks"],
 }]
 async fn project_disks_get_disk(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
@@ -653,7 +653,7 @@ async fn project_disks_get_disk(
 #[endpoint {
     method = DELETE,
     path = "/organizations/{organization_name}/projects/{project_name}/disks/{disk_name}",
-    tags = ["projects"],
+    tags = ["disks"],
 }]
 async fn project_disks_delete_disk(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
