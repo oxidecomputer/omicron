@@ -43,6 +43,7 @@ use omicron_common::api::external::Ipv6Net;
 use omicron_common::api::external::ListResult;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
+use omicron_common::api::external::LookupType;
 use omicron_common::api::external::PaginationOrder;
 use omicron_common::api::external::ResourceType;
 use omicron_common::api::external::RouteDestination;
@@ -747,9 +748,16 @@ impl Nexus {
         Ok((
             disk,
             authz::FLEET
-                .organization(organization_id)
-                .project(project_id)
-                .child_generic(ResourceType::Disk, disk_id),
+                .organization(
+                    organization_id,
+                    LookupType::from(&organization_name.0),
+                )
+                .project(project_id, LookupType::from(&project_name.0))
+                .child_generic(
+                    ResourceType::Disk,
+                    disk_id,
+                    LookupType::from(&disk_name.0),
+                ),
         ))
     }
 
@@ -790,7 +798,7 @@ impl Nexus {
          * before actually beginning the attach process.  Sagas can maybe
          * address that.
          */
-        self.db_datastore.project_delete_disk(opctx, authz_disk).await
+        self.db_datastore.project_delete_disk(opctx, &authz_disk).await
     }
 
     /*

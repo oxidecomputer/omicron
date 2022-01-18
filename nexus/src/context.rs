@@ -12,7 +12,7 @@ use super::db;
 use super::Nexus;
 use crate::authn::external::session_cookie::{Session, SessionStore};
 use crate::authn::Actor;
-use crate::authz::AuthzResource;
+use crate::authz::AuthorizedResource;
 use crate::db::model::ConsoleSession;
 use crate::db::DataStore;
 use async_trait::async_trait;
@@ -308,10 +308,10 @@ impl OpContext {
     pub async fn authorize<Resource>(
         &self,
         action: authz::Action,
-        resource: Resource,
+        resource: &Resource,
     ) -> Result<(), Error>
     where
-        Resource: oso::ToPolar + AuthzResource + Debug + Clone,
+        Resource: AuthorizedResource + Debug + Clone,
     {
         /*
          * TODO-cleanup In an ideal world, Oso would consume &Action and
@@ -322,13 +322,13 @@ impl OpContext {
         trace!(self.log, "authorize begin";
             "actor" => ?self.authn.actor(),
             "action" => ?action,
-            "resource" => ?resource
+            "resource" => ?*resource
         );
         let result = self.authz.authorize(self, action, resource.clone()).await;
         debug!(self.log, "authorize result";
             "actor" => ?self.authn.actor(),
             "action" => ?action,
-            "resource" => ?resource,
+            "resource" => ?*resource,
             "result" => ?result,
         );
         result
@@ -370,7 +370,7 @@ mod test {
         // For now, we check what we currently expect, which is that this
         // context has no official privileges.
         let error = opctx
-            .authorize(Action::Query, authz::DATABASE)
+            .authorize(Action::Query, &authz::DATABASE)
             .await
             .expect_err("expected authorization error");
         assert!(matches!(error, Error::Unauthenticated { .. }));
@@ -392,7 +392,7 @@ mod test {
         // themselves do that -- but it's useful to have a basic santiy test
         // that we can construct such a context it's authorized to do something.
         opctx
-            .authorize(Action::Query, authz::DATABASE)
+            .authorize(Action::Query, &authz::DATABASE)
             .await
             .expect("expected authorization to succeed");
         db.cleanup().await.unwrap();
