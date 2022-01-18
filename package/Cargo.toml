@@ -12,7 +12,7 @@ omicron-common = { path = "../common" }
 # We depend on the propolis-server here -- a binary, not a library -- to
 # make it visible to the packaging tool, which can compile it and shove
 # it in a tarball.
-propolis-server = { git = "https://github.com/oxidecomputer/propolis", rev = "5d293a7b13ed6c84cb9c722be26d4ab2ffc8389c" }
+propolis-server = { git = "https://github.com/oxidecomputer/propolis", rev = "a3e0625f592a14eff04b43f95b72e08159d925e9" }
 rayon = "1.5"
 reqwest = { version = "0.11", default-features = false, features = ["rustls-tls"] }
 serde = { version = "1.0", features = [ "derive" ] }

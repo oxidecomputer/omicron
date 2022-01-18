@@ -183,7 +183,7 @@ dependencies = [
 [[package]]
 name = "bhyve_api"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=5d293a7b13ed6c84cb9c722be26d4ab2ffc8389c#5d293a7b13ed6c84cb9c722be26d4ab2ffc8389c"
+source = "git+https://github.com/oxidecomputer/propolis?rev=a3e0625f592a14eff04b43f95b72e08159d925e9#a3e0625f592a14eff04b43f95b72e08159d925e9"
 dependencies = [
  "bitflags",
  "libc",
@@ -571,7 +571,7 @@ dependencies = [
 [[package]]
 name = "crucible"
 version = "0.0.1"
-source = "git+https://github.com/oxidecomputer/crucible?branch=main#4f02540ab2557ad75e9f170d362dc889eefe1d1b"
+source = "git+https://github.com/oxidecomputer/crucible?branch=main#9d0e4a6607786f15c0da46b4ae6e4faed670aae8"
 dependencies = [
  "aes",
  "aes-gcm-siv",
@@ -593,7 +593,7 @@ dependencies = [
  "tokio-util",
  "toml",
  "tracing",
- "usdt 0.2.1",
+ "usdt 0.3.1",
  "uuid",
  "xts-mode",
 ]
@@ -615,7 +615,7 @@ dependencies = [
 [[package]]
 name = "crucible-common"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/crucible?branch=main#4f02540ab2557ad75e9f170d362dc889eefe1d1b"
+source = "git+https://github.com/oxidecomputer/crucible?branch=main#9d0e4a6607786f15c0da46b4ae6e4faed670aae8"
 dependencies = [
  "anyhow",
  "serde",
@@ -629,7 +629,7 @@ dependencies = [
 [[package]]
 name = "crucible-protocol"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/crucible?branch=main#4f02540ab2557ad75e9f170d362dc889eefe1d1b"
+source = "git+https://github.com/oxidecomputer/crucible?branch=main#9d0e4a6607786f15c0da46b4ae6e4faed670aae8"
 dependencies = [
  "anyhow",
  "bincode",
@@ -643,7 +643,7 @@ dependencies = [
 [[package]]
 name = "crucible-scope"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/crucible?branch=main#4f02540ab2557ad75e9f170d362dc889eefe1d1b"
+source = "git+https://github.com/oxidecomputer/crucible?branch=main#9d0e4a6607786f15c0da46b4ae6e4faed670aae8"
 dependencies = [
  "anyhow",
  "futures",
@@ -911,7 +911,7 @@ dependencies = [
 [[package]]
 name = "dladm"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=5d293a7b13ed6c84cb9c722be26d4ab2ffc8389c#5d293a7b13ed6c84cb9c722be26d4ab2ffc8389c"
+source = "git+https://github.com/oxidecomputer/propolis?rev=a3e0625f592a14eff04b43f95b72e08159d925e9#a3e0625f592a14eff04b43f95b72e08159d925e9"
 dependencies = [
  "libc",
  "num_enum",
@@ -2831,7 +2831,7 @@ dependencies = [
 [[package]]
 name = "propolis"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=5d293a7b13ed6c84cb9c722be26d4ab2ffc8389c#5d293a7b13ed6c84cb9c722be26d4ab2ffc8389c"
+source = "git+https://github.com/oxidecomputer/propolis?rev=a3e0625f592a14eff04b43f95b72e08159d925e9#a3e0625f592a14eff04b43f95b72e08159d925e9"
 dependencies = [
  "anyhow",
  "bhyve_api",
@@ -2857,7 +2857,7 @@ dependencies = [
 [[package]]
 name = "propolis-client"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=5d293a7b13ed6c84cb9c722be26d4ab2ffc8389c#5d293a7b13ed6c84cb9c722be26d4ab2ffc8389c"
+source = "git+https://github.com/oxidecomputer/propolis?rev=a3e0625f592a14eff04b43f95b72e08159d925e9#a3e0625f592a14eff04b43f95b72e08159d925e9"
 dependencies = [
  "reqwest",
  "ring",
@@ -2873,7 +2873,7 @@ dependencies = [
 [[package]]
 name = "propolis-server"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=5d293a7b13ed6c84cb9c722be26d4ab2ffc8389c#5d293a7b13ed6c84cb9c722be26d4ab2ffc8389c"
+source = "git+https://github.com/oxidecomputer/propolis?rev=a3e0625f592a14eff04b43f95b72e08159d925e9#a3e0625f592a14eff04b43f95b72e08159d925e9"
 dependencies = [
  "anyhow",
  "bytes",
@@ -4527,7 +4527,7 @@ checksum = "5fecdca9a5291cc2b8dcf7dc02453fee791a280f3743cb0905f8822ae463b3fe"
 [[package]]
 name = "viona_api"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=5d293a7b13ed6c84cb9c722be26d4ab2ffc8389c#5d293a7b13ed6c84cb9c722be26d4ab2ffc8389c"
+source = "git+https://github.com/oxidecomputer/propolis?rev=a3e0625f592a14eff04b43f95b72e08159d925e9#a3e0625f592a14eff04b43f95b72e08159d925e9"
 
 [[package]]
 name = "vsss-rs"

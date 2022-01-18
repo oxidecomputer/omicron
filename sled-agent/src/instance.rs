@@ -12,6 +12,7 @@ use crate::illumos::svc::wait_for_service;
 use crate::illumos::zone::PROPOLIS_ZONE_PREFIX;
 use crate::instance_manager::InstanceTicket;
 use crate::vnic::{interface_name, IdAllocator, Vnic};
+use anyhow::anyhow;
 use futures::lock::{Mutex, MutexGuard};
 use omicron_common::api::external::NetworkInterface;
 use omicron_common::api::internal::nexus::InstanceRuntimeState;
@@ -57,6 +58,10 @@ pub enum Error {
     // TODO: This error type could become more specific
     #[error("Error performing a state transition: {0}")]
     Transition(omicron_common::api::external::Error),
+
+    // TODO: Add more specific errors
+    #[error("Failure during migration: {0}")]
+    Migration(anyhow::Error),
 }
 
 // Issues read-only, idempotent HTTP requests at propolis until it responds with
@@ -261,12 +266,20 @@ impl InstanceInner {
             })
             .collect();
 
-        let migrate = migrate.map(|params| {
-            propolis_client::api::InstanceMigrateInitiateRequest {
-                src_addr: params.src_propolis_addr,
-                src_uuid: params.src_propolis_uuid,
+        let migrate = match migrate {
+            Some(params) => {
+                let migration_id =
+                    self.state.current().migration_uuid.ok_or_else(|| {
+                        Error::Migration(anyhow!("Missing Migration UUID"))
+                    })?;
+                Some(propolis_client::api::InstanceMigrateInitiateRequest {
+                    src_addr: params.src_propolis_addr,
+                    src_uuid: params.src_propolis_uuid,
+                    migration_id,
+                })
             }
-        });
+            None => None,
+        };
 
         let request = propolis_client::api::InstanceEnsureRequest {
             properties: self.properties.clone(),
