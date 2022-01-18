@@ -11,8 +11,9 @@ use super::api_resources::FleetChild;
 use super::api_resources::Organization;
 use super::api_resources::Project;
 use super::api_resources::ProjectChild;
-use super::roles::AuthzResource;
+use super::context::AuthorizedResource;
 use super::roles::RoleSet;
+use super::Authz;
 use crate::authn;
 use crate::context::OpContext;
 use crate::db::DataStore;
@@ -149,8 +150,8 @@ impl oso::PolarClass for Database {
     }
 }
 
-impl AuthzResource for Database {
-    fn fetch_all_related_roles_for_user<'a, 'b, 'c, 'd, 'e, 'f>(
+impl AuthorizedResource for Database {
+    fn load_roles<'a, 'b, 'c, 'd, 'e, 'f>(
         &'a self,
         _: &'b OpContext,
         _: &'c DataStore,
@@ -174,5 +175,15 @@ impl AuthzResource for Database {
         // for roles on database objects -- it assumes they have a ResourceType
         // and id, neither of which is true for `Database`.
         futures::future::ready(Ok(())).boxed()
+    }
+
+    fn on_unauthorized(
+        &self,
+        _: &Authz,
+        error: Error,
+        _: AnyActor,
+        _: Action,
+    ) -> Error {
+        error
     }
 }

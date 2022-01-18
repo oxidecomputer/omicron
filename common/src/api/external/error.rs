@@ -68,7 +68,7 @@ pub enum Error {
 }
 
 /** Indicates how an object was looked up (for an `ObjectNotFound` error) */
-#[derive(Debug, Deserialize, PartialEq, Serialize)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub enum LookupType {
     /** a specific name was requested */
     ByName(String),
@@ -76,6 +76,26 @@ pub enum LookupType {
     ById(Uuid),
     /** some other lookup type was used */
     Other(String),
+}
+
+impl LookupType {
+    /// Returns an ObjectNotFound error appropriate for the case where this
+    /// lookup failed
+    pub fn into_not_found(self, type_name: ResourceType) -> Error {
+        Error::ObjectNotFound { type_name, lookup_type: self }
+    }
+}
+
+impl From<&str> for LookupType {
+    fn from(name: &str) -> Self {
+        LookupType::ByName(name.to_owned())
+    }
+}
+
+impl From<&Name> for LookupType {
+    fn from(name: &Name) -> Self {
+        LookupType::from(name.as_str())
+    }
 }
 
 impl Error {
@@ -103,17 +123,14 @@ impl Error {
      * name.
      */
     pub fn not_found_by_name(type_name: ResourceType, name: &Name) -> Error {
-        Error::ObjectNotFound {
-            type_name,
-            lookup_type: LookupType::ByName(name.as_str().to_owned()),
-        }
+        LookupType::from(name).into_not_found(type_name)
     }
 
     /**
      * Generates an [`Error::ObjectNotFound`] error for a lookup by object id.
      */
     pub fn not_found_by_id(type_name: ResourceType, id: &Uuid) -> Error {
-        Error::ObjectNotFound { type_name, lookup_type: LookupType::ById(*id) }
+        LookupType::ById(*id).into_not_found(type_name)
     }
 
     /**
@@ -121,10 +138,7 @@ impl Error {
      * lookup.
      */
     pub fn not_found_other(type_name: ResourceType, message: String) -> Error {
-        Error::ObjectNotFound {
-            type_name,
-            lookup_type: LookupType::Other(message),
-        }
+        LookupType::Other(message).into_not_found(type_name)
     }
 
     /**
