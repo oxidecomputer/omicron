@@ -3210,7 +3210,7 @@
             "description": "human-readable free-form text about a resource",
             "type": "string"
           },
-          "devicePath": {
+          "device_path": {
             "type": "string"
           },
           "id": {
@@ -3226,14 +3226,14 @@
               }
             ]
           },
-          "projectId": {
+          "project_id": {
             "type": "string",
             "format": "uuid"
           },
           "size": {
             "$ref": "#/components/schemas/ByteCount"
           },
-          "snapshotId": {
+          "snapshot_id": {
             "nullable": true,
             "type": "string",
             "format": "uuid"
@@ -3241,12 +3241,12 @@
           "state": {
             "$ref": "#/components/schemas/DiskState"
           },
-          "timeCreated": {
+          "time_created": {
             "description": "timestamp when this resource was created",
             "type": "string",
             "format": "date-time"
           },
-          "timeModified": {
+          "time_modified": {
             "description": "timestamp when this resource was last modified",
             "type": "string",
             "format": "date-time"
@@ -3254,14 +3254,14 @@
         },
         "required": [
           "description",
-          "devicePath",
+          "device_path",
           "id",
           "name",
-          "projectId",
+          "project_id",
           "size",
           "state",
-          "timeCreated",
-          "timeModified"
+          "time_created",
+          "time_modified"
         ]
       },
       "DiskCreate": {
@@ -3282,7 +3282,7 @@
               }
             ]
           },
-          "snapshotId": {
+          "snapshot_id": {
             "nullable": true,
             "description": "id for snapshot from which the Disk should be created, if any",
             "type": "string",
@@ -3533,25 +3533,25 @@
               }
             ]
           },
-          "projectId": {
+          "project_id": {
             "description": "id for the project containing this Instance",
             "type": "string",
             "format": "uuid"
           },
-          "runState": {
+          "run_state": {
             "$ref": "#/components/schemas/InstanceState"
           },
-          "timeCreated": {
+          "time_created": {
             "description": "timestamp when this resource was created",
             "type": "string",
             "format": "date-time"
           },
-          "timeModified": {
+          "time_modified": {
             "description": "timestamp when this resource was last modified",
             "type": "string",
             "format": "date-time"
           },
-          "timeRunStateUpdated": {
+          "time_run_state_updated": {
             "type": "string",
             "format": "date-time"
           }
@@ -3563,11 +3563,11 @@
           "memory",
           "name",
           "ncpus",
-          "projectId",
-          "runState",
-          "timeCreated",
-          "timeModified",
-          "timeRunStateUpdated"
+          "project_id",
+          "run_state",
+          "time_created",
+          "time_modified",
+          "time_run_state_updated"
         ]
       },
       "InstanceCpuCount": {
@@ -3701,7 +3701,7 @@
             "type": "string",
             "format": "uuid"
           },
-          "instanceId": {
+          "instance_id": {
             "description": "The Instance to which the interface belongs.",
             "type": "string",
             "format": "uuid"
@@ -3727,22 +3727,22 @@
               }
             ]
           },
-          "subnetId": {
+          "subnet_id": {
             "description": "The subnet to which the interface belongs.",
             "type": "string",
             "format": "uuid"
           },
-          "timeCreated": {
+          "time_created": {
             "description": "timestamp when this resource was created",
             "type": "string",
             "format": "date-time"
           },
-          "timeModified": {
+          "time_modified": {
             "description": "timestamp when this resource was last modified",
             "type": "string",
             "format": "date-time"
           },
-          "vpcId": {
+          "vpc_id": {
             "description": "The VPC to which the interface belongs.",
             "type": "string",
             "format": "uuid"
@@ -3751,14 +3751,14 @@
         "required": [
           "description",
           "id",
-          "instanceId",
+          "instance_id",
           "ip",
           "mac",
           "name",
-          "subnetId",
-          "timeCreated",
-          "timeModified",
-          "vpcId"
+          "subnet_id",
+          "time_created",
+          "time_modified",
+          "vpc_id"
         ]
       },
       "NetworkInterfaceResultsPage": {
@@ -3803,12 +3803,12 @@
               }
             ]
           },
-          "timeCreated": {
+          "time_created": {
             "description": "timestamp when this resource was created",
             "type": "string",
             "format": "date-time"
           },
-          "timeModified": {
+          "time_modified": {
             "description": "timestamp when this resource was last modified",
             "type": "string",
             "format": "date-time"
@@ -3818,8 +3818,8 @@
           "description",
           "id",
           "name",
-          "timeCreated",
-          "timeModified"
+          "time_created",
+          "time_modified"
         ]
       },
       "OrganizationCreate": {
@@ -3898,16 +3898,16 @@
               }
             ]
           },
-          "organizationId": {
+          "organization_id": {
             "type": "string",
             "format": "uuid"
           },
-          "timeCreated": {
+          "time_created": {
             "description": "timestamp when this resource was created",
             "type": "string",
             "format": "date-time"
           },
-          "timeModified": {
+          "time_modified": {
             "description": "timestamp when this resource was last modified",
             "type": "string",
             "format": "date-time"
@@ -3917,9 +3917,9 @@
           "description",
           "id",
           "name",
-          "organizationId",
-          "timeCreated",
-          "timeModified"
+          "organization_id",
+          "time_created",
+          "time_modified"
         ]
       },
       "ProjectCreate": {
@@ -3998,12 +3998,12 @@
               }
             ]
           },
-          "timeCreated": {
+          "time_created": {
             "description": "timestamp when this resource was created",
             "type": "string",
             "format": "date-time"
           },
-          "timeModified": {
+          "time_modified": {
             "description": "timestamp when this resource was last modified",
             "type": "string",
             "format": "date-time"
@@ -4013,8 +4013,8 @@
           "description",
           "id",
           "name",
-          "timeCreated",
-          "timeModified"
+          "time_created",
+          "time_modified"
         ]
       },
       "RackResultsPage": {
@@ -4091,7 +4091,7 @@
               "type": {
                 "type": "string",
                 "enum": [
-                  "ip"
+                  "Ip"
                 ]
               },
               "value": {
@@ -4110,7 +4110,7 @@
               "type": {
                 "type": "string",
                 "enum": [
-                  "vpc"
+                  "Vpc"
                 ]
               },
               "value": {
@@ -4128,7 +4128,7 @@
               "type": {
                 "type": "string",
                 "enum": [
-                  "subnet"
+                  "Subnet"
                 ]
               },
               "value": {
@@ -4151,7 +4151,7 @@
               "type": {
                 "type": "string",
                 "enum": [
-                  "ip"
+                  "Ip"
                 ]
               },
               "value": {
@@ -4170,7 +4170,7 @@
               "type": {
                 "type": "string",
                 "enum": [
-                  "vpc"
+                  "Vpc"
                 ]
               },
               "value": {
@@ -4188,7 +4188,7 @@
               "type": {
                 "type": "string",
                 "enum": [
-                  "subnet"
+                  "Subnet"
                 ]
               },
               "value": {
@@ -4206,7 +4206,7 @@
               "type": {
                 "type": "string",
                 "enum": [
-                  "instance"
+                  "Instance"
                 ]
               },
               "value": {
@@ -4224,7 +4224,7 @@
               "type": {
                 "type": "string",
                 "enum": [
-                  "internetGateway"
+                  "InternetGateway"
                 ]
               },
               "value": {
@@ -4270,7 +4270,7 @@
               }
             ]
           },
-          "routerId": {
+          "router_id": {
             "description": "The VPC Router to which the route belongs.",
             "type": "string",
             "format": "uuid"
@@ -4278,12 +4278,12 @@
           "target": {
             "$ref": "#/components/schemas/RouteTarget"
           },
-          "timeCreated": {
+          "time_created": {
             "description": "timestamp when this resource was created",
             "type": "string",
             "format": "date-time"
           },
-          "timeModified": {
+          "time_modified": {
             "description": "timestamp when this resource was last modified",
             "type": "string",
             "format": "date-time"
@@ -4295,10 +4295,10 @@
           "id",
           "kind",
           "name",
-          "routerId",
+          "router_id",
           "target",
-          "timeCreated",
-          "timeModified"
+          "time_created",
+          "time_modified"
         ]
       },
       "RouterRouteCreateParams": {
@@ -4408,7 +4408,7 @@
               "error": {
                 "type": "string",
                 "enum": [
-                  "actionFailed"
+                  "ActionFailed"
                 ]
               },
               "source_error": {}
@@ -4424,7 +4424,7 @@
               "error": {
                 "type": "string",
                 "enum": [
-                  "deserializeFailed"
+                  "DeserializeFailed"
                 ]
               },
               "message": {
@@ -4442,7 +4442,7 @@
               "error": {
                 "type": "string",
                 "enum": [
-                  "injectedError"
+                  "InjectedError"
                 ]
               }
             },
@@ -4456,7 +4456,7 @@
               "error": {
                 "type": "string",
                 "enum": [
-                  "serializeFailed"
+                  "SerializeFailed"
                 ]
               },
               "message": {
@@ -4474,7 +4474,7 @@
               "error": {
                 "type": "string",
                 "enum": [
-                  "subsagaCreateFailed"
+                  "SubsagaCreateFailed"
                 ]
               },
               "message": {
@@ -4517,7 +4517,7 @@
               "state": {
                 "type": "string",
                 "enum": [
-                  "running"
+                  "Running"
                 ]
               }
             },
@@ -4531,7 +4531,7 @@
               "state": {
                 "type": "string",
                 "enum": [
-                  "succeeded"
+                  "Succeeded"
                 ]
               }
             },
@@ -4551,7 +4551,7 @@
               "state": {
                 "type": "string",
                 "enum": [
-                  "failed"
+                  "Failed"
                 ]
               }
             },
@@ -4597,15 +4597,15 @@
               }
             ]
           },
-          "serviceAddress": {
+          "service_address": {
             "type": "string"
           },
-          "timeCreated": {
+          "time_created": {
             "description": "timestamp when this resource was created",
             "type": "string",
             "format": "date-time"
           },
-          "timeModified": {
+          "time_modified": {
             "description": "timestamp when this resource was last modified",
             "type": "string",
             "format": "date-time"
@@ -4615,9 +4615,9 @@
           "description",
           "id",
           "name",
-          "serviceAddress",
-          "timeCreated",
-          "timeModified"
+          "service_address",
+          "time_created",
+          "time_modified"
         ]
       },
       "SledResultsPage": {
@@ -4717,12 +4717,12 @@
               }
             ]
           },
-          "timeCreated": {
+          "time_created": {
             "description": "timestamp when this resource was created",
             "type": "string",
             "format": "date-time"
           },
-          "timeModified": {
+          "time_modified": {
             "description": "timestamp when this resource was last modified",
             "type": "string",
             "format": "date-time"
@@ -4732,8 +4732,8 @@
           "description",
           "id",
           "name",
-          "timeCreated",
-          "timeModified"
+          "time_created",
+          "time_modified"
         ]
       },
       "UserResultsPage": {
@@ -4765,7 +4765,7 @@
             "description": "human-readable free-form text about a resource",
             "type": "string"
           },
-          "dnsName": {
+          "dns_name": {
             "description": "The name used for the VPC in DNS.",
             "allOf": [
               {
@@ -4786,22 +4786,22 @@
               }
             ]
           },
-          "projectId": {
+          "project_id": {
             "description": "id for the project containing this VPC",
             "type": "string",
             "format": "uuid"
           },
-          "systemRouterId": {
+          "system_router_id": {
             "description": "id for the system router where subnet default routes are registered",
             "type": "string",
             "format": "uuid"
           },
-          "timeCreated": {
+          "time_created": {
             "description": "timestamp when this resource was created",
             "type": "string",
             "format": "date-time"
           },
-          "timeModified": {
+          "time_modified": {
             "description": "timestamp when this resource was last modified",
             "type": "string",
             "format": "date-time"
@@ -4809,13 +4809,13 @@
         },
         "required": [
           "description",
-          "dnsName",
+          "dns_name",
           "id",
           "name",
-          "projectId",
-          "systemRouterId",
-          "timeCreated",
-          "timeModified"
+          "project_id",
+          "system_router_id",
+          "time_created",
+          "time_modified"
         ]
       },
       "VpcCreate": {
@@ -4825,7 +4825,7 @@
           "description": {
             "type": "string"
           },
-          "dnsName": {
+          "dns_name": {
             "$ref": "#/components/schemas/Name"
           },
           "name": {
@@ -4834,7 +4834,7 @@
         },
         "required": [
           "description",
-          "dnsName",
+          "dns_name",
           "name"
         ]
       },
@@ -4904,12 +4904,12 @@
               "$ref": "#/components/schemas/VpcFirewallRuleTarget"
             }
           },
-          "timeCreated": {
+          "time_created": {
             "description": "timestamp when this resource was created",
             "type": "string",
             "format": "date-time"
           },
-          "timeModified": {
+          "time_modified": {
             "description": "timestamp when this resource was last modified",
             "type": "string",
             "format": "date-time"
@@ -4925,22 +4925,22 @@
           "priority",
           "status",
           "targets",
-          "timeCreated",
-          "timeModified"
+          "time_created",
+          "time_modified"
         ]
       },
       "VpcFirewallRuleAction": {
         "type": "string",
         "enum": [
-          "allow",
-          "deny"
+          "Allow",
+          "Deny"
         ]
       },
       "VpcFirewallRuleDirection": {
         "type": "string",
         "enum": [
-          "inbound",
-          "outbound"
+          "Inbound",
+          "Outbound"
         ]
       },
       "VpcFirewallRuleFilter": {
@@ -4982,7 +4982,7 @@
               "type": {
                 "type": "string",
                 "enum": [
-                  "vpc"
+                  "Vpc"
                 ]
               },
               "value": {
@@ -5000,7 +5000,7 @@
               "type": {
                 "type": "string",
                 "enum": [
-                  "subnet"
+                  "Subnet"
                 ]
               },
               "value": {
@@ -5018,7 +5018,7 @@
               "type": {
                 "type": "string",
                 "enum": [
-                  "instance"
+                  "Instance"
                 ]
               },
               "value": {
@@ -5036,7 +5036,7 @@
               "type": {
                 "type": "string",
                 "enum": [
-                  "ip"
+                  "Ip"
                 ]
               },
               "value": {
@@ -5055,7 +5055,7 @@
               "type": {
                 "type": "string",
                 "enum": [
-                  "internetGateway"
+                  "InternetGateway"
                 ]
               },
               "value": {
@@ -5102,8 +5102,8 @@
       "VpcFirewallRuleStatus": {
         "type": "string",
         "enum": [
-          "disabled",
-          "enabled"
+          "Disabled",
+          "Enabled"
         ]
       },
       "VpcFirewallRuleTarget": {
@@ -5115,7 +5115,7 @@
               "type": {
                 "type": "string",
                 "enum": [
-                  "vpc"
+                  "Vpc"
                 ]
               },
               "value": {
@@ -5133,7 +5133,7 @@
               "type": {
                 "type": "string",
                 "enum": [
-                  "subnet"
+                  "Subnet"
                 ]
               },
               "value": {
@@ -5151,7 +5151,7 @@
               "type": {
                 "type": "string",
                 "enum": [
-                  "instance"
+                  "Instance"
                 ]
               },
               "value": {
@@ -5288,17 +5288,17 @@
               }
             ]
           },
-          "timeCreated": {
+          "time_created": {
             "description": "timestamp when this resource was created",
             "type": "string",
             "format": "date-time"
           },
-          "timeModified": {
+          "time_modified": {
             "description": "timestamp when this resource was last modified",
             "type": "string",
             "format": "date-time"
           },
-          "vpcId": {
+          "vpc_id": {
             "description": "The VPC to which the router belongs.",
             "type": "string",
             "format": "uuid"
@@ -5309,9 +5309,9 @@
           "id",
           "kind",
           "name",
-          "timeCreated",
-          "timeModified",
-          "vpcId"
+          "time_created",
+          "time_modified",
+          "vpc_id"
         ]
       },
       "VpcRouterCreate": {
@@ -5333,8 +5333,8 @@
       "VpcRouterKind": {
         "type": "string",
         "enum": [
-          "system",
-          "custom"
+          "System",
+          "Custom"
         ]
       },
       "VpcRouterResultsPage": {
@@ -5389,7 +5389,7 @@
             "type": "string",
             "format": "uuid"
           },
-          "ipv4Block": {
+          "ipv4_block": {
             "nullable": true,
             "description": "The IPv4 subnet CIDR block.",
             "allOf": [
@@ -5398,7 +5398,7 @@
               }
             ]
           },
-          "ipv6Block": {
+          "ipv6_block": {
             "nullable": true,
             "description": "The IPv6 subnet CIDR block.",
             "allOf": [
@@ -5415,17 +5415,17 @@
               }
             ]
           },
-          "timeCreated": {
+          "time_created": {
             "description": "timestamp when this resource was created",
             "type": "string",
             "format": "date-time"
           },
-          "timeModified": {
+          "time_modified": {
             "description": "timestamp when this resource was last modified",
             "type": "string",
             "format": "date-time"
           },
-          "vpcId": {
+          "vpc_id": {
             "description": "The VPC to which the subnet belongs.",
             "type": "string",
             "format": "uuid"
@@ -5435,9 +5435,9 @@
           "description",
           "id",
           "name",
-          "timeCreated",
-          "timeModified",
-          "vpcId"
+          "time_created",
+          "time_modified",
+          "vpc_id"
         ]
       },
       "VpcSubnetCreate": {
@@ -5447,7 +5447,7 @@
           "description": {
             "type": "string"
           },
-          "ipv4Block": {
+          "ipv4_block": {
             "nullable": true,
             "allOf": [
               {
@@ -5455,7 +5455,7 @@
               }
             ]
           },
-          "ipv6Block": {
+          "ipv6_block": {
             "nullable": true,
             "allOf": [
               {
@@ -5501,7 +5501,7 @@
             "nullable": true,
             "type": "string"
           },
-          "ipv4Block": {
+          "ipv4_block": {
             "nullable": true,
             "allOf": [
               {
@@ -5509,7 +5509,7 @@
               }
             ]
           },
-          "ipv6Block": {
+          "ipv6_block": {
             "nullable": true,
             "allOf": [
               {
@@ -5535,7 +5535,7 @@
             "nullable": true,
             "type": "string"
           },
-          "dnsName": {
+          "dns_name": {
             "nullable": true,
             "allOf": [
               {

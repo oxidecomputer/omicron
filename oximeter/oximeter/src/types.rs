@@ -405,6 +405,7 @@ pub enum Error {
 
 /// A cumulative or counter data type.
 #[derive(Debug, Clone, Copy, PartialEq, JsonSchema, Deserialize, Serialize)]
+#[schemars(rename = "Cumulative{T}")]
 pub struct Cumulative<T> {
     start_time: DateTime<Utc>,
     value: T,
