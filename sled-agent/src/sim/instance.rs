@@ -102,6 +102,7 @@ impl Simulatable for SimInstance {
                 &nexus_client::types::InstanceRuntimeState::from(current),
             )
             .await
+            .map(|_| ())
             .map_err(Error::from)
     }
 }
