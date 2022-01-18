@@ -34,18 +34,18 @@ pub mod packaging;
 macro_rules! generate_logging_api {
     ($path:literal) => {
         progenitor::generate_api!(
-            $path,
-            slog::Logger,
-            |log: &slog::Logger, request: &reqwest::Request| {
+            spec = $path,
+            inner_type = slog::Logger,
+            pre_hook = (|log: &slog::Logger, request: &reqwest::Request| {
                 slog::debug!(log, "client request";
                     "method" => %request.method(),
                     "uri" => %request.url(),
                     "body" => ?&request.body(),
                 );
-            },
-            |log: &slog::Logger, result: &Result<_, _>| {
+            }),
+            post_hook = (|log: &slog::Logger, result: &Result<_, _>| {
                 slog::debug!(log, "client response"; "result" => ?result);
-            },
+            }),
         );
     };
 }
