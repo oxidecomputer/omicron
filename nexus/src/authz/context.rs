@@ -77,7 +77,7 @@ impl Context {
         resource: Resource,
     ) -> Result<(), Error>
     where
-        Resource: oso::ToPolar + Authorize + Clone,
+        Resource: AuthorizedResource + Clone,
     {
         let mut roles = RoleSet::new();
         resource
@@ -105,13 +105,13 @@ impl Context {
                     }
                 };
 
-                resource.on_unauthorized(&self.authz, error, actor, action)
+                Err(resource.on_unauthorized(&self.authz, error, actor, action))
             }
         }
     }
 }
 
-pub trait Authorize: Send + Sync + 'static {
+pub trait AuthorizedResource: oso::ToPolar + Send + Sync + 'static {
     /// Find all roles for the user described in `authn` that might be used to
     /// make an authorization decision on `self` (a resource)
     ///
@@ -148,7 +148,7 @@ pub trait Authorize: Send + Sync + 'static {
         error: Error,
         actor: AnyActor,
         action: Action,
-    ) -> Result<(), Error>;
+    ) -> Error;
 }
 
 #[cfg(test)]

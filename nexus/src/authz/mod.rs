@@ -171,7 +171,7 @@ pub use api_resources::ProjectChild;
 pub use api_resources::FLEET;
 
 mod context;
-pub use context::Authorize;
+pub use context::AuthorizedResource;
 pub use context::Authz;
 pub use context::Context;
 

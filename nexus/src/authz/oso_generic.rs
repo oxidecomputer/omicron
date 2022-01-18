@@ -11,7 +11,7 @@ use super::api_resources::FleetChild;
 use super::api_resources::Organization;
 use super::api_resources::Project;
 use super::api_resources::ProjectChild;
-use super::context::Authorize;
+use super::context::AuthorizedResource;
 use super::roles::RoleSet;
 use super::Authz;
 use crate::authn;
@@ -150,7 +150,7 @@ impl oso::PolarClass for Database {
     }
 }
 
-impl Authorize for Database {
+impl AuthorizedResource for Database {
     fn load_roles<'a, 'b, 'c, 'd, 'e, 'f>(
         &'a self,
         _: &'b OpContext,
@@ -183,7 +183,7 @@ impl Authorize for Database {
         error: Error,
         _: AnyActor,
         _: Action,
-    ) -> Result<(), Error> {
-        Err(error)
+    ) -> Error {
+        error
     }
 }

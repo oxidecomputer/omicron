@@ -12,7 +12,7 @@ use super::db;
 use super::Nexus;
 use crate::authn::external::session_cookie::{Session, SessionStore};
 use crate::authn::Actor;
-use crate::authz::Authorize;
+use crate::authz::AuthorizedResource;
 use crate::db::model::ConsoleSession;
 use crate::db::DataStore;
 use async_trait::async_trait;
@@ -311,7 +311,7 @@ impl OpContext {
         resource: &Resource,
     ) -> Result<(), Error>
     where
-        Resource: oso::ToPolar + Authorize + Debug + Clone,
+        Resource: AuthorizedResource + Debug + Clone,
     {
         /*
          * TODO-cleanup In an ideal world, Oso would consume &Action and

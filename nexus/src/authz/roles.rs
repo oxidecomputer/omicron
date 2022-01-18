@@ -17,8 +17,7 @@
 //! its parent Organization or the parent Fleet.  This isn't as large as it
 //! might sound, since the hierarchy is not _that_ deep, but we do have to make
 //! multiple database queries to load all this.  This is all done by
-//! [`AuthzResource::fetch_all_related_roles_for_user()`].  This is really done
-//! by the impl of [`AuthzResource`] for [`AuthzApiResource`].
+//! [`load_roles_for_resource_tree`].
 //!
 //! Once we've got the complete list of roles, we include that in the data
 //! structure we pass into Oso.   When it asks whether an actor has a role on a
@@ -35,7 +34,7 @@
 //! request, and we don't want that thread to block while we hit the database.
 //! Both of these issues could be addressed with considerably more work.
 
-use super::api_resources::AuthzApiResource;
+use super::api_resources::ApiResource;
 use crate::authn;
 use crate::context::OpContext;
 use crate::db::DataStore;
@@ -93,7 +92,7 @@ pub async fn load_roles_for_resource_tree<R>(
     roleset: &mut RoleSet,
 ) -> Result<(), Error>
 where
-    R: AuthzApiResource,
+    R: ApiResource,
 {
     // If roles can be assigned directly on this resource, load them.
     if let Some((resource_type, resource_id)) = resource.db_resource() {
