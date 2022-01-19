@@ -433,9 +433,9 @@ async fn sim_migrate_prep(
             }
             // Encountered a different ongoing migration, bail
             Some(_) => {
-                return Err(ActionError::action_failed(
-                    "unexpected migration already in progress".to_string(),
-                ));
+                return Err(ActionError::action_failed(Error::internal_error(
+                    "unexpected migration already in progress",
+                )));
             }
             // Marked as migrating but no ID yet?
             // Treat as new migration
@@ -459,9 +459,9 @@ async fn sim_migrate_prep(
         .await
         .map_err(ActionError::action_failed)?;
     if !updated {
-        return Err(ActionError::action_failed(
-            "failed to update instance state".to_string(),
-        ));
+        return Err(ActionError::action_failed(Error::internal_error(
+            "failed to update instance state",
+        )));
     }
 
     Ok((instance_id, runtime))
@@ -495,7 +495,9 @@ async fn sim_instance_migrate(
 
     let src_propolis_uuid = old_runtime.propolis_uuid;
     let src_propolis_addr = old_runtime.propolis_addr.ok_or_else(|| {
-        ActionError::action_failed("expected source propolis-addr".to_string())
+        ActionError::action_failed(Error::invalid_request(
+            "expected source propolis-addr",
+        ))
     })?;
 
     let dst_sa = osagactx
