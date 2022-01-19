@@ -144,7 +144,14 @@ where
 }
 
 #[derive(
-    Copy, Clone, Debug, AsExpression, FromSqlRow, Serialize, Deserialize, PartialEq,
+    Copy,
+    Clone,
+    Debug,
+    AsExpression,
+    FromSqlRow,
+    Serialize,
+    Deserialize,
+    PartialEq,
 )]
 #[sql_type = "sql_types::BigInt"]
 pub struct ByteCount(pub external::ByteCount);

@@ -40,12 +40,12 @@ use async_bb8_diesel::{
     PoolError,
 };
 use chrono::Utc;
+use diesel::pg::Pg;
 use diesel::prelude::*;
+use diesel::query_builder::{QueryFragment, QueryId};
+use diesel::query_dsl::methods::LoadQuery;
 use diesel::upsert::excluded;
 use diesel::{ExpressionMethods, QueryDsl, SelectableHelper};
-use diesel::query_builder::QueryFragment;
-use diesel::query_dsl::methods::LoadQuery;
-use diesel::pg::Pg;
 use omicron_common::api;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::DeleteResult;
@@ -90,15 +90,24 @@ const REGION_REDUNDANCY_THRESHOLD: usize = 3;
 
 // Represents a query that is ready to be executed.
 //
-// This is a helper trait which lets the statement
-// either be executed or explained.
+// This helper trait lets the statement either be executed or explained.
 //
 // U: The output type of executing the statement.
-trait RunnableQuery<U>: RunQueryDsl<DbConnection> + QueryFragment<Pg> + LoadQuery<DbConnection, U> {}
+trait RunnableQuery<U>:
+    RunQueryDsl<DbConnection>
+    + QueryFragment<Pg>
+    + LoadQuery<DbConnection, U>
+    + QueryId
+{
+}
 
-impl<U, T> RunnableQuery<U> for T
-where T: RunQueryDsl<DbConnection> + QueryFragment<Pg> + LoadQuery<DbConnection, U>
-    {}
+impl<U, T> RunnableQuery<U> for T where
+    T: RunQueryDsl<DbConnection>
+        + QueryFragment<Pg>
+        + LoadQuery<DbConnection, U>
+        + QueryId
+{
+}
 
 pub struct DataStore {
     pool: Arc<Pool>,
@@ -286,8 +295,7 @@ impl DataStore {
             .map_err(|e| public_error_from_diesel_pool_shouldnt_fail(e))
     }
 
-    fn get_allocatable_datasets_query(
-    ) -> impl RunnableQuery<Dataset> {
+    fn get_allocatable_datasets_query() -> impl RunnableQuery<Dataset> {
         use db::schema::dataset::dsl as dataset_dsl;
         use db::schema::region::dsl as region_dsl;
 
@@ -368,14 +376,17 @@ impl DataStore {
                 //
                 // If they are, return those regions and the associated
                 // datasets.
-                let datasets_and_regions = Self::get_allocated_regions_query(disk_id)
-                    .get_results::<(Dataset, Region)>(conn)?;
+                let datasets_and_regions = Self::get_allocated_regions_query(
+                    disk_id,
+                )
+                .get_results::<(Dataset, Region)>(conn)?;
                 if !datasets_and_regions.is_empty() {
                     return Ok(datasets_and_regions);
                 }
 
-                let datasets: Vec<Dataset> = Self::get_allocatable_datasets_query()
-                    .get_results::<Dataset>(conn)?;
+                let datasets: Vec<Dataset> =
+                    Self::get_allocatable_datasets_query()
+                        .get_results::<Dataset>(conn)?;
 
                 if datasets.len() < REGION_REDUNDANCY_THRESHOLD {
                     return Err(TxnError::CustomError(
@@ -1244,6 +1255,8 @@ impl DataStore {
             })
     }
 
+    /// Attempts to delete a disk. Returns the disk (prior to deletion)
+    /// if successful.
     // TODO: Delete me (this function, not the disk!), ensure all datastore
     // access is auth-checked.
     //
@@ -1264,7 +1277,7 @@ impl DataStore {
     pub async fn project_delete_disk_no_auth(
         &self,
         disk_id: &Uuid,
-    ) -> DeleteResult {
+    ) -> Result<(), Error> {
         use db::schema::disk::dsl;
         let pool = self.pool();
         let now = Utc::now();
@@ -1314,7 +1327,7 @@ impl DataStore {
                 } else {
                     // NOTE: This is a "catch-all" error case, more specific
                     // errors should be preferred as they're more actionable.
-                    return Err(Error::InternalError{
+                    return Err(Error::InternalError {
                         internal_message: String::from(
                             "disk exists, but cannot be deleted",
                         ),
@@ -2751,6 +2764,10 @@ mod test {
         sled_id
     }
 
+    fn test_zpool_size() -> ByteCount {
+        ByteCount::from_gibibytes_u32(100)
+    }
+
     // Creates a test zpool, returns its UUID.
     async fn create_test_zpool(datastore: &DataStore, sled_id: Uuid) -> Uuid {
         let zpool_id = Uuid::new_v4();
@@ -2758,7 +2775,7 @@ mod test {
             zpool_id,
             sled_id,
             &crate::internal_api::params::ZpoolPutRequest {
-                size: ByteCount::from_gibibytes_u32(100),
+                size: test_zpool_size(),
             },
         );
         datastore.zpool_upsert(zpool).await.unwrap();
@@ -2812,11 +2829,13 @@ mod test {
             ByteCount::from_mebibytes_u32(500),
         );
         let disk1_id = Uuid::new_v4();
+        // Currently, we only allocate one Region Set per disk.
+        let expected_region_count = REGION_REDUNDANCY_THRESHOLD;
         let dataset_and_regions =
             datastore.region_allocate(disk1_id, &params).await.unwrap();
 
         // Verify the allocation.
-        assert_eq!(REGION_REDUNDANCY_THRESHOLD, dataset_and_regions.len());
+        assert_eq!(expected_region_count, dataset_and_regions.len());
         let mut disk1_datasets = HashSet::new();
         for (dataset, region) in dataset_and_regions {
             assert!(disk1_datasets.insert(dataset.id()));
@@ -2835,7 +2854,7 @@ mod test {
         let disk2_id = Uuid::new_v4();
         let dataset_and_regions =
             datastore.region_allocate(disk2_id, &params).await.unwrap();
-        assert_eq!(REGION_REDUNDANCY_THRESHOLD, dataset_and_regions.len());
+        assert_eq!(expected_region_count, dataset_and_regions.len());
         let mut disk2_datasets = HashSet::new();
         for (dataset, region) in dataset_and_regions {
             assert!(disk2_datasets.insert(dataset.id()));
@@ -2956,6 +2975,51 @@ mod test {
         let _ = db.cleanup().await;
     }
 
+    // TODO: This test should be updated when the correct handling
+    // of this out-of-space case is implemented.
+    #[tokio::test]
+    async fn test_region_allocation_out_of_space_does_not_fail_yet() {
+        let logctx = dev::test_setup_log(
+            "test_region_allocation_out_of_space_does_not_fail_yet",
+        );
+        let mut db = test_setup_database(&logctx.log).await;
+        let cfg = db::Config { url: db.pg_config().clone() };
+        let pool = db::Pool::new(&cfg);
+        let datastore = DataStore::new(Arc::new(pool));
+
+        // Create a sled...
+        let sled_id = create_test_sled(&datastore).await;
+
+        // ... and a zpool within that sled...
+        let zpool_id = create_test_zpool(&datastore, sled_id).await;
+
+        // ... and datasets within that zpool.
+        let dataset_count = REGION_REDUNDANCY_THRESHOLD;
+        let bogus_addr =
+            SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 8080);
+        let kind =
+            DatasetKind(crate::internal_api::params::DatasetKind::Crucible);
+        let dataset_ids: Vec<Uuid> =
+            (0..dataset_count).map(|_| Uuid::new_v4()).collect();
+        for id in &dataset_ids {
+            let dataset = Dataset::new(*id, zpool_id, bogus_addr, kind.clone());
+            datastore.dataset_upsert(dataset).await.unwrap();
+        }
+
+        // Allocate regions from the datasets for this disk.
+        //
+        // Note that we ask for a disk which is as large as the zpool,
+        // so we shouldn't have space for redundancy.
+        let disk_size = test_zpool_size();
+        let params = create_test_disk_create_params("disk1", disk_size);
+        let disk1_id = Uuid::new_v4();
+
+        // NOTE: This *should* be an error, rather than succeeding.
+        datastore.region_allocate(disk1_id, &params).await.unwrap();
+
+        let _ = db.cleanup().await;
+    }
+
     // Validate that queries which should be executable without a full table
     // scan are, in fact, runnable without a FULL SCAN.
     #[tokio::test]
@@ -2971,7 +3035,11 @@ mod test {
             .explain_async(datastore.pool())
             .await
             .unwrap();
-        assert!(!explanation.contains("FULL SCAN"), "Found an unexpected FULL SCAN: {}", explanation);
+        assert!(
+            !explanation.contains("FULL SCAN"),
+            "Found an unexpected FULL SCAN: {}",
+            explanation
+        );
 
         let _ = db.cleanup().await;
     }
@@ -2998,7 +3066,11 @@ mod test {
             .explain_async(datastore.pool())
             .await
             .unwrap();
-        assert!(explanation.contains("FULL SCAN"), "Expected FULL SCAN: {}", explanation);
+        assert!(
+            explanation.contains("FULL SCAN"),
+            "Expected FULL SCAN: {}",
+            explanation
+        );
 
         let _ = db.cleanup().await;
     }

@@ -197,7 +197,8 @@ impl DiskCreate {
 
     pub fn extent_count(&self) -> i64 {
         let extent_size = self.extent_size().to_bytes();
-        i64::try_from((self.size.to_bytes() + extent_size - 1) / extent_size).unwrap()
+        i64::try_from((self.size.to_bytes() + extent_size - 1) / extent_size)
+            .unwrap()
     }
 }
 
@@ -250,17 +251,26 @@ mod test {
 
         let params = new_disk_create_params(ByteCount::try_from(1u64).unwrap());
         assert_eq!(1, params.extent_count());
-        let params = new_disk_create_params(ByteCount::try_from(EXTENT_SIZE - 1).unwrap());
+        let params = new_disk_create_params(
+            ByteCount::try_from(EXTENT_SIZE - 1).unwrap(),
+        );
         assert_eq!(1, params.extent_count());
-        let params = new_disk_create_params(ByteCount::try_from(EXTENT_SIZE).unwrap());
+        let params =
+            new_disk_create_params(ByteCount::try_from(EXTENT_SIZE).unwrap());
         assert_eq!(1, params.extent_count());
 
-        let params = new_disk_create_params(ByteCount::try_from(EXTENT_SIZE + 1).unwrap());
+        let params = new_disk_create_params(
+            ByteCount::try_from(EXTENT_SIZE + 1).unwrap(),
+        );
         assert_eq!(2, params.extent_count());
 
         // Mostly just checking we don't blow up on an unwrap here.
-        let params = new_disk_create_params(ByteCount::try_from(i64::MAX).unwrap());
-        assert!(params.size.to_bytes() < (params.extent_count() as u64) * params.extent_size().to_bytes());
+        let params =
+            new_disk_create_params(ByteCount::try_from(i64::MAX).unwrap());
+        assert!(
+            params.size.to_bytes()
+                < (params.extent_count() as u64)
+                    * params.extent_size().to_bytes()
+        );
     }
 }
-

@@ -38,7 +38,7 @@ use serde::Deserialize;
 use serde::Serialize;
 use slog::Logger;
 use std::collections::BTreeMap;
-use std::convert::{TryInto, TryFrom};
+use std::convert::{TryFrom, TryInto};
 use std::sync::Arc;
 use steno::new_action_noop_undo;
 use steno::ActionContext;
@@ -603,12 +603,24 @@ fn saga_disk_delete() -> SagaTemplate<SagaDiskDelete> {
     template_builder.append(
         "no_result",
         "DeleteDiskRecord",
+        // TODO: See the comment on the "DeleteRegions" step,
+        // we may want to un-delete the disk if we cannot remove
+        // underlying regions.
         new_action_noop_undo(sdd_delete_disk_record),
     );
 
     template_builder.append(
         "no_result",
         "DeleteRegions",
+        // TODO(https://github.com/oxidecomputer/omicron/issues/612):
+        // We need a way to deal with this operation failing, aside from
+        // propagating the error to the user.
+        //
+        // What if the Sled goes offline? Nexus must ultimately be
+        // responsible for reconciling this scenario.
+        //
+        // The current behavior causes the disk deletion saga to
+        // fail, but still marks the disk as destroyed.
         new_action_noop_undo(sdd_delete_regions),
     );
 
