@@ -574,7 +574,12 @@ impl Sample {
 }
 
 type ProducerList = Vec<Box<dyn Producer>>;
-pub type ProducerResults = Vec<Result<Vec<Sample>, Error>>;
+#[derive(Debug, Clone, JsonSchema, Deserialize, Serialize)]
+pub enum ProducerResultsItem {
+    Ok(Vec<Sample>),
+    Err(Error),
+}
+pub type ProducerResults = Vec<ProducerResultsItem>;
 
 /// The `ProducerRegistry` is a centralized collection point for metrics in consumer code.
 #[derive(Debug, Clone)]
@@ -618,7 +623,12 @@ impl ProducerRegistry {
         let mut producers = self.producers.lock().unwrap();
         let mut results = Vec::with_capacity(producers.len());
         for producer in producers.iter_mut() {
-            results.push(producer.produce().map(|samples| samples.collect()));
+            results.push(
+                producer.produce().map(Iterator::collect).map_or_else(
+                    ProducerResultsItem::Err,
+                    ProducerResultsItem::Ok,
+                ),
+            );
         }
         results
     }
