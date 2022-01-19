@@ -209,28 +209,28 @@ impl Nexus {
         };
 
         /* TODO-cleanup all the extra Arcs here seems wrong */
-        let nexus_arc = Arc::new(nexus);
+        let nexus = Arc::new(nexus);
         let opctx = OpContext::for_background(
             log.new(o!("component" => "SagaRecoverer")),
             authz,
             authn::Context::internal_saga_recovery(),
             Arc::clone(&db_datastore),
         );
+        let saga_logger = nexus.log.new(o!("saga_type" => "recovery"));
         let recovery_task = db::recover(
             opctx,
             my_sec_id,
-            Arc::new(Arc::new(SagaContext::new(Arc::clone(&nexus_arc)))),
+            Arc::new(Arc::new(SagaContext::new(
+                Arc::clone(&nexus),
+                saga_logger,
+            ))),
             db_datastore,
             Arc::clone(&sec_client),
             &sagas::ALL_TEMPLATES,
         );
 
-        *nexus_arc.recovery_task.lock().unwrap() = Some(recovery_task);
-        nexus_arc
-    }
-
-    pub fn log(&self) -> &Logger {
-        &self.log
+        *nexus.recovery_task.lock().unwrap() = Some(recovery_task);
+        nexus
     }
 
     pub async fn wait_for_populate(&self) -> Result<(), anyhow::Error> {
@@ -442,8 +442,10 @@ impl Nexus {
         P: serde::Serialize,
     {
         let saga_id = SagaId(Uuid::new_v4());
+        let saga_logger =
+            self.log.new(o!("template_name" => template_name.to_owned()));
         let saga_context =
-            Arc::new(Arc::new(SagaContext::new(Arc::clone(self))));
+            Arc::new(Arc::new(SagaContext::new(Arc::clone(self), saga_logger)));
         let future = self
             .sec_client
             .saga_create(

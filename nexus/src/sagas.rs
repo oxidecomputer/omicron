@@ -401,12 +401,6 @@ async fn sdc_create_disk_record(
     let params = sagactx.saga_params();
 
     let disk_id = sagactx.lookup::<Uuid>("disk_id")?;
-
-    // NOTE: This could be done in a transaction alongside region allocation?
-    //
-    // Unclear if it's a problem to let this disk exist without any backing
-    // regions for a brief period of time, or if that's under the valid
-    // jurisdiction of "Creating".
     let disk = db::model::Disk::new(
         disk_id,
         params.project_id,
@@ -443,6 +437,11 @@ async fn sdc_alloc_regions(
     // "creating" - the respective Crucible Agents must be instructed to
     // allocate the necessary regions before we can mark the disk as "ready to
     // be used".
+    //
+    // TODO: Depending on the result of
+    // https://github.com/oxidecomputer/omicron/issues/613 , we
+    // should consider using a paginated API to access regions, rather than
+    // returning all of them at once.
     let datasets_and_regions = osagactx
         .datastore()
         .region_allocate(disk_id, &params.create_params)
@@ -513,6 +512,10 @@ async fn ensure_region_in_dataset(
     Ok(region)
 }
 
+// Arbitrary limit on concurrency, for operations issued
+// on multiple regions within a disk at the same time.
+const MAX_CONCURRENT_REGION_REQUESTS: usize = 3;
+
 async fn sdc_regions_ensure(
     sagactx: ActionContext<SagaDiskCreate>,
 ) -> Result<(), ActionError> {
@@ -527,7 +530,10 @@ async fn sdc_regions_ensure(
             ensure_region_in_dataset(log, &dataset, &region).await
         })
         // Execute the allocation requests concurrently.
-        .buffer_unordered(request_count)
+        .buffer_unordered(std::cmp::min(
+            request_count,
+            MAX_CONCURRENT_REGION_REQUESTS,
+        ))
         .collect::<Vec<Result<_, _>>>()
         .await
         .into_iter()
@@ -550,7 +556,10 @@ async fn delete_regions(
             client.region_delete(&id).await
         })
         // Execute the allocation requests concurrently.
-        .buffer_unordered(request_count)
+        .buffer_unordered(std::cmp::min(
+            request_count,
+            MAX_CONCURRENT_REGION_REQUESTS,
+        ))
         .collect::<Vec<Result<_, _>>>()
         .await
         .into_iter()

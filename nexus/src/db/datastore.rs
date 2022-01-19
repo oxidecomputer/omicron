@@ -1255,8 +1255,10 @@ impl DataStore {
             })
     }
 
-    /// Attempts to delete a disk. Returns the disk (prior to deletion)
-    /// if successful.
+    /// Updates a disk record to indicate it has been deleted.
+    ///
+    /// Does not attempt to modify any resources (e.g. regions) which may
+    /// belong to the disk.
     // TODO: Delete me (this function, not the disk!), ensure all datastore
     // access is auth-checked.
     //
@@ -1312,12 +1314,20 @@ impl DataStore {
         match result.status {
             UpdateStatus::Updated => Ok(()),
             UpdateStatus::NotUpdatedButExists => {
-                let disk_state = result.found.state();
-                if !ok_to_delete_states.contains(disk_state.state()) {
+                let disk = result.found;
+                let disk_state = disk.state();
+                if disk.time_deleted().is_some()
+                    && disk_state.state()
+                        == &api::external::DiskState::Destroyed
+                {
+                    // To maintain idempotency, if the disk has already been
+                    // destroyed, don't throw an error.
+                    return Ok(());
+                } else if !ok_to_delete_states.contains(disk_state.state()) {
                     return Err(Error::InvalidRequest {
                         message: format!(
                             "disk cannot be deleted in state \"{}\"",
-                            result.found.runtime_state.disk_state
+                            disk.runtime_state.disk_state
                         ),
                     });
                 } else if disk_state.is_attached() {
