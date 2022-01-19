@@ -18,15 +18,21 @@ async fn test_roles_builtin(cptestctx: &ControlPlaneTestContext) {
     let testctx = &cptestctx.external_client;
 
     // Standard authn / authz checks
-    RequestBuilder::new(testctx, Method::GET, "/roles")
-        .expect_status(Some(StatusCode::UNAUTHORIZED))
-        .execute()
-        .await
-        .unwrap();
+    NexusRequest::expect_failure(
+        testctx,
+        StatusCode::UNAUTHORIZED,
+        Method::GET,
+        "/roles",
+    )
+    .execute()
+    .await
+    .unwrap();
 
-    NexusRequest::new(
-        RequestBuilder::new(testctx, Method::GET, "/roles")
-            .expect_status(Some(StatusCode::FORBIDDEN)),
+    NexusRequest::expect_failure(
+        testctx,
+        StatusCode::FORBIDDEN,
+        Method::GET,
+        "/roles",
     )
     .authn_as(AuthnMode::UnprivilegedUser)
     .execute()
@@ -88,14 +94,16 @@ async fn test_roles_builtin(cptestctx: &ControlPlaneTestContext) {
 
     // Standard authnn/authz checks
     RequestBuilder::new(testctx, Method::GET, "/roles/fleet.admin")
-        .expect_status(Some(StatusCode::UNAUTHORIZED))
+        .expect_status(Some(StatusCode::NOT_FOUND))
         .execute()
         .await
         .unwrap();
 
-    NexusRequest::new(
-        RequestBuilder::new(testctx, Method::GET, "/roles/fleet.admin")
-            .expect_status(Some(StatusCode::FORBIDDEN)),
+    NexusRequest::expect_failure(
+        testctx,
+        StatusCode::NOT_FOUND,
+        Method::GET,
+        "/roles/fleet.admin",
     )
     .authn_as(AuthnMode::UnprivilegedUser)
     .execute()

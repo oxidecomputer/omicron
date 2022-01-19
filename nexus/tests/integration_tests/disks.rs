@@ -695,23 +695,42 @@ async fn test_disk_deletion_requires_authentication(
     };
     let _: Disk = objects_post(&client, &disks_url, new_disk.clone()).await;
 
-    // If we're not authenticated, or authenticated as an unprivileged user, we
-    // shouldn't be able to delete this disk.
-    NexusRequest::new(
-        RequestBuilder::new(client, Method::DELETE, &disk_url)
-            .expect_status(Some(StatusCode::UNAUTHORIZED)),
-    )
-    .execute()
-    .await
-    .expect("expected request to fail");
-    NexusRequest::new(
-        RequestBuilder::new(client, Method::DELETE, &disk_url)
-            .expect_status(Some(StatusCode::FORBIDDEN)),
-    )
-    .authn_as(AuthnMode::UnprivilegedUser)
-    .execute()
-    .await
-    .expect("expected request to fail");
+    const BAD_DISK_NAME: &str = "wonderful-knife";
+    let bad_disk_url = format!("{}/{}", disks_url, BAD_DISK_NAME);
+
+    // If we are not authenticated, we should not be able to delete the disk.
+    //
+    // We should see the same error regardless of the existence of the disk.
+    let urls = [&disk_url, &bad_disk_url];
+    for url in &urls {
+        NexusRequest::expect_failure(
+            client,
+            StatusCode::NOT_FOUND,
+            Method::DELETE,
+            &url,
+        )
+        .execute()
+        .await
+        .expect("expected request to fail");
+    }
+
+    // If we are unprivileged, we should not be able to delete the disk.
+    //
+    // We should see the same error regardless of the existence of the disk.
+    for url in &urls {
+        NexusRequest::expect_failure(
+            client,
+            StatusCode::NOT_FOUND,
+            Method::DELETE,
+            &url,
+        )
+        .authn_as(AuthnMode::UnprivilegedUser)
+        .execute()
+        .await
+        .expect("expected request to fail");
+    }
+
+    // Privileged users can delete disks.
     NexusRequest::object_delete(client, &disk_url)
         .authn_as(AuthnMode::PrivilegedUser)
         .execute()

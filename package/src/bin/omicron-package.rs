@@ -9,6 +9,7 @@
 use omicron_common::packaging::sha256_digest;
 
 use anyhow::{anyhow, bail, Context, Result};
+use omicron_package::{parse, SubCommand};
 use rayon::prelude::*;
 use reqwest;
 use serde_derive::Deserialize;
@@ -19,7 +20,6 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use structopt::StructOpt;
 use tar::Builder;
-use thiserror::Error;
 use tokio::io::AsyncWriteExt;
 
 const S3_BUCKET: &str = "https://oxide-omicron-build.s3.amazonaws.com";
@@ -28,59 +28,6 @@ const S3_BUCKET: &str = "https://oxide-omicron-build.s3.amazonaws.com";
 const PKG: &str = "pkg";
 // Name for the directory component where downloaded blobs are stored.
 const BLOB: &str = "blob";
-
-#[derive(Debug, StructOpt)]
-enum SubCommand {
-    /// Builds the packages specified in a manifest, and places them into a target
-    /// directory.
-    Package {
-        /// The output directory, where artifacts should be placed.
-        ///
-        /// Defaults to "out".
-        #[structopt(long = "out", default_value = "out")]
-        artifact_dir: PathBuf,
-
-        /// The binary profile to package.
-        ///
-        /// True: release, False: debug (default).
-        #[structopt(
-            short,
-            long,
-            help = "True if bundling release-mode binaries"
-        )]
-        release: bool,
-    },
-    /// Checks the packages specified in a manifest, without building.
-    Check,
-    /// Installs the packages to a target machine.
-    Install {
-        /// The directory from which artifacts will be pulled.
-        ///
-        /// Should match the format from the Package subcommand.
-        #[structopt(long = "in", default_value = "out")]
-        artifact_dir: PathBuf,
-
-        /// The directory to which artifacts will be installed.
-        ///
-        /// Defaults to "/opt/oxide".
-        #[structopt(long = "out", default_value = "/opt/oxide")]
-        install_dir: PathBuf,
-    },
-    /// Removes the packages from the target machine.
-    Uninstall {
-        /// The directory from which artifacts were be pulled.
-        ///
-        /// Should match the format from the Package subcommand.
-        #[structopt(long = "in", default_value = "out")]
-        artifact_dir: PathBuf,
-
-        /// The directory to which artifacts were installed.
-        ///
-        /// Defaults to "/opt/oxide".
-        #[structopt(long = "out", default_value = "/opt/oxide")]
-        install_dir: PathBuf,
-    },
-}
 
 #[derive(Debug, StructOpt)]
 #[structopt(name = "packaging tool")]
@@ -119,15 +66,6 @@ fn run_cargo_on_package(
     }
 
     Ok(())
-}
-
-/// Errors which may be returned when parsing the server configuration.
-#[derive(Error, Debug)]
-enum ParseError {
-    #[error("Cannot parse toml: {0}")]
-    Toml(#[from] toml::de::Error),
-    #[error("IO error: {0}")]
-    Io(#[from] std::io::Error),
 }
 
 #[derive(Deserialize, Debug)]
@@ -198,12 +136,6 @@ struct Config {
 
     #[serde(default, rename = "package")]
     packages: BTreeMap<String, PackageInfo>,
-}
-
-fn parse<P: AsRef<Path>>(path: P) -> Result<Config, ParseError> {
-    let contents = std::fs::read_to_string(path.as_ref())?;
-    let cfg = toml::from_str::<Config>(&contents)?;
-    Ok(cfg)
 }
 
 async fn do_check(config: &Config) -> Result<()> {
@@ -356,6 +288,11 @@ fn do_install(
         anyhow!("Cannot create installation directory: {}", err)
     })?;
 
+    println!(
+        "Copying digest.toml from {} to {}",
+        artifact_dir.to_string_lossy(),
+        install_dir.to_string_lossy()
+    );
     // Move the digest of expected packages.
     std::fs::copy(
         artifact_dir.join("digest.toml"),
@@ -454,7 +391,7 @@ fn do_uninstall(
 #[tokio::main]
 async fn main() -> Result<()> {
     let args = Args::from_args_safe().map_err(|err| anyhow!(err))?;
-    let config = parse(&args.manifest)?;
+    let config = parse::<_, Config>(&args.manifest)?;
 
     // Use a CWD that is the root of the Omicron repository.
     if let Ok(manifest) = env::var("CARGO_MANIFEST_DIR") {
