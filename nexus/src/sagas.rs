@@ -450,6 +450,8 @@ async fn sim_migrate_prep(
     let runtime = InstanceRuntimeState {
         run_state: InstanceState::Migrating,
         migration_uuid: Some(migrate_uuid),
+        gen: runtime.gen.next(),
+        time_updated: Utc::now(),
         ..runtime
     };
 
