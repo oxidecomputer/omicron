@@ -26,7 +26,11 @@ pub trait Explainable<Q> {
 
 impl<Q> Explainable<Q> for Q
 where
-    Q: QueryFragment<Pg> + RunQueryDsl<DbConnection> + Sized,
+    Q: QueryFragment<Pg>
+        + QueryId
+        + RunQueryDsl<DbConnection>
+        + Sized
+        + 'static,
 {
     fn explain(
         self,
@@ -51,7 +55,12 @@ pub trait ExplainableAsync<Q> {
 #[async_trait]
 impl<Q> ExplainableAsync<Q> for Q
 where
-    Q: QueryFragment<Pg> + RunQueryDsl<DbConnection> + Sized + Send + 'static,
+    Q: QueryFragment<Pg>
+        + QueryId
+        + RunQueryDsl<DbConnection>
+        + Sized
+        + Send
+        + 'static,
 {
     async fn explain_async(
         self,
@@ -76,9 +85,12 @@ struct ExplainStatement<Q> {
     query: Q,
 }
 
-impl<Q> QueryId for ExplainStatement<Q> {
-    type QueryId = ();
-    const HAS_STATIC_QUERY_ID: bool = false;
+impl<Q> QueryId for ExplainStatement<Q>
+where
+    Q: QueryId + 'static,
+{
+    type QueryId = ExplainStatement<Q>;
+    const HAS_STATIC_QUERY_ID: bool = Q::HAS_STATIC_QUERY_ID;
 }
 
 impl<Q> Query for ExplainStatement<Q> {
