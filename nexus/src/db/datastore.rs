@@ -325,7 +325,9 @@ impl DataStore {
             .select(Dataset::as_select())
             .order(
                 diesel::dsl::sum(
-                    region_dsl::extent_size * region_dsl::extent_count,
+                    region_dsl::blocks_per_extent
+                        * region_dsl::block_size
+                        * region_dsl::extent_count,
                 )
                 .asc(),
             )
@@ -403,7 +405,7 @@ impl DataStore {
                             dataset.id(),
                             disk_id,
                             params.block_size().into(),
-                            params.extent_size().into(),
+                            params.blocks_per_extent(),
                             params.extent_count(),
                         )
                     })
@@ -2851,7 +2853,7 @@ mod test {
             assert!(disk1_datasets.insert(dataset.id()));
             assert_eq!(disk1_id, region.disk_id());
             assert_eq!(params.block_size(), region.block_size());
-            assert_eq!(params.extent_size(), region.extent_size());
+            assert_eq!(params.blocks_per_extent(), region.blocks_per_extent());
             assert_eq!(params.extent_count(), region.extent_count());
         }
 
@@ -2870,7 +2872,7 @@ mod test {
             assert!(disk2_datasets.insert(dataset.id()));
             assert_eq!(disk2_id, region.disk_id());
             assert_eq!(params.block_size(), region.block_size());
-            assert_eq!(params.extent_size(), region.extent_size());
+            assert_eq!(params.blocks_per_extent(), region.blocks_per_extent());
             assert_eq!(params.extent_count(), region.extent_count());
         }
 

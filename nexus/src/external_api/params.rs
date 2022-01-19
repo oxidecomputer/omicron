@@ -12,7 +12,6 @@ use omicron_common::api::external::{
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use std::convert::TryFrom;
 use uuid::Uuid;
 
 /*
@@ -183,7 +182,7 @@ pub struct DiskCreate {
     pub size: ByteCount,
 }
 
-const BLOCK_SIZE: u32 = 512_u32;
+const BLOCK_SIZE: u32 = 1_u32 << 12;
 const EXTENT_SIZE: u32 = 1_u32 << 20;
 
 impl DiskCreate {
@@ -191,14 +190,15 @@ impl DiskCreate {
         ByteCount::from(BLOCK_SIZE)
     }
 
-    pub fn extent_size(&self) -> ByteCount {
-        ByteCount::from(EXTENT_SIZE)
+    pub fn blocks_per_extent(&self) -> i64 {
+        EXTENT_SIZE as i64 / BLOCK_SIZE as i64
     }
 
     pub fn extent_count(&self) -> i64 {
-        let extent_size = self.extent_size().to_bytes();
-        i64::try_from((self.size.to_bytes() + extent_size - 1) / extent_size)
-            .unwrap()
+        let extent_size = EXTENT_SIZE as i64;
+        let size = self.size.to_bytes() as i64;
+        size / extent_size
+            + ((size % extent_size) + extent_size - 1) / extent_size
     }
 }
 
@@ -232,6 +232,7 @@ pub struct UserBuiltinCreate {
 #[cfg(test)]
 mod test {
     use super::*;
+    use std::convert::TryFrom;
 
     fn new_disk_create_params(size: ByteCount) -> DiskCreate {
         DiskCreate {
@@ -269,8 +270,9 @@ mod test {
             new_disk_create_params(ByteCount::try_from(i64::MAX).unwrap());
         assert!(
             params.size.to_bytes()
-                < (params.extent_count() as u64)
-                    * params.extent_size().to_bytes()
+                <= (params.extent_count() as u64)
+                    * (params.blocks_per_extent() as u64)
+                    * params.block_size().to_bytes()
         );
     }
 }

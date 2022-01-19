@@ -638,7 +638,7 @@ pub struct Region {
     disk_id: Uuid,
 
     block_size: ByteCount,
-    extent_size: ByteCount,
+    blocks_per_extent: i64,
     extent_count: i64,
 }
 
@@ -647,7 +647,7 @@ impl Region {
         dataset_id: Uuid,
         disk_id: Uuid,
         block_size: ByteCount,
-        extent_size: ByteCount,
+        blocks_per_extent: i64,
         extent_count: i64,
     ) -> Self {
         Self {
@@ -655,7 +655,7 @@ impl Region {
             dataset_id,
             disk_id,
             block_size,
-            extent_size,
+            blocks_per_extent,
             extent_count,
         }
     }
@@ -669,8 +669,8 @@ impl Region {
     pub fn block_size(&self) -> external::ByteCount {
         self.block_size.0
     }
-    pub fn extent_size(&self) -> external::ByteCount {
-        self.extent_size.0
+    pub fn blocks_per_extent(&self) -> i64 {
+        self.blocks_per_extent
     }
     pub fn extent_count(&self) -> i64 {
         self.extent_count
