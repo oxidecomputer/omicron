@@ -13,7 +13,7 @@ use dropshot::{
 };
 use omicron_common::api::internal::nexus::ProducerEndpoint;
 use omicron_common::backoff;
-use oximeter::types::ProducerResults;
+use oximeter::types::{ProducerResults, ProducerResultsItem};
 use oximeter_db::{Client, DbWrite};
 use serde::{Deserialize, Serialize};
 use slog::{debug, error, info, o, trace, warn, Drain, Logger};
@@ -184,8 +184,8 @@ async fn results_sink(
                             let mut flattened = Vec::with_capacity(results.len());
                             for inner_batch in results.into_iter() {
                                 match inner_batch {
-                                    Ok(samples) => flattened.extend(samples.into_iter()),
-                                    Err(e) => {
+                                    ProducerResultsItem::Ok(samples) => flattened.extend(samples.into_iter()),
+                                    ProducerResultsItem::Err(e) => {
                                         debug!(
                                             log,
                                             "received error (not samples) from a producer: {}",

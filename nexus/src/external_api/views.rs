@@ -26,7 +26,6 @@ use uuid::Uuid;
  * Client view of an [`Organization`]
  */
 #[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
 pub struct Organization {
     #[serde(flatten)]
     pub identity: IdentityMetadata,
@@ -46,7 +45,6 @@ impl Into<Organization> for model::Organization {
  * Client view of a [`Project`]
  */
 #[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
 pub struct Project {
     /*
      * TODO-correctness is flattening here (and in all the other types) the
@@ -74,7 +72,6 @@ impl Into<Project> for model::Project {
  * Client view of a [`Vpc`]
  */
 #[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
 pub struct Vpc {
     #[serde(flatten)]
     pub identity: IdentityMetadata,
@@ -104,7 +101,6 @@ impl Into<Vpc> for model::Vpc {
 /// A VPC subnet represents a logical grouping for instances that allows network traffic between
 /// them, within a IPv4 subnetwork or optionall an IPv6 subnetwork.
 #[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
 pub struct VpcSubnet {
     /** common identifying metadata */
     #[serde(flatten)]
@@ -146,7 +142,6 @@ impl Into<VpcSubnet> for model::VpcSubnet {
  * Client view of an [`Rack`]
  */
 #[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
 pub struct Rack {
     #[serde(flatten)]
     pub identity: IdentityMetadata,
@@ -166,7 +161,6 @@ impl Into<Rack> for model::Rack {
  * Client view of an [`Sled`]
  */
 #[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
 pub struct Sled {
     #[serde(flatten)]
     pub identity: IdentityMetadata,
@@ -187,7 +181,6 @@ impl Into<Sled> for model::Sled {
  * Client view of a [`User`]
  */
 #[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
 pub struct User {
     /*
      * TODO-correctness is flattening here (and in all the other types) the
@@ -209,7 +202,6 @@ impl Into<User> for model::UserBuiltin {
 // TODO: this may end up merged with User once more details about the user are
 // stored in the auth context. Right now there is only the ID.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
 pub struct SessionUser {
     pub id: Uuid,
 }
@@ -228,7 +220,6 @@ impl Into<SessionUser> for authn::Actor {
  * Client view of a [`Role`]
  */
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
 pub struct Role {
     pub name: RoleName,
     pub description: String,
