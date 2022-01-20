@@ -296,41 +296,22 @@ impl DataStore {
     }
 
     fn get_allocatable_datasets_query() -> impl RunnableQuery<Dataset> {
-        use db::schema::dataset::dsl as dataset_dsl;
-        use db::schema::region::dsl as region_dsl;
+        use db::schema::dataset::dsl;
 
-        dataset_dsl::dataset
+        dsl::dataset
             // We look for valid datasets (non-deleted crucible datasets).
-            .filter(dataset_dsl::time_deleted.is_null())
-            .filter(dataset_dsl::kind.eq(DatasetKind(
+            .filter(dsl::size_used.is_not_null())
+            .filter(dsl::time_deleted.is_null())
+            .filter(dsl::kind.eq(DatasetKind(
                 crate::internal_api::params::DatasetKind::Crucible,
             )))
-            // Next, observe all the regions allocated to each dataset, and
-            // determine how much space they're using.
-            //
-            // TODO: We could store "free/allocated" space per-dataset,
-            // and keep them up-to-date, rather than trying to recompute
-            // this.
-            //
+            .order(dsl::size_used.asc())
             // TODO: We admittedly don't actually *fail* any request for
             // running out of space - we try to send the request down to
             // crucible agents, and expect them to fail on our behalf in
             // out-of-storage conditions. This should undoubtedly be
             // handled more explicitly.
-            .left_outer_join(
-                region_dsl::region
-                    .on(dataset_dsl::id.eq(region_dsl::dataset_id)),
-            )
-            .group_by(dataset_dsl::id)
             .select(Dataset::as_select())
-            .order(
-                diesel::dsl::sum(
-                    region_dsl::blocks_per_extent
-                        * region_dsl::block_size
-                        * region_dsl::extent_count,
-                )
-                .asc(),
-            )
             .limit(REGION_REDUNDANCY_THRESHOLD.try_into().unwrap())
     }
 
@@ -343,6 +324,7 @@ impl DataStore {
         disk_id: Uuid,
         params: &params::DiskCreate,
     ) -> Result<Vec<(Dataset, Region)>, Error> {
+        use db::schema::dataset::dsl as dataset_dsl;
         use db::schema::region::dsl as region_dsl;
 
         // ALLOCATION POLICY
@@ -386,7 +368,7 @@ impl DataStore {
                     return Ok(datasets_and_regions);
                 }
 
-                let datasets: Vec<Dataset> =
+                let mut datasets: Vec<Dataset> =
                     Self::get_allocatable_datasets_query()
                         .get_results::<Dataset>(conn)?;
 
@@ -397,7 +379,8 @@ impl DataStore {
                 }
 
                 // Create identical regions on each of the following datasets.
-                let source_datasets = &datasets[0..REGION_REDUNDANCY_THRESHOLD];
+                let source_datasets =
+                    &mut datasets[0..REGION_REDUNDANCY_THRESHOLD];
                 let regions: Vec<Region> = source_datasets
                     .iter()
                     .map(|dataset| {
@@ -415,6 +398,26 @@ impl DataStore {
                     .returning(Region::as_returning())
                     .get_results(conn)?;
 
+                // Update the tallied sizes in the source datasets containing
+                // those regions.
+                let region_size = i64::from(params.block_size())
+                    * params.blocks_per_extent()
+                    * params.extent_count();
+                for dataset in source_datasets.iter_mut() {
+                    dataset.size_used =
+                        dataset.size_used.map(|v| v + region_size);
+                }
+
+                let dataset_ids: Vec<Uuid> =
+                    source_datasets.iter().map(|ds| ds.id()).collect();
+                diesel::update(dataset_dsl::dataset)
+                    .filter(dataset_dsl::id.eq_any(dataset_ids))
+                    .set(
+                        dataset_dsl::size_used
+                            .eq(dataset_dsl::size_used + region_size),
+                    )
+                    .execute(conn)?;
+
                 // Return the regions with the datasets to which they were allocated.
                 Ok(source_datasets
                     .into_iter()
@@ -429,20 +432,44 @@ impl DataStore {
     }
 
     /// Deletes all regions backing a disk.
+    ///
+    /// Also updates the storage usage on their corresponding datasets.
     pub async fn regions_hard_delete(&self, disk_id: Uuid) -> DeleteResult {
-        use db::schema::region::dsl;
+        use db::schema::dataset::dsl as dataset_dsl;
+        use db::schema::region::dsl as region_dsl;
 
-        diesel::delete(dsl::region)
-            .filter(dsl::disk_id.eq(disk_id))
-            .execute_async(self.pool())
+        // Remove the regions, collecting datasets they're from.
+        let (dataset_id, size) = diesel::delete(region_dsl::region)
+            .filter(region_dsl::disk_id.eq(disk_id))
+            .returning((
+                region_dsl::dataset_id,
+                region_dsl::block_size
+                    * region_dsl::blocks_per_extent
+                    * region_dsl::extent_count,
+            ))
+            .get_result_async::<(Uuid, i64)>(self.pool())
             .await
-            .map(|_| ())
             .map_err(|e| {
                 Error::internal_error(&format!(
                     "error deleting regions: {:?}",
                     e
                 ))
-            })
+            })?;
+
+        // Update those datasets to which the regions belonged.
+        diesel::update(dataset_dsl::dataset)
+            .filter(dataset_dsl::id.eq(dataset_id))
+            .set(dataset_dsl::size_used.eq(dataset_dsl::size_used - size))
+            .execute_async(self.pool())
+            .await
+            .map_err(|e| {
+                Error::internal_error(&format!(
+                    "error updating dataset space: {:?}",
+                    e
+                ))
+            })?;
+
+        Ok(())
     }
 
     /// Create a organization
@@ -3053,34 +3080,13 @@ mod test {
             explanation
         );
 
-        let _ = db.cleanup().await;
-    }
-
-    // Welp, life isn't perfect - sometimes, we take shortcuts, and implement
-    // queries that DO require FULL SCAN.
-    //
-    // These are problematic scans from a performance point-of-view, but we can
-    // keep track of which queries do so with this test!
-    //
-    // NOTE: If this test is failing because a table scan is no longer required,
-    // congratulations, move that query into the more appropriate test:
-    //      `test_queries_do_not_require_full_table_scan`.
-    #[tokio::test]
-    async fn test_queries_that_do_require_full_table_scan() {
-        let logctx =
-            dev::test_setup_log("test_queries_that_do_require_full_table_scan");
-        let mut db = test_setup_database(&logctx.log).await;
-        let cfg = db::Config { url: db.pg_config().clone() };
-        let pool = db::Pool::new(&cfg);
-        let datastore = DataStore::new(Arc::new(pool));
-
         let explanation = DataStore::get_allocatable_datasets_query()
             .explain_async(datastore.pool())
             .await
             .unwrap();
         assert!(
-            explanation.contains("FULL SCAN"),
-            "Expected FULL SCAN: {}",
+            !explanation.contains("FULL SCAN"),
+            "Found an unexpected FULL SCAN: {}",
             explanation
         );
 

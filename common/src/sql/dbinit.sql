@@ -105,12 +105,20 @@ CREATE TABLE omicron.public.Dataset (
     /* FK into the Pool table */
     pool_id UUID NOT NULL,
 
-    /* Contact information for the downstairs region */
+    /* Contact information for the dataset */
     ip INET NOT NULL,
     port INT4 NOT NULL,
 
-    kind omicron.public.dataset_kind NOT NULL
+    kind omicron.public.dataset_kind NOT NULL,
+
+    /* An upper bound on the amount of space that might be in-use */
+    size_used INT
 );
+
+/* Create an index on the size usage for Crucible's allocation */
+CREATE INDEX on omicron.public.Dataset (
+    size_used
+) WHERE size_used IS NOT NULL AND time_deleted IS NULL AND kind = 'crucible';
 
 /*
  * A region of space allocated to Crucible Downstairs, within a dataset.

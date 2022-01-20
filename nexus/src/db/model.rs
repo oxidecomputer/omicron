@@ -572,6 +572,7 @@ pub struct Dataset {
     port: i32,
 
     kind: DatasetKind,
+    pub size_used: Option<i64>,
 }
 
 impl Dataset {
@@ -581,6 +582,10 @@ impl Dataset {
         addr: SocketAddr,
         kind: DatasetKind,
     ) -> Self {
+        let size_used = match kind {
+            DatasetKind(internal_api::params::DatasetKind::Crucible) => Some(0),
+            _ => None,
+        };
         Self {
             identity: DatasetIdentity::new(id),
             time_deleted: None,
@@ -589,6 +594,7 @@ impl Dataset {
             ip: addr.ip().into(),
             port: addr.port().into(),
             kind,
+            size_used,
         }
     }
 

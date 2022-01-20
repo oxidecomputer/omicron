@@ -191,6 +191,8 @@ table! {
         port -> Int4,
 
         kind -> crate::db::model::DatasetKindEnum,
+
+        size_used -> Nullable<Int8>,
     }
 }
 
