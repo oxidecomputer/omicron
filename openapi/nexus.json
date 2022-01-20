@@ -4091,7 +4091,7 @@
               "type": {
                 "type": "string",
                 "enum": [
-                  "Ip"
+                  "ip"
                 ]
               },
               "value": {
@@ -4110,7 +4110,7 @@
               "type": {
                 "type": "string",
                 "enum": [
-                  "Vpc"
+                  "vpc"
                 ]
               },
               "value": {
@@ -4128,7 +4128,7 @@
               "type": {
                 "type": "string",
                 "enum": [
-                  "Subnet"
+                  "subnet"
                 ]
               },
               "value": {
@@ -4151,7 +4151,7 @@
               "type": {
                 "type": "string",
                 "enum": [
-                  "Ip"
+                  "ip"
                 ]
               },
               "value": {
@@ -4170,7 +4170,7 @@
               "type": {
                 "type": "string",
                 "enum": [
-                  "Vpc"
+                  "vpc"
                 ]
               },
               "value": {
@@ -4188,7 +4188,7 @@
               "type": {
                 "type": "string",
                 "enum": [
-                  "Subnet"
+                  "subnet"
                 ]
               },
               "value": {
@@ -4206,7 +4206,7 @@
               "type": {
                 "type": "string",
                 "enum": [
-                  "Instance"
+                  "instance"
                 ]
               },
               "value": {
@@ -4224,7 +4224,7 @@
               "type": {
                 "type": "string",
                 "enum": [
-                  "InternetGateway"
+                  "internet_gateway"
                 ]
               },
               "value": {
@@ -4329,10 +4329,10 @@
         "description": "The classification of a [`RouterRoute`] as defined by the system. The kind determines certain attributes such as if the route is modifiable and describes how or where the route was created.\n\nSee [RFD-21](https://rfd.shared.oxide.computer/rfd/0021#concept-router) for more context",
         "type": "string",
         "enum": [
-          "Default",
-          "VpcSubnet",
-          "VpcPeering",
-          "Custom"
+          "default",
+          "vpc_subnet",
+          "vpc_peering",
+          "custom"
         ]
       },
       "RouterRouteResultsPage": {
@@ -4408,7 +4408,7 @@
               "error": {
                 "type": "string",
                 "enum": [
-                  "ActionFailed"
+                  "action_failed"
                 ]
               },
               "source_error": {}
@@ -4424,7 +4424,7 @@
               "error": {
                 "type": "string",
                 "enum": [
-                  "DeserializeFailed"
+                  "deserialize_failed"
                 ]
               },
               "message": {
@@ -4442,7 +4442,7 @@
               "error": {
                 "type": "string",
                 "enum": [
-                  "InjectedError"
+                  "injected_error"
                 ]
               }
             },
@@ -4456,7 +4456,7 @@
               "error": {
                 "type": "string",
                 "enum": [
-                  "SerializeFailed"
+                  "serialize_failed"
                 ]
               },
               "message": {
@@ -4474,7 +4474,7 @@
               "error": {
                 "type": "string",
                 "enum": [
-                  "SubsagaCreateFailed"
+                  "subsaga_create_failed"
                 ]
               },
               "message": {
@@ -4517,7 +4517,7 @@
               "state": {
                 "type": "string",
                 "enum": [
-                  "Running"
+                  "running"
                 ]
               }
             },
@@ -4531,7 +4531,7 @@
               "state": {
                 "type": "string",
                 "enum": [
-                  "Succeeded"
+                  "succeeded"
                 ]
               }
             },
@@ -4551,7 +4551,7 @@
               "state": {
                 "type": "string",
                 "enum": [
-                  "Failed"
+                  "failed"
                 ]
               }
             },
@@ -4932,15 +4932,15 @@
       "VpcFirewallRuleAction": {
         "type": "string",
         "enum": [
-          "Allow",
-          "Deny"
+          "allow",
+          "deny"
         ]
       },
       "VpcFirewallRuleDirection": {
         "type": "string",
         "enum": [
-          "Inbound",
-          "Outbound"
+          "inbound",
+          "outbound"
         ]
       },
       "VpcFirewallRuleFilter": {
@@ -4982,7 +4982,7 @@
               "type": {
                 "type": "string",
                 "enum": [
-                  "Vpc"
+                  "vpc"
                 ]
               },
               "value": {
@@ -5000,7 +5000,7 @@
               "type": {
                 "type": "string",
                 "enum": [
-                  "Subnet"
+                  "subnet"
                 ]
               },
               "value": {
@@ -5018,7 +5018,7 @@
               "type": {
                 "type": "string",
                 "enum": [
-                  "Instance"
+                  "instance"
                 ]
               },
               "value": {
@@ -5036,7 +5036,7 @@
               "type": {
                 "type": "string",
                 "enum": [
-                  "Ip"
+                  "ip"
                 ]
               },
               "value": {
@@ -5055,7 +5055,7 @@
               "type": {
                 "type": "string",
                 "enum": [
-                  "InternetGateway"
+                  "internet_gateway"
                 ]
               },
               "value": {
@@ -5102,8 +5102,8 @@
       "VpcFirewallRuleStatus": {
         "type": "string",
         "enum": [
-          "Disabled",
-          "Enabled"
+          "disabled",
+          "enabled"
         ]
       },
       "VpcFirewallRuleTarget": {
@@ -5115,7 +5115,7 @@
               "type": {
                 "type": "string",
                 "enum": [
-                  "Vpc"
+                  "vpc"
                 ]
               },
               "value": {
@@ -5133,7 +5133,7 @@
               "type": {
                 "type": "string",
                 "enum": [
-                  "Subnet"
+                  "subnet"
                 ]
               },
               "value": {
@@ -5151,7 +5151,7 @@
               "type": {
                 "type": "string",
                 "enum": [
-                  "Instance"
+                  "instance"
                 ]
               },
               "value": {
@@ -5333,8 +5333,8 @@
       "VpcRouterKind": {
         "type": "string",
         "enum": [
-          "System",
-          "Custom"
+          "system",
+          "custom"
         ]
       },
       "VpcRouterResultsPage": {

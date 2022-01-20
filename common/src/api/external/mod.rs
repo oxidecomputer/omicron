@@ -662,7 +662,7 @@ pub struct IdentityMetadataUpdateParams {
     Serialize,
     JsonSchema,
 )]
-#[serde(rename_all = "lowercase")]
+#[serde(rename_all = "snake_case")]
 pub enum InstanceState {
     Creating, /* TODO-polish: paper over Creating in the API with Starting? */
     Starting,
@@ -840,8 +840,7 @@ pub struct Disk {
     Serialize,
     JsonSchema,
 )]
-#[serde(rename_all = "lowercase")]
-#[serde(tag = "state", content = "instance")]
+#[serde(tag = "state", content = "instance", rename_all = "snake_case")]
 pub enum DiskState {
     /** Disk is being initialized */
     Creating,
@@ -980,7 +979,7 @@ impl From<steno::SagaView> for Saga {
 }
 
 #[derive(Clone, Debug, Serialize, JsonSchema)]
-#[serde(tag = "state")]
+#[serde(tag = "state", rename_all = "snake_case")]
 pub enum SagaState {
     Running,
     Succeeded,
@@ -988,7 +987,7 @@ pub enum SagaState {
 }
 
 #[derive(Clone, Debug, Serialize, JsonSchema)]
-#[serde(tag = "error")]
+#[serde(tag = "error", rename_all = "snake_case")]
 pub enum SagaErrorInfo {
     ActionFailed { source_error: serde_json::Value },
     DeserializeFailed { message: String },
@@ -1142,6 +1141,7 @@ impl JsonSchema for Ipv6Net {
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, JsonSchema)]
+#[serde(rename_all = "snake_case")]
 pub enum VpcRouterKind {
     System,
     Custom,
@@ -1187,7 +1187,7 @@ pub enum NetworkTarget {
 /// A subset of [`NetworkTarget`], `RouteTarget` specifies all
 /// possible targets that a route can forward to.
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, JsonSchema)]
-#[serde(tag = "type", content = "value")]
+#[serde(tag = "type", content = "value", rename_all = "snake_case")]
 pub enum RouteTarget {
     Ip(IpAddr),
     Vpc(Name),
@@ -1259,7 +1259,7 @@ impl Display for RouteTarget {
 /// the kind of network traffic that will be matched to be forwarded
 /// to the [`RouteTarget`].
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, JsonSchema)]
-#[serde(tag = "type", content = "value")]
+#[serde(tag = "type", content = "value", rename_all = "snake_case")]
 pub enum RouteDestination {
     Ip(IpAddr),
     Vpc(Name),
@@ -1326,6 +1326,7 @@ impl Display for RouteDestination {
     Clone, Copy, Debug, PartialEq, Deserialize, Serialize, Display, JsonSchema,
 )]
 #[display("{}")]
+#[serde(rename_all = "snake_case")]
 pub enum RouterRouteKind {
     /// Determines the default destination of traffic, such as whether it goes to the internet or not.
     ///
@@ -1508,18 +1509,21 @@ pub enum VpcFirewallRuleProtocol {
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, JsonSchema)]
+#[serde(rename_all = "snake_case")]
 pub enum VpcFirewallRuleStatus {
     Disabled,
     Enabled,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, JsonSchema)]
+#[serde(rename_all = "snake_case")]
 pub enum VpcFirewallRuleDirection {
     Inbound,
     Outbound,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, JsonSchema)]
+#[serde(rename_all = "snake_case")]
 pub enum VpcFirewallRuleAction {
     Allow,
     Deny,
@@ -1528,7 +1532,7 @@ pub enum VpcFirewallRuleAction {
 /// A subset of [`NetworkTarget`], `VpcFirewallRuleTarget` specifies all
 /// possible targets that a firewall rule can be attached to.
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, JsonSchema)]
-#[serde(tag = "type", content = "value")]
+#[serde(tag = "type", content = "value", rename_all = "snake_case")]
 pub enum VpcFirewallRuleTarget {
     Vpc(Name),
     Subnet(Name),
@@ -1598,7 +1602,7 @@ impl Display for VpcFirewallRuleTarget {
 /// A subset of [`NetworkTarget`], `VpcFirewallRuleHostFilter` specifies all
 /// possible targets that a route can forward to.
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, JsonSchema)]
-#[serde(tag = "type", content = "value")]
+#[serde(tag = "type", content = "value", rename_all = "snake_case")]
 pub enum VpcFirewallRuleHostFilter {
     Vpc(Name),
     Subnet(Name),
