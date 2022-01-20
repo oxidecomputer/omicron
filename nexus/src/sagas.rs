@@ -353,9 +353,7 @@ async fn sic_instance_ensure(
  */
 #[derive(Debug, Deserialize, Serialize)]
 pub struct ParamsInstanceMigrate {
-    // TODO: just use instance_id
-    pub project_id: Uuid,
-    pub instance_name: Name,
+    pub instance_id: Uuid,
     pub migrate_params: params::InstanceMigrate,
 }
 
@@ -419,11 +417,7 @@ async fn sim_migrate_prep(
     // state in the db
     let instance = osagactx
         .nexus()
-        .instance_start_migrate(
-            &params.project_id,
-            &params.instance_name.clone().into(),
-            migrate_uuid,
-        )
+        .instance_start_migrate(&params.instance_id, migrate_uuid)
         .await
         .map_err(ActionError::action_failed)?;
     let instance_id = instance.id();

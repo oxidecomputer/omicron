@@ -942,8 +942,7 @@ impl Nexus {
 
         // Kick off the migration saga
         let saga_params = Arc::new(sagas::ParamsInstanceMigrate {
-            project_id,
-            instance_name: instance_name.clone().into(),
+            instance_id: instance.id(),
             migrate_params: params,
         });
         self.execute_saga(
@@ -1159,14 +1158,10 @@ impl Nexus {
      */
     pub async fn instance_start_migrate(
         &self,
-        project_id: &Uuid,
-        instance_name: &Name,
+        instance_id: &Uuid,
         migration_id: Uuid,
     ) -> UpdateResult<db::model::Instance> {
-        let instance = self
-            .datastore()
-            .instance_fetch_by_name(project_id, instance_name)
-            .await?;
+        let instance = self.datastore().instance_fetch(instance_id).await?;
         let runtime: nexus::InstanceRuntimeState =
             instance.runtime().clone().into();
 
