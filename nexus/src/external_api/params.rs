@@ -91,7 +91,6 @@ pub struct InstanceCreate {
  * Migration parameters for an [`Instance`]
  */
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
 pub struct InstanceMigrate {
     pub dst_sled_uuid: Uuid,
 }
