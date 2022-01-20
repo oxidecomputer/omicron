@@ -307,6 +307,7 @@ async fn sic_instance_ensure(
         sled_agent_client::types::InstanceRuntimeStateRequested {
             run_state:
                 sled_agent_client::types::InstanceStateRequested::Running,
+            migration_id: None,
         };
     let instance_id = sagactx.lookup::<Uuid>("instance_id")?;
     let sled_uuid = sagactx.lookup::<Uuid>("server_id")?;
@@ -352,6 +353,7 @@ async fn sic_instance_ensure(
  */
 #[derive(Debug, Deserialize, Serialize)]
 pub struct ParamsInstanceMigrate {
+    // TODO: just use instance_id
     pub project_id: Uuid,
     pub instance_name: Name,
     pub migrate_params: params::InstanceMigrate,
@@ -411,62 +413,22 @@ async fn sim_migrate_prep(
 
     let migrate_uuid = sagactx.lookup::<Uuid>("migrate_id")?;
 
+    // We have sled-agent (via Nexus) attempt to place
+    // the instance in a "Migrating" state w/ the given
+    // migration id. This will also update the instance
+    // state in the db
     let instance = osagactx
-        .datastore()
-        .instance_fetch_by_name(
+        .nexus()
+        .instance_start_migrate(
             &params.project_id,
             &params.instance_name.clone().into(),
+            migrate_uuid,
         )
         .await
         .map_err(ActionError::action_failed)?;
-
     let instance_id = instance.id();
 
-    let runtime: InstanceRuntimeState = instance.runtime_state.into();
-
-    // Is an existing migration ongoing?
-    if runtime.run_state == InstanceState::Migrating {
-        match runtime.migration_uuid {
-            // This is the same migration, nothing else to do
-            Some(id) if id == migrate_uuid => {
-                return Ok((instance_id, runtime.clone()));
-            }
-            // Encountered a different ongoing migration, bail
-            Some(_) => {
-                return Err(ActionError::action_failed(Error::internal_error(
-                    "unexpected migration already in progress",
-                )));
-            }
-            // Marked as migrating but no ID yet?
-            // Treat as new migration
-            None => {}
-        }
-    }
-
-    // Update the Instance's runtime state to indicate it's currently migrating.
-    // This also acts as a lock somewhat to prevent any further state changes
-    // from being performed on the instance in the meantime.
-    // See `check_runtime_change_allowed`.
-    let runtime = InstanceRuntimeState {
-        run_state: InstanceState::Migrating,
-        migration_uuid: Some(migrate_uuid),
-        gen: runtime.gen.next(),
-        time_updated: Utc::now(),
-        ..runtime
-    };
-
-    let updated = osagactx
-        .datastore()
-        .instance_update_runtime(&instance_id, &runtime.clone().into())
-        .await
-        .map_err(ActionError::action_failed)?;
-    if !updated {
-        return Err(ActionError::action_failed(Error::internal_error(
-            "failed to update instance state",
-        )));
-    }
-
-    Ok((instance_id, runtime))
+    Ok((instance_id, instance.runtime_state.into()))
 }
 
 async fn sim_instance_migrate(
@@ -493,6 +455,9 @@ async fn sim_instance_migrate(
     };
     let target = sled_agent_client::types::InstanceRuntimeStateRequested {
         run_state: sled_agent_client::types::InstanceStateRequested::Running,
+        // Note, we clear the migration_id in our target runtime state because
+        // at the end of the migration process in question, the id is reset
+        migration_id: None,
     };
 
     let src_propolis_uuid = old_runtime.propolis_uuid;

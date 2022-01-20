@@ -58,6 +58,7 @@ pub enum InstanceStateRequested {
     // Issues a reset command to the instance, such that it should
     // stop and then immediately become running.
     Reboot,
+    Migrating,
     Destroyed,
 }
 
@@ -73,6 +74,7 @@ impl InstanceStateRequested {
             InstanceStateRequested::Running => "running",
             InstanceStateRequested::Stopped => "stopped",
             InstanceStateRequested::Reboot => "reboot",
+            InstanceStateRequested::Migrating => "migrating",
             InstanceStateRequested::Destroyed => "destroyed",
         }
     }
@@ -83,6 +85,7 @@ impl InstanceStateRequested {
             InstanceStateRequested::Running => false,
             InstanceStateRequested::Stopped => true,
             InstanceStateRequested::Reboot => false,
+            InstanceStateRequested::Migrating => false,
             InstanceStateRequested::Destroyed => true,
         }
     }
@@ -90,9 +93,11 @@ impl InstanceStateRequested {
 
 /// Used to request an Instance state change from a sled agent
 ///
-/// Right now, it's only the run state that can be changed, though we might want
-/// to support changing properties like "ncpus" here.
+/// Right now, it's only the run state and migration id that can
+/// be changed, though we might want to support changing properties
+/// like "ncpus" here.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct InstanceRuntimeStateRequested {
     pub run_state: InstanceStateRequested,
+    pub migration_id: Option<Uuid>,
 }

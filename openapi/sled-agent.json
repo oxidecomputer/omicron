@@ -507,9 +507,14 @@
         ]
       },
       "InstanceRuntimeStateRequested": {
-        "description": "Used to request an Instance state change from a sled agent\n\nRight now, it's only the run state that can be changed, though we might want to support changing properties like \"ncpus\" here.",
+        "description": "Used to request an Instance state change from a sled agent\n\nRight now, it's only the run state and migration id that can be changed, though we might want to support changing properties like \"ncpus\" here.",
         "type": "object",
         "properties": {
+          "migration_id": {
+            "nullable": true,
+            "type": "string",
+            "format": "uuid"
+          },
           "run_state": {
             "$ref": "#/components/schemas/InstanceStateRequested"
           }
@@ -541,6 +546,7 @@
           "running",
           "stopped",
           "reboot",
+          "migrating",
           "destroyed"
         ]
       },

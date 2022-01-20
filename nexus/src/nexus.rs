@@ -1087,6 +1087,7 @@ impl Nexus {
             self.instance_sled(&instance).await?,
             InstanceRuntimeStateRequested {
                 run_state: InstanceStateRequested::Reboot,
+                migration_id: None,
             },
         )
         .await?;
@@ -1116,6 +1117,7 @@ impl Nexus {
             self.instance_sled(&instance).await?,
             InstanceRuntimeStateRequested {
                 run_state: InstanceStateRequested::Running,
+                migration_id: None,
             },
         )
         .await?;
@@ -1145,6 +1147,56 @@ impl Nexus {
             self.instance_sled(&instance).await?,
             InstanceRuntimeStateRequested {
                 run_state: InstanceStateRequested::Stopped,
+                migration_id: None,
+            },
+        )
+        .await?;
+        self.db_datastore.instance_fetch(&instance.id()).await
+    }
+
+    /**
+     * Place the instance in a 'Migrating' state.
+     */
+    pub async fn instance_start_migrate(
+        &self,
+        project_id: &Uuid,
+        instance_name: &Name,
+        migration_id: Uuid,
+    ) -> UpdateResult<db::model::Instance> {
+        let instance = self
+            .datastore()
+            .instance_fetch_by_name(project_id, instance_name)
+            .await?;
+        let runtime: nexus::InstanceRuntimeState =
+            instance.runtime().clone().into();
+
+        // Is the instance already migrating?
+        if let InstanceState::Migrating = runtime.run_state {
+            match runtime.migration_uuid {
+                // The instance is already performing this migration
+                Some(id) if id == migration_id => return Ok(instance),
+                // A different migration is already underway
+                Some(_) => {
+                    return Err(Error::invalid_request(
+                        "migration already in progress",
+                    ))
+                }
+                // Instance in 'Migrating' state but no migration id?
+                None => {
+                    return Err(Error::internal_error(
+                        "migrating but no migration id present",
+                    ))
+                }
+            }
+        }
+
+        self.check_runtime_change_allowed(&runtime)?;
+        self.instance_set_runtime(
+            &instance,
+            self.instance_sled(&instance).await?,
+            InstanceRuntimeStateRequested {
+                run_state: InstanceStateRequested::Migrating,
+                migration_id: Some(migration_id),
             },
         )
         .await?;

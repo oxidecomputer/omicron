@@ -628,7 +628,7 @@ impl Instance {
         let mut inner = self.inner.lock().await;
         if let Some(action) = inner
             .state
-            .request_transition(target.run_state)
+            .request_transition(&target)
             .map_err(|e| Error::Transition(e))?
         {
             info!(
@@ -1078,6 +1078,7 @@ mod test {
         // Start running the instance.
         inst.transition(InstanceRuntimeStateRequested {
             run_state: InstanceStateRequested::Running,
+            migration_id: None,
         })
         .await
         .unwrap();
@@ -1102,6 +1103,7 @@ mod test {
             });
         inst.transition(InstanceRuntimeStateRequested {
             run_state: InstanceStateRequested::Stopped,
+            migration_id: None,
         })
         .await
         .unwrap();
@@ -1132,6 +1134,7 @@ mod test {
         // result in a panic.
         inst.transition(InstanceRuntimeStateRequested {
             run_state: InstanceStateRequested::Running,
+            migration_id: None,
         })
         .await
         .unwrap();

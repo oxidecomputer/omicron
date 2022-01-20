@@ -99,7 +99,7 @@ impl From<omicron_common::api::internal::sled_agent::InstanceRuntimeStateRequest
     fn from(
         s: omicron_common::api::internal::sled_agent::InstanceRuntimeStateRequested,
     ) -> Self {
-        Self { run_state: s.run_state.into() }
+        Self { run_state: s.run_state.into(), migration_id: s.migration_id, }
     }
 }
 
@@ -113,6 +113,7 @@ impl From<omicron_common::api::internal::sled_agent::InstanceStateRequested>
             omicron_common::api::internal::sled_agent::InstanceStateRequested::Running => Self::Running,
             omicron_common::api::internal::sled_agent::InstanceStateRequested::Stopped => Self::Stopped,
             omicron_common::api::internal::sled_agent::InstanceStateRequested::Reboot => Self::Reboot,
+            omicron_common::api::internal::sled_agent::InstanceStateRequested::Migrating => Self::Migrating,
             omicron_common::api::internal::sled_agent::InstanceStateRequested::Destroyed => Self::Destroyed,
         }
     }

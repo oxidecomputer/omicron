@@ -11,6 +11,7 @@ use omicron_common::api::internal::nexus::InstanceRuntimeState;
 use omicron_common::api::internal::sled_agent::InstanceRuntimeStateRequested;
 use omicron_common::api::internal::sled_agent::InstanceStateRequested;
 use propolis_client::api::InstanceState as PropolisInstanceState;
+use uuid::Uuid;
 
 /// The port propolis-server listens on inside the propolis zone.
 pub const PROPOLIS_PORT: u16 = 12400;
@@ -136,12 +137,15 @@ impl InstanceStates {
     /// out this state transition.
     pub fn request_transition(
         &mut self,
-        target: InstanceStateRequested,
+        target: &InstanceRuntimeStateRequested,
     ) -> Result<Option<Action>, Error> {
-        match target {
+        match target.run_state {
             InstanceStateRequested::Running => self.request_running(),
             InstanceStateRequested::Stopped => self.request_stopped(),
             InstanceStateRequested::Reboot => self.request_reboot(),
+            InstanceStateRequested::Migrating => {
+                self.request_migrating(target.migration_id)
+            }
             InstanceStateRequested::Destroyed => self.request_destroyed(),
         }
     }
@@ -158,8 +162,10 @@ impl InstanceStates {
         self.current.run_state = next;
         self.current.gen = self.current.gen.next();
         self.current.time_updated = Utc::now();
-        self.desired = desired
-            .map(|run_state| InstanceRuntimeStateRequested { run_state });
+        self.desired = desired.map(|run_state| InstanceRuntimeStateRequested {
+            run_state,
+            migration_id: None,
+        });
     }
 
     fn request_running(&mut self) -> Result<Option<Action>, Error> {
@@ -254,6 +260,48 @@ impl InstanceStates {
         }
     }
 
+    fn request_migrating(
+        &mut self,
+        migration_id: Option<Uuid>,
+    ) -> Result<Option<Action>, Error> {
+        let migration_id = migration_id.ok_or_else(|| {
+            Error::invalid_request(
+                "expected migration id to transition to \"migrating\" state",
+            )
+        })?;
+        match self.current.run_state {
+            // Valid states for a migration request
+            InstanceState::Running => {
+                self.current.migration_uuid = Some(migration_id);
+                self.transition(
+                    InstanceState::Migrating,
+                    Some(InstanceStateRequested::Running),
+                );
+                // We don't return any action here for propolis to take
+                // because the actual migration process will be driven
+                // via a followup request to sled agent.
+                return Ok(None);
+            }
+            // Invalid states for a migration request
+            InstanceState::Creating
+            | InstanceState::Starting
+            | InstanceState::Stopping
+            | InstanceState::Stopped
+            | InstanceState::Rebooting
+            | InstanceState::Migrating
+            | InstanceState::Repairing
+            | InstanceState::Failed
+            | InstanceState::Destroyed => {
+                return Err(Error::InvalidRequest {
+                    message: format!(
+                        "cannot migrate instance in state \"{}\"",
+                        self.current.run_state,
+                    ),
+                });
+            }
+        }
+    }
+
     fn request_destroyed(&mut self) -> Result<Option<Action>, Error> {
         if self.current.run_state.is_stopped() {
             self.transition(InstanceState::Destroyed, None);
@@ -276,7 +324,7 @@ mod test {
         ByteCount, Generation, InstanceCpuCount, InstanceState as State,
     };
     use omicron_common::api::internal::{
-        nexus::InstanceRuntimeState,
+        nexus::InstanceRuntimeState, sled_agent::InstanceRuntimeStateRequested,
         sled_agent::InstanceStateRequested as Requested,
     };
     use propolis_client::api::InstanceState as Observed;
@@ -313,6 +361,10 @@ mod test {
         }
     }
 
+    fn runtime_state(run_state: Requested) -> InstanceRuntimeStateRequested {
+        InstanceRuntimeStateRequested { run_state, migration_id: None }
+    }
+
     #[test]
     fn test_running_from_creating() {
         let mut instance = make_instance();
@@ -320,7 +372,10 @@ mod test {
         verify_state(&instance, State::Creating, None);
         assert_eq!(
             Action::Run,
-            instance.request_transition(Requested::Running).unwrap().unwrap()
+            instance
+                .request_transition(&runtime_state(Requested::Running))
+                .unwrap()
+                .unwrap()
         );
         verify_state(&instance, State::Starting, Some(Requested::Running));
     }
@@ -331,7 +386,10 @@ mod test {
 
         assert_eq!(
             Action::Run,
-            instance.request_transition(Requested::Running).unwrap().unwrap()
+            instance
+                .request_transition(&runtime_state(Requested::Running))
+                .unwrap()
+                .unwrap()
         );
         verify_state(&instance, State::Starting, Some(Requested::Running));
         assert_eq!(None, instance.observe_transition(&Observed::Running));
@@ -341,7 +399,10 @@ mod test {
         // - Observe Stopping, Starting, Running
         assert_eq!(
             Action::Reboot,
-            instance.request_transition(Requested::Reboot).unwrap().unwrap()
+            instance
+                .request_transition(&runtime_state(Requested::Reboot))
+                .unwrap()
+                .unwrap()
         );
         verify_state(&instance, State::Rebooting, Some(Requested::Reboot));
 
@@ -361,7 +422,10 @@ mod test {
 
         assert_eq!(
             Action::Run,
-            instance.request_transition(Requested::Running).unwrap().unwrap()
+            instance
+                .request_transition(&runtime_state(Requested::Running))
+                .unwrap()
+                .unwrap()
         );
         verify_state(&instance, State::Starting, Some(Requested::Running));
         assert_eq!(None, instance.observe_transition(&Observed::Running));
@@ -372,7 +436,10 @@ mod test {
         // - Ultimately, we should still end up "running".
         assert_eq!(
             Action::Reboot,
-            instance.request_transition(Requested::Reboot).unwrap().unwrap()
+            instance
+                .request_transition(&runtime_state(Requested::Reboot))
+                .unwrap()
+                .unwrap()
         );
         verify_state(&instance, State::Rebooting, Some(Requested::Reboot));
 
@@ -389,7 +456,10 @@ mod test {
 
         assert_eq!(
             Action::Run,
-            instance.request_transition(Requested::Running).unwrap().unwrap()
+            instance
+                .request_transition(&runtime_state(Requested::Running))
+                .unwrap()
+                .unwrap()
         );
         verify_state(&instance, State::Starting, Some(Requested::Running));
         assert_eq!(None, instance.observe_transition(&Observed::Running));
@@ -400,7 +470,10 @@ mod test {
         // - Ultimately, we should still end up "running".
         assert_eq!(
             Action::Reboot,
-            instance.request_transition(Requested::Reboot).unwrap().unwrap()
+            instance
+                .request_transition(&runtime_state(Requested::Reboot))
+                .unwrap()
+                .unwrap()
         );
         verify_state(&instance, State::Rebooting, Some(Requested::Reboot));
 
@@ -417,7 +490,10 @@ mod test {
         assert_eq!(None, instance.observe_transition(&Observed::Running));
         assert_eq!(
             Action::Stop,
-            instance.request_transition(Requested::Destroyed).unwrap().unwrap()
+            instance
+                .request_transition(&runtime_state(Requested::Destroyed))
+                .unwrap()
+                .unwrap()
         );
         verify_state(&instance, State::Stopping, Some(Requested::Destroyed));
         assert_eq!(None, instance.observe_transition(&Observed::Stopped));
@@ -435,7 +511,10 @@ mod test {
         assert_eq!(None, instance.observe_transition(&Observed::Stopped));
         assert_eq!(
             Action::Destroy,
-            instance.request_transition(Requested::Destroyed).unwrap().unwrap()
+            instance
+                .request_transition(&runtime_state(Requested::Destroyed))
+                .unwrap()
+                .unwrap()
         );
         verify_state(&instance, State::Destroyed, None);
     }

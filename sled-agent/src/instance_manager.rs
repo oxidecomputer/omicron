@@ -304,6 +304,7 @@ mod test {
                 new_initial_instance(),
                 InstanceRuntimeStateRequested {
                     run_state: InstanceStateRequested::Running,
+                    migration_id: None,
                 },
                 None,
             )
@@ -383,6 +384,7 @@ mod test {
         let rt = new_initial_instance();
         let target = InstanceRuntimeStateRequested {
             run_state: InstanceStateRequested::Running,
+            migration_id: None,
         };
 
         // Creates instance, start + transition.
