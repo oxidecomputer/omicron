@@ -3,6 +3,10 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 //! Simulated sled agent storage implementation
+//!
+//! Note, this refers to the "storage which exists on the Sled", rather
+//! than the representation of "virtual disks" which would be presented
+//! through Nexus' external API.
 
 use crucible_agent_client::types::{CreateRegion, Region, RegionId, State};
 use futures::lock::Mutex;
