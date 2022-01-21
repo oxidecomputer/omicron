@@ -274,7 +274,7 @@ impl DataStore {
     ///   for example.
     /// * If a code path is only doing this lookup to get the id so that it can
     ///   look up something else inside the Organization, then the database
-    ///   record is not record -- and neither is an authz check on the
+    ///   record is not required -- and neither is an authz check on the
     ///   Organization.  Callers usually use `organization_lookup_id()` for
     ///   this.  That function does not expose the database row to the caller.
     ///
@@ -475,7 +475,7 @@ impl DataStore {
     ) -> UpdateResult<Organization> {
         use db::schema::organization::dsl;
 
-        let (authz_org, _) = self.organization_lookup_noauthz(name).await?;
+        let authz_org = self.organization_lookup_id(name).await?;
         opctx.authorize(authz::Action::Modify, &authz_org).await?;
 
         diesel::update(dsl::organization)
