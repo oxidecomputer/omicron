@@ -402,6 +402,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6245d59a3e82a7fc217c5828a6692dbc6dfb63a0c8c90495621f7b9d79704a0e"
 
 [[package]]
+name = "convert_case"
+version = "0.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fb4a24b1aaf0fd0ce8b45161144d6f42cd91677fd5940fd431183eb023b3a2b8"
+
+[[package]]
 name = "cookie"
 version = "0.16.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2155,8 +2161,9 @@ checksum = "624a8340c38c1b80fd549087862da4ba43e08858af025b236e509b6649fc13d5"
 [[package]]
 name = "openapi-lint"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/openapi-lint?branch=main#5ee546f7d5cdaf33fc355957b4decb792444292b"
+source = "git+https://github.com/oxidecomputer/openapi-lint?branch=main#025fc867b7da62b33474d0a765823653a437f362"
 dependencies = [
+ "convert_case 0.5.0",
  "indexmap",
  "openapiv3",
 ]
@@ -2768,7 +2775,7 @@ version = "0.0.0"
 source = "git+https://github.com/oxidecomputer/progenitor#f1f9e2e93850713908f4e6494808a07f3b253108"
 dependencies = [
  "anyhow",
- "convert_case",
+ "convert_case 0.4.0",
  "getopts",
  "indexmap",
  "openapiv3",
@@ -3361,12 +3368,12 @@ dependencies = [
 
 [[package]]
 name = "serde_urlencoded"
-version = "0.7.0"
+version = "0.7.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "edfa57a7f8d9c1d260a549e7224100f6c43d43f9103e06dd8b4095a9b2b43ce9"
+checksum = "d3491c14715ca2294c4d6a88f15e84739788c1d030eed8c110436aafdaa2f3fd"
 dependencies = [
  "form_urlencoded",
- "itoa 0.4.8",
+ "itoa 1.0.1",
  "ryu",
  "serde",
 ]
@@ -3742,9 +3749,9 @@ dependencies = [
 
 [[package]]
 name = "structopt"
-version = "0.3.25"
+version = "0.3.26"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "40b9788f4202aa75c240ecc9c15c65185e6a39ccdeb0fd5d008b98825464c87c"
+checksum = "0c6b5c64445ba8094a6ab0c3cd2ad323e07171012d9c98b0b15651daf1787a10"
 dependencies = [
  "clap",
  "lazy_static",
@@ -4210,7 +4217,7 @@ name = "typify-impl"
 version = "0.0.6-dev"
 source = "git+https://github.com/oxidecomputer/typify#9afa917671b29fc231bc9ce304e041bdd685af09"
 dependencies = [
- "convert_case",
+ "convert_case 0.4.0",
  "log",
  "proc-macro2",
  "quote",

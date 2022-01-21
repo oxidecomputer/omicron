@@ -22,7 +22,6 @@ use uuid::Uuid;
  * Create-time parameters for an [`Organization`]
  */
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
 pub struct OrganizationCreate {
     #[serde(flatten)]
     pub identity: IdentityMetadataCreateParams,
@@ -32,7 +31,6 @@ pub struct OrganizationCreate {
  * Updateable properties of an [`Organization`]
  */
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
 pub struct OrganizationUpdate {
     #[serde(flatten)]
     pub identity: IdentityMetadataUpdateParams,
@@ -46,7 +44,6 @@ pub struct OrganizationUpdate {
  * Create-time parameters for a [`Project`]
  */
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
 pub struct ProjectCreate {
     #[serde(flatten)]
     pub identity: IdentityMetadataCreateParams,
@@ -56,7 +53,6 @@ pub struct ProjectCreate {
  * Updateable properties of a [`Project`]
  */
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
 pub struct ProjectUpdate {
     #[serde(flatten)]
     pub identity: IdentityMetadataUpdateParams,
@@ -70,7 +66,6 @@ pub struct ProjectUpdate {
  * Create-time parameters for a [`NetworkInterface`]
  */
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
 pub struct NetworkInterfaceCreate {
     #[serde(flatten)]
     pub identity: IdentityMetadataCreateParams,
@@ -84,7 +79,6 @@ pub struct NetworkInterfaceCreate {
  * Create-time parameters for an [`Instance`]
  */
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
 pub struct InstanceCreate {
     #[serde(flatten)]
     pub identity: IdentityMetadataCreateParams,
@@ -101,7 +95,6 @@ pub struct InstanceCreate {
  * Create-time parameters for a [`Vpc`]
  */
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
 pub struct VpcCreate {
     #[serde(flatten)]
     pub identity: IdentityMetadataCreateParams,
@@ -112,7 +105,6 @@ pub struct VpcCreate {
  * Updateable properties of a [`Vpc`]
  */
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
 pub struct VpcUpdate {
     #[serde(flatten)]
     pub identity: IdentityMetadataUpdateParams,
@@ -123,7 +115,6 @@ pub struct VpcUpdate {
  * Create-time parameters for a [`VpcSubnet`]
  */
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
 pub struct VpcSubnetCreate {
     #[serde(flatten)]
     pub identity: IdentityMetadataCreateParams,
@@ -135,7 +126,6 @@ pub struct VpcSubnetCreate {
  * Updateable properties of a [`VpcSubnet`]
  */
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
 pub struct VpcSubnetUpdate {
     #[serde(flatten)]
     pub identity: IdentityMetadataUpdateParams,
@@ -149,7 +139,6 @@ pub struct VpcSubnetUpdate {
 
 /// Create-time parameters for a [`VpcRouter`]
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
 pub struct VpcRouterCreate {
     #[serde(flatten)]
     pub identity: IdentityMetadataCreateParams,
@@ -157,7 +146,6 @@ pub struct VpcRouterCreate {
 
 /// Updateable properties of a [`VpcRouter`]
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
 pub struct VpcRouterUpdate {
     #[serde(flatten)]
     pub identity: IdentityMetadataUpdateParams,
@@ -171,7 +159,6 @@ pub struct VpcRouterUpdate {
  * Create-time parameters for a [`Disk`]
  */
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
 pub struct DiskCreate {
     /** common identifying metadata */
     #[serde(flatten)]
@@ -206,7 +193,6 @@ impl DiskCreate {
  * Parameters for the [`Disk`] to be attached or detached to an instance
  */
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
 pub struct DiskIdentifier {
     pub disk: Name,
 }
@@ -223,7 +209,6 @@ pub struct DiskIdentifier {
  * Create-time parameters for a [`UserBuiltin`]
  */
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
 pub struct UserBuiltinCreate {
     #[serde(flatten)]
     pub identity: IdentityMetadataCreateParams,

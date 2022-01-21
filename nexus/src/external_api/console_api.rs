@@ -34,7 +34,6 @@ use std::{collections::HashSet, ffi::OsString, path::PathBuf, sync::Arc};
 use uuid::Uuid;
 
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
 pub struct LoginParams {
     pub username: String,
 }

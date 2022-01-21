@@ -48,7 +48,7 @@ expectorate = "1.0.4"
 mockall = "0.11"
 omicron-test-utils = { path = "../test-utils" }
 openapi-lint = { git = "https://github.com/oxidecomputer/openapi-lint", branch = "main" }
-openapiv3 = "1.0.0-beta.5"
+openapiv3 = "1.0"
 serial_test = "0.5"
 subprocess = "0.2.8"
 slog-async = "2.6"
