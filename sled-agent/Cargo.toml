@@ -12,7 +12,7 @@ bytes = "1.1"
 cfg-if = "1.0"
 chrono = { version = "0.4", features = [ "serde" ] }
 # Only used by the simulated sled agent.
-crucible-agent-client = { git = "https://github.com/oxidecomputer/crucible", rev = "de022b8a" }
+crucible-agent-client = { git = "https://github.com/oxidecomputer/crucible", rev = "078d364e14d57d5faa3a44001c65709935419779" }
 dropshot = { git = "https://github.com/oxidecomputer/dropshot", branch = "main", features = [ "usdt-probes" ] }
 futures = "0.3.18"
 ipnetwork = "0.18"

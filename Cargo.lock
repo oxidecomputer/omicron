@@ -581,12 +581,13 @@ dependencies = [
 [[package]]
 name = "crucible-agent-client"
 version = "0.0.1"
-source = "git+https://github.com/oxidecomputer/crucible?rev=de022b8a#de022b8ae24fb10cec6b024437aabc3acf249e43"
+source = "git+https://github.com/oxidecomputer/crucible?rev=078d364e14d57d5faa3a44001c65709935419779#078d364e14d57d5faa3a44001c65709935419779"
 dependencies = [
  "anyhow",
  "percent-encoding",
  "progenitor",
  "reqwest",
+ "schemars",
  "serde",
  "serde_json",
 ]

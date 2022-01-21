@@ -4,6 +4,7 @@
 
 //! Simulated sled agent storage implementation
 
+use crucible_agent_client::types::{CreateRegion, Region, RegionId, State};
 use futures::lock::Mutex;
 use nexus_client::types::{
     ByteCount, DatasetKind, DatasetPutRequest, ZpoolPutRequest,
@@ -15,8 +16,6 @@ use std::net::SocketAddr;
 use std::str::FromStr;
 use std::sync::Arc;
 use uuid::Uuid;
-
-use super::http_entrypoints_storage::{CreateRegion, Region, RegionId, State};
 
 type CreateCallback = Box<dyn Fn(&CreateRegion) -> State + Send + 'static>;
 
@@ -60,7 +59,7 @@ impl CrucibleDataInner {
         let old = self.regions.insert(id, region.clone());
         if let Some(old) = old {
             assert_eq!(
-                old.id, region.id,
+                old.id.0, region.id.0,
                 "Region already exists, but with a different ID"
             );
         }
