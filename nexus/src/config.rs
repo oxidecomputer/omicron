@@ -16,6 +16,7 @@ use serde::Serialize;
 use serde_with::DeserializeFromStr;
 use serde_with::SerializeDisplay;
 use std::fmt;
+use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 
 /*
@@ -48,6 +49,14 @@ pub struct UpdatesConfig {
 }
 
 /**
+ * Configuration for the timeseries database.
+ */
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+pub struct TimeseriesDbConfig {
+    pub address: SocketAddr,
+}
+
+/**
  * Configuration for a nexus server
  */
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
@@ -66,6 +75,8 @@ pub struct Config {
     pub database: db::Config,
     /** Authentication-related configuration */
     pub authn: AuthnConfig,
+    /** Timeseries database configuration. */
+    pub timeseries_db: TimeseriesDbConfig,
     /** Updates-related configuration */
     #[serde(default)]
     pub updates: UpdatesConfig,
@@ -174,7 +185,7 @@ impl Config {
 mod test {
     use super::{
         AuthnConfig, Config, ConsoleConfig, LoadError, LoadErrorKind,
-        SchemeName, UpdatesConfig,
+        SchemeName, TimeseriesDbConfig, UpdatesConfig,
     };
     use crate::db;
     use dropshot::ConfigDropshot;
@@ -303,6 +314,8 @@ mod test {
             level = "debug"
             path = "/nonexistent/path"
             if_exists = "fail"
+            [timeseries_db]
+            address = "[::1]:8123"
             [updates]
             tuf_trusted_root = "/path/to/root.json"
             "##,
@@ -342,6 +355,9 @@ mod test {
                         .parse()
                         .unwrap()
                 },
+                timeseries_db: TimeseriesDbConfig {
+                    address: "[::1]:8123".parse().unwrap()
+                },
                 updates: UpdatesConfig {
                     tuf_trusted_root: Some(PathBuf::from("/path/to/root.json"))
                 },
@@ -375,6 +391,8 @@ mod test {
             [insecure]
             allow_any_request_to_spoof_authn_header = true
             if_exists = "fail"
+            [timeseries_db]
+            address = "[::1]:8123"
             "##,
         )
         .unwrap();
@@ -411,6 +429,8 @@ mod test {
             level = "debug"
             path = "/nonexistent/path"
             if_exists = "fail"
+            [timeseries_db]
+            address = "[::1]:8123"
             "##,
         )
         .expect_err("expected failure");

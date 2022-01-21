@@ -27,7 +27,7 @@ smf = "0.2"
 steno = { git = "https://github.com/oxidecomputer/steno", branch = "main" }
 structopt = "0.3"
 thiserror = "1.0"
-tokio = { version = "1.14", features = [ "full" ] }
+tokio = { version = "1.15", features = [ "full" ] }
 tokio-postgres = { version = "0.7", features = [ "with-chrono-0_4", "with-uuid-0_8" ] }
 uuid = { version = "0.8", features = [ "serde", "v4" ] }
 parse-display = "0.5.3"
@@ -35,5 +35,5 @@ progenitor = { git = "https://github.com/oxidecomputer/progenitor" }
 
 [dev-dependencies]
 expectorate = "1.0.4"
-serde_urlencoded = "0.7.0"
-tokio = { version = "1.14", features = [ "test-util" ] }
+serde_urlencoded = "0.7.1"
+tokio = { version = "1.15", features = [ "test-util" ] }

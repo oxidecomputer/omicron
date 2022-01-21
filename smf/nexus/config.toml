@@ -40,6 +40,10 @@ mode = "stderr-terminal"
 #path = "logs/server.log"
 #if_exists = "append"
 
+# Configuration for interacting with the timeseries database
+[timeseries_db]
+address = "[::1]:8123"
+
 [updates]
 # If not present, accessing the TUF updates repository will fail
 #tuf_trusted_root = "/opt/oxide/nexus/pkg/root.json"

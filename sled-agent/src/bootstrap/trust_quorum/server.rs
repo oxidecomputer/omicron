@@ -115,9 +115,9 @@ mod test {
         let (shares, verifier) = secret.split(2, 2).unwrap();
 
         // Start a trust quorum server, but only accept one connection
-        let log =
-            omicron_test_utils::dev::test_setup_log("trust_quorum::send_share")
-                .log;
+        let logctx =
+            omicron_test_utils::dev::test_setup_log("trust_quorum::send_share");
+        let log = logctx.log.clone();
         let mut server = Server::new(&log, shares[0].clone()).unwrap();
         let join_handle = tokio::spawn(async move { server.accept().await });
 
@@ -127,5 +127,6 @@ mod test {
         assert_eq!(share, shares[0]);
 
         join_handle.await.unwrap().unwrap();
+        logctx.cleanup_successful();
     }
 }

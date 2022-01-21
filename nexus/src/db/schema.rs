@@ -312,6 +312,20 @@ table! {
 }
 
 table! {
+    role_assignment_builtin (
+        user_builtin_id,
+        resource_type,
+        resource_id,
+        role_name
+    ) {
+        resource_type -> Text,
+        role_name -> Text,
+        resource_id -> Uuid,
+        user_builtin_id -> Uuid,
+    }
+}
+
+table! {
     update_available_artifact (name, version, kind) {
         name -> Text,
         version -> Int8,
@@ -343,4 +357,5 @@ allow_tables_to_appear_in_same_query!(
     vpc_firewall_rule,
     user_builtin,
     role_builtin,
+    role_assignment_builtin,
 );

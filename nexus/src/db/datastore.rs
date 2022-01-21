@@ -32,7 +32,8 @@ use super::Pool;
 use crate::authn;
 use crate::authz;
 use crate::context::OpContext;
-use crate::db::model::RoleBuiltin;
+use crate::db::fixed_data::role_assignment_builtin::BUILTIN_ROLE_ASSIGNMENTS;
+use crate::db::fixed_data::role_builtin::BUILTIN_ROLES;
 use crate::external_api::params;
 use async_bb8_diesel::{
     AsyncConnection, AsyncRunQueryDsl, ConnectionError, ConnectionManager,
@@ -63,16 +64,16 @@ use crate::db::{
     self,
     error::{
         public_error_from_diesel_pool, public_error_from_diesel_pool_create,
-        public_error_from_diesel_pool_shouldnt_fail,
+        public_error_from_diesel_pool_shouldnt_fail, TransactionError,
     },
     model::{
         ConsoleSession, Dataset, Disk, DiskRuntimeState, Generation,
         IncompleteNetworkInterface, Instance, InstanceRuntimeState, Name,
         NetworkInterface, Organization, OrganizationUpdate, OximeterInfo,
-        ProducerEndpoint, Project, ProjectUpdate, RouterRoute,
-        RouterRouteUpdate, Sled, UpdateAvailableArtifact, UserBuiltin, Vpc,
-        VpcFirewallRule, VpcRouter, VpcRouterUpdate, VpcSubnet,
-        VpcSubnetUpdate, VpcUpdate, Zpool,
+        ProducerEndpoint, Project, ProjectUpdate, RoleAssignmentBuiltin,
+        RoleBuiltin, RouterRoute, RouterRouteUpdate, Sled,
+        UpdateAvailableArtifact, UserBuiltin, Vpc, VpcFirewallRule, VpcRouter,
+        VpcRouterUpdate, VpcSubnet, VpcSubnetUpdate, VpcUpdate, Zpool,
     },
     pagination::paginated,
     pagination::paginated_multicolumn,
@@ -98,11 +99,11 @@ impl DataStore {
         self.pool.pool()
     }
 
-    fn pool_authorized(
+    async fn pool_authorized(
         &self,
         opctx: &OpContext,
     ) -> Result<&bb8::Pool<ConnectionManager<DbConnection>>, Error> {
-        opctx.authorize(authz::Action::Query, authz::DATABASE)?;
+        opctx.authorize(authz::Action::Query, &authz::DATABASE).await?;
         Ok(self.pool.pool())
     }
 
@@ -245,13 +246,13 @@ impl DataStore {
     ) -> CreateResult<Organization> {
         use db::schema::organization::dsl;
 
-        opctx.authorize(authz::Action::CreateChild, authz::FLEET)?;
+        opctx.authorize(authz::Action::CreateChild, &authz::FLEET).await?;
 
         let name = organization.name().as_str().to_string();
         diesel::insert_into(dsl::organization)
             .values(organization)
             .returning(Organization::as_returning())
-            .get_result_async(self.pool_authorized(opctx)?)
+            .get_result_async(self.pool_authorized(opctx).await?)
             .await
             .map_err(|e| {
                 public_error_from_diesel_pool_create(
@@ -262,17 +263,45 @@ impl DataStore {
             })
     }
 
-    /// Lookup a organization by name.
-    pub async fn organization_fetch(
+    /// Fetches an Organization from the database and returns both the database
+    /// row and an authz::Organization for doing authz checks
+    ///
+    /// There are a few different ways this can be used:
+    ///
+    /// * If a code path wants to use anything in the database row _aside_ from
+    ///   the id, it should do an authz check for `authz::Action::Read` on the
+    ///   returned [`authz::Organization`].  `organization_fetch()` does this,
+    ///   for example.
+    /// * If a code path is only doing this lookup to get the id so that it can
+    ///   look up something else inside the Organization, then the database
+    ///   record is not record -- and neither is an authz check on the
+    ///   Organization.  Callers usually use `organization_lookup_id()` for
+    ///   this.  That function does not expose the database row to the caller.
+    ///
+    ///   Callers in this bucket should still do _some_ authz check.  Clients
+    ///   must not be able to discover whether an Organization exists with a
+    ///   particular name.  It's just that we don't know at this point whether
+    ///   they're allowed to see the Organization.  It depends on whether, as we
+    ///   look up things inside the Organization, we find something that they
+    ///   _are_ able to see.
+    ///
+    /// **This is an internal-only function.** This function cannot know what
+    /// authz checks are required.  As a result, it should not be made
+    /// accessible outside the DataStore.  It should always be wrapped by
+    /// something that does the appropriate authz check.
+    // TODO-security We should refactor things so that it's harder to
+    // accidentally mark this "pub" or otherwise expose database data without
+    // doing an authz check.
+    async fn organization_lookup_noauthz(
         &self,
         name: &Name,
-    ) -> LookupResult<Organization> {
+    ) -> LookupResult<(authz::Organization, Organization)> {
         use db::schema::organization::dsl;
         dsl::organization
             .filter(dsl::time_deleted.is_null())
             .filter(dsl::name.eq(name.clone()))
             .select(Organization::as_select())
-            .first_async::<Organization>(self.pool())
+            .get_result_async::<Organization>(self.pool())
             .await
             .map_err(|e| {
                 public_error_from_diesel_pool(
@@ -281,10 +310,48 @@ impl DataStore {
                     LookupType::ByName(name.as_str().to_owned()),
                 )
             })
+            .map(|o| {
+                (
+                    authz::FLEET
+                        .organization(o.id(), LookupType::from(&name.0)),
+                    o,
+                )
+            })
+    }
+
+    /// Look up the id for an organization based on its name
+    ///
+    /// Returns an [`authz::Organization`] (which makes the id available).
+    ///
+    /// This function does no authz checks because it is not possible to know
+    /// just by looking up an Organization's id what privileges are required.
+    pub async fn organization_lookup_id(
+        &self,
+        name: &Name,
+    ) -> LookupResult<authz::Organization> {
+        self.organization_lookup_noauthz(name).await.map(|(o, _)| o)
+    }
+
+    /// Lookup an organization by name.
+    pub async fn organization_fetch(
+        &self,
+        opctx: &OpContext,
+        name: &Name,
+    ) -> LookupResult<(authz::Organization, Organization)> {
+        let (authz_org, db_org) =
+            self.organization_lookup_noauthz(name).await?;
+        // TODO-security See the note in authz::authorize().  This needs to
+        // return a 404, not a 403.
+        opctx.authorize(authz::Action::Read, &authz_org).await?;
+        Ok((authz_org, db_org))
     }
 
     /// Delete a organization
-    pub async fn organization_delete(&self, name: &Name) -> DeleteResult {
+    pub async fn organization_delete(
+        &self,
+        opctx: &OpContext,
+        name: &Name,
+    ) -> DeleteResult {
         use db::schema::organization::dsl;
         use db::schema::project;
 
@@ -301,6 +368,12 @@ impl DataStore {
                     LookupType::ByName(name.as_str().to_owned()),
                 )
             })?;
+
+        // TODO-cleanup TODO-security This should use a more common lookup
+        // function.
+        let authz_org =
+            authz::FLEET.organization(id, LookupType::from(&name.0));
+        opctx.authorize(authz::Action::Delete, &authz_org).await?;
 
         // Make sure there are no projects present within this organization.
         let project_found = diesel_pool_result_optional(
@@ -351,50 +424,17 @@ impl DataStore {
         Ok(())
     }
 
-    /// Look up an organization by name
-    pub async fn organization_lookup(
-        &self,
-        name: &Name,
-    ) -> Result<authz::Organization, Error> {
-        use db::schema::organization::dsl;
-        dsl::organization
-            .filter(dsl::time_deleted.is_null())
-            .filter(dsl::name.eq(name.clone()))
-            .select(dsl::id)
-            .get_result_async::<Uuid>(self.pool())
-            .await
-            .map_err(|e| {
-                public_error_from_diesel_pool(
-                    e,
-                    ResourceType::Organization,
-                    LookupType::ByName(name.as_str().to_owned()),
-                )
-            })
-            .map(|o| authz::FLEET.organization(o))
-    }
-
-    /// Look up the id for a organization based on its name
-    ///
-    /// As endpoints move to doing authorization, they should move to
-    /// [`organization_lookup()`] instead of this function.
-    pub async fn organization_lookup_id_by_name(
-        &self,
-        name: &Name,
-    ) -> Result<Uuid, Error> {
-        self.organization_lookup(name).await.map(|o| o.id())
-    }
-
     pub async fn organizations_list_by_id(
         &self,
         opctx: &OpContext,
         pagparams: &DataPageParams<'_, Uuid>,
     ) -> ListResultVec<Organization> {
         use db::schema::organization::dsl;
-        opctx.authorize(authz::Action::ListChildren, authz::FLEET)?;
+        opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
         paginated(dsl::organization, dsl::id, pagparams)
             .filter(dsl::time_deleted.is_null())
             .select(Organization::as_select())
-            .load_async::<Organization>(self.pool_authorized(opctx)?)
+            .load_async::<Organization>(self.pool_authorized(opctx).await?)
             .await
             .map_err(|e| {
                 public_error_from_diesel_pool(
@@ -411,11 +451,11 @@ impl DataStore {
         pagparams: &DataPageParams<'_, Name>,
     ) -> ListResultVec<Organization> {
         use db::schema::organization::dsl;
-        opctx.authorize(authz::Action::ListChildren, authz::FLEET)?;
+        opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
         paginated(dsl::organization, dsl::name, pagparams)
             .filter(dsl::time_deleted.is_null())
             .select(Organization::as_select())
-            .load_async::<Organization>(self.pool_authorized(opctx)?)
+            .load_async::<Organization>(self.pool_authorized(opctx).await?)
             .await
             .map_err(|e| {
                 public_error_from_diesel_pool(
@@ -429,17 +469,21 @@ impl DataStore {
     /// Updates a organization by name (clobbering update -- no etag)
     pub async fn organization_update(
         &self,
+        opctx: &OpContext,
         name: &Name,
         updates: OrganizationUpdate,
     ) -> UpdateResult<Organization> {
         use db::schema::organization::dsl;
 
+        let (authz_org, _) = self.organization_lookup_noauthz(name).await?;
+        opctx.authorize(authz::Action::Modify, &authz_org).await?;
+
         diesel::update(dsl::organization)
             .filter(dsl::time_deleted.is_null())
-            .filter(dsl::name.eq(name.clone()))
+            .filter(dsl::id.eq(authz_org.id()))
             .set(updates)
             .returning(Organization::as_returning())
-            .get_result_async(self.pool())
+            .get_result_async(self.pool_authorized(opctx).await?)
             .await
             .map_err(|e| {
                 public_error_from_diesel_pool(
@@ -459,7 +503,7 @@ impl DataStore {
     ) -> CreateResult<Project> {
         use db::schema::project::dsl;
 
-        opctx.authorize(authz::Action::CreateChild, *org)?;
+        opctx.authorize(authz::Action::CreateChild, org).await?;
 
         let name = project.name().as_str().to_string();
         let organization_id = project.organization_id;
@@ -467,7 +511,7 @@ impl DataStore {
             organization_id,
             diesel::insert_into(dsl::project).values(project),
         )
-        .insert_and_get_result_async(self.pool_authorized(opctx)?)
+        .insert_and_get_result_async(self.pool_authorized(opctx).await?)
         .await
         .map_err(|e| match e {
             AsyncInsertError::CollectionNotFound => Error::ObjectNotFound {
@@ -1009,13 +1053,13 @@ impl DataStore {
     pub async fn project_delete_disk(
         &self,
         opctx: &OpContext,
-        disk_authz: authz::ProjectChild,
+        disk_authz: &authz::ProjectChild,
     ) -> DeleteResult {
         use db::schema::disk::dsl;
         let now = Utc::now();
 
         let disk_id = disk_authz.id();
-        opctx.authorize(authz::Action::Delete, disk_authz)?;
+        opctx.authorize(authz::Action::Delete, disk_authz).await?;
 
         let destroyed = api::external::DiskState::Destroyed.label();
         let detached = api::external::DiskState::Detached.label();
@@ -1027,7 +1071,7 @@ impl DataStore {
             .filter(dsl::disk_state.eq_any(vec![detached, faulted]))
             .set((dsl::disk_state.eq(destroyed), dsl::time_deleted.eq(now)))
             .check_if_exists::<Disk>(*disk_id)
-            .execute_and_check(self.pool_authorized(opctx)?)
+            .execute_and_check(self.pool_authorized(opctx).await?)
             .await
             .map_err(|e| {
                 public_error_from_diesel_pool(
@@ -1589,6 +1633,12 @@ impl DataStore {
             diesel::insert_into(dsl::vpc_firewall_rule).values(rules),
         );
 
+        #[derive(Debug)]
+        enum FirewallUpdateError {
+            CollectionNotFound,
+        }
+        type TxnError = TransactionError<FirewallUpdateError>;
+
         // TODO-scalability: Ideally this would be a CTE so we don't need to
         // hold a transaction open across multiple roundtrips from the database,
         // but for now we're using a transaction due to the severely decreased
@@ -1603,19 +1653,24 @@ impl DataStore {
                 insert_new_query.insert_and_get_results(conn).map_err(|e| {
                     match e {
                         SyncInsertError::CollectionNotFound => {
-                            diesel::result::Error::RollbackTransaction
+                            TxnError::CustomError(
+                                FirewallUpdateError::CollectionNotFound,
+                            )
                         }
-                        SyncInsertError::DatabaseError(e) => e,
+                        SyncInsertError::DatabaseError(e) => e.into(),
                     }
                 })
             })
             .await
-            .map_err(|e| {
-                public_error_from_diesel_pool(
+            .map_err(|e| match e {
+                TxnError::CustomError(
+                    FirewallUpdateError::CollectionNotFound,
+                ) => Error::not_found_by_id(ResourceType::Vpc, vpc_id),
+                TxnError::Pool(e) => public_error_from_diesel_pool(
                     e,
                     ResourceType::VpcFirewallRule,
                     LookupType::ById(*vpc_id),
-                )
+                ),
             })
     }
 
@@ -2074,10 +2129,10 @@ impl DataStore {
         pagparams: &DataPageParams<'_, Name>,
     ) -> ListResultVec<UserBuiltin> {
         use db::schema::user_builtin::dsl;
-        opctx.authorize(authz::Action::ListChildren, authz::FLEET)?;
+        opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
         paginated(dsl::user_builtin, dsl::name, pagparams)
             .select(UserBuiltin::as_select())
-            .load_async::<UserBuiltin>(self.pool_authorized(opctx)?)
+            .load_async::<UserBuiltin>(self.pool_authorized(opctx).await?)
             .await
             .map_err(|e| {
                 public_error_from_diesel_pool(
@@ -2094,11 +2149,19 @@ impl DataStore {
         name: &Name,
     ) -> LookupResult<UserBuiltin> {
         use db::schema::user_builtin::dsl;
-        opctx.authorize(authz::Action::Read, authz::FLEET.child_generic())?;
+        opctx
+            .authorize(
+                authz::Action::Read,
+                &authz::FLEET.child_generic(
+                    ResourceType::User,
+                    LookupType::from(&name.0),
+                ),
+            )
+            .await?;
         dsl::user_builtin
             .filter(dsl::name.eq(name.clone()))
             .select(UserBuiltin::as_select())
-            .first_async::<UserBuiltin>(self.pool_authorized(opctx)?)
+            .first_async::<UserBuiltin>(self.pool_authorized(opctx).await?)
             .await
             .map_err(|e| {
                 public_error_from_diesel_pool(
@@ -2116,7 +2179,7 @@ impl DataStore {
     ) -> Result<(), Error> {
         use db::schema::user_builtin::dsl;
 
-        opctx.authorize(authz::Action::Modify, authz::FLEET)?;
+        opctx.authorize(authz::Action::Modify, &authz::DATABASE).await?;
 
         let builtin_users = [
             // Note: "db_init" is also a builtin user, but that one by necessity
@@ -2144,7 +2207,7 @@ impl DataStore {
             .values(builtin_users)
             .on_conflict(dsl::id)
             .do_nothing()
-            .execute_async(self.pool_authorized(opctx)?)
+            .execute_async(self.pool_authorized(opctx).await?)
             .await
             .map_err(public_error_from_diesel_pool_shouldnt_fail)?;
         info!(opctx.log, "created {} built-in users", count);
@@ -2158,14 +2221,14 @@ impl DataStore {
         pagparams: &DataPageParams<'_, (String, String)>,
     ) -> ListResultVec<RoleBuiltin> {
         use db::schema::role_builtin::dsl;
-        opctx.authorize(authz::Action::ListChildren, authz::FLEET)?;
+        opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
         paginated_multicolumn(
             dsl::role_builtin,
             (dsl::resource_type, dsl::role_name),
             pagparams,
         )
         .select(RoleBuiltin::as_select())
-        .load_async::<RoleBuiltin>(self.pool_authorized(opctx)?)
+        .load_async::<RoleBuiltin>(self.pool_authorized(opctx).await?)
         .await
         .map_err(|e| {
             public_error_from_diesel_pool(
@@ -2182,7 +2245,13 @@ impl DataStore {
         name: &str,
     ) -> LookupResult<RoleBuiltin> {
         use db::schema::role_builtin::dsl;
-        opctx.authorize(authz::Action::Read, authz::FLEET.child_generic())?;
+        opctx
+            .authorize(
+                authz::Action::Read,
+                &authz::FLEET
+                    .child_generic(ResourceType::Role, LookupType::from(name)),
+            )
+            .await?;
 
         let (resource_type, role_name) =
             name.split_once(".").ok_or_else(|| Error::ObjectNotFound {
@@ -2194,7 +2263,7 @@ impl DataStore {
             .filter(dsl::resource_type.eq(String::from(resource_type)))
             .filter(dsl::role_name.eq(String::from(role_name)))
             .select(RoleBuiltin::as_select())
-            .first_async::<RoleBuiltin>(self.pool_authorized(opctx)?)
+            .first_async::<RoleBuiltin>(self.pool_authorized(opctx).await?)
             .await
             .map_err(|e| {
                 public_error_from_diesel_pool(
@@ -2212,9 +2281,9 @@ impl DataStore {
     ) -> Result<(), Error> {
         use db::schema::role_builtin::dsl;
 
-        opctx.authorize(authz::Action::Modify, authz::FLEET)?;
+        opctx.authorize(authz::Action::Modify, &authz::DATABASE).await?;
 
-        let builtin_roles = super::fixed_data::role_builtin::BUILTIN_ROLES
+        let builtin_roles = BUILTIN_ROLES
             .iter()
             .map(|role_config| {
                 RoleBuiltin::new(
@@ -2230,11 +2299,70 @@ impl DataStore {
             .values(builtin_roles)
             .on_conflict((dsl::resource_type, dsl::role_name))
             .do_nothing()
-            .execute_async(self.pool_authorized(opctx)?)
+            .execute_async(self.pool_authorized(opctx).await?)
             .await
             .map_err(public_error_from_diesel_pool_shouldnt_fail)?;
         info!(opctx.log, "created {} built-in roles", count);
         Ok(())
+    }
+
+    /// Load role assignments for built-in users and built-in roles into the
+    /// database
+    pub async fn load_builtin_role_asgns(
+        &self,
+        opctx: &OpContext,
+    ) -> Result<(), Error> {
+        use db::schema::role_assignment_builtin::dsl;
+
+        opctx.authorize(authz::Action::Modify, &authz::DATABASE).await?;
+
+        // The built-in "test-privileged" user gets the "fleet admin" role.
+        debug!(opctx.log, "attempting to create built-in role assignments");
+        let count = diesel::insert_into(dsl::role_assignment_builtin)
+            .values(&*BUILTIN_ROLE_ASSIGNMENTS)
+            .on_conflict((
+                dsl::user_builtin_id,
+                dsl::resource_type,
+                dsl::resource_id,
+                dsl::role_name,
+            ))
+            .do_nothing()
+            .execute_async(self.pool_authorized(opctx).await?)
+            .await
+            .map_err(public_error_from_diesel_pool_shouldnt_fail)?;
+        info!(opctx.log, "created {} built-in role assignments", count);
+        Ok(())
+    }
+
+    /// Return the built-in roles that the given built-in user has for the given
+    /// resource
+    pub async fn role_asgn_builtin_list_for(
+        &self,
+        opctx: &OpContext,
+        user_builtin_id: Uuid,
+        resource_type: ResourceType,
+        resource_id: Uuid,
+    ) -> Result<Vec<RoleAssignmentBuiltin>, Error> {
+        use db::schema::role_assignment_builtin::dsl;
+
+        // There is no resource-specific authorization check because all
+        // authenticated users need to be able to list their own roles --
+        // otherwise we can't do any authorization checks.
+
+        // TODO-scalability TODO-security This needs to be paginated.  It's not
+        // exposed via an external API right now but someone could still put us
+        // into some hurt by assigning loads of roles to someone and having that
+        // person attempt to access anything.
+        dsl::role_assignment_builtin
+            .filter(dsl::user_builtin_id.eq(user_builtin_id))
+            .filter(dsl::resource_type.eq(resource_type.to_string()))
+            .filter(dsl::resource_id.eq(resource_id))
+            .select(RoleAssignmentBuiltin::as_select())
+            .load_async::<RoleAssignmentBuiltin>(
+                self.pool_authorized(opctx).await?,
+            )
+            .await
+            .map_err(public_error_from_diesel_pool_shouldnt_fail)
     }
 
     pub async fn update_available_artifact_upsert(
@@ -2300,30 +2428,58 @@ impl DataStore {
     }
 }
 
+/// Constructs a DataStore for use in test suites that has preloaded the
+/// built-in users, roles, and role assignments that are needed for basic
+/// operation
+#[cfg(test)]
+pub async fn datastore_test(
+    logctx: &dropshot::test_util::LogContext,
+    db: &omicron_test_utils::dev::db::CockroachInstance,
+) -> (OpContext, Arc<DataStore>) {
+    let cfg = db::Config { url: db.pg_config().clone() };
+    let pool = Arc::new(db::Pool::new(&cfg));
+    let datastore = Arc::new(DataStore::new(pool));
+
+    // Create an OpContext with the credentials of "db-init" just for the
+    // purpose of loading the built-in users, roles, and assignments.
+    let opctx = OpContext::for_background(
+        logctx.log.new(o!()),
+        Arc::new(authz::Authz::new()),
+        authn::Context::internal_db_init(),
+        Arc::clone(&datastore),
+    );
+    datastore.load_builtin_users(&opctx).await.unwrap();
+    datastore.load_builtin_roles(&opctx).await.unwrap();
+    datastore.load_builtin_role_asgns(&opctx).await.unwrap();
+
+    // Create an OpContext with the credentials of "test-privileged" for general
+    // testing.
+    let opctx =
+        OpContext::for_unit_tests(logctx.log.new(o!()), Arc::clone(&datastore));
+
+    (opctx, datastore)
+}
+
 #[cfg(test)]
 mod test {
+    use super::datastore_test;
     use crate::authz;
-    use crate::context::OpContext;
-    use crate::db;
     use crate::db::identity::Resource;
     use crate::db::model::{ConsoleSession, Organization, Project};
-    use crate::db::DataStore;
     use crate::external_api::params;
     use chrono::{Duration, Utc};
-    use omicron_common::api::external::{Error, IdentityMetadataCreateParams};
+    use nexus_test_utils::db::test_setup_database;
+    use omicron_common::api::external::{
+        Error, IdentityMetadataCreateParams, LookupType,
+    };
     use omicron_test_utils::dev;
-    use std::sync::Arc;
     use uuid::Uuid;
 
     #[tokio::test]
     async fn test_project_creation() {
-        let logctx = dev::test_setup_log("test_collection_not_present");
-        let opctx = OpContext::for_unit_tests(logctx.log.new(o!()));
-        let mut db = dev::test_setup_database(&logctx.log).await;
-        let cfg = db::Config { url: db.pg_config().clone() };
-        let pool = db::Pool::new(&cfg);
-        let datastore = DataStore::new(Arc::new(pool));
-
+        let logctx = dev::test_setup_log("test_project_creation");
+        let mut db = test_setup_database(&logctx.log).await;
+        let (opctx, datastore) = datastore_test(&logctx, &db).await;
         let organization = Organization::new(params::OrganizationCreate {
             identity: IdentityMetadataCreateParams {
                 name: "org".parse().unwrap(),
@@ -2342,24 +2498,26 @@ mod test {
                 },
             },
         );
-        let org = authz::FLEET.organization(organization.id());
+        let org = authz::FLEET.organization(
+            organization.id(),
+            LookupType::ById(organization.id()),
+        );
         datastore.project_create(&opctx, &org, project).await.unwrap();
-        let organization_after_project_create =
-            datastore.organization_fetch(organization.name()).await.unwrap();
+        let (_, organization_after_project_create) = datastore
+            .organization_fetch(&opctx, organization.name())
+            .await
+            .unwrap();
         assert!(organization_after_project_create.rcgen > organization.rcgen);
 
-        let _ = db.cleanup().await;
+        db.cleanup().await.unwrap();
         logctx.cleanup_successful();
     }
 
     #[tokio::test]
     async fn test_session_methods() {
-        let logctx = dev::test_setup_log("test_collection_not_present");
-        let mut db = dev::test_setup_database(&logctx.log).await;
-        let cfg = db::Config { url: db.pg_config().clone() };
-        let pool = db::Pool::new(&cfg);
-        let datastore = DataStore::new(Arc::new(pool));
-
+        let logctx = dev::test_setup_log("test_session_methods");
+        let mut db = test_setup_database(&logctx.log).await;
+        let (_, datastore) = datastore_test(&logctx, &db).await;
         let token = "a_token".to_string();
         let session = ConsoleSession {
             token: token.clone(),
@@ -2405,7 +2563,7 @@ mod test {
         let delete_again = datastore.session_hard_delete(token.clone()).await;
         assert_eq!(delete_again, Ok(()));
 
-        let _ = db.cleanup().await;
+        db.cleanup().await.unwrap();
         logctx.cleanup_successful();
     }
 }

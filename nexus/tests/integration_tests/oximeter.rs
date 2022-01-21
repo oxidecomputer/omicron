@@ -104,7 +104,7 @@ async fn test_oximeter_reregistration() {
         0,
     );
     let client =
-        oximeter_db::Client::new(ch_address.into(), context.logctx.log.clone());
+        oximeter_db::Client::new(ch_address.into(), &context.logctx.log);
     client.init_db().await.expect("Failed to initialize timeseries database");
 
     // Helper to retrieve the timeseries from ClickHouse

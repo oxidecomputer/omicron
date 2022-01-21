@@ -481,17 +481,18 @@ where
 #[cfg(test)]
 mod test {
     use super::{AsyncInsertError, DatastoreCollection, SyncInsertError};
-    use crate::db;
-    use crate::db::identity::Resource as IdentityResource;
+    use crate::db::{
+        self, error::TransactionError, identity::Resource as IdentityResource,
+    };
     use async_bb8_diesel::{
         AsyncConnection, AsyncRunQueryDsl, AsyncSimpleConnection,
-        ConnectionError, PoolError,
     };
     use chrono::{DateTime, NaiveDateTime, Utc};
     use db_macros::Resource;
     use diesel::expression_methods::ExpressionMethods;
     use diesel::pg::Pg;
     use diesel::QueryDsl;
+    use nexus_test_utils::db::test_setup_database;
     use omicron_test_utils::dev;
 
     table! {
@@ -634,7 +635,7 @@ mod test {
     #[tokio::test]
     async fn test_collection_not_present() {
         let logctx = dev::test_setup_log("test_collection_not_present");
-        let mut db = dev::test_setup_database(&logctx.log).await;
+        let mut db = test_setup_database(&logctx.log).await;
         let cfg = db::Config { url: db.pg_config().clone() };
         let pool = db::Pool::new(&cfg);
 
@@ -669,28 +670,28 @@ mod test {
             )),
         );
 
-        let not_found = std::sync::Arc::new(std::sync::Mutex::new(false));
-        let not_found_ref = not_found.clone();
+        #[derive(Debug)]
+        enum CollectionError {
+            NotFound,
+        }
+        type TxnError = TransactionError<CollectionError>;
+
         let result = pool
             .pool()
             .transaction(move |conn| {
                 insert_query.insert_and_get_result(conn).map_err(|e| match e {
                     SyncInsertError::CollectionNotFound => {
-                        *not_found_ref.lock().unwrap() = true;
-                        diesel::result::Error::RollbackTransaction
+                        TxnError::CustomError(CollectionError::NotFound)
                     }
-                    SyncInsertError::DatabaseError(err) => err,
+                    SyncInsertError::DatabaseError(e) => TxnError::from(e),
                 })
             })
             .await;
 
         assert!(matches!(
             result,
-            Err(PoolError::Connection(ConnectionError::Query(
-                diesel::result::Error::RollbackTransaction
-            )))
+            Err(TxnError::CustomError(CollectionError::NotFound))
         ));
-        assert!(*not_found.lock().unwrap());
 
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();
@@ -699,7 +700,7 @@ mod test {
     #[tokio::test]
     async fn test_collection_present() {
         let logctx = dev::test_setup_log("test_collection_present");
-        let mut db = dev::test_setup_database(&logctx.log).await;
+        let mut db = test_setup_database(&logctx.log).await;
         let cfg = db::Config { url: db.pg_config().clone() };
         let pool = db::Pool::new(&cfg);
 

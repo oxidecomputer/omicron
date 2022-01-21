@@ -13,7 +13,7 @@ use dropshot::{
 };
 use omicron_common::api::internal::nexus::ProducerEndpoint;
 use omicron_common::backoff;
-use oximeter::types::ProducerResults;
+use oximeter::types::{ProducerResults, ProducerResultsItem};
 use oximeter_db::{Client, DbWrite};
 use serde::{Deserialize, Serialize};
 use slog::{debug, error, info, o, trace, warn, Drain, Logger};
@@ -184,8 +184,8 @@ async fn results_sink(
                             let mut flattened = Vec::with_capacity(results.len());
                             for inner_batch in results.into_iter() {
                                 match inner_batch {
-                                    Ok(samples) => flattened.extend(samples.into_iter()),
-                                    Err(e) => {
+                                    ProducerResultsItem::Ok(samples) => flattened.extend(samples.into_iter()),
+                                    ProducerResultsItem::Err(e) => {
                                         debug!(
                                             log,
                                             "received error (not samples) from a producer: {}",
@@ -263,11 +263,10 @@ impl OximeterAgent {
         let (result_sender, result_receiver) = mpsc::channel(8);
         let log = log.new(o!("component" => "oximeter-agent", "collector_id" => id.to_string()));
         let insertion_log = log.new(o!("component" => "results-sink"));
-        let client_log = log.new(o!("component" => "clickhouse-client"));
 
         // Construct the ClickHouse client first, propagate an error if we can't reach the
         // database.
-        let client = Client::new(db_config.address, client_log);
+        let client = Client::new(db_config.address, &log);
         client.init_db().await?;
 
         // Spawn the task for aggregating and inserting all metrics

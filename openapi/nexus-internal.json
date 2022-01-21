@@ -25,7 +25,11 @@
             "style": "simple"
           }
         ],
-        "responses": {}
+        "responses": {
+          "default": {
+            "description": ""
+          }
+        }
       }
     },
     "/disks/{disk_id}": {
@@ -116,10 +120,10 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "title": "Array_of_Result_of_Array_of_Sample_or_Error",
+                  "title": "Array_of_ProducerResultsItem",
                   "type": "array",
                   "items": {
-                    "$ref": "#/components/schemas/Result_of_Array_of_Sample_or_Error"
+                    "$ref": "#/components/schemas/ProducerResultsItem"
                   }
                 }
               }
@@ -306,7 +310,7 @@
   },
   "components": {
     "schemas": {
-      "BinRange_for_double": {
+      "BinRangedouble": {
         "description": "A type storing a range over `T`.\n\nThis type supports ranges similar to the `RangeTo`, `Range` and `RangeFrom` types in the standard library. Those cover `(..end)`, `(start..end)`, and `(start..)` respectively.",
         "oneOf": [
           {
@@ -366,7 +370,7 @@
           }
         ]
       },
-      "BinRange_for_int64": {
+      "BinRangeint64": {
         "description": "A type storing a range over `T`.\n\nThis type supports ranges similar to the `RangeTo`, `Range` and `RangeFrom` types in the standard library. Those cover `(..end)`, `(start..end)`, and `(start..)` respectively.",
         "oneOf": [
           {
@@ -426,7 +430,7 @@
           }
         ]
       },
-      "Bin_for_double": {
+      "Bindouble": {
         "description": "Type storing bin edges and a count of samples within it.",
         "type": "object",
         "properties": {
@@ -440,7 +444,7 @@
             "description": "The range of the support covered by this bin.",
             "allOf": [
               {
-                "$ref": "#/components/schemas/BinRange_for_double"
+                "$ref": "#/components/schemas/BinRangedouble"
               }
             ]
           }
@@ -450,7 +454,7 @@
           "range"
         ]
       },
-      "Bin_for_int64": {
+      "Binint64": {
         "description": "Type storing bin edges and a count of samples within it.",
         "type": "object",
         "properties": {
@@ -464,7 +468,7 @@
             "description": "The range of the support covered by this bin.",
             "allOf": [
               {
-                "$ref": "#/components/schemas/BinRange_for_int64"
+                "$ref": "#/components/schemas/BinRangeint64"
               }
             ]
           }
@@ -480,7 +484,7 @@
         "format": "uint64",
         "minimum": 0
       },
-      "Cumulative_for_double": {
+      "Cumulativedouble": {
         "description": "A cumulative or counter data type.",
         "type": "object",
         "properties": {
@@ -498,7 +502,7 @@
           "value"
         ]
       },
-      "Cumulative_for_int64": {
+      "Cumulativeint64": {
         "description": "A cumulative or counter data type.",
         "type": "object",
         "properties": {
@@ -645,7 +649,7 @@
             "type": "object",
             "properties": {
               "CumulativeI64": {
-                "$ref": "#/components/schemas/Cumulative_for_int64"
+                "$ref": "#/components/schemas/Cumulativeint64"
               }
             },
             "required": [
@@ -657,7 +661,7 @@
             "type": "object",
             "properties": {
               "CumulativeF64": {
-                "$ref": "#/components/schemas/Cumulative_for_double"
+                "$ref": "#/components/schemas/Cumulativedouble"
               }
             },
             "required": [
@@ -669,7 +673,7 @@
             "type": "object",
             "properties": {
               "HistogramI64": {
-                "$ref": "#/components/schemas/Histogram_for_int64"
+                "$ref": "#/components/schemas/Histogramint64"
               }
             },
             "required": [
@@ -681,7 +685,7 @@
             "type": "object",
             "properties": {
               "HistogramF64": {
-                "$ref": "#/components/schemas/Histogram_for_double"
+                "$ref": "#/components/schemas/Histogramdouble"
               }
             },
             "required": [
@@ -1188,14 +1192,14 @@
           }
         ]
       },
-      "Histogram_for_double": {
+      "Histogramdouble": {
         "description": "A simple type for managing a histogram metric.\n\nA histogram maintains the count of any number of samples, over a set of bins. Bins are specified on construction via their _left_ edges, inclusive. There can't be any \"gaps\" in the bins, and an additional bin may be added to the left, right, or both so that the bins extend to the entire range of the support.\n\nNote that any gaps, unsorted bins, or non-finite values will result in an error.\n\nExample ------- ```rust use oximeter::histogram::{BinRange, Histogram};\n\nlet edges = [0i64, 10, 20]; let mut hist = Histogram::new(&edges).unwrap(); assert_eq!(hist.n_bins(), 4); // One additional bin for the range (20..) assert_eq!(hist.n_samples(), 0); hist.sample(4); hist.sample(100); assert_eq!(hist.n_samples(), 2);\n\nlet data = hist.iter().collect::<Vec<_>>(); assert_eq!(data[0].range, BinRange::range(i64::MIN, 0)); // An additional bin for `..0` assert_eq!(data[0].count, 0); // Nothing is in this bin\n\nassert_eq!(data[1].range, BinRange::range(0, 10)); // The range `0..10` assert_eq!(data[1].count, 1); // 4 is sampled into this bin ```\n\nNotes -----\n\nHistograms may be constructed either from their left bin edges, or from a sequence of ranges. In either case, the left-most bin may be converted upon construction. In particular, if the left-most value is not equal to the minimum of the support, a new bin will be added from the minimum to that provided value. If the left-most value _is_ the support's minimum, because the provided bin was unbounded below, such as `(..0)`, then that bin will be converted into one bounded below, `(MIN..0)` in this case.\n\nThe short of this is that, most of the time, it shouldn't matter. If one specifies the extremes of the support as their bins, be aware that the left-most may be converted from a `BinRange::RangeTo` into a `BinRange::Range`. In other words, the first bin of a histogram is _always_ a `Bin::Range` or a `Bin::RangeFrom` after construction. In fact, every bin is one of those variants, the `BinRange::RangeTo` is only provided as a convenience during construction.",
         "type": "object",
         "properties": {
           "bins": {
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/Bin_for_double"
+              "$ref": "#/components/schemas/Bindouble"
             }
           },
           "n_samples": {
@@ -1214,14 +1218,14 @@
           "start_time"
         ]
       },
-      "Histogram_for_int64": {
+      "Histogramint64": {
         "description": "A simple type for managing a histogram metric.\n\nA histogram maintains the count of any number of samples, over a set of bins. Bins are specified on construction via their _left_ edges, inclusive. There can't be any \"gaps\" in the bins, and an additional bin may be added to the left, right, or both so that the bins extend to the entire range of the support.\n\nNote that any gaps, unsorted bins, or non-finite values will result in an error.\n\nExample ------- ```rust use oximeter::histogram::{BinRange, Histogram};\n\nlet edges = [0i64, 10, 20]; let mut hist = Histogram::new(&edges).unwrap(); assert_eq!(hist.n_bins(), 4); // One additional bin for the range (20..) assert_eq!(hist.n_samples(), 0); hist.sample(4); hist.sample(100); assert_eq!(hist.n_samples(), 2);\n\nlet data = hist.iter().collect::<Vec<_>>(); assert_eq!(data[0].range, BinRange::range(i64::MIN, 0)); // An additional bin for `..0` assert_eq!(data[0].count, 0); // Nothing is in this bin\n\nassert_eq!(data[1].range, BinRange::range(0, 10)); // The range `0..10` assert_eq!(data[1].count, 1); // 4 is sampled into this bin ```\n\nNotes -----\n\nHistograms may be constructed either from their left bin edges, or from a sequence of ranges. In either case, the left-most bin may be converted upon construction. In particular, if the left-most value is not equal to the minimum of the support, a new bin will be added from the minimum to that provided value. If the left-most value _is_ the support's minimum, because the provided bin was unbounded below, such as `(..0)`, then that bin will be converted into one bounded below, `(MIN..0)` in this case.\n\nThe short of this is that, most of the time, it shouldn't matter. If one specifies the extremes of the support as their bins, be aware that the left-most may be converted from a `BinRange::RangeTo` into a `BinRange::Range`. In other words, the first bin of a histogram is _always_ a `Bin::Range` or a `Bin::RangeFrom` after construction. In fact, every bin is one of those variants, the `BinRange::RangeTo` is only provided as a convenience during construction.",
         "type": "object",
         "properties": {
           "bins": {
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/Bin_for_int64"
+              "$ref": "#/components/schemas/Binint64"
             }
           },
           "n_samples": {
@@ -1389,7 +1393,7 @@
           "interval"
         ]
       },
-      "Result_of_Array_of_Sample_or_Error": {
+      "ProducerResultsItem": {
         "oneOf": [
           {
             "type": "object",
@@ -1403,7 +1407,8 @@
             },
             "required": [
               "Ok"
-            ]
+            ],
+            "additionalProperties": false
           },
           {
             "type": "object",
@@ -1414,7 +1419,8 @@
             },
             "required": [
               "Err"
-            ]
+            ],
+            "additionalProperties": false
           }
         ]
       },

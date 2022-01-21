@@ -5,17 +5,21 @@
 //! Models for timeseries data in ClickHouse
 // Copyright 2021 Oxide Computer Company
 
-use crate::TimeseriesKey;
+use crate::{
+    FieldSchema, FieldSource, Metric, Target, TimeseriesKey, TimeseriesName,
+    TimeseriesSchema,
+};
 use bytes::Bytes;
 use chrono::{DateTime, Utc};
 use oximeter::histogram::Histogram;
 use oximeter::traits;
 use oximeter::types::{
-    self, Cumulative, Datum, DatumType, FieldType, FieldValue, Measurement,
+    Cumulative, Datum, DatumType, Field, FieldType, FieldValue, Measurement,
     Sample,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
+use std::convert::TryFrom;
 use std::net::{IpAddr, Ipv6Addr};
 use uuid::Uuid;
 
@@ -63,31 +67,12 @@ impl From<DbBool> for Datum {
     }
 }
 
-/// The source, target or metric, from which a field is derived.
-#[derive(
-    Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Deserialize, Serialize,
-)]
-pub enum FieldSource {
-    Target,
-    Metric,
-}
-
-/// Information about a target or metric field as contained in a schema.
-#[derive(
-    Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Deserialize, Serialize,
-)]
-pub struct Field {
-    pub name: String,
-    pub ty: FieldType,
-    pub source: FieldSource,
-}
-
 // The list of fields in a schema as represented in the actual schema tables in the database.
 //
 // Data about the schema in ClickHouse is represented in the `timeseries_schema` table. this
 // contains the fields as a nested table, which is stored as a struct of arrays. This type is used
 // to convert between that representation in the database, and the representation we prefer, i.e.,
-// the `Field` type above. In other words, we prefer to work with an array of structs, but
+// the `FieldSchema` type. In other words, we prefer to work with an array of structs, but
 // ClickHouse requires a struct of arrays. `Field` is the former, `DbFieldList` is the latter.
 //
 // Note that the fields are renamed so that ClickHouse interprets them as correctly referring to
@@ -102,19 +87,19 @@ pub(crate) struct DbFieldList {
     pub sources: Vec<FieldSource>,
 }
 
-impl From<DbFieldList> for Vec<Field> {
+impl From<DbFieldList> for Vec<FieldSchema> {
     fn from(list: DbFieldList) -> Self {
         list.names
             .into_iter()
             .zip(list.types.into_iter())
             .zip(list.sources.into_iter())
-            .map(|((name, ty), source)| Field { name, ty, source })
+            .map(|((name, ty), source)| FieldSchema { name, ty, source })
             .collect()
     }
 }
 
-impl From<Vec<Field>> for DbFieldList {
-    fn from(list: Vec<Field>) -> Self {
+impl From<Vec<FieldSchema>> for DbFieldList {
+    fn from(list: Vec<FieldSchema>) -> Self {
         let mut names = Vec::with_capacity(list.len());
         let mut types = Vec::with_capacity(list.len());
         let mut sources = Vec::with_capacity(list.len());
@@ -127,65 +112,22 @@ impl From<Vec<Field>> for DbFieldList {
     }
 }
 
-/// The `TimeseriesSchema` struct represents the schema of a timeseries.
-#[derive(Clone, Debug, Deserialize, Serialize)]
-pub struct TimeseriesSchema {
-    pub timeseries_name: String,
-    pub fields: Vec<Field>,
-    pub datum_type: DatumType,
-    pub created: DateTime<Utc>,
-}
-
-impl TimeseriesSchema {
-    pub fn field<S>(&self, name: S) -> Option<&Field>
-    where
-        S: AsRef<str>,
-    {
-        self.fields.iter().find(|field| field.name == name.as_ref())
-    }
-
-    pub fn component_names(&self) -> (&str, &str) {
-        self.timeseries_name
-            .split_once(':')
-            .expect("Incorrectly formatted timseries name")
-    }
-}
-
-impl PartialEq for TimeseriesSchema {
-    fn eq(&self, other: &TimeseriesSchema) -> bool {
-        self.timeseries_name == other.timeseries_name
-            && self.datum_type == other.datum_type
-            && self.fields == other.fields
-    }
-}
-
 // The `DbTimeseriesSchema` type models the `oximeter.timeseries_schema` table.
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub(crate) struct DbTimeseriesSchema {
     pub timeseries_name: String,
     #[serde(flatten)]
-    pub fields: DbFieldList,
+    pub field_schema: DbFieldList,
     pub datum_type: DatumType,
     #[serde(with = "serde_timestamp")]
     pub created: DateTime<Utc>,
 }
 
-impl From<DbTimeseriesSchema> for TimeseriesSchema {
-    fn from(schema: DbTimeseriesSchema) -> TimeseriesSchema {
-        TimeseriesSchema {
-            timeseries_name: schema.timeseries_name,
-            fields: schema.fields.into(),
-            datum_type: schema.datum_type,
-            created: schema.created,
-        }
-    }
-}
-
 impl From<TimeseriesSchema> for DbTimeseriesSchema {
     fn from(schema: TimeseriesSchema) -> DbTimeseriesSchema {
         DbTimeseriesSchema {
-            timeseries_name: schema.timeseries_name,
-            fields: schema.fields.into(),
+            timeseries_name: schema.timeseries_name.to_string(),
+            field_schema: schema.field_schema.into(),
             datum_type: schema.datum_type,
             created: schema.created,
         }
@@ -541,23 +483,26 @@ pub(crate) fn unroll_measurement_row(sample: &Sample) -> (String, String) {
 /// Return the schema for a `Sample`.
 pub(crate) fn schema_for(sample: &Sample) -> TimeseriesSchema {
     let created = Utc::now();
-    let fields = sample
+    let field_schema = sample
         .target_fields()
         .iter()
-        .map(|field| Field {
+        .map(|field| FieldSchema {
             name: field.name.clone(),
             ty: field.value.field_type(),
             source: FieldSource::Target,
         })
-        .chain(sample.metric_fields().iter().map(|field| Field {
+        .chain(sample.metric_fields().iter().map(|field| FieldSchema {
             name: field.name.clone(),
             ty: field.value.field_type(),
             source: FieldSource::Metric,
         }))
         .collect();
     TimeseriesSchema {
-        timeseries_name: sample.timeseries_name.clone(),
-        fields,
+        timeseries_name: TimeseriesName::try_from(
+            sample.timeseries_name.as_str(),
+        )
+        .expect("Failed to parse timeseries name"),
+        field_schema,
         datum_type: sample.measurement.datum_type(),
         created,
     }
@@ -569,23 +514,29 @@ where
     T: traits::Target,
     M: traits::Metric,
 {
-    let make_field = |name: &str, value: FieldValue, source: FieldSource| {
-        Field { name: name.to_string(), ty: value.field_type(), source }
+    let make_field_schema = |name: &str,
+                             value: FieldValue,
+                             source: FieldSource| {
+        FieldSchema { name: name.to_string(), ty: value.field_type(), source }
     };
-    let target_fields =
+    let target_field_schema =
         target.field_names().iter().zip(target.field_values().into_iter());
-    let metric_fields =
+    let metric_field_schema =
         metric.field_names().iter().zip(metric.field_values().into_iter());
-    let fields =
-        target_fields
-            .map(|(name, value)| make_field(name, value, FieldSource::Target))
-            .chain(metric_fields.map(|(name, value)| {
-                make_field(name, value, FieldSource::Metric)
-            }))
-            .collect();
+    let field_schema = target_field_schema
+        .map(|(name, value)| {
+            make_field_schema(name, value, FieldSource::Target)
+        })
+        .chain(metric_field_schema.map(|(name, value)| {
+            make_field_schema(name, value, FieldSource::Metric)
+        }))
+        .collect();
     TimeseriesSchema {
-        timeseries_name: oximeter::timeseries_name(target, metric),
-        fields,
+        timeseries_name: TimeseriesName::try_from(oximeter::timeseries_name(
+            target, metric,
+        ))
+        .expect("Failed to parse timeseries name"),
+        field_schema,
         datum_type: metric.datum_type(),
         created: Utc::now(),
     }
@@ -765,7 +716,7 @@ pub(crate) fn parse_field_select_row(
 ) -> (TimeseriesKey, Target, Metric) {
     assert_eq!(
         row.fields.len(),
-        2 * schema.fields.len(),
+        2 * schema.field_schema.len(),
         "Expected pairs of (field_name, field_value) from the field query"
     );
     let (target_name, metric_name) = schema.component_names();
@@ -773,7 +724,7 @@ pub(crate) fn parse_field_select_row(
     let mut target_fields = Vec::new();
     let mut metric_fields = Vec::new();
     let mut actual_fields = row.fields.values();
-    while n_fields < schema.fields.len() {
+    while n_fields < schema.field_schema.len() {
         // Extract the field name from the row and find a matching expected field.
         let actual_field_name = actual_fields
             .next()
@@ -782,7 +733,7 @@ pub(crate) fn parse_field_select_row(
             .as_str()
             .expect("Expected a string field name")
             .to_string();
-        let expected_field = schema.field(&name).expect(
+        let expected_field = schema.field_schema(&name).expect(
             "Found field with name that is not part of the timeseries schema",
         );
 
@@ -824,7 +775,7 @@ pub(crate) fn parse_field_select_row(
                     )
             }
         };
-        let field = types::Field { name, value };
+        let field = Field { name, value };
         match expected_field.source {
             FieldSource::Target => target_fields.push(field),
             FieldSource::Metric => metric_fields.push(field),
@@ -840,30 +791,6 @@ pub(crate) fn parse_field_select_row(
             datum_type: schema.datum_type,
         },
     )
-}
-
-/// Information about a target, returned to clients in a query
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct Target {
-    pub name: String,
-    pub fields: Vec<types::Field>,
-}
-
-/// Information about a metric, returned to clients in a query
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct Metric {
-    pub name: String,
-    pub fields: Vec<types::Field>,
-    pub datum_type: DatumType,
-}
-
-/// A list of timestamped measurements from a timeseries.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct Timeseries {
-    pub timeseries_name: String,
-    pub target: Target,
-    pub metric: Metric,
-    pub measurements: Vec<Measurement>,
 }
 
 #[cfg(test)]

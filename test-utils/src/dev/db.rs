@@ -376,8 +376,7 @@ impl CockroachStarter {
                 temp_dir: Some(self.temp_dir),
                 child_process: Some(child_process),
             }),
-            Err(poll::Error::PermanentError(e)) => Err(e),
-            Err(poll::Error::TimedOut(time_waited)) => {
+            Err(poll_error) => {
                 /*
                  * Abort and tell the user.  We'll leave CockroachDB running so
                  * the user can debug if they want.  We'll skip cleanup of the
@@ -385,7 +384,13 @@ impl CockroachStarter {
                  * CockroachDB doesn't trip over its files being gone.
                  */
                 self.temp_dir.into_path();
-                Err(CockroachStartError::TimedOut { pid, time_waited })
+
+                Err(match poll_error {
+                    poll::Error::PermanentError(e) => e,
+                    poll::Error::TimedOut(time_waited) => {
+                        CockroachStartError::TimedOut { pid, time_waited }
+                    }
+                })
             }
         }
     }
@@ -522,14 +527,17 @@ impl CockroachInstance {
      */
     pub async fn cleanup(&mut self) -> Result<(), anyhow::Error> {
         /*
-         * Kill the process and wait for it to exit so that we can remove the
+         * SIGTERM the process and wait for it to exit so that we can remove the
          * temporary directory that we may have used to store its data.  We
          * don't care what the result of the process was.
          */
         if let Some(child_process) = self.child_process.as_mut() {
-            child_process
-                .start_kill()
-                .context("sending SIGKILL to child process")?;
+            let pid = child_process.id().expect("Missing child PID") as i32;
+            let success =
+                0 == unsafe { libc::kill(pid as libc::pid_t, libc::SIGTERM) };
+            if !success {
+                anyhow!("Failed to send SIGTERM to DB");
+            }
             child_process.wait().await.context("waiting for child process")?;
             self.child_process = None;
         }
@@ -567,7 +575,14 @@ impl Drop for CockroachInstance {
             }
             #[allow(unused_must_use)]
             if let Some(temp_dir) = self.temp_dir.take() {
-                temp_dir.close();
+                /*
+                 * Do NOT clean up the temporary directory in this case.
+                 */
+                let path = temp_dir.into_path();
+                eprintln!(
+                    "WARN: temporary directory leaked: {}",
+                    path.display()
+                );
             }
         }
     }
@@ -890,6 +905,7 @@ mod test {
     use crate::dev::process_running;
     use std::env;
     use std::path::Path;
+    use std::path::PathBuf;
     use std::time::Duration;
     use tempfile::tempdir;
     use tokio::fs;
@@ -932,7 +948,7 @@ mod test {
     #[tokio::test]
     async fn test_bad_cmd() {
         let builder = CockroachStarterBuilder::new_with_cmd("/nonexistent");
-        test_database_start_failure(builder).await;
+        let _ = test_database_start_failure(builder).await;
     }
 
     /*
@@ -944,27 +960,43 @@ mod test {
     async fn test_cmd_fails() {
         let mut builder = new_builder();
         builder.arg("not-a-valid-argument");
-        test_database_start_failure(builder).await;
+        let temp_dir = test_database_start_failure(builder).await;
+        fs::metadata(&temp_dir).await.expect("temporary directory was deleted");
+        // The temporary directory is preserved in this case so that we can
+        // debug the failure.  In this case, we injected the failure.  Remove
+        // the directory to avoid leaking it.
+        //
+        // We could use `fs::remove_dir_all`, but if somehow `temp_dir` was
+        // incorrect, we could accidentally do a lot of damage.  Instead, remove
+        // just the files we expect to be present, and then remove the
+        // (now-empty) directory.
+        fs::remove_file(temp_dir.join("cockroachdb_stdout"))
+            .await
+            .expect("failed to remove cockroachdb stdout file");
+        fs::remove_file(temp_dir.join("cockroachdb_stderr"))
+            .await
+            .expect("failed to remove cockroachdb stderr file");
+        fs::remove_dir(temp_dir)
+            .await
+            .expect("failed to remove cockroachdb temp directory");
     }
 
     /*
      * Helper function for testing cases where the database fails to start.
+     * Returns the temporary directory used by the failed attempt so that the
+     * caller can decide whether to check if it was cleaned up or not.  The
+     * expected behavior depends on the failure mode.
      */
-    async fn test_database_start_failure(builder: CockroachStarterBuilder) {
+    async fn test_database_start_failure(
+        builder: CockroachStarterBuilder,
+    ) -> PathBuf {
         let starter = builder.build().unwrap();
         let temp_dir = starter.temp_dir().to_owned();
         eprintln!("will run: {}", starter.cmdline());
         let error =
             starter.start().await.expect_err("unexpectedly started database");
         eprintln!("error: {:?}", error);
-        assert_eq!(
-            libc::ENOENT,
-            fs::metadata(temp_dir)
-                .await
-                .expect_err("temporary directory still exists")
-                .raw_os_error()
-                .unwrap()
-        );
+        temp_dir
     }
 
     /*
@@ -1217,13 +1249,13 @@ mod test {
      */
     #[tokio::test]
     async fn test_database_concurrent() {
-        let db1 = new_builder()
+        let mut db1 = new_builder()
             .build()
             .expect("failed to create starter for the first database")
             .start()
             .await
             .expect("failed to start first database");
-        let db2 = new_builder()
+        let mut db2 = new_builder()
             .build()
             .expect("failed to create starter for the second database")
             .start()
@@ -1252,6 +1284,9 @@ mod test {
             client2.query("SELECT v FROM foo", &[]).await.expect("list rows");
         assert_eq!(rows.len(), 0);
         client2.cleanup().await.expect("second connection closed ungracefully");
+
+        db1.cleanup().await.expect("failed to clean up first database");
+        db2.cleanup().await.expect("failed to clean up second database");
     }
 
     /* Success case for make_pg_config() */
