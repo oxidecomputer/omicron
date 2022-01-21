@@ -57,10 +57,8 @@ panic = "abort"
 #
 # Local client generation during development.
 #
-[patch."https://github.com/oxidecomputer/progenitor"]
-progenitor = { path = "../progenitor/progenitor" }
-[patch."https://github.com/oxidecomputer/crucible"]
-crucible-agent-client = { path = "../crucible/agent-client" }
+#[patch."https://github.com/oxidecomputer/progenitor"]
+#progenitor = { path = "../progenitor/progenitor" }
 #[patch."https://github.com/oxidecomputer/typify"]
 #typify = { path = "../typify/typify" }
 
