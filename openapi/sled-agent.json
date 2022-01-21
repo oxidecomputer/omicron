@@ -102,19 +102,8 @@
           "required": true
         },
         "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "title": "Null",
-                  "type": "string",
-                  "enum": [
-                    null
-                  ]
-                }
-              }
-            }
+          "204": {
+            "description": "resource updated"
           }
         }
       }

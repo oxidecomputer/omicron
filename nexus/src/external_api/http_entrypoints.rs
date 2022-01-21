@@ -1940,11 +1940,13 @@ async fn hardware_sleds_get_sled(
 }]
 async fn updates_refresh(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
-) -> Result<HttpResponseOk<()>, HttpError> {
+) -> Result<HttpResponseUpdatedNoContent, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
-    let handler =
-        async { Ok(HttpResponseOk(nexus.updates_refresh_metadata().await?)) };
+    let handler = async {
+        nexus.updates_refresh_metadata().await?;
+        Ok(HttpResponseUpdatedNoContent())
+    };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 

@@ -7,8 +7,8 @@
 use super::params::DiskEnsureBody;
 use super::updates::UpdateArtifact;
 use dropshot::{
-    endpoint, ApiDescription, HttpError, HttpResponseOk, Path, RequestContext,
-    TypedBody,
+    endpoint, ApiDescription, HttpError, HttpResponseOk,
+    HttpResponseUpdatedNoContent, Path, RequestContext, TypedBody,
 };
 use omicron_common::api::external::Error;
 use omicron_common::api::internal::nexus::DiskRuntimeState;
@@ -100,11 +100,10 @@ async fn disk_put(
 async fn update_artifact(
     rqctx: Arc<RequestContext<SledAgent>>,
     artifact: TypedBody<UpdateArtifact>,
-) -> Result<HttpResponseOk<()>, HttpError> {
+) -> Result<HttpResponseUpdatedNoContent, HttpError> {
     let sa = rqctx.context();
     let artifact = artifact.into_inner();
 
-    Ok(HttpResponseOk(
-        sa.update_artifact(&artifact).await.map_err(|e| Error::from(e))?,
-    ))
+    sa.update_artifact(&artifact).await.map_err(Error::from)?;
+    Ok(HttpResponseUpdatedNoContent())
 }
