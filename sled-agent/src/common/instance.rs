@@ -282,13 +282,31 @@ impl InstanceStates {
                 // via a followup request to sled agent.
                 return Ok(None);
             }
+            InstanceState::Migrating => match self.current.migration_uuid {
+                // We're already performing the given migration: no-op
+                Some(id) if id == migration_id => return Ok(None),
+                // A different migration is already underway
+                Some(id) => {
+                    return Err(Error::InvalidRequest {
+                        message: format!(
+                            "migration already in progress: {}",
+                            id,
+                        ),
+                    });
+                }
+                // If we're marked as 'Migrating' but have no migration
+                // id bail because that shouldn't be possible
+                None => Err(Error::internal_error(
+                    "migrating but no migration id present",
+                )),
+            },
+
             // Invalid states for a migration request
             InstanceState::Creating
             | InstanceState::Starting
             | InstanceState::Stopping
             | InstanceState::Stopped
             | InstanceState::Rebooting
-            | InstanceState::Migrating
             | InstanceState::Repairing
             | InstanceState::Failed
             | InstanceState::Destroyed => {

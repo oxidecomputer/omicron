@@ -978,6 +978,7 @@ impl Nexus {
     fn check_runtime_change_allowed(
         &self,
         runtime: &nexus::InstanceRuntimeState,
+        requested: &InstanceRuntimeStateRequested,
     ) -> Result<(), Error> {
         /*
          * Users are allowed to request a start or stop even if the instance is
@@ -985,6 +986,8 @@ impl Nexus {
          * request to the SA to make the state change in these cases in case the
          * runtime state we saw here was stale.  However, users are not allowed
          * to change the state of an instance that's migrating, failed or destroyed.
+         * But if we're already migrating, requesting a migration is allowed to
+         * allow for idempotency.
          */
         let allowed = match runtime.run_state {
             InstanceState::Creating => true,
@@ -994,7 +997,9 @@ impl Nexus {
             InstanceState::Stopped => true,
             InstanceState::Rebooting => true,
 
-            InstanceState::Migrating => false,
+            InstanceState::Migrating => {
+                requested.run_state == InstanceStateRequested::Migrating
+            }
             InstanceState::Repairing => false,
             InstanceState::Failed => false,
             InstanceState::Destroyed => false,
@@ -1080,14 +1085,18 @@ impl Nexus {
             )
             .await?;
 
-        self.check_runtime_change_allowed(&instance.runtime().clone().into())?;
+        let requested = InstanceRuntimeStateRequested {
+            run_state: InstanceStateRequested::Reboot,
+            migration_id: None,
+        };
+        self.check_runtime_change_allowed(
+            &instance.runtime().clone().into(),
+            &requested,
+        )?;
         self.instance_set_runtime(
             &instance,
             self.instance_sled(&instance).await?,
-            InstanceRuntimeStateRequested {
-                run_state: InstanceStateRequested::Reboot,
-                migration_id: None,
-            },
+            requested,
         )
         .await?;
         self.db_datastore.instance_fetch(&instance.id()).await
@@ -1110,14 +1119,18 @@ impl Nexus {
             )
             .await?;
 
-        self.check_runtime_change_allowed(&instance.runtime().clone().into())?;
+        let requested = InstanceRuntimeStateRequested {
+            run_state: InstanceStateRequested::Running,
+            migration_id: None,
+        };
+        self.check_runtime_change_allowed(
+            &instance.runtime().clone().into(),
+            &requested,
+        )?;
         self.instance_set_runtime(
             &instance,
             self.instance_sled(&instance).await?,
-            InstanceRuntimeStateRequested {
-                run_state: InstanceStateRequested::Running,
-                migration_id: None,
-            },
+            requested,
         )
         .await?;
         self.db_datastore.instance_fetch(&instance.id()).await
@@ -1140,21 +1153,25 @@ impl Nexus {
             )
             .await?;
 
-        self.check_runtime_change_allowed(&instance.runtime().clone().into())?;
+        let requested = InstanceRuntimeStateRequested {
+            run_state: InstanceStateRequested::Stopped,
+            migration_id: None,
+        };
+        self.check_runtime_change_allowed(
+            &instance.runtime().clone().into(),
+            &requested,
+        )?;
         self.instance_set_runtime(
             &instance,
             self.instance_sled(&instance).await?,
-            InstanceRuntimeStateRequested {
-                run_state: InstanceStateRequested::Stopped,
-                migration_id: None,
-            },
+            requested,
         )
         .await?;
         self.db_datastore.instance_fetch(&instance.id()).await
     }
 
     /**
-     * Place the instance in a 'Migrating' state.
+     * Idempotently place the instance in a 'Migrating' state.
      */
     pub async fn instance_start_migrate(
         &self,
@@ -1162,37 +1179,19 @@ impl Nexus {
         migration_id: Uuid,
     ) -> UpdateResult<db::model::Instance> {
         let instance = self.datastore().instance_fetch(&instance_id).await?;
-        let runtime: nexus::InstanceRuntimeState =
-            instance.runtime().clone().into();
 
-        // Is the instance already migrating?
-        if let InstanceState::Migrating = runtime.run_state {
-            match runtime.migration_uuid {
-                // The instance is already performing this migration
-                Some(id) if id == migration_id => return Ok(instance),
-                // A different migration is already underway
-                Some(_) => {
-                    return Err(Error::invalid_request(
-                        "migration already in progress",
-                    ))
-                }
-                // Instance in 'Migrating' state but no migration id?
-                None => {
-                    return Err(Error::internal_error(
-                        "migrating but no migration id present",
-                    ))
-                }
-            }
-        }
-
-        self.check_runtime_change_allowed(&runtime)?;
+        let requested = InstanceRuntimeStateRequested {
+            run_state: InstanceStateRequested::Migrating,
+            migration_id: Some(migration_id),
+        };
+        self.check_runtime_change_allowed(
+            &instance.runtime().clone().into(),
+            &requested,
+        )?;
         self.instance_set_runtime(
             &instance,
             self.instance_sled(&instance).await?,
-            InstanceRuntimeStateRequested {
-                run_state: InstanceStateRequested::Migrating,
-                migration_id: Some(migration_id),
-            },
+            requested,
         )
         .await?;
         self.db_datastore.instance_fetch(&instance.id()).await
