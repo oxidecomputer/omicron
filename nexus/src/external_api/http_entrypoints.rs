@@ -1070,7 +1070,7 @@ struct VpcPathParam {
 #[endpoint {
     method = GET,
     path = "/organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}",
-    tags = ["networking"],
+    tags = ["vpcs"],
 }]
 async fn project_vpcs_get_vpc(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,

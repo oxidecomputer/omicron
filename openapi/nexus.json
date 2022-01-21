@@ -1522,7 +1522,7 @@
     "/organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}": {
       "get": {
         "tags": [
-          "networking"
+          "vpcs"
         ],
         "description": "Get a VPC in a project.",
         "operationId": "project_vpcs_get_vpc",
