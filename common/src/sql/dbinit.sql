@@ -411,6 +411,8 @@ CREATE TABLE omicron.public.network_interface (
     time_modified TIMESTAMPTZ NOT NULL,
     /* Indicates that the object has been deleted */
     time_deleted TIMESTAMPTZ,
+    /* FK into Instance table. */
+    instance_id UUID NOT NULL,
     /* FK into VPC table */
     vpc_id UUID NOT NULL,
     /* FK into VPCSubnet table. */
@@ -430,6 +432,22 @@ CREATE TABLE omicron.public.network_interface (
 CREATE UNIQUE INDEX ON omicron.public.network_interface (
     vpc_id,
     name
+) WHERE
+    time_deleted IS NULL;
+
+/* Ensure we do not assign the same address twice within a subnet */
+CREATE UNIQUE INDEX ON omicron.public.network_interface (
+    subnet_id,
+    ip
+) WHERE
+    time_deleted IS NULL;
+
+/* Ensure we do not assign the same MAC twice within a VPC
+ * See RFD174's discussion on the scope of virtual MACs
+ */
+CREATE UNIQUE INDEX ON omicron.public.network_interface (
+    vpc_id,
+    mac
 ) WHERE
     time_deleted IS NULL;
 
@@ -669,6 +687,103 @@ CREATE TABLE omicron.public.update_available_artifact (
     target_length INT NOT NULL,
 
     PRIMARY KEY (name, version, kind)
+);
+
+/*******************************************************************/
+
+/*
+ * IAM
+ */
+
+/*
+ * Users built into the system
+ *
+ * The ids and names for these users are well-known (i.e., they are used by
+ * Nexus directly, so changing these would potentially break compatibility).
+ */
+CREATE TABLE omicron.public.user_builtin (
+    /*
+     * Identity metadata
+     *
+     * TODO-cleanup This uses the "resource identity" pattern because we want a
+     * name and description, but it's not valid to support soft-deleting these
+     * records.
+     */
+    id UUID PRIMARY KEY,
+    name STRING(63) NOT NULL,
+    description STRING(512) NOT NULL,
+    time_created TIMESTAMPTZ NOT NULL,
+    time_modified TIMESTAMPTZ NOT NULL,
+    time_deleted TIMESTAMPTZ
+);
+
+CREATE UNIQUE INDEX ON omicron.public.user_builtin (name);
+
+/* User used by Nexus to create other users.  Do NOT add more users here! */
+INSERT INTO omicron.public.user_builtin (
+    id,
+    name,
+    description,
+    time_created,
+    time_modified
+) VALUES (
+    /* NOTE: this uuid and name are duplicated in nexus::authn. */
+    '001de000-05e4-4000-8000-000000000001',
+    'db-init',
+    'user used for database initialization',
+    NOW(),
+    NOW()
+);
+
+
+/*
+ * Roles built into the system
+ *
+ * You can think of a built-in role as an opaque token to which we assign a
+ * hardcoded set of permissions.  The role that we call "project.viewer"
+ * corresponds to the "viewer" role on the "project" resource.  A user that has
+ * this role on a particular Project is granted various read-only permissions on
+ * that Project.  The specific permissions associated with the role are defined
+ * in Omicron's Polar (Oso) policy file.
+ *
+ * A built-in role like "project.viewer" has four parts:
+ *
+ * * resource type: "project"
+ * * role name: "viewer"
+ * * full name: "project.viewer"
+ * * description: "Project Viewer"
+ *
+ * Internally, we can treat the tuple (resource type, role name) as a composite
+ * primary key.  Externally, we expose this as the full name.  This is
+ * consistent with RFD 43 and other IAM systems.
+ *
+ * These fields look awfully close to the identity metadata that we use for most
+ * other tables.  But they're just different enough that we can't use most of
+ * the same abstractions:
+ *
+ * * "id": We have no need for a uuid because the (resource_type, role_name) is
+ *   already unique and immutable.
+ * * "name": What we call "full name" above could instead be called "name",
+ *   which would be consistent with other identity metadata.  But it's not a
+ *   legal "name" because of the period, and it would be confusing to have
+ *   "resource type", "role name", and "name".
+ * * "time_created": not that useful because it's whenever the system was
+ *   initialized, and we have plenty of other timestamps for that
+ * * "time_modified": does not apply because the role cannot be changed
+ * * "time_deleted" does not apply because the role cannot be deleted
+ *
+ * If the set of roles and their permissions are fixed, why store them in the
+ * database at all?  Because what's dynamic is the assignment of roles to users.
+ * We [will] have a separate table that says "user U has role ROLE on resource
+ * RESOURCE".  How do we represent the ROLE part of this association?  We use a
+ * foreign key into this "role_builtin" table.
+ */
+CREATE TABLE omicron.public.role_builtin (
+    resource_type STRING(63),
+    role_name STRING(63),
+    description STRING(512),
+
+    PRIMARY KEY(resource_type, role_name)
 );
 
 /*******************************************************************/

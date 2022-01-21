@@ -374,6 +374,7 @@ mod test {
             if_exists = "fail"
             [insecure]
             allow_any_request_to_spoof_authn_header = true
+            if_exists = "fail"
             "##,
         )
         .unwrap();

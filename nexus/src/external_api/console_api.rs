@@ -16,7 +16,7 @@ use crate::authn::external::{
         SessionStore, SESSION_COOKIE_COOKIE_NAME,
     },
 };
-use crate::authn::{TEST_USER_UUID_PRIVILEGED, TEST_USER_UUID_UNPRIVILEGED};
+use crate::authn::{USER_TEST_PRIVILEGED, USER_TEST_UNPRIVILEGED};
 use crate::context::OpContext;
 use crate::ServerContext;
 use dropshot::{endpoint, HttpError, Path, RequestContext, TypedBody};
@@ -51,8 +51,8 @@ pub async fn spoof_login(
     let nexus = &apictx.nexus;
     let params = params.into_inner();
     let user_id: Option<Uuid> = match params.username.as_str() {
-        "privileged" => Some(TEST_USER_UUID_PRIVILEGED.parse().unwrap()),
-        "unprivileged" => Some(TEST_USER_UUID_UNPRIVILEGED.parse().unwrap()),
+        "privileged" => Some(USER_TEST_PRIVILEGED.id),
+        "unprivileged" => Some(USER_TEST_UNPRIVILEGED.id),
         _ => None,
     };
 

@@ -4,10 +4,10 @@
 
 //! Bootstrap-related APIs.
 
-use super::client::types as bootstrap_types;
-use super::client::Client as BootstrapClient;
 use super::discovery;
-use super::spdm::SpdmError;
+use super::trust_quorum::{
+    self, RackSecret, ShareDistribution, TrustQuorumError,
+};
 use super::views::ShareResponse;
 use omicron_common::api::external::Error as ExternalError;
 use omicron_common::backoff::{
@@ -18,13 +18,10 @@ use omicron_common::packaging::sha256_digest;
 use slog::Logger;
 use std::collections::HashMap;
 use std::fs::File;
-use std::io::{Seek, SeekFrom};
+use std::io::{self, Seek, SeekFrom};
 use std::path::Path;
 use tar::Archive;
 use thiserror::Error;
-
-const UNLOCK_THRESHOLD: usize = 1;
-const BOOTSTRAP_PORT: u16 = 12346;
 
 /// Describes errors which may occur while operating the bootstrap service.
 #[derive(Error, Debug)]
@@ -47,11 +44,8 @@ pub enum BootstrapError {
     #[error("Error making HTTP request")]
     Api(#[from] anyhow::Error),
 
-    #[error("Error running SPDM protocol: {0}")]
-    Spdm(#[from] SpdmError),
-
-    #[error("Not enough peers to unlock storage")]
-    NotEnoughPeers,
+    #[error(transparent)]
+    TrustQuorum(#[from] TrustQuorumError),
 }
 
 impl From<BootstrapError> for ExternalError {
@@ -60,17 +54,41 @@ impl From<BootstrapError> for ExternalError {
     }
 }
 
+// Attempt to read a key share file. If the file does not exist, we return
+// `Ok(None)`, indicating the sled is operating in a single node cluster. If
+// the file exists, we parse it and return Ok(ShareDistribution). For any
+// other error, we return the error.
+//
+// TODO: Remove after dynamic key generation. See #513.
+fn read_key_share() -> Result<Option<ShareDistribution>, BootstrapError> {
+    let key_share_dir = Path::new("/opt/oxide/sled-agent/pkg");
+
+    match ShareDistribution::read(&key_share_dir) {
+        Ok(share) => Ok(Some(share)),
+        Err(TrustQuorumError::Io(err)) => {
+            if err.kind() == io::ErrorKind::NotFound {
+                Ok(None)
+            } else {
+                Err(BootstrapError::Io(err))
+            }
+        }
+        Err(e) => Err(e.into()),
+    }
+}
+
 /// The entity responsible for bootstrapping an Oxide rack.
 pub(crate) struct Agent {
     /// Debug log
     log: Logger,
     peer_monitor: discovery::PeerMonitor,
+    share: Option<ShareDistribution>,
 }
 
 impl Agent {
     pub fn new(log: Logger) -> Result<Self, BootstrapError> {
         let peer_monitor = discovery::PeerMonitor::new(&log)?;
-        Ok(Agent { log, peer_monitor })
+        let share = read_key_share()?;
+        Ok(Agent { log, peer_monitor, share })
     }
 
     /// Implements the "request share" API.
@@ -89,74 +107,84 @@ impl Agent {
 
     /// Communicates with peers, sharing secrets, until the rack has been
     /// sufficiently unlocked.
-    ///
-    /// - This method retries until [`UNLOCK_THRESHOLD`] other agents are
-    /// online, and have successfully responded to "share requests".
-    async fn establish_sled_quorum(&self) -> Result<(), BootstrapError> {
-        retry_notify(
+    async fn establish_sled_quorum(
+        &self,
+    ) -> Result<RackSecret, BootstrapError> {
+        let rack_secret = retry_notify(
             internal_service_policy(),
             || async {
                 let other_agents = self.peer_monitor.addrs().await;
-                info!(&self.log, "Bootstrap: Communicating with peers: {:?}", other_agents);
+                info!(
+                    &self.log,
+                    "Bootstrap: Communicating with peers: {:?}", other_agents
+                );
+
+                let share = self.share.as_ref().unwrap();
 
                 // "-1" to account for ourselves.
-                //
-                // NOTE: Clippy error exists while the compile-time unlock
-                // threshold is "1", because we basically don't require any
-                // peers to unlock.
-                #[allow(clippy::absurd_extreme_comparisons)]
-                if other_agents.len() < UNLOCK_THRESHOLD - 1 {
-                    warn!(&self.log, "Not enough peers to start establishing quorum");
+                if other_agents.len() < share.threshold - 1 {
+                    warn!(
+                        &self.log,
+                        "Not enough peers to start establishing quorum"
+                    );
                     return Err(BackoffError::Transient(
-                        BootstrapError::NotEnoughPeers,
+                        TrustQuorumError::NotEnoughPeers,
                     ));
                 }
-                info!(&self.log, "Bootstrap: Enough peers to start share transfer");
+                info!(
+                    &self.log,
+                    "Bootstrap: Enough peers to start share transfer"
+                );
 
-                // TODO-correctness:
-                // - Establish trust quorum.
-                // - Once this is done, "unlock" local storage
-                //
-                // The current implementation sends a stub request to all known sled
-                // agents, but does not actually create a quorum / unlock anything.
-                let other_agents: Vec<BootstrapClient> = other_agents
+                // Retrieve verified rack_secret shares from a quorum of agents
+                let other_agents: Vec<trust_quorum::Client> = other_agents
                     .into_iter()
                     .map(|mut addr| {
-                        addr.set_port(BOOTSTRAP_PORT);
-                        // TODO-correctness:
-                        //
-                        // Many rust crates - such as "URL" - really dislike
-                        // using scopes in IPv6 addresses. Using
-                        // "addr.to_string()" results in an IP address format
-                        // that is rejected when embedded into a URL.
-                        //
-                        // Instead, we merely use IP and port for the moment,
-                        // which loses the scope information. Longer-term, if we
-                        // use ULAs (Unique Local Addresses) the scope shouldn't
-                        // be a factor anyway.
-                        let addr_str = format!("[{}]:{}", addr.ip(), addr.port());
-                        info!(&self.log, "bootstrap: Connecting to {}", addr_str);
-                        BootstrapClient::new(
-                            &format!("http://{}", addr_str),
-                            self.log.new(o!(
-                                "Address" => addr_str,
-                            )),
+                        addr.set_port(trust_quorum::PORT);
+                        trust_quorum::Client::new(
+                            &self.log,
+                            share.verifier.clone(),
+                            addr,
                         )
                     })
                     .collect();
+
+                // TODO: Parallelize this and keep track of whose shares we've already retrieved and
+                // don't resend. See https://github.com/oxidecomputer/omicron/issues/514
+                let mut shares = vec![share.share.clone()];
                 for agent in &other_agents {
-                    agent
-                        .api_request_share(&bootstrap_types::ShareRequest {
-                            identity: vec![],
-                        })
-                        .await
+                    let share = agent.get_share().await
                         .map_err(|e| {
-                            info!(&self.log, "Bootstrap: Failed to share request with peer: {:?}", e);
-                            BackoffError::Transient(BootstrapError::Api(e))
+			    info!(&self.log, "Bootstrap: failed to retreive share from peer: {:?}", e);
+                            BackoffError::Transient(e)
                         })?;
-                        info!(&self.log, "Bootstrap: Shared request with peer");
+                    info!(
+                        &self.log,
+                        "Bootstrap: retreived share from peer: {}",
+                        agent.addr()
+                    );
+                    shares.push(share);
                 }
-                Ok(())
+                let rack_secret = RackSecret::combine_shares(
+                    share.threshold,
+                    share.total_shares,
+                    &shares,
+                )
+                .map_err(|e| {
+                    warn!(
+                        &self.log,
+                        "Bootstrap: failed to construct rack secret: {:?}", e
+                    );
+                    // TODO: We probably need to actually write an error
+                    // handling routine that gives up in some cases based on
+                    // the error returned from `RackSecret::combine_shares`.
+                    // See https://github.com/oxidecomputer/omicron/issues/516
+                    BackoffError::Transient(
+                        TrustQuorumError::RackSecretConstructionFailed(e),
+                    )
+                })?;
+                info!(self.log, "RackSecret computed from shares.");
+                Ok(rack_secret)
             },
             |error, duration| {
                 warn!(
@@ -169,7 +197,7 @@ impl Agent {
         )
         .await?;
 
-        Ok(())
+        Ok(rack_secret)
     }
 
     async fn launch_local_services(&self) -> Result<(), BootstrapError> {
@@ -200,14 +228,27 @@ impl Agent {
         Ok(())
     }
 
+    async fn run_trust_quorum_server(&self) -> Result<(), BootstrapError> {
+        let my_share = self.share.as_ref().unwrap().share.clone();
+        let mut server = trust_quorum::Server::new(&self.log, my_share)?;
+        tokio::spawn(async move { server.run().await });
+        Ok(())
+    }
+
     /// Performs device initialization:
     ///
-    /// - TODO: Communicates with other sled agents to establish a trust quorum.
+    /// - Communicates with other sled agents to establish a trust quorum if a
+    /// ShareDistribution file exists on the host. Otherwise, the sled operates
+    /// as a single node cluster.
     /// - Verifies, unpacks, and launches other services.
     pub async fn initialize(&self) -> Result<(), BootstrapError> {
         info!(&self.log, "bootstrap service initializing");
 
-        self.establish_sled_quorum().await?;
+        if self.share.is_some() {
+            self.run_trust_quorum_server().await?;
+            self.establish_sled_quorum().await?;
+        }
+
         self.launch_local_services().await?;
 
         Ok(())
