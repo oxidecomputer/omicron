@@ -43,6 +43,7 @@ use omicron_common::api::external::Ipv6Net;
 use omicron_common::api::external::ListResult;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
+use omicron_common::api::external::LookupType;
 use omicron_common::api::external::PaginationOrder;
 use omicron_common::api::external::ResourceType;
 use omicron_common::api::external::RouteDestination;
@@ -208,28 +209,28 @@ impl Nexus {
         };
 
         /* TODO-cleanup all the extra Arcs here seems wrong */
-        let nexus_arc = Arc::new(nexus);
+        let nexus = Arc::new(nexus);
         let opctx = OpContext::for_background(
             log.new(o!("component" => "SagaRecoverer")),
             authz,
             authn::Context::internal_saga_recovery(),
             Arc::clone(&db_datastore),
         );
+        let saga_logger = nexus.log.new(o!("saga_type" => "recovery"));
         let recovery_task = db::recover(
             opctx,
             my_sec_id,
-            Arc::new(Arc::new(SagaContext::new(Arc::clone(&nexus_arc)))),
+            Arc::new(Arc::new(SagaContext::new(
+                Arc::clone(&nexus),
+                saga_logger,
+            ))),
             db_datastore,
             Arc::clone(&sec_client),
             &sagas::ALL_TEMPLATES,
         );
 
-        *nexus_arc.recovery_task.lock().unwrap() = Some(recovery_task);
-        nexus_arc
-    }
-
-    pub fn log(&self) -> &Logger {
-        &self.log
+        *nexus.recovery_task.lock().unwrap() = Some(recovery_task);
+        nexus
     }
 
     pub async fn wait_for_populate(&self) -> Result<(), anyhow::Error> {
@@ -441,8 +442,10 @@ impl Nexus {
         P: serde::Serialize,
     {
         let saga_id = SagaId(Uuid::new_v4());
+        let saga_logger =
+            self.log.new(o!("template_name" => template_name.to_owned()));
         let saga_context =
-            Arc::new(Arc::new(SagaContext::new(Arc::clone(self))));
+            Arc::new(Arc::new(SagaContext::new(Arc::clone(self), saga_logger)));
         let future = self
             .sec_client
             .saga_create(
@@ -493,9 +496,10 @@ impl Nexus {
 
     pub async fn organization_fetch(
         &self,
+        opctx: &OpContext,
         name: &Name,
     ) -> LookupResult<db::model::Organization> {
-        self.db_datastore.organization_fetch(name).await
+        Ok(self.db_datastore.organization_fetch(opctx, name).await?.1)
     }
 
     pub async fn organizations_list_by_name(
@@ -514,17 +518,22 @@ impl Nexus {
         self.db_datastore.organizations_list_by_id(opctx, pagparams).await
     }
 
-    pub async fn organization_delete(&self, name: &Name) -> DeleteResult {
-        self.db_datastore.organization_delete(name).await
+    pub async fn organization_delete(
+        &self,
+        opctx: &OpContext,
+        name: &Name,
+    ) -> DeleteResult {
+        self.db_datastore.organization_delete(opctx, name).await
     }
 
     pub async fn organization_update(
         &self,
+        opctx: &OpContext,
         name: &Name,
         new_params: &params::OrganizationUpdate,
     ) -> UpdateResult<db::model::Organization> {
         self.db_datastore
-            .organization_update(name, new_params.clone().into())
+            .organization_update(opctx, name, new_params.clone().into())
             .await
     }
 
@@ -539,7 +548,7 @@ impl Nexus {
         new_project: &params::ProjectCreate,
     ) -> CreateResult<db::model::Project> {
         let org =
-            self.db_datastore.organization_lookup(organization_name).await?;
+            self.db_datastore.organization_lookup_id(organization_name).await?;
 
         // Create a project.
         let db_project = db::model::Project::new(org.id(), new_project.clone());
@@ -561,8 +570,9 @@ impl Nexus {
                         name: "default".parse().unwrap(),
                         description: "Default VPC".to_string(),
                     },
-                    // TODO-robustness this will need to be None if we decide to handle
-                    // the logic around name and dns_name by making dns_name optional
+                    // TODO-robustness this will need to be None if we decide to
+                    // handle the logic around name and dns_name by making
+                    // dns_name optional
                     dns_name: "default".parse().unwrap(),
                 },
             )
@@ -578,8 +588,9 @@ impl Nexus {
     ) -> LookupResult<db::model::Project> {
         let organization_id = self
             .db_datastore
-            .organization_lookup_id_by_name(organization_name)
-            .await?;
+            .organization_lookup_id(organization_name)
+            .await?
+            .id();
         self.db_datastore.project_fetch(&organization_id, project_name).await
     }
 
@@ -590,8 +601,9 @@ impl Nexus {
     ) -> ListResultVec<db::model::Project> {
         let organization_id = self
             .db_datastore
-            .organization_lookup_id_by_name(organization_name)
-            .await?;
+            .organization_lookup_id(organization_name)
+            .await?
+            .id();
         self.db_datastore
             .projects_list_by_name(&organization_id, pagparams)
             .await
@@ -604,8 +616,9 @@ impl Nexus {
     ) -> ListResultVec<db::model::Project> {
         let organization_id = self
             .db_datastore
-            .organization_lookup_id_by_name(organization_name)
-            .await?;
+            .organization_lookup_id(organization_name)
+            .await?
+            .id();
         self.db_datastore.projects_list_by_id(&organization_id, pagparams).await
     }
 
@@ -616,8 +629,9 @@ impl Nexus {
     ) -> DeleteResult {
         let organization_id = self
             .db_datastore
-            .organization_lookup_id_by_name(organization_name)
-            .await?;
+            .organization_lookup_id(organization_name)
+            .await?
+            .id();
         self.db_datastore.project_delete(&organization_id, project_name).await
     }
 
@@ -629,8 +643,9 @@ impl Nexus {
     ) -> UpdateResult<db::model::Project> {
         let organization_id = self
             .db_datastore
-            .organization_lookup_id_by_name(organization_name)
-            .await?;
+            .organization_lookup_id(organization_name)
+            .await?
+            .id();
         self.db_datastore
             .project_update(
                 &organization_id,
@@ -652,8 +667,9 @@ impl Nexus {
     ) -> ListResultVec<db::model::Disk> {
         let organization_id = self
             .db_datastore
-            .organization_lookup_id_by_name(organization_name)
-            .await?;
+            .organization_lookup_id(organization_name)
+            .await?
+            .id();
         let project_id = self
             .db_datastore
             .project_lookup_id_by_name(&organization_id, project_name)
@@ -709,8 +725,9 @@ impl Nexus {
     ) -> LookupResult<(db::model::Disk, authz::ProjectChild)> {
         let organization_id = self
             .db_datastore
-            .organization_lookup_id_by_name(organization_name)
-            .await?;
+            .organization_lookup_id(organization_name)
+            .await?
+            .id();
         let project_id = self
             .db_datastore
             .project_lookup_id_by_name(&organization_id, project_name)
@@ -723,9 +740,16 @@ impl Nexus {
         Ok((
             disk,
             authz::FLEET
-                .organization(organization_id)
-                .project(project_id)
-                .child_generic(ResourceType::Disk, disk_id),
+                .organization(
+                    organization_id,
+                    LookupType::from(&organization_name.0),
+                )
+                .project(project_id, LookupType::from(&project_name.0))
+                .child_generic(
+                    ResourceType::Disk,
+                    disk_id,
+                    LookupType::from(&disk_name.0),
+                ),
         ))
     }
 
@@ -746,8 +770,7 @@ impl Nexus {
         // datastore, but now that disk deletion exists within a Saga,
         // this would require OpContext to be serialized (which is
         // not trivial).
-        opctx.authorize(authz::Action::Query, authz::DATABASE).await?;
-        opctx.authorize(authz::Action::Delete, authz_disk).await?;
+        opctx.authorize(authz::Action::Delete, &authz_disk).await?;
 
         let saga_params =
             Arc::new(sagas::ParamsDiskDelete { disk_id: disk.id() });
@@ -798,8 +821,9 @@ impl Nexus {
     ) -> ListResultVec<db::model::Instance> {
         let organization_id = self
             .db_datastore
-            .organization_lookup_id_by_name(organization_name)
-            .await?;
+            .organization_lookup_id(organization_name)
+            .await?
+            .id();
         let project_id = self
             .db_datastore
             .project_lookup_id_by_name(&organization_id, project_name)
@@ -815,8 +839,9 @@ impl Nexus {
     ) -> CreateResult<db::model::Instance> {
         let organization_id = self
             .db_datastore
-            .organization_lookup_id_by_name(organization_name)
-            .await?;
+            .organization_lookup_id(organization_name)
+            .await?
+            .id();
         let project_id = self
             .db_datastore
             .project_lookup_id_by_name(&organization_id, project_name)
@@ -903,8 +928,9 @@ impl Nexus {
          */
         let organization_id = self
             .db_datastore
-            .organization_lookup_id_by_name(organization_name)
-            .await?;
+            .organization_lookup_id(organization_name)
+            .await?
+            .id();
         let project_id = self
             .db_datastore
             .project_lookup_id_by_name(&organization_id, project_name)
@@ -924,8 +950,9 @@ impl Nexus {
     ) -> LookupResult<db::model::Instance> {
         let organization_id = self
             .db_datastore
-            .organization_lookup_id_by_name(organization_name)
-            .await?;
+            .organization_lookup_id(organization_name)
+            .await?
+            .id();
         let project_id = self
             .db_datastore
             .project_lookup_id_by_name(&organization_id, project_name)
@@ -1487,8 +1514,9 @@ impl Nexus {
     ) -> ListResultVec<db::model::Vpc> {
         let organization_id = self
             .db_datastore
-            .organization_lookup_id_by_name(organization_name)
-            .await?;
+            .organization_lookup_id(organization_name)
+            .await?
+            .id();
         let project_id = self
             .db_datastore
             .project_lookup_id_by_name(&organization_id, project_name)
@@ -1506,8 +1534,9 @@ impl Nexus {
     ) -> CreateResult<db::model::Vpc> {
         let organization_id = self
             .db_datastore
-            .organization_lookup_id_by_name(organization_name)
-            .await?;
+            .organization_lookup_id(organization_name)
+            .await?
+            .id();
         let project_id = self
             .db_datastore
             .project_lookup_id_by_name(&organization_id, project_name)
@@ -1610,8 +1639,9 @@ impl Nexus {
     ) -> LookupResult<db::model::Vpc> {
         let organization_id = self
             .db_datastore
-            .organization_lookup_id_by_name(organization_name)
-            .await?;
+            .organization_lookup_id(organization_name)
+            .await?
+            .id();
         let project_id = self
             .db_datastore
             .project_lookup_id_by_name(&organization_id, project_name)
@@ -1628,8 +1658,9 @@ impl Nexus {
     ) -> UpdateResult<()> {
         let organization_id = self
             .db_datastore
-            .organization_lookup_id_by_name(organization_name)
-            .await?;
+            .organization_lookup_id(organization_name)
+            .await?
+            .id();
         let project_id = self
             .db_datastore
             .project_lookup_id_by_name(&organization_id, project_name)

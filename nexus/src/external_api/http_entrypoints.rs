@@ -205,8 +205,9 @@ pub fn external_api() -> NexusApiDescription {
  * List all organizations.
  */
 #[endpoint {
-     method = GET,
-     path = "/organizations",
+    method = GET,
+    path = "/organizations",
+    tags = ["organizations"],
  }]
 async fn organizations_get(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
@@ -246,7 +247,8 @@ async fn organizations_get(
  */
 #[endpoint {
     method = POST,
-    path = "/organizations"
+    path = "/organizations",
+    tags = ["organizations"],
 }]
 async fn organizations_post(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
@@ -279,6 +281,7 @@ struct OrganizationPathParam {
 #[endpoint {
     method = GET,
     path = "/organizations/{organization_name}",
+    tags = ["organizations"],
 }]
 async fn organizations_get_organization(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
@@ -289,7 +292,9 @@ async fn organizations_get_organization(
     let path = path_params.into_inner();
     let organization_name = &path.organization_name;
     let handler = async {
-        let organization = nexus.organization_fetch(&organization_name).await?;
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let organization =
+            nexus.organization_fetch(&opctx, &organization_name).await?;
         Ok(HttpResponseOk(organization.into()))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
@@ -299,9 +304,10 @@ async fn organizations_get_organization(
  * Delete a specific organization.
  */
 #[endpoint {
-     method = DELETE,
-     path = "/organizations/{organization_name}",
- }]
+    method = DELETE,
+    path = "/organizations/{organization_name}",
+    tags = ["organizations"],
+}]
 async fn organizations_delete_organization(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<OrganizationPathParam>,
@@ -311,7 +317,8 @@ async fn organizations_delete_organization(
     let params = path_params.into_inner();
     let organization_name = &params.organization_name;
     let handler = async {
-        nexus.organization_delete(&organization_name).await?;
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        nexus.organization_delete(&opctx, &organization_name).await?;
         Ok(HttpResponseDeleted())
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
@@ -327,9 +334,10 @@ async fn organizations_delete_organization(
  * "application/json-patch")?  We should see what other APIs do.
  */
 #[endpoint {
-     method = PUT,
-     path = "/organizations/{organization_name}",
- }]
+    method = PUT,
+    path = "/organizations/{organization_name}",
+    tags = ["organizations"],
+}]
 async fn organizations_put_organization(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<OrganizationPathParam>,
@@ -340,8 +348,10 @@ async fn organizations_put_organization(
     let path = path_params.into_inner();
     let organization_name = &path.organization_name;
     let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
         let new_organization = nexus
             .organization_update(
+                &opctx,
                 &organization_name,
                 &updated_organization.into_inner(),
             )
@@ -355,9 +365,10 @@ async fn organizations_put_organization(
  * List all projects.
  */
 #[endpoint {
-     method = GET,
-     path = "/organizations/{organization_name}/projects",
- }]
+    method = GET,
+    path = "/organizations/{organization_name}/projects",
+    tags = ["projects"],
+}]
 async fn organization_projects_get(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     query_params: Query<PaginatedByNameOrId>,
@@ -402,7 +413,8 @@ async fn organization_projects_get(
  */
 #[endpoint {
     method = POST,
-    path = "/organizations/{organization_name}/projects"
+    path = "/organizations/{organization_name}/projects",
+    tags = ["projects"],
 }]
 async fn organization_projects_post(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
@@ -444,6 +456,7 @@ struct ProjectPathParam {
 #[endpoint {
     method = GET,
     path = "/organizations/{organization_name}/projects/{project_name}",
+    tags = ["projects"],
 }]
 async fn organization_projects_get_project(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
@@ -466,9 +479,10 @@ async fn organization_projects_get_project(
  * Delete a specific project.
  */
 #[endpoint {
-     method = DELETE,
-     path = "/organizations/{organization_name}/projects/{project_name}",
- }]
+    method = DELETE,
+    path = "/organizations/{organization_name}/projects/{project_name}",
+    tags = ["projects"],
+}]
 async fn organization_projects_delete_project(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<ProjectPathParam>,
@@ -495,9 +509,10 @@ async fn organization_projects_delete_project(
  * "application/json-patch")?  We should see what other APIs do.
  */
 #[endpoint {
-     method = PUT,
-     path = "/organizations/{organization_name}/projects/{project_name}",
- }]
+    method = PUT,
+    path = "/organizations/{organization_name}/projects/{project_name}",
+    tags = ["organizations"],
+}]
 async fn organization_projects_put_project(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<ProjectPathParam>,
@@ -529,9 +544,10 @@ async fn organization_projects_put_project(
  * List disks in a project.
  */
 #[endpoint {
-     method = GET,
-     path = "/organizations/{organization_name}/projects/{project_name}/disks",
- }]
+    method = GET,
+    path = "/organizations/{organization_name}/projects/{project_name}/disks",
+    tags = ["projects"]
+}]
 async fn project_disks_get(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     query_params: Query<PaginatedByName>,
@@ -566,9 +582,10 @@ async fn project_disks_get(
  * TODO-correctness See note about instance create.  This should be async.
  */
 #[endpoint {
-     method = POST,
-     path = "/organizations/{organization_name}/projects/{project_name}/disks",
- }]
+    method = POST,
+    path = "/organizations/{organization_name}/projects/{project_name}/disks",
+    tags = ["projects"]
+}]
 async fn project_disks_post(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<ProjectPathParam>,
@@ -607,9 +624,10 @@ struct DiskPathParam {
  * Fetch a single disk in a project.
  */
 #[endpoint {
-     method = GET,
-     path = "/organizations/{organization_name}/projects/{project_name}/disks/{disk_name}",
- }]
+    method = GET,
+    path = "/organizations/{organization_name}/projects/{project_name}/disks/{disk_name}",
+    tags = ["projects"],
+}]
 async fn project_disks_get_disk(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<DiskPathParam>,
@@ -633,9 +651,10 @@ async fn project_disks_get_disk(
  * Delete a disk from a project.
  */
 #[endpoint {
-     method = DELETE,
-     path = "/organizations/{organization_name}/projects/{project_name}/disks/{disk_name}",
- }]
+    method = DELETE,
+    path = "/organizations/{organization_name}/projects/{project_name}/disks/{disk_name}",
+    tags = ["projects"],
+}]
 async fn project_disks_delete_disk(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<DiskPathParam>,
@@ -669,9 +688,10 @@ async fn project_disks_delete_disk(
  * List instances in a project.
  */
 #[endpoint {
-     method = GET,
-     path = "/organizations/{organization_name}/projects/{project_name}/instances",
- }]
+    method = GET,
+    path = "/organizations/{organization_name}/projects/{project_name}/instances",
+    tags = ["instances"],
+}]
 async fn project_instances_get(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     query_params: Query<PaginatedByName>,
@@ -712,9 +732,10 @@ async fn project_instances_get(
  * resource created?
  */
 #[endpoint {
-     method = POST,
+    method = POST,
      path = "/organizations/{organization_name}/projects/{project_name}/instances",
- }]
+    tags = ["instances"],
+}]
 async fn project_instances_post(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<ProjectPathParam>,
@@ -753,9 +774,10 @@ struct InstancePathParam {
  * Get an instance in a project.
  */
 #[endpoint {
-     method = GET,
-     path = "/organizations/{organization_name}/projects/{project_name}/instances/{instance_name}",
- }]
+    method = GET,
+    path = "/organizations/{organization_name}/projects/{project_name}/instances/{instance_name}",
+    tags = ["instances"],
+}]
 async fn project_instances_get_instance(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<InstancePathParam>,
@@ -783,9 +805,10 @@ async fn project_instances_get_instance(
  * Delete an instance from a project.
  */
 #[endpoint {
-     method = DELETE,
-     path = "/organizations/{organization_name}/projects/{project_name}/instances/{instance_name}",
- }]
+    method = DELETE,
+    path = "/organizations/{organization_name}/projects/{project_name}/instances/{instance_name}",
+    tags = ["instances"],
+}]
 async fn project_instances_delete_instance(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<InstancePathParam>,
@@ -815,6 +838,7 @@ async fn project_instances_delete_instance(
 #[endpoint {
     method = POST,
     path = "/organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/reboot",
+    tags = ["instances"],
 }]
 async fn project_instances_instance_reboot(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
@@ -841,6 +865,7 @@ async fn project_instances_instance_reboot(
 #[endpoint {
     method = POST,
     path = "/organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/start",
+    tags = ["instances"],
 }]
 async fn project_instances_instance_start(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
@@ -867,6 +892,7 @@ async fn project_instances_instance_start(
 #[endpoint {
     method = POST,
     path = "/organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/stop",
+    tags = ["instances"],
 }]
 /* Our naming convention kind of falls apart here. */
 async fn project_instances_instance_stop(
@@ -894,7 +920,8 @@ async fn project_instances_instance_stop(
 /* TODO-scalability needs to be paginated */
 #[endpoint {
     method = GET,
-    path = "/organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/disks"
+    path = "/organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/disks",
+    tags = ["instances"],
 }]
 async fn instance_disks_get(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
@@ -928,7 +955,8 @@ async fn instance_disks_get(
 
 #[endpoint {
     method = POST,
-    path = "/organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/disks/attach"
+    path = "/organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/disks/attach",
+    tags = ["instances"],
 }]
 async fn instance_disks_attach(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
@@ -957,7 +985,8 @@ async fn instance_disks_attach(
 
 #[endpoint {
     method = POST,
-    path = "/organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/disks/detach"
+    path = "/organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/disks/detach",
+    tags = ["instances"],
 }]
 async fn instance_disks_detach(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
@@ -992,9 +1021,10 @@ async fn instance_disks_detach(
  * List VPCs in a project.
  */
 #[endpoint {
-     method = GET,
-     path = "/organizations/{organization_name}/projects/{project_name}/vpcs",
- }]
+    method = GET,
+    path = "/organizations/{organization_name}/projects/{project_name}/vpcs",
+    tags = ["networking"],
+}]
 async fn project_vpcs_get(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     query_params: Query<PaginatedByName>,
@@ -1038,9 +1068,10 @@ struct VpcPathParam {
  * Get a VPC in a project.
  */
 #[endpoint {
-     method = GET,
-     path = "/organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}",
- }]
+    method = GET,
+    path = "/organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}",
+    tags = ["networking"],
+}]
 async fn project_vpcs_get_vpc(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<VpcPathParam>,
@@ -1064,9 +1095,10 @@ async fn project_vpcs_get_vpc(
  * Create a VPC in a project.
  */
 #[endpoint {
-     method = POST,
-     path = "/organizations/{organization_name}/projects/{project_name}/vpcs",
- }]
+    method = POST,
+    path = "/organizations/{organization_name}/projects/{project_name}/vpcs",
+    tags = ["networking"],
+}]
 async fn project_vpcs_post(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<ProjectPathParam>,
@@ -1095,9 +1127,10 @@ async fn project_vpcs_post(
  * Update a VPC.
  */
 #[endpoint {
-     method = PUT,
-     path = "/organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}",
- }]
+    method = PUT,
+    path = "/organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}",
+    tags = ["networking"],
+}]
 async fn project_vpcs_put_vpc(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<VpcPathParam>,
@@ -1124,9 +1157,10 @@ async fn project_vpcs_put_vpc(
  * Delete a vpc from a project.
  */
 #[endpoint {
-     method = DELETE,
-     path = "/organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}",
- }]
+    method = DELETE,
+    path = "/organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}",
+    tags = ["networking"],
+}]
 async fn project_vpcs_delete_vpc(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<VpcPathParam>,
@@ -1150,9 +1184,10 @@ async fn project_vpcs_delete_vpc(
  * List subnets in a VPC.
  */
 #[endpoint {
-     method = GET,
-     path = "/organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/subnets",
- }]
+    method = GET,
+    path = "/organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/subnets",
+    tags = ["networking"],
+}]
 async fn vpc_subnets_get(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     query_params: Query<PaginatedByName>,
@@ -1195,9 +1230,10 @@ struct VpcSubnetPathParam {
  * Get subnet in a VPC.
  */
 #[endpoint {
-     method = GET,
-     path = "/organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/subnets/{subnet_name}",
- }]
+    method = GET,
+    path = "/organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/subnets/{subnet_name}",
+    tags = ["networking"],
+}]
 async fn vpc_subnets_get_subnet(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<VpcSubnetPathParam>,
@@ -1223,9 +1259,10 @@ async fn vpc_subnets_get_subnet(
  * Create a subnet in a VPC.
  */
 #[endpoint {
-     method = POST,
-     path = "/organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/subnets",
- }]
+    method = POST,
+    path = "/organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/subnets",
+    tags = ["networking"],
+}]
 async fn vpc_subnets_post(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<VpcPathParam>,
@@ -1252,9 +1289,10 @@ async fn vpc_subnets_post(
  * Delete a subnet from a VPC.
  */
 #[endpoint {
-     method = DELETE,
-     path = "/organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/subnets/{subnet_name}",
- }]
+    method = DELETE,
+    path = "/organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/subnets/{subnet_name}",
+    tags = ["networking"],
+}]
 async fn vpc_subnets_delete_subnet(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<VpcSubnetPathParam>,
@@ -1280,9 +1318,10 @@ async fn vpc_subnets_delete_subnet(
  * Update a VPC Subnet.
  */
 #[endpoint {
-     method = PUT,
-     path = "/organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/subnets/{subnet_name}",
- }]
+    method = PUT,
+    path = "/organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/subnets/{subnet_name}",
+    tags = ["networking"],
+}]
 async fn vpc_subnets_put_subnet(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<VpcSubnetPathParam>,
@@ -1313,9 +1352,10 @@ async fn vpc_subnets_put_subnet(
 // may not actually be what we want. It is being implemented here to give our
 // testing introspection into network interfaces.
 #[endpoint {
-     method = GET,
-     path = "/organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/subnets/{subnet_name}/ips",
- }]
+    method = GET,
+    path = "/organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/subnets/{subnet_name}/ips",
+    tags = ["networking"],
+}]
 async fn subnets_ips_get(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     query_params: Query<PaginatedByName>,
@@ -1352,9 +1392,10 @@ async fn subnets_ips_get(
  * List firewall rules for a VPC.
  */
 #[endpoint {
-     method = GET,
-     path = "/organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/firewall/rules",
- }]
+    method = GET,
+    path = "/organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/firewall/rules",
+    tags = ["networking"],
+}]
 async fn vpc_firewall_rules_get(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     query_params: Query<PaginatedByName>,
@@ -1391,6 +1432,7 @@ async fn vpc_firewall_rules_get(
 #[endpoint {
     method = PUT,
     path = "/organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/firewall/rules",
+    tags = ["networking"],
 }]
 async fn vpc_firewall_rules_put(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
@@ -1423,9 +1465,10 @@ async fn vpc_firewall_rules_put(
  * List VPC Custom and System Routers
  */
 #[endpoint {
-     method = GET,
-     path = "/organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/routers",
- }]
+    method = GET,
+    path = "/organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/routers",
+    tags = ["networking"],
+}]
 async fn vpc_routers_get(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     query_params: Query<PaginatedByName>,
@@ -1469,7 +1512,8 @@ struct VpcRouterPathParam {
  */
 #[endpoint {
     method = GET,
-    path = "/organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/routers/{router_name}"
+    path = "/organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/routers/{router_name}",
+    tags = ["networking"],
 }]
 async fn vpc_routers_get_router(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
@@ -1498,6 +1542,7 @@ async fn vpc_routers_get_router(
 #[endpoint {
     method = POST,
     path = "/organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/routers",
+    tags = ["networking"],
 }]
 async fn vpc_routers_post(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
@@ -1528,6 +1573,7 @@ async fn vpc_routers_post(
 #[endpoint {
     method = DELETE,
     path = "/organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/routers/{router_name}",
+    tags = ["networking"],
 }]
 async fn vpc_routers_delete_router(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
@@ -1556,6 +1602,7 @@ async fn vpc_routers_delete_router(
 #[endpoint {
     method = PUT,
     path = "/organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/routers/{router_name}",
+    tags = ["networking"],
 }]
 async fn vpc_routers_put_router(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
@@ -1588,9 +1635,10 @@ async fn vpc_routers_put_router(
  * List a Router's routes
  */
 #[endpoint {
-     method = GET,
-     path = "/organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/routers/{router_name}/routes",
- }]
+    method = GET,
+    path = "/organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/routers/{router_name}/routes",
+    tags = ["networking"],
+}]
 async fn routers_routes_get(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     query_params: Query<PaginatedByName>,
@@ -1636,7 +1684,8 @@ struct RouterRoutePathParam {
  */
 #[endpoint {
     method = GET,
-    path = "/organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/routers/{router_name}/routes/{route_name}"
+    path = "/organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/routers/{router_name}/routes/{route_name}",
+    tags = ["networking"],
 }]
 async fn routers_routes_get_route(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
@@ -1666,6 +1715,7 @@ async fn routers_routes_get_route(
 #[endpoint {
     method = POST,
     path = "/organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/routers/{router_name}/routes",
+    tags = ["networking"],
 }]
 async fn routers_routes_post(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
@@ -1697,6 +1747,7 @@ async fn routers_routes_post(
 #[endpoint {
     method = DELETE,
     path = "/organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/routers/{router_name}/routes/{route_name}",
+    tags = ["networking"],
 }]
 async fn routers_routes_delete_route(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
@@ -1726,6 +1777,7 @@ async fn routers_routes_delete_route(
 #[endpoint {
     method = PUT,
     path = "/organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/routers/{router_name}/routes/{route_name}",
+    tags = ["networking"],
 }]
 async fn routers_routes_put_route(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
@@ -1759,9 +1811,10 @@ async fn routers_routes_put_route(
  * List racks in the system.
  */
 #[endpoint {
-     method = GET,
-     path = "/hardware/racks",
- }]
+    method = GET,
+    path = "/hardware/racks",
+    tags = ["hardware"],
+}]
 async fn hardware_racks_get(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     query_params: Query<PaginatedById>,
@@ -1793,6 +1846,7 @@ struct RackPathParam {
 #[endpoint {
     method = GET,
     path = "/hardware/racks/{rack_id}",
+    tags = ["hardware"],
 }]
 async fn hardware_racks_get_rack(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
@@ -1816,9 +1870,10 @@ async fn hardware_racks_get_rack(
  * List sleds in the system.
  */
 #[endpoint {
-     method = GET,
-     path = "/hardware/sleds",
- }]
+    method = GET,
+    path = "/hardware/sleds",
+    tags = ["hardware"],
+}]
 async fn hardware_sleds_get(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     query_params: Query<PaginatedById>,
@@ -1851,9 +1906,10 @@ struct SledPathParam {
  * Fetch information about a sled in the system.
  */
 #[endpoint {
-     method = GET,
-     path = "/hardware/sleds/{sled_id}",
- }]
+    method = GET,
+    path = "/hardware/sleds/{sled_id}",
+    tags = ["hardware"],
+}]
 async fn hardware_sleds_get_sled(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<SledPathParam>,
@@ -1876,9 +1932,10 @@ async fn hardware_sleds_get_sled(
  * List all sagas (for debugging)
  */
 #[endpoint {
-     method = GET,
-     path = "/sagas",
- }]
+    method = GET,
+    path = "/sagas",
+    tags = ["sagas"],
+}]
 async fn sagas_get(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     query_params: Query<PaginatedById>,
@@ -1907,9 +1964,10 @@ struct SagaPathParam {
  * Fetch information about a single saga (for debugging)
  */
 #[endpoint {
-     method = GET,
-     path = "/sagas/{saga_id}",
- }]
+    method = GET,
+    path = "/sagas/{saga_id}",
+    tags = ["sagas"],
+}]
 async fn sagas_get_saga(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<SagaPathParam>,
@@ -1934,6 +1992,7 @@ async fn sagas_get_saga(
 #[endpoint {
     method = GET,
     path = "/users",
+    tags = ["users"],
 }]
 async fn users_get(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
@@ -1972,6 +2031,7 @@ struct UserPathParam {
 #[endpoint {
     method = GET,
     path = "/users/{user_name}",
+    tags = ["users"],
 }]
 async fn users_get_user(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
@@ -1995,6 +2055,7 @@ async fn users_get_user(
 #[endpoint {
     method = GET,
     path = "/timeseries/schema",
+    tags = ["metrics"],
 }]
 async fn timeseries_schema_get(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
@@ -2030,6 +2091,7 @@ struct RolePage {
 #[endpoint {
     method = GET,
     path = "/roles",
+    tags = ["roles"],
 }]
 async fn roles_get(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
@@ -2087,6 +2149,7 @@ struct RolePathParam {
 #[endpoint {
     method = GET,
     path = "/roles/{role_name}",
+    tags = ["roles"],
 }]
 async fn roles_get_role(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,

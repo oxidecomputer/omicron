@@ -19,12 +19,84 @@
 // pass them to `is_allowed()`.  Using newtypes is a way to capture just the
 // parts we need for authorization.
 
-use super::actor::AuthenticatedActor;
-use super::roles::AuthzApiResource;
-use super::roles::AuthzResource;
+use super::actor::AnyActor;
+use super::context::AuthorizedResource;
+use super::roles::{
+    load_roles_for_resource, load_roles_for_resource_tree, RoleSet,
+};
+use super::Action;
+use super::{actor::AuthenticatedActor, Authz};
+use crate::authn;
+use crate::context::OpContext;
 use crate::db::fixed_data::FLEET_ID;
-use omicron_common::api::external::ResourceType;
+use crate::db::DataStore;
+use futures::future::BoxFuture;
+use futures::FutureExt;
+use omicron_common::api::external::{Error, LookupType, ResourceType};
 use uuid::Uuid;
+
+/// Describes an authz resource that corresponds to an API resource that has a
+/// corresponding ResourceType and is stored in the database
+pub trait ApiResource: Clone + Send + Sync + 'static {
+    /// If roles can be assigned to this resource, return the type and id of the
+    /// database record describing this resource
+    ///
+    /// If roles cannot be assigned to this resource, returns `None`.
+    fn db_resource(&self) -> Option<(ResourceType, Uuid)>;
+
+    /// If this resource has a parent in the API hierarchy whose assigned roles
+    /// can affect access to this resource, return the parent resource.
+    /// Otherwise, returns `None`.
+    fn parent(&self) -> Option<&dyn AuthorizedResource>;
+
+    /// Returns an error as though this resource were not found, suitable for
+    /// use when an actor should not be able to see that this resource exists
+    fn not_found(&self) -> Error;
+}
+
+impl<T: ApiResource + oso::PolarClass> AuthorizedResource for T {
+    fn load_roles<'a, 'b, 'c, 'd, 'e, 'f>(
+        &'a self,
+        opctx: &'b OpContext,
+        datastore: &'c DataStore,
+        authn: &'d authn::Context,
+        roleset: &'e mut RoleSet,
+    ) -> BoxFuture<'f, Result<(), Error>>
+    where
+        'a: 'f,
+        'b: 'f,
+        'c: 'f,
+        'd: 'f,
+        'e: 'f,
+    {
+        load_roles_for_resource_tree(self, opctx, datastore, authn, roleset)
+            .boxed()
+    }
+
+    fn on_unauthorized(
+        &self,
+        authz: &Authz,
+        error: Error,
+        actor: AnyActor,
+        action: Action,
+    ) -> Error {
+        if action == Action::Read {
+            return self.not_found();
+        }
+
+        // If the user failed an authz check, and they can't even read this
+        // resource, then we should produce a 404 rather than a 401/403.
+        match authz.is_allowed(&actor, Action::Read, self) {
+            Err(error) => Error::internal_error(&format!(
+                "failed to compute read authorization to determine visibility: \
+                {:#}",
+                error
+            )),
+            Ok(false) => self.not_found(),
+            Ok(true) => error,
+        }
+    }
+}
 
 /// Represents the Oxide fleet for authz purposes
 ///
@@ -38,15 +110,19 @@ use uuid::Uuid;
 /// You can perform authorization checks on children of the Fleet (e.g.,
 /// Organizations) using the methods below that return authz objects
 /// representing those children.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug)]
 pub struct Fleet;
 /// Singleton representing the [`Fleet`] itself for authz purposes
 pub const FLEET: Fleet = Fleet;
 
 impl Fleet {
     /// Returns an authz resource representing a child Organization
-    pub fn organization(&self, organization_id: Uuid) -> Organization {
-        Organization { organization_id }
+    pub fn organization(
+        &self,
+        organization_id: Uuid,
+        lookup_type: LookupType,
+    ) -> Organization {
+        Organization { organization_id, lookup_type }
     }
 
     /// Returns an authz resource representing some other kind of child (e.g.,
@@ -57,8 +133,20 @@ impl Fleet {
     /// children are treated interchangeably by the authz subsystem.  That's
     /// because we do not currently support assigning roles to these resources,
     /// so all that matters for authz is that they are a child of the Fleet.
-    pub fn child_generic(&self) -> FleetChild {
-        FleetChild {}
+    pub fn child_generic(
+        &self,
+        resource_type: ResourceType,
+        lookup_type: LookupType,
+    ) -> FleetChild {
+        FleetChild { resource_type, lookup_type }
+    }
+}
+
+impl Eq for Fleet {}
+impl PartialEq for Fleet {
+    fn eq(&self, _: &Self) -> bool {
+        // There is only one Fleet.
+        true
     }
 }
 
@@ -73,13 +161,40 @@ impl oso::PolarClass for Fleet {
     }
 }
 
-impl AuthzApiResource for Fleet {
-    fn db_resource(&self) -> Option<(ResourceType, Uuid)> {
-        Some((ResourceType::Fleet, *FLEET_ID))
+impl AuthorizedResource for Fleet {
+    fn load_roles<'a, 'b, 'c, 'd, 'e, 'f>(
+        &'a self,
+        opctx: &'b OpContext,
+        datastore: &'c DataStore,
+        authn: &'d authn::Context,
+        roleset: &'e mut RoleSet,
+    ) -> futures::future::BoxFuture<'f, Result<(), Error>>
+    where
+        'a: 'f,
+        'b: 'f,
+        'c: 'f,
+        'd: 'f,
+        'e: 'f,
+    {
+        load_roles_for_resource(
+            opctx,
+            datastore,
+            authn,
+            ResourceType::Fleet,
+            *FLEET_ID,
+            roleset,
+        )
+        .boxed()
     }
 
-    fn parent(&self) -> Option<Box<dyn AuthzResource>> {
-        None
+    fn on_unauthorized(
+        &self,
+        _: &Authz,
+        error: Error,
+        _: AnyActor,
+        _: Action,
+    ) -> Error {
+        error
     }
 }
 
@@ -97,13 +212,15 @@ impl AuthzApiResource for Fleet {
 // it, so if callers provided it, we'd have no way to test that it was correct.
 // If we wind up supporting attaching roles to these, then we could add a
 // resource type and id like we have with ProjectChild.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct FleetChild {}
+#[derive(Clone, Debug)]
+pub struct FleetChild {
+    resource_type: ResourceType,
+    lookup_type: LookupType,
+}
 
 impl oso::PolarClass for FleetChild {
     fn get_polar_class_builder() -> oso::ClassBuilder<Self> {
         oso::Class::builder()
-            .with_equality_check()
             .add_method(
                 "has_role",
                 /* Roles are not supported on FleetChilds today. */
@@ -113,13 +230,17 @@ impl oso::PolarClass for FleetChild {
     }
 }
 
-impl AuthzApiResource for FleetChild {
+impl ApiResource for FleetChild {
     fn db_resource(&self) -> Option<(ResourceType, Uuid)> {
         None
     }
 
-    fn parent(&self) -> Option<Box<dyn AuthzResource>> {
-        Some(Box::new(FLEET))
+    fn parent(&self) -> Option<&dyn AuthorizedResource> {
+        Some(&FLEET)
+    }
+
+    fn not_found(&self) -> Error {
+        self.lookup_type.clone().into_not_found(self.resource_type)
     }
 }
 
@@ -131,9 +252,10 @@ impl AuthzApiResource for FleetChild {
 /// can perform authorization checks on children of the Organization (e.g.,
 /// Projects) using one of the methods below that return authz objects
 /// representing those children.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug)]
 pub struct Organization {
     organization_id: Uuid,
+    lookup_type: LookupType,
 }
 
 impl Organization {
@@ -145,8 +267,19 @@ impl Organization {
     }
 
     /// Returns an authz resource representing a child Project
-    pub fn project(&self, project_id: Uuid) -> Project {
-        Project { organization_id: self.organization_id, project_id }
+    pub fn project(
+        &self,
+        project_id: Uuid,
+        lookup_type: LookupType,
+    ) -> Project {
+        Project { parent: self.clone(), project_id, lookup_type }
+    }
+}
+
+impl Eq for Organization {}
+impl PartialEq for Organization {
+    fn eq(&self, other: &Self) -> bool {
+        self.organization_id == other.organization_id
     }
 }
 
@@ -168,13 +301,17 @@ impl oso::PolarClass for Organization {
     }
 }
 
-impl AuthzApiResource for Organization {
+impl ApiResource for Organization {
     fn db_resource(&self) -> Option<(ResourceType, Uuid)> {
         Some((ResourceType::Organization, self.organization_id))
     }
 
-    fn parent(&self) -> Option<Box<dyn AuthzResource>> {
-        Some(Box::new(Fleet {}))
+    fn parent(&self) -> Option<&dyn AuthorizedResource> {
+        Some(&FLEET)
+    }
+
+    fn not_found(&self) -> Error {
+        self.lookup_type.clone().into_not_found(ResourceType::Organization)
     }
 }
 
@@ -186,10 +323,11 @@ impl AuthzApiResource for Organization {
 /// perform authorization checks on children of the Project (e.g., Instances)
 /// using one of the methods below that return authz objects representing those
 /// children.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug)]
 pub struct Project {
-    organization_id: Uuid,
+    parent: Organization,
     project_id: Uuid,
+    lookup_type: LookupType,
 }
 
 impl Project {
@@ -204,13 +342,21 @@ impl Project {
         &self,
         resource_type: ResourceType,
         resource_id: Uuid,
+        lookup_type: LookupType,
     ) -> ProjectChild {
         ProjectChild {
-            organization_id: self.organization_id,
-            project_id: self.project_id,
+            parent: self.clone(),
             resource_type,
             resource_id,
+            lookup_type,
         }
+    }
+}
+
+impl Eq for Project {}
+impl PartialEq for Project {
+    fn eq(&self, other: &Self) -> bool {
+        self.project_id == other.project_id
     }
 }
 
@@ -228,19 +374,23 @@ impl oso::PolarClass for Project {
                     )
                 },
             )
-            .add_attribute_getter("organization", |p: &Project| Organization {
-                organization_id: p.organization_id,
+            .add_attribute_getter("organization", |p: &Project| {
+                p.parent.clone()
             })
     }
 }
 
-impl AuthzApiResource for Project {
+impl ApiResource for Project {
     fn db_resource(&self) -> Option<(ResourceType, Uuid)> {
         Some((ResourceType::Project, self.project_id))
     }
 
-    fn parent(&self) -> Option<Box<dyn AuthzResource>> {
-        Some(Box::new(Organization { organization_id: self.organization_id }))
+    fn parent(&self) -> Option<&dyn AuthorizedResource> {
+        Some(&self.parent)
+    }
+
+    fn not_found(&self) -> Error {
+        self.lookup_type.clone().into_not_found(ResourceType::Project)
     }
 }
 
@@ -253,12 +403,12 @@ impl AuthzApiResource for Project {
 /// this as the `resource` argument to
 /// [`crate::context::OpContext::authorize()`].  You construct one of these
 /// using [`Project::child_generic()`].
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug)]
 pub struct ProjectChild {
-    organization_id: Uuid,
-    project_id: Uuid,
+    parent: Project,
     resource_type: ResourceType,
     resource_id: Uuid,
+    lookup_type: LookupType,
 }
 
 impl ProjectChild {
@@ -270,7 +420,6 @@ impl ProjectChild {
 impl oso::PolarClass for ProjectChild {
     fn get_polar_class_builder() -> oso::ClassBuilder<Self> {
         oso::Class::builder()
-            .with_equality_check()
             .add_method(
                 "has_role",
                 |pr: &ProjectChild, actor: AuthenticatedActor, role: String| {
@@ -281,23 +430,23 @@ impl oso::PolarClass for ProjectChild {
                     )
                 },
             )
-            .add_attribute_getter("project", |pr: &ProjectChild| Project {
-                organization_id: pr.organization_id,
-                project_id: pr.project_id,
+            .add_attribute_getter("project", |pr: &ProjectChild| {
+                pr.parent.clone()
             })
     }
 }
 
-impl AuthzApiResource for ProjectChild {
+impl ApiResource for ProjectChild {
     fn db_resource(&self) -> Option<(ResourceType, Uuid)> {
         // We do not support assigning roles to children of Projects.
         None
     }
 
-    fn parent(&self) -> Option<Box<dyn AuthzResource>> {
-        Some(Box::new(Project {
-            project_id: self.project_id,
-            organization_id: self.organization_id,
-        }))
+    fn parent(&self) -> Option<&dyn AuthorizedResource> {
+        Some(&self.parent)
+    }
+
+    fn not_found(&self) -> Error {
+        self.lookup_type.clone().into_not_found(self.resource_type)
     }
 }

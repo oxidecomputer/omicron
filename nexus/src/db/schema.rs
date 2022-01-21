@@ -191,6 +191,8 @@ table! {
         port -> Int4,
 
         kind -> crate::db::model::DatasetKindEnum,
+
+        size_used -> Nullable<Int8>,
     }
 }
 
@@ -204,7 +206,7 @@ table! {
         disk_id -> Uuid,
 
         block_size -> Int8,
-        extent_size -> Int8,
+        blocks_per_extent -> Int8,
         extent_count -> Int8,
     }
 }

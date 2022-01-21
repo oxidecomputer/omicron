@@ -475,9 +475,17 @@ async fn test_projects_basic(cptestctx: &ControlPlaneTestContext) {
 
     /*
      * Attempt to create a project without authenticating or without privileges.
+     * TODO-security TODO-correctness One thing that's a little strange here: we
+     * currently return a 404 if you attempt to create a Project inside an
+     * Organization and you're not authorized to do that.  In an ideal world,
+     * we'd return a 403 if you can _see_ the Organization and a 404 if not.
+     * But we don't really know if you should be able to see the Organization.
+     * Right now, the only real way to tell that is if you have permissions on
+     * anything _inside_ the Organization, which is incredibly expensive to
+     * determine in general.
      */
     RequestBuilder::new(client, Method::POST, &projects_url)
-        .expect_status(Some(StatusCode::UNAUTHORIZED))
+        .expect_status(Some(StatusCode::NOT_FOUND))
         .body(Some(&project_create))
         .execute()
         .await
@@ -485,7 +493,7 @@ async fn test_projects_basic(cptestctx: &ControlPlaneTestContext) {
     NexusRequest::new(
         RequestBuilder::new(client, Method::POST, &projects_url)
             .body(Some(&project_create))
-            .expect_status(Some(StatusCode::FORBIDDEN)),
+            .expect_status(Some(StatusCode::NOT_FOUND)),
     )
     .authn_as(AuthnMode::UnprivilegedUser)
     .execute()

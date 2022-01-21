@@ -23,6 +23,7 @@ use uuid::Uuid;
  */
 pub struct SagaContext {
     nexus: Arc<Nexus>,
+    log: Logger,
 }
 
 impl fmt::Debug for SagaContext {
@@ -32,12 +33,12 @@ impl fmt::Debug for SagaContext {
 }
 
 impl SagaContext {
-    pub fn new(nexus: Arc<Nexus>) -> SagaContext {
-        SagaContext { nexus }
+    pub fn new(nexus: Arc<Nexus>, log: Logger) -> SagaContext {
+        SagaContext { nexus, log }
     }
 
     pub fn log(&self) -> &Logger {
-        self.nexus.log()
+        &self.log
     }
 
     /*

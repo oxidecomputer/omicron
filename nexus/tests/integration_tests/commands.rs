@@ -22,6 +22,7 @@ use omicron_test_utils::dev::test_cmds::EXIT_FAILURE;
 use omicron_test_utils::dev::test_cmds::EXIT_SUCCESS;
 use omicron_test_utils::dev::test_cmds::EXIT_USAGE;
 use openapiv3::OpenAPI;
+use std::collections::BTreeMap;
 use std::fs;
 use std::path::PathBuf;
 use subprocess::Exec;
@@ -139,11 +140,56 @@ fn test_nexus_openapi() {
     assert!(errors.is_empty(), "{}", errors.join("\n\n"));
 
     /*
+     * Construct a string that helps us identify the organization of tags and
+     * operations.
+     */
+    let mut ops_by_tag = BTreeMap::<String, Vec<(String, String)>>::new();
+    for (path, _, op) in spec.operations() {
+        /*
+         * Make sure each operation has exactly one tag. Note, we intentionally
+         * do this before validating the OpenAPI output as fixing an error here
+         * would necessitate refreshing the spec file again.
+         */
+        assert_eq!(
+            op.tags.len(),
+            1,
+            "operation '{}' has {} tags rather than 1",
+            op.operation_id.as_ref().unwrap(),
+            op.tags.len()
+        );
+
+        ops_by_tag
+            .entry(op.tags.first().unwrap().to_string())
+            .or_default()
+            .push((
+                op.operation_id.as_ref().unwrap().to_string(),
+                path.to_string(),
+            ));
+    }
+
+    let mut tags = String::new();
+    for (tag, mut ops) in ops_by_tag {
+        ops.sort();
+        tags.push_str(&format!(r#"API operations found with tag "{}""#, tag));
+        tags.push_str(&format!("\n{:40} {}\n", "OPERATION ID", "URL PATH"));
+        for (operation_id, path) in ops {
+            tags.push_str(&format!("{:40} {}\n", operation_id, path));
+        }
+        tags.push('\n');
+    }
+
+    /*
      * Confirm that the output hasn't changed. It's expected that we'll change
      * this file as the API evolves, but pay attention to the diffs to ensure
      * that the changes match your expectations.
      */
     assert_contents("../openapi/nexus.json", &stdout_text);
+
+    /*
+     * When this fails, verify that operations on which you're adding,
+     * renaming, or changing the tags are what you intend.
+     */
+    assert_contents("tests/output/nexus_tags.txt", &tags);
 }
 
 #[test]

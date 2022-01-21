@@ -2,9 +2,10 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+use nexus_test_utils::http_testing::{AuthnMode, NexusRequest};
 use omicron_nexus::external_api::views::Organization;
 
-use dropshot::test_util::{object_delete, object_get};
+use dropshot::test_util::object_delete;
 
 use http::method::Method;
 use http::StatusCode;
@@ -24,16 +25,51 @@ async fn test_organizations(cptestctx: &ControlPlaneTestContext) {
     create_organization(&client, &o1_name).await;
     create_organization(&client, &o2_name).await;
 
-    let o1_url = format!("/organizations/{}", o1_name);
     // Verify GET /organizations/{org} works
-    let organization: Organization = object_get(&client, &o1_url).await;
+    let o1_url = format!("/organizations/{}", o1_name);
+    let organization: Organization = NexusRequest::object_get(&client, &o1_url)
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .expect("failed to make request")
+        .parsed_body()
+        .unwrap();
     assert_eq!(organization.identity.name, o1_name);
 
+    // You should get a 404 if not authenticated.
+    NexusRequest::expect_failure(
+        &client,
+        StatusCode::NOT_FOUND,
+        Method::GET,
+        &o1_url,
+    )
+    .execute()
+    .await
+    .expect("failed to make request");
+
+    // Same if you're authenticated but not authorized to see it.
+    NexusRequest::expect_failure(
+        &client,
+        StatusCode::NOT_FOUND,
+        Method::GET,
+        &o1_url,
+    )
+    .authn_as(AuthnMode::UnprivilegedUser)
+    .execute()
+    .await
+    .expect("failed to make request");
+
     let o2_url = format!("/organizations/{}", o2_name);
-    let organization: Organization = object_get(&client, &o2_url).await;
+    let organization: Organization = NexusRequest::object_get(&client, &o2_url)
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .expect("failed to make request")
+        .parsed_body()
+        .unwrap();
     assert_eq!(organization.identity.name, o2_name);
 
-    // Verifying requesting a non-existent organization fails
+    // Verify requesting a non-existent organization fails
     client
         .make_request_error(
             Method::GET,
@@ -52,14 +88,48 @@ async fn test_organizations(cptestctx: &ControlPlaneTestContext) {
     assert_eq!(organizations[0].identity.name, o2_name);
     assert_eq!(organizations[1].identity.name, o1_name);
 
+    // You should get a 404 if you attempt to delete an organization if you are
+    // unauthenticated or unauthorized.
+    NexusRequest::expect_failure(
+        &client,
+        StatusCode::NOT_FOUND,
+        Method::DELETE,
+        &o1_url,
+    )
+    .execute()
+    .await
+    .expect("failed to make request");
+
+    NexusRequest::expect_failure(
+        &client,
+        StatusCode::NOT_FOUND,
+        Method::DELETE,
+        &o1_url,
+    )
+    .authn_as(AuthnMode::UnprivilegedUser)
+    .execute()
+    .await
+    .expect("failed to make request");
+
     // Verify DELETE /organization/{org} works
     let o1_old_id = organizations[1].identity.id;
-    object_delete(&client, &o1_url).await;
+    NexusRequest::object_delete(&client, &o1_url)
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .expect("failed to make request");
 
     // Verify the org now returns a 404
-    client
-        .make_request_error(Method::GET, &o1_url, StatusCode::NOT_FOUND)
-        .await;
+    NexusRequest::expect_failure(
+        &client,
+        StatusCode::NOT_FOUND,
+        Method::GET,
+        &o1_url,
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .expect("failed to make request");
 
     // Verify the org is gone from the organizations list
     let organizations =
@@ -71,7 +141,13 @@ async fn test_organizations(cptestctx: &ControlPlaneTestContext) {
 
     // Verify the org's name can be reused
     create_organization(&client, &o1_name).await;
-    let organization: Organization = object_get(&client, &o1_url).await;
+    let organization: Organization = NexusRequest::object_get(&client, &o1_url)
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .expect("failed to make request")
+        .parsed_body()
+        .unwrap();
     assert_eq!(organization.identity.name, o1_name);
     // It should have a different UUID now
     assert_ne!(organization.identity.id, o1_old_id);
@@ -80,11 +156,22 @@ async fn test_organizations(cptestctx: &ControlPlaneTestContext) {
     let project_name = "p1";
     let project_url = format!("{}/projects/{}", o2_url, project_name);
     create_project(&client, &o2_name, &project_name).await;
-    client
-        .make_request_error(Method::DELETE, &o2_url, StatusCode::BAD_REQUEST)
-        .await;
+    NexusRequest::expect_failure(
+        &client,
+        StatusCode::BAD_REQUEST,
+        Method::DELETE,
+        &o2_url,
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .expect("failed to make request");
 
     // Delete the project, then delete the organization
     object_delete(&client, &project_url).await;
-    object_delete(&client, &o2_url).await;
+    NexusRequest::object_delete(&client, &o2_url)
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .expect("failed to make request");
 }

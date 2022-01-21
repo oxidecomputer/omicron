@@ -40,7 +40,10 @@ use async_bb8_diesel::{
     PoolError,
 };
 use chrono::Utc;
+use diesel::pg::Pg;
 use diesel::prelude::*;
+use diesel::query_builder::{QueryFragment, QueryId};
+use diesel::query_dsl::methods::LoadQuery;
 use diesel::upsert::excluded;
 use diesel::{ExpressionMethods, QueryDsl, SelectableHelper};
 use omicron_common::api;
@@ -85,6 +88,27 @@ use crate::db::{
 // TODO: This should likely turn into a configuration option.
 const REGION_REDUNDANCY_THRESHOLD: usize = 3;
 
+// Represents a query that is ready to be executed.
+//
+// This helper trait lets the statement either be executed or explained.
+//
+// U: The output type of executing the statement.
+trait RunnableQuery<U>:
+    RunQueryDsl<DbConnection>
+    + QueryFragment<Pg>
+    + LoadQuery<DbConnection, U>
+    + QueryId
+{
+}
+
+impl<U, T> RunnableQuery<U> for T where
+    T: RunQueryDsl<DbConnection>
+        + QueryFragment<Pg>
+        + LoadQuery<DbConnection, U>
+        + QueryId
+{
+}
+
 pub struct DataStore {
     pool: Arc<Pool>,
 }
@@ -107,7 +131,7 @@ impl DataStore {
         &self,
         opctx: &OpContext,
     ) -> Result<&bb8::Pool<ConnectionManager<DbConnection>>, Error> {
-        opctx.authorize(authz::Action::Query, authz::DATABASE).await?;
+        opctx.authorize(authz::Action::Query, &authz::DATABASE).await?;
         Ok(self.pool.pool())
     }
 
@@ -242,15 +266,9 @@ impl DataStore {
         })
     }
 
-    /// Gets allocated regions for a disk, and the datasets to which those
-    /// regions belong.
-    ///
-    /// Note that this function does not validate liveness of the Disk, so it
-    /// may be used in a context where the disk is being deleted.
-    pub async fn get_allocated_regions(
-        &self,
+    fn get_allocated_regions_query(
         disk_id: Uuid,
-    ) -> Result<Vec<(Dataset, Region)>, Error> {
+    ) -> impl RunnableQuery<(Dataset, Region)> {
         use db::schema::dataset::dsl as dataset_dsl;
         use db::schema::region::dsl as region_dsl;
         region_dsl::region
@@ -260,9 +278,41 @@ impl DataStore {
                     .on(region_dsl::dataset_id.eq(dataset_dsl::id)),
             )
             .select((Dataset::as_select(), Region::as_select()))
+    }
+
+    /// Gets allocated regions for a disk, and the datasets to which those
+    /// regions belong.
+    ///
+    /// Note that this function does not validate liveness of the Disk, so it
+    /// may be used in a context where the disk is being deleted.
+    pub async fn get_allocated_regions(
+        &self,
+        disk_id: Uuid,
+    ) -> Result<Vec<(Dataset, Region)>, Error> {
+        Self::get_allocated_regions_query(disk_id)
             .get_results_async::<(Dataset, Region)>(self.pool())
             .await
             .map_err(|e| public_error_from_diesel_pool_shouldnt_fail(e))
+    }
+
+    fn get_allocatable_datasets_query() -> impl RunnableQuery<Dataset> {
+        use db::schema::dataset::dsl;
+
+        dsl::dataset
+            // We look for valid datasets (non-deleted crucible datasets).
+            .filter(dsl::size_used.is_not_null())
+            .filter(dsl::time_deleted.is_null())
+            .filter(dsl::kind.eq(DatasetKind(
+                crate::internal_api::params::DatasetKind::Crucible,
+            )))
+            .order(dsl::size_used.asc())
+            // TODO: We admittedly don't actually *fail* any request for
+            // running out of space - we try to send the request down to
+            // crucible agents, and expect them to fail on our behalf in
+            // out-of-storage conditions. This should undoubtedly be
+            // handled more explicitly.
+            .select(Dataset::as_select())
+            .limit(REGION_REDUNDANCY_THRESHOLD.try_into().unwrap())
     }
 
     /// Idempotently allocates enough regions to back a disk.
@@ -310,49 +360,17 @@ impl DataStore {
                 //
                 // If they are, return those regions and the associated
                 // datasets.
-                let datasets_and_regions = region_dsl::region
-                    .filter(region_dsl::disk_id.eq(disk_id))
-                    .inner_join(
-                        dataset_dsl::dataset
-                            .on(region_dsl::dataset_id.eq(dataset_dsl::id)),
-                    )
-                    .select((Dataset::as_select(), Region::as_select()))
-                    .get_results::<(Dataset, Region)>(conn)?;
+                let datasets_and_regions = Self::get_allocated_regions_query(
+                    disk_id,
+                )
+                .get_results::<(Dataset, Region)>(conn)?;
                 if !datasets_and_regions.is_empty() {
                     return Ok(datasets_and_regions);
                 }
 
-                let datasets: Vec<Dataset> = dataset_dsl::dataset
-                    // We look for valid datasets (non-deleted crucible datasets).
-                    .filter(dataset_dsl::time_deleted.is_null())
-                    .filter(dataset_dsl::kind.eq(DatasetKind(
-                        crate::internal_api::params::DatasetKind::Crucible,
-                    )))
-                    // Next, observe all the regions allocated to each dataset, and
-                    // determine how much space they're using.
-                    //
-                    // TODO: We could store "free/allocated" space per-dataset,
-                    // and keep them up-to-date, rather than trying to recompute
-                    // this.
-                    //
-                    // TODO: We admittedly don't actually *fail* any request for
-                    // running out of space - we try to send the request down to
-                    // crucible agents, and expect them to fail on our behalf in
-                    // out-of-storage conditions. This should undoubtedly be
-                    // handled more explicitly.
-                    .left_outer_join(
-                        region_dsl::region
-                            .on(dataset_dsl::id.eq(region_dsl::dataset_id)),
-                    )
-                    .group_by(dataset_dsl::id)
-                    .select(Dataset::as_select())
-                    .order(
-                        diesel::dsl::sum(
-                            region_dsl::extent_size * region_dsl::extent_count,
-                        )
-                        .asc(),
-                    )
-                    .get_results::<Dataset>(conn)?;
+                let mut datasets: Vec<Dataset> =
+                    Self::get_allocatable_datasets_query()
+                        .get_results::<Dataset>(conn)?;
 
                 if datasets.len() < REGION_REDUNDANCY_THRESHOLD {
                     return Err(TxnError::CustomError(
@@ -361,16 +379,17 @@ impl DataStore {
                 }
 
                 // Create identical regions on each of the following datasets.
-                let source_datasets = &datasets[0..REGION_REDUNDANCY_THRESHOLD];
+                let source_datasets =
+                    &mut datasets[0..REGION_REDUNDANCY_THRESHOLD];
                 let regions: Vec<Region> = source_datasets
                     .iter()
                     .map(|dataset| {
                         Region::new(
                             dataset.id(),
                             disk_id,
-                            params.block_size().try_into().unwrap(),
-                            params.extent_size().try_into().unwrap(),
-                            params.extent_count().try_into().unwrap(),
+                            params.block_size().into(),
+                            params.blocks_per_extent(),
+                            params.extent_count(),
                         )
                     })
                     .collect();
@@ -378,6 +397,26 @@ impl DataStore {
                     .values(regions)
                     .returning(Region::as_returning())
                     .get_results(conn)?;
+
+                // Update the tallied sizes in the source datasets containing
+                // those regions.
+                let region_size = i64::from(params.block_size())
+                    * params.blocks_per_extent()
+                    * params.extent_count();
+                for dataset in source_datasets.iter_mut() {
+                    dataset.size_used =
+                        dataset.size_used.map(|v| v + region_size);
+                }
+
+                let dataset_ids: Vec<Uuid> =
+                    source_datasets.iter().map(|ds| ds.id()).collect();
+                diesel::update(dataset_dsl::dataset)
+                    .filter(dataset_dsl::id.eq_any(dataset_ids))
+                    .set(
+                        dataset_dsl::size_used
+                            .eq(dataset_dsl::size_used + region_size),
+                    )
+                    .execute(conn)?;
 
                 // Return the regions with the datasets to which they were allocated.
                 Ok(source_datasets
@@ -393,20 +432,44 @@ impl DataStore {
     }
 
     /// Deletes all regions backing a disk.
+    ///
+    /// Also updates the storage usage on their corresponding datasets.
     pub async fn regions_hard_delete(&self, disk_id: Uuid) -> DeleteResult {
-        use db::schema::region::dsl;
+        use db::schema::dataset::dsl as dataset_dsl;
+        use db::schema::region::dsl as region_dsl;
 
-        diesel::delete(dsl::region)
-            .filter(dsl::disk_id.eq(disk_id))
-            .execute_async(self.pool())
+        // Remove the regions, collecting datasets they're from.
+        let (dataset_id, size) = diesel::delete(region_dsl::region)
+            .filter(region_dsl::disk_id.eq(disk_id))
+            .returning((
+                region_dsl::dataset_id,
+                region_dsl::block_size
+                    * region_dsl::blocks_per_extent
+                    * region_dsl::extent_count,
+            ))
+            .get_result_async::<(Uuid, i64)>(self.pool())
             .await
-            .map(|_| ())
             .map_err(|e| {
                 Error::internal_error(&format!(
                     "error deleting regions: {:?}",
                     e
                 ))
-            })
+            })?;
+
+        // Update those datasets to which the regions belonged.
+        diesel::update(dataset_dsl::dataset)
+            .filter(dataset_dsl::id.eq(dataset_id))
+            .set(dataset_dsl::size_used.eq(dataset_dsl::size_used - size))
+            .execute_async(self.pool())
+            .await
+            .map_err(|e| {
+                Error::internal_error(&format!(
+                    "error updating dataset space: {:?}",
+                    e
+                ))
+            })?;
+
+        Ok(())
     }
 
     /// Create a organization
@@ -417,7 +480,7 @@ impl DataStore {
     ) -> CreateResult<Organization> {
         use db::schema::organization::dsl;
 
-        opctx.authorize(authz::Action::CreateChild, authz::FLEET).await?;
+        opctx.authorize(authz::Action::CreateChild, &authz::FLEET).await?;
 
         let name = organization.name().as_str().to_string();
         diesel::insert_into(dsl::organization)
@@ -434,17 +497,45 @@ impl DataStore {
             })
     }
 
-    /// Lookup a organization by name.
-    pub async fn organization_fetch(
+    /// Fetches an Organization from the database and returns both the database
+    /// row and an authz::Organization for doing authz checks
+    ///
+    /// There are a few different ways this can be used:
+    ///
+    /// * If a code path wants to use anything in the database row _aside_ from
+    ///   the id, it should do an authz check for `authz::Action::Read` on the
+    ///   returned [`authz::Organization`].  `organization_fetch()` does this,
+    ///   for example.
+    /// * If a code path is only doing this lookup to get the id so that it can
+    ///   look up something else inside the Organization, then the database
+    ///   record is not record -- and neither is an authz check on the
+    ///   Organization.  Callers usually use `organization_lookup_id()` for
+    ///   this.  That function does not expose the database row to the caller.
+    ///
+    ///   Callers in this bucket should still do _some_ authz check.  Clients
+    ///   must not be able to discover whether an Organization exists with a
+    ///   particular name.  It's just that we don't know at this point whether
+    ///   they're allowed to see the Organization.  It depends on whether, as we
+    ///   look up things inside the Organization, we find something that they
+    ///   _are_ able to see.
+    ///
+    /// **This is an internal-only function.** This function cannot know what
+    /// authz checks are required.  As a result, it should not be made
+    /// accessible outside the DataStore.  It should always be wrapped by
+    /// something that does the appropriate authz check.
+    // TODO-security We should refactor things so that it's harder to
+    // accidentally mark this "pub" or otherwise expose database data without
+    // doing an authz check.
+    async fn organization_lookup_noauthz(
         &self,
         name: &Name,
-    ) -> LookupResult<Organization> {
+    ) -> LookupResult<(authz::Organization, Organization)> {
         use db::schema::organization::dsl;
         dsl::organization
             .filter(dsl::time_deleted.is_null())
             .filter(dsl::name.eq(name.clone()))
             .select(Organization::as_select())
-            .first_async::<Organization>(self.pool())
+            .get_result_async::<Organization>(self.pool())
             .await
             .map_err(|e| {
                 public_error_from_diesel_pool(
@@ -453,10 +544,48 @@ impl DataStore {
                     LookupType::ByName(name.as_str().to_owned()),
                 )
             })
+            .map(|o| {
+                (
+                    authz::FLEET
+                        .organization(o.id(), LookupType::from(&name.0)),
+                    o,
+                )
+            })
+    }
+
+    /// Look up the id for an organization based on its name
+    ///
+    /// Returns an [`authz::Organization`] (which makes the id available).
+    ///
+    /// This function does no authz checks because it is not possible to know
+    /// just by looking up an Organization's id what privileges are required.
+    pub async fn organization_lookup_id(
+        &self,
+        name: &Name,
+    ) -> LookupResult<authz::Organization> {
+        self.organization_lookup_noauthz(name).await.map(|(o, _)| o)
+    }
+
+    /// Lookup an organization by name.
+    pub async fn organization_fetch(
+        &self,
+        opctx: &OpContext,
+        name: &Name,
+    ) -> LookupResult<(authz::Organization, Organization)> {
+        let (authz_org, db_org) =
+            self.organization_lookup_noauthz(name).await?;
+        // TODO-security See the note in authz::authorize().  This needs to
+        // return a 404, not a 403.
+        opctx.authorize(authz::Action::Read, &authz_org).await?;
+        Ok((authz_org, db_org))
     }
 
     /// Delete a organization
-    pub async fn organization_delete(&self, name: &Name) -> DeleteResult {
+    pub async fn organization_delete(
+        &self,
+        opctx: &OpContext,
+        name: &Name,
+    ) -> DeleteResult {
         use db::schema::organization::dsl;
         use db::schema::project;
 
@@ -473,6 +602,12 @@ impl DataStore {
                     LookupType::ByName(name.as_str().to_owned()),
                 )
             })?;
+
+        // TODO-cleanup TODO-security This should use a more common lookup
+        // function.
+        let authz_org =
+            authz::FLEET.organization(id, LookupType::from(&name.0));
+        opctx.authorize(authz::Action::Delete, &authz_org).await?;
 
         // Make sure there are no projects present within this organization.
         let project_found = diesel_pool_result_optional(
@@ -523,46 +658,13 @@ impl DataStore {
         Ok(())
     }
 
-    /// Look up an organization by name
-    pub async fn organization_lookup(
-        &self,
-        name: &Name,
-    ) -> Result<authz::Organization, Error> {
-        use db::schema::organization::dsl;
-        dsl::organization
-            .filter(dsl::time_deleted.is_null())
-            .filter(dsl::name.eq(name.clone()))
-            .select(dsl::id)
-            .get_result_async::<Uuid>(self.pool())
-            .await
-            .map_err(|e| {
-                public_error_from_diesel_pool(
-                    e,
-                    ResourceType::Organization,
-                    LookupType::ByName(name.as_str().to_owned()),
-                )
-            })
-            .map(|o| authz::FLEET.organization(o))
-    }
-
-    /// Look up the id for a organization based on its name
-    ///
-    /// As endpoints move to doing authorization, they should move to
-    /// [`organization_lookup()`] instead of this function.
-    pub async fn organization_lookup_id_by_name(
-        &self,
-        name: &Name,
-    ) -> Result<Uuid, Error> {
-        self.organization_lookup(name).await.map(|o| o.id())
-    }
-
     pub async fn organizations_list_by_id(
         &self,
         opctx: &OpContext,
         pagparams: &DataPageParams<'_, Uuid>,
     ) -> ListResultVec<Organization> {
         use db::schema::organization::dsl;
-        opctx.authorize(authz::Action::ListChildren, authz::FLEET).await?;
+        opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
         paginated(dsl::organization, dsl::id, pagparams)
             .filter(dsl::time_deleted.is_null())
             .select(Organization::as_select())
@@ -583,7 +685,7 @@ impl DataStore {
         pagparams: &DataPageParams<'_, Name>,
     ) -> ListResultVec<Organization> {
         use db::schema::organization::dsl;
-        opctx.authorize(authz::Action::ListChildren, authz::FLEET).await?;
+        opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
         paginated(dsl::organization, dsl::name, pagparams)
             .filter(dsl::time_deleted.is_null())
             .select(Organization::as_select())
@@ -601,17 +703,21 @@ impl DataStore {
     /// Updates a organization by name (clobbering update -- no etag)
     pub async fn organization_update(
         &self,
+        opctx: &OpContext,
         name: &Name,
         updates: OrganizationUpdate,
     ) -> UpdateResult<Organization> {
         use db::schema::organization::dsl;
 
+        let (authz_org, _) = self.organization_lookup_noauthz(name).await?;
+        opctx.authorize(authz::Action::Modify, &authz_org).await?;
+
         diesel::update(dsl::organization)
             .filter(dsl::time_deleted.is_null())
-            .filter(dsl::name.eq(name.clone()))
+            .filter(dsl::id.eq(authz_org.id()))
             .set(updates)
             .returning(Organization::as_returning())
-            .get_result_async(self.pool())
+            .get_result_async(self.pool_authorized(opctx).await?)
             .await
             .map_err(|e| {
                 public_error_from_diesel_pool(
@@ -631,7 +737,7 @@ impl DataStore {
     ) -> CreateResult<Project> {
         use db::schema::project::dsl;
 
-        opctx.authorize(authz::Action::CreateChild, *org).await?;
+        opctx.authorize(authz::Action::CreateChild, org).await?;
 
         let name = project.name().as_str().to_string();
         let organization_id = project.organization_id;
@@ -1178,20 +1284,10 @@ impl DataStore {
             })
     }
 
-    pub async fn project_delete_disk(
-        &self,
-        opctx: &OpContext,
-        disk_authz: authz::ProjectChild,
-    ) -> DeleteResult {
-        let disk_id = disk_authz.id();
-        opctx.authorize(authz::Action::Delete, disk_authz).await?;
-        self.project_delete_disk_internal(
-            disk_id,
-            self.pool_authorized(opctx).await?,
-        )
-        .await
-    }
-
+    /// Updates a disk record to indicate it has been deleted.
+    ///
+    /// Does not attempt to modify any resources (e.g. regions) which may
+    /// belong to the disk.
     // TODO: Delete me (this function, not the disk!), ensure all datastore
     // access is auth-checked.
     //
@@ -1212,16 +1308,9 @@ impl DataStore {
     pub async fn project_delete_disk_no_auth(
         &self,
         disk_id: &Uuid,
-    ) -> DeleteResult {
-        self.project_delete_disk_internal(disk_id, self.pool()).await
-    }
-
-    async fn project_delete_disk_internal(
-        &self,
-        disk_id: &Uuid,
-        pool: &bb8::Pool<ConnectionManager<DbConnection>>,
-    ) -> DeleteResult {
+    ) -> Result<(), Error> {
         use db::schema::disk::dsl;
+        let pool = self.pool();
         let now = Utc::now();
 
         let ok_to_delete_states = vec![
@@ -1254,12 +1343,20 @@ impl DataStore {
         match result.status {
             UpdateStatus::Updated => Ok(()),
             UpdateStatus::NotUpdatedButExists => {
-                let disk_state = result.found.state();
-                if !ok_to_delete_states.contains(disk_state.state()) {
+                let disk = result.found;
+                let disk_state = disk.state();
+                if disk.time_deleted().is_some()
+                    && disk_state.state()
+                        == &api::external::DiskState::Destroyed
+                {
+                    // To maintain idempotency, if the disk has already been
+                    // destroyed, don't throw an error.
+                    return Ok(());
+                } else if !ok_to_delete_states.contains(disk_state.state()) {
                     return Err(Error::InvalidRequest {
                         message: format!(
                             "disk cannot be deleted in state \"{}\"",
-                            result.found.runtime_state.disk_state
+                            disk.runtime_state.disk_state
                         ),
                     });
                 } else if disk_state.is_attached() {
@@ -1269,8 +1366,8 @@ impl DataStore {
                 } else {
                     // NOTE: This is a "catch-all" error case, more specific
                     // errors should be preferred as they're more actionable.
-                    return Err(Error::InvalidRequest {
-                        message: String::from(
+                    return Err(Error::InternalError {
+                        internal_message: String::from(
                             "disk exists, but cannot be deleted",
                         ),
                     });
@@ -2316,7 +2413,7 @@ impl DataStore {
         pagparams: &DataPageParams<'_, Name>,
     ) -> ListResultVec<UserBuiltin> {
         use db::schema::user_builtin::dsl;
-        opctx.authorize(authz::Action::ListChildren, authz::FLEET).await?;
+        opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
         paginated(dsl::user_builtin, dsl::name, pagparams)
             .select(UserBuiltin::as_select())
             .load_async::<UserBuiltin>(self.pool_authorized(opctx).await?)
@@ -2337,7 +2434,13 @@ impl DataStore {
     ) -> LookupResult<UserBuiltin> {
         use db::schema::user_builtin::dsl;
         opctx
-            .authorize(authz::Action::Read, authz::FLEET.child_generic())
+            .authorize(
+                authz::Action::Read,
+                &authz::FLEET.child_generic(
+                    ResourceType::User,
+                    LookupType::from(&name.0),
+                ),
+            )
             .await?;
         dsl::user_builtin
             .filter(dsl::name.eq(name.clone()))
@@ -2360,7 +2463,7 @@ impl DataStore {
     ) -> Result<(), Error> {
         use db::schema::user_builtin::dsl;
 
-        opctx.authorize(authz::Action::Modify, authz::DATABASE).await?;
+        opctx.authorize(authz::Action::Modify, &authz::DATABASE).await?;
 
         let builtin_users = [
             // Note: "db_init" is also a builtin user, but that one by necessity
@@ -2402,7 +2505,7 @@ impl DataStore {
         pagparams: &DataPageParams<'_, (String, String)>,
     ) -> ListResultVec<RoleBuiltin> {
         use db::schema::role_builtin::dsl;
-        opctx.authorize(authz::Action::ListChildren, authz::FLEET).await?;
+        opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
         paginated_multicolumn(
             dsl::role_builtin,
             (dsl::resource_type, dsl::role_name),
@@ -2427,7 +2530,11 @@ impl DataStore {
     ) -> LookupResult<RoleBuiltin> {
         use db::schema::role_builtin::dsl;
         opctx
-            .authorize(authz::Action::Read, authz::FLEET.child_generic())
+            .authorize(
+                authz::Action::Read,
+                &authz::FLEET
+                    .child_generic(ResourceType::Role, LookupType::from(name)),
+            )
             .await?;
 
         let (resource_type, role_name) =
@@ -2458,7 +2565,7 @@ impl DataStore {
     ) -> Result<(), Error> {
         use db::schema::role_builtin::dsl;
 
-        opctx.authorize(authz::Action::Modify, authz::DATABASE).await?;
+        opctx.authorize(authz::Action::Modify, &authz::DATABASE).await?;
 
         let builtin_roles = BUILTIN_ROLES
             .iter()
@@ -2491,7 +2598,7 @@ impl DataStore {
     ) -> Result<(), Error> {
         use db::schema::role_assignment_builtin::dsl;
 
-        opctx.authorize(authz::Action::Modify, authz::DATABASE).await?;
+        opctx.authorize(authz::Action::Modify, &authz::DATABASE).await?;
 
         // The built-in "test-privileged" user gets the "fleet admin" role.
         debug!(opctx.log, "attempting to create built-in role assignments");
@@ -2579,13 +2686,14 @@ pub async fn datastore_test(
 mod test {
     use super::*;
     use crate::authz;
+    use crate::db::explain::ExplainableAsync;
     use crate::db::identity::Resource;
     use crate::db::model::{ConsoleSession, Organization, Project};
     use crate::external_api::params;
     use chrono::{Duration, Utc};
     use nexus_test_utils::db::test_setup_database;
     use omicron_common::api::external::{
-        ByteCount, Error, IdentityMetadataCreateParams, Name,
+        ByteCount, Error, IdentityMetadataCreateParams, LookupType, Name,
     };
     use omicron_test_utils::dev;
     use std::collections::HashSet;
@@ -2616,10 +2724,15 @@ mod test {
                 },
             },
         );
-        let org = authz::FLEET.organization(organization.id());
+        let org = authz::FLEET.organization(
+            organization.id(),
+            LookupType::ById(organization.id()),
+        );
         datastore.project_create(&opctx, &org, project).await.unwrap();
-        let organization_after_project_create =
-            datastore.organization_fetch(organization.name()).await.unwrap();
+        let (_, organization_after_project_create) = datastore
+            .organization_fetch(&opctx, organization.name())
+            .await
+            .unwrap();
         assert!(organization_after_project_create.rcgen > organization.rcgen);
 
         db.cleanup().await.unwrap();
@@ -2690,6 +2803,10 @@ mod test {
         sled_id
     }
 
+    fn test_zpool_size() -> ByteCount {
+        ByteCount::from_gibibytes_u32(100)
+    }
+
     // Creates a test zpool, returns its UUID.
     async fn create_test_zpool(datastore: &DataStore, sled_id: Uuid) -> Uuid {
         let zpool_id = Uuid::new_v4();
@@ -2697,7 +2814,7 @@ mod test {
             zpool_id,
             sled_id,
             &crate::internal_api::params::ZpoolPutRequest {
-                size: ByteCount::from_gibibytes_u32(100),
+                size: test_zpool_size(),
             },
         );
         datastore.zpool_upsert(zpool).await.unwrap();
@@ -2751,17 +2868,19 @@ mod test {
             ByteCount::from_mebibytes_u32(500),
         );
         let disk1_id = Uuid::new_v4();
+        // Currently, we only allocate one Region Set per disk.
+        let expected_region_count = REGION_REDUNDANCY_THRESHOLD;
         let dataset_and_regions =
             datastore.region_allocate(disk1_id, &params).await.unwrap();
 
         // Verify the allocation.
-        assert_eq!(REGION_REDUNDANCY_THRESHOLD, dataset_and_regions.len());
+        assert_eq!(expected_region_count, dataset_and_regions.len());
         let mut disk1_datasets = HashSet::new();
         for (dataset, region) in dataset_and_regions {
             assert!(disk1_datasets.insert(dataset.id()));
             assert_eq!(disk1_id, region.disk_id());
             assert_eq!(params.block_size(), region.block_size());
-            assert_eq!(params.extent_size(), region.extent_size());
+            assert_eq!(params.blocks_per_extent(), region.blocks_per_extent());
             assert_eq!(params.extent_count(), region.extent_count());
         }
 
@@ -2774,13 +2893,13 @@ mod test {
         let disk2_id = Uuid::new_v4();
         let dataset_and_regions =
             datastore.region_allocate(disk2_id, &params).await.unwrap();
-        assert_eq!(REGION_REDUNDANCY_THRESHOLD, dataset_and_regions.len());
+        assert_eq!(expected_region_count, dataset_and_regions.len());
         let mut disk2_datasets = HashSet::new();
         for (dataset, region) in dataset_and_regions {
             assert!(disk2_datasets.insert(dataset.id()));
             assert_eq!(disk2_id, region.disk_id());
             assert_eq!(params.block_size(), region.block_size());
-            assert_eq!(params.extent_size(), region.extent_size());
+            assert_eq!(params.blocks_per_extent(), region.blocks_per_extent());
             assert_eq!(params.extent_count(), region.extent_count());
         }
 
@@ -2891,6 +3010,85 @@ mod test {
         assert!(err
             .to_string()
             .contains("Not enough datasets for replicated allocation"));
+
+        let _ = db.cleanup().await;
+    }
+
+    // TODO: This test should be updated when the correct handling
+    // of this out-of-space case is implemented.
+    #[tokio::test]
+    async fn test_region_allocation_out_of_space_does_not_fail_yet() {
+        let logctx = dev::test_setup_log(
+            "test_region_allocation_out_of_space_does_not_fail_yet",
+        );
+        let mut db = test_setup_database(&logctx.log).await;
+        let cfg = db::Config { url: db.pg_config().clone() };
+        let pool = db::Pool::new(&cfg);
+        let datastore = DataStore::new(Arc::new(pool));
+
+        // Create a sled...
+        let sled_id = create_test_sled(&datastore).await;
+
+        // ... and a zpool within that sled...
+        let zpool_id = create_test_zpool(&datastore, sled_id).await;
+
+        // ... and datasets within that zpool.
+        let dataset_count = REGION_REDUNDANCY_THRESHOLD;
+        let bogus_addr =
+            SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 8080);
+        let kind =
+            DatasetKind(crate::internal_api::params::DatasetKind::Crucible);
+        let dataset_ids: Vec<Uuid> =
+            (0..dataset_count).map(|_| Uuid::new_v4()).collect();
+        for id in &dataset_ids {
+            let dataset = Dataset::new(*id, zpool_id, bogus_addr, kind.clone());
+            datastore.dataset_upsert(dataset).await.unwrap();
+        }
+
+        // Allocate regions from the datasets for this disk.
+        //
+        // Note that we ask for a disk which is as large as the zpool,
+        // so we shouldn't have space for redundancy.
+        let disk_size = test_zpool_size();
+        let params = create_test_disk_create_params("disk1", disk_size);
+        let disk1_id = Uuid::new_v4();
+
+        // NOTE: This *should* be an error, rather than succeeding.
+        datastore.region_allocate(disk1_id, &params).await.unwrap();
+
+        let _ = db.cleanup().await;
+    }
+
+    // Validate that queries which should be executable without a full table
+    // scan are, in fact, runnable without a FULL SCAN.
+    #[tokio::test]
+    async fn test_queries_do_not_require_full_table_scan() {
+        let logctx =
+            dev::test_setup_log("test_queries_do_not_require_full_table_scan");
+        let mut db = test_setup_database(&logctx.log).await;
+        let cfg = db::Config { url: db.pg_config().clone() };
+        let pool = db::Pool::new(&cfg);
+        let datastore = DataStore::new(Arc::new(pool));
+
+        let explanation = DataStore::get_allocated_regions_query(Uuid::nil())
+            .explain_async(datastore.pool())
+            .await
+            .unwrap();
+        assert!(
+            !explanation.contains("FULL SCAN"),
+            "Found an unexpected FULL SCAN: {}",
+            explanation
+        );
+
+        let explanation = DataStore::get_allocatable_datasets_query()
+            .explain_async(datastore.pool())
+            .await
+            .unwrap();
+        assert!(
+            !explanation.contains("FULL SCAN"),
+            "Found an unexpected FULL SCAN: {}",
+            explanation
+        );
 
         let _ = db.cleanup().await;
     }

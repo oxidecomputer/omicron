@@ -249,26 +249,16 @@ impl From<&omicron_common::api::external::NetworkInterface>
 {
     fn from(s: &omicron_common::api::external::NetworkInterface) -> Self {
         Self {
-            identity: (&s.identity).into(),
+            description: s.identity.description.clone(),
+            id: s.identity.id,
+            name: (&s.identity.name).into(),
+            time_created: s.identity.time_created,
+            time_modified: s.identity.time_modified,
             ip: s.ip.to_string(),
             instance_id: s.instance_id,
             mac: s.mac.into(),
             subnet_id: s.subnet_id,
             vpc_id: s.vpc_id,
-        }
-    }
-}
-
-impl From<&omicron_common::api::external::IdentityMetadata>
-    for types::IdentityMetadata
-{
-    fn from(s: &omicron_common::api::external::IdentityMetadata) -> Self {
-        Self {
-            description: s.description.clone(),
-            id: s.id,
-            name: (&s.name).into(),
-            time_created: s.time_created,
-            time_modified: s.time_modified,
         }
     }
 }

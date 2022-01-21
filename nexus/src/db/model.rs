@@ -144,7 +144,14 @@ where
 }
 
 #[derive(
-    Copy, Clone, Debug, AsExpression, FromSqlRow, Serialize, Deserialize,
+    Copy,
+    Clone,
+    Debug,
+    AsExpression,
+    FromSqlRow,
+    Serialize,
+    Deserialize,
+    PartialEq,
 )]
 #[sql_type = "sql_types::BigInt"]
 pub struct ByteCount(pub external::ByteCount);
@@ -161,7 +168,7 @@ where
         &self,
         out: &mut serialize::Output<W, DB>,
     ) -> serialize::Result {
-        i64::from(&self.0).to_sql(out)
+        i64::from(self.0).to_sql(out)
     }
 }
 
@@ -565,6 +572,7 @@ pub struct Dataset {
     port: i32,
 
     kind: DatasetKind,
+    pub size_used: Option<i64>,
 }
 
 impl Dataset {
@@ -574,6 +582,10 @@ impl Dataset {
         addr: SocketAddr,
         kind: DatasetKind,
     ) -> Self {
+        let size_used = match kind {
+            DatasetKind(internal_api::params::DatasetKind::Crucible) => Some(0),
+            _ => None,
+        };
         Self {
             identity: DatasetIdentity::new(id),
             time_deleted: None,
@@ -582,6 +594,7 @@ impl Dataset {
             ip: addr.ip().into(),
             port: addr.port().into(),
             kind,
+            size_used,
         }
     }
 
@@ -630,8 +643,8 @@ pub struct Region {
     dataset_id: Uuid,
     disk_id: Uuid,
 
-    block_size: i64,
-    extent_size: i64,
+    block_size: ByteCount,
+    blocks_per_extent: i64,
     extent_count: i64,
 }
 
@@ -639,8 +652,8 @@ impl Region {
     pub fn new(
         dataset_id: Uuid,
         disk_id: Uuid,
-        block_size: i64,
-        extent_size: i64,
+        block_size: ByteCount,
+        blocks_per_extent: i64,
         extent_count: i64,
     ) -> Self {
         Self {
@@ -648,7 +661,7 @@ impl Region {
             dataset_id,
             disk_id,
             block_size,
-            extent_size,
+            blocks_per_extent,
             extent_count,
         }
     }
@@ -659,14 +672,14 @@ impl Region {
     pub fn dataset_id(&self) -> Uuid {
         self.dataset_id
     }
-    pub fn block_size(&self) -> u64 {
-        self.block_size as u64
+    pub fn block_size(&self) -> external::ByteCount {
+        self.block_size.0
     }
-    pub fn extent_size(&self) -> u64 {
-        self.extent_size as u64
+    pub fn blocks_per_extent(&self) -> i64 {
+        self.blocks_per_extent
     }
-    pub fn extent_count(&self) -> u64 {
-        self.extent_count as u64
+    pub fn extent_count(&self) -> i64 {
+        self.extent_count
     }
 }
 

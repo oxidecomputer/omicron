@@ -38,7 +38,7 @@ use serde::Deserialize;
 use serde::Serialize;
 use slog::Logger;
 use std::collections::BTreeMap;
-use std::convert::TryFrom;
+use std::convert::{TryFrom, TryInto};
 use std::sync::Arc;
 use steno::new_action_noop_undo;
 use steno::ActionContext;
@@ -401,12 +401,6 @@ async fn sdc_create_disk_record(
     let params = sagactx.saga_params();
 
     let disk_id = sagactx.lookup::<Uuid>("disk_id")?;
-
-    // NOTE: This could be done in a transaction alongside region allocation?
-    //
-    // Unclear if it's a problem to let this disk exist without any backing
-    // regions for a brief period of time, or if that's under the valid
-    // jurisdiction of "Creating".
     let disk = db::model::Disk::new(
         disk_id,
         params.project_id,
@@ -443,6 +437,11 @@ async fn sdc_alloc_regions(
     // "creating" - the respective Crucible Agents must be instructed to
     // allocate the necessary regions before we can mark the disk as "ready to
     // be used".
+    //
+    // TODO: Depending on the result of
+    // https://github.com/oxidecomputer/omicron/issues/613 , we
+    // should consider using a paginated API to access regions, rather than
+    // returning all of them at once.
     let datasets_and_regions = osagactx
         .datastore()
         .region_allocate(disk_id, &params.create_params)
@@ -470,9 +469,9 @@ async fn ensure_region_in_dataset(
     let client = CrucibleAgentClient::new(&url);
 
     let region_request = CreateRegion {
-        block_size: region.block_size(),
-        extent_count: region.extent_count(),
-        extent_size: region.extent_size(),
+        block_size: region.block_size().to_bytes(),
+        extent_count: region.extent_count().try_into().unwrap(),
+        extent_size: region.blocks_per_extent().try_into().unwrap(),
         // TODO: Can we avoid casting from UUID to string?
         // NOTE: This'll require updating the crucible agent client.
         id: RegionId(region.id().to_string()),
@@ -513,6 +512,10 @@ async fn ensure_region_in_dataset(
     Ok(region)
 }
 
+// Arbitrary limit on concurrency, for operations issued
+// on multiple regions within a disk at the same time.
+const MAX_CONCURRENT_REGION_REQUESTS: usize = 3;
+
 async fn sdc_regions_ensure(
     sagactx: ActionContext<SagaDiskCreate>,
 ) -> Result<(), ActionError> {
@@ -527,7 +530,10 @@ async fn sdc_regions_ensure(
             ensure_region_in_dataset(log, &dataset, &region).await
         })
         // Execute the allocation requests concurrently.
-        .buffer_unordered(request_count)
+        .buffer_unordered(std::cmp::min(
+            request_count,
+            MAX_CONCURRENT_REGION_REQUESTS,
+        ))
         .collect::<Vec<Result<_, _>>>()
         .await
         .into_iter()
@@ -550,7 +556,10 @@ async fn delete_regions(
             client.region_delete(&id).await
         })
         // Execute the allocation requests concurrently.
-        .buffer_unordered(request_count)
+        .buffer_unordered(std::cmp::min(
+            request_count,
+            MAX_CONCURRENT_REGION_REQUESTS,
+        ))
         .collect::<Vec<Result<_, _>>>()
         .await
         .into_iter()
@@ -603,12 +612,24 @@ fn saga_disk_delete() -> SagaTemplate<SagaDiskDelete> {
     template_builder.append(
         "no_result",
         "DeleteDiskRecord",
+        // TODO: See the comment on the "DeleteRegions" step,
+        // we may want to un-delete the disk if we cannot remove
+        // underlying regions.
         new_action_noop_undo(sdd_delete_disk_record),
     );
 
     template_builder.append(
         "no_result",
         "DeleteRegions",
+        // TODO(https://github.com/oxidecomputer/omicron/issues/612):
+        // We need a way to deal with this operation failing, aside from
+        // propagating the error to the user.
+        //
+        // What if the Sled goes offline? Nexus must ultimately be
+        // responsible for reconciling this scenario.
+        //
+        // The current behavior causes the disk deletion saga to
+        // fail, but still marks the disk as destroyed.
         new_action_noop_undo(sdd_delete_regions),
     );
 

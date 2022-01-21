@@ -34,7 +34,7 @@ spdm = { git = "https://github.com/oxidecomputer/spdm", rev = "9742f6e" }
 socket2 = { version = "0.4", features = [ "all" ] }
 structopt = "0.3"
 tar = "0.4"
-tempfile = "3.2"
+tempfile = "3.3"
 thiserror = "1.0"
 tokio = { version = "1.15", features = [ "full" ] }
 tokio-util = { version = "0.6", features = ["codec"] }
@@ -48,7 +48,7 @@ expectorate = "1.0.4"
 mockall = "0.11"
 omicron-test-utils = { path = "../test-utils" }
 openapi-lint = { git = "https://github.com/oxidecomputer/openapi-lint", branch = "main" }
-openapiv3 = "1.0.0-beta.5"
+openapiv3 = "1.0"
 serial_test = "0.5"
 subprocess = "0.2.8"
 slog-async = "2.6"

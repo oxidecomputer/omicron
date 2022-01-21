@@ -180,8 +180,8 @@ pub async fn register(
     client
         .cpapi_producers_post(&server_info.into())
         .await
-        .map_err(|msg| Error::RegistrationError(msg.to_string()))?;
-    Ok(())
+        .map(|_| ())
+        .map_err(|msg| Error::RegistrationError(msg.to_string()))
 }
 
 /// Handle a request to pull available metric data from a [`ProducerRegistry`].
