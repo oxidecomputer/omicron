@@ -1158,10 +1158,10 @@ impl Nexus {
      */
     pub async fn instance_start_migrate(
         &self,
-        instance_id: &Uuid,
+        instance_id: Uuid,
         migration_id: Uuid,
     ) -> UpdateResult<db::model::Instance> {
-        let instance = self.datastore().instance_fetch(instance_id).await?;
+        let instance = self.datastore().instance_fetch(&instance_id).await?;
         let runtime: nexus::InstanceRuntimeState =
             instance.runtime().clone().into();
 

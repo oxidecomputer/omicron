@@ -417,7 +417,7 @@ async fn sim_migrate_prep(
     // state in the db
     let instance = osagactx
         .nexus()
-        .instance_start_migrate(&params.instance_id, migrate_uuid)
+        .instance_start_migrate(params.instance_id, migrate_uuid)
         .await
         .map_err(ActionError::action_failed)?;
     let instance_id = instance.id();
