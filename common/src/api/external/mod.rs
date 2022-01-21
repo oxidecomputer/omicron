@@ -605,7 +605,6 @@ where
  * Identity-related metadata that's included in nearly all public API objects
  */
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
 pub struct IdentityMetadata {
     /** unique, immutable, system-controlled identifier for each resource */
     pub id: Uuid,
@@ -623,7 +622,6 @@ pub struct IdentityMetadata {
  * Create-time identity-related parameters
  */
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
 pub struct IdentityMetadataCreateParams {
     pub name: Name,
     pub description: String,
@@ -633,7 +631,6 @@ pub struct IdentityMetadataCreateParams {
  * Updateable identity-related parameters
  */
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
 pub struct IdentityMetadataUpdateParams {
     pub name: Option<Name>,
     pub description: Option<String>,
@@ -665,7 +662,7 @@ pub struct IdentityMetadataUpdateParams {
     Serialize,
     JsonSchema,
 )]
-#[serde(rename_all = "lowercase")]
+#[serde(rename_all = "snake_case")]
 pub enum InstanceState {
     Creating, /* TODO-polish: paper over Creating in the API with Starting? */
     Starting,
@@ -772,7 +769,6 @@ impl From<&InstanceCpuCount> for i64 {
  * Client view of an [`InstanceRuntimeState`]
  */
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
 pub struct InstanceRuntimeState {
     pub run_state: InstanceState,
     pub time_run_state_updated: DateTime<Utc>,
@@ -793,7 +789,6 @@ impl From<crate::api::internal::nexus::InstanceRuntimeState>
  * Client view of an [`Instance`]
  */
 #[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
 pub struct Instance {
     /* TODO is flattening here the intent in RFD 4? */
     #[serde(flatten)]
@@ -821,7 +816,6 @@ pub struct Instance {
  * Client view of an [`Disk`]
  */
 #[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
 pub struct Disk {
     #[serde(flatten)]
     pub identity: IdentityMetadata,
@@ -846,8 +840,7 @@ pub struct Disk {
     Serialize,
     JsonSchema,
 )]
-#[serde(rename_all = "lowercase")]
-#[serde(tag = "state", content = "instance")]
+#[serde(tag = "state", content = "instance", rename_all = "snake_case")]
 pub enum DiskState {
     /** Disk is being initialized */
     Creating,
@@ -986,8 +979,7 @@ impl From<steno::SagaView> for Saga {
 }
 
 #[derive(Clone, Debug, Serialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
-#[serde(tag = "state")]
+#[serde(tag = "state", rename_all = "snake_case")]
 pub enum SagaState {
     Running,
     Succeeded,
@@ -995,8 +987,7 @@ pub enum SagaState {
 }
 
 #[derive(Clone, Debug, Serialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
-#[serde(tag = "error")]
+#[serde(tag = "error", rename_all = "snake_case")]
 pub enum SagaErrorInfo {
     ActionFailed { source_error: serde_json::Value },
     DeserializeFailed { message: String },
@@ -1150,7 +1141,7 @@ impl JsonSchema for Ipv6Net {
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, JsonSchema)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "snake_case")]
 pub enum VpcRouterKind {
     System,
     Custom,
@@ -1159,7 +1150,6 @@ pub enum VpcRouterKind {
 /// A VPC router defines a series of rules that indicate where traffic
 /// should be sent depending on its destination.
 #[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
 pub struct VpcRouter {
     /// common identifying metadata
     #[serde(flatten)]
@@ -1197,8 +1187,7 @@ pub enum NetworkTarget {
 /// A subset of [`NetworkTarget`], `RouteTarget` specifies all
 /// possible targets that a route can forward to.
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, JsonSchema)]
-#[serde(rename_all = "camelCase")]
-#[serde(tag = "type", content = "value")]
+#[serde(tag = "type", content = "value", rename_all = "snake_case")]
 pub enum RouteTarget {
     Ip(IpAddr),
     Vpc(Name),
@@ -1270,8 +1259,7 @@ impl Display for RouteTarget {
 /// the kind of network traffic that will be matched to be forwarded
 /// to the [`RouteTarget`].
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, JsonSchema)]
-#[serde(rename_all = "camelCase")]
-#[serde(tag = "type", content = "value")]
+#[serde(tag = "type", content = "value", rename_all = "snake_case")]
 pub enum RouteDestination {
     Ip(IpAddr),
     Vpc(Name),
@@ -1338,6 +1326,7 @@ impl Display for RouteDestination {
     Clone, Copy, Debug, PartialEq, Deserialize, Serialize, Display, JsonSchema,
 )]
 #[display("{}")]
+#[serde(rename_all = "snake_case")]
 pub enum RouterRouteKind {
     /// Determines the default destination of traffic, such as whether it goes to the internet or not.
     ///
@@ -1364,7 +1353,6 @@ pub enum RouterRouteKind {
 
 ///  A route defines a rule that governs where traffic should be sent based on its destination.
 #[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
 pub struct RouterRoute {
     /// common identifying metadata
     #[serde(flatten)]
@@ -1382,7 +1370,6 @@ pub struct RouterRoute {
 
 /// Create-time parameters for a [`RouterRoute`]
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
 pub struct RouterRouteCreateParams {
     #[serde(flatten)]
     pub identity: IdentityMetadataCreateParams,
@@ -1392,7 +1379,6 @@ pub struct RouterRouteCreateParams {
 
 /// Updateable properties of a [`RouterRoute`]
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
 pub struct RouterRouteUpdateParams {
     #[serde(flatten)]
     pub identity: IdentityMetadataUpdateParams,
@@ -1523,21 +1509,21 @@ pub enum VpcFirewallRuleProtocol {
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, JsonSchema)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "snake_case")]
 pub enum VpcFirewallRuleStatus {
     Disabled,
     Enabled,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, JsonSchema)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "snake_case")]
 pub enum VpcFirewallRuleDirection {
     Inbound,
     Outbound,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, JsonSchema)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "snake_case")]
 pub enum VpcFirewallRuleAction {
     Allow,
     Deny,
@@ -1546,8 +1532,7 @@ pub enum VpcFirewallRuleAction {
 /// A subset of [`NetworkTarget`], `VpcFirewallRuleTarget` specifies all
 /// possible targets that a firewall rule can be attached to.
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, JsonSchema)]
-#[serde(rename_all = "camelCase")]
-#[serde(tag = "type", content = "value")]
+#[serde(tag = "type", content = "value", rename_all = "snake_case")]
 pub enum VpcFirewallRuleTarget {
     Vpc(Name),
     Subnet(Name),
@@ -1617,8 +1602,7 @@ impl Display for VpcFirewallRuleTarget {
 /// A subset of [`NetworkTarget`], `VpcFirewallRuleHostFilter` specifies all
 /// possible targets that a route can forward to.
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, JsonSchema)]
-#[serde(rename_all = "camelCase")]
-#[serde(tag = "type", content = "value")]
+#[serde(tag = "type", content = "value", rename_all = "snake_case")]
 pub enum VpcFirewallRuleHostFilter {
     Vpc(Name),
     Subnet(Name),
@@ -1893,7 +1877,6 @@ impl JsonSchema for MacAddr {
 
 /// A `NetworkInterface` represents a virtual network interface device.
 #[derive(ObjectIdentity, Clone, Debug, Deserialize, JsonSchema, Serialize)]
-#[serde(rename_all = "camelCase")]
 pub struct NetworkInterface {
     /// common identifying metadata
     #[serde(flatten)]

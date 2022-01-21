@@ -96,7 +96,7 @@ async fn test_vpc_subnets(cptestctx: &ControlPlaneTestContext) {
     assert_put_400(
         client,
         &subnet_url,
-        String::from("{ \"ipv4Block\": \"2001:db8::0/96\" }"),
+        String::from("{ \"ipv4_block\": \"2001:db8::0/96\" }"),
         "unable to parse body: invalid address: 2001:db8::0",
     )
     .await;
@@ -105,7 +105,7 @@ async fn test_vpc_subnets(cptestctx: &ControlPlaneTestContext) {
     assert_put_400(
         client,
         &subnet_url,
-        String::from("{ \"ipv6Block\": \"10.1.9.32/16\" }"),
+        String::from("{ \"ipv6_block\": \"10.1.9.32/16\" }"),
         "unable to parse body: invalid address: 10.1.9.32",
     )
     .await;

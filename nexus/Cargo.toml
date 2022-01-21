@@ -36,7 +36,7 @@ rand = "0.8.4"
 ref-cast = "1.0"
 reqwest = { version = "0.11.8", features = [ "json" ] }
 serde_json = "1.0"
-serde_urlencoded = "0.7.0"
+serde_urlencoded = "0.7.1"
 serde_with = "1.11.0"
 sled-agent-client = { path = "../sled-agent-client" }
 slog-dtrace = "0.2"
@@ -114,7 +114,7 @@ expectorate = "1.0.4"
 nexus-test-utils-macros = { path = "test-utils-macros" }
 nexus-test-utils = { path = "test-utils" }
 omicron-test-utils = { path = "../test-utils" }
-openapiv3 = "1.0.0-beta.5"
+openapiv3 = "1.0"
 subprocess = "0.2.8"
 
 [dev-dependencies.openapi-lint]

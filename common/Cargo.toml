@@ -35,5 +35,5 @@ progenitor = { git = "https://github.com/oxidecomputer/progenitor" }
 
 [dev-dependencies]
 expectorate = "1.0.4"
-serde_urlencoded = "0.7.0"
+serde_urlencoded = "0.7.1"
 tokio = { version = "1.15", features = [ "test-util" ] }
