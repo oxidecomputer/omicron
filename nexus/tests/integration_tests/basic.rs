@@ -9,7 +9,6 @@
  * TODO-coverage add test for racks, sleds
  */
 
-use dropshot::test_util::iter_collection;
 use dropshot::test_util::object_get;
 use dropshot::test_util::objects_list_page;
 use dropshot::test_util::read_json;
@@ -177,11 +176,32 @@ async fn test_projects_basic(cptestctx: &ControlPlaneTestContext) {
 
     let org_name = "test-org";
     create_organization(&client, &org_name).await;
+    let projects_url = "/organizations/test-org/projects";
+
+    /* Unauthenticated and unauthorized users cannot list projects. */
+    NexusRequest::expect_failure(
+        client,
+        http::StatusCode::NOT_FOUND,
+        http::Method::GET,
+        projects_url,
+    )
+    .execute()
+    .await
+    .expect("failed to make request");
+    NexusRequest::expect_failure(
+        client,
+        http::StatusCode::NOT_FOUND,
+        http::Method::GET,
+        projects_url,
+    )
+    .authn_as(AuthnMode::UnprivilegedUser)
+    .execute()
+    .await
+    .expect("failed to make request");
 
     /*
      * Verify that there are no projects to begin with.
      */
-    let projects_url = "/organizations/test-org/projects";
     let projects = projects_list(&client, &projects_url).await;
     assert_eq!(0, projects.len());
 
@@ -564,9 +584,15 @@ async fn test_projects_list(cptestctx: &ControlPlaneTestContext) {
      * increasing order of name.
      */
     let found_projects_by_name =
-        iter_collection::<Project>(&client, projects_url, "", projects_subset)
-            .await
-            .0;
+        NexusRequest::iter_collection_authn::<Project>(
+            &client,
+            projects_url,
+            "",
+            projects_subset,
+        )
+        .await
+        .expect("failed to list projects")
+        .all_items;
     assert_eq!(found_projects_by_name.len(), project_names_by_name.len());
     assert_eq!(
         project_names_by_name,
@@ -580,14 +606,16 @@ async fn test_projects_list(cptestctx: &ControlPlaneTestContext) {
      * Page through all the projects in ascending order by name, which should be
      * the same as above.
      */
-    let found_projects_by_name = iter_collection::<Project>(
-        &client,
-        projects_url,
-        "sort_by=name-ascending",
-        projects_subset,
-    )
-    .await
-    .0;
+    let found_projects_by_name =
+        NexusRequest::iter_collection_authn::<Project>(
+            &client,
+            projects_url,
+            "sort_by=name-ascending",
+            projects_subset,
+        )
+        .await
+        .expect("failed to list projects")
+        .all_items;
     assert_eq!(found_projects_by_name.len(), project_names_by_name.len());
     assert_eq!(
         project_names_by_name,
@@ -601,14 +629,16 @@ async fn test_projects_list(cptestctx: &ControlPlaneTestContext) {
      * Page through all the projects in descending order by name, which should be
      * the reverse of the above.
      */
-    let mut found_projects_by_name = iter_collection::<Project>(
-        &client,
-        projects_url,
-        "sort_by=name-descending",
-        projects_subset,
-    )
-    .await
-    .0;
+    let mut found_projects_by_name =
+        NexusRequest::iter_collection_authn::<Project>(
+            &client,
+            projects_url,
+            "sort_by=name-descending",
+            projects_subset,
+        )
+        .await
+        .expect("failed to list projects")
+        .all_items;
     assert_eq!(found_projects_by_name.len(), project_names_by_name.len());
     found_projects_by_name.reverse();
     assert_eq!(
@@ -622,14 +652,15 @@ async fn test_projects_list(cptestctx: &ControlPlaneTestContext) {
     /*
      * Page through the projects in ascending order by id.
      */
-    let found_projects_by_id = iter_collection::<Project>(
+    let found_projects_by_id = NexusRequest::iter_collection_authn::<Project>(
         &client,
         projects_url,
         "sort_by=id-ascending",
         projects_subset,
     )
     .await
-    .0;
+    .expect("failed to list projects")
+    .all_items;
     assert_eq!(found_projects_by_id.len(), project_names_by_id.len());
     assert_eq!(
         project_names_by_id,
@@ -679,7 +710,10 @@ async fn projects_list(
     client: &ClientTestContext,
     projects_url: &str,
 ) -> Vec<Project> {
-    objects_list_page::<Project>(client, projects_url).await.items
+    NexusRequest::iter_collection_authn(client, projects_url, "", 10)
+        .await
+        .expect("failed to list projects")
+        .all_items
 }
 
 async fn project_get(client: &ClientTestContext, project_url: &str) -> Project {

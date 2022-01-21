@@ -590,30 +590,28 @@ impl Nexus {
 
     pub async fn projects_list_by_name(
         &self,
+        opctx: &OpContext,
         organization_name: &Name,
         pagparams: &DataPageParams<'_, Name>,
     ) -> ListResultVec<db::model::Project> {
-        let organization_id = self
-            .db_datastore
-            .organization_lookup_id(organization_name)
-            .await?
-            .id();
+        let authz_org =
+            self.db_datastore.organization_lookup_id(organization_name).await?;
         self.db_datastore
-            .projects_list_by_name(&organization_id, pagparams)
+            .projects_list_by_name(opctx, &authz_org, pagparams)
             .await
     }
 
     pub async fn projects_list_by_id(
         &self,
+        opctx: &OpContext,
         organization_name: &Name,
         pagparams: &DataPageParams<'_, Uuid>,
     ) -> ListResultVec<db::model::Project> {
-        let organization_id = self
-            .db_datastore
-            .organization_lookup_id(organization_name)
-            .await?
-            .id();
-        self.db_datastore.projects_list_by_id(&organization_id, pagparams).await
+        let authz_org =
+            self.db_datastore.organization_lookup_id(organization_name).await?;
+        self.db_datastore
+            .projects_list_by_id(opctx, &authz_org, pagparams)
+            .await
     }
 
     pub async fn project_delete(

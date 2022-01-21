@@ -381,13 +381,18 @@ async fn organization_projects_get(
     let organization_name = &path.organization_name;
 
     let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
         let params = ScanByNameOrId::from_query(&query)?;
         let field = pagination_field_for_scan_params(params);
         let projects = match field {
             PagField::Id => {
                 let page_selector = data_page_params_nameid_id(&rqctx, &query)?;
                 nexus
-                    .projects_list_by_id(&organization_name, &page_selector)
+                    .projects_list_by_id(
+                        &opctx,
+                        &organization_name,
+                        &page_selector,
+                    )
                     .await?
             }
 
@@ -396,7 +401,11 @@ async fn organization_projects_get(
                     data_page_params_nameid_name(&rqctx, &query)?
                         .map_name(|n| Name::ref_cast(n));
                 nexus
-                    .projects_list_by_name(&organization_name, &page_selector)
+                    .projects_list_by_name(
+                        &opctx,
+                        &organization_name,
+                        &page_selector,
+                    )
                     .await?
             }
         }
