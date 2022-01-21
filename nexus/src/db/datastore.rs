@@ -607,45 +607,40 @@ impl DataStore {
 
     pub async fn projects_list_by_id(
         &self,
-        organization_id: &Uuid,
+        opctx: &OpContext,
+        authz_org: &authz::Organization,
         pagparams: &DataPageParams<'_, Uuid>,
     ) -> ListResultVec<Project> {
         use db::schema::project::dsl;
+
+        opctx.authorize(authz::Action::ListChildren, authz_org).await?;
+
         paginated(dsl::project, dsl::id, pagparams)
-            .filter(dsl::organization_id.eq(*organization_id))
+            .filter(dsl::organization_id.eq(authz_org.id()))
             .filter(dsl::time_deleted.is_null())
             .select(Project::as_select())
-            .load_async(self.pool())
+            .load_async(self.pool_authorized(opctx).await?)
             .await
-            .map_err(|e| {
-                public_error_from_diesel_pool(
-                    e,
-                    ResourceType::Project,
-                    LookupType::Other("Listing All".to_string()),
-                )
-            })
+            .map_err(public_error_from_diesel_pool_shouldnt_fail)
     }
 
     pub async fn projects_list_by_name(
         &self,
-        organization_id: &Uuid,
+        opctx: &OpContext,
+        authz_org: &authz::Organization,
         pagparams: &DataPageParams<'_, Name>,
     ) -> ListResultVec<Project> {
         use db::schema::project::dsl;
 
+        opctx.authorize(authz::Action::ListChildren, authz_org).await?;
+
         paginated(dsl::project, dsl::name, &pagparams)
-            .filter(dsl::organization_id.eq(*organization_id))
+            .filter(dsl::organization_id.eq(authz_org.id()))
             .filter(dsl::time_deleted.is_null())
             .select(Project::as_select())
-            .load_async(self.pool())
+            .load_async(self.pool_authorized(opctx).await?)
             .await
-            .map_err(|e| {
-                public_error_from_diesel_pool(
-                    e,
-                    ResourceType::Project,
-                    LookupType::Other("Listing All".to_string()),
-                )
-            })
+            .map_err(public_error_from_diesel_pool_shouldnt_fail)
     }
 
     /// Updates a project by name (clobbering update -- no etag)
