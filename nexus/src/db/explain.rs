@@ -118,6 +118,7 @@ mod test {
     use crate::db;
     use async_bb8_diesel::{AsyncConnection, AsyncSimpleConnection};
     use diesel::SelectableHelper;
+    use expectorate::assert_contents;
     use nexus_test_utils::db::test_setup_database;
     use omicron_test_utils::dev;
     use uuid::Uuid;
@@ -174,22 +175,20 @@ mod test {
 
         use schema::test_users::dsl;
         pool.pool()
-            .transaction(move |conn| -> Result<(), db::error::TransactionError<()>> {
-                let explanation = dsl::test_users
-                    .filter(dsl::id.eq(Uuid::nil()))
-                    .select(User::as_select())
-                    .explain(conn)
-                    .unwrap();
-                assert_eq!(r#"distribution: local
-vectorized: true
-
-• scan
-  missing stats
-  table: test_users@primary
-  spans: [/'00000000-0000-0000-0000-000000000000' - /'00000000-0000-0000-0000-000000000000']"#,
-                  explanation);
-                Ok(())
-            })
+            .transaction(
+                move |conn| -> Result<(), db::error::TransactionError<()>> {
+                    let explanation = dsl::test_users
+                        .filter(dsl::id.eq(Uuid::nil()))
+                        .select(User::as_select())
+                        .explain(conn)
+                        .unwrap();
+                    assert_contents(
+                        "tests/output/test-explain-output",
+                        &explanation,
+                    );
+                    Ok(())
+                },
+            )
             .await
             .unwrap();
     }
@@ -212,16 +211,7 @@ vectorized: true
             .await
             .unwrap();
 
-        assert_eq!(
-            r#"distribution: local
-vectorized: true
-
-• scan
-  missing stats
-  table: test_users@primary
-  spans: [/'00000000-0000-0000-0000-000000000000' - /'00000000-0000-0000-0000-000000000000']"#,
-            explanation
-        );
+        assert_contents("tests/output/test-explain-output", &explanation);
     }
 
     // Tests that ".explain()" can tell us when we're doing full table scans.

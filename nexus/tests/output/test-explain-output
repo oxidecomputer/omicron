@@ -1,0 +1,7 @@
+distribution: local
+vectorized: true
+
+• scan
+  missing stats
+  table: test_users@primary
+  spans: [/'00000000-0000-0000-0000-000000000000' - /'00000000-0000-0000-0000-000000000000']
