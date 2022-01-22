@@ -148,3 +148,16 @@ pub async fn create_router(
     )
     .await
 }
+
+pub async fn project_get(
+    client: &ClientTestContext,
+    project_url: &str,
+) -> Project {
+    NexusRequest::object_get(client, project_url)
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .expect("failed to get project")
+        .parsed_body()
+        .expect("failed to parse Project")
+}

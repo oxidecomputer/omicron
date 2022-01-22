@@ -4,9 +4,8 @@
 
 use nexus_test_utils::http_testing::AuthnMode;
 use nexus_test_utils::http_testing::NexusRequest;
+use nexus_test_utils::resource_helpers::project_get;
 use omicron_nexus::external_api::views::Project;
-
-use dropshot::test_util::object_get;
 
 use nexus_test_utils::resource_helpers::{create_organization, create_project};
 use nexus_test_utils::ControlPlaneTestContext;
@@ -28,11 +27,11 @@ async fn test_projects(cptestctx: &ControlPlaneTestContext) {
     create_project(&client, &org_name, &p2_name).await;
 
     let p1_url = format!("/organizations/{}/projects/{}", org_name, p1_name);
-    let project: Project = object_get(&client, &p1_url).await;
+    let project: Project = project_get(&client, &p1_url).await;
     assert_eq!(project.identity.name, p1_name);
 
     let p2_url = format!("/organizations/{}/projects/{}", org_name, p2_name);
-    let project: Project = object_get(&client, &p2_url).await;
+    let project: Project = project_get(&client, &p2_url).await;
     assert_eq!(project.identity.name, p2_name);
 
     /*
