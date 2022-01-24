@@ -33,7 +33,7 @@ pub struct ZpoolPutRequest {
 pub struct ZpoolPutResponse {}
 
 /// Describes the purpose of the dataset.
-#[derive(Debug, Serialize, Deserialize, JsonSchema, Clone, Copy)]
+#[derive(Debug, Serialize, Deserialize, JsonSchema, Clone, Copy, PartialEq)]
 pub enum DatasetKind {
     Crucible,
     Cockroach,

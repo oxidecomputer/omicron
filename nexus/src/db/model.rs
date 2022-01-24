@@ -27,7 +27,7 @@ use parse_display::Display;
 use rand::{rngs::StdRng, SeedableRng};
 use ref_cast::RefCast;
 use schemars::JsonSchema;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::convert::TryFrom;
 use std::net::SocketAddr;
 use uuid::Uuid;
@@ -106,8 +106,9 @@ macro_rules! impl_enum_type {
     Ord,
     PartialOrd,
     RefCast,
-    Deserialize,
     JsonSchema,
+    Serialize,
+    Deserialize,
 )]
 #[sql_type = "sql_types::Text"]
 #[serde(transparent)]
@@ -142,7 +143,16 @@ where
     }
 }
 
-#[derive(Copy, Clone, Debug, AsExpression, FromSqlRow)]
+#[derive(
+    Copy,
+    Clone,
+    Debug,
+    AsExpression,
+    FromSqlRow,
+    Serialize,
+    Deserialize,
+    PartialEq,
+)]
 #[sql_type = "sql_types::BigInt"]
 pub struct ByteCount(pub external::ByteCount);
 
@@ -158,7 +168,7 @@ where
         &self,
         out: &mut serialize::Output<W, DB>,
     ) -> serialize::Result {
-        i64::from(&self.0).to_sql(out)
+        i64::from(self.0).to_sql(out)
     }
 }
 
@@ -175,7 +185,17 @@ where
 }
 
 #[derive(
-    Copy, Clone, Debug, Eq, Ord, PartialEq, PartialOrd, AsExpression, FromSqlRow,
+    Copy,
+    Clone,
+    Debug,
+    Eq,
+    Ord,
+    PartialEq,
+    PartialOrd,
+    AsExpression,
+    FromSqlRow,
+    Serialize,
+    Deserialize,
 )]
 #[sql_type = "sql_types::BigInt"]
 #[repr(transparent)]
@@ -504,11 +524,11 @@ impl DatastoreCollection<Dataset> for Zpool {
 }
 
 impl_enum_type!(
-    #[derive(SqlType, Debug)]
+    #[derive(SqlType, Debug, QueryId)]
     #[postgres(type_name = "dataset_kind", type_schema = "public")]
     pub struct DatasetKindEnum;
 
-    #[derive(Clone, Debug, AsExpression, FromSqlRow)]
+    #[derive(Clone, Debug, AsExpression, FromSqlRow, Serialize, Deserialize, PartialEq)]
     #[sql_type = "DatasetKindEnum"]
     pub struct DatasetKind(pub internal_api::params::DatasetKind);
 
@@ -528,7 +548,17 @@ impl From<internal_api::params::DatasetKind> for DatasetKind {
 ///
 /// A dataset represents a portion of a Zpool, which is then made
 /// available to a service on the Sled.
-#[derive(Queryable, Insertable, Debug, Clone, Selectable, Asset)]
+#[derive(
+    Queryable,
+    Insertable,
+    Debug,
+    Clone,
+    Selectable,
+    Asset,
+    Deserialize,
+    Serialize,
+    PartialEq,
+)]
 #[table_name = "dataset"]
 pub struct Dataset {
     #[diesel(embed)]
@@ -542,6 +572,7 @@ pub struct Dataset {
     port: i32,
 
     kind: DatasetKind,
+    pub size_used: Option<i64>,
 }
 
 impl Dataset {
@@ -551,6 +582,10 @@ impl Dataset {
         addr: SocketAddr,
         kind: DatasetKind,
     ) -> Self {
+        let size_used = match kind {
+            DatasetKind(internal_api::params::DatasetKind::Crucible) => Some(0),
+            _ => None,
+        };
         Self {
             identity: DatasetIdentity::new(id),
             time_deleted: None,
@@ -559,6 +594,7 @@ impl Dataset {
             ip: addr.ip().into(),
             port: addr.port().into(),
             kind,
+            size_used,
         }
     }
 
@@ -588,7 +624,17 @@ impl DatastoreCollection<Region> for Disk {
 ///
 /// A region represents a portion of a Crucible Downstairs dataset
 /// allocated within a volume.
-#[derive(Queryable, Insertable, Debug, Clone, Selectable, Asset)]
+#[derive(
+    Queryable,
+    Insertable,
+    Debug,
+    Clone,
+    Selectable,
+    Asset,
+    Serialize,
+    Deserialize,
+    PartialEq,
+)]
 #[table_name = "region"]
 pub struct Region {
     #[diesel(embed)]
@@ -597,9 +643,44 @@ pub struct Region {
     dataset_id: Uuid,
     disk_id: Uuid,
 
-    block_size: i64,
-    extent_size: i64,
+    block_size: ByteCount,
+    blocks_per_extent: i64,
     extent_count: i64,
+}
+
+impl Region {
+    pub fn new(
+        dataset_id: Uuid,
+        disk_id: Uuid,
+        block_size: ByteCount,
+        blocks_per_extent: i64,
+        extent_count: i64,
+    ) -> Self {
+        Self {
+            identity: RegionIdentity::new(Uuid::new_v4()),
+            dataset_id,
+            disk_id,
+            block_size,
+            blocks_per_extent,
+            extent_count,
+        }
+    }
+
+    pub fn disk_id(&self) -> Uuid {
+        self.disk_id
+    }
+    pub fn dataset_id(&self) -> Uuid {
+        self.dataset_id
+    }
+    pub fn block_size(&self) -> external::ByteCount {
+        self.block_size.0
+    }
+    pub fn blocks_per_extent(&self) -> i64 {
+        self.blocks_per_extent
+    }
+    pub fn extent_count(&self) -> i64 {
+        self.extent_count
+    }
 }
 
 /// Describes an organization within the database.
@@ -665,7 +746,7 @@ impl Project {
     pub fn new(organization_id: Uuid, params: params::ProjectCreate) -> Self {
         Self {
             identity: ProjectIdentity::new(Uuid::new_v4(), params.identity),
-            organization_id: organization_id,
+            organization_id,
         }
     }
 }
@@ -851,7 +932,16 @@ where
 }
 
 /// A Disk (network block device).
-#[derive(Queryable, Insertable, Clone, Debug, Selectable, Resource)]
+#[derive(
+    Queryable,
+    Insertable,
+    Clone,
+    Debug,
+    Selectable,
+    Resource,
+    Serialize,
+    Deserialize,
+)]
 #[table_name = "disk"]
 pub struct Disk {
     #[diesel(embed)]
@@ -918,7 +1008,16 @@ impl Into<external::Disk> for Disk {
     }
 }
 
-#[derive(AsChangeset, Clone, Debug, Queryable, Insertable, Selectable)]
+#[derive(
+    AsChangeset,
+    Clone,
+    Debug,
+    Queryable,
+    Insertable,
+    Selectable,
+    Serialize,
+    Deserialize,
+)]
 #[table_name = "disk"]
 // When "attach_instance_id" is set to None, we'd like to
 // clear it from the DB, rather than ignore the update.

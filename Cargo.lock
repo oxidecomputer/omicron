@@ -579,6 +579,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "crucible-agent-client"
+version = "0.0.1"
+source = "git+https://github.com/oxidecomputer/crucible?rev=078d364e14d57d5faa3a44001c65709935419779#078d364e14d57d5faa3a44001c65709935419779"
+dependencies = [
+ "anyhow",
+ "percent-encoding",
+ "progenitor",
+ "reqwest",
+ "schemars",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "crucible-common"
 version = "0.0.0"
 source = "git+https://github.com/oxidecomputer/crucible?branch=main#4f02540ab2557ad75e9f170d362dc889eefe1d1b"
@@ -1969,6 +1983,7 @@ dependencies = [
  "chrono",
  "cookie",
  "criterion",
+ "crucible-agent-client",
  "db-macros",
  "diesel",
  "diesel-dtrace",
@@ -2057,6 +2072,7 @@ dependencies = [
  "bytes",
  "cfg-if",
  "chrono",
+ "crucible-agent-client",
  "dropshot",
  "expectorate",
  "futures",

@@ -399,7 +399,7 @@ impl JsonSchema for RoleName {
  * the database as an i64.  Constraining it here ensures that we can't fail to
  * serialize the value.
  */
-#[derive(Copy, Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[derive(Copy, Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
 pub struct ByteCount(u64);
 
 impl ByteCount {
@@ -468,8 +468,8 @@ impl From<u32> for ByteCount {
     }
 }
 
-impl From<&ByteCount> for i64 {
-    fn from(b: &ByteCount) -> Self {
+impl From<ByteCount> for i64 {
+    fn from(b: ByteCount) -> Self {
         /* We have already validated that this value is in range. */
         i64::try_from(b.0).unwrap()
     }
@@ -2072,12 +2072,12 @@ mod test {
         /* Largest supported value: both constructors that support it. */
         let max = ByteCount::try_from(i64::MAX).unwrap();
         assert_eq!(i64::MAX, max.to_bytes() as i64);
-        assert_eq!(i64::MAX, i64::from(&max));
+        assert_eq!(i64::MAX, i64::from(max));
 
         let maxu64 = u64::try_from(i64::MAX).unwrap();
         let max = ByteCount::try_from(maxu64).unwrap();
         assert_eq!(i64::MAX, max.to_bytes() as i64);
-        assert_eq!(i64::MAX, i64::from(&max));
+        assert_eq!(i64::MAX, i64::from(max));
         assert_eq!(
             (i64::MAX / 1024 / 1024 / 1024 / 1024) as u64,
             max.to_whole_tebibytes()

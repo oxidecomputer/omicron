@@ -209,24 +209,28 @@ impl Nexus {
         };
 
         /* TODO-cleanup all the extra Arcs here seems wrong */
-        let nexus_arc = Arc::new(nexus);
+        let nexus = Arc::new(nexus);
         let opctx = OpContext::for_background(
             log.new(o!("component" => "SagaRecoverer")),
             authz,
             authn::Context::internal_saga_recovery(),
             Arc::clone(&db_datastore),
         );
+        let saga_logger = nexus.log.new(o!("saga_type" => "recovery"));
         let recovery_task = db::recover(
             opctx,
             my_sec_id,
-            Arc::new(Arc::new(SagaContext::new(Arc::clone(&nexus_arc)))),
+            Arc::new(Arc::new(SagaContext::new(
+                Arc::clone(&nexus),
+                saga_logger,
+            ))),
             db_datastore,
             Arc::clone(&sec_client),
             &sagas::ALL_TEMPLATES,
         );
 
-        *nexus_arc.recovery_task.lock().unwrap() = Some(recovery_task);
-        nexus_arc
+        *nexus.recovery_task.lock().unwrap() = Some(recovery_task);
+        nexus
     }
 
     pub async fn wait_for_populate(&self) -> Result<(), anyhow::Error> {
@@ -438,8 +442,10 @@ impl Nexus {
         P: serde::Serialize,
     {
         let saga_id = SagaId(Uuid::new_v4());
+        let saga_logger =
+            self.log.new(o!("template_name" => template_name.to_owned()));
         let saga_context =
-            Arc::new(Arc::new(SagaContext::new(Arc::clone(self))));
+            Arc::new(Arc::new(SagaContext::new(Arc::clone(self), saga_logger)));
         let future = self
             .sec_client
             .saga_create(
@@ -676,7 +682,7 @@ impl Nexus {
     }
 
     pub async fn project_create_disk(
-        &self,
+        self: &Arc<Self>,
         organization_name: &Name,
         project_name: &Name,
         params: &params::DiskCreate,
@@ -697,37 +703,22 @@ impl Nexus {
             });
         }
 
-        let disk_id = Uuid::new_v4();
-        let disk = db::model::Disk::new(
-            disk_id,
-            authz_project.id(),
-            params.clone(),
-            db::model::DiskRuntimeState::new(),
-        );
-        let disk_created = self.db_datastore.project_create_disk(disk).await?;
-
-        // TODO: Here, we should ensure the disk is backed by appropriate
-        // regions. This is blocked behind actually having Crucible agents
-        // running in zones for dedicated zpools.
-        //
-        // TODO: Performing this operation, alongside "create" and "update
-        // state from create to detach", should be executed in a Saga.
-
-        /*
-         * This is a little hokey.  We'd like to simulate an asynchronous
-         * transition from "Creating" to "Detached".  For instances, the
-         * simulation lives in a simulated sled agent.  Here, the analog might
-         * be a simulated storage control plane.  But that doesn't exist yet,
-         * and we don't even know what APIs it would provide yet.  So we just
-         * carry out the simplest possible "simulation" here: we'll return to
-         * the client a structure describing a disk in state "Creating", but by
-         * the time we do so, we've already updated the internal representation
-         * to "Created".
-         */
-        self.db_datastore
-            .disk_update_runtime(&disk_id, &disk_created.runtime().detach())
+        let saga_params = Arc::new(sagas::ParamsDiskCreate {
+            project_id: authz_project.id(),
+            create_params: params.clone(),
+        });
+        let saga_outputs = self
+            .execute_saga(
+                Arc::clone(&sagas::SAGA_DISK_CREATE_TEMPLATE),
+                sagas::SAGA_DISK_CREATE_NAME,
+                saga_params,
+            )
             .await?;
-
+        let disk_created = saga_outputs
+            .lookup_output::<db::model::Disk>("created_disk")
+            .map_err(|e| Error::InternalError {
+                internal_message: e.to_string(),
+            })?;
         Ok(disk_created)
     }
 
@@ -757,7 +748,7 @@ impl Nexus {
     }
 
     pub async fn project_delete_disk(
-        &self,
+        self: &Arc<Self>,
         opctx: &OpContext,
         organization_name: &Name,
         project_name: &Name,
@@ -766,34 +757,25 @@ impl Nexus {
         let (disk, authz_disk) = self
             .project_lookup_disk(organization_name, project_name, disk_name)
             .await?;
-        let runtime = disk.runtime();
-        bail_unless!(runtime.state().state() != &DiskState::Destroyed);
 
-        if runtime.state().is_attached() {
-            return Err(Error::InvalidRequest {
-                message: String::from("disk is attached"),
-            });
-        }
+        // TODO: We need to sort out the authorization checks.
+        //
+        // Normally, this would be coupled alongside access to the
+        // datastore, but now that disk deletion exists within a Saga,
+        // this would require OpContext to be serialized (which is
+        // not trivial).
+        opctx.authorize(authz::Action::Delete, &authz_disk).await?;
 
-        /*
-         * TODO-correctness It's not clear how this handles the case where we
-         * begin this delete operation while some other request is ongoing to
-         * attach the disk.  We won't be able to see that in the state here.  We
-         * might be able to detect this when we go update the disk's state to
-         * Attaching (because a SQL UPDATE will update 0 rows), but we'd sort of
-         * already be in a bad state because the destroyed disk will be
-         * attaching (and eventually attached) on some sled, and if the wrong
-         * combination of components crash at this point, we could wind up not
-         * fixing that state.
-         *
-         * This is a consequence of the choice _not_ to record the Attaching
-         * state in the database before beginning the attach process.  If we did
-         * that, we wouldn't have this problem, but we'd have a similar problem
-         * of dealing with the case of a crash after recording this state and
-         * before actually beginning the attach process.  Sagas can maybe
-         * address that.
-         */
-        self.db_datastore.project_delete_disk(opctx, &authz_disk).await
+        let saga_params =
+            Arc::new(sagas::ParamsDiskDelete { disk_id: disk.id() });
+        self.execute_saga(
+            Arc::clone(&sagas::SAGA_DISK_DELETE_TEMPLATE),
+            sagas::SAGA_DISK_DELETE_NAME,
+            saga_params,
+        )
+        .await?;
+
+        Ok(())
     }
 
     /*

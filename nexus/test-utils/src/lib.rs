@@ -124,7 +124,7 @@ pub async fn test_setup_with_config(
 
     /* Set up a single sled agent. */
     let sa_id = Uuid::parse_str(SLED_AGENT_UUID).unwrap();
-    let sa = start_sled_agent(
+    let sled_agent = start_sled_agent(
         logctx.log.new(o!(
             "component" => "omicron_sled_agent::sim::Server",
             "sled_id" => sa_id.to_string(),
@@ -160,7 +160,7 @@ pub async fn test_setup_with_config(
         internal_client: testctx_internal,
         database,
         clickhouse,
-        sled_agent: sa,
+        sled_agent,
         oximeter,
         producer,
         logctx,
