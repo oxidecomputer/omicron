@@ -508,7 +508,7 @@ impl DataStore {
     ///   for example.
     /// * If a code path is only doing this lookup to get the id so that it can
     ///   look up something else inside the Organization, then the database
-    ///   record is not record -- and neither is an authz check on the
+    ///   record is not required -- and neither is an authz check on the
     ///   Organization.  Callers usually use `organization_lookup_id()` for
     ///   this.  That function does not expose the database row to the caller.
     ///
@@ -559,7 +559,7 @@ impl DataStore {
     ///
     /// This function does no authz checks because it is not possible to know
     /// just by looking up an Organization's id what privileges are required.
-    pub async fn organization_lookup_id(
+    pub async fn organization_lookup_path(
         &self,
         name: &Name,
     ) -> LookupResult<authz::Organization> {
@@ -574,8 +574,6 @@ impl DataStore {
     ) -> LookupResult<(authz::Organization, Organization)> {
         let (authz_org, db_org) =
             self.organization_lookup_noauthz(name).await?;
-        // TODO-security See the note in authz::authorize().  This needs to
-        // return a 404, not a 403.
         opctx.authorize(authz::Action::Read, &authz_org).await?;
         Ok((authz_org, db_org))
     }
@@ -709,7 +707,7 @@ impl DataStore {
     ) -> UpdateResult<Organization> {
         use db::schema::organization::dsl;
 
-        let (authz_org, _) = self.organization_lookup_noauthz(name).await?;
+        let authz_org = self.organization_lookup_path(name).await?;
         opctx.authorize(authz::Action::Modify, &authz_org).await?;
 
         diesel::update(dsl::organization)
@@ -762,17 +760,22 @@ impl DataStore {
         })
     }
 
-    /// Lookup a project by name.
-    pub async fn project_fetch(
+    /// Fetches a Project from the database and returns both the database row
+    /// and an authz::Project for doing authz checks
+    ///
+    /// See [`DataStore::organization_lookup_noauthz()`] for intended use cases
+    /// and caveats.
+    // TODO-security See the note on organization_lookup_noauthz().
+    async fn project_lookup_noauthz(
         &self,
-        organization_id: &Uuid,
-        name: &Name,
-    ) -> LookupResult<Project> {
+        authz_org: &authz::Organization,
+        project_name: &Name,
+    ) -> LookupResult<(authz::Project, Project)> {
         use db::schema::project::dsl;
         dsl::project
             .filter(dsl::time_deleted.is_null())
-            .filter(dsl::organization_id.eq(*organization_id))
-            .filter(dsl::name.eq(name.clone()))
+            .filter(dsl::organization_id.eq(authz_org.id()))
+            .filter(dsl::name.eq(project_name.clone()))
             .select(Project::as_select())
             .first_async(self.pool())
             .await
@@ -780,9 +783,47 @@ impl DataStore {
                 public_error_from_diesel_pool(
                     e,
                     ResourceType::Project,
-                    LookupType::ByName(name.as_str().to_owned()),
+                    LookupType::ByName(project_name.as_str().to_owned()),
                 )
             })
+            .map(|p| {
+                (
+                    authz_org
+                        .project(p.id(), LookupType::from(&project_name.0)),
+                    p,
+                )
+            })
+    }
+
+    /// Look up the id for a Project based on its name
+    ///
+    /// Returns an [`authz::Project`] (which makes the id available).
+    ///
+    /// This function does no authz checks because it is not possible to know
+    /// just by looking up an Project's id what privileges are required.
+    pub async fn project_lookup_path(
+        &self,
+        organization_name: &Name,
+        project_name: &Name,
+    ) -> LookupResult<authz::Project> {
+        let authz_org =
+            self.organization_lookup_path(organization_name).await?;
+        self.project_lookup_noauthz(&authz_org, project_name)
+            .await
+            .map(|(p, _)| p)
+    }
+
+    /// Lookup a project by name.
+    pub async fn project_fetch(
+        &self,
+        opctx: &OpContext,
+        authz_org: &authz::Organization,
+        name: &Name,
+    ) -> LookupResult<(authz::Project, Project)> {
+        let (authz_org, db_org) =
+            self.project_lookup_noauthz(authz_org, name).await?;
+        opctx.authorize(authz::Action::Read, &authz_org).await?;
+        Ok((authz_org, db_org))
     }
 
     /// Delete a project
@@ -816,70 +857,42 @@ impl DataStore {
         Ok(())
     }
 
-    /// Look up the id for a project based on its name
-    pub async fn project_lookup_id_by_name(
-        &self,
-        organization_id: &Uuid,
-        name: &Name,
-    ) -> Result<Uuid, Error> {
-        use db::schema::project::dsl;
-        dsl::project
-            .filter(dsl::time_deleted.is_null())
-            .filter(dsl::organization_id.eq(*organization_id))
-            .filter(dsl::name.eq(name.clone()))
-            .select(dsl::id)
-            .get_result_async::<Uuid>(self.pool())
-            .await
-            .map_err(|e| {
-                public_error_from_diesel_pool(
-                    e,
-                    ResourceType::Project,
-                    LookupType::ByName(name.as_str().to_owned()),
-                )
-            })
-    }
-
     pub async fn projects_list_by_id(
         &self,
-        organization_id: &Uuid,
+        opctx: &OpContext,
+        authz_org: &authz::Organization,
         pagparams: &DataPageParams<'_, Uuid>,
     ) -> ListResultVec<Project> {
         use db::schema::project::dsl;
+
+        opctx.authorize(authz::Action::ListChildren, authz_org).await?;
+
         paginated(dsl::project, dsl::id, pagparams)
-            .filter(dsl::organization_id.eq(*organization_id))
+            .filter(dsl::organization_id.eq(authz_org.id()))
             .filter(dsl::time_deleted.is_null())
             .select(Project::as_select())
-            .load_async(self.pool())
+            .load_async(self.pool_authorized(opctx).await?)
             .await
-            .map_err(|e| {
-                public_error_from_diesel_pool(
-                    e,
-                    ResourceType::Project,
-                    LookupType::Other("Listing All".to_string()),
-                )
-            })
+            .map_err(public_error_from_diesel_pool_shouldnt_fail)
     }
 
     pub async fn projects_list_by_name(
         &self,
-        organization_id: &Uuid,
+        opctx: &OpContext,
+        authz_org: &authz::Organization,
         pagparams: &DataPageParams<'_, Name>,
     ) -> ListResultVec<Project> {
         use db::schema::project::dsl;
 
+        opctx.authorize(authz::Action::ListChildren, authz_org).await?;
+
         paginated(dsl::project, dsl::name, &pagparams)
-            .filter(dsl::organization_id.eq(*organization_id))
+            .filter(dsl::organization_id.eq(authz_org.id()))
             .filter(dsl::time_deleted.is_null())
             .select(Project::as_select())
-            .load_async(self.pool())
+            .load_async(self.pool_authorized(opctx).await?)
             .await
-            .map_err(|e| {
-                public_error_from_diesel_pool(
-                    e,
-                    ResourceType::Project,
-                    LookupType::Other("Listing All".to_string()),
-                )
-            })
+            .map_err(public_error_from_diesel_pool_shouldnt_fail)
     }
 
     /// Updates a project by name (clobbering update -- no etag)

@@ -1,9 +1,14 @@
-API operations found with tag "hardware"
+API operations found with tag "disks"
 OPERATION ID                             URL PATH
-hardware_racks_get                       /hardware/racks
-hardware_racks_get_rack                  /hardware/racks/{rack_id}
-hardware_sleds_get                       /hardware/sleds
-hardware_sleds_get_sled                  /hardware/sleds/{sled_id}
+project_disks_delete_disk                /organizations/{organization_name}/projects/{project_name}/disks/{disk_name}
+project_disks_get                        /organizations/{organization_name}/projects/{project_name}/disks
+project_disks_get_disk                   /organizations/{organization_name}/projects/{project_name}/disks/{disk_name}
+project_disks_post                       /organizations/{organization_name}/projects/{project_name}/disks
+
+API operations found with tag "firewall"
+OPERATION ID                             URL PATH
+vpc_firewall_rules_get                   /organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/firewall/rules
+vpc_firewall_rules_put                   /organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/firewall/rules
 
 API operations found with tag "hidden"
 OPERATION ID                             URL PATH
@@ -28,35 +33,8 @@ API operations found with tag "metrics"
 OPERATION ID                             URL PATH
 timeseries_schema_get                    /timeseries/schema
 
-API operations found with tag "networking"
-OPERATION ID                             URL PATH
-project_vpcs_delete_vpc                  /organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}
-project_vpcs_get                         /organizations/{organization_name}/projects/{project_name}/vpcs
-project_vpcs_get_vpc                     /organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}
-project_vpcs_post                        /organizations/{organization_name}/projects/{project_name}/vpcs
-project_vpcs_put_vpc                     /organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}
-routers_routes_delete_route              /organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/routers/{router_name}/routes/{route_name}
-routers_routes_get                       /organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/routers/{router_name}/routes
-routers_routes_get_route                 /organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/routers/{router_name}/routes/{route_name}
-routers_routes_post                      /organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/routers/{router_name}/routes
-routers_routes_put_route                 /organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/routers/{router_name}/routes/{route_name}
-subnets_ips_get                          /organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/subnets/{subnet_name}/ips
-vpc_firewall_rules_get                   /organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/firewall/rules
-vpc_firewall_rules_put                   /organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/firewall/rules
-vpc_routers_delete_router                /organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/routers/{router_name}
-vpc_routers_get                          /organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/routers
-vpc_routers_get_router                   /organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/routers/{router_name}
-vpc_routers_post                         /organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/routers
-vpc_routers_put_router                   /organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/routers/{router_name}
-vpc_subnets_delete_subnet                /organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/subnets/{subnet_name}
-vpc_subnets_get                          /organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/subnets
-vpc_subnets_get_subnet                   /organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/subnets/{subnet_name}
-vpc_subnets_post                         /organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/subnets
-vpc_subnets_put_subnet                   /organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/subnets/{subnet_name}
-
 API operations found with tag "organizations"
 OPERATION ID                             URL PATH
-organization_projects_put_project        /organizations/{organization_name}/projects/{project_name}
 organizations_delete_organization        /organizations/{organization_name}
 organizations_get                        /organizations
 organizations_get_organization           /organizations/{organization_name}
@@ -69,23 +47,63 @@ organization_projects_delete_project     /organizations/{organization_name}/proj
 organization_projects_get                /organizations/{organization_name}/projects
 organization_projects_get_project        /organizations/{organization_name}/projects/{project_name}
 organization_projects_post               /organizations/{organization_name}/projects
-project_disks_delete_disk                /organizations/{organization_name}/projects/{project_name}/disks/{disk_name}
-project_disks_get                        /organizations/{organization_name}/projects/{project_name}/disks
-project_disks_get_disk                   /organizations/{organization_name}/projects/{project_name}/disks/{disk_name}
-project_disks_post                       /organizations/{organization_name}/projects/{project_name}/disks
+organization_projects_put_project        /organizations/{organization_name}/projects/{project_name}
+
+API operations found with tag "racks"
+OPERATION ID                             URL PATH
+hardware_racks_get                       /hardware/racks
+hardware_racks_get_rack                  /hardware/racks/{rack_id}
 
 API operations found with tag "roles"
 OPERATION ID                             URL PATH
 roles_get                                /roles
 roles_get_role                           /roles/{role_name}
 
+API operations found with tag "routers"
+OPERATION ID                             URL PATH
+vpc_routers_delete_router                /organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/routers/{router_name}
+vpc_routers_get                          /organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/routers
+vpc_routers_get_router                   /organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/routers/{router_name}
+vpc_routers_post                         /organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/routers
+vpc_routers_put_router                   /organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/routers/{router_name}
+
+API operations found with tag "routes"
+OPERATION ID                             URL PATH
+routers_routes_delete_route              /organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/routers/{router_name}/routes/{route_name}
+routers_routes_get                       /organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/routers/{router_name}/routes
+routers_routes_get_route                 /organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/routers/{router_name}/routes/{route_name}
+routers_routes_post                      /organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/routers/{router_name}/routes
+routers_routes_put_route                 /organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/routers/{router_name}/routes/{route_name}
+
 API operations found with tag "sagas"
 OPERATION ID                             URL PATH
 sagas_get                                /sagas
 sagas_get_saga                           /sagas/{saga_id}
 
+API operations found with tag "sleds"
+OPERATION ID                             URL PATH
+hardware_sleds_get                       /hardware/sleds
+hardware_sleds_get_sled                  /hardware/sleds/{sled_id}
+
+API operations found with tag "subnets"
+OPERATION ID                             URL PATH
+subnets_ips_get                          /organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/subnets/{subnet_name}/ips
+vpc_subnets_delete_subnet                /organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/subnets/{subnet_name}
+vpc_subnets_get                          /organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/subnets
+vpc_subnets_get_subnet                   /organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/subnets/{subnet_name}
+vpc_subnets_post                         /organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/subnets
+vpc_subnets_put_subnet                   /organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/subnets/{subnet_name}
+
 API operations found with tag "users"
 OPERATION ID                             URL PATH
 users_get                                /users
 users_get_user                           /users/{user_name}
+
+API operations found with tag "vpcs"
+OPERATION ID                             URL PATH
+project_vpcs_delete_vpc                  /organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}
+project_vpcs_get                         /organizations/{organization_name}/projects/{project_name}/vpcs
+project_vpcs_get_vpc                     /organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}
+project_vpcs_post                        /organizations/{organization_name}/projects/{project_name}/vpcs
+project_vpcs_put_vpc                     /organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}
 

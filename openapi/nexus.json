@@ -13,7 +13,7 @@
     "/hardware/racks": {
       "get": {
         "tags": [
-          "hardware"
+          "racks"
         ],
         "description": "List racks in the system.",
         "operationId": "hardware_racks_get",
@@ -67,7 +67,7 @@
     "/hardware/racks/{rack_id}": {
       "get": {
         "tags": [
-          "hardware"
+          "racks"
         ],
         "description": "Fetch information about a particular rack.",
         "operationId": "hardware_racks_get_rack",
@@ -101,7 +101,7 @@
     "/hardware/sleds": {
       "get": {
         "tags": [
-          "hardware"
+          "sleds"
         ],
         "description": "List sleds in the system.",
         "operationId": "hardware_sleds_get",
@@ -155,7 +155,7 @@
     "/hardware/sleds/{sled_id}": {
       "get": {
         "tags": [
-          "hardware"
+          "sleds"
         ],
         "description": "Fetch information about a sled in the system.",
         "operationId": "hardware_sleds_get_sled",
@@ -545,7 +545,7 @@
       },
       "put": {
         "tags": [
-          "organizations"
+          "projects"
         ],
         "description": "Update a specific project.\n * TODO-correctness: Is it valid for PUT to accept application/json that's a subset of what the resource actually represents?  If not, is that a problem? (HTTP may require that this be idempotent.)  If so, can we get around that having this be a slightly different content-type (e.g., \"application/json-patch\")?  We should see what other APIs do.",
         "operationId": "organization_projects_put_project",
@@ -628,7 +628,7 @@
     "/organizations/{organization_name}/projects/{project_name}/disks": {
       "get": {
         "tags": [
-          "projects"
+          "disks"
         ],
         "description": "List disks in a project.",
         "operationId": "project_disks_get",
@@ -698,7 +698,7 @@
       },
       "post": {
         "tags": [
-          "projects"
+          "disks"
         ],
         "description": "Create a disk in a project.\n * TODO-correctness See note about instance create.  This should be async.",
         "operationId": "project_disks_post",
@@ -749,7 +749,7 @@
     "/organizations/{organization_name}/projects/{project_name}/disks/{disk_name}": {
       "get": {
         "tags": [
-          "projects"
+          "disks"
         ],
         "description": "Fetch a single disk in a project.",
         "operationId": "project_disks_get_disk",
@@ -797,7 +797,7 @@
       },
       "delete": {
         "tags": [
-          "projects"
+          "disks"
         ],
         "description": "Delete a disk from a project.",
         "operationId": "project_disks_delete_disk",
@@ -1401,7 +1401,7 @@
     "/organizations/{organization_name}/projects/{project_name}/vpcs": {
       "get": {
         "tags": [
-          "networking"
+          "vpcs"
         ],
         "description": "List VPCs in a project.",
         "operationId": "project_vpcs_get",
@@ -1471,7 +1471,7 @@
       },
       "post": {
         "tags": [
-          "networking"
+          "vpcs"
         ],
         "description": "Create a VPC in a project.",
         "operationId": "project_vpcs_post",
@@ -1522,7 +1522,7 @@
     "/organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}": {
       "get": {
         "tags": [
-          "networking"
+          "vpcs"
         ],
         "description": "Get a VPC in a project.",
         "operationId": "project_vpcs_get_vpc",
@@ -1570,7 +1570,7 @@
       },
       "put": {
         "tags": [
-          "networking"
+          "vpcs"
         ],
         "description": "Update a VPC.",
         "operationId": "project_vpcs_put_vpc",
@@ -1621,7 +1621,7 @@
       },
       "delete": {
         "tags": [
-          "networking"
+          "vpcs"
         ],
         "description": "Delete a vpc from a project.",
         "operationId": "project_vpcs_delete_vpc",
@@ -1664,7 +1664,7 @@
     "/organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/firewall/rules": {
       "get": {
         "tags": [
-          "networking"
+          "firewall"
         ],
         "description": "List firewall rules for a VPC.",
         "operationId": "vpc_firewall_rules_get",
@@ -1743,7 +1743,7 @@
       },
       "put": {
         "tags": [
-          "networking"
+          "firewall"
         ],
         "description": "Replace the firewall rules for a VPC",
         "operationId": "vpc_firewall_rules_put",
@@ -1803,7 +1803,7 @@
     "/organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/routers": {
       "get": {
         "tags": [
-          "networking"
+          "routers"
         ],
         "description": "List VPC Custom and System Routers",
         "operationId": "vpc_routers_get",
@@ -1882,7 +1882,7 @@
       },
       "post": {
         "tags": [
-          "networking"
+          "routers"
         ],
         "description": "Create a VPC Router",
         "operationId": "vpc_routers_post",
@@ -1942,7 +1942,7 @@
     "/organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/routers/{router_name}": {
       "get": {
         "tags": [
-          "networking"
+          "routers"
         ],
         "description": "Get a VPC Router",
         "operationId": "vpc_routers_get_router",
@@ -1999,7 +1999,7 @@
       },
       "put": {
         "tags": [
-          "networking"
+          "routers"
         ],
         "description": "Update a VPC Router",
         "operationId": "vpc_routers_put_router",
@@ -2059,7 +2059,7 @@
       },
       "delete": {
         "tags": [
-          "networking"
+          "routers"
         ],
         "description": "Delete a router from its VPC",
         "operationId": "vpc_routers_delete_router",
@@ -2111,7 +2111,7 @@
     "/organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/routers/{router_name}/routes": {
       "get": {
         "tags": [
-          "networking"
+          "routes"
         ],
         "description": "List a Router's routes",
         "operationId": "routers_routes_get",
@@ -2199,7 +2199,7 @@
       },
       "post": {
         "tags": [
-          "networking"
+          "routes"
         ],
         "description": "Create a VPC Router",
         "operationId": "routers_routes_post",
@@ -2268,7 +2268,7 @@
     "/organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/routers/{router_name}/routes/{route_name}": {
       "get": {
         "tags": [
-          "networking"
+          "routes"
         ],
         "description": "Get a VPC Router route",
         "operationId": "routers_routes_get_route",
@@ -2334,7 +2334,7 @@
       },
       "put": {
         "tags": [
-          "networking"
+          "routes"
         ],
         "description": "Update a Router route",
         "operationId": "routers_routes_put_route",
@@ -2403,7 +2403,7 @@
       },
       "delete": {
         "tags": [
-          "networking"
+          "routes"
         ],
         "description": "Delete a route from its router",
         "operationId": "routers_routes_delete_route",
@@ -2464,7 +2464,7 @@
     "/organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/subnets": {
       "get": {
         "tags": [
-          "networking"
+          "subnets"
         ],
         "description": "List subnets in a VPC.",
         "operationId": "vpc_subnets_get",
@@ -2543,7 +2543,7 @@
       },
       "post": {
         "tags": [
-          "networking"
+          "subnets"
         ],
         "description": "Create a subnet in a VPC.",
         "operationId": "vpc_subnets_post",
@@ -2603,7 +2603,7 @@
     "/organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/subnets/{subnet_name}": {
       "get": {
         "tags": [
-          "networking"
+          "subnets"
         ],
         "description": "Get subnet in a VPC.",
         "operationId": "vpc_subnets_get_subnet",
@@ -2660,7 +2660,7 @@
       },
       "put": {
         "tags": [
-          "networking"
+          "subnets"
         ],
         "description": "Update a VPC Subnet.",
         "operationId": "vpc_subnets_put_subnet",
@@ -2720,7 +2720,7 @@
       },
       "delete": {
         "tags": [
-          "networking"
+          "subnets"
         ],
         "description": "Delete a subnet from a VPC.",
         "operationId": "vpc_subnets_delete_subnet",
@@ -2772,7 +2772,7 @@
     "/organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/subnets/{subnet_name}/ips": {
       "get": {
         "tags": [
-          "networking"
+          "subnets"
         ],
         "description": "List IP addresses on a VPC subnet.",
         "operationId": "subnets_ips_get",
