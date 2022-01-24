@@ -236,7 +236,7 @@ function cmd_project_delete
 function cmd_project_get
 {
 	[[ $# != 2 ]] && usage "expected ORGANIZATION_NAME PROJECT_NAME"
-	do_curl "/organizations/$1/projects/$2"
+	do_curl_authn "/organizations/$1/projects/$2"
 }
 
 function cmd_project_list_instances

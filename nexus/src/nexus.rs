@@ -541,8 +541,10 @@ impl Nexus {
         organization_name: &Name,
         new_project: &params::ProjectCreate,
     ) -> CreateResult<db::model::Project> {
-        let org =
-            self.db_datastore.organization_lookup_id(organization_name).await?;
+        let org = self
+            .db_datastore
+            .organization_lookup_path(organization_name)
+            .await?;
 
         // Create a project.
         let db_project = db::model::Project::new(org.id(), new_project.clone());
@@ -577,15 +579,19 @@ impl Nexus {
 
     pub async fn project_fetch(
         &self,
+        opctx: &OpContext,
         organization_name: &Name,
         project_name: &Name,
     ) -> LookupResult<db::model::Project> {
-        let organization_id = self
+        let authz_org = self
             .db_datastore
-            .organization_lookup_id(organization_name)
+            .organization_lookup_path(organization_name)
+            .await?;
+        Ok(self
+            .db_datastore
+            .project_fetch(opctx, &authz_org, project_name)
             .await?
-            .id();
-        self.db_datastore.project_fetch(&organization_id, project_name).await
+            .1)
     }
 
     pub async fn projects_list_by_name(
@@ -594,8 +600,10 @@ impl Nexus {
         organization_name: &Name,
         pagparams: &DataPageParams<'_, Name>,
     ) -> ListResultVec<db::model::Project> {
-        let authz_org =
-            self.db_datastore.organization_lookup_id(organization_name).await?;
+        let authz_org = self
+            .db_datastore
+            .organization_lookup_path(organization_name)
+            .await?;
         self.db_datastore
             .projects_list_by_name(opctx, &authz_org, pagparams)
             .await
@@ -607,8 +615,10 @@ impl Nexus {
         organization_name: &Name,
         pagparams: &DataPageParams<'_, Uuid>,
     ) -> ListResultVec<db::model::Project> {
-        let authz_org =
-            self.db_datastore.organization_lookup_id(organization_name).await?;
+        let authz_org = self
+            .db_datastore
+            .organization_lookup_path(organization_name)
+            .await?;
         self.db_datastore
             .projects_list_by_id(opctx, &authz_org, pagparams)
             .await
@@ -621,7 +631,7 @@ impl Nexus {
     ) -> DeleteResult {
         let organization_id = self
             .db_datastore
-            .organization_lookup_id(organization_name)
+            .organization_lookup_path(organization_name)
             .await?
             .id();
         self.db_datastore.project_delete(&organization_id, project_name).await
@@ -635,7 +645,7 @@ impl Nexus {
     ) -> UpdateResult<db::model::Project> {
         let organization_id = self
             .db_datastore
-            .organization_lookup_id(organization_name)
+            .organization_lookup_path(organization_name)
             .await?
             .id();
         self.db_datastore
@@ -657,15 +667,11 @@ impl Nexus {
         project_name: &Name,
         pagparams: &DataPageParams<'_, Name>,
     ) -> ListResultVec<db::model::Disk> {
-        let organization_id = self
-            .db_datastore
-            .organization_lookup_id(organization_name)
-            .await?
-            .id();
         let project_id = self
             .db_datastore
-            .project_lookup_id_by_name(&organization_id, project_name)
-            .await?;
+            .project_lookup_path(organization_name, project_name)
+            .await?
+            .id();
         self.db_datastore.project_list_disks(&project_id, pagparams).await
     }
 
@@ -675,8 +681,10 @@ impl Nexus {
         project_name: &Name,
         params: &params::DiskCreate,
     ) -> CreateResult<db::model::Disk> {
-        let project =
-            self.project_fetch(organization_name, project_name).await?;
+        let authz_project = self
+            .db_datastore
+            .project_lookup_path(organization_name, project_name)
+            .await?;
 
         /*
          * Until we implement snapshots, do not allow disks to be created with a
@@ -692,7 +700,7 @@ impl Nexus {
         let disk_id = Uuid::new_v4();
         let disk = db::model::Disk::new(
             disk_id,
-            project.id(),
+            authz_project.id(),
             params.clone(),
             db::model::DiskRuntimeState::new(),
         );
@@ -729,33 +737,22 @@ impl Nexus {
         project_name: &Name,
         disk_name: &Name,
     ) -> LookupResult<(db::model::Disk, authz::ProjectChild)> {
-        let organization_id = self
+        let authz_project = self
             .db_datastore
-            .organization_lookup_id(organization_name)
-            .await?
-            .id();
-        let project_id = self
-            .db_datastore
-            .project_lookup_id_by_name(&organization_id, project_name)
+            .project_lookup_path(organization_name, project_name)
             .await?;
         let disk = self
             .db_datastore
-            .disk_fetch_by_name(&project_id, disk_name)
+            .disk_fetch_by_name(&authz_project.id(), disk_name)
             .await?;
         let disk_id = disk.id();
         Ok((
             disk,
-            authz::FLEET
-                .organization(
-                    organization_id,
-                    LookupType::from(&organization_name.0),
-                )
-                .project(project_id, LookupType::from(&project_name.0))
-                .child_generic(
-                    ResourceType::Disk,
-                    disk_id,
-                    LookupType::from(&disk_name.0),
-                ),
+            authz_project.child_generic(
+                ResourceType::Disk,
+                disk_id,
+                LookupType::from(&disk_name.0),
+            ),
         ))
     }
 
@@ -834,15 +831,11 @@ impl Nexus {
         project_name: &Name,
         pagparams: &DataPageParams<'_, Name>,
     ) -> ListResultVec<db::model::Instance> {
-        let organization_id = self
-            .db_datastore
-            .organization_lookup_id(organization_name)
-            .await?
-            .id();
         let project_id = self
             .db_datastore
-            .project_lookup_id_by_name(&organization_id, project_name)
-            .await?;
+            .project_lookup_path(organization_name, project_name)
+            .await?
+            .id();
         self.db_datastore.project_list_instances(&project_id, pagparams).await
     }
 
@@ -852,18 +845,13 @@ impl Nexus {
         project_name: &Name,
         params: &params::InstanceCreate,
     ) -> CreateResult<db::model::Instance> {
-        let organization_id = self
+        let authz_project = self
             .db_datastore
-            .organization_lookup_id(organization_name)
-            .await?
-            .id();
-        let project_id = self
-            .db_datastore
-            .project_lookup_id_by_name(&organization_id, project_name)
+            .project_lookup_path(organization_name, project_name)
             .await?;
 
         let saga_params = Arc::new(sagas::ParamsInstanceCreate {
-            project_id,
+            project_id: authz_project.id(),
             create_params: params.clone(),
         });
 
@@ -941,15 +929,11 @@ impl Nexus {
          * instances?  Presumably we need to clean them up at some point, but
          * not right away so that callers can see that they've been destroyed.
          */
-        let organization_id = self
-            .db_datastore
-            .organization_lookup_id(organization_name)
-            .await?
-            .id();
         let project_id = self
             .db_datastore
-            .project_lookup_id_by_name(&organization_id, project_name)
-            .await?;
+            .project_lookup_path(organization_name, project_name)
+            .await?
+            .id();
         let instance = self
             .db_datastore
             .instance_fetch_by_name(&project_id, instance_name)
@@ -963,15 +947,11 @@ impl Nexus {
         project_name: &Name,
         instance_name: &Name,
     ) -> LookupResult<db::model::Instance> {
-        let organization_id = self
-            .db_datastore
-            .organization_lookup_id(organization_name)
-            .await?
-            .id();
         let project_id = self
             .db_datastore
-            .project_lookup_id_by_name(&organization_id, project_name)
-            .await?;
+            .project_lookup_path(organization_name, project_name)
+            .await?
+            .id();
         self.db_datastore
             .instance_fetch_by_name(&project_id, instance_name)
             .await
@@ -1527,15 +1507,11 @@ impl Nexus {
         project_name: &Name,
         pagparams: &DataPageParams<'_, Name>,
     ) -> ListResultVec<db::model::Vpc> {
-        let organization_id = self
-            .db_datastore
-            .organization_lookup_id(organization_name)
-            .await?
-            .id();
         let project_id = self
             .db_datastore
-            .project_lookup_id_by_name(&organization_id, project_name)
-            .await?;
+            .project_lookup_path(organization_name, project_name)
+            .await?
+            .id();
         let vpcs =
             self.db_datastore.project_list_vpcs(&project_id, pagparams).await?;
         Ok(vpcs)
@@ -1547,22 +1523,20 @@ impl Nexus {
         project_name: &Name,
         params: &params::VpcCreate,
     ) -> CreateResult<db::model::Vpc> {
-        let organization_id = self
-            .db_datastore
-            .organization_lookup_id(organization_name)
-            .await?
-            .id();
         let project_id = self
             .db_datastore
-            .project_lookup_id_by_name(&organization_id, project_name)
-            .await?;
+            .project_lookup_path(organization_name, project_name)
+            .await?
+            .id();
         let vpc_id = Uuid::new_v4();
         let system_router_id = Uuid::new_v4();
         let default_route_id = Uuid::new_v4();
         let default_subnet_id = Uuid::new_v4();
-        // TODO: Ultimately when the VPC is created a system router w/ an appropriate setup should also be created.
-        // Given that the underlying systems aren't wired up yet this is a naive implementation to populate the database
-        // with a starting router. Eventually this code should be replaced with a saga that'll handle creating the VPC and
+        // TODO: Ultimately when the VPC is created a system router w/ an
+        // appropriate setup should also be created.  Given that the underlying
+        // systems aren't wired up yet this is a naive implementation to
+        // populate the database with a starting router. Eventually this code
+        // should be replaced with a saga that'll handle creating the VPC and
         // its underlying system
         let router = db::model::VpcRouter::new(
             system_router_id,
@@ -1571,10 +1545,12 @@ impl Nexus {
             params::VpcRouterCreate {
                 identity: IdentityMetadataCreateParams {
                     name: "system".parse().unwrap(),
-                    description: "Routes are automatically added to this router as vpc subnets are created".into()
-                }
-            }
-            );
+                    description: "Routes are automatically added to this \
+                        router as vpc subnets are created"
+                        .into(),
+                },
+            },
+        );
         let _ = self.db_datastore.vpc_create_router(router).await?;
         let route = db::model::RouterRoute::new(
             default_route_id,
@@ -1594,9 +1570,11 @@ impl Nexus {
             },
         );
 
-        // TODO: This is both fake and utter nonsense. It should be eventually replaced with the proper behavior for creating
-        // the default route which may not even happen here. Creating the vpc, its system router, and that routers default route
-        // should all be apart of the same transaction.
+        // TODO: This is both fake and utter nonsense. It should be eventually
+        // replaced with the proper behavior for creating the default route
+        // which may not even happen here. Creating the vpc, its system router,
+        // and that routers default route should all be apart of the same
+        // transaction.
         self.db_datastore.router_create_route(route).await?;
         let vpc = db::model::Vpc::new(
             vpc_id,
@@ -1619,11 +1597,13 @@ impl Nexus {
                     ),
                 },
                 ipv4_block: Some(Ipv4Net(
-                    // TODO: This value should be replaced with the correct ipv4 range for a default subnet
+                    // TODO: This value should be replaced with the correct ipv4
+                    // range for a default subnet
                     "10.1.9.32/16".parse::<Ipv4Network>().unwrap(),
                 )),
                 ipv6_block: Some(Ipv6Net(
-                    // TODO: This value should be replaced w/ the first `/64` ipv6 from the address block
+                    // TODO: This value should be replaced w/ the first `/64`
+                    // ipv6 from the address block
                     "2001:db8::0/64".parse::<Ipv6Network>().unwrap(),
                 )),
             },
@@ -1652,15 +1632,11 @@ impl Nexus {
         project_name: &Name,
         vpc_name: &Name,
     ) -> LookupResult<db::model::Vpc> {
-        let organization_id = self
-            .db_datastore
-            .organization_lookup_id(organization_name)
-            .await?
-            .id();
         let project_id = self
             .db_datastore
-            .project_lookup_id_by_name(&organization_id, project_name)
-            .await?;
+            .project_lookup_path(organization_name, project_name)
+            .await?
+            .id();
         Ok(self.db_datastore.vpc_fetch_by_name(&project_id, vpc_name).await?)
     }
 
@@ -1671,15 +1647,11 @@ impl Nexus {
         vpc_name: &Name,
         params: &params::VpcUpdate,
     ) -> UpdateResult<()> {
-        let organization_id = self
-            .db_datastore
-            .organization_lookup_id(organization_name)
-            .await?
-            .id();
         let project_id = self
             .db_datastore
-            .project_lookup_id_by_name(&organization_id, project_name)
-            .await?;
+            .project_lookup_path(organization_name, project_name)
+            .await?
+            .id();
         let vpc =
             self.db_datastore.vpc_fetch_by_name(&project_id, vpc_name).await?;
         Ok(self

@@ -9,13 +9,13 @@
  * TODO-coverage add test for racks, sleds
  */
 
-use dropshot::test_util::object_get;
 use dropshot::test_util::objects_list_page;
 use dropshot::test_util::read_json;
 use dropshot::test_util::ClientTestContext;
 use dropshot::HttpErrorResponseBody;
 use http::method::Method;
 use http::StatusCode;
+use nexus_test_utils::resource_helpers::project_get;
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::IdentityMetadataUpdateParams;
 use omicron_common::api::external::Name;
@@ -240,6 +240,30 @@ async fn test_projects_basic(cptestctx: &ControlPlaneTestContext) {
 
         project_ids
     };
+
+    /*
+     * Unauthenticated and unauthorized users cannot fetch the Project.
+     */
+    let simproject1_url = "/organizations/test-org/projects/simproject1";
+    NexusRequest::expect_failure(
+        client,
+        http::StatusCode::NOT_FOUND,
+        http::Method::GET,
+        simproject1_url,
+    )
+    .execute()
+    .await
+    .expect("failed to make request");
+    NexusRequest::expect_failure(
+        client,
+        http::StatusCode::NOT_FOUND,
+        http::Method::GET,
+        simproject1_url,
+    )
+    .authn_as(AuthnMode::UnprivilegedUser)
+    .execute()
+    .await
+    .expect("failed to make request");
 
     /*
      * Error case: GET /organizations/test-org/projects/simproject1/nonexistent
@@ -714,10 +738,6 @@ async fn projects_list(
         .await
         .expect("failed to list projects")
         .all_items
-}
-
-async fn project_get(client: &ClientTestContext, project_url: &str) -> Project {
-    object_get::<Project>(client, project_url).await
 }
 
 async fn sleds_list(client: &ClientTestContext, sleds_url: &str) -> Vec<Sled> {

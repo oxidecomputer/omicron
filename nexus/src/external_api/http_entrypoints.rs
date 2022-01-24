@@ -477,8 +477,10 @@ async fn organization_projects_get_project(
     let organization_name = &path.organization_name;
     let project_name = &path.project_name;
     let handler = async {
-        let project =
-            nexus.project_fetch(&organization_name, &project_name).await?;
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let project = nexus
+            .project_fetch(&opctx, &organization_name, &project_name)
+            .await?;
         Ok(HttpResponseOk(project.into()))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
