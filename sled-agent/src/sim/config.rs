@@ -43,7 +43,7 @@ pub struct ConfigZpool {
 }
 
 /// Configuration describing simulated storage.
-#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+#[derive(Clone, Default, Debug, PartialEq, Deserialize, Serialize)]
 pub struct ConfigStorage {
     pub zpools: Vec<ConfigZpool>,
 }
