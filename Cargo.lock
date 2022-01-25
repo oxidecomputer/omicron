@@ -1663,9 +1663,9 @@ checksum = "e2abad23fbc42b3700f2f279844dc832adb2b2eb069b2df918f455c4e18cc646"
 
 [[package]]
 name = "libc"
-version = "0.2.113"
+version = "0.2.114"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "eef78b64d87775463c549fbd80e19249ef436ea3bf1de2a1eb7e717ec7fab1e9"
+checksum = "b0005d08a8f7b65fb8073cb697aa0b12b631ed251ce73d862ce50eeb52ce3b50"
 
 [[package]]
 name = "lock_api"
@@ -3714,7 +3714,7 @@ dependencies = [
 [[package]]
 name = "steno"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/steno?branch=main#c6ea85cfd268668a5974741b308d89acfae76063"
+source = "git+https://github.com/oxidecomputer/steno?branch=main#578498bbb43f9061c636b938dff98e7ece0b0efc"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -3831,9 +3831,9 @@ checksum = "6bdef32e8150c2a081110b42772ffe7d7c9032b606bc226c8260fd97e0976601"
 
 [[package]]
 name = "syn"
-version = "1.0.85"
+version = "1.0.86"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a684ac3dcd8913827e18cd09a68384ee66c1de24157e3c556c9ab16d85695fb7"
+checksum = "8a65b3f4ffa0092e9887669db0eae07941f023991ab58ea44da8fe8e2d511c6b"
 dependencies = [
  "proc-macro2",
  "quote",
