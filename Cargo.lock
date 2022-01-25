@@ -936,7 +936,7 @@ checksum = "1435fa1053d8b2fbbe9be7e97eca7f33d37b28409959813daefc1446a14247f1"
 [[package]]
 name = "dropshot"
 version = "0.6.1-dev"
-source = "git+https://github.com/oxidecomputer/dropshot?branch=main#8e4af93207fb79998eea90bd094ff7a5475673e5"
+source = "git+https://github.com/oxidecomputer/dropshot?branch=main#e0455b2d882bdd0b64c12bae829d2dd2ac4d6d61"
 dependencies = [
  "async-stream",
  "async-trait",
@@ -975,7 +975,7 @@ dependencies = [
 [[package]]
 name = "dropshot_endpoint"
 version = "0.6.1-dev"
-source = "git+https://github.com/oxidecomputer/dropshot?branch=main#8e4af93207fb79998eea90bd094ff7a5475673e5"
+source = "git+https://github.com/oxidecomputer/dropshot?branch=main#e0455b2d882bdd0b64c12bae829d2dd2ac4d6d61"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -2191,9 +2191,9 @@ dependencies = [
 
 [[package]]
 name = "openapiv3"
-version = "1.0.0"
+version = "1.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9de1b830d6f0f82e832f5a173d54f827f233e75b30f0f787c1289cca956879f8"
+checksum = "b6b4689110fd71f196934fbdf1ad0f0a4b49ea41fbc6f19008c00dba735b544c"
 dependencies = [
  "indexmap",
  "serde",
@@ -3388,9 +3388,9 @@ dependencies = [
 
 [[package]]
 name = "serde_json"
-version = "1.0.75"
+version = "1.0.78"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c059c05b48c5c0067d4b4b2b4f0732dd65feb52daf7e0ea09cd87e7dadc1af79"
+checksum = "d23c1ba4cf0efd44be32017709280b32d1cea5c3f1275c3b6d9e8bc54f758085"
 dependencies = [
  "itoa 1.0.1",
  "ryu",
