@@ -130,11 +130,11 @@ impl InstanceManager {
                         self.inner.vlan,
                         self.inner.nexus_client.clone(),
                     )?;
-                    let old_instance = instances.insert(
-                        instance_id,
-                        (target_propolis_id, instance.clone()),
-                    );
-                    if let Some((_old_propolis_id, old_instance)) = old_instance {
+                    let instance_clone = instance.clone();
+                    let old_instance = instances
+                        .insert(instance_id, (target_propolis_id, instance));
+                    if let Some((_old_propolis_id, old_instance)) = old_instance
+                    {
                         // If we had a previous instance, we must be migrating
                         assert!(migrate.is_some());
                         // TODO: assert that old_instance.inner.propolis_id() == migrate.src_uuid
@@ -154,7 +154,7 @@ impl InstanceManager {
                         instance_id,
                         self.inner.clone(),
                     ));
-                    (instance, ticket)
+                    (instance_clone, ticket)
                 }
             }
         };
