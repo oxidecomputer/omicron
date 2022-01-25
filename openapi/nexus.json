@@ -1250,6 +1250,9 @@
     },
     "/organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/migrate": {
       "post": {
+        "tags": [
+          "instances"
+        ],
         "description": "Migrate an instance to a different propolis-server, possibly on a different sled.",
         "operationId": "project_instances_migrate_instance",
         "parameters": [

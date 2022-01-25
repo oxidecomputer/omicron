@@ -850,6 +850,7 @@ async fn project_instances_delete_instance(
 #[endpoint {
     method = POST,
     path = "/organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/migrate",
+    tags = ["instances"],
 }]
 async fn project_instances_migrate_instance(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,

@@ -27,6 +27,7 @@ project_instances_get_instance           /organizations/{organization_name}/proj
 project_instances_instance_reboot        /organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/reboot
 project_instances_instance_start         /organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/start
 project_instances_instance_stop          /organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/stop
+project_instances_migrate_instance       /organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/migrate
 project_instances_post                   /organizations/{organization_name}/projects/{project_name}/instances
 
 API operations found with tag "metrics"
