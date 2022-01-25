@@ -100,6 +100,7 @@ impl InstanceStates {
             Observed::Stopping => State::Stopping,
             Observed::Stopped => State::Stopped,
             Observed::Rebooting => State::Rebooting,
+            Observed::Migrating => State::Migrating,
             Observed::Repairing => State::Repairing,
             Observed::Failed => State::Failed,
             // NOTE: This is a bit of an odd one - we intentionally do *not*
