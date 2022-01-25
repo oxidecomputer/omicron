@@ -43,7 +43,8 @@ struct InstanceManagerInternal {
     // TODO: If we held an object representing an enum of "Created OR Running"
     // instance, we could avoid the methods within "instance.rs" that panic
     // if the Propolis client hasn't been initialized.
-    instances: Mutex<BTreeMap<Uuid, Instance>>,
+    /// A mapping from a Sled Agent "Instance ID" to ("Propolis ID", [Instance]).
+    instances: Mutex<BTreeMap<Uuid, (Uuid, Instance)>>,
 
     vlan: Option<VlanID>,
     nic_id_allocator: IdAllocator,
@@ -90,12 +91,27 @@ impl InstanceManager {
             "instance_ensure {} -> {:?}", instance_id, target
         );
 
+        let target_propolis_id = initial_hardware.runtime.propolis_uuid;
+
         let (instance, maybe_instance_ticket) = {
             let mut instances = self.inner.instances.lock().unwrap();
-            match instances.get_mut(&instance_id) {
-                Some(instance) if migrate.is_none() => {
+            match (instances.get(&instance_id), &migrate) {
+                (Some((_, instance)), None) => {
                     // Instance already exists and we're not performing a migration
                     info!(&self.inner.log, "instance already exists");
+                    (instance.clone(), None)
+                }
+                (Some((propolis_id, instance)), Some(_))
+                    if *propolis_id == target_propolis_id =>
+                {
+                    // A migration was requested but the given propolis id
+                    // already seems to be the propolis backing this instance
+                    // so just return the instance as is without triggering
+                    // another migration.
+                    info!(
+                        &self.inner.log,
+                        "instance already exists with given dst propolis"
+                    );
                     (instance.clone(), None)
                 }
                 _ => {
@@ -106,18 +122,19 @@ impl InstanceManager {
                         .inner
                         .log
                         .new(o!("instance" => instance_id.to_string()));
+                    let instance = Instance::new(
+                        instance_log,
+                        instance_id,
+                        self.inner.nic_id_allocator.clone(),
+                        initial_hardware,
+                        self.inner.vlan,
+                        self.inner.nexus_client.clone(),
+                    )?;
                     let old_instance = instances.insert(
                         instance_id,
-                        Instance::new(
-                            instance_log,
-                            instance_id,
-                            self.inner.nic_id_allocator.clone(),
-                            initial_hardware,
-                            self.inner.vlan,
-                            self.inner.nexus_client.clone(),
-                        )?,
+                        (target_propolis_id, instance.clone()),
                     );
-                    if let Some(old_instance) = old_instance {
+                    if let Some((_old_propolis_id, old_instance)) = old_instance {
                         // If we had a previous instance, we must be migrating
                         assert!(migrate.is_some());
                         // TODO: assert that old_instance.inner.propolis_id() == migrate.src_uuid
@@ -133,8 +150,6 @@ impl InstanceManager {
                         std::mem::forget(old_instance);
                     }
 
-                    let instance =
-                        instances.get_mut(&instance_id).unwrap().clone();
                     let ticket = Some(InstanceTicket::new(
                         instance_id,
                         self.inner.clone(),
