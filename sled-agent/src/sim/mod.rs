@@ -17,6 +17,6 @@ mod simulatable;
 mod sled_agent;
 mod storage;
 
-pub use config::{Config, SimMode};
+pub use config::{Config, ConfigStorage, ConfigZpool, SimMode};
 pub use server::{run_server, Server};
 pub use sled_agent::SledAgent;

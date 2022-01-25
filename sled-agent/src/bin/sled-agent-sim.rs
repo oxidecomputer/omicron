@@ -15,7 +15,9 @@ use dropshot::ConfigLogging;
 use dropshot::ConfigLoggingLevel;
 use omicron_common::cmd::fatal;
 use omicron_common::cmd::CmdError;
-use omicron_sled_agent::sim::{run_server, Config, SimMode};
+use omicron_sled_agent::sim::{
+    run_server, Config, ConfigStorage, ConfigZpool, SimMode,
+};
 use std::net::SocketAddr;
 use structopt::StructOpt;
 use uuid::Uuid;
@@ -73,6 +75,10 @@ async fn do_run() -> Result<(), CmdError> {
             ..Default::default()
         },
         log: ConfigLogging::StderrTerminal { level: ConfigLoggingLevel::Info },
+        storage: ConfigStorage {
+            // Create 10 "virtual" U.2s, with 1 TB of storage.
+            zpools: vec![ConfigZpool { size: 1 << 40 }; 10],
+        },
     };
 
     run_server(&config).await.map_err(CmdError::Failure)
