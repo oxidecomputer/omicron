@@ -54,11 +54,14 @@ use uuid::Uuid;
  * We'll need a richer mechanism for registering sagas, but this works for now.
  */
 pub const SAGA_INSTANCE_CREATE_NAME: &'static str = "instance-create";
+pub const SAGA_INSTANCE_MIGRATE_NAME: &'static str = "instance-migrate";
 pub const SAGA_DISK_CREATE_NAME: &'static str = "disk-create";
 pub const SAGA_DISK_DELETE_NAME: &'static str = "disk-delete";
 lazy_static! {
     pub static ref SAGA_INSTANCE_CREATE_TEMPLATE: Arc<SagaTemplate<SagaInstanceCreate>> =
         Arc::new(saga_instance_create());
+    pub static ref SAGA_INSTANCE_MIGRATE_TEMPLATE: Arc<SagaTemplate<SagaInstanceMigrate>> =
+        Arc::new(saga_instance_migrate());
     pub static ref SAGA_DISK_CREATE_TEMPLATE: Arc<SagaTemplate<SagaDiskCreate>> =
         Arc::new(saga_disk_create());
     pub static ref SAGA_DISK_DELETE_TEMPLATE: Arc<SagaTemplate<SagaDiskDelete>> =
@@ -79,6 +82,11 @@ fn all_templates(
                 as Arc<dyn SagaTemplateGeneric<Arc<SagaContext>>>,
         ),
         (
+            SAGA_INSTANCE_MIGRATE_NAME,
+            Arc::clone(&SAGA_INSTANCE_MIGRATE_TEMPLATE)
+                as Arc<dyn SagaTemplateGeneric<Arc<SagaContext>>>,
+        ),
+        (
             SAGA_DISK_CREATE_NAME,
             Arc::clone(&SAGA_DISK_CREATE_TEMPLATE)
                 as Arc<dyn SagaTemplateGeneric<Arc<SagaContext>>>,
@@ -91,6 +99,12 @@ fn all_templates(
     ]
     .into_iter()
     .collect()
+}
+
+async fn saga_generate_uuid<UserType: SagaType>(
+    _: ActionContext<UserType>,
+) -> Result<Uuid, ActionError> {
+    Ok(Uuid::new_v4())
 }
 
 /*
@@ -116,13 +130,13 @@ pub fn saga_instance_create() -> SagaTemplate<SagaInstanceCreate> {
     template_builder.append(
         "instance_id",
         "GenerateInstanceId",
-        new_action_noop_undo(sic_generate_uuid),
+        new_action_noop_undo(saga_generate_uuid),
     );
 
     template_builder.append(
         "propolis_id",
         "GeneratePropolisId",
-        new_action_noop_undo(sic_generate_uuid),
+        new_action_noop_undo(saga_generate_uuid),
     );
 
     template_builder.append(
@@ -156,12 +170,6 @@ pub fn saga_instance_create() -> SagaTemplate<SagaInstanceCreate> {
     );
 
     template_builder.build()
-}
-
-async fn sic_generate_uuid(
-    _: ActionContext<SagaInstanceCreate>,
-) -> Result<Uuid, ActionError> {
-    Ok(Uuid::new_v4())
 }
 
 async fn sic_alloc_server(
@@ -259,6 +267,8 @@ async fn sic_create_instance_record(
         run_state: InstanceState::Creating,
         sled_uuid: sled_uuid?,
         propolis_uuid: propolis_uuid?,
+        propolis_addr: None,
+        migration_uuid: None,
         hostname: params.create_params.hostname.clone(),
         memory: params.create_params.memory,
         ncpus: params.create_params.ncpus,
@@ -297,6 +307,7 @@ async fn sic_instance_ensure(
         sled_agent_client::types::InstanceRuntimeStateRequested {
             run_state:
                 sled_agent_client::types::InstanceStateRequested::Running,
+            migration_id: None,
         };
     let instance_id = sagactx.lookup::<Uuid>("instance_id")?;
     let sled_uuid = sagactx.lookup::<Uuid>("server_id")?;
@@ -320,6 +331,7 @@ async fn sic_instance_ensure(
                     initial_runtime,
                 ),
                 target: runtime_params,
+                migrate: None,
             },
         )
         .await
@@ -334,6 +346,157 @@ async fn sic_instance_ensure(
         .await
         .map(|_| ())
         .map_err(ActionError::action_failed)
+}
+
+/*
+ * "Migrate Instance" saga template
+ */
+#[derive(Debug, Deserialize, Serialize)]
+pub struct ParamsInstanceMigrate {
+    pub instance_id: Uuid,
+    pub migrate_params: params::InstanceMigrate,
+}
+
+#[derive(Debug)]
+pub struct SagaInstanceMigrate;
+impl SagaType for SagaInstanceMigrate {
+    type SagaParamsType = Arc<ParamsInstanceMigrate>;
+    type ExecContextType = Arc<SagaContext>;
+}
+
+pub fn saga_instance_migrate() -> SagaTemplate<SagaInstanceMigrate> {
+    let mut template_builder = SagaTemplateBuilder::new();
+
+    template_builder.append(
+        "migrate_id",
+        "GenerateMigrateId",
+        new_action_noop_undo(saga_generate_uuid),
+    );
+
+    template_builder.append(
+        "migrate_instance",
+        "MigratePrep",
+        new_action_noop_undo(sim_migrate_prep),
+    );
+
+    template_builder.append(
+        "dst_propolis_id",
+        "GeneratePropolisId",
+        new_action_noop_undo(saga_generate_uuid),
+    );
+
+    template_builder.append(
+        "instance_migrate",
+        "InstanceMigrate",
+        // TODO robustness: This needs an undo action
+        new_action_noop_undo(sim_instance_migrate),
+    );
+
+    template_builder.append(
+        "cleanup_source",
+        "CleanupSource",
+        // TODO robustness: This needs an undo action. Is it even possible
+        // to undo at this point?
+        new_action_noop_undo(sim_cleanup_source),
+    );
+
+    template_builder.build()
+}
+
+async fn sim_migrate_prep(
+    sagactx: ActionContext<SagaInstanceMigrate>,
+) -> Result<(Uuid, InstanceRuntimeState), ActionError> {
+    let osagactx = sagactx.user_data();
+    let params = sagactx.saga_params();
+
+    let migrate_uuid = sagactx.lookup::<Uuid>("migrate_id")?;
+
+    // We have sled-agent (via Nexus) attempt to place
+    // the instance in a "Migrating" state w/ the given
+    // migration id. This will also update the instance
+    // state in the db
+    let instance = osagactx
+        .nexus()
+        .instance_start_migrate(params.instance_id, migrate_uuid)
+        .await
+        .map_err(ActionError::action_failed)?;
+    let instance_id = instance.id();
+
+    Ok((instance_id, instance.runtime_state.into()))
+}
+
+async fn sim_instance_migrate(
+    sagactx: ActionContext<SagaInstanceMigrate>,
+) -> Result<(), ActionError> {
+    let osagactx = sagactx.user_data();
+    let params = sagactx.saga_params();
+
+    let dst_sled_uuid = params.migrate_params.dst_sled_uuid;
+    let dst_propolis_uuid = sagactx.lookup::<Uuid>("dst_propolis_id")?;
+    let (instance_id, old_runtime) =
+        sagactx.lookup::<(Uuid, InstanceRuntimeState)>("migrate_instance")?;
+
+    let runtime = InstanceRuntimeState {
+        sled_uuid: dst_sled_uuid,
+        propolis_uuid: dst_propolis_uuid,
+        propolis_addr: None,
+        ..old_runtime
+    };
+    let instance_hardware = sled_agent_client::types::InstanceHardware {
+        runtime: runtime.into(),
+        // TODO: populate NICs
+        nics: vec![],
+    };
+    let target = sled_agent_client::types::InstanceRuntimeStateRequested {
+        run_state: sled_agent_client::types::InstanceStateRequested::Running,
+        // Note, we clear the migration_id in our target runtime state because
+        // at the end of the migration process in question, the id is reset
+        migration_id: None,
+    };
+
+    let src_propolis_uuid = old_runtime.propolis_uuid;
+    let src_propolis_addr = old_runtime.propolis_addr.ok_or_else(|| {
+        ActionError::action_failed(Error::invalid_request(
+            "expected source propolis-addr",
+        ))
+    })?;
+
+    let dst_sa = osagactx
+        .sled_client(&dst_sled_uuid)
+        .await
+        .map_err(ActionError::action_failed)?;
+
+    let new_runtime_state: InstanceRuntimeState = dst_sa
+        .instance_put(
+            &instance_id,
+            &sled_agent_client::types::InstanceEnsureBody {
+                initial: instance_hardware,
+                target,
+                migrate: Some(omicron_common::api::internal::sled_agent::InstanceMigrateParams {
+                    src_propolis_addr,
+                    src_propolis_uuid,
+                }.into()),
+            },
+        )
+        .await
+        .map_err(omicron_common::api::external::Error::from)
+        .map_err(ActionError::action_failed)?
+        .into();
+
+    osagactx
+        .datastore()
+        .instance_update_runtime(&instance_id, &new_runtime_state.into())
+        .await
+        .map_err(ActionError::action_failed)?;
+
+    Ok(())
+}
+
+async fn sim_cleanup_source(
+    _sagactx: ActionContext<SagaInstanceMigrate>,
+) -> Result<(), ActionError> {
+    // TODO: clean up the previous instance whether it's on the same sled or a different one
+    Ok(())
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -355,7 +518,7 @@ fn saga_disk_create() -> SagaTemplate<SagaDiskCreate> {
     template_builder.append(
         "disk_id",
         "GenerateDiskId",
-        new_action_noop_undo(sdc_generate_uuid),
+        new_action_noop_undo(saga_generate_uuid),
     );
 
     template_builder.append(
@@ -386,12 +549,6 @@ fn saga_disk_create() -> SagaTemplate<SagaDiskCreate> {
     );
 
     template_builder.build()
-}
-
-async fn sdc_generate_uuid(
-    _: ActionContext<SagaDiskCreate>,
-) -> Result<Uuid, ActionError> {
-    Ok(Uuid::new_v4())
 }
 
 async fn sdc_create_disk_record(

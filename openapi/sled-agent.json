@@ -370,6 +370,15 @@
               }
             ]
           },
+          "migrate": {
+            "nullable": true,
+            "description": "If we're migrating this instance, the details needed to drive the migration",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/InstanceMigrateParams"
+              }
+            ]
+          },
           "target": {
             "description": "requested runtime state of the Instance",
             "allOf": [
@@ -403,6 +412,22 @@
           "runtime"
         ]
       },
+      "InstanceMigrateParams": {
+        "type": "object",
+        "properties": {
+          "src_propolis_addr": {
+            "type": "string"
+          },
+          "src_propolis_uuid": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "required": [
+          "src_propolis_addr",
+          "src_propolis_uuid"
+        ]
+      },
       "InstanceRuntimeState": {
         "description": "Runtime state of the Instance, including the actual running state and minimal metadata\n\nThis state is owned by the sled agent running that Instance.",
         "type": "object",
@@ -427,6 +452,12 @@
               }
             ]
           },
+          "migration_uuid": {
+            "nullable": true,
+            "description": "migration id (if one in process)",
+            "type": "string",
+            "format": "uuid"
+          },
           "ncpus": {
             "description": "number of CPUs allocated for this Instance",
             "allOf": [
@@ -434,6 +465,11 @@
                 "$ref": "#/components/schemas/InstanceCpuCount"
               }
             ]
+          },
+          "propolis_addr": {
+            "nullable": true,
+            "description": "address of propolis-server running this Instance",
+            "type": "string"
           },
           "propolis_uuid": {
             "description": "which propolis-server is running this Instance",
@@ -471,9 +507,14 @@
         ]
       },
       "InstanceRuntimeStateRequested": {
-        "description": "Used to request an Instance state change from a sled agent\n\nRight now, it's only the run state that can be changed, though we might want to support changing properties like \"ncpus\" here.",
+        "description": "Used to request an Instance state change from a sled agent\n\nRight now, it's only the run state and migration id that can be changed, though we might want to support changing properties like \"ncpus\" here.",
         "type": "object",
         "properties": {
+          "migration_id": {
+            "nullable": true,
+            "type": "string",
+            "format": "uuid"
+          },
           "run_state": {
             "$ref": "#/components/schemas/InstanceStateRequested"
           }
@@ -492,6 +533,7 @@
           "stopping",
           "stopped",
           "rebooting",
+          "migrating",
           "repairing",
           "failed",
           "destroyed"
@@ -504,6 +546,7 @@
           "running",
           "stopped",
           "reboot",
+          "migrating",
           "destroyed"
         ]
       },

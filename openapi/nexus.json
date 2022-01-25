@@ -1248,6 +1248,66 @@
         }
       }
     },
+    "/organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/migrate": {
+      "post": {
+        "tags": [
+          "instances"
+        ],
+        "description": "Migrate an instance to a different propolis-server, possibly on a different sled.",
+        "operationId": "project_instances_migrate_instance",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "instance_name",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Name"
+            },
+            "style": "simple"
+          },
+          {
+            "in": "path",
+            "name": "organization_name",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Name"
+            },
+            "style": "simple"
+          },
+          {
+            "in": "path",
+            "name": "project_name",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Name"
+            },
+            "style": "simple"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InstanceMigrate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Instance"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/reboot": {
       "post": {
         "tags": [
@@ -3604,6 +3664,19 @@
           "ncpus"
         ]
       },
+      "InstanceMigrate": {
+        "description": "Migration parameters for an [`Instance`]",
+        "type": "object",
+        "properties": {
+          "dst_sled_uuid": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "required": [
+          "dst_sled_uuid"
+        ]
+      },
       "InstanceResultsPage": {
         "description": "A single page of results",
         "type": "object",
@@ -3635,6 +3708,7 @@
           "stopping",
           "stopped",
           "rebooting",
+          "migrating",
           "repairing",
           "failed",
           "destroyed"

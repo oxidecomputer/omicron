@@ -1252,6 +1252,12 @@
               }
             ]
           },
+          "migration_uuid": {
+            "nullable": true,
+            "description": "migration id (if one in process)",
+            "type": "string",
+            "format": "uuid"
+          },
           "ncpus": {
             "description": "number of CPUs allocated for this Instance",
             "allOf": [
@@ -1259,6 +1265,11 @@
                 "$ref": "#/components/schemas/InstanceCpuCount"
               }
             ]
+          },
+          "propolis_addr": {
+            "nullable": true,
+            "description": "address of propolis-server running this Instance",
+            "type": "string"
           },
           "propolis_uuid": {
             "description": "which propolis-server is running this Instance",
@@ -1305,6 +1316,7 @@
           "stopping",
           "stopped",
           "rebooting",
+          "migrating",
           "repairing",
           "failed",
           "destroyed"

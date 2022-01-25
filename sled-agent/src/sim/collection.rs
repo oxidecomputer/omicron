@@ -361,6 +361,8 @@ mod test {
                 run_state: InstanceState::Creating,
                 sled_uuid: uuid::Uuid::new_v4(),
                 propolis_uuid: uuid::Uuid::new_v4(),
+                propolis_addr: None,
+                migration_uuid: None,
                 ncpus: InstanceCpuCount(2),
                 memory: ByteCount::from_mebibytes_u32(512),
                 hostname: "myvm".to_string(),
@@ -424,6 +426,7 @@ mod test {
             let dropped = instance
                 .transition(InstanceRuntimeStateRequested {
                     run_state: state.clone(),
+                    migration_id: None,
                 })
                 .unwrap();
             assert!(dropped.is_none());
@@ -482,6 +485,7 @@ mod test {
         let dropped = instance
             .transition(InstanceRuntimeStateRequested {
                 run_state: InstanceStateRequested::Running,
+                migration_id: None,
             })
             .unwrap();
         assert!(dropped.is_none());
@@ -515,6 +519,7 @@ mod test {
         let dropped = instance
             .transition(InstanceRuntimeStateRequested {
                 run_state: InstanceStateRequested::Running,
+                migration_id: None,
             })
             .unwrap();
         assert!(dropped.is_none());
@@ -535,6 +540,7 @@ mod test {
         let dropped = instance
             .transition(InstanceRuntimeStateRequested {
                 run_state: InstanceStateRequested::Destroyed,
+                migration_id: None,
             })
             .unwrap();
         assert!(dropped.is_none());
@@ -598,6 +604,7 @@ mod test {
         let dropped = instance
             .transition(InstanceRuntimeStateRequested {
                 run_state: InstanceStateRequested::Running,
+                migration_id: None,
             })
             .unwrap();
         assert!(dropped.is_none());
@@ -615,6 +622,7 @@ mod test {
         let dropped = instance
             .transition(InstanceRuntimeStateRequested {
                 run_state: InstanceStateRequested::Destroyed,
+                migration_id: None,
             })
             .unwrap();
         assert_eq!(dropped.unwrap().run_state, InstanceStateRequested::Running);
@@ -661,6 +669,7 @@ mod test {
         assert!(instance
             .transition(InstanceRuntimeStateRequested {
                 run_state: InstanceStateRequested::Running,
+                migration_id: None,
             })
             .unwrap()
             .is_none());
@@ -679,6 +688,7 @@ mod test {
         assert!(instance
             .transition(InstanceRuntimeStateRequested {
                 run_state: InstanceStateRequested::Reboot,
+                migration_id: None,
             })
             .unwrap()
             .is_none());
@@ -720,6 +730,7 @@ mod test {
         assert!(instance
             .transition(InstanceRuntimeStateRequested {
                 run_state: InstanceStateRequested::Reboot,
+                migration_id: None,
             })
             .unwrap()
             .is_none());
@@ -728,6 +739,7 @@ mod test {
         assert!(instance
             .transition(InstanceRuntimeStateRequested {
                 run_state: InstanceStateRequested::Reboot,
+                migration_id: None,
             })
             .unwrap()
             .is_none());
@@ -752,6 +764,7 @@ mod test {
         assert!(instance
             .transition(InstanceRuntimeStateRequested {
                 run_state: InstanceStateRequested::Reboot,
+                migration_id: None,
             })
             .unwrap()
             .is_none());
@@ -763,6 +776,7 @@ mod test {
         assert!(instance
             .transition(InstanceRuntimeStateRequested {
                 run_state: InstanceStateRequested::Reboot,
+                migration_id: None,
             })
             .unwrap()
             .is_some());
@@ -789,6 +803,7 @@ mod test {
         assert!(instance
             .transition(InstanceRuntimeStateRequested {
                 run_state: InstanceStateRequested::Stopped,
+                migration_id: None,
             })
             .unwrap()
             .is_none());
@@ -798,6 +813,7 @@ mod test {
         assert!(instance
             .transition(InstanceRuntimeStateRequested {
                 run_state: InstanceStateRequested::Running,
+                migration_id: None,
             })
             .unwrap()
             .is_none());
@@ -806,6 +822,7 @@ mod test {
         assert!(instance
             .transition(InstanceRuntimeStateRequested {
                 run_state: InstanceStateRequested::Reboot,
+                migration_id: None,
             })
             .unwrap()
             .is_some());

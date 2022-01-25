@@ -674,6 +674,10 @@ pub enum InstanceState {
     /// The instance is in the process of rebooting - it will remain
     /// in the "rebooting" state until the VM is starting once more.
     Rebooting,
+    /// The instance is in the process of migrating - it will remain
+    /// in the "migrating" state until the migration process is complete
+    /// and the destination propolis is ready to continue execution.
+    Migrating,
     Repairing,
     Failed,
     Destroyed,
@@ -702,6 +706,7 @@ impl TryFrom<&str> for InstanceState {
             "stopping" => InstanceState::Stopping,
             "stopped" => InstanceState::Stopped,
             "rebooting" => InstanceState::Rebooting,
+            "migrating" => InstanceState::Migrating,
             "repairing" => InstanceState::Repairing,
             "failed" => InstanceState::Failed,
             "destroyed" => InstanceState::Destroyed,
@@ -720,6 +725,7 @@ impl InstanceState {
             InstanceState::Stopping => "stopping",
             InstanceState::Stopped => "stopped",
             InstanceState::Rebooting => "rebooting",
+            InstanceState::Migrating => "migrating",
             InstanceState::Repairing => "repairing",
             InstanceState::Failed => "failed",
             InstanceState::Destroyed => "destroyed",
@@ -737,6 +743,7 @@ impl InstanceState {
             InstanceState::Running => false,
             InstanceState::Stopping => false,
             InstanceState::Rebooting => false,
+            InstanceState::Migrating => false,
 
             InstanceState::Creating => true,
             InstanceState::Stopped => true,

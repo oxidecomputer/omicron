@@ -39,6 +39,7 @@ INSTANCES
     instance_create_demo ORGANIZATION_NAME PROJECT_NAME INSTANCE_NAME
     instance_get         ORGANIZATION_NAME PROJECT_NAME INSTANCE_NAME
     instance_delete      ORGANIZATION_NAME PROJECT_NAME INSTANCE_NAME
+    instance_migrate     ORGANIZATION_NAME PROJECT_NAME INSTANCE_NAME SLED_ID
 
     instance_stop        ORGANIZATION_NAME PROJECT_NAME INSTANCE_NAME
     instance_start       ORGANIZATION_NAME PROJECT_NAME INSTANCE_NAME
@@ -276,6 +277,13 @@ function cmd_instance_delete
 {
 	[[ $# != 3 ]] && usage "expected ORGANIZATION_NAME PROJECT_NAME INSTANCE_NAME"
 	do_curl "/organizations/$1/projects/$2/instances/$3" -X DELETE
+}
+
+function cmd_instance_migrate
+{
+	[[ $# != 4 ]] && usage "expected ORGANIZATION_NAME PROJECT_NAME INSTANCE_NAME SLED_ID"
+	mkjson dst_sled_uuid="$4" | \
+		do_curl "/organizations/$1/projects/$2/instances/$3/migrate" -X POST -T -
 }
 
 function cmd_instance_stop

@@ -154,6 +154,16 @@ impl Error {
     }
 
     /**
+     * Generates an [`Error::InvalidRequest`] error with the specific message
+     *
+     * This should be used for failures due possibly to invalid client input
+     * or malformed requests.
+     */
+    pub fn invalid_request(message: &str) -> Error {
+        Error::InvalidRequest { message: message.to_owned() }
+    }
+
+    /**
      * Generates an [`Error::ServiceUnavailable`] error with the specific
      * message
      *

@@ -23,6 +23,7 @@ use diesel::sql_types;
 use ipnetwork::IpNetwork;
 use omicron_common::api::external;
 use omicron_common::api::internal;
+use omicron_sled_agent::common::instance::PROPOLIS_PORT;
 use parse_display::Display;
 use rand::{rngs::StdRng, SeedableRng};
 use ref_cast::RefCast;
@@ -839,6 +840,10 @@ pub struct InstanceRuntimeState {
     pub sled_uuid: Uuid,
     #[column_name = "active_propolis_id"]
     pub propolis_uuid: Uuid,
+    #[column_name = "active_propolis_ip"]
+    pub propolis_ip: Option<ipnetwork::IpNetwork>,
+    #[column_name = "migration_id"]
+    pub migration_uuid: Option<Uuid>,
     #[column_name = "ncpus"]
     pub ncpus: InstanceCpuCount,
     #[column_name = "memory"]
@@ -865,6 +870,8 @@ impl From<internal::nexus::InstanceRuntimeState> for InstanceRuntimeState {
             state: InstanceState::new(state.run_state),
             sled_uuid: state.sled_uuid,
             propolis_uuid: state.propolis_uuid,
+            propolis_ip: state.propolis_addr.map(|addr| addr.ip().into()),
+            migration_uuid: state.migration_uuid,
             ncpus: state.ncpus.into(),
             memory: state.memory.into(),
             hostname: state.hostname,
@@ -881,6 +888,10 @@ impl Into<internal::nexus::InstanceRuntimeState> for InstanceRuntimeState {
             run_state: *self.state.state(),
             sled_uuid: self.sled_uuid,
             propolis_uuid: self.propolis_uuid,
+            propolis_addr: self
+                .propolis_ip
+                .map(|ip| SocketAddr::new(ip.ip(), PROPOLIS_PORT)),
+            migration_uuid: self.migration_uuid,
             ncpus: self.ncpus.into(),
             memory: self.memory.into(),
             hostname: self.hostname,

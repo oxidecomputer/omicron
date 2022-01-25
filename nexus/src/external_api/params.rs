@@ -87,6 +87,14 @@ pub struct InstanceCreate {
     pub hostname: String, /* TODO-cleanup different type? */
 }
 
+/**
+ * Migration parameters for an [`Instance`]
+ */
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct InstanceMigrate {
+    pub dst_sled_uuid: Uuid,
+}
+
 /*
  * VPCS
  */

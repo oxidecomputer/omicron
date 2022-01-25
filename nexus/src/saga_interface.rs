@@ -59,6 +59,10 @@ impl SagaContext {
         self.nexus.sled_allocate().await
     }
 
+    pub fn nexus(&self) -> &Arc<Nexus> {
+        &self.nexus
+    }
+
     pub fn datastore(&self) -> &db::DataStore {
         &*self.nexus.datastore()
     }
