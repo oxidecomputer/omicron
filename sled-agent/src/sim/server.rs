@@ -66,16 +66,6 @@ impl Server {
         .map_err(|error| format!("initializing server: {}", error))?
         .start();
 
-        // Create all the Zpools requested by the config, and allocate a single
-        // Crucible dataset for each. This emulates the setup we expect to have
-        // on the physical rack.
-        for zpool in &config.storage.zpools {
-            let zpool_id = uuid::Uuid::new_v4();
-            sled_agent.create_zpool(zpool_id, zpool.size).await;
-            let dataset_id = uuid::Uuid::new_v4();
-            sled_agent.create_crucible_dataset(zpool_id, dataset_id).await;
-        }
-
         /*
          * Notify the control plane that we're up, and continue trying this
          * until it succeeds. We retry with an randomized, capped exponential
@@ -108,6 +98,17 @@ impl Server {
         )
         .await
         .expect("Expected an infinite retry loop contacting Nexus");
+
+        // Create all the Zpools requested by the config, and allocate a single
+        // Crucible dataset for each. This emulates the setup we expect to have
+        // on the physical rack.
+        for zpool in &config.storage.zpools {
+            let zpool_id = uuid::Uuid::new_v4();
+            sled_agent.create_zpool(zpool_id, zpool.size).await;
+            let dataset_id = uuid::Uuid::new_v4();
+            sled_agent.create_crucible_dataset(zpool_id, dataset_id).await;
+        }
+
         Ok(Server { sled_agent, http_server })
     }
 
