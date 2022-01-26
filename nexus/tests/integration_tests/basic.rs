@@ -337,19 +337,24 @@ async fn test_projects_basic(cptestctx: &ControlPlaneTestContext) {
         .await
         .expect("failed to make request");
     }
-    client
-        .make_request_error_body(
+    NexusRequest::new(
+        RequestBuilder::new(
+            client,
             Method::PUT,
             "/organizations/test-org/projects/simproject2",
-            params::ProjectUpdate {
-                identity: IdentityMetadataUpdateParams {
-                    name: None,
-                    description: None,
-                },
-            },
-            StatusCode::NOT_FOUND,
         )
-        .await;
+        .body(Some(params::ProjectUpdate {
+            identity: IdentityMetadataUpdateParams {
+                name: None,
+                description: None,
+            },
+        }))
+        .expect_status(Some(StatusCode::NOT_FOUND)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .expect("failed to make request");
 
     /*
      * Similarly, verify "GET /organizations/test-org/projects"

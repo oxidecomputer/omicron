@@ -539,8 +539,10 @@ async fn organization_projects_put_project(
     let organization_name = &path.organization_name;
     let project_name = &path.project_name;
     let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
         let newproject = nexus
             .project_update(
+                &opctx,
                 &organization_name,
                 &project_name,
                 &updated_project.into_inner(),

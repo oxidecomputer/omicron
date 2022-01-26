@@ -645,21 +645,17 @@ impl Nexus {
 
     pub async fn project_update(
         &self,
+        opctx: &OpContext,
         organization_name: &Name,
         project_name: &Name,
         new_params: &params::ProjectUpdate,
     ) -> UpdateResult<db::model::Project> {
-        let organization_id = self
+        let authz_project = self
             .db_datastore
-            .organization_lookup_path(organization_name)
-            .await?
-            .id();
+            .project_lookup_path(organization_name, project_name)
+            .await?;
         self.db_datastore
-            .project_update(
-                &organization_id,
-                project_name,
-                new_params.clone().into(),
-            )
+            .project_update(&authz_project, new_params.clone().into())
             .await
     }
 

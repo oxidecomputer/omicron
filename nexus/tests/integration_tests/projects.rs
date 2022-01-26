@@ -94,4 +94,30 @@ async fn test_projects(cptestctx: &ControlPlaneTestContext) {
     .all_items;
     assert_eq!(projects.len(), 1);
     assert_eq!(projects[0].identity.name, p1_name);
+
+    // Unauthenticated and unauthorized users should not be able to delete or
+    // modify a Project.
+    NexusRequest::expect_failure(
+        &client,
+        http::StatusCode::NOT_FOUND,
+        http::Method::DELETE,
+        &p1_url,
+    )
+    .execute()
+    .await
+    .expect("failed to make request");
+    NexusRequest::new(
+        RequestBuilder::new(&client, http::Method::PUT, &projects_url)
+            .body(Some(params::ProjectUpdate {
+                identity: IdentityMetadataUpdateParams {
+                    name: None,
+                    description: None,
+                },
+            }))
+            .expect_status(Some(http::StatusCode::NOT_FOUND)),
+    )
+    .authn_as(AuthnMode::UnprivilegedUser)
+    .execute()
+    .await
+    .expect("failed to make request");
 }
