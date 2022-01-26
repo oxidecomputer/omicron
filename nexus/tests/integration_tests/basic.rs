@@ -464,27 +464,31 @@ async fn test_projects_basic(cptestctx: &ControlPlaneTestContext) {
             description: Some("little lightning".to_string()),
         },
     };
-    let mut response = client
-        .make_request(
-            Method::PUT,
-            "/organizations/test-org/projects/simproject3",
-            Some(project_update),
-            StatusCode::OK,
-        )
-        .await
-        .expect("failed to make request to server");
-    let project: Project = read_json(&mut response).await;
+    let project = NexusRequest::object_put(
+        client,
+        "/organizations/test-org/projects/simproject3",
+        Some(&project_update),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .expect("expected success")
+    .parsed_body::<Project>()
+    .expect("failed to parse Project from PUT response");
     assert_eq!(project.identity.id, new_project_ids[2]);
     assert_eq!(project.identity.name, "lil-lightnin");
     assert_eq!(project.identity.description, "little lightning");
 
-    client
-        .make_request_error(
-            Method::GET,
-            "/organizations/test-org/projects/simproject3",
-            StatusCode::NOT_FOUND,
-        )
-        .await;
+    NexusRequest::expect_failure(
+        client,
+        StatusCode::NOT_FOUND,
+        Method::GET,
+        "/organizations/test-org/projects/simproject3",
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .expect("expected success");
 
     /*
      * Try to create a project with a name that conflicts with an existing one.
