@@ -74,8 +74,6 @@ pub enum LookupType {
     ByName(String),
     /** a specific id was requested */
     ById(Uuid),
-    /** some other lookup type was used */
-    Other(String),
 }
 
 impl LookupType {
@@ -134,14 +132,6 @@ impl Error {
     }
 
     /**
-     * Generates an [`Error::ObjectNotFound`] error for some other kind of
-     * lookup.
-     */
-    pub fn not_found_other(type_name: ResourceType, message: String) -> Error {
-        LookupType::Other(message).into_not_found(type_name)
-    }
-
-    /**
      * Generates an [`Error::InternalError`] error with the specific message
      *
      * InternalError should be used for operational conditions that should not
@@ -186,29 +176,20 @@ impl From<Error> for HttpError {
     fn from(error: Error) -> HttpError {
         match error {
             Error::ObjectNotFound { type_name: t, lookup_type: lt } => {
-                if let LookupType::Other(message) = lt {
-                    HttpError::for_client_error(
-                        Some(String::from("ObjectNotFound")),
-                        http::StatusCode::NOT_FOUND,
-                        message,
-                    )
-                } else {
-                    /* TODO-cleanup is there a better way to express this? */
-                    let (lookup_field, lookup_value) = match lt {
-                        LookupType::ByName(name) => ("name", name),
-                        LookupType::ById(id) => ("id", id.to_string()),
-                        LookupType::Other(_) => panic!("unhandled other"),
-                    };
-                    let message = format!(
-                        "not found: {} with {} \"{}\"",
-                        t, lookup_field, lookup_value
-                    );
-                    HttpError::for_client_error(
-                        Some(String::from("ObjectNotFound")),
-                        http::StatusCode::NOT_FOUND,
-                        message,
-                    )
-                }
+                /* TODO-cleanup is there a better way to express this? */
+                let (lookup_field, lookup_value) = match lt {
+                    LookupType::ByName(name) => ("name", name),
+                    LookupType::ById(id) => ("id", id.to_string()),
+                };
+                let message = format!(
+                    "not found: {} with {} \"{}\"",
+                    t, lookup_field, lookup_value
+                );
+                HttpError::for_client_error(
+                    Some(String::from("ObjectNotFound")),
+                    http::StatusCode::NOT_FOUND,
+                    message,
+                )
             }
 
             Error::ObjectAlreadyExists { type_name: t, object_name: n } => {
