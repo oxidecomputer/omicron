@@ -91,10 +91,12 @@ pub fn public_error_from_diesel_pool_lookup(
     resource_type: ResourceType,
     lookup_type: LookupType,
 ) -> PublicError {
-    public_error_from_diesel_pool_lookup_helper(error, |error| {
-        public_error_from_diesel(error, || PublicError::ObjectNotFound {
-            type_name: resource_type,
-            lookup_type,
+    public_error_from_diesel_pool_helper(error, |error| {
+        public_error_from_diesel_lookup_helper(error, || {
+            PublicError::ObjectNotFound {
+                type_name: resource_type,
+                lookup_type,
+            }
         })
     })
 }
@@ -108,8 +110,8 @@ pub fn public_error_from_diesel_pool_authz<R>(
 where
     R: crate::authz::ApiResource,
 {
-    public_error_from_diesel_pool_lookup_helper(error, |error| {
-        public_error_from_diesel(error, || resource.not_found())
+    public_error_from_diesel_pool_helper(error, |error| {
+        public_error_from_diesel_lookup_helper(error, || resource.not_found())
     })
 }
 
@@ -120,7 +122,7 @@ pub fn public_error_from_diesel_pool_create(
     resource_type: ResourceType,
     object_name: &str,
 ) -> PublicError {
-    public_error_from_diesel_pool_lookup_helper(error, |error| {
+    public_error_from_diesel_pool_helper(error, |error| {
         public_error_from_diesel_create(error, resource_type, object_name)
     })
 }
@@ -131,7 +133,7 @@ pub fn public_error_from_diesel_pool_create(
 pub fn public_error_from_diesel_pool_shouldnt_fail(
     error: PoolError,
 ) -> PublicError {
-    public_error_from_diesel_pool_lookup_helper(error, |diesel_error| {
+    public_error_from_diesel_pool_helper(error, |diesel_error| {
         PublicError::internal_error(&format!(
             "unexpected database error: {:#}",
             diesel_error
@@ -144,7 +146,7 @@ pub fn public_error_from_diesel_pool_shouldnt_fail(
 /// `PoolError::Connection(ConnectionError::Query(diesel_error))` to
 /// `make_query_error(diesel_error)`, allowing the caller to decide how to
 /// format a message for that case.
-fn public_error_from_diesel_pool_lookup_helper<F>(
+fn public_error_from_diesel_pool_helper<F>(
     error: PoolError,
     make_query_error: F,
 ) -> PublicError
@@ -165,8 +167,9 @@ where
     }
 }
 
-/// Converts a Diesel error to an external error.
-fn public_error_from_diesel<F>(
+/// Converts a Diesel error to an external error, handling "NotFound" using
+/// `make_not_found_error`.
+fn public_error_from_diesel_lookup_helper<F>(
     error: DieselError,
     make_not_found_error: F,
 ) -> PublicError
