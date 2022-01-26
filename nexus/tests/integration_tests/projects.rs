@@ -4,7 +4,10 @@
 
 use nexus_test_utils::http_testing::AuthnMode;
 use nexus_test_utils::http_testing::NexusRequest;
+use nexus_test_utils::http_testing::RequestBuilder;
 use nexus_test_utils::resource_helpers::project_get;
+use omicron_common::api::external::IdentityMetadataUpdateParams;
+use omicron_nexus::external_api::params;
 use omicron_nexus::external_api::views::Project;
 
 use nexus_test_utils::resource_helpers::{create_organization, create_project};
@@ -107,8 +110,8 @@ async fn test_projects(cptestctx: &ControlPlaneTestContext) {
     .await
     .expect("failed to make request");
     NexusRequest::new(
-        RequestBuilder::new(&client, http::Method::PUT, &projects_url)
-            .body(Some(params::ProjectUpdate {
+        RequestBuilder::new(&client, http::Method::PUT, &p1_url)
+            .body(Some(&params::ProjectUpdate {
                 identity: IdentityMetadataUpdateParams {
                     name: None,
                     description: None,

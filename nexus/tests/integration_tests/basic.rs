@@ -343,7 +343,7 @@ async fn test_projects_basic(cptestctx: &ControlPlaneTestContext) {
             Method::PUT,
             "/organizations/test-org/projects/simproject2",
         )
-        .body(Some(params::ProjectUpdate {
+        .body(Some(&params::ProjectUpdate {
             identity: IdentityMetadataUpdateParams {
                 name: None,
                 description: None,
@@ -386,6 +386,41 @@ async fn test_projects_basic(cptestctx: &ControlPlaneTestContext) {
     );
 
     /*
+     * Unprivileged users should not be able to update a Project.
+     */
+    let project_update = params::ProjectUpdate {
+        identity: IdentityMetadataUpdateParams {
+            name: None,
+            description: None,
+        },
+    };
+    NexusRequest::new(
+        RequestBuilder::new(
+            client,
+            Method::PUT,
+            "/organizations/test-org/projects/simproject3",
+        )
+        .body(Some(&project_update))
+        .expect_status(Some(StatusCode::NOT_FOUND)),
+    )
+    .execute()
+    .await
+    .expect("failed to make request");
+    NexusRequest::new(
+        RequestBuilder::new(
+            client,
+            Method::PUT,
+            "/organizations/test-org/projects/simproject3",
+        )
+        .body(Some(&project_update))
+        .expect_status(Some(StatusCode::NOT_FOUND)),
+    )
+    .authn_as(AuthnMode::UnprivilegedUser)
+    .execute()
+    .await
+    .expect("failed to make request");
+
+    /*
      * Update "simproject3".  We'll make sure that's reflected in the other
      * requests.
      */
@@ -395,16 +430,17 @@ async fn test_projects_basic(cptestctx: &ControlPlaneTestContext) {
             description: Some("Li'l lightnin'".to_string()),
         },
     };
-    let mut response = client
-        .make_request(
-            Method::PUT,
-            "/organizations/test-org/projects/simproject3",
-            Some(project_update),
-            StatusCode::OK,
-        )
-        .await
-        .expect("expected success");
-    let project: Project = read_json(&mut response).await;
+    let project = NexusRequest::object_put(
+        client,
+        "/organizations/test-org/projects/simproject3",
+        Some(&project_update),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .expect("expected success")
+    .parsed_body::<Project>()
+    .expect("failed to parse Project from PUT response");
     assert_eq!(project.identity.id, new_project_ids[2]);
     assert_eq!(project.identity.name, "simproject3");
     assert_eq!(project.identity.description, "Li'l lightnin'");

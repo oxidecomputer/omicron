@@ -655,7 +655,7 @@ impl Nexus {
             .project_lookup_path(organization_name, project_name)
             .await?;
         self.db_datastore
-            .project_update(&authz_project, new_params.clone().into())
+            .project_update(opctx, &authz_project, new_params.clone().into())
             .await
     }
 

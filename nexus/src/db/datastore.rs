@@ -867,6 +867,7 @@ impl DataStore {
     /// Updates a project (clobbering update -- no etag)
     pub async fn project_update(
         &self,
+        opctx: &OpContext,
         authz_project: &authz::Project,
         updates: ProjectUpdate,
     ) -> UpdateResult<Project> {
