@@ -1295,14 +1295,7 @@ impl Nexus {
             }
         }
 
-        Err(Error::not_found_other(
-            ResourceType::Disk,
-            format!(
-                "disk \"{}\" is not attached to instance \"{}\"",
-                disk_name.as_str(),
-                instance_name.as_str()
-            ),
-        ))
+        Err(Error::not_found_by_name(ResourceType::Disk, disk_name))
     }
 
     /**
