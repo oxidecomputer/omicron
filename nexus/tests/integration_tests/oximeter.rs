@@ -148,7 +148,9 @@ async fn test_oximeter_reregistration() {
     // there's no new data in ClickHouse.
     //
     // Specifically, we grab a timestamp before dropping the producer, and assert that any data in
-    // the timeseries is from before that timestamp.
+    // the timeseries is from before that timestamp. Note that there is still techincally a race
+    // here, between when the timestamp is taken and we drop the producer. This is likely to be
+    // very small, but it definitely exists.
     let time_producer_dropped = chrono::Utc::now();
     drop(context.producer);
     let new_timeseries =
@@ -163,6 +165,7 @@ async fn test_oximeter_reregistration() {
     // the collector's memory. So we first check that the original timeseries is a prefix of the
     // new timeseries. Then we check that any remaining measurements are no later than the
     // timestamp immediately prior to dropping the producer.
+    #[track_caller]
     fn check_following_timeseries(
         timeseries: &oximeter_db::Timeseries,
         new_timeseries: &oximeter_db::Timeseries,
