@@ -146,12 +146,52 @@ async fn test_oximeter_reregistration() {
     //
     // At this point, Oximeter will still be collecting, so we poll for data and verify that
     // there's no new data in ClickHouse.
+    //
+    // Specifically, we grab a timestamp before dropping the producer, and assert that any data in
+    // the timeseries is from before that timestamp.
+    let time_producer_dropped = chrono::Utc::now();
     drop(context.producer);
     let new_timeseries =
         retrieve_timeseries().await.expect("Failed to retrieve timeseries");
     assert_eq!(new_timeseries.len(), 1);
     let new_timeseries = new_timeseries.into_iter().next().unwrap();
-    assert_eq!(timeseries, new_timeseries);
+
+    // The test here is a bit complicated, so deserves some explanation.
+    //
+    // We'd like to just assert that the old and new timeseries are equal. That's not quite right,
+    // since data may be somewhere on its way to ClickHouse before we drop the producer, e.g. in
+    // the collector's memory. So we first check that the original timeseries is a prefix of the
+    // new timeseries. Then we check that any remaining measurements are no later than the
+    // timestamp immediately prior to dropping the producer.
+    fn check_following_timeseries(
+        timeseries: &oximeter_db::Timeseries,
+        new_timeseries: &oximeter_db::Timeseries,
+        drop_time: chrono::DateTime<chrono::Utc>,
+    ) {
+        assert_eq!(timeseries.timeseries_name, new_timeseries.timeseries_name);
+        assert_eq!(timeseries.target, new_timeseries.target);
+        assert!(timeseries.measurements.len() <= new_timeseries.measurements.len(),
+            "New timeseries should have at least as many measurements as the original");
+        let n_measurements = timeseries.measurements.len();
+        assert_eq!(
+            timeseries.measurements,
+            &new_timeseries.measurements[..n_measurements],
+            "Original timeseries measurements should be a prefix of the new ones"
+        );
+        for meas in &new_timeseries.measurements[n_measurements..] {
+            assert!(
+                meas.timestamp() <= drop_time,
+                "Any new measurements should have timestamps after {}",
+                drop_time
+            );
+        }
+    }
+
+    check_following_timeseries(
+        &timeseries,
+        &new_timeseries,
+        time_producer_dropped,
+    );
 
     // Restart the producer, and verify that we have _more_ data than before
     // Set up a test metric producer server
@@ -214,16 +254,19 @@ async fn test_oximeter_reregistration() {
         "Expected the modification time of the producer record to have changed"
     );
 
-    // Verify that the time modified has changed as well.
-
     // Drop oximeter and verify that we've still got the same data, because there's no collector
     // running.
+    let time_oximeter_dropped = chrono::Utc::now();
     drop(context.oximeter);
     let new_timeseries =
         retrieve_timeseries().await.expect("Failed to retrieve timeseries");
     assert_eq!(new_timeseries.len(), 1);
     let new_timeseries = new_timeseries.into_iter().next().unwrap();
-    assert_eq!(timeseries, new_timeseries);
+    check_following_timeseries(
+        &timeseries,
+        &new_timeseries,
+        time_oximeter_dropped,
+    );
     let timeseries = new_timeseries;
 
     // Restart oximeter again, and verify that we have even more new data.
