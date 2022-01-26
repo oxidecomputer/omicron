@@ -936,7 +936,7 @@ checksum = "1435fa1053d8b2fbbe9be7e97eca7f33d37b28409959813daefc1446a14247f1"
 [[package]]
 name = "dropshot"
 version = "0.6.1-dev"
-source = "git+https://github.com/oxidecomputer/dropshot?branch=main#85799da7b031cc5455eb47fcce0f8e704db6cd7e"
+source = "git+https://github.com/oxidecomputer/dropshot?branch=main#ff0a22485616a6440dfdd634f5871fbcca1ee2ee"
 dependencies = [
  "async-stream",
  "async-trait",
@@ -975,7 +975,7 @@ dependencies = [
 [[package]]
 name = "dropshot_endpoint"
 version = "0.6.1-dev"
-source = "git+https://github.com/oxidecomputer/dropshot?branch=main#85799da7b031cc5455eb47fcce0f8e704db6cd7e"
+source = "git+https://github.com/oxidecomputer/dropshot?branch=main#ff0a22485616a6440dfdd634f5871fbcca1ee2ee"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -2235,9 +2235,9 @@ dependencies = [
 
 [[package]]
 name = "oso"
-version = "0.26.0"
+version = "0.25.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c527b33eaa5534f8a486051827f963dbc73de1a787b90e32adccce625613ca8c"
+checksum = "3130188f8467dd6d904e692f3d31a3aa6e63902449a1b02d056e8e2633b863d1"
 dependencies = [
  "impl-trait-for-tuples",
  "lazy_static",
@@ -2251,9 +2251,9 @@ dependencies = [
 
 [[package]]
 name = "oso-derive"
-version = "0.26.0"
+version = "0.25.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b6d027db8ed6ca7b074615f9c9dff2b4f01c352448c2d54b82087575ee5a58e8"
+checksum = "b03f10ad1ba555f82c0ccfe497010beccd873651604cb69999ba8c570d312fda"
 dependencies = [
  "quote",
  "syn",
@@ -2625,9 +2625,9 @@ dependencies = [
 
 [[package]]
 name = "polar-core"
-version = "0.26.0"
+version = "0.25.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fc2a1ed15352e3d6ca0575212741cbcd8db208bcca90ed8c92fb1c292f08f9d4"
+checksum = "b469dacc2c69faed6b71972dac8fb9fbddf18ae22ecce48f97a4643e58860fa3"
 dependencies = [
  "indoc",
  "js-sys",
@@ -2635,7 +2635,6 @@ dependencies = [
  "lalrpop-util",
  "serde",
  "serde_derive",
- "strum_macros",
  "wasm-bindgen",
 ]
 
@@ -3811,19 +3810,6 @@ dependencies = [
  "proc-macro-error",
  "proc-macro2",
  "quote",
- "syn",
-]
-
-[[package]]
-name = "strum_macros"
-version = "0.23.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5bb0dc7ee9c15cea6199cde9a127fa16a4c5819af85395457ad72d68edc85a38"
-dependencies = [
- "heck",
- "proc-macro2",
- "quote",
- "rustversion",
  "syn",
 ]
 

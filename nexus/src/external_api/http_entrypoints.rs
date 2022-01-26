@@ -327,7 +327,8 @@ async fn organizations_delete_organization(
 
 /**
  * Update a specific organization.
- *
+ */
+/*
  * TODO-correctness: Is it valid for PUT to accept application/json that's a
  * subset of what the resource actually represents?  If not, is that a problem?
  * (HTTP may require that this be idempotent.)  If so, can we get around that
@@ -513,7 +514,8 @@ async fn organization_projects_delete_project(
 
 /**
  * Update a specific project.
- *
+ */
+/*
  * TODO-correctness: Is it valid for PUT to accept application/json that's a
  * subset of what the resource actually represents?  If not, is that a problem?
  * (HTTP may require that this be idempotent.)  If so, can we get around that
@@ -590,7 +592,8 @@ async fn project_disks_get(
 
 /**
  * Create a disk in a project.
- *
+ */
+/*
  * TODO-correctness See note about instance create.  This should be async.
  */
 #[endpoint {
@@ -734,7 +737,8 @@ async fn project_instances_get(
 
 /**
  * Create an instance in a project.
- *
+ */
+/*
  * TODO-correctness This is supposed to be async.  Is that right?  We can create
  * the instance immediately -- it's just not booted yet.  Maybe the boot
  * operation is what's a separate operation_id.  What about the response code
