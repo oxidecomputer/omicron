@@ -81,14 +81,37 @@ pub fn diesel_pool_result_optional<T>(
 }
 
 /// Converts a Diesel pool error to an external error when operating on a
-/// particular resource
-pub fn public_error_from_diesel_pool(
+/// particular resource, identified by resource type and lookup type
+/// NOTE: If you already have an `authz::ApiResource`, you should use
+/// [`public_error_from_diesel_pool_authz()`] instead.  Eventually, the only
+/// uses of this function should be in the DataStore functions that actually
+/// look up a record for the first time.
+pub fn public_error_from_diesel_pool_lookup(
     error: PoolError,
     resource_type: ResourceType,
     lookup_type: LookupType,
 ) -> PublicError {
     public_error_from_diesel_pool_helper(error, |error| {
-        public_error_from_diesel(error, resource_type, lookup_type)
+        public_error_from_diesel_lookup_helper(error, || {
+            PublicError::ObjectNotFound {
+                type_name: resource_type,
+                lookup_type,
+            }
+        })
+    })
+}
+
+/// Converts a Diesel pool error to an external error when operating on a
+/// particular resource, identified by ApiResource
+pub fn public_error_from_diesel_pool_authz<R>(
+    error: PoolError,
+    resource: &R,
+) -> PublicError
+where
+    R: crate::authz::ApiResource,
+{
+    public_error_from_diesel_pool_helper(error, |error| {
+        public_error_from_diesel_lookup_helper(error, || resource.not_found())
     })
 }
 
@@ -144,17 +167,17 @@ where
     }
 }
 
-/// Converts a Diesel error to an external error.
-fn public_error_from_diesel(
+/// Converts a Diesel error to an external error, handling "NotFound" using
+/// `make_not_found_error`.
+fn public_error_from_diesel_lookup_helper<F>(
     error: DieselError,
-    resource_type: ResourceType,
-    lookup_type: LookupType,
-) -> PublicError {
+    make_not_found_error: F,
+) -> PublicError
+where
+    F: FnOnce() -> PublicError,
+{
     match error {
-        DieselError::NotFound => PublicError::ObjectNotFound {
-            type_name: resource_type,
-            lookup_type,
-        },
+        DieselError::NotFound => make_not_found_error(),
         DieselError::DatabaseError(kind, info) => {
             PublicError::internal_error(&format_database_error(kind, &*info))
         }
