@@ -812,6 +812,7 @@ impl DataStore {
         opctx.authorize(authz::Action::Delete, authz_project).await?;
 
         use db::schema::project::dsl;
+
         let now = Utc::now();
         diesel::update(dsl::project)
             .filter(dsl::time_deleted.is_null())
