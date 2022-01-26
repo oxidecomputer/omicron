@@ -109,6 +109,30 @@ async fn test_projects(cptestctx: &ControlPlaneTestContext) {
     .execute()
     .await
     .expect("failed to make request");
+    NexusRequest::expect_failure(
+        &client,
+        http::StatusCode::NOT_FOUND,
+        http::Method::DELETE,
+        &p1_url,
+    )
+    .authn_as(AuthnMode::UnprivilegedUser)
+    .execute()
+    .await
+    .expect("failed to make request");
+
+    NexusRequest::new(
+        RequestBuilder::new(&client, http::Method::PUT, &p1_url)
+            .body(Some(&params::ProjectUpdate {
+                identity: IdentityMetadataUpdateParams {
+                    name: None,
+                    description: None,
+                },
+            }))
+            .expect_status(Some(http::StatusCode::NOT_FOUND)),
+    )
+    .execute()
+    .await
+    .expect("failed to make request");
     NexusRequest::new(
         RequestBuilder::new(&client, http::Method::PUT, &p1_url)
             .body(Some(&params::ProjectUpdate {
