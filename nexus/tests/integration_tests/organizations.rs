@@ -5,8 +5,6 @@
 use nexus_test_utils::http_testing::{AuthnMode, NexusRequest};
 use omicron_nexus::external_api::views::Organization;
 
-use dropshot::test_util::object_delete;
-
 use http::method::Method;
 use http::StatusCode;
 use nexus_test_utils::resource_helpers::{
@@ -168,7 +166,11 @@ async fn test_organizations(cptestctx: &ControlPlaneTestContext) {
     .expect("failed to make request");
 
     // Delete the project, then delete the organization
-    object_delete(&client, &project_url).await;
+    NexusRequest::object_delete(&client, &project_url)
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .expect("failed to make request");
     NexusRequest::object_delete(&client, &o2_url)
         .authn_as(AuthnMode::PrivilegedUser)
         .execute()

@@ -312,33 +312,31 @@ async fn test_projects_basic(cptestctx: &ControlPlaneTestContext) {
      * Delete "simproject2".  We'll make sure that's reflected in the other
      * requests.
      */
-    client
-        .make_request_no_body(
-            Method::DELETE,
-            "/organizations/test-org/projects/simproject2",
-            StatusCode::NO_CONTENT,
-        )
-        .await
-        .expect("expected success");
+    NexusRequest::object_delete(
+        client,
+        "/organizations/test-org/projects/simproject2",
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .expect("expected request to fail");
 
     /*
      * Having deleted "simproject2", verify "GET", "PUT", and "DELETE" on
      * "/organizations/test-org/projects/simproject2".
      */
-    client
-        .make_request_error(
-            Method::GET,
-            "/organizations/test-org/projects/simproject2",
+    for method in [Method::GET, Method::DELETE] {
+        NexusRequest::expect_failure(
+            client,
             StatusCode::NOT_FOUND,
-        )
-        .await;
-    client
-        .make_request_error(
-            Method::DELETE,
+            method,
             "/organizations/test-org/projects/simproject2",
-            StatusCode::NOT_FOUND,
         )
-        .await;
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .expect("failed to make request");
+    }
     client
         .make_request_error_body(
             Method::PUT,

@@ -632,15 +632,15 @@ impl Nexus {
 
     pub async fn project_delete(
         &self,
+        opctx: &OpContext,
         organization_name: &Name,
         project_name: &Name,
     ) -> DeleteResult {
-        let organization_id = self
+        let authz_project = self
             .db_datastore
-            .organization_lookup_path(organization_name)
-            .await?
-            .id();
-        self.db_datastore.project_delete(&organization_id, project_name).await
+            .project_lookup_path(organization_name, project_name)
+            .await?;
+        self.db_datastore.project_delete(opctx, &authz_project).await
     }
 
     pub async fn project_update(

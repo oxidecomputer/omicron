@@ -806,26 +806,22 @@ impl DataStore {
      */
     pub async fn project_delete(
         &self,
-        organization_id: &Uuid,
-        name: &Name,
+        opctx: &OpContext,
+        authz_project: &authz::Project,
     ) -> DeleteResult {
         use db::schema::project::dsl;
 
+        opctx.authorize(authz::Action::Delete, authz_project).await?;
         let now = Utc::now();
         diesel::update(dsl::project)
             .filter(dsl::time_deleted.is_null())
-            .filter(dsl::organization_id.eq(*organization_id))
-            .filter(dsl::name.eq(name.clone()))
+            .filter(dsl::id.eq(authz_project.id()))
             .set(dsl::time_deleted.eq(now))
             .returning(Project::as_returning())
             .get_result_async(self.pool())
             .await
             .map_err(|e| {
-                public_error_from_diesel_pool_lookup(
-                    e,
-                    ResourceType::Project,
-                    LookupType::ByName(name.as_str().to_owned()),
-                )
+                public_error_from_diesel_pool_authz(e, authz_project)
             })?;
         Ok(())
     }
