@@ -506,7 +506,8 @@ async fn organization_projects_delete_project(
     let organization_name = &params.organization_name;
     let project_name = &params.project_name;
     let handler = async {
-        nexus.project_delete(&organization_name, &project_name).await?;
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        nexus.project_delete(&opctx, &organization_name, &project_name).await?;
         Ok(HttpResponseDeleted())
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
@@ -538,8 +539,10 @@ async fn organization_projects_put_project(
     let organization_name = &path.organization_name;
     let project_name = &path.project_name;
     let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
         let newproject = nexus
             .project_update(
+                &opctx,
                 &organization_name,
                 &project_name,
                 &updated_project.into_inner(),

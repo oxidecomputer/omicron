@@ -479,6 +479,22 @@ impl<'a> NexusRequest<'a> {
         )
     }
 
+    /// Returns a new `NexusRequest` suitable for `PUT $uri`
+    pub fn object_put<B>(
+        testctx: &'a ClientTestContext,
+        uri: &str,
+        body: Option<&B>,
+    ) -> Self
+    where
+        B: serde::Serialize,
+    {
+        NexusRequest::new(
+            RequestBuilder::new(testctx, http::Method::PUT, uri)
+                .body(body)
+                .expect_status(Some(http::StatusCode::OK)),
+        )
+    }
+
     /// Convenience constructor for failure cases
     pub fn expect_failure(
         testctx: &'a ClientTestContext,

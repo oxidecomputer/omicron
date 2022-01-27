@@ -10,7 +10,6 @@
  */
 
 use dropshot::test_util::objects_list_page;
-use dropshot::test_util::read_json;
 use dropshot::test_util::ClientTestContext;
 use dropshot::HttpErrorResponseBody;
 use http::method::Method;
@@ -312,46 +311,49 @@ async fn test_projects_basic(cptestctx: &ControlPlaneTestContext) {
      * Delete "simproject2".  We'll make sure that's reflected in the other
      * requests.
      */
-    client
-        .make_request_no_body(
-            Method::DELETE,
-            "/organizations/test-org/projects/simproject2",
-            StatusCode::NO_CONTENT,
-        )
-        .await
-        .expect("expected success");
+    NexusRequest::object_delete(
+        client,
+        "/organizations/test-org/projects/simproject2",
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .expect("expected request to fail");
 
     /*
      * Having deleted "simproject2", verify "GET", "PUT", and "DELETE" on
      * "/organizations/test-org/projects/simproject2".
      */
-    client
-        .make_request_error(
-            Method::GET,
-            "/organizations/test-org/projects/simproject2",
+    for method in [Method::GET, Method::DELETE] {
+        NexusRequest::expect_failure(
+            client,
             StatusCode::NOT_FOUND,
-        )
-        .await;
-    client
-        .make_request_error(
-            Method::DELETE,
+            method,
             "/organizations/test-org/projects/simproject2",
-            StatusCode::NOT_FOUND,
         )
-        .await;
-    client
-        .make_request_error_body(
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .expect("failed to make request");
+    }
+    NexusRequest::new(
+        RequestBuilder::new(
+            client,
             Method::PUT,
             "/organizations/test-org/projects/simproject2",
-            params::ProjectUpdate {
-                identity: IdentityMetadataUpdateParams {
-                    name: None,
-                    description: None,
-                },
-            },
-            StatusCode::NOT_FOUND,
         )
-        .await;
+        .body(Some(&params::ProjectUpdate {
+            identity: IdentityMetadataUpdateParams {
+                name: None,
+                description: None,
+            },
+        }))
+        .expect_status(Some(StatusCode::NOT_FOUND)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .expect("failed to make request");
 
     /*
      * Similarly, verify "GET /organizations/test-org/projects"
@@ -383,6 +385,41 @@ async fn test_projects_basic(cptestctx: &ControlPlaneTestContext) {
     );
 
     /*
+     * Unprivileged users should not be able to update a Project.
+     */
+    let project_update = params::ProjectUpdate {
+        identity: IdentityMetadataUpdateParams {
+            name: None,
+            description: None,
+        },
+    };
+    NexusRequest::new(
+        RequestBuilder::new(
+            client,
+            Method::PUT,
+            "/organizations/test-org/projects/simproject3",
+        )
+        .body(Some(&project_update))
+        .expect_status(Some(StatusCode::NOT_FOUND)),
+    )
+    .execute()
+    .await
+    .expect("failed to make request");
+    NexusRequest::new(
+        RequestBuilder::new(
+            client,
+            Method::PUT,
+            "/organizations/test-org/projects/simproject3",
+        )
+        .body(Some(&project_update))
+        .expect_status(Some(StatusCode::NOT_FOUND)),
+    )
+    .authn_as(AuthnMode::UnprivilegedUser)
+    .execute()
+    .await
+    .expect("failed to make request");
+
+    /*
      * Update "simproject3".  We'll make sure that's reflected in the other
      * requests.
      */
@@ -392,16 +429,17 @@ async fn test_projects_basic(cptestctx: &ControlPlaneTestContext) {
             description: Some("Li'l lightnin'".to_string()),
         },
     };
-    let mut response = client
-        .make_request(
-            Method::PUT,
-            "/organizations/test-org/projects/simproject3",
-            Some(project_update),
-            StatusCode::OK,
-        )
-        .await
-        .expect("expected success");
-    let project: Project = read_json(&mut response).await;
+    let project = NexusRequest::object_put(
+        client,
+        "/organizations/test-org/projects/simproject3",
+        Some(&project_update),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .expect("expected success")
+    .parsed_body::<Project>()
+    .expect("failed to parse Project from PUT response");
     assert_eq!(project.identity.id, new_project_ids[2]);
     assert_eq!(project.identity.name, "simproject3");
     assert_eq!(project.identity.description, "Li'l lightnin'");
@@ -425,27 +463,31 @@ async fn test_projects_basic(cptestctx: &ControlPlaneTestContext) {
             description: Some("little lightning".to_string()),
         },
     };
-    let mut response = client
-        .make_request(
-            Method::PUT,
-            "/organizations/test-org/projects/simproject3",
-            Some(project_update),
-            StatusCode::OK,
-        )
-        .await
-        .expect("failed to make request to server");
-    let project: Project = read_json(&mut response).await;
+    let project = NexusRequest::object_put(
+        client,
+        "/organizations/test-org/projects/simproject3",
+        Some(&project_update),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .expect("expected success")
+    .parsed_body::<Project>()
+    .expect("failed to parse Project from PUT response");
     assert_eq!(project.identity.id, new_project_ids[2]);
     assert_eq!(project.identity.name, "lil-lightnin");
     assert_eq!(project.identity.description, "little lightning");
 
-    client
-        .make_request_error(
-            Method::GET,
-            "/organizations/test-org/projects/simproject3",
-            StatusCode::NOT_FOUND,
-        )
-        .await;
+    NexusRequest::expect_failure(
+        client,
+        StatusCode::NOT_FOUND,
+        Method::GET,
+        "/organizations/test-org/projects/simproject3",
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .expect("expected success");
 
     /*
      * Try to create a project with a name that conflicts with an existing one.
