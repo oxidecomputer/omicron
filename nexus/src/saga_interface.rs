@@ -11,6 +11,7 @@ use crate::external_api::params;
 use crate::Nexus;
 use omicron_common::api::external::Error;
 use sled_agent_client::Client as SledAgentClient;
+use slog::Logger;
 use std::fmt;
 use std::sync::Arc;
 use uuid::Uuid;
@@ -22,6 +23,7 @@ use uuid::Uuid;
  */
 pub struct SagaContext {
     nexus: Arc<Nexus>,
+    log: Logger,
 }
 
 impl fmt::Debug for SagaContext {
@@ -31,8 +33,12 @@ impl fmt::Debug for SagaContext {
 }
 
 impl SagaContext {
-    pub fn new(nexus: Arc<Nexus>) -> SagaContext {
-        SagaContext { nexus }
+    pub fn new(nexus: Arc<Nexus>, log: Logger) -> SagaContext {
+        SagaContext { nexus, log }
+    }
+
+    pub fn log(&self) -> &Logger {
+        &self.log
     }
 
     /*
@@ -51,6 +57,10 @@ impl SagaContext {
         _params: &params::InstanceCreate,
     ) -> Result<Uuid, Error> {
         self.nexus.sled_allocate().await
+    }
+
+    pub fn nexus(&self) -> &Arc<Nexus> {
+        &self.nexus
     }
 
     pub fn datastore(&self) -> &db::DataStore {

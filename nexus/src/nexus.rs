@@ -220,24 +220,28 @@ impl Nexus {
         };
 
         /* TODO-cleanup all the extra Arcs here seems wrong */
-        let nexus_arc = Arc::new(nexus);
+        let nexus = Arc::new(nexus);
         let opctx = OpContext::for_background(
             log.new(o!("component" => "SagaRecoverer")),
             authz,
             authn::Context::internal_saga_recovery(),
             Arc::clone(&db_datastore),
         );
+        let saga_logger = nexus.log.new(o!("saga_type" => "recovery"));
         let recovery_task = db::recover(
             opctx,
             my_sec_id,
-            Arc::new(Arc::new(SagaContext::new(Arc::clone(&nexus_arc)))),
+            Arc::new(Arc::new(SagaContext::new(
+                Arc::clone(&nexus),
+                saga_logger,
+            ))),
             db_datastore,
             Arc::clone(&sec_client),
             &sagas::ALL_TEMPLATES,
         );
 
-        *nexus_arc.recovery_task.lock().unwrap() = Some(recovery_task);
-        nexus_arc
+        *nexus.recovery_task.lock().unwrap() = Some(recovery_task);
+        nexus
     }
 
     pub async fn wait_for_populate(&self) -> Result<(), anyhow::Error> {
@@ -449,8 +453,10 @@ impl Nexus {
         P: serde::Serialize,
     {
         let saga_id = SagaId(Uuid::new_v4());
+        let saga_logger =
+            self.log.new(o!("template_name" => template_name.to_owned()));
         let saga_context =
-            Arc::new(Arc::new(SagaContext::new(Arc::clone(self))));
+            Arc::new(Arc::new(SagaContext::new(Arc::clone(self), saga_logger)));
         let future = self
             .sec_client
             .saga_create(
@@ -552,8 +558,10 @@ impl Nexus {
         organization_name: &Name,
         new_project: &params::ProjectCreate,
     ) -> CreateResult<db::model::Project> {
-        let org =
-            self.db_datastore.organization_lookup_id(organization_name).await?;
+        let org = self
+            .db_datastore
+            .organization_lookup_path(organization_name)
+            .await?;
 
         // Create a project.
         let db_project = db::model::Project::new(org.id(), new_project.clone());
@@ -588,75 +596,77 @@ impl Nexus {
 
     pub async fn project_fetch(
         &self,
+        opctx: &OpContext,
         organization_name: &Name,
         project_name: &Name,
     ) -> LookupResult<db::model::Project> {
-        let organization_id = self
+        let authz_org = self
             .db_datastore
-            .organization_lookup_id(organization_name)
+            .organization_lookup_path(organization_name)
+            .await?;
+        Ok(self
+            .db_datastore
+            .project_fetch(opctx, &authz_org, project_name)
             .await?
-            .id();
-        self.db_datastore.project_fetch(&organization_id, project_name).await
+            .1)
     }
 
     pub async fn projects_list_by_name(
         &self,
+        opctx: &OpContext,
         organization_name: &Name,
         pagparams: &DataPageParams<'_, Name>,
     ) -> ListResultVec<db::model::Project> {
-        let organization_id = self
+        let authz_org = self
             .db_datastore
-            .organization_lookup_id(organization_name)
-            .await?
-            .id();
+            .organization_lookup_path(organization_name)
+            .await?;
         self.db_datastore
-            .projects_list_by_name(&organization_id, pagparams)
+            .projects_list_by_name(opctx, &authz_org, pagparams)
             .await
     }
 
     pub async fn projects_list_by_id(
         &self,
+        opctx: &OpContext,
         organization_name: &Name,
         pagparams: &DataPageParams<'_, Uuid>,
     ) -> ListResultVec<db::model::Project> {
-        let organization_id = self
+        let authz_org = self
             .db_datastore
-            .organization_lookup_id(organization_name)
-            .await?
-            .id();
-        self.db_datastore.projects_list_by_id(&organization_id, pagparams).await
+            .organization_lookup_path(organization_name)
+            .await?;
+        self.db_datastore
+            .projects_list_by_id(opctx, &authz_org, pagparams)
+            .await
     }
 
     pub async fn project_delete(
         &self,
+        opctx: &OpContext,
         organization_name: &Name,
         project_name: &Name,
     ) -> DeleteResult {
-        let organization_id = self
+        let authz_project = self
             .db_datastore
-            .organization_lookup_id(organization_name)
-            .await?
-            .id();
-        self.db_datastore.project_delete(&organization_id, project_name).await
+            .project_lookup_path(organization_name, project_name)
+            .await?;
+        self.db_datastore.project_delete(opctx, &authz_project).await
     }
 
     pub async fn project_update(
         &self,
+        opctx: &OpContext,
         organization_name: &Name,
         project_name: &Name,
         new_params: &params::ProjectUpdate,
     ) -> UpdateResult<db::model::Project> {
-        let organization_id = self
+        let authz_project = self
             .db_datastore
-            .organization_lookup_id(organization_name)
-            .await?
-            .id();
+            .project_lookup_path(organization_name, project_name)
+            .await?;
         self.db_datastore
-            .project_update(
-                &organization_id,
-                project_name,
-                new_params.clone().into(),
-            )
+            .project_update(opctx, &authz_project, new_params.clone().into())
             .await
     }
 
@@ -670,26 +680,24 @@ impl Nexus {
         project_name: &Name,
         pagparams: &DataPageParams<'_, Name>,
     ) -> ListResultVec<db::model::Disk> {
-        let organization_id = self
-            .db_datastore
-            .organization_lookup_id(organization_name)
-            .await?
-            .id();
         let project_id = self
             .db_datastore
-            .project_lookup_id_by_name(&organization_id, project_name)
-            .await?;
+            .project_lookup_path(organization_name, project_name)
+            .await?
+            .id();
         self.db_datastore.project_list_disks(&project_id, pagparams).await
     }
 
     pub async fn project_create_disk(
-        &self,
+        self: &Arc<Self>,
         organization_name: &Name,
         project_name: &Name,
         params: &params::DiskCreate,
     ) -> CreateResult<db::model::Disk> {
-        let project =
-            self.project_fetch(organization_name, project_name).await?;
+        let authz_project = self
+            .db_datastore
+            .project_lookup_path(organization_name, project_name)
+            .await?;
 
         /*
          * Until we implement snapshots, do not allow disks to be created with a
@@ -702,37 +710,22 @@ impl Nexus {
             });
         }
 
-        let disk_id = Uuid::new_v4();
-        let disk = db::model::Disk::new(
-            disk_id,
-            project.id(),
-            params.clone(),
-            db::model::DiskRuntimeState::new(),
-        );
-        let disk_created = self.db_datastore.project_create_disk(disk).await?;
-
-        // TODO: Here, we should ensure the disk is backed by appropriate
-        // regions. This is blocked behind actually having Crucible agents
-        // running in zones for dedicated zpools.
-        //
-        // TODO: Performing this operation, alongside "create" and "update
-        // state from create to detach", should be executed in a Saga.
-
-        /*
-         * This is a little hokey.  We'd like to simulate an asynchronous
-         * transition from "Creating" to "Detached".  For instances, the
-         * simulation lives in a simulated sled agent.  Here, the analog might
-         * be a simulated storage control plane.  But that doesn't exist yet,
-         * and we don't even know what APIs it would provide yet.  So we just
-         * carry out the simplest possible "simulation" here: we'll return to
-         * the client a structure describing a disk in state "Creating", but by
-         * the time we do so, we've already updated the internal representation
-         * to "Created".
-         */
-        self.db_datastore
-            .disk_update_runtime(&disk_id, &disk_created.runtime().detach())
+        let saga_params = Arc::new(sagas::ParamsDiskCreate {
+            project_id: authz_project.id(),
+            create_params: params.clone(),
+        });
+        let saga_outputs = self
+            .execute_saga(
+                Arc::clone(&sagas::SAGA_DISK_CREATE_TEMPLATE),
+                sagas::SAGA_DISK_CREATE_NAME,
+                saga_params,
+            )
             .await?;
-
+        let disk_created = saga_outputs
+            .lookup_output::<db::model::Disk>("created_disk")
+            .map_err(|e| Error::InternalError {
+                internal_message: e.to_string(),
+            })?;
         Ok(disk_created)
     }
 
@@ -742,38 +735,27 @@ impl Nexus {
         project_name: &Name,
         disk_name: &Name,
     ) -> LookupResult<(db::model::Disk, authz::ProjectChild)> {
-        let organization_id = self
+        let authz_project = self
             .db_datastore
-            .organization_lookup_id(organization_name)
-            .await?
-            .id();
-        let project_id = self
-            .db_datastore
-            .project_lookup_id_by_name(&organization_id, project_name)
+            .project_lookup_path(organization_name, project_name)
             .await?;
         let disk = self
             .db_datastore
-            .disk_fetch_by_name(&project_id, disk_name)
+            .disk_fetch_by_name(&authz_project.id(), disk_name)
             .await?;
         let disk_id = disk.id();
         Ok((
             disk,
-            authz::FLEET
-                .organization(
-                    organization_id,
-                    LookupType::from(&organization_name.0),
-                )
-                .project(project_id, LookupType::from(&project_name.0))
-                .child_generic(
-                    ResourceType::Disk,
-                    disk_id,
-                    LookupType::from(&disk_name.0),
-                ),
+            authz_project.child_generic(
+                ResourceType::Disk,
+                disk_id,
+                LookupType::from(&disk_name.0),
+            ),
         ))
     }
 
     pub async fn project_delete_disk(
-        &self,
+        self: &Arc<Self>,
         opctx: &OpContext,
         organization_name: &Name,
         project_name: &Name,
@@ -782,34 +764,25 @@ impl Nexus {
         let (disk, authz_disk) = self
             .project_lookup_disk(organization_name, project_name, disk_name)
             .await?;
-        let runtime = disk.runtime();
-        bail_unless!(runtime.state().state() != &DiskState::Destroyed);
 
-        if runtime.state().is_attached() {
-            return Err(Error::InvalidRequest {
-                message: String::from("disk is attached"),
-            });
-        }
+        // TODO: We need to sort out the authorization checks.
+        //
+        // Normally, this would be coupled alongside access to the
+        // datastore, but now that disk deletion exists within a Saga,
+        // this would require OpContext to be serialized (which is
+        // not trivial).
+        opctx.authorize(authz::Action::Delete, &authz_disk).await?;
 
-        /*
-         * TODO-correctness It's not clear how this handles the case where we
-         * begin this delete operation while some other request is ongoing to
-         * attach the disk.  We won't be able to see that in the state here.  We
-         * might be able to detect this when we go update the disk's state to
-         * Attaching (because a SQL UPDATE will update 0 rows), but we'd sort of
-         * already be in a bad state because the destroyed disk will be
-         * attaching (and eventually attached) on some sled, and if the wrong
-         * combination of components crash at this point, we could wind up not
-         * fixing that state.
-         *
-         * This is a consequence of the choice _not_ to record the Attaching
-         * state in the database before beginning the attach process.  If we did
-         * that, we wouldn't have this problem, but we'd have a similar problem
-         * of dealing with the case of a crash after recording this state and
-         * before actually beginning the attach process.  Sagas can maybe
-         * address that.
-         */
-        self.db_datastore.project_delete_disk(opctx, &authz_disk).await
+        let saga_params =
+            Arc::new(sagas::ParamsDiskDelete { disk_id: disk.id() });
+        self.execute_saga(
+            Arc::clone(&sagas::SAGA_DISK_DELETE_TEMPLATE),
+            sagas::SAGA_DISK_DELETE_NAME,
+            saga_params,
+        )
+        .await?;
+
+        Ok(())
     }
 
     /*
@@ -847,15 +820,11 @@ impl Nexus {
         project_name: &Name,
         pagparams: &DataPageParams<'_, Name>,
     ) -> ListResultVec<db::model::Instance> {
-        let organization_id = self
-            .db_datastore
-            .organization_lookup_id(organization_name)
-            .await?
-            .id();
         let project_id = self
             .db_datastore
-            .project_lookup_id_by_name(&organization_id, project_name)
-            .await?;
+            .project_lookup_path(organization_name, project_name)
+            .await?
+            .id();
         self.db_datastore.project_list_instances(&project_id, pagparams).await
     }
 
@@ -865,18 +834,13 @@ impl Nexus {
         project_name: &Name,
         params: &params::InstanceCreate,
     ) -> CreateResult<db::model::Instance> {
-        let organization_id = self
+        let authz_project = self
             .db_datastore
-            .organization_lookup_id(organization_name)
-            .await?
-            .id();
-        let project_id = self
-            .db_datastore
-            .project_lookup_id_by_name(&organization_id, project_name)
+            .project_lookup_path(organization_name, project_name)
             .await?;
 
         let saga_params = Arc::new(sagas::ParamsInstanceCreate {
-            project_id,
+            project_id: authz_project.id(),
             create_params: params.clone(),
         });
 
@@ -954,20 +918,52 @@ impl Nexus {
          * instances?  Presumably we need to clean them up at some point, but
          * not right away so that callers can see that they've been destroyed.
          */
-        let organization_id = self
-            .db_datastore
-            .organization_lookup_id(organization_name)
-            .await?
-            .id();
         let project_id = self
             .db_datastore
-            .project_lookup_id_by_name(&organization_id, project_name)
-            .await?;
+            .project_lookup_path(organization_name, project_name)
+            .await?
+            .id();
         let instance = self
             .db_datastore
             .instance_fetch_by_name(&project_id, instance_name)
             .await?;
         self.db_datastore.project_delete_instance(&instance.id()).await
+    }
+
+    pub async fn project_migrate_instance(
+        self: &Arc<Self>,
+        organization_name: &Name,
+        project_name: &Name,
+        instance_name: &Name,
+        params: params::InstanceMigrate,
+    ) -> UpdateResult<db::model::Instance> {
+        let project_id = self
+            .db_datastore
+            .project_lookup_path(organization_name, project_name)
+            .await?
+            .id();
+        let instance = self
+            .db_datastore
+            .instance_fetch_by_name(&project_id, instance_name)
+            .await?;
+
+        // Kick off the migration saga
+        let saga_params = Arc::new(sagas::ParamsInstanceMigrate {
+            instance_id: instance.id(),
+            migrate_params: params,
+        });
+        self.execute_saga(
+            Arc::clone(&sagas::SAGA_INSTANCE_MIGRATE_TEMPLATE),
+            sagas::SAGA_INSTANCE_MIGRATE_NAME,
+            saga_params,
+        )
+        .await?;
+
+        // TODO correctness TODO robustness TODO design
+        // Should we lookup the instance again here?
+        // See comment in project_create_instance.
+        let instance = self.db_datastore.instance_fetch(&instance.id()).await?;
+        Ok(instance)
     }
 
     pub async fn project_lookup_instance(
@@ -976,15 +972,11 @@ impl Nexus {
         project_name: &Name,
         instance_name: &Name,
     ) -> LookupResult<db::model::Instance> {
-        let organization_id = self
-            .db_datastore
-            .organization_lookup_id(organization_name)
-            .await?
-            .id();
         let project_id = self
             .db_datastore
-            .project_lookup_id_by_name(&organization_id, project_name)
-            .await?;
+            .project_lookup_path(organization_name, project_name)
+            .await?
+            .id();
         self.db_datastore
             .instance_fetch_by_name(&project_id, instance_name)
             .await
@@ -993,13 +985,16 @@ impl Nexus {
     fn check_runtime_change_allowed(
         &self,
         runtime: &nexus::InstanceRuntimeState,
+        requested: &InstanceRuntimeStateRequested,
     ) -> Result<(), Error> {
         /*
          * Users are allowed to request a start or stop even if the instance is
          * already in the desired state (or moving to it), and we will issue a
          * request to the SA to make the state change in these cases in case the
          * runtime state we saw here was stale.  However, users are not allowed
-         * to change the state of an instance that's failed or destroyed.
+         * to change the state of an instance that's migrating, failed or destroyed.
+         * But if we're already migrating, requesting a migration is allowed to
+         * allow for idempotency.
          */
         let allowed = match runtime.run_state {
             InstanceState::Creating => true,
@@ -1009,6 +1004,9 @@ impl Nexus {
             InstanceState::Stopped => true,
             InstanceState::Rebooting => true,
 
+            InstanceState::Migrating => {
+                requested.run_state == InstanceStateRequested::Migrating
+            }
             InstanceState::Repairing => false,
             InstanceState::Failed => false,
             InstanceState::Destroyed => false,
@@ -1094,13 +1092,18 @@ impl Nexus {
             )
             .await?;
 
-        self.check_runtime_change_allowed(&instance.runtime().clone().into())?;
+        let requested = InstanceRuntimeStateRequested {
+            run_state: InstanceStateRequested::Reboot,
+            migration_id: None,
+        };
+        self.check_runtime_change_allowed(
+            &instance.runtime().clone().into(),
+            &requested,
+        )?;
         self.instance_set_runtime(
             &instance,
             self.instance_sled(&instance).await?,
-            InstanceRuntimeStateRequested {
-                run_state: InstanceStateRequested::Reboot,
-            },
+            requested,
         )
         .await?;
         self.db_datastore.instance_fetch(&instance.id()).await
@@ -1123,13 +1126,18 @@ impl Nexus {
             )
             .await?;
 
-        self.check_runtime_change_allowed(&instance.runtime().clone().into())?;
+        let requested = InstanceRuntimeStateRequested {
+            run_state: InstanceStateRequested::Running,
+            migration_id: None,
+        };
+        self.check_runtime_change_allowed(
+            &instance.runtime().clone().into(),
+            &requested,
+        )?;
         self.instance_set_runtime(
             &instance,
             self.instance_sled(&instance).await?,
-            InstanceRuntimeStateRequested {
-                run_state: InstanceStateRequested::Running,
-            },
+            requested,
         )
         .await?;
         self.db_datastore.instance_fetch(&instance.id()).await
@@ -1152,13 +1160,45 @@ impl Nexus {
             )
             .await?;
 
-        self.check_runtime_change_allowed(&instance.runtime().clone().into())?;
+        let requested = InstanceRuntimeStateRequested {
+            run_state: InstanceStateRequested::Stopped,
+            migration_id: None,
+        };
+        self.check_runtime_change_allowed(
+            &instance.runtime().clone().into(),
+            &requested,
+        )?;
         self.instance_set_runtime(
             &instance,
             self.instance_sled(&instance).await?,
-            InstanceRuntimeStateRequested {
-                run_state: InstanceStateRequested::Stopped,
-            },
+            requested,
+        )
+        .await?;
+        self.db_datastore.instance_fetch(&instance.id()).await
+    }
+
+    /**
+     * Idempotently place the instance in a 'Migrating' state.
+     */
+    pub async fn instance_start_migrate(
+        &self,
+        instance_id: Uuid,
+        migration_id: Uuid,
+    ) -> UpdateResult<db::model::Instance> {
+        let instance = self.datastore().instance_fetch(&instance_id).await?;
+
+        let requested = InstanceRuntimeStateRequested {
+            run_state: InstanceStateRequested::Migrating,
+            migration_id: Some(migration_id),
+        };
+        self.check_runtime_change_allowed(
+            &instance.runtime().clone().into(),
+            &requested,
+        )?;
+        self.instance_set_runtime(
+            &instance,
+            self.instance_sled(&instance).await?,
+            requested,
         )
         .await?;
         self.db_datastore.instance_fetch(&instance.id()).await
@@ -1200,6 +1240,7 @@ impl Nexus {
                 &sled_agent_client::types::InstanceEnsureBody {
                     initial: instance_hardware,
                     target: requested.into(),
+                    migrate: None,
                 },
             )
             .await
@@ -1261,14 +1302,7 @@ impl Nexus {
             }
         }
 
-        Err(Error::not_found_other(
-            ResourceType::Disk,
-            format!(
-                "disk \"{}\" is not attached to instance \"{}\"",
-                disk_name.as_str(),
-                instance_name.as_str()
-            ),
-        ))
+        Err(Error::not_found_by_name(ResourceType::Disk, disk_name))
     }
 
     /**
@@ -1540,15 +1574,11 @@ impl Nexus {
         project_name: &Name,
         pagparams: &DataPageParams<'_, Name>,
     ) -> ListResultVec<db::model::Vpc> {
-        let organization_id = self
-            .db_datastore
-            .organization_lookup_id(organization_name)
-            .await?
-            .id();
         let project_id = self
             .db_datastore
-            .project_lookup_id_by_name(&organization_id, project_name)
-            .await?;
+            .project_lookup_path(organization_name, project_name)
+            .await?
+            .id();
         let vpcs =
             self.db_datastore.project_list_vpcs(&project_id, pagparams).await?;
         Ok(vpcs)
@@ -1560,22 +1590,20 @@ impl Nexus {
         project_name: &Name,
         params: &params::VpcCreate,
     ) -> CreateResult<db::model::Vpc> {
-        let organization_id = self
-            .db_datastore
-            .organization_lookup_id(organization_name)
-            .await?
-            .id();
         let project_id = self
             .db_datastore
-            .project_lookup_id_by_name(&organization_id, project_name)
-            .await?;
+            .project_lookup_path(organization_name, project_name)
+            .await?
+            .id();
         let vpc_id = Uuid::new_v4();
         let system_router_id = Uuid::new_v4();
         let default_route_id = Uuid::new_v4();
         let default_subnet_id = Uuid::new_v4();
-        // TODO: Ultimately when the VPC is created a system router w/ an appropriate setup should also be created.
-        // Given that the underlying systems aren't wired up yet this is a naive implementation to populate the database
-        // with a starting router. Eventually this code should be replaced with a saga that'll handle creating the VPC and
+        // TODO: Ultimately when the VPC is created a system router w/ an
+        // appropriate setup should also be created.  Given that the underlying
+        // systems aren't wired up yet this is a naive implementation to
+        // populate the database with a starting router. Eventually this code
+        // should be replaced with a saga that'll handle creating the VPC and
         // its underlying system
         let router = db::model::VpcRouter::new(
             system_router_id,
@@ -1584,10 +1612,12 @@ impl Nexus {
             params::VpcRouterCreate {
                 identity: IdentityMetadataCreateParams {
                     name: "system".parse().unwrap(),
-                    description: "Routes are automatically added to this router as vpc subnets are created".into()
-                }
-            }
-            );
+                    description: "Routes are automatically added to this \
+                        router as vpc subnets are created"
+                        .into(),
+                },
+            },
+        );
         let _ = self.db_datastore.vpc_create_router(router).await?;
         let route = db::model::RouterRoute::new(
             default_route_id,
@@ -1607,9 +1637,11 @@ impl Nexus {
             },
         );
 
-        // TODO: This is both fake and utter nonsense. It should be eventually replaced with the proper behavior for creating
-        // the default route which may not even happen here. Creating the vpc, its system router, and that routers default route
-        // should all be apart of the same transaction.
+        // TODO: This is both fake and utter nonsense. It should be eventually
+        // replaced with the proper behavior for creating the default route
+        // which may not even happen here. Creating the vpc, its system router,
+        // and that routers default route should all be apart of the same
+        // transaction.
         self.db_datastore.router_create_route(route).await?;
         let vpc = db::model::Vpc::new(
             vpc_id,
@@ -1632,11 +1664,13 @@ impl Nexus {
                     ),
                 },
                 ipv4_block: Some(Ipv4Net(
-                    // TODO: This value should be replaced with the correct ipv4 range for a default subnet
+                    // TODO: This value should be replaced with the correct ipv4
+                    // range for a default subnet
                     "10.1.9.32/16".parse::<Ipv4Network>().unwrap(),
                 )),
                 ipv6_block: Some(Ipv6Net(
-                    // TODO: This value should be replaced w/ the first `/64` ipv6 from the address block
+                    // TODO: This value should be replaced w/ the first `/64`
+                    // ipv6 from the address block
                     "2001:db8::0/64".parse::<Ipv6Network>().unwrap(),
                 )),
             },
@@ -1665,15 +1699,11 @@ impl Nexus {
         project_name: &Name,
         vpc_name: &Name,
     ) -> LookupResult<db::model::Vpc> {
-        let organization_id = self
-            .db_datastore
-            .organization_lookup_id(organization_name)
-            .await?
-            .id();
         let project_id = self
             .db_datastore
-            .project_lookup_id_by_name(&organization_id, project_name)
-            .await?;
+            .project_lookup_path(organization_name, project_name)
+            .await?
+            .id();
         Ok(self.db_datastore.vpc_fetch_by_name(&project_id, vpc_name).await?)
     }
 
@@ -1684,15 +1714,11 @@ impl Nexus {
         vpc_name: &Name,
         params: &params::VpcUpdate,
     ) -> UpdateResult<()> {
-        let organization_id = self
-            .db_datastore
-            .organization_lookup_id(organization_name)
-            .await?
-            .id();
         let project_id = self
             .db_datastore
-            .project_lookup_id_by_name(&organization_id, project_name)
-            .await?;
+            .project_lookup_path(organization_name, project_name)
+            .await?
+            .id();
         let vpc =
             self.db_datastore.vpc_fetch_by_name(&project_id, vpc_name).await?;
         Ok(self

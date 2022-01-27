@@ -33,6 +33,21 @@ pub enum SimMode {
     Explicit,
 }
 
+/// Configuration for a simulated zpool.
+///
+/// Currently, each zpool will receive a single Crucible Dataset.
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+pub struct ConfigZpool {
+    /// The size of the Zpool in bytes.
+    pub size: u64,
+}
+
+/// Configuration describing simulated storage.
+#[derive(Clone, Default, Debug, PartialEq, Deserialize, Serialize)]
+pub struct ConfigStorage {
+    pub zpools: Vec<ConfigZpool>,
+}
+
 /**
  * Configuration for a sled agent
  */
@@ -48,4 +63,6 @@ pub struct Config {
     pub dropshot: ConfigDropshot,
     /** configuration for the sled agent debug log */
     pub log: ConfigLogging,
+    /** configuration for the sled agent's storage */
+    pub storage: ConfigStorage,
 }

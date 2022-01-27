@@ -9,10 +9,11 @@ path = "../rpaths"
 
 [dependencies]
 anyhow = "1.0"
+async-bb8-diesel = { git = "https://github.com/oxidecomputer/async-bb8-diesel", rev = "c849b717be" }
 async-trait = "0.1.51"
 bb8 = "0.7.1"
-async-bb8-diesel = { git = "https://github.com/oxidecomputer/async-bb8-diesel", rev = "c849b717be" }
 cookie = "0.16"
+crucible-agent-client = { git = "https://github.com/oxidecomputer/crucible", rev = "078d364e14d57d5faa3a44001c65709935419779" }
 # Tracking pending 2.0 version.
 diesel = { git = "https://github.com/diesel-rs/diesel", rev = "ce77c382", features = ["postgres", "r2d2", "chrono", "serde_json", "network-address", "uuid"] }
 futures = "0.3.18"
@@ -22,11 +23,11 @@ hyper = "0.14"
 db-macros = { path = "src/db/db-macros" }
 ipnetwork = "0.18"
 lazy_static = "1.4.0"
-libc = "0.2.111"
+libc = "0.2.114"
 macaddr = { version = "1.0.1", features = [ "serde_std" ]}
 mime_guess = "2.0.3"
 newtype_derive = "0.1.6"
-oso = "0.25"
+oso = "0.26"
 oximeter-client = { path = "../oximeter-client" }
 oximeter-db = { path = "../oximeter/db/" }
 parse-display = "0.5.3"

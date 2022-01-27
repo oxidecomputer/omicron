@@ -12,7 +12,7 @@
   "paths": {
     "/artifacts/{path}": {
       "get": {
-        "description": "Endpoint used by Sled Agents to download cached artifacts.",
+        "summary": "Endpoint used by Sled Agents to download cached artifacts.",
         "operationId": "cpapi_artifact_download",
         "parameters": [
           {
@@ -34,7 +34,7 @@
     },
     "/disks/{disk_id}": {
       "put": {
-        "description": "Report updated state for a disk.",
+        "summary": "Report updated state for a disk.",
         "operationId": "cpapi_disks_put",
         "parameters": [
           {
@@ -67,7 +67,7 @@
     },
     "/instances/{instance_id}": {
       "put": {
-        "description": "Report updated state for an instance.",
+        "summary": "Report updated state for an instance.",
         "operationId": "cpapi_instances_put",
         "parameters": [
           {
@@ -100,7 +100,7 @@
     },
     "/metrics/collect/{producer_id}": {
       "get": {
-        "description": "Endpoint for oximeter to collect nexus server metrics.",
+        "summary": "Endpoint for oximeter to collect nexus server metrics.",
         "operationId": "cpapi_metrics_collect",
         "parameters": [
           {
@@ -134,7 +134,7 @@
     },
     "/metrics/collectors": {
       "post": {
-        "description": "Accept a notification of a new oximeter collection server.",
+        "summary": "Accept a notification of a new oximeter collection server.",
         "operationId": "cpapi_collectors_post",
         "requestBody": {
           "content": {
@@ -155,7 +155,7 @@
     },
     "/metrics/producers": {
       "post": {
-        "description": "Accept a registration from a new metric producer",
+        "summary": "Accept a registration from a new metric producer",
         "operationId": "cpapi_producers_post",
         "requestBody": {
           "content": {
@@ -176,7 +176,7 @@
     },
     "/sled_agents/{sled_id}": {
       "post": {
-        "description": "Report that the sled agent for the specified sled has come online.",
+        "summary": "Report that the sled agent for the specified sled has come online.",
         "operationId": "cpapi_sled_agents_post",
         "parameters": [
           {
@@ -209,7 +209,7 @@
     },
     "/sled_agents/{sled_id}/zpools/{zpool_id}": {
       "put": {
-        "description": "Report that a pool for a specified sled has come online.",
+        "summary": "Report that a pool for a specified sled has come online.",
         "operationId": "zpool_put",
         "parameters": [
           {
@@ -259,7 +259,7 @@
     },
     "/zpools/{zpool_id}/dataset/{dataset_id}": {
       "put": {
-        "description": "Report that a dataset within a pool has come online.",
+        "summary": "Report that a dataset within a pool has come online.",
         "operationId": "dataset_put",
         "parameters": [
           {
@@ -1274,6 +1274,12 @@
               }
             ]
           },
+          "migration_uuid": {
+            "nullable": true,
+            "description": "migration id (if one in process)",
+            "type": "string",
+            "format": "uuid"
+          },
           "ncpus": {
             "description": "number of CPUs allocated for this Instance",
             "allOf": [
@@ -1281,6 +1287,11 @@
                 "$ref": "#/components/schemas/InstanceCpuCount"
               }
             ]
+          },
+          "propolis_addr": {
+            "nullable": true,
+            "description": "address of propolis-server running this Instance",
+            "type": "string"
           },
           "propolis_uuid": {
             "description": "which propolis-server is running this Instance",
@@ -1327,6 +1338,7 @@
           "stopping",
           "stopped",
           "rebooting",
+          "migrating",
           "repairing",
           "failed",
           "destroyed"

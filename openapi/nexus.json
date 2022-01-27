@@ -13,9 +13,9 @@
     "/hardware/racks": {
       "get": {
         "tags": [
-          "hardware"
+          "racks"
         ],
-        "description": "List racks in the system.",
+        "summary": "List racks in the system.",
         "operationId": "hardware_racks_get",
         "parameters": [
           {
@@ -67,9 +67,9 @@
     "/hardware/racks/{rack_id}": {
       "get": {
         "tags": [
-          "hardware"
+          "racks"
         ],
-        "description": "Fetch information about a particular rack.",
+        "summary": "Fetch information about a particular rack.",
         "operationId": "hardware_racks_get_rack",
         "parameters": [
           {
@@ -101,9 +101,9 @@
     "/hardware/sleds": {
       "get": {
         "tags": [
-          "hardware"
+          "sleds"
         ],
-        "description": "List sleds in the system.",
+        "summary": "List sleds in the system.",
         "operationId": "hardware_sleds_get",
         "parameters": [
           {
@@ -155,9 +155,9 @@
     "/hardware/sleds/{sled_id}": {
       "get": {
         "tags": [
-          "hardware"
+          "sleds"
         ],
-        "description": "Fetch information about a sled in the system.",
+        "summary": "Fetch information about a sled in the system.",
         "operationId": "hardware_sleds_get_sled",
         "parameters": [
           {
@@ -227,7 +227,7 @@
         "tags": [
           "organizations"
         ],
-        "description": "List all organizations.",
+        "summary": "List all organizations.",
         "operationId": "organizations_get",
         "parameters": [
           {
@@ -279,7 +279,7 @@
         "tags": [
           "organizations"
         ],
-        "description": "Create a new organization.",
+        "summary": "Create a new organization.",
         "operationId": "organizations_post",
         "requestBody": {
           "content": {
@@ -310,7 +310,7 @@
         "tags": [
           "organizations"
         ],
-        "description": "Fetch a specific organization",
+        "summary": "Fetch a specific organization",
         "operationId": "organizations_get_organization",
         "parameters": [
           {
@@ -340,7 +340,7 @@
         "tags": [
           "organizations"
         ],
-        "description": "Update a specific organization.\n * TODO-correctness: Is it valid for PUT to accept application/json that's a subset of what the resource actually represents?  If not, is that a problem? (HTTP may require that this be idempotent.)  If so, can we get around that having this be a slightly different content-type (e.g., \"application/json-patch\")?  We should see what other APIs do.",
+        "summary": "Update a specific organization.",
         "operationId": "organizations_put_organization",
         "parameters": [
           {
@@ -380,7 +380,7 @@
         "tags": [
           "organizations"
         ],
-        "description": "Delete a specific organization.",
+        "summary": "Delete a specific organization.",
         "operationId": "organizations_delete_organization",
         "parameters": [
           {
@@ -405,7 +405,7 @@
         "tags": [
           "projects"
         ],
-        "description": "List all projects.",
+        "summary": "List all projects.",
         "operationId": "organization_projects_get",
         "parameters": [
           {
@@ -466,7 +466,7 @@
         "tags": [
           "projects"
         ],
-        "description": "Create a new project.",
+        "summary": "Create a new project.",
         "operationId": "organization_projects_post",
         "parameters": [
           {
@@ -508,7 +508,7 @@
         "tags": [
           "projects"
         ],
-        "description": "Fetch a specific project",
+        "summary": "Fetch a specific project",
         "operationId": "organization_projects_get_project",
         "parameters": [
           {
@@ -545,9 +545,9 @@
       },
       "put": {
         "tags": [
-          "organizations"
+          "projects"
         ],
-        "description": "Update a specific project.\n * TODO-correctness: Is it valid for PUT to accept application/json that's a subset of what the resource actually represents?  If not, is that a problem? (HTTP may require that this be idempotent.)  If so, can we get around that having this be a slightly different content-type (e.g., \"application/json-patch\")?  We should see what other APIs do.",
+        "summary": "Update a specific project.",
         "operationId": "organization_projects_put_project",
         "parameters": [
           {
@@ -596,7 +596,7 @@
         "tags": [
           "projects"
         ],
-        "description": "Delete a specific project.",
+        "summary": "Delete a specific project.",
         "operationId": "organization_projects_delete_project",
         "parameters": [
           {
@@ -628,9 +628,9 @@
     "/organizations/{organization_name}/projects/{project_name}/disks": {
       "get": {
         "tags": [
-          "projects"
+          "disks"
         ],
-        "description": "List disks in a project.",
+        "summary": "List disks in a project.",
         "operationId": "project_disks_get",
         "parameters": [
           {
@@ -698,9 +698,9 @@
       },
       "post": {
         "tags": [
-          "projects"
+          "disks"
         ],
-        "description": "Create a disk in a project.\n * TODO-correctness See note about instance create.  This should be async.",
+        "summary": "Create a disk in a project.",
         "operationId": "project_disks_post",
         "parameters": [
           {
@@ -749,9 +749,9 @@
     "/organizations/{organization_name}/projects/{project_name}/disks/{disk_name}": {
       "get": {
         "tags": [
-          "projects"
+          "disks"
         ],
-        "description": "Fetch a single disk in a project.",
+        "summary": "Fetch a single disk in a project.",
         "operationId": "project_disks_get_disk",
         "parameters": [
           {
@@ -797,9 +797,9 @@
       },
       "delete": {
         "tags": [
-          "projects"
+          "disks"
         ],
-        "description": "Delete a disk from a project.",
+        "summary": "Delete a disk from a project.",
         "operationId": "project_disks_delete_disk",
         "parameters": [
           {
@@ -842,7 +842,7 @@
         "tags": [
           "instances"
         ],
-        "description": "List instances in a project.",
+        "summary": "List instances in a project.",
         "operationId": "project_instances_get",
         "parameters": [
           {
@@ -912,7 +912,7 @@
         "tags": [
           "instances"
         ],
-        "description": "Create an instance in a project.\n * TODO-correctness This is supposed to be async.  Is that right?  We can create the instance immediately -- it's just not booted yet.  Maybe the boot operation is what's a separate operation_id.  What about the response code (201 Created vs 202 Accepted)?  Is that orthogonal?  Things can return a useful response, including an operation id, with either response code.  Maybe a \"reboot\" operation would return a 202 Accepted because there's no actual resource created?",
+        "summary": "Create an instance in a project.",
         "operationId": "project_instances_post",
         "parameters": [
           {
@@ -963,7 +963,7 @@
         "tags": [
           "instances"
         ],
-        "description": "Get an instance in a project.",
+        "summary": "Get an instance in a project.",
         "operationId": "project_instances_get_instance",
         "parameters": [
           {
@@ -1011,7 +1011,7 @@
         "tags": [
           "instances"
         ],
-        "description": "Delete an instance from a project.",
+        "summary": "Delete an instance from a project.",
         "operationId": "project_instances_delete_instance",
         "parameters": [
           {
@@ -1054,7 +1054,7 @@
         "tags": [
           "instances"
         ],
-        "description": "List disks attached to this instance.",
+        "summary": "List disks attached to this instance.",
         "operationId": "instance_disks_get",
         "parameters": [
           {
@@ -1248,12 +1248,72 @@
         }
       }
     },
+    "/organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/migrate": {
+      "post": {
+        "tags": [
+          "instances"
+        ],
+        "summary": "Migrate an instance to a different propolis-server, possibly on a different sled.",
+        "operationId": "project_instances_migrate_instance",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "instance_name",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Name"
+            },
+            "style": "simple"
+          },
+          {
+            "in": "path",
+            "name": "organization_name",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Name"
+            },
+            "style": "simple"
+          },
+          {
+            "in": "path",
+            "name": "project_name",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Name"
+            },
+            "style": "simple"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InstanceMigrate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Instance"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/reboot": {
       "post": {
         "tags": [
           "instances"
         ],
-        "description": "Reboot an instance.",
+        "summary": "Reboot an instance.",
         "operationId": "project_instances_instance_reboot",
         "parameters": [
           {
@@ -1303,7 +1363,7 @@
         "tags": [
           "instances"
         ],
-        "description": "Boot an instance.",
+        "summary": "Boot an instance.",
         "operationId": "project_instances_instance_start",
         "parameters": [
           {
@@ -1353,7 +1413,7 @@
         "tags": [
           "instances"
         ],
-        "description": "Halt an instance.",
+        "summary": "Halt an instance.",
         "operationId": "project_instances_instance_stop",
         "parameters": [
           {
@@ -1401,9 +1461,9 @@
     "/organizations/{organization_name}/projects/{project_name}/vpcs": {
       "get": {
         "tags": [
-          "networking"
+          "vpcs"
         ],
-        "description": "List VPCs in a project.",
+        "summary": "List VPCs in a project.",
         "operationId": "project_vpcs_get",
         "parameters": [
           {
@@ -1471,9 +1531,9 @@
       },
       "post": {
         "tags": [
-          "networking"
+          "vpcs"
         ],
-        "description": "Create a VPC in a project.",
+        "summary": "Create a VPC in a project.",
         "operationId": "project_vpcs_post",
         "parameters": [
           {
@@ -1522,9 +1582,9 @@
     "/organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}": {
       "get": {
         "tags": [
-          "networking"
+          "vpcs"
         ],
-        "description": "Get a VPC in a project.",
+        "summary": "Get a VPC in a project.",
         "operationId": "project_vpcs_get_vpc",
         "parameters": [
           {
@@ -1570,9 +1630,9 @@
       },
       "put": {
         "tags": [
-          "networking"
+          "vpcs"
         ],
-        "description": "Update a VPC.",
+        "summary": "Update a VPC.",
         "operationId": "project_vpcs_put_vpc",
         "parameters": [
           {
@@ -1621,9 +1681,9 @@
       },
       "delete": {
         "tags": [
-          "networking"
+          "vpcs"
         ],
-        "description": "Delete a vpc from a project.",
+        "summary": "Delete a vpc from a project.",
         "operationId": "project_vpcs_delete_vpc",
         "parameters": [
           {
@@ -1664,9 +1724,9 @@
     "/organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/firewall/rules": {
       "get": {
         "tags": [
-          "networking"
+          "firewall"
         ],
-        "description": "List firewall rules for a VPC.",
+        "summary": "List firewall rules for a VPC.",
         "operationId": "vpc_firewall_rules_get",
         "parameters": [
           {
@@ -1743,9 +1803,9 @@
       },
       "put": {
         "tags": [
-          "networking"
+          "firewall"
         ],
-        "description": "Replace the firewall rules for a VPC",
+        "summary": "Replace the firewall rules for a VPC",
         "operationId": "vpc_firewall_rules_put",
         "parameters": [
           {
@@ -1803,9 +1863,9 @@
     "/organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/routers": {
       "get": {
         "tags": [
-          "networking"
+          "routers"
         ],
-        "description": "List VPC Custom and System Routers",
+        "summary": "List VPC Custom and System Routers",
         "operationId": "vpc_routers_get",
         "parameters": [
           {
@@ -1882,9 +1942,9 @@
       },
       "post": {
         "tags": [
-          "networking"
+          "routers"
         ],
-        "description": "Create a VPC Router",
+        "summary": "Create a VPC Router",
         "operationId": "vpc_routers_post",
         "parameters": [
           {
@@ -1942,9 +2002,9 @@
     "/organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/routers/{router_name}": {
       "get": {
         "tags": [
-          "networking"
+          "routers"
         ],
-        "description": "Get a VPC Router",
+        "summary": "Get a VPC Router",
         "operationId": "vpc_routers_get_router",
         "parameters": [
           {
@@ -1999,9 +2059,9 @@
       },
       "put": {
         "tags": [
-          "networking"
+          "routers"
         ],
-        "description": "Update a VPC Router",
+        "summary": "Update a VPC Router",
         "operationId": "vpc_routers_put_router",
         "parameters": [
           {
@@ -2059,9 +2119,9 @@
       },
       "delete": {
         "tags": [
-          "networking"
+          "routers"
         ],
-        "description": "Delete a router from its VPC",
+        "summary": "Delete a router from its VPC",
         "operationId": "vpc_routers_delete_router",
         "parameters": [
           {
@@ -2111,9 +2171,9 @@
     "/organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/routers/{router_name}/routes": {
       "get": {
         "tags": [
-          "networking"
+          "routes"
         ],
-        "description": "List a Router's routes",
+        "summary": "List a Router's routes",
         "operationId": "routers_routes_get",
         "parameters": [
           {
@@ -2199,9 +2259,9 @@
       },
       "post": {
         "tags": [
-          "networking"
+          "routes"
         ],
-        "description": "Create a VPC Router",
+        "summary": "Create a VPC Router",
         "operationId": "routers_routes_post",
         "parameters": [
           {
@@ -2268,9 +2328,9 @@
     "/organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/routers/{router_name}/routes/{route_name}": {
       "get": {
         "tags": [
-          "networking"
+          "routes"
         ],
-        "description": "Get a VPC Router route",
+        "summary": "Get a VPC Router route",
         "operationId": "routers_routes_get_route",
         "parameters": [
           {
@@ -2334,9 +2394,9 @@
       },
       "put": {
         "tags": [
-          "networking"
+          "routes"
         ],
-        "description": "Update a Router route",
+        "summary": "Update a Router route",
         "operationId": "routers_routes_put_route",
         "parameters": [
           {
@@ -2403,9 +2463,9 @@
       },
       "delete": {
         "tags": [
-          "networking"
+          "routes"
         ],
-        "description": "Delete a route from its router",
+        "summary": "Delete a route from its router",
         "operationId": "routers_routes_delete_route",
         "parameters": [
           {
@@ -2464,9 +2524,9 @@
     "/organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/subnets": {
       "get": {
         "tags": [
-          "networking"
+          "subnets"
         ],
-        "description": "List subnets in a VPC.",
+        "summary": "List subnets in a VPC.",
         "operationId": "vpc_subnets_get",
         "parameters": [
           {
@@ -2543,9 +2603,9 @@
       },
       "post": {
         "tags": [
-          "networking"
+          "subnets"
         ],
-        "description": "Create a subnet in a VPC.",
+        "summary": "Create a subnet in a VPC.",
         "operationId": "vpc_subnets_post",
         "parameters": [
           {
@@ -2603,9 +2663,9 @@
     "/organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/subnets/{subnet_name}": {
       "get": {
         "tags": [
-          "networking"
+          "subnets"
         ],
-        "description": "Get subnet in a VPC.",
+        "summary": "Get subnet in a VPC.",
         "operationId": "vpc_subnets_get_subnet",
         "parameters": [
           {
@@ -2660,9 +2720,9 @@
       },
       "put": {
         "tags": [
-          "networking"
+          "subnets"
         ],
-        "description": "Update a VPC Subnet.",
+        "summary": "Update a VPC Subnet.",
         "operationId": "vpc_subnets_put_subnet",
         "parameters": [
           {
@@ -2720,9 +2780,9 @@
       },
       "delete": {
         "tags": [
-          "networking"
+          "subnets"
         ],
-        "description": "Delete a subnet from a VPC.",
+        "summary": "Delete a subnet from a VPC.",
         "operationId": "vpc_subnets_delete_subnet",
         "parameters": [
           {
@@ -2772,9 +2832,9 @@
     "/organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/subnets/{subnet_name}/ips": {
       "get": {
         "tags": [
-          "networking"
+          "subnets"
         ],
-        "description": "List IP addresses on a VPC subnet.",
+        "summary": "List IP addresses on a VPC subnet.",
         "operationId": "subnets_ips_get",
         "parameters": [
           {
@@ -2864,7 +2924,7 @@
         "tags": [
           "roles"
         ],
-        "description": "List the built-in roles",
+        "summary": "List the built-in roles",
         "operationId": "roles_get",
         "parameters": [
           {
@@ -2910,7 +2970,7 @@
         "tags": [
           "roles"
         ],
-        "description": "Fetch a specific built-in role",
+        "summary": "Fetch a specific built-in role",
         "operationId": "roles_get_role",
         "parameters": [
           {
@@ -2943,7 +3003,7 @@
         "tags": [
           "sagas"
         ],
-        "description": "List all sagas (for debugging)",
+        "summary": "List all sagas (for debugging)",
         "operationId": "sagas_get",
         "parameters": [
           {
@@ -2997,7 +3057,7 @@
         "tags": [
           "sagas"
         ],
-        "description": "Fetch information about a single saga (for debugging)",
+        "summary": "Fetch information about a single saga (for debugging)",
         "operationId": "sagas_get_saga",
         "parameters": [
           {
@@ -3030,7 +3090,7 @@
         "tags": [
           "hidden"
         ],
-        "description": "Fetch the user associated with the current session",
+        "summary": "Fetch the user associated with the current session",
         "operationId": "session_me",
         "responses": {
           "200": {
@@ -3051,7 +3111,7 @@
         "tags": [
           "metrics"
         ],
-        "description": "List all timeseries schema",
+        "summary": "List all timeseries schema",
         "operationId": "timeseries_schema_get",
         "parameters": [
           {
@@ -3097,7 +3157,7 @@
         "tags": [
           "updates"
         ],
-        "description": "Refresh update metadata",
+        "summary": "Refresh update metadata",
         "operationId": "updates_refresh",
         "responses": {
           "204": {
@@ -3111,7 +3171,7 @@
         "tags": [
           "users"
         ],
-        "description": "List the built-in system users",
+        "summary": "List the built-in system users",
         "operationId": "users_get",
         "parameters": [
           {
@@ -3165,7 +3225,7 @@
         "tags": [
           "users"
         ],
-        "description": "Fetch a specific built-in system user",
+        "summary": "Fetch a specific built-in system user",
         "operationId": "users_get_user",
         "parameters": [
           {
@@ -3618,6 +3678,19 @@
           "ncpus"
         ]
       },
+      "InstanceMigrate": {
+        "description": "Migration parameters for an [`Instance`]",
+        "type": "object",
+        "properties": {
+          "dst_sled_uuid": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "required": [
+          "dst_sled_uuid"
+        ]
+      },
       "InstanceResultsPage": {
         "description": "A single page of results",
         "type": "object",
@@ -3649,6 +3722,7 @@
           "stopping",
           "stopped",
           "rebooting",
+          "migrating",
           "repairing",
           "failed",
           "destroyed"

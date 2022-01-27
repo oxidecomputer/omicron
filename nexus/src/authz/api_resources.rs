@@ -331,6 +331,11 @@ pub struct Project {
 }
 
 impl Project {
+    // TODO-cleanup see note on Organization::id above.
+    pub fn id(&self) -> Uuid {
+        self.project_id
+    }
+
     /// Returns an authz resource representing any child of this Project (e.g.,
     /// an Instance or Disk)
     ///

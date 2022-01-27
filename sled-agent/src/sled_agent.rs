@@ -15,6 +15,7 @@ use crate::updates;
 use omicron_common::api::{
     internal::nexus::DiskRuntimeState, internal::nexus::InstanceRuntimeState,
     internal::sled_agent::InstanceHardware,
+    internal::sled_agent::InstanceMigrateParams,
     internal::sled_agent::InstanceRuntimeStateRequested,
 };
 use slog::Logger;
@@ -136,9 +137,10 @@ impl SledAgent {
         instance_id: Uuid,
         initial: InstanceHardware,
         target: InstanceRuntimeStateRequested,
+        migrate: Option<InstanceMigrateParams>,
     ) -> Result<InstanceRuntimeState, Error> {
         self.instances
-            .ensure(instance_id, initial, target)
+            .ensure(instance_id, initial, target, migrate)
             .await
             .map_err(|e| Error::Instance(e))
     }

@@ -39,6 +39,8 @@ table! {
         state_generation -> Int8,
         active_server_id -> Uuid,
         active_propolis_id -> Uuid,
+        active_propolis_ip -> Nullable<Inet>,
+        migration_id -> Nullable<Uuid>,
         ncpus -> Int8,
         memory -> Int8,
         hostname -> Text,
@@ -193,6 +195,8 @@ table! {
         port -> Int4,
 
         kind -> crate::db::model::DatasetKindEnum,
+
+        size_used -> Nullable<Int8>,
     }
 }
 
@@ -206,7 +210,7 @@ table! {
         disk_id -> Uuid,
 
         block_size -> Int8,
-        extent_size -> Int8,
+        blocks_per_extent -> Int8,
         extent_count -> Int8,
     }
 }
@@ -339,6 +343,7 @@ table! {
 }
 
 allow_tables_to_appear_in_same_query!(
+    dataset,
     disk,
     instance,
     metric_producer,
@@ -346,6 +351,7 @@ allow_tables_to_appear_in_same_query!(
     organization,
     oximeter,
     project,
+    region,
     saga,
     saga_node_event,
     console_session,
@@ -358,4 +364,5 @@ allow_tables_to_appear_in_same_query!(
     user_builtin,
     role_builtin,
     role_assignment_builtin,
+    zpool,
 );

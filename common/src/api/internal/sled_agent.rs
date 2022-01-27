@@ -8,6 +8,8 @@ use crate::api::{external, internal};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::fmt::{Debug, Display, Formatter, Result as FormatResult};
+use std::net::SocketAddr;
+use uuid::Uuid;
 
 /// Describes the instance hardware.
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
@@ -24,6 +26,14 @@ pub struct InstanceEnsureBody {
     pub initial: InstanceHardware,
     /// requested runtime state of the Instance
     pub target: InstanceRuntimeStateRequested,
+    /// If we're migrating this instance, the details needed to drive the migration
+    pub migrate: Option<InstanceMigrateParams>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct InstanceMigrateParams {
+    pub src_propolis_uuid: Uuid,
+    pub src_propolis_addr: SocketAddr,
 }
 
 /// Requestable running state of an Instance.
@@ -48,6 +58,7 @@ pub enum InstanceStateRequested {
     // Issues a reset command to the instance, such that it should
     // stop and then immediately become running.
     Reboot,
+    Migrating,
     Destroyed,
 }
 
@@ -63,6 +74,7 @@ impl InstanceStateRequested {
             InstanceStateRequested::Running => "running",
             InstanceStateRequested::Stopped => "stopped",
             InstanceStateRequested::Reboot => "reboot",
+            InstanceStateRequested::Migrating => "migrating",
             InstanceStateRequested::Destroyed => "destroyed",
         }
     }
@@ -73,6 +85,7 @@ impl InstanceStateRequested {
             InstanceStateRequested::Running => false,
             InstanceStateRequested::Stopped => true,
             InstanceStateRequested::Reboot => false,
+            InstanceStateRequested::Migrating => false,
             InstanceStateRequested::Destroyed => true,
         }
     }
@@ -80,9 +93,11 @@ impl InstanceStateRequested {
 
 /// Used to request an Instance state change from a sled agent
 ///
-/// Right now, it's only the run state that can be changed, though we might want
-/// to support changing properties like "ncpus" here.
+/// Right now, it's only the run state and migration id that can
+/// be changed, though we might want to support changing properties
+/// like "ncpus" here.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct InstanceRuntimeStateRequested {
     pub run_state: InstanceStateRequested,
+    pub migration_id: Option<Uuid>,
 }

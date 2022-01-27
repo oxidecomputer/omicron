@@ -399,7 +399,7 @@ impl JsonSchema for RoleName {
  * the database as an i64.  Constraining it here ensures that we can't fail to
  * serialize the value.
  */
-#[derive(Copy, Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[derive(Copy, Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
 pub struct ByteCount(u64);
 
 impl ByteCount {
@@ -468,8 +468,8 @@ impl From<u32> for ByteCount {
     }
 }
 
-impl From<&ByteCount> for i64 {
-    fn from(b: &ByteCount) -> Self {
+impl From<ByteCount> for i64 {
+    fn from(b: ByteCount) -> Self {
         /* We have already validated that this value is in range. */
         i64::try_from(b.0).unwrap()
     }
@@ -676,6 +676,10 @@ pub enum InstanceState {
     /// The instance is in the process of rebooting - it will remain
     /// in the "rebooting" state until the VM is starting once more.
     Rebooting,
+    /// The instance is in the process of migrating - it will remain
+    /// in the "migrating" state until the migration process is complete
+    /// and the destination propolis is ready to continue execution.
+    Migrating,
     Repairing,
     Failed,
     Destroyed,
@@ -704,6 +708,7 @@ impl TryFrom<&str> for InstanceState {
             "stopping" => InstanceState::Stopping,
             "stopped" => InstanceState::Stopped,
             "rebooting" => InstanceState::Rebooting,
+            "migrating" => InstanceState::Migrating,
             "repairing" => InstanceState::Repairing,
             "failed" => InstanceState::Failed,
             "destroyed" => InstanceState::Destroyed,
@@ -722,6 +727,7 @@ impl InstanceState {
             InstanceState::Stopping => "stopping",
             InstanceState::Stopped => "stopped",
             InstanceState::Rebooting => "rebooting",
+            InstanceState::Migrating => "migrating",
             InstanceState::Repairing => "repairing",
             InstanceState::Failed => "failed",
             InstanceState::Destroyed => "destroyed",
@@ -739,6 +745,7 @@ impl InstanceState {
             InstanceState::Running => false,
             InstanceState::Stopping => false,
             InstanceState::Rebooting => false,
+            InstanceState::Migrating => false,
 
             InstanceState::Creating => true,
             InstanceState::Stopped => true,
@@ -2074,12 +2081,12 @@ mod test {
         /* Largest supported value: both constructors that support it. */
         let max = ByteCount::try_from(i64::MAX).unwrap();
         assert_eq!(i64::MAX, max.to_bytes() as i64);
-        assert_eq!(i64::MAX, i64::from(&max));
+        assert_eq!(i64::MAX, i64::from(max));
 
         let maxu64 = u64::try_from(i64::MAX).unwrap();
         let max = ByteCount::try_from(maxu64).unwrap();
         assert_eq!(i64::MAX, max.to_bytes() as i64);
-        assert_eq!(i64::MAX, i64::from(&max));
+        assert_eq!(i64::MAX, i64::from(max));
         assert_eq!(
             (i64::MAX / 1024 / 1024 / 1024 / 1024) as u64,
             max.to_whole_tebibytes()

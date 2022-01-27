@@ -92,6 +92,7 @@ pub fn external_api() -> NexusApiDescription {
         api.register(project_instances_post)?;
         api.register(project_instances_get_instance)?;
         api.register(project_instances_delete_instance)?;
+        api.register(project_instances_migrate_instance)?;
         api.register(project_instances_instance_reboot)?;
         api.register(project_instances_instance_start)?;
         api.register(project_instances_instance_stop)?;
@@ -328,7 +329,8 @@ async fn organizations_delete_organization(
 
 /**
  * Update a specific organization.
- *
+ */
+/*
  * TODO-correctness: Is it valid for PUT to accept application/json that's a
  * subset of what the resource actually represents?  If not, is that a problem?
  * (HTTP may require that this be idempotent.)  If so, can we get around that
@@ -383,13 +385,18 @@ async fn organization_projects_get(
     let organization_name = &path.organization_name;
 
     let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
         let params = ScanByNameOrId::from_query(&query)?;
         let field = pagination_field_for_scan_params(params);
         let projects = match field {
             PagField::Id => {
                 let page_selector = data_page_params_nameid_id(&rqctx, &query)?;
                 nexus
-                    .projects_list_by_id(&organization_name, &page_selector)
+                    .projects_list_by_id(
+                        &opctx,
+                        &organization_name,
+                        &page_selector,
+                    )
                     .await?
             }
 
@@ -398,7 +405,11 @@ async fn organization_projects_get(
                     data_page_params_nameid_name(&rqctx, &query)?
                         .map_name(|n| Name::ref_cast(n));
                 nexus
-                    .projects_list_by_name(&organization_name, &page_selector)
+                    .projects_list_by_name(
+                        &opctx,
+                        &organization_name,
+                        &page_selector,
+                    )
                     .await?
             }
         }
@@ -470,8 +481,10 @@ async fn organization_projects_get_project(
     let organization_name = &path.organization_name;
     let project_name = &path.project_name;
     let handler = async {
-        let project =
-            nexus.project_fetch(&organization_name, &project_name).await?;
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let project = nexus
+            .project_fetch(&opctx, &organization_name, &project_name)
+            .await?;
         Ok(HttpResponseOk(project.into()))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
@@ -495,7 +508,8 @@ async fn organization_projects_delete_project(
     let organization_name = &params.organization_name;
     let project_name = &params.project_name;
     let handler = async {
-        nexus.project_delete(&organization_name, &project_name).await?;
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        nexus.project_delete(&opctx, &organization_name, &project_name).await?;
         Ok(HttpResponseDeleted())
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
@@ -503,7 +517,8 @@ async fn organization_projects_delete_project(
 
 /**
  * Update a specific project.
- *
+ */
+/*
  * TODO-correctness: Is it valid for PUT to accept application/json that's a
  * subset of what the resource actually represents?  If not, is that a problem?
  * (HTTP may require that this be idempotent.)  If so, can we get around that
@@ -513,7 +528,7 @@ async fn organization_projects_delete_project(
 #[endpoint {
     method = PUT,
     path = "/organizations/{organization_name}/projects/{project_name}",
-    tags = ["organizations"],
+    tags = ["projects"],
 }]
 async fn organization_projects_put_project(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
@@ -526,8 +541,10 @@ async fn organization_projects_put_project(
     let organization_name = &path.organization_name;
     let project_name = &path.project_name;
     let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
         let newproject = nexus
             .project_update(
+                &opctx,
                 &organization_name,
                 &project_name,
                 &updated_project.into_inner(),
@@ -548,7 +565,7 @@ async fn organization_projects_put_project(
 #[endpoint {
     method = GET,
     path = "/organizations/{organization_name}/projects/{project_name}/disks",
-    tags = ["projects"]
+    tags = ["disks"]
 }]
 async fn project_disks_get(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
@@ -580,13 +597,14 @@ async fn project_disks_get(
 
 /**
  * Create a disk in a project.
- *
+ */
+/*
  * TODO-correctness See note about instance create.  This should be async.
  */
 #[endpoint {
     method = POST,
     path = "/organizations/{organization_name}/projects/{project_name}/disks",
-    tags = ["projects"]
+    tags = ["disks"]
 }]
 async fn project_disks_post(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
@@ -628,7 +646,7 @@ struct DiskPathParam {
 #[endpoint {
     method = GET,
     path = "/organizations/{organization_name}/projects/{project_name}/disks/{disk_name}",
-    tags = ["projects"],
+    tags = ["disks"],
 }]
 async fn project_disks_get_disk(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
@@ -655,7 +673,7 @@ async fn project_disks_get_disk(
 #[endpoint {
     method = DELETE,
     path = "/organizations/{organization_name}/projects/{project_name}/disks/{disk_name}",
-    tags = ["projects"],
+    tags = ["disks"],
 }]
 async fn project_disks_delete_disk(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
@@ -724,7 +742,8 @@ async fn project_instances_get(
 
 /**
  * Create an instance in a project.
- *
+ */
+/*
  * TODO-correctness This is supposed to be async.  Is that right?  We can create
  * the instance immediately -- it's just not booted yet.  Maybe the boot
  * operation is what's a separate operation_id.  What about the response code
@@ -830,6 +849,40 @@ async fn project_instances_delete_instance(
             )
             .await?;
         Ok(HttpResponseDeleted())
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/**
+ * Migrate an instance to a different propolis-server, possibly on a different sled.
+ */
+#[endpoint {
+    method = POST,
+    path = "/organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/migrate",
+    tags = ["instances"],
+}]
+async fn project_instances_migrate_instance(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    path_params: Path<InstancePathParam>,
+    migrate_params: TypedBody<params::InstanceMigrate>,
+) -> Result<HttpResponseOk<Instance>, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let path = path_params.into_inner();
+    let organization_name = &path.organization_name;
+    let project_name = &path.project_name;
+    let instance_name = &path.instance_name;
+    let migrate_instance_params = migrate_params.into_inner();
+    let handler = async {
+        let instance = nexus
+            .project_migrate_instance(
+                &organization_name,
+                &project_name,
+                &instance_name,
+                migrate_instance_params,
+            )
+            .await?;
+        Ok(HttpResponseOk(instance.into()))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
@@ -1025,7 +1078,7 @@ async fn instance_disks_detach(
 #[endpoint {
     method = GET,
     path = "/organizations/{organization_name}/projects/{project_name}/vpcs",
-    tags = ["networking"],
+    tags = ["vpcs"],
 }]
 async fn project_vpcs_get(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
@@ -1072,7 +1125,7 @@ struct VpcPathParam {
 #[endpoint {
     method = GET,
     path = "/organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}",
-    tags = ["networking"],
+    tags = ["vpcs"],
 }]
 async fn project_vpcs_get_vpc(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
@@ -1099,7 +1152,7 @@ async fn project_vpcs_get_vpc(
 #[endpoint {
     method = POST,
     path = "/organizations/{organization_name}/projects/{project_name}/vpcs",
-    tags = ["networking"],
+    tags = ["vpcs"],
 }]
 async fn project_vpcs_post(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
@@ -1131,7 +1184,7 @@ async fn project_vpcs_post(
 #[endpoint {
     method = PUT,
     path = "/organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}",
-    tags = ["networking"],
+    tags = ["vpcs"],
 }]
 async fn project_vpcs_put_vpc(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
@@ -1161,7 +1214,7 @@ async fn project_vpcs_put_vpc(
 #[endpoint {
     method = DELETE,
     path = "/organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}",
-    tags = ["networking"],
+    tags = ["vpcs"],
 }]
 async fn project_vpcs_delete_vpc(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
@@ -1188,7 +1241,7 @@ async fn project_vpcs_delete_vpc(
 #[endpoint {
     method = GET,
     path = "/organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/subnets",
-    tags = ["networking"],
+    tags = ["subnets"],
 }]
 async fn vpc_subnets_get(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
@@ -1234,7 +1287,7 @@ struct VpcSubnetPathParam {
 #[endpoint {
     method = GET,
     path = "/organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/subnets/{subnet_name}",
-    tags = ["networking"],
+    tags = ["subnets"],
 }]
 async fn vpc_subnets_get_subnet(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
@@ -1263,7 +1316,7 @@ async fn vpc_subnets_get_subnet(
 #[endpoint {
     method = POST,
     path = "/organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/subnets",
-    tags = ["networking"],
+    tags = ["subnets"],
 }]
 async fn vpc_subnets_post(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
@@ -1293,7 +1346,7 @@ async fn vpc_subnets_post(
 #[endpoint {
     method = DELETE,
     path = "/organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/subnets/{subnet_name}",
-    tags = ["networking"],
+    tags = ["subnets"],
 }]
 async fn vpc_subnets_delete_subnet(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
@@ -1322,7 +1375,7 @@ async fn vpc_subnets_delete_subnet(
 #[endpoint {
     method = PUT,
     path = "/organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/subnets/{subnet_name}",
-    tags = ["networking"],
+    tags = ["subnets"],
 }]
 async fn vpc_subnets_put_subnet(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
@@ -1356,7 +1409,7 @@ async fn vpc_subnets_put_subnet(
 #[endpoint {
     method = GET,
     path = "/organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/subnets/{subnet_name}/ips",
-    tags = ["networking"],
+    tags = ["subnets"],
 }]
 async fn subnets_ips_get(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
@@ -1396,7 +1449,7 @@ async fn subnets_ips_get(
 #[endpoint {
     method = GET,
     path = "/organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/firewall/rules",
-    tags = ["networking"],
+    tags = ["firewall"],
 }]
 async fn vpc_firewall_rules_get(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
@@ -1434,7 +1487,7 @@ async fn vpc_firewall_rules_get(
 #[endpoint {
     method = PUT,
     path = "/organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/firewall/rules",
-    tags = ["networking"],
+    tags = ["firewall"],
 }]
 async fn vpc_firewall_rules_put(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
@@ -1469,7 +1522,7 @@ async fn vpc_firewall_rules_put(
 #[endpoint {
     method = GET,
     path = "/organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/routers",
-    tags = ["networking"],
+    tags = ["routers"],
 }]
 async fn vpc_routers_get(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
@@ -1515,7 +1568,7 @@ struct VpcRouterPathParam {
 #[endpoint {
     method = GET,
     path = "/organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/routers/{router_name}",
-    tags = ["networking"],
+    tags = ["routers"],
 }]
 async fn vpc_routers_get_router(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
@@ -1544,7 +1597,7 @@ async fn vpc_routers_get_router(
 #[endpoint {
     method = POST,
     path = "/organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/routers",
-    tags = ["networking"],
+    tags = ["routers"],
 }]
 async fn vpc_routers_post(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
@@ -1575,7 +1628,7 @@ async fn vpc_routers_post(
 #[endpoint {
     method = DELETE,
     path = "/organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/routers/{router_name}",
-    tags = ["networking"],
+    tags = ["routers"],
 }]
 async fn vpc_routers_delete_router(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
@@ -1604,7 +1657,7 @@ async fn vpc_routers_delete_router(
 #[endpoint {
     method = PUT,
     path = "/organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/routers/{router_name}",
-    tags = ["networking"],
+    tags = ["routers"],
 }]
 async fn vpc_routers_put_router(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
@@ -1639,7 +1692,7 @@ async fn vpc_routers_put_router(
 #[endpoint {
     method = GET,
     path = "/organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/routers/{router_name}/routes",
-    tags = ["networking"],
+    tags = ["routes"],
 }]
 async fn routers_routes_get(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
@@ -1687,7 +1740,7 @@ struct RouterRoutePathParam {
 #[endpoint {
     method = GET,
     path = "/organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/routers/{router_name}/routes/{route_name}",
-    tags = ["networking"],
+    tags = ["routes"],
 }]
 async fn routers_routes_get_route(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
@@ -1717,7 +1770,7 @@ async fn routers_routes_get_route(
 #[endpoint {
     method = POST,
     path = "/organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/routers/{router_name}/routes",
-    tags = ["networking"],
+    tags = ["routes"],
 }]
 async fn routers_routes_post(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
@@ -1749,7 +1802,7 @@ async fn routers_routes_post(
 #[endpoint {
     method = DELETE,
     path = "/organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/routers/{router_name}/routes/{route_name}",
-    tags = ["networking"],
+    tags = ["routes"],
 }]
 async fn routers_routes_delete_route(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
@@ -1779,7 +1832,7 @@ async fn routers_routes_delete_route(
 #[endpoint {
     method = PUT,
     path = "/organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/routers/{router_name}/routes/{route_name}",
-    tags = ["networking"],
+    tags = ["routes"],
 }]
 async fn routers_routes_put_route(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
@@ -1815,7 +1868,7 @@ async fn routers_routes_put_route(
 #[endpoint {
     method = GET,
     path = "/hardware/racks",
-    tags = ["hardware"],
+    tags = ["racks"],
 }]
 async fn hardware_racks_get(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
@@ -1848,7 +1901,7 @@ struct RackPathParam {
 #[endpoint {
     method = GET,
     path = "/hardware/racks/{rack_id}",
-    tags = ["hardware"],
+    tags = ["racks"],
 }]
 async fn hardware_racks_get_rack(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
@@ -1874,7 +1927,7 @@ async fn hardware_racks_get_rack(
 #[endpoint {
     method = GET,
     path = "/hardware/sleds",
-    tags = ["hardware"],
+    tags = ["sleds"],
 }]
 async fn hardware_sleds_get(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
@@ -1910,7 +1963,7 @@ struct SledPathParam {
 #[endpoint {
     method = GET,
     path = "/hardware/sleds/{sled_id}",
-    tags = ["hardware"],
+    tags = ["sleds"],
 }]
 async fn hardware_sleds_get_sled(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
