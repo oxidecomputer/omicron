@@ -19,7 +19,7 @@ use std::sync::Arc;
 use uuid::Uuid;
 
 use super::collection::SimCollection;
-use super::config::SimMode;
+use super::config::Config;
 use super::disk::SimDisk;
 use super::instance::SimInstance;
 use super::storage::{CrucibleData, Storage};
@@ -48,11 +48,12 @@ impl SledAgent {
      */
     /** Constructs a simulated SledAgent with the given uuid. */
     pub fn new_simulated_with_id(
-        id: &Uuid,
-        sim_mode: SimMode,
+        config: &Config,
         log: Logger,
         nexus_client: Arc<NexusClient>,
     ) -> SledAgent {
+        let id = config.id;
+        let sim_mode = config.sim_mode;
         info!(&log, "created simulated sled agent"; "sim_mode" => ?sim_mode);
 
         let instance_log = log.new(o!("kind" => "instances"));
@@ -71,8 +72,9 @@ impl SledAgent {
                 sim_mode,
             )),
             storage: Mutex::new(Storage::new(
-                *id,
+                id,
                 Arc::clone(&nexus_client),
+                config.storage.ip,
                 storage_log,
             )),
         }

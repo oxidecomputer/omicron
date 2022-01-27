@@ -17,7 +17,7 @@ use oximeter_collector::Oximeter;
 use oximeter_producer::Server as ProducerServer;
 use slog::o;
 use slog::Logger;
-use std::net::SocketAddr;
+use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::path::Path;
 use std::time::Duration;
 use uuid::Uuid;
@@ -183,7 +183,10 @@ pub async fn start_sled_agent(
         },
         /* TODO-cleanup this is unused */
         log: ConfigLogging::StderrTerminal { level: ConfigLoggingLevel::Debug },
-        storage: sim::ConfigStorage::default(),
+        storage: sim::ConfigStorage {
+            zpools: vec![],
+            ip: IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)),
+        },
     };
 
     sim::Server::start(&config, &log).await
