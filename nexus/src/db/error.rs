@@ -101,9 +101,9 @@ pub enum OpKind<'a> {
 ///
 /// [`OpKind`] may be used to add additional context to the error
 /// being returned.
-pub fn public_error_from_diesel_pool<'a>(
+pub fn public_error_from_diesel_pool(
     error: PoolError,
-    kind: OpKind<'a>,
+    kind: OpKind<'_>,
 ) -> PublicError {
     public_error_from_diesel_pool_helper(error, |error| match kind {
         OpKind::Authz(resource) => {
