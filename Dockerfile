@@ -37,4 +37,4 @@ COPY --from=cargo-build /usr/src/omicron/target/release/omicron-dev /usr/bin/omi
 COPY --from=cargo-build /usr/src/omicron/target/release/omicron-package /usr/bin/omicron-package
 COPY --from=cargo-build /usr/src/omicron/target/release/sled-agent-sim /usr/bin/sled-agent-sim
 
-CMD ["sled-agent-sim"]
+CMD ["echo", "nothing to run"]
