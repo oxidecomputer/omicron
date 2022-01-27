@@ -18,7 +18,7 @@ use omicron_common::cmd::CmdError;
 use omicron_sled_agent::sim::{
     run_server, Config, ConfigStorage, ConfigZpool, SimMode,
 };
-use std::net::{IpAddr, SocketAddr};
+use std::net::SocketAddr;
 use structopt::StructOpt;
 use uuid::Uuid;
 
@@ -52,9 +52,6 @@ struct Args {
 
     #[structopt(name = "NEXUS_IP:PORT", parse(try_from_str))]
     nexus_addr: SocketAddr,
-
-    #[structopt(name = "CRUCIBLE_IP", parse(try_from_str))]
-    crucible_addr: IpAddr,
 }
 
 #[tokio::main]
@@ -81,7 +78,7 @@ async fn do_run() -> Result<(), CmdError> {
         storage: ConfigStorage {
             // Create 10 "virtual" U.2s, with 1 TB of storage.
             zpools: vec![ConfigZpool { size: 1 << 40 }; 10],
-            ip: args.crucible_addr,
+            ip: args.sled_agent_addr.ip(),
         },
     };
 

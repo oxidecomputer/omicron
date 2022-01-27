@@ -2,9 +2,8 @@ sled-agent-sim: parsing arguments: error: The following required arguments were 
     <SA_UUID>
     <SA_IP:PORT>
     <NEXUS_IP:PORT>
-    <CRUCIBLE_IP>
 
 USAGE:
-    sled-agent-sim <SA_UUID> <SA_IP:PORT> <NEXUS_IP:PORT> <CRUCIBLE_IP> --sim-mode <sim-mode>
+    sled-agent-sim <SA_UUID> <SA_IP:PORT> <NEXUS_IP:PORT> --sim-mode <sim-mode>
 
 For more information try --help
