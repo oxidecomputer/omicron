@@ -140,7 +140,7 @@ impl CrucibleServer {
     fn new(log: &Logger) -> Self {
         let data = Arc::new(CrucibleData::new());
         let config = dropshot::ConfigDropshot {
-            bind_address: SocketAddr::new("127.0.0.1".parse().unwrap(), 0),
+            bind_address: SocketAddr::new("0.0.0.0".parse().unwrap(), 0),
             ..Default::default()
         };
         let dropshot_log = log
