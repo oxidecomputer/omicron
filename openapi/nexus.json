@@ -16,6 +16,7 @@
           "racks"
         ],
         "summary": "List racks in the system.",
+        "description": "",
         "operationId": "hardware_racks_get",
         "parameters": [
           {
@@ -59,6 +60,12 @@
                 }
               }
             }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
           }
         },
         "x-dropshot-pagination": true
@@ -70,6 +77,7 @@
           "racks"
         ],
         "summary": "Fetch information about a particular rack.",
+        "description": "",
         "operationId": "hardware_racks_get_rack",
         "parameters": [
           {
@@ -94,6 +102,12 @@
                 }
               }
             }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
           }
         }
       }
@@ -104,6 +118,7 @@
           "sleds"
         ],
         "summary": "List sleds in the system.",
+        "description": "",
         "operationId": "hardware_sleds_get",
         "parameters": [
           {
@@ -147,6 +162,12 @@
                 }
               }
             }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
           }
         },
         "x-dropshot-pagination": true
@@ -158,6 +179,7 @@
           "sleds"
         ],
         "summary": "Fetch information about a sled in the system.",
+        "description": "",
         "operationId": "hardware_sleds_get_sled",
         "parameters": [
           {
@@ -182,6 +204,12 @@
                 }
               }
             }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
           }
         }
       }
@@ -228,6 +256,7 @@
           "organizations"
         ],
         "summary": "List all organizations.",
+        "description": "",
         "operationId": "organizations_get",
         "parameters": [
           {
@@ -271,6 +300,12 @@
                 }
               }
             }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
           }
         },
         "x-dropshot-pagination": true
@@ -280,6 +315,7 @@
           "organizations"
         ],
         "summary": "Create a new organization.",
+        "description": "",
         "operationId": "organizations_post",
         "requestBody": {
           "content": {
@@ -301,6 +337,12 @@
                 }
               }
             }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
           }
         }
       }
@@ -311,6 +353,7 @@
           "organizations"
         ],
         "summary": "Fetch a specific organization",
+        "description": "",
         "operationId": "organizations_get_organization",
         "parameters": [
           {
@@ -333,6 +376,12 @@
                 }
               }
             }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
           }
         }
       },
@@ -341,6 +390,7 @@
           "organizations"
         ],
         "summary": "Update a specific organization.",
+        "description": "",
         "operationId": "organizations_put_organization",
         "parameters": [
           {
@@ -373,6 +423,12 @@
                 }
               }
             }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
           }
         }
       },
@@ -381,6 +437,7 @@
           "organizations"
         ],
         "summary": "Delete a specific organization.",
+        "description": "",
         "operationId": "organizations_delete_organization",
         "parameters": [
           {
@@ -396,6 +453,12 @@
         "responses": {
           "204": {
             "description": "successful deletion"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
           }
         }
       }
@@ -406,6 +469,7 @@
           "projects"
         ],
         "summary": "List all projects.",
+        "description": "",
         "operationId": "organization_projects_get",
         "parameters": [
           {
@@ -458,6 +522,12 @@
                 }
               }
             }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
           }
         },
         "x-dropshot-pagination": true
@@ -467,6 +537,7 @@
           "projects"
         ],
         "summary": "Create a new project.",
+        "description": "",
         "operationId": "organization_projects_post",
         "parameters": [
           {
@@ -499,6 +570,12 @@
                 }
               }
             }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
           }
         }
       }
@@ -509,6 +586,7 @@
           "projects"
         ],
         "summary": "Fetch a specific project",
+        "description": "",
         "operationId": "organization_projects_get_project",
         "parameters": [
           {
@@ -540,6 +618,12 @@
                 }
               }
             }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
           }
         }
       },
@@ -548,6 +632,7 @@
           "projects"
         ],
         "summary": "Update a specific project.",
+        "description": "",
         "operationId": "organization_projects_put_project",
         "parameters": [
           {
@@ -589,6 +674,12 @@
                 }
               }
             }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
           }
         }
       },
@@ -597,6 +688,7 @@
           "projects"
         ],
         "summary": "Delete a specific project.",
+        "description": "",
         "operationId": "organization_projects_delete_project",
         "parameters": [
           {
@@ -621,6 +713,12 @@
         "responses": {
           "204": {
             "description": "successful deletion"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
           }
         }
       }
@@ -631,6 +729,7 @@
           "disks"
         ],
         "summary": "List disks in a project.",
+        "description": "",
         "operationId": "project_disks_get",
         "parameters": [
           {
@@ -692,6 +791,12 @@
                 }
               }
             }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
           }
         },
         "x-dropshot-pagination": true
@@ -701,6 +806,7 @@
           "disks"
         ],
         "summary": "Create a disk in a project.",
+        "description": "",
         "operationId": "project_disks_post",
         "parameters": [
           {
@@ -742,6 +848,12 @@
                 }
               }
             }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
           }
         }
       }
@@ -752,6 +864,7 @@
           "disks"
         ],
         "summary": "Fetch a single disk in a project.",
+        "description": "",
         "operationId": "project_disks_get_disk",
         "parameters": [
           {
@@ -792,6 +905,12 @@
                 }
               }
             }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
           }
         }
       },
@@ -800,6 +919,7 @@
           "disks"
         ],
         "summary": "Delete a disk from a project.",
+        "description": "",
         "operationId": "project_disks_delete_disk",
         "parameters": [
           {
@@ -833,6 +953,12 @@
         "responses": {
           "204": {
             "description": "successful deletion"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
           }
         }
       }
@@ -843,6 +969,7 @@
           "instances"
         ],
         "summary": "List instances in a project.",
+        "description": "",
         "operationId": "project_instances_get",
         "parameters": [
           {
@@ -904,6 +1031,12 @@
                 }
               }
             }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
           }
         },
         "x-dropshot-pagination": true
@@ -913,6 +1046,7 @@
           "instances"
         ],
         "summary": "Create an instance in a project.",
+        "description": "",
         "operationId": "project_instances_post",
         "parameters": [
           {
@@ -954,6 +1088,12 @@
                 }
               }
             }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
           }
         }
       }
@@ -964,6 +1104,7 @@
           "instances"
         ],
         "summary": "Get an instance in a project.",
+        "description": "",
         "operationId": "project_instances_get_instance",
         "parameters": [
           {
@@ -1004,6 +1145,12 @@
                 }
               }
             }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
           }
         }
       },
@@ -1012,6 +1159,7 @@
           "instances"
         ],
         "summary": "Delete an instance from a project.",
+        "description": "",
         "operationId": "project_instances_delete_instance",
         "parameters": [
           {
@@ -1045,6 +1193,12 @@
         "responses": {
           "204": {
             "description": "successful deletion"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
           }
         }
       }
@@ -1055,6 +1209,7 @@
           "instances"
         ],
         "summary": "List disks attached to this instance.",
+        "description": "",
         "operationId": "instance_disks_get",
         "parameters": [
           {
@@ -1125,6 +1280,12 @@
                 }
               }
             }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
           }
         },
         "x-dropshot-pagination": true
@@ -1185,6 +1346,12 @@
                 }
               }
             }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
           }
         }
       }
@@ -1244,6 +1411,12 @@
                 }
               }
             }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
           }
         }
       }
@@ -1254,6 +1427,7 @@
           "instances"
         ],
         "summary": "Migrate an instance to a different propolis-server, possibly on a different sled.",
+        "description": "",
         "operationId": "project_instances_migrate_instance",
         "parameters": [
           {
@@ -1304,6 +1478,12 @@
                 }
               }
             }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
           }
         }
       }
@@ -1314,6 +1494,7 @@
           "instances"
         ],
         "summary": "Reboot an instance.",
+        "description": "",
         "operationId": "project_instances_instance_reboot",
         "parameters": [
           {
@@ -1354,6 +1535,12 @@
                 }
               }
             }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
           }
         }
       }
@@ -1364,6 +1551,7 @@
           "instances"
         ],
         "summary": "Boot an instance.",
+        "description": "",
         "operationId": "project_instances_instance_start",
         "parameters": [
           {
@@ -1404,6 +1592,12 @@
                 }
               }
             }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
           }
         }
       }
@@ -1414,6 +1608,7 @@
           "instances"
         ],
         "summary": "Halt an instance.",
+        "description": "",
         "operationId": "project_instances_instance_stop",
         "parameters": [
           {
@@ -1454,6 +1649,12 @@
                 }
               }
             }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
           }
         }
       }
@@ -1464,6 +1665,7 @@
           "vpcs"
         ],
         "summary": "List VPCs in a project.",
+        "description": "",
         "operationId": "project_vpcs_get",
         "parameters": [
           {
@@ -1525,6 +1727,12 @@
                 }
               }
             }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
           }
         },
         "x-dropshot-pagination": true
@@ -1534,6 +1742,7 @@
           "vpcs"
         ],
         "summary": "Create a VPC in a project.",
+        "description": "",
         "operationId": "project_vpcs_post",
         "parameters": [
           {
@@ -1575,6 +1784,12 @@
                 }
               }
             }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
           }
         }
       }
@@ -1585,6 +1800,7 @@
           "vpcs"
         ],
         "summary": "Get a VPC in a project.",
+        "description": "",
         "operationId": "project_vpcs_get_vpc",
         "parameters": [
           {
@@ -1625,6 +1841,12 @@
                 }
               }
             }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
           }
         }
       },
@@ -1633,6 +1855,7 @@
           "vpcs"
         ],
         "summary": "Update a VPC.",
+        "description": "",
         "operationId": "project_vpcs_put_vpc",
         "parameters": [
           {
@@ -1676,6 +1899,12 @@
         "responses": {
           "204": {
             "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
           }
         }
       },
@@ -1684,6 +1913,7 @@
           "vpcs"
         ],
         "summary": "Delete a vpc from a project.",
+        "description": "",
         "operationId": "project_vpcs_delete_vpc",
         "parameters": [
           {
@@ -1717,6 +1947,12 @@
         "responses": {
           "204": {
             "description": "successful deletion"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
           }
         }
       }
@@ -1727,6 +1963,7 @@
           "firewall"
         ],
         "summary": "List firewall rules for a VPC.",
+        "description": "",
         "operationId": "vpc_firewall_rules_get",
         "parameters": [
           {
@@ -1797,6 +2034,12 @@
                 }
               }
             }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
           }
         },
         "x-dropshot-pagination": true
@@ -1806,6 +2049,7 @@
           "firewall"
         ],
         "summary": "Replace the firewall rules for a VPC",
+        "description": "",
         "operationId": "vpc_firewall_rules_put",
         "parameters": [
           {
@@ -1856,6 +2100,12 @@
                 }
               }
             }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
           }
         }
       }
@@ -1866,6 +2116,7 @@
           "routers"
         ],
         "summary": "List VPC Custom and System Routers",
+        "description": "",
         "operationId": "vpc_routers_get",
         "parameters": [
           {
@@ -1936,6 +2187,12 @@
                 }
               }
             }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
           }
         },
         "x-dropshot-pagination": true
@@ -1945,6 +2202,7 @@
           "routers"
         ],
         "summary": "Create a VPC Router",
+        "description": "",
         "operationId": "vpc_routers_post",
         "parameters": [
           {
@@ -1995,6 +2253,12 @@
                 }
               }
             }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
           }
         }
       }
@@ -2005,6 +2269,7 @@
           "routers"
         ],
         "summary": "Get a VPC Router",
+        "description": "",
         "operationId": "vpc_routers_get_router",
         "parameters": [
           {
@@ -2054,6 +2319,12 @@
                 }
               }
             }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
           }
         }
       },
@@ -2062,6 +2333,7 @@
           "routers"
         ],
         "summary": "Update a VPC Router",
+        "description": "",
         "operationId": "vpc_routers_put_router",
         "parameters": [
           {
@@ -2114,6 +2386,12 @@
         "responses": {
           "204": {
             "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
           }
         }
       },
@@ -2122,6 +2400,7 @@
           "routers"
         ],
         "summary": "Delete a router from its VPC",
+        "description": "",
         "operationId": "vpc_routers_delete_router",
         "parameters": [
           {
@@ -2164,6 +2443,12 @@
         "responses": {
           "204": {
             "description": "successful deletion"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
           }
         }
       }
@@ -2174,6 +2459,7 @@
           "routes"
         ],
         "summary": "List a Router's routes",
+        "description": "",
         "operationId": "routers_routes_get",
         "parameters": [
           {
@@ -2253,6 +2539,12 @@
                 }
               }
             }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
           }
         },
         "x-dropshot-pagination": true
@@ -2262,6 +2554,7 @@
           "routes"
         ],
         "summary": "Create a VPC Router",
+        "description": "",
         "operationId": "routers_routes_post",
         "parameters": [
           {
@@ -2321,6 +2614,12 @@
                 }
               }
             }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
           }
         }
       }
@@ -2331,6 +2630,7 @@
           "routes"
         ],
         "summary": "Get a VPC Router route",
+        "description": "",
         "operationId": "routers_routes_get_route",
         "parameters": [
           {
@@ -2389,6 +2689,12 @@
                 }
               }
             }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
           }
         }
       },
@@ -2397,6 +2703,7 @@
           "routes"
         ],
         "summary": "Update a Router route",
+        "description": "",
         "operationId": "routers_routes_put_route",
         "parameters": [
           {
@@ -2458,6 +2765,12 @@
         "responses": {
           "204": {
             "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
           }
         }
       },
@@ -2466,6 +2779,7 @@
           "routes"
         ],
         "summary": "Delete a route from its router",
+        "description": "",
         "operationId": "routers_routes_delete_route",
         "parameters": [
           {
@@ -2517,6 +2831,12 @@
         "responses": {
           "204": {
             "description": "successful deletion"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
           }
         }
       }
@@ -2527,6 +2847,7 @@
           "subnets"
         ],
         "summary": "List subnets in a VPC.",
+        "description": "",
         "operationId": "vpc_subnets_get",
         "parameters": [
           {
@@ -2597,6 +2918,12 @@
                 }
               }
             }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
           }
         },
         "x-dropshot-pagination": true
@@ -2606,6 +2933,7 @@
           "subnets"
         ],
         "summary": "Create a subnet in a VPC.",
+        "description": "",
         "operationId": "vpc_subnets_post",
         "parameters": [
           {
@@ -2656,6 +2984,12 @@
                 }
               }
             }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
           }
         }
       }
@@ -2666,6 +3000,7 @@
           "subnets"
         ],
         "summary": "Get subnet in a VPC.",
+        "description": "",
         "operationId": "vpc_subnets_get_subnet",
         "parameters": [
           {
@@ -2715,6 +3050,12 @@
                 }
               }
             }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
           }
         }
       },
@@ -2723,6 +3064,7 @@
           "subnets"
         ],
         "summary": "Update a VPC Subnet.",
+        "description": "",
         "operationId": "vpc_subnets_put_subnet",
         "parameters": [
           {
@@ -2775,6 +3117,12 @@
         "responses": {
           "204": {
             "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
           }
         }
       },
@@ -2783,6 +3131,7 @@
           "subnets"
         ],
         "summary": "Delete a subnet from a VPC.",
+        "description": "",
         "operationId": "vpc_subnets_delete_subnet",
         "parameters": [
           {
@@ -2825,6 +3174,12 @@
         "responses": {
           "204": {
             "description": "successful deletion"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
           }
         }
       }
@@ -2835,6 +3190,7 @@
           "subnets"
         ],
         "summary": "List IP addresses on a VPC subnet.",
+        "description": "",
         "operationId": "subnets_ips_get",
         "parameters": [
           {
@@ -2914,6 +3270,12 @@
                 }
               }
             }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
           }
         },
         "x-dropshot-pagination": true
@@ -2925,6 +3287,7 @@
           "roles"
         ],
         "summary": "List the built-in roles",
+        "description": "",
         "operationId": "roles_get",
         "parameters": [
           {
@@ -2960,6 +3323,12 @@
                 }
               }
             }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
           }
         },
         "x-dropshot-pagination": true
@@ -2971,6 +3340,7 @@
           "roles"
         ],
         "summary": "Fetch a specific built-in role",
+        "description": "",
         "operationId": "roles_get_role",
         "parameters": [
           {
@@ -2994,6 +3364,12 @@
                 }
               }
             }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
           }
         }
       }
@@ -3004,6 +3380,7 @@
           "sagas"
         ],
         "summary": "List all sagas (for debugging)",
+        "description": "",
         "operationId": "sagas_get",
         "parameters": [
           {
@@ -3047,6 +3424,12 @@
                 }
               }
             }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
           }
         },
         "x-dropshot-pagination": true
@@ -3058,6 +3441,7 @@
           "sagas"
         ],
         "summary": "Fetch information about a single saga (for debugging)",
+        "description": "",
         "operationId": "sagas_get_saga",
         "parameters": [
           {
@@ -3081,6 +3465,12 @@
                 }
               }
             }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
           }
         }
       }
@@ -3102,6 +3492,12 @@
                 }
               }
             }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
           }
         }
       }
@@ -3112,6 +3508,7 @@
           "metrics"
         ],
         "summary": "List all timeseries schema",
+        "description": "",
         "operationId": "timeseries_schema_get",
         "parameters": [
           {
@@ -3147,6 +3544,12 @@
                 }
               }
             }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
           }
         },
         "x-dropshot-pagination": true
@@ -3158,6 +3561,7 @@
           "users"
         ],
         "summary": "List the built-in system users",
+        "description": "",
         "operationId": "users_get",
         "parameters": [
           {
@@ -3201,6 +3605,12 @@
                 }
               }
             }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
           }
         },
         "x-dropshot-pagination": true
@@ -3212,6 +3622,7 @@
           "users"
         ],
         "summary": "Fetch a specific built-in system user",
+        "description": "",
         "operationId": "users_get_user",
         "parameters": [
           {
@@ -3234,12 +3645,30 @@
                 }
               }
             }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
           }
         }
       }
     }
   },
   "components": {
+    "responses": {
+      "Error": {
+        "description": "Error",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      }
+    },
     "schemas": {
       "ByteCount": {
         "description": "A count of bytes, typically used either for memory or storage capacity\n\nThe maximum supported byte count is [`i64::MAX`].  This makes it somewhat inconvenient to define constructors: a u32 constructor can be infallible, but an i64 constructor can fail (if the value is negative) and a u64 constructor can fail (if the value is larger than i64::MAX).  We provide all of these for consumers' convenience.",
@@ -3511,6 +3940,25 @@
               "state"
             ]
           }
+        ]
+      },
+      "Error": {
+        "description": "Body of an HTTP response for an `HttpError`.  This type can be used to deserialize an HTTP response corresponding to an error in order to access the error code, message, etc.",
+        "type": "object",
+        "properties": {
+          "error_code": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          },
+          "request_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "message",
+          "request_id"
         ]
       },
       "FieldSchema": {

@@ -13,6 +13,7 @@
     "/disks/{disk_id}": {
       "put": {
         "summary": "Report updated state for a disk.",
+        "description": "",
         "operationId": "cpapi_disks_put",
         "parameters": [
           {
@@ -39,6 +40,12 @@
         "responses": {
           "204": {
             "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
           }
         }
       }
@@ -46,6 +53,7 @@
     "/instances/{instance_id}": {
       "put": {
         "summary": "Report updated state for an instance.",
+        "description": "",
         "operationId": "cpapi_instances_put",
         "parameters": [
           {
@@ -72,6 +80,12 @@
         "responses": {
           "204": {
             "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
           }
         }
       }
@@ -79,6 +93,7 @@
     "/metrics/collect/{producer_id}": {
       "get": {
         "summary": "Endpoint for oximeter to collect nexus server metrics.",
+        "description": "",
         "operationId": "cpapi_metrics_collect",
         "parameters": [
           {
@@ -106,6 +121,12 @@
                 }
               }
             }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
           }
         }
       }
@@ -113,6 +134,7 @@
     "/metrics/collectors": {
       "post": {
         "summary": "Accept a notification of a new oximeter collection server.",
+        "description": "",
         "operationId": "cpapi_collectors_post",
         "requestBody": {
           "content": {
@@ -127,6 +149,12 @@
         "responses": {
           "204": {
             "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
           }
         }
       }
@@ -134,6 +162,7 @@
     "/metrics/producers": {
       "post": {
         "summary": "Accept a registration from a new metric producer",
+        "description": "",
         "operationId": "cpapi_producers_post",
         "requestBody": {
           "content": {
@@ -148,6 +177,12 @@
         "responses": {
           "204": {
             "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
           }
         }
       }
@@ -181,6 +216,12 @@
         "responses": {
           "204": {
             "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
           }
         }
       }
@@ -188,6 +229,7 @@
     "/sled_agents/{sled_id}/zpools/{zpool_id}": {
       "put": {
         "summary": "Report that a pool for a specified sled has come online.",
+        "description": "",
         "operationId": "zpool_put",
         "parameters": [
           {
@@ -231,6 +273,12 @@
                 }
               }
             }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
           }
         }
       }
@@ -238,6 +286,7 @@
     "/zpools/{zpool_id}/dataset/{dataset_id}": {
       "put": {
         "summary": "Report that a dataset within a pool has come online.",
+        "description": "",
         "operationId": "dataset_put",
         "parameters": [
           {
@@ -281,12 +330,30 @@
                 }
               }
             }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
           }
         }
       }
     }
   },
   "components": {
+    "responses": {
+      "Error": {
+        "description": "Error",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      }
+    },
     "schemas": {
       "BinRangedouble": {
         "description": "A type storing a range over `T`.\n\nThis type supports ranges similar to the `RangeTo`, `Range` and `RangeFrom` types in the standard library. Those cover `(..end)`, `(start..end)`, and `(start..)` respectively.",
