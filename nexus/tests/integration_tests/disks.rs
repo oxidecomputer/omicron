@@ -860,7 +860,10 @@ async fn disk_get(client: &ClientTestContext, disk_url: &str) -> Disk {
 }
 
 async fn disks_list(client: &ClientTestContext, list_url: &str) -> Vec<Disk> {
-    objects_list_page::<Disk>(client, list_url).await.items
+    NexusRequest::iter_collection_authn(client, list_url, "", 10)
+        .await
+        .expect("failed to list disks")
+        .all_items
 }
 
 fn disks_eq(disk1: &Disk, disk2: &Disk) {
