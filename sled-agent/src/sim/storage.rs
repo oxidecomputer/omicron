@@ -153,6 +153,7 @@ impl CrucibleServer {
         )
         .expect("Could not initialize server")
         .start();
+        info!(&log, "Created Simulated Crucible Server"; "address" => server.local_addr());
 
         CrucibleServer { server, data }
     }
