@@ -10,7 +10,6 @@
  */
 
 use dropshot::test_util::objects_list_page;
-use dropshot::test_util::read_json;
 use dropshot::test_util::ClientTestContext;
 use dropshot::HttpErrorResponseBody;
 use http::method::Method;
