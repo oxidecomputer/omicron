@@ -164,6 +164,7 @@ mod actor;
 
 mod api_resources;
 pub use api_resources::ApiResource;
+pub use api_resources::ApiResourceError;
 pub use api_resources::Fleet;
 pub use api_resources::FleetChild;
 pub use api_resources::Organization;

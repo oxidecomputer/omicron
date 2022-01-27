@@ -80,64 +80,52 @@ pub fn diesel_pool_result_optional<T>(
     }
 }
 
-/// Converts a Diesel pool error to an external error when operating on a
-/// particular resource, identified by resource type and lookup type
-/// NOTE: If you already have an `authz::ApiResource`, you should use
-/// [`public_error_from_diesel_pool_authz()`] instead.  Eventually, the only
-/// uses of this function should be in the DataStore functions that actually
-/// look up a record for the first time.
-pub fn public_error_from_diesel_pool_lookup(
-    error: PoolError,
-    resource_type: ResourceType,
-    lookup_type: LookupType,
-) -> PublicError {
-    public_error_from_diesel_pool_helper(error, |error| {
-        public_error_from_diesel_lookup_helper(error, || {
-            PublicError::ObjectNotFound {
-                type_name: resource_type,
-                lookup_type,
-            }
-        })
-    })
+/// Describes the operation type which triggered the error,
+/// as well as context which may be used to populate more informative errors.
+pub enum OpKind<'a> {
+    /// The operation was performed on a particular [`ApiResource`].
+    ///
+    /// NOTE: Practically, all objects which implement [`ApiResourceError`]
+    /// also implement [`ApiResource`]. However, [`ApiResource`] is not object
+    /// safe because it implements [`std::clone::Clone`].
+    Authz(&'a dyn crate::authz::ApiResourceError),
+    /// The operation was attempting to lookup or update a resource.
+    Lookup(ResourceType, LookupType),
+    /// The operation was attempting to create a resource with a name.
+    Create(ResourceType, &'a str),
+    /// All other operation types.
+    Other,
 }
 
-/// Converts a Diesel pool error to an external error when operating on a
-/// particular resource, identified by ApiResource
-pub fn public_error_from_diesel_pool_authz<R>(
+/// Converts a Diesel pool error to a public-facing error.
+///
+/// [`OpKind`] may be used to add additional context to the error
+/// being returned.
+pub fn public_error_from_diesel_pool<'a>(
     error: PoolError,
-    resource: &R,
-) -> PublicError
-where
-    R: crate::authz::ApiResource,
-{
-    public_error_from_diesel_pool_helper(error, |error| {
-        public_error_from_diesel_lookup_helper(error, || resource.not_found())
-    })
-}
-
-/// Converts a Diesel pool error to an external error,
-/// when requested as part of a creation operation
-pub fn public_error_from_diesel_pool_create(
-    error: PoolError,
-    resource_type: ResourceType,
-    object_name: &str,
+    kind: OpKind<'a>,
 ) -> PublicError {
-    public_error_from_diesel_pool_helper(error, |error| {
-        public_error_from_diesel_create(error, resource_type, object_name)
-    })
-}
-
-/// Converts a Diesel pool error to an external error for a case where we do not
-/// expect the query to fail and the error cannot be easily summarized for an
-/// end user
-pub fn public_error_from_diesel_pool_shouldnt_fail(
-    error: PoolError,
-) -> PublicError {
-    public_error_from_diesel_pool_helper(error, |diesel_error| {
-        PublicError::internal_error(&format!(
+    public_error_from_diesel_pool_helper(error, |error| match kind {
+        OpKind::Authz(resource) => {
+            public_error_from_diesel_lookup_helper(error, || {
+                resource.not_found()
+            })
+        }
+        OpKind::Lookup(resource_type, lookup_type) => {
+            public_error_from_diesel_lookup_helper(error, || {
+                PublicError::ObjectNotFound {
+                    type_name: resource_type,
+                    lookup_type,
+                }
+            })
+        }
+        OpKind::Create(resource_type, object_name) => {
+            public_error_from_diesel_create(error, resource_type, object_name)
+        }
+        OpKind::Other => PublicError::internal_error(&format!(
             "unexpected database error: {:#}",
-            diesel_error
-        ))
+            error
+        )),
     })
 }
 
