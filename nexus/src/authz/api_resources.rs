@@ -50,6 +50,11 @@ pub trait ApiResource: Clone + Send + Sync + 'static {
     fn parent(&self) -> Option<&dyn AuthorizedResource>;
 }
 
+/// Practically, all objects which implement [`ApiResourceError`]
+/// also implement [`ApiResource`]. However, [`ApiResource`] is not object
+/// safe because it implements [`std::clone::Clone`].
+///
+/// This allows callers to use [`ApiResourceError`] as a trait object.
 pub trait ApiResourceError {
     /// Returns an error as though this resource were not found, suitable for
     /// use when an actor should not be able to see that this resource exists

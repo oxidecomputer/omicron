@@ -811,28 +811,23 @@ impl DataStore {
      */
     pub async fn project_delete(
         &self,
-        organization_id: &Uuid,
-        name: &Name,
+        opctx: &OpContext,
+        authz_project: &authz::Project,
     ) -> DeleteResult {
+        opctx.authorize(authz::Action::Delete, authz_project).await?;
+
         use db::schema::project::dsl;
 
         let now = Utc::now();
         diesel::update(dsl::project)
             .filter(dsl::time_deleted.is_null())
-            .filter(dsl::organization_id.eq(*organization_id))
-            .filter(dsl::name.eq(name.clone()))
+            .filter(dsl::id.eq(authz_project.id()))
             .set(dsl::time_deleted.eq(now))
             .returning(Project::as_returning())
-            .get_result_async(self.pool())
+            .get_result_async(self.pool_authorized(opctx).await?)
             .await
             .map_err(|e| {
-                public_error_from_diesel_pool(
-                    e,
-                    OpKind::Lookup(
-                        ResourceType::Project,
-                        LookupType::ByName(name.as_str().to_owned()),
-                    ),
-                )
+                public_error_from_diesel_pool(e, OpKind::Authz(authz_project))
             })?;
         Ok(())
     }
@@ -875,31 +870,25 @@ impl DataStore {
             .map_err(|e| public_error_from_diesel_pool(e, OpKind::Other))
     }
 
-    /// Updates a project by name (clobbering update -- no etag)
+    /// Updates a project (clobbering update -- no etag)
     pub async fn project_update(
         &self,
-        organization_id: &Uuid,
-        name: &Name,
+        opctx: &OpContext,
+        authz_project: &authz::Project,
         updates: ProjectUpdate,
     ) -> UpdateResult<Project> {
-        use db::schema::project::dsl;
+        opctx.authorize(authz::Action::Modify, authz_project).await?;
 
+        use db::schema::project::dsl;
         diesel::update(dsl::project)
             .filter(dsl::time_deleted.is_null())
-            .filter(dsl::organization_id.eq(*organization_id))
-            .filter(dsl::name.eq(name.clone()))
+            .filter(dsl::id.eq(authz_project.id()))
             .set(updates)
             .returning(Project::as_returning())
-            .get_result_async(self.pool())
+            .get_result_async(self.pool_authorized(opctx).await?)
             .await
             .map_err(|e| {
-                public_error_from_diesel_pool(
-                    e,
-                    OpKind::Lookup(
-                        ResourceType::Project,
-                        LookupType::ByName(name.as_str().to_owned()),
-                    ),
-                )
+                public_error_from_diesel_pool(e, OpKind::Authz(authz_project))
             })
     }
 

@@ -193,7 +193,7 @@ pub struct OpContext {
     kind: OpKind,
 }
 
-pub enum OpKind {
+enum OpKind {
     /// Handling an external API request
     ExternalApiRequest,
     /// Background operations in Nexus

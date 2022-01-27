@@ -632,34 +632,30 @@ impl Nexus {
 
     pub async fn project_delete(
         &self,
+        opctx: &OpContext,
         organization_name: &Name,
         project_name: &Name,
     ) -> DeleteResult {
-        let organization_id = self
+        let authz_project = self
             .db_datastore
-            .organization_lookup_path(organization_name)
-            .await?
-            .id();
-        self.db_datastore.project_delete(&organization_id, project_name).await
+            .project_lookup_path(organization_name, project_name)
+            .await?;
+        self.db_datastore.project_delete(opctx, &authz_project).await
     }
 
     pub async fn project_update(
         &self,
+        opctx: &OpContext,
         organization_name: &Name,
         project_name: &Name,
         new_params: &params::ProjectUpdate,
     ) -> UpdateResult<db::model::Project> {
-        let organization_id = self
+        let authz_project = self
             .db_datastore
-            .organization_lookup_path(organization_name)
-            .await?
-            .id();
+            .project_lookup_path(organization_name, project_name)
+            .await?;
         self.db_datastore
-            .project_update(
-                &organization_id,
-                project_name,
-                new_params.clone().into(),
-            )
+            .project_update(opctx, &authz_project, new_params.clone().into())
             .await
     }
 

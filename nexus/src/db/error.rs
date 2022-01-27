@@ -83,17 +83,26 @@ pub fn diesel_pool_result_optional<T>(
 /// Describes the operation type which triggered the error,
 /// as well as context which may be used to populate more informative errors.
 pub enum OpKind<'a> {
-    /// The operation was performed on a particular [`ApiResource`].
-    ///
-    /// NOTE: Practically, all objects which implement [`ApiResourceError`]
-    /// also implement [`ApiResource`]. However, [`ApiResource`] is not object
-    /// safe because it implements [`std::clone::Clone`].
+    /// The operation expected to fetch, update, or delete exactly one resource
+    /// identified by the [`crate::authz::ApiResourceError`]. If that row is not
+    /// found, an appropriate "not found" error will be returned.
     Authz(&'a dyn crate::authz::ApiResourceError),
     /// The operation was attempting to lookup or update a resource.
+    /// If that row is not found, an appropriate "not found" error will be
+    /// returned.
+    ///
+    /// NOTE: If you already have an [`crate::authz::ApiResource`] object, you
+    /// should use the [`OpKind::Authz`] variant instead. Eventually,
+    /// the only uses of this function should be in the DataStore functions
+    /// that actually look up a record for the first time.
     Lookup(ResourceType, LookupType),
     /// The operation was attempting to create a resource with a name.
+    /// If a ressource already exists with that name, an "already exists"
+    /// error will be returned.
     Create(ResourceType, &'a str),
-    /// All other operation types.
+    /// All other operation types. Note that without additional context, all
+    /// errors from this variant are translated to an "internal server error",
+    /// rather than something more specific.
     Other,
 }
 
