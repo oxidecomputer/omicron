@@ -234,7 +234,7 @@ impl DataStore {
                 .do_update()
                 .set((
                     dsl::time_modified.eq(Utc::now()),
-                    dsl::pool_id.eq(excluded(dsl::id)),
+                    dsl::pool_id.eq(excluded(dsl::pool_id)),
                     dsl::ip.eq(excluded(dsl::ip)),
                     dsl::port.eq(excluded(dsl::port)),
                     dsl::kind.eq(excluded(dsl::kind)),

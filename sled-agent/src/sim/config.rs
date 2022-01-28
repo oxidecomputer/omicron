@@ -10,7 +10,7 @@ use dropshot::ConfigDropshot;
 use dropshot::ConfigLogging;
 use serde::Deserialize;
 use serde::Serialize;
-use std::net::SocketAddr;
+use std::net::{IpAddr, SocketAddr};
 use uuid::Uuid;
 
 /**
@@ -43,9 +43,10 @@ pub struct ConfigZpool {
 }
 
 /// Configuration describing simulated storage.
-#[derive(Clone, Default, Debug, PartialEq, Deserialize, Serialize)]
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
 pub struct ConfigStorage {
     pub zpools: Vec<ConfigZpool>,
+    pub ip: IpAddr,
 }
 
 /**

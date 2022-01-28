@@ -16,7 +16,7 @@ use nexus_client::types::{
 use nexus_client::Client as NexusClient;
 use slog::Logger;
 use std::collections::HashMap;
-use std::net::SocketAddr;
+use std::net::{IpAddr, SocketAddr};
 use std::str::FromStr;
 use std::sync::Arc;
 use uuid::Uuid;
@@ -137,10 +137,10 @@ pub struct CrucibleServer {
 }
 
 impl CrucibleServer {
-    fn new(log: &Logger) -> Self {
+    fn new(log: &Logger, crucible_ip: IpAddr) -> Self {
         let data = Arc::new(CrucibleData::new());
         let config = dropshot::ConfigDropshot {
-            bind_address: SocketAddr::new("127.0.0.1".parse().unwrap(), 0),
+            bind_address: SocketAddr::new(crucible_ip, 0),
             ..Default::default()
         };
         let dropshot_log = log
@@ -153,6 +153,7 @@ impl CrucibleServer {
         )
         .expect("Could not initialize server")
         .start();
+        info!(&log, "Created Simulated Crucible Server"; "address" => server.local_addr());
 
         CrucibleServer { server, data }
     }
@@ -162,21 +163,22 @@ impl CrucibleServer {
     }
 }
 
-pub struct Zpool {
+struct Zpool {
     datasets: HashMap<Uuid, CrucibleServer>,
 }
 
 impl Zpool {
-    pub fn new() -> Self {
+    fn new() -> Self {
         Zpool { datasets: HashMap::new() }
     }
 
-    pub fn insert_dataset(
+    fn insert_dataset(
         &mut self,
         log: &Logger,
         id: Uuid,
+        crucible_ip: IpAddr,
     ) -> &CrucibleServer {
-        self.datasets.insert(id, CrucibleServer::new(log));
+        self.datasets.insert(id, CrucibleServer::new(log, crucible_ip));
         self.datasets
             .get(&id)
             .expect("Failed to get the dataset we just inserted")
@@ -189,15 +191,17 @@ pub struct Storage {
     nexus_client: Arc<NexusClient>,
     log: Logger,
     zpools: HashMap<Uuid, Zpool>,
+    crucible_ip: IpAddr,
 }
 
 impl Storage {
     pub fn new(
         sled_id: Uuid,
         nexus_client: Arc<NexusClient>,
+        crucible_ip: IpAddr,
         log: Logger,
     ) -> Self {
-        Self { sled_id, nexus_client, log, zpools: HashMap::new() }
+        Self { sled_id, nexus_client, log, zpools: HashMap::new(), crucible_ip }
     }
 
     /// Adds a Zpool to the sled's simulated storage and notifies Nexus.
@@ -220,7 +224,7 @@ impl Storage {
             .zpools
             .get_mut(&zpool_id)
             .expect("Zpool does not exist")
-            .insert_dataset(&self.log, dataset_id);
+            .insert_dataset(&self.log, dataset_id, self.crucible_ip);
 
         // Notify Nexus
         let request = DatasetPutRequest {
