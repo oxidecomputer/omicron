@@ -83,8 +83,9 @@ pub fn diesel_pool_result_optional<T>(
 /// Allows the caller to handle user-facing errors, and provide additional
 /// context which may be used to populate more informative errors.
 ///
-/// Note that all operations may return a "Service Unavailable" error if the
-/// database cannot be contacted.
+/// Note that all operations may return server-level errors for a variety
+/// of reasons, including being unable to contact the database, I/O errors,
+/// etc.
 pub enum ErrorHandler<'a> {
     /// The operation expected to fetch, update, or delete exactly one resource
     /// identified by the [`crate::authz::ApiResourceError`].
