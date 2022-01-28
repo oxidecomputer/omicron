@@ -80,47 +80,51 @@ pub fn diesel_pool_result_optional<T>(
     }
 }
 
-/// Describes the operation type which triggered the error,
-/// as well as context which may be used to populate more informative errors.
-pub enum OpKind<'a> {
+/// Allows the caller to handle user-facing errors, and provide additional
+/// context which may be used to populate more informative errors.
+///
+/// Note that all operations may return a "Service Unavailable" error if the
+/// database cannot be contacted.
+pub enum ErrorHandler<'a> {
     /// The operation expected to fetch, update, or delete exactly one resource
-    /// identified by the [`crate::authz::ApiResourceError`]. If that row is not
-    /// found, an appropriate "not found" error will be returned.
-    Authz(&'a dyn crate::authz::ApiResourceError),
+    /// identified by the [`crate::authz::ApiResourceError`].
+    /// If that row is not found, an appropriate "Not Found" error will be
+    /// returned.
+    NotFoundByResource(&'a dyn crate::authz::ApiResourceError),
     /// The operation was attempting to lookup or update a resource.
-    /// If that row is not found, an appropriate "not found" error will be
+    /// If that row is not found, an appropriate "Not Found" error will be
     /// returned.
     ///
     /// NOTE: If you already have an [`crate::authz::ApiResource`] object, you
-    /// should use the [`OpKind::Authz`] variant instead. Eventually,
+    /// should use the [`ErrorHandler::NotFoundByResource`] variant instead. Eventually,
     /// the only uses of this function should be in the DataStore functions
     /// that actually look up a record for the first time.
-    Lookup(ResourceType, LookupType),
+    NotFoundByLookup(ResourceType, LookupType),
     /// The operation was attempting to create a resource with a name.
-    /// If a ressource already exists with that name, an "already exists"
+    /// If a resource already exists with that name, an "Object Already Exists"
     /// error will be returned.
-    Create(ResourceType, &'a str),
-    /// All other operation types. Note that without additional context, all
-    /// errors from this variant are translated to an "internal server error",
-    /// rather than something more specific.
-    Other,
+    Conflict(ResourceType, &'a str),
+    /// The operation does not expect any user errors.
+    /// Without additional context, all errors from this variant are translated
+    /// to an "Internal Server Error".
+    Server,
 }
 
 /// Converts a Diesel pool error to a public-facing error.
 ///
-/// [`OpKind`] may be used to add additional context to the error
+/// [`ErrorHandler`] may be used to add additional handlers for the error
 /// being returned.
 pub fn public_error_from_diesel_pool(
     error: PoolError,
-    kind: OpKind<'_>,
+    handler: ErrorHandler<'_>,
 ) -> PublicError {
-    public_error_from_diesel_pool_helper(error, |error| match kind {
-        OpKind::Authz(resource) => {
+    public_error_from_diesel_pool_helper(error, |error| match handler {
+        ErrorHandler::NotFoundByResource(resource) => {
             public_error_from_diesel_lookup_helper(error, || {
                 resource.not_found()
             })
         }
-        OpKind::Lookup(resource_type, lookup_type) => {
+        ErrorHandler::NotFoundByLookup(resource_type, lookup_type) => {
             public_error_from_diesel_lookup_helper(error, || {
                 PublicError::ObjectNotFound {
                     type_name: resource_type,
@@ -128,10 +132,10 @@ pub fn public_error_from_diesel_pool(
                 }
             })
         }
-        OpKind::Create(resource_type, object_name) => {
+        ErrorHandler::Conflict(resource_type, object_name) => {
             public_error_from_diesel_create(error, resource_type, object_name)
         }
-        OpKind::Other => PublicError::internal_error(&format!(
+        ErrorHandler::Server => PublicError::internal_error(&format!(
             "unexpected database error: {:#}",
             error
         )),
