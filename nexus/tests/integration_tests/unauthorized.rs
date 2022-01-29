@@ -2,20 +2,8 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! This test hits authorization-protected endpoints with unauthenticated and
-//! unauthorized users to make sure we get the expected behavior (generally:
-//! 401, 403, or 404).
-
-// TODO-coverage
-// * It would be good to add a built-in test user that can read everything in
-//   the world and use that to exercise 404 vs. 401/403 behavior.
-// * It'd be nice to verify that all the endpoints listed here are within the
-//   OpenAPI spec.
-// * It'd be nice to produce a list of endpoints from the OpenAPI spec that are
-//   not checked here.  We could put this into an expectorate file and make sure
-//   that we don't add new unchecked endpoints.
-// * When we finish authz, maybe the hardcoded information here can come instead
-//   from the OpenAPI spec?
+//! Verify the behavior of API endpoints when hit by unauthenticated and
+//! unauthorized users
 
 use dropshot::test_util::ClientTestContext;
 use dropshot::HttpErrorResponseBody;
@@ -30,10 +18,39 @@ use nexus_test_utils::ControlPlaneTestContext;
 use nexus_test_utils_macros::nexus_test;
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::IdentityMetadataUpdateParams;
+use omicron_common::api::external::Name;
 use omicron_nexus::authn;
 use omicron_nexus::authn::external::spoof::HTTP_HEADER_OXIDE_AUTHN_SPOOF;
 use omicron_nexus::external_api::params;
 
+// This test hits a list Nexus API endpoints using both unauthenticated and
+// unauthorized requests to make sure we get the expected behavior (generally:
+// 401, 403, or 404).  This is trickier than it sounds because the appropriate
+// error code depends on what the user was trying to do and what other
+// permissions they have on the resource.  Notably, if you try to do anything
+// with a resource that you're not even supposed to be able to see, you should
+// get a 404 "Not Found", not a 403 "Forbidden".  It's critical to get this
+// right because the alternative can leak information to a potential attacker.
+//
+// Fortunately, most endpoints behave the same way when it comes to
+// unauthenticated or unauthorized requests so it's possible to exhaustively
+// test much of the API.
+//
+// This test works in two phases.  First, we execute a sequence of setup
+// requests that create all the resources that we're going to test with.  Then
+// we run through the list of endpoints we're going to test and verify each one.
+// See `verify_endpoint()` for exactly what we do for each one.
+//
+// TODO-coverage:
+// * It would be good to add a built-in test user that can read everything in
+//   the world and use that to exercise 404 vs. 401/403 behavior.
+// * It'd be nice to verify that all the endpoints listed here are within the
+//   OpenAPI spec.
+// * It'd be nice to produce a list of endpoints from the OpenAPI spec that are
+//   not checked here.  We could put this into an expectorate file and make sure
+//   that we don't add new unchecked endpoints.
+// * When we finish authz, maybe the hardcoded information here can come instead
+//   from the OpenAPI spec?
 #[nexus_test]
 async fn test_unauthorized(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
@@ -48,56 +65,137 @@ async fn test_unauthorized(cptestctx: &ControlPlaneTestContext) {
             .unwrap();
     }
 
+    // Verify the hardcoded endpoints.
     for endpoint in &*VERIFY_ENDPOINTS {
         verify_endpoint(&log, client, endpoint).await;
     }
 }
 
+//
+// SETUP PHASE
+//
+
+/// Describes a request made during the setup phase to create a resource that
+/// we'll use later in the verification phase
+///
+/// The setup phase takes a list of `SetupReq` structs and issues `POST`
+/// requests to each one's `url` with the specific `body`.
 struct SetupReq {
+    /// url to send the `POST` to
     url: &'static str,
+    /// body of the `POST` request
     body: serde_json::Value,
 }
 
 lazy_static! {
-    static ref DEMO_ORG_CREATE: params::OrganizationCreate =
-        params::OrganizationCreate {
-            identity: IdentityMetadataCreateParams {
-                name: "demo-org".parse().unwrap(),
-                description: "".parse().unwrap(),
-            },
-        };
-    static ref DEMO_PROJECT_CREATE: params::ProjectCreate =
-        params::ProjectCreate {
-            identity: IdentityMetadataCreateParams {
-                name: "demo-project".parse().unwrap(),
-                description: "".parse().unwrap(),
-            },
-        };
+    /// List of requests to execute at setup time
     static ref SETUP_REQUESTS: Vec<SetupReq> = vec![
+        // Create an Organization
         SetupReq {
             url: "/organizations",
             body: serde_json::to_value(&*DEMO_ORG_CREATE).unwrap()
         },
+        // Create a Project in the Organization
         SetupReq {
             url: "/organizations/demo-org/projects",
             body: serde_json::to_value(&*DEMO_PROJECT_CREATE).unwrap(),
         },
     ];
+
+    // Organization used for testing
+    static ref DEMO_ORG_NAME: Name = "demo-org".parse().unwrap();
+    static ref DEMO_ORG_URL: String =
+        format!("/organizations/{}", *DEMO_ORG_NAME);
+    static ref DEMO_ORG_PROJECTS_URL: String =
+        format!("{}/projects", *DEMO_ORG_URL);
+    static ref DEMO_ORG_CREATE: params::OrganizationCreate =
+        params::OrganizationCreate {
+            identity: IdentityMetadataCreateParams {
+                name: DEMO_ORG_NAME.clone(),
+                description: "".parse().unwrap(),
+            },
+        };
+
+    // Project used for testing
+    static ref DEMO_PROJECT_NAME: Name = "demo-project".parse().unwrap();
+    static ref DEMO_PROJECT_URL: String =
+        format!("{}/{}", *DEMO_ORG_PROJECTS_URL, *DEMO_PROJECT_NAME);
+    static ref DEMO_PROJECT_CREATE: params::ProjectCreate =
+        params::ProjectCreate {
+            identity: IdentityMetadataCreateParams {
+                name: DEMO_PROJECT_NAME.clone(),
+                description: "".parse().unwrap(),
+            },
+        };
 }
 
+//
+// VERIFY PHASE
+//
+
+/// Describes an API endpoint to be verified
+///
+/// `url` is an HTTP path for the endpoint.  (Note that we might talk about the
+/// "get organization" endpoint, and might write that "GET
+/// /organizations/{organization_name}".  But the URL here is for a specific
+/// HTTP resource, so it would look like "/organizations/demo-org" rather than
+/// "/organizations/{organization_name}".)
+///
+/// `visibility` specifies whether an HTTP resource handled by this endpoint is
+/// visible to unauthenticated or unauthorized users.  If it's
+/// [`Visibility::Public`] (like "/organizations"), unauthorized users can
+/// expect to get back a 401 or 403 when they attempt to access it.  If it's
+/// [`Visibility::Protected`] (like a specific Organization), unauthorized users
+/// will get a 404.
+///
+/// `allowed_methods` specifies what HTTP methods are supported for this
+/// HTTP resource.  The test runner tests a variety of HTTP methods.  For each
+/// method, if it's not in this list, we expect a 405 "Method Not Allowed"
+/// response.  For `PUT` and `POST`, the item in `allowed_methods` also contains
+/// the contents of the body to send with the `PUT` or `POST` request.  This
+/// should be valid input for the endpoint.  Otherwise, Nexus could choose to
+/// fail with a 400-level validation error, which would obscure the authn/authz
+/// error we're looking for.
+struct VerifyEndpoint {
+    /// URL path for the HTTP resource to test
+    url: &'static str,
+
+    /// Visibility of the HTTP resource
+    visibility: Visibility,
+
+    /// Methods that are supposed for the underlying API endpoint
+    allowed_methods: Vec<AllowedMethod>,
+}
+
+/// Describes the visibility of an HTTP resource
 enum Visibility {
-    Everyone,
+    /// All users can see the resource (including unauthenticated or
+    /// unauthorized users).
+    ///
+    /// "/organizations" is Public, for example.
+    Public,
+    /// Only users with certain privileges can see this endpoint.
+    ///
+    /// "/organizations/demo-org" is not public, for example.
     Protected,
 }
 
+/// Describes an HTTP method supported by a particular API endpoint
 enum AllowedMethod {
+    /// HTTP "DELETE" method
     Delete,
+    /// HTTP "GET" method
     Get,
+    /// HTTP "POST" method, with sample input (which should be valid input for
+    /// this endpoint)
     Post(serde_json::Value),
+    /// HTTP "PUT" method, with sample input (which should be valid input for
+    /// this endpoint)
     Put(serde_json::Value),
 }
 
 impl AllowedMethod {
+    /// Returns the [`http::Method`] used to make a request for this HTTP method
     fn http_method(&self) -> &'static http::Method {
         match self {
             AllowedMethod::Delete => &Method::DELETE,
@@ -107,6 +205,10 @@ impl AllowedMethod {
         }
     }
 
+    /// Returns a JSON value suitable for use as the request body when making a
+    /// request to a specific endpoint using this HTTP method
+    ///
+    /// If this returns `None`, the request body should be empty.
     fn body(&self) -> Option<&serde_json::Value> {
         match self {
             AllowedMethod::Delete | AllowedMethod::Get => None,
@@ -116,19 +218,13 @@ impl AllowedMethod {
     }
 }
 
-struct VerifyEndpoint {
-    url: &'static str,
-    visibility: Visibility,
-    allowed_methods: Vec<AllowedMethod>,
-}
-
 lazy_static! {
     static ref URL_USERS_DB_INIT: String =
         format!("/users/{}", authn::USER_DB_INIT.name);
     static ref VERIFY_ENDPOINTS: Vec<VerifyEndpoint> = vec![
         VerifyEndpoint {
             url: "/organizations",
-            visibility: Visibility::Everyone,
+            visibility: Visibility::Public,
             allowed_methods: vec![
                 AllowedMethod::Get,
                 AllowedMethod::Post(
@@ -137,7 +233,7 @@ lazy_static! {
             ],
         },
         VerifyEndpoint {
-            url: "/organizations/demo-org",
+            url: &*DEMO_ORG_URL,
             visibility: Visibility::Protected,
             allowed_methods: vec![
                 AllowedMethod::Get,
@@ -162,7 +258,7 @@ lazy_static! {
         // you have permissions on anything _inside_ the Organization, which is
         // incredibly expensive to determine in general.
         VerifyEndpoint {
-            url: "/organizations/demo-org/projects",
+            url: &*DEMO_ORG_PROJECTS_URL,
             visibility: Visibility::Protected,
             allowed_methods: vec![
                 AllowedMethod::Get,
@@ -172,7 +268,7 @@ lazy_static! {
             ],
         },
         VerifyEndpoint {
-            url: "/organizations/demo-org/projects/demo-project",
+            url: &*DEMO_PROJECT_URL,
             visibility: Visibility::Protected,
             allowed_methods: vec![
                 AllowedMethod::Get,
@@ -187,9 +283,10 @@ lazy_static! {
                 ),
             ],
         },
+
         VerifyEndpoint {
             url: "/roles",
-            visibility: Visibility::Everyone,
+            visibility: Visibility::Public,
             allowed_methods: vec![AllowedMethod::Get],
         },
         VerifyEndpoint {
@@ -197,9 +294,10 @@ lazy_static! {
             visibility: Visibility::Protected,
             allowed_methods: vec![AllowedMethod::Get],
         },
+
         VerifyEndpoint {
             url: "/users",
-            visibility: Visibility::Everyone,
+            visibility: Visibility::Public,
             allowed_methods: vec![AllowedMethod::Get],
         },
         VerifyEndpoint {
@@ -207,63 +305,94 @@ lazy_static! {
             visibility: Visibility::Protected,
             allowed_methods: vec![AllowedMethod::Get],
         },
-
-        // XXX clean up and document this test
     ];
 }
 
+/// Verifies a single API endpoint, described with `endpoint`
+///
+/// (Technically, a single `VerifyEndpoint` struct describes an HTTP resource,
+/// like "/organizations".  There are several API endpoints there, like "GET
+/// /organizations" and "POST /organizations".  We're a little loose with the
+/// terminology here.)
+///
+/// This test makes requests using a bunch of different HTTP methods: GET, PUT,
+/// POST, and DELETE because the API makes heavy use of those; plus TRACE as a
+/// sort of control to make sure we get back 405 "Method Not Allowed" for some
+/// other method.  (This is not really related to authorization per se, but
+/// getting 405 back for TRACE lets us know that the server correctly handles
+/// unsupported methods, which _is_ a security issue.)
+///
+/// Endpoints usually only support a few of these methods.
+/// `endpoint.allowed_methods` tells us which ones and provides request bodies
+/// to use for PUT and POST requests.  We always make requets for all of these
+/// HTTP methods, even the unsupported ones.  We expect to get back a 405 for
+/// the unsupported ones.  (This helps verify that we don't accidentally support
+/// DELETE on a resource, for example!)
+///
+/// The expected result for each resource is a little tricky:
+/// - If the requested method is not allowed, we always expect 405 "Method Not
+///   Allowed".
+/// - If the resource is not publicly visible, then we expect a 404 for both
+///   unauthenticated and unauthorized users.
+/// - If the resource is publicly visible (based on `endpoint.visibility`), then
+///   we expect a 401 for unauthenticated users and a 403 for unauthenticated,
+///   unauthorized users.  Note that "visible" here doesn't mean "accessible".
+///   We assume that everybody is allowed to know that "/organizations" exists.
+///   But they're not necessarily allowed to _use_ it.  That's why it's correct
+///   to get 401/403 on "GET /organizations", even though it's a GET and you
+///   might think all GETs to things you can't access should be 404s.
+///
+/// We also make requests to each resource with bogus credentials of various
+/// forms to make sure they're all correctingly using the authentication
+/// subsystem.
+///
+/// We also make one request to GET the endpoint using a privileged user to
+/// ensure that we get a 200.  (If that returned 404, then there's probably some
+/// other bug causing the endpoint to return a 404, and it would be wrong for us
+/// to believe we correctly got a 404 for an unauthorized user because they were
+/// unauthorized.)
+///
+/// There are some weird cases here.  For example, if you try to "POST
+/// /organizations/demo-org", then you'll get back a 405, even if you can't see
+/// "demo-org" (which you would normally think would result in a 404).  This is
+/// a little weird in that you can "learn" about what API endpoints exist.  But
+/// you already know that because we publish the API spec.  And you can't learn
+/// what _resources_ actually exist this way.
 async fn verify_endpoint(
     log: &slog::Logger,
     client: &ClientTestContext,
     endpoint: &VerifyEndpoint,
 ) {
     info!(log, "test endpoint"; "url" => endpoint.url);
-    let methods =
-        [Method::GET, Method::PUT, Method::POST, Method::DELETE, Method::TRACE];
 
-    // XXX Tests that we want to run
-    // privileged GET /url => always a 200
-    // unauthenticated GET, DELETE /url
-    //     if public, then 401; otherwise 404
-    // unauthenticated PUT /url
-    //     if has body
-    //         if public, then 401; otherwise 404
-    //     else
-    //         if public, then 405; otherwise 404 (how can this possibly work
-    //         XXX it'll probably be 405 and that's probably okay)
-    // unauthenticated POST /url: same as unauthenticated PUT
-    // unauthenticated TRACE: always 405
-    //
-    // unauthorized GET, DELETE /url:
-    //     if public, then 403; otherwise 404
-    // unauthorized PUT /url:
-    //     if has body
-    //      if public, then 403; otherwise 404
-    //     else
-    //      always 405
-    //
-
+    // Determine the expected status code for unauthenticated requests, based on
+    // the endpoint's visibility.
     let unauthn_status = match endpoint.visibility {
-        Visibility::Everyone => StatusCode::UNAUTHORIZED,
+        Visibility::Public => StatusCode::UNAUTHORIZED,
         Visibility::Protected => StatusCode::NOT_FOUND,
     };
 
+    // Determine the expected status code for authenticated, unauthorized
+    // requests, based on the endpoint's visibility.
     let unauthz_status = match endpoint.visibility {
-        Visibility::Everyone => StatusCode::FORBIDDEN,
+        Visibility::Public => StatusCode::FORBIDDEN,
         Visibility::Protected => StatusCode::NOT_FOUND,
     };
 
-    // Make one GET request as an authorized user to make sure we get a
-    // "200 OK" response.  Otherwise, the test might later succeed by
-    // coincidence.  We might find a 404 because of something that actually
-    // doesn't exist rather than something that's just hidden from
-    // unauthorized users.
+    // Make one GET request as an authorized user to make sure we get a "200 OK"
+    // response.  Otherwise, the test might later succeed by coincidence.  We
+    // might find a 404 because of something that actually doesn't exist rather
+    // than something that's just hidden from unauthorized users.
     NexusRequest::object_get(client, endpoint.url)
         .authn_as(AuthnMode::PrivilegedUser)
         .execute()
         .await
         .unwrap();
 
+    // For each of the HTTP methods we use plus TRACE, we'll make several
+    // requests to this URL and verify the results.
+    let methods =
+        [Method::GET, Method::PUT, Method::POST, Method::DELETE, Method::TRACE];
     for method in methods {
         let allowed = endpoint
             .allowed_methods
@@ -282,10 +411,9 @@ async fn verify_endpoint(
         };
 
         // First, make an authenticated, unauthorized request.
-        let expected_status = if allowed.is_none() {
-            StatusCode::METHOD_NOT_ALLOWED
-        } else {
-            unauthz_status
+        let expected_status = match allowed {
+            Some(_) => unauthz_status,
+            None => StatusCode::METHOD_NOT_ALLOWED,
         };
         let response = NexusRequest::new(
             RequestBuilder::new(client, method.clone(), endpoint.url)
@@ -298,11 +426,10 @@ async fn verify_endpoint(
         .unwrap();
         verify_response(&response);
 
-        // First, let's make an unauthenticated request.
-        let expected_status = if allowed.is_none() {
-            StatusCode::METHOD_NOT_ALLOWED
-        } else {
-            unauthn_status
+        // Next, make an unauthenticated request.
+        let expected_status = match allowed {
+            Some(_) => unauthn_status,
+            None => StatusCode::METHOD_NOT_ALLOWED,
         };
         let response =
             RequestBuilder::new(client, method.clone(), endpoint.url)
@@ -313,24 +440,22 @@ async fn verify_endpoint(
                 .unwrap();
         verify_response(&response);
 
-        // If we provide invalid credentials altogether, we should get the same
-        // error as if we were unauthenticated.  This is sort of duplicated by a
-        // test in test_authn_http() (which tests the authentication system in
-        // general, outside the context of Nexus).  These two tests verify that
-        // we've correctly integrated authn with Nexus.
-        //
-        // First, try a syntactically valid authn header for a non-existent
-        // actor.
-
-        let expected_status = if allowed.is_none() {
-            StatusCode::METHOD_NOT_ALLOWED
-        } else {
+        // Now try a few requests with bogus credentials.  We should get the
+        // same error as if we were unauthenticated.  This is sort of duplicated
+        // by a test in test_authn_http() (which tests the authentication system
+        // in general, outside the context of Nexus).  This version is an
+        // end-to-end test.
+        let expected_status = match allowed {
             // The 401 that you get for authentication failure overrides a 404
             // that you might get if you were authenticated but couldn't see the
             // resource in question.  That is, you should always see a 401 if
             // you fail to authenticate, whether or not the resource exists.
-            StatusCode::UNAUTHORIZED
+            Some(_) => StatusCode::UNAUTHORIZED,
+            None => StatusCode::METHOD_NOT_ALLOWED,
         };
+
+        // First, try a syntactically valid authn header for a non-existent
+        // actor.
         let bad_actor_authn_header = http::HeaderValue::from_str(
             omicron_nexus::authn::external::spoof::SPOOF_RESERVED_BAD_ACTOR,
         )
@@ -345,7 +470,7 @@ async fn verify_endpoint(
                 .unwrap();
         verify_response(&response);
 
-        // Now try a syntactically valid authn header.
+        // Now try a syntactically invalid authn header.
         let bad_creds_authn_header = http::HeaderValue::from_str(
             omicron_nexus::authn::external::spoof::SPOOF_RESERVED_BAD_CREDS,
         )
@@ -362,6 +487,7 @@ async fn verify_endpoint(
     }
 }
 
+/// Verifies the body of an HTTP response for status codes 401, 403, 404, or 405
 fn verify_response(response: &TestResponse) {
     let error: HttpErrorResponseBody = response.parsed_body().unwrap();
     match response.status {
