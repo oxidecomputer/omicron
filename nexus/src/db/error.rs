@@ -80,64 +80,66 @@ pub fn diesel_pool_result_optional<T>(
     }
 }
 
-/// Converts a Diesel pool error to an external error when operating on a
-/// particular resource, identified by resource type and lookup type
-/// NOTE: If you already have an `authz::ApiResource`, you should use
-/// [`public_error_from_diesel_pool_authz()`] instead.  Eventually, the only
-/// uses of this function should be in the DataStore functions that actually
-/// look up a record for the first time.
-pub fn public_error_from_diesel_pool_lookup(
-    error: PoolError,
-    resource_type: ResourceType,
-    lookup_type: LookupType,
-) -> PublicError {
-    public_error_from_diesel_pool_helper(error, |error| {
-        public_error_from_diesel_lookup_helper(error, || {
-            PublicError::ObjectNotFound {
-                type_name: resource_type,
-                lookup_type,
-            }
-        })
-    })
+/// Allows the caller to handle user-facing errors, and provide additional
+/// context which may be used to populate more informative errors.
+///
+/// Note that all operations may return server-level errors for a variety
+/// of reasons, including being unable to contact the database, I/O errors,
+/// etc.
+pub enum ErrorHandler<'a> {
+    /// The operation expected to fetch, update, or delete exactly one resource
+    /// identified by the [`crate::authz::ApiResourceError`].
+    /// If that row is not found, an appropriate "Not Found" error will be
+    /// returned.
+    NotFoundByResource(&'a dyn crate::authz::ApiResourceError),
+    /// The operation was attempting to lookup or update a resource.
+    /// If that row is not found, an appropriate "Not Found" error will be
+    /// returned.
+    ///
+    /// NOTE: If you already have an [`crate::authz::ApiResource`] object, you
+    /// should use the [`ErrorHandler::NotFoundByResource`] variant instead. Eventually,
+    /// the only uses of this function should be in the DataStore functions
+    /// that actually look up a record for the first time.
+    NotFoundByLookup(ResourceType, LookupType),
+    /// The operation was attempting to create a resource with a name.
+    /// If a resource already exists with that name, an "Object Already Exists"
+    /// error will be returned.
+    Conflict(ResourceType, &'a str),
+    /// The operation does not expect any user errors.
+    /// Without additional context, all errors from this variant are translated
+    /// to an "Internal Server Error".
+    Server,
 }
 
-/// Converts a Diesel pool error to an external error when operating on a
-/// particular resource, identified by ApiResource
-pub fn public_error_from_diesel_pool_authz<R>(
+/// Converts a Diesel pool error to a public-facing error.
+///
+/// [`ErrorHandler`] may be used to add additional handlers for the error
+/// being returned.
+pub fn public_error_from_diesel_pool(
     error: PoolError,
-    resource: &R,
-) -> PublicError
-where
-    R: crate::authz::ApiResource,
-{
-    public_error_from_diesel_pool_helper(error, |error| {
-        public_error_from_diesel_lookup_helper(error, || resource.not_found())
-    })
-}
-
-/// Converts a Diesel pool error to an external error,
-/// when requested as part of a creation operation
-pub fn public_error_from_diesel_pool_create(
-    error: PoolError,
-    resource_type: ResourceType,
-    object_name: &str,
+    handler: ErrorHandler<'_>,
 ) -> PublicError {
-    public_error_from_diesel_pool_helper(error, |error| {
-        public_error_from_diesel_create(error, resource_type, object_name)
-    })
-}
-
-/// Converts a Diesel pool error to an external error for a case where we do not
-/// expect the query to fail and the error cannot be easily summarized for an
-/// end user
-pub fn public_error_from_diesel_pool_shouldnt_fail(
-    error: PoolError,
-) -> PublicError {
-    public_error_from_diesel_pool_helper(error, |diesel_error| {
-        PublicError::internal_error(&format!(
+    public_error_from_diesel_pool_helper(error, |error| match handler {
+        ErrorHandler::NotFoundByResource(resource) => {
+            public_error_from_diesel_lookup_helper(error, || {
+                resource.not_found()
+            })
+        }
+        ErrorHandler::NotFoundByLookup(resource_type, lookup_type) => {
+            public_error_from_diesel_lookup_helper(error, || {
+                PublicError::ObjectNotFound {
+                    type_name: resource_type,
+                    lookup_type,
+                }
+            })
+        }
+        ErrorHandler::Conflict(resource_type, object_name) => {
+            public_error_from_diesel_create(error, resource_type, object_name)
+        }
+        ErrorHandler::Server => PublicError::internal_error(&format!(
             "unexpected database error: {:#}",
-            diesel_error
-        ))
+            error
+        )),
     })
 }
 
