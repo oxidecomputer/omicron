@@ -1,6 +1,7 @@
 [workspace]
 members = [
     "common",
+    "gateway",
     "nexus",
     "nexus/src/db/db-macros",
     "nexus/test-utils",
@@ -22,6 +23,7 @@ members = [
 
 default-members = [
     "common",
+    "gateway",
     "nexus",
     "nexus/src/db/db-macros",
     "package",
