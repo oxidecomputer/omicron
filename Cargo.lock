@@ -2038,6 +2038,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "omicron-gateway"
+version = "0.1.0"
+dependencies = [
+ "dropshot",
+]
+
+[[package]]
 name = "omicron-nexus"
 version = "0.1.0"
 dependencies = [
