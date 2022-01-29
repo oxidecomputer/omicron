@@ -34,29 +34,6 @@ async fn test_organizations(cptestctx: &ControlPlaneTestContext) {
         .unwrap();
     assert_eq!(organization.identity.name, o1_name);
 
-    // You should get a 404 if not authenticated.
-    NexusRequest::expect_failure(
-        &client,
-        StatusCode::NOT_FOUND,
-        Method::GET,
-        &o1_url,
-    )
-    .execute()
-    .await
-    .expect("failed to make request");
-
-    // Same if you're authenticated but not authorized to see it.
-    NexusRequest::expect_failure(
-        &client,
-        StatusCode::NOT_FOUND,
-        Method::GET,
-        &o1_url,
-    )
-    .authn_as(AuthnMode::UnprivilegedUser)
-    .execute()
-    .await
-    .expect("failed to make request");
-
     let o2_url = format!("/organizations/{}", o2_name);
     let organization: Organization = NexusRequest::object_get(&client, &o2_url)
         .authn_as(AuthnMode::PrivilegedUser)
@@ -85,29 +62,6 @@ async fn test_organizations(cptestctx: &ControlPlaneTestContext) {
     // alphabetical order for now
     assert_eq!(organizations[0].identity.name, o2_name);
     assert_eq!(organizations[1].identity.name, o1_name);
-
-    // You should get a 404 if you attempt to delete an organization if you are
-    // unauthenticated or unauthorized.
-    NexusRequest::expect_failure(
-        &client,
-        StatusCode::NOT_FOUND,
-        Method::DELETE,
-        &o1_url,
-    )
-    .execute()
-    .await
-    .expect("failed to make request");
-
-    NexusRequest::expect_failure(
-        &client,
-        StatusCode::NOT_FOUND,
-        Method::DELETE,
-        &o1_url,
-    )
-    .authn_as(AuthnMode::UnprivilegedUser)
-    .execute()
-    .await
-    .expect("failed to make request");
 
     // Verify DELETE /organization/{org} works
     let o1_old_id = organizations[1].identity.id;

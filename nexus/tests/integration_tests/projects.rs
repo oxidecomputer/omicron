@@ -2,12 +2,8 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use nexus_test_utils::http_testing::AuthnMode;
 use nexus_test_utils::http_testing::NexusRequest;
-use nexus_test_utils::http_testing::RequestBuilder;
 use nexus_test_utils::resource_helpers::project_get;
-use omicron_common::api::external::IdentityMetadataUpdateParams;
-use omicron_nexus::external_api::params;
 use omicron_nexus::external_api::views::Project;
 
 use nexus_test_utils::resource_helpers::{create_organization, create_project};
@@ -37,32 +33,8 @@ async fn test_projects(cptestctx: &ControlPlaneTestContext) {
     let project: Project = project_get(&client, &p2_url).await;
     assert_eq!(project.identity.name, p2_name);
 
-    /*
-     * Unauthenticated and unauthorized users should not be able to list
-     * Projects.
-     */
-    let projects_url = format!("/organizations/{}/projects", org_name);
-    NexusRequest::expect_failure(
-        &client,
-        http::StatusCode::NOT_FOUND,
-        http::Method::GET,
-        &projects_url,
-    )
-    .execute()
-    .await
-    .expect("failed to make request");
-    NexusRequest::expect_failure(
-        &client,
-        http::StatusCode::NOT_FOUND,
-        http::Method::GET,
-        &projects_url,
-    )
-    .authn_as(AuthnMode::UnprivilegedUser)
-    .execute()
-    .await
-    .expect("failed to make request");
-
     /* Verify the list of Projects. */
+    let projects_url = format!("/organizations/{}/projects", org_name);
     let projects = NexusRequest::iter_collection_authn::<Project>(
         &client,
         &projects_url,
@@ -97,54 +69,4 @@ async fn test_projects(cptestctx: &ControlPlaneTestContext) {
     .all_items;
     assert_eq!(projects.len(), 1);
     assert_eq!(projects[0].identity.name, p1_name);
-
-    // Unauthenticated and unauthorized users should not be able to delete or
-    // modify a Project.
-    NexusRequest::expect_failure(
-        &client,
-        http::StatusCode::NOT_FOUND,
-        http::Method::DELETE,
-        &p1_url,
-    )
-    .execute()
-    .await
-    .expect("failed to make request");
-    NexusRequest::expect_failure(
-        &client,
-        http::StatusCode::NOT_FOUND,
-        http::Method::DELETE,
-        &p1_url,
-    )
-    .authn_as(AuthnMode::UnprivilegedUser)
-    .execute()
-    .await
-    .expect("failed to make request");
-
-    NexusRequest::new(
-        RequestBuilder::new(&client, http::Method::PUT, &p1_url)
-            .body(Some(&params::ProjectUpdate {
-                identity: IdentityMetadataUpdateParams {
-                    name: None,
-                    description: None,
-                },
-            }))
-            .expect_status(Some(http::StatusCode::NOT_FOUND)),
-    )
-    .execute()
-    .await
-    .expect("failed to make request");
-    NexusRequest::new(
-        RequestBuilder::new(&client, http::Method::PUT, &p1_url)
-            .body(Some(&params::ProjectUpdate {
-                identity: IdentityMetadataUpdateParams {
-                    name: None,
-                    description: None,
-                },
-            }))
-            .expect_status(Some(http::StatusCode::NOT_FOUND)),
-    )
-    .authn_as(AuthnMode::UnprivilegedUser)
-    .execute()
-    .await
-    .expect("failed to make request");
 }

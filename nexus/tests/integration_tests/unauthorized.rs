@@ -152,6 +152,15 @@ lazy_static! {
                 ),
             ],
         },
+
+        // TODO-security TODO-correctness One thing that's a little strange
+        // here: we currently return a 404 if you attempt to create a Project
+        // inside an Organization and you're not authorized to do that.  In an
+        // ideal world, we'd return a 403 if you can _see_ the Organization and
+        // a 404 if not.  But we don't really know if you should be able to see
+        // the Organization.  Right now, the only real way to tell that is if
+        // you have permissions on anything _inside_ the Organization, which is
+        // incredibly expensive to determine in general.
         VerifyEndpoint {
             url: "/organizations/demo-org/projects",
             visibility: Visibility::Protected,
@@ -159,6 +168,22 @@ lazy_static! {
                 AllowedMethod::Get,
                 AllowedMethod::Post(
                     serde_json::to_value(&*DEMO_PROJECT_CREATE).unwrap()
+                ),
+            ],
+        },
+        VerifyEndpoint {
+            url: "/organizations/demo-org/projects/demo-project",
+            visibility: Visibility::Protected,
+            allowed_methods: vec![
+                AllowedMethod::Get,
+                AllowedMethod::Delete,
+                AllowedMethod::Put(
+                    serde_json::to_value(params::ProjectUpdate{
+                        identity: IdentityMetadataUpdateParams {
+                            name: None,
+                            description: None,
+                        },
+                    }).unwrap()
                 ),
             ],
         },
@@ -183,8 +208,6 @@ lazy_static! {
             allowed_methods: vec![AllowedMethod::Get],
         },
 
-        // XXX what other endpoints?
-        // XXX remove manual tests in random other tests
         // XXX clean up and document this test
     ];
 }
