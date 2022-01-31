@@ -167,10 +167,10 @@ async fn do_check(config: &Config) -> Result<()> {
             Package::Rust(package) => {
                 println!("Checking {}", package_name);
                 package.check(&package_name)?;
-            },
+            }
             Package::Zone(_) => {
-                println!("Checking Zone images not yet implemented");
-            },
+                println!("Checking Zone images unimplemented");
+            }
         }
     }
     Ok(())
@@ -195,8 +195,8 @@ async fn do_package(
             Package::Rust(package) => {
                 package.build(&package_name, release)?;
 
-                let tarfile =
-                    output_directory.join(format!("{}.tar", package.service_name()));
+                let tarfile = output_directory
+                    .join(format!("{}.tar", package.service_name()));
                 let file = OpenOptions::new()
                     .write(true)
                     .read(true)
@@ -233,23 +233,31 @@ async fn do_package(
                 add_path_to_archive(&mut archive, &smf_path, Path::new(PKG))?;
 
                 // Add (and possibly download) blobs
-                add_blobs(&mut archive, package_name, package, output_directory)
-                    .await?;
+                add_blobs(
+                    &mut archive,
+                    package_name,
+                    package,
+                    output_directory,
+                )
+                .await?;
 
-                let mut file = archive
-                    .into_inner()
-                    .map_err(|err| anyhow!("Failed to finalize archive: {}", err))?;
+                let mut file = archive.into_inner().map_err(|err| {
+                    anyhow!("Failed to finalize archive: {}", err)
+                })?;
 
                 // Once we've created the archive, acquire a digest which can
                 // later be used for verification.
                 let digest = sha256_digest(&mut file)?;
-                digests.insert(package.binary_name().into(), digest.as_ref().into());
-            },
+                digests.insert(
+                    package.binary_name().into(),
+                    digest.as_ref().into(),
+                );
+            }
             Package::Zone(package) => {
                 // Create a tarball which will become an Omicron-brand image
                 // archive.
-                let tarfile =
-                    output_directory.join(format!("{}.tar.gz", package.service_name));
+                let tarfile = output_directory
+                    .join(format!("{}.tar.gz", package.service_name));
                 let file = OpenOptions::new()
                     .write(true)
                     .read(true)
@@ -257,7 +265,10 @@ async fn do_package(
                     .create(true)
                     .open(&tarfile)
                     .map_err(|err| anyhow!("Cannot create tarfile: {}", err))?;
-                let gzw = flate2::write::GzEncoder::new(file, flate2::Compression::fast());
+                let gzw = flate2::write::GzEncoder::new(
+                    file,
+                    flate2::Compression::fast(),
+                );
                 let mut archive = Builder::new(gzw);
                 archive.mode(tar::HeaderMode::Deterministic);
 
@@ -265,11 +276,15 @@ async fn do_package(
                 // which identifies the format of the rest of the archive.
                 //
                 // See the OMICRON1(5) man page for more detail.
-                let mut root_json = tokio::fs::File::from_std(tempfile::tempfile()?);
+                let mut root_json =
+                    tokio::fs::File::from_std(tempfile::tempfile()?);
                 let contents = r#"{"v":"1","t":"layer"}"#;
                 root_json.write_all(contents.as_bytes()).await?;
                 root_json.seek(std::io::SeekFrom::Start(0)).await?;
-                archive.append_file("oxide.json", &mut root_json.into_std().await)?;
+                archive.append_file(
+                    "oxide.json",
+                    &mut root_json.into_std().await,
+                )?;
 
                 // All other files are contained under the "root" prefix.
                 //
@@ -279,7 +294,8 @@ async fn do_package(
                 // the namespace of the running Zone.
                 for path in &package.paths {
                     let leading_slash = std::path::MAIN_SEPARATOR.to_string();
-                    let dst = Path::new("root").join(&path.to.strip_prefix(leading_slash)?);
+                    let dst = Path::new("root")
+                        .join(&path.to.strip_prefix(leading_slash)?);
                     archive.append_dir_all(dst, &path.from)?;
                 }
                 archive.finish()?;
@@ -288,7 +304,7 @@ async fn do_package(
                 // TODO: Add expected SMF files, at some point
                 // TODO: Later: Refactor this into a separate library?
                 //       Could be part of "helios-omicron-brand" crate.
-            },
+            }
         }
     }
 
@@ -378,23 +394,34 @@ fn do_install(
     )?;
 
     // Copy all packages to the install location in parallel.
-    let packages: Vec<(&String, &Package)> =
-        config.packages.iter().collect();
+    let packages: Vec<(&String, &Package)> = config.packages.iter().collect();
     packages.into_par_iter().try_for_each(|(_, package)| -> Result<()> {
         match package {
+            // TODO: These are *nearly* identical, we can de-dup 'em.
             Package::Rust(package) => {
                 let tarfile =
                     artifact_dir.join(format!("{}.tar", package.service_name));
                 let src = tarfile.as_path();
                 let dst = install_dir.join(src.strip_prefix(artifact_dir)?);
                 println!(
-                    "Installing {} -> {}",
+                    "Installing Rust Service: {} -> {}",
                     src.to_string_lossy(),
                     dst.to_string_lossy()
                 );
                 std::fs::copy(&src, &dst)?;
             }
-            _ => unimplemented!(),
+            Package::Zone(package) => {
+                let tarfile = artifact_dir
+                    .join(format!("{}.tar.gz", package.service_name));
+                let src = tarfile.as_path();
+                let dst = install_dir.join(src.strip_prefix(artifact_dir)?);
+                println!(
+                    "Installing Zone: {} -> {}",
+                    src.to_string_lossy(),
+                    dst.to_string_lossy()
+                );
+                std::fs::copy(&src, &dst)?;
+            }
         }
         Ok(())
     })?;
@@ -408,8 +435,8 @@ fn do_install(
         match package {
             Package::Rust(package) => {
                 if let Some(manifest) = &package.bootstrap {
-                    let tar_path =
-                        install_dir.join(format!("{}.tar", package.service_name));
+                    let tar_path = install_dir
+                        .join(format!("{}.tar", package.service_name));
                     let service_path = install_dir.join(&package.service_name);
                     println!(
                         "Unpacking {} to {}",
@@ -434,7 +461,8 @@ fn do_install(
                     smf::Config::import().run(&manifest_path)?;
                 }
             }
-            _ => unimplemented!(),
+            // We don't support any other bootstrap mechanisms at the moment.
+            _ => {}
         }
     }
 
@@ -446,13 +474,16 @@ fn uninstall_all_packages(config: &Config) {
     for package in config.packages.values() {
         match package {
             Package::Rust(package) => {
-                let _ = smf::Adm::new()
-                    .disable()
-                    .synchronous()
-                    .run(smf::AdmSelection::ByPattern(&[&package.service_name]));
-                let _ = smf::Config::delete().force().run(&package.service_name);
+                let _ = smf::Adm::new().disable().synchronous().run(
+                    smf::AdmSelection::ByPattern(&[&package.service_name]),
+                );
+                let _ =
+                    smf::Config::delete().force().run(&package.service_name);
             }
-            _ => unimplemented!(),
+            Package::Zone(_) => {
+                // At the moment, zone uninstallation is the responsibility of
+                // the bootstrap agent.
+            }
         }
     }
 }
