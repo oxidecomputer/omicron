@@ -567,7 +567,7 @@ impl DataStore {
     ///
     /// This function does no authz checks because it is not possible to know
     /// just by looking up an Organization's id what privileges are required.
-    pub async fn organization_lookup_path(
+    pub async fn organization_lookup_by_path(
         &self,
         name: &Name,
     ) -> LookupResult<authz::Organization> {
@@ -701,7 +701,7 @@ impl DataStore {
     ) -> UpdateResult<Organization> {
         use db::schema::organization::dsl;
 
-        let authz_org = self.organization_lookup_path(name).await?;
+        let authz_org = self.organization_lookup_by_path(name).await?;
         opctx.authorize(authz::Action::Modify, &authz_org).await?;
 
         diesel::update(dsl::organization)
@@ -795,13 +795,13 @@ impl DataStore {
     ///
     /// This function does no authz checks because it is not possible to know
     /// just by looking up an Project's id what privileges are required.
-    pub async fn project_lookup_path(
+    pub async fn project_lookup_by_path(
         &self,
         organization_name: &Name,
         project_name: &Name,
     ) -> LookupResult<authz::Project> {
         let authz_org =
-            self.organization_lookup_path(organization_name).await?;
+            self.organization_lookup_by_path(organization_name).await?;
         self.project_lookup_noauthz(&authz_org, project_name)
             .await
             .map(|(p, _)| p)

@@ -549,7 +549,7 @@ impl Nexus {
     ) -> CreateResult<db::model::Project> {
         let org = self
             .db_datastore
-            .organization_lookup_path(organization_name)
+            .organization_lookup_by_path(organization_name)
             .await?;
 
         // Create a project.
@@ -591,7 +591,7 @@ impl Nexus {
     ) -> LookupResult<db::model::Project> {
         let authz_org = self
             .db_datastore
-            .organization_lookup_path(organization_name)
+            .organization_lookup_by_path(organization_name)
             .await?;
         Ok(self
             .db_datastore
@@ -608,7 +608,7 @@ impl Nexus {
     ) -> ListResultVec<db::model::Project> {
         let authz_org = self
             .db_datastore
-            .organization_lookup_path(organization_name)
+            .organization_lookup_by_path(organization_name)
             .await?;
         self.db_datastore
             .projects_list_by_name(opctx, &authz_org, pagparams)
@@ -623,7 +623,7 @@ impl Nexus {
     ) -> ListResultVec<db::model::Project> {
         let authz_org = self
             .db_datastore
-            .organization_lookup_path(organization_name)
+            .organization_lookup_by_path(organization_name)
             .await?;
         self.db_datastore
             .projects_list_by_id(opctx, &authz_org, pagparams)
@@ -638,7 +638,7 @@ impl Nexus {
     ) -> DeleteResult {
         let authz_project = self
             .db_datastore
-            .project_lookup_path(organization_name, project_name)
+            .project_lookup_by_path(organization_name, project_name)
             .await?;
         self.db_datastore.project_delete(opctx, &authz_project).await
     }
@@ -652,7 +652,7 @@ impl Nexus {
     ) -> UpdateResult<db::model::Project> {
         let authz_project = self
             .db_datastore
-            .project_lookup_path(organization_name, project_name)
+            .project_lookup_by_path(organization_name, project_name)
             .await?;
         self.db_datastore
             .project_update(opctx, &authz_project, new_params.clone().into())
@@ -672,7 +672,7 @@ impl Nexus {
     ) -> ListResultVec<db::model::Disk> {
         let authz_project = self
             .db_datastore
-            .project_lookup_path(organization_name, project_name)
+            .project_lookup_by_path(organization_name, project_name)
             .await?;
         self.db_datastore
             .project_list_disks(opctx, &authz_project, pagparams)
@@ -688,7 +688,7 @@ impl Nexus {
     ) -> CreateResult<db::model::Disk> {
         let authz_project = self
             .db_datastore
-            .project_lookup_path(organization_name, project_name)
+            .project_lookup_by_path(organization_name, project_name)
             .await?;
 
         // TODO-security This may need to be revisited once we implement authz
@@ -734,7 +734,7 @@ impl Nexus {
     ) -> LookupResult<(db::model::Disk, authz::ProjectChild)> {
         let authz_project = self
             .db_datastore
-            .project_lookup_path(organization_name, project_name)
+            .project_lookup_by_path(organization_name, project_name)
             .await?;
         let disk = self
             .db_datastore
@@ -819,7 +819,7 @@ impl Nexus {
     ) -> ListResultVec<db::model::Instance> {
         let project_id = self
             .db_datastore
-            .project_lookup_path(organization_name, project_name)
+            .project_lookup_by_path(organization_name, project_name)
             .await?
             .id();
         self.db_datastore.project_list_instances(&project_id, pagparams).await
@@ -833,7 +833,7 @@ impl Nexus {
     ) -> CreateResult<db::model::Instance> {
         let authz_project = self
             .db_datastore
-            .project_lookup_path(organization_name, project_name)
+            .project_lookup_by_path(organization_name, project_name)
             .await?;
 
         let saga_params = Arc::new(sagas::ParamsInstanceCreate {
@@ -917,7 +917,7 @@ impl Nexus {
          */
         let project_id = self
             .db_datastore
-            .project_lookup_path(organization_name, project_name)
+            .project_lookup_by_path(organization_name, project_name)
             .await?
             .id();
         let instance = self
@@ -936,7 +936,7 @@ impl Nexus {
     ) -> UpdateResult<db::model::Instance> {
         let project_id = self
             .db_datastore
-            .project_lookup_path(organization_name, project_name)
+            .project_lookup_by_path(organization_name, project_name)
             .await?
             .id();
         let instance = self
@@ -971,7 +971,7 @@ impl Nexus {
     ) -> LookupResult<db::model::Instance> {
         let project_id = self
             .db_datastore
-            .project_lookup_path(organization_name, project_name)
+            .project_lookup_by_path(organization_name, project_name)
             .await?
             .id();
         self.db_datastore
@@ -1573,7 +1573,7 @@ impl Nexus {
     ) -> ListResultVec<db::model::Vpc> {
         let project_id = self
             .db_datastore
-            .project_lookup_path(organization_name, project_name)
+            .project_lookup_by_path(organization_name, project_name)
             .await?
             .id();
         let vpcs =
@@ -1589,7 +1589,7 @@ impl Nexus {
     ) -> CreateResult<db::model::Vpc> {
         let project_id = self
             .db_datastore
-            .project_lookup_path(organization_name, project_name)
+            .project_lookup_by_path(organization_name, project_name)
             .await?
             .id();
         let vpc_id = Uuid::new_v4();
@@ -1698,7 +1698,7 @@ impl Nexus {
     ) -> LookupResult<db::model::Vpc> {
         let project_id = self
             .db_datastore
-            .project_lookup_path(organization_name, project_name)
+            .project_lookup_by_path(organization_name, project_name)
             .await?
             .id();
         Ok(self.db_datastore.vpc_fetch_by_name(&project_id, vpc_name).await?)
@@ -1713,7 +1713,7 @@ impl Nexus {
     ) -> UpdateResult<()> {
         let project_id = self
             .db_datastore
-            .project_lookup_path(organization_name, project_name)
+            .project_lookup_by_path(organization_name, project_name)
             .await?
             .id();
         let vpc =
