@@ -16,6 +16,7 @@ use nexus_test_utils::http_testing::RequestBuilder;
 use nexus_test_utils::http_testing::TestResponse;
 use nexus_test_utils::ControlPlaneTestContext;
 use nexus_test_utils_macros::nexus_test;
+use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::IdentityMetadataUpdateParams;
 use omicron_common::api::external::Name;
@@ -122,12 +123,28 @@ lazy_static! {
     static ref DEMO_PROJECT_NAME: Name = "demo-project".parse().unwrap();
     static ref DEMO_PROJECT_URL: String =
         format!("{}/{}", *DEMO_ORG_PROJECTS_URL, *DEMO_PROJECT_NAME);
+    static ref DEMO_PROJECT_URL_DISKS: String =
+        format!("{}/disks", *DEMO_PROJECT_URL);
     static ref DEMO_PROJECT_CREATE: params::ProjectCreate =
         params::ProjectCreate {
             identity: IdentityMetadataCreateParams {
                 name: DEMO_PROJECT_NAME.clone(),
                 description: "".parse().unwrap(),
             },
+        };
+
+    // Disk used for testing
+    static ref DEMO_DISK_NAME: Name = "demo-disk".parse().unwrap();
+    static ref DEMO_DISK_URL: String =
+        format!("{}/{}", *DEMO_PROJECT_URL_DISKS, *DEMO_DISK_NAME);
+    static ref DEMO_DISK_CREATE: params::DiskCreate =
+        params::DiskCreate {
+            identity: IdentityMetadataCreateParams {
+                name: DEMO_PROJECT_NAME.clone(),
+                description: "".parse().unwrap(),
+            },
+            snapshot_id: None,
+            size: ByteCount::from_gibibytes_u32(16),
         };
 }
 
@@ -286,6 +303,20 @@ lazy_static! {
                 ),
             ],
         },
+
+        VerifyEndpoint {
+            url: &*DEMO_PROJECT_URL_DISKS,
+            visibility: Visibility::Protected,
+            allowed_methods: vec![
+                AllowedMethod::Get,
+                AllowedMethod::Post(
+                    serde_json::to_value(&*DEMO_DISK_CREATE).unwrap()
+                ),
+            ],
+        },
+
+        // TODO-coverage The single disk endpoint belongs here, but we've only
+        // implemented authz for DELETE, not GET yet.
 
         VerifyEndpoint {
             url: "/roles",

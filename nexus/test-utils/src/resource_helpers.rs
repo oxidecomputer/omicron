@@ -9,6 +9,8 @@ use dropshot::test_util::ClientTestContext;
 use dropshot::HttpErrorResponseBody;
 use dropshot::Method;
 use http::StatusCode;
+use omicron_common::api::external::ByteCount;
+use omicron_common::api::external::Disk;
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::VpcRouter;
 use omicron_nexus::external_api::params;
@@ -30,23 +32,39 @@ where
         .unwrap()
 }
 
+pub async fn object_create<InputType, OutputType>(
+    client: &ClientTestContext,
+    path: &str,
+    input: &InputType,
+) -> OutputType
+where
+    InputType: serde::Serialize,
+    OutputType: serde::de::DeserializeOwned,
+{
+    NexusRequest::objects_post(client, path, input)
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .expect("failed to make \"create\" request")
+        .parsed_body()
+        .unwrap()
+}
+
 pub async fn create_organization(
     client: &ClientTestContext,
     organization_name: &str,
 ) -> Organization {
-    let input = params::OrganizationCreate {
-        identity: IdentityMetadataCreateParams {
-            name: organization_name.parse().unwrap(),
-            description: "an org".to_string(),
+    object_create(
+        client,
+        "/organizations",
+        &params::OrganizationCreate {
+            identity: IdentityMetadataCreateParams {
+                name: organization_name.parse().unwrap(),
+                description: "an org".to_string(),
+            },
         },
-    };
-    NexusRequest::objects_post(client, "/organizations", &input)
-        .authn_as(AuthnMode::PrivilegedUser)
-        .execute()
-        .await
-        .expect("failed to make request")
-        .parsed_body()
-        .unwrap()
+    )
+    .await
 }
 
 pub async fn create_project(
@@ -54,9 +72,10 @@ pub async fn create_project(
     organization_name: &str,
     project_name: &str,
 ) -> Project {
-    NexusRequest::objects_post(
+    let url = format!("/organizations/{}/projects", &organization_name);
+    object_create(
         client,
-        &format!("/organizations/{}/projects", &organization_name),
+        &url,
         &params::ProjectCreate {
             identity: IdentityMetadataCreateParams {
                 name: project_name.parse().unwrap(),
@@ -64,12 +83,32 @@ pub async fn create_project(
             },
         },
     )
-    .authn_as(AuthnMode::PrivilegedUser)
-    .execute()
     .await
-    .expect("failed to make request")
-    .parsed_body()
-    .unwrap()
+}
+
+pub async fn create_disk(
+    client: &ClientTestContext,
+    organization_name: &str,
+    project_name: &str,
+    disk_name: &str,
+) -> Disk {
+    let url = format!(
+        "/organizations/{}/projects/{}/disks",
+        organization_name, project_name
+    );
+    object_create(
+        client,
+        &url,
+        &params::DiskCreate {
+            identity: IdentityMetadataCreateParams {
+                name: disk_name.parse().unwrap(),
+                description: String::from("sells rainsticks"),
+            },
+            snapshot_id: None,
+            size: ByteCount::from_gibibytes_u32(1),
+        },
+    )
+    .await
 }
 
 pub async fn create_vpc(

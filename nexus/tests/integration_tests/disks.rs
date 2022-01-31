@@ -5,6 +5,7 @@
 //! Tests basic disk support in the API
 
 use crucible_agent_client::types::State as RegionState;
+use dropshot::HttpErrorResponseBody;
 use http::method::Method;
 use http::StatusCode;
 use omicron_common::api::external::ByteCount;
@@ -30,6 +31,7 @@ use nexus_test_utils::http_testing::AuthnMode;
 use nexus_test_utils::http_testing::NexusRequest;
 use nexus_test_utils::http_testing::RequestBuilder;
 use nexus_test_utils::identity_eq;
+use nexus_test_utils::resource_helpers::create_disk;
 use nexus_test_utils::resource_helpers::create_organization;
 use nexus_test_utils::resource_helpers::create_project;
 use nexus_test_utils::ControlPlaneTestContext;
@@ -159,15 +161,7 @@ async fn test_disk_create_attach_detach_delete(
 
     // Create a disk.
     let disk_url = format!("{}/{}", disks_url, DISK_NAME);
-    let new_disk = params::DiskCreate {
-        identity: IdentityMetadataCreateParams {
-            name: DISK_NAME.parse().unwrap(),
-            description: String::from("sells rainsticks"),
-        },
-        snapshot_id: None,
-        size: ByteCount::from_gibibytes_u32(1),
-    };
-    let disk: Disk = objects_post(&client, &disks_url, new_disk.clone()).await;
+    let disk = create_disk(&client, ORG_NAME, PROJECT_NAME, DISK_NAME).await;
     assert_eq!(disk.identity.name, DISK_NAME);
     assert_eq!(disk.identity.description, "sells rainsticks");
     assert_eq!(disk.project_id, test.project_id);
@@ -324,19 +318,22 @@ async fn test_disk_create_disk_that_already_exists_fails(
         snapshot_id: None,
         size: ByteCount::from_gibibytes_u32(1),
     };
-    let _: Disk = objects_post(&client, &disks_url, new_disk.clone()).await;
+    let _ = create_disk(&client, ORG_NAME, PROJECT_NAME, DISK_NAME).await;
     let disk_url = format!("{}/{}", disks_url, DISK_NAME);
     let disk = disk_get(&client, &disk_url).await;
 
     // Attempt to create a second disk with a conflicting name.
-    let error = client
-        .make_request_error_body(
-            Method::POST,
-            &disks_url,
-            new_disk,
-            StatusCode::BAD_REQUEST,
-        )
-        .await;
+    let error: HttpErrorResponseBody = NexusRequest::new(
+        RequestBuilder::new(client, Method::POST, &disks_url)
+            .body(Some(&new_disk))
+            .expect_status(Some(StatusCode::BAD_REQUEST)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap()
+    .parsed_body()
+    .unwrap();
     assert_eq!(
         error.message,
         format!("already exists: disk \"{}\"", DISK_NAME)
@@ -357,15 +354,7 @@ async fn test_disk_move_between_instances(cptestctx: &ControlPlaneTestContext) {
 
     // Create a disk.
     let disk_url = format!("{}/{}", disks_url, DISK_NAME);
-    let new_disk = params::DiskCreate {
-        identity: IdentityMetadataCreateParams {
-            name: DISK_NAME.parse().unwrap(),
-            description: String::from("sells rainsticks"),
-        },
-        snapshot_id: None,
-        size: ByteCount::from_gibibytes_u32(1),
-    };
-    let disk: Disk = objects_post(&client, &disks_url, new_disk.clone()).await;
+    let disk = create_disk(client, ORG_NAME, PROJECT_NAME, DISK_NAME).await;
 
     // Create an instance to attach the disk.
     let url_instances = get_instances_url();
@@ -677,75 +666,11 @@ async fn test_disk_move_between_instances(cptestctx: &ControlPlaneTestContext) {
 }
 
 #[nexus_test]
-async fn test_disk_deletion_requires_authentication(
-    cptestctx: &ControlPlaneTestContext,
-) {
-    let client = &cptestctx.external_client;
-    DiskTest::new(&cptestctx).await;
-    let disks_url = get_disks_url();
-
-    // Create a disk.
-    let disk_url = format!("{}/{}", disks_url, DISK_NAME);
-    let new_disk = params::DiskCreate {
-        identity: IdentityMetadataCreateParams {
-            name: DISK_NAME.parse().unwrap(),
-            description: String::from("sells rainsticks"),
-        },
-        snapshot_id: None,
-        size: ByteCount::from_gibibytes_u32(1),
-    };
-    let _: Disk = objects_post(&client, &disks_url, new_disk.clone()).await;
-
-    const BAD_DISK_NAME: &str = "wonderful-knife";
-    let bad_disk_url = format!("{}/{}", disks_url, BAD_DISK_NAME);
-
-    // If we are not authenticated, we should not be able to delete the disk.
-    //
-    // We should see the same error regardless of the existence of the disk.
-    let urls = [&disk_url, &bad_disk_url];
-    for url in &urls {
-        NexusRequest::expect_failure(
-            client,
-            StatusCode::NOT_FOUND,
-            Method::DELETE,
-            &url,
-        )
-        .execute()
-        .await
-        .expect("expected request to fail");
-    }
-
-    // If we are unprivileged, we should not be able to delete the disk.
-    //
-    // We should see the same error regardless of the existence of the disk.
-    for url in &urls {
-        NexusRequest::expect_failure(
-            client,
-            StatusCode::NOT_FOUND,
-            Method::DELETE,
-            &url,
-        )
-        .authn_as(AuthnMode::UnprivilegedUser)
-        .execute()
-        .await
-        .expect("expected request to fail");
-    }
-
-    // Privileged users can delete disks.
-    NexusRequest::object_delete(client, &disk_url)
-        .authn_as(AuthnMode::PrivilegedUser)
-        .execute()
-        .await
-        .expect("failed to delete disk");
-}
-
-#[nexus_test]
 async fn test_disk_creation_region_requested_then_started(
     cptestctx: &ControlPlaneTestContext,
 ) {
     let client = &cptestctx.external_client;
     let test = DiskTest::new(&cptestctx).await;
-    let disks_url = get_disks_url();
 
     // Before we create a disk, set the response from the Crucible Agent:
     // no matter what regions get requested, they'll always *start* as
@@ -768,15 +693,7 @@ async fn test_disk_creation_region_requested_then_started(
 
     // The disk is created successfully, even when this "requested" -> "started"
     // transition occurs.
-    let new_disk = params::DiskCreate {
-        identity: IdentityMetadataCreateParams {
-            name: DISK_NAME.parse().unwrap(),
-            description: String::from("sells rainsticks"),
-        },
-        snapshot_id: None,
-        size: ByteCount::from_gibibytes_u32(1),
-    };
-    let _: Disk = objects_post(&client, &disks_url, new_disk.clone()).await;
+    create_disk(client, ORG_NAME, PROJECT_NAME, DISK_NAME).await;
 }
 
 // Tests that region allocation failure causes disk allocation to fail.
@@ -822,14 +739,15 @@ async fn test_disk_region_creation_failure(
     //
     // TODO: Maybe consider making this a more informative error?
     // How should we propagate this to the client?
-    client
-        .make_request_error_body(
-            Method::POST,
-            &disks_url,
-            new_disk.clone(),
-            StatusCode::INTERNAL_SERVER_ERROR,
-        )
-        .await;
+    NexusRequest::new(
+        RequestBuilder::new(client, Method::POST, &disks_url)
+            .body(Some(&new_disk))
+            .expect_status(Some(StatusCode::INTERNAL_SERVER_ERROR)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap();
 
     // After the failed allocation, the disk should not exist.
     let disks = disks_list(&client, &disks_url).await;
@@ -852,7 +770,7 @@ async fn test_disk_region_creation_failure(
             test.sled_agent.get_crucible_dataset(test.zpool_id, *id).await;
         crucible.set_create_callback(Box::new(|_| RegionState::Created)).await;
     }
-    let _: Disk = objects_post(&client, &disks_url, new_disk.clone()).await;
+    let _ = create_disk(client, ORG_NAME, PROJECT_NAME, DISK_NAME).await;
 }
 
 async fn disk_get(client: &ClientTestContext, disk_url: &str) -> Disk {
