@@ -305,6 +305,7 @@ impl DataStore {
                 crate::internal_api::params::DatasetKind::Crucible,
             )))
             .order(dsl::size_used.asc())
+            .order(dsl::time_created.desc())
             // TODO: We admittedly don't actually *fail* any request for
             // running out of space - we try to send the request down to
             // crucible agents, and expect them to fail on our behalf in
