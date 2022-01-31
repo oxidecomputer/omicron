@@ -428,9 +428,7 @@ impl DataStore {
             .map_err(|e| match e {
                 TxnError::CustomError(
                     RegionAllocateError::NotEnoughDatasets(_),
-                ) => Error::unavail(&format!(
-                    "Not enough datasets to allocate disks"
-                )),
+                ) => Error::unavail("Not enough datasets to allocate disks"),
                 _ => {
                     Error::internal_error(&format!("Transaction error: {}", e))
                 }
