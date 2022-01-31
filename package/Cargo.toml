@@ -7,8 +7,8 @@ license = "MPL-2.0"
 [dependencies]
 anyhow = "1.0"
 crossbeam = "0.8"
+flate2 = "1.0.22"
 omicron-common = { path = "../common" }
-
 # We depend on the propolis-server here -- a binary, not a library -- to
 # make it visible to the packaging tool, which can compile it and shove
 # it in a tarball.
@@ -16,10 +16,12 @@ propolis-server = { git = "https://github.com/oxidecomputer/propolis", rev = "a3
 rayon = "1.5"
 reqwest = { version = "0.11", default-features = false, features = ["rustls-tls"] }
 serde = { version = "1.0", features = [ "derive" ] }
+serde_json = "1.0"
 serde_derive = "1.0"
 smf = "0.2"
 structopt = "0.3"
 tar = "0.4"
+tempfile = "3.3"
 thiserror = "1.0"
 tokio = { version = "1.15", features = [ "full" ] }
 toml = "0.5.6"

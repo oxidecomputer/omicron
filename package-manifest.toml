@@ -12,7 +12,7 @@ binary_name = "sled-agent"
 # Service name (subdirectory within "smf")
 service_name = "sled-agent"
 # Information about how to build this package
-build = "rust"
+type = "rust"
 # (Optional) Indicates this is a bootstrapping service, and should be installed.
 # Points to the SMF manifest within this package.
 bootstrap = "manifest.xml"
@@ -20,16 +20,24 @@ bootstrap = "manifest.xml"
 [package.omicron-nexus]
 binary_name = "nexus"
 service_name = "nexus"
-build = "rust"
+type = "rust"
 
 [package.oximeter-collector]
 binary_name = "oximeter"
 service_name = "oximeter"
-build = "rust"
+type = "rust"
 
 [package.propolis-server]
 binary_name = "propolis-server"
 service_name = "propolis-server"
-build = "rust"
+type = "rust"
 # (Optional) List of binary blobs to be downloaded from S3.
 blobs = [ "alpine.iso", "OVMF_CODE.fd" ]
+
+[package.cockroachdb]
+service_name = "cockroachdb"
+type = "zone"
+
+[[package.cockroachdb.paths]]
+from = "cockroachdb"
+to = "/opt/oxide/cockroachdb"
