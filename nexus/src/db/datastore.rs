@@ -425,8 +425,15 @@ impl DataStore {
                     .collect())
             })
             .await
-            .map_err(|e| {
-                Error::internal_error(&format!("Transaction error: {}", e))
+            .map_err(|e| match e {
+                TxnError::CustomError(
+                    RegionAllocateError::NotEnoughDatasets(_),
+                ) => Error::unavail(&format!(
+                    "Not enough datasets to allocate disks"
+                )),
+                _ => {
+                    Error::internal_error(&format!("Transaction error: {}", e))
+                }
             })
     }
 
@@ -3018,7 +3025,9 @@ mod test {
             datastore.region_allocate(disk1_id, &params).await.unwrap_err();
         assert!(err
             .to_string()
-            .contains("Not enough datasets for replicated allocation"));
+            .contains("Not enough datasets to allocate disks"));
+
+        assert!(matches!(err, Error::ServiceUnavailable { .. }));
 
         let _ = db.cleanup().await;
     }
