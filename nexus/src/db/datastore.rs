@@ -65,12 +65,7 @@ use uuid::Uuid;
 
 use crate::db::{
     self,
-    error::{
-        public_error_from_diesel_pool_authz,
-        public_error_from_diesel_pool_create,
-        public_error_from_diesel_pool_lookup,
-        public_error_from_diesel_pool_shouldnt_fail, TransactionError,
-    },
+    error::{public_error_from_diesel_pool, ErrorHandler, TransactionError},
     model::{
         ConsoleSession, Dataset, DatasetKind, Disk, DiskRuntimeState,
         Generation, IncompleteNetworkInterface, Instance, InstanceRuntimeState,
@@ -153,10 +148,12 @@ impl DataStore {
             .get_result_async(self.pool())
             .await
             .map_err(|e| {
-                public_error_from_diesel_pool_create(
+                public_error_from_diesel_pool(
                     e,
-                    ResourceType::Sled,
-                    &sled.id().to_string(),
+                    ErrorHandler::Conflict(
+                        ResourceType::Sled,
+                        &sled.id().to_string(),
+                    ),
                 )
             })
     }
@@ -170,7 +167,7 @@ impl DataStore {
             .select(Sled::as_select())
             .load_async(self.pool())
             .await
-            .map_err(public_error_from_diesel_pool_shouldnt_fail)
+            .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
     }
 
     pub async fn sled_fetch(&self, id: Uuid) -> LookupResult<Sled> {
@@ -181,10 +178,12 @@ impl DataStore {
             .first_async(self.pool())
             .await
             .map_err(|e| {
-                public_error_from_diesel_pool_lookup(
+                public_error_from_diesel_pool(
                     e,
-                    ResourceType::Sled,
-                    LookupType::ById(id),
+                    ErrorHandler::NotFoundByLookup(
+                        ResourceType::Sled,
+                        LookupType::ById(id),
+                    ),
                 )
             })
     }
@@ -214,10 +213,12 @@ impl DataStore {
                 lookup_type: LookupType::ById(sled_id),
             },
             AsyncInsertError::DatabaseError(e) => {
-                public_error_from_diesel_pool_create(
+                public_error_from_diesel_pool(
                     e,
-                    ResourceType::Zpool,
-                    &zpool.id().to_string(),
+                    ErrorHandler::Conflict(
+                        ResourceType::Zpool,
+                        &zpool.id().to_string(),
+                    ),
                 )
             }
         })
@@ -253,10 +254,12 @@ impl DataStore {
                 lookup_type: LookupType::ById(zpool_id),
             },
             AsyncInsertError::DatabaseError(e) => {
-                public_error_from_diesel_pool_create(
+                public_error_from_diesel_pool(
                     e,
-                    ResourceType::Dataset,
-                    &dataset.id().to_string(),
+                    ErrorHandler::Conflict(
+                        ResourceType::Dataset,
+                        &dataset.id().to_string(),
+                    ),
                 )
             }
         })
@@ -288,7 +291,7 @@ impl DataStore {
         Self::get_allocated_regions_query(disk_id)
             .get_results_async::<(Dataset, Region)>(self.pool())
             .await
-            .map_err(|e| public_error_from_diesel_pool_shouldnt_fail(e))
+            .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
     }
 
     fn get_allocatable_datasets_query() -> impl RunnableQuery<Dataset> {
@@ -485,10 +488,12 @@ impl DataStore {
             .get_result_async(self.pool_authorized(opctx).await?)
             .await
             .map_err(|e| {
-                public_error_from_diesel_pool_create(
+                public_error_from_diesel_pool(
                     e,
-                    ResourceType::Organization,
-                    name.as_str(),
+                    ErrorHandler::Conflict(
+                        ResourceType::Organization,
+                        name.as_str(),
+                    ),
                 )
             })
     }
@@ -534,10 +539,12 @@ impl DataStore {
             .get_result_async::<Organization>(self.pool())
             .await
             .map_err(|e| {
-                public_error_from_diesel_pool_lookup(
+                public_error_from_diesel_pool(
                     e,
-                    ResourceType::Organization,
-                    LookupType::ByName(name.as_str().to_owned()),
+                    ErrorHandler::NotFoundByLookup(
+                        ResourceType::Organization,
+                        LookupType::ByName(name.as_str().to_owned()),
+                    ),
                 )
             })
             .map(|o| {
@@ -590,10 +597,12 @@ impl DataStore {
             .get_result_async::<(Uuid, Generation)>(self.pool())
             .await
             .map_err(|e| {
-                public_error_from_diesel_pool_lookup(
+                public_error_from_diesel_pool(
                     e,
-                    ResourceType::Organization,
-                    LookupType::ByName(name.as_str().to_owned()),
+                    ErrorHandler::NotFoundByLookup(
+                        ResourceType::Organization,
+                        LookupType::ByName(name.as_str().to_owned()),
+                    ),
                 )
             })?;
 
@@ -613,7 +622,7 @@ impl DataStore {
                 .first_async::<Uuid>(self.pool())
                 .await,
         )
-        .map_err(public_error_from_diesel_pool_shouldnt_fail)?;
+        .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))?;
         if project_found.is_some() {
             return Err(Error::InvalidRequest {
                 message: "organization to be deleted contains a project"
@@ -630,10 +639,12 @@ impl DataStore {
             .execute_async(self.pool())
             .await
             .map_err(|e| {
-                public_error_from_diesel_pool_lookup(
+                public_error_from_diesel_pool(
                     e,
-                    ResourceType::Organization,
-                    LookupType::ById(id),
+                    ErrorHandler::NotFoundByLookup(
+                        ResourceType::Organization,
+                        LookupType::ById(id),
+                    ),
                 )
             })?;
 
@@ -658,7 +669,7 @@ impl DataStore {
             .select(Organization::as_select())
             .load_async::<Organization>(self.pool_authorized(opctx).await?)
             .await
-            .map_err(public_error_from_diesel_pool_shouldnt_fail)
+            .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
     }
 
     pub async fn organizations_list_by_name(
@@ -673,7 +684,7 @@ impl DataStore {
             .select(Organization::as_select())
             .load_async::<Organization>(self.pool_authorized(opctx).await?)
             .await
-            .map_err(public_error_from_diesel_pool_shouldnt_fail)
+            .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
     }
 
     /// Updates a organization by name (clobbering update -- no etag)
@@ -695,7 +706,12 @@ impl DataStore {
             .returning(Organization::as_returning())
             .get_result_async(self.pool_authorized(opctx).await?)
             .await
-            .map_err(|e| public_error_from_diesel_pool_authz(e, &authz_org))
+            .map_err(|e| {
+                public_error_from_diesel_pool(
+                    e,
+                    ErrorHandler::NotFoundByResource(&authz_org),
+                )
+            })
     }
 
     /// Create a project
@@ -723,10 +739,9 @@ impl DataStore {
                 lookup_type: LookupType::ById(organization_id),
             },
             AsyncInsertError::DatabaseError(e) => {
-                public_error_from_diesel_pool_create(
+                public_error_from_diesel_pool(
                     e,
-                    ResourceType::Project,
-                    &name,
+                    ErrorHandler::Conflict(ResourceType::Project, &name),
                 )
             }
         })
@@ -752,10 +767,12 @@ impl DataStore {
             .first_async(self.pool())
             .await
             .map_err(|e| {
-                public_error_from_diesel_pool_lookup(
+                public_error_from_diesel_pool(
                     e,
-                    ResourceType::Project,
-                    LookupType::ByName(project_name.as_str().to_owned()),
+                    ErrorHandler::NotFoundByLookup(
+                        ResourceType::Project,
+                        LookupType::ByName(project_name.as_str().to_owned()),
+                    ),
                 )
             })
             .map(|p| {
@@ -822,7 +839,10 @@ impl DataStore {
             .get_result_async(self.pool_authorized(opctx).await?)
             .await
             .map_err(|e| {
-                public_error_from_diesel_pool_authz(e, authz_project)
+                public_error_from_diesel_pool(
+                    e,
+                    ErrorHandler::NotFoundByResource(authz_project),
+                )
             })?;
         Ok(())
     }
@@ -843,7 +863,7 @@ impl DataStore {
             .select(Project::as_select())
             .load_async(self.pool_authorized(opctx).await?)
             .await
-            .map_err(public_error_from_diesel_pool_shouldnt_fail)
+            .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
     }
 
     pub async fn projects_list_by_name(
@@ -862,7 +882,7 @@ impl DataStore {
             .select(Project::as_select())
             .load_async(self.pool_authorized(opctx).await?)
             .await
-            .map_err(public_error_from_diesel_pool_shouldnt_fail)
+            .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
     }
 
     /// Updates a project (clobbering update -- no etag)
@@ -882,7 +902,12 @@ impl DataStore {
             .returning(Project::as_returning())
             .get_result_async(self.pool_authorized(opctx).await?)
             .await
-            .map_err(|e| public_error_from_diesel_pool_authz(e, authz_project))
+            .map_err(|e| {
+                public_error_from_diesel_pool(
+                    e,
+                    ErrorHandler::NotFoundByResource(authz_project),
+                )
+            })
     }
 
     /*
@@ -928,10 +953,12 @@ impl DataStore {
             .get_result_async(self.pool())
             .await
             .map_err(|e| {
-                public_error_from_diesel_pool_create(
+                public_error_from_diesel_pool(
                     e,
-                    ResourceType::Instance,
-                    name.as_str(),
+                    ErrorHandler::Conflict(
+                        ResourceType::Instance,
+                        name.as_str(),
+                    ),
                 )
             })?;
 
@@ -962,7 +989,7 @@ impl DataStore {
             .select(Instance::as_select())
             .load_async::<Instance>(self.pool())
             .await
-            .map_err(public_error_from_diesel_pool_shouldnt_fail)
+            .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
     }
 
     pub async fn instance_fetch(
@@ -978,10 +1005,12 @@ impl DataStore {
             .get_result_async(self.pool())
             .await
             .map_err(|e| {
-                public_error_from_diesel_pool_lookup(
+                public_error_from_diesel_pool(
                     e,
-                    ResourceType::Instance,
-                    LookupType::ById(*instance_id),
+                    ErrorHandler::NotFoundByLookup(
+                        ResourceType::Instance,
+                        LookupType::ById(*instance_id),
+                    ),
                 )
             })
     }
@@ -1001,10 +1030,12 @@ impl DataStore {
             .get_result_async(self.pool())
             .await
             .map_err(|e| {
-                public_error_from_diesel_pool_lookup(
+                public_error_from_diesel_pool(
                     e,
-                    ResourceType::Instance,
-                    LookupType::ByName(instance_name.as_str().to_owned()),
+                    ErrorHandler::NotFoundByLookup(
+                        ResourceType::Instance,
+                        LookupType::ByName(instance_name.as_str().to_owned()),
+                    ),
                 )
             })
     }
@@ -1038,10 +1069,12 @@ impl DataStore {
                 UpdateStatus::NotUpdatedButExists => false,
             })
             .map_err(|e| {
-                public_error_from_diesel_pool_lookup(
+                public_error_from_diesel_pool(
                     e,
-                    ResourceType::Instance,
-                    LookupType::ById(*instance_id),
+                    ErrorHandler::NotFoundByLookup(
+                        ResourceType::Instance,
+                        LookupType::ById(*instance_id),
+                    ),
                 )
             })?;
 
@@ -1080,10 +1113,12 @@ impl DataStore {
             .execute_and_check(self.pool())
             .await
             .map_err(|e| {
-                public_error_from_diesel_pool_lookup(
+                public_error_from_diesel_pool(
                     e,
-                    ResourceType::Instance,
-                    LookupType::ById(*instance_id),
+                    ErrorHandler::NotFoundByLookup(
+                        ResourceType::Instance,
+                        LookupType::ById(*instance_id),
+                    ),
                 )
             })?;
         match result.status {
@@ -1119,7 +1154,7 @@ impl DataStore {
             .select(Disk::as_select())
             .load_async::<Disk>(self.pool())
             .await
-            .map_err(public_error_from_diesel_pool_shouldnt_fail)
+            .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
     }
 
     pub async fn project_create_disk(&self, disk: Disk) -> CreateResult<Disk> {
@@ -1135,10 +1170,9 @@ impl DataStore {
             .get_result_async(self.pool())
             .await
             .map_err(|e| {
-                public_error_from_diesel_pool_create(
+                public_error_from_diesel_pool(
                     e,
-                    ResourceType::Disk,
-                    name.as_str(),
+                    ErrorHandler::Conflict(ResourceType::Disk, name.as_str()),
                 )
             })?;
 
@@ -1169,7 +1203,7 @@ impl DataStore {
             .select(Disk::as_select())
             .load_async::<Disk>(self.pool())
             .await
-            .map_err(public_error_from_diesel_pool_shouldnt_fail)
+            .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
     }
 
     pub async fn disk_update_runtime(
@@ -1192,10 +1226,12 @@ impl DataStore {
                 UpdateStatus::NotUpdatedButExists => false,
             })
             .map_err(|e| {
-                public_error_from_diesel_pool_lookup(
+                public_error_from_diesel_pool(
                     e,
-                    ResourceType::Disk,
-                    LookupType::ById(*disk_id),
+                    ErrorHandler::NotFoundByLookup(
+                        ResourceType::Disk,
+                        LookupType::ById(*disk_id),
+                    ),
                 )
             })?;
 
@@ -1212,10 +1248,12 @@ impl DataStore {
             .get_result_async(self.pool())
             .await
             .map_err(|e| {
-                public_error_from_diesel_pool_lookup(
+                public_error_from_diesel_pool(
                     e,
-                    ResourceType::Disk,
-                    LookupType::ById(*disk_id),
+                    ErrorHandler::NotFoundByLookup(
+                        ResourceType::Disk,
+                        LookupType::ById(*disk_id),
+                    ),
                 )
             })
     }
@@ -1235,10 +1273,12 @@ impl DataStore {
             .get_result_async(self.pool())
             .await
             .map_err(|e| {
-                public_error_from_diesel_pool_lookup(
+                public_error_from_diesel_pool(
                     e,
-                    ResourceType::Disk,
-                    LookupType::ByName(disk_name.as_str().to_owned()),
+                    ErrorHandler::NotFoundByLookup(
+                        ResourceType::Disk,
+                        LookupType::ByName(disk_name.as_str().to_owned()),
+                    ),
                 )
             })
     }
@@ -1292,10 +1332,12 @@ impl DataStore {
             .execute_and_check(pool)
             .await
             .map_err(|e| {
-                public_error_from_diesel_pool_lookup(
+                public_error_from_diesel_pool(
                     e,
-                    ResourceType::Disk,
-                    LookupType::ById(*disk_id),
+                    ErrorHandler::NotFoundByLookup(
+                        ResourceType::Disk,
+                        LookupType::ById(*disk_id),
+                    ),
                 )
             })?;
 
@@ -1367,10 +1409,12 @@ impl DataStore {
                     .get_result_async(self.pool())
                     .await
                     .map_err(|e| {
-                        public_error_from_diesel_pool_create(
+                        public_error_from_diesel_pool(
                             e,
-                            ResourceType::NetworkInterface,
-                            name.as_str(),
+                            ErrorHandler::Conflict(
+                                ResourceType::NetworkInterface,
+                                name.as_str(),
+                            ),
                         )
                     })
             }
@@ -1399,10 +1443,12 @@ impl DataStore {
                                     .to_string(),
                             }
                         } else {
-                            public_error_from_diesel_pool_create(
+                            public_error_from_diesel_pool(
                                 e,
-                                ResourceType::NetworkInterface,
-                                name.as_str(),
+                                ErrorHandler::Conflict(
+                                    ResourceType::NetworkInterface,
+                                    name.as_str(),
+                                ),
                             )
                         }
                     })
@@ -1428,10 +1474,12 @@ impl DataStore {
             .get_result_async(self.pool())
             .await
             .map_err(|e| {
-                public_error_from_diesel_pool_lookup(
+                public_error_from_diesel_pool(
                     e,
-                    ResourceType::NetworkInterface,
-                    LookupType::ById(*network_interface_id),
+                    ErrorHandler::NotFoundByLookup(
+                        ResourceType::NetworkInterface,
+                        LookupType::ById(*network_interface_id),
+                    ),
                 )
             })?;
         Ok(())
@@ -1460,10 +1508,12 @@ impl DataStore {
             .execute_async(self.pool())
             .await
             .map_err(|e| {
-                public_error_from_diesel_pool_create(
+                public_error_from_diesel_pool(
                     e,
-                    ResourceType::Oximeter,
-                    "Oximeter Info",
+                    ErrorHandler::Conflict(
+                        ResourceType::Oximeter,
+                        "Oximeter Info",
+                    ),
                 )
             })?;
         Ok(())
@@ -1480,10 +1530,12 @@ impl DataStore {
             .first_async::<OximeterInfo>(self.pool())
             .await
             .map_err(|e| {
-                public_error_from_diesel_pool_lookup(
+                public_error_from_diesel_pool(
                     e,
-                    ResourceType::Oximeter,
-                    LookupType::ById(id),
+                    ErrorHandler::NotFoundByLookup(
+                        ResourceType::Oximeter,
+                        LookupType::ById(id),
+                    ),
                 )
             })
     }
@@ -1497,7 +1549,7 @@ impl DataStore {
         paginated(dsl::oximeter, dsl::id, page_params)
             .load_async::<OximeterInfo>(self.pool())
             .await
-            .map_err(public_error_from_diesel_pool_shouldnt_fail)
+            .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
     }
 
     // Create a record for a new producer endpoint
@@ -1522,10 +1574,12 @@ impl DataStore {
             .execute_async(self.pool())
             .await
             .map_err(|e| {
-                public_error_from_diesel_pool_create(
+                public_error_from_diesel_pool(
                     e,
-                    ResourceType::MetricProducer,
-                    "Producer Endpoint",
+                    ErrorHandler::Conflict(
+                        ResourceType::MetricProducer,
+                        "Producer Endpoint",
+                    ),
                 )
             })?;
         Ok(())
@@ -1545,10 +1599,12 @@ impl DataStore {
             .load_async(self.pool())
             .await
             .map_err(|e| {
-                public_error_from_diesel_pool_create(
+                public_error_from_diesel_pool(
                     e,
-                    ResourceType::MetricProducer,
-                    "By Oximeter ID",
+                    ErrorHandler::Conflict(
+                        ResourceType::MetricProducer,
+                        "By Oximeter ID",
+                    ),
                 )
             })
     }
@@ -1567,10 +1623,9 @@ impl DataStore {
             .execute_async(self.pool())
             .await
             .map_err(|e| {
-                public_error_from_diesel_pool_create(
+                public_error_from_diesel_pool(
                     e,
-                    ResourceType::SagaDbg,
-                    &name,
+                    ErrorHandler::Conflict(ResourceType::SagaDbg, &name),
                 )
             })?;
         Ok(())
@@ -1589,10 +1644,9 @@ impl DataStore {
             .execute_async(self.pool())
             .await
             .map_err(|e| {
-                public_error_from_diesel_pool_create(
+                public_error_from_diesel_pool(
                     e,
-                    ResourceType::SagaDbg,
-                    "Saga Event",
+                    ErrorHandler::Conflict(ResourceType::SagaDbg, "Saga Event"),
                 )
             })?;
         Ok(())
@@ -1617,10 +1671,12 @@ impl DataStore {
             .execute_and_check(self.pool())
             .await
             .map_err(|e| {
-                public_error_from_diesel_pool_lookup(
+                public_error_from_diesel_pool(
                     e,
-                    ResourceType::SagaDbg,
-                    LookupType::ById(saga_id.0.into()),
+                    ErrorHandler::NotFoundByLookup(
+                        ResourceType::SagaDbg,
+                        LookupType::ById(saga_id.0.into()),
+                    ),
                 )
             })?;
 
@@ -1657,10 +1713,12 @@ impl DataStore {
             .load_async(self.pool())
             .await
             .map_err(|e| {
-                public_error_from_diesel_pool_lookup(
+                public_error_from_diesel_pool(
                     e,
-                    ResourceType::SagaDbg,
-                    LookupType::ById(sec_id.0),
+                    ErrorHandler::NotFoundByLookup(
+                        ResourceType::SagaDbg,
+                        LookupType::ById(sec_id.0),
+                    ),
                 )
             })
     }
@@ -1676,10 +1734,12 @@ impl DataStore {
             .load_async::<db::saga_types::SagaNodeEvent>(self.pool())
             .await
             .map_err(|e| {
-                public_error_from_diesel_pool_lookup(
+                public_error_from_diesel_pool(
                     e,
-                    ResourceType::SagaDbg,
-                    LookupType::ById(id.0 .0),
+                    ErrorHandler::NotFoundByLookup(
+                        ResourceType::SagaDbg,
+                        LookupType::ById(id.0 .0),
+                    ),
                 )
             })?
             .into_iter()
@@ -1702,7 +1762,7 @@ impl DataStore {
             .select(Vpc::as_select())
             .load_async(self.pool())
             .await
-            .map_err(public_error_from_diesel_pool_shouldnt_fail)
+            .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
     }
 
     pub async fn project_create_vpc(&self, vpc: Vpc) -> Result<Vpc, Error> {
@@ -1717,10 +1777,9 @@ impl DataStore {
             .get_result_async(self.pool())
             .await
             .map_err(|e| {
-                public_error_from_diesel_pool_create(
+                public_error_from_diesel_pool(
                     e,
-                    ResourceType::Vpc,
-                    name.as_str(),
+                    ErrorHandler::Conflict(ResourceType::Vpc, name.as_str()),
                 )
             })?;
         Ok(vpc)
@@ -1740,10 +1799,12 @@ impl DataStore {
             .execute_async(self.pool())
             .await
             .map_err(|e| {
-                public_error_from_diesel_pool_lookup(
+                public_error_from_diesel_pool(
                     e,
-                    ResourceType::Vpc,
-                    LookupType::ById(*vpc_id),
+                    ErrorHandler::NotFoundByLookup(
+                        ResourceType::Vpc,
+                        LookupType::ById(*vpc_id),
+                    ),
                 )
             })?;
         Ok(())
@@ -1764,10 +1825,12 @@ impl DataStore {
             .get_result_async(self.pool())
             .await
             .map_err(|e| {
-                public_error_from_diesel_pool_lookup(
+                public_error_from_diesel_pool(
                     e,
-                    ResourceType::Vpc,
-                    LookupType::ByName(vpc_name.as_str().to_owned()),
+                    ErrorHandler::NotFoundByLookup(
+                        ResourceType::Vpc,
+                        LookupType::ByName(vpc_name.as_str().to_owned()),
+                    ),
                 )
             })
     }
@@ -1790,10 +1853,12 @@ impl DataStore {
             .get_result_async(self.pool())
             .await
             .map_err(|e| {
-                public_error_from_diesel_pool_lookup(
+                public_error_from_diesel_pool(
                     e,
-                    ResourceType::Vpc,
-                    LookupType::ById(*vpc_id),
+                    ErrorHandler::NotFoundByLookup(
+                        ResourceType::Vpc,
+                        LookupType::ById(*vpc_id),
+                    ),
                 )
             })?;
         Ok(())
@@ -1812,7 +1877,7 @@ impl DataStore {
             .select(VpcFirewallRule::as_select())
             .load_async(self.pool())
             .await
-            .map_err(public_error_from_diesel_pool_shouldnt_fail)
+            .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
     }
 
     pub async fn vpc_delete_all_firewall_rules(
@@ -1830,10 +1895,12 @@ impl DataStore {
             .execute_async(self.pool())
             .await
             .map_err(|e| {
-                public_error_from_diesel_pool_lookup(
+                public_error_from_diesel_pool(
                     e,
-                    ResourceType::Vpc,
-                    LookupType::ById(*vpc_id),
+                    ErrorHandler::NotFoundByLookup(
+                        ResourceType::Vpc,
+                        LookupType::ById(*vpc_id),
+                    ),
                 )
             })?;
         Ok(())
@@ -1891,10 +1958,12 @@ impl DataStore {
                 TxnError::CustomError(
                     FirewallUpdateError::CollectionNotFound,
                 ) => Error::not_found_by_id(ResourceType::Vpc, vpc_id),
-                TxnError::Pool(e) => public_error_from_diesel_pool_lookup(
+                TxnError::Pool(e) => public_error_from_diesel_pool(
                     e,
-                    ResourceType::VpcFirewallRule,
-                    LookupType::ById(*vpc_id),
+                    ErrorHandler::NotFoundByLookup(
+                        ResourceType::VpcFirewallRule,
+                        LookupType::ById(*vpc_id),
+                    ),
                 ),
             })
     }
@@ -1912,7 +1981,7 @@ impl DataStore {
             .select(VpcSubnet::as_select())
             .load_async(self.pool())
             .await
-            .map_err(public_error_from_diesel_pool_shouldnt_fail)
+            .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
     }
 
     pub async fn vpc_subnet_fetch_by_name(
@@ -1930,10 +1999,12 @@ impl DataStore {
             .get_result_async(self.pool())
             .await
             .map_err(|e| {
-                public_error_from_diesel_pool_lookup(
+                public_error_from_diesel_pool(
                     e,
-                    ResourceType::VpcSubnet,
-                    LookupType::ByName(subnet_name.as_str().to_owned()),
+                    ErrorHandler::NotFoundByLookup(
+                        ResourceType::VpcSubnet,
+                        LookupType::ByName(subnet_name.as_str().to_owned()),
+                    ),
                 )
             })
     }
@@ -1953,10 +2024,12 @@ impl DataStore {
             .get_result_async(self.pool())
             .await
             .map_err(|e| {
-                public_error_from_diesel_pool_create(
+                public_error_from_diesel_pool(
                     e,
-                    ResourceType::VpcSubnet,
-                    name.as_str(),
+                    ErrorHandler::Conflict(
+                        ResourceType::VpcSubnet,
+                        name.as_str(),
+                    ),
                 )
             })?;
         Ok(subnet)
@@ -1974,10 +2047,12 @@ impl DataStore {
             .get_result_async(self.pool())
             .await
             .map_err(|e| {
-                public_error_from_diesel_pool_lookup(
+                public_error_from_diesel_pool(
                     e,
-                    ResourceType::VpcSubnet,
-                    LookupType::ById(*subnet_id),
+                    ErrorHandler::NotFoundByLookup(
+                        ResourceType::VpcSubnet,
+                        LookupType::ById(*subnet_id),
+                    ),
                 )
             })?;
         Ok(())
@@ -1997,10 +2072,12 @@ impl DataStore {
             .execute_async(self.pool())
             .await
             .map_err(|e| {
-                public_error_from_diesel_pool_lookup(
+                public_error_from_diesel_pool(
                     e,
-                    ResourceType::VpcSubnet,
-                    LookupType::ById(*subnet_id),
+                    ErrorHandler::NotFoundByLookup(
+                        ResourceType::VpcSubnet,
+                        LookupType::ById(*subnet_id),
+                    ),
                 )
             })?;
         Ok(())
@@ -2019,7 +2096,7 @@ impl DataStore {
             .select(NetworkInterface::as_select())
             .load_async::<db::model::NetworkInterface>(self.pool())
             .await
-            .map_err(public_error_from_diesel_pool_shouldnt_fail)
+            .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
     }
 
     pub async fn vpc_list_routers(
@@ -2035,7 +2112,7 @@ impl DataStore {
             .select(VpcRouter::as_select())
             .load_async::<db::model::VpcRouter>(self.pool())
             .await
-            .map_err(public_error_from_diesel_pool_shouldnt_fail)
+            .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
     }
 
     pub async fn vpc_router_fetch_by_name(
@@ -2053,10 +2130,12 @@ impl DataStore {
             .get_result_async(self.pool())
             .await
             .map_err(|e| {
-                public_error_from_diesel_pool_lookup(
+                public_error_from_diesel_pool(
                     e,
-                    ResourceType::VpcRouter,
-                    LookupType::ByName(router_name.as_str().to_owned()),
+                    ErrorHandler::NotFoundByLookup(
+                        ResourceType::VpcRouter,
+                        LookupType::ByName(router_name.as_str().to_owned()),
+                    ),
                 )
             })
     }
@@ -2076,10 +2155,12 @@ impl DataStore {
             .get_result_async(self.pool())
             .await
             .map_err(|e| {
-                public_error_from_diesel_pool_create(
+                public_error_from_diesel_pool(
                     e,
-                    ResourceType::VpcRouter,
-                    name.as_str(),
+                    ErrorHandler::Conflict(
+                        ResourceType::VpcRouter,
+                        name.as_str(),
+                    ),
                 )
             })?;
         Ok(router)
@@ -2097,10 +2178,12 @@ impl DataStore {
             .get_result_async(self.pool())
             .await
             .map_err(|e| {
-                public_error_from_diesel_pool_lookup(
+                public_error_from_diesel_pool(
                     e,
-                    ResourceType::VpcRouter,
-                    LookupType::ById(*router_id),
+                    ErrorHandler::NotFoundByLookup(
+                        ResourceType::VpcRouter,
+                        LookupType::ById(*router_id),
+                    ),
                 )
             })?;
         Ok(())
@@ -2120,10 +2203,12 @@ impl DataStore {
             .execute_async(self.pool())
             .await
             .map_err(|e| {
-                public_error_from_diesel_pool_lookup(
+                public_error_from_diesel_pool(
                     e,
-                    ResourceType::VpcRouter,
-                    LookupType::ById(*router_id),
+                    ErrorHandler::NotFoundByLookup(
+                        ResourceType::VpcRouter,
+                        LookupType::ById(*router_id),
+                    ),
                 )
             })?;
         Ok(())
@@ -2142,7 +2227,7 @@ impl DataStore {
             .select(RouterRoute::as_select())
             .load_async::<db::model::RouterRoute>(self.pool())
             .await
-            .map_err(public_error_from_diesel_pool_shouldnt_fail)
+            .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
     }
 
     pub async fn router_route_fetch_by_name(
@@ -2160,10 +2245,12 @@ impl DataStore {
             .get_result_async(self.pool())
             .await
             .map_err(|e| {
-                public_error_from_diesel_pool_lookup(
+                public_error_from_diesel_pool(
                     e,
-                    ResourceType::RouterRoute,
-                    LookupType::ByName(route_name.as_str().to_owned()),
+                    ErrorHandler::NotFoundByLookup(
+                        ResourceType::RouterRoute,
+                        LookupType::ByName(route_name.as_str().to_owned()),
+                    ),
                 )
             })
     }
@@ -2188,10 +2275,12 @@ impl DataStore {
                 lookup_type: LookupType::ById(router_id),
             },
             AsyncInsertError::DatabaseError(e) => {
-                public_error_from_diesel_pool_create(
+                public_error_from_diesel_pool(
                     e,
-                    ResourceType::RouterRoute,
-                    name.as_str(),
+                    ErrorHandler::Conflict(
+                        ResourceType::RouterRoute,
+                        name.as_str(),
+                    ),
                 )
             }
         })
@@ -2209,10 +2298,12 @@ impl DataStore {
             .get_result_async(self.pool())
             .await
             .map_err(|e| {
-                public_error_from_diesel_pool_lookup(
+                public_error_from_diesel_pool(
                     e,
-                    ResourceType::RouterRoute,
-                    LookupType::ById(*route_id),
+                    ErrorHandler::NotFoundByLookup(
+                        ResourceType::RouterRoute,
+                        LookupType::ById(*route_id),
+                    ),
                 )
             })?;
         Ok(())
@@ -2232,10 +2323,12 @@ impl DataStore {
             .execute_async(self.pool())
             .await
             .map_err(|e| {
-                public_error_from_diesel_pool_lookup(
+                public_error_from_diesel_pool(
                     e,
-                    ResourceType::RouterRoute,
-                    LookupType::ById(*route_id),
+                    ErrorHandler::NotFoundByLookup(
+                        ResourceType::RouterRoute,
+                        LookupType::ById(*route_id),
+                    ),
                 )
             })?;
         Ok(())
@@ -2336,7 +2429,7 @@ impl DataStore {
             .select(UserBuiltin::as_select())
             .load_async::<UserBuiltin>(self.pool_authorized(opctx).await?)
             .await
-            .map_err(public_error_from_diesel_pool_shouldnt_fail)
+            .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
     }
 
     pub async fn user_builtin_fetch(
@@ -2360,10 +2453,12 @@ impl DataStore {
             .first_async::<UserBuiltin>(self.pool_authorized(opctx).await?)
             .await
             .map_err(|e| {
-                public_error_from_diesel_pool_lookup(
+                public_error_from_diesel_pool(
                     e,
-                    ResourceType::User,
-                    LookupType::ByName(name.as_str().to_owned()),
+                    ErrorHandler::NotFoundByLookup(
+                        ResourceType::User,
+                        LookupType::ByName(name.as_str().to_owned()),
+                    ),
                 )
             })
     }
@@ -2405,7 +2500,9 @@ impl DataStore {
             .do_nothing()
             .execute_async(self.pool_authorized(opctx).await?)
             .await
-            .map_err(public_error_from_diesel_pool_shouldnt_fail)?;
+            .map_err(|e| {
+                public_error_from_diesel_pool(e, ErrorHandler::Server)
+            })?;
         info!(opctx.log, "created {} built-in users", count);
         Ok(())
     }
@@ -2426,7 +2523,7 @@ impl DataStore {
         .select(RoleBuiltin::as_select())
         .load_async::<RoleBuiltin>(self.pool_authorized(opctx).await?)
         .await
-        .map_err(public_error_from_diesel_pool_shouldnt_fail)
+        .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
     }
 
     pub async fn role_builtin_fetch(
@@ -2456,10 +2553,12 @@ impl DataStore {
             .first_async::<RoleBuiltin>(self.pool_authorized(opctx).await?)
             .await
             .map_err(|e| {
-                public_error_from_diesel_pool_lookup(
+                public_error_from_diesel_pool(
                     e,
-                    ResourceType::Role,
-                    LookupType::ByName(String::from(name)),
+                    ErrorHandler::NotFoundByLookup(
+                        ResourceType::Role,
+                        LookupType::ByName(String::from(name)),
+                    ),
                 )
             })
     }
@@ -2491,7 +2590,9 @@ impl DataStore {
             .do_nothing()
             .execute_async(self.pool_authorized(opctx).await?)
             .await
-            .map_err(public_error_from_diesel_pool_shouldnt_fail)?;
+            .map_err(|e| {
+                public_error_from_diesel_pool(e, ErrorHandler::Server)
+            })?;
         info!(opctx.log, "created {} built-in roles", count);
         Ok(())
     }
@@ -2519,7 +2620,9 @@ impl DataStore {
             .do_nothing()
             .execute_async(self.pool_authorized(opctx).await?)
             .await
-            .map_err(public_error_from_diesel_pool_shouldnt_fail)?;
+            .map_err(|e| {
+                public_error_from_diesel_pool(e, ErrorHandler::Server)
+            })?;
         info!(opctx.log, "created {} built-in role assignments", count);
         Ok(())
     }
@@ -2552,7 +2655,7 @@ impl DataStore {
                 self.pool_authorized(opctx).await?,
             )
             .await
-            .map_err(public_error_from_diesel_pool_shouldnt_fail)
+            .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
     }
 }
 
