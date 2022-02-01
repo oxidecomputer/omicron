@@ -432,8 +432,8 @@ pub struct ProjectChild {
 }
 
 impl ProjectChild {
-    pub fn id(&self) -> &Uuid {
-        &self.resource_id
+    pub fn id(&self) -> Uuid {
+        self.resource_id
     }
 }
 
@@ -472,3 +472,6 @@ impl ApiResourceError for ProjectChild {
         self.lookup_type.clone().into_not_found(self.resource_type)
     }
 }
+
+pub type Disk = ProjectChild;
+pub type Instance = ProjectChild;

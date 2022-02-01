@@ -33,7 +33,6 @@ use omicron_common::api::external;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::DeleteResult;
-use omicron_common::api::external::Disk;
 use omicron_common::api::external::DiskState;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::IdentityMetadataCreateParams;
@@ -43,7 +42,6 @@ use omicron_common::api::external::Ipv6Net;
 use omicron_common::api::external::ListResult;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
-use omicron_common::api::external::LookupType;
 use omicron_common::api::external::PaginationOrder;
 use omicron_common::api::external::ResourceType;
 use omicron_common::api::external::RouteDestination;
@@ -726,29 +724,22 @@ impl Nexus {
         Ok(disk_created)
     }
 
-    pub async fn project_lookup_disk(
+    pub async fn disk_fetch(
         &self,
+        opctx: &OpContext,
         organization_name: &Name,
         project_name: &Name,
         disk_name: &Name,
-    ) -> LookupResult<(db::model::Disk, authz::ProjectChild)> {
+    ) -> LookupResult<db::model::Disk> {
         let authz_project = self
             .db_datastore
             .project_lookup_by_path(organization_name, project_name)
             .await?;
-        let disk = self
+        Ok(self
             .db_datastore
-            .disk_fetch_by_name(&authz_project.id(), disk_name)
-            .await?;
-        let disk_id = disk.id();
-        Ok((
-            disk,
-            authz_project.child_generic(
-                ResourceType::Disk,
-                disk_id,
-                LookupType::from(&disk_name.0),
-            ),
-        ))
+            .disk_fetch(opctx, &authz_project, disk_name)
+            .await?
+            .1)
     }
 
     pub async fn project_delete_disk(
@@ -758,8 +749,9 @@ impl Nexus {
         project_name: &Name,
         disk_name: &Name,
     ) -> DeleteResult {
-        let (disk, authz_disk) = self
-            .project_lookup_disk(organization_name, project_name, disk_name)
+        let authz_disk = self
+            .db_datastore
+            .disk_lookup_by_path(organization_name, project_name, disk_name)
             .await?;
 
         // TODO: We need to sort out the authorization checks.
@@ -771,7 +763,7 @@ impl Nexus {
         opctx.authorize(authz::Action::Delete, &authz_disk).await?;
 
         let saga_params =
-            Arc::new(sagas::ParamsDiskDelete { disk_id: disk.id() });
+            Arc::new(sagas::ParamsDiskDelete { disk_id: authz_disk.id() });
         self.execute_saga(
             Arc::clone(&sagas::SAGA_DISK_DELETE_TEMPLATE),
             sagas::SAGA_DISK_DELETE_NAME,
@@ -1272,41 +1264,11 @@ impl Nexus {
     }
 
     /**
-     * Fetch information about whether this disk is attached to this instance.
-     */
-    pub async fn instance_get_disk(
-        &self,
-        organization_name: &Name,
-        project_name: &Name,
-        instance_name: &Name,
-        disk_name: &Name,
-    ) -> LookupResult<Disk> {
-        let instance = self
-            .project_lookup_instance(
-                organization_name,
-                project_name,
-                instance_name,
-            )
-            .await?;
-        // TODO: This shouldn't be looking up multiple database entries by name,
-        // it should resolve names to IDs first.
-        let (disk, _) = self
-            .project_lookup_disk(organization_name, project_name, disk_name)
-            .await?;
-        if let Some(instance_id) = disk.runtime_state.attach_instance_id {
-            if instance_id == instance.id() {
-                return Ok(disk.into());
-            }
-        }
-
-        Err(Error::not_found_by_name(ResourceType::Disk, disk_name))
-    }
-
-    /**
      * Attach a disk to an instance.
      */
     pub async fn instance_attach_disk(
         &self,
+        opctx: &OpContext,
         organization_name: &Name,
         project_name: &Name,
         instance_name: &Name,
@@ -1321,8 +1283,13 @@ impl Nexus {
             .await?;
         // TODO: This shouldn't be looking up multiple database entries by name,
         // it should resolve names to IDs first.
-        let (disk, _) = self
-            .project_lookup_disk(organization_name, project_name, disk_name)
+        let authz_project = self
+            .db_datastore
+            .project_lookup_by_path(organization_name, project_name)
+            .await?;
+        let (authz_disk, db_disk) = self
+            .db_datastore
+            .disk_fetch(opctx, &authz_project, disk_name)
             .await?;
         let instance_id = &instance.id();
 
@@ -1359,12 +1326,14 @@ impl Nexus {
             Err(Error::InvalidRequest { message })
         }
 
-        match &disk.state().into() {
+        match &db_disk.state().into() {
             /*
              * If we're already attaching or attached to the requested instance,
              * there's nothing else to do.
+             * TODO-security should it be an error if you're not authorized to
+             * do this and we did not actually have to do anything?
              */
-            DiskState::Attached(id) if id == instance_id => return Ok(disk),
+            DiskState::Attached(id) if id == instance_id => return Ok(db_disk),
 
             /*
              * If the disk is currently attaching or attached to another
@@ -1377,19 +1346,19 @@ impl Nexus {
              */
             DiskState::Attached(id) => {
                 assert_ne!(id, instance_id);
-                return disk_attachment_error(&disk);
+                return disk_attachment_error(&db_disk);
             }
             DiskState::Detaching(_) => {
-                return disk_attachment_error(&disk);
+                return disk_attachment_error(&db_disk);
             }
             DiskState::Attaching(id) if id != instance_id => {
-                return disk_attachment_error(&disk);
+                return disk_attachment_error(&db_disk);
             }
             DiskState::Destroyed => {
-                return disk_attachment_error(&disk);
+                return disk_attachment_error(&db_disk);
             }
             DiskState::Faulted => {
-                return disk_attachment_error(&disk);
+                return disk_attachment_error(&db_disk);
             }
 
             DiskState::Creating => (),
@@ -1400,14 +1369,16 @@ impl Nexus {
         }
 
         self.disk_set_runtime(
-            &disk,
+            opctx,
+            &authz_disk,
+            &db_disk,
             self.instance_sled(&instance).await?,
             sled_agent_client::types::DiskStateRequested::Attached(
                 *instance_id,
             ),
         )
         .await?;
-        self.db_datastore.disk_fetch(&disk.id()).await
+        self.db_datastore.disk_refetch(opctx, &authz_disk).await
     }
 
     /**
@@ -1415,6 +1386,7 @@ impl Nexus {
      */
     pub async fn instance_detach_disk(
         &self,
+        opctx: &OpContext,
         organization_name: &Name,
         project_name: &Name,
         instance_name: &Name,
@@ -1429,21 +1401,30 @@ impl Nexus {
             .await?;
         // TODO: This shouldn't be looking up multiple database entries by name,
         // it should resolve names to IDs first.
-        let (disk, _) = self
-            .project_lookup_disk(organization_name, project_name, disk_name)
+        let authz_project = self
+            .db_datastore
+            .project_lookup_by_path(organization_name, project_name)
+            .await?;
+        let (authz_disk, db_disk) = self
+            .db_datastore
+            .disk_fetch(opctx, &authz_project, disk_name)
             .await?;
         let instance_id = &instance.id();
 
-        match &disk.state().into() {
+        match &db_disk.state().into() {
             /*
              * This operation is a noop if the disk is not attached or already
              * detaching from the same instance.
+             * TODO-security should it be an error if you're not authorized to
+             * do this and we did not actually have to do anything?
              */
-            DiskState::Creating => return Ok(disk),
-            DiskState::Detached => return Ok(disk),
-            DiskState::Destroyed => return Ok(disk),
-            DiskState::Faulted => return Ok(disk),
-            DiskState::Detaching(id) if id == instance_id => return Ok(disk),
+            DiskState::Creating => return Ok(db_disk),
+            DiskState::Detached => return Ok(db_disk),
+            DiskState::Destroyed => return Ok(db_disk),
+            DiskState::Faulted => return Ok(db_disk),
+            DiskState::Detaching(id) if id == instance_id => {
+                return Ok(db_disk)
+            }
 
             /*
              * This operation is not allowed if the disk is attached to some
@@ -1471,12 +1452,17 @@ impl Nexus {
         }
 
         self.disk_set_runtime(
-            &disk,
+            opctx,
+            &authz_disk,
+            &db_disk,
             self.instance_sled(&instance).await?,
             sled_agent_client::types::DiskStateRequested::Detached,
         )
         .await?;
-        Ok(disk)
+        // XXX it seems like there was a bug here where we would report the old
+        // state ("attached") instead of the new one ("detaching").  If not, I'm
+        // missing something about how this used to work.
+        self.db_datastore.disk_refetch(opctx, &authz_disk).await
     }
 
     /**
@@ -1485,19 +1471,23 @@ impl Nexus {
      */
     async fn disk_set_runtime(
         &self,
-        disk: &db::model::Disk,
+        opctx: &OpContext,
+        authz_disk: &authz::Disk,
+        db_disk: &db::model::Disk,
         sa: Arc<SledAgentClient>,
         requested: sled_agent_client::types::DiskStateRequested,
     ) -> Result<(), Error> {
-        let runtime: DiskRuntimeState = disk.runtime().into();
+        let runtime: DiskRuntimeState = db_disk.runtime().into();
+
+        opctx.authorize(authz::Action::Modify, authz_disk).await?;
 
         /*
-         * Ask the SA to begin the state change.  Then update the database to
-         * reflect the new intermediate state.
+         * Ask the Sled Agent to begin the state change.  Then update the
+         * database to reflect the new intermediate state.
          */
         let new_runtime = sa
             .disk_put(
-                &disk.id(),
+                &authz_disk.id(),
                 &sled_agent_client::types::DiskEnsureBody {
                     initial_runtime:
                         sled_agent_client::types::DiskRuntimeState::from(
@@ -1512,7 +1502,7 @@ impl Nexus {
         let new_runtime: DiskRuntimeState = new_runtime.into();
 
         self.db_datastore
-            .disk_update_runtime(&disk.id(), &new_runtime.into())
+            .disk_update_runtime(opctx, authz_disk, &new_runtime.into())
             .await
             .map(|_| ())
     }
@@ -2324,14 +2314,16 @@ impl Nexus {
 
     pub async fn notify_disk_updated(
         &self,
-        id: &Uuid,
+        opctx: &OpContext,
+        id: Uuid,
         new_state: &DiskRuntimeState,
     ) -> Result<(), Error> {
         let log = &self.log;
+        let authz_disk = self.db_datastore.disk_lookup_by_id(id).await?;
 
         let result = self
             .db_datastore
-            .disk_update_runtime(id, &new_state.clone().into())
+            .disk_update_runtime(opctx, &authz_disk, &new_state.clone().into())
             .await;
 
         /* TODO-cleanup commonize with notify_instance_updated() */
@@ -2504,8 +2496,14 @@ impl TestInterfaces for Nexus {
         &self,
         id: &Uuid,
     ) -> Result<Arc<SledAgentClient>, Error> {
-        let disk = self.db_datastore.disk_fetch(id).await?;
-        let instance_id = disk.runtime().attach_instance_id.unwrap();
+        let opctx = OpContext::for_unit_tests(
+            self.log.new(o!()),
+            Arc::clone(&self.db_datastore),
+        );
+        let authz_disk = self.db_datastore.disk_lookup_by_id(*id).await?;
+        let db_disk =
+            self.db_datastore.disk_refetch(&opctx, &authz_disk).await?;
+        let instance_id = db_disk.runtime().attach_instance_id.unwrap();
         let instance = self.db_datastore.instance_fetch(&instance_id).await?;
         self.instance_sled(&instance).await
     }

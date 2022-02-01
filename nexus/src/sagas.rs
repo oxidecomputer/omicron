@@ -740,12 +740,19 @@ async fn sdc_finalize_disk_record(
 ) -> Result<(), ActionError> {
     let osagactx = sagactx.user_data();
     let _params = sagactx.saga_params();
+    let datastore = osagactx.datastore();
 
     let disk_id = sagactx.lookup::<Uuid>("disk_id")?;
     let disk_created = sagactx.lookup::<db::model::Disk>("created_disk")?;
-    osagactx
-        .datastore()
-        .disk_update_runtime(&disk_id, &disk_created.runtime().detach())
+    let authz_disk = datastore
+        .disk_lookup_by_id(disk_id)
+        .await
+        .map_err(ActionError::action_failed)?;
+    datastore
+        .disk_update_runtime_no_auth(
+            &authz_disk,
+            &disk_created.runtime().detach(),
+        )
         .await
         .map_err(ActionError::action_failed)?;
     Ok(())

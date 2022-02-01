@@ -2,6 +2,15 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+// XXX TODO in this change
+// - update "unauthorized" test
+// - make sure we have coverage for the case where you try to attach or detach
+//   an Instance when not authorized.  Make sure we actually check if a change
+//   was made!!  (Should the rest of the "unauthorized.rs" tests also try to
+//   assess this?  Maybe do a GET after doing all the other things and make sure
+//   nothing changed?  Maybe do that and also have the PUT bodies actually make
+//   a change?)
+
 /*!
  * Primary control plane interface for database read and write operations
  */
@@ -561,6 +570,33 @@ impl DataStore {
             })
     }
 
+    /// Fetch an [`authz::Organization`] based on its id
+    pub async fn organization_lookup_by_id(
+        &self,
+        organization_id: Uuid,
+    ) -> LookupResult<authz::Organization> {
+        use db::schema::organization::dsl;
+        // We only do this database lookup to verify that the Organization with
+        // this id exists and hasn't been deleted.
+        let _: Uuid = dsl::organization
+            .filter(dsl::time_deleted.is_null())
+            .filter(dsl::id.eq(organization_id))
+            .select(dsl::id)
+            .first_async(self.pool())
+            .await
+            .map_err(|e| {
+                public_error_from_diesel_pool(
+                    e,
+                    ErrorHandler::NotFoundByLookup(
+                        ResourceType::Organization,
+                        LookupType::ById(organization_id),
+                    ),
+                )
+            })?;
+        Ok(authz::FLEET
+            .organization(organization_id, LookupType::ById(organization_id)))
+    }
+
     /// Look up the id for an organization based on its name
     ///
     /// Returns an [`authz::Organization`] (which makes the id available).
@@ -789,6 +825,32 @@ impl DataStore {
             })
     }
 
+    /// Fetch an [`authz::Project`] based on its id
+    pub async fn project_lookup_by_id(
+        &self,
+        project_id: Uuid,
+    ) -> LookupResult<authz::Project> {
+        use db::schema::project::dsl;
+        let organization_id = dsl::project
+            .filter(dsl::time_deleted.is_null())
+            .filter(dsl::id.eq(project_id))
+            .select(dsl::organization_id)
+            .first_async(self.pool())
+            .await
+            .map_err(|e| {
+                public_error_from_diesel_pool(
+                    e,
+                    ErrorHandler::NotFoundByLookup(
+                        ResourceType::Project,
+                        LookupType::ById(project_id),
+                    ),
+                )
+            })?;
+        let authz_organization =
+            self.organization_lookup_by_id(organization_id).await?;
+        Ok(authz_organization.project(project_id, LookupType::ById(project_id)))
+    }
+
     /// Look up the id for a Project based on its name
     ///
     /// Returns an [`authz::Project`] (which makes the id available).
@@ -814,10 +876,10 @@ impl DataStore {
         authz_org: &authz::Organization,
         name: &Name,
     ) -> LookupResult<(authz::Project, Project)> {
-        let (authz_org, db_org) =
+        let (authz_project, db_project) =
             self.project_lookup_noauthz(authz_org, name).await?;
-        opctx.authorize(authz::Action::Read, &authz_org).await?;
-        Ok((authz_org, db_org))
+        opctx.authorize(authz::Action::Read, &authz_project).await?;
+        Ok((authz_project, db_project))
     }
 
     /// Delete a project
@@ -1143,6 +1205,114 @@ impl DataStore {
      * Disks
      */
 
+    /// Fetches a Disk from the database and returns both the database row
+    /// and an [`authz::Disk`] for doing authz checks
+    ///
+    /// See [`DataStore::organization_lookup_noauthz()`] for intended use cases
+    /// and caveats.
+    // TODO-security See the note on organization_lookup_noauthz().
+    async fn disk_lookup_noauthz(
+        &self,
+        authz_project: &authz::Project,
+        disk_name: &Name,
+    ) -> LookupResult<(authz::Disk, Disk)> {
+        use db::schema::disk::dsl;
+        dsl::disk
+            .filter(dsl::time_deleted.is_null())
+            .filter(dsl::project_id.eq(authz_project.id()))
+            .filter(dsl::name.eq(disk_name.clone()))
+            .select(Disk::as_select())
+            .first_async(self.pool())
+            .await
+            .map_err(|e| {
+                public_error_from_diesel_pool(
+                    e,
+                    ErrorHandler::NotFoundByLookup(
+                        ResourceType::Disk,
+                        LookupType::ByName(disk_name.as_str().to_owned()),
+                    ),
+                )
+            })
+            .map(|d| {
+                (
+                    authz_project.child_generic(
+                        ResourceType::Disk,
+                        d.id(),
+                        LookupType::from(&disk_name.0),
+                    ),
+                    d,
+                )
+            })
+    }
+
+    /// Fetch an [`authz::Disk`] based on its id
+    pub async fn disk_lookup_by_id(
+        &self,
+        disk_id: Uuid,
+    ) -> LookupResult<authz::Disk> {
+        use db::schema::disk::dsl;
+        let project_id = dsl::disk
+            .filter(dsl::time_deleted.is_null())
+            .filter(dsl::id.eq(disk_id))
+            .select(dsl::project_id)
+            .first_async(self.pool())
+            .await
+            .map_err(|e| {
+                public_error_from_diesel_pool(
+                    e,
+                    ErrorHandler::NotFoundByLookup(
+                        ResourceType::Disk,
+                        LookupType::ById(disk_id),
+                    ),
+                )
+            })?;
+        let authz_project = self.project_lookup_by_id(project_id).await?;
+        Ok(authz_project.child_generic(
+            ResourceType::Disk,
+            disk_id,
+            LookupType::ById(disk_id),
+        ))
+    }
+
+    /// Look up the id for a Disk based on its name
+    ///
+    /// Returns an [`authz::Disk`] (which makes the id available).
+    ///
+    /// Like the other "lookup_by_path()" functions, this function does no authz
+    /// checks.
+    // TODO-security For Containers in the hierarchy (like Organizations and
+    // Projects), we don't do an authz check in the "lookup_by_path" functions
+    // because we don't know if the caller has access to do the lookup.  For
+    // leaf resources (like Instances and Disks), though, we do.  We could do
+    // the authz check here, and in disk_fetch_by_id() too.  Should we?
+    pub async fn disk_lookup_by_path(
+        &self,
+        organization_name: &Name,
+        project_name: &Name,
+        disk_name: &Name,
+    ) -> LookupResult<authz::Disk> {
+        let authz_project = self
+            .project_lookup_by_path(organization_name, project_name)
+            .await?;
+        self.disk_lookup_noauthz(&authz_project, disk_name)
+            .await
+            .map(|(d, _)| d)
+    }
+
+    /// Lookup a Disk by name and return the full database record, along with
+    /// an [`authz::Disk`] for subsequent authorization checks
+    pub async fn disk_fetch(
+        &self,
+        opctx: &OpContext,
+        authz_project: &authz::Project,
+        name: &Name,
+    ) -> LookupResult<(authz::Disk, Disk)> {
+        let (authz_disk, db_disk) =
+            self.disk_lookup_noauthz(authz_project, name).await?;
+        opctx.authorize(authz::Action::Read, &authz_disk).await?;
+        Ok((authz_disk, db_disk))
+    }
+
     /**
      * List disks associated with a given instance.
      */
@@ -1213,19 +1383,23 @@ impl DataStore {
             .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
     }
 
-    pub async fn disk_update_runtime(
+    /// See `disk_update_runtime()`.  This version should only be used from
+    /// sagas, which do not currently have authn contexts.
+    // TODO-security Like project_delete_disk_no_auth(), this should be removed
+    // once we have support for authz checks from sagas.
+    pub async fn disk_update_runtime_no_auth(
         &self,
-        disk_id: &Uuid,
+        authz_disk: &authz::Disk,
         new_runtime: &DiskRuntimeState,
     ) -> Result<bool, Error> {
+        let disk_id = authz_disk.id();
         use db::schema::disk::dsl;
-
         let updated = diesel::update(dsl::disk)
             .filter(dsl::time_deleted.is_null())
-            .filter(dsl::id.eq(*disk_id))
+            .filter(dsl::id.eq(disk_id))
             .filter(dsl::state_generation.lt(new_runtime.gen))
             .set(new_runtime.clone())
-            .check_if_exists::<Disk>(*disk_id)
+            .check_if_exists::<Disk>(disk_id)
             .execute_and_check(self.pool())
             .await
             .map(|r| match r.status {
@@ -1235,57 +1409,61 @@ impl DataStore {
             .map_err(|e| {
                 public_error_from_diesel_pool(
                     e,
-                    ErrorHandler::NotFoundByLookup(
-                        ResourceType::Disk,
-                        LookupType::ById(*disk_id),
-                    ),
+                    ErrorHandler::NotFoundByResource(authz_disk),
                 )
             })?;
 
         Ok(updated)
     }
 
-    pub async fn disk_fetch(&self, disk_id: &Uuid) -> LookupResult<Disk> {
-        use db::schema::disk::dsl;
-
-        dsl::disk
-            .filter(dsl::time_deleted.is_null())
-            .filter(dsl::id.eq(*disk_id))
-            .select(Disk::as_select())
-            .get_result_async(self.pool())
-            .await
-            .map_err(|e| {
-                public_error_from_diesel_pool(
-                    e,
-                    ErrorHandler::NotFoundByLookup(
-                        ResourceType::Disk,
-                        LookupType::ById(*disk_id),
-                    ),
-                )
-            })
+    pub async fn disk_update_runtime(
+        &self,
+        opctx: &OpContext,
+        authz_disk: &authz::Disk,
+        new_runtime: &DiskRuntimeState,
+    ) -> Result<bool, Error> {
+        // TODO-security This permission might be overloaded here.  The way disk
+        // runtime updates work is that the caller in Nexus first updates the
+        // Sled Agent to make a change, then updates to the database to reflect
+        // that change.  So by the time we get here, we better have already done
+        // an authz check, or we will have already made some unauthorized change
+        // to the system!  At the same time, we don't want just anybody to be
+        // able to modify the database state.  So we _do_ still want an authz
+        // check here.  Arguably it's for a different kind of action, but it
+        // doesn't seem that useful to split it out right now.
+        opctx.authorize(authz::Action::Modify, authz_disk).await?;
+        self.disk_update_runtime_no_auth(authz_disk, new_runtime).await
     }
 
-    pub async fn disk_fetch_by_name(
+    /// Fetches information about a Disk that the caller has previously fetched
+    ///
+    /// The principal difference from `disk_fetch` is that this function takes
+    /// an `authz_disk` and does a lookup by id rather than the full path of
+    /// names (organization name, project name, and disk name).  This could be
+    /// called `disk_lookup_by_id`, except that you might expect to get back an
+    /// `authz::Disk` as well.  We cannot return you a new `authz::Disk` because
+    /// we don't know how you looked up the Disk in the first place.  However,
+    /// you must have previously looked it up, which is why we call this
+    /// `refetch`.
+    pub async fn disk_refetch(
         &self,
-        project_id: &Uuid,
-        disk_name: &Name,
+        opctx: &OpContext,
+        authz_disk: &authz::Disk,
     ) -> LookupResult<Disk> {
         use db::schema::disk::dsl;
 
+        opctx.authorize(authz::Action::Read, authz_disk).await?;
+
         dsl::disk
             .filter(dsl::time_deleted.is_null())
-            .filter(dsl::project_id.eq(*project_id))
-            .filter(dsl::name.eq(disk_name.clone()))
+            .filter(dsl::id.eq(authz_disk.id()))
             .select(Disk::as_select())
-            .get_result_async(self.pool())
+            .get_result_async(self.pool_authorized(opctx).await?)
             .await
             .map_err(|e| {
                 public_error_from_diesel_pool(
                     e,
-                    ErrorHandler::NotFoundByLookup(
-                        ResourceType::Disk,
-                        LookupType::ByName(disk_name.as_str().to_owned()),
-                    ),
+                    ErrorHandler::NotFoundByResource(authz_disk),
                 )
             })
     }
@@ -2482,6 +2660,7 @@ impl DataStore {
         let builtin_users = [
             // Note: "db_init" is also a builtin user, but that one by necessity
             // is created with the database.
+            &*authn::USER_INTERNAL_API,
             &*authn::USER_SAGA_RECOVERY,
             &*authn::USER_TEST_PRIVILEGED,
             &*authn::USER_TEST_UNPRIVILEGED,

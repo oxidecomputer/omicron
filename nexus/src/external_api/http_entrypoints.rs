@@ -661,8 +661,9 @@ async fn project_disks_get_disk(
     let project_name = &path.project_name;
     let disk_name = &path.disk_name;
     let handler = async {
-        let (disk, _) = nexus
-            .project_lookup_disk(&organization_name, &project_name, &disk_name)
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let disk = nexus
+            .disk_fetch(&opctx, &organization_name, &project_name, &disk_name)
             .await?;
         Ok(HttpResponseOk(disk.into()))
     };
@@ -1027,8 +1028,10 @@ async fn instance_disks_attach(
     let project_name = &path.project_name;
     let instance_name = &path.instance_name;
     let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
         let disk = nexus
             .instance_attach_disk(
+                &opctx,
                 &organization_name,
                 &project_name,
                 &instance_name,
@@ -1057,8 +1060,10 @@ async fn instance_disks_detach(
     let project_name = &path.project_name;
     let instance_name = &path.instance_name;
     let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
         let disk = nexus
             .instance_detach_disk(
+                &opctx,
                 &organization_name,
                 &project_name,
                 &instance_name,
