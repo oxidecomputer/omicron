@@ -231,7 +231,7 @@ function cmd_project_create_demo
 function cmd_project_delete
 {
 	[[ $# != 2 ]] && usage "expected ORGANIZATION_NAME PROJECT_NAME"
-	do_curl "/organizations/$1/projects/$2" -X DELETE
+	do_curl_authn "/organizations/$1/projects/$2" -X DELETE
 }
 
 function cmd_project_get
