@@ -14,6 +14,7 @@ use omicron_common::api::external::DiskState;
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::Instance;
 use omicron_common::api::external::InstanceCpuCount;
+use omicron_common::api::external::Name;
 use omicron_nexus::TestInterfaces as _;
 use omicron_nexus::{external_api::params, Nexus};
 use omicron_sled_agent::sim::SledAgent;
@@ -21,10 +22,8 @@ use sled_agent_client::TestInterfaces as _;
 use std::sync::Arc;
 use uuid::Uuid;
 
-use dropshot::test_util::object_get;
 use dropshot::test_util::objects_list_page;
 use dropshot::test_util::objects_post;
-use dropshot::test_util::read_json;
 use dropshot::test_util::ClientTestContext;
 
 use nexus_test_utils::http_testing::AuthnMode;
@@ -215,16 +214,12 @@ async fn test_disk_create_attach_detach_delete(
         get_disk_detach_url(instance.identity.name.as_str());
 
     // Start attaching the disk to the instance.
-    let mut response = client
-        .make_request(
-            Method::POST,
-            &url_instance_attach_disk,
-            Some(params::DiskIdentifier { disk: disk.identity.name.clone() }),
-            StatusCode::ACCEPTED,
-        )
-        .await
-        .unwrap();
-    let attached_disk: Disk = read_json(&mut response).await;
+    let attached_disk = disk_post(
+        client,
+        &url_instance_attach_disk,
+        disk.identity.name.clone(),
+    )
+    .await;
     let instance_id = &instance.identity.id;
     assert_eq!(attached_disk.identity.name, disk.identity.name);
     assert_eq!(attached_disk.identity.id, disk.identity.id);
@@ -240,28 +235,20 @@ async fn test_disk_create_attach_detach_delete(
 
     // Attach the disk to the same instance.  This should complete immediately
     // with no state change.
-    client
-        .make_request(
-            Method::POST,
-            &url_instance_attach_disk,
-            Some(params::DiskIdentifier { disk: disk.identity.name }),
-            StatusCode::ACCEPTED,
-        )
-        .await
-        .unwrap();
+    let disk =
+        disk_post(client, &url_instance_attach_disk, disk.identity.name).await;
+    assert_eq!(disk.state, DiskState::Attached(instance_id.clone()));
     let disk = disk_get(&client, &disk_url).await;
     assert_eq!(disk.state, DiskState::Attached(instance_id.clone()));
 
     // Begin detaching the disk.
-    client
-        .make_request(
-            Method::POST,
-            &url_instance_detach_disk,
-            Some(params::DiskIdentifier { disk: disk.identity.name.clone() }),
-            StatusCode::ACCEPTED,
-        )
-        .await
-        .unwrap();
+    let disk = disk_post(
+        client,
+        &url_instance_detach_disk,
+        disk.identity.name.clone(),
+    )
+    .await;
+    assert_eq!(disk.state, DiskState::Detaching(instance_id.clone()));
     let disk: Disk = disk_get(&client, &disk_url).await;
     assert_eq!(disk.state, DiskState::Detaching(instance_id.clone()));
 
@@ -271,17 +258,15 @@ async fn test_disk_create_attach_detach_delete(
     assert_eq!(disk.state, DiskState::Detached);
 
     // Since detach is idempotent, we can detach it again.
-    client
-        .make_request(
-            Method::POST,
-            &url_instance_detach_disk,
-            Some(params::DiskIdentifier { disk: disk.identity.name.clone() }),
-            StatusCode::ACCEPTED,
-        )
-        .await
-        .unwrap();
+    let disk = disk_post(
+        client,
+        &url_instance_detach_disk,
+        disk.identity.name.clone(),
+    )
+    .await;
+    assert_eq!(disk.state, DiskState::Detached);
 
-    // A priveleged user should be able to delete the disk.
+    // Delete the disk.
     NexusRequest::object_delete(client, &disk_url)
         .authn_as(AuthnMode::PrivilegedUser)
         .execute()
@@ -386,16 +371,12 @@ async fn test_disk_move_between_instances(cptestctx: &ControlPlaneTestContext) {
         get_disk_detach_url(instance.identity.name.as_str());
 
     // Start attaching the disk to the instance.
-    let mut response = client
-        .make_request(
-            Method::POST,
-            &url_instance_attach_disk,
-            Some(params::DiskIdentifier { disk: disk.identity.name.clone() }),
-            StatusCode::ACCEPTED,
-        )
-        .await
-        .unwrap();
-    let attached_disk: Disk = read_json(&mut response).await;
+    let attached_disk = disk_post(
+        client,
+        &url_instance_attach_disk,
+        disk.identity.name.clone(),
+    )
+    .await;
     let instance_id = &instance.identity.id;
     assert_eq!(attached_disk.identity.name, disk.identity.name);
     assert_eq!(attached_disk.identity.id, disk.identity.id);
@@ -411,16 +392,8 @@ async fn test_disk_move_between_instances(cptestctx: &ControlPlaneTestContext) {
 
     // Attach the disk to the same instance.  This should complete immediately
     // with no state change.
-    client
-        .make_request(
-            Method::POST,
-            &url_instance_attach_disk,
-            Some(params::DiskIdentifier { disk: disk.identity.name }),
-            StatusCode::ACCEPTED,
-        )
-        .await
-        .unwrap();
-    let disk = disk_get(&client, &disk_url).await;
+    let disk =
+        disk_post(client, &url_instance_attach_disk, disk.identity.name).await;
     assert_eq!(disk.state, DiskState::Attached(instance_id.clone()));
 
     // Create a second instance and try to attach the disk to that.  This should
@@ -443,19 +416,24 @@ async fn test_disk_move_between_instances(cptestctx: &ControlPlaneTestContext) {
         get_disk_attach_url(instance2.identity.name.as_str());
     let url_instance2_detach_disk =
         get_disk_detach_url(instance2.identity.name.as_str());
-    let error = client
-        .make_request_error_body(
-            Method::POST,
-            &url_instance2_attach_disk,
-            params::DiskIdentifier { disk: disk.identity.name.clone() },
-            StatusCode::BAD_REQUEST,
-        )
-        .await;
+
+    let error: HttpErrorResponseBody = NexusRequest::new(
+        RequestBuilder::new(client, Method::POST, &url_instance2_attach_disk)
+            .body(Some(&params::DiskIdentifier {
+                disk: disk.identity.name.clone(),
+            }))
+            .expect_status(Some(StatusCode::BAD_REQUEST)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap()
+    .parsed_body()
+    .unwrap();
     assert_eq!(
         error.message,
         format!(
-            "cannot attach disk \"{}\": disk is attached to another \
-         instance",
+            "cannot attach disk \"{}\": disk is attached to another instance",
             DISK_NAME
         )
     );
@@ -464,65 +442,60 @@ async fn test_disk_move_between_instances(cptestctx: &ControlPlaneTestContext) {
     assert_eq!(attached_disk.state, DiskState::Attached(instance_id.clone()));
 
     // Begin detaching the disk.
-    client
-        .make_request(
-            Method::POST,
-            &url_instance_detach_disk,
-            Some(params::DiskIdentifier { disk: disk.identity.name.clone() }),
-            StatusCode::ACCEPTED,
-        )
-        .await
-        .unwrap();
-    let disk: Disk = disk_get(&client, &disk_url).await;
+    let disk =
+        disk_post(client, &url_instance_detach_disk, disk.identity.name).await;
+    assert_eq!(disk.state, DiskState::Detaching(instance_id.clone()));
+    let disk = disk_get(&client, &disk_url).await;
     assert_eq!(disk.state, DiskState::Detaching(instance_id.clone()));
 
     // It's still illegal to attach this disk elsewhere.
-    let error = client
-        .make_request_error_body(
-            Method::POST,
-            &url_instance2_attach_disk,
-            Some(params::DiskIdentifier { disk: disk.identity.name.clone() }),
-            StatusCode::BAD_REQUEST,
-        )
-        .await;
+    let error: HttpErrorResponseBody = NexusRequest::new(
+        RequestBuilder::new(client, Method::POST, &url_instance2_attach_disk)
+            .body(Some(&params::DiskIdentifier {
+                disk: disk.identity.name.clone(),
+            }))
+            .expect_status(Some(StatusCode::BAD_REQUEST)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap()
+    .parsed_body()
+    .unwrap();
     assert_eq!(
         error.message,
         format!(
-            "cannot attach disk \"{}\": disk is attached to another \
-         instance",
+            "cannot attach disk \"{}\": disk is attached to another instance",
             DISK_NAME
         )
     );
 
     // It's even illegal to attach this disk back to the same instance.
-    let error = client
-        .make_request_error_body(
-            Method::POST,
-            &url_instance_attach_disk,
-            Some(params::DiskIdentifier { disk: disk.identity.name.clone() }),
-            StatusCode::BAD_REQUEST,
-        )
-        .await;
-    // TODO-debug the error message here is misleading.
+    let error: HttpErrorResponseBody = NexusRequest::new(
+        RequestBuilder::new(client, Method::POST, &url_instance_attach_disk)
+            .body(Some(&params::DiskIdentifier {
+                disk: disk.identity.name.clone(),
+            }))
+            .expect_status(Some(StatusCode::BAD_REQUEST)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap()
+    .parsed_body()
+    .unwrap();
     assert_eq!(
         error.message,
         format!(
-            "cannot attach disk \"{}\": disk is attached to another \
-         instance",
+            "cannot attach disk \"{}\": disk is attached to another instance",
             DISK_NAME
         )
     );
 
     // However, there's no problem attempting to detach it again.
-    client
-        .make_request(
-            Method::POST,
-            &url_instance_detach_disk,
-            Some(params::DiskIdentifier { disk: disk.identity.name.clone() }),
-            StatusCode::ACCEPTED,
-        )
-        .await
-        .unwrap();
+    let disk =
+        disk_post(client, &url_instance_detach_disk, disk.identity.name).await;
+    assert_eq!(disk.state, DiskState::Detaching(instance_id.clone()));
     let disk = disk_get(&client, &disk_url).await;
     assert_eq!(disk.state, DiskState::Detaching(instance_id.clone()));
 
@@ -532,36 +505,20 @@ async fn test_disk_move_between_instances(cptestctx: &ControlPlaneTestContext) {
     assert_eq!(disk.state, DiskState::Detached);
 
     // Since delete is idempotent, we can detach it again -- from either one.
-    client
-        .make_request(
-            Method::POST,
-            &url_instance_detach_disk,
-            Some(params::DiskIdentifier { disk: disk.identity.name.clone() }),
-            StatusCode::ACCEPTED,
-        )
-        .await
-        .unwrap();
-    client
-        .make_request(
-            Method::POST,
-            &url_instance2_detach_disk,
-            Some(params::DiskIdentifier { disk: disk.identity.name.clone() }),
-            StatusCode::ACCEPTED,
-        )
-        .await
-        .unwrap();
+    let disk =
+        disk_post(client, &url_instance_detach_disk, disk.identity.name).await;
+    assert_eq!(disk.state, DiskState::Detached);
+    let disk =
+        disk_post(client, &url_instance2_detach_disk, disk.identity.name).await;
+    assert_eq!(disk.state, DiskState::Detached);
 
     // Now, start attaching it again to the second instance.
-    let mut response = client
-        .make_request(
-            Method::POST,
-            &url_instance2_attach_disk,
-            Some(params::DiskIdentifier { disk: disk.identity.name.clone() }),
-            StatusCode::ACCEPTED,
-        )
-        .await
-        .unwrap();
-    let attached_disk: Disk = read_json(&mut response).await;
+    let attached_disk = disk_post(
+        client,
+        &url_instance2_attach_disk,
+        disk.identity.name.clone(),
+    )
+    .await;
     let instance2_id = &instance2.identity.id;
     assert_eq!(attached_disk.identity.name, disk.identity.name);
     assert_eq!(attached_disk.identity.id, disk.identity.id);
@@ -572,40 +529,44 @@ async fn test_disk_move_between_instances(cptestctx: &ControlPlaneTestContext) {
 
     // At this point, it's not legal to attempt to attach it to a different
     // instance (the first one).
-    let error = client
-        .make_request_error_body(
-            Method::POST,
-            &url_instance_attach_disk,
-            Some(params::DiskIdentifier { disk: disk.identity.name.clone() }),
-            StatusCode::BAD_REQUEST,
-        )
-        .await;
+    let error: HttpErrorResponseBody = NexusRequest::new(
+        RequestBuilder::new(client, Method::POST, &url_instance_attach_disk)
+            .body(Some(&params::DiskIdentifier {
+                disk: disk.identity.name.clone(),
+            }))
+            .expect_status(Some(StatusCode::BAD_REQUEST)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap()
+    .parsed_body()
+    .unwrap();
     assert_eq!(
         error.message,
         format!(
-            "cannot attach disk \"{}\": disk is attached to another \
-         instance",
+            "cannot attach disk \"{}\": disk is attached to another instance",
             DISK_NAME
         )
     );
 
     // It's fine to attempt another attachment to the same instance.
-    client
-        .make_request(
-            Method::POST,
-            &url_instance2_attach_disk,
-            Some(params::DiskIdentifier { disk: disk.identity.name.clone() }),
-            StatusCode::ACCEPTED,
-        )
-        .await
-        .unwrap();
+    let disk = disk_post(
+        client,
+        &url_instance2_attach_disk,
+        disk.identity.name.clone(),
+    )
+    .await;
+    assert_eq!(disk.state, DiskState::Attaching(instance2_id.clone()));
     let disk = disk_get(&client, &disk_url).await;
     assert_eq!(disk.state, DiskState::Attaching(instance2_id.clone()));
 
     // It's not allowed to delete a disk that's attaching.
-    let error = NexusRequest::new(
-        RequestBuilder::new(client, Method::DELETE, &disk_url)
-            .expect_status(Some(StatusCode::BAD_REQUEST)),
+    let error = NexusRequest::expect_failure(
+        client,
+        StatusCode::BAD_REQUEST,
+        Method::DELETE,
+        &disk_url,
     )
     .authn_as(AuthnMode::PrivilegedUser)
     .execute()
@@ -616,22 +577,22 @@ async fn test_disk_move_between_instances(cptestctx: &ControlPlaneTestContext) {
     assert_eq!(error.message, "disk cannot be deleted in state \"attaching\"");
 
     // Now, begin a detach while the disk is still being attached.
-    client
-        .make_request(
-            Method::POST,
-            &url_instance2_detach_disk,
-            Some(params::DiskIdentifier { disk: disk.identity.name.clone() }),
-            StatusCode::ACCEPTED,
-        )
-        .await
-        .unwrap();
+    let disk = disk_post(
+        client,
+        &url_instance2_detach_disk,
+        disk.identity.name.clone(),
+    )
+    .await;
+    assert_eq!(disk.state, DiskState::Detaching(instance2_id.clone()));
     let disk: Disk = disk_get(&client, &disk_url).await;
     assert_eq!(disk.state, DiskState::Detaching(instance2_id.clone()));
 
     // It's not allowed to delete a disk that's detaching, either.
-    let error = NexusRequest::new(
-        RequestBuilder::new(client, Method::DELETE, &disk_url)
-            .expect_status(Some(StatusCode::BAD_REQUEST)),
+    let error = NexusRequest::expect_failure(
+        client,
+        StatusCode::BAD_REQUEST,
+        Method::DELETE,
+        &disk_url,
     )
     .authn_as(AuthnMode::PrivilegedUser)
     .execute()
@@ -646,6 +607,7 @@ async fn test_disk_move_between_instances(cptestctx: &ControlPlaneTestContext) {
     let disk = disk_get(&client, &disk_url).await;
     assert_eq!(disk.state, DiskState::Detached);
 
+    // Now we can delete the disk.
     NexusRequest::object_delete(client, &disk_url)
         .authn_as(AuthnMode::PrivilegedUser)
         .execute()
@@ -656,9 +618,18 @@ async fn test_disk_move_between_instances(cptestctx: &ControlPlaneTestContext) {
     assert_eq!(disks_list(&client, &disks_url).await.len(), 0);
 
     // We shouldn't find it if we request it explicitly.
-    let error = client
-        .make_request_error(Method::GET, &disk_url, StatusCode::NOT_FOUND)
-        .await;
+    let error: HttpErrorResponseBody = NexusRequest::expect_failure(
+        client,
+        StatusCode::NOT_FOUND,
+        Method::GET,
+        &disk_url,
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap()
+    .parsed_body()
+    .unwrap();
     assert_eq!(
         error.message,
         format!("not found: disk with name \"{}\"", DISK_NAME)
@@ -774,7 +745,13 @@ async fn test_disk_region_creation_failure(
 }
 
 async fn disk_get(client: &ClientTestContext, disk_url: &str) -> Disk {
-    object_get::<Disk>(client, disk_url).await
+    NexusRequest::object_get(client, disk_url)
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .unwrap()
+        .parsed_body()
+        .unwrap()
 }
 
 async fn disks_list(client: &ClientTestContext, list_url: &str) -> Vec<Disk> {
@@ -782,6 +759,24 @@ async fn disks_list(client: &ClientTestContext, list_url: &str) -> Vec<Disk> {
         .await
         .expect("failed to list disks")
         .all_items
+}
+
+async fn disk_post(
+    client: &ClientTestContext,
+    url: &str,
+    disk_name: Name,
+) -> Disk {
+    NexusRequest::new(
+        RequestBuilder::new(client, Method::POST, url)
+            .body(Some(&params::DiskIdentifier { disk: disk_name }))
+            .expect_status(Some(StatusCode::ACCEPTED)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap()
+    .parsed_body()
+    .unwrap()
 }
 
 fn disks_eq(disk1: &Disk, disk2: &Disk) {

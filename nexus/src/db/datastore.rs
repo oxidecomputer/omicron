@@ -4,10 +4,12 @@
 
 // XXX TODO in this change
 // - update "unauthorized" test
+//   - currently failing because there are no datasets to allocate the disk.
+//     what does the disk integration test do?
 // - make sure we have coverage for the case where you try to attach or detach
-//   an Instance when not authorized.  Make sure we actually check if a change
-//   was made!!  (Should the rest of the "unauthorized.rs" tests also try to
-//   assess this?  Maybe do a GET after doing all the other things and make sure
+//   a Disk when not authorized.  Make sure we actually check if a change was
+//   made!!  (Should the rest of the "unauthorized.rs" tests also try to assess
+//   this?  Maybe do a GET after doing all the other things and make sure
 //   nothing changed?  Maybe do that and also have the PUT bodies actually make
 //   a change?)
 
@@ -1284,7 +1286,7 @@ impl DataStore {
     // Projects), we don't do an authz check in the "lookup_by_path" functions
     // because we don't know if the caller has access to do the lookup.  For
     // leaf resources (like Instances and Disks), though, we do.  We could do
-    // the authz check here, and in disk_fetch_by_id() too.  Should we?
+    // the authz check here, and in disk_lookup_by_id() too.  Should we?
     pub async fn disk_lookup_by_path(
         &self,
         organization_name: &Name,

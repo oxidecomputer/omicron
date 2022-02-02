@@ -103,6 +103,11 @@ lazy_static! {
             url: &*DEMO_ORG_PROJECTS_URL,
             body: serde_json::to_value(&*DEMO_PROJECT_CREATE).unwrap(),
         },
+        // Create a Disk in the Project
+        SetupReq {
+            url: &*DEMO_PROJECT_URL_DISKS,
+            body: serde_json::to_value(&*DEMO_DISK_CREATE).unwrap(),
+        },
     ];
 
     // Organization used for testing
@@ -312,6 +317,15 @@ lazy_static! {
                 AllowedMethod::Post(
                     serde_json::to_value(&*DEMO_DISK_CREATE).unwrap()
                 ),
+            ],
+        },
+
+        VerifyEndpoint {
+            url: &*DEMO_DISK_URL,
+            visibility: Visibility::Protected,
+            allowed_methods: vec![
+                AllowedMethod::Get,
+                AllowedMethod::Delete,
             ],
         },
 
