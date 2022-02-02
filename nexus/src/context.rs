@@ -204,8 +204,8 @@ enum OpKind {
     InternalApiRequest,
     /// Background operations in Nexus
     Background,
-    /// Unit tests
-    UnitTest,
+    /// Automated testing (unit tests and integration tests)
+    Test,
 }
 
 impl OpContext {
@@ -323,9 +323,9 @@ impl OpContext {
         }
     }
 
-    /// Returns a context suitable for automated unit tests where an OpContext
-    /// is needed outside of a Dropshot context
-    pub fn for_unit_tests(
+    /// Returns a context suitable for automated tests where an OpContext is
+    /// needed outside of a Dropshot context
+    pub fn for_tests(
         log: slog::Logger,
         datastore: Arc<DataStore>,
     ) -> OpContext {
@@ -344,7 +344,7 @@ impl OpContext {
             created_instant,
             created_walltime,
             metadata: BTreeMap::new(),
-            kind: OpKind::UnitTest,
+            kind: OpKind::Test,
         }
     }
 
@@ -429,7 +429,7 @@ mod test {
         let mut db = test_setup_database(&logctx.log).await;
         let (_, datastore) =
             crate::db::datastore::datastore_test(&logctx, &db).await;
-        let opctx = OpContext::for_unit_tests(logctx.log.new(o!()), datastore);
+        let opctx = OpContext::for_tests(logctx.log.new(o!()), datastore);
 
         // Like in test_background_context(), this is essentially a test of the
         // authorization policy.  The unit tests assume this user can do

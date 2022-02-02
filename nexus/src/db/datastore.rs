@@ -2863,7 +2863,7 @@ pub async fn datastore_test(
     // Create an OpContext with the credentials of "test-privileged" for general
     // testing.
     let opctx =
-        OpContext::for_unit_tests(logctx.log.new(o!()), Arc::clone(&datastore));
+        OpContext::for_tests(logctx.log.new(o!()), Arc::clone(&datastore));
 
     (opctx, datastore)
 }

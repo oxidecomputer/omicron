@@ -2493,7 +2493,7 @@ impl TestInterfaces for Nexus {
         &self,
         id: &Uuid,
     ) -> Result<Arc<SledAgentClient>, Error> {
-        let opctx = OpContext::for_unit_tests(
+        let opctx = OpContext::for_tests(
             self.log.new(o!()),
             Arc::clone(&self.db_datastore),
         );

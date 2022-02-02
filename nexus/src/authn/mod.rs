@@ -113,7 +113,7 @@ impl Context {
 
     /// Returns an authenticated context for a specific user
     ///
-    /// This is used for unit testing the authorization rules.
+    /// This is used for testing.
     pub fn test_context_for_actor(actor_id: Uuid) -> Context {
         Context::context_for_actor(actor_id)
     }
