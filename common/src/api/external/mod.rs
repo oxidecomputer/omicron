@@ -1411,6 +1411,8 @@ pub struct VpcFirewallRule {
     pub action: VpcFirewallRuleAction,
     /// the relative priority of this rule
     pub priority: VpcFirewallRulePriority,
+    /// the VPC to which this rule belongs
+    pub vpc_id: Uuid,
 }
 
 /// A single rule in a VPC firewall

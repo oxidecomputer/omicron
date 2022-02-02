@@ -4987,6 +4987,11 @@
             "description": "timestamp when this resource was last modified",
             "type": "string",
             "format": "date-time"
+          },
+          "vpc_id": {
+            "description": "the VPC to which this rule belongs",
+            "type": "string",
+            "format": "uuid"
           }
         },
         "required": [
@@ -5000,7 +5005,8 @@
           "status",
           "targets",
           "time_created",
-          "time_modified"
+          "time_modified",
+          "vpc_id"
         ]
       },
       "VpcFirewallRuleAction": {
