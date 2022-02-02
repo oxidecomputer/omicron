@@ -86,8 +86,9 @@ impl RequestLatencyHistogram {
 /// HTTP service, in seconds.
 ///
 /// Consumers should construct one `LatencyTracker` for each HTTP service they wish to instrument.
-/// As requests are received, the [`update`] method can be called with the request/response and the
-/// latency for handling the request, and the tracker will store that in the appropriate histogram.
+/// As requests are received, the [`LatencyTracker::update`] method can be called with the
+/// request/response and the latency for handling the request, and the tracker will store that in
+/// the appropriate histogram.
 ///
 /// The `LatencyTracker` can be used to produce metric data collected by `oximeter`.
 #[derive(Debug, Clone)]
@@ -110,7 +111,8 @@ impl LatencyTracker {
     }
 
     /// Build a new tracker for the given `service`, with a histogram that spans the given decades
-    /// (powers of 10). See [`RequestLatencyHistogram::span_decades`] for details on the arguments.
+    /// (powers of 10). See [`RequestLatencyHistogram::with_latency_decades`] for details on the
+    /// arguments.
     pub fn with_latency_decades(
         service: HttpService,
         start_decade: i8,
