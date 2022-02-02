@@ -1459,9 +1459,6 @@ impl Nexus {
             sled_agent_client::types::DiskStateRequested::Detached,
         )
         .await?;
-        // XXX it seems like there was a bug here where we would report the old
-        // state ("attached") instead of the new one ("detaching").  If not, I'm
-        // missing something about how this used to work.
         self.db_datastore.disk_refetch(opctx, &authz_disk).await
     }
 
