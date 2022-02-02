@@ -14,6 +14,7 @@ use nexus_test_utils::http_testing::AuthnMode;
 use nexus_test_utils::http_testing::NexusRequest;
 use nexus_test_utils::http_testing::RequestBuilder;
 use nexus_test_utils::http_testing::TestResponse;
+use nexus_test_utils::resource_helpers::DiskTest;
 use nexus_test_utils::ControlPlaneTestContext;
 use nexus_test_utils_macros::nexus_test;
 use omicron_common::api::external::ByteCount;
@@ -54,6 +55,7 @@ use omicron_nexus::external_api::params;
 //   from the OpenAPI spec?
 #[nexus_test]
 async fn test_unauthorized(cptestctx: &ControlPlaneTestContext) {
+    DiskTest::new(cptestctx).await;
     let client = &cptestctx.external_client;
     let log = &cptestctx.logctx.log;
 
@@ -145,7 +147,7 @@ lazy_static! {
     static ref DEMO_DISK_CREATE: params::DiskCreate =
         params::DiskCreate {
             identity: IdentityMetadataCreateParams {
-                name: DEMO_PROJECT_NAME.clone(),
+                name: DEMO_DISK_NAME.clone(),
                 description: "".parse().unwrap(),
             },
             snapshot_id: None,

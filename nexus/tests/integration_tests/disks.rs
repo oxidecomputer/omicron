@@ -17,7 +17,6 @@ use omicron_common::api::external::InstanceCpuCount;
 use omicron_common::api::external::Name;
 use omicron_nexus::TestInterfaces as _;
 use omicron_nexus::{external_api::params, Nexus};
-use omicron_sled_agent::sim::SledAgent;
 use sled_agent_client::TestInterfaces as _;
 use std::sync::Arc;
 use uuid::Uuid;
@@ -33,6 +32,7 @@ use nexus_test_utils::identity_eq;
 use nexus_test_utils::resource_helpers::create_disk;
 use nexus_test_utils::resource_helpers::create_organization;
 use nexus_test_utils::resource_helpers::create_project;
+use nexus_test_utils::resource_helpers::DiskTest;
 use nexus_test_utils::ControlPlaneTestContext;
 use nexus_test_utils_macros::nexus_test;
 
@@ -70,52 +70,13 @@ async fn create_org_and_project(client: &ClientTestContext) -> Uuid {
     project.identity.id
 }
 
-struct DiskTest {
-    sled_agent: Arc<SledAgent>,
-    zpool_id: Uuid,
-    zpool_size: ByteCount,
-    dataset_ids: Vec<Uuid>,
-    project_id: Uuid,
-}
-
-impl DiskTest {
-    // Creates fake physical storage, an organization, and a project.
-    async fn new(cptestctx: &ControlPlaneTestContext) -> Self {
-        let client = &cptestctx.external_client;
-        let sled_agent = cptestctx.sled_agent.sled_agent.clone();
-
-        // Create a Zpool.
-        let zpool_id = Uuid::new_v4();
-        let zpool_size = ByteCount::from_gibibytes_u32(10);
-        sled_agent.create_zpool(zpool_id, zpool_size.to_bytes()).await;
-
-        // Create multiple Datasets within that Zpool.
-        let dataset_count = 3;
-        let dataset_ids: Vec<_> =
-            (0..dataset_count).map(|_| Uuid::new_v4()).collect();
-        for id in &dataset_ids {
-            sled_agent.create_crucible_dataset(zpool_id, *id).await;
-
-            // By default, regions are created immediately.
-            let crucible = sled_agent.get_crucible_dataset(zpool_id, *id).await;
-            crucible
-                .set_create_callback(Box::new(|_| RegionState::Created))
-                .await;
-        }
-
-        // Create a project for testing.
-        let project_id = create_org_and_project(&client).await;
-
-        Self { sled_agent, zpool_id, zpool_size, dataset_ids, project_id }
-    }
-}
-
 #[nexus_test]
 async fn test_disk_not_found_before_creation(
     cptestctx: &ControlPlaneTestContext,
 ) {
     let client = &cptestctx.external_client;
     DiskTest::new(&cptestctx).await;
+    create_org_and_project(client).await;
     let disks_url = get_disks_url();
 
     // List disks.  There aren't any yet.
@@ -154,7 +115,8 @@ async fn test_disk_create_attach_detach_delete(
     cptestctx: &ControlPlaneTestContext,
 ) {
     let client = &cptestctx.external_client;
-    let test = DiskTest::new(&cptestctx).await;
+    DiskTest::new(&cptestctx).await;
+    let project_id = create_org_and_project(client).await;
     let nexus = &cptestctx.server.apictx.nexus;
     let disks_url = get_disks_url();
 
@@ -163,7 +125,7 @@ async fn test_disk_create_attach_detach_delete(
     let disk = create_disk(&client, ORG_NAME, PROJECT_NAME, DISK_NAME).await;
     assert_eq!(disk.identity.name, DISK_NAME);
     assert_eq!(disk.identity.description, "sells rainsticks");
-    assert_eq!(disk.project_id, test.project_id);
+    assert_eq!(disk.project_id, project_id);
     assert_eq!(disk.snapshot_id, None);
     assert_eq!(disk.size.to_whole_mebibytes(), 1024);
     assert_eq!(disk.state, DiskState::Creating);
@@ -174,7 +136,7 @@ async fn test_disk_create_attach_detach_delete(
     let disk = disk_get(&client, &disk_url).await;
     assert_eq!(disk.identity.name, DISK_NAME);
     assert_eq!(disk.identity.description, "sells rainsticks");
-    assert_eq!(disk.project_id, test.project_id);
+    assert_eq!(disk.project_id, project_id);
     assert_eq!(disk.snapshot_id, None);
     assert_eq!(disk.size.to_whole_mebibytes(), 1024);
     assert_eq!(disk.state, DiskState::Detached);
@@ -292,6 +254,7 @@ async fn test_disk_create_disk_that_already_exists_fails(
 ) {
     let client = &cptestctx.external_client;
     DiskTest::new(&cptestctx).await;
+    create_org_and_project(client).await;
     let disks_url = get_disks_url();
 
     // Create a disk.
@@ -335,6 +298,7 @@ async fn test_disk_move_between_instances(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
     let nexus = &cptestctx.server.apictx.nexus;
     DiskTest::new(&cptestctx).await;
+    create_org_and_project(&client).await;
     let disks_url = get_disks_url();
 
     // Create a disk.
@@ -642,6 +606,7 @@ async fn test_disk_creation_region_requested_then_started(
 ) {
     let client = &cptestctx.external_client;
     let test = DiskTest::new(&cptestctx).await;
+    create_org_and_project(client).await;
 
     // Before we create a disk, set the response from the Crucible Agent:
     // no matter what regions get requested, they'll always *start* as
@@ -674,6 +639,7 @@ async fn test_disk_region_creation_failure(
 ) {
     let client = &cptestctx.external_client;
     let test = DiskTest::new(&cptestctx).await;
+    create_org_and_project(client).await;
 
     // Before we create a disk, set the response from the Crucible Agent:
     // no matter what regions get requested, they'll always fail.
