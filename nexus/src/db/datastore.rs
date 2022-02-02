@@ -2,17 +2,6 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-// XXX TODO in this change
-// - update "unauthorized" test
-//   - currently failing because there are no datasets to allocate the disk.
-//     what does the disk integration test do?
-// - make sure we have coverage for the case where you try to attach or detach
-//   a Disk when not authorized.  Make sure we actually check if a change was
-//   made!!  (Should the rest of the "unauthorized.rs" tests also try to assess
-//   this?  Maybe do a GET after doing all the other things and make sure
-//   nothing changed?  Maybe do that and also have the PUT bodies actually make
-//   a change?)
-
 /*!
  * Primary control plane interface for database read and write operations
  */
