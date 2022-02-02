@@ -449,10 +449,8 @@ async fn sim_instance_migrate(
         nics: vec![],
     };
     let target = sled_agent_client::types::InstanceRuntimeStateRequested {
-        run_state: sled_agent_client::types::InstanceStateRequested::Running,
-        // Note, we clear the migration_id in our target runtime state because
-        // at the end of the migration process in question, the id is reset
-        migration_id: None,
+        run_state: sled_agent_client::types::InstanceStateRequested::Migrating,
+        migration_id: old_runtime.migration_uuid,
     };
 
     let src_propolis_uuid = old_runtime.propolis_uuid;
