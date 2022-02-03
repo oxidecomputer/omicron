@@ -17,6 +17,7 @@ use omicron_sled_agent::{
     common::vlan::VlanID, config::Config as SledConfig, server as sled_server,
 };
 use std::net::SocketAddr;
+use std::path::PathBuf;
 use structopt::StructOpt;
 use uuid::Uuid;
 
@@ -54,29 +55,8 @@ enum Args {
     },
     /// Runs the Sled Agent server.
     Run {
-        /// UUID of the Sled Agent.
-        #[structopt(name = "SA_UUID", parse(try_from_str))]
-        uuid: Uuid,
-
-        /// Socket address of the bootstrap agent.
-        #[structopt(name = "BA_IP:PORT", parse(try_from_str))]
-        bootstrap_agent_addr: SocketAddr,
-
-        /// Socket address of the sled agent.
-        #[structopt(name = "SA_IP:PORT", parse(try_from_str))]
-        sled_agent_addr: SocketAddr,
-
-        /// Socket address of Nexus.
-        #[structopt(name = "NEXUS_IP:PORT", parse(try_from_str))]
-        nexus_addr: SocketAddr,
-
-        /// Optional VLAN, tagged on all guest NICs.
-        #[structopt(long = "vlan")]
-        vlan: Option<VlanID>,
-
-        /// Optional list of zpools managed by Sled agent.
-        #[structopt(long = "zpools", name = "zpools", parse(try_from_str))]
-        zpools: Option<Vec<String>>,
+        #[structopt(name = "CONFIG_FILE_PATH", parse(from_os_str))]
+        config_file: PathBuf,
     },
 }
 
@@ -102,13 +82,16 @@ async fn do_run() -> Result<(), CmdError> {
             }
         },
         Args::Run {
-            uuid,
-            bootstrap_agent_addr,
-            sled_agent_addr,
-            nexus_addr,
-            vlan,
-            zpools,
+            config_file,
+//            uuid,
+//            bootstrap_agent_addr,
+//            sled_agent_addr,
+//            nexus_addr,
+//            vlan,
+//            zpools,
         } => {
+            let config = Config::from_file(config_path)?;
+
             // Configure and run the Bootstrap server.
             let config = BootstrapConfig {
                 id: uuid,

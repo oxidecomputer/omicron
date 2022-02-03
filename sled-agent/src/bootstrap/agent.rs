@@ -155,7 +155,7 @@ impl Agent {
                 for agent in &other_agents {
                     let share = agent.get_share().await
                         .map_err(|e| {
-			    info!(&self.log, "Bootstrap: failed to retreive share from peer: {:?}", e);
+                            info!(&self.log, "Bootstrap: failed to retreive share from peer: {:?}", e);
                             BackoffError::Transient(e)
                         })?;
                     info!(
@@ -224,6 +224,11 @@ impl Agent {
         // This is the responsibility of the sled agent in response to requests
         // from Nexus.
         self.extract(&digests, &tar_source, &destination, "propolis-server")?;
+
+        // TODO: We should also have any Zone Images at this point.
+        // Though we don't want to extract them - that's what the Omicron brand
+        // does - we could at least validate they exist, and have the hashes we
+        // expect?
 
         Ok(())
     }

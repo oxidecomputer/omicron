@@ -258,6 +258,7 @@ async fn do_package(
                 // archive.
                 let tarfile = output_directory
                     .join(format!("{}.tar.gz", package.service_name));
+                println!("Creating zone image: {}", tarfile.to_string_lossy());
                 let file = OpenOptions::new()
                     .write(true)
                     .read(true)
@@ -276,6 +277,7 @@ async fn do_package(
                 // which identifies the format of the rest of the archive.
                 //
                 // See the OMICRON1(5) man page for more detail.
+                println!("Creating tempfile root_json");
                 let mut root_json =
                     tokio::fs::File::from_std(tempfile::tempfile()?);
                 let contents = r#"{"v":"1","t":"layer"}"#;
@@ -293,15 +295,23 @@ async fn do_package(
                 // "root") which will again appear like an absolute path within
                 // the namespace of the running Zone.
                 for path in &package.paths {
+                    println!("Adding path: {:#?}", path);
                     let leading_slash = std::path::MAIN_SEPARATOR.to_string();
                     let dst = Path::new("root")
                         .join(&path.to.strip_prefix(leading_slash)?);
                     archive.append_dir_all(dst, &path.from)?;
                 }
+
+                // Add SMF directory
+                let smf_path = Path::new(&config.smf).join(package.service_name());
+                println!("Adding SMF path: {}", smf_path.to_string_lossy());
+                let dst = Path::new("root").join("var/svc/manifest/site").join(package.service_name());
+                archive.append_dir_all(&dst, &smf_path)?;
+
                 archive.finish()?;
 
+                // Add (and possibly download) blobs
                 // TODO: ... Digests?
-                // TODO: Add expected SMF files, at some point
                 // TODO: Later: Refactor this into a separate library?
                 //       Could be part of "helios-omicron-brand" crate.
             }
@@ -316,8 +326,10 @@ async fn do_package(
 // Adds all files within "path" to "archive".
 //
 // Within the archive, all files are renamed to "dst_prefix/<file_name>".
-fn add_path_to_archive(
-    archive: &mut Builder<std::fs::File>,
+//
+// TODO: Is this redundant w/append_dir_all?
+fn add_path_to_archive<W: std::io::Write>(
+    archive: &mut Builder<W>,
     path: &Path,
     dst_prefix: &Path,
 ) -> Result<()> {

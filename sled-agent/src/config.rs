@@ -7,11 +7,13 @@
 use crate::common::vlan::VlanID;
 use dropshot::ConfigDropshot;
 use dropshot::ConfigLogging;
+use serde::Deserialize;
 use std::net::SocketAddr;
+use std::path::Path;
 use uuid::Uuid;
 
 /// Configuration for a sled agent
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Deserialize)]
 pub struct Config {
     /// Unique id for the sled
     pub id: Uuid,
@@ -25,4 +27,21 @@ pub struct Config {
     pub vlan: Option<VlanID>,
     /// Optional list of zpools to be used as "discovered disks".
     pub zpools: Option<Vec<String>>,
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum ConfigError {
+    #[error("Failed to read config: {0}")]
+    Io(#[from] std::io::Error),
+    #[error("Failed to parse config: {0}")]
+    Parse(#[from] toml::de::Error),
+}
+
+impl Config {
+    pub fn from_file<P: AsRef<Path>>(path: P) -> Result<Config, ConfigError> {
+        let path = path.as_ref();
+        let contents = std::fs::read_to_string(path)?;
+        let config = toml::from_str(&contents)?;
+        Ok(config)
+    }
 }

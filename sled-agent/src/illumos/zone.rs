@@ -151,6 +151,62 @@ impl Zones {
         Ok(())
     }
 
+    fn install_omicron_zone(
+        name: &str,
+        log: &Logger,
+        filesystems: &[zone::Fs],
+        devices: &[zone::Device],
+    ) -> Result<(), Error> {
+        info!(log, "Querying for prescence of zone: {}", name);
+        if let Some(zone) = Self::find(name)? {
+            info!(
+                log,
+                "Found zone: {} in state {:?}",
+                zone.name(),
+                zone.state()
+            );
+            if zone.state() == zone::State::Installed {
+                // TODO: Admittedly, the zone still might be messed up. However,
+                // for now, we assume that "installed" means "good to go".
+                return Ok(());
+            } else {
+                info!(
+                    log,
+                    "Invalid state; uninstalling and deleting zone {}", name
+                );
+                Zones::halt_and_remove(log, zone.name())?;
+            }
+        }
+
+        info!(log, "Configuring new Omicron zone: {}", name);
+        let mut cfg = zone::Config::create(
+            name,
+            /* overwrite= */ true,
+            zone::CreationOptions::Blank,
+        );
+        let path = format!("{}/{}", ZONE_ZFS_DATASET_MOUNTPOINT, name);
+        cfg.get_global()
+            .set_brand("omicron1")
+            .set_path(&path)
+            .set_autoboot(false)
+            .set_ip_type(zone::IpType::Exclusive);
+        for fs in filesystems {
+            cfg.add_fs(&fs);
+        }
+        for device in devices {
+            cfg.add_device(device);
+        }
+        cfg.run().map_err(Error::Configure)?;
+
+        // TODO: This process takes a little while... Consider optimizing.
+        info!(log, "Installing Omicron zone: {}", name);
+
+        let path_to_tarball = std::ffi::OsString::from(&format!("/opt/oxide/{}.tar.gz", name));
+        zone::Adm::new(name).install(&[&path_to_tarball]).map_err(Error::Install)?;
+
+        Ok(())
+    }
+
     fn create_base(
         name: &str,
         log: &Logger,
