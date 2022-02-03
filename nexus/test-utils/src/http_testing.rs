@@ -514,15 +514,17 @@ impl<'a> NexusRequest<'a> {
         testctx: &'a ClientTestContext,
         collection_url: &str,
         initial_params: &str,
-        limit: usize,
+        limit: Option<usize>,
     ) -> Result<Collection<T>, anyhow::Error>
     where
         T: Clone + serde::de::DeserializeOwned,
     {
-        let url_base = format!("{}?limit={}&", collection_url, limit);
         let mut npages = 0;
         let mut all_items = Vec::new();
         let mut next_token: Option<String> = None;
+        const DEFAULT_PAGE_SIZE: usize = 10;
+        let limit = limit.unwrap_or(DEFAULT_PAGE_SIZE);
+        let url_base = format!("{}?limit={}&", collection_url, limit);
 
         loop {
             let url = if let Some(next_token) = &next_token {

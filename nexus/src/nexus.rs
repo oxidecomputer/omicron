@@ -665,20 +665,23 @@ impl Nexus {
 
     pub async fn project_list_disks(
         &self,
+        opctx: &OpContext,
         organization_name: &Name,
         project_name: &Name,
         pagparams: &DataPageParams<'_, Name>,
     ) -> ListResultVec<db::model::Disk> {
-        let project_id = self
+        let authz_project = self
             .db_datastore
             .project_lookup_path(organization_name, project_name)
-            .await?
-            .id();
-        self.db_datastore.project_list_disks(&project_id, pagparams).await
+            .await?;
+        self.db_datastore
+            .project_list_disks(opctx, &authz_project, pagparams)
+            .await
     }
 
     pub async fn project_create_disk(
         self: &Arc<Self>,
+        opctx: &OpContext,
         organization_name: &Name,
         project_name: &Name,
         params: &params::DiskCreate,
@@ -687,6 +690,11 @@ impl Nexus {
             .db_datastore
             .project_lookup_path(organization_name, project_name)
             .await?;
+
+        // TODO-security This may need to be revisited once we implement authz
+        // checks for saga actions.  Even then, though, it still will be correct
+        // (if possibly redundant) to check this here.
+        opctx.authorize(authz::Action::CreateChild, &authz_project).await?;
 
         /*
          * Until we implement snapshots, do not allow disks to be created with a

@@ -549,7 +549,7 @@ async fn test_projects_list(cptestctx: &ControlPlaneTestContext) {
             &client,
             projects_url,
             "",
-            projects_subset,
+            Some(projects_subset),
         )
         .await
         .expect("failed to list projects")
@@ -572,7 +572,7 @@ async fn test_projects_list(cptestctx: &ControlPlaneTestContext) {
             &client,
             projects_url,
             "sort_by=name-ascending",
-            projects_subset,
+            Some(projects_subset),
         )
         .await
         .expect("failed to list projects")
@@ -595,7 +595,7 @@ async fn test_projects_list(cptestctx: &ControlPlaneTestContext) {
             &client,
             projects_url,
             "sort_by=name-descending",
-            projects_subset,
+            Some(projects_subset),
         )
         .await
         .expect("failed to list projects")
@@ -617,7 +617,7 @@ async fn test_projects_list(cptestctx: &ControlPlaneTestContext) {
         &client,
         projects_url,
         "sort_by=id-ascending",
-        projects_subset,
+        Some(projects_subset),
     )
     .await
     .expect("failed to list projects")
@@ -671,7 +671,7 @@ async fn projects_list(
     client: &ClientTestContext,
     projects_url: &str,
 ) -> Vec<Project> {
-    NexusRequest::iter_collection_authn(client, projects_url, "", 10)
+    NexusRequest::iter_collection_authn(client, projects_url, "", None)
         .await
         .expect("failed to list projects")
         .all_items
