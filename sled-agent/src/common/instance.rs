@@ -8,10 +8,10 @@ use chrono::Utc;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::InstanceState;
 use omicron_common::api::internal::nexus::InstanceRuntimeState;
+use omicron_common::api::internal::sled_agent::InstanceRuntimeStateMigrateParams;
 use omicron_common::api::internal::sled_agent::InstanceRuntimeStateRequested;
 use omicron_common::api::internal::sled_agent::InstanceStateRequested;
 use propolis_client::api::InstanceState as PropolisInstanceState;
-use uuid::Uuid;
 
 /// The port propolis-server listens on inside the propolis zone.
 pub const PROPOLIS_PORT: u16 = 12400;
@@ -145,7 +145,7 @@ impl InstanceStates {
             InstanceStateRequested::Stopped => self.request_stopped(),
             InstanceStateRequested::Reboot => self.request_reboot(),
             InstanceStateRequested::Migrating => {
-                self.request_migrating(target.migration_id)
+                self.request_migrating(target.migration_params)
             }
             InstanceStateRequested::Destroyed => self.request_destroyed(),
         }
@@ -165,7 +165,7 @@ impl InstanceStates {
         self.current.time_updated = Utc::now();
         self.desired = desired.map(|run_state| InstanceRuntimeStateRequested {
             run_state,
-            migration_id: None,
+            migration_params: None,
         });
     }
 
@@ -263,16 +263,18 @@ impl InstanceStates {
 
     fn request_migrating(
         &mut self,
-        migration_id: Option<Uuid>,
+        migration_params: Option<InstanceRuntimeStateMigrateParams>,
     ) -> Result<Option<Action>, Error> {
-        let migration_id = migration_id.ok_or_else(|| {
-            Error::invalid_request(
-                "expected migration id to transition to \"migrating\" state",
+        let InstanceRuntimeStateMigrateParams { migration_id, dst_propolis_id } =
+            migration_params.ok_or_else(|| {
+                Error::invalid_request(
+                "expected migration IDs to transition to \"migrating\" state",
             )
-        })?;
+            })?;
         match self.current.run_state {
             // Valid states for a migration request
             InstanceState::Running => {
+                self.current.dst_propolis_uuid = Some(dst_propolis_id);
                 self.current.migration_uuid = Some(migration_id);
                 self.transition(
                     InstanceState::Migrating,
@@ -281,20 +283,32 @@ impl InstanceStates {
                 // We don't return any action here for propolis to take
                 // because the actual migration process will be driven
                 // via a followup request to sled agent.
-                return Ok(None);
+                Ok(None)
             }
             InstanceState::Migrating => match self.current.migration_uuid {
-                // We're already performing the given migration: no-op
-                Some(id) if id == migration_id => return Ok(None),
-                // A different migration is already underway
-                Some(id) => {
-                    return Err(Error::InvalidRequest {
-                        message: format!(
-                            "migration already in progress: {}",
-                            id,
-                        ),
-                    });
+                Some(id) if id == migration_id => {
+                    match self.current.dst_propolis_uuid {
+                        // We're already performing the given migration to the
+                        // given propolis instance: no-op
+                        Some(id) if id == dst_propolis_id => Ok(None),
+                        // The migration ID matched but not the propolis ID: bail out
+                        Some(id) => Err(Error::InvalidRequest {
+                                message: format!(
+                                    "already perfoming given migration to different propolis: {}",
+                                    id
+                                )
+                            }),
+                        // If we're marked as 'Migrating' but have no dst propolis
+                        // ID bail because that shouldn't be possible
+                        None => Err(Error::internal_error(
+                            "migrating but no dst propolis id present"
+                        )),
+                    }
                 }
+                // A different migration is already underway
+                Some(id) => Err(Error::InvalidRequest {
+                    message: format!("migration already in progress: {}", id),
+                }),
                 // If we're marked as 'Migrating' but have no migration
                 // id bail because that shouldn't be possible
                 None => Err(Error::internal_error(
@@ -353,6 +367,7 @@ mod test {
             run_state: State::Creating,
             sled_uuid: uuid::Uuid::new_v4(),
             propolis_uuid: uuid::Uuid::new_v4(),
+            dst_propolis_uuid: None,
             propolis_addr: None,
             migration_uuid: None,
             ncpus: InstanceCpuCount(2),
@@ -381,7 +396,7 @@ mod test {
     }
 
     fn runtime_state(run_state: Requested) -> InstanceRuntimeStateRequested {
-        InstanceRuntimeStateRequested { run_state, migration_id: None }
+        InstanceRuntimeStateRequested { run_state, migration_params: None }
     }
 
     #[test]

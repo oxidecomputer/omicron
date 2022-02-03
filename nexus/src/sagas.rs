@@ -268,6 +268,7 @@ async fn sic_create_instance_record(
         run_state: InstanceState::Creating,
         sled_uuid: sled_uuid?,
         propolis_uuid: propolis_uuid?,
+        dst_propolis_uuid: None,
         propolis_addr: None,
         migration_uuid: None,
         hostname: params.create_params.hostname.clone(),
@@ -308,7 +309,7 @@ async fn sic_instance_ensure(
         sled_agent_client::types::InstanceRuntimeStateRequested {
             run_state:
                 sled_agent_client::types::InstanceStateRequested::Running,
-            migration_id: None,
+            migration_params: None,
         };
     let instance_id = sagactx.lookup::<Uuid>("instance_id")?;
     let sled_uuid = sagactx.lookup::<Uuid>("server_id")?;
@@ -375,15 +376,15 @@ pub fn saga_instance_migrate() -> SagaTemplate<SagaInstanceMigrate> {
     );
 
     template_builder.append(
-        "migrate_instance",
-        "MigratePrep",
-        new_action_noop_undo(sim_migrate_prep),
-    );
-
-    template_builder.append(
         "dst_propolis_id",
         "GeneratePropolisId",
         new_action_noop_undo(saga_generate_uuid),
+    );
+
+    template_builder.append(
+        "migrate_instance",
+        "MigratePrep",
+        new_action_noop_undo(sim_migrate_prep),
     );
 
     template_builder.append(
@@ -411,6 +412,7 @@ async fn sim_migrate_prep(
     let params = sagactx.saga_params();
 
     let migrate_uuid = sagactx.lookup::<Uuid>("migrate_id")?;
+    let dst_propolis_uuid = sagactx.lookup::<Uuid>("dst_propolis_id")?;
 
     // We have sled-agent (via Nexus) attempt to place
     // the instance in a "Migrating" state w/ the given
@@ -418,7 +420,11 @@ async fn sim_migrate_prep(
     // state in the db
     let instance = osagactx
         .nexus()
-        .instance_start_migrate(params.instance_id, migrate_uuid)
+        .instance_start_migrate(
+            params.instance_id,
+            migrate_uuid,
+            dst_propolis_uuid,
+        )
         .await
         .map_err(ActionError::action_failed)?;
     let instance_id = instance.id();
@@ -432,6 +438,7 @@ async fn sim_instance_migrate(
     let osagactx = sagactx.user_data();
     let params = sagactx.saga_params();
 
+    let migration_id = sagactx.lookup::<Uuid>("migrate_id")?;
     let dst_sled_uuid = params.migrate_params.dst_sled_uuid;
     let dst_propolis_uuid = sagactx.lookup::<Uuid>("dst_propolis_id")?;
     let (instance_id, old_runtime) =
@@ -450,7 +457,12 @@ async fn sim_instance_migrate(
     };
     let target = sled_agent_client::types::InstanceRuntimeStateRequested {
         run_state: sled_agent_client::types::InstanceStateRequested::Migrating,
-        migration_id: old_runtime.migration_uuid,
+        migration_params: Some(
+            sled_agent_client::types::InstanceRuntimeStateMigrateParams {
+                migration_id,
+                dst_propolis_id: dst_propolis_uuid,
+            },
+        ),
     };
 
     let src_propolis_uuid = old_runtime.propolis_uuid;

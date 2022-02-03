@@ -23,6 +23,7 @@ impl From<omicron_common::api::internal::nexus::InstanceRuntimeState>
             run_state: s.run_state.into(),
             sled_uuid: s.sled_uuid,
             propolis_uuid: s.propolis_uuid,
+            dst_propolis_uuid: s.dst_propolis_uuid,
             propolis_addr: s.propolis_addr.map(|addr| addr.to_string()),
             migration_uuid: s.migration_uuid,
             ncpus: s.ncpus.into(),
@@ -93,13 +94,23 @@ impl From<omicron_common::api::external::Generation> for types::Generation {
     }
 }
 
+impl From<omicron_common::api::internal::sled_agent::InstanceRuntimeStateMigrateParams>
+    for types::InstanceRuntimeStateMigrateParams
+{
+    fn from(
+        s: omicron_common::api::internal::sled_agent::InstanceRuntimeStateMigrateParams,
+    ) -> Self {
+        Self { migration_id: s.migration_id, dst_propolis_id: s.dst_propolis_id }
+    }
+}
+
 impl From<omicron_common::api::internal::sled_agent::InstanceRuntimeStateRequested>
     for types::InstanceRuntimeStateRequested
 {
     fn from(
         s: omicron_common::api::internal::sled_agent::InstanceRuntimeStateRequested,
     ) -> Self {
-        Self { run_state: s.run_state.into(), migration_id: s.migration_id, }
+        Self { run_state: s.run_state.into(), migration_params: s.migration_params.map(|p| p.into()) }
     }
 }
 
@@ -127,6 +138,7 @@ impl From<types::InstanceRuntimeState>
             run_state: s.run_state.into(),
             sled_uuid: s.sled_uuid,
             propolis_uuid: s.propolis_uuid,
+            dst_propolis_uuid: s.dst_propolis_uuid,
             propolis_addr: s.propolis_addr.map(|addr| addr.parse().unwrap()),
             migration_uuid: s.migration_uuid,
             ncpus: s.ncpus.into(),

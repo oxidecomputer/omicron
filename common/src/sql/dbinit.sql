@@ -252,8 +252,11 @@ CREATE TABLE omicron.public.instance (
      */
     active_server_id UUID,
     /* Identifies the underlying propolis-server backing the instance. */
-    active_propolis_id UUID,
+    active_propolis_id UUID NOT NULL,
     active_propolis_ip INET,
+
+    /* Identifies the target propolis-server during a migration of the instance. */
+    target_propolis_id UUID,
 
     /*
      * Identifies an ongoing migration for this instance.

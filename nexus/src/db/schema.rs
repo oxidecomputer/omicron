@@ -39,6 +39,7 @@ table! {
         state_generation -> Int8,
         active_server_id -> Uuid,
         active_propolis_id -> Uuid,
+        target_propolis_id -> Nullable<Uuid>,
         active_propolis_ip -> Nullable<Inet>,
         migration_id -> Nullable<Uuid>,
         ncpus -> Int8,

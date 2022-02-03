@@ -54,6 +54,7 @@ use omicron_common::api::external::VpcFirewallRuleUpdateParams;
 use omicron_common::api::external::VpcRouterKind;
 use omicron_common::api::internal::nexus;
 use omicron_common::api::internal::nexus::DiskRuntimeState;
+use omicron_common::api::internal::sled_agent::InstanceRuntimeStateMigrateParams;
 use omicron_common::api::internal::sled_agent::InstanceRuntimeStateRequested;
 use omicron_common::api::internal::sled_agent::InstanceStateRequested;
 use omicron_common::backoff;
@@ -1092,7 +1093,7 @@ impl Nexus {
 
         let requested = InstanceRuntimeStateRequested {
             run_state: InstanceStateRequested::Reboot,
-            migration_id: None,
+            migration_params: None,
         };
         self.check_runtime_change_allowed(
             &instance.runtime().clone().into(),
@@ -1126,7 +1127,7 @@ impl Nexus {
 
         let requested = InstanceRuntimeStateRequested {
             run_state: InstanceStateRequested::Running,
-            migration_id: None,
+            migration_params: None,
         };
         self.check_runtime_change_allowed(
             &instance.runtime().clone().into(),
@@ -1160,7 +1161,7 @@ impl Nexus {
 
         let requested = InstanceRuntimeStateRequested {
             run_state: InstanceStateRequested::Stopped,
-            migration_id: None,
+            migration_params: None,
         };
         self.check_runtime_change_allowed(
             &instance.runtime().clone().into(),
@@ -1182,23 +1183,33 @@ impl Nexus {
         &self,
         instance_id: Uuid,
         migration_id: Uuid,
+        dst_propolis_id: Uuid,
     ) -> UpdateResult<db::model::Instance> {
         let instance = self.datastore().instance_fetch(&instance_id).await?;
 
         let requested = InstanceRuntimeStateRequested {
             run_state: InstanceStateRequested::Migrating,
-            migration_id: Some(migration_id),
+            migration_params: Some(InstanceRuntimeStateMigrateParams {
+                migration_id,
+                dst_propolis_id,
+            }),
         };
         self.check_runtime_change_allowed(
             &instance.runtime().clone().into(),
             &requested,
         )?;
-        self.instance_set_runtime(
-            &instance,
-            self.instance_sled(&instance).await?,
-            requested,
-        )
-        .await?;
+        let updated = self
+            .instance_set_runtime(
+                &instance,
+                self.instance_sled(&instance).await?,
+                requested,
+            )
+            .await?;
+        if !updated {
+            return Err(Error::internal_error(
+                "couldn't update instance record for migrate",
+            ));
+        }
         self.db_datastore.instance_fetch(&instance.id()).await
     }
 
@@ -1211,7 +1222,7 @@ impl Nexus {
         instance: &db::model::Instance,
         sa: Arc<SledAgentClient>,
         requested: InstanceRuntimeStateRequested,
-    ) -> Result<(), Error> {
+    ) -> Result<bool, Error> {
         /*
          * Ask the sled agent to begin the state change.  Then update the
          * database to reflect the new intermediate state.  If this update is
@@ -1249,7 +1260,6 @@ impl Nexus {
         self.db_datastore
             .instance_update_runtime(&instance.id(), &new_runtime.into())
             .await
-            .map(|_| ())
     }
 
     /**
