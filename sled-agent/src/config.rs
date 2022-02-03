@@ -17,6 +17,8 @@ use uuid::Uuid;
 pub struct Config {
     /// Unique id for the sled
     pub id: Uuid,
+    /// Address of the Bootstrap Agent interface.
+    pub bootstrap_address: SocketAddr,
     /// IP address and TCP port for Nexus instance
     pub nexus_address: SocketAddr,
     /// Configuration for the sled agent dropshot server

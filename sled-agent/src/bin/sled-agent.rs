@@ -14,12 +14,10 @@ use omicron_sled_agent::bootstrap::{
     config::Config as BootstrapConfig, server as bootstrap_server,
 };
 use omicron_sled_agent::{
-    common::vlan::VlanID, config::Config as SledConfig, server as sled_server,
+    config::Config as SledConfig, server as sled_server,
 };
-use std::net::SocketAddr;
 use std::path::PathBuf;
 use structopt::StructOpt;
-use uuid::Uuid;
 
 #[derive(Debug)]
 enum ApiRequest {
@@ -56,7 +54,7 @@ enum Args {
     /// Runs the Sled Agent server.
     Run {
         #[structopt(name = "CONFIG_FILE_PATH", parse(from_os_str))]
-        config_file: PathBuf,
+        config_path: PathBuf,
     },
 }
 
@@ -82,46 +80,24 @@ async fn do_run() -> Result<(), CmdError> {
             }
         },
         Args::Run {
-            config_file,
-//            uuid,
-//            bootstrap_agent_addr,
-//            sled_agent_addr,
-//            nexus_addr,
-//            vlan,
-//            zpools,
+            config_path,
         } => {
-            let config = Config::from_file(config_path)?;
+            let config = SledConfig::from_file(config_path).map_err(|e| CmdError::Failure(e.to_string()))?;
 
             // Configure and run the Bootstrap server.
-            let config = BootstrapConfig {
-                id: uuid,
+            let bootstrap_config = BootstrapConfig {
+                id: config.id,
                 dropshot: ConfigDropshot {
-                    bind_address: bootstrap_agent_addr,
+                    bind_address: config.bootstrap_address,
                     ..Default::default()
                 },
                 log: ConfigLogging::StderrTerminal {
                     level: ConfigLoggingLevel::Info,
                 },
             };
-            let boot_server = bootstrap_server::Server::start(&config)
+            let boot_server = bootstrap_server::Server::start(&bootstrap_config)
                 .await
                 .map_err(CmdError::Failure)?;
-
-            // Configure and run the Sled server now that we've reached a
-            // quorum.
-            let config = SledConfig {
-                id: uuid,
-                nexus_address: nexus_addr,
-                dropshot: ConfigDropshot {
-                    bind_address: sled_agent_addr,
-                    ..Default::default()
-                },
-                log: ConfigLogging::StderrTerminal {
-                    level: ConfigLoggingLevel::Info,
-                },
-                vlan,
-                zpools,
-            };
 
             let sled_server = sled_server::Server::start(&config)
                 .await
