@@ -28,7 +28,7 @@ use uuid::Uuid;
 /// The query builder is created from a timeseries schema, at which point filters on the fields may
 /// be added. The start and stop time may also be set, incusively or exclusively. After adding all
 /// the desired filtering criteria, the builder is consumed to generate a [`SelectQuery`], which is
-/// used by the [`oximeter_db::Client`] to query the database for field values and measurements
+/// used by the [`crate::Client`] to query the database for field values and measurements
 /// matching those criteria.
 #[derive(Debug, Clone)]
 pub struct SelectQueryBuilder {

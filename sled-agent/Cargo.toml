@@ -36,7 +36,7 @@ structopt = "0.3"
 tar = "0.4"
 tempfile = "3.3"
 thiserror = "1.0"
-tokio = { version = "1.15", features = [ "full" ] }
+tokio = { version = "1.16", features = [ "full" ] }
 tokio-util = { version = "0.6", features = ["codec"] }
 toml = "0.5.6"
 uuid = { version = "0.8", features = [ "serde", "v4" ] }

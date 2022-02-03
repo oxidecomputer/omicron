@@ -540,7 +540,7 @@
         ]
       },
       "InstanceStateRequested": {
-        "description": "Requestable running state of an Instance.\n\nA subset of [`InstanceState`].",
+        "description": "Requestable running state of an Instance.\n\nA subset of [`external::InstanceState`].",
         "type": "string",
         "enum": [
           "running",
