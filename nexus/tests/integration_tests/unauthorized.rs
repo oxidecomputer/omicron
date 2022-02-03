@@ -182,6 +182,8 @@ lazy_static! {
             memory: ByteCount::from_gibibytes_u32(16),
             hostname: String::from("demo-instance"),
         };
+=======
+>>>>>>> main
 }
 
 //

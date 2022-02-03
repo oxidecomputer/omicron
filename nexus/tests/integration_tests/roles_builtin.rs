@@ -46,7 +46,7 @@ async fn test_roles_builtin(cptestctx: &ControlPlaneTestContext) {
     // This endpoint uses a custom pagination scheme that is easy to get wrong.
     // Let's test that all markers do work.
     let roles_paginated =
-        NexusRequest::iter_collection_authn(&testctx, "/roles", "", 1)
+        NexusRequest::iter_collection_authn(&testctx, "/roles", "", Some(1))
             .await
             .expect("failed to iterate all roles");
     assert_eq!(roles, roles_paginated.all_items);
