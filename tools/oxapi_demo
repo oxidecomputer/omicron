@@ -231,7 +231,7 @@ function cmd_project_create_demo
 function cmd_project_delete
 {
 	[[ $# != 2 ]] && usage "expected ORGANIZATION_NAME PROJECT_NAME"
-	do_curl "/organizations/$1/projects/$2" -X DELETE
+	do_curl_authn "/organizations/$1/projects/$2" -X DELETE
 }
 
 function cmd_project_get
@@ -308,14 +308,14 @@ function cmd_instance_attach_disk
 {
 	[[ $# != 4 ]] && usage "expected ORGANIZATION_NAME PROJECT_NAME INSTANCE_NAME DISK_NAME"
 	mkjson disk="$4" |
-		do_curl "/organizations/$1/projects/$2/instances/$3/disks/attach" -X POST -T -
+		do_curl_authn "/organizations/$1/projects/$2/instances/$3/disks/attach" -X POST -T -
 }
 
 function cmd_instance_detach_disk
 {
 	[[ $# != 4 ]] && usage "expected ORGANIZATION_NAME PROJECT_NAME INSTANCE_NAME DISK_NAME"
 	mkjson disk="$4" |
-		do_curl "/organizations/$1/projects/$2/instances/$3/disks/detach" -X POST -T -
+		do_curl_authn "/organizations/$1/projects/$2/instances/$3/disks/detach" -X POST -T -
 }
 
 function cmd_instance_list_disks
@@ -334,7 +334,7 @@ function cmd_disk_create_demo
 function cmd_disk_get
 {
 	[[ $# != 3 ]] && usage "expected ORGANIZATION_NAME PROJECT_NAME DISK_NAME"
-	do_curl "/organizations/$1/projects/$2/disks/$3"
+	do_curl_authn "/organizations/$1/projects/$2/disks/$3"
 }
 
 function cmd_disk_delete

@@ -43,6 +43,8 @@ pub struct ServerContext {
     pub log: Logger,
     /** authenticator for external HTTP requests */
     pub external_authn: authn::external::Authenticator<Arc<ServerContext>>,
+    /** authentication context used for internal HTTP requests */
+    pub internal_authn: Arc<authn::Context>,
     /** authorizer */
     pub authz: Arc<authz::Authz>,
     /** internal API request latency tracker */
@@ -91,6 +93,7 @@ impl ServerContext {
             })
             .collect();
         let external_authn = authn::external::Authenticator::new(nexus_schemes);
+        let internal_authn = Arc::new(authn::Context::internal_api());
         let authz = Arc::new(authz::Authz::new());
         let create_tracker = |name: &str| {
             let target = HttpService { name: name.to_string(), id: config.id };
@@ -145,6 +148,7 @@ impl ServerContext {
             ),
             log,
             external_authn,
+            internal_authn,
             authz,
             internal_latencies,
             external_latencies,
@@ -196,11 +200,12 @@ pub struct OpContext {
 enum OpKind {
     /// Handling an external API request
     ExternalApiRequest,
+    /// Handling an internal API request
+    InternalApiRequest,
     /// Background operations in Nexus
     Background,
-    #[cfg(test)]
-    /// Unit tests
-    UnitTest,
+    /// Automated testing (unit tests and integration tests)
+    Test,
 }
 
 impl OpContext {
@@ -220,12 +225,55 @@ impl OpContext {
             datastore,
         );
 
-        let request = rqctx.request.lock().await;
+        let (log, metadata) =
+            OpContext::log_and_metadata_for_request(rqctx, &authn).await;
+
+        Ok(OpContext {
+            log,
+            authz,
+            authn,
+            created_instant,
+            created_walltime,
+            metadata,
+            kind: OpKind::ExternalApiRequest,
+        })
+    }
+
+    /// Returns a context suitable for use in handling internal API operations
+    // TODO-security this should eventually do some kind of authentication
+    pub async fn for_internal_api(
+        rqctx: &dropshot::RequestContext<Arc<ServerContext>>,
+    ) -> OpContext {
+        let created_instant = Instant::now();
+        let created_walltime = SystemTime::now();
+        let apictx = rqctx.context();
+        let authn = Arc::clone(&apictx.internal_authn);
+        let datastore = Arc::clone(apictx.nexus.datastore());
+        let authz = authz::Context::new(
+            Arc::clone(&authn),
+            Arc::clone(&apictx.authz),
+            datastore,
+        );
+
+        let (log, metadata) =
+            OpContext::log_and_metadata_for_request(rqctx, &authn).await;
+
+        OpContext {
+            log,
+            authz,
+            authn,
+            created_instant,
+            created_walltime,
+            metadata,
+            kind: OpKind::InternalApiRequest,
+        }
+    }
+
+    async fn log_and_metadata_for_request<T: Send + Sync + 'static>(
+        rqctx: &dropshot::RequestContext<T>,
+        authn: &authn::Context,
+    ) -> (slog::Logger, BTreeMap<String, String>) {
         let mut metadata = BTreeMap::new();
-        metadata.insert(String::from("request_id"), rqctx.request_id.clone());
-        metadata
-            .insert(String::from("http_method"), request.method().to_string());
-        metadata.insert(String::from("http_uri"), request.uri().to_string());
 
         let log = if let Some(Actor(actor_id)) = authn.actor() {
             metadata
@@ -240,15 +288,13 @@ impl OpContext {
             rqctx.log.new(o!("authenticated" => false))
         };
 
-        Ok(OpContext {
-            log,
-            authz,
-            authn,
-            created_instant,
-            created_walltime,
-            metadata,
-            kind: OpKind::ExternalApiRequest,
-        })
+        let request = rqctx.request.lock().await;
+        metadata.insert(String::from("request_id"), rqctx.request_id.clone());
+        metadata
+            .insert(String::from("http_method"), request.method().to_string());
+        metadata.insert(String::from("http_uri"), request.uri().to_string());
+
+        (log, metadata)
     }
 
     /// Returns a context suitable for use in background operations in Nexus
@@ -277,10 +323,9 @@ impl OpContext {
         }
     }
 
-    /// Returns a context suitable for automated unit tests where an OpContext
-    /// is needed outside of a Dropshot context
-    #[cfg(test)]
-    pub fn for_unit_tests(
+    /// Returns a context suitable for automated tests where an OpContext is
+    /// needed outside of a Dropshot context
+    pub fn for_tests(
         log: slog::Logger,
         datastore: Arc<DataStore>,
     ) -> OpContext {
@@ -299,7 +344,7 @@ impl OpContext {
             created_instant,
             created_walltime,
             metadata: BTreeMap::new(),
-            kind: OpKind::UnitTest,
+            kind: OpKind::Test,
         }
     }
 
@@ -384,7 +429,7 @@ mod test {
         let mut db = test_setup_database(&logctx.log).await;
         let (_, datastore) =
             crate::db::datastore::datastore_test(&logctx, &db).await;
-        let opctx = OpContext::for_unit_tests(logctx.log.new(o!()), datastore);
+        let opctx = OpContext::for_tests(logctx.log.new(o!()), datastore);
 
         // Like in test_background_context(), this is essentially a test of the
         // authorization policy.  The unit tests assume this user can do

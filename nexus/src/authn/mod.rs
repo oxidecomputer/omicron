@@ -27,6 +27,7 @@
 pub mod external;
 
 pub use crate::db::fixed_data::user_builtin::USER_DB_INIT;
+pub use crate::db::fixed_data::user_builtin::USER_INTERNAL_API;
 pub use crate::db::fixed_data::user_builtin::USER_SAGA_RECOVERY;
 pub use crate::db::fixed_data::user_builtin::USER_TEST_PRIVILEGED;
 pub use crate::db::fixed_data::user_builtin::USER_TEST_UNPRIVILEGED;
@@ -82,6 +83,11 @@ impl Context {
         Context { kind: Kind::Unauthenticated, schemes_tried: vec![] }
     }
 
+    /// Returns an authenticated context for handling internal API contexts
+    pub fn internal_api() -> Context {
+        Context::context_for_actor(USER_INTERNAL_API.id)
+    }
+
     /// Returns an authenticated context for saga recovery
     pub fn internal_saga_recovery() -> Context {
         Context::context_for_actor(USER_SAGA_RECOVERY.id)
@@ -101,15 +107,13 @@ impl Context {
     }
 
     /// Returns an authenticated context for a special testing user
-    #[cfg(test)]
     pub fn internal_test_user() -> Context {
         Context::test_context_for_actor(USER_TEST_PRIVILEGED.id)
     }
 
     /// Returns an authenticated context for a specific user
     ///
-    /// This is used for unit testing the authorization rules.
-    #[cfg(test)]
+    /// This is used for testing.
     pub fn test_context_for_actor(actor_id: Uuid) -> Context {
         Context::context_for_actor(actor_id)
     }
@@ -119,6 +123,7 @@ impl Context {
 mod test {
     use super::Context;
     use super::USER_DB_INIT;
+    use super::USER_INTERNAL_API;
     use super::USER_SAGA_RECOVERY;
     use super::USER_TEST_PRIVILEGED;
 
@@ -142,6 +147,10 @@ mod test {
         let authn = Context::internal_saga_recovery();
         let actor = authn.actor().unwrap();
         assert_eq!(actor.0, USER_SAGA_RECOVERY.id);
+
+        let authn = Context::internal_api();
+        let actor = authn.actor().unwrap();
+        assert_eq!(actor.0, USER_INTERNAL_API.id);
     }
 }
 

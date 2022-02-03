@@ -30,6 +30,7 @@ mod sagas;
 
 pub use config::Config;
 pub use context::ServerContext;
+pub use crucible_agent_client;
 use external_api::http_entrypoints::external_api;
 use internal_api::http_entrypoints::internal_api;
 pub use nexus::Nexus;

@@ -14,11 +14,13 @@ use nexus_test_utils::http_testing::AuthnMode;
 use nexus_test_utils::http_testing::NexusRequest;
 use nexus_test_utils::http_testing::RequestBuilder;
 use nexus_test_utils::http_testing::TestResponse;
+use nexus_test_utils::resource_helpers::DiskTest;
 use nexus_test_utils::ControlPlaneTestContext;
 use nexus_test_utils_macros::nexus_test;
 use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::IdentityMetadataUpdateParams;
+use omicron_common::api::external::InstanceCpuCount;
 use omicron_common::api::external::Name;
 use omicron_nexus::authn;
 use omicron_nexus::authn::external::spoof::HTTP_HEADER_OXIDE_AUTHN_SPOOF;
@@ -54,6 +56,7 @@ use omicron_nexus::external_api::params;
 //   from the OpenAPI spec?
 #[nexus_test]
 async fn test_unauthorized(cptestctx: &ControlPlaneTestContext) {
+    DiskTest::new(cptestctx).await;
     let client = &cptestctx.external_client;
     let log = &cptestctx.logctx.log;
 
@@ -103,6 +106,16 @@ lazy_static! {
             url: &*DEMO_ORG_PROJECTS_URL,
             body: serde_json::to_value(&*DEMO_PROJECT_CREATE).unwrap(),
         },
+        // Create a Disk in the Project
+        SetupReq {
+            url: &*DEMO_PROJECT_URL_DISKS,
+            body: serde_json::to_value(&*DEMO_DISK_CREATE).unwrap(),
+        },
+        // Create an Instance in the Project
+        SetupReq {
+            url: &*DEMO_PROJECT_URL_INSTANCES,
+            body: serde_json::to_value(&*DEMO_INSTANCE_CREATE).unwrap(),
+        },
     ];
 
     // Organization used for testing
@@ -125,6 +138,8 @@ lazy_static! {
         format!("{}/{}", *DEMO_ORG_PROJECTS_URL, *DEMO_PROJECT_NAME);
     static ref DEMO_PROJECT_URL_DISKS: String =
         format!("{}/disks", *DEMO_PROJECT_URL);
+    static ref DEMO_PROJECT_URL_INSTANCES: String =
+        format!("{}/instances", *DEMO_PROJECT_URL);
     static ref DEMO_PROJECT_CREATE: params::ProjectCreate =
         params::ProjectCreate {
             identity: IdentityMetadataCreateParams {
@@ -140,11 +155,32 @@ lazy_static! {
     static ref DEMO_DISK_CREATE: params::DiskCreate =
         params::DiskCreate {
             identity: IdentityMetadataCreateParams {
-                name: DEMO_PROJECT_NAME.clone(),
+                name: DEMO_DISK_NAME.clone(),
                 description: "".parse().unwrap(),
             },
             snapshot_id: None,
             size: ByteCount::from_gibibytes_u32(16),
+        };
+
+    // Instance used for testing
+    static ref DEMO_INSTANCE_NAME: Name = "demo-instance".parse().unwrap();
+    static ref DEMO_INSTANCE_URL: String =
+        format!("{}/{}", *DEMO_PROJECT_URL_INSTANCES, *DEMO_INSTANCE_NAME);
+    static ref DEMO_INSTANCE_DISKS_URL: String =
+        format!("{}/disks", *DEMO_INSTANCE_URL);
+    static ref DEMO_INSTANCE_DISKS_ATTACH_URL: String =
+        format!("{}/attach", *DEMO_INSTANCE_DISKS_URL);
+    static ref DEMO_INSTANCE_DISKS_DETACH_URL: String =
+        format!("{}/detach", *DEMO_INSTANCE_DISKS_URL);
+    static ref DEMO_INSTANCE_CREATE: params::InstanceCreate =
+        params::InstanceCreate {
+            identity: IdentityMetadataCreateParams {
+                name: DEMO_DISK_NAME.clone(),
+                description: "".parse().unwrap(),
+            },
+            ncpus: InstanceCpuCount(1),
+            memory: ByteCount::from_gibibytes_u32(16),
+            hostname: String::from("demo-instance"),
         };
 }
 
@@ -262,7 +298,7 @@ lazy_static! {
                     serde_json::to_value(&params::OrganizationUpdate {
                         identity: IdentityMetadataUpdateParams {
                             name: None,
-                            description: None,
+                            description: Some("different".to_string())
                         }
                     }).unwrap()
                 ),
@@ -297,7 +333,7 @@ lazy_static! {
                     serde_json::to_value(params::ProjectUpdate{
                         identity: IdentityMetadataUpdateParams {
                             name: None,
-                            description: None,
+                            description: Some("different".to_string())
                         },
                     }).unwrap()
                 ),
@@ -315,8 +351,37 @@ lazy_static! {
             ],
         },
 
-        // TODO-coverage The single disk endpoint belongs here, but we've only
-        // implemented authz for DELETE, not GET yet.
+        VerifyEndpoint {
+            url: &*DEMO_DISK_URL,
+            visibility: Visibility::Protected,
+            allowed_methods: vec![
+                AllowedMethod::Get,
+                AllowedMethod::Delete,
+            ],
+        },
+
+        VerifyEndpoint {
+            url: &*DEMO_INSTANCE_DISKS_ATTACH_URL,
+            visibility: Visibility::Protected,
+            allowed_methods: vec![
+                AllowedMethod::Post(
+                    serde_json::to_value(params::DiskIdentifier {
+                        disk: DEMO_DISK_NAME.clone()
+                    }).unwrap()
+                )
+            ],
+        },
+        VerifyEndpoint {
+            url: &*DEMO_INSTANCE_DISKS_DETACH_URL,
+            visibility: Visibility::Protected,
+            allowed_methods: vec![
+                AllowedMethod::Post(
+                    serde_json::to_value(params::DiskIdentifier {
+                        disk: DEMO_DISK_NAME.clone()
+                    }).unwrap()
+                )
+            ],
+        },
 
         VerifyEndpoint {
             url: "/roles",
@@ -418,12 +483,25 @@ async fn verify_endpoint(
     // response.  Otherwise, the test might later succeed by coincidence.  We
     // might find a 404 because of something that actually doesn't exist rather
     // than something that's just hidden from unauthorized users.
-    info!(log, "test: privileged GET");
-    NexusRequest::object_get(client, endpoint.url)
-        .authn_as(AuthnMode::PrivilegedUser)
-        .execute()
-        .await
-        .unwrap();
+    let get_allowed = endpoint
+        .allowed_methods
+        .iter()
+        .any(|allowed| allowed.http_method() == Method::GET);
+    let resource_before: Option<serde_json::Value> = if get_allowed {
+        info!(log, "test: privileged GET");
+        Some(
+            NexusRequest::object_get(client, endpoint.url)
+                .authn_as(AuthnMode::PrivilegedUser)
+                .execute()
+                .await
+                .unwrap()
+                .parsed_body()
+                .unwrap(),
+        )
+    } else {
+        warn!(log, "test: skipping privileged GET (method not allowed)");
+        None
+    };
 
     // For each of the HTTP methods we use in the API as well as TRACE, we'll
     // make several requests to this URL and verify the results.
@@ -515,6 +593,34 @@ async fn verify_endpoint(
                 .await
                 .unwrap();
         verify_response(&response);
+    }
+
+    // If we fetched the resource earlier, fetch it again and check the state.
+    // We're trying to catch cases where an endpoint correctly returns an error
+    // but still applied the result.
+    //
+    // This might seem gratuitous but it's an important check for resources like
+    // disk attachment and detachment, where Nexus reaches out to the Sled Agent
+    // before making a database change.  If Nexus only authorized the request at
+    // the database query (as is our current emphasis), we could wind up making
+    // the change to the system even for unauthorized users (and still returning
+    // an "unauthorized" error)!
+    // TODO-coverage It would be good to check the ETag here as well, once we
+    // provide one.
+    info!(log, "test: compare current resource content with earlier");
+    if let Some(resource_before) = resource_before {
+        let resource_after: serde_json::Value =
+            NexusRequest::object_get(client, endpoint.url)
+                .authn_as(AuthnMode::PrivilegedUser)
+                .execute()
+                .await
+                .unwrap()
+                .parsed_body()
+                .unwrap();
+        assert_eq!(
+            resource_before, resource_after,
+            "resource changed after making a bunch of failed requests"
+        );
     }
 }
 
