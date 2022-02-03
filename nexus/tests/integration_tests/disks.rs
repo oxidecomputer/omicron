@@ -778,7 +778,7 @@ async fn disk_get(client: &ClientTestContext, disk_url: &str) -> Disk {
 }
 
 async fn disks_list(client: &ClientTestContext, list_url: &str) -> Vec<Disk> {
-    NexusRequest::iter_collection_authn(client, list_url, "", 10)
+    NexusRequest::iter_collection_authn(client, list_url, "", None)
         .await
         .expect("failed to list disks")
         .all_items
