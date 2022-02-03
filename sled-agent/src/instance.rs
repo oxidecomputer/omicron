@@ -205,6 +205,9 @@ impl InstanceInner {
     ) -> Result<Reaction, Error> {
         info!(self.log, "Observing new propolis state: {:?}", state);
 
+        let was_migrating = self.state.current().migration_uuid.is_some();
+        let dst_propolis_uuid = self.state.current().dst_propolis_uuid;
+
         // Update the Sled Agent's internal state machine.
         let action = self.state.observe_transition(&state);
         info!(
@@ -214,16 +217,22 @@ impl InstanceInner {
             action
         );
 
-        // Notify Nexus of the state change.
-        self.nexus_client
-            .cpapi_instances_put(
-                self.id(),
-                &nexus_client::types::InstanceRuntimeState::from(
-                    self.state.current(),
-                ),
-            )
-            .await
-            .map_err(|e| Error::Notification(e))?;
+        // If there's no migration, nothing further to consider in updating nexus.
+        // If we are migrating, the destination becomes the source of truth.
+        let update_nexus =
+            !was_migrating || dst_propolis_uuid == Some(*self.propolis_id());
+        if update_nexus {
+            // Notify Nexus of the state change.
+            self.nexus_client
+                .cpapi_instances_put(
+                    self.id(),
+                    &nexus_client::types::InstanceRuntimeState::from(
+                        self.state.current(),
+                    ),
+                )
+                .await
+                .map_err(|e| Error::Notification(e))?;
+        }
 
         // Take the next action, if any.
         if let Some(action) = action {
