@@ -577,8 +577,10 @@ async fn project_disks_get(
     let organization_name = &path.organization_name;
     let project_name = &path.project_name;
     let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
         let disks = nexus
             .project_list_disks(
+                &opctx,
                 organization_name,
                 project_name,
                 &data_page_params_for(&rqctx, &query)?
@@ -616,8 +618,10 @@ async fn project_disks_post(
     let project_name = &path.project_name;
     let new_disk_params = &new_disk.into_inner();
     let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
         let disk = nexus
             .project_create_disk(
+                &opctx,
                 &organization_name,
                 &project_name,
                 &new_disk_params,

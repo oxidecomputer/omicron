@@ -39,7 +39,7 @@ async fn test_projects(cptestctx: &ControlPlaneTestContext) {
         &client,
         &projects_url,
         "",
-        10,
+        None,
     )
     .await
     .expect("failed to list projects")
@@ -62,7 +62,7 @@ async fn test_projects(cptestctx: &ControlPlaneTestContext) {
         &client,
         &format!("/organizations/{}/projects", org2_name),
         "",
-        10,
+        None,
     )
     .await
     .expect("failed to list projects")
