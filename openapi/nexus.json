@@ -4852,6 +4852,14 @@
             "type": "string",
             "format": "uuid"
           },
+          "ipv6_prefix": {
+            "description": "The unique local IPv6 address range for subnets in this VPC",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Ipv6Net"
+              }
+            ]
+          },
           "name": {
             "description": "unique, mutable, user-controlled identifier for each resource",
             "allOf": [
@@ -4885,6 +4893,7 @@
           "description",
           "dns_name",
           "id",
+          "ipv6_prefix",
           "name",
           "project_id",
           "system_router_id",
@@ -4901,6 +4910,14 @@
           },
           "dns_name": {
             "$ref": "#/components/schemas/Name"
+          },
+          "ipv6_prefix": {
+            "nullable": true,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Ipv6Net"
+              }
+            ]
           },
           "name": {
             "$ref": "#/components/schemas/Name"

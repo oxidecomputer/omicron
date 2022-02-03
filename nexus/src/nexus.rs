@@ -14,6 +14,7 @@ use crate::db;
 use crate::db::identity::{Asset, Resource};
 use crate::db::model::DatasetKind;
 use crate::db::model::Name;
+use crate::defaults;
 use crate::external_api::params;
 use crate::internal_api::params::{OximeterInfo, ZpoolPutRequest};
 use crate::populate::populate_start;
@@ -28,7 +29,6 @@ use futures::StreamExt;
 use hex;
 use ipnetwork::Ipv4Network;
 use ipnetwork::Ipv6Network;
-use lazy_static::lazy_static;
 use omicron_common::api::external;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DataPageParams;
@@ -570,6 +570,7 @@ impl Nexus {
                         name: "default".parse().unwrap(),
                         description: "Default VPC".to_string(),
                     },
+                    ipv6_prefix: Some(defaults::random_unique_local_ipv6()?),
                     // TODO-robustness this will need to be None if we decide to
                     // handle the logic around name and dns_name by making
                     // dns_name optional
@@ -1632,7 +1633,7 @@ impl Nexus {
             project_id,
             system_router_id,
             params.clone(),
-        );
+        )?;
         let vpc = self.db_datastore.project_create_vpc(vpc).await?;
 
         // TODO: batch this up with everything above
@@ -1671,7 +1672,7 @@ impl Nexus {
     ) -> CreateResult<()> {
         let rules = db::model::VpcFirewallRule::vec_from_params(
             *vpc_id,
-            DEFAULT_FIREWALL_RULES.clone(),
+            defaults::DEFAULT_FIREWALL_RULES.clone(),
         );
         self.db_datastore.vpc_update_firewall_rules(&vpc_id, rules).await?;
         Ok(())
@@ -2511,46 +2512,4 @@ impl TestInterfaces for Nexus {
     ) -> CreateResult<db::model::ConsoleSession> {
         Ok(self.db_datastore.session_create(session).await?)
     }
-}
-
-lazy_static! {
-    static ref DEFAULT_FIREWALL_RULES: external::VpcFirewallRuleUpdateParams =
-        serde_json::from_str(r#"{
-            "allow-internal-inbound": {
-                "status": "enabled",
-                "direction": "inbound",
-                "targets": [ { "type": "vpc", "value": "default" } ],
-                "filters": { "hosts": [ { "type": "vpc", "value": "default" } ] },
-                "action": "allow",
-                "priority": 65534,
-                "description": "allow inbound traffic to all instances within the VPC if originated within the VPC"
-            },
-            "allow-ssh": {
-                "status": "enabled",
-                "direction": "inbound",
-                "targets": [ { "type": "vpc", "value": "default" } ],
-                "filters": { "ports": [ "22" ], "protocols": [ "TCP" ] },
-                "action": "allow",
-                "priority": 65534,
-                "description": "allow inbound TCP connections on port 22 from anywhere"
-            },
-            "allow-icmp": {
-                "status": "enabled",
-                "direction": "inbound",
-                "targets": [ { "type": "vpc", "value": "default" } ],
-                "filters": { "protocols": [ "ICMP" ] },
-                "action": "allow",
-                "priority": 65534,
-                "description": "allow inbound ICMP traffic from anywhere"
-            },
-            "allow-rdp": {
-                "status": "enabled",
-                "direction": "inbound",
-                "targets": [ { "type": "vpc", "value": "default" } ],
-                "filters": { "ports": [ "3389" ], "protocols": [ "TCP" ] },
-                "action": "allow",
-                "priority": 65534,
-                "description": "allow inbound TCP connections on port 3389 from anywhere"
-            }
-        }"#).unwrap();
 }

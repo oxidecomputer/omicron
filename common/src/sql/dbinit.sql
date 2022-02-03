@@ -387,6 +387,9 @@ CREATE TABLE omicron.public.vpc (
     system_router_id UUID NOT NULL,
     dns_name STRING(63) NOT NULL,
 
+    /* The IPv6 prefix allocated to subnets. */
+    ipv6_prefix INET NOT NULL,
+
     /* Used to ensure that two requests do not concurrently modify the
        VPC's firewall */
     firewall_gen INT NOT NULL

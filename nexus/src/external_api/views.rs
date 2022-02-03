@@ -82,6 +82,9 @@ pub struct Vpc {
     /// id for the system router where subnet default routes are registered
     pub system_router_id: Uuid,
 
+    /// The unique local IPv6 address range for subnets in this VPC
+    pub ipv6_prefix: Ipv6Net,
+
     // TODO-design should this be optional?
     /** The name used for the VPC in DNS. */
     pub dns_name: Name,
@@ -93,6 +96,7 @@ impl Into<Vpc> for model::Vpc {
             identity: self.identity(),
             project_id: self.project_id,
             system_router_id: self.system_router_id,
+            ipv6_prefix: *self.ipv6_prefix,
             dns_name: self.dns_name.0,
         }
     }

@@ -4,7 +4,9 @@
 
 use http::method::Method;
 use http::StatusCode;
+use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::IdentityMetadataUpdateParams;
+use omicron_common::api::external::Ipv6Net;
 use omicron_nexus::external_api::{params, views::Vpc};
 
 use dropshot::test_util::object_get;
@@ -54,12 +56,43 @@ async fn test_vpcs(cptestctx: &ControlPlaneTestContext) {
         .await;
     assert_eq!(error.message, "not found: vpc with name \"just-rainsticks\"");
 
+    /*
+     * Make sure creating a VPC fails if we specify an IPv6 prefix that is
+     * not a valid ULA range.
+     */
+    let bad_prefix = Ipv6Net("2000:1000::/48".parse().unwrap());
+    let _ = client
+        .make_request_error_body(
+            Method::POST,
+            &vpcs_url,
+            params::VpcCreate {
+                identity: IdentityMetadataCreateParams {
+                    name: "just-rainsticks".parse().unwrap(),
+                    description: String::from("vpc description"),
+                },
+                ipv6_prefix: Some(bad_prefix),
+                dns_name: "abc".parse().unwrap(),
+            },
+            StatusCode::BAD_REQUEST,
+        )
+        .await;
+
     /* Create a VPC. */
     let vpc_name = "just-rainsticks";
     let vpc = create_vpc(&client, org_name, project_name, vpc_name).await;
     assert_eq!(vpc.identity.name, "just-rainsticks");
     assert_eq!(vpc.identity.description, "vpc description");
     assert_eq!(vpc.dns_name, "abc");
+    assert_eq!(
+        vpc.ipv6_prefix.prefix(),
+        48,
+        "Expected a 48-bit ULA IPv6 address prefix"
+    );
+    assert_eq!(
+        vpc.ipv6_prefix.ip().segments()[0],
+        0xfd00,
+        "Expected a ULA IPv6 address prefix"
+    );
 
     /* Attempt to create a second VPC with a conflicting name. */
     let error = create_vpc_with_error(
