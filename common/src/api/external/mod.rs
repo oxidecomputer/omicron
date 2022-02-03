@@ -1172,7 +1172,7 @@ pub struct VpcRouter {
 /// This enum itself isn't intended to be used directly but rather as a
 /// delegate for subset enums to not have to re-implement all the base type conversions.
 ///
-/// See https://rfd.shared.oxide.computer/rfd/0021#api-target-strings
+/// See <https://rfd.shared.oxide.computer/rfd/0021#api-target-strings>
 #[derive(Debug, PartialEq, Display, FromStr)]
 pub enum NetworkTarget {
     #[display("vpc:{0}")]
@@ -1435,7 +1435,7 @@ pub struct VpcFirewallRuleUpdate {
 }
 
 /**
- * Updateable properties of a [`Vpc`]'s firewall
+ * Updateable properties of a `Vpc`'s firewall
  * Note that VpcFirewallRules are implicitly created along with a Vpc,
  * so there is no explicit creation.
  */
@@ -1449,7 +1449,7 @@ pub struct VpcFirewallRuleUpdateParams {
 }
 
 /**
- * Response to an update replacing [`Vpc`]'s firewall
+ * Response to an update replacing `Vpc`'s firewall
  */
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 // TODO we're controlling the schemars output, but not the serde

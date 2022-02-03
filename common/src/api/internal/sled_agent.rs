@@ -38,7 +38,7 @@ pub struct InstanceMigrateParams {
 
 /// Requestable running state of an Instance.
 ///
-/// A subset of [`InstanceState`].
+/// A subset of [`external::InstanceState`].
 #[derive(
     Copy,
     Clone,

@@ -23,7 +23,7 @@ hyper = "0.14"
 db-macros = { path = "src/db/db-macros" }
 ipnetwork = "0.18"
 lazy_static = "1.4.0"
-libc = "0.2.114"
+libc = "0.2.116"
 macaddr = { version = "1.0.1", features = [ "serde_std" ]}
 mime_guess = "2.0.3"
 newtype_derive = "0.1.6"
@@ -98,7 +98,7 @@ git = "https://github.com/oxidecomputer/steno"
 branch = "main"
 
 [dependencies.tokio]
-version = "1.15"
+version = "1.16"
 features = [ "full" ]
 
 [dependencies.tokio-postgres]

@@ -17,28 +17,6 @@ use omicron_nexus::external_api::views::Role;
 async fn test_roles_builtin(cptestctx: &ControlPlaneTestContext) {
     let testctx = &cptestctx.external_client;
 
-    // Standard authn / authz checks
-    NexusRequest::expect_failure(
-        testctx,
-        StatusCode::UNAUTHORIZED,
-        Method::GET,
-        "/roles",
-    )
-    .execute()
-    .await
-    .unwrap();
-
-    NexusRequest::expect_failure(
-        testctx,
-        StatusCode::FORBIDDEN,
-        Method::GET,
-        "/roles",
-    )
-    .authn_as(AuthnMode::UnprivilegedUser)
-    .execute()
-    .await
-    .unwrap();
-
     // Success cases
     let roles = NexusRequest::object_get(&testctx, "/roles")
         .authn_as(AuthnMode::PrivilegedUser)
@@ -91,24 +69,6 @@ async fn test_roles_builtin(cptestctx: &ControlPlaneTestContext) {
                 .unwrap();
         assert_eq!(one_role, *r);
     }
-
-    // Standard authnn/authz checks
-    RequestBuilder::new(testctx, Method::GET, "/roles/fleet.admin")
-        .expect_status(Some(StatusCode::NOT_FOUND))
-        .execute()
-        .await
-        .unwrap();
-
-    NexusRequest::expect_failure(
-        testctx,
-        StatusCode::NOT_FOUND,
-        Method::GET,
-        "/roles/fleet.admin",
-    )
-    .authn_as(AuthnMode::UnprivilegedUser)
-    .execute()
-    .await
-    .unwrap();
 
     // Invalid name: missing "."
     NexusRequest::new(
