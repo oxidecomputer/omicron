@@ -52,9 +52,8 @@ use omicron_common::api::external::RouterRouteCreateParams;
 use omicron_common::api::external::RouterRouteKind;
 use omicron_common::api::external::RouterRouteUpdateParams;
 use omicron_common::api::external::Saga;
-use omicron_common::api::external::VpcFirewallRule;
 use omicron_common::api::external::VpcFirewallRuleUpdateParams;
-use omicron_common::api::external::VpcFirewallRuleUpdateResult;
+use omicron_common::api::external::VpcFirewallRules;
 use omicron_common::api::external::VpcRouter;
 use omicron_common::api::external::VpcRouterKind;
 use ref_cast::RefCast;
@@ -1460,15 +1459,13 @@ async fn subnets_ips_get(
 }]
 async fn vpc_firewall_rules_get(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
-    query_params: Query<PaginatedByName>,
     path_params: Path<VpcPathParam>,
-) -> Result<HttpResponseOk<ResultsPage<VpcFirewallRule>>, HttpError> {
+) -> Result<HttpResponseOk<VpcFirewallRules>, HttpError> {
     // TODO: Check If-Match and fail if the ETag doesn't match anymore.
     // Without this check, if firewall rules change while someone is listing
     // the rules, they will see a mix of the old and new rules.
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
-    let query = query_params.into_inner();
     let path = path_params.into_inner();
     let handler = async {
         let rules = nexus
@@ -1476,14 +1473,12 @@ async fn vpc_firewall_rules_get(
                 &path.organization_name,
                 &path.project_name,
                 &path.vpc_name,
-                &data_page_params_for(&rqctx, &query)?
-                    .map_name(|n| Name::ref_cast(n)),
             )
             .await?
             .into_iter()
             .map(|rule| rule.into())
             .collect();
-        Ok(HttpResponseOk(ScanByName::results_page(&query, rules)?))
+        Ok(HttpResponseOk(rules))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
@@ -1500,8 +1495,9 @@ async fn vpc_firewall_rules_put(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<VpcPathParam>,
     router_params: TypedBody<VpcFirewallRuleUpdateParams>,
-) -> Result<HttpResponseOk<VpcFirewallRuleUpdateResult>, HttpError> {
+) -> Result<HttpResponseOk<VpcFirewallRules>, HttpError> {
     // TODO: Check If-Match and fail if the ETag doesn't match anymore.
+    // TODO: limit size of the ruleset because the GET endpoint is not paginated
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
     let path = path_params.into_inner();

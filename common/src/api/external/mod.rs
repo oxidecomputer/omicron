@@ -1415,6 +1415,14 @@ pub struct VpcFirewallRule {
     pub vpc_id: Uuid,
 }
 
+/**
+ * Collection of a [`Vpc`]'s firewall rules
+ */
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct VpcFirewallRules {
+    pub rules: Vec<VpcFirewallRule>,
+}
+
 /// A single rule in a VPC firewall
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize, JsonSchema)]
 pub struct VpcFirewallRuleUpdate {
@@ -1446,15 +1454,7 @@ pub struct VpcFirewallRuleUpdateParams {
     pub rules: Vec<VpcFirewallRuleUpdate>,
 }
 
-/**
- * Response to an update replacing `Vpc`'s firewall
- */
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-pub struct VpcFirewallRuleUpdateResult {
-    pub rules: Vec<VpcFirewallRule>,
-}
-
-impl FromIterator<VpcFirewallRule> for VpcFirewallRuleUpdateResult {
+impl FromIterator<VpcFirewallRule> for VpcFirewallRules {
     fn from_iter<T>(iter: T) -> Self
     where
         T: IntoIterator<Item = VpcFirewallRule>,

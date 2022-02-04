@@ -51,7 +51,7 @@ use omicron_common::api::external::RouterRouteKind;
 use omicron_common::api::external::RouterRouteUpdateParams;
 use omicron_common::api::external::UpdateResult;
 use omicron_common::api::external::VpcFirewallRuleUpdateParams;
-use omicron_common::api::external::VpcFirewallRuleUpdateResult;
+use omicron_common::api::external::VpcFirewallRules;
 use omicron_common::api::external::VpcRouterKind;
 use omicron_common::api::internal::nexus;
 use omicron_common::api::internal::nexus::DiskRuntimeState;
@@ -1735,16 +1735,13 @@ impl Nexus {
         organization_name: &Name,
         project_name: &Name,
         vpc_name: &Name,
-        pagparams: &DataPageParams<'_, Name>,
     ) -> ListResultVec<db::model::VpcFirewallRule> {
         let vpc = self
             .project_lookup_vpc(organization_name, project_name, vpc_name)
             .await?;
-        let subnets = self
-            .db_datastore
-            .vpc_list_firewall_rules(&vpc.id(), pagparams)
-            .await?;
-        Ok(subnets)
+        let rules =
+            self.db_datastore.vpc_list_firewall_rules(&vpc.id()).await?;
+        Ok(rules)
     }
 
     pub async fn vpc_update_firewall_rules(
@@ -1753,7 +1750,7 @@ impl Nexus {
         project_name: &Name,
         vpc_name: &Name,
         params: &VpcFirewallRuleUpdateParams,
-    ) -> UpdateResult<VpcFirewallRuleUpdateResult> {
+    ) -> UpdateResult<VpcFirewallRules> {
         let vpc = self
             .project_lookup_vpc(organization_name, project_name, vpc_name)
             .await?;

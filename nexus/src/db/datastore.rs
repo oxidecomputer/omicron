@@ -2043,13 +2043,13 @@ impl DataStore {
     pub async fn vpc_list_firewall_rules(
         &self,
         vpc_id: &Uuid,
-        pagparams: &DataPageParams<'_, Name>,
     ) -> ListResultVec<VpcFirewallRule> {
         use db::schema::vpc_firewall_rule::dsl;
 
-        paginated(dsl::vpc_firewall_rule, dsl::name, &pagparams)
+        dsl::vpc_firewall_rule
             .filter(dsl::time_deleted.is_null())
             .filter(dsl::vpc_id.eq(*vpc_id))
+            .order(dsl::name.asc())
             .select(VpcFirewallRule::as_select())
             .load_async(self.pool())
             .await
