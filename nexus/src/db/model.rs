@@ -1836,6 +1836,7 @@ impl Into<external::VpcFirewallRule> for VpcFirewallRule {
             },
             action: self.action.into(),
             priority: self.priority.into(),
+            vpc_id: self.vpc_id,
         }
     }
 }

@@ -11,10 +11,12 @@ use omicron_common::api::external::{
     VpcFirewallRuleProtocol, VpcFirewallRuleStatus, VpcFirewallRuleTarget,
     VpcFirewallRuleUpdate, VpcFirewallRuleUpdateParams,
 };
+use omicron_nexus::external_api::views::Vpc;
 use std::collections::HashMap;
 use std::convert::TryFrom;
+use uuid::Uuid;
 
-use dropshot::test_util::{object_delete, objects_list_page};
+use dropshot::test_util::{object_delete, object_get, objects_list_page};
 
 use nexus_test_utils::resource_helpers::{
     create_organization, create_project, create_vpc,
@@ -35,22 +37,27 @@ async fn test_vpc_firewall(cptestctx: &ControlPlaneTestContext) {
     create_project(&client, &org_name, &project_name).await;
 
     // Each project has a default VPC. Make sure it has the default rules.
+    let default_vpc_url = format!("{}/default", vpcs_url);
+    let default_vpc = object_get::<Vpc>(client, &default_vpc_url).await;
+
     let default_vpc_firewall = format!("{}/default/firewall/rules", vpcs_url);
     let rules =
         objects_list_page::<VpcFirewallRule>(client, &default_vpc_firewall)
             .await
             .items;
+    assert!(rules.iter().all(|r| r.vpc_id == default_vpc.identity.id));
     assert!(is_default_firewall_rules(&rules));
 
     // Create another VPC and make sure it gets the default rules.
     let other_vpc = "second-vpc";
     let other_vpc_firewall =
         format!("{}/{}/firewall/rules", vpcs_url, other_vpc);
-    create_vpc(&client, &org_name, &project_name, &other_vpc).await;
+    let vpc2 = create_vpc(&client, &org_name, &project_name, &other_vpc).await;
     let rules =
         objects_list_page::<VpcFirewallRule>(client, &other_vpc_firewall)
             .await
             .items;
+    assert!(rules.iter().all(|r| r.vpc_id == vpc2.identity.id));
     assert!(is_default_firewall_rules(&rules));
 
     // Modify one VPC's firewall
@@ -163,6 +170,7 @@ fn is_default_firewall_rules(rules: &Vec<VpcFirewallRule>) -> bool {
             },
             action: VpcFirewallRuleAction::Allow,
             priority: VpcFirewallRulePriority(65534),
+            vpc_id: Uuid::new_v4(), // placeholder, not used in comparison
         },
         VpcFirewallRule {
             identity: IdentityMetadata {
@@ -189,6 +197,7 @@ fn is_default_firewall_rules(rules: &Vec<VpcFirewallRule>) -> bool {
             },
             action: VpcFirewallRuleAction::Allow,
             priority: VpcFirewallRulePriority(65534),
+            vpc_id: Uuid::new_v4(),
         },
         VpcFirewallRule {
             identity: IdentityMetadata {
@@ -215,6 +224,7 @@ fn is_default_firewall_rules(rules: &Vec<VpcFirewallRule>) -> bool {
             },
             action: VpcFirewallRuleAction::Allow,
             priority: VpcFirewallRulePriority(65534),
+            vpc_id: Uuid::new_v4(),
         },
         VpcFirewallRule {
             identity: IdentityMetadata {
@@ -241,6 +251,7 @@ fn is_default_firewall_rules(rules: &Vec<VpcFirewallRule>) -> bool {
             },
             action: VpcFirewallRuleAction::Allow,
             priority: VpcFirewallRulePriority(65534),
+            vpc_id: Uuid::new_v4(),
         },
     ];
 
