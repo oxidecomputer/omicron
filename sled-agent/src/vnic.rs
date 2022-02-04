@@ -78,16 +78,20 @@ impl Vnic {
         ip: IpAddr,
         vlan: Option<VlanID>,
     ) -> Result<Self, Error> {
+        use opte_core::{ether, geneve, ip6};
+        use opte_core::headers::{IpAddr, IpCidr};
+        use opte_core::oxide_net::{overlay, router};
+
         let name = guest_vnic_name(allocator.next());
         Dladm::create_vnic(physical_dl, &name, mac, vlan)?;
         let ip4 = match ip {
-            IpAddr::V4(v) => v,
+            std::net::IpAddr::V4(v) => v,
 
             _ => {
                 todo!("OPTE supports IPv4 guests only at the moment");
             }
         };
-        let ip_cfg = opte_core::ioctl::IpConfig {
+        let ip_cfg = opte_core::ioctl::IpCfg {
             // NOTE: OPTE has it's own Ipv4Addr, thus the into().
             private_ip: ip4.into(),
 	    snat: None,
@@ -98,6 +102,69 @@ impl Vnic {
         };
         let hdl = opteadm::OpteAdm::open()?;
         hdl.add_port(&req)?;
+        let ip4b = ip4.octets();
+        hdl.set_overlay(&overlay::SetOverlayReq {
+            port_name: name.clone(),
+            cfg: overlay::OverlayCfg {
+                boundary_services: overlay::PhysNet {
+                    ether: ether::EtherAddr::from(
+                        [0x01, 0x02, 0x03, 0x04, 0x05, 0x06]
+                    ),
+                    ip: ip6::Ipv6Addr::from(
+                        [
+                            0x2601, 0x0284, 0x4100, 0xe240,
+                            0x0000, 0x0000, 0x7777, 0xABCD
+                        ]
+                    ),
+                    vni: geneve::Vni::new(7777u32).unwrap(),
+                },
+                vni: geneve::Vni::new(99u32).unwrap(),
+                phys_mac_src: ether::EtherAddr::from(mac.unwrap().into_array()),
+                // kalm's e1000g0
+                phys_mac_dst: ether::EtherAddr::from(
+                    [0x54, 0xbe, 0xf7, 0x0b, 0x09, 0xec]
+                ),
+                // mom's router
+                // phys_mac_dst: ether::EtherAddr::from(
+                //     [0xB8, 0xF8, 0x53, 0xAF, 0x53, 0x7D]
+                // ),
+                // steamboat router
+                // phys_mac_dst: ether::EtherAddr::from(
+                //     [0x78, 0x23, 0xAE, 0x5d, 0x4F, 0x0D]
+                // ),
+                phys_ip_src: ip6::Ipv6Addr::from(
+                    [
+                        0x2601, 0x0284, 0x4100, 0xE240,
+                        0x0000, 0x0000, u16::from_be_bytes([ip4b[0], ip4b[1]]),
+                        u16::from_be_bytes([ip4b[2], ip4b[3]])
+                    ]
+                ),
+            }
+        })?;
+
+        hdl.set_v2p(&overlay::SetVirt2PhysReq {
+            vip: IpAddr::Ip4(ip4.into()),
+            phys: overlay::PhysNet {
+                ether: ether::EtherAddr::from(mac.unwrap().into_array()),
+                ip: ip6::Ipv6Addr::from(
+                    [
+                        0x2601, 0x0284, 0x4100, 0xE240,
+                        0x0000, 0x0000, u16::from_be_bytes([ip4b[0], ip4b[1]]),
+                        u16::from_be_bytes([ip4b[2], ip4b[3]])
+                    ]
+                ),
+                vni: geneve::Vni::new(99u32).unwrap(),
+            }
+        })?;
+
+        hdl.add_router_entry_ip4(&router::AddRouterEntryIpv4Req {
+            port_name: name.clone(),
+            dest: "192.168.1.240/28".parse().unwrap(),
+            target: router::RouterTarget::VpcSubnet(
+                IpCidr::Ip4("192.168.1.240/28".parse().unwrap())
+            ),
+        })?;
+
         Ok(Vnic { name, deleted: false })
     }
 

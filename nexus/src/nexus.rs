@@ -1629,7 +1629,7 @@ impl Nexus {
                     // TODO: This value should be replaced with the correct ipv4 range for a default subnet
                     // RPZ: Need to modify this here until we have way to create a VPC subnet and
                     // specify that subnet during instance creation.
-                    "10.0.0.240/28".parse::<Ipv4Network>().unwrap(),
+                    "192.168.1.240/28".parse::<Ipv4Network>().unwrap(),
                 )),
                 ipv6_block: Some(Ipv6Net(
                     // TODO: This value should be replaced w/ the first `/64` ipv6 from the address block
