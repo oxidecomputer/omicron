@@ -1474,11 +1474,10 @@ async fn vpc_firewall_rules_get(
                 &path.project_name,
                 &path.vpc_name,
             )
-            .await?
-            .into_iter()
-            .map(|rule| rule.into())
-            .collect();
-        Ok(HttpResponseOk(rules))
+            .await?;
+        Ok(HttpResponseOk(VpcFirewallRules {
+            rules: rules.into_iter().map(|rule| rule.into()).collect(),
+        }))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
@@ -1510,7 +1509,9 @@ async fn vpc_firewall_rules_put(
                 &router_params.into_inner(),
             )
             .await?;
-        Ok(HttpResponseOk(rules))
+        Ok(HttpResponseOk(VpcFirewallRules {
+            rules: rules.into_iter().map(|rule| rule.into()).collect(),
+        }))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }

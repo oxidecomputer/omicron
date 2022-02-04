@@ -34,7 +34,6 @@ use std::fmt::Debug;
 use std::fmt::Display;
 use std::fmt::Formatter;
 use std::fmt::Result as FormatResult;
-use std::iter::FromIterator;
 use std::net::IpAddr;
 use std::num::{NonZeroU16, NonZeroU32};
 use std::str::FromStr;
@@ -1452,15 +1451,6 @@ pub struct VpcFirewallRuleUpdate {
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct VpcFirewallRuleUpdateParams {
     pub rules: Vec<VpcFirewallRuleUpdate>,
-}
-
-impl FromIterator<VpcFirewallRule> for VpcFirewallRules {
-    fn from_iter<T>(iter: T) -> Self
-    where
-        T: IntoIterator<Item = VpcFirewallRule>,
-    {
-        Self { rules: iter.into_iter().collect() }
-    }
 }
 
 /// Firewall rule priority. This is a value from 0 to 65535, with rules with
