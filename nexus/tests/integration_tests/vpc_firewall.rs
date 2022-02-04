@@ -12,7 +12,6 @@ use omicron_common::api::external::{
     VpcFirewallRuleUpdate, VpcFirewallRuleUpdateParams,
 };
 use omicron_nexus::external_api::views::Vpc;
-use std::collections::HashMap;
 use std::convert::TryFrom;
 use uuid::Uuid;
 
@@ -61,10 +60,9 @@ async fn test_vpc_firewall(cptestctx: &ControlPlaneTestContext) {
     assert!(is_default_firewall_rules(&rules));
 
     // Modify one VPC's firewall
-    let mut new_rules = HashMap::new();
-    new_rules.insert(
-        "deny-all-incoming".parse().unwrap(),
+    let new_rules = vec![
         VpcFirewallRuleUpdate {
+            name: "deny-all-incoming".parse().unwrap(),
             action: VpcFirewallRuleAction::Deny,
             description: "test desc".to_string(),
             status: VpcFirewallRuleStatus::Disabled,
@@ -79,10 +77,8 @@ async fn test_vpc_firewall(cptestctx: &ControlPlaneTestContext) {
             direction: VpcFirewallRuleDirection::Inbound,
             priority: VpcFirewallRulePriority(100),
         },
-    );
-    new_rules.insert(
-        "allow-icmp".parse().unwrap(),
         VpcFirewallRuleUpdate {
+            name: "allow-icmp".parse().unwrap(),
             action: VpcFirewallRuleAction::Allow,
             description: "allow icmp".to_string(),
             status: VpcFirewallRuleStatus::Enabled,
@@ -97,7 +93,7 @@ async fn test_vpc_firewall(cptestctx: &ControlPlaneTestContext) {
             direction: VpcFirewallRuleDirection::Inbound,
             priority: VpcFirewallRulePriority(10),
         },
-    );
+    ];
     let update_params =
         VpcFirewallRuleUpdateParams { rules: new_rules.clone() };
     client

@@ -28,7 +28,7 @@ use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
 use serde_with::{DeserializeFromStr, SerializeDisplay};
-use std::collections::{BTreeMap, HashMap};
+use std::collections::BTreeMap;
 use std::convert::TryFrom;
 use std::fmt::Debug;
 use std::fmt::Display;
@@ -1416,10 +1416,10 @@ pub struct VpcFirewallRule {
 }
 
 /// A single rule in a VPC firewall
-#[derive(Clone, Debug, PartialEq, Deserialize, Serialize, JsonSchema)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize, JsonSchema)]
 pub struct VpcFirewallRuleUpdate {
-    // In an update, the name is encoded as a key in the JSON object, so we
-    // don't include one here
+    /// name of the rule, unique to this VPC
+    pub name: Name,
     /// human-readable free-form text about a resource
     pub description: String,
     /// whether this rule is in effect
@@ -1442,24 +1442,16 @@ pub struct VpcFirewallRuleUpdate {
  * so there is no explicit creation.
  */
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-// TODO we're controlling the schemars output, but not the serde
-// deserialization here because of surprising behavior; see #449
-#[schemars(deny_unknown_fields)]
 pub struct VpcFirewallRuleUpdateParams {
-    #[serde(flatten)]
-    pub rules: HashMap<Name, VpcFirewallRuleUpdate>,
+    pub rules: Vec<VpcFirewallRuleUpdate>,
 }
 
 /**
  * Response to an update replacing `Vpc`'s firewall
  */
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-// TODO we're controlling the schemars output, but not the serde
-// deserialization here because of surprising behavior; see #449
-#[schemars(deny_unknown_fields)]
 pub struct VpcFirewallRuleUpdateResult {
-    #[serde(flatten)]
-    pub rules: HashMap<Name, VpcFirewallRule>,
+    pub rules: Vec<VpcFirewallRule>,
 }
 
 impl FromIterator<VpcFirewallRule> for VpcFirewallRuleUpdateResult {
@@ -1467,12 +1459,7 @@ impl FromIterator<VpcFirewallRule> for VpcFirewallRuleUpdateResult {
     where
         T: IntoIterator<Item = VpcFirewallRule>,
     {
-        Self {
-            rules: iter
-                .into_iter()
-                .map(|rule| (rule.identity.name.clone(), rule))
-                .collect(),
-        }
+        Self { rules: iter.into_iter().collect() }
     }
 }
 
@@ -2191,9 +2178,10 @@ mod test {
 
     #[test]
     fn test_firewall_deserialization() {
-        let json = r#"
-            {
-            "allow-internal-inbound": {
+        let json = r#"{
+            "rules": [
+              {
+                "name": "allow-internal-inbound",
                 "status": "enabled",
                 "direction": "inbound",
                 "targets": [ { "type": "vpc", "value": "default" } ],
@@ -2201,8 +2189,9 @@ mod test {
                 "action": "allow",
                 "priority": 65534,
                 "description": "allow inbound traffic between instances"
-            },
-            "rule2": {
+              },
+              {
+                "name": "rule2",
                 "status": "disabled",
                 "direction": "outbound",
                 "targets": [ { "type": "vpc", "value": "default" } ],
@@ -2210,16 +2199,17 @@ mod test {
                 "action": "deny",
                 "priority": 65533,
                 "description": "second rule"
-            }
-            }
-            "#;
+              }
+            ]
+          }"#;
         let params =
             serde_json::from_str::<VpcFirewallRuleUpdateParams>(json).unwrap();
         assert_eq!(params.rules.len(), 2);
         assert_eq!(
-            params.rules[&Name::try_from("allow-internal-inbound".to_string())
-                .unwrap()],
+            params.rules[0],
             VpcFirewallRuleUpdate {
+                name: Name::try_from("allow-internal-inbound".to_string())
+                    .unwrap(),
                 status: VpcFirewallRuleStatus::Enabled,
                 direction: VpcFirewallRuleDirection::Inbound,
                 targets: vec![VpcFirewallRuleTarget::Vpc(
@@ -2239,8 +2229,9 @@ mod test {
             }
         );
         assert_eq!(
-            params.rules[&Name::try_from("rule2".to_string()).unwrap()],
+            params.rules[1],
             VpcFirewallRuleUpdate {
+                name: Name::try_from("rule2".to_string()).unwrap(),
                 status: VpcFirewallRuleStatus::Disabled,
                 direction: VpcFirewallRuleDirection::Outbound,
                 targets: vec![VpcFirewallRuleTarget::Vpc(

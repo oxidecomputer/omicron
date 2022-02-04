@@ -5277,6 +5277,14 @@
               }
             ]
           },
+          "name": {
+            "description": "name of the rule, unique to this VPC",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Name"
+              }
+            ]
+          },
           "priority": {
             "description": "the relative priority of this rule",
             "type": "integer",
@@ -5304,6 +5312,7 @@
           "description",
           "direction",
           "filters",
+          "name",
           "priority",
           "status",
           "targets"
@@ -5312,16 +5321,32 @@
       "VpcFirewallRuleUpdateParams": {
         "description": "Updateable properties of a `Vpc`'s firewall Note that VpcFirewallRules are implicitly created along with a Vpc, so there is no explicit creation.",
         "type": "object",
-        "additionalProperties": {
-          "$ref": "#/components/schemas/VpcFirewallRuleUpdate"
-        }
+        "properties": {
+          "rules": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/VpcFirewallRuleUpdate"
+            }
+          }
+        },
+        "required": [
+          "rules"
+        ]
       },
       "VpcFirewallRuleUpdateResult": {
         "description": "Response to an update replacing `Vpc`'s firewall",
         "type": "object",
-        "additionalProperties": {
-          "$ref": "#/components/schemas/VpcFirewallRule"
-        }
+        "properties": {
+          "rules": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/VpcFirewallRule"
+            }
+          }
+        },
+        "required": [
+          "rules"
+        ]
       },
       "VpcResultsPage": {
         "description": "A single page of results",
