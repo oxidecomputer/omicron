@@ -2,6 +2,11 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+mod http_entrypoints;
+mod http_entrypoints_2;
+
+pub struct GatewayService;
+
 fn main() {
     println!("Hello, world!");
 }
