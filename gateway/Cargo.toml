@@ -6,3 +6,6 @@ license = "MPL-2.0"
 
 [dependencies]
 dropshot = { git = "https://github.com/oxidecomputer/dropshot", branch = "main", features = [ "usdt-probes" ] }
+schemars = "0.8"
+serde = { version = "1.0", features = ["derive"] }
+uuid = "0.8"
