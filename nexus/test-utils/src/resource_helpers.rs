@@ -135,6 +135,7 @@ pub async fn create_vpc(
                 name: vpc_name.parse().unwrap(),
                 description: "vpc description".to_string(),
             },
+            ipv6_prefix: None,
             dns_name: "abc".parse().unwrap(),
         },
     )
@@ -163,6 +164,7 @@ pub async fn create_vpc_with_error(
                     name: vpc_name.parse().unwrap(),
                     description: String::from("vpc description"),
                 },
+                ipv6_prefix: None,
                 dns_name: "abc".parse().unwrap(),
             },
             status,

@@ -12,6 +12,7 @@ use crate::db::schema::{
     role_assignment_builtin, role_builtin, router_route, sled, user_builtin,
     vpc, vpc_firewall_rule, vpc_router, vpc_subnet, zpool,
 };
+use crate::defaults;
 use crate::external_api::params;
 use crate::internal_api;
 use chrono::{DateTime, Utc};
@@ -1213,6 +1214,7 @@ pub struct Vpc {
 
     pub project_id: Uuid,
     pub system_router_id: Uuid,
+    pub ipv6_prefix: Ipv6Net,
     pub dns_name: Name,
 
     /// firewall generation number, used as a child resource generation number
@@ -1226,15 +1228,32 @@ impl Vpc {
         project_id: Uuid,
         system_router_id: Uuid,
         params: params::VpcCreate,
-    ) -> Self {
+    ) -> Result<Self, external::Error> {
         let identity = VpcIdentity::new(vpc_id, params.identity);
-        Self {
+        let ipv6_prefix = match params.ipv6_prefix {
+            None => defaults::random_unique_local_ipv6(),
+            Some(prefix) => {
+                // TODO: Delegate to `Ipv6Addr::is_unique_local()` when stabilized.
+                if prefix.0.prefix() == 48 && prefix.0.ip().octets()[0] == 0xfd
+                {
+                    Ok(prefix)
+                } else {
+                    Err(external::Error::invalid_request(
+                        "VPC IPv6 address prefixes must be in the 
+                            Unique Local Address range `fd00::/48` (RFD 4193)",
+                    ))
+                }
+            }
+        }?
+        .into();
+        Ok(Self {
             identity,
             project_id,
             system_router_id,
+            ipv6_prefix,
             dns_name: params.dns_name.into(),
             firewall_gen: Generation::new(),
-        }
+        })
     }
 }
 
@@ -1694,7 +1713,7 @@ where
     }
 }
 
-// Deserialize the "L4PortRange" object from SQL TEXT.
+// Deserialize the "L4PortRange" object from SQL INT4.
 impl<DB> FromSql<sql_types::Text, DB> for L4PortRange
 where
     DB: Backend,
