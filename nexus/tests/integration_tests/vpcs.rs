@@ -89,8 +89,8 @@ async fn test_vpcs(cptestctx: &ControlPlaneTestContext) {
         "Expected a 48-bit ULA IPv6 address prefix"
     );
     assert_eq!(
-        vpc.ipv6_prefix.ip().segments()[0],
-        0xfd00,
+        vpc.ipv6_prefix.ip().octets()[0],
+        0xfd,
         "Expected a ULA IPv6 address prefix"
     );
 

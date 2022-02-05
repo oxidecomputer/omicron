@@ -54,9 +54,9 @@ lazy_static! {
 
 pub fn random_unique_local_ipv6() -> Result<Ipv6Net, external::Error> {
     use rand::Rng;
-    let mut bytes = [0u16; 8];
-    bytes[0] = 0xfd00;
-    rand::thread_rng().try_fill(&mut bytes[1..4]).map_err(|_| {
+    let mut bytes = [0u8; 16];
+    bytes[0] = 0xfd;
+    rand::thread_rng().try_fill(&mut bytes[1..6]).map_err(|_| {
         external::Error::internal_error(
             "Unable to allocate random IPv6 address range",
         )
@@ -72,8 +72,8 @@ mod tests {
     fn test_random_unique_local_ipv6() {
         let network = random_unique_local_ipv6().unwrap().0;
         assert_eq!(network.prefix(), 48);
-        let segments = network.network().segments();
-        assert_eq!(segments[0], 0xfd00);
-        assert!(segments[4..].iter().all(|x| *x == 0));
+        let octets = network.network().octets();
+        assert_eq!(octets[0], 0xfd);
+        assert!(octets[6..].iter().all(|x| *x == 0));
     }
 }

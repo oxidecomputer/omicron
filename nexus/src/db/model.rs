@@ -1234,8 +1234,7 @@ impl Vpc {
             None => defaults::random_unique_local_ipv6(),
             Some(prefix) => {
                 // TODO: Delegate to `Ipv6Addr::is_unique_local()` when stabilized.
-                if prefix.0.prefix() == 48
-                    && prefix.0.ip().segments()[0] == 0xfd00
+                if prefix.0.prefix() == 48 && prefix.0.ip().octets()[0] == 0xfd
                 {
                     Ok(prefix)
                 } else {
