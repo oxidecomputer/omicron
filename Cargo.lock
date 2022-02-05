@@ -1996,6 +1996,9 @@ name = "omicron-gateway"
 version = "0.1.0"
 dependencies = [
  "dropshot",
+ "schemars",
+ "serde",
+ "uuid",
 ]
 
 [[package]]
