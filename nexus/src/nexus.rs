@@ -128,6 +128,9 @@ pub struct Nexus {
     /** persistent storage for resources in the control plane */
     db_datastore: Arc<db::DataStore>,
 
+    /** handle to global authz information */
+    authz: Arc<authz::Authz>,
+
     /** saga execution coordinator */
     sec_client: Arc<steno::SecClient>,
 
@@ -200,6 +203,7 @@ impl Nexus {
             log: log.new(o!()),
             api_rack_identity: db::model::RackIdentity::new(*rack_id),
             db_datastore: Arc::clone(&db_datastore),
+            authz: Arc::clone(&authz),
             sec_client: Arc::clone(&sec_client),
             recovery_task: std::sync::Mutex::new(None),
             populate_status,
@@ -210,7 +214,7 @@ impl Nexus {
         let nexus = Arc::new(nexus);
         let opctx = OpContext::for_background(
             log.new(o!("component" => "SagaRecoverer")),
-            authz,
+            Arc::clone(&authz),
             authn::Context::internal_saga_recovery(),
             Arc::clone(&db_datastore),
         );
@@ -221,6 +225,7 @@ impl Nexus {
             Arc::new(Arc::new(SagaContext::new(
                 Arc::clone(&nexus),
                 saga_logger,
+                Arc::clone(&authz),
             ))),
             db_datastore,
             Arc::clone(&sec_client),
@@ -442,8 +447,11 @@ impl Nexus {
         let saga_id = SagaId(Uuid::new_v4());
         let saga_logger =
             self.log.new(o!("template_name" => template_name.to_owned()));
-        let saga_context =
-            Arc::new(Arc::new(SagaContext::new(Arc::clone(self), saga_logger)));
+        let saga_context = Arc::new(Arc::new(SagaContext::new(
+            Arc::clone(self),
+            saga_logger,
+            Arc::clone(&self.authz),
+        )));
         let future = self
             .sec_client
             .saga_create(
@@ -707,6 +715,7 @@ impl Nexus {
         }
 
         let saga_params = Arc::new(sagas::ParamsDiskCreate {
+            serialized_authn: authn::saga::Serialized::for_opctx(opctx),
             project_id: authz_project.id(),
             create_params: params.clone(),
         });
