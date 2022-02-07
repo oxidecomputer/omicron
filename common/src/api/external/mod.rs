@@ -1134,9 +1134,9 @@ impl JsonSchema for Ipv6Net {
                     max_length: Some(43),
                     min_length: None,
                     pattern: Some(
-                        // Conforming to unique local addressing scheme, `fd00::/8`
+                        // Conforming to unique local addressing scheme, `fd00::/8`.
                         concat!(
-                            r#"^(fd|FD)00:((([0-9a-fA-F]{1,4}\:){6}[0-9a-fA-F]{1,4})|(([0-9a-fA-F]{1,4}:){1,6}:))/(6[4-9]|[7-9][0-9]|1[0-1][0-9]|12[0-6])$"#,
+                            r#"^(fd|FD)[0-9a-fA-F]{2}:((([0-9a-fA-F]{1,4}\:){6}[0-9a-fA-F]{1,4})|(([0-9a-fA-F]{1,4}:){1,6}:))/(6[4-9]|[7-9][0-9]|1[0-1][0-9]|12[0-6])$"#,
                         ).to_string(),
                     ),
                 })),
