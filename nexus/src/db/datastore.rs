@@ -1376,13 +1376,23 @@ impl DataStore {
 
     /// See `disk_update_runtime()`.  This version should only be used from
     /// sagas, which do not currently have authn contexts.
-    // TODO-security Like project_delete_disk_no_auth(), this should be removed
-    // once we have support for authz checks from sagas.
-    pub async fn disk_update_runtime_no_auth(
+    pub async fn disk_update_runtime(
         &self,
+        opctx: &OpContext,
         authz_disk: &authz::Disk,
         new_runtime: &DiskRuntimeState,
     ) -> Result<bool, Error> {
+        // TODO-security This permission might be overloaded here.  The way disk
+        // runtime updates work is that the caller in Nexus first updates the
+        // Sled Agent to make a change, then updates to the database to reflect
+        // that change.  So by the time we get here, we better have already done
+        // an authz check, or we will have already made some unauthorized change
+        // to the system!  At the same time, we don't want just anybody to be
+        // able to modify the database state.  So we _do_ still want an authz
+        // check here.  Arguably it's for a different kind of action, but it
+        // doesn't seem that useful to split it out right now.
+        opctx.authorize(authz::Action::Modify, authz_disk).await?;
+
         let disk_id = authz_disk.id();
         use db::schema::disk::dsl;
         let updated = diesel::update(dsl::disk)
@@ -1405,25 +1415,6 @@ impl DataStore {
             })?;
 
         Ok(updated)
-    }
-
-    pub async fn disk_update_runtime(
-        &self,
-        opctx: &OpContext,
-        authz_disk: &authz::Disk,
-        new_runtime: &DiskRuntimeState,
-    ) -> Result<bool, Error> {
-        // TODO-security This permission might be overloaded here.  The way disk
-        // runtime updates work is that the caller in Nexus first updates the
-        // Sled Agent to make a change, then updates to the database to reflect
-        // that change.  So by the time we get here, we better have already done
-        // an authz check, or we will have already made some unauthorized change
-        // to the system!  At the same time, we don't want just anybody to be
-        // able to modify the database state.  So we _do_ still want an authz
-        // check here.  Arguably it's for a different kind of action, but it
-        // doesn't seem that useful to split it out right now.
-        opctx.authorize(authz::Action::Modify, authz_disk).await?;
-        self.disk_update_runtime_no_auth(authz_disk, new_runtime).await
     }
 
     /// Fetches information about a Disk that the caller has previously fetched
