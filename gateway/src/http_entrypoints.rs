@@ -9,7 +9,7 @@
 use std::sync::Arc;
 
 use dropshot::{
-    endpoint, ApiDescription, HttpError, HttpResponseOk,
+    endpoint, ApiDescription, EmptyScanParams, HttpError, HttpResponseOk,
     HttpResponseUpdatedNoContent, PaginationParams, Path, Query,
     RequestContext, ResultsPage, TypedBody,
 };
@@ -19,25 +19,49 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, JsonSchema)]
-struct SpInfo;
+struct SpInfo {
+    info: SpIgnitionInfo,
+    details: SpDetails,
+}
+
+#[derive(Serialize, JsonSchema)]
+#[serde(tag = "state")]
+enum SpDetails {
+    Disabled,
+    Unresponsive,
+    Enabled {
+        serial_number: String,
+        // TODO more stuff
+    },
+}
 
 #[derive(Serialize, JsonSchema)]
 #[serde(tag = "present")]
-enum SpIgnitionInfo {
+struct SpIgnitionInfo {
+    id: SpIdentifier,
+    details: SpIgnitionDetails,
+}
+
+#[derive(Serialize, JsonSchema)]
+#[serde(tag = "present")]
+enum SpIgnitionDetails {
     #[serde(rename = "no")]
     Absent,
     #[serde(rename = "yes")]
-    Present { id: u8, status: u8 },
+    Present {
+        id: u8,
+        power: bool,
+        ctrl_detect_0: bool,
+        ctrl_detect_1: bool,
+        flt_a3: bool,
+        flt_a2: bool,
+        flt_rot: bool,
+        flt_sp: bool,
+    },
 }
 
 #[derive(Serialize, JsonSchema)]
 struct SpComponentInfo;
-
-#[derive(Deserialize, JsonSchema)]
-struct TimeoutAndCount {
-    timeout_ms: Option<u32>,
-    expected_count: Option<u32>,
-}
 
 #[derive(Deserialize, JsonSchema)]
 struct Timeout {
@@ -45,10 +69,9 @@ struct Timeout {
 }
 
 #[derive(Serialize, Deserialize)]
-struct TimeoutAndCountSelector<T> {
+struct TimeoutSelector<T> {
     last: T,
     start_time: u64, // TODO
-    count_so_far: u32,
 }
 
 #[derive(Serialize, Deserialize, JsonSchema)]
@@ -66,8 +89,7 @@ struct SpIdentifier {
     slot: u32,
 }
 
-type TimeoutAndCountPaginationParams<T> =
-    PaginationParams<TimeoutAndCount, TimeoutAndCountSelector<T>>;
+type TimeoutPaginationParams<T> = PaginationParams<Timeout, TimeoutSelector<T>>;
 
 #[derive(Deserialize, JsonSchema)]
 struct PathSp {
@@ -88,27 +110,33 @@ struct PathSpComponent {
     component: String,
 }
 
-/// List SPs on the management network
+/// List SPs
 ///
 /// Since communication with SPs may be unreliable, consumers may specify an
-/// optional timeout to override the default and/or an optional value for the
-/// expected number of SPs (i.e. the number after which we don't expect
-/// additional waiting to reveal more nodes on the management network).
+/// optional timeout to override the default.
 ///
 /// This interface may return a page of SPs prior to reaching either the
-/// timeout or expected count with the expectation that callers will keep
-/// calling this interface until the terminal page is reached.
+/// timeout with the expectation that callers will keep calling this interface
+/// until the terminal page is reached. If the timeout is reached, the final
+/// call will result in an error.
 ///
-/// TODO this could use Ignition to detect presense of each component along
-/// with its power state. We could merge that with data from the management
-/// network.
+/// This interface makes use of Ignition as well as the management network.
+/// SPs that are powered off (and therefore cannot respond over the
+/// management network) are represented in the output set. SPs that Ignition
+/// reports as powered on, but that do not respond within the allotted timeout
+/// will similarly be represented in the output; these will only be included in
+/// the terminal output page when the allotted timeout has expired.
+///
+/// Note that Ignition provides the full set of SPs that are plugged into the
+/// system so the gateway service knows prior to waiting for responses the
+/// expected cardinality.
 #[endpoint {
     method = GET,
     path = "/sp",
 }]
 async fn sp_list(
     _rqctx: Arc<RequestContext<GatewayService>>,
-    _query: Query<TimeoutAndCountPaginationParams<SpIdentifier>>,
+    _query: Query<TimeoutPaginationParams<SpIdentifier>>,
 ) -> Result<HttpResponseOk<ResultsPage<SpInfo>>, HttpError> {
     todo!()
 }
@@ -131,14 +159,14 @@ async fn sp_get(
 
 /// List components of an SP
 ///
-/// A components is a distinct entity under an SP's direct control. This lists
-/// all those components for an SP.
+/// A component is a distinct entity under an SP's direct control. This lists
+/// all those components for a given SP.
 ///
-/// As communication with SPs may be unreliable, consumers may specify a
-/// timeout and/or a count of the expected number of components. This interface
-/// may return a page of components prior to reaching either the timeout or
-/// expected count with the expectation that callers will keep calling this
-/// interface until the terminal page is reached.
+/// As communication with SPs may be unreliable, consumers may optionally
+/// override the timeout. This interface may return a page of components prior
+/// to reaching either the timeout with the expectation that callers will keep
+/// calling this interface until the terminal page is reached. If the timeout
+/// is reached, the final call will result in an error.
 #[endpoint {
     method = GET,
     path = "/sp/{type}/{slot}/component",
@@ -146,7 +174,7 @@ async fn sp_get(
 async fn sp_component_list(
     _rqctx: Arc<RequestContext<GatewayService>>,
     _path: Path<PathSp>,
-    _query: Query<TimeoutAndCountPaginationParams<PathSpComponent>>,
+    _query: Query<TimeoutPaginationParams<PathSpComponent>>,
 ) -> Result<HttpResponseOk<ResultsPage<SpComponentInfo>>, HttpError> {
     todo!()
 }
@@ -156,6 +184,10 @@ async fn sp_component_list(
 /// This can be useful, for example, to poll the state of a component if
 /// another interface has changed the power state of a component or updated a
 /// component.
+///
+/// As communication with SPs maybe unreliable, consumers may specify a timeout
+/// to override the default. This interface will return an error when the
+/// timeout is reached.
 #[endpoint {
     method = GET,
     path = "/sp/{type}/{slot}/component/{component}",
@@ -163,6 +195,7 @@ async fn sp_component_list(
 async fn sp_component_get(
     _rqctx: Arc<RequestContext<GatewayService>>,
     _path: Path<PathSpComponent>,
+    _query: Path<Timeout>,
 ) -> Result<HttpResponseOk<SpComponentInfo>, HttpError> {
     todo!()
 }
@@ -180,7 +213,7 @@ struct UpdateBody;
 /// specified or due to an error originating from the SP itself.
 ///
 /// Note that not all components may be updated; components without known
-/// update mechanisms will return an error without any considertion of the
+/// update mechanisms will return an error without any inspection of the
 /// update bundle.
 #[endpoint {
     method = POST,
@@ -195,6 +228,8 @@ async fn sp_component_update(
 }
 
 /// Power on an SP component
+///
+/// Components whose power state cannot be changed will always return an error.
 #[endpoint {
     method = POST,
     path = "/sp/{type}/{slot}/component/{component}/power_on",
@@ -208,6 +243,8 @@ async fn sp_component_power_on(
 }
 
 /// Power off an SP component
+///
+/// Components whose power state cannot be changed will always return an error.
 #[endpoint {
     method = POST,
     path = "/sp/{type}/{slot}/component/{component}/power_off",
@@ -226,14 +263,16 @@ async fn sp_component_power_off(
 /// information than over the management network, however it is lower latency
 /// and has fewer moving pieces that could result in delayed responses or
 /// unknown states.
+///
+/// This interface queries ignition via its associated SP. As this interface
+/// may be unreliable, consumers may optionally override the default.
 #[endpoint {
     method = GET,
     path = "/ignition",
 }]
 async fn ignition_list(
     _rqctx: Arc<RequestContext<GatewayService>>,
-    // TODO these pagination params aren't quite right
-    _query: Query<TimeoutAndCountPaginationParams<SpIdentifier>>,
+    _query: Query<PaginationParams<EmptyScanParams, SpIdentifier>>,
 ) -> Result<HttpResponseOk<ResultsPage<SpIgnitionInfo>>, HttpError> {
     todo!()
 }
