@@ -955,6 +955,7 @@ impl Nexus {
 
         // Kick off the migration saga
         let saga_params = Arc::new(sagas::ParamsInstanceMigrate {
+            serialized_authn: authn::saga::Serialized::for_opctx(opctx),
             instance_id: authz_instance.id(),
             migrate_params: params,
         });
@@ -1181,8 +1182,6 @@ impl Nexus {
     /**
      * Idempotently place the instance in a 'Migrating' state.
      */
-    // XXX need to update caller, and that's going to be a bear because it's in
-    // a saga action
     pub async fn instance_start_migrate(
         &self,
         opctx: &OpContext,

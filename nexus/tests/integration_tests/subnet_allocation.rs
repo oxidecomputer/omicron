@@ -9,39 +9,24 @@
 
 use http::method::Method;
 use http::StatusCode;
+use nexus_test_utils::http_testing::AuthnMode;
+use nexus_test_utils::http_testing::NexusRequest;
+use nexus_test_utils::http_testing::RequestBuilder;
+use nexus_test_utils::resource_helpers::create_instance;
 use omicron_common::api::external::{
     ByteCount, IdentityMetadataCreateParams, IdentityMetadataUpdateParams,
-    Instance, InstanceCpuCount, Ipv4Net, NetworkInterface,
+    InstanceCpuCount, Ipv4Net, NetworkInterface,
 };
 use omicron_nexus::external_api::params;
 use std::net::IpAddr;
 
 use dropshot::test_util::objects_list_page;
-use dropshot::test_util::objects_post;
 use dropshot::test_util::ClientTestContext;
 use dropshot::HttpErrorResponseBody;
 
 use nexus_test_utils::resource_helpers::{create_organization, create_project};
 use nexus_test_utils::ControlPlaneTestContext;
 use nexus_test_utils_macros::nexus_test;
-
-async fn create_instance(
-    client: &ClientTestContext,
-    url_instances: &String,
-    name: &str,
-) {
-    let new_instance = params::InstanceCreate {
-        identity: IdentityMetadataCreateParams {
-            name: name.parse().unwrap(),
-            description: "".to_string(),
-        },
-        ncpus: InstanceCpuCount(1),
-        memory: ByteCount::from_mebibytes_u32(256),
-        hostname: name.to_string(),
-    };
-    objects_post::<_, Instance>(&client, url_instances, new_instance.clone())
-        .await;
-}
 
 async fn create_instance_expect_failure(
     client: &ClientTestContext,
@@ -57,14 +42,18 @@ async fn create_instance_expect_failure(
         memory: ByteCount::from_mebibytes_u32(256),
         hostname: name.to_string(),
     };
-    client
-        .make_request_error_body(
-            Method::POST,
-            &url_instances,
-            new_instance,
-            StatusCode::BAD_REQUEST,
-        )
-        .await
+
+    NexusRequest::new(
+        RequestBuilder::new(&client, Method::POST, &url_instances)
+            .body(Some(&new_instance))
+            .expect_status(Some(StatusCode::BAD_REQUEST)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap()
+    .parsed_body()
+    .unwrap()
 }
 
 #[nexus_test]
@@ -109,8 +98,8 @@ async fn test_subnet_allocation(cptestctx: &ControlPlaneTestContext) {
 
     // The valid addresses for allocation in `subnet` are 192.168.42.5 and
     // 192.168.42.6. The rest are reserved as described in RFD21.
-    create_instance(client, &url_instances, "i1").await;
-    create_instance(client, &url_instances, "i2").await;
+    create_instance(client, organization_name, project_name, "i1").await;
+    create_instance(client, organization_name, project_name, "i2").await;
 
     // This should fail from address exhaustion
     let error =

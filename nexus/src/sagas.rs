@@ -354,6 +354,7 @@ async fn sic_instance_ensure(
  */
 #[derive(Debug, Deserialize, Serialize)]
 pub struct ParamsInstanceMigrate {
+    pub serialized_authn: authn::saga::Serialized,
     pub instance_id: Uuid,
     pub migrate_params: params::InstanceMigrate,
 }
@@ -409,6 +410,7 @@ async fn sim_migrate_prep(
 ) -> Result<(Uuid, InstanceRuntimeState), ActionError> {
     let osagactx = sagactx.user_data();
     let params = sagactx.saga_params();
+    let opctx = OpContext::for_saga_action(&sagactx, &params.serialized_authn);
 
     let migrate_uuid = sagactx.lookup::<Uuid>("migrate_id")?;
 
@@ -418,7 +420,7 @@ async fn sim_migrate_prep(
     // state in the db
     let instance = osagactx
         .nexus()
-        .instance_start_migrate(params.instance_id, migrate_uuid)
+        .instance_start_migrate(&opctx, params.instance_id, migrate_uuid)
         .await
         .map_err(ActionError::action_failed)?;
     let instance_id = instance.id();
