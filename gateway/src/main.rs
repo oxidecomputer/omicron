@@ -3,7 +3,6 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 mod http_entrypoints;
-mod http_entrypoints_2;
 
 pub struct GatewayService;
 
