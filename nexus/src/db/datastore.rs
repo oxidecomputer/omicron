@@ -1461,8 +1461,6 @@ impl DataStore {
             .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
     }
 
-    /// See `disk_update_runtime()`.  This version should only be used from
-    /// sagas, which do not currently have authn contexts.
     pub async fn disk_update_runtime(
         &self,
         opctx: &OpContext,
