@@ -51,7 +51,6 @@ use omicron_common::api::external::RouterRouteKind;
 use omicron_common::api::external::RouterRouteUpdateParams;
 use omicron_common::api::external::UpdateResult;
 use omicron_common::api::external::VpcFirewallRuleUpdateParams;
-use omicron_common::api::external::VpcFirewallRuleUpdateResult;
 use omicron_common::api::external::VpcRouterKind;
 use omicron_common::api::internal::nexus;
 use omicron_common::api::internal::nexus::DiskRuntimeState;
@@ -128,6 +127,9 @@ pub struct Nexus {
     /** persistent storage for resources in the control plane */
     db_datastore: Arc<db::DataStore>,
 
+    /** handle to global authz information */
+    authz: Arc<authz::Authz>,
+
     /** saga execution coordinator */
     sec_client: Arc<steno::SecClient>,
 
@@ -200,6 +202,7 @@ impl Nexus {
             log: log.new(o!()),
             api_rack_identity: db::model::RackIdentity::new(*rack_id),
             db_datastore: Arc::clone(&db_datastore),
+            authz: Arc::clone(&authz),
             sec_client: Arc::clone(&sec_client),
             recovery_task: std::sync::Mutex::new(None),
             populate_status,
@@ -210,7 +213,7 @@ impl Nexus {
         let nexus = Arc::new(nexus);
         let opctx = OpContext::for_background(
             log.new(o!("component" => "SagaRecoverer")),
-            authz,
+            Arc::clone(&authz),
             authn::Context::internal_saga_recovery(),
             Arc::clone(&db_datastore),
         );
@@ -221,6 +224,7 @@ impl Nexus {
             Arc::new(Arc::new(SagaContext::new(
                 Arc::clone(&nexus),
                 saga_logger,
+                Arc::clone(&authz),
             ))),
             db_datastore,
             Arc::clone(&sec_client),
@@ -442,8 +446,11 @@ impl Nexus {
         let saga_id = SagaId(Uuid::new_v4());
         let saga_logger =
             self.log.new(o!("template_name" => template_name.to_owned()));
-        let saga_context =
-            Arc::new(Arc::new(SagaContext::new(Arc::clone(self), saga_logger)));
+        let saga_context = Arc::new(Arc::new(SagaContext::new(
+            Arc::clone(self),
+            saga_logger,
+            Arc::clone(&self.authz),
+        )));
         let future = self
             .sec_client
             .saga_create(
@@ -707,6 +714,7 @@ impl Nexus {
         }
 
         let saga_params = Arc::new(sagas::ParamsDiskCreate {
+            serialized_authn: authn::saga::Serialized::for_opctx(opctx),
             project_id: authz_project.id(),
             create_params: params.clone(),
         });
@@ -1750,16 +1758,13 @@ impl Nexus {
         organization_name: &Name,
         project_name: &Name,
         vpc_name: &Name,
-        pagparams: &DataPageParams<'_, Name>,
     ) -> ListResultVec<db::model::VpcFirewallRule> {
         let vpc = self
             .project_lookup_vpc(organization_name, project_name, vpc_name)
             .await?;
-        let subnets = self
-            .db_datastore
-            .vpc_list_firewall_rules(&vpc.id(), pagparams)
-            .await?;
-        Ok(subnets)
+        let rules =
+            self.db_datastore.vpc_list_firewall_rules(&vpc.id()).await?;
+        Ok(rules)
     }
 
     pub async fn vpc_update_firewall_rules(
@@ -1768,7 +1773,7 @@ impl Nexus {
         project_name: &Name,
         vpc_name: &Name,
         params: &VpcFirewallRuleUpdateParams,
-    ) -> UpdateResult<VpcFirewallRuleUpdateResult> {
+    ) -> UpdateResult<Vec<db::model::VpcFirewallRule>> {
         let vpc = self
             .project_lookup_vpc(organization_name, project_name, vpc_name)
             .await?;
@@ -1776,14 +1781,7 @@ impl Nexus {
             vpc.id(),
             params.clone(),
         );
-        let result = self
-            .db_datastore
-            .vpc_update_firewall_rules(&vpc.id(), rules)
-            .await?
-            .into_iter()
-            .map(|rule| rule.into())
-            .collect();
-        Ok(result)
+        self.db_datastore.vpc_update_firewall_rules(&vpc.id(), rules).await
     }
 
     pub async fn vpc_list_subnets(

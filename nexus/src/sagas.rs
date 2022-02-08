@@ -13,10 +13,11 @@
  * easier it will be to test, version, and update in deployed systems.
  */
 
-use crate::db;
+use crate::context::OpContext;
 use crate::db::identity::{Asset, Resource};
 use crate::external_api::params;
 use crate::saga_interface::SagaContext;
+use crate::{authn, db};
 use anyhow::anyhow;
 use chrono::Utc;
 use crucible_agent_client::{
@@ -501,6 +502,7 @@ async fn sim_cleanup_source(
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct ParamsDiskCreate {
+    pub serialized_authn: authn::saga::Serialized,
     pub project_id: Uuid,
     pub create_params: params::DiskCreate,
 }
@@ -739,8 +741,9 @@ async fn sdc_finalize_disk_record(
     sagactx: ActionContext<SagaDiskCreate>,
 ) -> Result<(), ActionError> {
     let osagactx = sagactx.user_data();
-    let _params = sagactx.saga_params();
+    let params = sagactx.saga_params();
     let datastore = osagactx.datastore();
+    let opctx = OpContext::for_saga_action(&sagactx, &params.serialized_authn);
 
     let disk_id = sagactx.lookup::<Uuid>("disk_id")?;
     let disk_created = sagactx.lookup::<db::model::Disk>("created_disk")?;
@@ -748,8 +751,19 @@ async fn sdc_finalize_disk_record(
         .disk_lookup_by_id(disk_id)
         .await
         .map_err(ActionError::action_failed)?;
+    // TODO-security Review whether this can ever fail an authz check.  We don't
+    // want this to ever fail the authz check here -- if it did, we would have
+    // wanted to catch that a lot sooner.  It wouldn't make sense for it to fail
+    // anyway because we're modifying something that *we* just created.  Right
+    // now, it's very unlikely that it would ever fail because we checked
+    // Action::CreateChild on the Project before we created this saga.  The only
+    // role that gets that permission is "project collaborator", which also gets
+    // Action::Modify on Disks within the Project.  So this shouldn't break in
+    // practice.  However, that's brittle.  It would be better if this were
+    // better guaranteed.
     datastore
-        .disk_update_runtime_no_auth(
+        .disk_update_runtime(
+            &opctx,
             &authz_disk,
             &disk_created.runtime().detach(),
         )

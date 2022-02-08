@@ -15,6 +15,7 @@ use crate::authn::Actor;
 use crate::authz::AuthorizedResource;
 use crate::db::model::ConsoleSession;
 use crate::db::DataStore;
+use crate::saga_interface::SagaContext;
 use async_trait::async_trait;
 use authn::external::session_cookie::HttpAuthnSessionCookie;
 use authn::external::spoof::HttpAuthnSpoof;
@@ -202,6 +203,8 @@ enum OpKind {
     ExternalApiRequest,
     /// Handling an internal API request
     InternalApiRequest,
+    /// Executing a saga activity
+    Saga,
     /// Background operations in Nexus
     Background,
     /// Automated testing (unit tests and integration tests)
@@ -225,8 +228,9 @@ impl OpContext {
             datastore,
         );
 
-        let (log, metadata) =
-            OpContext::log_and_metadata_for_request(rqctx, &authn).await;
+        let (log, mut metadata) =
+            OpContext::log_and_metadata_for_authn(&rqctx.log, &authn);
+        OpContext::load_request_metadata(rqctx, &mut metadata).await;
 
         Ok(OpContext {
             log,
@@ -255,8 +259,9 @@ impl OpContext {
             datastore,
         );
 
-        let (log, metadata) =
-            OpContext::log_and_metadata_for_request(rqctx, &authn).await;
+        let (log, mut metadata) =
+            OpContext::log_and_metadata_for_authn(&rqctx.log, &authn);
+        OpContext::load_request_metadata(rqctx, &mut metadata).await;
 
         OpContext {
             log,
@@ -269,8 +274,8 @@ impl OpContext {
         }
     }
 
-    async fn log_and_metadata_for_request<T: Send + Sync + 'static>(
-        rqctx: &dropshot::RequestContext<T>,
+    fn log_and_metadata_for_authn(
+        log: &slog::Logger,
         authn: &authn::Context,
     ) -> (slog::Logger, BTreeMap<String, String>) {
         let mut metadata = BTreeMap::new();
@@ -279,22 +284,71 @@ impl OpContext {
             metadata
                 .insert(String::from("authenticated"), String::from("true"));
             metadata.insert(String::from("actor"), actor_id.to_string());
-            rqctx.log.new(
+            log.new(
                 o!("authenticated" => true, "actor" => actor_id.to_string()),
             )
         } else {
             metadata
                 .insert(String::from("authenticated"), String::from("false"));
-            rqctx.log.new(o!("authenticated" => false))
+            log.new(o!("authenticated" => false))
         };
 
+        (log, metadata)
+    }
+
+    async fn load_request_metadata<T: Send + Sync + 'static>(
+        rqctx: &dropshot::RequestContext<T>,
+        metadata: &mut BTreeMap<String, String>,
+    ) {
         let request = rqctx.request.lock().await;
         metadata.insert(String::from("request_id"), rqctx.request_id.clone());
         metadata
             .insert(String::from("http_method"), request.method().to_string());
         metadata.insert(String::from("http_uri"), request.uri().to_string());
+    }
 
-        (log, metadata)
+    pub fn for_saga_action<T>(
+        sagactx: &steno::ActionContext<T>,
+        serialized_authn: &authn::saga::Serialized,
+    ) -> OpContext
+    where
+        T: steno::SagaType<ExecContextType = Arc<SagaContext>>,
+    {
+        let created_instant = Instant::now();
+        let created_walltime = SystemTime::now();
+        let osagactx = sagactx.user_data();
+        let nexus = osagactx.nexus();
+        let datastore = Arc::clone(nexus.datastore());
+        let authn = Arc::new(serialized_authn.to_authn());
+        let authz = authz::Context::new(
+            Arc::clone(&authn),
+            Arc::clone(&osagactx.authz()),
+            datastore,
+        );
+        let (log, mut metadata) =
+            OpContext::log_and_metadata_for_authn(osagactx.log(), &authn);
+
+        // TODO-debugging This would be a good place to put the saga template
+        // name, but we don't have it available here.  This log maybe should
+        // come from steno, prepopulated with useful metadata similar to the
+        // way dropshot::RequestContext does.
+        let log = log.new(o!(
+            "saga_node" => sagactx.node_label().to_string(),
+        ));
+        metadata.insert(
+            String::from("saga_node"),
+            sagactx.node_label().to_string(),
+        );
+
+        OpContext {
+            log,
+            authz,
+            authn,
+            created_instant,
+            created_walltime,
+            metadata,
+            kind: OpKind::Saga,
+        }
     }
 
     /// Returns a context suitable for use in background operations in Nexus
