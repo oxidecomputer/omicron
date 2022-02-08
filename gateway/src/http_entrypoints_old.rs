@@ -37,21 +37,6 @@ struct TimeoutAndCountSelector<T> {
     count_so_far: u32,
 }
 
-#[derive(Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "lowercase")]
-enum SpType {
-    Sled,
-    Power,
-    Switch,
-}
-
-#[derive(Serialize, Deserialize, JsonSchema)]
-struct SpIdentifier {
-    #[serde(rename = "type")]
-    typ: SpType,
-    slot: u32,
-}
-
 type TimeoutAndCountPaginationParams<T> =
     PaginationParams<TimeoutAndCount, TimeoutAndCountSelector<T>>;
 
@@ -65,17 +50,13 @@ type TimeoutAndCountPaginationParams<T> =
 /// This interface may return a page of SPs prior to reaching either the
 /// timeout or expected count with the expectation that callers will keep
 /// calling this interface until the terminal page is reached.
-///
-/// TODO this could use Ignition to detect presense of each component along
-/// with its power state. We could merge that with data from the management
-/// network.
 #[endpoint {
     method = GET,
     path = "/sp",
 }]
 async fn sp_list(
     _rqctx: Arc<RequestContext<GatewayService>>,
-    _query: Query<TimeoutAndCountPaginationParams<SpIdentifier>>,
+    _query: Query<TimeoutAndCountPaginationParams<Uuid>>,
 ) -> Result<HttpResponseOk<ResultsPage<ManagementNode>>, HttpError> {
     todo!()
 }
@@ -84,8 +65,7 @@ async fn sp_list(
 struct PathSp {
     /// ID for the SP that the gateway service translates into the appropriate
     /// port for communicating with the given SP.
-    #[serde(flatten)]
-    sp: SpIdentifier,
+    sp: Uuid,
 }
 
 /// List components of an SP
@@ -100,22 +80,21 @@ struct PathSp {
 /// interface until the terminal page is reached.
 #[endpoint {
     method = GET,
-    path = "/sp/{type}/{slot}/component",
+    path = "/sp/{sp}/component",
 }]
 async fn sp_component_list(
     _rqctx: Arc<RequestContext<GatewayService>>,
     _path: Path<PathSp>,
-    _query: Query<TimeoutAndCountPaginationParams<PathSpComponent>>,
+    _query: Query<TimeoutAndCountPaginationParams<String>>,
 ) -> Result<HttpResponseOk<ResultsPage<ManagementNodeComponent>>, HttpError> {
     todo!()
 }
 
-#[derive(Serialize, Deserialize, JsonSchema)]
+#[derive(Deserialize, JsonSchema)]
 struct PathSpComponent {
     /// ID for the SP that the gateway service translates into the appropriate
     /// port for communicating with the given SP.
-    #[serde(flatten)]
-    sp: SpIdentifier,
+    sp: Uuid,
     /// ID for the component of the SP; this is the internal identifier used by
     /// the SP itself to identify its components.
     component: String,
@@ -128,7 +107,7 @@ struct PathSpComponent {
 /// component.
 #[endpoint {
     method = GET,
-    path = "/sp/{type}/{slot}/component/{component}",
+    path = "/sp/{sp}/component/{component}",
 }]
 async fn sp_component_get(
     _rqctx: Arc<RequestContext<GatewayService>>,
@@ -154,7 +133,7 @@ struct UpdateBody;
 /// update bundle.
 #[endpoint {
     method = POST,
-    path = "/sp/{type}/{slot}/component/{component}/update",
+    path = "/sp/{sp}/component/{component}/update",
 }]
 async fn sp_component_update(
     _rqctx: Arc<RequestContext<GatewayService>>,
@@ -167,7 +146,7 @@ async fn sp_component_update(
 /// Power on an SP component
 #[endpoint {
     method = POST,
-    path = "/sp/{type}/{slot}/component/{component}/power_on",
+    path = "/sp/{sp}/component/{component}/power_on",
 }]
 async fn sp_component_power_on(
     _rqctx: Arc<RequestContext<GatewayService>>,
@@ -180,7 +159,7 @@ async fn sp_component_power_on(
 /// Power off an SP component
 #[endpoint {
     method = POST,
-    path = "/sp/{type}/{slot}/component/{component}/power_off",
+    path = "/sp/{sp}/component/{component}/power_off",
 }]
 async fn sp_component_power_off(
     _rqctx: Arc<RequestContext<GatewayService>>,
@@ -193,7 +172,7 @@ async fn sp_component_power_off(
 /// Power on an SP via Ignition
 #[endpoint {
     method = POST,
-    path = "/sp/{type}/{slot}/power_on",
+    path = "/sp/{sp}/power_on",
 }]
 async fn sp_power_on(
     _rqctx: Arc<RequestContext<GatewayService>>,
@@ -204,5 +183,13 @@ async fn sp_power_on(
 }
 
 // TODO
-// - Do we want a separate collection of interfaces for Ignition facilities
-// other than power on/off/cycle?
+// - Do we need to have some interface to get the Ignition power state for
+// everything?
+//
+// - Does ignition give us presence?
+//
+// - If an SP is off we can't get its UUID so the interfaces that operate with
+// Ignition really need to speak in terms of either rack location identifier
+// (sled 7, PSC 0, switch 1) or in terms of the management switch port number
+// (although the latter seems hard to use since the mapping from port number to
+// rack location depends on which Sidecar we're talking to)

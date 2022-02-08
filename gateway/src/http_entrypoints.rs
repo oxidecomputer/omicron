@@ -2,32 +2,46 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! HTTP entrypoint functions for the gateway service
-
 // Copyright 2022 Oxide Computer Company
+
+//! HTTP entrypoint functions for the gateway service
 
 use std::sync::Arc;
 
 use dropshot::{
-    endpoint, HttpError, HttpResponseOk, HttpResponseUpdatedNoContent,
-    PaginationParams, Path, Query, RequestContext, ResultsPage, TypedBody,
+    endpoint, ApiDescription, HttpError, HttpResponseOk,
+    HttpResponseUpdatedNoContent, PaginationParams, Path, Query,
+    RequestContext, ResultsPage, TypedBody,
 };
-use uuid::Uuid;
 
 use crate::GatewayService;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, JsonSchema)]
-struct ManagementNode;
+struct SpInfo;
 
 #[derive(Serialize, JsonSchema)]
-struct ManagementNodeComponent;
+#[serde(tag = "present")]
+enum SpIgnitionInfo {
+    #[serde(rename = "no")]
+    Absent,
+    #[serde(rename = "yes")]
+    Present { id: u8, status: u8 },
+}
+
+#[derive(Serialize, JsonSchema)]
+struct SpComponentInfo;
 
 #[derive(Deserialize, JsonSchema)]
 struct TimeoutAndCount {
     timeout_ms: Option<u32>,
     expected_count: Option<u32>,
+}
+
+#[derive(Deserialize, JsonSchema)]
+struct Timeout {
+    timeout: Option<u32>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -37,8 +51,42 @@ struct TimeoutAndCountSelector<T> {
     count_so_far: u32,
 }
 
+#[derive(Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "lowercase")]
+enum SpType {
+    Sled,
+    Power,
+    Switch,
+}
+
+#[derive(Serialize, Deserialize, JsonSchema)]
+struct SpIdentifier {
+    #[serde(rename = "type")]
+    typ: SpType,
+    slot: u32,
+}
+
 type TimeoutAndCountPaginationParams<T> =
     PaginationParams<TimeoutAndCount, TimeoutAndCountSelector<T>>;
+
+#[derive(Deserialize, JsonSchema)]
+struct PathSp {
+    /// ID for the SP that the gateway service translates into the appropriate
+    /// port for communicating with the given SP.
+    #[serde(flatten)]
+    sp: SpIdentifier,
+}
+
+#[derive(Serialize, Deserialize, JsonSchema)]
+struct PathSpComponent {
+    /// ID for the SP that the gateway service translates into the appropriate
+    /// port for communicating with the given SP.
+    #[serde(flatten)]
+    sp: SpIdentifier,
+    /// ID for the component of the SP; this is the internal identifier used by
+    /// the SP itself to identify its components.
+    component: String,
+}
 
 /// List SPs on the management network
 ///
@@ -50,22 +98,35 @@ type TimeoutAndCountPaginationParams<T> =
 /// This interface may return a page of SPs prior to reaching either the
 /// timeout or expected count with the expectation that callers will keep
 /// calling this interface until the terminal page is reached.
+///
+/// TODO this could use Ignition to detect presense of each component along
+/// with its power state. We could merge that with data from the management
+/// network.
 #[endpoint {
     method = GET,
     path = "/sp",
 }]
 async fn sp_list(
     _rqctx: Arc<RequestContext<GatewayService>>,
-    _query: Query<TimeoutAndCountPaginationParams<Uuid>>,
-) -> Result<HttpResponseOk<ResultsPage<ManagementNode>>, HttpError> {
+    _query: Query<TimeoutAndCountPaginationParams<SpIdentifier>>,
+) -> Result<HttpResponseOk<ResultsPage<SpInfo>>, HttpError> {
     todo!()
 }
 
-#[derive(Deserialize, JsonSchema)]
-struct PathSp {
-    /// ID for the SP that the gateway service translates into the appropriate
-    /// port for communicating with the given SP.
-    sp: Uuid,
+/// Get info on an SP
+///
+/// As communication with SPs may be unreliable, consumers may specify an
+/// optional timeout to override the default.
+#[endpoint {
+    method = GET,
+    path = "/sp/{type}/{slot}",
+}]
+async fn sp_get(
+    _rqctx: Arc<RequestContext<GatewayService>>,
+    _path: Path<PathSp>,
+    _query: Query<Timeout>,
+) -> Result<HttpResponseOk<SpInfo>, HttpError> {
+    todo!()
 }
 
 /// List components of an SP
@@ -80,24 +141,14 @@ struct PathSp {
 /// interface until the terminal page is reached.
 #[endpoint {
     method = GET,
-    path = "/sp/{sp}/component",
+    path = "/sp/{type}/{slot}/component",
 }]
 async fn sp_component_list(
     _rqctx: Arc<RequestContext<GatewayService>>,
     _path: Path<PathSp>,
-    _query: Query<TimeoutAndCountPaginationParams<String>>,
-) -> Result<HttpResponseOk<ResultsPage<ManagementNodeComponent>>, HttpError> {
+    _query: Query<TimeoutAndCountPaginationParams<PathSpComponent>>,
+) -> Result<HttpResponseOk<ResultsPage<SpComponentInfo>>, HttpError> {
     todo!()
-}
-
-#[derive(Deserialize, JsonSchema)]
-struct PathSpComponent {
-    /// ID for the SP that the gateway service translates into the appropriate
-    /// port for communicating with the given SP.
-    sp: Uuid,
-    /// ID for the component of the SP; this is the internal identifier used by
-    /// the SP itself to identify its components.
-    component: String,
 }
 
 /// Get info for an SP component
@@ -107,12 +158,12 @@ struct PathSpComponent {
 /// component.
 #[endpoint {
     method = GET,
-    path = "/sp/{sp}/component/{component}",
+    path = "/sp/{type}/{slot}/component/{component}",
 }]
 async fn sp_component_get(
     _rqctx: Arc<RequestContext<GatewayService>>,
     _path: Path<PathSpComponent>,
-) -> Result<HttpResponseOk<ManagementNodeComponent>, HttpError> {
+) -> Result<HttpResponseOk<SpComponentInfo>, HttpError> {
     todo!()
 }
 
@@ -133,20 +184,20 @@ struct UpdateBody;
 /// update bundle.
 #[endpoint {
     method = POST,
-    path = "/sp/{sp}/component/{component}/update",
+    path = "/sp/{type}/{slot}/component/{component}/update",
 }]
 async fn sp_component_update(
     _rqctx: Arc<RequestContext<GatewayService>>,
     _path: Path<PathSpComponent>,
     _body: TypedBody<UpdateBody>,
-) -> Result<HttpResponseOk<ResultsPage<ManagementNodeComponent>>, HttpError> {
+) -> Result<HttpResponseOk<ResultsPage<SpComponentInfo>>, HttpError> {
     todo!()
 }
 
 /// Power on an SP component
 #[endpoint {
     method = POST,
-    path = "/sp/{sp}/component/{component}/power_on",
+    path = "/sp/{type}/{slot}/component/{component}/power_on",
 }]
 async fn sp_component_power_on(
     _rqctx: Arc<RequestContext<GatewayService>>,
@@ -159,7 +210,7 @@ async fn sp_component_power_on(
 /// Power off an SP component
 #[endpoint {
     method = POST,
-    path = "/sp/{sp}/component/{component}/power_off",
+    path = "/sp/{type}/{slot}/component/{component}/power_off",
 }]
 async fn sp_component_power_off(
     _rqctx: Arc<RequestContext<GatewayService>>,
@@ -169,27 +220,99 @@ async fn sp_component_power_off(
     todo!()
 }
 
+/// List SPs via Ignition
+///
+/// List the SPs via the Ignition controller. This mechanism retrieves less
+/// information than over the management network, however it is lower latency
+/// and has fewer moving pieces that could result in delayed responses or
+/// unknown states.
+#[endpoint {
+    method = GET,
+    path = "/ignition",
+}]
+async fn ignition_list(
+    _rqctx: Arc<RequestContext<GatewayService>>,
+    // TODO these pagination params aren't quite right
+    _query: Query<TimeoutAndCountPaginationParams<SpIdentifier>>,
+) -> Result<HttpResponseOk<ResultsPage<SpIgnitionInfo>>, HttpError> {
+    todo!()
+}
+
+/// Get SP info via Ignition
+///
+/// Retreive information for an SP via the Ignition controller. This is lower
+/// latency and has fewer possible failure modes than querying the SP over the
+/// management network.
+#[endpoint {
+    method = GET,
+    path = "/ignition/{type}/{slot}",
+}]
+async fn ignition_get(
+    _rqctx: Arc<RequestContext<GatewayService>>,
+    _path: Path<PathSp>,
+) -> Result<HttpResponseOk<SpIgnitionInfo>, HttpError> {
+    todo!()
+}
+
 /// Power on an SP via Ignition
 #[endpoint {
     method = POST,
-    path = "/sp/{sp}/power_on",
+    path = "/sp/{type}/{slot}/power_on",
 }]
-async fn sp_power_on(
+async fn ignition_power_on(
     _rqctx: Arc<RequestContext<GatewayService>>,
     _path: Path<PathSp>,
-    // TODO do we need a timeout?
-) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+) -> Result<HttpResponseOk<SpIgnitionInfo>, HttpError> {
+    todo!()
+}
+
+/// Power off an SP via Ignition
+#[endpoint {
+    method = POST,
+    path = "/sp/{type}/{slot}/power_off",
+}]
+async fn ignition_power_off(
+    _rqctx: Arc<RequestContext<GatewayService>>,
+    _path: Path<PathSp>,
+) -> Result<HttpResponseOk<SpIgnitionInfo>, HttpError> {
     todo!()
 }
 
 // TODO
-// - Do we need to have some interface to get the Ignition power state for
-// everything?
-//
-// - Does ignition give us presence?
-//
-// - If an SP is off we can't get its UUID so the interfaces that operate with
-// Ignition really need to speak in terms of either rack location identifier
-// (sled 7, PSC 0, switch 1) or in terms of the management switch port number
-// (although the latter seems hard to use since the mapping from port number to
-// rack location depends on which Sidecar we're talking to)
+// The gateway service will get asynchronous notifications both from directly
+// SPs over the management network and indirectly from Ignition via the Sidecar
+// SP.
+// TODO The Ignition controller will send an interrupt to its local SP. Will
+// that SP then notify both gateway services or just its local gateway service?
+// Both Ignition controller should both do the same thing at about the same
+// time so is there a real benefit to them both sending messages to both
+// gateways? This would cause a single message to effectively be replicated 4x
+// (Nexus would need to dedup these).
+
+type GatewayApiDescription = ApiDescription<GatewayService>;
+
+/// Returns a description of the gateway API
+pub fn api() -> GatewayApiDescription {
+    fn register_endpoints(
+        api: &mut GatewayApiDescription,
+    ) -> Result<(), String> {
+        api.register(sp_list)?;
+        api.register(sp_get)?;
+        api.register(sp_component_list)?;
+        api.register(sp_component_get)?;
+        api.register(sp_component_update)?;
+        api.register(sp_component_power_on)?;
+        api.register(sp_component_power_off)?;
+        api.register(ignition_list)?;
+        api.register(ignition_get)?;
+        api.register(ignition_power_on)?;
+        api.register(ignition_power_off)?;
+        Ok(())
+    }
+
+    let mut api = GatewayApiDescription::new();
+    if let Err(err) = register_endpoints(&mut api) {
+        panic!("failed to register entrypoints: {}", err);
+    }
+    api
+}
