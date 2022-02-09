@@ -352,21 +352,25 @@ impl InstanceStates {
 #[cfg(test)]
 mod test {
     use super::{Action, InstanceStates};
+
+    use std::assert_matches::assert_matches;
+
     use chrono::Utc;
     use omicron_common::api::external::{
-        ByteCount, Generation, InstanceCpuCount, InstanceState as State,
+        ByteCount, Error, Generation, InstanceCpuCount, InstanceState as State,
     };
     use omicron_common::api::internal::{
-        nexus::InstanceRuntimeState, sled_agent::InstanceRuntimeStateRequested,
-        sled_agent::InstanceStateRequested as Requested,
+        nexus::InstanceRuntimeState, sled_agent::InstanceRuntimeStateMigrateParams,
+        sled_agent::InstanceRuntimeStateRequested, sled_agent::InstanceStateRequested as Requested,
     };
     use propolis_client::api::InstanceState as Observed;
+    use uuid::Uuid;
 
     fn make_instance() -> InstanceStates {
         InstanceStates::new(InstanceRuntimeState {
             run_state: State::Creating,
-            sled_uuid: uuid::Uuid::new_v4(),
-            propolis_uuid: uuid::Uuid::new_v4(),
+            sled_uuid: Uuid::new_v4(),
+            propolis_uuid: Uuid::new_v4(),
             dst_propolis_uuid: None,
             propolis_addr: None,
             migration_uuid: None,
@@ -551,5 +555,252 @@ mod test {
                 .unwrap()
         );
         verify_state(&instance, State::Destroyed, None);
+    }
+
+    fn migrating_req() -> InstanceRuntimeStateRequested {
+        InstanceRuntimeStateRequested {
+            run_state: Requested::Migrating,
+            migration_params: Some(
+                InstanceRuntimeStateMigrateParams {
+                    migration_id: Uuid::new_v4(),
+                    dst_propolis_id: Uuid::new_v4(),
+                }
+            )
+        }
+    }
+
+    #[test]
+    fn test_migrating_from_invalid_states_fails() {
+        let mut instance = make_instance();
+
+        let invalid_migrate_states = [
+            State::Creating,
+            State::Starting,
+            State::Stopping,
+            State::Stopped,
+            State::Rebooting,
+            State::Repairing,
+            State::Failed,
+            State::Destroyed,
+        ];
+
+        for state in invalid_migrate_states {
+            instance.current_mut().run_state = state;
+            assert_matches!(
+                // Match state here as well so failure shows which
+                // state we failed on.
+                (state, instance.request_transition(&migrating_req())),
+                (_, Err(Error::InvalidRequest { message }))
+                    if message.contains("cannot migrate instance"),
+            );
+        }
+    }
+
+    #[test]
+    fn test_migrating_from_running() {
+        let mut instance = make_instance();
+
+        verify_state(&instance, State::Creating, None);
+        assert_eq!(
+            Action::Run,
+            instance
+                .request_transition(&runtime_state(Requested::Running))
+                .unwrap()
+                .unwrap()
+        );
+        verify_state(&instance, State::Starting, Some(Requested::Running));
+        assert_eq!(None, instance.observe_transition(&Observed::Running));
+        verify_state(&instance, State::Running, None);
+
+        let migrating_req = migrating_req();
+        assert_matches!(
+            instance.request_transition(&migrating_req),
+            Ok(None),
+        );
+        verify_state(&instance, State::Migrating, Some(Requested::Running));
+        assert_eq!(
+            migrating_req
+                .migration_params
+                .map(|m| m.migration_id),
+            instance
+                .current()
+                .migration_uuid,
+        );
+        assert_eq!(
+            migrating_req
+                .migration_params
+                .map(|m| m.dst_propolis_id),
+            instance
+                .current()
+                .dst_propolis_uuid,
+        );
+    }
+
+    #[test]
+    fn test_migrating_with_same_migration() {
+        let mut instance = make_instance();
+
+        verify_state(&instance, State::Creating, None);
+        assert_eq!(
+            Action::Run,
+            instance
+                .request_transition(&runtime_state(Requested::Running))
+                .unwrap()
+                .unwrap()
+        );
+        verify_state(&instance, State::Starting, Some(Requested::Running));
+        assert_eq!(None, instance.observe_transition(&Observed::Running));
+        verify_state(&instance, State::Running, None);
+
+        let migrating_req = migrating_req();
+        assert_matches!(
+            instance.request_transition(&migrating_req),
+            Ok(None),
+        );
+        verify_state(&instance, State::Migrating, Some(Requested::Running));
+
+        // A subsequent request for the same migration is a no-op
+        assert_matches!(
+            instance.request_transition(&migrating_req),
+            Ok(None),
+        );
+        verify_state(&instance, State::Migrating, Some(Requested::Running));
+    }
+
+    #[test]
+    fn test_migrating_missing_params_fails() {
+        let mut instance = make_instance();
+
+        verify_state(&instance, State::Creating, None);
+        assert_eq!(
+            Action::Run,
+            instance
+                .request_transition(&runtime_state(Requested::Running))
+                .unwrap()
+                .unwrap()
+        );
+        verify_state(&instance, State::Starting, Some(Requested::Running));
+        assert_eq!(None, instance.observe_transition(&Observed::Running));
+        verify_state(&instance, State::Running, None);
+
+        assert_matches!(
+            instance.request_transition(&runtime_state(Requested::Migrating)),
+            Err(Error::InvalidRequest { message })
+                if message.contains("expected migration IDs to transition"),
+        );
+    }
+
+    #[test]
+    fn test_migrating_with_same_migration_different_propolis_fails() {
+        let mut instance = make_instance();
+
+        verify_state(&instance, State::Creating, None);
+        assert_eq!(
+            Action::Run,
+            instance
+                .request_transition(&runtime_state(Requested::Running))
+                .unwrap()
+                .unwrap()
+        );
+        verify_state(&instance, State::Starting, Some(Requested::Running));
+        assert_eq!(None, instance.observe_transition(&Observed::Running));
+        verify_state(&instance, State::Running, None);
+
+        let mut migrating_req = migrating_req();
+        assert_matches!(
+            instance.request_transition(&migrating_req),
+            Ok(None),
+        );
+        verify_state(&instance, State::Migrating, Some(Requested::Running));
+
+        // We keep the Migration ID the same but pass a different
+        // propolis ID to migrate too.
+        migrating_req.migration_params.as_mut().unwrap().dst_propolis_id = Uuid::new_v4();
+        assert_matches!(
+            instance.request_transition(&migrating_req),
+            Err(Error::InvalidRequest { message })
+                if message.contains("already perfoming given migration to different propolis"),
+        );
+    }
+
+    #[test]
+    fn test_migrating_with_new_migration_fails() {
+        let mut instance = make_instance();
+
+        verify_state(&instance, State::Creating, None);
+        assert_eq!(
+            Action::Run,
+            instance
+                .request_transition(&runtime_state(Requested::Running))
+                .unwrap()
+                .unwrap()
+        );
+        verify_state(&instance, State::Starting, Some(Requested::Running));
+        assert_eq!(None, instance.observe_transition(&Observed::Running));
+        verify_state(&instance, State::Running, None);
+
+        assert_matches!(
+            instance.request_transition(&migrating_req()),
+            Ok(None),
+        );
+        verify_state(&instance, State::Migrating, Some(Requested::Running));
+
+        assert_matches!(
+            // NOTE: different migration parameters given in subsequent request
+            instance.request_transition(&migrating_req()),
+            Err(Error::InvalidRequest { message })
+                if message.contains("migration already in progress"),
+        );
+    }
+
+    #[test]
+    fn test_migrating_inconsistent_internal_state() {
+        let mut instance = make_instance();
+
+        verify_state(&instance, State::Creating, None);
+        assert_eq!(
+            Action::Run,
+            instance
+                .request_transition(&runtime_state(Requested::Running))
+                .unwrap()
+                .unwrap()
+        );
+        verify_state(&instance, State::Starting, Some(Requested::Running));
+        assert_eq!(None, instance.observe_transition(&Observed::Running));
+        verify_state(&instance, State::Running, None);
+
+        let migrating_req = migrating_req();
+        assert_matches!(
+            instance.request_transition(&migrating_req),
+            Ok(None),
+        );
+        verify_state(&instance, State::Migrating, Some(Requested::Running));
+
+        // This shouldn't happen during the normal course of operation
+        // but we also don't want things to proceed if such a state is encountered.
+
+        // Instance is currently marked as 'Migrating' but we'll
+        // remove the destination propolis ID
+        instance.current_mut().dst_propolis_uuid = None;
+
+        // A subsequent migrate request that would've been a no-op
+        // otherwise should fail in this case
+        assert_matches!(
+            instance.request_transition(&migrating_req),
+            Err(Error::InternalError { internal_message })
+                if internal_message.contains("migrating but no dst propolis id present"),
+        );
+
+        // Instance is still marked as 'Migrating' but we'll
+        // remove the Migration ID as well
+        instance.current_mut().migration_uuid = None;
+
+        // A subsequent migrate request that would've been a no-op
+        // otherwise should fail in this case
+        assert_matches!(
+            instance.request_transition(&migrating_req),
+            Err(Error::InternalError { internal_message })
+                if internal_message.contains("migrating but no migration id present"),
+        );
     }
 }

@@ -10,6 +10,9 @@
 // Clippy's style lints are useful, but not worth running automatically.
 #![allow(clippy::style)]
 
+// assert_matches! is pretty useful for tests so just enable it conditionally.
+#![cfg_attr(test, feature(assert_matches))]
+
 // Module for executing the simulated sled agent.
 pub mod sim;
 
