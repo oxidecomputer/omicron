@@ -288,6 +288,10 @@ async fn do_package(
                     &mut root_json.into_std().await,
                 )?;
 
+                archive.append_dir("root", ".")?;
+                archive.append_dir("root/opt", ".")?;
+                archive.append_dir("root/opt/oxide", ".")?;
+
                 // All other files are contained under the "root" prefix.
                 //
                 // "path.from" exists on the machine running the package

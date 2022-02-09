@@ -82,6 +82,8 @@ impl SledAgent {
 
         // Before we start creating zones, we need to ensure that the
         // necessary ZFS and Zone resources are ready.
+        //
+        // TODO: Should this be the responsibility of the "storage manager"?
         Zfs::ensure_filesystem(
             ZONE_ZFS_DATASET,
             Mountpoint::Path(std::path::PathBuf::from(
@@ -118,6 +120,7 @@ impl SledAgent {
             StorageManager::new(&log, *id, nexus_client.clone()).await?;
         if let Some(pools) = &config.zpools {
             for pool in pools {
+                info!(log, "Sled Agent upserting zpool to Storage Manager: {}", pool);
                 storage.upsert_zpool(pool).await?;
             }
         }

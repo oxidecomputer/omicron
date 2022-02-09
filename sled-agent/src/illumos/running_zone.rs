@@ -5,6 +5,7 @@
 //! Utilities to manage running zones.
 
 use crate::illumos::svc::wait_for_service;
+use crate::illumos::zone::AddrType;
 use crate::vnic::{interface_name, Vnic};
 use slog::Logger;
 use std::net::SocketAddr;
@@ -21,6 +22,12 @@ pub enum Error {
 
     #[error("Zone is not running")]
     NotRunning,
+
+    #[error("Execution error: {0}")]
+    Execution(#[from] crate::illumos::ExecutionError),
+
+    #[error("Failed to parse output: {0}")]
+    Parse(#[from] std::string::FromUtf8Error),
 
     #[error("Zone operation failed: {0}")]
     Operation(#[from] crate::illumos::zone::Error),
@@ -50,6 +57,29 @@ impl RunningZone {
         self.address
     }
 
+    /// Runs a command within the Zone, return the output.
+    pub fn run_cmd<I, S>(&self, args: I) -> Result<String, Error>
+    where
+        I: IntoIterator<Item = S>,
+        S: AsRef<std::ffi::OsStr>
+    {
+        let mut command = std::process::Command::new(crate::illumos::PFEXEC);
+
+        let name = self.name();
+        let prefix = &[super::zone::ZLOGIN, name];
+        let prefix_iter: Vec<_> = prefix
+            .iter()
+            .map(|s| std::ffi::OsStr::new(s))
+            .collect();
+        let suffix: Vec<_> = args.into_iter().collect();
+        let full_args = prefix_iter.into_iter().chain(suffix.iter().map(|a| a.as_ref()));
+
+        let cmd = command.args(full_args);
+        let output = crate::illumos::execute(cmd)?;
+        let stdout = String::from_utf8(output.stdout)?;
+        Ok(stdout)
+    }
+
     /// Boots a new zone.
     ///
     /// Note that the zone must already be configured to be booted.
@@ -73,7 +103,7 @@ impl RunningZone {
             .map_err(|_| Error::Timeout(fmri.to_string()))?;
 
         let network =
-            Zones::ensure_address(&zone_name, &interface_name(&nic.name()))?;
+            Zones::ensure_address(&zone_name, &interface_name(&nic.name()), AddrType::Dhcp)?;
 
         Ok(RunningZone {
             log: log.clone(),
@@ -101,7 +131,7 @@ impl RunningZone {
         let zone_name = zone.name();
         let vnic_name = Zones::get_control_interface(zone_name)?;
         let network =
-            Zones::ensure_address(zone_name, &interface_name(&vnic_name))?;
+            Zones::ensure_address(zone_name, &interface_name(&vnic_name), AddrType::Dhcp)?;
 
         Ok(Self {
             log: log.clone(),

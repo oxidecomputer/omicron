@@ -18,7 +18,7 @@ schemes_external = ["spoof"]
 
 [database]
 # URL for connecting to the database
-url = "postgresql://root@127.0.0.1:32221/omicron?sslmode=disable"
+url = "postgresql://root@[fd00:1234::]:32221/omicron?sslmode=disable"
 
 [dropshot_external]
 # IP address and TCP port on which to listen for the external API

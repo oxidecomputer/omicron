@@ -32,6 +32,7 @@ pub struct Zfs {}
 
 /// Describes a mountpoint for a ZFS filesystem.
 pub enum Mountpoint {
+    #[allow(dead_code)]
     Legacy,
     Path(PathBuf),
 }
@@ -71,6 +72,9 @@ impl Zfs {
         let cmd = command.args(&[
             ZFS,
             "create",
+            // The filesystem is managed from the Global Zone.
+            "-o",
+            "zoned=on",
             "-o",
             &format!("mountpoint={}", mountpoint),
             name,

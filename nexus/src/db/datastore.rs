@@ -484,9 +484,7 @@ impl DataStore {
     ) -> CreateResult<Organization> {
         use db::schema::organization::dsl;
 
-        eprintln!("Authorizing organization_create...");
         opctx.authorize(authz::Action::CreateChild, &authz::FLEET).await?;
-        eprintln!("Authorizing organization_create... OK");
 
         let name = organization.name().as_str().to_string();
         diesel::insert_into(dsl::organization)

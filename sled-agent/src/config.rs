@@ -19,8 +19,14 @@ pub struct Config {
     pub id: Uuid,
     /// Address of the Bootstrap Agent interface.
     pub bootstrap_address: SocketAddr,
-    /// IP address and TCP port for Nexus instance
+    /// Address of Nexus instance
     pub nexus_address: SocketAddr,
+    /// If this node should be part of a CockroachDB cluster,
+    /// the address it should use.
+    ///
+    /// TODO: The full set of CRDB nodes should be negotiated after establishing
+    /// a trust quorum.
+    pub cockroach_address: Option<SocketAddr>,
     /// Configuration for the sled agent dropshot server
     pub dropshot: ConfigDropshot,
     /// Configuration for the sled agent debug log
@@ -28,6 +34,9 @@ pub struct Config {
     /// Optional VLAN ID to be used for tagging guest VNICs.
     pub vlan: Option<VlanID>,
     /// Optional list of zpools to be used as "discovered disks".
+    ///
+    /// TODO: Can we make one from the local fs, to keep the "with/without"
+    /// zpool cases similar?
     pub zpools: Option<Vec<String>>,
 }
 

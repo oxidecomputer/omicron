@@ -9,7 +9,7 @@ use crate::common::{
     vlan::VlanID,
 };
 use crate::illumos::svc::wait_for_service;
-use crate::illumos::zone::PROPOLIS_ZONE_PREFIX;
+use crate::illumos::zone::{AddrType, PROPOLIS_ZONE_PREFIX};
 use crate::instance_manager::InstanceTicket;
 use crate::vnic::{interface_name, IdAllocator, Vnic};
 use anyhow::anyhow;
@@ -502,6 +502,7 @@ impl Instance {
         let network = Zones::create_address(
             &zname,
             &interface_name(&control_nic.name()),
+            AddrType::Dhcp,
         )?;
         info!(inner.log, "Created address {} for zone: {}", network, zname);
 
@@ -929,7 +930,8 @@ mod test {
             .expect()
             .times(1)
             .in_sequence(&mut seq)
-            .returning(|zone, iface| {
+            .returning(|zone, iface, addrtype| {
+                assert!(matches!(addrtype, AddrType::Dhcp));
                 assert_eq!(zone, propolis_zone_name(&test_propolis_uuid()));
                 assert_eq!(iface, interface_name(&control_vnic_name(0)));
                 Ok("127.0.0.1/24".parse().unwrap())

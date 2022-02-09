@@ -6,22 +6,21 @@
 
 use crate::illumos::{
     zfs::Mountpoint,
-    zone::{
-        COCKROACH_SVC_DIRECTORY, COCKROACH_ZONE_PREFIX, CRUCIBLE_SVC_DIRECTORY,
-        CRUCIBLE_ZONE_PREFIX,
-    },
+    zone::ZONE_PREFIX,
     zpool::ZpoolInfo,
 };
-use crate::running_zone::RunningZone;
+use crate::illumos::running_zone::RunningZone;
 use crate::vnic::{IdAllocator, Vnic};
 use futures::stream::FuturesOrdered;
 use futures::StreamExt;
+use lazy_static::lazy_static;
 use nexus_client::types::{DatasetKind, DatasetPutRequest, ZpoolPutRequest};
 use omicron_common::api::external::{ByteCount, ByteCountRangeError};
 use omicron_common::backoff;
 use slog::Logger;
 use std::collections::HashMap;
 use std::convert::TryFrom;
+use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::{mpsc, Mutex};
 use tokio::task::JoinHandle;
@@ -58,7 +57,7 @@ pub enum Error {
     ZoneConfiguration(crate::illumos::zone::Error),
 
     #[error("Failed to manage a running zone: {0}")]
-    ZoneManagement(#[from] crate::running_zone::Error),
+    ZoneManagement(#[from] crate::illumos::running_zone::Error),
 
     #[error("Error parsing pool size: {0}")]
     BadPoolSize(#[from] ByteCountRangeError),
@@ -111,32 +110,57 @@ impl Pool {
     }
 }
 
+#[derive(Debug)]
+struct DatasetName {
+    // A unique identifier for the Zpool on which the dataset is stored.
+    pool_name: String,
+    // A name for the dataset within the Zpool.
+    dataset_name: String,
+}
+
+impl DatasetName {
+    fn new(pool_name: &str, dataset_name: &str) -> Self {
+        Self {
+            pool_name: pool_name.to_string(),
+            dataset_name: dataset_name.to_string(),
+        }
+    }
+
+    fn full(&self) -> String {
+        format!("{}/{}", self.pool_name, self.dataset_name)
+    }
+}
+
 // Description of a dataset within a ZFS pool, which should be created
 // by the Sled Agent.
-struct PartitionInfo<'a> {
-    name: &'a str,
-    zone_prefix: &'a str,
-    data_directory: &'a str,
-    svc_directory: &'a str,
+struct PartitionInfo {
+    name: String,
+    data_directory: String,
     port: u16,
     kind: DatasetKind,
+}
+
+impl PartitionInfo {
+    fn zone_prefix(&self) -> String {
+        format!("{}{}_", ZONE_PREFIX, self.name)
+    }
 }
 
 async fn ensure_running_zone(
     log: &Logger,
     vnic_id_allocator: &IdAllocator,
-    partition_info: &PartitionInfo<'_>,
-    dataset_name: &str,
+    partition_info: &PartitionInfo,
+    dataset_name: &DatasetName,
 ) -> Result<RunningZone, Error> {
-    match RunningZone::get(log, partition_info.zone_prefix, partition_info.port)
+    match RunningZone::get(log, &partition_info.zone_prefix(), partition_info.port)
         .await
     {
         Ok(zone) => {
-            info!(log, "Zone for {} is already running", dataset_name);
+            info!(log, "Zone for {} is already running", dataset_name.full());
             Ok(zone)
         }
         Err(_) => {
-            info!(log, "Zone for {} is not running: Booting", dataset_name);
+            info!(log, "Zone for {} is not running (it may exist, but it's not running). Booting", dataset_name.full());
             let (nic, zname) = configure_zone(
                 log,
                 vnic_id_allocator,
@@ -154,69 +178,63 @@ async fn ensure_running_zone(
 fn configure_zone(
     log: &Logger,
     vnic_id_allocator: &IdAllocator,
-    partition_info: &PartitionInfo<'_>,
-    dataset_name: &str,
+    partition_info: &PartitionInfo,
+    dataset_name: &DatasetName,
 ) -> Result<(Vnic, String), Error> {
     let physical_dl = Dladm::find_physical()?;
     let nic = Vnic::new_control(vnic_id_allocator, &physical_dl, None)?;
-    let id = Uuid::new_v4();
-    let zname = format!("{}{}", partition_info.zone_prefix, id);
+
+    // The zone name is based on:
+    // - A unique Oxide prefix ("oxz_")
+    // - The name of the partition being hosted (e.g., "cockroachdb")
+    // - Unique Zpool identifier (typically a UUID).
+    //
+    // This results in a zone name which is distinct across different zpools,
+    // but stable and predictable across reboots.
+    let zname = format!("{}{}", partition_info.zone_prefix(), dataset_name.pool_name);
+
+    let zone_image = PathBuf::from(&format!("/opt/oxide/{}.tar.gz", partition_info.name));
 
     // Configure the new zone - this should be identical to the base zone,
     // but with a specified VNIC and pool.
-    Zones::configure_zone(
+    Zones::install_omicron_zone(
         log,
         &zname,
+        &zone_image,
         &[
-            zone::Fs {
-                ty: "lofs".to_string(),
-                dir: partition_info.svc_directory.to_string(),
-                special: partition_info.svc_directory.to_string(),
-                options: vec!["ro".to_string()],
-                ..Default::default()
-            },
-            zone::Fs {
-                ty: "zfs".to_string(),
-                dir: partition_info.data_directory.to_string(),
-                special: dataset_name.to_string(),
-                options: vec!["rw".to_string()],
-                ..Default::default()
+            zone::Dataset {
+                name: dataset_name.full(),
             },
         ],
         &[],
         vec![nic.name().to_string()],
     )
     .map_err(|e| Error::ZoneConfiguration(e))?;
-
-    // Clone from the base zone installation.
-    Zones::clone_from_base_storage(&zname)
-        .map_err(|e| Error::BaseZoneCreation(e))?;
-
     Ok((nic, zname))
 }
 
-const PARTITIONS: &[PartitionInfo<'static>] = &[
-    PartitionInfo {
-        name: "crucible",
-        zone_prefix: CRUCIBLE_ZONE_PREFIX,
-        data_directory: "/data",
-        svc_directory: CRUCIBLE_SVC_DIRECTORY,
-        // TODO: Ensure crucible agent uses this port.
-        // Currently, nothing is running in the zone, so it's made up.
-        port: 8080,
-        kind: DatasetKind::Crucible,
-    },
-    PartitionInfo {
-        name: "cockroach",
-        zone_prefix: COCKROACH_ZONE_PREFIX,
-        data_directory: "/data",
-        svc_directory: COCKROACH_SVC_DIRECTORY,
-        // TODO: Ensure cockroach uses this port.
-        // Currently, nothing is running in the zone, so it's made up.
-        port: 8080,
-        kind: DatasetKind::Cockroach,
-    },
-];
+lazy_static! {
+    static ref PARTITIONS: Vec<PartitionInfo> = vec![
+        /*
+        PartitionInfo {
+            name: "crucible",
+            data_directory: "/data",
+            // TODO: Ensure crucible agent uses this port.
+            // Currently, nothing is running in the zone, so it's made up.
+            port: 8080,
+            kind: DatasetKind::Crucible,
+        },
+        */
+        PartitionInfo {
+            name: "cockroachdb".to_string(),
+            data_directory: "/data".to_string(),
+            // TODO: Ensure cockroach uses this port.
+            // Currently, nothing is running in the zone, so it's made up.
+            port: 32221,
+            kind: DatasetKind::Cockroach,
+        },
+    ];
+}
 
 // A worker that starts zones for pools as they are received.
 struct StorageWorker {
@@ -232,8 +250,9 @@ impl StorageWorker {
     // Idempotently ensure the named dataset exists as a filesystem with a UUID.
     //
     // Returns the UUID attached to the ZFS filesystem.
-    fn ensure_dataset_with_id(fs_name: &str) -> Result<Uuid, Error> {
-        Zfs::ensure_filesystem(&fs_name, Mountpoint::Legacy)?;
+    fn ensure_dataset_with_id(dataset_name: &DatasetName) -> Result<Uuid, Error> {
+        let fs_name = &dataset_name.full();
+        Zfs::ensure_filesystem(&fs_name, Mountpoint::Path(PathBuf::from("/data")))?;
         // Ensure the dataset has a usable UUID.
         if let Ok(id_str) = Zfs::get_oxide_value(&fs_name, "uuid") {
             if let Ok(id) = id_str.parse::<Uuid>() {
@@ -259,23 +278,149 @@ impl StorageWorker {
     async fn initialize_partition(
         &self,
         pool: &mut Pool,
-        partition: &PartitionInfo<'static>,
+        partition_info: &PartitionInfo,
     ) -> Result<Uuid, Error> {
-        let name = format!("{}/{}", pool.info.name(), partition.name);
+        let dataset_name = DatasetName::new(pool.info.name(), &partition_info.name);
 
-        info!(&self.log, "Ensuring dataset {} exists", name);
-        let id = StorageWorker::ensure_dataset_with_id(&name)?;
+        info!(&self.log, "[InitializePartition] Ensuring dataset {} exists", dataset_name.full());
+        let id = StorageWorker::ensure_dataset_with_id(&dataset_name)?;
 
-        info!(&self.log, "Creating zone for {}", name);
+        info!(&self.log, "[InitializePartition] Creating zone for {}", dataset_name.full());
         let zone = ensure_running_zone(
             &self.log,
             &self.vnic_id_allocator,
-            partition,
-            &name,
+            partition_info,
+            &dataset_name,
         )
         .await?;
+        info!(&self.log, "[InitializePartition] Zone {} with address {} is running", zone.name(), zone.address());
 
-        info!(&self.log, "Created zone with address {}", zone.address());
+        // TODO: This function isn't named as something "CRDB specific".
+        // How do we distinguish this from the "crucible setup"?
+
+        info!(&self.log, "[InitializePartition] Importing CRDB Manifest");
+        zone.run_cmd(
+            &[
+                crate::illumos::zone::SVCCFG,
+                "import",
+                "/var/svc/manifest/site/cockroachdb/manifest.xml"
+            ]
+        )?;
+
+        zone.run_cmd(
+            &[
+                crate::illumos::zone::SVCCFG,
+                "-s",
+                "svc:system/illumos/cockroachdb",
+                "setprop",
+                &format!("config/listen_addr={}", zone.address().to_string()),
+            ]
+        )?;
+
+        zone.run_cmd(
+            &[
+                crate::illumos::zone::SVCCFG,
+                "-s",
+                "svc:system/illumos/cockroachdb",
+                "setprop",
+                &format!("config/store={}", partition_info.data_directory),
+            ]
+        )?;
+
+        // TODO: Set these addresses, use "start" instead of
+        // "start-single-node".
+        zone.run_cmd(
+            &[
+                crate::illumos::zone::SVCCFG,
+                "-s",
+                "svc:system/illumos/cockroachdb",
+                "setprop",
+                &format!("config/join_addrs={}", "unknown"),
+            ]
+        )?;
+
+        // Refresh the manifest with the new properties we set,
+        // so they become "effective" properties when the service is enabled.
+        zone.run_cmd(
+            &[
+                crate::illumos::zone::SVCCFG,
+                "-s",
+                "svc:system/illumos/cockroachdb:default",
+                "refresh",
+            ]
+        )?;
+
+        zone.run_cmd(
+            &[
+                crate::illumos::zone::SVCADM,
+                "enable",
+                "-t",
+                &format!("svc:/system/illumos/cockroachdb:default"),
+            ]
+        )?;
+
+        // "What does omicron-dev do":
+        // "start-single-node" vs "start"
+        //
+        // DB Console HTTP Requests:
+        //   --http-addr=:0
+        //
+        // DB Node/Client Request Port:
+        //   --listen-addr=127.0.0.1:32221
+        //
+        // Path to the postgresql URL:
+        //   --listening-url-file=<file>
+        //
+        //   Can be a tempfile, seems optional? Happens to be co-located
+        //   w/"store".
+        //
+        // Store:
+        //   --store=PATH
+        //
+        //
+        // TODO: New ones:
+        // Use to ensure you're joining the right cluster
+        //   --cluster-name=...
+
+        // TODO: Populate DB
+        // TODO: Decide whether or not to populate DB
+        //
+        // TODO: Maybe move the "initialize / populate" decision somewhere else?
+
+//      tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
+
+//        info!(&self.log, "[InitializePartition] Populating CRDB");
+//
+//        zone.run_cmd(
+//            &[
+//                "/opt/oxide/cockroachdb/bin/cockroach",
+//                "sql",
+//                "--insecure",
+//                "--host",
+//                zone.address().to_string(),
+//                "--file",
+//                "/opt/oxide/cockroachdb/sql/dbwipe.sql",
+//            ]
+//        )?;
+//
+//        zone.run_cmd(
+//            &[
+//                "/opt/oxide/cockroachdb/bin/cockroach",
+//                "sql",
+//                "--insecure",
+//                "--host",
+//                zone.address().to_string(),
+//                "--file",
+//                "/opt/oxide/cockroachdb/sql/dbinit.sql",
+//            ]
+//        )?;
+
+        info!(
+            &self.log,
+            "[InitializePartition] Set up zone {} for partition {} successfully",
+            zone.name(),
+            partition_info.name
+        );
         pool.add_zone(id, zone);
         Ok(id)
     }
@@ -319,7 +464,13 @@ impl StorageWorker {
 
                     // Initialize all sled-local state.
                     let mut partitions = vec![];
-                    for partition in PARTITIONS {
+                    for partition in PARTITIONS.iter() {
+                        // NOTE: I've noticed that a failure to set up *any*
+                        // partitions takes the whole storage worker down here.
+                        //
+                        // TODO: Can we tolerate *some* faults? Maybe have a
+                        // managed set of "known bad" partitions, and keep
+                        // going?
                         let id = self.initialize_partition(pool, partition).await?;
                         // Unwrap safety: We just put this zone in the pool.
                         let zone = pool.get_zone(id).unwrap();

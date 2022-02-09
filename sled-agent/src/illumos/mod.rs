@@ -5,6 +5,7 @@
 //! Wrappers around illumos-specific commands.
 
 pub mod dladm;
+pub mod running_zone;
 pub mod svc;
 pub mod zfs;
 pub mod zone;

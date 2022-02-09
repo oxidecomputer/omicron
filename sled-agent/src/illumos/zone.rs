@@ -16,20 +16,16 @@ use crate::illumos::{execute, PFEXEC};
 const PROPOLIS_BASE_ZONE: &str = "oxz_propolis_base";
 const STORAGE_BASE_ZONE: &str = "oxz_storage_base";
 const PROPOLIS_SVC_DIRECTORY: &str = "/opt/oxide/propolis-server";
-pub const CRUCIBLE_SVC_DIRECTORY: &str = "/opt/oxide/crucible-agent";
-pub const COCKROACH_SVC_DIRECTORY: &str = "/opt/oxide/cockroachdb";
 
 const DLADM: &str = "/usr/sbin/dladm";
 const IPADM: &str = "/usr/sbin/ipadm";
-const SVCADM: &str = "/usr/sbin/svcadm";
-const SVCCFG: &str = "/usr/sbin/svccfg";
-const ZLOGIN: &str = "/usr/sbin/zlogin";
+pub const SVCADM: &str = "/usr/sbin/svcadm";
+pub const SVCCFG: &str = "/usr/sbin/svccfg";
+pub const ZLOGIN: &str = "/usr/sbin/zlogin";
 
 // TODO: These could become enums
 pub const ZONE_PREFIX: &str = "oxz_";
 pub const PROPOLIS_ZONE_PREFIX: &str = "oxz_propolis_instance_";
-pub const CRUCIBLE_ZONE_PREFIX: &str = "oxz_crucible_instance_";
-pub const COCKROACH_ZONE_PREFIX: &str = "oxz_cockroach_instance_";
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
@@ -68,8 +64,16 @@ pub enum Error {
     #[error("Error accessing filesystem: {0}")]
     Filesystem(std::io::Error),
 
+    #[error("Unexpected IP address: {0}")]
+    Ip(IpNetwork),
+
     #[error("Value not found")]
     NotFound,
+}
+
+pub enum AddrType {
+    Dhcp,
+    Static(IpNetwork),
 }
 
 /// Wraps commands for interacting with Zones.
@@ -81,12 +85,25 @@ impl Zones {
     pub fn halt_and_remove(log: &Logger, name: &str) -> Result<(), Error> {
         if let Some(zone) = Self::find(name)? {
             info!(log, "halt_and_remove: Zone state: {:?}", zone.state());
-            if zone.state() == zone::State::Running {
+            let (halt, uninstall) =
+                match zone.state() {
+                    // For states where we could be running, attempt to halt.
+                    zone::State::Running | zone::State::Ready => (true, true),
+                    // For zones where we never performed installation, simply
+                    // delete the zone - uninstallation is invalid.
+                    zone::State::Configured => (false, false),
+                    // For most zone states, perform uninstallation.
+                    _ => (false, true),
+                };
+
+            if halt {
                 zone::Adm::new(name).halt().map_err(Error::Halt)?;
             }
-            zone::Adm::new(name)
-                .uninstall(/* force= */ true)
-                .map_err(Error::Uninstall)?;
+            if uninstall {
+                zone::Adm::new(name)
+                    .uninstall(/* force= */ true)
+                    .map_err(Error::Uninstall)?;
+            }
             zone::Config::new(name)
                 .delete(/* force= */ true)
                 .run()
@@ -151,14 +168,16 @@ impl Zones {
         Ok(())
     }
 
-    fn install_omicron_zone(
-        name: &str,
+    pub fn install_omicron_zone(
         log: &Logger,
-        filesystems: &[zone::Fs],
+        zone_name: &str,
+        zone_image: &std::path::Path,
+        datasets: &[zone::Dataset],
         devices: &[zone::Device],
+        vnics: Vec<String>,
     ) -> Result<(), Error> {
-        info!(log, "Querying for prescence of zone: {}", name);
-        if let Some(zone) = Self::find(name)? {
+        info!(log, "Querying for prescence of zone: {}", zone_name);
+        if let Some(zone) = Self::find(zone_name)? {
             info!(
                 log,
                 "Found zone: {} in state {:?}",
@@ -172,38 +191,43 @@ impl Zones {
             } else {
                 info!(
                     log,
-                    "Invalid state; uninstalling and deleting zone {}", name
+                    "Invalid state; uninstalling and deleting zone {}", zone_name
                 );
                 Zones::halt_and_remove(log, zone.name())?;
             }
         }
 
-        info!(log, "Configuring new Omicron zone: {}", name);
+        info!(log, "Configuring new Omicron zone: {}", zone_name);
         let mut cfg = zone::Config::create(
-            name,
+            zone_name,
             /* overwrite= */ true,
             zone::CreationOptions::Blank,
         );
-        let path = format!("{}/{}", ZONE_ZFS_DATASET_MOUNTPOINT, name);
+        let path = format!("{}/{}", ZONE_ZFS_DATASET_MOUNTPOINT, zone_name);
         cfg.get_global()
             .set_brand("omicron1")
             .set_path(&path)
             .set_autoboot(false)
             .set_ip_type(zone::IpType::Exclusive);
-        for fs in filesystems {
-            cfg.add_fs(&fs);
+
+        for dataset in datasets {
+            cfg.add_dataset(&dataset);
         }
         for device in devices {
             cfg.add_device(device);
         }
+        for vnic in &vnics {
+            cfg.add_net(&zone::Net {
+                physical: vnic.to_string(),
+                ..Default::default()
+            });
+        }
         cfg.run().map_err(Error::Configure)?;
 
         // TODO: This process takes a little while... Consider optimizing.
-        info!(log, "Installing Omicron zone: {}", name);
+        info!(log, "Installing Omicron zone: {}", zone_name);
 
-        let path_to_tarball = std::ffi::OsString::from(&format!("/opt/oxide/{}.tar.gz", name));
-        zone::Adm::new(name).install(&[&path_to_tarball]).map_err(Error::Install)?;
-
+        zone::Adm::new(zone_name).install(&[zone_image.as_ref()]).map_err(Error::Install)?;
         Ok(())
     }
 
@@ -438,10 +462,19 @@ impl Zones {
     pub fn ensure_address(
         zone: &str,
         addrobj: &str,
+        addrtype: AddrType,
     ) -> Result<IpNetwork, Error> {
         match Zones::get_address(zone, addrobj) {
-            Ok(addr) => Ok(addr),
-            Err(_) => Zones::create_address(zone, addrobj),
+            Ok(addr) => {
+                if let AddrType::Static(expected_addr) = addrtype {
+                    if addr != expected_addr {
+                        return Err(Error::Ip(addr));
+                    }
+
+                }
+                Ok(addr)
+            },
+            Err(_) => Zones::create_address(zone, addrobj, addrtype),
         }
     }
 
@@ -471,18 +504,41 @@ impl Zones {
     pub fn create_address(
         zone: &str,
         addrobj: &str,
+        addrtype: AddrType,
     ) -> Result<IpNetwork, Error> {
         let mut command = std::process::Command::new(PFEXEC);
-        let cmd = command.args(&[
+
+        let mut args: Vec<String> = vec![
             ZLOGIN,
             zone,
             IPADM,
             "create-addr",
             "-t",
-            "-T",
-            "dhcp",
-            addrobj,
-        ]);
+        ].into_iter().map(String::from).collect();
+
+        match addrtype {
+            AddrType::Dhcp => {
+                args.extend(
+                    vec![
+                        "-T",
+                        "dhcp",
+                    ].into_iter().map(String::from)
+                )
+            },
+            AddrType::Static(addr) => {
+                args.extend(
+                    vec![
+                        "-T",
+                        "static",
+                        "-a",
+                    ].into_iter().map(String::from)
+                );
+                args.push(addr.to_string());
+            }
+        };
+
+        args.push(addrobj.to_string());
+        let cmd = command.args(args);
         execute(cmd)?;
         Self::get_address(zone, addrobj)
     }
@@ -505,6 +561,9 @@ impl Zones {
         execute(cmd)?;
 
         // Set the desired address of the Propolis server.
+        //
+        // This is used to customize the arguments to "propolis-server"
+        // within the "manifest.xml" file.
         let mut command = std::process::Command::new(PFEXEC);
         let cmd = command.args(&[
             ZLOGIN,
