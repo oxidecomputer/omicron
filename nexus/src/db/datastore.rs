@@ -78,6 +78,7 @@ use crate::db::{
     pagination::paginated,
     pagination::paginated_multicolumn,
     subnet_allocation::AllocateIpQuery,
+    subnet_allocation::FilterConflictingVpcSubnetRangesQuery,
     update_and_check::{UpdateAndCheck, UpdateStatus},
 };
 
@@ -1571,6 +1572,7 @@ impl DataStore {
         match interface.ip {
             // Attempt an insert with a requested IP address
             Some(ip) => {
+                interface.subnet.contains(ip)?;
                 let row = NetworkInterface {
                     identity: interface.identity,
                     instance_id: interface.instance_id,
@@ -1596,11 +1598,10 @@ impl DataStore {
             }
             // Insert and allocate an IP address
             None => {
-                let block = interface.subnet.ipv4_block.ok_or_else(|| {
-                    Error::internal_error("assuming subnets all have v4 block")
-                })?;
                 let allocation_query = AllocateIpQuery {
-                    block: ipnetwork::IpNetwork::V4(block.0 .0),
+                    block: ipnetwork::IpNetwork::V4(
+                        interface.subnet.ipv4_block.0 .0,
+                    ),
                     interface,
                     now: Utc::now(),
                 };
@@ -2185,30 +2186,50 @@ impl DataStore {
             })
     }
 
+    /// Insert a VPC Subnet, checking for unique IP address ranges.
+    ///
+    /// Notes
+    /// -----
+    ///
+    /// This method is a bit different from others, indicated by the fact that
+    /// it returns an `Option`. This method internally checks that the IP
+    /// address ranges of the provided subnet don't overlap any existing VPC
+    /// Subnets in the same VPC. If that check _fails_, then `Ok(None)` is
+    /// returned.
+    ///
+    /// This is mainly done so that callers can easily distinguish this case.
+    /// This method is used internally, in some cases where we generate the IP
+    /// address ranges automatically, in which case we'll likely want to retry
+    /// in some way. The `Ok(None)` return value can be more easily checked than
+    /// looking for some sentinel value in a public conflict error variant.
+    ///
+    /// In other cases, the request from the client is more or less directly
+    /// passed through. Here, any conflict, including overlapping IP ranges, is
+    /// returned to the client as a 400-level error, since their request is not
+    /// valid.
     pub async fn vpc_create_subnet(
         &self,
         subnet: VpcSubnet,
-    ) -> CreateResult<VpcSubnet> {
+    ) -> CreateResult<Option<VpcSubnet>> {
         use db::schema::vpc_subnet::dsl;
-
         let name = subnet.name().clone();
-        let subnet = diesel::insert_into(dsl::vpc_subnet)
-            .values(subnet)
-            .on_conflict(dsl::id)
-            .do_nothing()
-            .returning(VpcSubnet::as_returning())
-            .get_result_async(self.pool())
-            .await
-            .map_err(|e| {
-                public_error_from_diesel_pool(
-                    e,
-                    ErrorHandler::Conflict(
-                        ResourceType::VpcSubnet,
-                        name.as_str(),
-                    ),
-                )
-            })?;
-        Ok(subnet)
+        let values = FilterConflictingVpcSubnetRangesQuery(subnet);
+        diesel_pool_result_optional(
+            diesel::insert_into(dsl::vpc_subnet)
+                .values(values)
+                .returning(VpcSubnet::as_returning())
+                .get_result_async(self.pool())
+                .await,
+        )
+        .map_err(|err| {
+            public_error_from_diesel_pool(
+                err,
+                ErrorHandler::Conflict(
+                    ResourceType::VpcSubnet,
+                    name.to_string().as_str(),
+                ),
+            )
+        })
     }
 
     pub async fn vpc_delete_subnet(&self, subnet_id: &Uuid) -> DeleteResult {

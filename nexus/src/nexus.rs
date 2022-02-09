@@ -27,8 +27,6 @@ use async_trait::async_trait;
 use futures::future::ready;
 use futures::StreamExt;
 use hex;
-use ipnetwork::Ipv4Network;
-use ipnetwork::Ipv6Network;
 use omicron_common::api::external;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DataPageParams;
@@ -37,8 +35,6 @@ use omicron_common::api::external::DiskState;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::InstanceState;
-use omicron_common::api::external::Ipv4Net;
-use omicron_common::api::external::Ipv6Net;
 use omicron_common::api::external::ListResult;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
@@ -1636,31 +1632,41 @@ impl Nexus {
         )?;
         let vpc = self.db_datastore.project_create_vpc(vpc).await?;
 
+        // Allocate the first /64 sub-range from the requested or created
+        // prefix.
+        let ipv6_block = external::Ipv6Net(
+            ipnetwork::Ipv6Network::new(vpc.ipv6_prefix.network(), 64)
+                .map_err(|_| {
+                    external::Error::internal_error(
+                        "Failed to allocate default IPv6 subnet",
+                    )
+                })?,
+        );
+
         // TODO: batch this up with everything above
         let subnet = db::model::VpcSubnet::new(
             default_subnet_id,
             vpc_id,
-            params::VpcSubnetCreate {
-                identity: IdentityMetadataCreateParams {
-                    name: "default".parse().unwrap(),
-                    description: format!(
-                        "The default subnet for {}",
-                        params.identity.name
-                    ),
-                },
-                ipv4_block: Some(Ipv4Net(
-                    // TODO: This value should be replaced with the correct ipv4
-                    // range for a default subnet
-                    "10.1.9.32/16".parse::<Ipv4Network>().unwrap(),
-                )),
-                ipv6_block: Some(Ipv6Net(
-                    // TODO: This value should be replaced w/ the first `/64`
-                    // ipv6 from the address block
-                    "2001:db8::0/64".parse::<Ipv6Network>().unwrap(),
-                )),
+            IdentityMetadataCreateParams {
+                name: "default".parse().unwrap(),
+                description: format!(
+                    "The default subnet for {}",
+                    params.identity.name
+                ),
             },
+            *defaults::DEFAULT_VPC_SUBNET_IPV4_BLOCK,
+            ipv6_block,
         );
-        self.db_datastore.vpc_create_subnet(subnet).await?;
+
+        // Create the subnet record in the database. Overlapping IP ranges should be translated
+        // into an internal error. That implies that there's already an existing VPC Subnet, but
+        // we're explicitly creating the _first_ VPC in the project. Something is wrong, and likely
+        // a bug in our code.
+        if let None = self.db_datastore.vpc_create_subnet(subnet).await? {
+            return Err(external::Error::internal_error(
+                "Failed to create default VPC Subnet, found overlapping IP address ranges"
+            ));
+        }
 
         self.create_default_vpc_firewall(&vpc_id).await?;
         Ok(vpc)
@@ -1815,10 +1821,87 @@ impl Nexus {
         let vpc = self
             .project_lookup_vpc(organization_name, project_name, vpc_name)
             .await?;
-        let id = Uuid::new_v4();
-        let subnet = db::model::VpcSubnet::new(id, vpc.id(), params.clone());
-        let subnet = self.db_datastore.vpc_create_subnet(subnet).await?;
-        Ok(subnet)
+
+        // Validate IPv4 range
+        if !params.ipv4_block.network().is_private() {
+            return Err(external::Error::invalid_request(
+                "VPC Subnet IPv4 address ranges must be from a private range",
+            ));
+        }
+        if params.ipv4_block.prefix() < defaults::MIN_VPC_IPV4_SUBNET_PREFIX
+            || params.ipv4_block.prefix() > defaults::MAX_VPC_IPV4_SUBNET_PREFIX
+        {
+            return Err(external::Error::invalid_request(&format!(
+                concat!(
+                    "VPC Subnet IPv4 address ranges must have prefix ",
+                    "length between {} and {}, inclusive"
+                ),
+                defaults::MIN_VPC_IPV4_SUBNET_PREFIX,
+                defaults::MAX_VPC_IPV4_SUBNET_PREFIX
+            )));
+        }
+
+        // Allocate an ID and insert the record.
+        //
+        // This operates differently, depending on whether the client provided
+        // an address range. We return a 503 if we happen to generate an
+        // overlapping address range. We _could_ retry here, but there are
+        // annoying policy decision, such as how many times we retry, that I'd
+        // really like to defer.
+        //
+        // TODO-completeness: Review this strategy, and consider how we might
+        // better allocate or retry to avoid these transient errors.
+        let subnet_id = Uuid::new_v4();
+        match params.ipv6_block {
+            None => {
+                let ipv6_block = vpc
+                    .ipv6_prefix
+                    .random_subnet(defaults::DEFAULT_VPC_SUBNET_IPV6_PREFIX)
+                    .map(|block| block.0)
+                    .ok_or_else(|| {
+                        external::Error::internal_error(
+                            "Failed to create random IPv6 subnet",
+                        )
+                    })?;
+                let subnet = db::model::VpcSubnet::new(
+                    subnet_id,
+                    vpc.id(),
+                    params.identity.clone(),
+                    params.ipv4_block,
+                    ipv6_block,
+                );
+                self.db_datastore.vpc_create_subnet(subnet).await?.ok_or_else(
+                    || {
+                        external::Error::unavail(
+                            "Failed to allocate address range for VPC Subnet",
+                        )
+                    },
+                )
+            }
+            Some(ipv6_block) => {
+                if !ipv6_block.is_unique_local() {
+                    return Err(external::Error::invalid_request(concat!(
+                        "VPC Subnet IPv6 address ranges must be unique local ",
+                        "addresses (RFC 4193)"
+                    )));
+                }
+                let subnet = db::model::VpcSubnet::new(
+                    subnet_id,
+                    vpc.id(),
+                    params.identity.clone(),
+                    params.ipv4_block,
+                    ipv6_block,
+                );
+
+                // `Ok(None)` is returned if the IP addresses overlap, convert
+                // that to a client error
+                self.db_datastore.vpc_create_subnet(subnet).await?.ok_or_else(|| {
+                    external::Error::invalid_request(
+                        "IP address ranges must not overlap for subnets within a VPC"
+                    )
+                })
+            }
+        }
     }
 
     // TODO: When a subnet is deleted it should remove its entry from the VPC's system router.

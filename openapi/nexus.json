@@ -4913,6 +4913,7 @@
           },
           "ipv6_prefix": {
             "nullable": true,
+            "description": "The IPv6 prefix for this VPC.\n\nAll IPv6 subnets created from this VPC must be taken from this range, which sould be a Unique Local Address in the range `fd00::/48`. The default VPC Subnet will have the first `/64` range from this prefix.",
             "allOf": [
               {
                 "$ref": "#/components/schemas/Ipv6Net"
@@ -5487,7 +5488,6 @@
             "format": "uuid"
           },
           "ipv4_block": {
-            "nullable": true,
             "description": "The IPv4 subnet CIDR block.",
             "allOf": [
               {
@@ -5496,7 +5496,6 @@
             ]
           },
           "ipv6_block": {
-            "nullable": true,
             "description": "The IPv6 subnet CIDR block.",
             "allOf": [
               {
@@ -5531,6 +5530,8 @@
         "required": [
           "description",
           "id",
+          "ipv4_block",
+          "ipv6_block",
           "name",
           "time_created",
           "time_modified",
@@ -5545,7 +5546,7 @@
             "type": "string"
           },
           "ipv4_block": {
-            "nullable": true,
+            "description": "The IPv4 address range for this subnet.\n\nIt must be allocated from an RFC 1918 private address range, and must not overlap with any other existing subnet in the VPC.",
             "allOf": [
               {
                 "$ref": "#/components/schemas/Ipv4Net"
@@ -5554,6 +5555,7 @@
           },
           "ipv6_block": {
             "nullable": true,
+            "description": "The IPv6 address range for this subnet.\n\nIt must be allocated from the RFC 4193 Unique Local Address range, with the prefix equal to the parent VPC's prefix. A random `/64` block will be assigned if one is not provided. It must not overlap with any existing subnet in the VPC.",
             "allOf": [
               {
                 "$ref": "#/components/schemas/Ipv6Net"
@@ -5566,6 +5568,7 @@
         },
         "required": [
           "description",
+          "ipv4_block",
           "name"
         ]
       },

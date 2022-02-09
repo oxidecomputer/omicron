@@ -31,6 +31,7 @@ use ref_cast::RefCast;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::convert::TryFrom;
+use std::net::IpAddr;
 use std::net::SocketAddr;
 use uuid::Uuid;
 
@@ -351,6 +352,55 @@ pub struct Ipv6Net(pub external::Ipv6Net);
 
 NewtypeFrom! { () pub struct Ipv6Net(external::Ipv6Net); }
 NewtypeDeref! { () pub struct Ipv6Net(external::Ipv6Net); }
+
+impl Ipv6Net {
+    /// Generate a random subnetwork from this one, of the given prefix length.
+    ///
+    /// `None` is returned if:
+    ///
+    ///  - `prefix` is less than this address's prefix
+    ///  - `prefix` is greater than 128
+    pub fn random_subnet(&self, prefix: u8) -> Option<Self> {
+        use rand::RngCore;
+
+        if prefix < self.prefix() || prefix > 128 {
+            return None;
+        }
+        if prefix == self.prefix() {
+            return Some(*self);
+        }
+
+        // Generate a random address
+        let mut rng = rand::thread_rng();
+        let random =
+            u128::from(rng.next_u64()) << 64 | u128::from(rng.next_u64());
+
+        // Generate a mask for the new address.
+        //
+        // Left-shift will zero-fill. Even if we bit-OR with the original
+        // prefix, there may still be zeros in the "middle" if the original
+        // prefix is small and the new one large.
+        //
+        // So use a right-shift, to arrive at the desired prefix length.
+        //
+        // Safety: We've already checked above that the subtraction won't panic,
+        // since `prefix` <= 128.
+        let full_mask = u128::MAX >> (128 - prefix);
+
+        // Get the existing network address and mask.
+        let network = u128::from_le_bytes(self.network().octets());
+        let network_mask = u128::from_le_bytes(self.mask().octets());
+
+        // Take random bits _only_ where the new mask is set.
+        let random_mask = full_mask ^ network_mask;
+
+        let out = (network & network_mask) | (random & random_mask);
+        let addr = std::net::Ipv6Addr::from(out.to_le_bytes());
+        let net = ipnetwork::Ipv6Network::new(addr, prefix)
+            .expect("Failed to create random subnet");
+        Some(Self(external::Ipv6Net(net)))
+    }
+}
 
 impl<DB> ToSql<sql_types::Inet, DB> for Ipv6Net
 where
@@ -1234,8 +1284,7 @@ impl Vpc {
             None => defaults::random_unique_local_ipv6(),
             Some(prefix) => {
                 // TODO: Delegate to `Ipv6Addr::is_unique_local()` when stabilized.
-                if prefix.0.prefix() == 48 && prefix.0.ip().octets()[0] == 0xfd
-                {
+                if prefix.is_unique_local() {
                     Ok(prefix)
                 } else {
                     Err(external::Error::invalid_request(
@@ -1291,22 +1340,59 @@ pub struct VpcSubnet {
     identity: VpcSubnetIdentity,
 
     pub vpc_id: Uuid,
-    pub ipv4_block: Option<Ipv4Net>,
-    pub ipv6_block: Option<Ipv6Net>,
+    pub ipv4_block: Ipv4Net,
+    pub ipv6_block: Ipv6Net,
 }
 
 impl VpcSubnet {
+    /// Create a new VPC Subnet.
+    ///
+    /// NOTE: This assumes that the IP address ranges provided in `params` are
+    /// valid for the VPC, and does not do any further validation.
     pub fn new(
         subnet_id: Uuid,
         vpc_id: Uuid,
-        params: params::VpcSubnetCreate,
+        identity: external::IdentityMetadataCreateParams,
+        ipv4_block: external::Ipv4Net,
+        ipv6_block: external::Ipv6Net,
     ) -> Self {
-        let identity = VpcSubnetIdentity::new(subnet_id, params.identity);
+        let identity = VpcSubnetIdentity::new(subnet_id, identity);
         Self {
             identity,
             vpc_id,
-            ipv4_block: params.ipv4_block.map(Ipv4Net),
-            ipv6_block: params.ipv6_block.map(Ipv6Net),
+            ipv4_block: Ipv4Net(ipv4_block),
+            ipv6_block: Ipv6Net(ipv6_block),
+        }
+    }
+
+    /// Verify that the provided IP address is contained in the VPC Subnet.
+    ///
+    /// This checks:
+    ///
+    /// - The subnet has an allocated block of the same version as the address
+    /// - The allocated block contains the address.
+    pub fn contains(&self, addr: IpAddr) -> Result<(), external::Error> {
+        match addr {
+            IpAddr::V4(addr) => {
+                if self.ipv4_block.contains(addr) {
+                    Ok(())
+                } else {
+                    Err(external::Error::invalid_request(&format!(
+                        "Address '{}' not in IPv4 subnet '{}'",
+                        addr, self.ipv4_block.0,
+                    )))
+                }
+            }
+            IpAddr::V6(addr) => {
+                if self.ipv6_block.contains(addr) {
+                    Ok(())
+                } else {
+                    Err(external::Error::invalid_request(&format!(
+                        "Address '{}' not in IPv6 subnet '{}'",
+                        addr, self.ipv6_block.0,
+                    )))
+                }
+            }
         }
     }
 }
@@ -1996,5 +2082,74 @@ impl RoleAssignmentBuiltin {
             resource_id,
             role_name: String::from(role_name),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Uuid;
+    use super::VpcSubnet;
+    use ipnetwork::Ipv4Network;
+    use ipnetwork::Ipv6Network;
+    use omicron_common::api::external::IdentityMetadataCreateParams;
+    use omicron_common::api::external::Ipv4Net;
+    use omicron_common::api::external::Ipv6Net;
+    use std::net::IpAddr;
+    use std::net::Ipv4Addr;
+    use std::net::Ipv6Addr;
+
+    #[test]
+    fn test_vpc_subnet_contains() {
+        let ipv4_block =
+            Ipv4Net("192.168.0.0/16".parse::<Ipv4Network>().unwrap());
+        let ipv6_block = Ipv6Net("fd00::/48".parse::<Ipv6Network>().unwrap());
+        let identity = IdentityMetadataCreateParams {
+            name: "net-test-vpc".parse().unwrap(),
+            description: "A test VPC".parse().unwrap(),
+        };
+        let vpc = VpcSubnet::new(
+            Uuid::new_v4(),
+            Uuid::new_v4(),
+            identity,
+            ipv4_block,
+            ipv6_block,
+        );
+        assert!(vpc
+            .contains(IpAddr::from(Ipv4Addr::new(192, 168, 1, 1)))
+            .is_ok());
+        assert!(vpc
+            .contains(IpAddr::from(Ipv4Addr::new(192, 160, 1, 1)))
+            .is_err());
+        assert!(vpc
+            .contains(IpAddr::from(Ipv6Addr::new(
+                0xfd00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01
+            )))
+            .is_ok());
+        assert!(vpc
+            .contains(IpAddr::from(Ipv6Addr::new(
+                0xfc00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01
+            )))
+            .is_err());
+    }
+
+    #[test]
+    fn test_ipv6_net_random_subnet() {
+        let base = super::Ipv6Net(Ipv6Net(
+            "fd00::/48".parse::<Ipv6Network>().unwrap(),
+        ));
+        assert!(
+            base.random_subnet(8).is_none(),
+            "random_subnet() should fail when prefix is less than the base prefix"
+        );
+        assert!(
+            base.random_subnet(130).is_none(),
+            "random_subnet() should fail when prefix is greater than 128"
+        );
+        let subnet = base.random_subnet(64).unwrap();
+        assert!(
+            base.is_supernet_of(subnet.0 .0),
+            "random_subnet should generate an actual subnet"
+        );
+        assert_eq!(base.random_subnet(base.prefix()), Some(base));
     }
 }

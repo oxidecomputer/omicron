@@ -411,8 +411,8 @@ CREATE TABLE omicron.public.vpc_subnet (
     /* Indicates that the object has been deleted */
     time_deleted TIMESTAMPTZ,
     vpc_id UUID NOT NULL,
-    ipv4_block INET,
-    ipv6_block INET
+    ipv4_block INET NOT NULL,
+    ipv6_block INET NOT NULL
 );
 
 /* Subnet and network interface names are unique per VPC, not project */
