@@ -360,8 +360,10 @@ mod test {
         ByteCount, Error, Generation, InstanceCpuCount, InstanceState as State,
     };
     use omicron_common::api::internal::{
-        nexus::InstanceRuntimeState, sled_agent::InstanceRuntimeStateMigrateParams,
-        sled_agent::InstanceRuntimeStateRequested, sled_agent::InstanceStateRequested as Requested,
+        nexus::InstanceRuntimeState,
+        sled_agent::InstanceRuntimeStateMigrateParams,
+        sled_agent::InstanceRuntimeStateRequested,
+        sled_agent::InstanceStateRequested as Requested,
     };
     use propolis_client::api::InstanceState as Observed;
     use uuid::Uuid;
@@ -560,12 +562,10 @@ mod test {
     fn migrating_req() -> InstanceRuntimeStateRequested {
         InstanceRuntimeStateRequested {
             run_state: Requested::Migrating,
-            migration_params: Some(
-                InstanceRuntimeStateMigrateParams {
-                    migration_id: Uuid::new_v4(),
-                    dst_propolis_id: Uuid::new_v4(),
-                }
-            )
+            migration_params: Some(InstanceRuntimeStateMigrateParams {
+                migration_id: Uuid::new_v4(),
+                dst_propolis_id: Uuid::new_v4(),
+            }),
         }
     }
 
@@ -613,26 +613,15 @@ mod test {
         verify_state(&instance, State::Running, None);
 
         let migrating_req = migrating_req();
-        assert_matches!(
-            instance.request_transition(&migrating_req),
-            Ok(None),
-        );
+        assert_matches!(instance.request_transition(&migrating_req), Ok(None),);
         verify_state(&instance, State::Migrating, Some(Requested::Running));
         assert_eq!(
-            migrating_req
-                .migration_params
-                .map(|m| m.migration_id),
-            instance
-                .current()
-                .migration_uuid,
+            migrating_req.migration_params.map(|m| m.migration_id),
+            instance.current().migration_uuid,
         );
         assert_eq!(
-            migrating_req
-                .migration_params
-                .map(|m| m.dst_propolis_id),
-            instance
-                .current()
-                .dst_propolis_uuid,
+            migrating_req.migration_params.map(|m| m.dst_propolis_id),
+            instance.current().dst_propolis_uuid,
         );
     }
 
@@ -653,17 +642,11 @@ mod test {
         verify_state(&instance, State::Running, None);
 
         let migrating_req = migrating_req();
-        assert_matches!(
-            instance.request_transition(&migrating_req),
-            Ok(None),
-        );
+        assert_matches!(instance.request_transition(&migrating_req), Ok(None),);
         verify_state(&instance, State::Migrating, Some(Requested::Running));
 
         // A subsequent request for the same migration is a no-op
-        assert_matches!(
-            instance.request_transition(&migrating_req),
-            Ok(None),
-        );
+        assert_matches!(instance.request_transition(&migrating_req), Ok(None),);
         verify_state(&instance, State::Migrating, Some(Requested::Running));
     }
 
@@ -707,15 +690,13 @@ mod test {
         verify_state(&instance, State::Running, None);
 
         let mut migrating_req = migrating_req();
-        assert_matches!(
-            instance.request_transition(&migrating_req),
-            Ok(None),
-        );
+        assert_matches!(instance.request_transition(&migrating_req), Ok(None),);
         verify_state(&instance, State::Migrating, Some(Requested::Running));
 
         // We keep the Migration ID the same but pass a different
         // propolis ID to migrate too.
-        migrating_req.migration_params.as_mut().unwrap().dst_propolis_id = Uuid::new_v4();
+        migrating_req.migration_params.as_mut().unwrap().dst_propolis_id =
+            Uuid::new_v4();
         assert_matches!(
             instance.request_transition(&migrating_req),
             Err(Error::InvalidRequest { message })
@@ -770,10 +751,7 @@ mod test {
         verify_state(&instance, State::Running, None);
 
         let migrating_req = migrating_req();
-        assert_matches!(
-            instance.request_transition(&migrating_req),
-            Ok(None),
-        );
+        assert_matches!(instance.request_transition(&migrating_req), Ok(None),);
         verify_state(&instance, State::Migrating, Some(Requested::Running));
 
         // This shouldn't happen during the normal course of operation
