@@ -41,3 +41,7 @@ type = "zone"
 [[package.cockroachdb.paths]]
 from = "cockroachdb"
 to = "/opt/oxide/cockroachdb"
+
+[[package.cockroachdb.paths]]
+from = "common/src/sql"
+to = "/opt/oxide/cockroachdb/sql"

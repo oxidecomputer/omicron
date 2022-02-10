@@ -16,6 +16,7 @@ use omicron_common::api::{
     internal::sled_agent::InstanceHardware,
     internal::sled_agent::InstanceMigrateParams,
     internal::sled_agent::InstanceRuntimeStateRequested,
+    internal::sled_agent::PartitionKind,
 };
 use slog::Logger;
 use std::sync::Arc;
@@ -65,7 +66,7 @@ impl From<Error> for omicron_common::api::external::Error {
 ///
 /// Contains both a connection to the Nexus, as well as managed instances.
 pub struct SledAgent {
-    _storage: StorageManager,
+    storage: StorageManager,
     instances: InstanceManager,
 }
 
@@ -126,7 +127,19 @@ impl SledAgent {
         }
         let instances = InstanceManager::new(log, vlan, nexus_client.clone())?;
 
-        Ok(SledAgent { _storage: storage, instances })
+        Ok(SledAgent { storage, instances })
+    }
+
+    /// Ensures that a filesystem type exists within the zpool.
+    pub async fn filesystem_ensure(
+        &self,
+        zpool_uuid: Uuid,
+        partition_kind: PartitionKind,
+    ) -> Result<(), Error> {
+        self.storage
+            .upsert_filesystem(zpool_uuid, partition_kind)
+            .await?;
+        Ok(())
     }
 
     /// Idempotently ensures that a given Instance is running on the sled.

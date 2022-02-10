@@ -11,18 +11,24 @@ use crate::illumos::{
 };
 use crate::illumos::running_zone::RunningZone;
 use crate::vnic::{IdAllocator, Vnic};
+use futures::FutureExt;
 use futures::stream::FuturesOrdered;
 use futures::StreamExt;
 use lazy_static::lazy_static;
-use nexus_client::types::{DatasetKind, DatasetPutRequest, ZpoolPutRequest};
+use nexus_client::types::{DatasetPutRequest, ZpoolPutRequest};
 use omicron_common::api::external::{ByteCount, ByteCountRangeError};
+use omicron_common::api::internal::sled_agent::PartitionKind;
+use omicron_common::api::internal::nexus::DatasetKind;
 use omicron_common::backoff;
 use slog::Logger;
 use std::collections::HashMap;
 use std::convert::TryFrom;
+use std::net::SocketAddr;
 use std::path::PathBuf;
+use std::pin::Pin;
+use std::str::FromStr;
 use std::sync::Arc;
-use tokio::sync::{mpsc, Mutex};
+use tokio::sync::{mpsc, Mutex, oneshot};
 use tokio::task::JoinHandle;
 use uuid::Uuid;
 
@@ -67,6 +73,9 @@ pub enum Error {
 
     #[error("Timed out waiting for service: {0}")]
     Timeout(String),
+
+    #[error("Object Not Found: {0}")]
+    NotFound(String),
 }
 
 /// A ZFS storage pool.
@@ -128,6 +137,26 @@ impl DatasetName {
 
     fn full(&self) -> String {
         format!("{}/{}", self.pool_name, self.dataset_name)
+    }
+}
+
+trait Partition {
+    fn name(&self) -> &str;
+}
+
+struct CockroachPartition {}
+
+impl Partition for CockroachPartition {
+    fn name(&self) -> &str {
+        "cockroach"
+    }
+}
+
+struct CruciblePartition {}
+
+impl Partition for CruciblePartition {
+    fn name(&self) -> &str {
+        "crucible"
     }
 }
 
@@ -214,26 +243,48 @@ fn configure_zone(
 }
 
 lazy_static! {
-    static ref PARTITIONS: Vec<PartitionInfo> = vec![
-        /*
-        PartitionInfo {
-            name: "crucible",
-            data_directory: "/data",
-            // TODO: Ensure crucible agent uses this port.
-            // Currently, nothing is running in the zone, so it's made up.
-            port: 8080,
-            kind: DatasetKind::Crucible,
+    static ref COCKROACH_INFO: PartitionInfo = PartitionInfo {
+        name: "cockroachdb".to_string(),
+        data_directory: "/data".to_string(),
+        port: 32221,
+        kind: DatasetKind::Cockroach,
+    };
+
+    static ref CRUCIBLE_INFO: PartitionInfo = PartitionInfo {
+        name: "crucible".to_string(),
+        data_directory: "/data".to_string(),
+        // TODO: Ensure crucible agent uses this port.
+        // Currently, nothing is running in the zone, so it's made up.
+        port: 8080,
+        kind: DatasetKind::Crucible,
+    };
+}
+
+fn get_partition_info(
+    kind: &DatasetKind,
+) -> &'static PartitionInfo {
+    use DatasetKind::*;
+    match kind {
+        Cockroach => {
+            &COCKROACH_INFO
         },
-        */
-        PartitionInfo {
-            name: "cockroachdb".to_string(),
-            data_directory: "/data".to_string(),
-            // TODO: Ensure cockroach uses this port.
-            // Currently, nothing is running in the zone, so it's made up.
-            port: 32221,
-            kind: DatasetKind::Cockroach,
+        Crucible => {
+            &CRUCIBLE_INFO
         },
-    ];
+        Clickhouse => {
+            unimplemented!()
+        },
+    }
+}
+
+
+type NotifyFut = dyn futures::Future<Output = Result<(), anyhow::Error>> + Send;
+
+#[derive(Debug)]
+struct NewFilesystemRequest {
+    zpool_id: Uuid,
+    partition_kind: PartitionKind,
+    responder: oneshot::Sender<Result<(), Error>>,
 }
 
 // A worker that starts zones for pools as they are received.
@@ -243,6 +294,7 @@ struct StorageWorker {
     nexus_client: Arc<NexusClient>,
     pools: Arc<Mutex<HashMap<String, Pool>>>,
     new_pools_rx: mpsc::Receiver<String>,
+    new_filesystems_rx: mpsc::Receiver<NewFilesystemRequest>,
     vnic_id_allocator: IdAllocator,
 }
 
@@ -425,6 +477,119 @@ impl StorageWorker {
         Ok(id)
     }
 
+    // Adds a "notification to nexus" to `nexus_notifications`,
+    // informing it about the addition of `pool_id` to this sled.
+    fn add_zpool_notify(
+        &self,
+        nexus_notifications: &mut FuturesOrdered<Pin<Box<NotifyFut>>>,
+        pool_id: Uuid,
+        size: ByteCount,
+    ) {
+        let sled_id = self.sled_id;
+        let nexus = self.nexus_client.clone();
+        let notify_nexus = move || {
+            let zpool_request = ZpoolPutRequest { size: size.into() };
+            let nexus = nexus.clone();
+            async move {
+                nexus
+                    .zpool_put(&sled_id, &pool_id, &zpool_request)
+                    .await
+                    .map_err(backoff::BackoffError::Transient)?;
+                Ok::<(), backoff::BackoffError<anyhow::Error>>(())
+            }
+        };
+        let log = self.log.clone();
+        let log_post_failure = move |error, delay| {
+            warn!(
+                log,
+                "failed to notify nexus, will retry in {:?}", delay;
+                "error" => ?error,
+            );
+        };
+        nexus_notifications.push(
+            backoff::retry_notify(
+                backoff::internal_service_policy(),
+                notify_nexus,
+                log_post_failure,
+            ).boxed()
+        );
+    }
+
+    // Adds a "notification to nexus" to `nexus_notifications`,
+    // informing it about the addition of `partitions` to `pool_id`.
+    fn add_partitions_notify(
+        &self,
+        nexus_notifications: &mut FuturesOrdered<Pin<Box<NotifyFut>>>,
+        partitions: Vec<(Uuid, SocketAddr, DatasetKind)>,
+        pool_id: Uuid,
+    ) {
+        let nexus = self.nexus_client.clone();
+        let notify_nexus = move || {
+            let nexus = nexus.clone();
+            let partitions = partitions.clone();
+            async move {
+                for (id, address, kind) in partitions {
+                    let request = DatasetPutRequest {
+                        address: address.to_string(),
+                        kind: kind.into(),
+                    };
+                    nexus
+                        .dataset_put(&pool_id, &id, &request)
+                        .await
+                        .map_err(backoff::BackoffError::Transient)?;
+                }
+
+                Ok::<(), backoff::BackoffError<anyhow::Error>>(())
+            }
+        };
+        let log = self.log.clone();
+        let log_post_failure = move |error, delay| {
+            warn!(
+                log,
+                "failed to notify nexus, will retry in {:?}", delay;
+                "error" => ?error,
+            );
+        };
+        nexus_notifications.push(
+            backoff::retry_notify(
+                backoff::internal_service_policy(),
+                notify_nexus,
+                log_post_failure,
+            ).boxed()
+        );
+    }
+
+    // TODO: a lot of these functions act on the `FuturesOrdered` - should
+    // that just be a part of the "worker" struct?
+
+    // Attempts to add a partition within a zpool, according to `request`.
+    async fn add_partition(
+        &self,
+        nexus_notifications: &mut FuturesOrdered<Pin<Box<NotifyFut>>>,
+        request: &NewFilesystemRequest,
+    ) -> Result<(), Error> {
+        let mut pools = self.pools.lock().await;
+        let pool = pools.get_mut(&request.zpool_id.to_string()).ok_or_else(|| {
+            Error::NotFound(format!("zpool: {}", request.zpool_id))
+        })?;
+
+        let partition_info = get_partition_info(&request.partition_kind.as_dataset());
+        let id = self.initialize_partition(
+            pool,
+            partition_info
+        ).await?;
+        // Unwrap safety: We just put this zone in the pool.
+        let zone = pool.get_zone(id).unwrap();
+
+        self.add_partitions_notify(
+            nexus_notifications,
+            vec![(id, zone.address(), partition_info.kind.clone())],
+            pool.id(),
+        );
+
+        Ok(())
+    }
+
     // Small wrapper around `Self::do_work_internal` that ensures we always
     // emit info to the log when we exit.
     async fn do_work(&mut self) -> Result<(), Error> {
@@ -462,65 +627,57 @@ impl StorageWorker {
 
                     let size = ByteCount::try_from(pool.info.size())?;
 
-                    // Initialize all sled-local state.
+                    // If we find filesystems within our datasets, ensure their
+                    // zones are up-and-running.
                     let mut partitions = vec![];
-                    for partition in PARTITIONS.iter() {
-                        // NOTE: I've noticed that a failure to set up *any*
-                        // partitions takes the whole storage worker down here.
-                        //
-                        // TODO: Can we tolerate *some* faults? Maybe have a
-                        // managed set of "known bad" partitions, and keep
-                        // going?
-                        let id = self.initialize_partition(pool, partition).await?;
-                        // Unwrap safety: We just put this zone in the pool.
-                        let zone = pool.get_zone(id).unwrap();
-                        partitions.push((id, zone.address(), partition.kind.clone()));
+                    let existing_filesystems = Zfs::list_filesystems(&pool_name)?;
+                    for fs_name in existing_filesystems {
+                        info!(&self.log, "StorageWorker Processing fs {} on zpool {}", fs_name, pool_name);
+                        if let Ok(kind) = DatasetKind::from_str(&fs_name) {
+                            let partition_info = get_partition_info(&kind);
+                            // NOTE: I've noticed that a failure to set up *any*
+                            // partitions takes the whole storage worker down here.
+                            //
+                            // TODO: Can we tolerate *some* faults? Maybe have a
+                            // managed set of "known bad" partitions, and keep
+                            // going?
+                            let id = self.initialize_partition(pool, partition_info).await?;
+                            // Unwrap safety: We just put this zone in the pool.
+                            let zone = pool.get_zone(id).unwrap();
+                            partitions.push((id, zone.address(), partition_info.kind.clone()));
+                        } else {
+                            warn!(&self.log, "Unrecognized filesystem: {}", fs_name);
+                        }
                     }
 
+                    // Some set of filesystems should always exist.
+                    //
+                    // TODO: Do something like this, once we have a crucible
+                    // zone ready-to-go?
+                    //
+                    // self.initialize_partition(
+                    //      pool,
+                    //      PARTITIONS.get("crucible").unwrap()
+                    // ).await?
+
+
                     // Notify Nexus of the zpool and all datasets within.
-                    let pool_id = pool.id();
-                    let sled_id = self.sled_id;
-                    let nexus = self.nexus_client.clone();
-                    let notify_nexus = move || {
-                        let zpool_request = ZpoolPutRequest { size: size.into() };
-                        let nexus = nexus.clone();
-                        let partitions = partitions.clone();
-                        async move {
-                            nexus
-                                .zpool_put(&sled_id, &pool_id, &zpool_request)
-                                .await
-                                .map_err(backoff::BackoffError::Transient)?;
+                    self.add_zpool_notify(
+                        &mut nexus_notifications,
+                        pool.id(),
+                        size.into()
+                    );
 
-                            for (id, address, kind) in partitions {
-                                let request = DatasetPutRequest {
-                                    address: address.to_string(),
-                                    kind,
-                                };
-                                nexus
-                                    .dataset_put(&pool_id, &id, &request)
-                                    .await
-                                    .map_err(backoff::BackoffError::Transient)?;
-                            }
-
-                            Ok::<(), backoff::BackoffError<anyhow::Error>>(())
-                        }
-                    };
-                    let log = self.log.clone();
-                    let log_post_failure = move |error, delay| {
-                        warn!(
-                            log,
-                            "failed to notify nexus, will retry in {:?}", delay;
-                            "error" => ?error,
-                        );
-                    };
-                    nexus_notifications.push(
-                        backoff::retry_notify(
-                            backoff::internal_service_policy(),
-                            notify_nexus,
-                            log_post_failure,
-                        )
+                    self.add_partitions_notify(
+                        &mut nexus_notifications,
+                        partitions,
+                        pool.id(),
                     );
                 },
+                Some(request) = self.new_filesystems_rx.recv() => {
+                    let result = self.add_partition(&mut nexus_notifications, &request).await;
+                    let _ = request.responder.send(result);
+                }
             }
         }
     }
@@ -531,6 +688,7 @@ pub struct StorageManager {
     // A map of "zpool name" to "pool".
     pools: Arc<Mutex<HashMap<String, Pool>>>,
     new_pools_tx: mpsc::Sender<String>,
+    new_filesystems_tx: mpsc::Sender<NewFilesystemRequest>,
 
     // A handle to a worker which updates "pools".
     task: JoinHandle<Result<(), Error>>,
@@ -546,17 +704,20 @@ impl StorageManager {
         let log = log.new(o!("component" => "sled agent storage manager"));
         let pools = Arc::new(Mutex::new(HashMap::new()));
         let (new_pools_tx, new_pools_rx) = mpsc::channel(10);
+        let (new_filesystems_tx, new_filesystems_rx) = mpsc::channel(10);
         let mut worker = StorageWorker {
             log,
             sled_id,
             nexus_client,
             pools: pools.clone(),
             new_pools_rx,
+            new_filesystems_rx,
             vnic_id_allocator: IdAllocator::new(),
         };
         Ok(StorageManager {
             pools,
             new_pools_tx,
+            new_filesystems_tx,
             task: tokio::task::spawn(async move { worker.do_work().await }),
         })
     }
@@ -585,6 +746,21 @@ impl StorageManager {
         if is_new {
             self.new_pools_tx.send(name.to_string()).await.unwrap();
         }
+        Ok(())
+    }
+
+    pub async fn upsert_filesystem(&self, zpool_id: Uuid, partition_kind: PartitionKind)
+        -> Result<(), Error> {
+        let (tx, rx) = oneshot::channel();
+        let request = NewFilesystemRequest {
+            zpool_id,
+            partition_kind,
+            responder: tx,
+        };
+
+        self.new_filesystems_tx.send(request).await.expect("Storage worker bug (not alive)");
+        rx.await.expect("Storage worker bug (dropped responder without responding)")?;
+
         Ok(())
     }
 }

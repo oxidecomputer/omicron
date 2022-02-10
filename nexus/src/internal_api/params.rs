@@ -8,9 +8,7 @@
 use omicron_common::api::external::ByteCount;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use std::fmt;
 use std::net::SocketAddr;
-use std::str::FromStr;
 use uuid::Uuid;
 
 /// Sent by a sled agent on startup to Nexus to request further instruction
@@ -32,42 +30,6 @@ pub struct ZpoolPutRequest {
 #[derive(Serialize, Deserialize, JsonSchema)]
 pub struct ZpoolPutResponse {}
 
-/// Describes the purpose of the dataset.
-#[derive(Debug, Serialize, Deserialize, JsonSchema, Clone, Copy, PartialEq)]
-pub enum DatasetKind {
-    Crucible,
-    Cockroach,
-    Clickhouse,
-}
-
-impl fmt::Display for DatasetKind {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        use DatasetKind::*;
-        let s = match self {
-            Crucible => "crucible",
-            Cockroach => "cockroach",
-            Clickhouse => "clickhouse",
-        };
-        write!(f, "{}", s)
-    }
-}
-
-impl FromStr for DatasetKind {
-    type Err = omicron_common::api::external::Error;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        use DatasetKind::*;
-        match s {
-            "crucible" => Ok(Crucible),
-            "cockroach" => Ok(Cockroach),
-            "clickhouse" => Ok(Clickhouse),
-            _ => Err(Self::Err::InternalError {
-                internal_message: format!("Unknown dataset kind: {}", s),
-            }),
-        }
-    }
-}
-
 /// Describes a dataset within a pool.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct DatasetPutRequest {
@@ -76,7 +38,7 @@ pub struct DatasetPutRequest {
     pub address: SocketAddr,
 
     /// Type of dataset being inserted.
-    pub kind: DatasetKind,
+    pub kind: omicron_common::api::internal::nexus::DatasetKind,
 }
 
 /// Describes which ZFS properties should be set for a particular allocated

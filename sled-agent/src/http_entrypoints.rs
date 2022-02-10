@@ -15,6 +15,7 @@ use dropshot::TypedBody;
 use omicron_common::api::external::Error;
 use omicron_common::api::internal::nexus::DiskRuntimeState;
 use omicron_common::api::internal::nexus::InstanceRuntimeState;
+use omicron_common::api::internal::sled_agent::PartitionEnsureBody;
 use omicron_common::api::internal::sled_agent::InstanceEnsureBody;
 use schemars::JsonSchema;
 use serde::Deserialize;
@@ -28,6 +29,7 @@ type SledApiDescription = ApiDescription<SledAgent>;
 /// Returns a description of the sled agent API
 pub fn api() -> SledApiDescription {
     fn register_endpoints(api: &mut SledApiDescription) -> Result<(), String> {
+        api.register(filesystem_put)?;
         api.register(instance_put)?;
         api.register(disk_put)?;
         Ok(())
@@ -38,6 +40,26 @@ pub fn api() -> SledApiDescription {
         panic!("failed to register entrypoints: {}", err);
     }
     api
+}
+
+#[endpoint {
+    method = PUT,
+    path = "/filesystem",
+}]
+async fn filesystem_put(
+    rqctx: Arc<RequestContext<SledAgent>>,
+    body: TypedBody<PartitionEnsureBody>,
+) -> Result<HttpResponseOk<()>, HttpError> {
+    let sa = rqctx.context();
+    let body_args = body.into_inner();
+    Ok(HttpResponseOk(
+        sa.filesystem_ensure(
+            body_args.zpool_uuid,
+            body_args.partition_kind,
+        )
+        .await
+        .map_err(|e| Error::from(e))?,
+    ))
 }
 
 /// Path parameters for Instance requests (sled agent API)

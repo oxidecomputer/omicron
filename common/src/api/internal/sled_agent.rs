@@ -101,3 +101,40 @@ pub struct InstanceRuntimeStateRequested {
     pub run_state: InstanceStateRequested,
     pub migration_id: Option<Uuid>,
 }
+
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub enum PartitionKind {
+    CockroachDb {
+        /// Address on which the node should service requests.
+        address: SocketAddr,
+        /// The addresses of all nodes within the cluster.
+        all_addresses: Vec<SocketAddr>,
+    },
+    Crucible {
+        /// Address on which the node should service requests.
+        address: SocketAddr,
+    },
+}
+
+impl PartitionKind {
+    pub fn as_dataset(&self) -> internal::nexus::DatasetKind {
+        use PartitionKind::*;
+        match *self {
+            CockroachDb { .. } => internal::nexus::DatasetKind::Cockroach,
+            Crucible { .. } => internal::nexus::DatasetKind::Crucible,
+        }
+    }
+}
+
+/// Used to request a new partition kind exists within a zpool.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct PartitionEnsureBody {
+    // The name (and UUID) of the Zpool which we are inserting into.
+    pub zpool_uuid: Uuid,
+    // The type of the filesystem.
+    pub partition_kind: PartitionKind,
+
+    // TODO: We could insert a UUID here, if we want that to be set by the
+    // caller explicitly? Currently, the lack of a UUID implies that
+    // "at most one partition type" exists within a zpool.
+}
