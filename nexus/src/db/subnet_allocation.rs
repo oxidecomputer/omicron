@@ -651,8 +651,8 @@ mod test {
                 r#"SELECT "ipv4_block", "ipv6_block" FROM "vpc_subnet" WHERE "#,
                 r#""vpc_id" = $9 AND "time_deleted" IS NULL AND ("#,
                 r#"("ipv4_block" && $10) OR ("ipv6_block" && $11)))) "#,
-                r#"-- binds: [{subnet_id}, "{name}", "{description}", {time_created}, "#,
-                r#"{time_modified}, {vpc_id}, V4({ipv4_block:?}), V6({ipv6_block:?}), "#,
+                r#"-- binds: [{subnet_id}, "{name}", "{description}", {time_created:?}, "#,
+                r#"{time_modified:?}, {vpc_id}, V4({ipv4_block:?}), V6({ipv6_block:?}), "#,
                 r#"{vpc_id}, V4({ipv4_block:?}), V6({ipv6_block:?})]"#,
             ),
             subnet_id = row.id(),
@@ -661,12 +661,8 @@ mod test {
             vpc_id = row.vpc_id,
             ipv4_block = row.ipv4_block.0 .0,
             ipv6_block = row.ipv6_block.0 .0,
-            time_created = row
-                .time_created()
-                .to_rfc3339_opts(chrono::SecondsFormat::Nanos, true),
-            time_modified = row
-                .time_modified()
-                .to_rfc3339_opts(chrono::SecondsFormat::Nanos, true),
+            time_created = row.time_created(),
+            time_modified = row.time_modified(),
         );
         assert_eq!(query_str, expected_query);
     }
