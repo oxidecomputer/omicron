@@ -87,6 +87,7 @@ impl RunningZone {
         log: &Logger,
         zone_name: String,
         nic: Vnic,
+        addrtype: AddrType,
         port: u16,
     ) -> Result<Self, Error> {
         // Boot the zone.
@@ -103,7 +104,7 @@ impl RunningZone {
             .map_err(|_| Error::Timeout(fmri.to_string()))?;
 
         let network =
-            Zones::ensure_address(&zone_name, &interface_name(&nic.name()), AddrType::Dhcp)?;
+            Zones::ensure_address(&zone_name, &interface_name(&nic.name()), addrtype)?;
 
         Ok(RunningZone {
             log: log.clone(),
@@ -117,6 +118,7 @@ impl RunningZone {
     pub async fn get(
         log: &Logger,
         zone_prefix: &str,
+        addrtype: AddrType,
         port: u16,
     ) -> Result<Self, Error> {
         let zone = Zones::get()?
@@ -131,7 +133,7 @@ impl RunningZone {
         let zone_name = zone.name();
         let vnic_name = Zones::get_control_interface(zone_name)?;
         let network =
-            Zones::ensure_address(zone_name, &interface_name(&vnic_name), AddrType::Dhcp)?;
+            Zones::ensure_address(zone_name, &interface_name(&vnic_name), addrtype)?;
 
         Ok(Self {
             log: log.clone(),

@@ -10,6 +10,7 @@ use crate::illumos::{
     zpool::ZpoolInfo,
 };
 use crate::illumos::running_zone::RunningZone;
+use crate::illumos::zone::AddrType;
 use crate::vnic::{IdAllocator, Vnic};
 use futures::FutureExt;
 use futures::stream::FuturesOrdered;
@@ -176,19 +177,18 @@ struct PartitionInfo {
     name: String,
     // TODO: Is this always "/data"?
     data_directory: String,
-    // TODO: Can potentially remove port? Implied by socket addr?
-    port: u16,
+    address: SocketAddr,
     kind: PartitionKind,
 }
 
 impl PartitionInfo {
-    fn new(kind: PartitionKind) -> PartitionInfo {
+    fn new(kind: PartitionKind, address: SocketAddr) -> PartitionInfo {
         match kind {
             PartitionKind::CockroachDb { .. } => {
                 PartitionInfo {
                     name: "cockroachdb".to_string(),
                     data_directory: "/data".to_string(),
-                    port: 32221,
+                    address,
                     kind,
                 }
             },
@@ -196,9 +196,7 @@ impl PartitionInfo {
                 PartitionInfo {
                     name: "crucible".to_string(),
                     data_directory: "/data".to_string(),
-                    // TODO: Ensure crucible agent uses this port.
-                    // Currently, nothing is running in the zone, so it's made up.
-                    port: 8080,
+                    address,
                     kind,
                 }
             },
@@ -323,7 +321,18 @@ async fn ensure_running_zone(
     partition_info: &PartitionInfo,
     dataset_name: &DatasetName,
 ) -> Result<RunningZone, Error> {
-    match RunningZone::get(log, &partition_info.zone_prefix(), partition_info.port)
+    // At the moment, we only provide a single IP address to the running zone.
+    //
+    // We could plausible allow each zone to have a network of IP addresses,
+    // but at the moment that is not necessary.
+    let prefix = match partition_info.address.ip() {
+        std::net::IpAddr::V4(_) => 32,
+        std::net::IpAddr::V6(_) => 128,
+    };
+    let addr = ipnetwork::IpNetwork::new(partition_info.address.ip(), prefix).unwrap();
+    let addrtype = AddrType::Static(addr);
+
+    match RunningZone::get(log, &partition_info.zone_prefix(), addrtype, partition_info.address.port())
         .await
     {
         Ok(zone) => {
@@ -338,7 +347,7 @@ async fn ensure_running_zone(
                 partition_info,
                 dataset_name,
             )?;
-            RunningZone::boot(log, zname, nic, partition_info.port)
+            RunningZone::boot(log, zname, nic, addrtype, partition_info.address.port())
                 .await
                 .map_err(|e| e.into())
         }
@@ -390,6 +399,7 @@ type NotifyFut = dyn futures::Future<Output = Result<(), anyhow::Error>> + Send;
 struct NewFilesystemRequest {
     zpool_id: Uuid,
     partition_kind: PartitionKind,
+    address: SocketAddr,
     responder: oneshot::Sender<Result<(), Error>>,
 }
 
@@ -551,7 +561,7 @@ impl StorageWorker {
             Error::NotFound(format!("zpool: {}", request.zpool_id))
         })?;
 
-        let partition_info = PartitionInfo::new(request.partition_kind.clone());
+        let partition_info = PartitionInfo::new(request.partition_kind.clone(), request.address);
         let id = self.initialize_partition(
             pool,
             &partition_info
@@ -744,12 +754,13 @@ impl StorageManager {
         Ok(())
     }
 
-    pub async fn upsert_filesystem(&self, zpool_id: Uuid, partition_kind: PartitionKind)
+    pub async fn upsert_filesystem(&self, zpool_id: Uuid, partition_kind: PartitionKind, address: SocketAddr)
         -> Result<(), Error> {
         let (tx, rx) = oneshot::channel();
         let request = NewFilesystemRequest {
             zpool_id,
             partition_kind,
+            address,
             responder: tx,
         };
 

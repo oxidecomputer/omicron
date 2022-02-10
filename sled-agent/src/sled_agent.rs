@@ -19,6 +19,7 @@ use omicron_common::api::{
     internal::sled_agent::PartitionKind,
 };
 use slog::Logger;
+use std::net::SocketAddr;
 use std::sync::Arc;
 use uuid::Uuid;
 
@@ -135,9 +136,10 @@ impl SledAgent {
         &self,
         zpool_uuid: Uuid,
         partition_kind: PartitionKind,
+        address: SocketAddr,
     ) -> Result<(), Error> {
         self.storage
-            .upsert_filesystem(zpool_uuid, partition_kind)
+            .upsert_filesystem(zpool_uuid, partition_kind, address)
             .await?;
         Ok(())
     }

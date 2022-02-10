@@ -105,19 +105,11 @@ pub struct InstanceRuntimeStateRequested {
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub enum PartitionKind {
     CockroachDb {
-        /// Address on which the node should service requests.
-        address: SocketAddr,
         /// The addresses of all nodes within the cluster.
         all_addresses: Vec<SocketAddr>,
     },
-    Crucible {
-        /// Address on which the node should service requests.
-        address: SocketAddr,
-    },
-    Clickhouse {
-        /// Address on which the node should service requests.
-        address: SocketAddr,
-    },
+    Crucible,
+    Clickhouse,
 }
 
 impl PartitionKind {
@@ -138,6 +130,8 @@ pub struct PartitionEnsureBody {
     pub zpool_uuid: Uuid,
     // The type of the filesystem.
     pub partition_kind: PartitionKind,
+    // The address on which the zone will listen for requests.
+    pub address: SocketAddr,
 
     // TODO: We could insert a UUID here, if we want that to be set by the
     // caller explicitly? Currently, the lack of a UUID implies that

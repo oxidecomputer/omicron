@@ -56,6 +56,7 @@ async fn filesystem_put(
         sa.filesystem_ensure(
             body_args.zpool_uuid,
             body_args.partition_kind,
+            body_args.address,
         )
         .await
         .map_err(|e| Error::from(e))?,

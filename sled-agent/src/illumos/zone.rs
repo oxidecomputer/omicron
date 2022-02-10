@@ -71,6 +71,7 @@ pub enum Error {
     NotFound,
 }
 
+#[derive(Copy, Clone, Debug)]
 pub enum AddrType {
     Dhcp,
     Static(IpNetwork),
