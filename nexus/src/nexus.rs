@@ -1198,18 +1198,12 @@ impl Nexus {
             &instance.runtime().clone().into(),
             &requested,
         )?;
-        let updated = self
-            .instance_set_runtime(
-                &instance,
-                self.instance_sled(&instance).await?,
-                requested,
-            )
-            .await?;
-        if !updated {
-            return Err(Error::internal_error(
-                "couldn't update instance record for migrate",
-            ));
-        }
+        self.instance_set_runtime(
+            &instance,
+            self.instance_sled(&instance).await?,
+            requested,
+        )
+        .await?;
         self.db_datastore.instance_fetch(&instance.id()).await
     }
 
@@ -1222,7 +1216,7 @@ impl Nexus {
         instance: &db::model::Instance,
         sa: Arc<SledAgentClient>,
         requested: InstanceRuntimeStateRequested,
-    ) -> Result<bool, Error> {
+    ) -> Result<(), Error> {
         /*
          * Ask the sled agent to begin the state change.  Then update the
          * database to reflect the new intermediate state.  If this update is
@@ -1260,6 +1254,7 @@ impl Nexus {
         self.db_datastore
             .instance_update_runtime(&instance.id(), &new_runtime.into())
             .await
+            .map(|_| ())
     }
 
     /**
