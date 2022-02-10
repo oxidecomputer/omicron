@@ -14,20 +14,22 @@ use crate::vnic::{IdAllocator, Vnic};
 use futures::FutureExt;
 use futures::stream::FuturesOrdered;
 use futures::StreamExt;
-use lazy_static::lazy_static;
 use nexus_client::types::{DatasetPutRequest, ZpoolPutRequest};
 use omicron_common::api::external::{ByteCount, ByteCountRangeError};
 use omicron_common::api::internal::sled_agent::PartitionKind;
 use omicron_common::api::internal::nexus::DatasetKind;
 use omicron_common::backoff;
+use schemars::JsonSchema;
+use serde::{Deserialize, Serialize};
 use slog::Logger;
 use std::collections::HashMap;
 use std::convert::TryFrom;
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::pin::Pin;
-use std::str::FromStr;
 use std::sync::Arc;
+use tokio::io::AsyncWriteExt;
+use tokio::fs::{create_dir_all, File};
 use tokio::sync::{mpsc, Mutex, oneshot};
 use tokio::task::JoinHandle;
 use uuid::Uuid;
@@ -69,13 +71,22 @@ pub enum Error {
     BadPoolSize(#[from] ByteCountRangeError),
 
     #[error("Failed to parse as UUID: {0}")]
-    Parse(uuid::Error),
+    Parse(#[from] uuid::Error),
 
     #[error("Timed out waiting for service: {0}")]
     Timeout(String),
 
     #[error("Object Not Found: {0}")]
     NotFound(String),
+
+    #[error("Failed to serialize toml: {0}")]
+    Serialize(#[from] toml::ser::Error),
+
+    #[error("Failed to deserialize toml: {0}")]
+    Deserialize(#[from] toml::de::Error),
+
+    #[error("Failed to perform I/O: {0}")]
+    Io(#[from] std::io::Error),
 }
 
 /// A ZFS storage pool.
@@ -117,6 +128,24 @@ impl Pool {
     fn id(&self) -> Uuid {
         self.id
     }
+
+    /// Returns the path for the configuration of a particular
+    /// dataset within the pool. This configuration file provides
+    /// the necessary information for zones to "launch themselves"
+    /// after a reboot.
+    // TODO: We need a better location for this.
+    //
+    // Currently, we store this configuration information in:
+    //
+    //  /var/tmp/<Pool UUID>/<Dataset UUID>
+    async fn dataset_config_path(&self, dataset_id: Uuid) -> Result<PathBuf, Error> {
+        let path = std::path::Path::new("/var/tmp").join(self.id.to_string());
+        create_dir_all(&path).await?;
+        let path = path.join(dataset_id.to_string());
+        let mut path_buf = path.to_path_buf();
+        path_buf.set_extension(".toml");
+        Ok(path_buf)
+    }
 }
 
 #[derive(Debug)]
@@ -140,38 +169,151 @@ impl DatasetName {
     }
 }
 
-trait Partition {
-    fn name(&self) -> &str;
-}
-
-struct CockroachPartition {}
-
-impl Partition for CockroachPartition {
-    fn name(&self) -> &str {
-        "cockroach"
-    }
-}
-
-struct CruciblePartition {}
-
-impl Partition for CruciblePartition {
-    fn name(&self) -> &str {
-        "crucible"
-    }
-}
-
 // Description of a dataset within a ZFS pool, which should be created
 // by the Sled Agent.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 struct PartitionInfo {
     name: String,
+    // TODO: Is this always "/data"?
     data_directory: String,
+    // TODO: Can potentially remove port? Implied by socket addr?
     port: u16,
-    kind: DatasetKind,
+    kind: PartitionKind,
 }
 
 impl PartitionInfo {
+    fn new(kind: PartitionKind) -> PartitionInfo {
+        match kind {
+            PartitionKind::CockroachDb { .. } => {
+                PartitionInfo {
+                    name: "cockroachdb".to_string(),
+                    data_directory: "/data".to_string(),
+                    port: 32221,
+                    kind,
+                }
+            },
+            PartitionKind::Crucible { .. } => {
+                PartitionInfo {
+                    name: "crucible".to_string(),
+                    data_directory: "/data".to_string(),
+                    // TODO: Ensure crucible agent uses this port.
+                    // Currently, nothing is running in the zone, so it's made up.
+                    port: 8080,
+                    kind,
+                }
+            },
+            PartitionKind::Clickhouse { .. } => {
+                unimplemented!();
+            },
+        }
+    }
+
     fn zone_prefix(&self) -> String {
         format!("{}{}_", ZONE_PREFIX, self.name)
+    }
+
+    fn start_zone(&self, zone: &RunningZone) -> Result<(), Error> {
+        match self.kind {
+            PartitionKind::CockroachDb { .. } => {
+                zone.run_cmd(
+                    &[
+                        crate::illumos::zone::SVCCFG,
+                        "import",
+                        "/var/svc/manifest/site/cockroachdb/manifest.xml"
+                    ]
+                )?;
+
+                zone.run_cmd(
+                    &[
+                        crate::illumos::zone::SVCCFG,
+                        "-s",
+                        "svc:system/illumos/cockroachdb",
+                        "setprop",
+                        &format!("config/listen_addr={}", zone.address().to_string()),
+                    ]
+                )?;
+
+                zone.run_cmd(
+                    &[
+                        crate::illumos::zone::SVCCFG,
+                        "-s",
+                        "svc:system/illumos/cockroachdb",
+                        "setprop",
+                        &format!("config/store={}", self.data_directory),
+                    ]
+                )?;
+
+                // TODO: Set these addresses, use "start" instead of
+                // "start-single-node".
+                zone.run_cmd(
+                    &[
+                        crate::illumos::zone::SVCCFG,
+                        "-s",
+                        "svc:system/illumos/cockroachdb",
+                        "setprop",
+                        &format!("config/join_addrs={}", "unknown"),
+                    ]
+                )?;
+
+                // Refresh the manifest with the new properties we set,
+                // so they become "effective" properties when the service is enabled.
+                zone.run_cmd(
+                    &[
+                        crate::illumos::zone::SVCCFG,
+                        "-s",
+                        "svc:system/illumos/cockroachdb:default",
+                        "refresh",
+                    ]
+                )?;
+
+                zone.run_cmd(
+                    &[
+                        crate::illumos::zone::SVCADM,
+                        "enable",
+                        "-t",
+                        &format!("svc:/system/illumos/cockroachdb:default"),
+                    ]
+                )?;
+
+                // TODO: Populate DB
+                // TODO: Decide whether or not to populate DB
+                //
+                // TODO: Maybe move the "initialize / populate" decision somewhere else?
+
+                /*
+                tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
+
+                info!(&self.log, "[InitializePartition] Populating CRDB");
+                zone.run_cmd(
+                    &[
+                        "/opt/oxide/cockroachdb/bin/cockroach",
+                        "sql",
+                        "--insecure",
+                        "--host",
+                        zone.address().to_string(),
+                        "--file",
+                        "/opt/oxide/cockroachdb/sql/dbwipe.sql",
+                    ]
+                )?;
+                zone.run_cmd(
+                    &[
+                        "/opt/oxide/cockroachdb/bin/cockroach",
+                        "sql",
+                        "--insecure",
+                        "--host",
+                        zone.address().to_string(),
+                        "--file",
+                        "/opt/oxide/cockroachdb/sql/dbinit.sql",
+                    ]
+                )?;
+                */
+
+
+                Ok(())
+            },
+            PartitionKind::Crucible { .. } => unimplemented!(),
+            PartitionKind::Clickhouse { .. } => unimplemented!(),
+        }
     }
 }
 
@@ -189,7 +331,7 @@ async fn ensure_running_zone(
             Ok(zone)
         }
         Err(_) => {
-            info!(log, "Zone for {} is not running (it may exist, but it's not running). Booting", dataset_name.full());
+            info!(log, "Zone for {} is not running. Booting", dataset_name.full());
             let (nic, zname) = configure_zone(
                 log,
                 vnic_id_allocator,
@@ -242,42 +384,6 @@ fn configure_zone(
     Ok((nic, zname))
 }
 
-lazy_static! {
-    static ref COCKROACH_INFO: PartitionInfo = PartitionInfo {
-        name: "cockroachdb".to_string(),
-        data_directory: "/data".to_string(),
-        port: 32221,
-        kind: DatasetKind::Cockroach,
-    };
-
-    static ref CRUCIBLE_INFO: PartitionInfo = PartitionInfo {
-        name: "crucible".to_string(),
-        data_directory: "/data".to_string(),
-        // TODO: Ensure crucible agent uses this port.
-        // Currently, nothing is running in the zone, so it's made up.
-        port: 8080,
-        kind: DatasetKind::Crucible,
-    };
-}
-
-fn get_partition_info(
-    kind: &DatasetKind,
-) -> &'static PartitionInfo {
-    use DatasetKind::*;
-    match kind {
-        Cockroach => {
-            &COCKROACH_INFO
-        },
-        Crucible => {
-            &CRUCIBLE_INFO
-        },
-        Clickhouse => {
-            unimplemented!()
-        },
-    }
-}
-
-
 type NotifyFut = dyn futures::Future<Output = Result<(), anyhow::Error>> + Send;
 
 #[derive(Debug)]
@@ -318,15 +424,6 @@ impl StorageWorker {
 
     // Formats a partition within a zpool, starting a zone for it.
     // Returns the UUID attached to the underlying ZFS partition.
-    //
-    // For now, we place all "expected" datasets on each new zpool
-    // we see. The decision of "whether or not to actually use the
-    // dataset" is a decision left to both the bootstrapping protocol
-    // and Nexus.
-    //
-    // If we had a better signal - from the bootstrapping system - about
-    // where Cockroach nodes should exist, we could be more selective
-    // about this placement.
     async fn initialize_partition(
         &self,
         pool: &mut Pool,
@@ -346,126 +443,7 @@ impl StorageWorker {
         )
         .await?;
         info!(&self.log, "[InitializePartition] Zone {} with address {} is running", zone.name(), zone.address());
-
-        // TODO: This function isn't named as something "CRDB specific".
-        // How do we distinguish this from the "crucible setup"?
-
-        info!(&self.log, "[InitializePartition] Importing CRDB Manifest");
-        zone.run_cmd(
-            &[
-                crate::illumos::zone::SVCCFG,
-                "import",
-                "/var/svc/manifest/site/cockroachdb/manifest.xml"
-            ]
-        )?;
-
-        zone.run_cmd(
-            &[
-                crate::illumos::zone::SVCCFG,
-                "-s",
-                "svc:system/illumos/cockroachdb",
-                "setprop",
-                &format!("config/listen_addr={}", zone.address().to_string()),
-            ]
-        )?;
-
-        zone.run_cmd(
-            &[
-                crate::illumos::zone::SVCCFG,
-                "-s",
-                "svc:system/illumos/cockroachdb",
-                "setprop",
-                &format!("config/store={}", partition_info.data_directory),
-            ]
-        )?;
-
-        // TODO: Set these addresses, use "start" instead of
-        // "start-single-node".
-        zone.run_cmd(
-            &[
-                crate::illumos::zone::SVCCFG,
-                "-s",
-                "svc:system/illumos/cockroachdb",
-                "setprop",
-                &format!("config/join_addrs={}", "unknown"),
-            ]
-        )?;
-
-        // Refresh the manifest with the new properties we set,
-        // so they become "effective" properties when the service is enabled.
-        zone.run_cmd(
-            &[
-                crate::illumos::zone::SVCCFG,
-                "-s",
-                "svc:system/illumos/cockroachdb:default",
-                "refresh",
-            ]
-        )?;
-
-        zone.run_cmd(
-            &[
-                crate::illumos::zone::SVCADM,
-                "enable",
-                "-t",
-                &format!("svc:/system/illumos/cockroachdb:default"),
-            ]
-        )?;
-
-        // "What does omicron-dev do":
-        // "start-single-node" vs "start"
-        //
-        // DB Console HTTP Requests:
-        //   --http-addr=:0
-        //
-        // DB Node/Client Request Port:
-        //   --listen-addr=127.0.0.1:32221
-        //
-        // Path to the postgresql URL:
-        //   --listening-url-file=<file>
-        //
-        //   Can be a tempfile, seems optional? Happens to be co-located
-        //   w/"store".
-        //
-        // Store:
-        //   --store=PATH
-        //
-        //
-        // TODO: New ones:
-        // Use to ensure you're joining the right cluster
-        //   --cluster-name=...
-
-        // TODO: Populate DB
-        // TODO: Decide whether or not to populate DB
-        //
-        // TODO: Maybe move the "initialize / populate" decision somewhere else?
-
-//      tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
-
-//        info!(&self.log, "[InitializePartition] Populating CRDB");
-//
-//        zone.run_cmd(
-//            &[
-//                "/opt/oxide/cockroachdb/bin/cockroach",
-//                "sql",
-//                "--insecure",
-//                "--host",
-//                zone.address().to_string(),
-//                "--file",
-//                "/opt/oxide/cockroachdb/sql/dbwipe.sql",
-//            ]
-//        )?;
-//
-//        zone.run_cmd(
-//            &[
-//                "/opt/oxide/cockroachdb/bin/cockroach",
-//                "sql",
-//                "--insecure",
-//                "--host",
-//                zone.address().to_string(),
-//                "--file",
-//                "/opt/oxide/cockroachdb/sql/dbinit.sql",
-//            ]
-//        )?;
+        partition_info.start_zone(&zone)?;
 
         info!(
             &self.log,
@@ -573,21 +551,41 @@ impl StorageWorker {
             Error::NotFound(format!("zpool: {}", request.zpool_id))
         })?;
 
-        let partition_info = get_partition_info(&request.partition_kind.as_dataset());
+        let partition_info = PartitionInfo::new(request.partition_kind.clone());
         let id = self.initialize_partition(
             pool,
-            partition_info
+            &partition_info
         ).await?;
+
+        // Now that the partition has been initialized, record the configuration
+        // so it can re-initialize itself after a reboot.
+        let info_str = toml::to_string(&partition_info)?;
+        let path = pool.dataset_config_path(id).await?;
+        let mut file = File::create(path).await?;
+        file.write_all(info_str.as_bytes()).await?;
+
         // Unwrap safety: We just put this zone in the pool.
         let zone = pool.get_zone(id).unwrap();
 
         self.add_partitions_notify(
             nexus_notifications,
-            vec![(id, zone.address(), partition_info.kind.clone())],
+            vec![(id, zone.address(), partition_info.kind.as_dataset())],
             pool.id(),
         );
 
         Ok(())
+    }
+
+    async fn load_partition(&self, pool: &mut Pool, fs_name: &str)
+        -> Result<(Uuid, SocketAddr, DatasetKind), Error> {
+        let id = Zfs::get_oxide_value(&fs_name, "uuid")?.parse::<Uuid>()?;
+        let config_path = pool.dataset_config_path(id).await?;
+        let partition_info: PartitionInfo = toml::from_slice(&tokio::fs::read(config_path).await?)?;
+        self.initialize_partition(pool, &partition_info).await?;
+
+        // Unwrap safety: We just put this zone in the pool.
+        let zone = pool.get_zone(id).unwrap();
+        Ok((id, zone.address(), partition_info.kind.as_dataset()))
     }
 
     // Small wrapper around `Self::do_work_internal` that ensures we always
@@ -632,28 +630,25 @@ impl StorageWorker {
                     let mut partitions = vec![];
                     let existing_filesystems = Zfs::list_filesystems(&pool_name)?;
                     for fs_name in existing_filesystems {
-                        info!(&self.log, "StorageWorker Processing fs {} on zpool {}", fs_name, pool_name);
-                        if let Ok(kind) = DatasetKind::from_str(&fs_name) {
-                            let partition_info = get_partition_info(&kind);
-                            // NOTE: I've noticed that a failure to set up *any*
-                            // partitions takes the whole storage worker down here.
-                            //
-                            // TODO: Can we tolerate *some* faults? Maybe have a
-                            // managed set of "known bad" partitions, and keep
-                            // going?
-                            let id = self.initialize_partition(pool, partition_info).await?;
-                            // Unwrap safety: We just put this zone in the pool.
-                            let zone = pool.get_zone(id).unwrap();
-                            partitions.push((id, zone.address(), partition_info.kind.clone()));
-                        } else {
-                            warn!(&self.log, "Unrecognized filesystem: {}", fs_name);
-                        }
+                        info!(&self.log, "StorageWorker loading fs {} on zpool {}", fs_name, pool_name);
+                        // NOTE: I've noticed that a failure to set up *any*
+                        // partitions takes the whole storage worker down here.
+                        //
+                        // TODO: Can we tolerate *some* faults? Maybe have a
+                        // managed set of "known bad" partitions, and keep
+                        // going?
+                        let partition = self.load_partition(pool, &fs_name).await?;
+                        partitions.push(partition);
                     }
 
                     // Some set of filesystems should always exist.
                     //
                     // TODO: Do something like this, once we have a crucible
                     // zone ready-to-go?
+                    //
+                    // TODO: Alternative idea - should these *always* be
+                    // initialized externally? Plus, Nexus could call these same
+                    // APIs when new hw is registered...
                     //
                     // self.initialize_partition(
                     //      pool,

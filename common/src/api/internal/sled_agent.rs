@@ -114,6 +114,10 @@ pub enum PartitionKind {
         /// Address on which the node should service requests.
         address: SocketAddr,
     },
+    Clickhouse {
+        /// Address on which the node should service requests.
+        address: SocketAddr,
+    },
 }
 
 impl PartitionKind {
@@ -122,6 +126,7 @@ impl PartitionKind {
         match *self {
             CockroachDb { .. } => internal::nexus::DatasetKind::Cockroach,
             Crucible { .. } => internal::nexus::DatasetKind::Crucible,
+            Clickhouse { .. } => internal::nexus::DatasetKind::Clickhouse,
         }
     }
 }
