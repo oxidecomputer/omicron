@@ -1118,6 +1118,11 @@ impl DataStore {
             .filter(dsl::time_deleted.is_null())
             .filter(dsl::id.eq(*instance_id))
             .filter(dsl::state_generation.lt(new_runtime.gen))
+            .filter(
+                dsl::migration_id
+                    .is_null()
+                    .or(dsl::target_propolis_id.eq(new_runtime.propolis_uuid)),
+            )
             .set(new_runtime.clone())
             .check_if_exists::<Instance>(*instance_id)
             .execute_and_check(self.pool())

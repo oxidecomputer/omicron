@@ -1232,6 +1232,12 @@
         "description": "Runtime state of the Instance, including the actual running state and minimal metadata\n\nThis state is owned by the sled agent running that Instance.",
         "type": "object",
         "properties": {
+          "dst_propolis_uuid": {
+            "nullable": true,
+            "description": "the target propolis-server during a migration of this Instance",
+            "type": "string",
+            "format": "uuid"
+          },
           "gen": {
             "description": "generation number for this state",
             "allOf": [

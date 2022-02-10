@@ -841,6 +841,8 @@ pub struct InstanceRuntimeState {
     pub sled_uuid: Uuid,
     #[column_name = "active_propolis_id"]
     pub propolis_uuid: Uuid,
+    #[column_name = "target_propolis_id"]
+    pub dst_propolis_uuid: Option<Uuid>,
     #[column_name = "active_propolis_ip"]
     pub propolis_ip: Option<ipnetwork::IpNetwork>,
     #[column_name = "migration_id"]
@@ -871,6 +873,7 @@ impl From<internal::nexus::InstanceRuntimeState> for InstanceRuntimeState {
             state: InstanceState::new(state.run_state),
             sled_uuid: state.sled_uuid,
             propolis_uuid: state.propolis_uuid,
+            dst_propolis_uuid: state.dst_propolis_uuid,
             propolis_ip: state.propolis_addr.map(|addr| addr.ip().into()),
             migration_uuid: state.migration_uuid,
             ncpus: state.ncpus.into(),
@@ -889,6 +892,7 @@ impl Into<internal::nexus::InstanceRuntimeState> for InstanceRuntimeState {
             run_state: *self.state.state(),
             sled_uuid: self.sled_uuid,
             propolis_uuid: self.propolis_uuid,
+            dst_propolis_uuid: self.dst_propolis_uuid,
             propolis_addr: self
                 .propolis_ip
                 .map(|ip| SocketAddr::new(ip.ip(), PROPOLIS_PORT)),
