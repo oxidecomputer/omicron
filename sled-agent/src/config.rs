@@ -21,12 +21,6 @@ pub struct Config {
     pub bootstrap_address: SocketAddr,
     /// Address of Nexus instance
     pub nexus_address: SocketAddr,
-    /// If this node should be part of a CockroachDB cluster,
-    /// the address it should use.
-    ///
-    /// TODO: The full set of CRDB nodes should be negotiated after establishing
-    /// a trust quorum.
-    pub cockroach_address: Option<SocketAddr>,
     /// Configuration for the sled agent dropshot server
     pub dropshot: ConfigDropshot,
     /// Configuration for the sled agent debug log
@@ -49,7 +43,7 @@ pub enum ConfigError {
 }
 
 impl Config {
-    pub fn from_file<P: AsRef<Path>>(path: P) -> Result<Config, ConfigError> {
+    pub fn from_file<P: AsRef<Path>>(path: P) -> Result<Self, ConfigError> {
         let path = path.as_ref();
         let contents = std::fs::read_to_string(path)?;
         let config = toml::from_str(&contents)?;

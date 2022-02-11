@@ -102,7 +102,10 @@ pub struct InstanceRuntimeStateRequested {
     pub migration_id: Option<Uuid>,
 }
 
+/// The type of a partition, and an axuiliary information necessary
+/// to successfully launch a zone managing the associated data.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(tag = "type", rename_all = "snake_case")]
 pub enum PartitionKind {
     CockroachDb {
         /// The addresses of all nodes within the cluster.

@@ -434,15 +434,20 @@ impl StorageWorker {
 
     // Formats a partition within a zpool, starting a zone for it.
     // Returns the UUID attached to the underlying ZFS partition.
+    //
+    // Returns (was_inserted, Uuid).
     async fn initialize_partition(
         &self,
         pool: &mut Pool,
         partition_info: &PartitionInfo,
-    ) -> Result<Uuid, Error> {
+    ) -> Result<(bool, Uuid), Error> {
         let dataset_name = DatasetName::new(pool.info.name(), &partition_info.name);
 
         info!(&self.log, "[InitializePartition] Ensuring dataset {} exists", dataset_name.full());
         let id = StorageWorker::ensure_dataset_with_id(&dataset_name)?;
+        if let Some(_) = pool.get_zone(id) {
+            return Ok((false, id));
+        }
 
         info!(&self.log, "[InitializePartition] Creating zone for {}", dataset_name.full());
         let zone = ensure_running_zone(
@@ -462,7 +467,7 @@ impl StorageWorker {
             partition_info.name
         );
         pool.add_zone(id, zone);
-        Ok(id)
+        Ok((true, id))
     }
 
     // Adds a "notification to nexus" to `nexus_notifications`,
@@ -562,10 +567,14 @@ impl StorageWorker {
         })?;
 
         let partition_info = PartitionInfo::new(request.partition_kind.clone(), request.address);
-        let id = self.initialize_partition(
+        let (is_new_partition, id) = self.initialize_partition(
             pool,
             &partition_info
         ).await?;
+
+        if !is_new_partition {
+            return Ok(());
+        }
 
         // Now that the partition has been initialized, record the configuration
         // so it can re-initialize itself after a reboot.
@@ -641,14 +650,16 @@ impl StorageWorker {
                     let existing_filesystems = Zfs::list_filesystems(&pool_name)?;
                     for fs_name in existing_filesystems {
                         info!(&self.log, "StorageWorker loading fs {} on zpool {}", fs_name, pool_name);
-                        // NOTE: I've noticed that a failure to set up *any*
-                        // partitions takes the whole storage worker down here.
+                        // We intentionally do not exit on error here -
+                        // otherwise, the failure of a single partition would
+                        // stop the storage manager from processing all storage.
                         //
-                        // TODO: Can we tolerate *some* faults? Maybe have a
-                        // managed set of "known bad" partitions, and keep
-                        // going?
-                        let partition = self.load_partition(pool, &fs_name).await?;
-                        partitions.push(partition);
+                        // Instead, we opt to log the failure.
+                        let result = self.load_partition(pool, &fs_name).await;
+                        match result {
+                            Ok(partition) => partitions.push(partition),
+                            Err(e) => warn!(&self.log, "StorageWorker Failed to load partition: {}", e),
+                        }
                     }
 
                     // Some set of filesystems should always exist.
@@ -764,8 +775,11 @@ impl StorageManager {
             responder: tx,
         };
 
+        eprintln!("upsert fs....");
         self.new_filesystems_tx.send(request).await.expect("Storage worker bug (not alive)");
+        eprintln!("upsert fs.... sent ok");
         rx.await.expect("Storage worker bug (dropped responder without responding)")?;
+        eprintln!("upsert fs.... completed ok");
 
         Ok(())
     }

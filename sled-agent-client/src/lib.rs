@@ -297,6 +297,32 @@ impl From<omicron_common::api::external::MacAddr> for types::MacAddr {
         Self(s.0.to_string())
     }
 }
+
+impl From<omicron_common::api::internal::sled_agent::PartitionKind> for types::PartitionKind {
+    fn from(k: omicron_common::api::internal::sled_agent::PartitionKind) -> Self {
+        use omicron_common::api::internal::sled_agent::PartitionKind::*;
+        match k {
+            CockroachDb { all_addresses } => {
+                Self::CockroachDb(
+                    all_addresses.iter().map(|a| a.to_string()).collect()
+                )
+            },
+            Crucible => Self::Crucible,
+            Clickhouse => Self::Clickhouse,
+        }
+    }
+}
+
+impl From<omicron_common::api::internal::sled_agent::PartitionEnsureBody> for types::PartitionEnsureBody {
+    fn from(p: omicron_common::api::internal::sled_agent::PartitionEnsureBody) -> Self {
+        Self {
+            zpool_uuid: p.zpool_uuid,
+            partition_kind: p.partition_kind.into(),
+            address: p.address.to_string(),
+        }
+    }
+}
+
 /**
  * Exposes additional [`Client`] interfaces for use by the test suite. These
  * are bonus endpoints, not generated in the real client.

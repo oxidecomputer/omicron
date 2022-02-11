@@ -4,6 +4,7 @@
 
 //! Bootstrap-related APIs.
 
+use super::config::Config;
 use super::discovery;
 use super::trust_quorum::{
     self, RackSecret, ShareDistribution, TrustQuorumError,
@@ -208,6 +209,9 @@ impl Agent {
             &std::fs::read_to_string(tar_source.join("digest.toml"))?,
         )?;
 
+        // TODO: Await CRDB liveness?
+        tokio::time::sleep(tokio::time::Duration::from_secs(100000)).await;
+
         // TODO-correctness: Nexus may not be enabled on all racks.
         // Some decision-making logic should be used here to make this
         // conditional.
@@ -225,11 +229,6 @@ impl Agent {
         // from Nexus.
         self.extract(&digests, &tar_source, &destination, "propolis-server")?;
 
-        // TODO: We should also have any Zone Images at this point.
-        // Though we don't want to extract them - that's what the Omicron brand
-        // does - we could at least validate they exist, and have the hashes we
-        // expect?
-
         Ok(())
     }
 
@@ -240,13 +239,58 @@ impl Agent {
         Ok(())
     }
 
+    // In lieu of having an operator send requests to all sleds via an
+    // initialization service, the sled-agent configuration may allow for the
+    // automated injection of setup requests from a sled.
+    async fn inject_rack_setup_service_requests(&self, config: &Config) -> Result<(), BootstrapError> {
+        if let Some(rss_config) = &config.rss_config {
+            info!(self.log, "Injecting RSS configuration: {:#?}", rss_config);
+            // TODO: We could 100% parallelize these requests; they're probably
+            // going to distinct sleds.
+            for request in &rss_config.requests {
+                info!(self.log, "observing request: {:#?}", request);
+                let dur = std::time::Duration::from_secs(120);
+                let client = reqwest::ClientBuilder::new()
+                    .connect_timeout(dur)
+                    .timeout(dur)
+                    .build()
+                    .unwrap();
+                let client = sled_agent_client::Client::new_with_client(
+                    &format!("http://{}", request.sled_address),
+                    client,
+                    self.log.new(o!("SledAgentClient" => request.sled_address)),
+                );
+
+                info!(self.log, "sending requests...");
+                for partition in &request.partitions {
+                    let filesystem_put = || async {
+                        info!(self.log, "creating new filesystem: {:?}", partition);
+                        client.filesystem_put(&partition.clone().into())
+                            .await
+                            .map_err(BackoffError::Transient)
+                    };
+                    let log_failure = |error, _| {
+                        warn!(self.log, "failed to create filesystem"; "error" => ?error);
+                    };
+                    retry_notify(
+                        internal_service_policy(),
+                        filesystem_put,
+                        log_failure,
+                    ).await
+                    .expect("expected an infinite retry loop registering nexus as a metric producer");
+                }
+            }
+        }
+        Ok(())
+    }
+
     /// Performs device initialization:
     ///
     /// - Communicates with other sled agents to establish a trust quorum if a
     /// ShareDistribution file exists on the host. Otherwise, the sled operates
     /// as a single node cluster.
     /// - Verifies, unpacks, and launches other services.
-    pub async fn initialize(&self) -> Result<(), BootstrapError> {
+    pub async fn initialize(&self, config: &Config) -> Result<(), BootstrapError> {
         info!(&self.log, "bootstrap service initializing");
 
         if self.share.is_some() {
@@ -254,6 +298,7 @@ impl Agent {
             self.establish_sled_quorum().await?;
         }
 
+        self.inject_rack_setup_service_requests(config).await?;
         self.launch_local_services().await?;
 
         Ok(())

@@ -121,14 +121,19 @@ impl RunningZone {
         addrtype: AddrType,
         port: u16,
     ) -> Result<Self, Error> {
+        eprintln!("RunningZone: get({})", zone_prefix);
         let zone = Zones::get()?
             .into_iter()
             .find(|zone| zone.name().starts_with(&zone_prefix))
             .ok_or_else(|| Error::NotFound)?;
 
+        eprintln!("RunningZone: get({}) - Found a zone", zone_prefix);
+
         if zone.state() != zone::State::Running {
             return Err(Error::NotRunning);
         }
+
+        eprintln!("RunningZone: get({}) - And it's running", zone_prefix);
 
         let zone_name = zone.name();
         let vnic_name = Zones::get_control_interface(zone_name)?;

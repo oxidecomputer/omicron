@@ -58,7 +58,7 @@ impl Server {
         // This ordering allows the bootstrap agent to communicate with
         // other bootstrap agents on the rack during the initialization
         // process.
-        if let Err(e) = server.bootstrap_agent.initialize().await {
+        if let Err(e) = server.bootstrap_agent.initialize(config).await {
             let _ = server.close().await;
             return Err(e.to_string());
         }

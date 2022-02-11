@@ -49,6 +49,26 @@
         }
       }
     },
+    "/filesystem": {
+      "put": {
+        "operationId": "filesystem_put",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PartitionEnsureBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          }
+        }
+      }
+    },
     "/instances/{instance_id}": {
       "put": {
         "operationId": "instance_put",
@@ -636,6 +656,82 @@
           "time_created",
           "time_modified",
           "vpc_id"
+        ]
+      },
+      "PartitionEnsureBody": {
+        "description": "Used to request a new partition kind exists within a zpool.",
+        "type": "object",
+        "properties": {
+          "address": {
+            "type": "string"
+          },
+          "partition_kind": {
+            "$ref": "#/components/schemas/PartitionKind"
+          },
+          "zpool_uuid": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "required": [
+          "address",
+          "partition_kind",
+          "zpool_uuid"
+        ]
+      },
+      "PartitionKind": {
+        "description": "The type of a partition, and an axuiliary information necessary to successfully launch a zone managing the associated data.",
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "all_addresses": {
+                "description": "The addresses of all nodes within the cluster.",
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "cockroach_db"
+                ]
+              }
+            },
+            "required": [
+              "all_addresses",
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "crucible"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "clickhouse"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          }
         ]
       }
     }

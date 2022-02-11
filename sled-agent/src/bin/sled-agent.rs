@@ -4,6 +4,8 @@
 
 //! Executable program to run the sled agent
 
+#![feature(async_closure)]
+
 use dropshot::ConfigDropshot;
 use dropshot::ConfigLogging;
 use dropshot::ConfigLoggingLevel;
@@ -11,6 +13,7 @@ use omicron_common::api::external::Error;
 use omicron_common::cmd::fatal;
 use omicron_common::cmd::CmdError;
 use omicron_sled_agent::bootstrap::{
+    config::SetupServiceConfig as RssConfig,
     config::Config as BootstrapConfig, server as bootstrap_server,
 };
 use omicron_sled_agent::{
@@ -82,7 +85,35 @@ async fn do_run() -> Result<(), CmdError> {
         Args::Run {
             config_path,
         } => {
-            let config = SledConfig::from_file(config_path).map_err(|e| CmdError::Failure(e.to_string()))?;
+            let config = SledConfig::from_file(&config_path).map_err(|e| CmdError::Failure(e.to_string()))?;
+
+            // TODO: I don't love this, but...
+            //
+            // - Sled agent starts with the normal config file - typically
+            // called "config.toml".
+            // - Thing-flinger likes allowing "sled-specific" configs to arrive
+            // by overlaying files in the package...
+            // - ... so we need a way to *possibly* supply this extra config,
+            // without otherwise changing the package.
+            //
+            // This means we gotta (maybe) ingest a config file, without
+            // *explicitly* being told about it.
+            //
+            // Hence, this approach: look around in the same directory as the
+            // expected config file.
+            //
+            // Better ideas are welcome.
+            let rss_config_path = {
+                let mut rss_config_path = config_path.clone();
+                rss_config_path.pop();
+                rss_config_path.push("config-rss.toml");
+                rss_config_path
+            };
+            let rss_config = if rss_config_path.exists() {
+                Some(RssConfig::from_file(rss_config_path).map_err(|e| CmdError::Failure(e.to_string()))?)
+            } else {
+                None
+            };
 
             // Configure and run the Bootstrap server.
             let bootstrap_config = BootstrapConfig {
@@ -94,20 +125,31 @@ async fn do_run() -> Result<(), CmdError> {
                 log: ConfigLogging::StderrTerminal {
                     level: ConfigLoggingLevel::Info,
                 },
+                rss_config,
             };
-            let boot_server = bootstrap_server::Server::start(&bootstrap_config)
-                .await
-                .map_err(CmdError::Failure)?;
+            let run_bootstrap = async move || -> Result<(), CmdError> {
+                bootstrap_server::Server::start(&bootstrap_config)
+                    .await
+                    .map_err(CmdError::Failure)?
+                    .wait_for_finish()
+                    .await
+                    .map_err(CmdError::Failure)
+            };
 
-            let sled_server = sled_server::Server::start(&config)
-                .await
-                .map_err(CmdError::Failure)?;
+            let run_sled_server = async move || -> Result<(), CmdError> {
+                sled_server::Server::start(&config)
+                    .await
+                    .map_err(CmdError::Failure)?
+                    .wait_for_finish()
+                    .await
+                    .map_err(CmdError::Failure)
+            };
 
             tokio::select! {
-                _ = boot_server.wait_for_finish() => {
+                _ = run_bootstrap() => {
                     eprintln!("Boot server exited unexpectedly");
                 },
-                _ = sled_server.wait_for_finish() => {
+                _ = run_sled_server() => {
                     eprintln!("Sled server exited unexpectedly");
                 },
             }
