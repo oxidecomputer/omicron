@@ -21,12 +21,12 @@ use serde::{Deserialize, Serialize};
 #[derive(Serialize, JsonSchema)]
 struct SpInfo {
     info: SpIgnitionInfo,
-    details: SpDetails,
+    details: SpState,
 }
 
 #[derive(Serialize, JsonSchema)]
 #[serde(tag = "state")]
-enum SpDetails {
+enum SpState {
     Disabled,
     Unresponsive,
     Enabled {
@@ -39,12 +39,12 @@ enum SpDetails {
 #[serde(tag = "present")]
 struct SpIgnitionInfo {
     id: SpIdentifier,
-    details: SpIgnitionDetails,
+    details: SpIgnition,
 }
 
 #[derive(Serialize, JsonSchema)]
 #[serde(tag = "present")]
-enum SpIgnitionDetails {
+enum SpIgnition {
     #[serde(rename = "no")]
     Absent,
     #[serde(rename = "yes")]
@@ -84,7 +84,7 @@ enum SpType {
 
 #[derive(Serialize, Deserialize, JsonSchema)]
 struct SpIdentifier {
-    #[serde(rename = "type")]
+    //#[serde(rename = "type")]
     typ: SpType,
     slot: u32,
 }
@@ -147,7 +147,7 @@ async fn sp_list(
 /// optional timeout to override the default.
 #[endpoint {
     method = GET,
-    path = "/sp/{type}/{slot}",
+    path = "/sp/{typ}/{slot}",
 }]
 async fn sp_get(
     _rqctx: Arc<RequestContext<GatewayService>>,
@@ -169,7 +169,7 @@ async fn sp_get(
 /// is reached, the final call will result in an error.
 #[endpoint {
     method = GET,
-    path = "/sp/{type}/{slot}/component",
+    path = "/sp/{typ}/{slot}/component",
 }]
 async fn sp_component_list(
     _rqctx: Arc<RequestContext<GatewayService>>,
@@ -190,12 +190,12 @@ async fn sp_component_list(
 /// timeout is reached.
 #[endpoint {
     method = GET,
-    path = "/sp/{type}/{slot}/component/{component}",
+    path = "/sp/{typ}/{slot}/component/{component}",
 }]
 async fn sp_component_get(
     _rqctx: Arc<RequestContext<GatewayService>>,
     _path: Path<PathSpComponent>,
-    _query: Path<Timeout>,
+    _query: Query<Timeout>,
 ) -> Result<HttpResponseOk<SpComponentInfo>, HttpError> {
     todo!()
 }
@@ -217,7 +217,7 @@ struct UpdateBody;
 /// update bundle.
 #[endpoint {
     method = POST,
-    path = "/sp/{type}/{slot}/component/{component}/update",
+    path = "/sp/{typ}/{slot}/component/{component}/update",
 }]
 async fn sp_component_update(
     _rqctx: Arc<RequestContext<GatewayService>>,
@@ -232,7 +232,7 @@ async fn sp_component_update(
 /// Components whose power state cannot be changed will always return an error.
 #[endpoint {
     method = POST,
-    path = "/sp/{type}/{slot}/component/{component}/power_on",
+    path = "/sp/{typ}/{slot}/component/{component}/power_on",
 }]
 async fn sp_component_power_on(
     _rqctx: Arc<RequestContext<GatewayService>>,
@@ -247,7 +247,7 @@ async fn sp_component_power_on(
 /// Components whose power state cannot be changed will always return an error.
 #[endpoint {
     method = POST,
-    path = "/sp/{type}/{slot}/component/{component}/power_off",
+    path = "/sp/{typ}/{slot}/component/{component}/power_off",
 }]
 async fn sp_component_power_off(
     _rqctx: Arc<RequestContext<GatewayService>>,
@@ -284,7 +284,7 @@ async fn ignition_list(
 /// management network.
 #[endpoint {
     method = GET,
-    path = "/ignition/{type}/{slot}",
+    path = "/ignition/{typ}/{slot}",
 }]
 async fn ignition_get(
     _rqctx: Arc<RequestContext<GatewayService>>,
@@ -296,7 +296,7 @@ async fn ignition_get(
 /// Power on an SP via Ignition
 #[endpoint {
     method = POST,
-    path = "/sp/{type}/{slot}/power_on",
+    path = "/sp/{typ}/{slot}/power_on",
 }]
 async fn ignition_power_on(
     _rqctx: Arc<RequestContext<GatewayService>>,
@@ -308,7 +308,7 @@ async fn ignition_power_on(
 /// Power off an SP via Ignition
 #[endpoint {
     method = POST,
-    path = "/sp/{type}/{slot}/power_off",
+    path = "/sp/{typ}/{slot}/power_off",
 }]
 async fn ignition_power_off(
     _rqctx: Arc<RequestContext<GatewayService>>,
