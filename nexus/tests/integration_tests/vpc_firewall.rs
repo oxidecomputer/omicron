@@ -25,6 +25,7 @@ use nexus_test_utils_macros::nexus_test;
 
 #[nexus_test]
 async fn test_vpc_firewall(cptestctx: &ControlPlaneTestContext) {
+    usdt::register_probes().unwrap();
     let client = &cptestctx.external_client;
 
     /* Create a project that we'll use for testing. */
@@ -93,6 +94,10 @@ async fn test_vpc_firewall(cptestctx: &ControlPlaneTestContext) {
     ];
     let update_params =
         VpcFirewallRuleUpdateParams { rules: new_rules.clone() };
+    /*
+    println!("---> Going to sleep now...");
+    tokio::time::sleep(std::time::Duration::from_secs(100000)).await;
+    */
     client
         .make_request(
             Method::PUT,

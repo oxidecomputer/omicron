@@ -60,6 +60,7 @@ use omicron_common::api::external::{
 };
 use omicron_common::bail_unless;
 use std::convert::{TryFrom, TryInto};
+use std::collections::HashMap;
 use std::sync::Arc;
 use uuid::Uuid;
 
@@ -1286,6 +1287,143 @@ impl DataStore {
         }
     }
 
+    /// Identify all IPs in use by each instance
+    // TODO: how to name/where to put this
+    pub async fn resolve_instances_to_interfaces<
+        T: IntoIterator<Item = Name>,
+    >(
+        &self,
+        vpc: &Vpc,
+        instance_names: T,
+    ) -> Result<HashMap<Name, Vec<NetworkInterface>>, Error> {
+        use db::schema::{instance, network_interface};
+        // TODO-performance: paginate the results of this query?
+        let ifaces = network_interface::table
+            .inner_join(
+                instance::table
+                    .on(instance::id.eq(network_interface::instance_id)),
+            )
+            .select((instance::name, NetworkInterface::as_select()))
+            .filter(instance::project_id.eq(vpc.project_id))
+            .filter(instance::name.eq_any(instance_names))
+            .filter(network_interface::time_deleted.is_null())
+            .filter(instance::time_deleted.is_null())
+            .get_results_async(self.pool())
+            .await
+            .map_err(|e| {
+                public_error_from_diesel_pool(
+                    e,
+                    ErrorHandler::Server,
+                )
+            })?;
+
+        let mut result = HashMap::with_capacity(ifaces.len());
+        for (name, iface) in ifaces.into_iter() {
+            result.entry(name).or_insert_with(Vec::new).push(iface)
+        }
+        Ok(result)
+    }
+
+    /// Identify all VNICs connected to each VpcSubnet
+    // TODO: how to name/where to put this
+    pub async fn resolve_subnets_to_interfaces<T: IntoIterator<Item = Name>>(
+        &self,
+        vpc: &Vpc,
+        subnet_names: T,
+    ) -> Result<HashMap<Name, Vec<NetworkInterface>>, Error> {
+        use db::schema::{network_interface, vpc_subnet};
+        // TODO-performance: paginate the results of this query?
+        let subnets = network_interface::table
+            .inner_join(
+                vpc_subnet::table
+                    .on(vpc_subnet::id.eq(network_interface::subnet_id)),
+            )
+            .select((vpc_subnet::name, NetworkInterface::as_select()))
+            .filter(vpc_subnet::vpc_id.eq(vpc.id()))
+            .filter(vpc_subnet::name.eq_any(subnet_names))
+            .filter(network_interface::time_deleted.is_null())
+            .filter(vpc_subnet::time_deleted.is_null())
+            .get_results_async(self.pool())
+            .await
+            .map_err(|e| {
+                public_error_from_diesel_pool(
+                    e,
+                    ErrorHandler::Server,
+                )
+            })?;
+        let mut result = HashMap::with_capacity(subnets.len());
+        for (name, interface) in subnets.into_iter() {
+            result.entry(name).or_insert_with(Vec::new).push(interface);
+        }
+        Ok(result)
+    }
+
+    /// Identify all VNICs connected to each Vpc
+    // TODO: how to name/where to put this
+    pub async fn resolve_vpcs_to_interfaces<T: IntoIterator<Item = Name>>(
+        &self,
+        project_id: &Uuid,
+        vpc_names: T,
+    ) -> Result<HashMap<Name, Vec<NetworkInterface>>, Error> {
+        use db::schema::{network_interface, vpc};
+        // TODO-performance: paginate the results of this query?
+        let interfaces = network_interface::table
+            .inner_join(vpc::table.on(vpc::id.eq(network_interface::vpc_id)))
+            .select((vpc::name, NetworkInterface::as_select()))
+            .filter(vpc::project_id.eq(*project_id))
+            .filter(vpc::name.eq_any(vpc_names))
+            .filter(network_interface::time_deleted.is_null())
+            .filter(vpc::time_deleted.is_null())
+            .get_results_async(self.pool())
+            .await
+            .map_err(|e| {
+                public_error_from_diesel_pool(
+                    e,
+                    ErrorHandler::Server,
+                )
+            })?;
+        let mut result = HashMap::with_capacity(interfaces.len());
+        for (name, interface) in interfaces.into_iter() {
+            result.entry(name).or_insert_with(Vec::new).push(interface);
+        }
+        Ok(result)
+    }
+
+    /// Identify all subnets in use by each VpcSubnet
+    // TODO: how to name/where to put this
+    pub async fn resolve_subnets_to_ips<T: IntoIterator<Item = Name>>(
+        &self,
+        vpc: &Vpc,
+        subnet_names: T,
+    ) -> Result<HashMap<Name, Vec<ipnetwork::IpNetwork>>, Error> {
+        use db::schema::vpc_subnet;
+        // TODO-performance: paginate the results of this query?
+        let subnets = vpc_subnet::table
+            .select(VpcSubnet::as_select())
+            .filter(vpc_subnet::vpc_id.eq(vpc.id()))
+            .filter(vpc_subnet::name.eq_any(subnet_names))
+            .filter(vpc_subnet::time_deleted.is_null())
+            .get_results_async(self.pool())
+            .await
+            .map_err(|e| {
+                public_error_from_diesel_pool(
+                    e,
+                    ErrorHandler::Server,
+                )
+            })?;
+        let mut result = HashMap::with_capacity(subnets.len());
+        for subnet in subnets {
+            let entry = result.entry(subnet.name().clone()).or_insert_with(Vec::new);
+            if let Some(block) = subnet.ipv4_block {
+                entry.push(ipnetwork::IpNetwork::V4(block.0 .0))
+            }
+            if let Some(block) = subnet.ipv6_block {
+                entry.push(ipnetwork::IpNetwork::V6(block.0 .0))
+            }
+        }
+        Ok(result)
+    }
+
     /*
      * Disks
      */
@@ -2244,6 +2382,36 @@ impl DataStore {
                         LookupType::ById(*vpc_id),
                     ),
                 ),
+            })
+    }
+
+    /// Return the list of `Sled`s hosting instances with network interfaces on
+    /// the provided VPC.
+    pub async fn vpc_resolve_to_sleds(
+        &self,
+        vpc_id: &Uuid,
+    ) -> Result<Vec<Sled>, Error> {
+        use db::schema::{instance, network_interface, sled};
+
+        // Resolve each VNIC in the VPC to the Sled its on, so we know which
+        // Sleds to notify when firewall rules change.
+        network_interface::table
+            .inner_join(
+                instance::table
+                    .on(instance::id.eq(network_interface::instance_id)),
+            )
+            .inner_join(sled::table.on(sled::id.eq(instance::active_server_id)))
+            .filter(network_interface::vpc_id.eq(*vpc_id))
+            .filter(network_interface::time_deleted.is_null())
+            .filter(instance::time_deleted.is_null())
+            .select(Sled::as_select())
+            .get_results_async(self.pool())
+            .await
+            .map_err(|e| {
+                public_error_from_diesel_pool(
+                    e,
+                    ErrorHandler::Server,
+                )
             })
     }
 

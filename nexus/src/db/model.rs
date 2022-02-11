@@ -107,6 +107,7 @@ macro_rules! impl_enum_type {
     AsExpression,
     FromSqlRow,
     Eq,
+    Hash,
     PartialEq,
     Ord,
     PartialOrd,
@@ -1680,7 +1681,7 @@ impl_enum_type!(
     #[postgres(type_name = "vpc_firewall_rule_status", type_schema = "public")]
     pub struct VpcFirewallRuleStatusEnum;
 
-    #[derive(Clone, Debug, AsExpression, FromSqlRow)]
+    #[derive(Clone, Copy, Debug, AsExpression, FromSqlRow)]
     #[sql_type = "VpcFirewallRuleStatusEnum"]
     pub struct VpcFirewallRuleStatus(pub external::VpcFirewallRuleStatus);
 
@@ -1695,7 +1696,7 @@ impl_enum_type!(
     #[postgres(type_name = "vpc_firewall_rule_direction", type_schema = "public")]
     pub struct VpcFirewallRuleDirectionEnum;
 
-    #[derive(Clone, Debug, AsExpression, FromSqlRow)]
+    #[derive(Clone, Copy, Debug, AsExpression, FromSqlRow)]
     #[sql_type = "VpcFirewallRuleDirectionEnum"]
     pub struct VpcFirewallRuleDirection(pub external::VpcFirewallRuleDirection);
 
@@ -1710,7 +1711,7 @@ impl_enum_type!(
     #[postgres(type_name = "vpc_firewall_rule_action", type_schema = "public")]
     pub struct VpcFirewallRuleActionEnum;
 
-    #[derive(Clone, Debug, AsExpression, FromSqlRow)]
+    #[derive(Clone, Copy, Debug, AsExpression, FromSqlRow)]
     #[sql_type = "VpcFirewallRuleActionEnum"]
     pub struct VpcFirewallRuleAction(pub external::VpcFirewallRuleAction);
 
@@ -1725,7 +1726,7 @@ impl_enum_type!(
     #[postgres(type_name = "vpc_firewall_rule_protocol", type_schema = "public")]
     pub struct VpcFirewallRuleProtocolEnum;
 
-    #[derive(Clone, Debug, AsExpression, FromSqlRow)]
+    #[derive(Clone, Copy, Debug, AsExpression, FromSqlRow)]
     #[sql_type = "VpcFirewallRuleProtocolEnum"]
     pub struct VpcFirewallRuleProtocol(pub external::VpcFirewallRuleProtocol);
 

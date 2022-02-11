@@ -87,6 +87,38 @@
           }
         }
       }
+    },
+    "/vpc/{vpc_id}/firewall/rules": {
+      "put": {
+        "operationId": "vpc_firewall_rules_put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "vpc_id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "style": "simple"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/VpcFirewallRulesEnsureBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          }
+        }
+      }
     }
   },
   "components": {
@@ -577,6 +609,18 @@
           "destroyed"
         ]
       },
+      "IpNetwork": {
+        "description": "IPv4 (in dotted quad) or IPv6address, followed by a slash and prefix length",
+        "type": "string"
+      },
+      "L4PortRange": {
+        "title": "A range of IP ports",
+        "description": "An inclusive-inclusive range of IP ports. The second port may be omitted to represent a single port",
+        "type": "string",
+        "pattern": "^[0-9]{1,5}(-[0-9]{1,5})?$",
+        "minLength": 1,
+        "maxLength": 11
+      },
       "MacAddr": {
         "title": "A MAC address",
         "description": "A Media Access Control address, in EUI-48 format",
@@ -663,6 +707,105 @@
           "time_created",
           "time_modified",
           "vpc_id"
+        ]
+      },
+      "VpcFirewallRule": {
+        "description": "VPC firewall rule after object name resolution has been performed by Nexus",
+        "type": "object",
+        "properties": {
+          "action": {
+            "$ref": "#/components/schemas/VpcFirewallRuleAction"
+          },
+          "direction": {
+            "$ref": "#/components/schemas/VpcFirewallRuleDirection"
+          },
+          "filter_hosts": {
+            "nullable": true,
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/IpNetwork"
+            }
+          },
+          "filter_ports": {
+            "nullable": true,
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/L4PortRange"
+            }
+          },
+          "filter_protocols": {
+            "nullable": true,
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/VpcFirewallRuleProtocol"
+            }
+          },
+          "priority": {
+            "type": "integer",
+            "format": "uint16",
+            "minimum": 0
+          },
+          "status": {
+            "$ref": "#/components/schemas/VpcFirewallRuleStatus"
+          },
+          "targets": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/NetworkInterface"
+            }
+          }
+        },
+        "required": [
+          "action",
+          "direction",
+          "priority",
+          "status",
+          "targets"
+        ]
+      },
+      "VpcFirewallRuleAction": {
+        "type": "string",
+        "enum": [
+          "allow",
+          "deny"
+        ]
+      },
+      "VpcFirewallRuleDirection": {
+        "type": "string",
+        "enum": [
+          "inbound",
+          "outbound"
+        ]
+      },
+      "VpcFirewallRuleProtocol": {
+        "description": "The protocols that may be specified in a firewall rule's filter",
+        "type": "string",
+        "enum": [
+          "TCP",
+          "UDP",
+          "ICMP"
+        ]
+      },
+      "VpcFirewallRuleStatus": {
+        "type": "string",
+        "enum": [
+          "disabled",
+          "enabled"
+        ]
+      },
+      "VpcFirewallRulesEnsureBody": {
+        "description": "Sent to a sled agent to establish the current firewall rules for a VPC",
+        "type": "object",
+        "properties": {
+          "rules": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/VpcFirewallRule"
+            }
+          }
+        },
+        "required": [
+          "rules"
         ]
       }
     }

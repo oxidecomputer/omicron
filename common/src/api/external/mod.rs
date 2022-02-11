@@ -1509,19 +1509,26 @@ pub struct VpcFirewallRuleUpdateParams {
 #[repr(transparent)]
 pub struct VpcFirewallRulePriority(pub u16);
 
-/// Filter for a firewall rule. A given packet must match every field that is
-/// present for the rule to apply to it. A packet matches a field if any entry
-/// in that field matches the packet.
+/// Filter for a firewall rule.
+///
+/// Each of these fields is a dimension on which a packet is evaluated. A packet
+/// matches on that dimension if it matches any of the entries in the field. An
+/// empty field (whether not specified or an empty array) always matches any
+/// packet.
+///
+/// A packet matches the filter as a whole if it matches _all_ fields. 
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize, JsonSchema)]
 pub struct VpcFirewallRuleFilter {
     /// If present, the sources (if incoming) or destinations (if outgoing)
-    /// this rule applies to.
+    /// this rule applies to. If not specified, the filter matches any host.
     pub hosts: Option<Vec<VpcFirewallRuleHostFilter>>,
 
-    /// If present, the networking protocols this rule applies to.
+    /// If present, the networking protocols this rule applies to. If not
+    /// specified, the filter matches any protocol
     pub protocols: Option<Vec<VpcFirewallRuleProtocol>>,
 
-    /// If present, the destination ports this rule applies to.
+    /// If present, the destination ports this rule applies to. If not
+    /// specified, the filter matches any port.
     pub ports: Option<Vec<L4PortRange>>,
 }
 
@@ -1548,6 +1555,9 @@ pub enum VpcFirewallRuleDirection {
     Outbound,
 }
 
+/// The action to take with traffic that matches the filter.
+///
+/// Note that `Deny` action takes precedence over `Allow`, in the case of ties.
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum VpcFirewallRuleAction {
@@ -1556,7 +1566,7 @@ pub enum VpcFirewallRuleAction {
 }
 
 /// A subset of [`NetworkTarget`], `VpcFirewallRuleTarget` specifies all
-/// possible targets that a firewall rule can be attached to.
+/// possible targets that a firewall rule can be applied to.
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, JsonSchema)]
 #[serde(tag = "type", content = "value", rename_all = "snake_case")]
 pub enum VpcFirewallRuleTarget {
@@ -1625,8 +1635,8 @@ impl Display for VpcFirewallRuleTarget {
     }
 }
 
-/// A subset of [`NetworkTarget`], `VpcFirewallRuleHostFilter` specifies all
-/// possible targets that a route can forward to.
+/// A subset of [`NetworkTarget`], `VpcFirewallRuleHostFilter` identifies a set
+/// of hosts to apply a firewall filter to.
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, JsonSchema)]
 #[serde(tag = "type", content = "value", rename_all = "snake_case")]
 pub enum VpcFirewallRuleHostFilter {
