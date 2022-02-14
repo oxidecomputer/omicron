@@ -1011,6 +1011,7 @@ mod test {
                 run_state: InstanceState::Creating,
                 sled_uuid: Uuid::new_v4(),
                 propolis_uuid: test_propolis_uuid(),
+                dst_propolis_uuid: None,
                 propolis_addr: None,
                 migration_uuid: None,
                 ncpus: InstanceCpuCount(2),
@@ -1080,7 +1081,7 @@ mod test {
         // Start running the instance.
         inst.transition(InstanceRuntimeStateRequested {
             run_state: InstanceStateRequested::Running,
-            migration_id: None,
+            migration_params: None,
         })
         .await
         .unwrap();
@@ -1105,7 +1106,7 @@ mod test {
             });
         inst.transition(InstanceRuntimeStateRequested {
             run_state: InstanceStateRequested::Stopped,
-            migration_id: None,
+            migration_params: None,
         })
         .await
         .unwrap();
@@ -1136,7 +1137,7 @@ mod test {
         // result in a panic.
         inst.transition(InstanceRuntimeStateRequested {
             run_state: InstanceStateRequested::Running,
-            migration_id: None,
+            migration_params: None,
         })
         .await
         .unwrap();

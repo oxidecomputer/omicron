@@ -10,13 +10,26 @@ use crate::db::model::RoleAssignmentBuiltin;
 use lazy_static::lazy_static;
 
 lazy_static! {
-    // The "test-privileged" user gets the "admin" role on the sole Fleet.
-    // This will grant them all permissions on all resources.
     pub static ref BUILTIN_ROLE_ASSIGNMENTS: Vec<RoleAssignmentBuiltin> =
-        vec![RoleAssignmentBuiltin::new(
-            user_builtin::USER_TEST_PRIVILEGED.id,
-            role_builtin::FLEET_ADMIN.resource_type,
-            *FLEET_ID,
-            role_builtin::FLEET_ADMIN.role_name,
-        )];
+        vec![
+            // The "test-privileged" user gets the "admin" role on the sole
+            // Fleet.  This will grant them all permissions on all resources.
+            RoleAssignmentBuiltin::new(
+                user_builtin::USER_TEST_PRIVILEGED.id,
+                role_builtin::FLEET_ADMIN.resource_type,
+                *FLEET_ID,
+                role_builtin::FLEET_ADMIN.role_name,
+            ),
+
+            // The "internal-api" user gets the "admin" role on the sole Fleet.
+            // This will grant them all permissions on all resources.
+            // TODO-security We should scope this down (or, really, figure out a
+            // better internal authn/authz story).
+            RoleAssignmentBuiltin::new(
+                user_builtin::USER_INTERNAL_API.id,
+                role_builtin::FLEET_ADMIN.resource_type,
+                *FLEET_ID,
+                role_builtin::FLEET_ADMIN.role_name,
+            ),
+        ];
 }

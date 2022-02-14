@@ -252,8 +252,11 @@ CREATE TABLE omicron.public.instance (
      */
     active_server_id UUID,
     /* Identifies the underlying propolis-server backing the instance. */
-    active_propolis_id UUID,
+    active_propolis_id UUID NOT NULL,
     active_propolis_ip INET,
+
+    /* Identifies the target propolis-server during a migration of the instance. */
+    target_propolis_id UUID,
 
     /*
      * Identifies an ongoing migration for this instance.
@@ -386,6 +389,9 @@ CREATE TABLE omicron.public.vpc (
     project_id UUID NOT NULL,
     system_router_id UUID NOT NULL,
     dns_name STRING(63) NOT NULL,
+
+    /* The IPv6 prefix allocated to subnets. */
+    ipv6_prefix INET NOT NULL,
 
     /* Used to ensure that two requests do not concurrently modify the
        VPC's firewall */

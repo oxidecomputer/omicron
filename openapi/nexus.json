@@ -1730,36 +1730,6 @@
         "operationId": "vpc_firewall_rules_get",
         "parameters": [
           {
-            "in": "query",
-            "name": "limit",
-            "schema": {
-              "nullable": true,
-              "description": "Maximum number of items returned by a single call",
-              "type": "integer",
-              "format": "uint32",
-              "minimum": 1
-            },
-            "style": "form"
-          },
-          {
-            "in": "query",
-            "name": "page_token",
-            "schema": {
-              "nullable": true,
-              "description": "Token returned by previous call to retreive the subsequent page",
-              "type": "string"
-            },
-            "style": "form"
-          },
-          {
-            "in": "query",
-            "name": "sort_by",
-            "schema": {
-              "$ref": "#/components/schemas/NameSortMode"
-            },
-            "style": "form"
-          },
-          {
             "in": "path",
             "name": "organization_name",
             "required": true,
@@ -1793,13 +1763,12 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/VpcFirewallRuleResultsPage"
+                  "$ref": "#/components/schemas/VpcFirewallRules"
                 }
               }
             }
           }
-        },
-        "x-dropshot-pagination": true
+        }
       },
       "put": {
         "tags": [
@@ -1852,7 +1821,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/VpcFirewallRuleUpdateResult"
+                  "$ref": "#/components/schemas/VpcFirewallRules"
                 }
               }
             }
@@ -3725,7 +3694,7 @@
         "title": "An IPv6 subnet",
         "description": "An IPv6 subnet, including prefix and subnet mask",
         "type": "string",
-        "pattern": "^(fd|FD)00:((([0-9a-fA-F]{1,4}\\:){6}[0-9a-fA-F]{1,4})|(([0-9a-fA-F]{1,4}:){1,6}:))/(6[4-9]|[7-9][0-9]|1[0-1][0-9]|12[0-6])$",
+        "pattern": "^(fd|FD)[0-9a-fA-F]{2}:((([0-9a-fA-F]{1,4}\\:){6}[0-9a-fA-F]{1,4})|(([0-9a-fA-F]{1,4}:){1,6}:))/(6[4-9]|[7-9][0-9]|1[0-1][0-9]|12[0-6])$",
         "maxLength": 43
       },
       "L4PortRange": {
@@ -4852,6 +4821,14 @@
             "type": "string",
             "format": "uuid"
           },
+          "ipv6_prefix": {
+            "description": "The unique local IPv6 address range for subnets in this VPC",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Ipv6Net"
+              }
+            ]
+          },
           "name": {
             "description": "unique, mutable, user-controlled identifier for each resource",
             "allOf": [
@@ -4885,6 +4862,7 @@
           "description",
           "dns_name",
           "id",
+          "ipv6_prefix",
           "name",
           "project_id",
           "system_router_id",
@@ -4901,6 +4879,14 @@
           },
           "dns_name": {
             "$ref": "#/components/schemas/Name"
+          },
+          "ipv6_prefix": {
+            "nullable": true,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Ipv6Net"
+              }
+            ]
           },
           "name": {
             "$ref": "#/components/schemas/Name"
@@ -4987,6 +4973,11 @@
             "description": "timestamp when this resource was last modified",
             "type": "string",
             "format": "date-time"
+          },
+          "vpc_id": {
+            "description": "the VPC to which this rule belongs",
+            "type": "string",
+            "format": "uuid"
           }
         },
         "required": [
@@ -5000,7 +4991,8 @@
           "status",
           "targets",
           "time_created",
-          "time_modified"
+          "time_modified",
+          "vpc_id"
         ]
       },
       "VpcFirewallRuleAction": {
@@ -5152,27 +5144,6 @@
           "ICMP"
         ]
       },
-      "VpcFirewallRuleResultsPage": {
-        "description": "A single page of results",
-        "type": "object",
-        "properties": {
-          "items": {
-            "description": "list of items on this page of results",
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/VpcFirewallRule"
-            }
-          },
-          "next_page": {
-            "nullable": true,
-            "description": "token used to fetch the next page of results (if any)",
-            "type": "string"
-          }
-        },
-        "required": [
-          "items"
-        ]
-      },
       "VpcFirewallRuleStatus": {
         "type": "string",
         "enum": [
@@ -5271,6 +5242,14 @@
               }
             ]
           },
+          "name": {
+            "description": "name of the rule, unique to this VPC",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Name"
+              }
+            ]
+          },
           "priority": {
             "description": "the relative priority of this rule",
             "type": "integer",
@@ -5298,6 +5277,7 @@
           "description",
           "direction",
           "filters",
+          "name",
           "priority",
           "status",
           "targets"
@@ -5306,16 +5286,32 @@
       "VpcFirewallRuleUpdateParams": {
         "description": "Updateable properties of a `Vpc`'s firewall Note that VpcFirewallRules are implicitly created along with a Vpc, so there is no explicit creation.",
         "type": "object",
-        "additionalProperties": {
-          "$ref": "#/components/schemas/VpcFirewallRuleUpdate"
-        }
+        "properties": {
+          "rules": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/VpcFirewallRuleUpdate"
+            }
+          }
+        },
+        "required": [
+          "rules"
+        ]
       },
-      "VpcFirewallRuleUpdateResult": {
-        "description": "Response to an update replacing `Vpc`'s firewall",
+      "VpcFirewallRules": {
+        "description": "Collection of a [`Vpc`]'s firewall rules",
         "type": "object",
-        "additionalProperties": {
-          "$ref": "#/components/schemas/VpcFirewallRule"
-        }
+        "properties": {
+          "rules": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/VpcFirewallRule"
+            }
+          }
+        },
+        "required": [
+          "rules"
+        ]
       },
       "VpcResultsPage": {
         "description": "A single page of results",

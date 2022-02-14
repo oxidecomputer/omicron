@@ -14,14 +14,14 @@ chrono = { version = "0.4", features = [ "serde" ] }
 # Only used by the simulated sled agent.
 crucible-agent-client = { git = "https://github.com/oxidecomputer/crucible", rev = "078d364e14d57d5faa3a44001c65709935419779" }
 dropshot = { git = "https://github.com/oxidecomputer/dropshot", branch = "main", features = [ "usdt-probes" ] }
-futures = "0.3.18"
+futures = "0.3.21"
 ipnetwork = "0.18"
 nexus-client = { path = "../nexus-client" }
 omicron-common = { path = "../common" }
 p256 = "0.9.0"
 percent-encoding = "2.1.0"
 progenitor = { git = "https://github.com/oxidecomputer/progenitor" }
-propolis-client = { git = "https://github.com/oxidecomputer/propolis", rev = "a3e0625f592a14eff04b43f95b72e08159d925e9" }
+propolis-client = { git = "https://github.com/oxidecomputer/propolis", rev = "0e3798510ae190131f63b9df767ec01b2beacf91" }
 rand = { version = "0.8.4", features = ["getrandom"] }
 reqwest = "0.11.8"
 schemars = { version = "0.8", features = [ "chrono", "uuid" ] }

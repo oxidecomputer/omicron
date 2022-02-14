@@ -107,6 +107,7 @@ pub struct InstanceMigrate {
 pub struct VpcCreate {
     #[serde(flatten)]
     pub identity: IdentityMetadataCreateParams,
+    pub ipv6_prefix: Option<Ipv6Net>,
     pub dns_name: Name,
 }
 

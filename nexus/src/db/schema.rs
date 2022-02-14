@@ -39,6 +39,7 @@ table! {
         state_generation -> Int8,
         active_server_id -> Uuid,
         active_propolis_id -> Uuid,
+        target_propolis_id -> Nullable<Uuid>,
         active_propolis_ip -> Nullable<Inet>,
         migration_id -> Nullable<Uuid>,
         ncpus -> Int8,
@@ -223,6 +224,7 @@ table! {
         time_deleted -> Nullable<Timestamptz>,
         project_id -> Uuid,
         system_router_id -> Uuid,
+        ipv6_prefix -> Inet,
         dns_name -> Text,
         firewall_gen -> Int8,
     }

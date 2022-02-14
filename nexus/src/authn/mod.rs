@@ -25,12 +25,16 @@
 //! authentication, but they'd all produce the same [`Context`] struct.
 
 pub mod external;
+pub mod saga;
 
 pub use crate::db::fixed_data::user_builtin::USER_DB_INIT;
+pub use crate::db::fixed_data::user_builtin::USER_INTERNAL_API;
 pub use crate::db::fixed_data::user_builtin::USER_SAGA_RECOVERY;
 pub use crate::db::fixed_data::user_builtin::USER_TEST_PRIVILEGED;
 pub use crate::db::fixed_data::user_builtin::USER_TEST_UNPRIVILEGED;
 
+use serde::Deserialize;
+use serde::Serialize;
 use uuid::Uuid;
 
 /// Describes how the actor performing the current operation is authenticated
@@ -82,6 +86,11 @@ impl Context {
         Context { kind: Kind::Unauthenticated, schemes_tried: vec![] }
     }
 
+    /// Returns an authenticated context for handling internal API contexts
+    pub fn internal_api() -> Context {
+        Context::context_for_actor(USER_INTERNAL_API.id)
+    }
+
     /// Returns an authenticated context for saga recovery
     pub fn internal_saga_recovery() -> Context {
         Context::context_for_actor(USER_SAGA_RECOVERY.id)
@@ -101,15 +110,13 @@ impl Context {
     }
 
     /// Returns an authenticated context for a special testing user
-    #[cfg(test)]
     pub fn internal_test_user() -> Context {
         Context::test_context_for_actor(USER_TEST_PRIVILEGED.id)
     }
 
     /// Returns an authenticated context for a specific user
     ///
-    /// This is used for unit testing the authorization rules.
-    #[cfg(test)]
+    /// This is used for testing.
     pub fn test_context_for_actor(actor_id: Uuid) -> Context {
         Context::context_for_actor(actor_id)
     }
@@ -119,6 +126,7 @@ impl Context {
 mod test {
     use super::Context;
     use super::USER_DB_INIT;
+    use super::USER_INTERNAL_API;
     use super::USER_SAGA_RECOVERY;
     use super::USER_TEST_PRIVILEGED;
 
@@ -142,13 +150,17 @@ mod test {
         let authn = Context::internal_saga_recovery();
         let actor = authn.actor().unwrap();
         assert_eq!(actor.0, USER_SAGA_RECOVERY.id);
+
+        let authn = Context::internal_api();
+        let actor = authn.actor().unwrap();
+        assert_eq!(actor.0, USER_INTERNAL_API.id);
     }
 }
 
 /// Describes whether the user is authenticated and provides more information
 /// that's specific to whether they're authenticated (or not)
-#[derive(Debug)]
-pub enum Kind {
+#[derive(Clone, Debug, Deserialize, Serialize)]
+enum Kind {
     /// Client successfully authenticated
     Authenticated(Details),
     /// Client did not attempt to authenticate
@@ -159,14 +171,14 @@ pub enum Kind {
 ///
 /// This could eventually include other information used during authorization,
 /// like a remote IP, the time of authentication, etc.
-#[derive(Debug)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct Details {
     /// the actor performing the request
     actor: Actor,
 }
 
 /// Who is performing an operation
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct Actor(pub Uuid);
 
 /// Label for a particular authentication scheme (used in log messages and

@@ -13,10 +13,11 @@
  * easier it will be to test, version, and update in deployed systems.
  */
 
-use crate::db;
+use crate::context::OpContext;
 use crate::db::identity::{Asset, Resource};
 use crate::external_api::params;
 use crate::saga_interface::SagaContext;
+use crate::{authn, db};
 use anyhow::anyhow;
 use chrono::Utc;
 use crucible_agent_client::{
@@ -267,6 +268,7 @@ async fn sic_create_instance_record(
         run_state: InstanceState::Creating,
         sled_uuid: sled_uuid?,
         propolis_uuid: propolis_uuid?,
+        dst_propolis_uuid: None,
         propolis_addr: None,
         migration_uuid: None,
         hostname: params.create_params.hostname.clone(),
@@ -307,7 +309,7 @@ async fn sic_instance_ensure(
         sled_agent_client::types::InstanceRuntimeStateRequested {
             run_state:
                 sled_agent_client::types::InstanceStateRequested::Running,
-            migration_id: None,
+            migration_params: None,
         };
     let instance_id = sagactx.lookup::<Uuid>("instance_id")?;
     let sled_uuid = sagactx.lookup::<Uuid>("server_id")?;
@@ -374,15 +376,15 @@ pub fn saga_instance_migrate() -> SagaTemplate<SagaInstanceMigrate> {
     );
 
     template_builder.append(
-        "migrate_instance",
-        "MigratePrep",
-        new_action_noop_undo(sim_migrate_prep),
-    );
-
-    template_builder.append(
         "dst_propolis_id",
         "GeneratePropolisId",
         new_action_noop_undo(saga_generate_uuid),
+    );
+
+    template_builder.append(
+        "migrate_instance",
+        "MigratePrep",
+        new_action_noop_undo(sim_migrate_prep),
     );
 
     template_builder.append(
@@ -410,6 +412,7 @@ async fn sim_migrate_prep(
     let params = sagactx.saga_params();
 
     let migrate_uuid = sagactx.lookup::<Uuid>("migrate_id")?;
+    let dst_propolis_uuid = sagactx.lookup::<Uuid>("dst_propolis_id")?;
 
     // We have sled-agent (via Nexus) attempt to place
     // the instance in a "Migrating" state w/ the given
@@ -417,7 +420,11 @@ async fn sim_migrate_prep(
     // state in the db
     let instance = osagactx
         .nexus()
-        .instance_start_migrate(params.instance_id, migrate_uuid)
+        .instance_start_migrate(
+            params.instance_id,
+            migrate_uuid,
+            dst_propolis_uuid,
+        )
         .await
         .map_err(ActionError::action_failed)?;
     let instance_id = instance.id();
@@ -431,6 +438,7 @@ async fn sim_instance_migrate(
     let osagactx = sagactx.user_data();
     let params = sagactx.saga_params();
 
+    let migration_id = sagactx.lookup::<Uuid>("migrate_id")?;
     let dst_sled_uuid = params.migrate_params.dst_sled_uuid;
     let dst_propolis_uuid = sagactx.lookup::<Uuid>("dst_propolis_id")?;
     let (instance_id, old_runtime) =
@@ -448,10 +456,13 @@ async fn sim_instance_migrate(
         nics: vec![],
     };
     let target = sled_agent_client::types::InstanceRuntimeStateRequested {
-        run_state: sled_agent_client::types::InstanceStateRequested::Running,
-        // Note, we clear the migration_id in our target runtime state because
-        // at the end of the migration process in question, the id is reset
-        migration_id: None,
+        run_state: sled_agent_client::types::InstanceStateRequested::Migrating,
+        migration_params: Some(
+            sled_agent_client::types::InstanceRuntimeStateMigrateParams {
+                migration_id,
+                dst_propolis_id: dst_propolis_uuid,
+            },
+        ),
     };
 
     let src_propolis_uuid = old_runtime.propolis_uuid;
@@ -501,6 +512,7 @@ async fn sim_cleanup_source(
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct ParamsDiskCreate {
+    pub serialized_authn: authn::saga::Serialized,
     pub project_id: Uuid,
     pub create_params: params::DiskCreate,
 }
@@ -739,13 +751,32 @@ async fn sdc_finalize_disk_record(
     sagactx: ActionContext<SagaDiskCreate>,
 ) -> Result<(), ActionError> {
     let osagactx = sagactx.user_data();
-    let _params = sagactx.saga_params();
+    let params = sagactx.saga_params();
+    let datastore = osagactx.datastore();
+    let opctx = OpContext::for_saga_action(&sagactx, &params.serialized_authn);
 
     let disk_id = sagactx.lookup::<Uuid>("disk_id")?;
     let disk_created = sagactx.lookup::<db::model::Disk>("created_disk")?;
-    osagactx
-        .datastore()
-        .disk_update_runtime(&disk_id, &disk_created.runtime().detach())
+    let authz_disk = datastore
+        .disk_lookup_by_id(disk_id)
+        .await
+        .map_err(ActionError::action_failed)?;
+    // TODO-security Review whether this can ever fail an authz check.  We don't
+    // want this to ever fail the authz check here -- if it did, we would have
+    // wanted to catch that a lot sooner.  It wouldn't make sense for it to fail
+    // anyway because we're modifying something that *we* just created.  Right
+    // now, it's very unlikely that it would ever fail because we checked
+    // Action::CreateChild on the Project before we created this saga.  The only
+    // role that gets that permission is "project collaborator", which also gets
+    // Action::Modify on Disks within the Project.  So this shouldn't break in
+    // practice.  However, that's brittle.  It would be better if this were
+    // better guaranteed.
+    datastore
+        .disk_update_runtime(
+            &opctx,
+            &authz_disk,
+            &disk_created.runtime().detach(),
+        )
         .await
         .map_err(ActionError::action_failed)?;
     Ok(())

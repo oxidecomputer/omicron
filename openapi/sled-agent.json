@@ -452,6 +452,12 @@
         "description": "Runtime state of the Instance, including the actual running state and minimal metadata\n\nThis state is owned by the sled agent running that Instance.",
         "type": "object",
         "properties": {
+          "dst_propolis_uuid": {
+            "nullable": true,
+            "description": "the target propolis-server during a migration of this Instance",
+            "type": "string",
+            "format": "uuid"
+          },
           "gen": {
             "description": "generation number for this state",
             "allOf": [
@@ -526,14 +532,35 @@
           "time_updated"
         ]
       },
+      "InstanceRuntimeStateMigrateParams": {
+        "description": "Instance runtime state to update for a migration.",
+        "type": "object",
+        "properties": {
+          "dst_propolis_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "migration_id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "required": [
+          "dst_propolis_id",
+          "migration_id"
+        ]
+      },
       "InstanceRuntimeStateRequested": {
         "description": "Used to request an Instance state change from a sled agent\n\nRight now, it's only the run state and migration id that can be changed, though we might want to support changing properties like \"ncpus\" here.",
         "type": "object",
         "properties": {
-          "migration_id": {
+          "migration_params": {
             "nullable": true,
-            "type": "string",
-            "format": "uuid"
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/InstanceRuntimeStateMigrateParams"
+              }
+            ]
           },
           "run_state": {
             "$ref": "#/components/schemas/InstanceStateRequested"
