@@ -144,7 +144,7 @@ impl Pool {
         create_dir_all(&path).await?;
         let path = path.join(dataset_id.to_string());
         let mut path_buf = path.to_path_buf();
-        path_buf.set_extension(".toml");
+        path_buf.set_extension("toml");
         Ok(path_buf)
     }
 }

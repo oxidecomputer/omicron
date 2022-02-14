@@ -279,7 +279,46 @@ impl Agent {
                     ).await
                     .expect("expected an infinite retry loop registering nexus as a metric producer");
                 }
+
+                // If this node holds a CockroachDB partition, initialize the
+                // tables.
+                //
+                // TODO: reach out to the crdb address directly?
             }
+
+            // TODO: Populate CRDB unconditionally
+
+            // TODO: Add a check - before we send any requests - if we've done
+            // this before. Use the same path (const? pls?) as we're using to
+            // store the "dataset_config_path".
+            //
+            // - Do "dbwipe + dbinit" together
+            // - Store the file after populating CRDB
+            // - Read the file before sending any requests (could actually
+            // just be the old config, so we can compare?)
+            //
+            // XXX: Okay, problems:
+            // (Option 1) If we want to "Just zlogin and run the command inside the
+            // zone", we don't have handle to the RunningZone object. It's owned
+            // by the storage manager, not the bootstrap agent, and these two
+            // services are fairly decoupled.
+            //   - Admittedly, we're all on the same machine, so we still *could*
+            //   just grab it out of thin air...
+            //   - Alternatively, we could expose a "reset DB" command out of the
+            //   sled agent. Do we want that???
+            //   ^
+            //   - TODO: This may actualy be the right path. We could stop
+            //   trying to make partition initialization idempotent - it could
+            //   be forcefully re-initializing, and we rely on the RSS injection
+            //   to just not re-run by storing a local file in the bootstrap
+            //   server.
+            //
+            // (Option 2) If we want to contact CRDB directly (via TCP/IP, using the IPv6
+            // address), who supplies the SQL files? They're currently contained
+            // within the zone. Should they be a part of the bootstrap image
+            // instead?
+            //   - They *could* be, but this would require reshuffling the
+            //   packaging of the SQL files...
         }
         Ok(())
     }
