@@ -135,6 +135,9 @@ impl RunningZone {
 
         eprintln!("RunningZone: get({}) - And it's running", zone_prefix);
 
+        // TODO: I think if we have an error case here - if we fail to setup
+        // the address in a running zone - we fall back to a "set up zone from
+        // scratch" pathway...
         let zone_name = zone.name();
         let vnic_name = Zones::get_control_interface(zone_name)?;
         let network =

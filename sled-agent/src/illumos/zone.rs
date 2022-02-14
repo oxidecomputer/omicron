@@ -501,6 +501,63 @@ impl Zones {
             .ok_or(Error::NotFound)
     }
 
+    fn has_link_local_v6_address(
+        zone: &str,
+        addrobj: &str,
+    ) -> Result<(), Error> {
+        let mut command = std::process::Command::new(PFEXEC);
+        let cmd = command.args(&[
+            ZLOGIN,
+            zone,
+            IPADM,
+            "show-addr",
+            "-p",
+            "-o",
+            "TYPE",
+            addrobj,
+        ]);
+        let output = execute(cmd)?;
+        if let Some(_) = String::from_utf8(output.stdout)?
+            .lines()
+            .find(|s| s.trim() == "addrconf") {
+            return Ok(());
+        }
+        Err(Error::NotFound)
+    }
+
+    // Ensures a link local IPv6 exists for the object.
+    //
+    // This is necessary for allocating IPv6 addresses on illumos.
+    //
+    // For more context, see:
+    // <https://ry.goodwu.net/tinkering/a-day-in-the-life-of-an-ipv6-address-on-illumos/>
+    fn ensure_has_link_local_v6_address(
+        zone: &str,
+        addrobj: &str,
+    ) -> Result<(), Error> {
+        // TODO: better type safety of the "addrobj" object would be preferable.
+        let link_local_addrobj = addrobj.replace("/omicron", "/linklocal");
+
+        if let Ok(()) = Self::has_link_local_v6_address(zone, &link_local_addrobj) {
+            return Ok(());
+        }
+
+        // No link-local address was found, attempt to make one.
+        let mut command = std::process::Command::new(PFEXEC);
+        let cmd = command.args(&[
+            ZLOGIN,
+            zone,
+            IPADM,
+            "create-addr",
+            "-t",
+            "-T",
+            "addrconf",
+            &link_local_addrobj,
+        ]);
+        execute(cmd)?;
+        Ok(())
+    }
+
     /// Creates an IP address within a Zone.
     pub fn create_address(
         zone: &str,
@@ -527,6 +584,10 @@ impl Zones {
                 )
             },
             AddrType::Static(addr) => {
+                if addr.is_ipv6() {
+                    Self::ensure_has_link_local_v6_address(zone, addrobj)?;
+                }
+
                 args.extend(
                     vec![
                         "-T",
@@ -539,7 +600,7 @@ impl Zones {
         };
 
         args.push(addrobj.to_string());
-        println!("IPADM args: {:#?}", args);
+        println!("Creating address: {:#?}", args);
         let cmd = command.args(args);
         execute(cmd)?;
         Self::get_address(zone, addrobj)

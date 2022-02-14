@@ -321,13 +321,9 @@ async fn ensure_running_zone(
     partition_info: &PartitionInfo,
     dataset_name: &DatasetName,
 ) -> Result<RunningZone, Error> {
-    // At the moment, we only provide a single IP address to the running zone.
-    //
-    // We could plausible allow each zone to have a network of IP addresses,
-    // but at the moment that is not necessary.
     let prefix = match partition_info.address.ip() {
         std::net::IpAddr::V4(_) => 32,
-        std::net::IpAddr::V6(_) => 128,
+        std::net::IpAddr::V6(_) => 64,
     };
     let addr = ipnetwork::IpNetwork::new(partition_info.address.ip(), prefix).unwrap();
     let addrtype = AddrType::Static(addr);
@@ -336,17 +332,22 @@ async fn ensure_running_zone(
         .await
     {
         Ok(zone) => {
-            info!(log, "Zone for {} is already running", dataset_name.full());
+            info!(log, "[storage:ensure_running_zone] Zone for {} is already running", dataset_name.full());
             Ok(zone)
         }
         Err(_) => {
-            info!(log, "Zone for {} is not running. Booting", dataset_name.full());
+            info!(log, "[storage:ensure_running_zone] Zone for {} is not running. Booting", dataset_name.full());
             let (nic, zname) = configure_zone(
                 log,
                 vnic_id_allocator,
                 partition_info,
                 dataset_name,
             )?;
+
+            // TODO: What if we *found* an existing zone?
+            // It may have a borked network, that doesn't necessarily mean we
+            // want to go through the full "boot" process if it's already
+            // running.
             RunningZone::boot(log, zname, nic, addrtype, partition_info.address.port())
                 .await
                 .map_err(|e| e.into())
