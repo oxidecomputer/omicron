@@ -91,6 +91,7 @@ impl SledAgent {
             Mountpoint::Path(std::path::PathBuf::from(
                 ZONE_ZFS_DATASET_MOUNTPOINT,
             )),
+            /* do_format= */ true,
         )?;
 
         // Identify all existing zones which should be managed by the Sled

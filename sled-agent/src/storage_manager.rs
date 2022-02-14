@@ -9,7 +9,7 @@ use crate::illumos::{
     zone::ZONE_PREFIX,
     zpool::ZpoolInfo,
 };
-use crate::illumos::running_zone::RunningZone;
+use crate::illumos::running_zone::{RunningZone, Error as RunningZoneError};
 use crate::illumos::zone::AddrType;
 use crate::vnic::{IdAllocator, Vnic};
 use futures::FutureExt;
@@ -278,17 +278,14 @@ impl PartitionInfo {
                 //
                 // TODO: Maybe move the "initialize / populate" decision somewhere else?
 
-                /*
-                tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
-
-                info!(&self.log, "[InitializePartition] Populating CRDB");
+//                tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
                 zone.run_cmd(
                     &[
                         "/opt/oxide/cockroachdb/bin/cockroach",
                         "sql",
                         "--insecure",
                         "--host",
-                        zone.address().to_string(),
+                        &zone.address().to_string(),
                         "--file",
                         "/opt/oxide/cockroachdb/sql/dbwipe.sql",
                     ]
@@ -299,13 +296,11 @@ impl PartitionInfo {
                         "sql",
                         "--insecure",
                         "--host",
-                        zone.address().to_string(),
+                        &zone.address().to_string(),
                         "--file",
                         "/opt/oxide/cockroachdb/sql/dbinit.sql",
                     ]
                 )?;
-                */
-
 
                 Ok(())
             },
@@ -333,9 +328,9 @@ async fn ensure_running_zone(
     {
         Ok(zone) => {
             info!(log, "[storage:ensure_running_zone] Zone for {} is already running", dataset_name.full());
-            Ok(zone)
+            return Ok(zone);
         }
-        Err(_) => {
+        Err(RunningZoneError::NotFound) => {
             info!(log, "[storage:ensure_running_zone] Zone for {} is not running. Booting", dataset_name.full());
             let (nic, zname) = configure_zone(
                 log,
@@ -351,6 +346,12 @@ async fn ensure_running_zone(
             RunningZone::boot(log, zname, nic, addrtype, partition_info.address.port())
                 .await
                 .map_err(|e| e.into())
+        },
+        Err(RunningZoneError::NotRunning(_state)) => {
+            unimplemented!("Handle a zone which exists, but is not running");
+        },
+        Err(_) => {
+            unimplemented!("Handle a zone which exists, has some other problem");
         }
     }
 }
@@ -416,12 +417,13 @@ struct StorageWorker {
 }
 
 impl StorageWorker {
-    // Idempotently ensure the named dataset exists as a filesystem with a UUID.
+    // Ensures the named dataset exists as a filesystem with a UUID, optionally
+    // creating it if `do_format` is true.
     //
     // Returns the UUID attached to the ZFS filesystem.
-    fn ensure_dataset_with_id(dataset_name: &DatasetName) -> Result<Uuid, Error> {
+    fn ensure_dataset_with_id(dataset_name: &DatasetName, do_format: bool) -> Result<Uuid, Error> {
         let fs_name = &dataset_name.full();
-        Zfs::ensure_filesystem(&fs_name, Mountpoint::Path(PathBuf::from("/data")))?;
+        Zfs::ensure_filesystem(&fs_name, Mountpoint::Path(PathBuf::from("/data")), do_format)?;
         // Ensure the dataset has a usable UUID.
         if let Ok(id_str) = Zfs::get_oxide_value(&fs_name, "uuid") {
             if let Ok(id) = id_str.parse::<Uuid>() {
@@ -433,19 +435,23 @@ impl StorageWorker {
         Ok(id)
     }
 
-    // Formats a partition within a zpool, starting a zone for it.
-    // Returns the UUID attached to the underlying ZFS partition.
+    // Starts the zone for a dataset within a particular zpool.
     //
+    // If requested via the `do_format` parameter, may also initialize
+    // these resources.
+    //
+    // Returns the UUID attached to the underlying ZFS partition.
     // Returns (was_inserted, Uuid).
     async fn initialize_partition(
         &self,
         pool: &mut Pool,
         partition_info: &PartitionInfo,
+        do_format: bool,
     ) -> Result<(bool, Uuid), Error> {
         let dataset_name = DatasetName::new(pool.info.name(), &partition_info.name);
 
         info!(&self.log, "[InitializePartition] Ensuring dataset {} exists", dataset_name.full());
-        let id = StorageWorker::ensure_dataset_with_id(&dataset_name)?;
+        let id = StorageWorker::ensure_dataset_with_id(&dataset_name, do_format)?;
         if let Some(_) = pool.get_zone(id) {
             return Ok((false, id));
         }
@@ -570,7 +576,8 @@ impl StorageWorker {
         let partition_info = PartitionInfo::new(request.partition_kind.clone(), request.address);
         let (is_new_partition, id) = self.initialize_partition(
             pool,
-            &partition_info
+            &partition_info,
+            /* do_format= */ true,
         ).await?;
 
         if !is_new_partition {
@@ -601,7 +608,11 @@ impl StorageWorker {
         let id = Zfs::get_oxide_value(&fs_name, "uuid")?.parse::<Uuid>()?;
         let config_path = pool.dataset_config_path(id).await?;
         let partition_info: PartitionInfo = toml::from_slice(&tokio::fs::read(config_path).await?)?;
-        self.initialize_partition(pool, &partition_info).await?;
+        self.initialize_partition(
+            pool,
+            &partition_info,
+            /* do_format= */ false,
+        ).await?;
 
         // Unwrap safety: We just put this zone in the pool.
         let zone = pool.get_zone(id).unwrap();

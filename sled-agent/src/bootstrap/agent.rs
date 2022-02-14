@@ -249,7 +249,7 @@ impl Agent {
             // going to distinct sleds.
             for request in &rss_config.requests {
                 info!(self.log, "observing request: {:#?}", request);
-                let dur = std::time::Duration::from_secs(120);
+                let dur = std::time::Duration::from_secs(5 * 60);
                 let client = reqwest::ClientBuilder::new()
                     .connect_timeout(dur)
                     .timeout(dur)

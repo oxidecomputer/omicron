@@ -71,6 +71,7 @@ impl Zfs {
     pub fn ensure_filesystem(
         name: &str,
         mountpoint: Mountpoint,
+        do_format: bool,
     ) -> Result<(), Error> {
         // If the dataset exists, we're done.
         let mut command = std::process::Command::new(ZFS);
@@ -84,6 +85,10 @@ impl Zfs {
                 return Err(Error::Output(stdout));
             }
             return Ok(());
+        }
+
+        if !do_format {
+            return Err(Error::NotFound(format!("Filesystem {} not found", name)));
         }
 
         // If it doesn't exist, make it.

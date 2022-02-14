@@ -20,8 +20,8 @@ pub enum Error {
     #[error("Zone not found")]
     NotFound,
 
-    #[error("Zone is not running")]
-    NotRunning,
+    #[error("Zone is not running; it is in the {0:?} state instead")]
+    NotRunning(zone::State),
 
     #[error("Execution error: {0}")]
     Execution(#[from] crate::illumos::ExecutionError),
@@ -114,7 +114,15 @@ impl RunningZone {
         })
     }
 
-    /// Looks up a running zone, if one already exists.
+    /// Looks up a running zone based on the `zone_prefix`, if one already exists.
+    ///
+    /// - If the zone was found, is running, and has a network interface, it is
+    /// returned.
+    /// - If the zone was not found `Error::NotFound` is returned.
+    /// - If the zone was found, but not running, `Error::NotRunning` is
+    /// returned.
+    /// - Other errors may be returned attemping to look up and accessing an
+    /// address on the zone.
     pub async fn get(
         log: &Logger,
         zone_prefix: &str,
@@ -130,14 +138,10 @@ impl RunningZone {
         eprintln!("RunningZone: get({}) - Found a zone", zone_prefix);
 
         if zone.state() != zone::State::Running {
-            return Err(Error::NotRunning);
+            return Err(Error::NotRunning(zone.state()));
         }
 
         eprintln!("RunningZone: get({}) - And it's running", zone_prefix);
-
-        // TODO: I think if we have an error case here - if we fail to setup
-        // the address in a running zone - we fall back to a "set up zone from
-        // scratch" pathway...
         let zone_name = zone.name();
         let vnic_name = Zones::get_control_interface(zone_name)?;
         let network =
