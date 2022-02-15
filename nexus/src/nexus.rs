@@ -54,6 +54,7 @@ use omicron_common::api::external::VpcFirewallRuleUpdateParams;
 use omicron_common::api::external::VpcRouterKind;
 use omicron_common::api::internal::nexus;
 use omicron_common::api::internal::nexus::DiskRuntimeState;
+use omicron_common::api::internal::sled_agent::InstanceRuntimeStateMigrateParams;
 use omicron_common::api::internal::sled_agent::InstanceRuntimeStateRequested;
 use omicron_common::api::internal::sled_agent::InstanceStateRequested;
 use omicron_common::backoff;
@@ -1105,7 +1106,7 @@ impl Nexus {
             .await?;
         let requested = InstanceRuntimeStateRequested {
             run_state: InstanceStateRequested::Reboot,
-            migration_id: None,
+            migration_params: None,
         };
         self.instance_set_runtime(
             opctx,
@@ -1137,7 +1138,7 @@ impl Nexus {
             .await?;
         let requested = InstanceRuntimeStateRequested {
             run_state: InstanceStateRequested::Running,
-            migration_id: None,
+            migration_params: None,
         };
         self.instance_set_runtime(
             opctx,
@@ -1169,7 +1170,7 @@ impl Nexus {
             .await?;
         let requested = InstanceRuntimeStateRequested {
             run_state: InstanceStateRequested::Stopped,
-            migration_id: None,
+            migration_params: None,
         };
         self.instance_set_runtime(
             opctx,
@@ -1189,6 +1190,7 @@ impl Nexus {
         opctx: &OpContext,
         instance_id: Uuid,
         migration_id: Uuid,
+        dst_propolis_id: Uuid,
     ) -> UpdateResult<db::model::Instance> {
         let authz_instance =
             self.db_datastore.instance_lookup_by_id(instance_id).await?;
@@ -1196,7 +1198,10 @@ impl Nexus {
             self.db_datastore.instance_refetch(opctx, &authz_instance).await?;
         let requested = InstanceRuntimeStateRequested {
             run_state: InstanceStateRequested::Migrating,
-            migration_id: Some(migration_id),
+            migration_params: Some(InstanceRuntimeStateMigrateParams {
+                migration_id,
+                dst_propolis_id,
+            }),
         };
         self.instance_set_runtime(
             opctx,
@@ -2281,13 +2286,16 @@ impl Nexus {
             Ok(true) => {
                 info!(log, "instance updated by sled agent";
                     "instance_id" => %id,
+                    "propolis_id" => %new_runtime_state.propolis_uuid,
                     "new_state" => %new_runtime_state.run_state);
                 Ok(())
             }
 
             Ok(false) => {
                 info!(log, "instance update from sled agent ignored (old)";
-                    "instance_id" => %id);
+                    "instance_id" => %id,
+                    "propolis_id" => %new_runtime_state.propolis_uuid,
+                    "requested_state" => %new_runtime_state.run_state);
                 Ok(())
             }
 
