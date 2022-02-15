@@ -1108,10 +1108,34 @@ impl JsonSchema for Ipv4Net {
 pub struct Ipv6Net(pub ipnetwork::Ipv6Network);
 
 impl Ipv6Net {
+    /// The length for all VPC IPv6 prefixes
+    pub const VPC_IPV6_PREFIX_LENGTH: u8 = 48;
+
+    /// The prefix length for all VPC Sunets
+    pub const VPC_SUBNET_IPV6_PREFIX_LENGTH: u8 = 64;
+
     /// Return `true` if this subnetwork is in the IPv6 Unique Local Address
-    /// range defined in RFC 4193, e.g., `fd00:/48`
+    /// range defined in RFC 4193, e.g., `fd00:/8`
     pub fn is_unique_local(&self) -> bool {
-        self.0.network().octets()[0] == 0xfd && self.0.prefix() >= 48
+        // TODO: Delegate to `Ipv6Addr::is_unique_local()` when stabilized.
+        self.0.network().octets()[0] == 0xfd
+    }
+
+    /// Return `true` if this subnetwork is a valid VPC prefix.
+    ///
+    /// This checks that the subnet is a unique local address, and has the VPC
+    /// prefix length required.
+    pub fn is_vpc_prefix(&self) -> bool {
+        self.is_unique_local()
+            && self.0.prefix() == Self::VPC_IPV6_PREFIX_LENGTH
+    }
+
+    /// Return `true` if this subnetwork is a valid VPC Subnet, given the VPC's
+    /// prefix.
+    pub fn is_vpc_subnet(&self, vpc_prefix: &Ipv6Net) -> bool {
+        self.is_unique_local()
+            && self.is_subnet_of(vpc_prefix.0)
+            && self.prefix() == Self::VPC_SUBNET_IPV6_PREFIX_LENGTH
     }
 }
 
@@ -2322,6 +2346,28 @@ mod test {
         assert_eq!(
             "nope:this-should-error".parse::<NetworkTarget>().unwrap_err(),
             parse_display::ParseError::new()
+        );
+    }
+
+    #[test]
+    fn test_ipv6_net_operations() {
+        use super::Ipv6Net;
+        assert!(Ipv6Net("fd00::/8".parse().unwrap()).is_unique_local());
+        assert!(!Ipv6Net("fe00::/8".parse().unwrap()).is_unique_local());
+
+        assert!(Ipv6Net("fd00::/48".parse().unwrap()).is_vpc_prefix());
+        assert!(!Ipv6Net("fe00::/48".parse().unwrap()).is_vpc_prefix());
+        assert!(!Ipv6Net("fd00::/40".parse().unwrap()).is_vpc_prefix());
+
+        let vpc_prefix = Ipv6Net("fd00::/48".parse().unwrap());
+        assert!(
+            Ipv6Net("fd00::/64".parse().unwrap()).is_vpc_subnet(&vpc_prefix)
+        );
+        assert!(
+            !Ipv6Net("fd10::/64".parse().unwrap()).is_vpc_subnet(&vpc_prefix)
+        );
+        assert!(
+            !Ipv6Net("fd00::/63".parse().unwrap()).is_vpc_subnet(&vpc_prefix)
         );
     }
 }

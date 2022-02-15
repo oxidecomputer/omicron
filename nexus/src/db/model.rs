@@ -360,10 +360,14 @@ impl Ipv6Net {
     ///
     ///  - `prefix` is less than this address's prefix
     ///  - `prefix` is greater than 128
+    ///
+    /// Note that if the prefix is the same as this address's prefix, a copy of
+    /// `self` is returned.
     pub fn random_subnet(&self, prefix: u8) -> Option<Self> {
         use rand::RngCore;
 
-        if prefix < self.prefix() || prefix > 128 {
+        const MAX_IPV6_SUBNET_PREFIX: u8 = 128;
+        if prefix < self.prefix() || prefix > MAX_IPV6_SUBNET_PREFIX {
             return None;
         }
         if prefix == self.prefix() {
@@ -371,31 +375,30 @@ impl Ipv6Net {
         }
 
         // Generate a random address
-        let mut rng = rand::thread_rng();
+        let mut rng = if cfg!(test) {
+            StdRng::seed_from_u64(0)
+        } else {
+            StdRng::from_entropy()
+        };
         let random =
             u128::from(rng.next_u64()) << 64 | u128::from(rng.next_u64());
 
         // Generate a mask for the new address.
         //
-        // Left-shift will zero-fill. Even if we bit-OR with the original
-        // prefix, there may still be zeros in the "middle" if the original
-        // prefix is small and the new one large.
-        //
-        // So use a right-shift, to arrive at the desired prefix length.
-        //
-        // Safety: We've already checked above that the subtraction won't panic,
-        // since `prefix` <= 128.
-        let full_mask = u128::MAX >> (128 - prefix);
+        // We're operating on the big-endian byte representation of the address.
+        // So shift down by the prefix, and then invert, so that we have 1's
+        // on the leading bits up to the prefix.
+        let full_mask = !(u128::MAX >> prefix);
 
         // Get the existing network address and mask.
-        let network = u128::from_le_bytes(self.network().octets());
-        let network_mask = u128::from_le_bytes(self.mask().octets());
+        let network = u128::from_be_bytes(self.network().octets());
+        let network_mask = u128::from_be_bytes(self.mask().octets());
 
         // Take random bits _only_ where the new mask is set.
         let random_mask = full_mask ^ network_mask;
 
         let out = (network & network_mask) | (random & random_mask);
-        let addr = std::net::Ipv6Addr::from(out.to_le_bytes());
+        let addr = std::net::Ipv6Addr::from(out.to_be_bytes());
         let net = ipnetwork::Ipv6Network::new(addr, prefix)
             .expect("Failed to create random subnet");
         Some(Self(external::Ipv6Net(net)))
@@ -1281,10 +1284,9 @@ impl Vpc {
     ) -> Result<Self, external::Error> {
         let identity = VpcIdentity::new(vpc_id, params.identity);
         let ipv6_prefix = match params.ipv6_prefix {
-            None => defaults::random_unique_local_ipv6(),
+            None => defaults::random_vpc_ipv6_prefix(),
             Some(prefix) => {
-                // TODO: Delegate to `Ipv6Addr::is_unique_local()` when stabilized.
-                if prefix.is_unique_local() {
+                if prefix.is_vpc_prefix() {
                     Ok(prefix)
                 } else {
                     Err(external::Error::invalid_request(
@@ -2146,6 +2148,18 @@ mod tests {
             "random_subnet() should fail when prefix is greater than 128"
         );
         let subnet = base.random_subnet(64).unwrap();
+        assert_eq!(
+            subnet.prefix(),
+            64,
+            "random_subnet() returned an incorrect prefix"
+        );
+        let octets = subnet.network().octets();
+        const EXPECTED_RANDOM_BYTES: [u8; 8] = [253, 0, 0, 0, 0, 0, 111, 127];
+        assert_eq!(octets[..8], EXPECTED_RANDOM_BYTES);
+        assert!(
+            octets[8..].iter().all(|x| *x == 0),
+            "Host address portion should be 0"
+        );
         assert!(
             base.is_supernet_of(subnet.0 .0),
             "random_subnet should generate an actual subnet"

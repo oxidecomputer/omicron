@@ -23,10 +23,6 @@ pub const MIN_VPC_IPV4_SUBNET_PREFIX: u8 = 8;
 /// NOTE: This is the maximum _prefix_, which sets the minimum subnet size.
 pub const MAX_VPC_IPV4_SUBNET_PREFIX: u8 = 26;
 
-/// The default prefix size for a automatically-generated IPv6 address range for
-/// VPC Subnets
-pub const DEFAULT_VPC_SUBNET_IPV6_PREFIX: u8 = 64;
-
 lazy_static! {
     /// The default IPv4 subnet range assigned to the default VPC Subnet, when
     /// the VPC is created, if one is not provided in the request. See
@@ -77,7 +73,8 @@ lazy_static! {
         }"#).unwrap();
 }
 
-pub fn random_unique_local_ipv6() -> Result<Ipv6Net, external::Error> {
+/// Generate a random VPC IPv6 prefix, in the range `fd00::/48`.
+pub fn random_vpc_ipv6_prefix() -> Result<Ipv6Net, external::Error> {
     use rand::Rng;
     let mut bytes = [0u8; 16];
     bytes[0] = 0xfd;
@@ -86,7 +83,13 @@ pub fn random_unique_local_ipv6() -> Result<Ipv6Net, external::Error> {
             "Unable to allocate random IPv6 address range",
         )
     })?;
-    Ok(Ipv6Net(Ipv6Network::new(Ipv6Addr::from(bytes), 48).unwrap()))
+    Ok(Ipv6Net(
+        Ipv6Network::new(
+            Ipv6Addr::from(bytes),
+            Ipv6Net::VPC_IPV6_PREFIX_LENGTH,
+        )
+        .unwrap(),
+    ))
 }
 
 #[cfg(test)]
@@ -94,9 +97,9 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_random_unique_local_ipv6() {
-        let network = random_unique_local_ipv6().unwrap();
-        assert!(network.is_unique_local());
+    fn test_random_vpc_ipv6_prefix() {
+        let network = random_vpc_ipv6_prefix().unwrap();
+        assert!(network.is_vpc_prefix());
         let octets = network.network().octets();
         assert!(octets[6..].iter().all(|x| *x == 0));
     }

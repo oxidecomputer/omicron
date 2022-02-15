@@ -73,9 +73,15 @@ async fn test_vpc_subnets(cptestctx: &ControlPlaneTestContext) {
     /* Create a VPC Subnet. */
     let ipv4_block = Ipv4Net("10.0.0.0/24".parse().unwrap());
     let other_ipv4_block = Ipv4Net("172.31.0.0/16".parse().unwrap());
-    let ipv6_block = Some(Ipv6Net("fd12:3456:7890::/48".parse().unwrap()));
+    // Create the first two available IPv6 address ranges. */
+    let prefix = vpc.ipv6_prefix.network();
+    let ipv6_block =
+        Some(Ipv6Net(ipnetwork::Ipv6Network::new(prefix, 64).unwrap()));
+    let mut segments = prefix.segments();
+    segments[3] = 1;
+    let addr = std::net::Ipv6Addr::from(segments);
     let other_ipv6_block =
-        Some(Ipv6Net("fd12:3456:7891::/64".parse().unwrap()));
+        Some(Ipv6Net(ipnetwork::Ipv6Network::new(addr, 64).unwrap()));
     let new_subnet = params::VpcSubnetCreate {
         identity: IdentityMetadataCreateParams {
             name: subnet_name.parse().unwrap(),
@@ -91,6 +97,7 @@ async fn test_vpc_subnets(cptestctx: &ControlPlaneTestContext) {
     assert_eq!(subnet.vpc_id, vpc.identity.id);
     assert_eq!(subnet.ipv4_block, ipv4_block);
     assert_eq!(subnet.ipv6_block, ipv6_block.unwrap());
+    assert!(subnet.ipv6_block.is_vpc_subnet(&vpc.ipv6_prefix));
 
     // try to update ipv4_block with IPv6 value, should 400
     assert_put_400(
@@ -137,7 +144,7 @@ async fn test_vpc_subnets(cptestctx: &ControlPlaneTestContext) {
             StatusCode::BAD_REQUEST,
         )
         .await;
-    assert!(error.message.starts_with("IP address ranges"));
+    assert!(error.message.starts_with("IPv4 block '"));
 
     // creating another subnet in the same VPC with the same name, but different
     // IP address ranges also fails.
@@ -184,14 +191,7 @@ async fn test_vpc_subnets(cptestctx: &ControlPlaneTestContext) {
     assert_eq!(subnet2.identity.description, "it's also below the net");
     assert_eq!(subnet2.vpc_id, vpc.identity.id);
     assert_eq!(subnet2.ipv4_block, ipv4_block);
-
-    /*
-     * Verify the IPv6 range is a ULA, and should be the first /64 divided off
-     * from the VPCs range.
-     */
-    assert!(subnet2.ipv6_block.is_unique_local());
-    assert!(vpc.ipv6_prefix.is_supernet_of(*subnet2.ipv6_block));
-    assert_eq!(subnet2.ipv6_block.prefix(), 64);
+    assert!(subnet2.ipv6_block.is_vpc_subnet(&vpc.ipv6_prefix));
 
     // subnets list should now have two in it
     let subnets =

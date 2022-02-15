@@ -12,6 +12,7 @@ use diesel::pg::Pg;
 use diesel::prelude::*;
 use diesel::query_builder::*;
 use diesel::sql_types;
+use omicron_common::api::external;
 use std::convert::TryFrom;
 use uuid::Uuid;
 
@@ -224,6 +225,13 @@ impl QueryFragment<Pg> for AllocateIpQueryValues {
     }
 }
 
+/// Errors related to allocating VPC Subnets.
+#[derive(Debug)]
+pub enum SubnetError {
+    OverlappingIpRange,
+    External(external::Error),
+}
+
 /// Generate a CTE that can be used to insert a VPC Subnet, only if the IP
 /// address ranges of that subnet don't overlap with existing Subnets in the
 /// same VPC.
@@ -261,22 +269,11 @@ impl QueryFragment<Pg> for AllocateIpQueryValues {
 ///         vpc_id = <vpc_id> AND
 ///         time_deleted IS NULL AND
 ///         (
-///             (ipv4_block && candidate.ipv4_block) OR
-///             (ipv6_block && candidate.ipv6_block)
+///             inet_contains_or_equals(ipv4_block, candidate.ipv4_block) OR
+///             inet_contains_or_equals(ipv6_block, candidate.ipv6_block)
 ///         )
 /// )
 /// ```
-///
-/// This can be used
-///
-/// Notes
-/// -----
-///
-/// This might be better done with an exclusion constraint on the actual table,
-/// but CRDB does not yet support them. See
-/// <https://github.com/cockroachdb/cockroach/issues/46657>. It's not clear this
-/// would work, since the constraint is only _within_ a VPC, but it might be
-/// feasible.
 pub struct FilterConflictingVpcSubnetRangesQuery(pub db::model::VpcSubnet);
 
 impl QueryId for FilterConflictingVpcSubnetRangesQuery {
@@ -414,19 +411,20 @@ impl QueryFragment<Pg> for FilterConflictingVpcSubnetRangesQuery {
         // " AND time_deleted IS NULL AND (("
         out.push_sql(" AND ");
         out.push_identifier(dsl::time_deleted::NAME)?;
-        out.push_sql(" IS NULL AND ((");
+        out.push_sql(" IS NULL AND (");
 
-        // "ipv4_block && <ipv4_block>
+        // "inet_contains_or_equals(ipv4_block, <ipv4_block>
+        out.push_sql("inet_contains_or_equals(");
         out.push_identifier(dsl::ipv4_block::NAME)?;
-        out.push_sql(" && ");
+        out.push_sql(", ");
         out.push_bind_param::<sql_types::Inet, ipnetwork::IpNetwork>(
             &ipnetwork::IpNetwork::from(self.0.ipv4_block.0 .0),
         )?;
 
-        // ") OR (ipv6_block && <ipv6_block>))"
-        out.push_sql(") OR (");
+        // ") OR inet_contains_or_equals(ipv6_block, <ipv6_block>))"
+        out.push_sql(") OR inet_contains_or_equals(");
         out.push_identifier(dsl::ipv6_block::NAME)?;
-        out.push_sql(" && ");
+        out.push_sql(", ");
         out.push_bind_param::<sql_types::Inet, ipnetwork::IpNetwork>(
             &ipnetwork::IpNetwork::from(self.0.ipv6_block.0 .0),
         )?;
@@ -496,6 +494,7 @@ impl QueryFragment<Pg> for FilterConflictingVpcSubnetRangesQueryValues {
 mod test {
     use super::AllocateIpQuery;
     use super::FilterConflictingVpcSubnetRangesQuery;
+    use super::SubnetError;
     use crate::db::model::{
         IncompleteNetworkInterface, NetworkInterface, VpcSubnet,
     };
@@ -650,7 +649,7 @@ mod test {
                 "SELECT * FROM candidate WHERE NOT EXISTS (",
                 r#"SELECT "ipv4_block", "ipv6_block" FROM "vpc_subnet" WHERE "#,
                 r#""vpc_id" = $9 AND "time_deleted" IS NULL AND ("#,
-                r#"("ipv4_block" && $10) OR ("ipv6_block" && $11)))) "#,
+                r#"inet_contains_or_equals("ipv4_block", $10) OR inet_contains_or_equals("ipv6_block", $11)))) "#,
                 r#"-- binds: [{subnet_id}, "{name}", "{description}", {time_created:?}, "#,
                 r#"{time_modified:?}, {vpc_id}, V4({ipv4_block:?}), V6({ipv6_block:?}), "#,
                 r#"{vpc_id}, V4({ipv4_block:?}), V6({ipv6_block:?})]"#,
@@ -703,7 +702,7 @@ mod test {
 
         // We should be able to insert anything into an empty table.
         assert!(
-            matches!(db_datastore.vpc_create_subnet(row).await, Ok(Some(_))),
+            matches!(db_datastore.vpc_create_subnet(row).await, Ok(_)),
             "Should be able to insert VPC subnet into empty table"
         );
 
@@ -717,7 +716,10 @@ mod test {
             ipv6_block,
         );
         assert!(
-            matches!(db_datastore.vpc_create_subnet(new_row).await, Ok(None)),
+            matches!(
+                db_datastore.vpc_create_subnet(new_row).await,
+                Err(SubnetError::OverlappingIpRange)
+            ),
             "Should not be able to insert new VPC subnet with the same IP ranges"
         );
 
@@ -731,7 +733,7 @@ mod test {
             ipv6_block,
         );
         assert!(
-            matches!(db_datastore.vpc_create_subnet(new_row).await, Ok(Some(_))),
+            matches!(db_datastore.vpc_create_subnet(new_row).await, Ok(_)),
             "Should be able to insert a VPC Subnet with the same ranges in a different VPC",
         );
 
@@ -745,7 +747,10 @@ mod test {
             ipv6_block,
         );
         assert!(
-            matches!(db_datastore.vpc_create_subnet(new_row).await, Ok(None)),
+            matches!(
+                db_datastore.vpc_create_subnet(new_row).await,
+                Err(SubnetError::OverlappingIpRange),
+            ),
             "Should not be able to insert VPC Subnet with overlapping IPv4 range"
         );
         let new_row = VpcSubnet::new(
@@ -756,12 +761,15 @@ mod test {
             other_ipv6_block,
         );
         assert!(
-            matches!(db_datastore.vpc_create_subnet(new_row).await, Ok(None)),
+            matches!(
+                db_datastore.vpc_create_subnet(new_row).await,
+                Err(SubnetError::OverlappingIpRange),
+            ),
             "Should not be able to insert VPC Subnet with overlapping IPv6 range"
         );
 
-        // We should get an _error_, not `Ok(None)`, if the IP address ranges
-        // are OK, but the name conflicts.
+        // We should get an _external error_ if the IP address ranges are OK,
+        // but the name conflicts.
         let new_row = VpcSubnet::new(
             other_subnet_id,
             vpc_id,
@@ -770,7 +778,10 @@ mod test {
             other_ipv6_block,
         );
         assert!(
-            matches!(db_datastore.vpc_create_subnet(new_row).await, Err(_)),
+            matches!(
+                db_datastore.vpc_create_subnet(new_row).await,
+                Err(SubnetError::External(_))
+            ),
             "Should get an error inserting a VPC Subnet with unique IP ranges, but the same name"
         );
 
@@ -784,7 +795,7 @@ mod test {
             other_ipv6_block,
         );
         assert!(
-            matches!(db_datastore.vpc_create_subnet(new_row).await, Ok(Some(_))),
+            matches!(db_datastore.vpc_create_subnet(new_row).await, Ok(_)),
             "Should be able to insert new VPC Subnet with non-overlapping IP ranges"
         );
 

@@ -79,6 +79,7 @@ use crate::db::{
     pagination::paginated_multicolumn,
     subnet_allocation::AllocateIpQuery,
     subnet_allocation::FilterConflictingVpcSubnetRangesQuery,
+    subnet_allocation::SubnetError,
     update_and_check::{UpdateAndCheck, UpdateStatus},
 };
 
@@ -2187,49 +2188,34 @@ impl DataStore {
     }
 
     /// Insert a VPC Subnet, checking for unique IP address ranges.
-    ///
-    /// Notes
-    /// -----
-    ///
-    /// This method is a bit different from others, indicated by the fact that
-    /// it returns an `Option`. This method internally checks that the IP
-    /// address ranges of the provided subnet don't overlap any existing VPC
-    /// Subnets in the same VPC. If that check _fails_, then `Ok(None)` is
-    /// returned.
-    ///
-    /// This is mainly done so that callers can easily distinguish this case.
-    /// This method is used internally, in some cases where we generate the IP
-    /// address ranges automatically, in which case we'll likely want to retry
-    /// in some way. The `Ok(None)` return value can be more easily checked than
-    /// looking for some sentinel value in a public conflict error variant.
-    ///
-    /// In other cases, the request from the client is more or less directly
-    /// passed through. Here, any conflict, including overlapping IP ranges, is
-    /// returned to the client as a 400-level error, since their request is not
-    /// valid.
     pub async fn vpc_create_subnet(
         &self,
         subnet: VpcSubnet,
-    ) -> CreateResult<Option<VpcSubnet>> {
+    ) -> Result<VpcSubnet, SubnetError> {
         use db::schema::vpc_subnet::dsl;
         let name = subnet.name().clone();
         let values = FilterConflictingVpcSubnetRangesQuery(subnet);
-        diesel_pool_result_optional(
-            diesel::insert_into(dsl::vpc_subnet)
-                .values(values)
-                .returning(VpcSubnet::as_returning())
-                .get_result_async(self.pool())
-                .await,
-        )
-        .map_err(|err| {
-            public_error_from_diesel_pool(
-                err,
-                ErrorHandler::Conflict(
-                    ResourceType::VpcSubnet,
-                    name.to_string().as_str(),
-                ),
-            )
-        })
+        diesel::insert_into(dsl::vpc_subnet)
+            .values(values)
+            .returning(VpcSubnet::as_returning())
+            .get_result_async(self.pool())
+            .await
+            .map_err(|err| {
+                if let PoolError::Connection(ConnectionError::Query(
+                    diesel::result::Error::NotFound,
+                )) = err
+                {
+                    SubnetError::OverlappingIpRange
+                } else {
+                    SubnetError::External(public_error_from_diesel_pool(
+                        err,
+                        ErrorHandler::Conflict(
+                            ResourceType::VpcSubnet,
+                            name.to_string().as_str(),
+                        ),
+                    ))
+                }
+            })
     }
 
     pub async fn vpc_delete_subnet(&self, subnet_id: &Uuid) -> DeleteResult {
@@ -3272,6 +3258,7 @@ mod test {
     // scan are, in fact, runnable without a FULL SCAN.
     #[tokio::test]
     async fn test_queries_do_not_require_full_table_scan() {
+        use omicron_common::api::external;
         let logctx =
             dev::test_setup_log("test_queries_do_not_require_full_table_scan");
         let mut db = test_setup_database(&logctx.log).await;
@@ -3297,6 +3284,29 @@ mod test {
             !explanation.contains("FULL SCAN"),
             "Found an unexpected FULL SCAN: {}",
             explanation
+        );
+
+        let subnet = db::model::VpcSubnet::new(
+            Uuid::nil(),
+            Uuid::nil(),
+            external::IdentityMetadataCreateParams {
+                name: external::Name::try_from(String::from("name")).unwrap(),
+                description: String::from("description"),
+            },
+            external::Ipv4Net("172.30.0.0/22".parse().unwrap()),
+            external::Ipv6Net("fd00::/64".parse().unwrap()),
+        );
+        let values = FilterConflictingVpcSubnetRangesQuery(subnet);
+        let query =
+            diesel::insert_into(db::schema::vpc_subnet::dsl::vpc_subnet)
+                .values(values)
+                .returning(VpcSubnet::as_returning());
+        println!("{}", diesel::debug_query(&query));
+        let explanation = query.explain_async(datastore.pool()).await.unwrap();
+        assert!(
+            !explanation.contains("FULL SCAN"),
+            "Found an unexpected FULL SCAN: {}",
+            explanation,
         );
 
         let _ = db.cleanup().await;

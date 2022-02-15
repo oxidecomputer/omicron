@@ -104,9 +104,8 @@ where
     Q: QueryFragment<Pg>,
 {
     fn walk_ast(&self, mut out: AstPass<Pg>) -> QueryResult<()> {
-        out.push_sql("EXPLAIN (");
+        out.push_sql("EXPLAIN ");
         self.query.walk_ast(out.reborrow())?;
-        out.push_sql(")");
         Ok(())
     }
 }
