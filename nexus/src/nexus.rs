@@ -814,16 +814,18 @@ impl Nexus {
 
     pub async fn project_list_instances(
         &self,
+        opctx: &OpContext,
         organization_name: &Name,
         project_name: &Name,
         pagparams: &DataPageParams<'_, Name>,
     ) -> ListResultVec<db::model::Instance> {
-        let project_id = self
+        let authz_project = self
             .db_datastore
             .project_lookup_by_path(organization_name, project_name)
-            .await?
-            .id();
-        self.db_datastore.project_list_instances(&project_id, pagparams).await
+            .await?;
+        self.db_datastore
+            .project_list_instances(opctx, &authz_project, pagparams)
+            .await
     }
 
     pub async fn project_create_instance(

@@ -6,9 +6,6 @@
  * Tests basic instance support in the API
  */
 
-// XXX working on this test
-// XXX do I need to update the unauthorized test
-
 use http::method::Method;
 use http::StatusCode;
 use nexus_test_utils::http_testing::AuthnMode;

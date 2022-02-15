@@ -166,6 +166,14 @@ lazy_static! {
     static ref DEMO_INSTANCE_NAME: Name = "demo-instance".parse().unwrap();
     static ref DEMO_INSTANCE_URL: String =
         format!("{}/{}", *DEMO_PROJECT_URL_INSTANCES, *DEMO_INSTANCE_NAME);
+    static ref DEMO_INSTANCE_START_URL: String =
+        format!("{}/start", *DEMO_INSTANCE_URL);
+    static ref DEMO_INSTANCE_STOP_URL: String =
+        format!("{}/stop", *DEMO_INSTANCE_URL);
+    static ref DEMO_INSTANCE_REBOOT_URL: String =
+        format!("{}/reboot", *DEMO_INSTANCE_URL);
+    static ref DEMO_INSTANCE_MIGRATE_URL: String =
+        format!("{}/migrate", *DEMO_INSTANCE_URL);
     static ref DEMO_INSTANCE_DISKS_URL: String =
         format!("{}/disks", *DEMO_INSTANCE_URL);
     static ref DEMO_INSTANCE_DISKS_ATTACH_URL: String =
@@ -175,7 +183,7 @@ lazy_static! {
     static ref DEMO_INSTANCE_CREATE: params::InstanceCreate =
         params::InstanceCreate {
             identity: IdentityMetadataCreateParams {
-                name: DEMO_DISK_NAME.clone(),
+                name: DEMO_INSTANCE_NAME.clone(),
                 description: "".parse().unwrap(),
             },
             ncpus: InstanceCpuCount(1),
@@ -278,6 +286,8 @@ lazy_static! {
 
     /// List of endpoints to be verified
     static ref VERIFY_ENDPOINTS: Vec<VerifyEndpoint> = vec![
+        /* Organizations */
+
         VerifyEndpoint {
             url: "/organizations",
             visibility: Visibility::Public,
@@ -304,6 +314,8 @@ lazy_static! {
                 ),
             ],
         },
+
+        /* Projects */
 
         // TODO-security TODO-correctness One thing that's a little strange
         // here: we currently return a 404 if you attempt to create a Project
@@ -339,6 +351,8 @@ lazy_static! {
                 ),
             ],
         },
+
+        /* Disks */
 
         VerifyEndpoint {
             url: &*DEMO_PROJECT_URL_DISKS,
@@ -382,6 +396,62 @@ lazy_static! {
                 )
             ],
         },
+
+        /* Instances */
+        VerifyEndpoint {
+            url: &*DEMO_PROJECT_URL_INSTANCES,
+            visibility: Visibility::Protected,
+            allowed_methods: vec![
+                AllowedMethod::Get,
+                AllowedMethod::Post(
+                    serde_json::to_value(&*DEMO_INSTANCE_CREATE).unwrap()
+                ),
+            ],
+        },
+
+        VerifyEndpoint {
+            url: &*DEMO_INSTANCE_URL,
+            visibility: Visibility::Protected,
+            allowed_methods: vec![
+                AllowedMethod::Get,
+                AllowedMethod::Delete,
+            ],
+        },
+
+        VerifyEndpoint {
+            url: &*DEMO_INSTANCE_START_URL,
+            visibility: Visibility::Protected,
+            allowed_methods: vec![
+                AllowedMethod::Post(serde_json::Value::Null)
+            ],
+        },
+        VerifyEndpoint {
+            url: &*DEMO_INSTANCE_STOP_URL,
+            visibility: Visibility::Protected,
+            allowed_methods: vec![
+                AllowedMethod::Post(serde_json::Value::Null)
+            ],
+        },
+        VerifyEndpoint {
+            url: &*DEMO_INSTANCE_REBOOT_URL,
+            visibility: Visibility::Protected,
+            allowed_methods: vec![
+                AllowedMethod::Post(serde_json::Value::Null)
+            ],
+        },
+        VerifyEndpoint {
+            url: &*DEMO_INSTANCE_MIGRATE_URL,
+            visibility: Visibility::Protected,
+            allowed_methods: vec![
+                AllowedMethod::Post(serde_json::to_value(
+                    params::InstanceMigrate {
+                        dst_sled_uuid: uuid::Uuid::new_v4(),
+                    }
+                ).unwrap()),
+            ],
+        },
+
+        /* IAM */
 
         VerifyEndpoint {
             url: "/roles",

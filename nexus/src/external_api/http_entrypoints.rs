@@ -726,8 +726,10 @@ async fn project_instances_get(
     let organization_name = &path.organization_name;
     let project_name = &path.project_name;
     let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
         let instances = nexus
             .project_list_instances(
+                &opctx,
                 &organization_name,
                 &project_name,
                 &data_page_params_for(&rqctx, &query)?
