@@ -29,10 +29,6 @@ pub fn control_vnic_name(id: u64) -> String {
     format!("{}{}", VNIC_PREFIX_CONTROL, id)
 }
 
-pub fn interface_name(vnic_name: &str) -> String {
-    format!("{}/omicron", vnic_name)
-}
-
 /// A shareable wrapper around an atomic counter.
 /// May be used to allocate runtime-unique IDs for objects
 /// which have naming constraints - such as VNICs.

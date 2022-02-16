@@ -4,9 +4,10 @@
 
 //! Utilities to manage running zones.
 
+use crate::addrobj::AddrObject;
 use crate::illumos::svc::wait_for_service;
 use crate::illumos::zone::AddrType;
-use crate::vnic::{interface_name, Vnic};
+use crate::vnic::Vnic;
 use slog::Logger;
 use std::net::SocketAddr;
 
@@ -102,9 +103,10 @@ impl RunningZone {
             .await
             .map_err(|_| Error::Timeout(fmri.to_string()))?;
 
+        let addrobj = AddrObject::new_control(nic.name());
         let network = Zones::ensure_address(
             &zone_name,
-            &interface_name(&nic.name()),
+            &addrobj,
             addrtype,
         )?;
 
@@ -142,9 +144,10 @@ impl RunningZone {
 
         let zone_name = zone.name();
         let vnic_name = Zones::get_control_interface(zone_name)?;
+        let addrobj = AddrObject::new_control(&vnic_name);
         let network = Zones::ensure_address(
             zone_name,
-            &interface_name(&vnic_name),
+            &addrobj,
             addrtype,
         )?;
 

@@ -4,6 +4,7 @@
 
 //! API for controlling a single instance.
 
+use crate::addrobj::AddrObject;
 use crate::common::{
     instance::{Action as InstanceAction, InstanceStates, PROPOLIS_PORT},
     vlan::VlanID,
@@ -11,7 +12,7 @@ use crate::common::{
 use crate::illumos::svc::wait_for_service;
 use crate::illumos::zone::{AddrType, PROPOLIS_ZONE_PREFIX};
 use crate::instance_manager::InstanceTicket;
-use crate::vnic::{interface_name, IdAllocator, Vnic};
+use crate::vnic::{IdAllocator, Vnic};
 use anyhow::anyhow;
 use futures::lock::{Mutex, MutexGuard};
 use omicron_common::api::external::NetworkInterface;
@@ -499,9 +500,10 @@ impl Instance {
             .map_err(|_| Error::Timeout(fmri.to_string()))?;
         info!(inner.log, "Network milestone ready for {}", zname);
 
+        let addrobj = AddrObject::new_control(&control_nic.name());
         let network = Zones::create_address(
             &zname,
-            &interface_name(&control_nic.name()),
+            &addrobj,
             AddrType::Dhcp,
         )?;
         info!(inner.log, "Created address {} for zone: {}", network, zname);
@@ -933,7 +935,7 @@ mod test {
             .returning(|zone, iface, addrtype| {
                 assert!(matches!(addrtype, AddrType::Dhcp));
                 assert_eq!(zone, propolis_zone_name(&test_propolis_uuid()));
-                assert_eq!(iface, interface_name(&control_vnic_name(0)));
+                assert_eq!(iface, &AddrObject::new_control(&control_vnic_name(0)));
                 Ok("127.0.0.1/24".parse().unwrap())
             });
 

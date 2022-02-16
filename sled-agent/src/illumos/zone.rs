@@ -9,6 +9,7 @@ use slog::Logger;
 use std::net::SocketAddr;
 use uuid::Uuid;
 
+use crate::addrobj::AddrObject;
 use crate::illumos::dladm::VNIC_PREFIX_CONTROL;
 use crate::illumos::zfs::ZONE_ZFS_DATASET_MOUNTPOINT;
 use crate::illumos::{execute, PFEXEC};
@@ -468,10 +469,10 @@ impl Zones {
     /// Gets the address if one exists, creates one if one does not exist.
     pub fn ensure_address(
         zone: &str,
-        addrobj: &str,
+        addrobj: &AddrObject,
         addrtype: AddrType,
     ) -> Result<IpNetwork, Error> {
-        match Zones::get_address(zone, addrobj) {
+        match Self::get_address(zone, addrobj) {
             Ok(addr) => {
                 if let AddrType::Static(expected_addr) = addrtype {
                     if addr != expected_addr {
@@ -480,14 +481,12 @@ impl Zones {
                 }
                 Ok(addr)
             }
-            Err(_) => Zones::create_address(zone, addrobj, addrtype),
+            Err(_) => Self::create_address(zone, addrobj, addrtype),
         }
     }
 
     /// Gets the IP address of an interface within a Zone.
-    ///
-    /// TODO: Use types to distinguish "addrobj" from "interface" objects.
-    pub fn get_address(zone: &str, addrobj: &str) -> Result<IpNetwork, Error> {
+    pub fn get_address(zone: &str, addrobj: &AddrObject) -> Result<IpNetwork, Error> {
         let mut command = std::process::Command::new(PFEXEC);
         let cmd = command.args(&[
             ZLOGIN,
@@ -497,7 +496,7 @@ impl Zones {
             "-p",
             "-o",
             "ADDR",
-            addrobj,
+            &addrobj.to_string(),
         ]);
         let output = execute(cmd)?;
         String::from_utf8(output.stdout)?
@@ -508,7 +507,7 @@ impl Zones {
 
     fn has_link_local_v6_address(
         zone: &str,
-        addrobj: &str,
+        addrobj: &AddrObject,
     ) -> Result<(), Error> {
         let mut command = std::process::Command::new(PFEXEC);
         let cmd = command.args(&[
@@ -519,7 +518,7 @@ impl Zones {
             "-p",
             "-o",
             "TYPE",
-            addrobj,
+            &addrobj.to_string(),
         ]);
         let output = execute(cmd)?;
         if let Some(_) = String::from_utf8(output.stdout)?
@@ -539,10 +538,9 @@ impl Zones {
     // <https://ry.goodwu.net/tinkering/a-day-in-the-life-of-an-ipv6-address-on-illumos/>
     fn ensure_has_link_local_v6_address(
         zone: &str,
-        addrobj: &str,
+        addrobj: &AddrObject,
     ) -> Result<(), Error> {
-        // TODO: better type safety of the "addrobj" object would be preferable.
-        let link_local_addrobj = addrobj.replace("/omicron", "/linklocal");
+        let link_local_addrobj = addrobj.on_same_interface("linklocal");
 
         if let Ok(()) =
             Self::has_link_local_v6_address(zone, &link_local_addrobj)
@@ -560,7 +558,7 @@ impl Zones {
             "-t",
             "-T",
             "addrconf",
-            &link_local_addrobj,
+            &link_local_addrobj.to_string(),
         ]);
         execute(cmd)?;
         Ok(())
@@ -569,7 +567,7 @@ impl Zones {
     /// Creates an IP address within a Zone.
     pub fn create_address(
         zone: &str,
-        addrobj: &str,
+        addrobj: &AddrObject,
         addrtype: AddrType,
     ) -> Result<IpNetwork, Error> {
         let mut command = std::process::Command::new(PFEXEC);
@@ -597,7 +595,6 @@ impl Zones {
         };
 
         args.push(addrobj.to_string());
-        println!("Creating address: {:#?}", args);
         let cmd = command.args(args);
         execute(cmd)?;
         Self::get_address(zone, addrobj)

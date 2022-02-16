@@ -826,16 +826,13 @@ impl StorageManager {
             responder: tx,
         };
 
-        eprintln!("upsert fs....");
         self.new_filesystems_tx
             .send(request)
             .await
             .expect("Storage worker bug (not alive)");
-        eprintln!("upsert fs.... sent ok");
         rx.await.expect(
             "Storage worker bug (dropped responder without responding)",
         )?;
-        eprintln!("upsert fs.... completed ok");
 
         Ok(())
     }
