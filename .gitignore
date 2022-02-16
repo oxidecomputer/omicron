@@ -6,5 +6,5 @@ logs
 out
 tools/clickhouse*
 tools/cockroach*
-clickhouse/
-cockroachdb/
+/clickhouse/
+/cockroachdb/

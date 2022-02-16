@@ -642,10 +642,11 @@ impl StorageWorker {
     async fn load_dataset(
         &self,
         pool: &mut Pool,
-        fs_name: &str,
+        dataset_name: &DatasetName,
     ) -> Result<(Uuid, SocketAddr, DatasetKind), Error> {
-        let id = Zfs::get_oxide_value(&fs_name, "uuid")?.parse::<Uuid>()?;
+        let id = Zfs::get_oxide_value(&dataset_name.full(), "uuid")?.parse::<Uuid>()?;
         let config_path = pool.dataset_config_path(id).await?;
+        info!(self.log, "Loading Dataset from {}", config_path.to_string_lossy());
         let dataset_info: DatasetInfo =
             toml::from_slice(&tokio::fs::read(config_path).await?)?;
         self.initialize_dataset_and_zone(
@@ -708,27 +709,20 @@ impl StorageWorker {
                         // stop the storage manager from processing all storage.
                         //
                         // Instead, we opt to log the failure.
-                        let result = self.load_dataset(pool, &fs_name).await;
+                        let dataset_name = DatasetName::new(&pool_name, &fs_name);
+                        let result = self.load_dataset(pool, &dataset_name).await;
                         match result {
                             Ok(dataset) => datasets.push(dataset),
                             Err(e) => warn!(&self.log, "StorageWorker Failed to load dataset: {}", e),
                         }
                     }
 
-                    // Some set of filesystems should always exist.
-                    //
-                    // TODO: Do something like this, once we have a crucible
-                    // zone ready-to-go?
-                    //
-                    // TODO: Alternative idea - should these *always* be
-                    // initialized externally? Plus, Nexus could call these same
-                    // APIs when new hw is registered...
+                    // TODO: Add this to the RSS Config.
                     //
                     // self.initialize_dataset_and_zone(
                     //      pool,
                     //      PARTITIONS.get("crucible").unwrap()
                     // ).await?
-
 
                     // Notify Nexus of the zpool and all datasets within.
                     self.add_zpool_notify(

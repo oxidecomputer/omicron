@@ -38,4 +38,4 @@ mod mocks;
 extern crate slog;
 
 /// Location on internal storage where sled-specific information is stored.
-pub(crate) const OMICRON_CONFIG_PATH: &'static str = "/var/tmp";
+pub(crate) const OMICRON_CONFIG_PATH: &'static str = "/var/tmp/oxide";
