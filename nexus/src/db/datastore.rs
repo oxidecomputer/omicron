@@ -1838,7 +1838,7 @@ impl DataStore {
             .filter(dsl::id.eq(saga_id))
             .filter(dsl::current_sec.eq(current_sec))
             .filter(dsl::adopt_generation.eq(current_adopt_generation))
-            .set(dsl::saga_state.eq(new_state.to_string()))
+            .set(dsl::saga_state.eq(db::saga_types::SagaCachedState(new_state)))
             .check_if_exists::<db::saga_types::Saga>(saga_id)
             .execute_and_check(self.pool())
             .await
@@ -1878,9 +1878,9 @@ impl DataStore {
     ) -> ListResultVec<db::saga_types::Saga> {
         use db::schema::saga::dsl;
         paginated(dsl::saga, dsl::id, &pagparams)
-            .filter(
-                dsl::saga_state.ne(steno::SagaCachedState::Done.to_string()),
-            )
+            .filter(dsl::saga_state.ne(db::saga_types::SagaCachedState(
+                steno::SagaCachedState::Done,
+            )))
             .filter(dsl::current_sec.eq(*sec_id))
             .load_async(self.pool())
             .await
