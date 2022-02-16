@@ -111,7 +111,7 @@ pub struct InstanceRuntimeStateRequested {
 
 /// The type of a partition, and an axuiliary information necessary
 /// to successfully launch a zone managing the associated data.
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum PartitionKind {
     CockroachDb {
@@ -134,7 +134,7 @@ impl PartitionKind {
 }
 
 /// Used to request a new partition kind exists within a zpool.
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
 pub struct PartitionEnsureBody {
     // The name (and UUID) of the Zpool which we are inserting into.
     pub zpool_uuid: Uuid,

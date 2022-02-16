@@ -140,7 +140,7 @@ impl Pool {
     //
     //  /var/tmp/<Pool UUID>/<Dataset UUID>
     async fn dataset_config_path(&self, dataset_id: Uuid) -> Result<PathBuf, Error> {
-        let path = std::path::Path::new("/var/tmp").join(self.id.to_string());
+        let path = std::path::Path::new(crate::OMICRON_CONFIG_PATH).join(self.id.to_string());
         create_dir_all(&path).await?;
         let path = path.join(dataset_id.to_string());
         let mut path_buf = path.to_path_buf();
@@ -173,7 +173,7 @@ impl DatasetName {
 // Description of a dataset within a ZFS pool, which should be created
 // by the Sled Agent.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-struct PartitionInfo {
+struct DatasetInfo {
     name: String,
     // TODO: Is this always "/data"?
     data_directory: String,
@@ -181,11 +181,11 @@ struct PartitionInfo {
     kind: PartitionKind,
 }
 
-impl PartitionInfo {
-    fn new(kind: PartitionKind, address: SocketAddr) -> PartitionInfo {
+impl DatasetInfo {
+    fn new(kind: PartitionKind, address: SocketAddr) -> DatasetInfo {
         match kind {
             PartitionKind::CockroachDb { .. } => {
-                PartitionInfo {
+                DatasetInfo {
                     name: "cockroachdb".to_string(),
                     data_directory: "/data".to_string(),
                     address,
@@ -193,7 +193,7 @@ impl PartitionInfo {
                 }
             },
             PartitionKind::Crucible { .. } => {
-                PartitionInfo {
+                DatasetInfo {
                     name: "crucible".to_string(),
                     data_directory: "/data".to_string(),
                     address,
@@ -210,9 +210,10 @@ impl PartitionInfo {
         format!("{}{}_", ZONE_PREFIX, self.name)
     }
 
-    fn start_zone(&self, zone: &RunningZone) -> Result<(), Error> {
+    async fn start_zone(&self, log: &Logger, zone: &RunningZone, do_format: bool) -> Result<(), Error> {
         match self.kind {
             PartitionKind::CockroachDb { .. } => {
+                // Load the CRDB manifest.
                 zone.run_cmd(
                     &[
                         crate::illumos::zone::SVCCFG,
@@ -221,6 +222,7 @@ impl PartitionInfo {
                     ]
                 )?;
 
+                // Set parameters which are passed to the CRDB binary.
                 zone.run_cmd(
                     &[
                         crate::illumos::zone::SVCCFG,
@@ -230,7 +232,6 @@ impl PartitionInfo {
                         &format!("config/listen_addr={}", zone.address().to_string()),
                     ]
                 )?;
-
                 zone.run_cmd(
                     &[
                         crate::illumos::zone::SVCCFG,
@@ -240,7 +241,6 @@ impl PartitionInfo {
                         &format!("config/store={}", self.data_directory),
                     ]
                 )?;
-
                 // TODO: Set these addresses, use "start" instead of
                 // "start-single-node".
                 zone.run_cmd(
@@ -273,34 +273,51 @@ impl PartitionInfo {
                     ]
                 )?;
 
-                // TODO: Populate DB
-                // TODO: Decide whether or not to populate DB
-                //
-                // TODO: Maybe move the "initialize / populate" decision somewhere else?
+                // Await liveness of the cluster.
+                let check_health = || async {
+                    let http_addr = SocketAddr::new(zone.address().ip(), 8080);
+                    reqwest::get(format!("http://{}/health?ready=1", http_addr))
+                        .await
+                        .map_err(backoff::BackoffError::Transient)
+                };
+                let log_failure = |_, _| {
+                    warn!(log, "cockroachdb not yet alive");
+                };
+                backoff::retry_notify(
+                    backoff::internal_service_policy(),
+                    check_health,
+                    log_failure,
+                ).await
+                .expect("expected an infinite retry loop waiting for crdb");
 
-//                tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
-                zone.run_cmd(
-                    &[
-                        "/opt/oxide/cockroachdb/bin/cockroach",
-                        "sql",
-                        "--insecure",
-                        "--host",
-                        &zone.address().to_string(),
-                        "--file",
-                        "/opt/oxide/cockroachdb/sql/dbwipe.sql",
-                    ]
-                )?;
-                zone.run_cmd(
-                    &[
-                        "/opt/oxide/cockroachdb/bin/cockroach",
-                        "sql",
-                        "--insecure",
-                        "--host",
-                        &zone.address().to_string(),
-                        "--file",
-                        "/opt/oxide/cockroachdb/sql/dbinit.sql",
-                    ]
-                )?;
+                info!(log, "CRDB is online");
+                // If requested, format the cluster with the initial tables.
+                if do_format {
+                    info!(log, "Formatting CRDB");
+                    zone.run_cmd(
+                        &[
+                            "/opt/oxide/cockroachdb/bin/cockroach",
+                            "sql",
+                            "--insecure",
+                            "--host",
+                            &zone.address().to_string(),
+                            "--file",
+                            "/opt/oxide/cockroachdb/sql/dbwipe.sql",
+                        ]
+                    )?;
+                    zone.run_cmd(
+                        &[
+                            "/opt/oxide/cockroachdb/bin/cockroach",
+                            "sql",
+                            "--insecure",
+                            "--host",
+                            &zone.address().to_string(),
+                            "--file",
+                            "/opt/oxide/cockroachdb/sql/dbinit.sql",
+                        ]
+                    )?;
+                    info!(log, "Formatting CRDB - Completed");
+                }
 
                 Ok(())
             },
@@ -310,42 +327,41 @@ impl PartitionInfo {
     }
 }
 
+// Ensures that a zone backing a particular dataset is running.
 async fn ensure_running_zone(
     log: &Logger,
     vnic_id_allocator: &IdAllocator,
-    partition_info: &PartitionInfo,
+    dataset_info: &DatasetInfo,
     dataset_name: &DatasetName,
+    do_format: bool,
 ) -> Result<RunningZone, Error> {
-    let prefix = match partition_info.address.ip() {
+    let prefix = match dataset_info.address.ip() {
         std::net::IpAddr::V4(_) => 32,
         std::net::IpAddr::V6(_) => 64,
     };
-    let addr = ipnetwork::IpNetwork::new(partition_info.address.ip(), prefix).unwrap();
+    let addr = ipnetwork::IpNetwork::new(dataset_info.address.ip(), prefix).unwrap();
     let addrtype = AddrType::Static(addr);
 
-    match RunningZone::get(log, &partition_info.zone_prefix(), addrtype, partition_info.address.port())
+    match RunningZone::get(log, &dataset_info.zone_prefix(), addrtype, dataset_info.address.port())
         .await
     {
         Ok(zone) => {
-            info!(log, "[storage:ensure_running_zone] Zone for {} is already running", dataset_name.full());
+            info!(log, "Zone for {} is already running", dataset_name.full());
             return Ok(zone);
         }
         Err(RunningZoneError::NotFound) => {
-            info!(log, "[storage:ensure_running_zone] Zone for {} is not running. Booting", dataset_name.full());
+            info!(log, "Zone for {} was not found", dataset_name.full());
             let (nic, zname) = configure_zone(
                 log,
                 vnic_id_allocator,
-                partition_info,
+                dataset_info,
                 dataset_name,
             )?;
+            let zone = RunningZone::boot(log, zname, nic, addrtype, dataset_info.address.port())
+                .await?;
+            dataset_info.start_zone(log, &zone, do_format).await?;
 
-            // TODO: What if we *found* an existing zone?
-            // It may have a borked network, that doesn't necessarily mean we
-            // want to go through the full "boot" process if it's already
-            // running.
-            RunningZone::boot(log, zname, nic, addrtype, partition_info.address.port())
-                .await
-                .map_err(|e| e.into())
+            Ok(zone)
         },
         Err(RunningZoneError::NotRunning(_state)) => {
             unimplemented!("Handle a zone which exists, but is not running");
@@ -360,7 +376,7 @@ async fn ensure_running_zone(
 fn configure_zone(
     log: &Logger,
     vnic_id_allocator: &IdAllocator,
-    partition_info: &PartitionInfo,
+    dataset_info: &DatasetInfo,
     dataset_name: &DatasetName,
 ) -> Result<(Vnic, String), Error> {
     let physical_dl = Dladm::find_physical()?;
@@ -368,14 +384,14 @@ fn configure_zone(
 
     // The zone name is based on:
     // - A unique Oxide prefix ("oxz_")
-    // - The name of the partition being hosted (e.g., "cockroachdb")
+    // - The name of the dataset being hosted (e.g., "cockroachdb")
     // - Unique Zpool identifier (typically a UUID).
     //
     // This results in a zone name which is distinct across different zpools,
     // but stable and predictable across reboots.
-    let zname = format!("{}{}", partition_info.zone_prefix(), dataset_name.pool_name);
+    let zname = format!("{}{}", dataset_info.zone_prefix(), dataset_name.pool_name);
 
-    let zone_image = PathBuf::from(&format!("/opt/oxide/{}.tar.gz", partition_info.name));
+    let zone_image = PathBuf::from(&format!("/opt/oxide/{}.tar.gz", dataset_info.name));
 
     // Configure the new zone - this should be identical to the base zone,
     // but with a specified VNIC and pool.
@@ -442,37 +458,34 @@ impl StorageWorker {
     //
     // Returns the UUID attached to the underlying ZFS partition.
     // Returns (was_inserted, Uuid).
-    async fn initialize_partition(
+    async fn initialize_dataset_and_zone(
         &self,
         pool: &mut Pool,
-        partition_info: &PartitionInfo,
+        dataset_info: &DatasetInfo,
         do_format: bool,
     ) -> Result<(bool, Uuid), Error> {
-        let dataset_name = DatasetName::new(pool.info.name(), &partition_info.name);
-
-        info!(&self.log, "[InitializePartition] Ensuring dataset {} exists", dataset_name.full());
+        // Ensure the underlying dataset exists before trying to poke at zones.
+        let dataset_name = DatasetName::new(pool.info.name(), &dataset_info.name);
+        info!(&self.log, "Ensuring dataset {} exists", dataset_name.full());
         let id = StorageWorker::ensure_dataset_with_id(&dataset_name, do_format)?;
+
+        // If this zone has already been processed by us, return immediately.
         if let Some(_) = pool.get_zone(id) {
             return Ok((false, id));
         }
-
-        info!(&self.log, "[InitializePartition] Creating zone for {}", dataset_name.full());
+        // Otherwise, the zone may or may not exit.
+        // We need to either look up or create the zone.
+        info!(&self.log, "Ensuring zone for {} is running", dataset_name.full());
         let zone = ensure_running_zone(
             &self.log,
             &self.vnic_id_allocator,
-            partition_info,
+            dataset_info,
             &dataset_name,
+            do_format,
         )
         .await?;
-        info!(&self.log, "[InitializePartition] Zone {} with address {} is running", zone.name(), zone.address());
-        partition_info.start_zone(&zone)?;
 
-        info!(
-            &self.log,
-            "[InitializePartition] Set up zone {} for partition {} successfully",
-            zone.name(),
-            partition_info.name
-        );
+        info!(&self.log, "Zone {} with address {} is running", zone.name(), zone.address());
         pool.add_zone(id, zone);
         Ok((true, id))
     }
@@ -499,11 +512,10 @@ impl StorageWorker {
             }
         };
         let log = self.log.clone();
-        let log_post_failure = move |error, delay| {
+        let log_post_failure = move |_, delay| {
             warn!(
                 log,
                 "failed to notify nexus, will retry in {:?}", delay;
-                "error" => ?error,
             );
         };
         nexus_notifications.push(
@@ -516,19 +528,19 @@ impl StorageWorker {
     }
 
     // Adds a "notification to nexus" to `nexus_notifications`,
-    // informing it about the addition of `partitions` to `pool_id`.
-    fn add_partitions_notify(
+    // informing it about the addition of `datasets` to `pool_id`.
+    fn add_datasets_notify(
         &self,
         nexus_notifications: &mut FuturesOrdered<Pin<Box<NotifyFut>>>,
-        partitions: Vec<(Uuid, SocketAddr, DatasetKind)>,
+        datasets: Vec<(Uuid, SocketAddr, DatasetKind)>,
         pool_id: Uuid,
     ) {
         let nexus = self.nexus_client.clone();
         let notify_nexus = move || {
             let nexus = nexus.clone();
-            let partitions = partitions.clone();
+            let datasets = datasets.clone();
             async move {
-                for (id, address, kind) in partitions {
+                for (id, address, kind) in datasets {
                     let request = DatasetPutRequest {
                         address: address.to_string(),
                         kind: kind.into(),
@@ -543,11 +555,10 @@ impl StorageWorker {
             }
         };
         let log = self.log.clone();
-        let log_post_failure = move |error, delay| {
+        let log_post_failure = move |_, delay| {
             warn!(
                 log,
                 "failed to notify nexus, will retry in {:?}", delay;
-                "error" => ?error,
             );
         };
         nexus_notifications.push(
@@ -562,8 +573,8 @@ impl StorageWorker {
     // TODO: a lot of these functions act on the `FuturesOrdered` - should
     // that just be a part of the "worker" struct?
 
-    // Attempts to add a partition within a zpool, according to `request`.
-    async fn add_partition(
+    // Attempts to add a dataset within a zpool, according to `request`.
+    async fn add_dataset(
         &self,
         nexus_notifications: &mut FuturesOrdered<Pin<Box<NotifyFut>>>,
         request: &NewFilesystemRequest,
@@ -573,20 +584,20 @@ impl StorageWorker {
             Error::NotFound(format!("zpool: {}", request.zpool_id))
         })?;
 
-        let partition_info = PartitionInfo::new(request.partition_kind.clone(), request.address);
-        let (is_new_partition, id) = self.initialize_partition(
+        let dataset_info = DatasetInfo::new(request.partition_kind.clone(), request.address);
+        let (is_new_dataset, id) = self.initialize_dataset_and_zone(
             pool,
-            &partition_info,
+            &dataset_info,
             /* do_format= */ true,
         ).await?;
 
-        if !is_new_partition {
+        if !is_new_dataset {
             return Ok(());
         }
 
-        // Now that the partition has been initialized, record the configuration
+        // Now that the dataset has been initialized, record the configuration
         // so it can re-initialize itself after a reboot.
-        let info_str = toml::to_string(&partition_info)?;
+        let info_str = toml::to_string(&dataset_info)?;
         let path = pool.dataset_config_path(id).await?;
         let mut file = File::create(path).await?;
         file.write_all(info_str.as_bytes()).await?;
@@ -594,29 +605,29 @@ impl StorageWorker {
         // Unwrap safety: We just put this zone in the pool.
         let zone = pool.get_zone(id).unwrap();
 
-        self.add_partitions_notify(
+        self.add_datasets_notify(
             nexus_notifications,
-            vec![(id, zone.address(), partition_info.kind.as_dataset())],
+            vec![(id, zone.address(), dataset_info.kind.as_dataset())],
             pool.id(),
         );
 
         Ok(())
     }
 
-    async fn load_partition(&self, pool: &mut Pool, fs_name: &str)
+    async fn load_dataset(&self, pool: &mut Pool, fs_name: &str)
         -> Result<(Uuid, SocketAddr, DatasetKind), Error> {
         let id = Zfs::get_oxide_value(&fs_name, "uuid")?.parse::<Uuid>()?;
         let config_path = pool.dataset_config_path(id).await?;
-        let partition_info: PartitionInfo = toml::from_slice(&tokio::fs::read(config_path).await?)?;
-        self.initialize_partition(
+        let dataset_info: DatasetInfo = toml::from_slice(&tokio::fs::read(config_path).await?)?;
+        self.initialize_dataset_and_zone(
             pool,
-            &partition_info,
+            &dataset_info,
             /* do_format= */ false,
         ).await?;
 
         // Unwrap safety: We just put this zone in the pool.
         let zone = pool.get_zone(id).unwrap();
-        Ok((id, zone.address(), partition_info.kind.as_dataset()))
+        Ok((id, zone.address(), dataset_info.kind.as_dataset()))
     }
 
     // Small wrapper around `Self::do_work_internal` that ensures we always
@@ -658,19 +669,19 @@ impl StorageWorker {
 
                     // If we find filesystems within our datasets, ensure their
                     // zones are up-and-running.
-                    let mut partitions = vec![];
+                    let mut datasets = vec![];
                     let existing_filesystems = Zfs::list_filesystems(&pool_name)?;
                     for fs_name in existing_filesystems {
                         info!(&self.log, "StorageWorker loading fs {} on zpool {}", fs_name, pool_name);
                         // We intentionally do not exit on error here -
-                        // otherwise, the failure of a single partition would
+                        // otherwise, the failure of a single dataset would
                         // stop the storage manager from processing all storage.
                         //
                         // Instead, we opt to log the failure.
-                        let result = self.load_partition(pool, &fs_name).await;
+                        let result = self.load_dataset(pool, &fs_name).await;
                         match result {
-                            Ok(partition) => partitions.push(partition),
-                            Err(e) => warn!(&self.log, "StorageWorker Failed to load partition: {}", e),
+                            Ok(dataset) => datasets.push(dataset),
+                            Err(e) => warn!(&self.log, "StorageWorker Failed to load dataset: {}", e),
                         }
                     }
 
@@ -683,7 +694,7 @@ impl StorageWorker {
                     // initialized externally? Plus, Nexus could call these same
                     // APIs when new hw is registered...
                     //
-                    // self.initialize_partition(
+                    // self.initialize_dataset_and_zone(
                     //      pool,
                     //      PARTITIONS.get("crucible").unwrap()
                     // ).await?
@@ -696,14 +707,14 @@ impl StorageWorker {
                         size.into()
                     );
 
-                    self.add_partitions_notify(
+                    self.add_datasets_notify(
                         &mut nexus_notifications,
-                        partitions,
+                        datasets,
                         pool.id(),
                     );
                 },
                 Some(request) = self.new_filesystems_rx.recv() => {
-                    let result = self.add_partition(&mut nexus_notifications, &request).await;
+                    let result = self.add_dataset(&mut nexus_notifications, &request).await;
                     let _ = request.responder.send(result);
                 }
             }

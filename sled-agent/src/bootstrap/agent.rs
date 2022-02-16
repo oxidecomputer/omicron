@@ -16,6 +16,7 @@ use omicron_common::backoff::{
 };
 use omicron_common::packaging::sha256_digest;
 
+use anyhow::anyhow;
 use slog::Logger;
 use std::collections::HashMap;
 use std::fs::File;
@@ -47,6 +48,9 @@ pub enum BootstrapError {
 
     #[error(transparent)]
     TrustQuorum(#[from] TrustQuorumError),
+
+    #[error("Configuration changed")]
+    Configuration,
 }
 
 impl From<BootstrapError> for ExternalError {
@@ -209,9 +213,6 @@ impl Agent {
             &std::fs::read_to_string(tar_source.join("digest.toml"))?,
         )?;
 
-        // TODO: Await CRDB liveness?
-        tokio::time::sleep(tokio::time::Duration::from_secs(100000)).await;
-
         // TODO-correctness: Nexus may not be enabled on all racks.
         // Some decision-making logic should be used here to make this
         // conditional.
@@ -245,80 +246,88 @@ impl Agent {
     async fn inject_rack_setup_service_requests(&self, config: &Config) -> Result<(), BootstrapError> {
         if let Some(rss_config) = &config.rss_config {
             info!(self.log, "Injecting RSS configuration: {:#?}", rss_config);
-            // TODO: We could 100% parallelize these requests; they're probably
-            // going to distinct sleds.
-            for request in &rss_config.requests {
-                info!(self.log, "observing request: {:#?}", request);
-                let dur = std::time::Duration::from_secs(5 * 60);
-                let client = reqwest::ClientBuilder::new()
-                    .connect_timeout(dur)
-                    .timeout(dur)
-                    .build()
-                    .unwrap();
-                let client = sled_agent_client::Client::new_with_client(
-                    &format!("http://{}", request.sled_address),
-                    client,
-                    self.log.new(o!("SledAgentClient" => request.sled_address)),
-                );
 
-                info!(self.log, "sending requests...");
-                for partition in &request.partitions {
-                    let filesystem_put = || async {
-                        info!(self.log, "creating new filesystem: {:?}", partition);
-                        client.filesystem_put(&partition.clone().into())
-                            .await
-                            .map_err(BackoffError::Transient)
-                    };
-                    let log_failure = |error, _| {
-                        warn!(self.log, "failed to create filesystem"; "error" => ?error);
-                    };
-                    retry_notify(
-                        internal_service_policy(),
-                        filesystem_put,
-                        log_failure,
-                    ).await
-                    .expect("expected an infinite retry loop registering nexus as a metric producer");
+            let serialized_config = toml::Value::try_from(&config).expect("Cannot serialize configuration");
+            let config_str = toml::to_string(&serialized_config).expect("Cannot turn config to string");
+
+            // First, check if this request has previously been made.
+            //
+            // Normally, the rack setup service is run with a human-in-the-loop,
+            // but with this automated injection, we need a way to determine the
+            // (destructive) initialization has occurred.
+            //
+            // We do this by storing the configuration at "rss_config_path"
+            // after successfully performing initialization.
+            let rss_config_path = std::path::Path::new(crate::OMICRON_CONFIG_PATH).join("config-rss.toml");
+            if rss_config_path.exists() {
+                let old_config: Config = toml::from_str(&tokio::fs::read_to_string(&rss_config_path).await?)?;
+                if &old_config == config {
+                    info!(self.log, "RSS config already applied from: {}", rss_config_path.to_string_lossy());
+                    return Ok(());
                 }
 
-                // If this node holds a CockroachDB partition, initialize the
-                // tables.
-                //
-                // TODO: reach out to the crdb address directly?
+                // TODO: We could potentially handle this case by deleting all
+                // partitions (in preparation for applying the new
+                // configuration), but at the moment it's an error.
+                warn!(
+                    self.log,
+                    "Rack Setup Service Config was already applied, but has changed.\n
+                     To re-initialize:\n
+                       - Disable all Oxide services\n
+                       - Delete all partitions within the attached zpool\n
+                       - Delete the configuration file ({})\n
+                       - Restart the sled agent\n
+                    ",
+                    rss_config_path.to_string_lossy()
+                );
+                return Err(BootstrapError::Configuration);
             }
 
-            // TODO: Populate CRDB unconditionally
+            // Issue the initialization requests to all sleds.
+            //
+            // Perform the requests concurrently.
+            futures::future::join_all(
+                rss_config.requests.iter().map(|request| async move {
+                    info!(self.log, "observing request: {:#?}", request);
+                    let dur = std::time::Duration::from_secs(60);
+                    let client = reqwest::ClientBuilder::new()
+                        .connect_timeout(dur)
+                        .timeout(dur)
+                        .build()
+                        .map_err(|e| BootstrapError::Api(anyhow!(e)))?;
+                    let client = sled_agent_client::Client::new_with_client(
+                        &format!("http://{}", request.sled_address),
+                        client,
+                        self.log.new(o!("SledAgentClient" => request.sled_address)),
+                    );
 
-            // TODO: Add a check - before we send any requests - if we've done
-            // this before. Use the same path (const? pls?) as we're using to
-            // store the "dataset_config_path".
-            //
-            // - Do "dbwipe + dbinit" together
-            // - Store the file after populating CRDB
-            // - Read the file before sending any requests (could actually
-            // just be the old config, so we can compare?)
-            //
-            // XXX: Okay, problems:
-            // (Option 1) If we want to "Just zlogin and run the command inside the
-            // zone", we don't have handle to the RunningZone object. It's owned
-            // by the storage manager, not the bootstrap agent, and these two
-            // services are fairly decoupled.
-            //   - Admittedly, we're all on the same machine, so we still *could*
-            //   just grab it out of thin air...
-            //   - Alternatively, we could expose a "reset DB" command out of the
-            //   sled agent. Do we want that???
-            //   ^
-            //   - TODO: This may actualy be the right path. We could stop
-            //   trying to make partition initialization idempotent - it could
-            //   be forcefully re-initializing, and we rely on the RSS injection
-            //   to just not re-run by storing a local file in the bootstrap
-            //   server.
-            //
-            // (Option 2) If we want to contact CRDB directly (via TCP/IP, using the IPv6
-            // address), who supplies the SQL files? They're currently contained
-            // within the zone. Should they be a part of the bootstrap image
-            // instead?
-            //   - They *could* be, but this would require reshuffling the
-            //   packaging of the SQL files...
+                    info!(self.log, "sending requests...");
+                    for partition in &request.partitions {
+                        let filesystem_put = || async {
+                            info!(self.log, "creating new filesystem: {:?}", partition);
+                            client.filesystem_put(&partition.clone().into())
+                                .await
+                                .map_err(BackoffError::Transient)
+                        };
+                        let log_failure = |error, _| {
+                            warn!(self.log, "failed to create filesystem"; "error" => ?error);
+                        };
+                        retry_notify(
+                            internal_service_policy(),
+                            filesystem_put,
+                            log_failure,
+                        ).await?;
+                    }
+                    Ok::<(), BootstrapError>(())
+                })
+            ).await.into_iter().collect::<Result<Vec<()>, BootstrapError>>()?;
+
+            // Finally, make sure the configuration is saved so we don't inject
+            // the requests on the next iteration.
+            tokio::fs::write(
+                rss_config_path,
+                config_str,
+            ).await?;
         }
         Ok(())
     }

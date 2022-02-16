@@ -29,9 +29,13 @@
  */
 
 use super::Config as DbConfig;
+use anyhow::anyhow;
+use async_bb8_diesel::AsyncSimpleConnection;
 use async_bb8_diesel::ConnectionManager;
 use diesel::PgConnection;
 use diesel_dtrace::DTraceConnection;
+use omicron_common::backoff;
+use slog::Logger;
 
 pub type DbConnection = DTraceConnection<PgConnection>;
 
@@ -53,5 +57,33 @@ impl Pool {
     /// Returns a reference to the underlying pool.
     pub fn pool(&self) -> &bb8::Pool<ConnectionManager<DbConnection>> {
         &self.pool
+    }
+
+    /// Contact CockroachDB using exponential backoff until it appears alive.
+    ///
+    /// Although liveness of CRDB is not guaranteed generally (such is the
+    /// nature of distributed systems), this check lets a caller avoid a
+    /// race condition during initialization, where Nexus may boot before
+    /// the database.
+    pub async fn wait_for_cockroachdb(&self, log: &Logger) {
+        let check_health = || async {
+            let conn = self.pool.get()
+                .await
+                .map_err(|e| backoff::BackoffError::Transient(anyhow!(e)))?;
+            conn.batch_execute_async("SHOW DATABASES;")
+                .await
+                .map_err(|e| backoff::BackoffError::Transient(anyhow!(e)))
+        };
+        let log_failure = |_, _| {
+            warn!(log, "cockroachdb not yet alive");
+        };
+        backoff::retry_notify(
+            backoff::internal_service_policy(),
+            check_health,
+            log_failure,
+        ).await
+        .expect("expected an infinite retry loop waiting for crdb");
+
+        info!(log, "CockroachDB appears online");
     }
 }

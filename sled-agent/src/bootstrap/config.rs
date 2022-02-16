@@ -16,7 +16,7 @@ use std::path::Path;
 use uuid::Uuid;
 
 /// Configuration for a bootstrap agent
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
 pub struct Config {
     pub id: Uuid,
     pub dropshot: ConfigDropshot,
@@ -35,14 +35,14 @@ pub struct Config {
 ///
 /// By injecting this (optional) configuration into the bootstrap agent, it
 /// can act as a stand-in initialization service.
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
 pub struct SetupServiceConfig {
     #[serde(default, rename = "request")]
     pub requests: Vec<PartitionRequest>,
 }
 
 /// A request to initialize a partition.
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
 pub struct PartitionRequest {
     /// The Sled Agent address receiving these partitions.
     pub sled_address: SocketAddr,

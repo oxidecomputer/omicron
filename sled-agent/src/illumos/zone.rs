@@ -177,11 +177,10 @@ impl Zones {
         devices: &[zone::Device],
         vnics: Vec<String>,
     ) -> Result<(), Error> {
-        info!(log, "Querying for prescence of zone: {}", zone_name);
         if let Some(zone) = Self::find(zone_name)? {
             info!(
                 log,
-                "Found zone: {} in state {:?}",
+                "install_omicron_zone: Found zone: {} in state {:?}",
                 zone.name(),
                 zone.state()
             );
@@ -238,7 +237,7 @@ impl Zones {
         filesystems: &[zone::Fs],
         devices: &[zone::Device],
     ) -> Result<(), Error> {
-        info!(log, "Querying for prescence of zone: {}", name);
+        info!(log, "create_base zone: Querying for prescence of zone: {}", name);
         if let Some(zone) = Self::find(name)? {
             info!(
                 log,
