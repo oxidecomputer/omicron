@@ -123,7 +123,10 @@ impl SledAgent {
             StorageManager::new(&log, *id, nexus_client.clone()).await?;
         if let Some(pools) = &config.zpools {
             for pool in pools {
-                info!(log, "Sled Agent upserting zpool to Storage Manager: {}", pool);
+                info!(
+                    log,
+                    "Sled Agent upserting zpool to Storage Manager: {}", pool
+                );
                 storage.upsert_zpool(pool).await?;
             }
         }

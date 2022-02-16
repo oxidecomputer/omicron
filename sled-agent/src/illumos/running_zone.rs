@@ -61,18 +61,17 @@ impl RunningZone {
     pub fn run_cmd<I, S>(&self, args: I) -> Result<String, Error>
     where
         I: IntoIterator<Item = S>,
-        S: AsRef<std::ffi::OsStr>
+        S: AsRef<std::ffi::OsStr>,
     {
         let mut command = std::process::Command::new(crate::illumos::PFEXEC);
 
         let name = self.name();
         let prefix = &[super::zone::ZLOGIN, name];
-        let prefix_iter: Vec<_> = prefix
-            .iter()
-            .map(|s| std::ffi::OsStr::new(s))
-            .collect();
+        let prefix_iter: Vec<_> =
+            prefix.iter().map(|s| std::ffi::OsStr::new(s)).collect();
         let suffix: Vec<_> = args.into_iter().collect();
-        let full_args = prefix_iter.into_iter().chain(suffix.iter().map(|a| a.as_ref()));
+        let full_args =
+            prefix_iter.into_iter().chain(suffix.iter().map(|a| a.as_ref()));
 
         let cmd = command.args(full_args);
         let output = crate::illumos::execute(cmd)?;
@@ -103,8 +102,11 @@ impl RunningZone {
             .await
             .map_err(|_| Error::Timeout(fmri.to_string()))?;
 
-        let network =
-            Zones::ensure_address(&zone_name, &interface_name(&nic.name()), addrtype)?;
+        let network = Zones::ensure_address(
+            &zone_name,
+            &interface_name(&nic.name()),
+            addrtype,
+        )?;
 
         Ok(RunningZone {
             log: log.clone(),
@@ -140,8 +142,11 @@ impl RunningZone {
 
         let zone_name = zone.name();
         let vnic_name = Zones::get_control_interface(zone_name)?;
-        let network =
-            Zones::ensure_address(zone_name, &interface_name(&vnic_name), addrtype)?;
+        let network = Zones::ensure_address(
+            zone_name,
+            &interface_name(&vnic_name),
+            addrtype,
+        )?;
 
         Ok(Self {
             log: log.clone(),

@@ -13,12 +13,10 @@ use omicron_common::api::external::Error;
 use omicron_common::cmd::fatal;
 use omicron_common::cmd::CmdError;
 use omicron_sled_agent::bootstrap::{
-    config::SetupServiceConfig as RssConfig,
-    config::Config as BootstrapConfig, server as bootstrap_server,
+    config::Config as BootstrapConfig, config::SetupServiceConfig as RssConfig,
+    server as bootstrap_server,
 };
-use omicron_sled_agent::{
-    config::Config as SledConfig, server as sled_server,
-};
+use omicron_sled_agent::{config::Config as SledConfig, server as sled_server};
 use std::path::PathBuf;
 use structopt::StructOpt;
 
@@ -82,10 +80,9 @@ async fn do_run() -> Result<(), CmdError> {
                 sled_server::run_openapi().map_err(CmdError::Failure)
             }
         },
-        Args::Run {
-            config_path,
-        } => {
-            let config = SledConfig::from_file(&config_path).map_err(|e| CmdError::Failure(e.to_string()))?;
+        Args::Run { config_path } => {
+            let config = SledConfig::from_file(&config_path)
+                .map_err(|e| CmdError::Failure(e.to_string()))?;
 
             // TODO: I don't love this, but...
             //
@@ -110,7 +107,10 @@ async fn do_run() -> Result<(), CmdError> {
                 rss_config_path
             };
             let rss_config = if rss_config_path.exists() {
-                Some(RssConfig::from_file(rss_config_path).map_err(|e| CmdError::Failure(e.to_string()))?)
+                Some(
+                    RssConfig::from_file(rss_config_path)
+                        .map_err(|e| CmdError::Failure(e.to_string()))?,
+                )
             } else {
                 None
             };

@@ -310,23 +310,29 @@ impl From<omicron_common::api::external::MacAddr> for types::MacAddr {
     }
 }
 
-impl From<omicron_common::api::internal::sled_agent::PartitionKind> for types::PartitionKind {
-    fn from(k: omicron_common::api::internal::sled_agent::PartitionKind) -> Self {
+impl From<omicron_common::api::internal::sled_agent::PartitionKind>
+    for types::PartitionKind
+{
+    fn from(
+        k: omicron_common::api::internal::sled_agent::PartitionKind,
+    ) -> Self {
         use omicron_common::api::internal::sled_agent::PartitionKind::*;
         match k {
-            CockroachDb { all_addresses } => {
-                Self::CockroachDb(
-                    all_addresses.iter().map(|a| a.to_string()).collect()
-                )
-            },
+            CockroachDb { all_addresses } => Self::CockroachDb(
+                all_addresses.iter().map(|a| a.to_string()).collect(),
+            ),
             Crucible => Self::Crucible,
             Clickhouse => Self::Clickhouse,
         }
     }
 }
 
-impl From<omicron_common::api::internal::sled_agent::PartitionEnsureBody> for types::PartitionEnsureBody {
-    fn from(p: omicron_common::api::internal::sled_agent::PartitionEnsureBody) -> Self {
+impl From<omicron_common::api::internal::sled_agent::PartitionEnsureBody>
+    for types::PartitionEnsureBody
+{
+    fn from(
+        p: omicron_common::api::internal::sled_agent::PartitionEnsureBody,
+    ) -> Self {
         Self {
             zpool_uuid: p.zpool_uuid,
             partition_kind: p.partition_kind.into(),

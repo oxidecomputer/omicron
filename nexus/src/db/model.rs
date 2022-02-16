@@ -585,7 +585,9 @@ impl Dataset {
         kind: DatasetKind,
     ) -> Self {
         let size_used = match kind {
-            DatasetKind(omicron_common::api::internal::nexus::DatasetKind::Crucible) => Some(0),
+            DatasetKind(
+                omicron_common::api::internal::nexus::DatasetKind::Crucible,
+            ) => Some(0),
             _ => None,
         };
         Self {

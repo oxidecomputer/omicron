@@ -67,9 +67,10 @@ impl Pool {
     /// the database.
     pub async fn wait_for_cockroachdb(&self, log: &Logger) {
         let check_health = || async {
-            let conn = self.pool.get()
-                .await
-                .map_err(|e| backoff::BackoffError::Transient(anyhow!(e)))?;
+            let conn =
+                self.pool.get().await.map_err(|e| {
+                    backoff::BackoffError::Transient(anyhow!(e))
+                })?;
             conn.batch_execute_async("SHOW DATABASES;")
                 .await
                 .map_err(|e| backoff::BackoffError::Transient(anyhow!(e)))
@@ -81,7 +82,8 @@ impl Pool {
             backoff::internal_service_policy(),
             check_health,
             log_failure,
-        ).await
+        )
+        .await
         .expect("expected an infinite retry loop waiting for crdb");
 
         info!(log, "CockroachDB appears online");

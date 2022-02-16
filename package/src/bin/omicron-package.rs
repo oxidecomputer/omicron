@@ -307,9 +307,12 @@ async fn do_package(
                 }
 
                 // Add SMF directory
-                let smf_path = Path::new(&config.smf).join(package.service_name());
+                let smf_path =
+                    Path::new(&config.smf).join(package.service_name());
                 println!("Adding SMF path: {}", smf_path.to_string_lossy());
-                let dst = Path::new("root").join("var/svc/manifest/site").join(package.service_name());
+                let dst = Path::new("root")
+                    .join("var/svc/manifest/site")
+                    .join(package.service_name());
                 archive.append_dir_all(&dst, &smf_path)?;
 
                 archive.finish()?;

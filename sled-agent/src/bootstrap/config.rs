@@ -48,7 +48,8 @@ pub struct PartitionRequest {
     pub sled_address: SocketAddr,
     /// The request to be sent.
     #[serde(default, rename = "partition")]
-    pub partitions: Vec<omicron_common::api::internal::sled_agent::PartitionEnsureBody>,
+    pub partitions:
+        Vec<omicron_common::api::internal::sled_agent::PartitionEnsureBody>,
 }
 
 impl SetupServiceConfig {

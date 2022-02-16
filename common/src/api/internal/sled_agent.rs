@@ -142,7 +142,6 @@ pub struct PartitionEnsureBody {
     pub partition_kind: PartitionKind,
     // The address on which the zone will listen for requests.
     pub address: SocketAddr,
-
     // TODO: We could insert a UUID here, if we want that to be set by the
     // caller explicitly? Currently, the lack of a UUID implies that
     // "at most one partition type" exists within a zpool.

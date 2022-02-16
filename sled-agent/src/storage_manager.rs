@@ -4,21 +4,17 @@
 
 //! Management of sled-local storage.
 
-use crate::illumos::{
-    zfs::Mountpoint,
-    zone::ZONE_PREFIX,
-    zpool::ZpoolInfo,
-};
-use crate::illumos::running_zone::{RunningZone, Error as RunningZoneError};
+use crate::illumos::running_zone::{Error as RunningZoneError, RunningZone};
 use crate::illumos::zone::AddrType;
+use crate::illumos::{zfs::Mountpoint, zone::ZONE_PREFIX, zpool::ZpoolInfo};
 use crate::vnic::{IdAllocator, Vnic};
-use futures::FutureExt;
 use futures::stream::FuturesOrdered;
+use futures::FutureExt;
 use futures::StreamExt;
 use nexus_client::types::{DatasetPutRequest, ZpoolPutRequest};
 use omicron_common::api::external::{ByteCount, ByteCountRangeError};
-use omicron_common::api::internal::sled_agent::PartitionKind;
 use omicron_common::api::internal::nexus::DatasetKind;
+use omicron_common::api::internal::sled_agent::PartitionKind;
 use omicron_common::backoff;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -29,9 +25,9 @@ use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::pin::Pin;
 use std::sync::Arc;
-use tokio::io::AsyncWriteExt;
 use tokio::fs::{create_dir_all, File};
-use tokio::sync::{mpsc, Mutex, oneshot};
+use tokio::io::AsyncWriteExt;
+use tokio::sync::{mpsc, oneshot, Mutex};
 use tokio::task::JoinHandle;
 use uuid::Uuid;
 
@@ -139,8 +135,12 @@ impl Pool {
     // Currently, we store this configuration information in:
     //
     //  /var/tmp/<Pool UUID>/<Dataset UUID>
-    async fn dataset_config_path(&self, dataset_id: Uuid) -> Result<PathBuf, Error> {
-        let path = std::path::Path::new(crate::OMICRON_CONFIG_PATH).join(self.id.to_string());
+    async fn dataset_config_path(
+        &self,
+        dataset_id: Uuid,
+    ) -> Result<PathBuf, Error> {
+        let path = std::path::Path::new(crate::OMICRON_CONFIG_PATH)
+            .join(self.id.to_string());
         create_dir_all(&path).await?;
         let path = path.join(dataset_id.to_string());
         let mut path_buf = path.to_path_buf();
@@ -184,25 +184,21 @@ struct DatasetInfo {
 impl DatasetInfo {
     fn new(kind: PartitionKind, address: SocketAddr) -> DatasetInfo {
         match kind {
-            PartitionKind::CockroachDb { .. } => {
-                DatasetInfo {
-                    name: "cockroachdb".to_string(),
-                    data_directory: "/data".to_string(),
-                    address,
-                    kind,
-                }
+            PartitionKind::CockroachDb { .. } => DatasetInfo {
+                name: "cockroachdb".to_string(),
+                data_directory: "/data".to_string(),
+                address,
+                kind,
             },
-            PartitionKind::Crucible { .. } => {
-                DatasetInfo {
-                    name: "crucible".to_string(),
-                    data_directory: "/data".to_string(),
-                    address,
-                    kind,
-                }
+            PartitionKind::Crucible { .. } => DatasetInfo {
+                name: "crucible".to_string(),
+                data_directory: "/data".to_string(),
+                address,
+                kind,
             },
             PartitionKind::Clickhouse { .. } => {
                 unimplemented!();
-            },
+            }
         }
     }
 
@@ -210,68 +206,64 @@ impl DatasetInfo {
         format!("{}{}_", ZONE_PREFIX, self.name)
     }
 
-    async fn start_zone(&self, log: &Logger, zone: &RunningZone, do_format: bool) -> Result<(), Error> {
+    async fn start_zone(
+        &self,
+        log: &Logger,
+        zone: &RunningZone,
+        do_format: bool,
+    ) -> Result<(), Error> {
         match self.kind {
             PartitionKind::CockroachDb { .. } => {
                 // Load the CRDB manifest.
-                zone.run_cmd(
-                    &[
-                        crate::illumos::zone::SVCCFG,
-                        "import",
-                        "/var/svc/manifest/site/cockroachdb/manifest.xml"
-                    ]
-                )?;
+                zone.run_cmd(&[
+                    crate::illumos::zone::SVCCFG,
+                    "import",
+                    "/var/svc/manifest/site/cockroachdb/manifest.xml",
+                ])?;
 
                 // Set parameters which are passed to the CRDB binary.
-                zone.run_cmd(
-                    &[
-                        crate::illumos::zone::SVCCFG,
-                        "-s",
-                        "svc:system/illumos/cockroachdb",
-                        "setprop",
-                        &format!("config/listen_addr={}", zone.address().to_string()),
-                    ]
-                )?;
-                zone.run_cmd(
-                    &[
-                        crate::illumos::zone::SVCCFG,
-                        "-s",
-                        "svc:system/illumos/cockroachdb",
-                        "setprop",
-                        &format!("config/store={}", self.data_directory),
-                    ]
-                )?;
+                zone.run_cmd(&[
+                    crate::illumos::zone::SVCCFG,
+                    "-s",
+                    "svc:system/illumos/cockroachdb",
+                    "setprop",
+                    &format!(
+                        "config/listen_addr={}",
+                        zone.address().to_string()
+                    ),
+                ])?;
+                zone.run_cmd(&[
+                    crate::illumos::zone::SVCCFG,
+                    "-s",
+                    "svc:system/illumos/cockroachdb",
+                    "setprop",
+                    &format!("config/store={}", self.data_directory),
+                ])?;
                 // TODO: Set these addresses, use "start" instead of
                 // "start-single-node".
-                zone.run_cmd(
-                    &[
-                        crate::illumos::zone::SVCCFG,
-                        "-s",
-                        "svc:system/illumos/cockroachdb",
-                        "setprop",
-                        &format!("config/join_addrs={}", "unknown"),
-                    ]
-                )?;
+                zone.run_cmd(&[
+                    crate::illumos::zone::SVCCFG,
+                    "-s",
+                    "svc:system/illumos/cockroachdb",
+                    "setprop",
+                    &format!("config/join_addrs={}", "unknown"),
+                ])?;
 
                 // Refresh the manifest with the new properties we set,
                 // so they become "effective" properties when the service is enabled.
-                zone.run_cmd(
-                    &[
-                        crate::illumos::zone::SVCCFG,
-                        "-s",
-                        "svc:system/illumos/cockroachdb:default",
-                        "refresh",
-                    ]
-                )?;
+                zone.run_cmd(&[
+                    crate::illumos::zone::SVCCFG,
+                    "-s",
+                    "svc:system/illumos/cockroachdb:default",
+                    "refresh",
+                ])?;
 
-                zone.run_cmd(
-                    &[
-                        crate::illumos::zone::SVCADM,
-                        "enable",
-                        "-t",
-                        &format!("svc:/system/illumos/cockroachdb:default"),
-                    ]
-                )?;
+                zone.run_cmd(&[
+                    crate::illumos::zone::SVCADM,
+                    "enable",
+                    "-t",
+                    &format!("svc:/system/illumos/cockroachdb:default"),
+                ])?;
 
                 // Await liveness of the cluster.
                 let check_health = || async {
@@ -287,40 +279,37 @@ impl DatasetInfo {
                     backoff::internal_service_policy(),
                     check_health,
                     log_failure,
-                ).await
+                )
+                .await
                 .expect("expected an infinite retry loop waiting for crdb");
 
                 info!(log, "CRDB is online");
                 // If requested, format the cluster with the initial tables.
                 if do_format {
                     info!(log, "Formatting CRDB");
-                    zone.run_cmd(
-                        &[
-                            "/opt/oxide/cockroachdb/bin/cockroach",
-                            "sql",
-                            "--insecure",
-                            "--host",
-                            &zone.address().to_string(),
-                            "--file",
-                            "/opt/oxide/cockroachdb/sql/dbwipe.sql",
-                        ]
-                    )?;
-                    zone.run_cmd(
-                        &[
-                            "/opt/oxide/cockroachdb/bin/cockroach",
-                            "sql",
-                            "--insecure",
-                            "--host",
-                            &zone.address().to_string(),
-                            "--file",
-                            "/opt/oxide/cockroachdb/sql/dbinit.sql",
-                        ]
-                    )?;
+                    zone.run_cmd(&[
+                        "/opt/oxide/cockroachdb/bin/cockroach",
+                        "sql",
+                        "--insecure",
+                        "--host",
+                        &zone.address().to_string(),
+                        "--file",
+                        "/opt/oxide/cockroachdb/sql/dbwipe.sql",
+                    ])?;
+                    zone.run_cmd(&[
+                        "/opt/oxide/cockroachdb/bin/cockroach",
+                        "sql",
+                        "--insecure",
+                        "--host",
+                        &zone.address().to_string(),
+                        "--file",
+                        "/opt/oxide/cockroachdb/sql/dbinit.sql",
+                    ])?;
                     info!(log, "Formatting CRDB - Completed");
                 }
 
                 Ok(())
-            },
+            }
             PartitionKind::Crucible { .. } => unimplemented!(),
             PartitionKind::Clickhouse { .. } => unimplemented!(),
         }
@@ -339,11 +328,17 @@ async fn ensure_running_zone(
         std::net::IpAddr::V4(_) => 32,
         std::net::IpAddr::V6(_) => 64,
     };
-    let addr = ipnetwork::IpNetwork::new(dataset_info.address.ip(), prefix).unwrap();
+    let addr =
+        ipnetwork::IpNetwork::new(dataset_info.address.ip(), prefix).unwrap();
     let addrtype = AddrType::Static(addr);
 
-    match RunningZone::get(log, &dataset_info.zone_prefix(), addrtype, dataset_info.address.port())
-        .await
+    match RunningZone::get(
+        log,
+        &dataset_info.zone_prefix(),
+        addrtype,
+        dataset_info.address.port(),
+    )
+    .await
     {
         Ok(zone) => {
             info!(log, "Zone for {} is already running", dataset_name.full());
@@ -357,17 +352,25 @@ async fn ensure_running_zone(
                 dataset_info,
                 dataset_name,
             )?;
-            let zone = RunningZone::boot(log, zname, nic, addrtype, dataset_info.address.port())
-                .await?;
+            let zone = RunningZone::boot(
+                log,
+                zname,
+                nic,
+                addrtype,
+                dataset_info.address.port(),
+            )
+            .await?;
             dataset_info.start_zone(log, &zone, do_format).await?;
 
             Ok(zone)
-        },
+        }
         Err(RunningZoneError::NotRunning(_state)) => {
             unimplemented!("Handle a zone which exists, but is not running");
-        },
+        }
         Err(_) => {
-            unimplemented!("Handle a zone which exists, has some other problem");
+            unimplemented!(
+                "Handle a zone which exists, has some other problem"
+            );
         }
     }
 }
@@ -389,9 +392,11 @@ fn configure_zone(
     //
     // This results in a zone name which is distinct across different zpools,
     // but stable and predictable across reboots.
-    let zname = format!("{}{}", dataset_info.zone_prefix(), dataset_name.pool_name);
+    let zname =
+        format!("{}{}", dataset_info.zone_prefix(), dataset_name.pool_name);
 
-    let zone_image = PathBuf::from(&format!("/opt/oxide/{}.tar.gz", dataset_info.name));
+    let zone_image =
+        PathBuf::from(&format!("/opt/oxide/{}.tar.gz", dataset_info.name));
 
     // Configure the new zone - this should be identical to the base zone,
     // but with a specified VNIC and pool.
@@ -399,11 +404,7 @@ fn configure_zone(
         log,
         &zname,
         &zone_image,
-        &[
-            zone::Dataset {
-                name: dataset_name.full(),
-            },
-        ],
+        &[zone::Dataset { name: dataset_name.full() }],
         &[],
         vec![nic.name().to_string()],
     )
@@ -437,9 +438,16 @@ impl StorageWorker {
     // creating it if `do_format` is true.
     //
     // Returns the UUID attached to the ZFS filesystem.
-    fn ensure_dataset_with_id(dataset_name: &DatasetName, do_format: bool) -> Result<Uuid, Error> {
+    fn ensure_dataset_with_id(
+        dataset_name: &DatasetName,
+        do_format: bool,
+    ) -> Result<Uuid, Error> {
         let fs_name = &dataset_name.full();
-        Zfs::ensure_filesystem(&fs_name, Mountpoint::Path(PathBuf::from("/data")), do_format)?;
+        Zfs::ensure_filesystem(
+            &fs_name,
+            Mountpoint::Path(PathBuf::from("/data")),
+            do_format,
+        )?;
         // Ensure the dataset has a usable UUID.
         if let Ok(id_str) = Zfs::get_oxide_value(&fs_name, "uuid") {
             if let Ok(id) = id_str.parse::<Uuid>() {
@@ -465,9 +473,11 @@ impl StorageWorker {
         do_format: bool,
     ) -> Result<(bool, Uuid), Error> {
         // Ensure the underlying dataset exists before trying to poke at zones.
-        let dataset_name = DatasetName::new(pool.info.name(), &dataset_info.name);
+        let dataset_name =
+            DatasetName::new(pool.info.name(), &dataset_info.name);
         info!(&self.log, "Ensuring dataset {} exists", dataset_name.full());
-        let id = StorageWorker::ensure_dataset_with_id(&dataset_name, do_format)?;
+        let id =
+            StorageWorker::ensure_dataset_with_id(&dataset_name, do_format)?;
 
         // If this zone has already been processed by us, return immediately.
         if let Some(_) = pool.get_zone(id) {
@@ -475,7 +485,11 @@ impl StorageWorker {
         }
         // Otherwise, the zone may or may not exit.
         // We need to either look up or create the zone.
-        info!(&self.log, "Ensuring zone for {} is running", dataset_name.full());
+        info!(
+            &self.log,
+            "Ensuring zone for {} is running",
+            dataset_name.full()
+        );
         let zone = ensure_running_zone(
             &self.log,
             &self.vnic_id_allocator,
@@ -485,7 +499,12 @@ impl StorageWorker {
         )
         .await?;
 
-        info!(&self.log, "Zone {} with address {} is running", zone.name(), zone.address());
+        info!(
+            &self.log,
+            "Zone {} with address {} is running",
+            zone.name(),
+            zone.address()
+        );
         pool.add_zone(id, zone);
         Ok((true, id))
     }
@@ -523,7 +542,8 @@ impl StorageWorker {
                 backoff::internal_service_policy(),
                 notify_nexus,
                 log_post_failure,
-            ).boxed()
+            )
+            .boxed(),
         );
     }
 
@@ -566,7 +586,8 @@ impl StorageWorker {
                 backoff::internal_service_policy(),
                 notify_nexus,
                 log_post_failure,
-            ).boxed()
+            )
+            .boxed(),
         );
     }
 
@@ -580,16 +601,20 @@ impl StorageWorker {
         request: &NewFilesystemRequest,
     ) -> Result<(), Error> {
         let mut pools = self.pools.lock().await;
-        let pool = pools.get_mut(&request.zpool_id.to_string()).ok_or_else(|| {
-            Error::NotFound(format!("zpool: {}", request.zpool_id))
-        })?;
+        let pool =
+            pools.get_mut(&request.zpool_id.to_string()).ok_or_else(|| {
+                Error::NotFound(format!("zpool: {}", request.zpool_id))
+            })?;
 
-        let dataset_info = DatasetInfo::new(request.partition_kind.clone(), request.address);
-        let (is_new_dataset, id) = self.initialize_dataset_and_zone(
-            pool,
-            &dataset_info,
-            /* do_format= */ true,
-        ).await?;
+        let dataset_info =
+            DatasetInfo::new(request.partition_kind.clone(), request.address);
+        let (is_new_dataset, id) = self
+            .initialize_dataset_and_zone(
+                pool,
+                &dataset_info,
+                /* do_format= */ true,
+            )
+            .await?;
 
         if !is_new_dataset {
             return Ok(());
@@ -614,16 +639,21 @@ impl StorageWorker {
         Ok(())
     }
 
-    async fn load_dataset(&self, pool: &mut Pool, fs_name: &str)
-        -> Result<(Uuid, SocketAddr, DatasetKind), Error> {
+    async fn load_dataset(
+        &self,
+        pool: &mut Pool,
+        fs_name: &str,
+    ) -> Result<(Uuid, SocketAddr, DatasetKind), Error> {
         let id = Zfs::get_oxide_value(&fs_name, "uuid")?.parse::<Uuid>()?;
         let config_path = pool.dataset_config_path(id).await?;
-        let dataset_info: DatasetInfo = toml::from_slice(&tokio::fs::read(config_path).await?)?;
+        let dataset_info: DatasetInfo =
+            toml::from_slice(&tokio::fs::read(config_path).await?)?;
         self.initialize_dataset_and_zone(
             pool,
             &dataset_info,
             /* do_format= */ false,
-        ).await?;
+        )
+        .await?;
 
         // Unwrap safety: We just put this zone in the pool.
         let zone = pool.get_zone(id).unwrap();
@@ -788,8 +818,12 @@ impl StorageManager {
         Ok(())
     }
 
-    pub async fn upsert_filesystem(&self, zpool_id: Uuid, partition_kind: PartitionKind, address: SocketAddr)
-        -> Result<(), Error> {
+    pub async fn upsert_filesystem(
+        &self,
+        zpool_id: Uuid,
+        partition_kind: PartitionKind,
+        address: SocketAddr,
+    ) -> Result<(), Error> {
         let (tx, rx) = oneshot::channel();
         let request = NewFilesystemRequest {
             zpool_id,
@@ -799,9 +833,14 @@ impl StorageManager {
         };
 
         eprintln!("upsert fs....");
-        self.new_filesystems_tx.send(request).await.expect("Storage worker bug (not alive)");
+        self.new_filesystems_tx
+            .send(request)
+            .await
+            .expect("Storage worker bug (not alive)");
         eprintln!("upsert fs.... sent ok");
-        rx.await.expect("Storage worker bug (dropped responder without responding)")?;
+        rx.await.expect(
+            "Storage worker bug (dropped responder without responding)",
+        )?;
         eprintln!("upsert fs.... completed ok");
 
         Ok(())

@@ -49,15 +49,14 @@ impl fmt::Display for Mountpoint {
 #[cfg_attr(test, mockall::automock, allow(dead_code))]
 impl Zfs {
     /// Lists all filesystems within a dataset.
-    pub fn list_filesystems(
-        name: &str
-    ) -> Result<Vec<String>, Error> {
+    pub fn list_filesystems(name: &str) -> Result<Vec<String>, Error> {
         let mut command = std::process::Command::new(ZFS);
         let cmd = command.args(&["list", "-d", "1", "-rHpo", "name", name]);
 
         let output = execute(cmd)?;
         let stdout = String::from_utf8(output.stdout)?;
-        let filesystems: Vec<String> = stdout.trim()
+        let filesystems: Vec<String> = stdout
+            .trim()
             .split('\n')
             .filter(|n| *n != name)
             .map(|s| {
@@ -88,7 +87,10 @@ impl Zfs {
         }
 
         if !do_format {
-            return Err(Error::NotFound(format!("Filesystem {} not found", name)));
+            return Err(Error::NotFound(format!(
+                "Filesystem {} not found",
+                name
+            )));
         }
 
         // If it doesn't exist, make it.

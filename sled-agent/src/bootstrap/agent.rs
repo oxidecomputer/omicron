@@ -243,12 +243,17 @@ impl Agent {
     // In lieu of having an operator send requests to all sleds via an
     // initialization service, the sled-agent configuration may allow for the
     // automated injection of setup requests from a sled.
-    async fn inject_rack_setup_service_requests(&self, config: &Config) -> Result<(), BootstrapError> {
+    async fn inject_rack_setup_service_requests(
+        &self,
+        config: &Config,
+    ) -> Result<(), BootstrapError> {
         if let Some(rss_config) = &config.rss_config {
             info!(self.log, "Injecting RSS configuration: {:#?}", rss_config);
 
-            let serialized_config = toml::Value::try_from(&config).expect("Cannot serialize configuration");
-            let config_str = toml::to_string(&serialized_config).expect("Cannot turn config to string");
+            let serialized_config = toml::Value::try_from(&config)
+                .expect("Cannot serialize configuration");
+            let config_str = toml::to_string(&serialized_config)
+                .expect("Cannot turn config to string");
 
             // First, check if this request has previously been made.
             //
@@ -258,11 +263,19 @@ impl Agent {
             //
             // We do this by storing the configuration at "rss_config_path"
             // after successfully performing initialization.
-            let rss_config_path = std::path::Path::new(crate::OMICRON_CONFIG_PATH).join("config-rss.toml");
+            let rss_config_path =
+                std::path::Path::new(crate::OMICRON_CONFIG_PATH)
+                    .join("config-rss.toml");
             if rss_config_path.exists() {
-                let old_config: Config = toml::from_str(&tokio::fs::read_to_string(&rss_config_path).await?)?;
+                let old_config: Config = toml::from_str(
+                    &tokio::fs::read_to_string(&rss_config_path).await?,
+                )?;
                 if &old_config == config {
-                    info!(self.log, "RSS config already applied from: {}", rss_config_path.to_string_lossy());
+                    info!(
+                        self.log,
+                        "RSS config already applied from: {}",
+                        rss_config_path.to_string_lossy()
+                    );
                     return Ok(());
                 }
 
@@ -272,12 +285,13 @@ impl Agent {
                 warn!(
                     self.log,
                     "Rack Setup Service Config was already applied, but has changed.\n
-                     To re-initialize:\n
+                    This means that you may have partitions set up on this sled, but they\n
+                    may not match the ones requested by the supplied configuration.\n\n
+                    To re-initialize this sled:\n
                        - Disable all Oxide services\n
                        - Delete all partitions within the attached zpool\n
                        - Delete the configuration file ({})\n
-                       - Restart the sled agent\n
-                    ",
+                       - Restart the sled agent",
                     rss_config_path.to_string_lossy()
                 );
                 return Err(BootstrapError::Configuration);
@@ -324,10 +338,7 @@ impl Agent {
 
             // Finally, make sure the configuration is saved so we don't inject
             // the requests on the next iteration.
-            tokio::fs::write(
-                rss_config_path,
-                config_str,
-            ).await?;
+            tokio::fs::write(rss_config_path, config_str).await?;
         }
         Ok(())
     }
@@ -338,7 +349,10 @@ impl Agent {
     /// ShareDistribution file exists on the host. Otherwise, the sled operates
     /// as a single node cluster.
     /// - Verifies, unpacks, and launches other services.
-    pub async fn initialize(&self, config: &Config) -> Result<(), BootstrapError> {
+    pub async fn initialize(
+        &self,
+        config: &Config,
+    ) -> Result<(), BootstrapError> {
         info!(&self.log, "bootstrap service initializing");
 
         if self.share.is_some() {

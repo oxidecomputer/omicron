@@ -86,16 +86,15 @@ impl Zones {
     pub fn halt_and_remove(log: &Logger, name: &str) -> Result<(), Error> {
         if let Some(zone) = Self::find(name)? {
             info!(log, "halt_and_remove: Zone state: {:?}", zone.state());
-            let (halt, uninstall) =
-                match zone.state() {
-                    // For states where we could be running, attempt to halt.
-                    zone::State::Running | zone::State::Ready => (true, true),
-                    // For zones where we never performed installation, simply
-                    // delete the zone - uninstallation is invalid.
-                    zone::State::Configured => (false, false),
-                    // For most zone states, perform uninstallation.
-                    _ => (false, true),
-                };
+            let (halt, uninstall) = match zone.state() {
+                // For states where we could be running, attempt to halt.
+                zone::State::Running | zone::State::Ready => (true, true),
+                // For zones where we never performed installation, simply
+                // delete the zone - uninstallation is invalid.
+                zone::State::Configured => (false, false),
+                // For most zone states, perform uninstallation.
+                _ => (false, true),
+            };
 
             if halt {
                 zone::Adm::new(name).halt().map_err(Error::Halt)?;
@@ -184,14 +183,17 @@ impl Zones {
                 zone.name(),
                 zone.state()
             );
-            if zone.state() == zone::State::Installed || zone.state() == zone::State::Running {
+            if zone.state() == zone::State::Installed
+                || zone.state() == zone::State::Running
+            {
                 // TODO: Admittedly, the zone still might be messed up. However,
                 // for now, we assume that "installed" means "good to go".
                 return Ok(());
             } else {
                 info!(
                     log,
-                    "Invalid state; uninstalling and deleting zone {}", zone_name
+                    "Invalid state; uninstalling and deleting zone {}",
+                    zone_name
                 );
                 Zones::halt_and_remove(log, zone.name())?;
             }
@@ -227,7 +229,9 @@ impl Zones {
         // TODO: This process takes a little while... Consider optimizing.
         info!(log, "Installing Omicron zone: {}", zone_name);
 
-        zone::Adm::new(zone_name).install(&[zone_image.as_ref()]).map_err(Error::Install)?;
+        zone::Adm::new(zone_name)
+            .install(&[zone_image.as_ref()])
+            .map_err(Error::Install)?;
         Ok(())
     }
 
@@ -237,7 +241,10 @@ impl Zones {
         filesystems: &[zone::Fs],
         devices: &[zone::Device],
     ) -> Result<(), Error> {
-        info!(log, "create_base zone: Querying for prescence of zone: {}", name);
+        info!(
+            log,
+            "create_base zone: Querying for prescence of zone: {}", name
+        );
         if let Some(zone) = Self::find(name)? {
             info!(
                 log,
@@ -470,10 +477,9 @@ impl Zones {
                     if addr != expected_addr {
                         return Err(Error::Ip(addr));
                     }
-
                 }
                 Ok(addr)
-            },
+            }
             Err(_) => Zones::create_address(zone, addrobj, addrtype),
         }
     }
@@ -518,7 +524,8 @@ impl Zones {
         let output = execute(cmd)?;
         if let Some(_) = String::from_utf8(output.stdout)?
             .lines()
-            .find(|s| s.trim() == "addrconf") {
+            .find(|s| s.trim() == "addrconf")
+        {
             return Ok(());
         }
         Err(Error::NotFound)
@@ -537,7 +544,9 @@ impl Zones {
         // TODO: better type safety of the "addrobj" object would be preferable.
         let link_local_addrobj = addrobj.replace("/omicron", "/linklocal");
 
-        if let Ok(()) = Self::has_link_local_v6_address(zone, &link_local_addrobj) {
+        if let Ok(()) =
+            Self::has_link_local_v6_address(zone, &link_local_addrobj)
+        {
             return Ok(());
         }
 
@@ -565,34 +574,23 @@ impl Zones {
     ) -> Result<IpNetwork, Error> {
         let mut command = std::process::Command::new(PFEXEC);
 
-        let mut args: Vec<String> = vec![
-            ZLOGIN,
-            zone,
-            IPADM,
-            "create-addr",
-            "-t",
-        ].into_iter().map(String::from).collect();
+        let mut args: Vec<String> =
+            vec![ZLOGIN, zone, IPADM, "create-addr", "-t"]
+                .into_iter()
+                .map(String::from)
+                .collect();
 
         match addrtype {
             AddrType::Dhcp => {
-                args.extend(
-                    vec![
-                        "-T",
-                        "dhcp",
-                    ].into_iter().map(String::from)
-                )
-            },
+                args.extend(vec!["-T", "dhcp"].into_iter().map(String::from))
+            }
             AddrType::Static(addr) => {
                 if addr.is_ipv6() {
                     Self::ensure_has_link_local_v6_address(zone, addrobj)?;
                 }
 
                 args.extend(
-                    vec![
-                        "-T",
-                        "static",
-                        "-a",
-                    ].into_iter().map(String::from)
+                    vec!["-T", "static", "-a"].into_iter().map(String::from),
                 );
                 args.push(addr.to_string());
             }

@@ -16,8 +16,8 @@ use dropshot::TypedBody;
 use omicron_common::api::external::Error;
 use omicron_common::api::internal::nexus::DiskRuntimeState;
 use omicron_common::api::internal::nexus::InstanceRuntimeState;
-use omicron_common::api::internal::sled_agent::PartitionEnsureBody;
 use omicron_common::api::internal::sled_agent::InstanceEnsureBody;
+use omicron_common::api::internal::sled_agent::PartitionEnsureBody;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use std::sync::Arc;
@@ -54,12 +54,12 @@ async fn filesystem_put(
     let sa = rqctx.context();
     let body_args = body.into_inner();
     sa.filesystem_ensure(
-            body_args.zpool_uuid,
-            body_args.partition_kind,
-            body_args.address,
-        )
-        .await
-        .map_err(|e| Error::from(e))?;
+        body_args.zpool_uuid,
+        body_args.partition_kind,
+        body_args.address,
+    )
+    .await
+    .map_err(|e| Error::from(e))?;
     Ok(HttpResponseUpdatedNoContent())
 }
 
