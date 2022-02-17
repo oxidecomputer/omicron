@@ -318,12 +318,6 @@ impl Zones {
         )
     }
 
-    /// Creates a "base" zone for storage services, from which other
-    /// zones may quickly be cloned.
-    pub fn create_storage_base(log: &Logger) -> Result<(), Error> {
-        Zones::create_base(STORAGE_BASE_ZONE, log, &[], &[])
-    }
-
     /// Sets the configuration for a zone.
     pub fn configure_zone(
         log: &Logger,
@@ -395,11 +389,6 @@ impl Zones {
     /// Clones a zone (named `name`) from the base Propolis zone.
     pub fn clone_from_base_propolis(name: &str) -> Result<(), Error> {
         Zones::clone_from_base(name, PROPOLIS_BASE_ZONE)
-    }
-
-    /// Clones a zone (named `name`) from the base Crucible zone.
-    pub fn clone_from_base_storage(name: &str) -> Result<(), Error> {
-        Zones::clone_from_base(name, STORAGE_BASE_ZONE)
     }
 
     /// Boots a zone (named `name`).

@@ -55,9 +55,6 @@ pub enum Error {
     #[error(transparent)]
     Zpool(#[from] crate::illumos::zpool::Error),
 
-    #[error("Failed to create base zone: {0}")]
-    BaseZoneCreation(crate::illumos::zone::Error),
-
     #[error("Failed to configure a zone: {0}")]
     ZoneConfiguration(crate::illumos::zone::Error),
 
@@ -676,12 +673,6 @@ impl StorageWorker {
     }
 
     async fn do_work_internal(&mut self) -> Result<(), Error> {
-        info!(self.log, "StorageWorker creating storage base zone");
-        // Create a base zone, from which all running storage zones are cloned.
-        Zones::create_storage_base(&self.log)
-            .map_err(|e| Error::BaseZoneCreation(e))?;
-        info!(self.log, "StorageWorker creating storage base zone - DONE");
-
         let mut nexus_notifications = FuturesOrdered::new();
 
         loop {
