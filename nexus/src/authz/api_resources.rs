@@ -435,6 +435,10 @@ impl ProjectChild {
     pub fn id(&self) -> Uuid {
         self.resource_id
     }
+
+    pub fn project(&self) -> &Project {
+        &self.parent
+    }
 }
 
 impl oso::PolarClass for ProjectChild {

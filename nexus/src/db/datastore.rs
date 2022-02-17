@@ -972,6 +972,110 @@ impl DataStore {
      * Instances
      */
 
+    /// Fetches an Instance from the database and returns both the database row
+    /// and an [`authz::Instance`] for doing authz checks
+    ///
+    /// See [`DataStore::organization_lookup_noauthz()`] for intended use cases
+    /// and caveats.
+    // TODO-security See the note on organization_lookup_noauthz().
+    async fn instance_lookup_noauthz(
+        &self,
+        authz_project: &authz::Project,
+        instance_name: &Name,
+    ) -> LookupResult<(authz::Instance, Instance)> {
+        use db::schema::instance::dsl;
+        dsl::instance
+            .filter(dsl::time_deleted.is_null())
+            .filter(dsl::project_id.eq(authz_project.id()))
+            .filter(dsl::name.eq(instance_name.clone()))
+            .select(Instance::as_select())
+            .first_async(self.pool())
+            .await
+            .map_err(|e| {
+                public_error_from_diesel_pool(
+                    e,
+                    ErrorHandler::NotFoundByLookup(
+                        ResourceType::Instance,
+                        LookupType::ByName(instance_name.as_str().to_owned()),
+                    ),
+                )
+            })
+            .map(|d| {
+                (
+                    authz_project.child_generic(
+                        ResourceType::Instance,
+                        d.id(),
+                        LookupType::from(&instance_name.0),
+                    ),
+                    d,
+                )
+            })
+    }
+
+    /// Fetch an [`authz::Instance`] based on its id
+    pub async fn instance_lookup_by_id(
+        &self,
+        instance_id: Uuid,
+    ) -> LookupResult<authz::Instance> {
+        use db::schema::instance::dsl;
+        let project_id = dsl::instance
+            .filter(dsl::time_deleted.is_null())
+            .filter(dsl::id.eq(instance_id))
+            .select(dsl::project_id)
+            .first_async(self.pool())
+            .await
+            .map_err(|e| {
+                public_error_from_diesel_pool(
+                    e,
+                    ErrorHandler::NotFoundByLookup(
+                        ResourceType::Instance,
+                        LookupType::ById(instance_id),
+                    ),
+                )
+            })?;
+        let authz_project = self.project_lookup_by_id(project_id).await?;
+        Ok(authz_project.child_generic(
+            ResourceType::Instance,
+            instance_id,
+            LookupType::ById(instance_id),
+        ))
+    }
+
+    /// Look up the id for an Instance based on its name
+    ///
+    /// Returns an [`authz::Instance`] (which makes the id available).
+    ///
+    /// Like the other "lookup_by_path()" functions, this function does no authz
+    /// checks.
+    // TODO-security See note on disk_lookup_by_path().
+    pub async fn instance_lookup_by_path(
+        &self,
+        organization_name: &Name,
+        project_name: &Name,
+        instance_name: &Name,
+    ) -> LookupResult<authz::Instance> {
+        let authz_project = self
+            .project_lookup_by_path(organization_name, project_name)
+            .await?;
+        self.instance_lookup_noauthz(&authz_project, instance_name)
+            .await
+            .map(|(d, _)| d)
+    }
+
+    /// Lookup an Instance by name and return the full database record, along
+    /// with an [`authz::Instance`] for subsequent authorization checks
+    pub async fn instance_fetch(
+        &self,
+        opctx: &OpContext,
+        authz_project: &authz::Project,
+        name: &Name,
+    ) -> LookupResult<(authz::Instance, Instance)> {
+        let (authz_instance, db_instance) =
+            self.instance_lookup_noauthz(authz_project, name).await?;
+        opctx.authorize(authz::Action::Read, &authz_instance).await?;
+        Ok((authz_instance, db_instance))
+    }
+
     /// Idempotently insert a database record for an Instance
     ///
     /// This is intended to be used by a saga action.  When we say this is
@@ -1036,64 +1140,45 @@ impl DataStore {
 
     pub async fn project_list_instances(
         &self,
-        project_id: &Uuid,
+        opctx: &OpContext,
+        authz_project: &authz::Project,
         pagparams: &DataPageParams<'_, Name>,
     ) -> ListResultVec<Instance> {
-        use db::schema::instance::dsl;
+        opctx.authorize(authz::Action::ListChildren, authz_project).await?;
 
+        use db::schema::instance::dsl;
         paginated(dsl::instance, dsl::name, &pagparams)
             .filter(dsl::time_deleted.is_null())
-            .filter(dsl::project_id.eq(*project_id))
+            .filter(dsl::project_id.eq(authz_project.id()))
             .select(Instance::as_select())
-            .load_async::<Instance>(self.pool())
+            .load_async::<Instance>(self.pool_authorized(opctx).await?)
             .await
             .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
     }
 
-    pub async fn instance_fetch(
+    /// Fetches information about an Instance that the caller has previously
+    /// fetched
+    ///
+    /// See disk_refetch().
+    pub async fn instance_refetch(
         &self,
-        instance_id: &Uuid,
+        opctx: &OpContext,
+        authz_instance: &authz::Instance,
     ) -> LookupResult<Instance> {
         use db::schema::instance::dsl;
 
+        opctx.authorize(authz::Action::Read, authz_instance).await?;
+
         dsl::instance
             .filter(dsl::time_deleted.is_null())
-            .filter(dsl::id.eq(*instance_id))
+            .filter(dsl::id.eq(authz_instance.id()))
             .select(Instance::as_select())
-            .get_result_async(self.pool())
+            .get_result_async(self.pool_authorized(opctx).await?)
             .await
             .map_err(|e| {
                 public_error_from_diesel_pool(
                     e,
-                    ErrorHandler::NotFoundByLookup(
-                        ResourceType::Instance,
-                        LookupType::ById(*instance_id),
-                    ),
-                )
-            })
-    }
-
-    pub async fn instance_fetch_by_name(
-        &self,
-        project_id: &Uuid,
-        instance_name: &Name,
-    ) -> LookupResult<Instance> {
-        use db::schema::instance::dsl;
-
-        dsl::instance
-            .filter(dsl::time_deleted.is_null())
-            .filter(dsl::project_id.eq(*project_id))
-            .filter(dsl::name.eq(instance_name.clone()))
-            .select(Instance::as_select())
-            .get_result_async(self.pool())
-            .await
-            .map_err(|e| {
-                public_error_from_diesel_pool(
-                    e,
-                    ErrorHandler::NotFoundByLookup(
-                        ResourceType::Instance,
-                        LookupType::ByName(instance_name.as_str().to_owned()),
-                    ),
+                    ErrorHandler::NotFoundByResource(authz_instance),
                 )
             })
     }
@@ -1146,8 +1231,11 @@ impl DataStore {
 
     pub async fn project_delete_instance(
         &self,
-        instance_id: &Uuid,
+        opctx: &OpContext,
+        authz_instance: &authz::Instance,
     ) -> DeleteResult {
+        opctx.authorize(authz::Action::Delete, authz_instance).await?;
+
         /*
          * This is subject to change, but for now we're going to say that an
          * instance must be "stopped" or "failed" in order to delete it.  The
@@ -1167,21 +1255,19 @@ impl DataStore {
         let stopped = DbInstanceState::new(ApiInstanceState::Stopped);
         let failed = DbInstanceState::new(ApiInstanceState::Failed);
 
+        let instance_id = authz_instance.id();
         let result = diesel::update(dsl::instance)
             .filter(dsl::time_deleted.is_null())
-            .filter(dsl::id.eq(*instance_id))
+            .filter(dsl::id.eq(instance_id))
             .filter(dsl::state.eq_any(vec![stopped, failed]))
             .set((dsl::state.eq(destroyed), dsl::time_deleted.eq(now)))
-            .check_if_exists::<Instance>(*instance_id)
+            .check_if_exists::<Instance>(instance_id)
             .execute_and_check(self.pool())
             .await
             .map_err(|e| {
                 public_error_from_diesel_pool(
                     e,
-                    ErrorHandler::NotFoundByLookup(
-                        ResourceType::Instance,
-                        LookupType::ById(*instance_id),
-                    ),
+                    ErrorHandler::NotFoundByResource(authz_instance),
                 )
             })?;
         match result.status {
@@ -1314,16 +1400,19 @@ impl DataStore {
      */
     pub async fn instance_list_disks(
         &self,
-        instance_id: &Uuid,
+        opctx: &OpContext,
+        authz_instance: &authz::Instance,
         pagparams: &DataPageParams<'_, Name>,
     ) -> ListResultVec<Disk> {
         use db::schema::disk::dsl;
 
+        opctx.authorize(authz::Action::ListChildren, authz_instance).await?;
+
         paginated(dsl::disk, dsl::name, &pagparams)
             .filter(dsl::time_deleted.is_null())
-            .filter(dsl::attach_instance_id.eq(*instance_id))
+            .filter(dsl::attach_instance_id.eq(authz_instance.id()))
             .select(Disk::as_select())
-            .load_async::<Disk>(self.pool())
+            .load_async::<Disk>(self.pool_authorized(opctx).await?)
             .await
             .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
     }
@@ -1379,8 +1468,6 @@ impl DataStore {
             .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
     }
 
-    /// See `disk_update_runtime()`.  This version should only be used from
-    /// sagas, which do not currently have authn contexts.
     pub async fn disk_update_runtime(
         &self,
         opctx: &OpContext,
