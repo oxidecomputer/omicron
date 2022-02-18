@@ -606,7 +606,8 @@
             "format": "uuid"
           },
           "instance_id": {
-            "description": "The Instance to which the interface belongs.",
+            "nullable": true,
+            "description": "The Instance to which the interface belongs. * * An interface may not be attached to any instance, in which case this is * None.",
             "type": "string",
             "format": "uuid"
           },
@@ -655,7 +656,6 @@
         "required": [
           "description",
           "id",
-          "instance_id",
           "ip",
           "mac",
           "name",

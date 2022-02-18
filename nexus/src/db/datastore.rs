@@ -77,8 +77,9 @@ use crate::db::{
     },
     pagination::paginated,
     pagination::paginated_multicolumn,
-    subnet_allocation::AllocateIpQuery,
     subnet_allocation::FilterConflictingVpcSubnetRangesQuery,
+    subnet_allocation::InsertNetworkInterfaceQuery,
+    subnet_allocation::NetworkInterfaceError,
     subnet_allocation::SubnetError,
     update_and_check::{UpdateAndCheck, UpdateStatus},
 };
@@ -1641,85 +1642,27 @@ impl DataStore {
     /*
      * Network interfaces
      */
-
-    pub async fn instance_create_network_interface(
+    pub async fn vpc_subnet_create_network_interface(
         &self,
         interface: IncompleteNetworkInterface,
-    ) -> CreateResult<NetworkInterface> {
+    ) -> Result<NetworkInterface, NetworkInterfaceError> {
         use db::schema::network_interface::dsl;
-
-        // TODO: Longer term, it would be nice to decouple the IP allocation
-        // (and MAC allocation) from the NetworkInterface table, so that
-        // retrying from parallel inserts doesn't need to happen here.
-
-        let name = interface.identity.name.clone();
-        match interface.ip {
-            // Attempt an insert with a requested IP address
-            Some(ip) => {
-                interface.subnet.contains(ip)?;
-                let row = NetworkInterface {
-                    identity: interface.identity,
-                    instance_id: interface.instance_id,
-                    vpc_id: interface.vpc_id,
-                    subnet_id: interface.subnet.id(),
-                    mac: interface.mac,
-                    ip: ip.into(),
-                };
-                diesel::insert_into(dsl::network_interface)
-                    .values(row)
-                    .returning(NetworkInterface::as_returning())
-                    .get_result_async(self.pool())
-                    .await
-                    .map_err(|e| {
-                        public_error_from_diesel_pool(
-                            e,
-                            ErrorHandler::Conflict(
-                                ResourceType::NetworkInterface,
-                                name.as_str(),
-                            ),
-                        )
-                    })
-            }
-            // Insert and allocate an IP address
-            None => {
-                let allocation_query = AllocateIpQuery {
-                    block: ipnetwork::IpNetwork::V4(
-                        interface.subnet.ipv4_block.0 .0,
-                    ),
-                    interface,
-                    now: Utc::now(),
-                };
-                diesel::insert_into(dsl::network_interface)
-                    .values(allocation_query)
-                    .returning(NetworkInterface::as_returning())
-                    .get_result_async(self.pool())
-                    .await
-                    .map_err(|e| {
-                        if let PoolError::Connection(ConnectionError::Query(
-                            diesel::result::Error::NotFound,
-                        )) = e
-                        {
-                            Error::InvalidRequest {
-                                message: "no available IP addresses"
-                                    .to_string(),
-                            }
-                        } else {
-                            public_error_from_diesel_pool(
-                                e,
-                                ErrorHandler::Conflict(
-                                    ResourceType::NetworkInterface,
-                                    name.as_str(),
-                                ),
-                            )
-                        }
-                    })
-            }
-        }
+        let query = InsertNetworkInterfaceQuery {
+            interface: interface.clone(),
+            now: Utc::now(),
+        };
+        diesel::insert_into(dsl::network_interface)
+            .values(query)
+            .returning(NetworkInterface::as_returning())
+            .get_result_async(self.pool())
+            .await
+            .map_err(|e| NetworkInterfaceError::from_pool(e, &interface))
     }
 
-    pub async fn instance_delete_network_interface(
+    pub async fn vpc_subnet_delete_network_interface(
         &self,
-        network_interface_id: &Uuid,
+        vpc_id: &Uuid,
+        interface_name: &Name,
     ) -> DeleteResult {
         use db::schema::network_interface::dsl;
 
@@ -1729,7 +1672,8 @@ impl DataStore {
         let now = Utc::now();
         diesel::update(dsl::network_interface)
             .filter(dsl::time_deleted.is_null())
-            .filter(dsl::id.eq(*network_interface_id))
+            .filter(dsl::vpc_id.eq(*vpc_id))
+            .filter(dsl::name.eq(interface_name.clone()))
             .set(dsl::time_deleted.eq(now))
             .returning(NetworkInterface::as_returning())
             .get_result_async(self.pool())
@@ -1739,7 +1683,7 @@ impl DataStore {
                     e,
                     ErrorHandler::NotFoundByLookup(
                         ResourceType::NetworkInterface,
-                        LookupType::ById(*network_interface_id),
+                        LookupType::ByName(interface_name.to_string()),
                     ),
                 )
             })?;

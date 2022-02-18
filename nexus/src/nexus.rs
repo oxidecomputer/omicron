@@ -14,6 +14,7 @@ use crate::db;
 use crate::db::identity::{Asset, Resource};
 use crate::db::model::DatasetKind;
 use crate::db::model::Name;
+use crate::db::subnet_allocation::NetworkInterfaceError;
 use crate::db::subnet_allocation::SubnetError;
 use crate::defaults;
 use crate::external_api::params;
@@ -833,6 +834,29 @@ impl Nexus {
         project_name: &Name,
         params: &params::InstanceCreate,
     ) -> CreateResult<db::model::Instance> {
+        // Quickly fail the request if the networking parameters are invalid.
+        fn fail_if_empty_interfaces<T>(
+            interfaces: &[T],
+        ) -> Result<(), external::Error> {
+            if interfaces.is_empty() {
+                Err(external::Error::invalid_request(
+                    "At least one networking interface must be specified",
+                ))
+            } else {
+                Ok(())
+            }
+        }
+        match params.network_interface {
+            params::InstanceNetworkInterfaceAttachment::Attach(ref attach) => {
+                fail_if_empty_interfaces(&attach.interface_names)?;
+            }
+            params::InstanceNetworkInterfaceAttachment::Create(ref create) => {
+                fail_if_empty_interfaces(&create.interface_params)?;
+            }
+            params::InstanceNetworkInterfaceAttachment::Default
+            | params::InstanceNetworkInterfaceAttachment::None => {}
+        }
+
         let authz_project = self
             .db_datastore
             .project_lookup_by_path(organization_name, project_name)
@@ -1530,54 +1554,59 @@ impl Nexus {
             .map(|_| ())
     }
 
-    /**
-     * Creates a new network interface for this instance
-     */
-    pub async fn instance_create_network_interface(
+    pub async fn vpc_subnet_create_network_interface(
         &self,
         organization_name: &Name,
         project_name: &Name,
-        instance_name: &Name,
         vpc_name: &Name,
         subnet_name: &Name,
         params: &params::NetworkInterfaceCreate,
     ) -> CreateResult<db::model::NetworkInterface> {
-        let authz_instance = self
-            .db_datastore
-            .instance_lookup_by_path(
-                organization_name,
-                project_name,
-                instance_name,
-            )
-            .await?;
         let vpc = self
-            .db_datastore
-            .vpc_fetch_by_name(&authz_instance.project().id(), vpc_name)
+            .project_lookup_vpc(organization_name, project_name, vpc_name)
             .await?;
         let subnet = self
             .db_datastore
             .vpc_subnet_fetch_by_name(&vpc.id(), subnet_name)
             .await?;
-
         let mac = db::model::MacAddr::new()?;
-
         let interface_id = Uuid::new_v4();
-        // Request an allocation
-        let ip = None;
         let interface = db::model::IncompleteNetworkInterface::new(
             interface_id,
-            authz_instance.id(),
-            // TODO-correctness: vpc_id here is used for name uniqueness. Should
-            // interface names be unique to the subnet's VPC or to the
-            // VPC associated with the instance's default interface?
+            None, // Do not attach to an instance
             vpc.id(),
             subnet,
             mac,
-            ip,
             params.clone(),
-        );
-        self.db_datastore.instance_create_network_interface(interface).await
+        )?;
+        let interface = self
+            .db_datastore
+            .vpc_subnet_create_network_interface(interface)
+            .await
+            .map_err(NetworkInterfaceError::into_external)?;
+        // TODO: Notify the sled for the instance, if an instance was specified in the request.
+        Ok(interface)
     }
+
+    pub async fn vpc_subnet_delete_network_interface(
+        &self,
+        organization_name: &Name,
+        project_name: &Name,
+        vpc_name: &Name,
+        interface_name: &Name,
+    ) -> DeleteResult {
+        let vpc = self
+            .project_lookup_vpc(organization_name, project_name, vpc_name)
+            .await?;
+        self.db_datastore
+            .vpc_subnet_delete_network_interface(&vpc.id(), interface_name)
+            .await
+    }
+
+    // TODO-completeness: Add instance_{attach,detach}_network_interface, once
+    // hotplug is supported in Propolis and the sled agent supports updating the
+    // hardware of an instance, i.e., its `instance_ensure` endpoint compares
+    // the requested and actual hardware and udpates as needed.
 
     pub async fn project_list_vpcs(
         &self,

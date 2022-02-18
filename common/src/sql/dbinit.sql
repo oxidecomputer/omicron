@@ -438,8 +438,15 @@ CREATE TABLE omicron.public.network_interface (
     time_modified TIMESTAMPTZ NOT NULL,
     /* Indicates that the object has been deleted */
     time_deleted TIMESTAMPTZ,
-    /* FK into Instance table. */
-    instance_id UUID NOT NULL,
+
+    /* FK into Instance table.
+     *
+     * Note that it's possible for an interface to not be attached
+     * to any instance, in which case this is NULL. However, an
+     * interface will only be attached to at most one instance.
+     */
+    instance_id UUID,
+
     /* FK into VPC table */
     vpc_id UUID NOT NULL,
     /* FK into VPCSubnet table. */
@@ -477,6 +484,18 @@ CREATE UNIQUE INDEX ON omicron.public.network_interface (
     mac
 ) WHERE
     time_deleted IS NULL;
+
+/*
+ * Index used to verify that an Instance's networking is contained
+ * within a single VPC. Note that this index is not unique, since
+ * there be multiple interfaces for a single instance. 
+ */
+CREATE INDEX ON omicron.public.network_interface (
+    instance_id
+)
+STORING (vpc_id)
+WHERE
+    time_deleted IS NULL AND instance_id IS NOT NULL;
 
 CREATE TYPE omicron.public.vpc_router_kind AS ENUM (
     'system',

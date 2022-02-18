@@ -1908,8 +1908,12 @@ pub struct NetworkInterface {
     #[serde(flatten)]
     pub identity: IdentityMetadata,
 
-    /** The Instance to which the interface belongs. */
-    pub instance_id: Uuid,
+    /** The Instance to which the interface belongs.
+     *
+     * An interface may not be attached to any instance, in which case this is
+     * None.
+     */
+    pub instance_id: Option<Uuid>,
 
     /** The VPC to which the interface belongs. */
     pub vpc_id: Uuid,
@@ -1922,6 +1926,8 @@ pub struct NetworkInterface {
 
     /** The IP address assigned to this interface. */
     pub ip: IpAddr,
+    // TODO-correctness: We need to split this into an optional V4 and optional
+    // V6 address, at least one of which must be specified.
 }
 
 #[cfg(test)]

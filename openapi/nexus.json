@@ -3599,6 +3599,30 @@
           "time_run_state_updated"
         ]
       },
+      "InstanceAttachNetworkInterface": {
+        "type": "object",
+        "properties": {
+          "interface_names": {
+            "description": "The names of the interfaces to attach to the instance.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Name"
+            }
+          },
+          "vpc_name": {
+            "description": "The name of the VPC containing the interface to attach to",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Name"
+              }
+            ]
+          }
+        },
+        "required": [
+          "interface_names",
+          "vpc_name"
+        ]
+      },
       "InstanceCpuCount": {
         "description": "The number of CPUs in an Instance",
         "type": "integer",
@@ -3623,6 +3647,14 @@
           },
           "ncpus": {
             "$ref": "#/components/schemas/InstanceCpuCount"
+          },
+          "network_interface": {
+            "description": "The network interface to create or attach for this instance. If not provided, a default interface will be created.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/InstanceNetworkInterfaceAttachment"
+              }
+            ]
           }
         },
         "required": [
@@ -3631,6 +3663,55 @@
           "memory",
           "name",
           "ncpus"
+        ]
+      },
+      "InstanceCreateNetworkInterface": {
+        "type": "object",
+        "properties": {
+          "interface_params": {
+            "description": "The parameters used to create each interface.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/InstanceCreateNetworkInterfaceParams"
+            }
+          },
+          "vpc_name": {
+            "description": "The name of the VPC in which to create the interface",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Name"
+              }
+            ]
+          }
+        },
+        "required": [
+          "interface_params",
+          "vpc_name"
+        ]
+      },
+      "InstanceCreateNetworkInterfaceParams": {
+        "type": "object",
+        "properties": {
+          "params": {
+            "description": "Create-time parameters for the interface.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/NetworkInterfaceCreate"
+              }
+            ]
+          },
+          "vpc_subnet_name": {
+            "description": "The name of the VPC Subnet in which to create the instance",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Name"
+              }
+            ]
+          }
+        },
+        "required": [
+          "params",
+          "vpc_subnet_name"
         ]
       },
       "InstanceMigrate": {
@@ -3644,6 +3725,79 @@
         },
         "required": [
           "dst_sled_uuid"
+        ]
+      },
+      "InstanceNetworkInterfaceAttachment": {
+        "description": "Describes an attachment of a `NetworkInterface` to an `Instance`, at the time the instance is created.",
+        "oneOf": [
+          {
+            "description": "Attach to an existing network interface.",
+            "type": "object",
+            "properties": {
+              "params": {
+                "$ref": "#/components/schemas/InstanceAttachNetworkInterface"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "Attach"
+                ]
+              }
+            },
+            "required": [
+              "params",
+              "type"
+            ]
+          },
+          {
+            "description": "Create a new `NetworkInterface` for the `Instance`",
+            "type": "object",
+            "properties": {
+              "params": {
+                "$ref": "#/components/schemas/InstanceCreateNetworkInterface"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "Create"
+                ]
+              }
+            },
+            "required": [
+              "params",
+              "type"
+            ]
+          },
+          {
+            "description": "Default networking setup, which creates a single interface with an auto-assigned IP address from project's \"default\" VPC and \"default\" VPC Subnet.",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "Default"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "description": "No network interfaces at all will be created for the instance.",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "None"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          }
         ]
       },
       "InstanceResultsPage": {
@@ -3745,7 +3899,8 @@
             "format": "uuid"
           },
           "instance_id": {
-            "description": "The Instance to which the interface belongs.",
+            "nullable": true,
+            "description": "The Instance to which the interface belongs. * * An interface may not be attached to any instance, in which case this is * None.",
             "type": "string",
             "format": "uuid"
           },
@@ -3794,7 +3949,6 @@
         "required": [
           "description",
           "id",
-          "instance_id",
           "ip",
           "mac",
           "name",
@@ -3802,6 +3956,27 @@
           "time_created",
           "time_modified",
           "vpc_id"
+        ]
+      },
+      "NetworkInterfaceCreate": {
+        "description": "Create-time parameters for a [`NetworkInterface`](omicron_common::api::external::NetworkInterface)",
+        "type": "object",
+        "properties": {
+          "description": {
+            "type": "string"
+          },
+          "ip": {
+            "nullable": true,
+            "type": "string",
+            "format": "ip"
+          },
+          "name": {
+            "$ref": "#/components/schemas/Name"
+          }
+        },
+        "required": [
+          "description",
+          "name"
         ]
       },
       "NetworkInterfaceResultsPage": {

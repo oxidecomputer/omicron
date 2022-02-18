@@ -190,6 +190,7 @@ lazy_static! {
             ncpus: InstanceCpuCount(1),
             memory: ByteCount::from_gibibytes_u32(16),
             hostname: String::from("demo-instance"),
+            network_interface: params::InstanceNetworkInterfaceAttachment::Default,
         };
 }
 

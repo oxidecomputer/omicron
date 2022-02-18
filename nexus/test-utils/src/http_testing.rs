@@ -18,7 +18,7 @@ use std::fmt::Debug;
 /// properties of the response for testing
 //
 // When testing an HTTP server, we make varying requests to the server and
-// verify a bunch of properties about it's behavior.  A lot of things can go
+// verify a bunch of properties about its behavior.  A lot of things can go
 // wrong along the way:
 //
 // - failed to serialize request body
