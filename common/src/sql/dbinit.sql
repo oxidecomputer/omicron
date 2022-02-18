@@ -465,8 +465,13 @@ CREATE TABLE omicron.public.network_interface (
     time_modified TIMESTAMPTZ NOT NULL,
     /* Indicates that the object has been deleted */
     time_deleted TIMESTAMPTZ,
-    /* FK into Instance table. */
+
+    /* FK into Instance table.
+     * Note that interfaces are always attached to a particular instance.
+     * IP addresses may be reserved, but this is a different resource.
+     */
     instance_id UUID NOT NULL,
+
     /* FK into VPC table */
     vpc_id UUID NOT NULL,
     /* FK into VPCSubnet table. */
@@ -483,12 +488,6 @@ CREATE TABLE omicron.public.network_interface (
  * as moving IPs between NICs on different instances, etc.
  */
 
-CREATE UNIQUE INDEX ON omicron.public.network_interface (
-    vpc_id,
-    name
-) WHERE
-    time_deleted IS NULL;
-
 /* Ensure we do not assign the same address twice within a subnet */
 CREATE UNIQUE INDEX ON omicron.public.network_interface (
     subnet_id,
@@ -503,6 +502,18 @@ CREATE UNIQUE INDEX ON omicron.public.network_interface (
     vpc_id,
     mac
 ) WHERE
+    time_deleted IS NULL;
+
+/*
+ * Index used to verify that an Instance's networking is contained
+ * within a single VPC.
+ */
+CREATE UNIQUE INDEX ON omicron.public.network_interface (
+    instance_id,
+    name
+)
+STORING (vpc_id)
+WHERE
     time_deleted IS NULL;
 
 CREATE TYPE omicron.public.vpc_router_kind AS ENUM (
