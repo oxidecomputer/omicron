@@ -7,7 +7,7 @@
 /// Describes an "addrobj", which is the combination of an interface
 /// with an associated name.
 ///
-/// This frequently is used as a two-parter name, such as:
+/// This frequently is used as a two-part name, such as:
 ///
 /// igb0/omicron
 /// ^    ^

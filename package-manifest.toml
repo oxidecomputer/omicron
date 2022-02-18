@@ -8,40 +8,38 @@ smf = "smf"
 # Package name
 [package.omicron-sled-agent]
 # Binary name
-binary_name = "sled-agent"
+rust.binary_name = "sled-agent"
 # Service name (subdirectory within "smf")
 service_name = "sled-agent"
-# Information about how to build this package
-type = "rust"
 # (Optional) Indicates this is a bootstrapping service, and should be installed.
 # Points to the SMF manifest within this package.
 bootstrap = "manifest.xml"
 
 [package.omicron-nexus]
-binary_name = "nexus"
+rust.binary_name = "nexus"
 service_name = "nexus"
-type = "rust"
+zone.paths = []
 
 [package.oximeter-collector]
-binary_name = "oximeter"
+rust.binary_name = "oximeter"
 service_name = "oximeter"
-type = "rust"
+zone.paths = []
 
 [package.propolis-server]
-binary_name = "propolis-server"
+rust.binary_name = "propolis-server"
 service_name = "propolis-server"
-type = "rust"
 # (Optional) List of binary blobs to be downloaded from S3.
 blobs = [ "alpine.iso", "OVMF_CODE.fd" ]
+# TODO: There's probably a better way to specify this
+zone.paths = []
 
 [package.cockroachdb]
 service_name = "cockroachdb"
-type = "zone"
 
-[[package.cockroachdb.paths]]
+[[package.cockroachdb.zone.paths]]
 from = "cockroachdb"
 to = "/opt/oxide/cockroachdb"
 
-[[package.cockroachdb.paths]]
+[[package.cockroachdb.zone.paths]]
 from = "common/src/sql"
 to = "/opt/oxide/cockroachdb/sql"

@@ -69,23 +69,7 @@ fn run_cargo_on_package(
 }
 
 #[derive(Deserialize, Debug)]
-#[serde(tag = "type", rename_all = "snake_case")]
-enum Package {
-    Rust(RustPackage),
-    Zone(ZonePackage),
-}
-
-// Describes an object which may be packaged.
-trait Packagable {
-    fn service_name(&self) -> &str;
-}
-
-#[derive(Deserialize, Debug)]
-struct RustPackage {
-    // The name of the compiled binary to be used.
-    // TODO: Could be extrapolated to "produced build artifacts", we don't
-    // really care about the individual binary file.
-    binary_name: String,
+struct Package {
     // The name of the service name to be used on the target OS.
     // Also used as a lookup within the "smf/" directory.
     service_name: String,
@@ -98,12 +82,20 @@ struct RustPackage {
     // This is typically set to None - most services are bootstrapped
     // by the bootstrap agent.
     bootstrap: Option<PathBuf>,
+
+    // Configuration for packages containing Rust binaries.
+    rust: Option<RustPackage>,
+
+    // Configuration for packages which are bundled into zone images.
+    zone: Option<ZonePackage>,
 }
 
-impl Packagable for RustPackage {
-    fn service_name(&self) -> &str {
-        &self.service_name
-    }
+#[derive(Deserialize, Debug)]
+struct RustPackage {
+    // The name of the compiled binary to be used.
+    // TODO: Could be extrapolated to "produced build artifacts", we don't
+    // really care about the individual binary file.
+    binary_name: String,
 }
 
 impl RustPackage {
@@ -112,7 +104,7 @@ impl RustPackage {
     }
 
     // Returns the path to the compiled binary.
-    fn binary_path(&self, release: bool) -> PathBuf {
+    fn local_binary_path(&self, release: bool) -> PathBuf {
         format!(
             "target/{}/{}",
             if release { "release" } else { "debug" },
@@ -143,13 +135,6 @@ struct MappedPath {
 #[derive(Deserialize, Debug)]
 struct ZonePackage {
     paths: Vec<MappedPath>,
-    service_name: String,
-}
-
-impl Packagable for ZonePackage {
-    fn service_name(&self) -> &str {
-        &self.service_name
-    }
 }
 
 #[derive(Deserialize, Debug)]
@@ -163,14 +148,9 @@ struct Config {
 
 async fn do_check(config: &Config) -> Result<()> {
     for (package_name, package) in &config.packages {
-        match package {
-            Package::Rust(package) => {
-                println!("Checking {}", package_name);
-                package.check(&package_name)?;
-            }
-            Package::Zone(_) => {
-                println!("Checking Zone images unimplemented");
-            }
+        if let Some(rust_pkg) = &package.rust {
+            println!("Checking {}", package_name);
+            rust_pkg.check(&package_name)?;
         }
     }
     Ok(())
@@ -191,137 +171,118 @@ async fn do_package(
 
     for (package_name, package) in &config.packages {
         println!("Building {}", package_name);
-        match package {
-            Package::Rust(package) => {
-                package.build(&package_name, release)?;
+        if let Some(rust_pkg) = &package.rust {
+            rust_pkg.build(&package_name, release)?;
+        }
 
-                let tarfile = output_directory
-                    .join(format!("{}.tar", package.service_name()));
-                let file = OpenOptions::new()
-                    .write(true)
-                    .read(true)
-                    .truncate(true)
-                    .create(true)
-                    .open(&tarfile)
-                    .map_err(|err| anyhow!("Cannot create tarfile: {}", err))?;
+        if let Some(zone_pkg) = &package.zone {
+            // Create a tarball which will become an Omicron-brand image
+            // archive.
+            let tarfile = output_directory
+                .join(format!("{}.tar.gz", package.service_name));
+            println!("Creating zone image: {}", tarfile.to_string_lossy());
+            let file = open_tarfile(&tarfile)?;
+            let gzw = flate2::write::GzEncoder::new(
+                file,
+                flate2::Compression::fast(),
+            );
+            let mut archive = Builder::new(gzw);
+            archive.mode(tar::HeaderMode::Deterministic);
 
-                // Create an archive filled with:
-                // - The binary
-                // - The corresponding SMF directory
-                //
-                // TODO: We could add compression here, if we'd like?
-                let mut archive = Builder::new(file);
-                archive.mode(tar::HeaderMode::Deterministic);
+            // The first file in the archive must always be a JSON file
+            // which identifies the format of the rest of the archive.
+            //
+            // See the OMICRON1(5) man page for more detail.
+            let mut root_json =
+                tokio::fs::File::from_std(tempfile::tempfile()?);
+            let contents = r#"{"v":"1","t":"layer"}"#;
+            root_json.write_all(contents.as_bytes()).await?;
+            root_json.seek(std::io::SeekFrom::Start(0)).await?;
+            archive.append_file(
+                "oxide.json",
+                &mut root_json.into_std().await,
+            )?;
 
-                // Add binary
-                archive
-                    .append_path_with_name(
-                        package.binary_path(release),
-                        &package.binary_name,
-                    )
-                    .map_err(|err| {
-                        anyhow!("Cannot append binary to tarfile: {}", err)
-                    })?;
+            archive.append_dir("root", ".")?;
+            archive.append_dir("root/opt", ".")?;
+            archive.append_dir("root/opt/oxide", ".")?;
 
-                // Add SMF directory
-                let smf_path: PathBuf = format!(
-                    "{}/{}",
-                    config.smf.to_string_lossy(),
-                    package.service_name
-                )
-                .into();
-                add_path_to_archive(&mut archive, &smf_path, Path::new(PKG))?;
-
-                // Add (and possibly download) blobs
-                add_blobs(
-                    &mut archive,
-                    package_name,
-                    package,
-                    output_directory,
-                )
-                .await?;
-
-                let mut file = archive.into_inner().map_err(|err| {
-                    anyhow!("Failed to finalize archive: {}", err)
-                })?;
-
-                // Once we've created the archive, acquire a digest which can
-                // later be used for verification.
-                let digest = sha256_digest(&mut file)?;
-                digests.insert(
-                    package.binary_name().into(),
-                    digest.as_ref().into(),
-                );
-            }
-            Package::Zone(package) => {
-                // Create a tarball which will become an Omicron-brand image
-                // archive.
-                let tarfile = output_directory
-                    .join(format!("{}.tar.gz", package.service_name));
-                println!("Creating zone image: {}", tarfile.to_string_lossy());
-                let file = OpenOptions::new()
-                    .write(true)
-                    .read(true)
-                    .truncate(true)
-                    .create(true)
-                    .open(&tarfile)
-                    .map_err(|err| anyhow!("Cannot create tarfile: {}", err))?;
-                let gzw = flate2::write::GzEncoder::new(
-                    file,
-                    flate2::Compression::fast(),
-                );
-                let mut archive = Builder::new(gzw);
-                archive.mode(tar::HeaderMode::Deterministic);
-
-                // The first file in the archive must always be a JSON file
-                // which identifies the format of the rest of the archive.
-                //
-                // See the OMICRON1(5) man page for more detail.
-                println!("Creating tempfile root_json");
-                let mut root_json =
-                    tokio::fs::File::from_std(tempfile::tempfile()?);
-                let contents = r#"{"v":"1","t":"layer"}"#;
-                root_json.write_all(contents.as_bytes()).await?;
-                root_json.seek(std::io::SeekFrom::Start(0)).await?;
-                archive.append_file(
-                    "oxide.json",
-                    &mut root_json.into_std().await,
-                )?;
-
-                archive.append_dir("root", ".")?;
-                archive.append_dir("root/opt", ".")?;
-                archive.append_dir("root/opt/oxide", ".")?;
-
-                // All other files are contained under the "root" prefix.
-                //
-                // "path.from" exists on the machine running the package
-                // command, "path.to" is an absolute path (remapped under
-                // "root") which will again appear like an absolute path within
-                // the namespace of the running Zone.
-                for path in &package.paths {
-                    println!("Adding path: {:#?}", path);
-                    let leading_slash = std::path::MAIN_SEPARATOR.to_string();
-                    let dst = Path::new("root")
-                        .join(&path.to.strip_prefix(leading_slash)?);
-                    archive.append_dir_all(dst, &path.from)?;
-                }
-
-                // Add SMF directory
-                let smf_path =
-                    Path::new(&config.smf).join(package.service_name());
-                println!("Adding SMF path: {}", smf_path.to_string_lossy());
+            // All other files are contained under the "root" prefix.
+            //
+            // "path.from" exists on the machine running the package
+            // command, "path.to" is an absolute path (remapped under
+            // "root") which will again appear like an absolute path within
+            // the namespace of the running Zone.
+            for path in &zone_pkg.paths {
+                println!("Adding path: {:#?}", path);
+                let leading_slash = std::path::MAIN_SEPARATOR.to_string();
                 let dst = Path::new("root")
-                    .join("var/svc/manifest/site")
-                    .join(package.service_name());
-                archive.append_dir_all(&dst, &smf_path)?;
-
-                archive.finish()?;
-
-                // Add (and possibly download) blobs
-                // TODO: ... Digests?
-                // TODO: Later: Refactor this into a separate library?
-                //       Could be part of "helios-omicron-brand" crate.
+                    .join(&path.to.strip_prefix(leading_slash)?);
+                archive.append_dir_all(dst, &path.from)?;
             }
+
+            // Attempt to add the rust binary, if one was built.
+            maybe_add_rust_binary(
+                &package,
+                &mut archive,
+                &Path::new("root/opt/oxide").join(&package.service_name).join("bin"),
+                release,
+            )?;
+
+            // Add (and possibly download) blobs
+            add_blobs(
+                &mut archive,
+                package,
+                output_directory,
+                &Path::new("root/opt/oxide").join(&package.service_name).join(BLOB),
+            )
+            .await?;
+
+            // Add SMF directory
+            add_smf(&config, &package, &mut archive, &Path::new("root").join("var/svc/manifest/site"))?;
+
+            archive.finish()?;
+            // TODO: ... Digests?
+        } else {
+            // Create a tarball containing the necessary executable and SMF
+            // information.
+            let tarfile = output_directory
+                .join(format!("{}.tar", package.service_name));
+            let file = open_tarfile(&tarfile)?;
+            // Create an archive filled with:
+            // - The binary
+            // - The corresponding SMF directory
+            //
+            // TODO: We could add compression here, if we'd like?
+            let mut archive = Builder::new(file);
+            archive.mode(tar::HeaderMode::Deterministic);
+
+            // Attempt to add the rust binary, if one was built.
+            maybe_add_rust_binary(&package, &mut archive, Path::new(""), release)?;
+
+            // Add SMF directory
+            add_smf(&config, &package, &mut archive, &Path::new(PKG))?;
+
+            // Add (and possibly download) blobs
+            add_blobs(
+                &mut archive,
+                package,
+                output_directory,
+                &Path::new(BLOB),
+            )
+            .await?;
+
+            let mut file = archive.into_inner().map_err(|err| {
+                anyhow!("Failed to finalize archive: {}", err)
+            })?;
+
+            // Once we've created the archive, acquire a digest which can
+            // later be used for verification.
+            let digest = sha256_digest(&mut file)?;
+            digests.insert(
+                package.service_name.clone(),
+                digest.as_ref().into(),
+            );
         }
     }
 
@@ -330,45 +291,21 @@ async fn do_package(
     Ok(())
 }
 
-// Adds all files within "path" to "archive".
+// Adds blobs from S3 to the package.
 //
-// Within the archive, all files are renamed to "dst_prefix/<file_name>".
-//
-// TODO: Is this redundant w/append_dir_all?
-fn add_path_to_archive<W: std::io::Write>(
+// - `archive`: The archive to add the blobs into
+// - `package`: The package being constructed
+// - `download_directory`: The location to which the blobs should be downloaded
+// - `destination_path`: The destination path of the blobs within the archive
+async fn add_blobs<W: std::io::Write>(
     archive: &mut Builder<W>,
-    path: &Path,
-    dst_prefix: &Path,
-) -> Result<()> {
-    for entry in walkdir::WalkDir::new(&path) {
-        let entry =
-            entry.map_err(|err| anyhow!("Cannot access entry: {}", err))?;
-        if entry.file_name().to_string_lossy().starts_with('.') {
-            // Omit hidden files - we don't want to include text editor
-            // artifacts in the tarfile.
-            continue;
-        }
-        let dst = dst_prefix.join(entry.path().strip_prefix(&path)?);
-        println!(
-            "Archiving {} -> {}",
-            entry.path().to_string_lossy(),
-            dst.to_string_lossy()
-        );
-        archive
-            .append_path_with_name(entry.path(), dst)
-            .map_err(|err| anyhow!("Cannot append file to tarfile: {}", err))?;
-    }
-    Ok(())
-}
-
-async fn add_blobs(
-    archive: &mut Builder<std::fs::File>,
-    name: &String,
-    package: &RustPackage,
-    output_directory: &Path,
+    package: &Package,
+    download_directory: &Path,
+    destination_path: &Path,
 ) -> Result<()> {
     if let Some(blobs) = &package.blobs {
-        let blobs_path = output_directory.join(name);
+        let blobs_path = download_directory.join(&package.service_name);
+        println!("Downloading blobs to: {}", blobs_path.to_string_lossy());
         std::fs::create_dir_all(&blobs_path)?;
         for blob in blobs {
             let blob_path = blobs_path.join(blob);
@@ -378,7 +315,58 @@ async fn add_blobs(
                 download(&blob.to_string_lossy(), &blob_path).await?;
             }
         }
-        add_path_to_archive(archive, blobs_path.as_path(), Path::new(BLOB))?;
+        archive.append_dir_all(&destination_path, &blobs_path)?;
+    }
+    Ok(())
+}
+
+// Helper to open a tarfile for reading/writing.
+fn open_tarfile(tarfile: &Path) -> Result<std::fs::File> {
+    OpenOptions::new()
+        .write(true)
+        .read(true)
+        .truncate(true)
+        .create(true)
+        .open(&tarfile)
+        .map_err(|err| anyhow!("Cannot create tarfile: {}", err))
+}
+
+// Adds the SMF directory for the service to the associated archive.
+fn add_smf<W: std::io::Write>(
+    config: &Config,
+    package: &Package,
+    archive: &mut tar::Builder<W>,
+    dst_prefix: &Path,
+) -> Result<()> {
+    let smf_path =
+        Path::new(&config.smf).join(&package.service_name);
+    let dst = dst_prefix.join(&package.service_name);
+    archive.append_dir_all(&dst, &smf_path)?;
+
+    Ok(())
+}
+
+// Optionally adds a rust binary to the archive.
+//
+// - `package`: The package being constructed
+// - `archive`: The archive to which the binary (might) be added (if it exists)
+// - `dst_directory`: The pathwhere the binary should be added to the archive.
+// - `release`: True if the binary was built in "release" mode.
+fn maybe_add_rust_binary<W: std::io::Write>(
+    package: &Package,
+    archive: &mut tar::Builder<W>,
+    dst_directory: &Path,
+    release: bool,
+) -> Result<()> {
+    if let Some(rust_pkg) = &package.rust {
+        archive
+            .append_path_with_name(
+                rust_pkg.local_binary_path(release),
+                dst_directory.join(&rust_pkg.binary_name),
+            )
+            .map_err(|err| {
+                anyhow!("Cannot append binary to tarfile: {}", err)
+            })?;
     }
     Ok(())
 }
@@ -415,33 +403,19 @@ fn do_install(
     // Copy all packages to the install location in parallel.
     let packages: Vec<(&String, &Package)> = config.packages.iter().collect();
     packages.into_par_iter().try_for_each(|(_, package)| -> Result<()> {
-        match package {
-            // TODO: These are *nearly* identical, we can de-dup 'em.
-            Package::Rust(package) => {
-                let tarfile =
-                    artifact_dir.join(format!("{}.tar", package.service_name));
-                let src = tarfile.as_path();
-                let dst = install_dir.join(src.strip_prefix(artifact_dir)?);
-                println!(
-                    "Installing Rust Service: {} -> {}",
-                    src.to_string_lossy(),
-                    dst.to_string_lossy()
-                );
-                std::fs::copy(&src, &dst)?;
-            }
-            Package::Zone(package) => {
-                let tarfile = artifact_dir
-                    .join(format!("{}.tar.gz", package.service_name));
-                let src = tarfile.as_path();
-                let dst = install_dir.join(src.strip_prefix(artifact_dir)?);
-                println!(
-                    "Installing Zone: {} -> {}",
-                    src.to_string_lossy(),
-                    dst.to_string_lossy()
-                );
-                std::fs::copy(&src, &dst)?;
-            }
-        }
+        let tarfile = match package.zone {
+            Some(_) => artifact_dir.join(format!("{}.tar.gz", package.service_name)),
+            None => artifact_dir.join(format!("{}.tar", package.service_name)),
+        };
+
+        let src = tarfile.as_path();
+        let dst = install_dir.join(src.strip_prefix(artifact_dir)?);
+        println!(
+            "Installing Service: {} -> {}",
+            src.to_string_lossy(),
+            dst.to_string_lossy()
+        );
+        std::fs::copy(&src, &dst)?;
         Ok(())
     })?;
 
@@ -451,37 +425,31 @@ fn do_install(
     // Extract and install the bootstrap service, which itself extracts and
     // installs other services.
     for (_, package) in &config.packages {
-        match package {
-            Package::Rust(package) => {
-                if let Some(manifest) = &package.bootstrap {
-                    let tar_path = install_dir
-                        .join(format!("{}.tar", package.service_name));
-                    let service_path = install_dir.join(&package.service_name);
-                    println!(
-                        "Unpacking {} to {}",
-                        tar_path.to_string_lossy(),
-                        service_path.to_string_lossy()
-                    );
+        if let Some(manifest) = &package.bootstrap {
+            let tar_path = install_dir
+                .join(format!("{}.tar", package.service_name));
+            let service_path = install_dir.join(&package.service_name);
+            println!(
+                "Unpacking {} to {}",
+                tar_path.to_string_lossy(),
+                service_path.to_string_lossy()
+            );
 
-                    let tar_file = std::fs::File::open(&tar_path)?;
-                    let _ = std::fs::remove_dir_all(&service_path);
-                    std::fs::create_dir_all(&service_path)?;
-                    let mut archive = tar::Archive::new(tar_file);
-                    archive.unpack(&service_path)?;
+            let tar_file = std::fs::File::open(&tar_path)?;
+            let _ = std::fs::remove_dir_all(&service_path);
+            std::fs::create_dir_all(&service_path)?;
+            let mut archive = tar::Archive::new(tar_file);
+            archive.unpack(&service_path)?;
 
-                    let mut manifest_path = install_dir.to_path_buf();
-                    manifest_path.push(&package.service_name);
-                    manifest_path.push(PKG);
-                    manifest_path.push(manifest);
-                    println!(
-                        "Installing bootstrap service from {}",
-                        manifest_path.to_string_lossy()
-                    );
-                    smf::Config::import().run(&manifest_path)?;
-                }
-            }
-            // We don't support any other bootstrap mechanisms at the moment.
-            _ => {}
+            let mut manifest_path = install_dir.to_path_buf();
+            manifest_path.push(&package.service_name);
+            manifest_path.push(PKG);
+            manifest_path.push(manifest);
+            println!(
+                "Installing bootstrap service from {}",
+                manifest_path.to_string_lossy()
+            );
+            smf::Config::import().run(&manifest_path)?;
         }
     }
 
@@ -491,18 +459,14 @@ fn do_install(
 // Attempts to both disable and delete all requested packages.
 fn uninstall_all_packages(config: &Config) {
     for package in config.packages.values() {
-        match package {
-            Package::Rust(package) => {
-                let _ = smf::Adm::new().disable().synchronous().run(
-                    smf::AdmSelection::ByPattern(&[&package.service_name]),
-                );
-                let _ =
-                    smf::Config::delete().force().run(&package.service_name);
-            }
-            Package::Zone(_) => {
-                // At the moment, zone uninstallation is the responsibility of
-                // the bootstrap agent.
-            }
+        if let Some(_) = &package.zone {
+            // TODO: At the moment, zones are entirely managed by the sled
+            // agent.
+        } else {
+            let _ = smf::Adm::new().disable().synchronous().run(
+                smf::AdmSelection::ByPattern(&[&package.service_name]),
+            );
+            let _ = smf::Config::delete().force().run(&package.service_name);
         }
     }
 }
