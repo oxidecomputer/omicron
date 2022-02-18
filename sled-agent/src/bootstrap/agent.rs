@@ -220,6 +220,24 @@ impl Agent {
         // Presumably, we'd try to contact a Nexus elsewhere
         // on the rack, or use the unlocked local storage to remember
         // a decision from the previous boot.
+        //
+        // TODO: The RSS *could* tell us this info during bootstrap, then Nexus
+        // can be responsible afterwards?
+
+        // TODO: The calls to "launch" (here, *and* in instances.rs) should
+        // be shared with the code that currently lives in "storage_maanger.rs".
+        //
+        // The {lookup, create, boot} calls should mostly live elsewhere -
+        // though we're going to need to pass additional info to:
+        // - Manage VNICs + Running Zones (NEW)
+        // - Configure IP addresses (NEW)
+        // - Reference the SMF manifests (previously in launch)
+        // - Hold references to these zones in the agent (NEW)
+        //
+        // (related: Should this actually be the bootstrap agent doing this
+        // work? Maybe the sled agent should be in charge of some of the zone
+        // management?)
+
         self.launch(&digests, &tar_source, &destination, "nexus")?;
 
         // TODO-correctness: The same note as above applies to oximeter.
@@ -404,7 +422,7 @@ impl Agent {
         let service = service.as_ref();
 
         info!(&self.log, "Extracting {} Service", service);
-        let tar_name = format!("{}.tar", service);
+        let tar_name = format!("{}.tar.gz", service);
         let tar_path = tar_source.join(&tar_name);
 
         let digest_expected = digests.get(service).ok_or_else(|| {

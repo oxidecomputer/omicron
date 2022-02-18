@@ -362,9 +362,11 @@ async fn ensure_running_zone(
             Ok(zone)
         }
         Err(RunningZoneError::NotRunning(_state)) => {
+            // TODO:
             unimplemented!("Handle a zone which exists, but is not running");
         }
         Err(_) => {
+            // TODO:
             unimplemented!(
                 "Handle a zone which exists, has some other problem"
             );

@@ -71,6 +71,9 @@ impl Pool {
                 self.pool.get().await.map_err(|e| {
                     backoff::BackoffError::Transient(anyhow!(e))
                 })?;
+
+            // TODO: Is this command sufficient? Don't we want to show that CRDB
+            // is up *and* that the tables have been populated?
             conn.batch_execute_async("SHOW DATABASES;")
                 .await
                 .map_err(|e| backoff::BackoffError::Transient(anyhow!(e)))
