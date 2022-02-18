@@ -156,6 +156,136 @@ async fn do_check(config: &Config) -> Result<()> {
     Ok(())
 }
 
+async fn create_zone_package(
+    config: &Config,
+    package: &Package,
+    output_directory: &Path,
+    release: bool,
+) -> Result<std::fs::File> {
+    // Create a tarball which will become an Omicron-brand image
+    // archive.
+    let tarfile = output_directory
+        .join(format!("{}.tar.gz", package.service_name));
+    println!("Creating zone image: {}", tarfile.to_string_lossy());
+    let file = open_tarfile(&tarfile)?;
+    let gzw = flate2::write::GzEncoder::new(
+        file,
+        flate2::Compression::fast(),
+    );
+    let mut archive = Builder::new(gzw);
+    archive.mode(tar::HeaderMode::Deterministic);
+
+    // The first file in the archive must always be a JSON file
+    // which identifies the format of the rest of the archive.
+    //
+    // See the OMICRON1(5) man page for more detail.
+    let mut root_json =
+        tokio::fs::File::from_std(tempfile::tempfile()?);
+    let contents = r#"{"v":"1","t":"layer"}"#;
+    root_json.write_all(contents.as_bytes()).await?;
+    root_json.seek(std::io::SeekFrom::Start(0)).await?;
+    archive.append_file(
+        "oxide.json",
+        &mut root_json.into_std().await,
+    )?;
+
+    archive.append_dir("root", ".")?;
+    archive.append_dir("root/opt", ".")?;
+    archive.append_dir("root/opt/oxide", ".")?;
+
+    // All other files are contained under the "root" prefix.
+    //
+    // "path.from" exists on the machine running the package
+    // command, "path.to" is an absolute path (remapped under
+    // "root") which will again appear like an absolute path within
+    // the namespace of the running Zone.
+    if let Some(zone_pkg) = &package.zone {
+        for path in &zone_pkg.paths {
+            println!("Adding path: {:#?}", path);
+            let leading_slash = std::path::MAIN_SEPARATOR.to_string();
+            let dst = Path::new("root")
+                .join(&path.to.strip_prefix(leading_slash)?);
+            archive.append_dir_all(dst, &path.from)?;
+        }
+    }
+
+    // Attempt to add the rust binary, if one was built.
+    if let Some(rust_pkg) = &package.rust {
+        let dst = Path::new("root/opt/oxide").join(&package.service_name);
+        archive.append_dir(&dst, ".")?;
+        let dst = dst.join("bin");
+        archive.append_dir(&dst, ".")?;
+
+        add_rust_binary(
+            &rust_pkg,
+            &mut archive,
+            &dst,
+            release,
+        )?;
+    }
+
+    // Add (and possibly download) blobs
+    add_blobs(
+        &mut archive,
+        package,
+        output_directory,
+        &Path::new("root/opt/oxide").join(&package.service_name).join(BLOB),
+    )
+    .await?;
+
+    // Add SMF directory
+    add_smf(&config, &package, &mut archive, &Path::new("root").join("var/svc/manifest/site"))?;
+
+    let file = archive.into_inner().map_err(|err| {
+        anyhow!("Failed to finalize archive: {}", err)
+    })?;
+
+    Ok(file.finish()?)
+}
+
+async fn create_tarball_package(
+    config: &Config,
+    package: &Package,
+    output_directory: &Path,
+    release: bool,
+) -> Result<std::fs::File> {
+    // Create a tarball containing the necessary executable and SMF
+    // information.
+    let tarfile = output_directory
+        .join(format!("{}.tar", package.service_name));
+    let file = open_tarfile(&tarfile)?;
+    // Create an archive filled with:
+    // - The binary
+    // - The corresponding SMF directory
+    //
+    // TODO: We could add compression here, if we'd like?
+    let mut archive = Builder::new(file);
+    archive.mode(tar::HeaderMode::Deterministic);
+
+    // Attempt to add the rust binary, if one was built.
+    if let Some(rust_pkg) = &package.rust {
+        add_rust_binary(&rust_pkg, &mut archive, Path::new(""), release)?;
+    }
+
+    // Add SMF directory
+    add_smf(&config, &package, &mut archive, &Path::new(PKG))?;
+
+    // Add (and possibly download) blobs
+    add_blobs(
+        &mut archive,
+        package,
+        output_directory,
+        &Path::new(BLOB),
+    )
+    .await?;
+
+    let file = archive.into_inner().map_err(|err| {
+        anyhow!("Failed to finalize archive: {}", err)
+    })?;
+
+    Ok(file)
+}
+
 async fn do_package(
     config: &Config,
     output_directory: &Path,
@@ -175,115 +305,19 @@ async fn do_package(
             rust_pkg.build(&package_name, release)?;
         }
 
-        if let Some(zone_pkg) = &package.zone {
-            // Create a tarball which will become an Omicron-brand image
-            // archive.
-            let tarfile = output_directory
-                .join(format!("{}.tar.gz", package.service_name));
-            println!("Creating zone image: {}", tarfile.to_string_lossy());
-            let file = open_tarfile(&tarfile)?;
-            let gzw = flate2::write::GzEncoder::new(
-                file,
-                flate2::Compression::fast(),
-            );
-            let mut archive = Builder::new(gzw);
-            archive.mode(tar::HeaderMode::Deterministic);
-
-            // The first file in the archive must always be a JSON file
-            // which identifies the format of the rest of the archive.
-            //
-            // See the OMICRON1(5) man page for more detail.
-            let mut root_json =
-                tokio::fs::File::from_std(tempfile::tempfile()?);
-            let contents = r#"{"v":"1","t":"layer"}"#;
-            root_json.write_all(contents.as_bytes()).await?;
-            root_json.seek(std::io::SeekFrom::Start(0)).await?;
-            archive.append_file(
-                "oxide.json",
-                &mut root_json.into_std().await,
-            )?;
-
-            archive.append_dir("root", ".")?;
-            archive.append_dir("root/opt", ".")?;
-            archive.append_dir("root/opt/oxide", ".")?;
-
-            // All other files are contained under the "root" prefix.
-            //
-            // "path.from" exists on the machine running the package
-            // command, "path.to" is an absolute path (remapped under
-            // "root") which will again appear like an absolute path within
-            // the namespace of the running Zone.
-            for path in &zone_pkg.paths {
-                println!("Adding path: {:#?}", path);
-                let leading_slash = std::path::MAIN_SEPARATOR.to_string();
-                let dst = Path::new("root")
-                    .join(&path.to.strip_prefix(leading_slash)?);
-                archive.append_dir_all(dst, &path.from)?;
-            }
-
-            // Attempt to add the rust binary, if one was built.
-            maybe_add_rust_binary(
-                &package,
-                &mut archive,
-                &Path::new("root/opt/oxide").join(&package.service_name).join("bin"),
-                release,
-            )?;
-
-            // Add (and possibly download) blobs
-            add_blobs(
-                &mut archive,
-                package,
-                output_directory,
-                &Path::new("root/opt/oxide").join(&package.service_name).join(BLOB),
-            )
-            .await?;
-
-            // Add SMF directory
-            add_smf(&config, &package, &mut archive, &Path::new("root").join("var/svc/manifest/site"))?;
-
-            archive.finish()?;
-            // TODO: ... Digests?
+        let mut file = if package.zone.is_some() {
+            create_zone_package(config, package, output_directory, release).await?
         } else {
-            // Create a tarball containing the necessary executable and SMF
-            // information.
-            let tarfile = output_directory
-                .join(format!("{}.tar", package.service_name));
-            let file = open_tarfile(&tarfile)?;
-            // Create an archive filled with:
-            // - The binary
-            // - The corresponding SMF directory
-            //
-            // TODO: We could add compression here, if we'd like?
-            let mut archive = Builder::new(file);
-            archive.mode(tar::HeaderMode::Deterministic);
+            create_tarball_package(config, package, output_directory, release).await?
+        };
 
-            // Attempt to add the rust binary, if one was built.
-            maybe_add_rust_binary(&package, &mut archive, Path::new(""), release)?;
-
-            // Add SMF directory
-            add_smf(&config, &package, &mut archive, &Path::new(PKG))?;
-
-            // Add (and possibly download) blobs
-            add_blobs(
-                &mut archive,
-                package,
-                output_directory,
-                &Path::new(BLOB),
-            )
-            .await?;
-
-            let mut file = archive.into_inner().map_err(|err| {
-                anyhow!("Failed to finalize archive: {}", err)
-            })?;
-
-            // Once we've created the archive, acquire a digest which can
-            // later be used for verification.
-            let digest = sha256_digest(&mut file)?;
-            digests.insert(
-                package.service_name.clone(),
-                digest.as_ref().into(),
-            );
-        }
+        // Once we've created the archive, acquire a digest which can
+        // later be used for verification.
+        let digest = sha256_digest(&mut file)?;
+        digests.insert(
+            package.service_name.clone(),
+            digest.as_ref().into(),
+        );
     }
 
     let toml = toml::to_string(&digests)?;
@@ -346,28 +380,26 @@ fn add_smf<W: std::io::Write>(
     Ok(())
 }
 
-// Optionally adds a rust binary to the archive.
+// Adds a rust binary to the archive.
 //
 // - `package`: The package being constructed
-// - `archive`: The archive to which the binary (might) be added (if it exists)
-// - `dst_directory`: The pathwhere the binary should be added to the archive.
-// - `release`: True if the binary was built in "release" mode.
-fn maybe_add_rust_binary<W: std::io::Write>(
-    package: &Package,
+// - `archive`: The archive to which the binary should be added
+// - `dst_directory`: The path where the binary should be added in the archive
+// - `release`: True if the binary was built in "release" mod
+fn add_rust_binary<W: std::io::Write>(
+    rust_pkg: &RustPackage,
     archive: &mut tar::Builder<W>,
     dst_directory: &Path,
     release: bool,
 ) -> Result<()> {
-    if let Some(rust_pkg) = &package.rust {
-        archive
-            .append_path_with_name(
-                rust_pkg.local_binary_path(release),
-                dst_directory.join(&rust_pkg.binary_name),
-            )
-            .map_err(|err| {
-                anyhow!("Cannot append binary to tarfile: {}", err)
-            })?;
-    }
+    archive
+        .append_path_with_name(
+            rust_pkg.local_binary_path(release),
+            dst_directory.join(&rust_pkg.binary_name),
+        )
+        .map_err(|err| {
+            anyhow!("Cannot append binary to tarfile: {}", err)
+        })?;
     Ok(())
 }
 
