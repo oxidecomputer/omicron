@@ -4,15 +4,15 @@
 
 //! API for controlling a single instance.
 
-use crate::addrobj::AddrObject;
 use crate::common::{
     instance::{Action as InstanceAction, InstanceStates, PROPOLIS_PORT},
     vlan::VlanID,
 };
+use crate::illumos::addrobj::AddrObject;
 use crate::illumos::svc::wait_for_service;
-use crate::illumos::zone::{AddrType, PROPOLIS_ZONE_PREFIX};
+use crate::illumos::vnic::{IdAllocator, Vnic};
+use crate::illumos::zone::{AddressRequest, PROPOLIS_ZONE_PREFIX};
 use crate::instance_manager::InstanceTicket;
-use crate::vnic::{IdAllocator, Vnic};
 use anyhow::anyhow;
 use futures::lock::{Mutex, MutexGuard};
 use omicron_common::api::external::NetworkInterface;
@@ -504,7 +504,7 @@ impl Instance {
         let network = Zones::create_address(
             &zname,
             &addrobj,
-            AddrType::Dhcp,
+            AddressRequest::Dhcp,
         )?;
         info!(inner.log, "Created address {} for zone: {}", network, zname);
 
@@ -652,7 +652,7 @@ mod test {
         zone::MockZones,
     };
     use crate::mocks::MockNexusClient;
-    use crate::vnic::control_vnic_name;
+    use crate::illumos::vnic::control_vnic_name;
     use chrono::Utc;
     use dropshot::{
         endpoint, ApiDescription, ConfigDropshot, ConfigLogging,
@@ -933,7 +933,7 @@ mod test {
             .times(1)
             .in_sequence(&mut seq)
             .returning(|zone, iface, addrtype| {
-                assert!(matches!(addrtype, AddrType::Dhcp));
+                assert!(matches!(addrtype, AddressRequest::Dhcp));
                 assert_eq!(zone, propolis_zone_name(&test_propolis_uuid()));
                 assert_eq!(iface, &AddrObject::new_control(&control_vnic_name(0)));
                 Ok("127.0.0.1/24".parse().unwrap())

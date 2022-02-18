@@ -4,17 +4,24 @@
 
 //! Utilities to manage running zones.
 
-use crate::addrobj::AddrObject;
+use crate::illumos::addrobj::AddrObject;
 use crate::illumos::svc::wait_for_service;
-use crate::illumos::zone::AddrType;
-use crate::vnic::Vnic;
+use crate::illumos::zone::{AddressRequest, ZONE_PREFIX};
+use crate::illumos::vnic::{IdAllocator, Vnic};
 use slog::Logger;
 use std::net::SocketAddr;
+use std::path::PathBuf;
 
 #[cfg(test)]
-use crate::illumos::zone::MockZones as Zones;
+use crate::illumos::{
+    dladm::MockDladm as Dladm,
+    zone::MockZones as Zones,
+};
 #[cfg(not(test))]
-use crate::illumos::zone::Zones;
+use crate::illumos::{
+    dladm::Dladm,
+    zone::Zones,
+};
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
@@ -33,25 +40,22 @@ pub enum Error {
     #[error("Zone operation failed: {0}")]
     Operation(#[from] crate::illumos::zone::Error),
 
+    #[error("Zone error accessing datalink: {0}")]
+    Datalink(#[from] crate::illumos::dladm::Error),
+
     #[error("Timeout waiting for a service: {0}")]
     Timeout(String),
 }
 
 /// Represents a running zone.
 pub struct RunningZone {
-    log: Logger,
-
-    // Name of the zone.
-    name: String,
-
-    // NIC used for control plane communication.
-    _nic: Vnic,
+    inner: InstalledZone,
     address: SocketAddr,
 }
 
 impl RunningZone {
     pub fn name(&self) -> &str {
-        &self.name
+        &self.inner.name
     }
 
     pub fn address(&self) -> SocketAddr {
@@ -84,36 +88,32 @@ impl RunningZone {
     ///
     /// Note that the zone must already be configured to be booted.
     pub async fn boot(
-        log: &Logger,
-        zone_name: String,
-        nic: Vnic,
-        addrtype: AddrType,
+        zone: InstalledZone,
+        addrtype: AddressRequest,
         port: u16,
     ) -> Result<Self, Error> {
         // Boot the zone.
-        info!(log, "Zone {} booting", zone_name);
+        info!(zone.log, "Zone booting");
 
         // TODO: "Ensure booted", to make this more idempotent?
-        Zones::boot(&zone_name)?;
+        Zones::boot(&zone.name)?;
 
         // Wait for the network services to come online, then create an address
         // to use for communicating with the newly created zone.
         let fmri = "svc:/milestone/network:default";
-        wait_for_service(Some(&zone_name), fmri)
+        wait_for_service(Some(&zone.name), fmri)
             .await
             .map_err(|_| Error::Timeout(fmri.to_string()))?;
 
-        let addrobj = AddrObject::new_control(nic.name());
+        let addrobj = AddrObject::new_control(zone.control_vnic.name());
         let network = Zones::ensure_address(
-            &zone_name,
+            &zone.name,
             &addrobj,
             addrtype,
         )?;
 
         Ok(RunningZone {
-            log: log.clone(),
-            name: zone_name,
-            _nic: nic,
+            inner: zone,
             address: SocketAddr::new(network.ip(), port),
         })
     }
@@ -130,19 +130,19 @@ impl RunningZone {
     pub async fn get(
         log: &Logger,
         zone_prefix: &str,
-        addrtype: AddrType,
+        addrtype: AddressRequest,
         port: u16,
     ) -> Result<Self, Error> {
-        let zone = Zones::get()?
+        let zone_info = Zones::get()?
             .into_iter()
-            .find(|zone| zone.name().starts_with(&zone_prefix))
+            .find(|zone_info| zone_info.name().starts_with(&zone_prefix))
             .ok_or_else(|| Error::NotFound)?;
 
-        if zone.state() != zone::State::Running {
-            return Err(Error::NotRunning(zone.state()));
+        if zone_info.state() != zone::State::Running {
+            return Err(Error::NotRunning(zone_info.state()));
         }
 
-        let zone_name = zone.name();
+        let zone_name = zone_info.name();
         let vnic_name = Zones::get_control_interface(zone_name)?;
         let addrobj = AddrObject::new_control(&vnic_name);
         let network = Zones::ensure_address(
@@ -152,9 +152,13 @@ impl RunningZone {
         )?;
 
         Ok(Self {
-            log: log.clone(),
-            name: zone_name.to_string(),
-            _nic: Vnic::wrap_existing(vnic_name),
+            inner: InstalledZone {
+                log: log.new(o!("zone" => zone_name.to_string())),
+                name: zone_name.to_string(),
+                control_vnic: Vnic::wrap_existing(vnic_name),
+                // TODO: How can the sled agent recoup other vnics?
+                _other_vnics: vec![],
+            },
             address: SocketAddr::new(network.ip(), port),
         })
     }
@@ -162,13 +166,81 @@ impl RunningZone {
 
 impl Drop for RunningZone {
     fn drop(&mut self) {
-        match Zones::halt_and_remove(&self.log, self.name()) {
+        match Zones::halt_and_remove(&self.inner.log, self.name()) {
             Ok(()) => {
-                info!(self.log, "Stopped and uninstalled zone: {}", self.name)
+                info!(self.inner.log, "Stopped and uninstalled zone")
             }
             Err(e) => {
-                warn!(self.log, "Failed to stop zone {}: {}", self.name, e)
+                warn!(self.inner.log, "Failed to stop zone: {}", e)
             }
         }
+    }
+}
+
+pub struct InstalledZone {
+    log: Logger,
+
+    // Name of the Zone.
+    name: String,
+
+    // NIC used for control plane communication.
+    control_vnic: Vnic,
+
+    // Other NICs being used by the zone.
+    _other_vnics: Vec<Vnic>,
+}
+
+impl InstalledZone {
+    // TODO: Maybe should have a "get" method, like "RunningZone"?
+
+    pub async fn install(
+        log: &Logger,
+        vnic_id_allocator: &IdAllocator,
+        service_name: &str,
+        unique_name: Option<&str>,
+        datasets: &[zone::Dataset],
+        devices: &[zone::Device],
+        vnics: Vec<Vnic>,
+    ) -> Result<InstalledZone, Error> {
+        let physical_dl = Dladm::find_physical()?;
+        let control_vnic = Vnic::new_control(vnic_id_allocator, &physical_dl, None)?;
+
+        // The zone name is based on:
+        // - A unique Oxide prefix ("oxz_")
+        // - The name of the service being hosted (e.g., "nexus")
+        // - An optional, service-unique identifier (typically a UUID).
+        //
+        // This results in a zone name which is distinct across different zpools,
+        // but stable and predictable across reboots.
+        let mut zone_name = format!("{}{}", ZONE_PREFIX, service_name);
+        if let Some(suffix) = unique_name {
+            zone_name.push_str(&format!("_{}", suffix));
+        }
+
+        let zone_image_path =
+            PathBuf::from(&format!("/opt/oxide/{}.tar.gz", service_name));
+
+        let vnic_names: Vec<String> = vnics.iter()
+            .map(|vnic| vnic.name().to_string())
+            .chain(std::iter::once(control_vnic.name().to_string()))
+            .collect();
+
+        Zones::install_omicron_zone(
+            log,
+            &zone_name,
+            &zone_image_path,
+            &datasets,
+            &devices,
+            vnic_names,
+        )?;
+
+        Ok(
+            InstalledZone {
+                log: log.new(o!("zone" => zone_name.clone())),
+                name: zone_name,
+                control_vnic,
+                _other_vnics: vnics,
+            }
+        )
     }
 }

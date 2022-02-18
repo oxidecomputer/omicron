@@ -4,10 +4,10 @@
 
 //! Management of sled-local storage.
 
-use crate::illumos::running_zone::{Error as RunningZoneError, RunningZone};
-use crate::illumos::zone::AddrType;
+use crate::illumos::running_zone::{Error as RunningZoneError, RunningZone, InstalledZone};
+use crate::illumos::zone::AddressRequest;
+use crate::illumos::vnic::{IdAllocator};
 use crate::illumos::{zfs::Mountpoint, zone::ZONE_PREFIX, zpool::ZpoolInfo};
-use crate::vnic::{IdAllocator, Vnic};
 use futures::stream::FuturesOrdered;
 use futures::FutureExt;
 use futures::StreamExt;
@@ -32,11 +32,10 @@ use tokio::task::JoinHandle;
 use uuid::Uuid;
 
 #[cfg(not(test))]
-use crate::illumos::{dladm::Dladm, zfs::Zfs, zone::Zones, zpool::Zpool};
+use crate::illumos::{zfs::Zfs, zpool::Zpool};
 #[cfg(test)]
 use crate::illumos::{
-    dladm::MockDladm as Dladm, zfs::MockZfs as Zfs, zone::MockZones as Zones,
-    zpool::MockZpool as Zpool,
+    zfs::MockZfs as Zfs, zpool::MockZpool as Zpool,
 };
 
 #[cfg(test)]
@@ -321,18 +320,12 @@ async fn ensure_running_zone(
     dataset_name: &DatasetName,
     do_format: bool,
 ) -> Result<RunningZone, Error> {
-    let prefix = match dataset_info.address.ip() {
-        std::net::IpAddr::V4(_) => 32,
-        std::net::IpAddr::V6(_) => 64,
-    };
-    let addr =
-        ipnetwork::IpNetwork::new(dataset_info.address.ip(), prefix).unwrap();
-    let addrtype = AddrType::Static(addr);
+    let address_request = AddressRequest::new_static(dataset_info.address.ip(), None);
 
     match RunningZone::get(
         log,
         &dataset_info.zone_prefix(),
-        addrtype,
+        address_request,
         dataset_info.address.port(),
     )
     .await
@@ -343,17 +336,20 @@ async fn ensure_running_zone(
         }
         Err(RunningZoneError::NotFound) => {
             info!(log, "Zone for {} was not found", dataset_name.full());
-            let (nic, zname) = configure_zone(
+
+            let installed_zone = InstalledZone::install(
                 log,
                 vnic_id_allocator,
-                dataset_info,
-                dataset_name,
-            )?;
+                &dataset_info.name,
+                Some(&dataset_name.pool_name),
+                &[zone::Dataset { name: dataset_name.full() }],
+                &[],
+                vec![],
+            ).await?;
+
             let zone = RunningZone::boot(
-                log,
-                zname,
-                nic,
-                addrtype,
+                installed_zone,
+                address_request,
                 dataset_info.address.port(),
             )
             .await?;
@@ -372,43 +368,6 @@ async fn ensure_running_zone(
             );
         }
     }
-}
-
-// Creates a VNIC and configures a zone.
-fn configure_zone(
-    log: &Logger,
-    vnic_id_allocator: &IdAllocator,
-    dataset_info: &DatasetInfo,
-    dataset_name: &DatasetName,
-) -> Result<(Vnic, String), Error> {
-    let physical_dl = Dladm::find_physical()?;
-    let nic = Vnic::new_control(vnic_id_allocator, &physical_dl, None)?;
-
-    // The zone name is based on:
-    // - A unique Oxide prefix ("oxz_")
-    // - The name of the dataset being hosted (e.g., "cockroachdb")
-    // - Unique Zpool identifier (typically a UUID).
-    //
-    // This results in a zone name which is distinct across different zpools,
-    // but stable and predictable across reboots.
-    let zname =
-        format!("{}{}", dataset_info.zone_prefix(), dataset_name.pool_name);
-
-    let zone_image =
-        PathBuf::from(&format!("/opt/oxide/{}.tar.gz", dataset_info.name));
-
-    // Configure the new zone - this should be identical to the base zone,
-    // but with a specified VNIC and pool.
-    Zones::install_omicron_zone(
-        log,
-        &zname,
-        &zone_image,
-        &[zone::Dataset { name: dataset_name.full() }],
-        &[],
-        vec![nic.name().to_string()],
-    )
-    .map_err(|e| Error::ZoneConfiguration(e))?;
-    Ok((nic, zname))
 }
 
 type NotifyFut = dyn futures::Future<Output = Result<(), anyhow::Error>> + Send;

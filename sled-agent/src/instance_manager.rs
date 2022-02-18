@@ -5,7 +5,7 @@
 //! API for controlling multiple instances on a sled.
 
 use crate::common::vlan::VlanID;
-use crate::vnic::IdAllocator;
+use crate::illumos::vnic::IdAllocator;
 use omicron_common::api::internal::nexus::InstanceRuntimeState;
 use omicron_common::api::internal::sled_agent::InstanceHardware;
 use omicron_common::api::internal::sled_agent::InstanceMigrateParams;

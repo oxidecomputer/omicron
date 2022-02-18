@@ -6,10 +6,10 @@
 
 use ipnetwork::IpNetwork;
 use slog::Logger;
-use std::net::SocketAddr;
+use std::net::{IpAddr, SocketAddr};
 use uuid::Uuid;
 
-use crate::addrobj::AddrObject;
+use crate::illumos::addrobj::AddrObject;
 use crate::illumos::dladm::VNIC_PREFIX_CONTROL;
 use crate::illumos::zfs::ZONE_ZFS_DATASET_MOUNTPOINT;
 use crate::illumos::{execute, PFEXEC};
@@ -72,10 +72,25 @@ pub enum Error {
     NotFound,
 }
 
+/// Describes the type of addresses which may be requested from a zone.
 #[derive(Copy, Clone, Debug)]
-pub enum AddrType {
+pub enum AddressRequest {
     Dhcp,
     Static(IpNetwork),
+}
+
+impl AddressRequest {
+    /// Convenience function for creating an `AddressRequest` from a static IP.
+    pub fn new_static(ip: IpAddr, prefix: Option<u8>) -> Self {
+        let prefix = prefix.unwrap_or_else(|| {
+                match ip {
+                    IpAddr::V4(_) => 32,
+                    IpAddr::V6(_) => 64,
+                }
+            });
+        let addr = IpNetwork::new(ip, prefix).unwrap();
+        AddressRequest::Static(addr)
+    }
 }
 
 /// Wraps commands for interacting with Zones.
@@ -459,11 +474,11 @@ impl Zones {
     pub fn ensure_address(
         zone: &str,
         addrobj: &AddrObject,
-        addrtype: AddrType,
+        addrtype: AddressRequest,
     ) -> Result<IpNetwork, Error> {
         match Self::get_address(zone, addrobj) {
             Ok(addr) => {
-                if let AddrType::Static(expected_addr) = addrtype {
+                if let AddressRequest::Static(expected_addr) = addrtype {
                     if addr != expected_addr {
                         return Err(Error::Ip(addr));
                     }
@@ -557,7 +572,7 @@ impl Zones {
     pub fn create_address(
         zone: &str,
         addrobj: &AddrObject,
-        addrtype: AddrType,
+        addrtype: AddressRequest,
     ) -> Result<IpNetwork, Error> {
         let mut command = std::process::Command::new(PFEXEC);
 
@@ -568,10 +583,10 @@ impl Zones {
                 .collect();
 
         match addrtype {
-            AddrType::Dhcp => {
+            AddressRequest::Dhcp => {
                 args.extend(vec!["-T", "dhcp"].into_iter().map(String::from))
             }
-            AddrType::Static(addr) => {
+            AddressRequest::Static(addr) => {
                 if addr.is_ipv6() {
                     Self::ensure_has_link_local_v6_address(zone, addrobj)?;
                 }

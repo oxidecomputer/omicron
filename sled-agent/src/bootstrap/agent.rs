@@ -20,9 +20,8 @@ use anyhow::anyhow;
 use slog::Logger;
 use std::collections::HashMap;
 use std::fs::File;
-use std::io::{self, Seek, SeekFrom};
+use std::io;
 use std::path::Path;
-use tar::Archive;
 use thiserror::Error;
 
 /// Describes errors which may occur while operating the bootstrap service.
@@ -207,7 +206,6 @@ impl Agent {
 
     async fn launch_local_services(&self) -> Result<(), BootstrapError> {
         let tar_source = Path::new("/opt/oxide");
-        let destination = Path::new("/opt/oxide");
         // TODO-correctness: Validation should come from ROT, not local file.
         let digests: HashMap<String, Vec<u8>> = toml::from_str(
             &std::fs::read_to_string(tar_source.join("digest.toml"))?,
@@ -223,6 +221,7 @@ impl Agent {
         //
         // TODO: The RSS *could* tell us this info during bootstrap, then Nexus
         // can be responsible afterwards?
+        // TODO: ^ Only partially true; what about "cold boot" post-installation?
 
         // TODO: The calls to "launch" (here, *and* in instances.rs) should
         // be shared with the code that currently lives in "storage_maanger.rs".
@@ -238,15 +237,15 @@ impl Agent {
         // work? Maybe the sled agent should be in charge of some of the zone
         // management?)
 
-        self.launch(&digests, &tar_source, &destination, "nexus")?;
+        self.launch(&digests, &tar_source, "nexus")?;
 
         // TODO-correctness: The same note as above applies to oximeter.
-        self.launch(&digests, &tar_source, &destination, "oximeter")?;
+        self.launch(&digests, &tar_source, "oximeter")?;
 
         // Note that we extract the propolis-server, but do not launch it.
         // This is the responsibility of the sled agent in response to requests
         // from Nexus.
-        self.extract(&digests, &tar_source, &destination, "propolis-server")?;
+        self.verify(&digests, &tar_source, "propolis-server")?;
 
         Ok(())
     }
@@ -387,38 +386,43 @@ impl Agent {
         Ok(())
     }
 
-    fn launch<S, P1, P2>(
+    // Installs and boots the zone for a service.
+    fn launch<S, P>(
         &self,
         digests: &HashMap<String, Vec<u8>>,
-        tar_source: P1,
-        destination: P2,
+        tar_source: P,
         service: S,
     ) -> Result<(), BootstrapError>
     where
         S: AsRef<str>,
-        P1: AsRef<Path>,
-        P2: AsRef<Path>,
+        P: AsRef<Path>,
     {
-        self.extract(digests, tar_source, destination, &service)?;
-        self.enable_service(service)
+        self.verify(digests, tar_source, &service)?;
+
+        // TODO: Look up a zone, see if it's already running
+        // TODO: Install a zone
+        // TODO: Boot a zone
+
+
+        // TODO: Arguments we need to do this:
+        // - vnic_id_allocator
+        // - address / port of the service
+
+        Ok(())
     }
 
-    // Verify and unpack a service.
-    // NOTE: Does not enable the service.
-    fn extract<S, P1, P2>(
+    // Verifies a service's package against the known digests.
+    fn verify<S, P>(
         &self,
         digests: &HashMap<String, Vec<u8>>,
-        tar_source: P1,
-        destination: P2,
+        tar_source: P,
         service: S,
     ) -> Result<(), BootstrapError>
     where
         S: AsRef<str>,
-        P1: AsRef<Path>,
-        P2: AsRef<Path>,
+        P: AsRef<Path>,
     {
         let tar_source = tar_source.as_ref();
-        let destination = destination.as_ref();
         let service = service.as_ref();
 
         info!(&self.log, "Extracting {} Service", service);
@@ -442,32 +446,6 @@ impl Agent {
         if digest_expected.as_slice() != digest_actual.as_ref() {
             return Err(BootstrapError::UnexpectedDigest(service.into()));
         }
-
-        info!(&self.log, "Verified {} Service", service);
-        self.extract_archive(&mut tar_file, destination.join(service))
-    }
-
-    // Given a verified archive file, unpack it to a location.
-    fn extract_archive<P>(
-        &self,
-        file: &mut File,
-        destination: P,
-    ) -> Result<(), BootstrapError>
-    where
-        P: AsRef<Path>,
-    {
-        file.seek(SeekFrom::Start(0))?;
-
-        // Clear the destination directory.
-        //
-        // It's likely these files will exist from a prior boot, but we only
-        // want to validate / extract files from this current boot sequence.
-        // Ignore errors; the directory might not have previously existed.
-        let _ = std::fs::remove_dir_all(destination.as_ref());
-        std::fs::create_dir_all(destination.as_ref())?;
-
-        let mut archive = Archive::new(file);
-        archive.unpack(destination.as_ref())?;
         Ok(())
     }
 

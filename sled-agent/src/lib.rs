@@ -19,7 +19,6 @@ pub mod sim;
 pub mod common;
 
 // Modules for the non-simulated sled agent.
-mod addrobj;
 pub mod bootstrap;
 pub mod config;
 mod http_entrypoints;
@@ -30,7 +29,6 @@ mod params;
 pub mod server;
 mod sled_agent;
 mod storage_manager;
-mod vnic;
 
 #[cfg(test)]
 mod mocks;
