@@ -15,6 +15,7 @@ http = "0.2.5"
 hyper = "0.14"
 ipnetwork = "0.18"
 macaddr = { version = "1.0.1", features = [ "serde_std" ] }
+rand = "0.8.4"
 reqwest = { version = "0.11", default-features = false, features = ["rustls-tls"] }
 ring = "0.16"
 schemars = { version = "0.8", features = [ "chrono", "uuid" ] }
