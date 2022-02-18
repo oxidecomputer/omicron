@@ -114,6 +114,7 @@ pub async fn create_disk(
             },
             snapshot_id: None,
             size: ByteCount::from_gibibytes_u32(1),
+            encryption_key: None,
         },
     )
     .await

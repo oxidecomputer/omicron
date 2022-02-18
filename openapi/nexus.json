@@ -3300,6 +3300,12 @@
           "description": {
             "type": "string"
           },
+          "encryption_key": {
+            "nullable": true,
+            "description": "if present, on-disk blocks should be encrypted",
+            "type": "string",
+            "format": "uuid"
+          },
           "name": {
             "$ref": "#/components/schemas/Name"
           },

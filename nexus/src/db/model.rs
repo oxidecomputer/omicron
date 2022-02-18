@@ -648,6 +648,7 @@ pub struct Region {
     block_size: ByteCount,
     blocks_per_extent: i64,
     extent_count: i64,
+    encrypted: bool,
 }
 
 impl Region {
@@ -657,6 +658,7 @@ impl Region {
         block_size: ByteCount,
         blocks_per_extent: i64,
         extent_count: i64,
+        encrypted: bool,
     ) -> Self {
         Self {
             identity: RegionIdentity::new(Uuid::new_v4()),
@@ -665,6 +667,7 @@ impl Region {
             block_size,
             blocks_per_extent,
             extent_count,
+            encrypted,
         }
     }
 
@@ -682,6 +685,9 @@ impl Region {
     }
     pub fn extent_count(&self) -> i64 {
         self.extent_count
+    }
+    pub fn encrypted(&self) -> bool {
+        self.encrypted
     }
 }
 
