@@ -8,9 +8,8 @@ use crate::common::vlan::VlanID;
 use crate::illumos::{execute, ExecutionError, PFEXEC};
 use omicron_common::api::external::MacAddr;
 
-pub const VNIC_PREFIX: &str = "ox_vnic_";
-pub const VNIC_PREFIX_GUEST: &str = "ox_vnic_guest";
-pub const VNIC_PREFIX_CONTROL: &str = "ox_vnic_control";
+pub const VNIC_PREFIX: &str = "ox";
+pub const VNIC_PREFIX_CONTROL: &str = "oxControl";
 
 pub const DLADM: &str = "/usr/sbin/dladm";
 

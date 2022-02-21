@@ -18,6 +18,7 @@ use omicron_common::api::internal::nexus::DiskRuntimeState;
 use omicron_common::api::internal::nexus::InstanceRuntimeState;
 use omicron_common::api::internal::sled_agent::InstanceEnsureBody;
 use omicron_common::api::internal::sled_agent::PartitionEnsureBody;
+use omicron_common::api::internal::sled_agent::ServiceEnsureBody;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use std::sync::Arc;
@@ -30,6 +31,7 @@ type SledApiDescription = ApiDescription<SledAgent>;
 /// Returns a description of the sled agent API
 pub fn api() -> SledApiDescription {
     fn register_endpoints(api: &mut SledApiDescription) -> Result<(), String> {
+        api.register(services_put)?;
         api.register(filesystem_put)?;
         api.register(instance_put)?;
         api.register(disk_put)?;
@@ -41,6 +43,24 @@ pub fn api() -> SledApiDescription {
         panic!("failed to register entrypoints: {}", err);
     }
     api
+}
+
+#[endpoint {
+    method = PUT,
+    path = "/services",
+}]
+async fn services_put(
+    rqctx: Arc<RequestContext<SledAgent>>,
+    body: TypedBody<ServiceEnsureBody>,
+) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+    let sa = rqctx.context();
+    let body_args = body.into_inner();
+    sa.services_ensure(
+        body_args.services,
+    )
+    .await
+    .map_err(|e| Error::from(e))?;
+    Ok(HttpResponseUpdatedNoContent())
 }
 
 #[endpoint {

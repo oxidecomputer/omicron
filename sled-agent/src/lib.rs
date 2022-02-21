@@ -27,6 +27,7 @@ mod instance;
 mod instance_manager;
 mod params;
 pub mod server;
+mod services;
 mod sled_agent;
 mod storage_manager;
 

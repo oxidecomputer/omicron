@@ -6,7 +6,7 @@
 
 use crate::illumos::running_zone::{Error as RunningZoneError, RunningZone, InstalledZone};
 use crate::illumos::zone::AddressRequest;
-use crate::illumos::vnic::{IdAllocator};
+use crate::illumos::vnic::VnicAllocator;
 use crate::illumos::{zfs::Mountpoint, zone::ZONE_PREFIX, zpool::ZpoolInfo};
 use futures::stream::FuturesOrdered;
 use futures::FutureExt;
@@ -315,7 +315,7 @@ impl DatasetInfo {
 // Ensures that a zone backing a particular dataset is running.
 async fn ensure_running_zone(
     log: &Logger,
-    vnic_id_allocator: &IdAllocator,
+    vnic_allocator: &VnicAllocator,
     dataset_info: &DatasetInfo,
     dataset_name: &DatasetName,
     do_format: bool,
@@ -339,7 +339,7 @@ async fn ensure_running_zone(
 
             let installed_zone = InstalledZone::install(
                 log,
-                vnic_id_allocator,
+                vnic_allocator,
                 &dataset_info.name,
                 Some(&dataset_name.pool_name),
                 &[zone::Dataset { name: dataset_name.full() }],
@@ -388,7 +388,7 @@ struct StorageWorker {
     pools: Arc<Mutex<HashMap<String, Pool>>>,
     new_pools_rx: mpsc::Receiver<String>,
     new_filesystems_rx: mpsc::Receiver<NewFilesystemRequest>,
-    vnic_id_allocator: IdAllocator,
+    vnic_allocator: VnicAllocator,
 }
 
 impl StorageWorker {
@@ -450,7 +450,7 @@ impl StorageWorker {
         );
         let zone = ensure_running_zone(
             &self.log,
-            &self.vnic_id_allocator,
+            &self.vnic_allocator,
             dataset_info,
             &dataset_name,
             do_format,
@@ -727,7 +727,7 @@ impl StorageManager {
             pools: pools.clone(),
             new_pools_rx,
             new_filesystems_rx,
-            vnic_id_allocator: IdAllocator::new(),
+            vnic_allocator: VnicAllocator::new("Storage"),
         };
         Ok(StorageManager {
             pools,

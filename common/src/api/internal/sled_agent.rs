@@ -134,6 +134,9 @@ impl PartitionKind {
 }
 
 /// Used to request a new partition kind exists within a zpool.
+///
+/// Many partition types are associated with services that will be
+/// instantiated when the partition is detected.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
 pub struct PartitionEnsureBody {
     // The name (and UUID) of the Zpool which we are inserting into.
@@ -145,4 +148,22 @@ pub struct PartitionEnsureBody {
     // TODO: We could insert a UUID here, if we want that to be set by the
     // caller explicitly? Currently, the lack of a UUID implies that
     // "at most one partition type" exists within a zpool.
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq, Hash)]
+pub struct ServiceRequest {
+    // The name of the service to be created.
+    pub name: String,
+    // The address on which the service should listen for requests.
+    pub address: SocketAddr,
+}
+
+/// Used to request that the Sled initialize certain services on initialization.
+///
+/// This may be used to record that certain sleds are responsible for
+/// launching services which may not be associated with a partition, such
+/// as Nexus.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
+pub struct ServiceEnsureBody {
+    pub services: Vec<ServiceRequest>,
 }

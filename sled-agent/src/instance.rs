@@ -10,7 +10,7 @@ use crate::common::{
 };
 use crate::illumos::addrobj::AddrObject;
 use crate::illumos::svc::wait_for_service;
-use crate::illumos::vnic::{IdAllocator, Vnic};
+use crate::illumos::vnic::{VnicAllocator, Vnic};
 use crate::illumos::zone::{AddressRequest, PROPOLIS_ZONE_PREFIX};
 use crate::instance_manager::InstanceTicket;
 use anyhow::anyhow;
@@ -177,7 +177,7 @@ struct InstanceInner {
     properties: propolis_client::api::InstanceProperties,
 
     // NIC-related properties
-    nic_id_allocator: IdAllocator,
+    nic_id_allocator: VnicAllocator,
     requested_nics: Vec<NetworkInterface>,
     allocated_nics: Vec<Vnic>,
     vlan: Option<VlanID>,
@@ -358,7 +358,7 @@ mockall::mock! {
         pub fn new(
             log: Logger,
             id: Uuid,
-            nic_id_allocator: IdAllocator,
+            nic_id_allocator: VnicAllocator,
             initial: InstanceHardware,
             vlan: Option<VlanID>,
             nexus_client: Arc<NexusClient>,
@@ -394,7 +394,7 @@ impl Instance {
     pub fn new(
         log: Logger,
         id: Uuid,
-        nic_id_allocator: IdAllocator,
+        nic_id_allocator: VnicAllocator,
         initial: InstanceHardware,
         vlan: Option<VlanID>,
         nexus_client: Arc<NexusClient>,
@@ -652,7 +652,6 @@ mod test {
         zone::MockZones,
     };
     use crate::mocks::MockNexusClient;
-    use crate::illumos::vnic::control_vnic_name;
     use chrono::Utc;
     use dropshot::{
         endpoint, ApiDescription, ConfigDropshot, ConfigLogging,
@@ -878,7 +877,7 @@ mod test {
             .in_sequence(&mut seq)
             .returning(|phys, vnic, _maybe_mac, _maybe_vlan| {
                 assert_eq!(phys.0, "physical");
-                assert_eq!(vnic, control_vnic_name(0));
+                assert_eq!(vnic, "oxControlTest0");
                 Ok(())
             });
 
@@ -891,7 +890,7 @@ mod test {
             .returning(|_, zone, vnics| {
                 assert_eq!(zone, propolis_zone_name(&test_propolis_uuid()));
                 assert_eq!(vnics.len(), 1);
-                assert_eq!(vnics[0], control_vnic_name(0));
+                assert_eq!(vnics[0], "oxControlTest0");
                 Ok(())
             });
 
@@ -935,7 +934,7 @@ mod test {
             .returning(|zone, iface, addrtype| {
                 assert!(matches!(addrtype, AddressRequest::Dhcp));
                 assert_eq!(zone, propolis_zone_name(&test_propolis_uuid()));
-                assert_eq!(iface, &AddrObject::new_control(&control_vnic_name(0)));
+                assert_eq!(iface, &AddrObject::new_control("oxControlTest0"));
                 Ok("127.0.0.1/24".parse().unwrap())
             });
 
@@ -1042,7 +1041,7 @@ mod test {
     #[serial_test::serial]
     async fn start_then_stop() {
         let log = logger();
-        let nic_id_allocator = IdAllocator::new();
+        let nic_id_allocator = VnicAllocator::new("Test".to_string());
         let mut nexus_client = MockNexusClient::default();
 
         // Set expectations about what will be seen (and when) by Nexus before
@@ -1103,7 +1102,7 @@ mod test {
             .times(1)
             .in_sequence(&mut seq)
             .returning(|vnic| {
-                assert_eq!(vnic, control_vnic_name(0));
+                assert_eq!(vnic, "oxControlTest0");
                 Ok(())
             });
         inst.transition(InstanceRuntimeStateRequested {
@@ -1122,7 +1121,7 @@ mod test {
     )]
     async fn transition_before_start() {
         let log = logger();
-        let nic_id_allocator = IdAllocator::new();
+        let nic_id_allocator = VnicAllocator::new("Test".to_string());
         let nexus_client = MockNexusClient::default();
 
         let inst = Instance::new(

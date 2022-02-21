@@ -5,7 +5,7 @@
 //! API for controlling multiple instances on a sled.
 
 use crate::common::vlan::VlanID;
-use crate::illumos::vnic::IdAllocator;
+use crate::illumos::vnic::VnicAllocator;
 use omicron_common::api::internal::nexus::InstanceRuntimeState;
 use omicron_common::api::internal::sled_agent::InstanceHardware;
 use omicron_common::api::internal::sled_agent::InstanceMigrateParams;
@@ -47,7 +47,7 @@ struct InstanceManagerInternal {
     instances: Mutex<BTreeMap<Uuid, (Uuid, Instance)>>,
 
     vlan: Option<VlanID>,
-    nic_id_allocator: IdAllocator,
+    nic_id_allocator: VnicAllocator,
 }
 
 /// All instances currently running on the sled.
@@ -71,7 +71,7 @@ impl InstanceManager {
                 nexus_client,
                 instances: Mutex::new(BTreeMap::new()),
                 vlan,
-                nic_id_allocator: IdAllocator::new(),
+                nic_id_allocator: VnicAllocator::new("Instance"),
             }),
         })
     }

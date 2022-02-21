@@ -6,7 +6,7 @@
 
 use crate::common::vlan::VlanID;
 use crate::illumos::dladm::{
-    PhysicalLink, VNIC_PREFIX_CONTROL, VNIC_PREFIX_GUEST,
+    PhysicalLink, VNIC_PREFIX, VNIC_PREFIX_CONTROL
 };
 use omicron_common::api::external::MacAddr;
 use std::sync::{
@@ -21,28 +21,52 @@ use crate::illumos::dladm::MockDladm as Dladm;
 
 type Error = crate::illumos::dladm::Error;
 
-fn guest_vnic_name(id: u64) -> String {
-    format!("{}{}", VNIC_PREFIX_GUEST, id)
-}
-
-pub fn control_vnic_name(id: u64) -> String {
-    format!("{}{}", VNIC_PREFIX_CONTROL, id)
-}
-
 /// A shareable wrapper around an atomic counter.
 /// May be used to allocate runtime-unique IDs for objects
 /// which have naming constraints - such as VNICs.
 #[derive(Clone, Debug)]
-pub struct IdAllocator {
+pub struct VnicAllocator {
     value: Arc<AtomicU64>,
+    scope: String,
 }
 
-impl IdAllocator {
-    pub fn new() -> Self {
-        Self { value: Arc::new(AtomicU64::new(0)) }
+impl VnicAllocator {
+    /// Creates a new Vnic name allocator with a particular scope.
+    ///
+    /// The intent with varying scopes is to create non-overlapping
+    /// ranges of Vnic names, for example:
+    ///
+    /// - oxGuestInstance[NNN]    # Network of VM instance (guest-visible).
+    /// - oxControlInstance[NNN]  # Network of VM instance (control-plane).
+    pub fn new<S: AsRef<str>>(scope: S) -> Self {
+        Self {
+            value: Arc::new(AtomicU64::new(0)),
+            scope: scope.as_ref().to_string(),
+        }
     }
 
-    pub fn next(&self) -> u64 {
+    /// Creates a new Vnic Allocator scoped under the current one.
+    pub fn new_subscope<S: AsRef<str>>(&self, scope: S) -> Self {
+        Self {
+            value: self.value.clone(),
+            scope: format!("{}{}", self.scope, scope.as_ref().to_string()),
+        }
+    }
+
+    fn new_superscope<S: AsRef<str>>(&self, scope: S) -> Self {
+        Self {
+            value: self.value.clone(),
+            scope: format!("{}{}", scope.as_ref().to_string(), self.scope),
+        }
+    }
+
+    /// Allocates a new VNIC name, which should be unique within the
+    /// scope of this allocator.
+    fn next(&self) -> String {
+        format!("{}{}{}", VNIC_PREFIX, self.scope, self.next_id())
+    }
+
+    fn next_id(&self) -> u64 {
         self.value.fetch_add(1, Ordering::SeqCst)
     }
 }
@@ -67,29 +91,34 @@ impl Vnic {
 
     /// Creates a new NIC, intended for usage by the guest.
     pub fn new_guest(
-        allocator: &IdAllocator,
+        allocator: &VnicAllocator,
         physical_dl: &PhysicalLink,
         mac: Option<MacAddr>,
         vlan: Option<VlanID>,
     ) -> Result<Self, Error> {
-        let name = guest_vnic_name(allocator.next());
+        let allocator = allocator.new_superscope("Guest");
+        let name = allocator.next();
+        debug_assert!(name.starts_with(VNIC_PREFIX));
         Dladm::create_vnic(physical_dl, &name, mac, vlan)?;
         Ok(Vnic { name, deleted: false })
     }
 
     /// Creates a new NIC, intended for allowing Propolis to communicate
-    // with the control plane.
+    /// with the control plane.
     pub fn new_control(
-        allocator: &IdAllocator,
+        allocator: &VnicAllocator,
         physical_dl: &PhysicalLink,
         mac: Option<MacAddr>,
     ) -> Result<Self, Error> {
-        let name = control_vnic_name(allocator.next());
+        let allocator = allocator.new_superscope("Control");
+        let name = allocator.next();
+        debug_assert!(name.starts_with(VNIC_PREFIX));
+        debug_assert!(name.starts_with(VNIC_PREFIX_CONTROL));
         Dladm::create_vnic(physical_dl, &name, mac, None)?;
         Ok(Vnic { name, deleted: false })
     }
 
-    // Deletes a NIC (if it has not already been deleted).
+    /// Deletes a NIC (if it has not already been deleted).
     pub fn delete(&mut self) -> Result<(), Error> {
         if self.deleted {
             Ok(())
@@ -110,5 +139,28 @@ impl Drop for Vnic {
         if let Err(e) = r {
             eprintln!("Failed to delete VNIC: {}", e);
         }
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn test_allocate() {
+        let allocator = VnicAllocator::new("Foo");
+        assert_eq!("oxFoo0", allocator.next());
+        assert_eq!("oxFoo1", allocator.next());
+        assert_eq!("oxFoo2", allocator.next());
+    }
+
+    #[test]
+    fn test_allocate_within_scopes() {
+        let allocator = VnicAllocator::new("Foo");
+        assert_eq!("oxFoo0", allocator.next());
+        let allocator = allocator.new_subscope("Bar");
+        assert_eq!("oxFooBar1", allocator.next());
+        let allocator = allocator.new_superscope("Baz");
+        assert_eq!("oxBazFooBar2", allocator.next());
     }
 }

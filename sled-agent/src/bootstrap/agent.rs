@@ -224,7 +224,7 @@ impl Agent {
         // TODO: ^ Only partially true; what about "cold boot" post-installation?
 
         // TODO: The calls to "launch" (here, *and* in instances.rs) should
-        // be shared with the code that currently lives in "storage_maanger.rs".
+        // be shared with the code that currently lives in "storage_manager.rs".
         //
         // The {lookup, create, boot} calls should mostly live elsewhere -
         // though we're going to need to pass additional info to:
@@ -403,9 +403,8 @@ impl Agent {
         // TODO: Install a zone
         // TODO: Boot a zone
 
-
         // TODO: Arguments we need to do this:
-        // - vnic_id_allocator
+        // - vnic_allocator
         // - address / port of the service
 
         Ok(())

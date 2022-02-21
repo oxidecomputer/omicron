@@ -7,7 +7,7 @@
 use crate::illumos::addrobj::AddrObject;
 use crate::illumos::svc::wait_for_service;
 use crate::illumos::zone::{AddressRequest, ZONE_PREFIX};
-use crate::illumos::vnic::{IdAllocator, Vnic};
+use crate::illumos::vnic::{VnicAllocator, Vnic};
 use slog::Logger;
 use std::net::SocketAddr;
 use std::path::PathBuf;
@@ -195,7 +195,7 @@ impl InstalledZone {
 
     pub async fn install(
         log: &Logger,
-        vnic_id_allocator: &IdAllocator,
+        vnic_allocator: &VnicAllocator,
         service_name: &str,
         unique_name: Option<&str>,
         datasets: &[zone::Dataset],
@@ -203,7 +203,7 @@ impl InstalledZone {
         vnics: Vec<Vnic>,
     ) -> Result<InstalledZone, Error> {
         let physical_dl = Dladm::find_physical()?;
-        let control_vnic = Vnic::new_control(vnic_id_allocator, &physical_dl, None)?;
+        let control_vnic = Vnic::new_control(vnic_allocator, &physical_dl, None)?;
 
         // The zone name is based on:
         // - A unique Oxide prefix ("oxz_")

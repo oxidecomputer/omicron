@@ -10,13 +10,14 @@ use crate::illumos::zfs::{
 };
 use crate::instance_manager::InstanceManager;
 use crate::params::DiskStateRequested;
+use crate::services::ServiceManager;
 use crate::storage_manager::StorageManager;
 use omicron_common::api::{
     internal::nexus::DiskRuntimeState, internal::nexus::InstanceRuntimeState,
     internal::sled_agent::InstanceHardware,
     internal::sled_agent::InstanceMigrateParams,
-    internal::sled_agent::InstanceRuntimeStateRequested,
-    internal::sled_agent::PartitionKind,
+    internal::sled_agent::InstanceRuntimeStateRequested, internal::sled_agent::PartitionKind,
+    internal::sled_agent::ServiceRequest,
 };
 use slog::Logger;
 use std::net::SocketAddr;
@@ -43,6 +44,9 @@ pub enum Error {
     Datalink(#[from] crate::illumos::dladm::Error),
 
     #[error(transparent)]
+    Services(#[from] crate::services::Error),
+
+    #[error(transparent)]
     Zone(#[from] crate::illumos::zone::Error),
 
     #[error(transparent)]
@@ -67,8 +71,14 @@ impl From<Error> for omicron_common::api::external::Error {
 ///
 /// Contains both a connection to the Nexus, as well as managed instances.
 pub struct SledAgent {
+    // Component of Sled Agent responsible for storage and partition management.
     storage: StorageManager,
+
+    // Component of Sled Agent responsible for managing Propolis instances.
     instances: InstanceManager,
+
+    // Other Oxide-controlled services running on this Sled.
+    services: ServiceManager,
 }
 
 impl SledAgent {
@@ -84,8 +94,6 @@ impl SledAgent {
 
         // Before we start creating zones, we need to ensure that the
         // necessary ZFS and Zone resources are ready.
-        //
-        // TODO: Should this be the responsibility of the "storage manager"?
         Zfs::ensure_filesystem(
             ZONE_ZFS_DATASET,
             Mountpoint::Path(std::path::PathBuf::from(
@@ -112,7 +120,8 @@ impl SledAgent {
         // identify if they're being used by the aforementioned existing zones,
         // and track them once more.
         //
-        // (dladm show-vnic -p -o ZONE,LINK) might help
+        // This should be accessible via:
+        // $ dladm show-linkprop -c -p zone -o LINK,VALUE
         let vnics = Dladm::get_vnics()?;
         for vnic in vnics {
             warn!(log, "Deleting VNIC: {}", vnic);
@@ -130,9 +139,26 @@ impl SledAgent {
                 storage.upsert_zpool(pool).await?;
             }
         }
-        let instances = InstanceManager::new(log, vlan, nexus_client.clone())?;
+        let instances = InstanceManager::new(log.clone(), vlan, nexus_client.clone())?;
+        let services = ServiceManager::new(log.clone()).await?;
 
-        Ok(SledAgent { storage, instances })
+        Ok(SledAgent {
+            storage,
+            instances,
+            services,
+        })
+    }
+
+    /// Ensures that particular services should be initialized.
+    ///
+    /// These services will be instantiated by this function, will be recorded
+    /// to a local file to ensure they start automatically on next boot.
+    pub async fn services_ensure(
+        &self,
+        requested_services: Vec<ServiceRequest>,
+    ) -> Result<(), Error> {
+        self.services.ensure(requested_services).await?;
+        Ok(())
     }
 
     /// Ensures that a filesystem type exists within the zpool.
