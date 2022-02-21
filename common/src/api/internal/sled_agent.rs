@@ -150,7 +150,9 @@ pub struct PartitionEnsureBody {
     // "at most one partition type" exists within a zpool.
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq, Hash)]
+#[derive(
+    Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq, Hash,
+)]
 pub struct ServiceRequest {
     // The name of the service to be created.
     pub name: String,

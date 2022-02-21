@@ -16,8 +16,8 @@ use omicron_common::api::{
     internal::nexus::DiskRuntimeState, internal::nexus::InstanceRuntimeState,
     internal::sled_agent::InstanceHardware,
     internal::sled_agent::InstanceMigrateParams,
-    internal::sled_agent::InstanceRuntimeStateRequested, internal::sled_agent::PartitionKind,
-    internal::sled_agent::ServiceRequest,
+    internal::sled_agent::InstanceRuntimeStateRequested,
+    internal::sled_agent::PartitionKind, internal::sled_agent::ServiceRequest,
 };
 use slog::Logger;
 use std::net::SocketAddr;
@@ -139,14 +139,11 @@ impl SledAgent {
                 storage.upsert_zpool(pool).await?;
             }
         }
-        let instances = InstanceManager::new(log.clone(), vlan, nexus_client.clone())?;
+        let instances =
+            InstanceManager::new(log.clone(), vlan, nexus_client.clone())?;
         let services = ServiceManager::new(log.clone()).await?;
 
-        Ok(SledAgent {
-            storage,
-            instances,
-            services,
-        })
+        Ok(SledAgent { storage, instances, services })
     }
 
     /// Ensures that particular services should be initialized.

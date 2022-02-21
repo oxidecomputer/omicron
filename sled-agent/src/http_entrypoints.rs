@@ -55,11 +55,7 @@ async fn services_put(
 ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
     let sa = rqctx.context();
     let body_args = body.into_inner();
-    sa.services_ensure(
-        body_args.services,
-    )
-    .await
-    .map_err(|e| Error::from(e))?;
+    sa.services_ensure(body_args.services).await.map_err(|e| Error::from(e))?;
     Ok(HttpResponseUpdatedNoContent())
 }
 

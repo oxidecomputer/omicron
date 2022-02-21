@@ -4,9 +4,11 @@
 
 //! Management of sled-local storage.
 
-use crate::illumos::running_zone::{Error as RunningZoneError, RunningZone, InstalledZone};
-use crate::illumos::zone::AddressRequest;
+use crate::illumos::running_zone::{
+    Error as RunningZoneError, InstalledZone, RunningZone,
+};
 use crate::illumos::vnic::VnicAllocator;
+use crate::illumos::zone::AddressRequest;
 use crate::illumos::{zfs::Mountpoint, zone::ZONE_PREFIX, zpool::ZpoolInfo};
 use futures::stream::FuturesOrdered;
 use futures::FutureExt;
@@ -31,12 +33,10 @@ use tokio::sync::{mpsc, oneshot, Mutex};
 use tokio::task::JoinHandle;
 use uuid::Uuid;
 
+#[cfg(test)]
+use crate::illumos::{zfs::MockZfs as Zfs, zpool::MockZpool as Zpool};
 #[cfg(not(test))]
 use crate::illumos::{zfs::Zfs, zpool::Zpool};
-#[cfg(test)]
-use crate::illumos::{
-    zfs::MockZfs as Zfs, zpool::MockZpool as Zpool,
-};
 
 #[cfg(test)]
 use crate::mocks::MockNexusClient as NexusClient;
@@ -320,7 +320,8 @@ async fn ensure_running_zone(
     dataset_name: &DatasetName,
     do_format: bool,
 ) -> Result<RunningZone, Error> {
-    let address_request = AddressRequest::new_static(dataset_info.address.ip(), None);
+    let address_request =
+        AddressRequest::new_static(dataset_info.address.ip(), None);
 
     match RunningZone::get(
         log,
@@ -345,7 +346,8 @@ async fn ensure_running_zone(
                 &[zone::Dataset { name: dataset_name.full() }],
                 &[],
                 vec![],
-            ).await?;
+            )
+            .await?;
 
             let zone = RunningZone::boot(
                 installed_zone,
@@ -602,9 +604,14 @@ impl StorageWorker {
         pool: &mut Pool,
         dataset_name: &DatasetName,
     ) -> Result<(Uuid, SocketAddr, DatasetKind), Error> {
-        let id = Zfs::get_oxide_value(&dataset_name.full(), "uuid")?.parse::<Uuid>()?;
+        let id = Zfs::get_oxide_value(&dataset_name.full(), "uuid")?
+            .parse::<Uuid>()?;
         let config_path = pool.dataset_config_path(id).await?;
-        info!(self.log, "Loading Dataset from {}", config_path.to_string_lossy());
+        info!(
+            self.log,
+            "Loading Dataset from {}",
+            config_path.to_string_lossy()
+        );
         let dataset_info: DatasetInfo =
             toml::from_slice(&tokio::fs::read(config_path).await?)?;
         self.initialize_dataset_and_zone(

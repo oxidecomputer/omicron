@@ -5,9 +5,7 @@
 //! API for controlling a single instance.
 
 use crate::common::vlan::VlanID;
-use crate::illumos::dladm::{
-    PhysicalLink, VNIC_PREFIX, VNIC_PREFIX_CONTROL
-};
+use crate::illumos::dladm::{PhysicalLink, VNIC_PREFIX, VNIC_PREFIX_CONTROL};
 use omicron_common::api::external::MacAddr;
 use std::sync::{
     atomic::{AtomicU64, Ordering},

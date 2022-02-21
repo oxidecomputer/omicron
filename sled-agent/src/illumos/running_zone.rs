@@ -6,22 +6,16 @@
 
 use crate::illumos::addrobj::AddrObject;
 use crate::illumos::svc::wait_for_service;
+use crate::illumos::vnic::{Vnic, VnicAllocator};
 use crate::illumos::zone::{AddressRequest, ZONE_PREFIX};
-use crate::illumos::vnic::{VnicAllocator, Vnic};
 use slog::Logger;
 use std::net::SocketAddr;
 use std::path::PathBuf;
 
-#[cfg(test)]
-use crate::illumos::{
-    dladm::MockDladm as Dladm,
-    zone::MockZones as Zones,
-};
 #[cfg(not(test))]
-use crate::illumos::{
-    dladm::Dladm,
-    zone::Zones,
-};
+use crate::illumos::{dladm::Dladm, zone::Zones};
+#[cfg(test)]
+use crate::illumos::{dladm::MockDladm as Dladm, zone::MockZones as Zones};
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
@@ -106,11 +100,7 @@ impl RunningZone {
             .map_err(|_| Error::Timeout(fmri.to_string()))?;
 
         let addrobj = AddrObject::new_control(zone.control_vnic.name());
-        let network = Zones::ensure_address(
-            &zone.name,
-            &addrobj,
-            addrtype,
-        )?;
+        let network = Zones::ensure_address(&zone.name, &addrobj, addrtype)?;
 
         Ok(RunningZone {
             inner: zone,
@@ -145,11 +135,7 @@ impl RunningZone {
         let zone_name = zone_info.name();
         let vnic_name = Zones::get_control_interface(zone_name)?;
         let addrobj = AddrObject::new_control(&vnic_name);
-        let network = Zones::ensure_address(
-            zone_name,
-            &addrobj,
-            addrtype,
-        )?;
+        let network = Zones::ensure_address(zone_name, &addrobj, addrtype)?;
 
         Ok(Self {
             inner: InstalledZone {
@@ -203,7 +189,8 @@ impl InstalledZone {
         vnics: Vec<Vnic>,
     ) -> Result<InstalledZone, Error> {
         let physical_dl = Dladm::find_physical()?;
-        let control_vnic = Vnic::new_control(vnic_allocator, &physical_dl, None)?;
+        let control_vnic =
+            Vnic::new_control(vnic_allocator, &physical_dl, None)?;
 
         // The zone name is based on:
         // - A unique Oxide prefix ("oxz_")
@@ -220,7 +207,8 @@ impl InstalledZone {
         let zone_image_path =
             PathBuf::from(&format!("/opt/oxide/{}.tar.gz", service_name));
 
-        let vnic_names: Vec<String> = vnics.iter()
+        let vnic_names: Vec<String> = vnics
+            .iter()
             .map(|vnic| vnic.name().to_string())
             .chain(std::iter::once(control_vnic.name().to_string()))
             .collect();
@@ -234,13 +222,11 @@ impl InstalledZone {
             vnic_names,
         )?;
 
-        Ok(
-            InstalledZone {
-                log: log.new(o!("zone" => zone_name.clone())),
-                name: zone_name,
-                control_vnic,
-                _other_vnics: vnics,
-            }
-        )
+        Ok(InstalledZone {
+            log: log.new(o!("zone" => zone_name.clone())),
+            name: zone_name,
+            control_vnic,
+            _other_vnics: vnics,
+        })
     }
 }

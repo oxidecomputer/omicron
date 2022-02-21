@@ -284,7 +284,11 @@ impl Agent {
                 std::path::Path::new(crate::OMICRON_CONFIG_PATH)
                     .join("config-rss.toml");
             if rss_config_path.exists() {
-                info!(self.log, "RSS configuration already exists at {}", rss_config_path.to_string_lossy());
+                info!(
+                    self.log,
+                    "RSS configuration already exists at {}",
+                    rss_config_path.to_string_lossy()
+                );
                 let old_config: Config = toml::from_str(
                     &tokio::fs::read_to_string(&rss_config_path).await?,
                 )?;
@@ -314,7 +318,11 @@ impl Agent {
                 );
                 return Err(BootstrapError::Configuration);
             } else {
-                info!(self.log, "No RSS configuration found at {}", rss_config_path.to_string_lossy());
+                info!(
+                    self.log,
+                    "No RSS configuration found at {}",
+                    rss_config_path.to_string_lossy()
+                );
             }
 
             // Issue the initialization requests to all sleds.

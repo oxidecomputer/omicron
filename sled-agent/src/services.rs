@@ -4,7 +4,7 @@
 
 //! Support for miscellaneous services managed by the sled.
 
-use crate::illumos::running_zone::{RunningZone, InstalledZone};
+use crate::illumos::running_zone::{InstalledZone, RunningZone};
 use crate::illumos::vnic::VnicAllocator;
 use crate::illumos::zone::AddressRequest;
 use omicron_common::api::internal::sled_agent::ServiceRequest;
@@ -54,13 +54,11 @@ pub struct ServiceManager {
 impl ServiceManager {
     /// Creates a service manager, which returns once all requested services
     /// have been started.
-    pub async fn new(
-        log: Logger,
-    ) -> Result<Self, Error> {
+    pub async fn new(log: Logger) -> Result<Self, Error> {
         let mgr = Self {
             log,
             zones: Mutex::new(vec![]),
-            vnic_allocator: VnicAllocator::new("Service")
+            vnic_allocator: VnicAllocator::new("Service"),
         };
 
         let config_path = services_config_path();
@@ -69,7 +67,8 @@ impl ServiceManager {
                 &tokio::fs::read_to_string(&services_config_path()).await?,
             )?;
             let mut existing_zones = mgr.zones.lock().await;
-            mgr.initialize_services_locked(&mut existing_zones, &requests).await?;
+            mgr.initialize_services_locked(&mut existing_zones, &requests)
+                .await?;
         }
 
         Ok(mgr)
@@ -79,7 +78,7 @@ impl ServiceManager {
     async fn initialize_services_locked(
         &self,
         existing_zones: &mut Vec<RunningZone>,
-        services: &Vec<ServiceRequest>
+        services: &Vec<ServiceRequest>,
     ) -> Result<(), Error> {
         // TODO: As long as we ensure the requests don't overlap, we could
         // parallelize this request.
@@ -91,8 +90,9 @@ impl ServiceManager {
             }) {
                 // The caller is requesting that we instantiate a zone that
                 // already exists, with the desired configuration.
-                if existing_zone.name() == service.name &&
-                    existing_zone.address() == service.address {
+                if existing_zone.name() == service.name
+                    && existing_zone.address() == service.address
+                {
                     continue;
                 }
                 // Otherwise, there is a request which collides with our
@@ -108,13 +108,15 @@ impl ServiceManager {
                 /* dataset= */ &[],
                 /* devices= */ &[],
                 /* vnics= */ vec![],
-            ).await?;
+            )
+            .await?;
 
             let running_zone = RunningZone::boot(
                 installed_zone,
                 AddressRequest::new_static(service.address.ip(), None),
                 service.address.port(),
-            ).await?;
+            )
+            .await?;
             existing_zones.push(running_zone);
         }
         Ok(())
@@ -135,7 +137,8 @@ impl ServiceManager {
                 &tokio::fs::read_to_string(&services_config_path()).await?,
             )?;
 
-            let known_set: HashSet<&ServiceRequest> = HashSet::from_iter(known_services.iter());
+            let known_set: HashSet<&ServiceRequest> =
+                HashSet::from_iter(known_services.iter());
             let requested_set = HashSet::from_iter(services.iter());
 
             if known_set != requested_set {
@@ -157,12 +160,9 @@ impl ServiceManager {
 
         self.initialize_services_locked(&mut existing_zones, &services).await?;
 
-        tokio::fs::write(
-            &services_config_path(),
-            toml::to_string(&services)?,
-        ).await?;
+        tokio::fs::write(&services_config_path(), toml::to_string(&services)?)
+            .await?;
 
         Ok(())
     }
-
 }

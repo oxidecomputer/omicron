@@ -10,7 +10,7 @@ use crate::common::{
 };
 use crate::illumos::addrobj::AddrObject;
 use crate::illumos::svc::wait_for_service;
-use crate::illumos::vnic::{VnicAllocator, Vnic};
+use crate::illumos::vnic::{Vnic, VnicAllocator};
 use crate::illumos::zone::{AddressRequest, PROPOLIS_ZONE_PREFIX};
 use crate::instance_manager::InstanceTicket;
 use anyhow::anyhow;
@@ -501,11 +501,8 @@ impl Instance {
         info!(inner.log, "Network milestone ready for {}", zname);
 
         let addrobj = AddrObject::new_control(&control_nic.name());
-        let network = Zones::create_address(
-            &zname,
-            &addrobj,
-            AddressRequest::Dhcp,
-        )?;
+        let network =
+            Zones::create_address(&zname, &addrobj, AddressRequest::Dhcp)?;
         info!(inner.log, "Created address {} for zone: {}", network, zname);
 
         // Run Propolis in the Zone.

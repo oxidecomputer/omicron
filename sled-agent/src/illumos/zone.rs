@@ -82,12 +82,10 @@ pub enum AddressRequest {
 impl AddressRequest {
     /// Convenience function for creating an `AddressRequest` from a static IP.
     pub fn new_static(ip: IpAddr, prefix: Option<u8>) -> Self {
-        let prefix = prefix.unwrap_or_else(|| {
-                match ip {
-                    IpAddr::V4(_) => 32,
-                    IpAddr::V6(_) => 64,
-                }
-            });
+        let prefix = prefix.unwrap_or_else(|| match ip {
+            IpAddr::V4(_) => 32,
+            IpAddr::V6(_) => 64,
+        });
         let addr = IpNetwork::new(ip, prefix).unwrap();
         AddressRequest::Static(addr)
     }
@@ -490,7 +488,10 @@ impl Zones {
     }
 
     /// Gets the IP address of an interface within a Zone.
-    pub fn get_address(zone: &str, addrobj: &AddrObject) -> Result<IpNetwork, Error> {
+    pub fn get_address(
+        zone: &str,
+        addrobj: &AddrObject,
+    ) -> Result<IpNetwork, Error> {
         let mut command = std::process::Command::new(PFEXEC);
         let cmd = command.args(&[
             ZLOGIN,
