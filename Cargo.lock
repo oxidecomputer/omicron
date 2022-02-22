@@ -3879,9 +3879,12 @@ dependencies = [
  "anyhow",
  "dropshot",
  "gateway-messages",
+ "omicron-common",
+ "serde",
  "slog",
  "slog-dtrace",
  "structopt",
+ "thiserror",
  "tokio",
  "toml",
 ]

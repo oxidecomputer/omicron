@@ -3,8 +3,9 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use crate::Config;
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, bail};
 use gateway_messages::{Request, SerializedSize};
+use slog::{debug, error, Logger};
 use std::net::SocketAddr;
 use tokio::net::UdpSocket;
 
@@ -17,9 +18,9 @@ pub(crate) struct UdpServer {
 impl UdpServer {
     pub(crate) async fn new(config: &Config) -> Result<Self> {
         let sock =
-            UdpSocket::bind((config.ip, config.port)).await.with_context(
-                || format!("failed to bind to {}:{}", config.ip, config.port),
-            )?;
+            UdpSocket::bind(config.bind_address).await.with_context(|| {
+                format!("failed to bind to {}", config.bind_address)
+            })?;
 
         Ok(Self { sock, buf: [0; Request::MAX_SIZE] })
     }
@@ -37,4 +38,23 @@ impl UdpServer {
         self.sock.send_to(buf, addr).await.with_context(|| "send_to failed")?;
         Ok(())
     }
+}
+
+pub(crate) fn logger(config: &Config, name: &str) -> Result<Logger> {
+    use slog::Drain;
+    let (drain, registration) = slog_dtrace::with_drain(
+        config
+            .log
+            .to_logger(name)
+            .with_context(|| "initializing logger")?
+    );
+    let log = slog::Logger::root(drain.fuse(), slog::o!());
+    if let slog_dtrace::ProbeRegistration::Failed(e) = registration {
+        let msg = format!("failed to register DTrace probes: {}", e);
+        error!(log, "{}", msg);
+        bail!("{}", msg);
+    } else {
+        debug!(log, "registered DTrace probes");
+    }
+    Ok(log)
 }

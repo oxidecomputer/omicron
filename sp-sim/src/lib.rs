@@ -4,12 +4,7 @@
 
 mod server;
 mod sidecar;
+mod config;
 
-use std::net::IpAddr;
-
-pub struct Config {
-    pub ip: IpAddr,
-    pub port: u16,
-}
-
+pub use config::Config;
 pub use sidecar::Sidecar;

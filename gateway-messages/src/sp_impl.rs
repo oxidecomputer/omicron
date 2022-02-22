@@ -50,6 +50,14 @@ where
         Self { buf: Default::default(), handler }
     }
 
+    pub fn handler(&self) -> &Handler {
+        &self.handler
+    }
+
+    pub fn handler_mut(&mut self) -> &mut Handler {
+        &mut self.handler
+    }
+
     /// Handler for incoming UDP requests.
     ///
     /// `data` should be a UDP packet that has arrived for the current SP. It

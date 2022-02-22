@@ -2,10 +2,12 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use crate::{server::UdpServer, Config};
+use crate::server::{self, UdpServer};
+use crate::Config;
 use anyhow::Result;
 use gateway_messages::sp_impl::{SpHandler, SpServer};
 use gateway_messages::{IgnitionFlags, IgnitionState, ResponseKind};
+use slog::{debug, error, info, Logger};
 use tokio::{
     select,
     task::{self, JoinHandle},
@@ -24,18 +26,22 @@ impl Drop for Sidecar {
 
 impl Sidecar {
     pub async fn spawn(config: &Config) -> Result<Self> {
+        let log = server::logger(&config, "sidecar")?;
+        info!(log, "setting up simualted sidecar");
         let server = UdpServer::new(config).await?;
-        let inner = Inner::new(server);
+        let inner = Inner::new(server, log);
         let inner_task = task::spawn(async move { inner.run().await.unwrap() });
         Ok(Self { inner_task })
     }
 }
 
-struct Handler;
+struct Handler {
+    log: Logger,
+}
 
 impl SpHandler for Handler {
     fn ping(&mut self) -> ResponseKind {
-        println!("received ping; sending pong");
+        debug!(&self.log, "received ping; sending pong");
         ResponseKind::Pong
     }
 
@@ -47,9 +53,11 @@ impl SpHandler for Handler {
             flags: IgnitionFlags::POWER | IgnitionFlags::CTRL_DETECT_0,
         };
 
-        println!(
+        debug!(
+            &self.log,
             "received ignition state request for {}; sending {:?}",
-            target, state
+            target,
+            state
         );
         ResponseKind::IgnitionState(state)
     }
@@ -59,9 +67,11 @@ impl SpHandler for Handler {
         target: u8,
         command: gateway_messages::IgnitionCommand,
     ) -> ResponseKind {
-        println!(
+        debug!(
+            &self.log,
             "received ignition command {:?} for target {}; sending ack",
-            command, target
+            command,
+            target
         );
         ResponseKind::IgnitionCommandAck
     }
@@ -72,32 +82,35 @@ impl SpHandler for Handler {
 }
 
 struct Inner {
-    server: UdpServer,
-    handler: SpServer<Handler>,
+    udp: UdpServer,
+    server: SpServer<Handler>,
 }
 
 impl Inner {
-    fn new(server: UdpServer) -> Self {
-        Self { server, handler: SpServer::new(Handler) }
+    fn new(server: UdpServer, log: Logger) -> Self {
+        Self { udp: server, server: SpServer::new(Handler { log }) }
     }
 
     async fn run(mut self) -> Result<()> {
         loop {
             select! {
-                recv = self.server.recv_from() => {
+                recv = self.udp.recv_from() => {
                     let (data, addr) = recv?;
 
-                    let resp = match self.handler.dispatch(data) {
+                    let resp = match self.server.dispatch(data) {
                         Ok(resp) => resp,
                         // TODO: should we send back an error here? may not be
                         // able to say anything meaningful, depending on `err`
                         Err(err) => {
-                            println!("dispatching message failed: {:?}", err);
+                            error!(
+                                self.server.handler().log,
+                                "dispatching message failed: {:?}", err,
+                            );
                             continue;
                         }
                     };
 
-                    self.server.send_to(resp, addr).await?;
+                    self.udp.send_to(resp, addr).await?;
                 }
             }
         }
