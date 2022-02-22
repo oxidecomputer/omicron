@@ -160,7 +160,6 @@ lazy_static! {
             },
             snapshot_id: None,
             size: ByteCount::from_gibibytes_u32(16),
-            encryption_key: None,
         };
 
     // Instance used for testing

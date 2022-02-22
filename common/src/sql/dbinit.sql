@@ -138,8 +138,7 @@ CREATE TABLE omicron.public.Region (
     /* Metadata describing the region */
     block_size INT NOT NULL,
     blocks_per_extent INT NOT NULL,
-    extent_count INT NOT NULL,
-    encrypted BOOLEAN NOT NULL
+    extent_count INT NOT NULL
 );
 
 /*

@@ -389,7 +389,6 @@ impl DataStore {
                             params.block_size().into(),
                             params.blocks_per_extent(),
                             params.extent_count(),
-                            params.encrypted(),
                         )
                     })
                     .collect();
@@ -3102,7 +3101,6 @@ mod test {
             },
             snapshot_id: None,
             size,
-            encryption_key: None,
         }
     }
 

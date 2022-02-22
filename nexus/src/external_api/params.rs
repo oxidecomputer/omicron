@@ -177,8 +177,6 @@ pub struct DiskCreate {
     pub snapshot_id: Option<Uuid>, /* TODO should be a name? */
     /** size of the Disk */
     pub size: ByteCount,
-    /** if present, on-disk blocks should be encrypted */
-    pub encryption_key: Option<Uuid>,
 }
 
 const BLOCK_SIZE: u32 = 1_u32 << 12;
@@ -198,10 +196,6 @@ impl DiskCreate {
         let size = self.size.to_bytes() as i64;
         size / extent_size
             + ((size % extent_size) + extent_size - 1) / extent_size
-    }
-
-    pub fn encrypted(&self) -> bool {
-        self.encryption_key.is_some()
     }
 }
 
@@ -244,7 +238,6 @@ mod test {
             },
             snapshot_id: None,
             size,
-            encryption_key: None,
         }
     }
 
