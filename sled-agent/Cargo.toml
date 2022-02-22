@@ -49,7 +49,7 @@ mockall = "0.11"
 omicron-test-utils = { path = "../test-utils" }
 openapi-lint = { git = "https://github.com/oxidecomputer/openapi-lint", branch = "main" }
 openapiv3 = "1.0"
-serial_test = "0.5"
+serial_test = "0.6"
 subprocess = "0.2.8"
 slog-async = "2.6"
 slog-term = "2.9"
