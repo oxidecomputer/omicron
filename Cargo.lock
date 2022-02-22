@@ -954,7 +954,7 @@ checksum = "1435fa1053d8b2fbbe9be7e97eca7f33d37b28409959813daefc1446a14247f1"
 [[package]]
 name = "dropshot"
 version = "0.6.1-dev"
-source = "git+https://github.com/oxidecomputer/dropshot?branch=main#cc10bb61318c669e62790a886a71f02bdcab0cd3"
+source = "git+https://github.com/oxidecomputer/dropshot?branch=main#da7330b6430fe5b2aebb22233350b212e8ccf2e3"
 dependencies = [
  "async-stream",
  "async-trait",
@@ -982,7 +982,6 @@ dependencies = [
  "slog-bunyan",
  "slog-json",
  "slog-term",
- "syn",
  "tokio",
  "tokio-rustls",
  "toml",
@@ -993,7 +992,7 @@ dependencies = [
 [[package]]
 name = "dropshot_endpoint"
 version = "0.6.1-dev"
-source = "git+https://github.com/oxidecomputer/dropshot?branch=main#cc10bb61318c669e62790a886a71f02bdcab0cd3"
+source = "git+https://github.com/oxidecomputer/dropshot?branch=main#da7330b6430fe5b2aebb22233350b212e8ccf2e3"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -2468,9 +2467,9 @@ dependencies = [
 
 [[package]]
 name = "parse-display"
-version = "0.5.3"
+version = "0.5.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "898bf4c2a569dedbfd4e6c3f0bbd0ae825e5b6b0b69bae3e3c1000158689334a"
+checksum = "8bb10034e2db1d7ec22c3da90743505c07ab1e7483e93df8222c41dadb5937e8"
 dependencies = [
  "once_cell",
  "parse-display-derive",
@@ -2479,9 +2478,9 @@ dependencies = [
 
 [[package]]
 name = "parse-display-derive"
-version = "0.5.3"
+version = "0.5.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1779d1e28ab04568223744c2af4aa4e642e67b92c76bdce0929a6d2c36267199"
+checksum = "4546f47b5e547d7f9a5cc60d798798aebb013bb930df9297ada0048fd4901558"
 dependencies = [
  "once_cell",
  "proc-macro2",
@@ -3221,9 +3220,9 @@ dependencies = [
 
 [[package]]
 name = "rustls"
-version = "0.20.2"
+version = "0.20.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d37e5e2290f3e040b594b1a9e04377c2c671f1a1cfd9bfdef82106ac1c113f84"
+checksum = "4fbfeb8d0ddb84706bc597a5574ab8912817c52a397f819e5b614e2265206921"
 dependencies = [
  "log",
  "ring",
