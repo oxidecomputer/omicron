@@ -959,11 +959,27 @@ impl Into<internal::nexus::InstanceRuntimeState> for InstanceRuntimeState {
     }
 }
 
-/// A wrapper around the external "InstanceState" object,
-/// which may be stored to disk.
-#[derive(Copy, Clone, Debug, AsExpression, FromSqlRow)]
-#[sql_type = "sql_types::Text"]
-pub struct InstanceState(external::InstanceState);
+impl_enum_type!(
+    #[derive(SqlType, Debug)]
+    #[postgres(type_name = "instance_state", type_schema = "public")]
+    pub struct InstanceStateEnum;
+
+    #[derive(Clone, Debug, AsExpression, FromSqlRow)]
+    #[sql_type = "InstanceStateEnum"]
+    pub struct InstanceState(pub external::InstanceState);
+
+    // Enum values
+    Creating => b"creating"
+    Starting => b"starting"
+    Running => b"running"
+    Stopping => b"stopping"
+    Stopped => b"stopped"
+    Rebooting => b"rebooting"
+    Migrating => b"migrating"
+    Repairing => b"repairing"
+    Failed => b"failed"
+    Destroyed => b"destroyed"
+);
 
 impl InstanceState {
     pub fn new(state: external::InstanceState) -> Self {
@@ -972,31 +988,6 @@ impl InstanceState {
 
     pub fn state(&self) -> &external::InstanceState {
         &self.0
-    }
-}
-
-impl<DB> ToSql<sql_types::Text, DB> for InstanceState
-where
-    DB: Backend,
-    String: ToSql<sql_types::Text, DB>,
-{
-    fn to_sql<W: std::io::Write>(
-        &self,
-        out: &mut serialize::Output<W, DB>,
-    ) -> serialize::Result {
-        (&self.0.label().to_string() as &String).to_sql(out)
-    }
-}
-
-impl<DB> FromSql<sql_types::Text, DB> for InstanceState
-where
-    DB: Backend,
-    String: FromSql<sql_types::Text, DB>,
-{
-    fn from_sql(bytes: RawValue<DB>) -> deserialize::Result<Self> {
-        let s = String::from_sql(bytes)?;
-        let state = external::InstanceState::try_from(s.as_str())?;
-        Ok(InstanceState::new(state))
     }
 }
 
