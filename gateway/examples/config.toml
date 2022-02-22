@@ -1,0 +1,23 @@
+#
+# Oxide API: example configuration file
+#
+
+# Identifier for this instance of MGS
+#id = "e6bff1ff-24fb-49dc-a54e-c6a350cd4d6c"
+
+[dropshot]
+# IP address and TCP port on which to listen for the external API
+bind_address = "127.0.0.1:12222"
+#request_body_max_bytes = 1048576
+
+[log]
+# Show log messages of this level and more severe
+level = "debug"
+
+# Example output to a terminal (with colors)
+mode = "stderr-terminal"
+
+# Example output to a file, appending if it already exists.
+#mode = "file"
+#path = "logs/server.log"
+#if_exists = "append"

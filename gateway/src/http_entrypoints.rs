@@ -14,7 +14,7 @@ use dropshot::{
     RequestContext, ResultsPage, TypedBody,
 };
 
-use crate::GatewayService;
+use crate::ServerContext;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -135,7 +135,7 @@ struct PathSpComponent {
     path = "/sp",
 }]
 async fn sp_list(
-    _rqctx: Arc<RequestContext<GatewayService>>,
+    _rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     _query: Query<TimeoutPaginationParams<SpIdentifier>>,
 ) -> Result<HttpResponseOk<ResultsPage<SpInfo>>, HttpError> {
     todo!()
@@ -150,7 +150,7 @@ async fn sp_list(
     path = "/sp/{typ}/{slot}",
 }]
 async fn sp_get(
-    _rqctx: Arc<RequestContext<GatewayService>>,
+    _rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     _path: Path<PathSp>,
     _query: Query<Timeout>,
 ) -> Result<HttpResponseOk<SpInfo>, HttpError> {
@@ -172,7 +172,7 @@ async fn sp_get(
     path = "/sp/{typ}/{slot}/component",
 }]
 async fn sp_component_list(
-    _rqctx: Arc<RequestContext<GatewayService>>,
+    _rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     _path: Path<PathSp>,
     _query: Query<TimeoutPaginationParams<PathSpComponent>>,
 ) -> Result<HttpResponseOk<ResultsPage<SpComponentInfo>>, HttpError> {
@@ -193,7 +193,7 @@ async fn sp_component_list(
     path = "/sp/{typ}/{slot}/component/{component}",
 }]
 async fn sp_component_get(
-    _rqctx: Arc<RequestContext<GatewayService>>,
+    _rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     _path: Path<PathSpComponent>,
     _query: Query<Timeout>,
 ) -> Result<HttpResponseOk<SpComponentInfo>, HttpError> {
@@ -220,7 +220,7 @@ struct UpdateBody;
     path = "/sp/{typ}/{slot}/component/{component}/update",
 }]
 async fn sp_component_update(
-    _rqctx: Arc<RequestContext<GatewayService>>,
+    _rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     _path: Path<PathSpComponent>,
     _body: TypedBody<UpdateBody>,
 ) -> Result<HttpResponseOk<ResultsPage<SpComponentInfo>>, HttpError> {
@@ -235,7 +235,7 @@ async fn sp_component_update(
     path = "/sp/{typ}/{slot}/component/{component}/power_on",
 }]
 async fn sp_component_power_on(
-    _rqctx: Arc<RequestContext<GatewayService>>,
+    _rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     _path: Path<PathSpComponent>,
     // TODO do we need a timeout?
 ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
@@ -250,7 +250,7 @@ async fn sp_component_power_on(
     path = "/sp/{typ}/{slot}/component/{component}/power_off",
 }]
 async fn sp_component_power_off(
-    _rqctx: Arc<RequestContext<GatewayService>>,
+    _rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     _path: Path<PathSpComponent>,
     // TODO do we need a timeout?
 ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
@@ -271,7 +271,7 @@ async fn sp_component_power_off(
     path = "/ignition",
 }]
 async fn ignition_list(
-    _rqctx: Arc<RequestContext<GatewayService>>,
+    _rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     _query: Query<PaginationParams<EmptyScanParams, SpIdentifier>>,
 ) -> Result<HttpResponseOk<ResultsPage<SpIgnitionInfo>>, HttpError> {
     todo!()
@@ -287,7 +287,7 @@ async fn ignition_list(
     path = "/ignition/{typ}/{slot}",
 }]
 async fn ignition_get(
-    _rqctx: Arc<RequestContext<GatewayService>>,
+    _rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     _path: Path<PathSp>,
 ) -> Result<HttpResponseOk<SpIgnitionInfo>, HttpError> {
     todo!()
@@ -299,7 +299,7 @@ async fn ignition_get(
     path = "/sp/{typ}/{slot}/power_on",
 }]
 async fn ignition_power_on(
-    _rqctx: Arc<RequestContext<GatewayService>>,
+    _rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     _path: Path<PathSp>,
 ) -> Result<HttpResponseOk<SpIgnitionInfo>, HttpError> {
     todo!()
@@ -311,7 +311,7 @@ async fn ignition_power_on(
     path = "/sp/{typ}/{slot}/power_off",
 }]
 async fn ignition_power_off(
-    _rqctx: Arc<RequestContext<GatewayService>>,
+    _rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     _path: Path<PathSp>,
 ) -> Result<HttpResponseOk<SpIgnitionInfo>, HttpError> {
     todo!()
@@ -328,7 +328,7 @@ async fn ignition_power_off(
 // gateways? This would cause a single message to effectively be replicated 4x
 // (Nexus would need to dedup these).
 
-type GatewayApiDescription = ApiDescription<GatewayService>;
+type GatewayApiDescription = ApiDescription<Arc<ServerContext>>;
 
 /// Returns a description of the gateway API
 pub fn api() -> GatewayApiDescription {
