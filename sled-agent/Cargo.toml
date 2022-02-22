@@ -52,7 +52,7 @@ openapiv3 = "1.0"
 serial_test = "0.5"
 subprocess = "0.2.8"
 slog-async = "2.6"
-slog-term = "2.8"
+slog-term = "2.9"
 
 #
 # Disable doc builds by default for our binaries to work around issue
