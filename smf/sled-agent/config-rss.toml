@@ -10,6 +10,8 @@ sled_address = "127.0.0.1:12345"
 # address = "[fd00:1234::]:32345"
 # partition_kind.type = "crucible"
 
+# TODO: Add a partition for Clickhouse too
+
 [[request.partition]]
 zpool_uuid = "d462a7f7-b628-40fe-80ff-4e4189e2d62b"
 address = "[fd00:1234::5]:32221"
@@ -17,3 +19,11 @@ partition_kind.type = "cockroach_db"
 partition_kind.all_addresses = [
   "[fd00:1234::5]:32221",
 ]
+
+[[request.service]]
+name = "nexus"
+address = "[fd00:1234::5]:32221"
+
+# [[request.service]]
+# name = "oximeter"
+# address = "[fd00:1234::6]:12223"

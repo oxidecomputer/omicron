@@ -341,6 +341,16 @@ impl From<omicron_common::api::internal::sled_agent::PartitionEnsureBody>
     }
 }
 
+impl From<omicron_common::api::internal::sled_agent::ServiceRequest>
+    for types::ServiceRequest
+{
+    fn from(
+        s: omicron_common::api::internal::sled_agent::ServiceRequest,
+    ) -> Self {
+        Self { name: s.name, address: s.address.to_string() }
+    }
+}
+
 /**
  * Exposes additional [`Client`] interfaces for use by the test suite. These
  * are bonus endpoints, not generated in the real client.

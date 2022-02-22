@@ -107,6 +107,26 @@
           }
         }
       }
+    },
+    "/services": {
+      "put": {
+        "operationId": "services_put",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ServiceEnsureBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          }
+        }
+      }
     }
   },
   "components": {
@@ -686,7 +706,7 @@
         ]
       },
       "PartitionEnsureBody": {
-        "description": "Used to request a new partition kind exists within a zpool.",
+        "description": "Used to request a new partition kind exists within a zpool.\n\nMany partition types are associated with services that will be instantiated when the partition is detected.",
         "type": "object",
         "properties": {
           "address": {
@@ -759,6 +779,36 @@
               "type"
             ]
           }
+        ]
+      },
+      "ServiceEnsureBody": {
+        "description": "Used to request that the Sled initialize certain services on initialization.\n\nThis may be used to record that certain sleds are responsible for launching services which may not be associated with a partition, such as Nexus.",
+        "type": "object",
+        "properties": {
+          "services": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ServiceRequest"
+            }
+          }
+        },
+        "required": [
+          "services"
+        ]
+      },
+      "ServiceRequest": {
+        "type": "object",
+        "properties": {
+          "address": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "address",
+          "name"
         ]
       }
     }

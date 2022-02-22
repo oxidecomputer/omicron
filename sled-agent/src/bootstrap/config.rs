@@ -9,6 +9,9 @@
 use crate::config::ConfigError;
 use dropshot::ConfigDropshot;
 use dropshot::ConfigLogging;
+use omicron_common::api::internal::sled_agent::{
+    PartitionEnsureBody, ServiceRequest,
+};
 use serde::Deserialize;
 use serde::Serialize;
 use std::net::SocketAddr;
@@ -38,18 +41,22 @@ pub struct Config {
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
 pub struct SetupServiceConfig {
     #[serde(default, rename = "request")]
-    pub requests: Vec<PartitionRequest>,
+    pub requests: Vec<SledRequest>,
 }
 
-/// A request to initialize a partition.
+/// A request to initialize a sled.
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
-pub struct PartitionRequest {
-    /// The Sled Agent address receiving these partitions.
+pub struct SledRequest {
+    /// The Sled Agent address receiving these requests.
     pub sled_address: SocketAddr,
-    /// The request to be sent.
+
+    /// Partitions to be created.
     #[serde(default, rename = "partition")]
-    pub partitions:
-        Vec<omicron_common::api::internal::sled_agent::PartitionEnsureBody>,
+    pub partitions: Vec<PartitionEnsureBody>,
+
+    /// Services to be instantiated.
+    #[serde(default, rename = "service")]
+    pub services: Vec<ServiceRequest>,
 }
 
 impl SetupServiceConfig {

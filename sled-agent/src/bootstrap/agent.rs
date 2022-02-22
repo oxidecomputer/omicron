@@ -237,6 +237,7 @@ impl Agent {
         // work? Maybe the sled agent should be in charge of some of the zone
         // management?)
 
+        /*
         self.launch(&digests, &tar_source, "nexus")?;
 
         // TODO-correctness: The same note as above applies to oximeter.
@@ -246,6 +247,7 @@ impl Agent {
         // This is the responsibility of the sled agent in response to requests
         // from Nexus.
         self.verify(&digests, &tar_source, "propolis-server")?;
+        */
 
         Ok(())
     }
@@ -360,6 +362,24 @@ impl Agent {
                             log_failure,
                         ).await?;
                     }
+
+                    let services_put = || async {
+                        info!(self.log, "initializing sled services: {:?}", request.services);
+                        client.services_put(
+                            &sled_agent_client::types::ServiceEnsureBody {
+                                services: request.services.iter().map(|s| s.clone().into()).collect()
+                            })
+                            .await
+                            .map_err(BackoffError::Transient)
+                    };
+                    let log_failure = |error, _| {
+                        warn!(self.log, "failed to initialize services"; "error" => ?error);
+                    };
+                    retry_notify(
+                        internal_service_policy(),
+                        services_put,
+                        log_failure,
+                    ).await?;
                     Ok::<(), BootstrapError>(())
                 })
             ).await.into_iter().collect::<Result<Vec<()>, BootstrapError>>()?;

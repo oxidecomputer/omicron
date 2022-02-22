@@ -13,4 +13,4 @@ level = "debug"
 mode = "stderr-terminal"
 
 [dropshot]
-bind_address = "[::1]:12223"
+bind_address = "[fd00:1234::6]:12223"
