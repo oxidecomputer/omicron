@@ -284,6 +284,8 @@ CREATE UNIQUE INDEX ON omicron.public.instance (
  * This makes the conversion to/from this enum type here much
  * more difficult, since we need a way to manage that data
  * coherently.
+ *
+ * See <https://github.com/oxidecomputer/omicron/issues/312>.
  */
 -- CREATE TYPE omicron.public.DiskState AS ENUM (
 --     'creating',
@@ -638,6 +640,8 @@ CREATE UNIQUE INDEX ON omicron.public.saga (
  */
 /*
  * TODO: This is a data-carrying enum, see note on disk_state.
+ *
+ * See <https://github.com/oxidecomputer/omicron/issues/312>.
  */
 -- CREATE TYPE omicron.public.saga_node_event_type AS ENUM (
 --    'started',
