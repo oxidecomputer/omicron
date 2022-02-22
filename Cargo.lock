@@ -954,7 +954,7 @@ checksum = "1435fa1053d8b2fbbe9be7e97eca7f33d37b28409959813daefc1446a14247f1"
 [[package]]
 name = "dropshot"
 version = "0.6.1-dev"
-source = "git+https://github.com/oxidecomputer/dropshot?branch=main#cc10bb61318c669e62790a886a71f02bdcab0cd3"
+source = "git+https://github.com/oxidecomputer/dropshot?branch=main#da7330b6430fe5b2aebb22233350b212e8ccf2e3"
 dependencies = [
  "async-stream",
  "async-trait",
@@ -982,7 +982,6 @@ dependencies = [
  "slog-bunyan",
  "slog-json",
  "slog-term",
- "syn",
  "tokio",
  "tokio-rustls",
  "toml",
@@ -993,7 +992,7 @@ dependencies = [
 [[package]]
 name = "dropshot_endpoint"
 version = "0.6.1-dev"
-source = "git+https://github.com/oxidecomputer/dropshot?branch=main#cc10bb61318c669e62790a886a71f02bdcab0cd3"
+source = "git+https://github.com/oxidecomputer/dropshot?branch=main#da7330b6430fe5b2aebb22233350b212e8ccf2e3"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -1699,9 +1698,9 @@ checksum = "e2abad23fbc42b3700f2f279844dc832adb2b2eb069b2df918f455c4e18cc646"
 
 [[package]]
 name = "libc"
-version = "0.2.117"
+version = "0.2.119"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e74d72e0f9b65b5b4ca49a346af3976df0f9c61d550727f349ecd559f251a26c"
+checksum = "1bf2e165bb3457c8e098ea76f3e3bc9db55f87aa90d52d0e6be741470916aaa4"
 
 [[package]]
 name = "libsqlite3-sys"
@@ -3221,9 +3220,9 @@ dependencies = [
 
 [[package]]
 name = "rustls"
-version = "0.20.2"
+version = "0.20.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d37e5e2290f3e040b594b1a9e04377c2c671f1a1cfd9bfdef82106ac1c113f84"
+checksum = "4fbfeb8d0ddb84706bc597a5574ab8912817c52a397f819e5b614e2265206921"
 dependencies = [
  "log",
  "ring",
@@ -3711,9 +3710,9 @@ dependencies = [
 
 [[package]]
 name = "slog-term"
-version = "2.8.0"
+version = "2.8.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "95c1e7e5aab61ced6006149ea772770b84a0d16ce0f7885def313e4829946d76"
+checksum = "f3668dd2252f4381d64de0c79e6c8dc6bd509d1cab3535b35a3fc9bafd1241d5"
 dependencies = [
  "atty",
  "chrono",
