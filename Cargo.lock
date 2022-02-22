@@ -69,9 +69,9 @@ dependencies = [
 
 [[package]]
 name = "anyhow"
-version = "1.0.53"
+version = "1.0.55"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "94a45b455c14666b85fc40a019e8ab9eb75e3a124e05494f5397122bc9eb06e0"
+checksum = "159bb86af3a200e19a068f4224eae4c8bb2d0fa054c7e5d1cacd5cef95e684cd"
 
 [[package]]
 name = "api_identity"
@@ -2467,9 +2467,9 @@ dependencies = [
 
 [[package]]
 name = "parse-display"
-version = "0.5.3"
+version = "0.5.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "898bf4c2a569dedbfd4e6c3f0bbd0ae825e5b6b0b69bae3e3c1000158689334a"
+checksum = "8bb10034e2db1d7ec22c3da90743505c07ab1e7483e93df8222c41dadb5937e8"
 dependencies = [
  "once_cell",
  "parse-display-derive",
@@ -2478,9 +2478,9 @@ dependencies = [
 
 [[package]]
 name = "parse-display-derive"
-version = "0.5.3"
+version = "0.5.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1779d1e28ab04568223744c2af4aa4e642e67b92c76bdce0929a6d2c36267199"
+checksum = "4546f47b5e547d7f9a5cc60d798798aebb013bb930df9297ada0048fd4901558"
 dependencies = [
  "once_cell",
  "proc-macro2",
