@@ -681,7 +681,8 @@ async fn ensure_region_in_dataset(
         create_region,
         log_create_failure,
     )
-    .await?;
+    .await
+    .map_err(|e| Error::internal_error(&e.to_string()))?;
 
     Ok(region.into_inner())
 }

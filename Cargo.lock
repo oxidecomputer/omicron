@@ -1889,10 +1889,8 @@ dependencies = [
 name = "nexus-client"
 version = "0.1.0"
 dependencies = [
- "anyhow",
  "chrono",
  "omicron-common",
- "percent-encoding",
  "progenitor",
  "reqwest",
  "serde",
@@ -2324,10 +2322,8 @@ dependencies = [
 name = "oximeter-client"
 version = "0.1.0"
 dependencies = [
- "anyhow",
  "chrono",
  "omicron-common",
- "percent-encoding",
  "progenitor",
  "reqwest",
  "serde",
@@ -3675,11 +3671,9 @@ checksum = "9def91fd1e018fe007022791f865d0ccc9b3a0d5001e01aabb8b40e46000afb5"
 name = "sled-agent-client"
 version = "0.1.0"
 dependencies = [
- "anyhow",
  "async-trait",
  "chrono",
  "omicron-common",
- "percent-encoding",
  "progenitor",
  "reqwest",
  "serde",
