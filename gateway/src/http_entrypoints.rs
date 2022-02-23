@@ -358,12 +358,15 @@ async fn ignition_get(
 ) -> Result<HttpResponseOk<SpIgnitionInfo>, HttpError> {
     let apictx = rqctx.context();
     let path = path.into_inner();
+
     let target = path
         .sp
         .placeholder_map_to_target(apictx.sp_comms.placeholder_known_sps())?;
 
-    // TODO TIMEOUT
-    let state = apictx.sp_comms.ignition_get(target).await.unwrap(); // TODO
+    let state = apictx
+        .sp_comms
+        .ignition_get(target, apictx.ignition_controller_timeout)
+        .await?;
 
     let info = SpIgnitionInfo { id: path.sp, details: state.into() };
     Ok(HttpResponseOk(info))

@@ -50,10 +50,8 @@ impl Server {
         let log = log.new(o!("name" => "TODO".to_string()));
         info!(log, "setting up gateway server");
 
-        let ctxlog = log.new(o!("component" => "ServerContext"));
-        //let apictx = ServerContext::new(rack_id, ctxlog, pool, &config)?;
         let apictx =
-            ServerContext::new(config, ctxlog).await.map_err(|error| {
+            ServerContext::new(config, &log).await.map_err(|error| {
                 format!("initializing server context: {}", error)
             })?;
 

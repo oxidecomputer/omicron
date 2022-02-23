@@ -33,6 +33,8 @@ pub struct Config {
     /// Bind address for UDP socket for SP communication on the management
     /// network.
     pub udp_bind_address: SocketAddr,
+    /// Timeout for messages to our local ignition controller SP.
+    pub ignition_controller_timeout_milliseconds: u64,
     /// Placeholder description of all known SPs in the system.
     pub known_sps: KnownSps,
     /*

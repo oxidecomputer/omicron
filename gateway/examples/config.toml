@@ -5,8 +5,12 @@
 # Identifier for this instance of MGS
 #id = "e6bff1ff-24fb-49dc-a54e-c6a350cd4d6c"
 udp_bind_address = "127.0.0.1:22222"
+ignition_controller_timeout_milliseconds = 1_000
 
 [known_sps]
+# TODO we repeat the ignition_controller IP as a switch; should we specify it as
+# an index into `switches` instead? Punting since this isn't how we want to map
+# our known SPs anyway.
 ignition_controller = "127.0.0.1:23456"
 switches = ["127.0.0.1:23456"]
 sleds = []
