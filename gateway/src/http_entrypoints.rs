@@ -101,9 +101,9 @@ pub(crate) enum SpType {
 
 #[derive(Serialize, Deserialize, JsonSchema, PartialEq, Debug, Clone)]
 pub(crate) struct SpIdentifier {
-    //#[serde(rename = "type")]
+    #[serde(rename = "type")]
     pub(crate) typ: SpType,
-    pub(crate) slot: String,
+    pub(crate) slot: u32,
 }
 
 impl SpIdentifier {
@@ -119,10 +119,8 @@ impl SpIdentifier {
         // from 0 starting with switches followed by sleds followed by power
         // controllers.
 
-        // TODO `slot` really shouldn't be a `String` and we shouldn't need to
-        // parse it here, but working around a dropshot issue. TODO link issue
-        let slot: usize = self.slot.parse().map_err(|_| {
-            Error::DeleteThis("slot must be an unsigned integer".to_string())
+        let slot: usize = usize::try_from(self.slot).map_err(|_| {
+            Error::SpDoesNotExist(self.clone())
         })?;
 
         let mut base = 0;
@@ -161,15 +159,26 @@ type TimeoutPaginationParams<T> = PaginationParams<Timeout, TimeoutSelector<T>>;
 struct PathSp {
     /// ID for the SP that the gateway service translates into the appropriate
     /// port for communicating with the given SP.
-    #[serde(flatten)]
-    sp: SpIdentifier,
+    ///
+    /// This should be a `#[serde(flatten)]`'d [`SpIdentifier`], but serde
+    /// cannot deserialize flattened types containing non-`String` types through
+    /// a dropshot [`Path`].
+    #[serde(rename = "type")]
+    typ: SpType,
+    slot: u32,
+}
+
+impl PathSp {
+    fn into_sp_identifier(self) -> SpIdentifier {
+        SpIdentifier { typ: self.typ, slot: self.slot }
+    }
 }
 
 #[derive(Serialize, Deserialize, JsonSchema)]
 struct PathSpComponent {
     /// ID for the SP that the gateway service translates into the appropriate
     /// port for communicating with the given SP.
-    #[serde(flatten)]
+    #[serde(flatten)] // TODO this may need the same treatment as `PathSp`
     sp: SpIdentifier,
     /// ID for the component of the SP; this is the internal identifier used by
     /// the SP itself to identify its components.
@@ -213,7 +222,7 @@ async fn sp_list(
 /// optional timeout to override the default.
 #[endpoint {
     method = GET,
-    path = "/sp/{typ}/{slot}",
+    path = "/sp/{type}/{slot}",
 }]
 async fn sp_get(
     _rqctx: Arc<RequestContext<Arc<ServerContext>>>,
@@ -235,7 +244,7 @@ async fn sp_get(
 /// is reached, the final call will result in an error.
 #[endpoint {
     method = GET,
-    path = "/sp/{typ}/{slot}/component",
+    path = "/sp/{type}/{slot}/component",
 }]
 async fn sp_component_list(
     _rqctx: Arc<RequestContext<Arc<ServerContext>>>,
@@ -256,7 +265,7 @@ async fn sp_component_list(
 /// timeout is reached.
 #[endpoint {
     method = GET,
-    path = "/sp/{typ}/{slot}/component/{component}",
+    path = "/sp/{type}/{slot}/component/{component}",
 }]
 async fn sp_component_get(
     _rqctx: Arc<RequestContext<Arc<ServerContext>>>,
@@ -283,7 +292,7 @@ struct UpdateBody;
 /// update bundle.
 #[endpoint {
     method = POST,
-    path = "/sp/{typ}/{slot}/component/{component}/update",
+    path = "/sp/{type}/{slot}/component/{component}/update",
 }]
 async fn sp_component_update(
     _rqctx: Arc<RequestContext<Arc<ServerContext>>>,
@@ -298,7 +307,7 @@ async fn sp_component_update(
 /// Components whose power state cannot be changed will always return an error.
 #[endpoint {
     method = POST,
-    path = "/sp/{typ}/{slot}/component/{component}/power_on",
+    path = "/sp/{type}/{slot}/component/{component}/power_on",
 }]
 async fn sp_component_power_on(
     _rqctx: Arc<RequestContext<Arc<ServerContext>>>,
@@ -313,7 +322,7 @@ async fn sp_component_power_on(
 /// Components whose power state cannot be changed will always return an error.
 #[endpoint {
     method = POST,
-    path = "/sp/{typ}/{slot}/component/{component}/power_off",
+    path = "/sp/{type}/{slot}/component/{component}/power_off",
 }]
 async fn sp_component_power_off(
     _rqctx: Arc<RequestContext<Arc<ServerContext>>>,
@@ -350,32 +359,31 @@ async fn ignition_list(
 /// management network.
 #[endpoint {
     method = GET,
-    path = "/ignition/{typ}/{slot}",
+    path = "/ignition/{type}/{slot}",
 }]
 async fn ignition_get(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path: Path<PathSp>,
 ) -> Result<HttpResponseOk<SpIgnitionInfo>, HttpError> {
     let apictx = rqctx.context();
-    let path = path.into_inner();
+    let sp = path.into_inner().into_sp_identifier();
 
-    let target = path
-        .sp
-        .placeholder_map_to_target(apictx.sp_comms.placeholder_known_sps())?;
+    let target =
+        sp.placeholder_map_to_target(apictx.sp_comms.placeholder_known_sps())?;
 
     let state = apictx
         .sp_comms
         .ignition_get(target, apictx.ignition_controller_timeout)
         .await?;
 
-    let info = SpIgnitionInfo { id: path.sp, details: state.into() };
+    let info = SpIgnitionInfo { id: sp, details: state.into() };
     Ok(HttpResponseOk(info))
 }
 
 /// Power on an SP via Ignition
 #[endpoint {
     method = POST,
-    path = "/sp/{typ}/{slot}/power_on",
+    path = "/sp/{type}/{slot}/power_on",
 }]
 async fn ignition_power_on(
     _rqctx: Arc<RequestContext<Arc<ServerContext>>>,
@@ -387,7 +395,7 @@ async fn ignition_power_on(
 /// Power off an SP via Ignition
 #[endpoint {
     method = POST,
-    path = "/sp/{typ}/{slot}/power_off",
+    path = "/sp/{type}/{slot}/power_off",
 }]
 async fn ignition_power_off(
     _rqctx: Arc<RequestContext<Arc<ServerContext>>>,

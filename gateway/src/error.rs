@@ -14,18 +14,14 @@ pub(crate) enum Error {
     /// A requested SP does not exist.
     ///
     /// This is not the same as the requested SP target being offline; this
-    /// error indicates a fatal, invalid request (e.g., asing for the SP on the 17th
-    /// switch when there are only two switches).
+    /// error indicates a fatal, invalid request (e.g., asing for the SP on the
+    /// 17th switch when there are only two switches).
     #[error("SP {} (of type {:?}) does not exist", .0.slot, .0.typ)]
     SpDoesNotExist(SpIdentifier),
 
     /// The system encountered an unhandled operational error.
     #[error("internal error: {internal_message}")]
     InternalError { internal_message: String },
-
-    /// DELETE THIS LATER; work around dropshot issue TODO LINK
-    #[error("placeholder error: {0}")]
-    DeleteThis(String),
 }
 
 impl From<Error> for HttpError {
@@ -41,10 +37,6 @@ impl From<Error> for HttpError {
             Error::InternalError { internal_message } => {
                 HttpError::for_internal_error(internal_message)
             }
-            Error::DeleteThis(message) => HttpError::for_bad_request(
-                Some(String::from("PLACEHOLDER")),
-                message,
-            ),
         }
     }
 }
