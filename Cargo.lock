@@ -1538,6 +1538,7 @@ checksum = "c4a1e36c821dbe04574f602848a19f742f4fb3c98d40449f11bcad18d6b17421"
 [[package]]
 name = "hubpack"
 version = "0.1.0"
+source = "git+https://github.com/jgallagher/hubpack?rev=36b13ad37a3b9606ea9f7f4d74f4d93ae83f4004#36b13ad37a3b9606ea9f7f4d74f4d93ae83f4004"
 dependencies = [
  "hubpack_derive",
  "serde",
@@ -1546,6 +1547,7 @@ dependencies = [
 [[package]]
 name = "hubpack_derive"
 version = "0.1.0"
+source = "git+https://github.com/jgallagher/hubpack?rev=36b13ad37a3b9606ea9f7f4d74f4d93ae83f4004#36b13ad37a3b9606ea9f7f4d74f4d93ae83f4004"
 dependencies = [
  "proc-macro2",
  "quote",
