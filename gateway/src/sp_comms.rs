@@ -55,7 +55,7 @@ pub struct SpCommunicator {
     log: Logger,
     socket: Arc<UdpSocket>,
     known_sps: KnownSps,
-    outstanding_requests: Arc<OutstandingRequests>,
+    sp_state: Arc<SpState>,
     request_id: AtomicU32,
     recv_task: JoinHandle<()>,
 }
@@ -82,11 +82,13 @@ impl SpCommunicator {
             "componennt" => "SpCommunicator",
             "local_addr" => bind_addr,
         ));
-        let outstanding_requests =
-            Arc::new(OutstandingRequests::new(&known_sps));
+
+        // build our fixed-keys-after-this-point map of known SP IPs
+        let sp_state = Arc::new(SpState::new(&known_sps));
+
         let recv_task = RecvTask::new(
             Arc::clone(&socket),
-            Arc::clone(&outstanding_requests),
+            Arc::clone(&sp_state),
             log.clone(),
         );
         let recv_task = tokio::spawn(recv_task.run());
@@ -95,7 +97,7 @@ impl SpCommunicator {
             log,
             socket,
             known_sps,
-            outstanding_requests,
+            sp_state,
             request_id: AtomicU32::new(0),
             recv_task,
         })
@@ -133,7 +135,7 @@ impl SpCommunicator {
 
         // tell our background receiver to expect a response to this request
         let response =
-            self.outstanding_requests.insert(controller.ip(), request_id);
+            self.sp_state.insert_expected_response(controller.ip(), request_id);
 
         // Serialize and send our request. We know `buf` is large enough for any
         // `Request`, so unwrapping here is fine.
@@ -200,17 +202,17 @@ impl SpCommunicator {
 /// `outstanding_requests` (via its `Drop` impl).
 struct RecvTask {
     socket: Arc<UdpSocket>,
-    outstanding_requests: Arc<OutstandingRequests>,
+    sp_state: Arc<SpState>,
     log: Logger,
 }
 
 impl RecvTask {
     fn new(
         socket: Arc<UdpSocket>,
-        outstanding_requests: Arc<OutstandingRequests>,
+        sp_state: Arc<SpState>,
         log: Logger,
     ) -> Self {
-        Self { socket, outstanding_requests, log }
+        Self { socket, sp_state, log }
     }
 
     async fn run(self) {
@@ -276,7 +278,10 @@ impl RecvTask {
         kind: ResponseKind,
     ) {
         // see if we know who to send the response to
-        let tx = match self.outstanding_requests.remove(addr.ip(), request_id) {
+        let tx = match self
+            .sp_state
+            .remove_expected_response(addr.ip(), request_id)
+        {
             Some(tx) => tx,
             None => {
                 error!(&self.log,
@@ -325,56 +330,74 @@ impl RecvTask {
 }
 
 #[derive(Debug)]
-struct OutstandingRequests {
-    // map of SP -> request ID -> receiving oneshot channel
-    requests_by_sp: HashMap<IpAddr, Mutex<HashMap<u32, Sender<ResponseKind>>>>,
+struct SpState {
+    all_sps: HashMap<IpAddr, SingleSpState>,
 }
 
-impl OutstandingRequests {
+impl SpState {
     fn new(known_sps: &KnownSps) -> Self {
-        let mut requests_by_sp = HashMap::new();
+        let mut all_sps = HashMap::new();
         for sp_list in [
             &known_sps.switches,
             &known_sps.sleds,
             &known_sps.power_controllers,
         ] {
             for sp in sp_list {
-                requests_by_sp.insert(sp.ip(), Mutex::default());
+                all_sps.insert(sp.ip(), SingleSpState::default());
             }
         }
-        Self { requests_by_sp }
+        Self { all_sps }
     }
 
-    fn insert(
-        self: &Arc<Self>,
+    fn insert_expected_response(
+        &self,
         sp: IpAddr,
         request_id: u32,
     ) -> ResponseReceiver {
         // caller should never try to send a request to an SP we don't know
         // about, since it created us with all SPs it knows.
-        let requests = self.requests_by_sp.get(&sp).expect("nonexistent SP");
-
-        let (tx, rx) = oneshot::channel();
-        requests.lock().unwrap().insert(request_id, tx);
-
-        ResponseReceiver {
-            parent: Arc::clone(self),
-            sp,
-            request_id,
-            rx,
-            removed_from_parent: false,
-        }
+        let state = self.all_sps.get(&sp).expect("nonexistent SP");
+        state.outstanding_requests.insert(request_id)
     }
 
-    fn remove(
+    fn remove_expected_response(
         &self,
         sp: IpAddr,
         request_id: u32,
     ) -> Option<Sender<ResponseKind>> {
         // caller should never try to send a request to an SP we don't know
         // about, since it created us with all SPs it knows.
-        let requests = self.requests_by_sp.get(&sp).expect("nonexistent SP");
-        requests.lock().unwrap().remove(&request_id)
+        let state = self.all_sps.get(&sp).expect("nonexistent SP");
+        state.outstanding_requests.remove(request_id)
+    }
+}
+
+#[derive(Debug, Default)]
+struct SingleSpState {
+    outstanding_requests: Arc<OutstandingRequests>,
+}
+
+#[derive(Debug, Default)]
+struct OutstandingRequests {
+    // map of request ID -> receiving oneshot channel
+    requests: Mutex<HashMap<u32, Sender<ResponseKind>>>,
+}
+
+impl OutstandingRequests {
+    fn insert(self: &Arc<Self>, request_id: u32) -> ResponseReceiver {
+        let (tx, rx) = oneshot::channel();
+        self.requests.lock().unwrap().insert(request_id, tx);
+
+        ResponseReceiver {
+            parent: Arc::clone(self),
+            request_id,
+            rx,
+            removed_from_parent: false,
+        }
+    }
+
+    fn remove(&self, request_id: u32) -> Option<Sender<ResponseKind>> {
+        self.requests.lock().unwrap().remove(&request_id)
     }
 }
 
@@ -384,7 +407,6 @@ impl OutstandingRequests {
 // error/cancellation)
 struct ResponseReceiver {
     parent: Arc<OutstandingRequests>,
-    sp: IpAddr,
     request_id: u32,
     rx: Receiver<ResponseKind>,
     removed_from_parent: bool,
@@ -410,12 +432,7 @@ impl ResponseReceiver {
             return;
         }
 
-        // we should never have an SP IP address that doesn't exist in our
-        // parent
-        let map =
-            self.parent.requests_by_sp.get(&self.sp).expect("nonexistent SP");
-
-        map.lock().unwrap().remove(&self.request_id);
+        self.parent.requests.lock().unwrap().remove(&self.request_id);
         self.removed_from_parent = true;
     }
 }
