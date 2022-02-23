@@ -122,9 +122,8 @@ impl SpIdentifier {
         // from 0 starting with switches followed by sleds followed by power
         // controllers.
 
-        let slot: usize = usize::try_from(self.slot).map_err(|_| {
-            Error::SpDoesNotExist(self.clone())
-        })?;
+        let slot: usize = usize::try_from(self.slot)
+            .map_err(|_| Error::SpDoesNotExist(self.clone()))?;
 
         let mut base = 0;
         for (typ, count) in [
