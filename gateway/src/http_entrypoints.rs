@@ -27,6 +27,7 @@ struct SpInfo {
 
 #[derive(Serialize, JsonSchema)]
 #[serde(tag = "state")]
+#[allow(dead_code)] // TODO remove once this is used
 enum SpState {
     Disabled,
     Unresponsive,
@@ -44,6 +45,7 @@ struct SpIgnitionInfo {
 
 #[derive(Serialize, JsonSchema)]
 #[serde(tag = "present")]
+#[allow(dead_code)] // TODO remove once `Absent` is used
 enum SpIgnition {
     #[serde(rename = "no")]
     Absent,
@@ -81,6 +83,7 @@ impl From<gateway_messages::IgnitionState> for SpIgnition {
 struct SpComponentInfo;
 
 #[derive(Deserialize, JsonSchema)]
+#[allow(dead_code)] // TODO remove once this is used
 struct Timeout {
     timeout: Option<u32>,
 }
