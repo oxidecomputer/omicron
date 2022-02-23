@@ -73,27 +73,6 @@ impl Server {
      * or until something else initiates a graceful shutdown.
      */
     pub async fn wait_for_finish(self) -> Result<(), String> {
-        /*
-        let errors = vec![
-            self.http_server
-                .await
-                .map_err(|e| format!("external: {}", e)),
-            self.http_server_internal
-                .await
-                .map_err(|e| format!("internal: {}", e)),
-        ]
-        .into_iter()
-        .filter(Result::is_err)
-        .map(|r| r.unwrap_err())
-        .collect::<Vec<String>>();
-
-        if errors.len() > 0 {
-            let msg = format!("errors shutting down: ({})", errors.join(", "));
-            Err(msg)
-        } else {
-            Ok(())
-        }
-        */
         self.http_server.await
     }
 

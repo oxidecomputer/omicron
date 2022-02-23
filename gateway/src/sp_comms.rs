@@ -89,7 +89,7 @@ impl SpCommunicator {
             Arc::clone(&outstanding_requests),
             log.clone(),
         );
-        let recv_task = tokio::spawn(async move { recv_task.run().await });
+        let recv_task = tokio::spawn(recv_task.run());
         info!(&log, "started sp-server");
         Ok(Self {
             log,
@@ -273,6 +273,19 @@ impl RecvTask {
 
             // actually send it
             if tx.send(resp.kind).is_err() {
+                // This can only fail if the receiving half has been dropped.
+                // That's held in the relevant `SpCommunicator` method above
+                // that initiated this request; they should only have dropped
+                // the rx half if they've been dropped (in which case we've been
+                // aborted and can't get here) or if we landed in a race where
+                // the `SpCommunicator` task was cancelled (presumably by
+                // timeout) in between us pulling `tx` out of
+                // `outstanding_requests` and actually sending the response on
+                // it. But that window does exist, so log when we fail to send.
+                // I believe these should be interpreted as timeout failures;
+                // most of the time failing to get a `tx` at all (above) is also
+                // caused by a timeout, but that path is also invoked if we get
+                // a garbage response somehow.
                 error!(
                     &self.log,
                     "discarding unexpected response {} from {} (receiver gone)",
