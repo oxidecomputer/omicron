@@ -10,8 +10,8 @@
 use crate::config::KnownSps;
 use dropshot::HttpError;
 use gateway_messages::{
-    version, IgnitionState, Request, RequestKind, Response, ResponseKind,
-    SerializedSize,
+    version, IgnitionState, Request, RequestKind, ResponseKind, SerialConsole,
+    SerializedSize, SpMessage, SpMessageKind,
 };
 use slog::{debug, error, info, o, Logger};
 use std::{
@@ -178,6 +178,8 @@ impl SpCommunicator {
 /// dropped. When the communicator wants to send a request on behalf of an HTTP
 /// request:
 ///
+/// TODO update for non-response messages
+///
 /// 1. `SpCommunicator` creates a tokio oneshot channel for this task to use to
 ///    send the response.
 /// 2. `SpCommunicator` inserts the sending half of that channel into
@@ -212,10 +214,10 @@ impl RecvTask {
     }
 
     async fn run(self) {
-        let mut resp_buf = [0; Response::MAX_SIZE];
+        let mut buf = [0; SpMessage::MAX_SIZE];
         loop {
             // raw recv
-            let (n, addr) = match self.socket.recv_from(&mut resp_buf).await {
+            let (n, addr) = match self.socket.recv_from(&mut buf).await {
                 Ok((n, addr)) => (n, addr),
                 Err(err) => {
                     error!(&self.log, "recv_from() failed: {}", err);
@@ -224,76 +226,101 @@ impl RecvTask {
             };
             debug!(&self.log, "received {} bytes from {}", n, addr);
 
-            // parse into a `Response`
-            let resp =
-                match gateway_messages::deserialize::<Response>(&resp_buf[..n])
-                {
-                    Ok((resp, _extra)) => {
+            // parse into an `SpMessage`
+            let sp_msg =
+                match gateway_messages::deserialize::<SpMessage>(&buf[..n]) {
+                    Ok((msg, _extra)) => {
                         // TODO should we check that `extra` is empty? if the
                         // response is maximal size any extra data is silently
                         // discarded anyway, so probably not?
-                        resp
+                        msg
                     }
                     Err(err) => {
                         error!(
                             &self.log,
-                            "discarding malformed response ({})", err
+                            "discarding malformed message ({})", err
                         );
                         continue;
                     }
                 };
-            debug!(&self.log, "received {:?} from {}", resp, addr);
+            debug!(&self.log, "received {:?} from {}", sp_msg, addr);
 
             // `version` is intentionally the first 4 bytes of the packet; we
             // could check it before trying to deserialize?
-            if resp.version != version::V1 {
+            if sp_msg.version != version::V1 {
                 error!(
                     &self.log,
                     "discarding message with unsupported version {}",
-                    resp.version
+                    sp_msg.version
                 );
                 continue;
             }
 
-            // see if we know who to send the response to
-            let tx = match self
-                .outstanding_requests
-                .remove(addr.ip(), resp.request_id)
-            {
-                Some(tx) => tx,
-                None => {
-                    error!(&self.log,
-                        "discarding unexpected response {} from {} (possibly past timeout?)",
-                        resp.request_id,
-                        addr,
-                    );
-                    continue;
+            // decide whether this is a response to an outstanding request or an
+            // unprompted message
+            match sp_msg.kind {
+                SpMessageKind::Response { request_id, kind } => {
+                    self.handle_response(addr, request_id, kind);
                 }
-            };
-
-            // actually send it
-            if tx.send(resp.kind).is_err() {
-                // This can only fail if the receiving half has been dropped.
-                // That's held in the relevant `SpCommunicator` method above
-                // that initiated this request; they should only have dropped
-                // the rx half if they've been dropped (in which case we've been
-                // aborted and can't get here) or if we landed in a race where
-                // the `SpCommunicator` task was cancelled (presumably by
-                // timeout) in between us pulling `tx` out of
-                // `outstanding_requests` and actually sending the response on
-                // it. But that window does exist, so log when we fail to send.
-                // I believe these should be interpreted as timeout failures;
-                // most of the time failing to get a `tx` at all (above) is also
-                // caused by a timeout, but that path is also invoked if we get
-                // a garbage response somehow.
-                error!(
-                    &self.log,
-                    "discarding unexpected response {} from {} (receiver gone)",
-                    resp.request_id,
-                    addr,
-                );
+                SpMessageKind::SerialConsole(serial_console) => {
+                    self.handle_serial_console(addr, serial_console);
+                }
             }
         }
+    }
+
+    fn handle_response(
+        &self,
+        addr: SocketAddr,
+        request_id: u32,
+        kind: ResponseKind,
+    ) {
+        // see if we know who to send the response to
+        let tx = match self.outstanding_requests.remove(addr.ip(), request_id) {
+            Some(tx) => tx,
+            None => {
+                error!(&self.log,
+                        "discarding unexpected response {} from {} (possibly past timeout?)",
+                        request_id,
+                        addr,
+                    );
+                return;
+            }
+        };
+
+        // actually send it
+        if tx.send(kind).is_err() {
+            // This can only fail if the receiving half has been dropped.
+            // That's held in the relevant `SpCommunicator` method above
+            // that initiated this request; they should only have dropped
+            // the rx half if they've been dropped (in which case we've been
+            // aborted and can't get here) or if we landed in a race where
+            // the `SpCommunicator` task was cancelled (presumably by
+            // timeout) in between us pulling `tx` out of
+            // `outstanding_requests` and actually sending the response on
+            // it. But that window does exist, so log when we fail to send.
+            // I believe these should be interpreted as timeout failures;
+            // most of the time failing to get a `tx` at all (above) is also
+            // caused by a timeout, but that path is also invoked if we get
+            // a garbage response somehow.
+            error!(
+                &self.log,
+                "discarding unexpected response {} from {} (receiver gone)",
+                request_id,
+                addr,
+            );
+        }
+    }
+
+    fn handle_serial_console(
+        &self,
+        addr: SocketAddr,
+        serial_console: SerialConsole,
+    ) {
+        debug!(
+            &self.log,
+            "received serial console data from {}: {:?}", addr, serial_console
+        );
     }
 }
 

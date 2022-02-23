@@ -2,36 +2,63 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use crate::server::{self, UdpServer};
+use std::net::SocketAddr;
+use std::sync::Arc;
+
 use crate::config::Config;
+use crate::server::{self, UdpServer};
 use anyhow::Result;
-use gateway_messages::sp_impl::{SpHandler, SpServer};
-use gateway_messages::{IgnitionFlags, IgnitionState, ResponseKind};
-use slog::{debug, error, info, Logger};
+use gateway_messages::sp_impl::{SerialConsolePacketizer, SpHandler, SpServer};
+use gateway_messages::{
+    ResponseError, ResponseKind, SerializedSize, SpMessage,
+};
+use slog::{debug, error, info, warn, Logger};
+use tokio::net::UdpSocket;
 use tokio::{
     select,
     task::{self, JoinHandle},
 };
 
-pub struct Sidecar {
+pub struct Gimlet {
+    sock: Arc<UdpSocket>,
+    gateway_address: SocketAddr,
+    console_packetizer: SerialConsolePacketizer,
+    buf: [u8; SpMessage::MAX_SIZE],
     inner_task: JoinHandle<()>,
 }
 
-impl Drop for Sidecar {
+impl Drop for Gimlet {
     fn drop(&mut self) {
         // default join handle drop behavior is to detach; we want to abort
         self.inner_task.abort();
     }
 }
 
-impl Sidecar {
+impl Gimlet {
     pub async fn spawn(config: &Config) -> Result<Self> {
-        let log = server::logger(&config, "sidecar")?;
-        info!(log, "setting up simualted sidecar");
+        let log = server::logger(&config, "gimlet")?;
+        info!(log, "setting up simualted gimlet");
         let server = UdpServer::new(config).await?;
+        let sock = Arc::clone(server.socket());
         let inner = Inner::new(server, log);
         let inner_task = task::spawn(async move { inner.run().await.unwrap() });
-        Ok(Self { inner_task })
+        Ok(Self {
+            sock,
+            gateway_address: config.gateway_address,
+            console_packetizer: SerialConsolePacketizer::new(
+                gateway_messages::SpComponent { id: *b"TODO-COMPONENT.." },
+            ),
+            buf: [0; SpMessage::MAX_SIZE],
+            inner_task,
+        })
+    }
+
+    pub async fn send_serial_console(&mut self, data: &[u8]) -> Result<()> {
+        let mut packets = self.console_packetizer.packetize(data);
+        while let Some(buf) = packets.next_packet(&mut self.buf) {
+            self.sock.send_to(buf, self.gateway_address).await?;
+        }
+        Ok(())
     }
 }
 
@@ -46,20 +73,12 @@ impl SpHandler for Handler {
     }
 
     fn ignition_state(&mut self, target: u8) -> ResponseKind {
-        const SIDECAR_ID: u16 = 0b01_0010;
-
-        let state = IgnitionState {
-            id: SIDECAR_ID,
-            flags: IgnitionFlags::POWER | IgnitionFlags::CTRL_DETECT_0,
-        };
-
-        debug!(
+        warn!(
             &self.log,
-            "received ignition state request for {}; sending {:?}",
+            "received ignition state request for {}; not supported by gimlet",
             target,
-            state
         );
-        ResponseKind::IgnitionState(state)
+        ResponseKind::Error(ResponseError::RequestUnsupported)
     }
 
     fn ignition_command(
@@ -67,13 +86,13 @@ impl SpHandler for Handler {
         target: u8,
         command: gateway_messages::IgnitionCommand,
     ) -> ResponseKind {
-        debug!(
+        warn!(
             &self.log,
-            "received ignition command {:?} for target {}; sending ack",
+            "received ignition command {:?} for target {}; not supported by gimlet",
             command,
             target
         );
-        ResponseKind::IgnitionCommandAck
+        ResponseKind::Error(ResponseError::RequestUnsupported)
     }
 }
 

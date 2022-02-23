@@ -13,7 +13,7 @@ ignition_controller_timeout_milliseconds = 1_000
 # our known SPs anyway.
 ignition_controller = "127.0.0.1:23456"
 switches = ["127.0.0.1:23456"]
-sleds = []
+sleds = ["127.0.0.1:23457"]
 power_controllers = []
 
 [dropshot]

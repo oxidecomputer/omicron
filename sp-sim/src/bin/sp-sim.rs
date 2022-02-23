@@ -4,7 +4,8 @@
 
 use anyhow::Result;
 use omicron_common::cmd::{fatal, CmdError};
-use sp_sim::{Config, Sidecar};
+use sp_sim::{Gimlet, Sidecar};
+use sp_sim::config::{Config, SpType};
 use std::path::PathBuf;
 use std::time::Duration;
 use structopt::StructOpt;
@@ -30,13 +31,32 @@ async fn do_run() -> Result<(), CmdError> {
     let config = Config::from_file(args.config_file_path)
         .map_err(|e| CmdError::Failure(e.to_string()))?;
 
-    let _sidecar = Sidecar::spawn(&config)
+    match config.sp_type {
+        SpType::Sidecar => run_sidecar(&config).await,
+        SpType::Gimlet => run_gimlet(&config).await,
+    }
+}
+
+async fn run_sidecar(config: &Config) -> Result<(), CmdError> {
+    let _sidecar = Sidecar::spawn(config)
         .await
         .map_err(|e| CmdError::Failure(e.to_string()))?;
 
-    // gross; real use case is as a lib, where we wait for incoming requests to
-    // poke at `sidecar` to change its state for tests. for now just wait to be
-    // killed.
+    // for now, do nothing except respond to incoming messages. in the future,
+    // maybe we respond to external input (signals?) to change ignition state,
+    // or maybe that's limited to library use.
     tokio::time::sleep(Duration::MAX).await;
     Ok(())
+}
+
+async fn run_gimlet(config: &Config) -> Result<(), CmdError> {
+    let mut gimlet = Gimlet::spawn(config)
+        .await
+        .map_err(|e| CmdError::Failure(e.to_string()))?;
+
+    loop {
+        tokio::time::sleep(Duration::from_secs(1)).await;
+        gimlet.send_serial_console(b"hello world\n").await
+            .map_err(|e| CmdError::Failure(e.to_string()))?;
+    }
 }

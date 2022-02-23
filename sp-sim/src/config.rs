@@ -15,11 +15,22 @@ use std::{
 };
 use thiserror::Error;
 
-/// Configuration for a gateway server
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum SpType {
+    Sidecar,
+    Gimlet,
+}
+
+/// Configuration for a simulated SP
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct Config {
+    /// Type of SP to simulate.
+    pub sp_type: SpType,
     /// UDP listen address.
     pub bind_address: SocketAddr,
+    /// UDP address of MGS.
+    pub gateway_address: SocketAddr,
     /// Server-wide logging configuration.
     pub log: ConfigLogging,
 }

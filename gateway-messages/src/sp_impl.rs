@@ -5,7 +5,8 @@
 //! Behavior implemented by both real and simulated SPs.
 
 use crate::{
-    version, IgnitionCommand, Request, RequestKind, Response, ResponseKind,
+    version, IgnitionCommand, Request, RequestKind, ResponseKind,
+    SerialConsole, SpMessage, SpMessageKind, SpComponent,
 };
 use hubpack::SerializedSize;
 
@@ -40,8 +41,80 @@ impl From<hubpack::error::Error> for Error {
 }
 
 #[derive(Debug)]
+pub struct SerialConsolePacketizer {
+    component: SpComponent,
+    offset: u64,
+}
+
+impl SerialConsolePacketizer {
+    pub fn new(component: SpComponent) -> Self {
+        Self {
+            component,
+            offset: 0,
+        }
+    }
+
+    pub fn packetize<'a, 'b>(
+        &'a mut self,
+        data: &'b [u8],
+    ) -> SerialConsolePackets<'a, 'b> {
+        SerialConsolePackets { parent: self, data }
+    }
+}
+
+#[derive(Debug)]
+pub struct SerialConsolePackets<'a, 'b> {
+    parent: &'a mut SerialConsolePacketizer,
+    data: &'b [u8],
+}
+
+impl SerialConsolePackets<'_, '_> {
+    /// Get the next packet of serial console data, if one exists.
+    ///
+    /// Returns `Some(data)` with a packet to be sent if any data remains, or
+    /// `None` if all data has been previously returned.
+    pub fn next_packet<'a>(
+        &mut self,
+        out: &'a mut [u8; SpMessage::MAX_SIZE],
+    ) -> Option<&'a [u8]> {
+        if self.data.is_empty() {
+            return None;
+        }
+
+        let (this_packet, remaining) = self.data.split_at(usize::min(
+            self.data.len(),
+            SerialConsole::MAX_DATA_PER_PACKET,
+        ));
+
+        let mut message = SerialConsole {
+            component: self.parent.component,
+            offset: self.parent.offset,
+            len: this_packet.len() as u8,
+            data: [0; SerialConsole::MAX_DATA_PER_PACKET],
+        };
+        message.data[..this_packet.len()].copy_from_slice(this_packet);
+        let message = SpMessage {
+            version: version::V1,
+            kind: SpMessageKind::SerialConsole(message),
+        };
+
+        // We know `out` is big enough for any `SpMessage`, so no need to bubble
+        // up an error here.
+        let n = match hubpack::serialize(&mut out[..], &message){
+            Ok(n) => n,
+            Err(_) => panic!(),
+        };
+
+        self.data = remaining;
+        self.parent.offset += this_packet.len() as u64;
+
+        Some(&out[..n])
+    }
+}
+
+#[derive(Debug)]
 pub struct SpServer<Handler> {
-    buf: [u8; Response::MAX_SIZE],
+    buf: [u8; SpMessage::MAX_SIZE],
     handler: Handler,
 }
 
@@ -50,7 +123,7 @@ where
     Handler: SpHandler,
 {
     pub fn new(handler: Handler) -> Self {
-        Self { buf: Default::default(), handler }
+        Self { buf: [0; SpMessage::MAX_SIZE], handler }
     }
 
     pub fn handler(&self) -> &Handler {
@@ -94,12 +167,14 @@ where
             }
         };
 
-        // we control `Response` and know all cases can successfully serialize
+        // we control `SpMessage` and know all cases can successfully serialize
         // into `self.buf`
-        let response = Response {
+        let response = SpMessage {
             version: version::V1,
-            request_id: request.request_id,
-            kind: response_kind,
+            kind: SpMessageKind::Response {
+                request_id: request.request_id,
+                kind: response_kind,
+            },
         };
         let n = match hubpack::serialize(&mut self.buf, &response) {
             Ok(n) => n,

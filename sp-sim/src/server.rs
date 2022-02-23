@@ -2,27 +2,31 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use crate::Config;
+use crate::config::Config;
 use anyhow::{bail, Context, Result};
 use gateway_messages::{Request, SerializedSize};
 use slog::{debug, error, Logger};
-use std::net::SocketAddr;
+use std::{net::SocketAddr, sync::Arc};
 use tokio::net::UdpSocket;
 
 /// Thin wrapper pairing a [`UdpSocket`] with a buffer sized for [`Request`]s.
 pub(crate) struct UdpServer {
-    sock: UdpSocket,
+    sock: Arc<UdpSocket>,
     buf: [u8; Request::MAX_SIZE],
 }
 
 impl UdpServer {
     pub(crate) async fn new(config: &Config) -> Result<Self> {
         let sock =
-            UdpSocket::bind(config.bind_address).await.with_context(|| {
-                format!("failed to bind to {}", config.bind_address)
-            })?;
+            Arc::new(UdpSocket::bind(config.bind_address).await.with_context(
+                || format!("failed to bind to {}", config.bind_address),
+            )?);
 
         Ok(Self { sock, buf: [0; Request::MAX_SIZE] })
+    }
+
+    pub(crate) fn socket(&self) -> &Arc<UdpSocket> {
+        &self.sock
     }
 
     pub(crate) async fn recv_from(&mut self) -> Result<(&[u8], SocketAddr)> {
