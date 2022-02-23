@@ -3,7 +3,6 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 /// Behavior implemented by both real and simulated SPs.
-
 use crate::{
     version, IgnitionCommand, Request, RequestKind, Response, ResponseKind,
 };

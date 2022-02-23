@@ -7,7 +7,7 @@
  */
 
 use omicron_common::cmd::{fatal, CmdError};
-use omicron_gateway::{Config, run_openapi, run_server};
+use omicron_gateway::{run_openapi, run_server, Config};
 use std::path::PathBuf;
 use structopt::StructOpt;
 

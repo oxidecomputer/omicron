@@ -7,8 +7,8 @@ pub mod sp_impl;
 use bitflags::bitflags;
 use serde::{Deserialize, Serialize};
 
-pub use hubpack::{deserialize, serialize, SerializedSize};
 pub use hubpack::error::Error as HubpackError;
+pub use hubpack::{deserialize, serialize, SerializedSize};
 
 pub mod version {
     pub const V1: u32 = 1;

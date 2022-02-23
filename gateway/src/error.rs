@@ -41,12 +41,10 @@ impl From<Error> for HttpError {
             Error::InternalError { internal_message } => {
                 HttpError::for_internal_error(internal_message)
             }
-            Error::DeleteThis(message) => {
-                HttpError::for_bad_request(
-                    Some(String::from("PLACEHOLDER")),
-                    message,
-                )
-            }
+            Error::DeleteThis(message) => HttpError::for_bad_request(
+                Some(String::from("PLACEHOLDER")),
+                message,
+            ),
         }
     }
 }

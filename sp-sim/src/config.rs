@@ -9,7 +9,10 @@
 
 use dropshot::ConfigLogging;
 use serde::{Deserialize, Serialize};
-use std::{path::{Path, PathBuf}, net::SocketAddr};
+use std::{
+    net::SocketAddr,
+    path::{Path, PathBuf},
+};
 use thiserror::Error;
 
 /**

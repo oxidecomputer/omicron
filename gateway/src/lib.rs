@@ -4,9 +4,9 @@
 
 mod config;
 mod context;
+mod error;
 mod http_entrypoints;
 mod sp_comms;
-mod error;
 
 pub use config::Config;
 pub use context::ServerContext;

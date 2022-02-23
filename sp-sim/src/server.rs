@@ -3,7 +3,7 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use crate::Config;
-use anyhow::{Context, Result, bail};
+use anyhow::{bail, Context, Result};
 use gateway_messages::{Request, SerializedSize};
 use slog::{debug, error, Logger};
 use std::net::SocketAddr;
@@ -43,10 +43,7 @@ impl UdpServer {
 pub(crate) fn logger(config: &Config, name: &str) -> Result<Logger> {
     use slog::Drain;
     let (drain, registration) = slog_dtrace::with_drain(
-        config
-            .log
-            .to_logger(name)
-            .with_context(|| "initializing logger")?
+        config.log.to_logger(name).with_context(|| "initializing logger")?,
     );
     let log = slog::Logger::root(drain.fuse(), slog::o!());
     if let slog_dtrace::ProbeRegistration::Failed(e) = registration {

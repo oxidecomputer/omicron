@@ -2,8 +2,8 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use omicron_common::cmd::{fatal, CmdError};
 use anyhow::Result;
+use omicron_common::cmd::{fatal, CmdError};
 use sp_sim::{Config, Sidecar};
 use std::path::PathBuf;
 use std::time::Duration;
@@ -30,7 +30,8 @@ async fn do_run() -> Result<(), CmdError> {
     let config = Config::from_file(args.config_file_path)
         .map_err(|e| CmdError::Failure(e.to_string()))?;
 
-    let _sidecar = Sidecar::spawn(&config).await
+    let _sidecar = Sidecar::spawn(&config)
+        .await
         .map_err(|e| CmdError::Failure(e.to_string()))?;
 
     // gross; real use case is as a lib, where we wait for incoming requests to
