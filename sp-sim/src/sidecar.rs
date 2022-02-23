@@ -46,7 +46,7 @@ impl SpHandler for Handler {
     }
 
     fn ignition_state(&mut self, target: u8) -> ResponseKind {
-        const SIDECAR_ID: u8 = 0b01_0010;
+        const SIDECAR_ID: u16 = 0b01_0010;
 
         let state = IgnitionState {
             id: SIDECAR_ID,

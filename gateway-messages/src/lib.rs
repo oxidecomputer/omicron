@@ -8,6 +8,7 @@ use bitflags::bitflags;
 use serde::{Deserialize, Serialize};
 
 pub use hubpack::{deserialize, serialize, SerializedSize};
+pub use hubpack::error::Error as HubpackError;
 
 // TODO: Ignition messages have a `target: u8` for identification; what do the
 // other messages need?
@@ -83,7 +84,7 @@ pub struct SpMessageAck {
 
 #[derive(Debug, Clone, Copy, SerializedSize, Serialize, Deserialize)]
 pub struct IgnitionState {
-    pub id: u8,
+    pub id: u16,
     pub flags: IgnitionFlags,
 }
 
@@ -111,7 +112,9 @@ pub enum IgnitionCommand {
     // Nop
 }
 
-#[derive(Debug, Clone, Copy, Default, SerializedSize, Serialize, Deserialize)]
+#[derive(
+    Debug, Clone, Copy, Default, SerializedSize, Serialize, Deserialize,
+)]
 pub struct SerialConsole {
     len: u8,
     // TODO: What's a reasonable chunk size? Or do we want some variability

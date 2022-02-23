@@ -4,6 +4,13 @@
 
 # Identifier for this instance of MGS
 #id = "e6bff1ff-24fb-49dc-a54e-c6a350cd4d6c"
+udp_bind_address = "127.0.0.1:22222"
+
+[known_sps]
+ignition_controller = "127.0.0.1:23456"
+switches = ["127.0.0.1:23456"]
+sleds = []
+power_controllers = []
 
 [dropshot]
 # IP address and TCP port on which to listen for the external API

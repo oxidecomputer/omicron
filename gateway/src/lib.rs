@@ -7,6 +7,8 @@
 mod config;
 mod context;
 mod http_entrypoints;
+mod sp_comms;
+mod error;
 
 pub use config::Config;
 pub use context::ServerContext;
@@ -48,10 +50,12 @@ impl Server {
         let log = log.new(o!("name" => "TODO".to_string()));
         info!(log, "setting up gateway server");
 
-        //let ctxlog = log.new(o!("component" => "ServerContext"));
-        //let pool = db::Pool::new(&config.database);
+        let ctxlog = log.new(o!("component" => "ServerContext"));
         //let apictx = ServerContext::new(rack_id, ctxlog, pool, &config)?;
-        let apictx = ServerContext::new();
+        let apictx =
+            ServerContext::new(config, ctxlog).await.map_err(|error| {
+                format!("initializing server context: {}", error)
+            })?;
 
         let http_server_starter = dropshot::HttpServerStarter::new(
             &config.dropshot,

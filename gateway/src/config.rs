@@ -9,23 +9,39 @@
 
 use dropshot::{ConfigDropshot, ConfigLogging};
 use serde::{Deserialize, Serialize};
-use std::path::{Path, PathBuf};
+use std::{path::{Path, PathBuf}, net::SocketAddr};
 use thiserror::Error;
+
+// TODO: This is a placeholder; how do we determine what SPs should exist and
+// how to talk to them? Just store a list of socket addrs we'll hit with UDP for
+// now.
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+pub struct KnownSps {
+    pub ignition_controller: SocketAddr,
+    pub switches: Vec<SocketAddr>,
+    pub sleds: Vec<SocketAddr>,
+    pub power_controllers: Vec<SocketAddr>,
+}
 
 /**
  * Configuration for a gateway server
  */
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct Config {
-    /** Dropshot configuration for API server */
+    /// Dropshot configuration for API server
     pub dropshot: ConfigDropshot,
+    /// Bind address for UDP socket for SP communication on the management
+    /// network.
+    pub udp_bind_address: SocketAddr,
+    /// Placeholder description of all known SPs in the system.
+    pub known_sps: KnownSps,
     /*
     /** Identifier for this instance of Nexus */
     pub id: uuid::Uuid,
     /** Console-related tunables */
     pub console: ConsoleConfig,
     */
-    /** Server-wide logging configuration. */
+    /// Server-wide logging configuration.
     pub log: ConfigLogging,
     /*
     /** Database parameters */

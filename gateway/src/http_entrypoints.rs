@@ -6,17 +6,18 @@
 
 //! HTTP entrypoint functions for the gateway service
 
-use std::sync::Arc;
-
+use crate::config::KnownSps;
+use crate::error::Error;
+use crate::ServerContext;
 use dropshot::{
     endpoint, ApiDescription, EmptyScanParams, HttpError, HttpResponseOk,
     HttpResponseUpdatedNoContent, PaginationParams, Path, Query,
     RequestContext, ResultsPage, TypedBody,
 };
-
-use crate::ServerContext;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use std::convert::TryFrom;
+use std::sync::Arc;
 
 #[derive(Serialize, JsonSchema)]
 struct SpInfo {
@@ -36,7 +37,6 @@ enum SpState {
 }
 
 #[derive(Serialize, JsonSchema)]
-#[serde(tag = "present")]
 struct SpIgnitionInfo {
     id: SpIdentifier,
     details: SpIgnition,
@@ -49,7 +49,7 @@ enum SpIgnition {
     Absent,
     #[serde(rename = "yes")]
     Present {
-        id: u8,
+        id: u16,
         power: bool,
         ctrl_detect_0: bool,
         ctrl_detect_1: bool,
@@ -58,6 +58,23 @@ enum SpIgnition {
         flt_rot: bool,
         flt_sp: bool,
     },
+}
+
+impl From<gateway_messages::IgnitionState> for SpIgnition {
+    fn from(state: gateway_messages::IgnitionState) -> Self {
+        use gateway_messages::IgnitionFlags;
+        // if we have a state, the SP was present
+        Self::Present {
+            id: state.id,
+            power: state.flags.intersects(IgnitionFlags::POWER),
+            ctrl_detect_0: state.flags.intersects(IgnitionFlags::CTRL_DETECT_0),
+            ctrl_detect_1: state.flags.intersects(IgnitionFlags::CTRL_DETECT_1),
+            flt_a3: state.flags.intersects(IgnitionFlags::FLT_A3),
+            flt_a2: state.flags.intersects(IgnitionFlags::FLT_A2),
+            flt_rot: state.flags.intersects(IgnitionFlags::FLT_ROT),
+            flt_sp: state.flags.intersects(IgnitionFlags::FLT_SP),
+        }
+    }
 }
 
 #[derive(Serialize, JsonSchema)]
@@ -74,19 +91,68 @@ struct TimeoutSelector<T> {
     start_time: u64, // TODO
 }
 
-#[derive(Serialize, Deserialize, JsonSchema)]
+#[derive(Serialize, Deserialize, JsonSchema, PartialEq, Debug, Clone, Copy)]
 #[serde(rename_all = "lowercase")]
-enum SpType {
+pub(crate) enum SpType {
     Sled,
     Power,
     Switch,
 }
 
-#[derive(Serialize, Deserialize, JsonSchema)]
-struct SpIdentifier {
+#[derive(Serialize, Deserialize, JsonSchema, PartialEq, Debug, Clone)]
+pub(crate) struct SpIdentifier {
     //#[serde(rename = "type")]
-    typ: SpType,
-    slot: u32,
+    pub(crate) typ: SpType,
+    pub(crate) slot: String,
+}
+
+impl SpIdentifier {
+    fn placeholder_map_to_target(
+        &self,
+        known_sps: &KnownSps,
+    ) -> Result<u8, Error> {
+        // TODO This is wrong in all kinds of ways, but is just a placeholder
+        // for now until we have a better story for bootstrapping how MGS knows
+        // which SP is which.
+        //
+        // Maps `self` to a target number by assuming target numbers are indexed
+        // from 0 starting with switches followed by sleds followed by power
+        // controllers.
+
+        // TODO `slot` really shouldn't be a `String` and we shouldn't need to
+        // parse it here, but working around a dropshot issue. TODO link issue
+        let slot: usize = self.slot.parse().map_err(|_| {
+            Error::DeleteThis("slot must be an unsigned integer".to_string())
+        })?;
+
+        let mut base = 0;
+        for (typ, count) in [
+            (SpType::Switch, known_sps.switches.len()),
+            (SpType::Sled, known_sps.sleds.len()),
+            (SpType::Power, known_sps.power_controllers.len()),
+        ] {
+            if self.typ != typ {
+                base += count;
+                continue;
+            }
+
+            if slot < count {
+                let slot = u8::try_from(slot + base).map_err(|_| {
+                    Error::InternalError {
+                        internal_message:
+                            "too many total configured SP slots (must be < 256)"
+                                .to_string(),
+                    }
+                })?;
+                return Ok(slot);
+            } else {
+                return Err(Error::SpDoesNotExist(self.clone()));
+            }
+        }
+
+        // above loop returns once we match on `typ`
+        unreachable!()
+    }
 }
 
 type TimeoutPaginationParams<T> = PaginationParams<Timeout, TimeoutSelector<T>>;
@@ -287,10 +353,20 @@ async fn ignition_list(
     path = "/ignition/{typ}/{slot}",
 }]
 async fn ignition_get(
-    _rqctx: Arc<RequestContext<Arc<ServerContext>>>,
-    _path: Path<PathSp>,
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    path: Path<PathSp>,
 ) -> Result<HttpResponseOk<SpIgnitionInfo>, HttpError> {
-    todo!()
+    let apictx = rqctx.context();
+    let path = path.into_inner();
+    let target = path
+        .sp
+        .placeholder_map_to_target(apictx.sp_comms.placeholder_known_sps())?;
+
+    // TODO TIMEOUT
+    let state = apictx.sp_comms.ignition_get(target).await.unwrap(); // TODO
+
+    let info = SpIgnitionInfo { id: path.sp, details: state.into() };
+    Ok(HttpResponseOk(info))
 }
 
 /// Power on an SP via Ignition
