@@ -17,7 +17,8 @@ use omicron_common::api::{
     internal::sled_agent::InstanceHardware,
     internal::sled_agent::InstanceMigrateParams,
     internal::sled_agent::InstanceRuntimeStateRequested,
-    internal::sled_agent::PartitionKind, internal::sled_agent::ServiceRequest,
+    internal::sled_agent::PartitionKind,
+    internal::sled_agent::ServiceEnsureBody,
 };
 use slog::Logger;
 use std::net::SocketAddr;
@@ -152,7 +153,7 @@ impl SledAgent {
     /// to a local file to ensure they start automatically on next boot.
     pub async fn services_ensure(
         &self,
-        requested_services: Vec<ServiceRequest>,
+        requested_services: ServiceEnsureBody,
     ) -> Result<(), Error> {
         self.services.ensure(requested_services).await?;
         Ok(())

@@ -22,7 +22,7 @@ partition_kind.all_addresses = [
 
 [[request.service]]
 name = "nexus"
-address = "[fd00:1234::5]:32221"
+address = "[fd00:1234::7]:32221"
 
 # [[request.service]]
 # name = "oximeter"

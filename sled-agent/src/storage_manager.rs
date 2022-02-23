@@ -258,7 +258,7 @@ impl DatasetInfo {
                     crate::illumos::zone::SVCADM,
                     "enable",
                     "-t",
-                    &format!("svc:/system/illumos/cockroachdb:default"),
+                    "svc:/system/illumos/cockroachdb:default",
                 ])?;
 
                 // Await liveness of the cluster.

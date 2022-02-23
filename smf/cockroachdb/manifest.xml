@@ -26,8 +26,8 @@
   <exec_method type='method' name='stop' exec=':kill' timeout_seconds='0' />
 
   <property_group name='config' type='application'>
-    <propval name='listen_addr' type='astring' value='127.0.0.1:32221' />
-    <propval name='store' type='astring' value='/var/tmp/crdb' />
+    <propval name='listen_addr' type='astring' value='unknown' />
+    <propval name='store' type='astring' value='unknown' />
     <propval name='join_addrs' type='astring' value='unknown' />
   </property_group>
 

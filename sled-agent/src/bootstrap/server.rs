@@ -35,7 +35,7 @@ impl Server {
         info!(log, "setting up bootstrap agent server");
 
         let ba_log = log.new(o!(
-            "component" => "Agent",
+            "component" => "BootstrapAgent",
             "server" => config.id.clone().to_string()
         ));
         let bootstrap_agent =

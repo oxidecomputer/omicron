@@ -7,7 +7,9 @@
 use crate::illumos::running_zone::{InstalledZone, RunningZone};
 use crate::illumos::vnic::VnicAllocator;
 use crate::illumos::zone::AddressRequest;
-use omicron_common::api::internal::sled_agent::ServiceRequest;
+use omicron_common::api::internal::sled_agent::{
+    ServiceEnsureBody, ServiceRequest,
+};
 use slog::Logger;
 use std::collections::HashSet;
 use std::iter::FromIterator;
@@ -16,10 +18,10 @@ use tokio::sync::Mutex;
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
-    #[error("Cannot serialize TOML file")]
+    #[error("Cannot serialize TOML file: {0}")]
     TomlSerialize(#[from] toml::ser::Error),
 
-    #[error("Cannot deserialize TOML file")]
+    #[error("Cannot deserialize TOML file: {0}")]
     TomlDeserialize(#[from] toml::de::Error),
 
     #[error("Error accessing filesystem: {0}")]
@@ -63,12 +65,23 @@ impl ServiceManager {
 
         let config_path = services_config_path();
         if config_path.exists() {
-            let requests: Vec<ServiceRequest> = toml::from_str(
+            info!(
+                &mgr.log,
+                "Sled services found at {}; loading",
+                config_path.to_string_lossy()
+            );
+            let cfg: ServiceEnsureBody = toml::from_str(
                 &tokio::fs::read_to_string(&services_config_path()).await?,
             )?;
             let mut existing_zones = mgr.zones.lock().await;
-            mgr.initialize_services_locked(&mut existing_zones, &requests)
+            mgr.initialize_services_locked(&mut existing_zones, &cfg.services)
                 .await?;
+        } else {
+            info!(
+                &mgr.log,
+                "No sled services found at {}",
+                config_path.to_string_lossy()
+            );
         }
 
         Ok(mgr)
@@ -117,6 +130,23 @@ impl ServiceManager {
                 service.address.port(),
             )
             .await?;
+
+            running_zone.run_cmd(&[
+                crate::illumos::zone::SVCCFG,
+                "import",
+                &format!(
+                    "/var/svc/manifest/site/{}/manifest.xml",
+                    service.name
+                ),
+            ])?;
+
+            running_zone.run_cmd(&[
+                crate::illumos::zone::SVCADM,
+                "enable",
+                "-t",
+                &format!("svc:/system/illumos/{}:default", service.name),
+            ])?;
+
             existing_zones.push(running_zone);
         }
         Ok(())
@@ -128,18 +158,19 @@ impl ServiceManager {
     /// to a local file to ensure they start automatically on next boot.
     pub async fn ensure(
         &self,
-        services: Vec<ServiceRequest>,
+        request: ServiceEnsureBody,
     ) -> Result<(), Error> {
         let mut existing_zones = self.zones.lock().await;
         let config_path = services_config_path();
         if config_path.exists() {
-            let known_services: Vec<ServiceRequest> = toml::from_str(
+            let cfg: ServiceEnsureBody = toml::from_str(
                 &tokio::fs::read_to_string(&services_config_path()).await?,
             )?;
+            let known_services = cfg.services;
 
             let known_set: HashSet<&ServiceRequest> =
                 HashSet::from_iter(known_services.iter());
-            let requested_set = HashSet::from_iter(services.iter());
+            let requested_set = HashSet::from_iter(request.services.iter());
 
             if known_set != requested_set {
                 // If the caller is requesting we instantiate a
@@ -158,10 +189,16 @@ impl ServiceManager {
             }
         }
 
-        self.initialize_services_locked(&mut existing_zones, &services).await?;
-
-        tokio::fs::write(&services_config_path(), toml::to_string(&services)?)
+        self.initialize_services_locked(&mut existing_zones, &request.services)
             .await?;
+
+        let serialized_services = toml::Value::try_from(&request)
+            .expect("Cannot serialize service list");
+        tokio::fs::write(
+            &services_config_path(),
+            toml::to_string(&serialized_services)?,
+        )
+        .await?;
 
         Ok(())
     }

@@ -124,8 +124,6 @@ impl RustPackage {
     }
 }
 
-// TODO: Figure out how to merge this with "RustPackage". We have
-// zones which are built from rust packages...
 #[derive(Deserialize, Debug)]
 struct MappedPath {
     from: PathBuf,
@@ -182,10 +180,6 @@ async fn create_zone_package(
     root_json.seek(std::io::SeekFrom::Start(0)).await?;
     archive.append_file("oxide.json", &mut root_json.into_std().await)?;
 
-    archive.append_dir("root", ".")?;
-    archive.append_dir("root/opt", ".")?;
-    archive.append_dir("root/opt/oxide", ".")?;
-
     // All other files are contained under the "root" prefix.
     //
     // "path.from" exists on the machine running the package
@@ -195,39 +189,37 @@ async fn create_zone_package(
     if let Some(zone_pkg) = &package.zone {
         for path in &zone_pkg.paths {
             println!("Adding path: {:#?}", path);
-            let leading_slash = std::path::MAIN_SEPARATOR.to_string();
-            let dst =
-                Path::new("root").join(&path.to.strip_prefix(leading_slash)?);
+            add_directory_and_parents(&mut archive, path.to.parent().unwrap())?;
+            let dst = archive_path(&path.to)?;
             archive.append_dir_all(dst, &path.from)?;
         }
     }
 
     // Attempt to add the rust binary, if one was built.
     if let Some(rust_pkg) = &package.rust {
-        let dst = Path::new("root/opt/oxide").join(&package.service_name);
-        archive.append_dir(&dst, ".")?;
-        let dst = dst.join("bin");
-        archive.append_dir(&dst, ".")?;
-
+        println!("Adding rust binary");
+        let dst =
+            Path::new("/opt/oxide").join(&package.service_name).join("bin");
+        add_directory_and_parents(&mut archive, &dst)?;
+        let dst = archive_path(&dst)?;
         add_rust_binary(&rust_pkg, &mut archive, &dst, release)?;
     }
 
     // Add (and possibly download) blobs
+    let blob_dst =
+        Path::new("/opt/oxide").join(&package.service_name).join(BLOB);
     add_blobs(
         &mut archive,
         package,
         output_directory,
-        &Path::new("root/opt/oxide").join(&package.service_name).join(BLOB),
+        &archive_path(&blob_dst)?,
     )
     .await?;
 
     // Add SMF directory
-    add_smf(
-        &config,
-        &package,
-        &mut archive,
-        &Path::new("root").join("var/svc/manifest/site"),
-    )?;
+    let smf_dst =
+        Path::new("/var/svc/manifest/site").join(&package.service_name);
+    add_smf(&config, &package, &mut archive, &archive_path(&smf_dst)?)?;
 
     let file = archive
         .into_inner()
@@ -357,11 +349,53 @@ fn add_smf<W: std::io::Write>(
     config: &Config,
     package: &Package,
     archive: &mut tar::Builder<W>,
-    dst_prefix: &Path,
+    dst: &Path,
 ) -> Result<()> {
     let smf_path = Path::new(&config.smf).join(&package.service_name);
-    let dst = dst_prefix.join(&package.service_name);
     archive.append_dir_all(&dst, &smf_path)?;
+
+    Ok(())
+}
+
+// Returns the path as it should be placed within an archive, by
+// prepending "root/".
+fn archive_path(path: &Path) -> Result<PathBuf> {
+    let leading_slash = std::path::MAIN_SEPARATOR.to_string();
+    Ok(Path::new("root").join(&path.strip_prefix(leading_slash)?))
+}
+
+// Adds all parent directories of a path to the archive.
+//
+// For example, if we wanted to insert the file into the archive:
+//
+// - /opt/oxide/foo/bar.txt
+//
+// We could call the following:
+//
+// ```
+// let path = Path::new("/opt/oxide/foo/bar.txt");
+// add_directory_and_parents(&mut archive, path.parent().unwrap());
+// ```
+//
+// Which would add the following directories to the archive:
+//
+// - /root
+// - /root/opt
+// - /root/opt/oxide
+// - /root/opt/oxide/foo
+fn add_directory_and_parents<W: std::io::Write>(
+    archive: &mut tar::Builder<W>,
+    to: &Path,
+) -> Result<()> {
+    let mut parents: Vec<&Path> = to.ancestors().collect::<Vec<&Path>>();
+    parents.reverse();
+
+    for parent in parents {
+        println!("Adding path to archive: {}", parent.to_string_lossy());
+        let dst = archive_path(&parent)?;
+        archive.append_dir(&dst, ".")?;
+        println!("Added path to archive: {}", parent.to_string_lossy());
+    }
 
     Ok(())
 }

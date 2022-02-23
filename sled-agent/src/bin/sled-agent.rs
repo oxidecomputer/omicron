@@ -146,11 +146,11 @@ async fn do_run() -> Result<(), CmdError> {
             };
 
             tokio::select! {
-                _ = run_bootstrap() => {
-                    eprintln!("Boot server exited unexpectedly");
+                Err(e) = run_bootstrap() => {
+                    eprintln!("Boot server exited unexpectedly: {:?}", e);
                 },
-                _ = run_sled_server() => {
-                    eprintln!("Sled server exited unexpectedly");
+                Err(e) = run_sled_server() => {
+                    eprintln!("Sled server exited unexpectedly: {:?}", e);
                 },
             }
             Ok(())
