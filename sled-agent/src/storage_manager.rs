@@ -351,7 +351,7 @@ impl StorageWorker {
                                     .map_err(backoff::BackoffError::Transient)?;
                             }
 
-                            Ok::<(), backoff::BackoffError<anyhow::Error>>(())
+                            Ok::<(), backoff::BackoffError<nexus_client::Error<()>>>(())
                         }
                     };
                     let log = self.log.clone();
