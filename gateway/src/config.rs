@@ -28,31 +28,19 @@ pub struct KnownSps {
  */
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct Config {
-    /// Dropshot configuration for API server
-    pub dropshot: ConfigDropshot,
+    /// Identifier for this instance of MGS
+    pub id: uuid::Uuid,
     /// Bind address for UDP socket for SP communication on the management
     /// network.
     pub udp_bind_address: SocketAddr,
     /// Timeout for messages to our local ignition controller SP.
     pub ignition_controller_timeout_milliseconds: u64,
+    /// Dropshot configuration for API server
+    pub dropshot: ConfigDropshot,
     /// Placeholder description of all known SPs in the system.
     pub known_sps: KnownSps,
-    /*
-    /** Identifier for this instance of Nexus */
-    pub id: uuid::Uuid,
-    /** Console-related tunables */
-    pub console: ConsoleConfig,
-    */
     /// Server-wide logging configuration.
     pub log: ConfigLogging,
-    /*
-    /** Database parameters */
-    pub database: db::Config,
-    /** Authentication-related configuration */
-    pub authn: AuthnConfig,
-    /** Timeseries database configuration. */
-    pub timeseries_db: TimeseriesDbConfig,
-    */
 }
 
 impl Config {

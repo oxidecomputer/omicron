@@ -2,8 +2,6 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-#![allow(dead_code)] // TODO remove; WIP only
-
 mod config;
 mod context;
 mod http_entrypoints;
@@ -46,8 +44,7 @@ impl Server {
         _rack_id: &Uuid,
         log: &Logger,
     ) -> Result<Server, String> {
-        //let log = log.new(o!("name" => config.id.to_string()));
-        let log = log.new(o!("name" => "TODO".to_string()));
+        let log = log.new(o!("name" => config.id.to_string()));
         info!(log, "setting up gateway server");
 
         let apictx =

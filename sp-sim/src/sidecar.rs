@@ -75,10 +75,6 @@ impl SpHandler for Handler {
         );
         ResponseKind::IgnitionCommandAck
     }
-
-    fn sp_message_ack(&mut self, _msg_id: u32) {
-        todo!()
-    }
 }
 
 struct Inner {

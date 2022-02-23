@@ -10,12 +10,17 @@ use serde::{Deserialize, Serialize};
 pub use hubpack::{deserialize, serialize, SerializedSize};
 pub use hubpack::error::Error as HubpackError;
 
-// TODO: Ignition messages have a `target: u8` for identification; what do the
+pub mod version {
+    pub const V1: u32 = 1;
+}
+
+// TODO: Ignition messages have a `target` for identification; what do the
 // other messages need?
 
 /// Messages from a gateway to an SP.
 #[derive(Debug, Clone, Copy, SerializedSize, Serialize, Deserialize)]
 pub struct Request {
+    pub version: u32,
     pub request_id: u32,
     pub kind: RequestKind,
 }
@@ -32,6 +37,7 @@ pub enum RequestKind {
 /// Messages from an SP to a gateway, specifically responding to a [Request].
 #[derive(Debug, Clone, Copy, SerializedSize, Serialize, Deserialize)]
 pub struct Response {
+    pub version: u32,
     pub request_id: u32,
     pub kind: ResponseKind,
 }
@@ -42,7 +48,6 @@ pub struct Response {
 #[derive(Debug, Clone, Copy, SerializedSize, Serialize, Deserialize)]
 pub enum ResponseKind {
     Pong,
-    // TODO repeat `target` for these, or is our `request_id` sufficient?
     IgnitionState(IgnitionState),
     IgnitionCommandAck,
     Error(ResponseError),
@@ -54,6 +59,8 @@ pub enum ResponseError {
     /// SP without an attached ignition controller for ignition state.
     RequestUnsupported,
 }
+
+/* IGNORE - treat these as notes; will flesh this out in the near future
 
 /// Messages from an SP to a gateway, prompted by the SP itself; e.g., ignition
 /// state change or serial console output.
@@ -72,15 +79,7 @@ pub enum SpMessageKind {
     IgnitionChange { target: u8, new_state: IgnitionState },
     SerialConsole(SerialConsole),
 }
-
-/// Acks send from a gateway to an SP in response to an [SpMessage].
-// TODO: Is this the right way to handle serial console streaming? SP sends
-// `SerialConsole` with a chunk of data, waits for an ack, then sends the next?
-// How to handle overflow on the SP if acks are slow or nonexistant?
-#[derive(Debug, Clone, Copy, SerializedSize, Serialize, Deserialize)]
-pub struct SpMessageAck {
-    pub msg_id: u32,
-}
+*/
 
 #[derive(Debug, Clone, Copy, SerializedSize, Serialize, Deserialize)]
 pub struct IgnitionState {
@@ -112,6 +111,7 @@ pub enum IgnitionCommand {
     // Nop
 }
 
+/* IGNORE - treat these as notes; will flesh this out in the near future
 #[derive(
     Debug, Clone, Copy, Default, SerializedSize, Serialize, Deserialize,
 )]
@@ -146,3 +146,4 @@ mod tests {
         assert_eq!(deserialized.data, console.data);
     }
 }
+*/

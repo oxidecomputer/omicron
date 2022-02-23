@@ -3,7 +3,7 @@
 #
 
 # Identifier for this instance of MGS
-#id = "e6bff1ff-24fb-49dc-a54e-c6a350cd4d6c"
+id = "8afcb12d-f625-4df9-bdf2-f495c3bbd323"
 udp_bind_address = "127.0.0.1:22222"
 ignition_controller_timeout_milliseconds = 1_000
 

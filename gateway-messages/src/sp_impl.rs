@@ -3,7 +3,10 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 /// Behavior implemented by both real and simulated SPs.
-use crate::{IgnitionCommand, Request, RequestKind, Response, ResponseKind};
+
+use crate::{
+    version, IgnitionCommand, Request, RequestKind, Response, ResponseKind,
+};
 use hubpack::SerializedSize;
 
 pub trait SpHandler {
@@ -16,8 +19,6 @@ pub trait SpHandler {
         target: u8,
         command: IgnitionCommand,
     ) -> ResponseKind;
-
-    fn sp_message_ack(&mut self, msg_id: u32);
 }
 
 #[derive(Debug)]
@@ -26,6 +27,8 @@ pub enum Error {
     DataTooLarge,
     /// Incoming data packet had leftover trailing data.
     LeftoverData,
+    /// Message version is unsupported.
+    UnsupportedVersion(u32),
     /// Deserializing the packet into a [`Request`] failed.
     DeserializationFailed(hubpack::error::Error),
 }
@@ -64,10 +67,7 @@ where
     /// will be parsed (into a [`Request`]), the appropriate method will be
     /// called on the underlying message handler, and a serialized response will
     /// be returned, which the caller should send back to the requester.
-    pub fn dispatch(
-        &mut self,
-        data: &[u8],
-    ) -> Result<&[u8], Error> {
+    pub fn dispatch(&mut self, data: &[u8]) -> Result<&[u8], Error> {
         // parse request, with sanity checks on sizes
         if data.len() > Request::MAX_SIZE {
             return Err(Error::DataTooLarge);
@@ -75,6 +75,12 @@ where
         let (request, leftover) = hubpack::deserialize::<Request>(data)?;
         if !leftover.is_empty() {
             return Err(Error::LeftoverData);
+        }
+
+        // `version` is intentionally the first 4 bytes of the packet; we could
+        // check it before trying to deserialize?
+        if request.version != version::V1 {
+            return Err(Error::UnsupportedVersion(request.version));
         }
 
         // call out to handler to provide response
@@ -91,6 +97,7 @@ where
         // we control `Response` and know all cases can successfully serialize
         // into `self.buf`
         let response = Response {
+            version: version::V1,
             request_id: request.request_id,
             kind: response_kind,
         };
@@ -99,9 +106,10 @@ where
             Err(_) => panic!(),
         };
 
-        // TODO: Do we want some mechanism for remembering `n` if our caller
-        // needs to resend this packet (which would have to happen before
-        // calling this method again)?
+        // Do we want some mechanism for remembering `n` if our caller wants to
+        // resend this packet, which would have to happen before calling this
+        // method again? For now (and maybe forever), force them to just call us
+        // again, and we'll reserialize.
         Ok(&self.buf[..n])
     }
 }
