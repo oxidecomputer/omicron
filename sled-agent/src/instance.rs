@@ -923,14 +923,17 @@ mod test {
             },
         );
 
-        let zone_create_address_ctx = MockZones::create_address_context();
-        zone_create_address_ctx
+        let zone_ensure_address_ctx = MockZones::ensure_address_context();
+        zone_ensure_address_ctx
             .expect()
             .times(1)
             .in_sequence(&mut seq)
             .returning(|zone, iface, addrtype| {
                 assert!(matches!(addrtype, AddressRequest::Dhcp));
-                assert_eq!(zone, propolis_zone_name(&test_propolis_uuid()));
+                assert_eq!(
+                    zone,
+                    Some(propolis_zone_name(&test_propolis_uuid())).as_deref()
+                );
                 assert_eq!(iface, &AddrObject::new_control("oxControlTest0"));
                 Ok("127.0.0.1/24".parse().unwrap())
             });

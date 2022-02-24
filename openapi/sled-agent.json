@@ -137,6 +137,82 @@
         "format": "uint64",
         "minimum": 0
       },
+      "DatasetEnsureBody": {
+        "description": "Used to request a new partition kind exists within a zpool.\n\nMany partition types are associated with services that will be instantiated when the partition is detected.",
+        "type": "object",
+        "properties": {
+          "address": {
+            "type": "string"
+          },
+          "partition_kind": {
+            "$ref": "#/components/schemas/DatasetKind"
+          },
+          "zpool_uuid": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "required": [
+          "address",
+          "partition_kind",
+          "zpool_uuid"
+        ]
+      },
+      "DatasetKind": {
+        "description": "The type of a dataset, and an axuiliary information necessary to successfully launch a zone managing the associated data.",
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "all_addresses": {
+                "description": "The addresses of all nodes within the cluster.",
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "cockroach_db"
+                ]
+              }
+            },
+            "required": [
+              "all_addresses",
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "crucible"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "clickhouse"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          }
+        ]
+      },
       "DiskEnsureBody": {
         "description": "Sent from to a sled agent to establish the runtime state of a Disk",
         "type": "object",
@@ -703,82 +779,6 @@
           "time_created",
           "time_modified",
           "vpc_id"
-        ]
-      },
-      "DatasetEnsureBody": {
-        "description": "Used to request a new partition kind exists within a zpool.\n\nMany partition types are associated with services that will be instantiated when the partition is detected.",
-        "type": "object",
-        "properties": {
-          "address": {
-            "type": "string"
-          },
-          "partition_kind": {
-            "$ref": "#/components/schemas/DatasetKind"
-          },
-          "zpool_uuid": {
-            "type": "string",
-            "format": "uuid"
-          }
-        },
-        "required": [
-          "address",
-          "partition_kind",
-          "zpool_uuid"
-        ]
-      },
-      "DatasetKind": {
-        "description": "The type of a partition, and an axuiliary information necessary to successfully launch a zone managing the associated data.",
-        "oneOf": [
-          {
-            "type": "object",
-            "properties": {
-              "all_addresses": {
-                "description": "The addresses of all nodes within the cluster.",
-                "type": "array",
-                "items": {
-                  "type": "string"
-                }
-              },
-              "type": {
-                "type": "string",
-                "enum": [
-                  "cockroach_db"
-                ]
-              }
-            },
-            "required": [
-              "all_addresses",
-              "type"
-            ]
-          },
-          {
-            "type": "object",
-            "properties": {
-              "type": {
-                "type": "string",
-                "enum": [
-                  "crucible"
-                ]
-              }
-            },
-            "required": [
-              "type"
-            ]
-          },
-          {
-            "type": "object",
-            "properties": {
-              "type": {
-                "type": "string",
-                "enum": [
-                  "clickhouse"
-                ]
-              }
-            },
-            "required": [
-              "type"
-            ]
-          }
         ]
       },
       "ServiceEnsureBody": {

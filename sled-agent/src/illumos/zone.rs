@@ -472,8 +472,9 @@ impl Zones {
     }
 
     /// Gets the address if one exists, creates one if one does not exist.
-    pub fn ensure_address(
-        zone: Option<&str>,
+    #[allow(clippy::needless_lifetimes)]
+    pub fn ensure_address<'a>(
+        zone: Option<&'a str>,
         addrobj: &AddrObject,
         addrtype: AddressRequest,
     ) -> Result<IpNetwork, Error> {
@@ -491,8 +492,9 @@ impl Zones {
     }
 
     /// Gets the IP address of an interface within a Zone.
-    fn get_address(
-        zone: Option<&str>,
+    #[allow(clippy::needless_lifetimes)]
+    fn get_address<'a>(
+        zone: Option<&'a str>,
         addrobj: &AddrObject,
     ) -> Result<IpNetwork, Error> {
         let mut command = std::process::Command::new(PFEXEC);
@@ -517,8 +519,9 @@ impl Zones {
     ///
     /// Zone may either be `Some(zone)` for a non-global zone, or `None` to
     /// run the command in the Global zone.
-    fn has_link_local_v6_address(
-        zone: Option<&str>,
+    #[allow(clippy::needless_lifetimes)]
+    fn has_link_local_v6_address<'a>(
+        zone: Option<&'a str>,
         addrobj: &AddrObject,
     ) -> Result<(), Error> {
         let mut command = std::process::Command::new(PFEXEC);
@@ -544,8 +547,9 @@ impl Zones {
     // Attempts to create the requested address.
     //
     // Does NOT check if the address already exists.
-    fn create_address_internal(
-        zone: Option<&str>,
+    #[allow(clippy::needless_lifetimes)]
+    fn create_address_internal<'a>(
+        zone: Option<&'a str>,
         addrobj: &AddrObject,
         addrtype: AddressRequest,
     ) -> Result<(), Error> {
@@ -586,8 +590,9 @@ impl Zones {
     //
     // For more context, see:
     // <https://ry.goodwu.net/tinkering/a-day-in-the-life-of-an-ipv6-address-on-illumos/>
-    fn ensure_has_link_local_v6_address(
-        zone: Option<&str>,
+    #[allow(clippy::needless_lifetimes)]
+    fn ensure_has_link_local_v6_address<'a>(
+        zone: Option<&'a str>,
         addrobj: &AddrObject,
     ) -> Result<(), Error> {
         let link_local_addrobj = addrobj.on_same_interface("linklocal");
@@ -620,8 +625,9 @@ impl Zones {
     }
 
     // Creates an IP address within a Zone.
-    fn create_address(
-        zone: Option<&str>,
+    #[allow(clippy::needless_lifetimes)]
+    fn create_address<'a>(
+        zone: Option<&'a str>,
         addrobj: &AddrObject,
         addrtype: AddressRequest,
     ) -> Result<IpNetwork, Error> {
