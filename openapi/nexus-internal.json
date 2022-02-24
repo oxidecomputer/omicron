@@ -499,7 +499,7 @@
         ]
       },
       "DatasetKind": {
-        "description": "Describes the purpose of the dataset.",
+        "description": "Describes the purpose of a dataset.",
         "type": "string",
         "enum": [
           "Crucible",
