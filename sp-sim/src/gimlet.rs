@@ -65,7 +65,13 @@ impl Gimlet {
         })
     }
 
-    pub async fn send_serial_console(&mut self, data: &[u8]) -> Result<()> {
+    pub async fn send_serial_console(&mut self, mut data: &[u8]) -> Result<()> {
+        // if we're told to send something starting with "SKIP ", emulate a
+        // dropped packet spanning 10 bytes before sending the rest of the data.
+        if let Some(remaining) = data.strip_prefix(b"SKIP ") {
+            self.console_packetizer.danger_emulate_dropped_packets(10);
+            data = remaining;
+        }
         let mut packets = self.console_packetizer.packetize(data);
         while let Some(buf) = packets.next_packet(&mut self.buf) {
             self.sock.send_to(buf, self.gateway_address).await?;

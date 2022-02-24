@@ -57,6 +57,12 @@ impl SerialConsolePacketizer {
     ) -> SerialConsolePackets<'a, 'b> {
         SerialConsolePackets { parent: self, data }
     }
+
+    // TODO this function exists only to allow callers to inject artifical gaps
+    // in the data they're sending; should we gate it behind a cargo feature?
+    pub fn danger_emulate_dropped_packets(&mut self, bytes_to_skip: u64) {
+        self.offset += bytes_to_skip;
+    }
 }
 
 #[derive(Debug)]
