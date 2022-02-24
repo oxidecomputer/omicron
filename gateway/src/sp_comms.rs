@@ -7,6 +7,10 @@
 
 //! Inteface for communicating with SPs over UDP on the management network.
 
+mod serial_console_history;
+
+use serial_console_history::SerialConsoleHistory;
+
 use crate::config::KnownSps;
 use dropshot::HttpError;
 use gateway_messages::{
@@ -317,15 +321,12 @@ impl RecvTask {
         }
     }
 
-    fn handle_serial_console(
-        &self,
-        addr: SocketAddr,
-        serial_console: SerialConsole,
-    ) {
+    fn handle_serial_console(&self, addr: SocketAddr, packet: SerialConsole) {
         debug!(
             &self.log,
-            "received serial console data from {}: {:?}", addr, serial_console
+            "received serial console data from {}: {:?}", addr, packet
         );
+        self.sp_state.push_serial_console(addr.ip(), packet, &self.log);
     }
 }
 
@@ -347,6 +348,18 @@ impl SpState {
             }
         }
         Self { all_sps }
+    }
+
+    fn push_serial_console(
+        &self,
+        sp: IpAddr,
+        packet: SerialConsole,
+        log: &Logger,
+    ) {
+        // caller should never try to send a request to an SP we don't know
+        // about, since it created us with all SPs it knows.
+        let state = self.all_sps.get(&sp).expect("nonexistent SP");
+        state.serial_console.lock().unwrap().push(packet, log);
     }
 
     fn insert_expected_response(
@@ -375,6 +388,7 @@ impl SpState {
 #[derive(Debug, Default)]
 struct SingleSpState {
     outstanding_requests: Arc<OutstandingRequests>,
+    serial_console: Mutex<SerialConsoleHistory>,
 }
 
 #[derive(Debug, Default)]

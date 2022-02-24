@@ -136,7 +136,7 @@ pub struct SerialConsole {
 }
 
 impl SerialConsole {
-    const MAX_DATA_PER_PACKET: usize = 32;
+    pub const MAX_DATA_PER_PACKET: usize = 32;
 }
 
 #[cfg(test)]
