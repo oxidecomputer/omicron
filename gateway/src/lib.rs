@@ -14,10 +14,8 @@ use slog::{debug, error, info, o, Logger};
 use std::sync::Arc;
 use uuid::Uuid;
 
-/**
- * Run the OpenAPI generator for the API, which emits the OpenAPI spec
- * to stdout.
- */
+/// Run the OpenAPI generator for the API, which emits the OpenAPI spec
+/// to stdout.
 pub fn run_openapi() -> Result<(), String> {
     http_entrypoints::api()
         .openapi("Oxide Management Gateway Service API", "0.0.1")
@@ -29,16 +27,14 @@ pub fn run_openapi() -> Result<(), String> {
 }
 
 pub struct Server {
-    /** shared state used by API request handlers */
+    /// shared state used by API request handlers
     pub apictx: Arc<ServerContext>,
-    /** dropshot server for requests from nexus */
+    /// dropshot server for requests from nexus
     pub http_server: dropshot::HttpServer<Arc<ServerContext>>,
 }
 
 impl Server {
-    /**
-     * Start a gateway server.
-     */
+    /// Start a gateway server.
     pub async fn start(
         config: &Config,
         _rack_id: &Uuid,
@@ -65,22 +61,18 @@ impl Server {
         Ok(Server { apictx, http_server })
     }
 
-    /**
-     * Wait for the server to shut down
-     *
-     * Note that this doesn't initiate a graceful shutdown, so if you call this
-     * immediately after calling `start()`, the program will block indefinitely
-     * or until something else initiates a graceful shutdown.
-     */
+    /// Wait for the server to shut down
+    ///
+    /// Note that this doesn't initiate a graceful shutdown, so if you call this
+    /// immediately after calling `start()`, the program will block indefinitely
+    /// or until something else initiates a graceful shutdown.
     pub async fn wait_for_finish(self) -> Result<(), String> {
         self.http_server.await
     }
 
     // TODO does MGS register itself with oximeter?
     /*
-    /**
-     * Register the Nexus server as a metric producer with `oximeter.
-     */
+    /// Register the Nexus server as a metric producer with `oximeter.
     pub async fn register_as_producer(&self) {
         self.apictx
             .nexus
@@ -90,9 +82,7 @@ impl Server {
     */
 }
 
-/**
- * Run an instance of the [Server].
- */
+/// Run an instance of the [Server].
 pub async fn run_server(config: &Config) -> Result<(), String> {
     use slog::Drain;
     let (drain, registration) = slog_dtrace::with_drain(

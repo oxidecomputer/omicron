@@ -28,7 +28,6 @@ impl From<Error> for HttpError {
     fn from(err: Error) -> Self {
         match err {
             Error::SpDoesNotExist(_) => {
-                // TODO is this error code okay?
                 HttpError::for_bad_request(
                     Some(String::from("SpDoesNotExist")),
                     err.to_string(),

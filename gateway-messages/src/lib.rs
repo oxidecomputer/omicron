@@ -108,7 +108,6 @@ bitflags! {
 pub enum IgnitionCommand {
     PowerOn,
     PowerOff,
-    // Nop
 }
 
 /* IGNORE - treat these as notes; will flesh this out in the near future

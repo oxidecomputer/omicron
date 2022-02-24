@@ -2,9 +2,9 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-/*!
- * Executable program to run gateway, the management gateway service
- */
+//!
+//! Executable program to run gateway, the management gateway service
+//!
 
 use omicron_common::cmd::{fatal, CmdError};
 use omicron_gateway::{run_openapi, run_server, Config};

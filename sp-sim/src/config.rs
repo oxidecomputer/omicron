@@ -2,10 +2,10 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-/*!
- * Interfaces for parsing configuration files and working with a simulated SP
- * configuration
- */
+//!
+//! Interfaces for parsing configuration files and working with a simulated SP
+//! configuration
+//!
 
 use dropshot::ConfigLogging;
 use serde::{Deserialize, Serialize};
@@ -15,9 +15,7 @@ use std::{
 };
 use thiserror::Error;
 
-/**
- * Configuration for a gateway server
- */
+/// Configuration for a gateway server
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct Config {
     /// UDP listen address.
@@ -27,11 +25,9 @@ pub struct Config {
 }
 
 impl Config {
-    /**
-     * Load a `Config` from the given TOML file
-     *
-     * This config object can then be used to create a new simulated SP.
-     */
+    /// Load a `Config` from the given TOML file
+    ///
+    /// This config object can then be used to create a new simulated SP.
     // The format is described in the README. // TODO add a README
     pub fn from_file<P: AsRef<Path>>(path: P) -> Result<Config, LoadError> {
         let path = path.as_ref();

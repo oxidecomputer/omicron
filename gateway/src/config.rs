@@ -2,10 +2,10 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-/*!
- * Interfaces for parsing configuration files and working with a gateway server
- * configuration
- */
+//!
+//! Interfaces for parsing configuration files and working with a gateway server
+//! configuration
+//!
 
 use dropshot::{ConfigDropshot, ConfigLogging};
 use serde::{Deserialize, Serialize};
@@ -26,9 +26,7 @@ pub struct KnownSps {
     pub power_controllers: Vec<SocketAddr>,
 }
 
-/**
- * Configuration for a gateway server
- */
+/// Configuration for a gateway server
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct Config {
     /// Identifier for this instance of MGS
@@ -47,11 +45,9 @@ pub struct Config {
 }
 
 impl Config {
-    /**
-     * Load a `Config` from the given TOML file
-     *
-     * This config object can then be used to create a new gateway server.
-     */
+    /// Load a `Config` from the given TOML file
+    ///
+    /// This config object can then be used to create a new gateway server.
     // The format is described in the README. // TODO add a README
     pub fn from_file<P: AsRef<Path>>(path: P) -> Result<Config, LoadError> {
         let path = path.as_ref();
