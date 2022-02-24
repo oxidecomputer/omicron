@@ -109,11 +109,11 @@ pub struct InstanceRuntimeStateRequested {
     pub migration_params: Option<InstanceRuntimeStateMigrateParams>,
 }
 
-/// The type of a partition, and an axuiliary information necessary
+/// The type of a dataset, and an axuiliary information necessary
 /// to successfully launch a zone managing the associated data.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
 #[serde(tag = "type", rename_all = "snake_case")]
-pub enum PartitionKind {
+pub enum DatasetKind {
     CockroachDb {
         /// The addresses of all nodes within the cluster.
         all_addresses: Vec<SocketAddr>,
@@ -122,9 +122,9 @@ pub enum PartitionKind {
     Clickhouse,
 }
 
-impl PartitionKind {
+impl DatasetKind {
     pub fn as_dataset(&self) -> internal::nexus::DatasetKind {
-        use PartitionKind::*;
+        use DatasetKind::*;
         match *self {
             CockroachDb { .. } => internal::nexus::DatasetKind::Cockroach,
             Crucible { .. } => internal::nexus::DatasetKind::Crucible,
@@ -138,11 +138,11 @@ impl PartitionKind {
 /// Many partition types are associated with services that will be
 /// instantiated when the partition is detected.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
-pub struct PartitionEnsureBody {
+pub struct DatasetEnsureBody {
     // The name (and UUID) of the Zpool which we are inserting into.
     pub zpool_uuid: Uuid,
     // The type of the filesystem.
-    pub partition_kind: PartitionKind,
+    pub partition_kind: DatasetKind,
     // The address on which the zone will listen for requests.
     pub address: SocketAddr,
     // TODO: We could insert a UUID here, if we want that to be set by the

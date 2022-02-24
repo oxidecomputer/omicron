@@ -10,7 +10,7 @@ use crate::config::ConfigError;
 use dropshot::ConfigDropshot;
 use dropshot::ConfigLogging;
 use omicron_common::api::internal::sled_agent::{
-    PartitionEnsureBody, ServiceRequest,
+    DatasetEnsureBody, ServiceRequest,
 };
 use serde::Deserialize;
 use serde::Serialize;
@@ -52,7 +52,7 @@ pub struct SledRequest {
 
     /// Partitions to be created.
     #[serde(default, rename = "partition")]
-    pub partitions: Vec<PartitionEnsureBody>,
+    pub partitions: Vec<DatasetEnsureBody>,
 
     /// Services to be instantiated.
     #[serde(default, rename = "service")]

@@ -16,8 +16,8 @@ use dropshot::TypedBody;
 use omicron_common::api::external::Error;
 use omicron_common::api::internal::nexus::DiskRuntimeState;
 use omicron_common::api::internal::nexus::InstanceRuntimeState;
+use omicron_common::api::internal::sled_agent::DatasetEnsureBody;
 use omicron_common::api::internal::sled_agent::InstanceEnsureBody;
-use omicron_common::api::internal::sled_agent::PartitionEnsureBody;
 use omicron_common::api::internal::sled_agent::ServiceEnsureBody;
 use schemars::JsonSchema;
 use serde::Deserialize;
@@ -65,7 +65,7 @@ async fn services_put(
 }]
 async fn filesystem_put(
     rqctx: Arc<RequestContext<SledAgent>>,
-    body: TypedBody<PartitionEnsureBody>,
+    body: TypedBody<DatasetEnsureBody>,
 ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
     let sa = rqctx.context();
     let body_args = body.into_inner();

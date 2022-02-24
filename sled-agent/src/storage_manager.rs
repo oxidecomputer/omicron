@@ -15,8 +15,8 @@ use futures::FutureExt;
 use futures::StreamExt;
 use nexus_client::types::{DatasetPutRequest, ZpoolPutRequest};
 use omicron_common::api::external::{ByteCount, ByteCountRangeError};
-use omicron_common::api::internal::nexus::DatasetKind;
-use omicron_common::api::internal::sled_agent::PartitionKind;
+use omicron_common::api::internal::nexus::DatasetKind as NexusDatasetKind;
+use omicron_common::api::internal::sled_agent::DatasetKind;
 use omicron_common::backoff;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -173,25 +173,25 @@ struct DatasetInfo {
     // TODO: Is this always "/data"?
     data_directory: String,
     address: SocketAddr,
-    kind: PartitionKind,
+    kind: DatasetKind,
 }
 
 impl DatasetInfo {
-    fn new(kind: PartitionKind, address: SocketAddr) -> DatasetInfo {
+    fn new(kind: DatasetKind, address: SocketAddr) -> DatasetInfo {
         match kind {
-            PartitionKind::CockroachDb { .. } => DatasetInfo {
+            DatasetKind::CockroachDb { .. } => DatasetInfo {
                 name: "cockroachdb".to_string(),
                 data_directory: "/data".to_string(),
                 address,
                 kind,
             },
-            PartitionKind::Crucible { .. } => DatasetInfo {
+            DatasetKind::Crucible { .. } => DatasetInfo {
                 name: "crucible".to_string(),
                 data_directory: "/data".to_string(),
                 address,
                 kind,
             },
-            PartitionKind::Clickhouse { .. } => {
+            DatasetKind::Clickhouse { .. } => {
                 unimplemented!();
             }
         }
@@ -208,7 +208,7 @@ impl DatasetInfo {
         do_format: bool,
     ) -> Result<(), Error> {
         match self.kind {
-            PartitionKind::CockroachDb { .. } => {
+            DatasetKind::CockroachDb { .. } => {
                 // Load the CRDB manifest.
                 zone.run_cmd(&[
                     crate::illumos::zone::SVCCFG,
@@ -302,8 +302,8 @@ impl DatasetInfo {
 
                 Ok(())
             }
-            PartitionKind::Crucible { .. } => unimplemented!(),
-            PartitionKind::Clickhouse { .. } => unimplemented!(),
+            DatasetKind::Crucible { .. } => unimplemented!(),
+            DatasetKind::Clickhouse { .. } => unimplemented!(),
         }
     }
 }
@@ -373,7 +373,7 @@ type NotifyFut = dyn futures::Future<Output = Result<(), anyhow::Error>> + Send;
 #[derive(Debug)]
 struct NewFilesystemRequest {
     zpool_id: Uuid,
-    partition_kind: PartitionKind,
+    dataset_kind: DatasetKind,
     address: SocketAddr,
     responder: oneshot::Sender<Result<(), Error>>,
 }
@@ -508,7 +508,7 @@ impl StorageWorker {
     fn add_datasets_notify(
         &self,
         nexus_notifications: &mut FuturesOrdered<Pin<Box<NotifyFut>>>,
-        datasets: Vec<(Uuid, SocketAddr, DatasetKind)>,
+        datasets: Vec<(Uuid, SocketAddr, NexusDatasetKind)>,
         pool_id: Uuid,
     ) {
         let nexus = self.nexus_client.clone();
@@ -563,7 +563,7 @@ impl StorageWorker {
             })?;
 
         let dataset_info =
-            DatasetInfo::new(request.partition_kind.clone(), request.address);
+            DatasetInfo::new(request.dataset_kind.clone(), request.address);
         let (is_new_dataset, id) = self
             .initialize_dataset_and_zone(
                 pool,
@@ -599,7 +599,7 @@ impl StorageWorker {
         &self,
         pool: &mut Pool,
         dataset_name: &DatasetName,
-    ) -> Result<(Uuid, SocketAddr, DatasetKind), Error> {
+    ) -> Result<(Uuid, SocketAddr, NexusDatasetKind), Error> {
         let id = Zfs::get_oxide_value(&dataset_name.full(), "uuid")?
             .parse::<Uuid>()?;
         let config_path = pool.dataset_config_path(id).await?;
@@ -770,13 +770,13 @@ impl StorageManager {
     pub async fn upsert_filesystem(
         &self,
         zpool_id: Uuid,
-        partition_kind: PartitionKind,
+        dataset_kind: DatasetKind,
         address: SocketAddr,
     ) -> Result<(), Error> {
         let (tx, rx) = oneshot::channel();
         let request = NewFilesystemRequest {
             zpool_id,
-            partition_kind,
+            dataset_kind,
             address,
             responder: tx,
         };

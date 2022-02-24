@@ -14,10 +14,9 @@ use crate::services::ServiceManager;
 use crate::storage_manager::StorageManager;
 use omicron_common::api::{
     internal::nexus::DiskRuntimeState, internal::nexus::InstanceRuntimeState,
-    internal::sled_agent::InstanceHardware,
+    internal::sled_agent::DatasetKind, internal::sled_agent::InstanceHardware,
     internal::sled_agent::InstanceMigrateParams,
     internal::sled_agent::InstanceRuntimeStateRequested,
-    internal::sled_agent::PartitionKind,
     internal::sled_agent::ServiceEnsureBody,
 };
 use slog::Logger;
@@ -163,7 +162,7 @@ impl SledAgent {
     pub async fn filesystem_ensure(
         &self,
         zpool_uuid: Uuid,
-        partition_kind: PartitionKind,
+        partition_kind: DatasetKind,
         address: SocketAddr,
     ) -> Result<(), Error> {
         self.storage
