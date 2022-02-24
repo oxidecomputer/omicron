@@ -93,10 +93,7 @@ impl SerialConsoleHistory {
             chunks.push(SerialConsoleChunk::Data { bytes: buf });
         }
 
-        Some(SerialConsoleContents {
-            start: start.unwrap_or(0),
-            chunks,
-        })
+        Some(SerialConsoleContents { start: start.unwrap_or(0), chunks })
     }
 
     pub(super) fn push(&mut self, packet: SerialConsole, log: &Logger) {
