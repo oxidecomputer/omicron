@@ -1889,10 +1889,8 @@ dependencies = [
 name = "nexus-client"
 version = "0.1.0"
 dependencies = [
- "anyhow",
  "chrono",
  "omicron-common",
- "percent-encoding",
  "progenitor",
  "reqwest",
  "serde",
@@ -2324,10 +2322,8 @@ dependencies = [
 name = "oximeter-client"
 version = "0.1.0"
 dependencies = [
- "anyhow",
  "chrono",
  "omicron-common",
- "percent-encoding",
  "progenitor",
  "reqwest",
  "serde",
@@ -2849,11 +2845,12 @@ dependencies = [
 [[package]]
 name = "progenitor"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/progenitor#f1f9e2e93850713908f4e6494808a07f3b253108"
+source = "git+https://github.com/oxidecomputer/progenitor#24aa57a243b7eb0faf631c9276c4dec0281cdf5c"
 dependencies = [
  "anyhow",
  "getopts",
  "openapiv3",
+ "progenitor-client",
  "progenitor-impl",
  "progenitor-macro",
  "serde",
@@ -2861,11 +2858,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "progenitor-client"
+version = "0.0.0"
+source = "git+https://github.com/oxidecomputer/progenitor#24aa57a243b7eb0faf631c9276c4dec0281cdf5c"
+dependencies = [
+ "percent-encoding",
+ "reqwest",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "progenitor-impl"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/progenitor#f1f9e2e93850713908f4e6494808a07f3b253108"
+source = "git+https://github.com/oxidecomputer/progenitor#24aa57a243b7eb0faf631c9276c4dec0281cdf5c"
 dependencies = [
- "anyhow",
  "convert_case 0.4.0",
  "getopts",
  "indexmap",
@@ -2886,7 +2893,7 @@ dependencies = [
 [[package]]
 name = "progenitor-macro"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/progenitor#f1f9e2e93850713908f4e6494808a07f3b253108"
+source = "git+https://github.com/oxidecomputer/progenitor#24aa57a243b7eb0faf631c9276c4dec0281cdf5c"
 dependencies = [
  "openapiv3",
  "proc-macro2",
@@ -3666,11 +3673,9 @@ checksum = "9def91fd1e018fe007022791f865d0ccc9b3a0d5001e01aabb8b40e46000afb5"
 name = "sled-agent-client"
 version = "0.1.0"
 dependencies = [
- "anyhow",
  "async-trait",
  "chrono",
  "omicron-common",
- "percent-encoding",
  "progenitor",
  "reqwest",
  "serde",
@@ -4379,7 +4384,7 @@ checksum = "b63708a265f51345575b27fe43f9500ad611579e764c79edbc2037b1121959ec"
 [[package]]
 name = "typify"
 version = "0.0.6-dev"
-source = "git+https://github.com/oxidecomputer/typify#9afa917671b29fc231bc9ce304e041bdd685af09"
+source = "git+https://github.com/oxidecomputer/typify#b712fe6d643a8cf88fc1d5020cb0583a69a76c9b"
 dependencies = [
  "typify-impl",
  "typify-macro",
@@ -4388,7 +4393,7 @@ dependencies = [
 [[package]]
 name = "typify-impl"
 version = "0.0.6-dev"
-source = "git+https://github.com/oxidecomputer/typify#9afa917671b29fc231bc9ce304e041bdd685af09"
+source = "git+https://github.com/oxidecomputer/typify#b712fe6d643a8cf88fc1d5020cb0583a69a76c9b"
 dependencies = [
  "convert_case 0.4.0",
  "log",
@@ -4405,7 +4410,7 @@ dependencies = [
 [[package]]
 name = "typify-macro"
 version = "0.0.6-dev"
-source = "git+https://github.com/oxidecomputer/typify#9afa917671b29fc231bc9ce304e041bdd685af09"
+source = "git+https://github.com/oxidecomputer/typify#b712fe6d643a8cf88fc1d5020cb0583a69a76c9b"
 dependencies = [
  "proc-macro2",
  "quote",

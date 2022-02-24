@@ -1262,7 +1262,8 @@ impl Nexus {
             .await
             .map_err(Error::from)?;
 
-        let new_runtime: nexus::InstanceRuntimeState = new_runtime.into();
+        let new_runtime: nexus::InstanceRuntimeState =
+            new_runtime.into_inner().into();
 
         self.db_datastore
             .instance_update_runtime(&db_instance.id(), &new_runtime.into())
@@ -1521,7 +1522,7 @@ impl Nexus {
             .await
             .map_err(Error::from)?;
 
-        let new_runtime: DiskRuntimeState = new_runtime.into();
+        let new_runtime: DiskRuntimeState = new_runtime.into_inner().into();
 
         self.db_datastore
             .disk_update_runtime(opctx, authz_disk, &new_runtime.into())
