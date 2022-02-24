@@ -7,40 +7,40 @@ use ringbuffer::{AllocRingBuffer, RingBufferExt, RingBufferWrite};
 use schemars::JsonSchema;
 use serde::Serialize;
 use slog::{warn, Logger};
-use std::{cmp::Ordering, collections::HashMap};
+use std::{cmp::Ordering, collections::HashMap, mem};
 
 /// Current in-memory contents of an SP component's serial console.
 ///
-/// Note that we currently embed a placeholder string for missing data, which
-/// adds some nuance around what the "length" of this buffer means: We have both
-/// the length in bytes of the buffer itself, but also the nominal length of
-/// what range of data from the SP it covers. If we haven't missed any packets,
-/// these lengths will be the same. If we have, they will probably be different;
-/// typically the nominal length will be longer, but it could be shorter if we
-/// missed packets containing chunks shorter than the placeholder string we drop
-/// in in their place(s).
-///
 /// If we have not received any serial console data from this SP component,
-/// `start` and `end` will both be `0`, and `buf` will be empty.
+/// `start` will be `0` and `chunks` will be empty.
 // TODO is it a code smell that this type impls Serialize and JsonSchema but
 // isn't defined in `http_entrypoints.rs`?
 #[derive(Debug, Default, Serialize, JsonSchema)]
 pub(crate) struct SerialConsoleContents {
-    /// Position since SP component start of the first byte of `buf`.
+    /// Position since SP component start of the first byte of the first element
+    /// of `chunks`.
     ///
-    /// This is equal to the number of bytes that we've discarded due to
-    /// dropping out of our internal ring buffer.
+    /// This is equal to the number of bytes that we've discarded since the SP
+    /// started.
     pub(crate) start: u64,
 
-    /// Nominal end of the data covered by `buf`.
+    /// Chunks of serial console data.
     ///
-    /// If we have not missed any packets since `start`, this will be equal to
-    /// `start + data.len()`. If we _have_ missed at least one packet, those
-    /// lengths are likely different.
-    pub(crate) end: u64,
+    /// We collapse contiguous regions of data (present or missing) into a
+    /// single chunk: any two consecutive elements of `chunks` are guaranteed to
+    /// be different (i.e., one will be [`SerialConsoleChunk::Missing`] and the
+    /// other will be [`SerialConsoleChunk::Data`]). If `chunks` is not empty,
+    /// its final element is guaranteed to be a [`SerialConsoleChunk::Data`].
+    pub(crate) chunks: Vec<SerialConsoleChunk>,
+}
 
-    /// Contents of the serial console buffer.
-    pub(crate) buf: Vec<u8>,
+/// A chunk of serial console data: either actual data, or an amount of data
+/// we missed (presumably due to dropped packets or something similar).
+#[derive(Debug, Serialize, JsonSchema)]
+#[serde(tag = "kind", rename_all = "lowercase")]
+pub(crate) enum SerialConsoleChunk {
+    Data { bytes: Vec<u8> },
+    Missing { len: u64 },
 }
 
 // We currently store serial console packets from an SP more or less "as is" in
@@ -60,35 +60,42 @@ impl SerialConsoleHistory {
         component: &SpComponent,
     ) -> Option<SerialConsoleContents> {
         let slots = self.by_component.get(component)?;
+        let mut chunks = Vec::new();
         let mut buf = Vec::new();
         let mut start = None;
-        let mut end = None;
 
         for slot in slots.iter() {
             match slot {
-                Slot::MissingData { offset, len } => {
-                    buf.extend_from_slice(
-                        format!("... MISSING {} BYTES ...", len).as_bytes(),
-                    );
-                    if start.is_none() {
-                        start = Some(*offset);
+                &Slot::MissingData { offset, len } => {
+                    if !buf.is_empty() {
+                        // we've collected some amount of contiguous data; add a
+                        // chunk and reset `buf` before appending our missing
+                        // chunk
+                        let mut steal = Vec::new();
+                        mem::swap(&mut buf, &mut steal);
+                        chunks.push(SerialConsoleChunk::Data { bytes: steal });
                     }
-                    end = Some(offset + len);
+                    chunks.push(SerialConsoleChunk::Missing { len });
+                    if start.is_none() {
+                        start = Some(offset);
+                    }
                 }
-                Slot::Valid { offset, len, data } => {
-                    buf.extend_from_slice(&data[..usize::from(*len)]);
+                &Slot::Valid { offset, len, data } => {
+                    buf.extend_from_slice(&data[..usize::from(len)]);
                     if start.is_none() {
-                        start = Some(*offset);
+                        start = Some(offset);
                     }
-                    end = Some(offset + u64::from(*len));
                 }
             }
         }
 
+        if !buf.is_empty() {
+            chunks.push(SerialConsoleChunk::Data { bytes: buf });
+        }
+
         Some(SerialConsoleContents {
             start: start.unwrap_or(0),
-            end: end.unwrap_or(0),
-            buf,
+            chunks,
         })
     }
 
