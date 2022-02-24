@@ -201,8 +201,6 @@ impl SpCommunicator {
 /// dropped. When the communicator wants to send a request on behalf of an HTTP
 /// request:
 ///
-/// TODO update for non-response messages
-///
 /// 1. `SpCommunicator` creates a tokio oneshot channel for this task to use to
 ///    send the response.
 /// 2. `SpCommunicator` inserts the sending half of that channel into
@@ -221,6 +219,10 @@ impl SpCommunicator {
 /// If a timeout or other error occurs between step 2 and the end of step 4, the
 /// `ResponseReceiver` wrapper below is responsible for cleaning up the entry in
 /// `outstanding_requests` (via its `Drop` impl).
+///
+/// We can also receive messages from SPs that are not responses to oustanding
+/// requests. These are handled on a case-by-case basis; e.g., serial console
+/// data is pushed into the in-memory ringbuffer corresponding to the source.
 struct RecvTask {
     socket: Arc<UdpSocket>,
     sp_state: Arc<SpState>,

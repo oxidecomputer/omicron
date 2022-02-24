@@ -95,8 +95,6 @@ impl Inner {
 
                     let resp = match self.server.dispatch(data) {
                         Ok(resp) => resp,
-                        // TODO: should we send back an error here? may not be
-                        // able to say anything meaningful, depending on `err`
                         Err(err) => {
                             error!(
                                 self.server.handler().log,
