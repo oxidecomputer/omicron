@@ -79,7 +79,7 @@ impl VnicAllocator {
     fn new_superscope<S: AsRef<str>>(&self, scope: S) -> Self {
         Self {
             value: self.value.clone(),
-            scope: format!("{}{}", scope.as_ref().to_string(), self.scope),
+            scope: format!("{}{}", scope.as_ref(), self.scope),
         }
     }
 

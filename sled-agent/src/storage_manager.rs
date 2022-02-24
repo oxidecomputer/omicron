@@ -138,10 +138,9 @@ impl Pool {
         let path = std::path::Path::new(crate::OMICRON_CONFIG_PATH)
             .join(self.id.to_string());
         create_dir_all(&path).await?;
-        let path = path.join(dataset_id.to_string());
-        let mut path_buf = path.to_path_buf();
-        path_buf.set_extension("toml");
-        Ok(path_buf)
+        let mut path = path.join(dataset_id.to_string());
+        path.set_extension("toml");
+        Ok(path)
     }
 }
 
@@ -223,10 +222,7 @@ impl DatasetInfo {
                     "-s",
                     "svc:system/illumos/cockroachdb",
                     "setprop",
-                    &format!(
-                        "config/listen_addr={}",
-                        zone.address().to_string()
-                    ),
+                    &format!("config/listen_addr={}", zone.address(),),
                 ])?;
                 zone.run_cmd(&[
                     crate::illumos::zone::SVCCFG,
@@ -687,7 +683,7 @@ impl StorageWorker {
                     self.add_zpool_notify(
                         &mut nexus_notifications,
                         pool.id(),
-                        size.into()
+                        size,
                     );
 
                     self.add_datasets_notify(

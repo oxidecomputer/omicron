@@ -30,8 +30,8 @@ impl AddrObject {
 
     pub fn new(interface: &str, name: &str) -> Self {
         // TODO: These could be checked / returned as a Result.
-        assert!(!interface.contains("/"));
-        assert!(!name.contains("/"));
+        assert!(!interface.contains('/'));
+        assert!(!name.contains('/'));
         Self { interface: interface.to_string(), name: name.to_string() }
     }
 }

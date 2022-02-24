@@ -444,7 +444,8 @@ impl Instance {
         // Instead, we just use a per-agent incrementing number. We do the same
         // for the guest-accessible NICs too.
         let physical_dl = Dladm::find_physical()?;
-        let control_nic = inner.vnic_allocator.new_control(&physical_dl, None)?;
+        let control_nic =
+            inner.vnic_allocator.new_control(&physical_dl, None)?;
 
         // Instantiate all guest-requested VNICs.
         //
@@ -458,12 +459,10 @@ impl Instance {
             .clone()
             .into_iter()
             .map(|nic| {
-                inner.vnic_allocator.new_guest(
-                    &physical_dl,
-                    Some(nic.mac),
-                    inner.vlan,
-                )
-                .map_err(|e| e.into())
+                inner
+                    .vnic_allocator
+                    .new_guest(&physical_dl, Some(nic.mac), inner.vlan)
+                    .map_err(|e| e.into())
             })
             .collect::<Result<Vec<_>, Error>>()?;
 

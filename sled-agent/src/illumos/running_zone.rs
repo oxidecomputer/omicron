@@ -66,11 +66,11 @@ impl RunningZone {
 
         let name = self.name();
         let prefix = &[super::zone::ZLOGIN, name];
-        let prefix_iter: Vec<_> =
-            prefix.iter().map(|s| std::ffi::OsStr::new(s)).collect();
         let suffix: Vec<_> = args.into_iter().collect();
-        let full_args =
-            prefix_iter.into_iter().chain(suffix.iter().map(|a| a.as_ref()));
+        let full_args = prefix
+            .iter()
+            .map(|s| std::ffi::OsStr::new(s))
+            .chain(suffix.iter().map(|a| a.as_ref()));
 
         let cmd = command.args(full_args);
         let output = crate::illumos::execute(cmd)?;
