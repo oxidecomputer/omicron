@@ -14,12 +14,9 @@ use omicron_common::api::external::Error as ExternalError;
 use omicron_common::backoff::{
     internal_service_policy, retry_notify, BackoffError,
 };
-use omicron_common::packaging::sha256_digest;
 
 use anyhow::anyhow;
 use slog::Logger;
-use std::collections::HashMap;
-use std::fs::File;
 use std::io;
 use std::path::Path;
 use thiserror::Error;
@@ -204,54 +201,6 @@ impl Agent {
         Ok(rack_secret)
     }
 
-    async fn launch_local_services(&self) -> Result<(), BootstrapError> {
-        let tar_source = Path::new("/opt/oxide");
-        // TODO-correctness: Validation should come from ROT, not local file.
-        let digests: HashMap<String, Vec<u8>> = toml::from_str(
-            &std::fs::read_to_string(tar_source.join("digest.toml"))?,
-        )?;
-
-        // TODO-correctness: Nexus may not be enabled on all racks.
-        // Some decision-making logic should be used here to make this
-        // conditional.
-        //
-        // Presumably, we'd try to contact a Nexus elsewhere
-        // on the rack, or use the unlocked local storage to remember
-        // a decision from the previous boot.
-        //
-        // TODO: The RSS *could* tell us this info during bootstrap, then Nexus
-        // can be responsible afterwards?
-        // TODO: ^ Only partially true; what about "cold boot" post-installation?
-
-        // TODO: The calls to "launch" (here, *and* in instances.rs) should
-        // be shared with the code that currently lives in "storage_manager.rs".
-        //
-        // The {lookup, create, boot} calls should mostly live elsewhere -
-        // though we're going to need to pass additional info to:
-        // - Manage VNICs + Running Zones (NEW)
-        // - Configure IP addresses (NEW)
-        // - Reference the SMF manifests (previously in launch)
-        // - Hold references to these zones in the agent (NEW)
-        //
-        // (related: Should this actually be the bootstrap agent doing this
-        // work? Maybe the sled agent should be in charge of some of the zone
-        // management?)
-
-        /*
-        self.launch(&digests, &tar_source, "nexus")?;
-
-        // TODO-correctness: The same note as above applies to oximeter.
-        self.launch(&digests, &tar_source, "oximeter")?;
-
-        // Note that we extract the propolis-server, but do not launch it.
-        // This is the responsibility of the sled agent in response to requests
-        // from Nexus.
-        self.verify(&digests, &tar_source, "propolis-server")?;
-        */
-
-        Ok(())
-    }
-
     async fn run_trust_quorum_server(&self) -> Result<(), BootstrapError> {
         let my_share = self.share.as_ref().unwrap().share.clone();
         let mut server = trust_quorum::Server::new(&self.log, my_share)?;
@@ -409,95 +358,7 @@ impl Agent {
         }
 
         self.inject_rack_setup_service_requests(config).await?;
-        self.launch_local_services().await?;
 
-        Ok(())
-    }
-
-    // Installs and boots the zone for a service.
-    fn launch<S, P>(
-        &self,
-        digests: &HashMap<String, Vec<u8>>,
-        tar_source: P,
-        service: S,
-    ) -> Result<(), BootstrapError>
-    where
-        S: AsRef<str>,
-        P: AsRef<Path>,
-    {
-        self.verify(digests, tar_source, &service)?;
-
-        // TODO: Look up a zone, see if it's already running
-        // TODO: Install a zone
-        // TODO: Boot a zone
-
-        // TODO: Arguments we need to do this:
-        // - vnic_allocator
-        // - address / port of the service
-
-        Ok(())
-    }
-
-    // Verifies a service's package against the known digests.
-    fn verify<S, P>(
-        &self,
-        digests: &HashMap<String, Vec<u8>>,
-        tar_source: P,
-        service: S,
-    ) -> Result<(), BootstrapError>
-    where
-        S: AsRef<str>,
-        P: AsRef<Path>,
-    {
-        let tar_source = tar_source.as_ref();
-        let service = service.as_ref();
-
-        info!(&self.log, "Extracting {} Service", service);
-        let tar_name = format!("{}.tar.gz", service);
-        let tar_path = tar_source.join(&tar_name);
-
-        let digest_expected = digests.get(service).ok_or_else(|| {
-            BootstrapError::UnexpectedDigest(format!(
-                "Missing digest for {}",
-                service
-            ))
-        })?;
-
-        // TODO: The tarfile could hypothetically be modified between
-        // calculating the digest and extracting the archive.
-        // Do we care? Is this a plausible threat, and would it be
-        // worthwhile to load the files into memory to attempt to
-        // isolate write access?
-        let mut tar_file = File::open(&tar_path)?;
-        let digest_actual = sha256_digest(&mut tar_file)?;
-        if digest_expected.as_slice() != digest_actual.as_ref() {
-            return Err(BootstrapError::UnexpectedDigest(service.into()));
-        }
-        Ok(())
-    }
-
-    // Given a service which has already been verified and unpacked,
-    // launch it within the SMF system.
-    fn enable_service<S: AsRef<str>>(
-        &self,
-        service: S,
-    ) -> Result<(), BootstrapError> {
-        info!(&self.log, "Enabling service: {}", service.as_ref());
-        let manifest =
-            format!("/opt/oxide/{}/pkg/manifest.xml", service.as_ref());
-
-        // Import and enable the service as distinct steps.
-        //
-        // This allows the service to remain "transient", which avoids
-        // it being auto-initialized by SMF across reboots.
-        // Instead, the sled agent remains responsible for verifying
-        // and enabling the services on each access.
-        smf::Config::import().run(manifest)?;
-        smf::Adm::new()
-            .enable()
-            .synchronous()
-            .temporary()
-            .run(smf::AdmSelection::ByPattern(&[service]))?;
         Ok(())
     }
 }

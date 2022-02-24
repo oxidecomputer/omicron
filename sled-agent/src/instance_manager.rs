@@ -47,7 +47,7 @@ struct InstanceManagerInternal {
     instances: Mutex<BTreeMap<Uuid, (Uuid, Instance)>>,
 
     vlan: Option<VlanID>,
-    nic_id_allocator: VnicAllocator,
+    vnic_allocator: VnicAllocator,
 }
 
 /// All instances currently running on the sled.
@@ -71,7 +71,7 @@ impl InstanceManager {
                 nexus_client,
                 instances: Mutex::new(BTreeMap::new()),
                 vlan,
-                nic_id_allocator: VnicAllocator::new("Instance"),
+                vnic_allocator: VnicAllocator::new("Instance"),
             }),
         })
     }
@@ -125,7 +125,7 @@ impl InstanceManager {
                     let instance = Instance::new(
                         instance_log,
                         instance_id,
-                        self.inner.nic_id_allocator.clone(),
+                        self.inner.vnic_allocator.clone(),
                         initial_hardware,
                         self.inner.vlan,
                         self.inner.nexus_client.clone(),

@@ -34,8 +34,12 @@ impl VnicAllocator {
     /// The intent with varying scopes is to create non-overlapping
     /// ranges of Vnic names, for example:
     ///
-    /// - oxGuestInstance[NNN]    # Network of VM instance (guest-visible).
-    /// - oxControlInstance[NNN]  # Network of VM instance (control-plane).
+    /// VnicAllocator::new("Instance")
+    /// - oxGuestInstance[NNN]
+    /// - oxControlInstance[NNN]
+    ///
+    /// VnicAllocator::new("Storage") produces
+    /// - oxControlStorage[NNN]
     pub fn new<S: AsRef<str>>(scope: S) -> Self {
         Self {
             value: Arc::new(AtomicU64::new(0)),
@@ -43,12 +47,33 @@ impl VnicAllocator {
         }
     }
 
-    /// Creates a new Vnic Allocator scoped under the current one.
-    pub fn new_subscope<S: AsRef<str>>(&self, scope: S) -> Self {
-        Self {
-            value: self.value.clone(),
-            scope: format!("{}{}", self.scope, scope.as_ref().to_string()),
-        }
+    /// Creates a new NIC, intended for usage by the guest.
+    pub fn new_guest(
+        &self,
+        physical_dl: &PhysicalLink,
+        mac: Option<MacAddr>,
+        vlan: Option<VlanID>,
+    ) -> Result<Vnic, Error> {
+        let allocator = self.new_superscope("Guest");
+        let name = allocator.next();
+        debug_assert!(name.starts_with(VNIC_PREFIX));
+        Dladm::create_vnic(physical_dl, &name, mac, vlan)?;
+        Ok(Vnic { name, deleted: false })
+    }
+
+    /// Creates a new NIC, intended for allowing Propolis to communicate
+    /// with the control plane.
+    pub fn new_control(
+        &self,
+        physical_dl: &PhysicalLink,
+        mac: Option<MacAddr>,
+    ) -> Result<Vnic, Error> {
+        let allocator = self.new_superscope("Control");
+        let name = allocator.next();
+        debug_assert!(name.starts_with(VNIC_PREFIX));
+        debug_assert!(name.starts_with(VNIC_PREFIX_CONTROL));
+        Dladm::create_vnic(physical_dl, &name, mac, None)?;
+        Ok(Vnic { name, deleted: false })
     }
 
     fn new_superscope<S: AsRef<str>>(&self, scope: S) -> Self {
@@ -85,35 +110,6 @@ impl Vnic {
     /// Takes ownership of an existing VNIC.
     pub fn wrap_existing(name: String) -> Self {
         Vnic { name, deleted: false }
-    }
-
-    /// Creates a new NIC, intended for usage by the guest.
-    pub fn new_guest(
-        allocator: &VnicAllocator,
-        physical_dl: &PhysicalLink,
-        mac: Option<MacAddr>,
-        vlan: Option<VlanID>,
-    ) -> Result<Self, Error> {
-        let allocator = allocator.new_superscope("Guest");
-        let name = allocator.next();
-        debug_assert!(name.starts_with(VNIC_PREFIX));
-        Dladm::create_vnic(physical_dl, &name, mac, vlan)?;
-        Ok(Vnic { name, deleted: false })
-    }
-
-    /// Creates a new NIC, intended for allowing Propolis to communicate
-    /// with the control plane.
-    pub fn new_control(
-        allocator: &VnicAllocator,
-        physical_dl: &PhysicalLink,
-        mac: Option<MacAddr>,
-    ) -> Result<Self, Error> {
-        let allocator = allocator.new_superscope("Control");
-        let name = allocator.next();
-        debug_assert!(name.starts_with(VNIC_PREFIX));
-        debug_assert!(name.starts_with(VNIC_PREFIX_CONTROL));
-        Dladm::create_vnic(physical_dl, &name, mac, None)?;
-        Ok(Vnic { name, deleted: false })
     }
 
     /// Deletes a NIC (if it has not already been deleted).
@@ -156,9 +152,7 @@ mod test {
     fn test_allocate_within_scopes() {
         let allocator = VnicAllocator::new("Foo");
         assert_eq!("oxFoo0", allocator.next());
-        let allocator = allocator.new_subscope("Bar");
-        assert_eq!("oxFooBar1", allocator.next());
         let allocator = allocator.new_superscope("Baz");
-        assert_eq!("oxBazFooBar2", allocator.next());
+        assert_eq!("oxBazFoo1", allocator.next());
     }
 }

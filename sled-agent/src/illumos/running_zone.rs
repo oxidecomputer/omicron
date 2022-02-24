@@ -189,8 +189,7 @@ impl InstalledZone {
         vnics: Vec<Vnic>,
     ) -> Result<InstalledZone, Error> {
         let physical_dl = Dladm::find_physical()?;
-        let control_vnic =
-            Vnic::new_control(vnic_allocator, &physical_dl, None)?;
+        let control_vnic = vnic_allocator.new_control(&physical_dl, None)?;
 
         // The zone name is based on:
         // - A unique Oxide prefix ("oxz_")

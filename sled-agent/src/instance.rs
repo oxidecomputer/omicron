@@ -177,7 +177,7 @@ struct InstanceInner {
     properties: propolis_client::api::InstanceProperties,
 
     // NIC-related properties
-    nic_id_allocator: VnicAllocator,
+    vnic_allocator: VnicAllocator,
     requested_nics: Vec<NetworkInterface>,
     allocated_nics: Vec<Vnic>,
     vlan: Option<VlanID>,
@@ -358,7 +358,7 @@ mockall::mock! {
         pub fn new(
             log: Logger,
             id: Uuid,
-            nic_id_allocator: VnicAllocator,
+            vnic_allocator: VnicAllocator,
             initial: InstanceHardware,
             vlan: Option<VlanID>,
             nexus_client: Arc<NexusClient>,
@@ -384,7 +384,7 @@ impl Instance {
     /// Arguments:
     /// * `log`: Logger for dumping debug information.
     /// * `id`: UUID of the instance to be created.
-    /// * `nic_id_allocator`: A unique (to the sled) ID generator to
+    /// * `vnic_allocator`: A unique (to the sled) ID generator to
     /// refer to a VNIC. (This exists because of a restriction on VNIC name
     /// lengths, otherwise the UUID would be used instead).
     /// * `initial`: State of the instance at initialization time.
@@ -394,7 +394,7 @@ impl Instance {
     pub fn new(
         log: Logger,
         id: Uuid,
-        nic_id_allocator: VnicAllocator,
+        vnic_allocator: VnicAllocator,
         initial: InstanceHardware,
         vlan: Option<VlanID>,
         nexus_client: Arc<NexusClient>,
@@ -416,7 +416,7 @@ impl Instance {
                 // InstanceCpuCount here, to avoid any casting...
                 vcpus: initial.runtime.ncpus.0 as u8,
             },
-            nic_id_allocator,
+            vnic_allocator,
             requested_nics: initial.nics,
             allocated_nics: vec![],
             vlan,
@@ -444,8 +444,7 @@ impl Instance {
         // Instead, we just use a per-agent incrementing number. We do the same
         // for the guest-accessible NICs too.
         let physical_dl = Dladm::find_physical()?;
-        let control_nic =
-            Vnic::new_control(&inner.nic_id_allocator, &physical_dl, None)?;
+        let control_nic = inner.vnic_allocator.new_control(&physical_dl, None)?;
 
         // Instantiate all guest-requested VNICs.
         //
@@ -459,8 +458,7 @@ impl Instance {
             .clone()
             .into_iter()
             .map(|nic| {
-                Vnic::new_guest(
-                    &inner.nic_id_allocator,
+                inner.vnic_allocator.new_guest(
                     &physical_dl,
                     Some(nic.mac),
                     inner.vlan,
@@ -1038,7 +1036,7 @@ mod test {
     #[serial_test::serial]
     async fn start_then_stop() {
         let log = logger();
-        let nic_id_allocator = VnicAllocator::new("Test".to_string());
+        let vnic_allocator = VnicAllocator::new("Test".to_string());
         let mut nexus_client = MockNexusClient::default();
 
         // Set expectations about what will be seen (and when) by Nexus before
@@ -1067,7 +1065,7 @@ mod test {
         let inst = Instance::new(
             log.clone(),
             test_uuid(),
-            nic_id_allocator,
+            vnic_allocator,
             new_initial_instance(),
             None,
             Arc::new(nexus_client),
@@ -1118,13 +1116,13 @@ mod test {
     )]
     async fn transition_before_start() {
         let log = logger();
-        let nic_id_allocator = VnicAllocator::new("Test".to_string());
+        let vnic_allocator = VnicAllocator::new("Test".to_string());
         let nexus_client = MockNexusClient::default();
 
         let inst = Instance::new(
             log.clone(),
             test_uuid(),
-            nic_id_allocator,
+            vnic_allocator,
             new_initial_instance(),
             None,
             Arc::new(nexus_client),
