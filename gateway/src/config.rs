@@ -10,7 +10,7 @@
 use dropshot::{ConfigDropshot, ConfigLogging};
 use serde::{Deserialize, Serialize};
 use std::{
-    net::{IpAddr, SocketAddr},
+    net::SocketAddr,
     path::{Path, PathBuf},
 };
 use thiserror::Error;
@@ -29,15 +29,22 @@ pub struct KnownSps {
 }
 
 impl KnownSps {
-    pub(crate) fn ip_for(&self, sp: &SpIdentifier) -> Option<IpAddr> {
+    pub(crate) fn addr_for(&self, sp: &SpIdentifier) -> Option<SocketAddr> {
         let slot = sp.slot as usize;
-        let socket_addr = match sp.typ {
-            SpType::Sled => self.sleds.get(slot),
-            SpType::Power => self.power_controllers.get(slot),
-            SpType::Switch => self.switches.get(slot),
-        };
-        socket_addr.map(|addr| addr.ip())
+        match sp.typ {
+            SpType::Sled => self.sleds.get(slot).copied(),
+            SpType::Power => self.power_controllers.get(slot).copied(),
+            SpType::Switch => self.switches.get(slot).copied(),
+        }
     }
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+pub struct Timeouts {
+    /// Timeout for messages to our local ignition controller SP.
+    pub ignition_controller_milliseconds: u64,
+    /// Timeout for requests sent to arbitrary SPs.
+    pub sp_request_milliseconds: u64,
 }
 
 /// Configuration for a gateway server
@@ -45,11 +52,11 @@ impl KnownSps {
 pub struct Config {
     /// Identifier for this instance of MGS
     pub id: uuid::Uuid,
+    /// Various timeouts
+    pub timeouts: Timeouts,
     /// Bind address for UDP socket for SP communication on the management
     /// network.
     pub udp_bind_address: SocketAddr,
-    /// Timeout for messages to our local ignition controller SP.
-    pub ignition_controller_timeout_milliseconds: u64,
     /// Dropshot configuration for API server
     pub dropshot: ConfigDropshot,
     /// Placeholder description of all known SPs in the system.
