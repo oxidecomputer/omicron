@@ -102,106 +102,43 @@ pub(crate) enum SpType {
     Switch,
 }
 
-#[derive(Serialize, JsonSchema, PartialEq, Debug, Clone)]
+#[derive(Serialize, Deserialize, JsonSchema, PartialEq, Debug, Clone)]
 pub(crate) struct SpIdentifier {
     #[serde(rename = "type")]
     pub(crate) typ: SpType,
+    #[serde(deserialize_with = "deserializer_u32_from_string")]
     pub(crate) slot: u32,
 }
 
-// We can't `#[derive(Deserialize)]` for `SpIdentifier` because it's embedded in
-// other structs via `serde(flatten)`, which does not play well with the way
-// dropshot parses HTTP queries/paths. serde ends up trying to deserialize the
-// flattened struct as a map of strings to strings, which breaks on our `slot`
-// (but not on `typ` for reasons I don't entirely understand). We can work
-// around this by manually implementing `Deserialize` with a custom enum that
-// allows either `String` or `u32` for `slot` (which gets us past the serde map
-// of strings), and then parsing the string into a u32 ourselves (which gets us
-// to the `slot` we want). More background:
-// https://github.com/serde-rs/serde/issues/1346
-impl<'de> Deserialize<'de> for SpIdentifier {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        use serde::de::{self, MapAccess, Unexpected, Visitor};
+// We can't use the default `Deserialize` derivation for `SpIdentifier::slot`
+// because it's embedded in other structs via `serde(flatten)`, which does not
+// play well with the way dropshot parses HTTP queries/paths. serde ends up
+// trying to deserialize the flattened struct as a map of strings to strings,
+// which breaks on `slot` (but not on `typ` for reasons I don't entirely
+// understand). We can work around by using an enum that allows either `String`
+// or `u32` (which gets us past the serde map of strings), and then parsing the
+// string into a u32 ourselves (which gets us to the `slot` we want). More
+// background: https://github.com/serde-rs/serde/issues/1346
+fn deserializer_u32_from_string<'de, D>(
+    deserializer: D,
+) -> Result<u32, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    use serde::de::{self, Unexpected};
 
-        const FIELDS: &[&str] = &["type", "slot"];
+    #[derive(Debug, Deserialize)]
+    #[serde(untagged)]
+    enum StringOrU32 {
+        String(String),
+        U32(u32),
+    }
 
-        // Workaround for serde(flatten) issue part 1: We want to be able to
-        // accept a `slot` as either a `String` or a `u32` from serde.
-        #[derive(Debug, Deserialize)]
-        #[serde(untagged)]
-        enum StringOrU32 {
-            String(String),
-            U32(u32),
-        }
-
-        struct SpIdentifierVisitor;
-
-        impl<'de> Visitor<'de> for SpIdentifierVisitor {
-            type Value = SpIdentifier;
-
-            fn expecting(
-                &self,
-                formatter: &mut std::fmt::Formatter,
-            ) -> std::fmt::Result {
-                formatter.write_str("struct SpIdentifier")
-            }
-
-            fn visit_map<A>(self, mut map: A) -> Result<Self::Value, A::Error>
-            where
-                A: MapAccess<'de>,
-            {
-                let mut typ = None;
-                let mut slot = None;
-                while let Some(key) = map.next_key::<String>()? {
-                    match key.as_str() {
-                        "type" => {
-                            if typ.is_some() {
-                                return Err(de::Error::duplicate_field("type"));
-                            }
-                            typ = Some(map.next_value()?);
-                        }
-                        "slot" => {
-                            if slot.is_some() {
-                                return Err(de::Error::duplicate_field("slot"));
-                            }
-                            // serde(flatten) workaround part 2 - accept either
-                            // `String` or `u32` here; if we get a string, parse
-                            // it as a u32.
-                            let val = map.next_value::<StringOrU32>()?;
-                            match val {
-                                StringOrU32::String(s) => {
-                                    slot = Some(s.parse().map_err(|_| {
-                                        de::Error::invalid_type(
-                                            Unexpected::Str(&s),
-                                            &"u32",
-                                        )
-                                    })?);
-                                }
-                                StringOrU32::U32(n) => slot = Some(n),
-                            }
-                        }
-                        other => {
-                            return Err(de::Error::unknown_field(other, FIELDS))
-                        }
-                    }
-                }
-
-                let typ =
-                    typ.ok_or_else(|| de::Error::missing_field("type"))?;
-                let slot =
-                    slot.ok_or_else(|| de::Error::missing_field("slot"))?;
-                Ok(SpIdentifier { typ, slot })
-            }
-        }
-
-        deserializer.deserialize_struct(
-            "SpIdentifier",
-            FIELDS,
-            SpIdentifierVisitor,
-        )
+    match StringOrU32::deserialize(deserializer)? {
+        StringOrU32::String(s) => s
+            .parse()
+            .map_err(|_| de::Error::invalid_type(Unexpected::Str(&s), &"u32")),
+        StringOrU32::U32(n) => Ok(n),
     }
 }
 
