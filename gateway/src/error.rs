@@ -27,12 +27,10 @@ pub(crate) enum Error {
 impl From<Error> for HttpError {
     fn from(err: Error) -> Self {
         match err {
-            Error::SpDoesNotExist(_) => {
-                HttpError::for_bad_request(
-                    Some(String::from("SpDoesNotExist")),
-                    err.to_string(),
-                )
-            }
+            Error::SpDoesNotExist(_) => HttpError::for_bad_request(
+                Some(String::from("SpDoesNotExist")),
+                err.to_string(),
+            ),
             Error::InternalError { internal_message } => {
                 HttpError::for_internal_error(internal_message)
             }
