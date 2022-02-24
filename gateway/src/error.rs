@@ -19,6 +19,10 @@ pub(crate) enum Error {
     #[error("SP {} (of type {:?}) does not exist", .0.slot, .0.typ)]
     SpDoesNotExist(SpIdentifier),
 
+    /// The requested SP component ID is invalid (i.e., too long).
+    #[error("invalid SP component ID `{0}`")]
+    InvalidSpComponentId(String),
+
     /// The system encountered an unhandled operational error.
     #[error("internal error: {internal_message}")]
     InternalError { internal_message: String },
@@ -29,6 +33,10 @@ impl From<Error> for HttpError {
         match err {
             Error::SpDoesNotExist(_) => HttpError::for_bad_request(
                 Some(String::from("SpDoesNotExist")),
+                err.to_string(),
+            ),
+            Error::InvalidSpComponentId(_) => HttpError::for_bad_request(
+                Some(String::from("InvalidSpComponentId")),
                 err.to_string(),
             ),
             Error::InternalError { internal_message } => {

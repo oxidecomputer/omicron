@@ -102,14 +102,54 @@ pub enum IgnitionCommand {
 }
 
 /// Identifier for a single component managed by an SP.
-#[derive(Debug, Clone, Copy, SerializedSize, Serialize, Deserialize)]
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Hash,
+    SerializedSize,
+    Serialize,
+    Deserialize,
+)]
 pub struct SpComponent {
     /// The ID of the component.
     ///
-    /// TODO This needs some thought/polish. Is this "up to 16 bytes of human
-    /// readable data" (my current thought)? If so, should we add a length field
-    /// or specify padding?
-    pub id: [u8; 16],
+    /// TODO This may need some thought. Currently we expect this to contain
+    /// up to `MAX_ID_LENGTH` nonzero utf8 bytes followed by nul bytes as
+    /// padding.
+    ///
+    /// An `SpComponent` can be created via its `TryFrom<&str>` implementation,
+    /// which appends the appropriate padding.
+    pub id: [u8; Self::MAX_ID_LENGTH],
+}
+
+impl SpComponent {
+    /// Maximum number of bytes for a component ID.
+    pub const MAX_ID_LENGTH: usize = 16;
+}
+
+/// Error type returned from `TryFrom<&str> for SpComponent` if the provided ID
+/// is too long.
+pub struct SpComponentIdTooLong;
+
+impl TryFrom<&str> for SpComponent {
+    type Error = SpComponentIdTooLong;
+
+    fn try_from(value: &str) -> Result<Self, Self::Error> {
+        if value.len() > Self::MAX_ID_LENGTH {
+            return Err(SpComponentIdTooLong);
+        }
+
+        let mut component = SpComponent { id: [0; Self::MAX_ID_LENGTH] };
+
+        // should we sanity check that `value` doesn't contain any nul bytes?
+        // seems like overkill; probably fine to omit
+        component.id[..value.len()].copy_from_slice(value.as_bytes());
+
+        Ok(component)
+    }
 }
 
 #[derive(Debug, Clone, Copy, SerializedSize, Serialize, Deserialize)]

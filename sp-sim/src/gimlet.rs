@@ -2,17 +2,16 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use std::net::SocketAddr;
-use std::sync::Arc;
-
 use crate::config::Config;
 use crate::server::{self, UdpServer};
-use anyhow::Result;
+use anyhow::{anyhow, bail, Result};
 use gateway_messages::sp_impl::{SerialConsolePacketizer, SpHandler, SpServer};
 use gateway_messages::{
     ResponseError, ResponseKind, SerializedSize, SpMessage,
 };
 use slog::{debug, error, info, warn, Logger};
+use std::net::SocketAddr;
+use std::sync::Arc;
 use tokio::net::UdpSocket;
 use tokio::{
     select,
@@ -42,11 +41,24 @@ impl Gimlet {
         let sock = Arc::clone(server.socket());
         let inner = Inner::new(server, log);
         let inner_task = task::spawn(async move { inner.run().await.unwrap() });
+
+        if config.components.serial_console.len() != 1 {
+            bail!("simulated gimlet currently requires exactly 1 component with a serial console");
+        }
+
         Ok(Self {
             sock,
             gateway_address: config.gateway_address,
             console_packetizer: SerialConsolePacketizer::new(
-                gateway_messages::SpComponent { id: *b"TODO-COMPONENT.." },
+                gateway_messages::SpComponent::try_from(
+                    config.components.serial_console[0].as_str(),
+                )
+                .map_err(|_| {
+                    anyhow!(
+                        "component id {} too long",
+                        config.components.serial_console[0]
+                    )
+                })?,
             ),
             buf: [0; SpMessage::MAX_SIZE],
             inner_task,

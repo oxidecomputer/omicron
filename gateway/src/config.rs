@@ -10,10 +10,12 @@
 use dropshot::{ConfigDropshot, ConfigLogging};
 use serde::{Deserialize, Serialize};
 use std::{
-    net::SocketAddr,
+    net::{IpAddr, SocketAddr},
     path::{Path, PathBuf},
 };
 use thiserror::Error;
+
+use crate::http_entrypoints::{SpIdentifier, SpType};
 
 // TODO: This is a placeholder; how do we determine what SPs should exist and
 // how to talk to them? Just store a list of socket addrs we'll hit with UDP for
@@ -24,6 +26,18 @@ pub struct KnownSps {
     pub switches: Vec<SocketAddr>,
     pub sleds: Vec<SocketAddr>,
     pub power_controllers: Vec<SocketAddr>,
+}
+
+impl KnownSps {
+    pub(crate) fn ip_for(&self, sp: &SpIdentifier) -> Option<IpAddr> {
+        let slot = sp.slot as usize;
+        let socket_addr = match sp.typ {
+            SpType::Sled => self.sleds.get(slot),
+            SpType::Power => self.power_controllers.get(slot),
+            SpType::Switch => self.switches.get(slot),
+        };
+        socket_addr.map(|addr| addr.ip())
+    }
 }
 
 /// Configuration for a gateway server

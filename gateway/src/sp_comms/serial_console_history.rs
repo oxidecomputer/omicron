@@ -2,10 +2,12 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use gateway_messages::SerialConsole;
+use gateway_messages::{SerialConsole, SpComponent};
 use ringbuffer::{AllocRingBuffer, RingBufferExt, RingBufferWrite};
+use schemars::JsonSchema;
+use serde::Serialize;
 use slog::{warn, Logger};
-use std::cmp::Ordering;
+use std::{cmp::Ordering, collections::HashMap};
 
 /// Current in-memory contents of an SP component's serial console.
 ///
@@ -20,7 +22,9 @@ use std::cmp::Ordering;
 ///
 /// If we have not received any serial console data from this SP component,
 /// `start` and `end` will both be `0`, and `buf` will be empty.
-#[derive(Debug)]
+// TODO is it a code smell that this type impls Serialize and JsonSchema but
+// isn't defined in `http_entrypoints.rs`?
+#[derive(Debug, Default, Serialize, JsonSchema)]
 pub(crate) struct SerialConsoleContents {
     /// Position since SP component start of the first byte of `buf`.
     ///
@@ -40,33 +44,27 @@ pub(crate) struct SerialConsoleContents {
 }
 
 // We currently store serial console packets from an SP more or less "as is" in
-// a ringbuffer. It might be better to keep a ringbuffer backed by a `Vec<u8>`
-// to make querying the current serial console state simpler, but (a) I'm not
-// aware of a nice ringbuffer API that would let us push in chunks of data, and
-// (b) it makes managing gaps in the data more complicated. This seems good
-// enough for now (and possibly for the foreseeable future).
-#[derive(Debug)]
+// a ringbuffer per component. It might be better to keep a ringbuffer backed by
+// a `Vec<u8>` to make querying the current serial console state simpler, but
+// (a) I'm not aware of a nice ringbuffer API that would let us push in chunks
+// of data, and (b) it makes managing gaps in the data more complicated. This
+// seems good enough for now (and possibly for the foreseeable future).
+#[derive(Debug, Default)]
 pub(super) struct SerialConsoleHistory {
-    slots: AllocRingBuffer<Slot>,
-}
-
-impl Default for SerialConsoleHistory {
-    fn default() -> Self {
-        Self {
-            // TODO do we want this capacity to be configurable, or just pick
-            // something small but reasonable?
-            slots: AllocRingBuffer::with_capacity(32),
-        }
-    }
+    by_component: HashMap<SpComponent, AllocRingBuffer<Slot>>,
 }
 
 impl SerialConsoleHistory {
-    pub(super) fn contents(&self) -> SerialConsoleContents {
+    pub(super) fn contents(
+        &self,
+        component: &SpComponent,
+    ) -> Option<SerialConsoleContents> {
+        let slots = self.by_component.get(component)?;
         let mut buf = Vec::new();
         let mut start = None;
         let mut end = None;
 
-        for slot in self.slots.iter() {
+        for slot in slots.iter() {
             match slot {
                 Slot::MissingData { offset, len } => {
                     buf.extend_from_slice(
@@ -87,18 +85,29 @@ impl SerialConsoleHistory {
             }
         }
 
-        SerialConsoleContents {
+        Some(SerialConsoleContents {
             start: start.unwrap_or(0),
             end: end.unwrap_or(0),
             buf,
-        }
+        })
     }
 
     pub(super) fn push(&mut self, packet: SerialConsole, log: &Logger) {
+        // TODO do we want this capacity to be configurable, or just pick
+        // something small but reasonable?
+        const NUM_RINGBUFFER_SLOTS: usize = 32;
+
+        // TODO We're assuming the SP will only send us components it should and
+        // are happy to blindly accept its component IDs. Is this right, or
+        // should we limit this (if so, based on what?)
+        let slots =
+            self.by_component.entry(packet.component).or_insert_with(|| {
+                AllocRingBuffer::with_capacity(NUM_RINGBUFFER_SLOTS)
+            });
+
         // detect dropped packets - see what we expect `packet.offset` to be
         // based on the end of our most-recently-received packet.
-        let expected_offset =
-            self.slots.back().map_or(0, |slot| slot.end_pos());
+        let expected_offset = slots.back().map_or(0, |slot| slot.end_pos());
 
         match packet.offset.cmp(&expected_offset) {
             Ordering::Less => {
@@ -118,7 +127,7 @@ impl SerialConsoleHistory {
             }
             Ordering::Greater => {
                 // we have a gap; push a "missing data" entry
-                self.slots.push(Slot::MissingData {
+                slots.push(Slot::MissingData {
                     offset: expected_offset,
                     len: packet.offset - expected_offset,
                 });
@@ -126,16 +135,11 @@ impl SerialConsoleHistory {
             Ordering::Equal => (), // nothing to do; this is expected
         }
 
-        self.slots.push(Slot::Valid {
+        slots.push(Slot::Valid {
             offset: packet.offset,
             len: packet.len,
             data: packet.data,
         });
-
-        // TODO FIX THIS - expose in API
-        let contents = self.contents();
-        dbg!((contents.start, contents.end));
-        dbg!(String::from_utf8(contents.buf).unwrap());
     }
 }
 

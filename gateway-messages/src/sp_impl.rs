@@ -6,7 +6,7 @@
 
 use crate::{
     version, IgnitionCommand, Request, RequestKind, ResponseKind,
-    SerialConsole, SpMessage, SpMessageKind, SpComponent,
+    SerialConsole, SpComponent, SpMessage, SpMessageKind,
 };
 use hubpack::SerializedSize;
 
@@ -48,10 +48,7 @@ pub struct SerialConsolePacketizer {
 
 impl SerialConsolePacketizer {
     pub fn new(component: SpComponent) -> Self {
-        Self {
-            component,
-            offset: 0,
-        }
+        Self { component, offset: 0 }
     }
 
     pub fn packetize<'a, 'b>(
@@ -100,7 +97,7 @@ impl SerialConsolePackets<'_, '_> {
 
         // We know `out` is big enough for any `SpMessage`, so no need to bubble
         // up an error here.
-        let n = match hubpack::serialize(&mut out[..], &message){
+        let n = match hubpack::serialize(&mut out[..], &message) {
             Ok(n) => n,
             Err(_) => panic!(),
         };

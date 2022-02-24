@@ -9,13 +9,14 @@
 
 mod serial_console_history;
 
+pub(crate) use serial_console_history::SerialConsoleContents;
 use serial_console_history::SerialConsoleHistory;
 
 use crate::config::KnownSps;
 use dropshot::HttpError;
 use gateway_messages::{
     version, IgnitionState, Request, RequestKind, ResponseKind, SerialConsole,
-    SerializedSize, SpMessage, SpMessageKind,
+    SerializedSize, SpComponent, SpMessage, SpMessageKind,
 };
 use slog::{debug, error, info, o, Logger};
 use std::{
@@ -38,12 +39,18 @@ pub enum StartupError {
     UdpBind { addr: SocketAddr, err: io::Error },
 }
 
+// TODO This has some duplication with `gateway::error::Error`. This might be
+// right if these comms are going to move to their own crate, but at the moment
+// it's confusing. For now we'll keep them separate, but maybe we should split
+// this module out into its own crate sooner rather than later.
 #[derive(Debug, Error)]
 pub enum Error {
     #[error("error sending to UDP address {addr}: {err}")]
     UdpSend { addr: SocketAddr, err: io::Error },
     #[error("timeout")]
     Timeout(#[from] tokio::time::error::Elapsed),
+    #[error("no known SP at {0}")]
+    SpDoesNotExist(IpAddr),
 }
 
 impl From<Error> for HttpError {
@@ -109,6 +116,16 @@ impl SpCommunicator {
 
     pub fn placeholder_known_sps(&self) -> &KnownSps {
         &self.known_sps
+    }
+
+    pub(crate) fn serial_console_get(
+        &self,
+        sp: IpAddr,
+        component: &SpComponent,
+    ) -> Result<Option<SerialConsoleContents>, Error> {
+        let sp =
+            self.sp_state.all_sps.get(&sp).ok_or(Error::SpDoesNotExist(sp))?;
+        Ok(sp.serial_console.lock().unwrap().contents(component))
     }
 
     // How do we want to describe ignition targets? Currently we want to

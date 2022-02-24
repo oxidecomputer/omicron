@@ -22,11 +22,23 @@ pub enum SpType {
     Gimlet,
 }
 
+/// Description of a simulated SP's components.
+// TODO should reorganize this once we have more to do with components than just
+// a serial console - maybe a list of components with flags for which operations
+// they support (serial console, power on/off, etc)
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+pub struct SpComponents {
+    /// List of components with a serial console.
+    pub serial_console: Vec<String>,
+}
+
 /// Configuration for a simulated SP
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct Config {
     /// Type of SP to simulate.
     pub sp_type: SpType,
+    /// Components to simulate.
+    pub components: SpComponents,
     /// UDP listen address.
     pub bind_address: SocketAddr,
     /// UDP address of MGS.

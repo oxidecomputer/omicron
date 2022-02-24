@@ -8,12 +8,14 @@
 
 use crate::config::KnownSps;
 use crate::error::Error;
+use crate::sp_comms::SerialConsoleContents;
 use crate::ServerContext;
 use dropshot::{
     endpoint, ApiDescription, EmptyScanParams, HttpError, HttpResponseOk,
     HttpResponseUpdatedNoContent, PaginationParams, Path, Query,
     RequestContext, ResultsPage, TypedBody,
 };
+use gateway_messages::SpComponent;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::convert::TryFrom;
@@ -199,14 +201,14 @@ struct PathSp {
 }
 
 #[derive(Serialize, Deserialize, JsonSchema)]
-struct PathSpComponent {
+pub(crate) struct PathSpComponent {
     /// ID for the SP that the gateway service translates into the appropriate
     /// port for communicating with the given SP.
     #[serde(flatten)]
-    sp: SpIdentifier,
+    pub(crate) sp: SpIdentifier,
     /// ID for the component of the SP; this is the internal identifier used by
     /// the SP itself to identify its components.
-    component: String,
+    pub(crate) component: String,
 }
 
 /// List SPs
@@ -297,6 +299,38 @@ async fn sp_component_get(
     _query: Query<Timeout>,
 ) -> Result<HttpResponseOk<SpComponentInfo>, HttpError> {
     todo!()
+}
+
+/// Get the currently-buffered data for an SP component's serial console.
+///
+/// This does not require any communication with the target SP; it returns any
+/// buffered data we have received from that SP (subject to limitations on how
+/// much we keep around; see [`SerialConsoleContents`] for details.
+#[endpoint {
+    method = GET,
+    path = "/sp/{type}/{slot}/component/{component}/serial_console",
+}]
+async fn sp_component_serial_console_get(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    path: Path<PathSpComponent>,
+) -> Result<HttpResponseOk<SerialConsoleContents>, HttpError> {
+    let comms = &rqctx.context().sp_comms;
+    let PathSpComponent { sp, component } = path.into_inner();
+
+    let sp = comms
+        .placeholder_known_sps()
+        .ip_for(&sp)
+        .ok_or(Error::SpDoesNotExist(sp))?;
+    let component = SpComponent::try_from(component.as_str())
+        .map_err(|_| Error::InvalidSpComponentId(component))?;
+    let contents = comms.serial_console_get(sp, &component)?;
+
+    // TODO we can't tell the difference between "this component has no serial
+    // console" and "we haven't received any serial console data for this
+    // component". Is that okay? For now both cases send back empty contents.
+    Ok(HttpResponseOk(
+        contents.unwrap_or_else(|| SerialConsoleContents::default()),
+    ))
 }
 
 // TODO: how can we make this generic enough to support any update mechanism?
@@ -450,6 +484,7 @@ pub fn api() -> GatewayApiDescription {
         api.register(sp_get)?;
         api.register(sp_component_list)?;
         api.register(sp_component_get)?;
+        api.register(sp_component_serial_console_get)?;
         api.register(sp_component_update)?;
         api.register(sp_component_power_on)?;
         api.register(sp_component_power_off)?;
