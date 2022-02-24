@@ -10,7 +10,7 @@ use std::net::{IpAddr, SocketAddr};
 use uuid::Uuid;
 
 use crate::illumos::addrobj::AddrObject;
-use crate::illumos::dladm::VNIC_PREFIX_CONTROL;
+use crate::illumos::dladm::{Dladm, VNIC_PREFIX_CONTROL};
 use crate::illumos::zfs::ZONE_ZFS_DATASET_MOUNTPOINT;
 use crate::illumos::{execute, PFEXEC};
 
@@ -61,6 +61,9 @@ pub enum Error {
 
     #[error("Failed to parse output: {0}")]
     Parse(#[from] std::string::FromUtf8Error),
+
+    #[error(transparent)]
+    Dladm(#[from] crate::illumos::dladm::Error),
 
     #[error("Error accessing filesystem: {0}")]
     Filesystem(std::io::Error),
@@ -470,7 +473,7 @@ impl Zones {
 
     /// Gets the address if one exists, creates one if one does not exist.
     pub fn ensure_address(
-        zone: &str,
+        zone: Option<&str>,
         addrobj: &AddrObject,
         addrtype: AddressRequest,
     ) -> Result<IpNetwork, Error> {
@@ -488,21 +491,30 @@ impl Zones {
     }
 
     /// Gets the IP address of an interface within a Zone.
-    pub fn get_address(
-        zone: &str,
+    fn get_address(
+        zone: Option<&str>,
         addrobj: &AddrObject,
     ) -> Result<IpNetwork, Error> {
         let mut command = std::process::Command::new(PFEXEC);
-        let cmd = command.args(&[
-            ZLOGIN,
-            zone,
-            IPADM,
-            "show-addr",
-            "-p",
-            "-o",
-            "ADDR",
-            &addrobj.to_string(),
-        ]);
+
+        let mut args = vec![];
+        if let Some(zone) = zone {
+            args.push(ZLOGIN);
+            args.push(zone);
+        };
+        let addrobj_str = addrobj.to_string();
+        args.extend(
+            &[
+                IPADM,
+                "show-addr",
+                "-p",
+                "-o",
+                "ADDR",
+                &addrobj_str,
+            ]
+        );
+
+        let cmd = command.args(args);
         let output = execute(cmd)?;
         String::from_utf8(output.stdout)?
             .lines()
@@ -510,21 +522,35 @@ impl Zones {
             .ok_or(Error::NotFound)
     }
 
+    /// Returns Ok(()) if `addrobj` has a corresponding link-local IPv6 address.
+    ///
+    /// Zone may either be `Some(zone)` for a non-global zone, or `None` to
+    /// run the command in the Global zone.
     fn has_link_local_v6_address(
-        zone: &str,
+        zone: Option<&str>,
         addrobj: &AddrObject,
     ) -> Result<(), Error> {
         let mut command = std::process::Command::new(PFEXEC);
-        let cmd = command.args(&[
-            ZLOGIN,
-            zone,
+
+        let prefix = if let Some(zone) = zone {
+            vec![ZLOGIN, zone]
+        } else {
+            vec![]
+        };
+
+        let show_addr_args = &[
             IPADM,
             "show-addr",
             "-p",
             "-o",
             "TYPE",
             &addrobj.to_string(),
-        ]);
+        ];
+
+        let args = prefix
+            .iter()
+            .chain(show_addr_args);
+        let cmd = command.args(args);
         let output = execute(cmd)?;
         if let Some(_) = String::from_utf8(output.stdout)?
             .lines()
@@ -535,6 +561,50 @@ impl Zones {
         Err(Error::NotFound)
     }
 
+    // Attempts to create the requested address.
+    //
+    // Does NOT check if the address already exists.
+    fn create_address_internal(
+        zone: Option<&str>,
+        addrobj: &AddrObject,
+        addrtype: AddressRequest,
+    ) -> Result<(), Error> {
+        // No link-local address was found, attempt to make one.
+        let mut command = std::process::Command::new(PFEXEC);
+        let mut args = vec![];
+        if let Some(zone) = zone {
+            args.push(ZLOGIN.to_string());
+            args.push(zone.to_string());
+        };
+
+        args.extend(vec![
+                IPADM,
+                "create-addr",
+                "-t",
+                "-T",
+            ]
+            .into_iter()
+            .map(String::from)
+        );
+
+        match addrtype {
+            AddressRequest::Dhcp => {
+                args.push("dhcp".to_string());
+            }
+            AddressRequest::Static(addr) => {
+                args.push("static".to_string());
+                args.push("-a".to_string());
+                args.push(addr.to_string());
+            }
+        }
+        args.push(addrobj.to_string());
+
+        let cmd = command.args(args);
+        execute(cmd)?;
+        Ok(())
+    }
+
+
     // Ensures a link local IPv6 exists for the object.
     //
     // This is necessary for allocating IPv6 addresses on illumos.
@@ -542,7 +612,7 @@ impl Zones {
     // For more context, see:
     // <https://ry.goodwu.net/tinkering/a-day-in-the-life-of-an-ipv6-address-on-illumos/>
     fn ensure_has_link_local_v6_address(
-        zone: &str,
+        zone: Option<&str>,
         addrobj: &AddrObject,
     ) -> Result<(), Error> {
         let link_local_addrobj = addrobj.on_same_interface("linklocal");
@@ -555,53 +625,76 @@ impl Zones {
 
         // No link-local address was found, attempt to make one.
         let mut command = std::process::Command::new(PFEXEC);
-        let cmd = command.args(&[
-            ZLOGIN,
-            zone,
+
+        let prefix = if let Some(zone) = zone {
+            vec![ZLOGIN, zone]
+        } else {
+            vec![]
+        };
+
+        let create_addr_args = &[
             IPADM,
             "create-addr",
             "-t",
             "-T",
             "addrconf",
             &link_local_addrobj.to_string(),
-        ]);
+        ];
+        let args = prefix
+            .iter()
+            .chain(create_addr_args);
+
+        let cmd = command.args(args);
         execute(cmd)?;
         Ok(())
     }
 
-    /// Creates an IP address within a Zone.
-    pub fn create_address(
-        zone: &str,
+    // Creates an IP address within a Zone.
+    fn create_address(
+        zone: Option<&str>,
         addrobj: &AddrObject,
         addrtype: AddressRequest,
     ) -> Result<IpNetwork, Error> {
-        let mut command = std::process::Command::new(PFEXEC);
+        // Do any prep work before allocating the address.
+        //
+        // Currently, this only happens when allocating IPv6 addresses in the
+        // non-global zone - to access these addresses, we must first set up
+        // an arbitrary IPv6 address within the Global Zone.
+        if let Some(zone) = zone {
+            match addrtype {
+                AddressRequest::Dhcp => {}
+                AddressRequest::Static(addr) => {
+                    if addr.is_ipv6() {
+                        // Ensure that addrconf has been set up in the Global
+                        // Zone.
+                        let gz_link_local_addrobj = AddrObject::new(&Dladm::find_physical()?.0, "linklocal");
+                        Self::ensure_has_link_local_v6_address(None, &gz_link_local_addrobj)?;
 
-        let mut args: Vec<String> =
-            vec![ZLOGIN, zone, IPADM, "create-addr", "-t"]
-                .into_iter()
-                .map(String::from)
-                .collect();
+                        // Ensure that a static IPv6 address has been allocated
+                        // to the Global Zone. Without this, we don't have a way
+                        // to route to IP addresses that we want to create in
+                        // the non-GZ.
+                        Self::ensure_address(
+                            None,
+                            &gz_link_local_addrobj.on_same_interface("v6route"),
+                            AddressRequest::new_static("fd00:1234::".parse().unwrap(), Some(16))
+                        )?;
 
-        match addrtype {
-            AddressRequest::Dhcp => {
-                args.extend(vec!["-T", "dhcp"].into_iter().map(String::from))
-            }
-            AddressRequest::Static(addr) => {
-                if addr.is_ipv6() {
-                    Self::ensure_has_link_local_v6_address(zone, addrobj)?;
+                        // Finally, actually ensure that the v6 address we want
+                        // exists within the zone.
+                        Self::ensure_has_link_local_v6_address(Some(zone), addrobj)?;
+                    }
                 }
-
-                args.extend(
-                    vec!["-T", "static", "-a"].into_iter().map(String::from),
-                );
-                args.push(addr.to_string());
             }
         };
 
-        args.push(addrobj.to_string());
-        let cmd = command.args(args);
-        execute(cmd)?;
+        // Actually perform address allocation.
+        Self::create_address_internal(
+            zone,
+            addrobj,
+            addrtype,
+        )?;
+
         Self::get_address(zone, addrobj)
     }
 

@@ -499,7 +499,7 @@ impl Instance {
 
         let addrobj = AddrObject::new_control(&control_nic.name());
         let network =
-            Zones::create_address(&zname, &addrobj, AddressRequest::Dhcp)?;
+            Zones::ensure_address(Some(&zname), &addrobj, AddressRequest::Dhcp)?;
         info!(inner.log, "Created address {} for zone: {}", network, zname);
 
         // Run Propolis in the Zone.

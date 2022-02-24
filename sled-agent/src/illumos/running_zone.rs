@@ -100,7 +100,7 @@ impl RunningZone {
             .map_err(|_| Error::Timeout(fmri.to_string()))?;
 
         let addrobj = AddrObject::new_control(zone.control_vnic.name());
-        let network = Zones::ensure_address(&zone.name, &addrobj, addrtype)?;
+        let network = Zones::ensure_address(Some(&zone.name), &addrobj, addrtype)?;
 
         Ok(RunningZone {
             inner: zone,
@@ -135,7 +135,7 @@ impl RunningZone {
         let zone_name = zone_info.name();
         let vnic_name = Zones::get_control_interface(zone_name)?;
         let addrobj = AddrObject::new_control(&vnic_name);
-        let network = Zones::ensure_address(zone_name, &addrobj, addrtype)?;
+        let network = Zones::ensure_address(Some(zone_name), &addrobj, addrtype)?;
 
         Ok(Self {
             inner: InstalledZone {
