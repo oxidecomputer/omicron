@@ -42,7 +42,6 @@ use uuid::Uuid;
 // particularly dangerous because the tokens are long-lived and not secret.
 
 pub const SPOOF_SCHEME_NAME: authn::SchemeName = authn::SchemeName("spoof");
-/// Header used for "spoof" authentication
 
 /// Magic value to produce a "no such actor" error
 const SPOOF_RESERVED_BAD_ACTOR: &str = "Jack-Donaghy";
