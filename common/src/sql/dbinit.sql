@@ -199,21 +199,18 @@ CREATE UNIQUE INDEX ON omicron.public.project (
  * Instances
  */
 
-/*
- * TODO We'd like to use this enum for Instance.instance_state.  This doesn't
- * currently work due to cockroachdb/cockroach#57411 /
- * cockroachdb/cockroach#58084.
- */
--- CREATE TYPE omicron.public.InstanceState AS ENUM (
---     'creating',
---     'starting',
---     'running',
---     'stopping',
---     'stopped',
---     'repairing',
---     'failed',
---     'destroyed'
--- );
+CREATE TYPE omicron.public.instance_state AS ENUM (
+    'creating',
+    'starting',
+    'running',
+    'stopping',
+    'stopped',
+    'rebooting',
+    'migrating',
+    'repairing',
+    'failed',
+    'destroyed'
+);
 
 /*
  * TODO consider how we want to manage multiple sagas operating on the same
@@ -239,8 +236,7 @@ CREATE TABLE omicron.public.instance (
      * table?
      */
     /* Runtime state */
-    -- state omicron.public.InstanceState NOT NULL, // TODO see above
-    state TEXT NOT NULL,
+    state omicron.public.instance_state NOT NULL,
     time_state_updated TIMESTAMPTZ NOT NULL,
     state_generation INT NOT NULL,
     /*
@@ -281,7 +277,15 @@ CREATE UNIQUE INDEX ON omicron.public.instance (
  */
 
 /*
- * TODO See the note on InstanceState above.
+ * TODO The Rust enum to which this type is converted
+ * carries data in some of its variants, such as the UUID
+ * of the instance to which a disk is attached.
+ *
+ * This makes the conversion to/from this enum type here much
+ * more difficult, since we need a way to manage that data
+ * coherently.
+ *
+ * See <https://github.com/oxidecomputer/omicron/issues/312>.
  */
 -- CREATE TYPE omicron.public.DiskState AS ENUM (
 --     'creating',
@@ -414,8 +418,8 @@ CREATE TABLE omicron.public.vpc_subnet (
     /* Indicates that the object has been deleted */
     time_deleted TIMESTAMPTZ,
     vpc_id UUID NOT NULL,
-    ipv4_block INET,
-    ipv6_block INET
+    ipv4_block INET NOT NULL,
+    ipv6_block INET NOT NULL
 );
 
 /* Subnet and network interface names are unique per VPC, not project */
@@ -586,15 +590,13 @@ CREATE UNIQUE INDEX ON omicron.public.router_route (
  */
 
 /*
- * TODO See notes above about cockroachdb/cockroach#57411 /
- * cockroachdb/cockroach#58084.
  * TODO This may eventually have 'paused', 'needs-operator', and 'needs-support'
  */
--- CREATE TYPE omicron.public.SagaState AS ENUM (
---     'running',
---     'unwinding',
---     'done'
--- );
+CREATE TYPE omicron.public.saga_state AS ENUM (
+    'running',
+    'unwinding',
+    'done'
+);
 
 
 CREATE TABLE omicron.public.saga (
@@ -618,7 +620,7 @@ CREATE TABLE omicron.public.saga (
      * - previous SEC? previous adoption time?
      * - number of adoptions?
      */
-    saga_state STRING(31) NOT NULL, /* see SagaState above */
+    saga_state omicron.public.saga_state NOT NULL,
     current_sec UUID,
     adopt_generation INT NOT NULL,
     adopt_time TIMESTAMPTZ NOT NULL
@@ -636,23 +638,24 @@ CREATE UNIQUE INDEX ON omicron.public.saga (
  * TODO more indexes for Saga?
  * - Debugging and/or reporting: saga_template_name? creator?
  */
-
 /*
- * TODO See notes above about cockroachdb/cockroach#57411 /
- * cockroachdb/cockroach#58084.
+ * TODO: This is a data-carrying enum, see note on disk_state.
+ *
+ * See <https://github.com/oxidecomputer/omicron/issues/312>.
  */
--- CREATE TYPE omicron.public.SagaNodeEventType AS ENUM (
---     'started',
---     'succeeded',
---     'failed'
---     'undo_started'
---     'undo_finished'
+-- CREATE TYPE omicron.public.saga_node_event_type AS ENUM (
+--    'started',
+--    'succeeded',
+--    'failed'
+--    'undo_started'
+--    'undo_finished'
 -- );
 
 CREATE TABLE omicron.public.saga_node_event (
     saga_id UUID NOT NULL,
     node_id INT NOT NULL,
-    event_type STRING(31) NOT NULL, /* see SagaNodeEventType above */
+    -- event_type omicron.public.saga_node_event_type NOT NULL,
+    event_type STRING(31) NOT NULL,
     data JSONB,
     event_time TIMESTAMPTZ NOT NULL,
     creator UUID NOT NULL,

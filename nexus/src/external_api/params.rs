@@ -107,7 +107,14 @@ pub struct InstanceMigrate {
 pub struct VpcCreate {
     #[serde(flatten)]
     pub identity: IdentityMetadataCreateParams,
+
+    /// The IPv6 prefix for this VPC.
+    ///
+    /// All IPv6 subnets created from this VPC must be taken from this range,
+    /// which sould be a Unique Local Address in the range `fd00::/48`. The
+    /// default VPC Subnet will have the first `/64` range from this prefix.
     pub ipv6_prefix: Option<Ipv6Net>,
+
     pub dns_name: Name,
 }
 
@@ -128,7 +135,19 @@ pub struct VpcUpdate {
 pub struct VpcSubnetCreate {
     #[serde(flatten)]
     pub identity: IdentityMetadataCreateParams,
-    pub ipv4_block: Option<Ipv4Net>,
+
+    /// The IPv4 address range for this subnet.
+    ///
+    /// It must be allocated from an RFC 1918 private address range, and must
+    /// not overlap with any other existing subnet in the VPC.
+    pub ipv4_block: Ipv4Net,
+
+    /// The IPv6 address range for this subnet.
+    ///
+    /// It must be allocated from the RFC 4193 Unique Local Address range, with
+    /// the prefix equal to the parent VPC's prefix. A random `/64` block will
+    /// be assigned if one is not provided. It must not overlap with any
+    /// existing subnet in the VPC.
     pub ipv6_block: Option<Ipv6Net>,
 }
 
@@ -139,6 +158,8 @@ pub struct VpcSubnetCreate {
 pub struct VpcSubnetUpdate {
     #[serde(flatten)]
     pub identity: IdentityMetadataUpdateParams,
+    // TODO-correctness: It seems fraught to allow changing these, since it can
+    // invalidate arbitrary sub-resources (e.g., network interfaces).
     pub ipv4_block: Option<Ipv4Net>,
     pub ipv6_block: Option<Ipv6Net>,
 }

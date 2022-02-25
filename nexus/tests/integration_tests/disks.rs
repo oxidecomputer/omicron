@@ -5,15 +5,25 @@
 //! Tests basic disk support in the API
 
 use crucible_agent_client::types::State as RegionState;
+use dropshot::test_util::ClientTestContext;
 use dropshot::HttpErrorResponseBody;
 use http::method::Method;
 use http::StatusCode;
+use nexus_test_utils::http_testing::AuthnMode;
+use nexus_test_utils::http_testing::NexusRequest;
+use nexus_test_utils::http_testing::RequestBuilder;
+use nexus_test_utils::identity_eq;
+use nexus_test_utils::resource_helpers::create_disk;
+use nexus_test_utils::resource_helpers::create_instance;
+use nexus_test_utils::resource_helpers::create_organization;
+use nexus_test_utils::resource_helpers::create_project;
+use nexus_test_utils::resource_helpers::DiskTest;
+use nexus_test_utils::ControlPlaneTestContext;
+use nexus_test_utils_macros::nexus_test;
 use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::Disk;
 use omicron_common::api::external::DiskState;
 use omicron_common::api::external::IdentityMetadataCreateParams;
-use omicron_common::api::external::Instance;
-use omicron_common::api::external::InstanceCpuCount;
 use omicron_common::api::external::Name;
 use omicron_nexus::TestInterfaces as _;
 use omicron_nexus::{external_api::params, Nexus};
@@ -21,24 +31,10 @@ use sled_agent_client::TestInterfaces as _;
 use std::sync::Arc;
 use uuid::Uuid;
 
-use dropshot::test_util::objects_list_page;
-use dropshot::test_util::objects_post;
-use dropshot::test_util::ClientTestContext;
-
-use nexus_test_utils::http_testing::AuthnMode;
-use nexus_test_utils::http_testing::NexusRequest;
-use nexus_test_utils::http_testing::RequestBuilder;
-use nexus_test_utils::identity_eq;
-use nexus_test_utils::resource_helpers::create_disk;
-use nexus_test_utils::resource_helpers::create_organization;
-use nexus_test_utils::resource_helpers::create_project;
-use nexus_test_utils::resource_helpers::DiskTest;
-use nexus_test_utils::ControlPlaneTestContext;
-use nexus_test_utils_macros::nexus_test;
-
 const ORG_NAME: &str = "test-org";
 const PROJECT_NAME: &str = "springfield-squidport-disks";
 const DISK_NAME: &str = "just-rainsticks";
+const INSTANCE_NAME: &str = "just-rainsticks";
 
 fn get_project_url() -> String {
     format!("/organizations/{}/projects/{}", ORG_NAME, PROJECT_NAME)
@@ -147,28 +143,15 @@ async fn test_disk_create_attach_detach_delete(
     disks_eq(&disks[0], &disk);
 
     // Create an instance to attach the disk.
-    let url_instances = get_instances_url();
-    let instance: Instance = objects_post(
-        &client,
-        &url_instances,
-        params::InstanceCreate {
-            identity: IdentityMetadataCreateParams {
-                name: "instance1".parse().unwrap(),
-                description: "instance1".to_string(),
-            },
-            ncpus: InstanceCpuCount(4),
-            memory: ByteCount::from_mebibytes_u32(256),
-            hostname: "instance1".to_string(),
-        },
-    )
-    .await;
+    let instance =
+        create_instance(&client, ORG_NAME, PROJECT_NAME, INSTANCE_NAME).await;
 
     // Verify that there are no disks attached to the instance, and specifically
     // that our disk is not attached to this instance.
     let url_instance_disks =
         get_instance_disks_url(instance.identity.name.as_str());
-    let disks = objects_list_page::<Disk>(&client, &url_instance_disks).await;
-    assert_eq!(disks.items.len(), 0);
+    let disks = disks_list(&client, &url_instance_disks).await;
+    assert_eq!(disks.len(), 0);
 
     let url_instance_attach_disk =
         get_disk_attach_url(instance.identity.name.as_str());
@@ -306,28 +289,15 @@ async fn test_disk_move_between_instances(cptestctx: &ControlPlaneTestContext) {
     let disk = create_disk(client, ORG_NAME, PROJECT_NAME, DISK_NAME).await;
 
     // Create an instance to attach the disk.
-    let url_instances = get_instances_url();
-    let instance: Instance = objects_post(
-        &client,
-        &url_instances,
-        params::InstanceCreate {
-            identity: IdentityMetadataCreateParams {
-                name: DISK_NAME.parse().unwrap(),
-                description: String::from("sells rainsticks"),
-            },
-            ncpus: InstanceCpuCount(4),
-            memory: ByteCount::from_mebibytes_u32(256),
-            hostname: String::from("rainsticks"),
-        },
-    )
-    .await;
+    let instance =
+        create_instance(&client, ORG_NAME, PROJECT_NAME, INSTANCE_NAME).await;
 
     // Verify that there are no disks attached to the instance, and specifically
     // that our disk is not attached to this instance.
     let url_instance_disks =
         get_instance_disks_url(instance.identity.name.as_str());
-    let disks = objects_list_page::<Disk>(&client, &url_instance_disks).await;
-    assert_eq!(disks.items.len(), 0);
+    let disks = disks_list(&client, &url_instance_disks).await;
+    assert_eq!(disks.len(), 0);
 
     let url_instance_attach_disk =
         get_disk_attach_url(instance.identity.name.as_str());
@@ -362,20 +332,8 @@ async fn test_disk_move_between_instances(cptestctx: &ControlPlaneTestContext) {
 
     // Create a second instance and try to attach the disk to that.  This should
     // fail and the disk should remain attached to the first instance.
-    let instance2: Instance = objects_post(
-        &client,
-        &url_instances,
-        params::InstanceCreate {
-            identity: IdentityMetadataCreateParams {
-                name: "instance2".parse().unwrap(),
-                description: "instance2".to_string(),
-            },
-            ncpus: InstanceCpuCount(4),
-            memory: ByteCount::from_mebibytes_u32(256),
-            hostname: "instance2".to_string(),
-        },
-    )
-    .await;
+    let instance2 =
+        create_instance(&client, ORG_NAME, PROJECT_NAME, "instance2").await;
     let url_instance2_attach_disk =
         get_disk_attach_url(instance2.identity.name.as_str());
     let url_instance2_detach_disk =

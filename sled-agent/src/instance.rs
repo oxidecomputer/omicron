@@ -54,7 +54,7 @@ pub enum Error {
 
     // TODO: Remove this error; prefer to retry notifications.
     #[error("Notifying Nexus failed: {0}")]
-    Notification(anyhow::Error),
+    Notification(nexus_client::Error<()>),
 
     // TODO: This error type could become more specific
     #[error("Error performing a state transition: {0}")]

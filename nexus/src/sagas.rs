@@ -340,7 +340,8 @@ async fn sic_instance_ensure(
         .map_err(omicron_common::api::external::Error::from)
         .map_err(ActionError::action_failed)?;
 
-    let new_runtime_state: InstanceRuntimeState = new_runtime_state.into();
+    let new_runtime_state: InstanceRuntimeState =
+        new_runtime_state.into_inner().into();
 
     osagactx
         .datastore()
@@ -355,6 +356,7 @@ async fn sic_instance_ensure(
  */
 #[derive(Debug, Deserialize, Serialize)]
 pub struct ParamsInstanceMigrate {
+    pub serialized_authn: authn::saga::Serialized,
     pub instance_id: Uuid,
     pub migrate_params: params::InstanceMigrate,
 }
@@ -410,6 +412,7 @@ async fn sim_migrate_prep(
 ) -> Result<(Uuid, InstanceRuntimeState), ActionError> {
     let osagactx = sagactx.user_data();
     let params = sagactx.saga_params();
+    let opctx = OpContext::for_saga_action(&sagactx, &params.serialized_authn);
 
     let migrate_uuid = sagactx.lookup::<Uuid>("migrate_id")?;
     let dst_propolis_uuid = sagactx.lookup::<Uuid>("dst_propolis_id")?;
@@ -421,6 +424,7 @@ async fn sim_migrate_prep(
     let instance = osagactx
         .nexus()
         .instance_start_migrate(
+            &opctx,
             params.instance_id,
             migrate_uuid,
             dst_propolis_uuid,
@@ -492,6 +496,7 @@ async fn sim_instance_migrate(
         .await
         .map_err(omicron_common::api::external::Error::from)
         .map_err(ActionError::action_failed)?
+        .into_inner()
         .into();
 
     osagactx
@@ -651,7 +656,7 @@ async fn ensure_region_in_dataset(
         let region = client
             .region_create(&region_request)
             .await
-            .map_err(|e| BackoffError::Permanent(e))?;
+            .map_err(|e| BackoffError::Permanent(e.into()))?;
         match region.state {
             RegionState::Requested => Err(BackoffError::Transient(anyhow!(
                 "Region creation in progress"
@@ -676,9 +681,10 @@ async fn ensure_region_in_dataset(
         create_region,
         log_create_failure,
     )
-    .await?;
+    .await
+    .map_err(|e| Error::internal_error(&e.to_string()))?;
 
-    Ok(region)
+    Ok(region.into_inner())
 }
 
 // Arbitrary limit on concurrency, for operations issued

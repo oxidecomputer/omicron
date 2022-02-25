@@ -726,8 +726,10 @@ async fn project_instances_get(
     let organization_name = &path.organization_name;
     let project_name = &path.project_name;
     let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
         let instances = nexus
             .project_list_instances(
+                &opctx,
                 &organization_name,
                 &project_name,
                 &data_page_params_for(&rqctx, &query)?
@@ -771,8 +773,10 @@ async fn project_instances_post(
     let project_name = &path.project_name;
     let new_instance_params = &new_instance.into_inner();
     let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
         let instance = nexus
             .project_create_instance(
+                &opctx,
                 &organization_name,
                 &project_name,
                 &new_instance_params,
@@ -812,8 +816,10 @@ async fn project_instances_get_instance(
     let project_name = &path.project_name;
     let instance_name = &path.instance_name;
     let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
         let instance = nexus
-            .project_lookup_instance(
+            .instance_fetch(
+                &opctx,
                 &organization_name,
                 &project_name,
                 &instance_name,
@@ -843,8 +849,10 @@ async fn project_instances_delete_instance(
     let project_name = &path.project_name;
     let instance_name = &path.instance_name;
     let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
         nexus
             .project_destroy_instance(
+                &opctx,
                 &organization_name,
                 &project_name,
                 &instance_name,
@@ -876,8 +884,10 @@ async fn project_instances_migrate_instance(
     let instance_name = &path.instance_name;
     let migrate_instance_params = migrate_params.into_inner();
     let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
         let instance = nexus
             .project_migrate_instance(
+                &opctx,
                 &organization_name,
                 &project_name,
                 &instance_name,
@@ -908,8 +918,14 @@ async fn project_instances_instance_reboot(
     let project_name = &path.project_name;
     let instance_name = &path.instance_name;
     let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
         let instance = nexus
-            .instance_reboot(&organization_name, &project_name, &instance_name)
+            .instance_reboot(
+                &opctx,
+                &organization_name,
+                &project_name,
+                &instance_name,
+            )
             .await?;
         Ok(HttpResponseAccepted(instance.into()))
     };
@@ -935,8 +951,14 @@ async fn project_instances_instance_start(
     let project_name = &path.project_name;
     let instance_name = &path.instance_name;
     let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
         let instance = nexus
-            .instance_start(&organization_name, &project_name, &instance_name)
+            .instance_start(
+                &opctx,
+                &organization_name,
+                &project_name,
+                &instance_name,
+            )
             .await?;
         Ok(HttpResponseAccepted(instance.into()))
     };
@@ -963,8 +985,14 @@ async fn project_instances_instance_stop(
     let project_name = &path.project_name;
     let instance_name = &path.instance_name;
     let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
         let instance = nexus
-            .instance_stop(&organization_name, &project_name, &instance_name)
+            .instance_stop(
+                &opctx,
+                &organization_name,
+                &project_name,
+                &instance_name,
+            )
             .await?;
         Ok(HttpResponseAccepted(instance.into()))
     };
@@ -993,8 +1021,10 @@ async fn instance_disks_get(
     let project_name = &path.project_name;
     let instance_name = &path.instance_name;
     let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
         let disks = nexus
             .instance_list_disks(
+                &opctx,
                 &organization_name,
                 &project_name,
                 &instance_name,

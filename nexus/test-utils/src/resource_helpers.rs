@@ -14,6 +14,8 @@ use http::StatusCode;
 use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::Disk;
 use omicron_common::api::external::IdentityMetadataCreateParams;
+use omicron_common::api::external::Instance;
+use omicron_common::api::external::InstanceCpuCount;
 use omicron_common::api::external::VpcRouter;
 use omicron_nexus::crucible_agent_client::types::State as RegionState;
 use omicron_nexus::external_api::params;
@@ -112,6 +114,32 @@ pub async fn create_disk(
             },
             snapshot_id: None,
             size: ByteCount::from_gibibytes_u32(1),
+        },
+    )
+    .await
+}
+
+pub async fn create_instance(
+    client: &ClientTestContext,
+    organization_name: &str,
+    project_name: &str,
+    instance_name: &str,
+) -> Instance {
+    let url = format!(
+        "/organizations/{}/projects/{}/instances",
+        organization_name, project_name
+    );
+    object_create(
+        client,
+        &url,
+        &params::InstanceCreate {
+            identity: IdentityMetadataCreateParams {
+                name: instance_name.parse().unwrap(),
+                description: format!("instance {:?}", instance_name),
+            },
+            ncpus: InstanceCpuCount(4),
+            memory: ByteCount::from_mebibytes_u32(256),
+            hostname: String::from("the_host"),
         },
     )
     .await

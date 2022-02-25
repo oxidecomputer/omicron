@@ -4,11 +4,32 @@
 
 //! Default values for data in the Nexus API, when not provided explicitly in a request.
 
+use ipnetwork::Ipv4Network;
 use ipnetwork::Ipv6Network;
 use lazy_static::lazy_static;
 use omicron_common::api::external;
+use omicron_common::api::external::Ipv4Net;
 use omicron_common::api::external::Ipv6Net;
+use std::net::Ipv4Addr;
 use std::net::Ipv6Addr;
+
+/// Minimum prefix size supported in IPv4 VPC Subnets.
+///
+/// NOTE: This is the minimum _prefix_, which sets the maximum subnet size.
+pub const MIN_VPC_IPV4_SUBNET_PREFIX: u8 = 8;
+
+/// Maximum prefix size supported in IPv4 VPC Subnets.
+///
+/// NOTE: This is the maximum _prefix_, which sets the minimum subnet size.
+pub const MAX_VPC_IPV4_SUBNET_PREFIX: u8 = 26;
+
+lazy_static! {
+    /// The default IPv4 subnet range assigned to the default VPC Subnet, when
+    /// the VPC is created, if one is not provided in the request. See
+    /// <https://rfd.shared.oxide.computer/rfd/0021> for details.
+    pub static ref DEFAULT_VPC_SUBNET_IPV4_BLOCK: external::Ipv4Net =
+        Ipv4Net(Ipv4Network::new(Ipv4Addr::new(172, 30, 0, 0), 22).unwrap());
+}
 
 lazy_static! {
     pub static ref DEFAULT_FIREWALL_RULES: external::VpcFirewallRuleUpdateParams =
@@ -58,7 +79,8 @@ lazy_static! {
         }"#).unwrap();
 }
 
-pub fn random_unique_local_ipv6() -> Result<Ipv6Net, external::Error> {
+/// Generate a random VPC IPv6 prefix, in the range `fd00::/48`.
+pub fn random_vpc_ipv6_prefix() -> Result<Ipv6Net, external::Error> {
     use rand::Rng;
     let mut bytes = [0u8; 16];
     bytes[0] = 0xfd;
@@ -67,7 +89,13 @@ pub fn random_unique_local_ipv6() -> Result<Ipv6Net, external::Error> {
             "Unable to allocate random IPv6 address range",
         )
     })?;
-    Ok(Ipv6Net(Ipv6Network::new(Ipv6Addr::from(bytes), 48).unwrap()))
+    Ok(Ipv6Net(
+        Ipv6Network::new(
+            Ipv6Addr::from(bytes),
+            Ipv6Net::VPC_IPV6_PREFIX_LENGTH,
+        )
+        .unwrap(),
+    ))
 }
 
 #[cfg(test)]
@@ -75,11 +103,10 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_random_unique_local_ipv6() {
-        let network = random_unique_local_ipv6().unwrap().0;
-        assert_eq!(network.prefix(), 48);
+    fn test_random_vpc_ipv6_prefix() {
+        let network = random_vpc_ipv6_prefix().unwrap();
+        assert!(network.is_vpc_prefix());
         let octets = network.network().octets();
-        assert_eq!(octets[0], 0xfd);
         assert!(octets[6..].iter().all(|x| *x == 0));
     }
 }

@@ -15,7 +15,6 @@ use omicron_common::backoff::{
     internal_service_policy, retry_notify, BackoffError,
 };
 
-use anyhow::anyhow;
 use slog::Logger;
 use std::io;
 use std::path::Path;
@@ -40,7 +39,7 @@ pub enum BootstrapError {
     SmfAdm(#[from] smf::AdmError),
 
     #[error("Error making HTTP request")]
-    Api(#[from] anyhow::Error),
+    Api(#[from] nexus_client::Error::<()>),
 
     #[error(transparent)]
     TrustQuorum(#[from] TrustQuorumError),
@@ -287,7 +286,7 @@ impl Agent {
                         .connect_timeout(dur)
                         .timeout(dur)
                         .build()
-                        .map_err(|e| BootstrapError::Api(anyhow!(e)))?;
+                        .map_err(|e| nexus_client::Error::<()>::from(e))?;
                     let client = sled_agent_client::Client::new_with_client(
                         &format!("http://{}", request.sled_address),
                         client,
