@@ -368,7 +368,8 @@ async fn ensure_running_zone(
     }
 }
 
-type NotifyFut = dyn futures::Future<Output = Result<(), nexus_client::Error::<()>>> + Send;
+type NotifyFut =
+    dyn futures::Future<Output = Result<(), nexus_client::Error<()>>> + Send;
 
 #[derive(Debug)]
 struct NewFilesystemRequest {

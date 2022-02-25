@@ -39,7 +39,7 @@ pub enum BootstrapError {
     SmfAdm(#[from] smf::AdmError),
 
     #[error("Error making HTTP request")]
-    Api(#[from] nexus_client::Error::<()>),
+    Api(#[from] nexus_client::Error<()>),
 
     #[error(transparent)]
     TrustQuorum(#[from] TrustQuorumError),
