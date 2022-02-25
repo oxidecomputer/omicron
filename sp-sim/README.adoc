@@ -1,0 +1,49 @@
+## SP Simulator
+
+`sp-sim` is a simulator for the various kinds of service processors that exist
+on the management network. It exists to aid in the testing and development of
+the Management Gateway Service (MGS).
+
+### Running the simulator
+
+TODO Flesh this out once we can simulate more than just a single sidecar SP. For
+now, the quick and dirty instructions.
+
+Start a simulated sidecar SP:
+
+[source,text]
+----
+$ cargo run --bin sp-sim -- sp-sim/examples/sidecar.toml
+----
+
+Start the MGS (its config file should have an IP/port that matches
+`sidecar.toml` above):
+
+[source,text]
+----
+$ cargo run --bin gateway -- gateway/examples/config.toml
+----
+
+Ask MGS for the ignition state of the sole simulated sidecar SP:
+
+[source,text]
+----
+$ curl -s http://127.0.0.1:12222/ignition/switch/0 | jq
+{
+  "id": {
+    "typ": "switch",
+    "slot": "0"
+  },
+  "details": {
+    "present": "yes",
+    "id": 18,
+    "power": true,
+    "ctrl_detect_0": true,
+    "ctrl_detect_1": false,
+    "flt_a3": false,
+    "flt_a2": false,
+    "flt_rot": false,
+    "flt_sp": false
+  }
+}
+----
