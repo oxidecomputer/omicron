@@ -9,6 +9,7 @@ anyhow = "1.0"
 bytes = "1.0.1"
 chrono = { version = "0.4",  features = [ "serde" ] }
 dropshot = { git = "https://github.com/oxidecomputer/dropshot", branch = "main", features = [ "usdt-probes" ] }
+headers = "0.3.7"
 http = "0.2.5"
 hyper = "0.14"
 omicron-common = { path = "../../common" }

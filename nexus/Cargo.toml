@@ -17,6 +17,7 @@ crucible-agent-client = { git = "https://github.com/oxidecomputer/crucible", rev
 # Tracking pending 2.0 version.
 diesel = { git = "https://github.com/diesel-rs/diesel", rev = "ce77c382", features = ["postgres", "r2d2", "chrono", "serde_json", "network-address", "uuid"] }
 futures = "0.3.21"
+headers = "0.3.7"
 hex = "0.4.3"
 http = "0.2.5"
 hyper = "0.14"

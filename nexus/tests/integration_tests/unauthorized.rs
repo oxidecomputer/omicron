@@ -7,6 +7,7 @@
 
 use dropshot::test_util::ClientTestContext;
 use dropshot::HttpErrorResponseBody;
+use headers::authorization::Credentials;
 use http::method::Method;
 use http::StatusCode;
 use lazy_static::lazy_static;
@@ -23,7 +24,7 @@ use omicron_common::api::external::IdentityMetadataUpdateParams;
 use omicron_common::api::external::InstanceCpuCount;
 use omicron_common::api::external::Name;
 use omicron_nexus::authn;
-use omicron_nexus::authn::external::spoof::HTTP_HEADER_OXIDE_AUTHN_SPOOF;
+use omicron_nexus::authn::external::spoof;
 use omicron_nexus::external_api::params;
 
 // This test hits a list Nexus API endpoints using both unauthenticated and
@@ -634,15 +635,15 @@ async fn verify_endpoint(
         // First, try a syntactically valid authn header for a non-existent
         // actor.
         info!(log, "test: bogus creds: bad actor"; "method" => ?method);
-        let bad_actor_authn_header = http::HeaderValue::from_str(
-            omicron_nexus::authn::external::spoof::SPOOF_RESERVED_BAD_ACTOR,
-        )
-        .unwrap();
+        let bad_actor_authn_header = &spoof::SPOOF_HEADER_BAD_ACTOR;
         let response =
             RequestBuilder::new(client, method.clone(), endpoint.url)
                 .body(body.as_ref())
                 .expect_status(Some(expected_status))
-                .header(HTTP_HEADER_OXIDE_AUTHN_SPOOF, bad_actor_authn_header)
+                .header(
+                    &http::header::AUTHORIZATION,
+                    bad_actor_authn_header.0.encode(),
+                )
                 .execute()
                 .await
                 .unwrap();
@@ -650,15 +651,15 @@ async fn verify_endpoint(
 
         // Now try a syntactically invalid authn header.
         info!(log, "test: bogus creds: bad cred syntax"; "method" => ?method);
-        let bad_creds_authn_header = http::HeaderValue::from_str(
-            omicron_nexus::authn::external::spoof::SPOOF_RESERVED_BAD_CREDS,
-        )
-        .unwrap();
+        let bad_creds_authn_header = &spoof::SPOOF_HEADER_BAD_CREDS;
         let response =
             RequestBuilder::new(client, method.clone(), endpoint.url)
                 .body(body.as_ref())
                 .expect_status(Some(expected_status))
-                .header(HTTP_HEADER_OXIDE_AUTHN_SPOOF, bad_creds_authn_header)
+                .header(
+                    &http::header::AUTHORIZATION,
+                    bad_creds_authn_header.0.encode(),
+                )
                 .execute()
                 .await
                 .unwrap();

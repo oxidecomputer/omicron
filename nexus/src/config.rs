@@ -373,9 +373,6 @@ mod test {
             level = "debug"
             path = "/nonexistent/path"
             if_exists = "fail"
-            [insecure]
-            allow_any_request_to_spoof_authn_header = true
-            if_exists = "fail"
             [timeseries_db]
             address = "[::1]:8123"
             "##,
