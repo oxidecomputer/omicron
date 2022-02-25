@@ -191,12 +191,12 @@ impl SpCommunicator {
             .sp_state
             .all_sps
             .get(&sp.ip())
-            .ok_or(Error::SpDoesNotExist(sp.ip()))?;
+            .ok_or_else(|| Error::SpDoesNotExist(sp.ip()))?;
 
         let mut packetizers = sp_state.serial_console_to_sp.lock().await;
         let packetizer = packetizers
             .entry(component)
-            .or_insert(SerialConsolePacketizer::new(component));
+            .or_insert_with(|| SerialConsolePacketizer::new(component));
 
         for packet in packetizer.packetize(data) {
             let request = RequestKind::SerialConsoleWrite(packet);
