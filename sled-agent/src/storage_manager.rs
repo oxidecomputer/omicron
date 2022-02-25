@@ -588,7 +588,7 @@ impl StorageWorker {
 
         self.add_datasets_notify(
             nexus_notifications,
-            vec![(id, zone.address(), dataset_info.kind.as_dataset())],
+            vec![(id, zone.address(), dataset_info.kind.into())],
             pool.id(),
         );
 
@@ -619,7 +619,7 @@ impl StorageWorker {
 
         // Unwrap safety: We just put this zone in the pool.
         let zone = pool.get_zone(id).unwrap();
-        Ok((id, zone.address(), dataset_info.kind.as_dataset()))
+        Ok((id, zone.address(), dataset_info.kind.into()))
     }
 
     // Small wrapper around `Self::do_work_internal` that ensures we always

@@ -122,10 +122,10 @@ pub enum DatasetKind {
     Clickhouse,
 }
 
-impl DatasetKind {
-    pub fn as_dataset(&self) -> internal::nexus::DatasetKind {
+impl From<DatasetKind> for internal::nexus::DatasetKind {
+    fn from(d: DatasetKind) -> Self {
         use DatasetKind::*;
-        match *self {
+        match d {
             CockroachDb { .. } => internal::nexus::DatasetKind::Cockroach,
             Crucible { .. } => internal::nexus::DatasetKind::Crucible,
             Clickhouse { .. } => internal::nexus::DatasetKind::Clickhouse,
