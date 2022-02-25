@@ -23,6 +23,7 @@ use omicron_common::api::external::IdentityMetadataUpdateParams;
 use omicron_common::api::external::InstanceCpuCount;
 use omicron_common::api::external::Name;
 use omicron_nexus::authn;
+use omicron_nexus::authn::external::spoof;
 use omicron_nexus::authn::external::spoof::HTTP_HEADER_OXIDE_AUTHN_SPOOF;
 use omicron_nexus::external_api::params;
 
@@ -634,10 +635,7 @@ async fn verify_endpoint(
         // First, try a syntactically valid authn header for a non-existent
         // actor.
         info!(log, "test: bogus creds: bad actor"; "method" => ?method);
-        let bad_actor_authn_header = http::HeaderValue::from_str(
-            omicron_nexus::authn::external::spoof::SPOOF_RESERVED_BAD_ACTOR,
-        )
-        .unwrap();
+        let bad_actor_authn_header = spoof::SPOOF_HEADER_BAD_ACTOR.clone();
         let response =
             RequestBuilder::new(client, method.clone(), endpoint.url)
                 .body(body.as_ref())
@@ -650,10 +648,7 @@ async fn verify_endpoint(
 
         // Now try a syntactically invalid authn header.
         info!(log, "test: bogus creds: bad cred syntax"; "method" => ?method);
-        let bad_creds_authn_header = http::HeaderValue::from_str(
-            omicron_nexus::authn::external::spoof::SPOOF_RESERVED_BAD_CREDS,
-        )
-        .unwrap();
+        let bad_creds_authn_header = spoof::SPOOF_HEADER_BAD_CREDS.clone();
         let response =
             RequestBuilder::new(client, method.clone(), endpoint.url)
                 .body(body.as_ref())
