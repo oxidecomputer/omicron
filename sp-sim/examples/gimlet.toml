@@ -2,9 +2,11 @@
 # SP simulator: example config file
 #
 
-sp_type = "gimlet"
 bind_address = "127.0.0.1:23457"
 gateway_address = "127.0.0.1:22222"
+
+[sp_type]
+type = "gimlet"
 
 [components]
 serial_console = ["sp3"]

@@ -8,6 +8,7 @@
 //!
 
 use dropshot::ConfigLogging;
+use gateway_messages::IgnitionState;
 use serde::{Deserialize, Serialize};
 use std::{
     net::SocketAddr,
@@ -15,10 +16,15 @@ use std::{
 };
 use thiserror::Error;
 
-#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Serialize)]
-#[serde(rename_all = "lowercase")]
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+pub struct SidecarConfig {
+    pub ignition_targets: Vec<IgnitionState>,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[serde(rename_all = "lowercase", tag = "type")]
 pub enum SpType {
-    Sidecar,
+    Sidecar(SidecarConfig),
     Gimlet,
 }
 

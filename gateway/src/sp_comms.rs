@@ -15,9 +15,9 @@ use serial_console_history::SerialConsoleHistory;
 use crate::config::KnownSps;
 use dropshot::HttpError;
 use gateway_messages::{
-    sp_impl::SerialConsolePacketizer, version, IgnitionState, Request,
-    RequestKind, ResponseKind, SerialConsole, SerializedSize, SpComponent,
-    SpMessage, SpMessageKind,
+    sp_impl::SerialConsolePacketizer, version, IgnitionCommand, IgnitionState,
+    Request, RequestKind, ResponseError, ResponseKind, SerialConsole,
+    SerializedSize, SpComponent, SpMessage, SpMessageKind,
 };
 use slog::{debug, error, info, o, Logger};
 use std::{
@@ -52,6 +52,8 @@ pub enum Error {
         "SP sent a bogus response type (got `{got}`; expected `{expected}`)"
     )]
     BogusResponseType { got: &'static str, expected: &'static str },
+    #[error("error from SP: {0}")]
+    SpError(String),
     #[error("timeout")]
     Timeout(#[from] tokio::time::error::Elapsed),
     #[error("no known SP at {0}")]
@@ -67,11 +69,37 @@ impl From<Error> for HttpError {
 }
 
 impl Error {
-    fn bogus_response_type(
+    fn from_unhandled_response_kind(
         kind: &ResponseKind,
         expected: &'static str,
     ) -> Self {
-        Self::BogusResponseType { got: response_kind_name(kind), expected }
+        // Our caller couldn't handle `kind`; most likely case is that it's a
+        // `ResponseError`, which we'll handle below. It could also be that we
+        // got a response kind that doesn't match the request we sent - peel
+        // that out here.
+        let err = match kind {
+            ResponseKind::Error(err) => err,
+            other => {
+                return Self::BogusResponseType {
+                    got: response_kind_name(other),
+                    expected,
+                }
+            }
+        };
+
+        // `ResponseError` is defined in a `no_std` crate and therefore doesn't
+        // implement `Display` or `std::error::Error`; for now we'll just
+        // stringify all its cases. Can we do something better, or make it impl
+        // `Error` if compiled in a std environment?
+        let msg = match err {
+            ResponseError::RequestUnsupported => {
+                String::from("unsupported request")
+            }
+            ResponseError::IgnitionTargetDoesNotExist(target) => {
+                format!("nonexistent ignition target {}", target)
+            }
+        };
+        Self::SpError(msg)
     }
 }
 
@@ -203,7 +231,7 @@ impl SpCommunicator {
             match self.request_response(sp, request).await? {
                 ResponseKind::SerialConsoleWriteAck => (),
                 other => {
-                    return Err(Error::bogus_response_type(
+                    return Err(Error::from_unhandled_response_kind(
                         &other,
                         response_kind_names::SERIAL_CONSOLE_WRITE_ACK,
                     ))
@@ -224,9 +252,6 @@ impl SpCommunicator {
         tokio::time::timeout(timeout, self.ignition_get_impl(target)).await?
     }
 
-    // TODO As we add additional methods, it's likely this should be cleaned up
-    // to extract common logic, as most methods will only vary by the type of
-    // request/response they're sending. For now we only have this one method.
     async fn ignition_get_impl(
         &self,
         target: u8,
@@ -240,9 +265,54 @@ impl SpCommunicator {
         match self.request_response(controller, request).await? {
             ResponseKind::IgnitionState(state) => Ok(state),
             other => {
-                return Err(Error::bogus_response_type(
+                return Err(Error::from_unhandled_response_kind(
                     &other,
                     response_kind_names::IGNITION_STATE,
+                ))
+            }
+        }
+    }
+
+    pub async fn ignition_power_on(
+        &self,
+        target: u8,
+        timeout: Duration,
+    ) -> Result<(), Error> {
+        tokio::time::timeout(
+            timeout,
+            self.ignition_command(target, IgnitionCommand::PowerOn),
+        )
+        .await?
+    }
+
+    pub async fn ignition_power_off(
+        &self,
+        target: u8,
+        timeout: Duration,
+    ) -> Result<(), Error> {
+        tokio::time::timeout(
+            timeout,
+            self.ignition_command(target, IgnitionCommand::PowerOff),
+        )
+        .await?
+    }
+
+    async fn ignition_command(
+        &self,
+        target: u8,
+        command: IgnitionCommand,
+    ) -> Result<(), Error> {
+        // XXX We currently assume we're know which ignition controller is our
+        // local one, and only use it for ignition interactions.
+        let controller = self.known_sps.ignition_controller;
+        let request = RequestKind::IgnitionCommand { target, command };
+
+        match self.request_response(controller, request).await? {
+            ResponseKind::IgnitionCommandAck => Ok(()),
+            other => {
+                return Err(Error::from_unhandled_response_kind(
+                    &other,
+                    response_kind_names::IGNITION_COMMAND_ACK,
                 ))
             }
         }

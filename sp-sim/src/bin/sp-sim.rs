@@ -4,7 +4,7 @@
 
 use anyhow::Result;
 use omicron_common::cmd::{fatal, CmdError};
-use sp_sim::config::{Config, SpType};
+use sp_sim::config::{Config, SidecarConfig, SpType};
 use sp_sim::{Gimlet, Sidecar};
 use std::io::Write;
 use std::path::PathBuf;
@@ -34,14 +34,19 @@ async fn do_run() -> Result<(), CmdError> {
     let config = Config::from_file(args.config_file_path)
         .map_err(|e| CmdError::Failure(e.to_string()))?;
 
-    match config.sp_type {
-        SpType::Sidecar => run_sidecar(&config).await,
+    match &config.sp_type {
+        SpType::Sidecar(sidecar_config) => {
+            run_sidecar(&config, sidecar_config).await
+        }
         SpType::Gimlet => run_gimlet(&config).await,
     }
 }
 
-async fn run_sidecar(config: &Config) -> Result<(), CmdError> {
-    let _sidecar = Sidecar::spawn(config)
+async fn run_sidecar(
+    config: &Config,
+    sidecar_config: &SidecarConfig,
+) -> Result<(), CmdError> {
+    let _sidecar = Sidecar::spawn(config, sidecar_config)
         .await
         .map_err(|e| CmdError::Failure(e.to_string()))?;
 

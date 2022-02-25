@@ -54,6 +54,8 @@ pub enum ResponseError {
     /// The [RequestKind] is not supported by the receiving SP; e.g., asking an
     /// SP without an attached ignition controller for ignition state.
     RequestUnsupported,
+    /// The specified ignition target does not exist.
+    IgnitionTargetDoesNotExist(u8),
 }
 
 /// Messages from an SP to a gateway. Includes both responses to [`Request`]s as
@@ -76,7 +78,9 @@ pub enum SpMessageKind {
     SerialConsole(SerialConsole),
 }
 
-#[derive(Debug, Clone, Copy, SerializedSize, Serialize, Deserialize)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, SerializedSize, Serialize, Deserialize,
+)]
 pub struct IgnitionState {
     pub id: u16,
     pub flags: IgnitionFlags,

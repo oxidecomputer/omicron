@@ -2,12 +2,12 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use crate::config::Config;
+use crate::config::{Config, SidecarConfig};
 use crate::server::{self, UdpServer};
 use anyhow::Result;
 use gateway_messages::sp_impl::{SpHandler, SpServer};
 use gateway_messages::{
-    IgnitionFlags, IgnitionState, ResponseError, ResponseKind,
+    IgnitionCommand, IgnitionFlags, IgnitionState, ResponseError, ResponseKind,
 };
 use slog::{debug, error, info, warn, Logger};
 use tokio::{
@@ -27,11 +27,14 @@ impl Drop for Sidecar {
 }
 
 impl Sidecar {
-    pub async fn spawn(config: &Config) -> Result<Self> {
+    pub async fn spawn(
+        config: &Config,
+        sidecar_config: &SidecarConfig,
+    ) -> Result<Self> {
         let log = server::logger(&config, "sidecar")?;
         info!(log, "setting up simualted sidecar");
         let server = UdpServer::new(config).await?;
-        let inner = Inner::new(server, log);
+        let inner = Inner::new(server, sidecar_config.clone(), log);
         let inner_task = task::spawn(async move { inner.run().await.unwrap() });
         Ok(Self { inner_task })
     }
@@ -43,8 +46,12 @@ struct Inner {
 }
 
 impl Inner {
-    fn new(server: UdpServer, log: Logger) -> Self {
-        Self { handler: Handler { log }, udp: server }
+    fn new(
+        server: UdpServer,
+        sidecar_config: SidecarConfig,
+        log: Logger,
+    ) -> Self {
+        Self { handler: Handler { log, sidecar_config }, udp: server }
     }
 
     async fn run(mut self) -> Result<()> {
@@ -74,6 +81,26 @@ impl Inner {
 
 struct Handler {
     log: Logger,
+    sidecar_config: SidecarConfig,
+}
+
+impl Handler {
+    fn get_target(&self, target: u8) -> Result<&IgnitionState, ResponseError> {
+        self.sidecar_config
+            .ignition_targets
+            .get(usize::from(target))
+            .ok_or(ResponseError::IgnitionTargetDoesNotExist(target))
+    }
+
+    fn get_target_mut(
+        &mut self,
+        target: u8,
+    ) -> Result<&mut IgnitionState, ResponseError> {
+        self.sidecar_config
+            .ignition_targets
+            .get_mut(usize::from(target))
+            .ok_or(ResponseError::IgnitionTargetDoesNotExist(target))
+    }
 }
 
 impl SpHandler for Handler {
@@ -83,11 +110,9 @@ impl SpHandler for Handler {
     }
 
     fn ignition_state(&mut self, target: u8) -> ResponseKind {
-        const SIDECAR_ID: u16 = 0b01_0010;
-
-        let state = IgnitionState {
-            id: SIDECAR_ID,
-            flags: IgnitionFlags::POWER | IgnitionFlags::CTRL_DETECT_0,
+        let state = match self.get_target(target) {
+            Ok(state) => *state,
+            Err(err) => return ResponseKind::Error(err),
         };
 
         debug!(
@@ -102,8 +127,21 @@ impl SpHandler for Handler {
     fn ignition_command(
         &mut self,
         target: u8,
-        command: gateway_messages::IgnitionCommand,
+        command: IgnitionCommand,
     ) -> ResponseKind {
+        let state = match self.get_target_mut(target) {
+            Ok(state) => state,
+            Err(err) => return ResponseKind::Error(err),
+        };
+        match command {
+            IgnitionCommand::PowerOn => {
+                state.flags.set(IgnitionFlags::POWER, true)
+            }
+            IgnitionCommand::PowerOff => {
+                state.flags.set(IgnitionFlags::POWER, false)
+            }
+        }
+
         debug!(
             &self.log,
             "received ignition command {:?} for target {}; sending ack",
