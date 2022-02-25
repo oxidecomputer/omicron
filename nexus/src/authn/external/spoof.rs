@@ -39,7 +39,7 @@ use uuid::Uuid;
 //
 // This mechanism trusts (without verification) that the client is whoever
 // they say they are.  That's true of any bearer token, but this one is
-// particularly dangerous because the tokens are not long-lived and not secret.
+// particularly dangerous because the tokens are long-lived and not secret.
 
 pub const SPOOF_SCHEME_NAME: authn::SchemeName = authn::SchemeName("spoof");
 /// Header used for "spoof" authentication
