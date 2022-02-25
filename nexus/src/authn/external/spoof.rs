@@ -19,21 +19,51 @@ use headers::HeaderMapExt;
 use lazy_static::lazy_static;
 use uuid::Uuid;
 
+// This scheme is intended for demos, development, and testing until we have a
+// more automatable identity provider that can be used for those purposes.
+//
+// For ease of integration into existing clients, we use RFC 6750 bearer tokens.
+// This mechanism in turn uses HTTP's "Authorization" header.  In practice, it
+// looks like this:
+//
+//     Authorization: Bearer oxide-spoof-001de000-05e4-4000-8000-000000060001
+//     ^^^^^^^^^^^^^  ^^^^^^ ^^^^^^^^^^^ ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+//     |              |      |           |
+//     |              |      |           +--- specifies the actor id
+//     |              |      +--------------- specifies this "spoof" mechanism
+//     |              +---------------------- specifies RFC 6750 bearer tokens
+//     +------------------------------------- standard HTTP authentication hdr
+//
+// (That's not a typo -- the "authorization" header is generally used to specify
+// _authentication_ information.  Similarly, the "Unauthorized" HTTP response
+// code usually describes an _authentication_ error.)
+//
+// **This mechanism trusts (without verification) that the client is whoever
+// they say they are.**
+
+pub const SPOOF_SCHEME_NAME: authn::SchemeName = authn::SchemeName("spoof");
 /// Header used for "spoof" authentication
 pub const HTTP_HEADER_OXIDE_AUTHN_SPOOF: &http::header::HeaderName =
     &http::header::AUTHORIZATION;
-/// Magic header value to produce a "no such actor" error
+
+/// Magic value to produce a "no such actor" error
 const SPOOF_RESERVED_BAD_ACTOR: &str = "Jack-Donaghy";
-/// Magic header value to produce a "bad credentials" error
+/// Magic value to produce a "bad credentials" error
 const SPOOF_RESERVED_BAD_CREDS: &str = "this-fake-ID-it-is-truly-excellent";
-pub const SPOOF_SCHEME_NAME: authn::SchemeName = authn::SchemeName("spoof");
+/// Prefix used on the bearer token to identify this scheme
+// RFC 6750 expects bearer tokens to be opaque base64-encoded data.  In our
+// case, the data we want to represent (this prefix, plus valid uuids) are
+// subsets of the base64 character set, so we do not bother encoding them.
 const SPOOF_PREFIX: &str = "oxide-spoof-";
 
 lazy_static! {
+    /// Actor (id) used for the special "bad credentials" error
     static ref SPOOF_RESERVED_BAD_CREDS_ACTOR: Actor =
         Actor("22222222-2222-2222-2222-222222222222".parse().unwrap());
+    /// Complete HTTP header value to trigger the "bad actor" error
     pub static ref SPOOF_HEADER_BAD_ACTOR: http::header::HeaderValue =
         make_header_value_raw(SPOOF_RESERVED_BAD_ACTOR.as_bytes()).unwrap();
+    /// Complete HTTP header value to trigger the "bad creds" error
     pub static ref SPOOF_HEADER_BAD_CREDS: http::header::HeaderValue =
         make_header_value_raw(SPOOF_RESERVED_BAD_CREDS.as_bytes()).unwrap();
 }
@@ -126,8 +156,6 @@ pub fn make_header_value_raw(
     http::HeaderValue::from_bytes(&v).context("not a valid HTTP header value")
 }
 
-// XXX add test for make_header_value() and make_header_value_raw().
-
 #[cfg(test)]
 mod test {
     use super::super::super::Details;
@@ -139,6 +167,54 @@ mod test {
     use crate::authn;
     use authn::Actor;
     use uuid::Uuid;
+
+    #[test]
+    fn test_make_header_value() {
+        let test_uuid_str = "37b56e4f-8c60-453b-a37e-99be6efe8a89";
+        let test_uuid = test_uuid_str.parse::<Uuid>().unwrap();
+        let header_value = make_header_value(test_uuid);
+        // Other formats are valid here (e.g., changes in case or spacing).
+        // However, a black-box test that accounted for those would be at least
+        // as complicated as `make_header_value()` itself and wouldn't be so
+        // convincing in demonstrating that that function does what we think it
+        // does.
+        assert_eq!(
+            header_value.to_str().unwrap(),
+            "Bearer oxide-spoof-37b56e4f-8c60-453b-a37e-99be6efe8a89"
+        );
+    }
+
+    #[test]
+    fn test_make_header_value_raw() {
+        let test_uuid_str = "37b56e4f-8c60-453b-a37e-99be6efe8a89";
+        let test_uuid = test_uuid_str.parse::<Uuid>().unwrap();
+        assert_eq!(
+            make_header_value_raw(test_uuid_str.as_bytes()).unwrap(),
+            make_header_value(test_uuid)
+        );
+
+        assert_eq!(
+            make_header_value_raw(b"who-put-the-bomp").unwrap(),
+            "Bearer oxide-spoof-who-put-the-bomp"
+        );
+
+        // This one is not a valid bearer token because it's not base64
+        assert_eq!(
+            make_header_value_raw(b"not base64").unwrap(),
+            "Bearer oxide-spoof-not base64"
+        );
+
+        // Perhaps surprisingly, header values do not need to be valid UTF-8
+        let non_utf8 = make_header_value_raw(b"not-\x80-UTF8").unwrap();
+        assert_eq!(
+            non_utf8,
+            b"Bearer oxide-spoof-not-\x80-UTF8".as_ref(),
+        );
+        non_utf8.to_str().unwrap_err();
+
+        // Valid UTF-8, but not a valid HTTP header
+        make_header_value_raw(b"not valid \x08 HTTP header").unwrap_err();
+    }
 
     #[test]
     fn test_spoof_header_valid() {
