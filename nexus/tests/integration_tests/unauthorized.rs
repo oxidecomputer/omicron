@@ -7,6 +7,7 @@
 
 use dropshot::test_util::ClientTestContext;
 use dropshot::HttpErrorResponseBody;
+use headers::authorization::Credentials;
 use http::method::Method;
 use http::StatusCode;
 use lazy_static::lazy_static;
@@ -634,12 +635,15 @@ async fn verify_endpoint(
         // First, try a syntactically valid authn header for a non-existent
         // actor.
         info!(log, "test: bogus creds: bad actor"; "method" => ?method);
-        let bad_actor_authn_header = spoof::SPOOF_HEADER_BAD_ACTOR.clone();
+        let bad_actor_authn_header = &spoof::SPOOF_HEADER_BAD_ACTOR;
         let response =
             RequestBuilder::new(client, method.clone(), endpoint.url)
                 .body(body.as_ref())
                 .expect_status(Some(expected_status))
-                .header(&http::header::AUTHORIZATION, bad_actor_authn_header)
+                .header(
+                    &http::header::AUTHORIZATION,
+                    bad_actor_authn_header.0.encode(),
+                )
                 .execute()
                 .await
                 .unwrap();
@@ -647,12 +651,15 @@ async fn verify_endpoint(
 
         // Now try a syntactically invalid authn header.
         info!(log, "test: bogus creds: bad cred syntax"; "method" => ?method);
-        let bad_creds_authn_header = spoof::SPOOF_HEADER_BAD_CREDS.clone();
+        let bad_creds_authn_header = &spoof::SPOOF_HEADER_BAD_CREDS;
         let response =
             RequestBuilder::new(client, method.clone(), endpoint.url)
                 .body(body.as_ref())
                 .expect_status(Some(expected_status))
-                .header(&http::header::AUTHORIZATION, bad_creds_authn_header)
+                .header(
+                    &http::header::AUTHORIZATION,
+                    bad_creds_authn_header.0.encode(),
+                )
                 .execute()
                 .await
                 .unwrap();

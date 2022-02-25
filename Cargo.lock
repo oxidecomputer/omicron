@@ -1932,6 +1932,7 @@ dependencies = [
  "bytes",
  "chrono",
  "dropshot",
+ "headers",
  "http",
  "hyper",
  "omicron-common",

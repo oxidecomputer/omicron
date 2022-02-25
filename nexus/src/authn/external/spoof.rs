@@ -14,7 +14,6 @@ use anyhow::anyhow;
 use anyhow::Context;
 use async_trait::async_trait;
 use headers::authorization::{Authorization, Bearer};
-use headers::Header;
 use headers::HeaderMapExt;
 use lazy_static::lazy_static;
 use uuid::Uuid;
@@ -60,11 +59,11 @@ lazy_static! {
     static ref SPOOF_RESERVED_BAD_CREDS_ACTOR: Actor =
         Actor("22222222-2222-2222-2222-222222222222".parse().unwrap());
     /// Complete HTTP header value to trigger the "bad actor" error
-    pub static ref SPOOF_HEADER_BAD_ACTOR: http::header::HeaderValue =
-        make_header_value_raw(SPOOF_RESERVED_BAD_ACTOR.as_bytes()).unwrap();
+    pub static ref SPOOF_HEADER_BAD_ACTOR: Authorization<Bearer> =
+        make_header_value_str(SPOOF_RESERVED_BAD_ACTOR).unwrap();
     /// Complete HTTP header value to trigger the "bad creds" error
-    pub static ref SPOOF_HEADER_BAD_CREDS: http::header::HeaderValue =
-        make_header_value_raw(SPOOF_RESERVED_BAD_CREDS.as_bytes()).unwrap();
+    pub static ref SPOOF_HEADER_BAD_CREDS: Authorization<Bearer> =
+        make_header_value_str(SPOOF_RESERVED_BAD_CREDS).unwrap();
 }
 
 /// Implements a (test-only) authentication scheme where the client simply
@@ -90,27 +89,23 @@ where
         request: &http::Request<hyper::Body>,
     ) -> SchemeResult {
         let headers = request.headers();
-        authn_spoof(headers.get(&http::header::AUTHORIZATION))
+        authn_spoof(headers.typed_get().as_ref())
     }
 }
 
-fn authn_spoof(raw_value: Option<&http::HeaderValue>) -> SchemeResult {
-    let decode_result =
-        <Authorization<Bearer>>::decode(&mut raw_value.into_iter());
-    let bearer = match decode_result {
-        // This is `NotRequested` because there might be some other module that
-        // can parse this Authorization header.
-        Err(_) => return SchemeResult::NotRequested,
-        Ok(bearer) => bearer,
+fn authn_spoof(raw_value: Option<&Authorization<Bearer>>) -> SchemeResult {
+    let token = match raw_value {
+        None => return SchemeResult::NotRequested,
+        Some(bearer) => bearer.token(),
     };
 
-    let token = bearer.token();
     if !token.starts_with(SPOOF_PREFIX) {
+        // This is some other kind of bearer token.  Maybe another scheme knows
+        // how to deal with it.
         return SchemeResult::NotRequested;
     }
 
     let str_value = &token[SPOOF_PREFIX.len()..];
-
     if str_value == SPOOF_RESERVED_BAD_ACTOR {
         return SchemeResult::Failed(Reason::UnknownActor {
             actor: str_value.to_owned(),
@@ -132,12 +127,22 @@ fn authn_spoof(raw_value: Option<&http::HeaderValue>) -> SchemeResult {
 
 /// Returns a value of the `Authorization` header for this actor that will be
 /// accepted using this scheme
-pub fn make_header_value(id: Uuid) -> http::HeaderValue {
-    let mut map = http::HeaderMap::new();
-    let header =
-        Authorization::bearer(&format!("{}{}", SPOOF_PREFIX, id)).unwrap();
-    map.typed_insert(header);
-    map.remove(&http::header::AUTHORIZATION).unwrap()
+pub fn make_header_value(id: Uuid) -> Authorization<Bearer> {
+    make_header_value_str(&id.to_string()).unwrap()
+}
+
+/// Returns a value of the `Authorization` header with `str` in the place where
+/// the actor id goes
+///
+/// Unlike `make_header_value`, this can is not guaranteed to work, as the
+/// string may contain non-base64 characters.  Unlike `make_header_value_raw`,
+/// this returns a typed value and so cannot be used to make various kinds of
+/// invalid headers.
+fn make_header_value_str(
+    s: &str,
+) -> Result<Authorization<Bearer>, anyhow::Error> {
+    Authorization::bearer(&format!("{}{}", SPOOF_PREFIX, s))
+        .context("not a valid HTTP header value")
 }
 
 /// Returns a value of the `Authorization` header with `data` in the place where
@@ -162,8 +167,13 @@ mod test {
     use super::authn_spoof;
     use super::make_header_value;
     use super::make_header_value_raw;
+    use super::make_header_value_str;
     use crate::authn;
     use authn::Actor;
+    use headers::authorization::Bearer;
+    use headers::authorization::Credentials;
+    use headers::Authorization;
+    use headers::HeaderMapExt;
     use uuid::Uuid;
 
     #[test]
@@ -177,7 +187,7 @@ mod test {
         // convincing in demonstrating that that function does what we think it
         // does.
         assert_eq!(
-            header_value.to_str().unwrap(),
+            header_value.0.encode().to_str().unwrap(),
             "Bearer oxide-spoof-37b56e4f-8c60-453b-a37e-99be6efe8a89"
         );
     }
@@ -188,7 +198,7 @@ mod test {
         let test_uuid = test_uuid_str.parse::<Uuid>().unwrap();
         assert_eq!(
             make_header_value_raw(test_uuid_str.as_bytes()).unwrap(),
-            make_header_value(test_uuid)
+            make_header_value(test_uuid).0.encode(),
         );
 
         assert_eq!(
@@ -259,13 +269,13 @@ mod test {
     fn test_spoof_header_bad_uuids() {
         // These inputs are all legal HTTP headers but not valid values for our
         // "oxide-authn-spoof" header.
-        let bad_inputs: Vec<&[u8]> = vec![
-            b"garbage-in-garbage-can--makes-sense", // not a uuid
-            b"",                                    // empty value
+        let bad_inputs: Vec<&str> = vec![
+            "garbage-in-garbage-can--makes-sense", // not a uuid
+            "",                                    // empty value
         ];
 
         for input in &bad_inputs {
-            let test_header = make_header_value_raw(input).unwrap();
+            let test_header = make_header_value_str(input).unwrap();
             let result = authn_spoof(Some(&test_header));
             if let SchemeResult::Failed(error) = result {
                 assert!(error.to_string().starts_with(
@@ -274,8 +284,7 @@ mod test {
             } else {
                 panic!(
                     "unexpected result from bad input {:?}: {:?}",
-                    String::from_utf8_lossy(input),
-                    result
+                    input, result
                 );
             }
         }
@@ -293,8 +302,12 @@ mod test {
         // It currently returns `NotRequested`.  The specific code isn't
         // important so much as that we don't crash or succeed.
         let test_header = make_header_value_raw(b"foo\x80ar").unwrap();
+        let mut map = http::HeaderMap::new();
+        map.insert(&http::header::AUTHORIZATION, test_header);
+        let typed_header = map.typed_get::<Authorization<Bearer>>();
+        assert!(typed_header.is_none());
         assert!(matches!(
-            authn_spoof(Some(&test_header)),
+            authn_spoof(typed_header.as_ref()),
             SchemeResult::NotRequested
         ));
     }

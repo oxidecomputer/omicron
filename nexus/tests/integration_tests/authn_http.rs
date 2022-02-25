@@ -16,6 +16,7 @@ use dropshot::test_util::LogContext;
 use dropshot::test_util::TestContext;
 use dropshot::ApiDescription;
 use dropshot::HttpErrorResponseBody;
+use headers::authorization::Credentials;
 use http::header::HeaderValue;
 use omicron_nexus::authn::external::session_cookie;
 use omicron_nexus::authn::external::spoof;
@@ -60,7 +61,8 @@ async fn test_authn_spoof_allowed() {
 
     // Successful authentication
     let valid_uuid = "7f927c86-3371-4295-c34a-e3246a4b9c02";
-    let header = spoof::make_header_value(valid_uuid.parse().unwrap());
+    let header =
+        spoof::make_header_value(valid_uuid.parse().unwrap()).0.encode();
     assert_eq!(
         whoami_request(Some(header), None, &testctx).await.unwrap(),
         WhoamiResponse {
@@ -71,7 +73,7 @@ async fn test_authn_spoof_allowed() {
     );
 
     // Bad header value (malformed)
-    let header = spoof::make_header_value_raw("not-a-uuid".as_bytes()).unwrap();
+    let header = spoof::make_header_value_raw(b"not-a-uuid").unwrap();
     let (status_code, error) =
         whoami_request(Some(header), None, &testctx).await.unwrap_err();
     assert_eq!(error.error_code, None);
@@ -81,13 +83,13 @@ async fn test_authn_spoof_allowed() {
     assert_eq!(status_code, http::StatusCode::BAD_REQUEST);
 
     // Unknown actor
-    let header = spoof::SPOOF_HEADER_BAD_ACTOR.clone();
+    let header = spoof::SPOOF_HEADER_BAD_ACTOR.0.encode();
     let (status_code, error) =
         whoami_request(Some(header), None, &testctx).await.unwrap_err();
     assert_authn_failed(status_code, &error);
 
     // Bad credentials
-    let header = spoof::SPOOF_HEADER_BAD_CREDS.clone();
+    let header = spoof::SPOOF_HEADER_BAD_CREDS.0.encode();
     let (status_code, error) =
         whoami_request(Some(header), None, &testctx).await.unwrap_err();
     assert_authn_failed(status_code, &error);
@@ -188,12 +190,16 @@ async fn test_authn_spoof_unconfigured() {
 
     let values = [
         None,
-        Some(spoof::make_header_value(
-            "7f927c86-3371-4295-c34a-e3246a4b9c02".parse().unwrap(),
-        )),
+        Some(
+            spoof::make_header_value(
+                "7f927c86-3371-4295-c34a-e3246a4b9c02".parse().unwrap(),
+            )
+            .0
+            .encode(),
+        ),
         Some(spoof::make_header_value_raw(b"not-a-uuid").unwrap()),
-        Some(spoof::SPOOF_HEADER_BAD_ACTOR.clone()),
-        Some(spoof::SPOOF_HEADER_BAD_CREDS.clone()),
+        Some(spoof::SPOOF_HEADER_BAD_ACTOR.0.encode()),
+        Some(spoof::SPOOF_HEADER_BAD_CREDS.0.encode()),
     ];
 
     for v in values {
