@@ -436,7 +436,7 @@ impl<'a> NexusRequest<'a> {
         };
 
         self.request_builder = self.request_builder.header(
-            spoof::HTTP_HEADER_OXIDE_AUTHN_SPOOF,
+            &http::header::AUTHORIZATION,
             spoof::make_header_value(header_value),
         );
         self

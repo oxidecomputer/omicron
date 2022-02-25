@@ -20,7 +20,6 @@ use http::header::HeaderValue;
 use omicron_nexus::authn::external::session_cookie;
 use omicron_nexus::authn::external::spoof;
 use omicron_nexus::authn::external::spoof::HttpAuthnSpoof;
-use omicron_nexus::authn::external::spoof::HTTP_HEADER_OXIDE_AUTHN_SPOOF;
 use omicron_nexus::authn::external::spoof::SPOOF_SCHEME_NAME;
 use omicron_nexus::authn::external::HttpAuthnScheme;
 use std::collections::HashMap;
@@ -223,7 +222,7 @@ async fn whoami_request(
 
     if let Some(spoof_header_value) = spoof_header {
         builder =
-            builder.header(HTTP_HEADER_OXIDE_AUTHN_SPOOF, spoof_header_value);
+            builder.header(http::header::AUTHORIZATION, spoof_header_value);
     }
 
     if let Some(cookie_header_value) = cookie_header {

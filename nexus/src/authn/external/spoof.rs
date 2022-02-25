@@ -38,13 +38,12 @@ use uuid::Uuid;
 // _authentication_ information.  Similarly, the "Unauthorized" HTTP response
 // code usually describes an _authentication_ error.)
 //
-// **This mechanism trusts (without verification) that the client is whoever
-// they say they are.**
+// This mechanism trusts (without verification) that the client is whoever
+// they say they are.  That's true of any bearer token, but this one is
+// particularly dangerous because the tokens are not long-lived and not secret.
 
 pub const SPOOF_SCHEME_NAME: authn::SchemeName = authn::SchemeName("spoof");
 /// Header used for "spoof" authentication
-pub const HTTP_HEADER_OXIDE_AUTHN_SPOOF: &http::header::HeaderName =
-    &http::header::AUTHORIZATION;
 
 /// Magic value to produce a "no such actor" error
 const SPOOF_RESERVED_BAD_ACTOR: &str = "Jack-Donaghy";
@@ -69,10 +68,9 @@ lazy_static! {
 }
 
 /// Implements a (test-only) authentication scheme where the client simply
-/// provides the actor information in a custom header
-/// ([`HTTP_HEADER_OXIDE_AUTHN_SPOOF`]) and we always trust it.  This is useful
-/// for testing the rest of the authn facilities since we can very easily and
-/// precisely control its output.
+/// provides the actor information in a custom bearer token and we always trust
+/// it.  This is useful for testing the rest of the authn facilities since we
+/// can very easily and precisely control its output.
 #[derive(Debug)]
 pub struct HttpAuthnSpoof;
 
@@ -92,13 +90,13 @@ where
         request: &http::Request<hyper::Body>,
     ) -> SchemeResult {
         let headers = request.headers();
-        authn_spoof(headers.get(HTTP_HEADER_OXIDE_AUTHN_SPOOF))
+        authn_spoof(headers.get(&http::header::AUTHORIZATION))
     }
 }
 
 fn authn_spoof(raw_value: Option<&http::HeaderValue>) -> SchemeResult {
     let decode_result =
-        <Authorization<Bearer> as Header>::decode(&mut raw_value.into_iter());
+        <Authorization<Bearer>>::decode(&mut raw_value.into_iter());
     let bearer = match decode_result {
         // This is `NotRequested` because there might be some other module that
         // can parse this Authorization header.

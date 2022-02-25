@@ -24,7 +24,6 @@ use omicron_common::api::external::InstanceCpuCount;
 use omicron_common::api::external::Name;
 use omicron_nexus::authn;
 use omicron_nexus::authn::external::spoof;
-use omicron_nexus::authn::external::spoof::HTTP_HEADER_OXIDE_AUTHN_SPOOF;
 use omicron_nexus::external_api::params;
 
 // This test hits a list Nexus API endpoints using both unauthenticated and
@@ -640,7 +639,7 @@ async fn verify_endpoint(
             RequestBuilder::new(client, method.clone(), endpoint.url)
                 .body(body.as_ref())
                 .expect_status(Some(expected_status))
-                .header(HTTP_HEADER_OXIDE_AUTHN_SPOOF, bad_actor_authn_header)
+                .header(&http::header::AUTHORIZATION, bad_actor_authn_header)
                 .execute()
                 .await
                 .unwrap();
@@ -653,7 +652,7 @@ async fn verify_endpoint(
             RequestBuilder::new(client, method.clone(), endpoint.url)
                 .body(body.as_ref())
                 .expect_status(Some(expected_status))
-                .header(HTTP_HEADER_OXIDE_AUTHN_SPOOF, bad_creds_authn_header)
+                .header(&http::header::AUTHORIZATION, bad_creds_authn_header)
                 .execute()
                 .await
                 .unwrap();
