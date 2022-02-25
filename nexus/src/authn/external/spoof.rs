@@ -206,10 +206,7 @@ mod test {
 
         // Perhaps surprisingly, header values do not need to be valid UTF-8
         let non_utf8 = make_header_value_raw(b"not-\x80-UTF8").unwrap();
-        assert_eq!(
-            non_utf8,
-            b"Bearer oxide-spoof-not-\x80-UTF8".as_ref(),
-        );
+        assert_eq!(non_utf8, b"Bearer oxide-spoof-not-\x80-UTF8".as_ref(),);
         non_utf8.to_str().unwrap_err();
 
         // Valid UTF-8, but not a valid HTTP header
