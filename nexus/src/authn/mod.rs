@@ -63,6 +63,7 @@ impl Context {
     }
 
     /// Returns the authenticated actor if present, Unauthenticated error otherwise
+    // TODO this should maybe return omicron_common::api::external::Error
     pub fn actor_required(&self) -> Result<&Actor, dropshot::HttpError> {
         match &self.kind {
             Kind::Authenticated(Details { actor }) => Ok(actor),
@@ -71,6 +72,19 @@ impl Context {
                     internal_message: "Actor required".to_string(),
                 },
             )),
+        }
+    }
+
+    pub fn silo_required(
+        &self,
+    ) -> Result<Uuid, omicron_common::api::external::Error> {
+        match self.actor_required() {
+            Ok(actor) => Ok(actor.silo_id),
+            Err(_) => {
+                Err(omicron_common::api::external::Error::Unauthenticated {
+                    internal_message: "Actor required".to_string(),
+                })
+            }
         }
     }
 
@@ -88,23 +102,31 @@ impl Context {
 
     /// Returns an authenticated context for handling internal API contexts
     pub fn internal_api() -> Context {
-        Context::context_for_actor(USER_INTERNAL_API.id)
+        Context::context_for_actor(
+            USER_INTERNAL_API.id,
+            USER_INTERNAL_API.silo_id,
+        )
     }
 
     /// Returns an authenticated context for saga recovery
     pub fn internal_saga_recovery() -> Context {
-        Context::context_for_actor(USER_SAGA_RECOVERY.id)
+        Context::context_for_actor(
+            USER_SAGA_RECOVERY.id,
+            USER_SAGA_RECOVERY.silo_id,
+        )
     }
 
     /// Returns an authenticated context for Nexus-startup database
     /// initialization
     pub fn internal_db_init() -> Context {
-        Context::context_for_actor(USER_DB_INIT.id)
+        Context::context_for_actor(USER_DB_INIT.id, USER_DB_INIT.silo_id)
     }
 
-    fn context_for_actor(actor_id: Uuid) -> Context {
+    fn context_for_actor(actor_id: Uuid, silo_id: Uuid) -> Context {
         Context {
-            kind: Kind::Authenticated(Details { actor: Actor(actor_id) }),
+            kind: Kind::Authenticated(Details {
+                actor: Actor { id: actor_id, silo_id: silo_id },
+            }),
             schemes_tried: Vec::new(),
         }
     }
@@ -118,7 +140,10 @@ impl Context {
     ///
     /// This is used for testing.
     pub fn test_context_for_actor(actor_id: Uuid) -> Context {
-        Context::context_for_actor(actor_id)
+        Context::context_for_actor(
+            actor_id,
+            *crate::db::fixed_data::silo_builtin::SILO_ID,
+        )
     }
 }
 
@@ -141,19 +166,19 @@ mod test {
         // The privileges are (or will be) verified in authz tests.
         let authn = Context::internal_test_user();
         let actor = authn.actor().unwrap();
-        assert_eq!(actor.0, USER_TEST_PRIVILEGED.id);
+        assert_eq!(actor.id, USER_TEST_PRIVILEGED.id);
 
         let authn = Context::internal_db_init();
         let actor = authn.actor().unwrap();
-        assert_eq!(actor.0, USER_DB_INIT.id);
+        assert_eq!(actor.id, USER_DB_INIT.id);
 
         let authn = Context::internal_saga_recovery();
         let actor = authn.actor().unwrap();
-        assert_eq!(actor.0, USER_SAGA_RECOVERY.id);
+        assert_eq!(actor.id, USER_SAGA_RECOVERY.id);
 
         let authn = Context::internal_api();
         let actor = authn.actor().unwrap();
-        assert_eq!(actor.0, USER_INTERNAL_API.id);
+        assert_eq!(actor.id, USER_INTERNAL_API.id);
     }
 }
 
@@ -179,7 +204,10 @@ pub struct Details {
 
 /// Who is performing an operation
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
-pub struct Actor(pub Uuid);
+pub struct Actor {
+    pub id: Uuid,
+    pub silo_id: Uuid,
+}
 
 /// Label for a particular authentication scheme (used in log messages and
 /// internal error messages)

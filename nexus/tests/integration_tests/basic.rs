@@ -55,118 +55,137 @@ async fn test_basic_failures(cptestctx: &ControlPlaneTestContext) {
 
     /*
      * Error case: GET /organizations/test-org/projects/nonexistent (a possible
-     * value that does not exist inside a collection that does exist)
-     */
+     * value that does not exist inside a collection that does exist) from an
+     * unauthorized user results in a 401.
+
+     // XXX uncomment when this endpoint is protected by authn!
+
     let error = client
         .make_request(
             Method::GET,
             "/organizations/test-org/projects/nonexistent",
             None as Option<()>,
-            StatusCode::NOT_FOUND,
+            StatusCode::UNAUTHORIZED,
         )
         .await
         .expect_err("expected error");
-    assert_eq!("not found: project with name \"nonexistent\"", error.message);
-
-    /*
-     * Error case: GET /organizations/test-org/projects/-invalid-name
-     * TODO-correctness is 400 the right error code here or is 404 more
-     * appropriate?
+    assert_eq!("credentials missing or invalid", error.message);
      */
-    let error = client
-        .make_request(
-            Method::GET,
-            "/organizations/test-org/projects/-invalid-name",
-            None as Option<()>,
-            StatusCode::BAD_REQUEST,
-        )
-        .await
-        .expect_err("expected error");
-    assert_eq!(
-        "bad parameter in URL path: name must begin with an ASCII lowercase \
-         character",
-        error.message
-    );
 
-    /* Error case: PUT /organizations/test-org/projects */
-    let error = client
-        .make_request(
-            Method::PUT,
-            "/organizations/test-org/projects",
-            None as Option<()>,
-            StatusCode::METHOD_NOT_ALLOWED,
-        )
-        .await
-        .expect_err("expected error");
-    assert_eq!("Method Not Allowed", error.message);
+    struct TestCase<'a> {
+        method: http::Method,
+        uri: &'a str,
+        expected_code: http::StatusCode,
+        expected_error: &'a str,
+        body: Option<String>,
+    }
 
-    /* Error case: DELETE /organizations/test-org/projects */
-    let error = client
-        .make_request(
-            Method::DELETE,
-            "/organizations/test-org/projects",
-            None as Option<()>,
-            StatusCode::METHOD_NOT_ALLOWED,
-        )
-        .await
-        .expect_err("expected error");
-    assert_eq!("Method Not Allowed", error.message);
+    let test_cases = vec![
+        /*
+         * Error case: GET /organizations/test-org/projects/nonexistent (a
+         * possible value that does not exist inside a collection that does
+         * exist) from an authorized user results in a 404.
+         */
+        TestCase {
+            method: Method::GET,
+            uri: "/organizations/test-org/projects/nonexistent",
+            expected_code: StatusCode::NOT_FOUND,
+            expected_error: "not found: project with name \"nonexistent\"",
+            body: None,
+        },
+        /*
+         * Error case: GET /organizations/test-org/projects/-invalid-name
+         * TODO-correctness is 400 the right error code here or is 404 more
+         * appropriate?
+         */
+        TestCase {
+            method: Method::GET,
+            uri: "/organizations/test-org/projects/-invalid-name",
+            expected_code: StatusCode::BAD_REQUEST,
+            expected_error: "bad parameter in URL path: name must begin with \
+            an ASCII lowercase character",
+            body: None,
+        },
+        /* Error case: PUT /organizations/test-org/projects */
+        TestCase {
+            method: Method::PUT,
+            uri: "/organizations/test-org/projects",
+            expected_code: StatusCode::METHOD_NOT_ALLOWED,
+            expected_error: "Method Not Allowed",
+            body: None,
+        },
+        /* Error case: DELETE /organizations/test-org/projects */
+        TestCase {
+            method: Method::DELETE,
+            uri: "/organizations/test-org/projects",
+            expected_code: StatusCode::METHOD_NOT_ALLOWED,
+            expected_error: "Method Not Allowed",
+            body: None,
+        },
+        /* Error case: list instances in a nonexistent project. */
+        TestCase {
+            method: Method::GET,
+            uri: "/organizations/test-org/projects/nonexistent/instances",
+            expected_code: StatusCode::NOT_FOUND,
+            expected_error: "not found: project with name \"nonexistent\"",
+            body: Some("".into()),
+        },
+        /* Error case: fetch an instance in a nonexistent project. */
+        TestCase {
+            method: Method::GET,
+            uri: "/organizations/test-org/projects/nonexistent/instances/my-instance",
+            expected_code: StatusCode::NOT_FOUND,
+            expected_error: "not found: project with name \"nonexistent\"",
+            body: Some("".into()),
+        },
+        /* Error case: fetch an instance with an invalid name. */
+        TestCase {
+            method: Method::GET,
+            uri: "/organizations/test-org/projects/nonexistent/instances/my_instance",
+            expected_code: StatusCode::BAD_REQUEST,
+            expected_error: "bad parameter in URL path: name contains \
+                invalid character: \"_\" (allowed characters are lowercase \
+                ASCII, digits, and \"-\")",
+            body: Some("".into()),
+        },
+        /* Error case: delete an instance with an invalid name. */
+        TestCase {
+            method: Method::DELETE,
+            uri: "/organizations/test-org/projects/nonexistent/instances/my_instance",
+            expected_code: StatusCode::BAD_REQUEST,
+            expected_error: "bad parameter in URL path: name contains \
+                invalid character: \"_\" (allowed characters are lowercase \
+                ASCII, digits, and \"-\")",
+            body: Some("".into()),
+        },
+    ];
 
-    /* Error case: list instances in a nonexistent project. */
-    let error = client
-        .make_request_with_body(
-            Method::GET,
-            "/organizations/test-org/projects/nonexistent/instances",
-            "".into(),
-            StatusCode::NOT_FOUND,
-        )
+    for test_case in test_cases {
+        let error = if let Some(body) = test_case.body {
+            NexusRequest::expect_failure_with_body(
+                client,
+                test_case.expected_code,
+                test_case.method,
+                test_case.uri,
+                &body,
+            )
+        } else {
+            NexusRequest::expect_failure(
+                client,
+                test_case.expected_code,
+                test_case.method,
+                test_case.uri,
+            )
+        }
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
         .await
-        .expect_err("expected error");
-    assert_eq!("not found: project with name \"nonexistent\"", error.message);
+        .unwrap()
+        .parsed_body::<dropshot::HttpErrorResponseBody>()
+        .unwrap();
 
-    /* Error case: fetch an instance in a nonexistent project. */
-    let error = client
-        .make_request_with_body(
-            Method::GET,
-            "/organizations/test-org/projects/nonexistent/instances/my-instance",
-            "".into(),
-            StatusCode::NOT_FOUND,
-        )
-        .await
-        .expect_err("expected error");
-    assert_eq!("not found: project with name \"nonexistent\"", error.message);
-
-    /* Error case: fetch an instance with an invalid name. */
-    let error = client
-        .make_request_with_body(
-            Method::GET,
-            "/organizations/test-org/projects/nonexistent/instances/my_instance",
-            "".into(),
-            StatusCode::BAD_REQUEST,
-        )
-        .await
-        .expect_err("expected error");
-    assert_eq!(
-        "bad parameter in URL path: name contains invalid character: \"_\" \
-         (allowed characters are lowercase ASCII, digits, and \"-\")",
-        error.message
-    );
-
-    /* Error case: delete an instance with an invalid name. */
-    let error = client
-        .make_request_with_body(
-            Method::DELETE,
-            "/organizations/test-org/projects/nonexistent/instances/my_instance",
-            "".into(),
-            StatusCode::BAD_REQUEST,
-        )
-        .await
-        .expect_err("expected error");
-    assert_eq!(
-        "bad parameter in URL path: name contains invalid character: \"_\" \
-         (allowed characters are lowercase ASCII, digits, and \"-\")",
-        error.message
-    );
+        assert_eq!(test_case.expected_error, error.message);
+    }
 }
 
 #[nexus_test]

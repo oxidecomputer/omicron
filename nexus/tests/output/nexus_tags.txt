@@ -81,6 +81,13 @@ OPERATION ID                             URL PATH
 sagas_get                                /sagas
 sagas_get_saga                           /sagas/{saga_id}
 
+API operations found with tag "silos"
+OPERATION ID                             URL PATH
+silos_delete_silo                        /silos/{silo_name}
+silos_get                                /silos
+silos_get_silo                           /silos/{silo_name}
+silos_post                               /silos
+
 API operations found with tag "sleds"
 OPERATION ID                             URL PATH
 hardware_sleds_get                       /hardware/sleds

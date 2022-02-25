@@ -105,16 +105,19 @@ async fn test_authn_session_cookie() {
     > = vec![Box::new(session_cookie::HttpAuthnSessionCookie)];
     let valid_session = FakeSession {
         user_id: Uuid::new_v4(),
+        silo_id: Uuid::new_v4(),
         time_last_used: Utc::now() - Duration::seconds(5),
         time_created: Utc::now() - Duration::seconds(5),
     };
     let idle_expired_session = FakeSession {
         user_id: Uuid::new_v4(),
+        silo_id: Uuid::new_v4(),
         time_last_used: Utc::now() - Duration::hours(2),
         time_created: Utc::now() - Duration::hours(3),
     };
     let abs_expired_session = FakeSession {
         user_id: Uuid::new_v4(),
+        silo_id: Uuid::new_v4(),
         time_last_used: Utc::now(),
         time_created: Utc::now() - Duration::hours(10),
     };
@@ -308,6 +311,7 @@ struct WhoamiServerState {
 #[derive(Clone, Copy)]
 struct FakeSession {
     user_id: Uuid,
+    silo_id: Uuid,
     time_created: DateTime<Utc>,
     time_last_used: DateTime<Utc>,
 }
@@ -315,6 +319,9 @@ struct FakeSession {
 impl session_cookie::Session for FakeSession {
     fn user_id(&self) -> Uuid {
         self.user_id
+    }
+    fn silo_id(&self) -> Uuid {
+        self.silo_id
     }
     fn time_created(&self) -> DateTime<Utc> {
         self.time_created
@@ -380,7 +387,7 @@ async fn whoami_get(
 ) -> Result<dropshot::HttpResponseOk<WhoamiResponse>, dropshot::HttpError> {
     let whoami_state = rqctx.context();
     let authn = whoami_state.authn.authn_request(&rqctx).await?;
-    let actor = authn.actor().map(|a| a.0.to_string());
+    let actor = authn.actor().map(|a| a.id.to_string());
     let authenticated = actor.is_some();
     let schemes_tried =
         authn.schemes_tried().iter().map(|s| s.to_string()).collect();

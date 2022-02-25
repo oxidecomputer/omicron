@@ -79,8 +79,37 @@ table! {
 }
 
 table! {
+    silo (id) {
+        id -> Uuid,
+        name -> Text,
+        description -> Text,
+        discoverable -> Bool,
+        time_created -> Timestamptz,
+        time_modified -> Timestamptz,
+        time_deleted -> Nullable<Timestamptz>,
+        rcgen -> Int8,
+    }
+}
+
+table! {
+    silo_user (id) {
+        id -> Uuid,
+        silo_id -> Uuid,
+
+        name -> Text,
+
+        time_created -> Timestamptz,
+        time_modified -> Timestamptz,
+        time_deleted -> Nullable<Timestamptz>,
+
+        internal_user_id -> Uuid,
+    }
+}
+
+table! {
     organization (id) {
         id -> Uuid,
+        silo_id -> Uuid,
         name -> Text,
         description -> Text,
         time_created -> Timestamptz,

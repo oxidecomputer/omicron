@@ -14,6 +14,7 @@ use crate::db;
 use crate::db::identity::{Asset, Resource};
 use crate::db::model::DatasetKind;
 use crate::db::model::Name;
+use crate::db::model::SiloUser;
 use crate::db::subnet_allocation::SubnetError;
 use crate::defaults;
 use crate::external_api::params;
@@ -495,6 +496,51 @@ impl Nexus {
     }
 
     /*
+     * Silos
+     */
+
+    pub async fn silo_create(
+        &self,
+        opctx: &OpContext,
+        new_silo_params: params::SiloCreate,
+    ) -> CreateResult<db::model::Silo> {
+        let silo = db::model::Silo::new(new_silo_params);
+        self.db_datastore.silo_create(opctx, silo).await
+    }
+
+    pub async fn silo_fetch(
+        &self,
+        opctx: &OpContext,
+        name: &Name,
+    ) -> LookupResult<db::model::Silo> {
+        self.db_datastore.silo_fetch(opctx, name).await
+    }
+
+    pub async fn silos_list_by_name(
+        &self,
+        opctx: &OpContext,
+        pagparams: &DataPageParams<'_, Name>,
+    ) -> ListResultVec<db::model::Silo> {
+        self.db_datastore.silos_list_by_name(opctx, pagparams).await
+    }
+
+    pub async fn silos_list_by_id(
+        &self,
+        opctx: &OpContext,
+        pagparams: &DataPageParams<'_, Uuid>,
+    ) -> ListResultVec<db::model::Silo> {
+        self.db_datastore.silos_list_by_id(opctx, pagparams).await
+    }
+
+    pub async fn silo_delete(
+        &self,
+        opctx: &OpContext,
+        name: &Name,
+    ) -> DeleteResult {
+        self.db_datastore.silo_delete(opctx, name).await
+    }
+
+    /*
      * Organizations
      */
 
@@ -503,7 +549,9 @@ impl Nexus {
         opctx: &OpContext,
         new_organization: &params::OrganizationCreate,
     ) -> CreateResult<db::model::Organization> {
-        let db_org = db::model::Organization::new(new_organization.clone());
+        let silo_id = opctx.authn.silo_required()?;
+        let db_org =
+            db::model::Organization::new(new_organization.clone(), silo_id);
         self.db_datastore.organization_create(opctx, db_org).await
     }
 
@@ -2625,7 +2673,7 @@ impl Nexus {
     pub async fn session_fetch(
         &self,
         token: String,
-    ) -> LookupResult<db::model::ConsoleSession> {
+    ) -> LookupResult<db::model::ConsoleSessionWithSiloId> {
         self.db_datastore.session_fetch(token).await
     }
 
@@ -2642,7 +2690,7 @@ impl Nexus {
     pub async fn session_update_last_used(
         &self,
         token: String,
-    ) -> UpdateResult<db::model::ConsoleSession> {
+    ) -> UpdateResult<db::model::ConsoleSessionWithSiloId> {
         Ok(self.db_datastore.session_update_last_used(token).await?)
     }
 
@@ -2877,6 +2925,32 @@ impl Nexus {
             ))
         })?;
         Ok(body)
+    }
+
+    pub async fn get_silo_id_from_silo_user_id(
+        &self,
+        silo_user_id: Uuid,
+    ) -> LookupResult<Uuid> {
+        self.db_datastore.get_silo_id_from_silo_user_id(silo_user_id).await
+    }
+
+    pub async fn get_silo_id_from_internal_user_id(
+        &self,
+        user_id: Uuid,
+    ) -> LookupResult<Uuid> {
+        self.db_datastore.get_silo_id_from_internal_user_id(user_id).await
+    }
+
+    pub async fn silo_user_create(
+        &self,
+        silo_id: Uuid,
+        silo_user_id: Uuid,
+        name: String,
+        internal_user_id: Uuid,
+    ) -> CreateResult<SiloUser> {
+        let silo_user =
+            SiloUser::new(silo_id, silo_user_id, name, internal_user_id);
+        Ok(self.db_datastore.silo_user_create(silo_user).await?)
     }
 }
 

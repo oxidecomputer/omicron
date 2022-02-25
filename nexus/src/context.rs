@@ -11,9 +11,8 @@ use super::config;
 use super::db;
 use super::Nexus;
 use crate::authn::external::session_cookie::{Session, SessionStore};
-use crate::authn::Actor;
 use crate::authz::AuthorizedResource;
-use crate::db::model::ConsoleSession;
+use crate::db::model::ConsoleSessionWithSiloId;
 use crate::db::DataStore;
 use crate::saga_interface::SagaContext;
 use async_trait::async_trait;
@@ -280,7 +279,8 @@ impl OpContext {
     ) -> (slog::Logger, BTreeMap<String, String>) {
         let mut metadata = BTreeMap::new();
 
-        let log = if let Some(Actor(actor_id)) = authn.actor() {
+        let log = if let Some(actor) = authn.actor() {
+            let actor_id = actor.id;
             metadata
                 .insert(String::from("authenticated"), String::from("true"));
             metadata.insert(String::from("actor"), actor_id.to_string());
@@ -501,7 +501,7 @@ mod test {
 
 #[async_trait]
 impl SessionStore for Arc<ServerContext> {
-    type SessionModel = ConsoleSession;
+    type SessionModel = ConsoleSessionWithSiloId;
 
     async fn session_fetch(&self, token: String) -> Option<Self::SessionModel> {
         self.nexus.session_fetch(token).await.ok()
@@ -527,14 +527,17 @@ impl SessionStore for Arc<ServerContext> {
     }
 }
 
-impl Session for ConsoleSession {
+impl Session for ConsoleSessionWithSiloId {
     fn user_id(&self) -> Uuid {
-        self.user_id
+        self.console_session.user_id
+    }
+    fn silo_id(&self) -> Uuid {
+        self.silo_id
     }
     fn time_last_used(&self) -> DateTime<Utc> {
-        self.time_last_used
+        self.console_session.time_last_used
     }
     fn time_created(&self) -> DateTime<Utc> {
-        self.time_created
+        self.console_session.time_created
     }
 }

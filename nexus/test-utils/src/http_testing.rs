@@ -11,6 +11,7 @@ use dropshot::test_util::ClientTestContext;
 use dropshot::ResultsPage;
 use headers::authorization::Credentials;
 use omicron_nexus::authn::external::spoof;
+use omicron_nexus::db::model::ConsoleSession;
 use std::convert::TryInto;
 use std::fmt::Debug;
 
@@ -380,6 +381,7 @@ where
 }
 
 /// Represents a response from an HTTP server
+#[derive(Debug)]
 pub struct TestResponse {
     pub status: http::StatusCode,
     pub headers: http::HeaderMap,
@@ -439,6 +441,14 @@ impl<'a> NexusRequest<'a> {
         self.request_builder = self.request_builder.header(
             &http::header::AUTHORIZATION,
             spoof::make_header_value(header_value).0.encode(),
+        );
+        self
+    }
+
+    pub fn authn_with_session(mut self, session: &ConsoleSession) -> Self {
+        self.request_builder = self.request_builder.header(
+            &http::header::COOKIE,
+            format!("session={}", session.token),
         );
         self
     }
@@ -503,6 +513,20 @@ impl<'a> NexusRequest<'a> {
     ) -> Self {
         NexusRequest::new(
             RequestBuilder::new(testctx, method, uri)
+                .expect_status(Some(expected_status)),
+        )
+    }
+
+    pub fn expect_failure_with_body<B: serde::Serialize>(
+        testctx: &'a ClientTestContext,
+        expected_status: http::StatusCode,
+        method: http::Method,
+        uri: &str,
+        body: &B,
+    ) -> Self {
+        NexusRequest::new(
+            RequestBuilder::new(testctx, method, uri)
+                .body(Some(body))
                 .expect_status(Some(expected_status)),
         )
     }

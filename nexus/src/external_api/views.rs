@@ -19,6 +19,27 @@ use std::net::SocketAddr;
 use uuid::Uuid;
 
 /*
+ * SILOS
+ */
+
+/**
+ * Client view of a ['Silo']
+ */
+#[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct Silo {
+    #[serde(flatten)]
+    pub identity: IdentityMetadata,
+
+    pub discoverable: bool,
+}
+
+impl Into<Silo> for model::Silo {
+    fn into(self) -> Silo {
+        Silo { identity: self.identity(), discoverable: self.discoverable }
+    }
+}
+
+/*
  * ORGANIZATIONS
  */
 
@@ -29,6 +50,7 @@ use uuid::Uuid;
 pub struct Organization {
     #[serde(flatten)]
     pub identity: IdentityMetadata,
+    // Important: Silo ID does not get presented to user
 }
 
 impl Into<Organization> for model::Organization {
@@ -205,7 +227,7 @@ pub struct SessionUser {
 
 impl Into<SessionUser> for authn::Actor {
     fn into(self) -> SessionUser {
-        SessionUser { id: self.0 }
+        SessionUser { id: self.id }
     }
 }
 

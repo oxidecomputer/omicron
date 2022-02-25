@@ -45,13 +45,16 @@ async fn test_organizations(cptestctx: &ControlPlaneTestContext) {
     assert_eq!(organization.identity.name, o2_name);
 
     // Verify requesting a non-existent organization fails
-    client
-        .make_request_error(
-            Method::GET,
-            "/organizations/fake-org",
-            StatusCode::NOT_FOUND,
-        )
-        .await;
+    NexusRequest::expect_failure(
+        &client,
+        StatusCode::NOT_FOUND,
+        Method::GET,
+        &"/organizations/fake-org",
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .expect("failed to make request");
 
     // Verify GET /organizations works
     let organizations =

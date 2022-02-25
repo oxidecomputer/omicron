@@ -18,8 +18,9 @@ use omicron_common::api::external::Instance;
 use omicron_common::api::external::InstanceCpuCount;
 use omicron_common::api::external::VpcRouter;
 use omicron_nexus::crucible_agent_client::types::State as RegionState;
+use omicron_nexus::db::model::ConsoleSession;
 use omicron_nexus::external_api::params;
-use omicron_nexus::external_api::views::{Organization, Project, Vpc};
+use omicron_nexus::external_api::views::{Organization, Project, Silo, Vpc};
 use omicron_sled_agent::sim::SledAgent;
 use std::sync::Arc;
 use uuid::Uuid;
@@ -33,6 +34,23 @@ where
 {
     NexusRequest::object_get(client, path)
         .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .expect("failed to make request")
+        .parsed_body()
+        .unwrap()
+}
+
+pub async fn objects_list_page_authz_with_session<ItemType>(
+    client: &ClientTestContext,
+    path: &str,
+    session: &ConsoleSession,
+) -> dropshot::ResultsPage<ItemType>
+where
+    ItemType: serde::de::DeserializeOwned,
+{
+    NexusRequest::object_get(client, path)
+        .authn_with_session(session)
         .execute()
         .await
         .expect("failed to make request")
@@ -56,6 +74,25 @@ where
         .expect("failed to make \"create\" request")
         .parsed_body()
         .unwrap()
+}
+
+pub async fn create_silo(
+    client: &ClientTestContext,
+    silo_name: &str,
+    discoverable: bool,
+) -> Silo {
+    object_create(
+        client,
+        "/silos",
+        &params::SiloCreate {
+            identity: IdentityMetadataCreateParams {
+                name: silo_name.parse().unwrap(),
+                description: "a silo".to_string(),
+            },
+            discoverable,
+        },
+    )
+    .await
 }
 
 pub async fn create_organization(

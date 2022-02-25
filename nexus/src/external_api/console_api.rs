@@ -67,10 +67,18 @@ pub async fn spoof_login(
             .body("".into())?); // TODO: failed login response body?
     }
 
-    let session = nexus
-        // TODO: obviously
-        .session_create(user_id.unwrap())
-        .await?;
+    let user_id = user_id.unwrap();
+
+    // look up silo id, make sure user is legal
+    if let Err(e) = nexus.get_silo_id_from_internal_user_id(user_id).await {
+        return Err(HttpError::for_internal_error(format!(
+            "no silo id found! {}",
+            e
+        )));
+    }
+
+    let session = nexus.session_create(user_id).await?;
+
     Ok(Response::builder()
         .status(StatusCode::OK)
         .header(

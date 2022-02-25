@@ -18,6 +18,7 @@ use uuid::Uuid;
 
 pub trait Session {
     fn user_id(&self) -> Uuid;
+    fn silo_id(&self) -> Uuid;
     fn time_last_used(&self) -> DateTime<Utc>;
     fn time_created(&self) -> DateTime<Utc>;
 }
@@ -104,7 +105,7 @@ where
             }
         };
 
-        let actor = Actor(session.user_id());
+        let actor = Actor { id: session.user_id(), silo_id: session.silo_id() };
 
         // if the session has gone unused for longer than idle_timeout, it is expired
         let now = Utc::now();
@@ -194,6 +195,9 @@ mod test {
 
     impl Session for FakeSession {
         fn user_id(&self) -> Uuid {
+            Uuid::new_v4()
+        }
+        fn silo_id(&self) -> Uuid {
             Uuid::new_v4()
         }
         fn time_created(&self) -> DateTime<Utc> {
