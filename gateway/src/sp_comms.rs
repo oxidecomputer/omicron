@@ -48,6 +48,10 @@ pub enum StartupError {
 pub enum Error {
     #[error("error sending to UDP address {addr}: {err}")]
     UdpSend { addr: SocketAddr, err: io::Error },
+    #[error(
+        "SP sent a bogus response type (got `{got}`; expected `{expected}`)"
+    )]
+    BogusResponseType { got: &'static str, expected: &'static str },
     #[error("timeout")]
     Timeout(#[from] tokio::time::error::Elapsed),
     #[error("no known SP at {0}")]
@@ -59,6 +63,40 @@ impl From<Error> for HttpError {
         // none of `Error`'s cases are caused by the client; they're all
         // internal to gateway <-> SP failures
         HttpError::for_internal_error(err.to_string())
+    }
+}
+
+impl Error {
+    fn bogus_response_type(
+        kind: &ResponseKind,
+        expected: &'static str,
+    ) -> Self {
+        Self::BogusResponseType { got: response_kind_name(kind), expected }
+    }
+}
+
+// helper constants mapping SP response kinds to stringy names for error
+// messages
+mod response_kind_names {
+    pub(super) const PONG: &str = "pong";
+    pub(super) const IGNITION_STATE: &str = "ignition_state";
+    pub(super) const IGNITION_COMMAND_ACK: &str = "ignition_command_ack";
+    pub(super) const SERIAL_CONSOLE_WRITE_ACK: &str =
+        "serial_console_write_ack";
+    pub(super) const ERROR: &str = "error";
+}
+
+fn response_kind_name(kind: &ResponseKind) -> &'static str {
+    match kind {
+        ResponseKind::Pong => response_kind_names::PONG,
+        ResponseKind::IgnitionState(_) => response_kind_names::IGNITION_STATE,
+        ResponseKind::IgnitionCommandAck => {
+            response_kind_names::IGNITION_COMMAND_ACK
+        }
+        ResponseKind::SerialConsoleWriteAck => {
+            response_kind_names::SERIAL_CONSOLE_WRITE_ACK
+        }
+        ResponseKind::Error(_) => response_kind_names::ERROR,
     }
 }
 
@@ -164,7 +202,12 @@ impl SpCommunicator {
             let request = RequestKind::SerialConsoleWrite(packet);
             match self.request_response(sp, request).await? {
                 ResponseKind::SerialConsoleWriteAck => (),
-                other => panic!("bogus response kind {:?}", other),
+                other => {
+                    return Err(Error::bogus_response_type(
+                        &other,
+                        response_kind_names::SERIAL_CONSOLE_WRITE_ACK,
+                    ))
+                }
             }
         }
 
@@ -196,7 +239,12 @@ impl SpCommunicator {
 
         match self.request_response(controller, request).await? {
             ResponseKind::IgnitionState(state) => Ok(state),
-            other => panic!("bogus response kind {:?}", other),
+            other => {
+                return Err(Error::bogus_response_type(
+                    &other,
+                    response_kind_names::IGNITION_STATE,
+                ))
+            }
         }
     }
 
