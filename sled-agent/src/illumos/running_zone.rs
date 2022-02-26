@@ -75,9 +75,7 @@ impl RunningZone {
     /// Boots a new zone.
     ///
     /// Note that the zone must already be configured to be booted.
-    pub async fn boot(
-        zone: InstalledZone,
-    ) -> Result<Self, Error> {
+    pub async fn boot(zone: InstalledZone) -> Result<Self, Error> {
         // Boot the zone.
         info!(zone.log, "Zone booting");
 
@@ -91,9 +89,7 @@ impl RunningZone {
             .await
             .map_err(|_| Error::Timeout(fmri.to_string()))?;
 
-        Ok(RunningZone {
-            inner: zone,
-        })
+        Ok(RunningZone { inner: zone })
     }
 
     pub async fn ensure_address(
@@ -103,12 +99,10 @@ impl RunningZone {
         info!(self.inner.log, "Adding address: {:?}", addrtype);
         let name = match addrtype {
             AddressRequest::Dhcp => "omicron",
-            AddressRequest::Static(net) => {
-                match net.ip() {
-                    std::net::IpAddr::V4(_) => "omicron4",
-                    std::net::IpAddr::V6(_) => "omicron6",
-                }
-            }
+            AddressRequest::Static(net) => match net.ip() {
+                std::net::IpAddr::V4(_) => "omicron4",
+                std::net::IpAddr::V6(_) => "omicron6",
+            },
         };
         let addrobj = AddrObject::new(self.inner.control_vnic.name(), name);
         Zones::ensure_address(Some(&self.inner.name), &addrobj, addrtype)?;

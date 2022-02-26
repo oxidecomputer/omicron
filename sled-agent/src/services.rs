@@ -99,9 +99,11 @@ impl ServiceManager {
         for service in services {
             // Before we bother allocating anything for this request, check if
             // this service has already been created.
-            if existing_zones.iter().find(|z| {
-                z.name() == service.name
-            }).is_some() {
+            if existing_zones
+                .iter()
+                .find(|z| z.name() == service.name)
+                .is_some()
+            {
                 info!(self.log, "Service {} already exists", service.name);
                 continue;
             } else {
@@ -119,16 +121,17 @@ impl ServiceManager {
             )
             .await?;
 
-            let running_zone = RunningZone::boot(
-                installed_zone,
-            )
-            .await?;
+            let running_zone = RunningZone::boot(installed_zone).await?;
 
             for addr in &service.addresses {
                 info!(self.log, "Ensuring address {} exists", addr.to_string());
                 let addr_request = AddressRequest::new_static(addr.ip(), None);
                 running_zone.ensure_address(addr_request).await?;
-                info!(self.log, "Ensuring address {} exists - OK", addr.to_string());
+                info!(
+                    self.log,
+                    "Ensuring address {} exists - OK",
+                    addr.to_string()
+                );
             }
 
             running_zone.run_cmd(&[

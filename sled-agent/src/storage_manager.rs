@@ -320,12 +320,8 @@ async fn ensure_running_zone(
     let address_request =
         AddressRequest::new_static(dataset_info.address.ip(), None);
 
-    match RunningZone::get(
-        log,
-        &dataset_info.zone_prefix(),
-        address_request,
-    )
-    .await
+    match RunningZone::get(log, &dataset_info.zone_prefix(), address_request)
+        .await
     {
         Ok(zone) => {
             info!(log, "Zone for {} is already running", dataset_name.full());
@@ -345,13 +341,12 @@ async fn ensure_running_zone(
             )
             .await?;
 
-            let zone = RunningZone::boot(
-                installed_zone,
-            )
-            .await?;
+            let zone = RunningZone::boot(installed_zone).await?;
 
             zone.ensure_address(address_request).await?;
-            dataset_info.start_zone(log, &zone, dataset_info.address, do_format).await?;
+            dataset_info
+                .start_zone(log, &zone, dataset_info.address, do_format)
+                .await?;
 
             Ok(zone)
         }

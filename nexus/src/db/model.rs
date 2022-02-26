@@ -7,7 +7,7 @@
 use crate::db::collection_insert::DatastoreCollection;
 use crate::db::identity::{Asset, Resource};
 use crate::db::schema::{
-    console_session, db_metadata, dataset, disk, instance, metric_producer,
+    console_session, dataset, db_metadata, disk, instance, metric_producer,
     network_interface, organization, oximeter, project, rack, region,
     role_assignment_builtin, role_builtin, router_route, sled, user_builtin,
     vpc, vpc_firewall_rule, vpc_router, vpc_subnet, zpool,

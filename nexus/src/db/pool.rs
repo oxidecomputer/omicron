@@ -29,9 +29,9 @@
  */
 
 use super::Config as DbConfig;
+use crate::db::model::DbMetadata;
 use anyhow::anyhow;
 use async_bb8_diesel::{AsyncRunQueryDsl, ConnectionManager};
-use crate::db::model::DbMetadata;
 use diesel::{ExpressionMethods, PgConnection, QueryDsl, SelectableHelper};
 use diesel_dtrace::DTraceConnection;
 use omicron_common::backoff;
@@ -74,9 +74,7 @@ impl Pool {
                 .select(DbMetadata::as_select())
                 .first_async(self.pool())
                 .await
-                .map_err(|e| {
-                    backoff::BackoffError::Transient(anyhow!(e))
-                })
+                .map_err(|e| backoff::BackoffError::Transient(anyhow!(e)))
         };
         let log_failure = |_, _| {
             warn!(log, "cockroachdb not yet alive");

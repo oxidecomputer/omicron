@@ -345,7 +345,10 @@ impl From<omicron_common::api::internal::sled_agent::ServiceRequest>
     fn from(
         s: omicron_common::api::internal::sled_agent::ServiceRequest,
     ) -> Self {
-        Self { name: s.name, addresses: s.addresses.into_iter().map(|s| s.to_string()).collect() }
+        Self {
+            name: s.name,
+            addresses: s.addresses.into_iter().map(|s| s.to_string()).collect(),
+        }
     }
 }
 
