@@ -9,7 +9,6 @@ use crate::illumos::svc::wait_for_service;
 use crate::illumos::vnic::{Vnic, VnicAllocator};
 use crate::illumos::zone::{AddressRequest, ZONE_PREFIX};
 use slog::Logger;
-use std::net::SocketAddr;
 use std::path::PathBuf;
 
 #[cfg(not(test))]
@@ -44,16 +43,11 @@ pub enum Error {
 /// Represents a running zone.
 pub struct RunningZone {
     inner: InstalledZone,
-    address: SocketAddr,
 }
 
 impl RunningZone {
     pub fn name(&self) -> &str {
         &self.inner.name
-    }
-
-    pub fn address(&self) -> SocketAddr {
-        self.address
     }
 
     /// Runs a command within the Zone, return the output.
@@ -83,8 +77,6 @@ impl RunningZone {
     /// Note that the zone must already be configured to be booted.
     pub async fn boot(
         zone: InstalledZone,
-        addrtype: AddressRequest,
-        port: u16,
     ) -> Result<Self, Error> {
         // Boot the zone.
         info!(zone.log, "Zone booting");
@@ -92,21 +84,35 @@ impl RunningZone {
         // TODO: "Ensure booted", to make this more idempotent?
         Zones::boot(&zone.name)?;
 
-        // Wait for the network services to come online, then create an address
-        // to use for communicating with the newly created zone.
+        // Wait for the network services to come online, so future
+        // requests to create addresses can operate immediately.
         let fmri = "svc:/milestone/network:default";
         wait_for_service(Some(&zone.name), fmri)
             .await
             .map_err(|_| Error::Timeout(fmri.to_string()))?;
 
-        let addrobj = AddrObject::new_control(zone.control_vnic.name());
-        let network =
-            Zones::ensure_address(Some(&zone.name), &addrobj, addrtype)?;
-
         Ok(RunningZone {
             inner: zone,
-            address: SocketAddr::new(network.ip(), port),
         })
+    }
+
+    pub async fn ensure_address(
+        &self,
+        addrtype: AddressRequest,
+    ) -> Result<(), Error> {
+        info!(self.inner.log, "Adding address: {:?}", addrtype);
+        let name = match addrtype {
+            AddressRequest::Dhcp => "omicron",
+            AddressRequest::Static(net) => {
+                match net.ip() {
+                    std::net::IpAddr::V4(_) => "omicron4",
+                    std::net::IpAddr::V6(_) => "omicron6",
+                }
+            }
+        };
+        let addrobj = AddrObject::new(self.inner.control_vnic.name(), name);
+        Zones::ensure_address(Some(&self.inner.name), &addrobj, addrtype)?;
+        Ok(())
     }
 
     /// Looks up a running zone based on the `zone_prefix`, if one already exists.
@@ -122,7 +128,6 @@ impl RunningZone {
         log: &Logger,
         zone_prefix: &str,
         addrtype: AddressRequest,
-        port: u16,
     ) -> Result<Self, Error> {
         let zone_info = Zones::get()?
             .into_iter()
@@ -136,8 +141,7 @@ impl RunningZone {
         let zone_name = zone_info.name();
         let vnic_name = Zones::get_control_interface(zone_name)?;
         let addrobj = AddrObject::new_control(&vnic_name);
-        let network =
-            Zones::ensure_address(Some(zone_name), &addrobj, addrtype)?;
+        Zones::ensure_address(Some(zone_name), &addrobj, addrtype)?;
 
         Ok(Self {
             inner: InstalledZone {
@@ -147,7 +151,6 @@ impl RunningZone {
                 // TODO: How can the sled agent recoup other vnics?
                 _other_vnics: vec![],
             },
-            address: SocketAddr::new(network.ip(), port),
         })
     }
 }

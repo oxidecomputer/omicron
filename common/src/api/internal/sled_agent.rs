@@ -156,8 +156,8 @@ pub struct DatasetEnsureBody {
 pub struct ServiceRequest {
     // The name of the service to be created.
     pub name: String,
-    // The address on which the service should listen for requests.
-    pub address: SocketAddr,
+    // The addresses on which the service should listen for requests.
+    pub addresses: Vec<SocketAddr>,
 }
 
 /// Used to request that the Sled initialize certain services on initialization.

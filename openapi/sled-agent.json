@@ -799,15 +799,18 @@
       "ServiceRequest": {
         "type": "object",
         "properties": {
-          "address": {
-            "type": "string"
+          "addresses": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
           },
           "name": {
             "type": "string"
           }
         },
         "required": [
-          "address",
+          "addresses",
           "name"
         ]
       }

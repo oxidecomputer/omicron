@@ -30,9 +30,9 @@
 
 use super::Config as DbConfig;
 use anyhow::anyhow;
-use async_bb8_diesel::AsyncSimpleConnection;
-use async_bb8_diesel::ConnectionManager;
-use diesel::PgConnection;
+use async_bb8_diesel::{AsyncRunQueryDsl, ConnectionManager};
+use crate::db::model::DbMetadata;
+use diesel::{ExpressionMethods, PgConnection, QueryDsl, SelectableHelper};
 use diesel_dtrace::DTraceConnection;
 use omicron_common::backoff;
 use slog::Logger;
@@ -67,16 +67,16 @@ impl Pool {
     /// the database.
     pub async fn wait_for_cockroachdb(&self, log: &Logger) {
         let check_health = || async {
-            let conn =
-                self.pool.get().await.map_err(|e| {
-                    backoff::BackoffError::Transient(anyhow!(e))
-                })?;
+            use crate::db::schema::db_metadata::dsl;
 
-            // TODO: Is this command sufficient? Don't we want to show that CRDB
-            // is up *and* that the tables have been populated?
-            conn.batch_execute_async("SHOW DATABASES;")
+            dsl::db_metadata
+                .filter(dsl::name.eq("schema_version"))
+                .select(DbMetadata::as_select())
+                .first_async(self.pool())
                 .await
-                .map_err(|e| backoff::BackoffError::Transient(anyhow!(e)))
+                .map_err(|e| {
+                    backoff::BackoffError::Transient(anyhow!(e))
+                })
         };
         let log_failure = |_, _| {
             warn!(log, "cockroachdb not yet alive");

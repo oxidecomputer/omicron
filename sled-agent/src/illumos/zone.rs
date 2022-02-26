@@ -86,7 +86,7 @@ impl AddressRequest {
     /// Convenience function for creating an `AddressRequest` from a static IP.
     pub fn new_static(ip: IpAddr, prefix: Option<u8>) -> Self {
         let prefix = prefix.unwrap_or_else(|| match ip {
-            IpAddr::V4(_) => 32,
+            IpAddr::V4(_) => 24,
             IpAddr::V6(_) => 64,
         });
         let addr = IpNetwork::new(ip, prefix).unwrap();

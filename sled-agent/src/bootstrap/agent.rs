@@ -256,13 +256,13 @@ impl Agent {
                 // configuration), but at the moment it's an error.
                 warn!(
                     self.log,
-                    "Rack Setup Service Config was already applied, but has changed.\n
-                    This means that you may have partitions set up on this sled, but they\n
-                    may not match the ones requested by the supplied configuration.\n\n
-                    To re-initialize this sled:\n
-                       - Disable all Oxide services\n
-                       - Delete all partitions within the attached zpool\n
-                       - Delete the configuration file ({})\n
+                    "Rack Setup Service Config was already applied, but has changed.
+                    This means that you may have partitions set up on this sled, but they
+                    may not match the ones requested by the supplied configuration.\n
+                    To re-initialize this sled:
+                       - Disable all Oxide services
+                       - Delete all partitions within the attached zpool
+                       - Delete the configuration file ({})
                        - Restart the sled agent",
                     rss_config_path.to_string_lossy()
                 );

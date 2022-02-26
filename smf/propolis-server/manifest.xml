@@ -20,7 +20,7 @@
   <exec_method type='method' name='stop' exec=':kill' timeout_seconds='0' />
 
   <property_group name='config' type='application'>
-    <propval name='server_addr' type='astring' value='127.0.0.1:12400' />
+    <propval name='server_addr' type='astring' value='unknown' />
   </property_group>
 
   <property_group name='startd' type='framework'>

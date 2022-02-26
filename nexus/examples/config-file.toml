@@ -26,11 +26,11 @@ url = "postgresql://root@127.0.0.1:26257/omicron?sslmode=disable"
 
 [dropshot_external]
 # IP address and TCP port on which to listen for the external API
-bind_address = "127.0.0.1:12220"
+bind_address = "192.168.1.123:12220"
 
 [dropshot_internal]
 # IP address and TCP port on which to listen for the internal API
-bind_address = "127.0.0.1:12221"
+bind_address = "[fd00:1234::7]:12221"
 
 [log]
 # Show log messages of this level and more severe

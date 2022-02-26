@@ -7,7 +7,7 @@
 use crate::db::collection_insert::DatastoreCollection;
 use crate::db::identity::{Asset, Resource};
 use crate::db::schema::{
-    console_session, dataset, disk, instance, metric_producer,
+    console_session, db_metadata, dataset, disk, instance, metric_producer,
     network_interface, organization, oximeter, project, rack, region,
     role_assignment_builtin, role_builtin, router_route, sled, user_builtin,
     vpc, vpc_firewall_rule, vpc_router, vpc_subnet, zpool,
@@ -2079,6 +2079,13 @@ impl RoleAssignmentBuiltin {
             role_name: String::from(role_name),
         }
     }
+}
+
+#[derive(Queryable, Debug, Selectable)]
+#[table_name = "db_metadata"]
+pub struct DbMetadata {
+    pub name: String,
+    pub value: String,
 }
 
 #[cfg(test)]

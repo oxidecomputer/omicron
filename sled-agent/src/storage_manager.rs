@@ -205,6 +205,7 @@ impl DatasetInfo {
         &self,
         log: &Logger,
         zone: &RunningZone,
+        address: SocketAddr,
         do_format: bool,
     ) -> Result<(), Error> {
         match self.kind {
@@ -222,7 +223,7 @@ impl DatasetInfo {
                     "-s",
                     "svc:system/illumos/cockroachdb",
                     "setprop",
-                    &format!("config/listen_addr={}", zone.address(),),
+                    &format!("config/listen_addr={}", address),
                 ])?;
                 zone.run_cmd(&[
                     crate::illumos::zone::SVCCFG,
@@ -259,7 +260,7 @@ impl DatasetInfo {
 
                 // Await liveness of the cluster.
                 let check_health = || async {
-                    let http_addr = SocketAddr::new(zone.address().ip(), 8080);
+                    let http_addr = SocketAddr::new(address.ip(), 8080);
                     reqwest::get(format!("http://{}/health?ready=1", http_addr))
                         .await
                         .map_err(backoff::BackoffError::Transient)
@@ -284,7 +285,7 @@ impl DatasetInfo {
                         "sql",
                         "--insecure",
                         "--host",
-                        &zone.address().to_string(),
+                        &address.to_string(),
                         "--file",
                         "/opt/oxide/cockroachdb/sql/dbwipe.sql",
                     ])?;
@@ -293,7 +294,7 @@ impl DatasetInfo {
                         "sql",
                         "--insecure",
                         "--host",
-                        &zone.address().to_string(),
+                        &address.to_string(),
                         "--file",
                         "/opt/oxide/cockroachdb/sql/dbinit.sql",
                     ])?;
@@ -323,7 +324,6 @@ async fn ensure_running_zone(
         log,
         &dataset_info.zone_prefix(),
         address_request,
-        dataset_info.address.port(),
     )
     .await
     {
@@ -347,11 +347,11 @@ async fn ensure_running_zone(
 
             let zone = RunningZone::boot(
                 installed_zone,
-                address_request,
-                dataset_info.address.port(),
             )
             .await?;
-            dataset_info.start_zone(log, &zone, do_format).await?;
+
+            zone.ensure_address(address_request).await?;
+            dataset_info.start_zone(log, &zone, dataset_info.address, do_format).await?;
 
             Ok(zone)
         }
@@ -460,7 +460,7 @@ impl StorageWorker {
             &self.log,
             "Zone {} with address {} is running",
             zone.name(),
-            zone.address()
+            dataset_info.address,
         );
         pool.add_zone(id, zone);
         Ok((true, id))
@@ -584,12 +584,9 @@ impl StorageWorker {
         let mut file = File::create(path).await?;
         file.write_all(info_str.as_bytes()).await?;
 
-        // Unwrap safety: We just put this zone in the pool.
-        let zone = pool.get_zone(id).unwrap();
-
         self.add_datasets_notify(
             nexus_notifications,
-            vec![(id, zone.address(), dataset_info.kind.into())],
+            vec![(id, dataset_info.address, dataset_info.kind.into())],
             pool.id(),
         );
 
@@ -618,9 +615,7 @@ impl StorageWorker {
         )
         .await?;
 
-        // Unwrap safety: We just put this zone in the pool.
-        let zone = pool.get_zone(id).unwrap();
-        Ok((id, zone.address(), dataset_info.kind.into()))
+        Ok((id, dataset_info.address, dataset_info.kind.into()))
     }
 
     // Small wrapper around `Self::do_work_internal` that ensures we always
