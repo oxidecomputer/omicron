@@ -14,10 +14,6 @@ use crate::illumos::dladm::{Dladm, VNIC_PREFIX_CONTROL};
 use crate::illumos::zfs::ZONE_ZFS_DATASET_MOUNTPOINT;
 use crate::illumos::{execute, PFEXEC};
 
-const PROPOLIS_BASE_ZONE: &str = "oxz_propolis_base";
-const STORAGE_BASE_ZONE: &str = "oxz_storage_base";
-const PROPOLIS_SVC_DIRECTORY: &str = "/opt/oxide/propolis-server";
-
 const DLADM: &str = "/usr/sbin/dladm";
 const IPADM: &str = "/usr/sbin/ipadm";
 pub const SVCADM: &str = "/usr/sbin/svcadm";
@@ -26,7 +22,7 @@ pub const ZLOGIN: &str = "/usr/sbin/zlogin";
 
 // TODO: These could become enums
 pub const ZONE_PREFIX: &str = "oxz_";
-pub const PROPOLIS_ZONE_PREFIX: &str = "oxz_propolis_instance_";
+pub const PROPOLIS_ZONE_PREFIX: &str = "oxz_propolis-server_";
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
@@ -252,87 +248,87 @@ impl Zones {
         Ok(())
     }
 
-    fn create_base(
-        name: &str,
-        log: &Logger,
-        filesystems: &[zone::Fs],
-        devices: &[zone::Device],
-    ) -> Result<(), Error> {
-        info!(
-            log,
-            "create_base zone: Querying for prescence of zone: {}", name
-        );
-        if let Some(zone) = Self::find(name)? {
-            info!(
-                log,
-                "Found zone: {} in state {:?}",
-                zone.name(),
-                zone.state()
-            );
-            if zone.state() == zone::State::Installed {
-                // TODO: Admittedly, the zone still might be messed up. However,
-                // for now, we assume that "installed" means "good to go".
-                return Ok(());
-            } else {
-                info!(
-                    log,
-                    "Invalid state; uninstalling and deleting zone {}", name
-                );
-                Zones::halt_and_remove(log, zone.name())?;
-            }
-        }
-
-        info!(log, "Creating new base zone: {}", name);
-        let mut cfg = zone::Config::create(
-            name,
-            /* overwrite= */ true,
-            zone::CreationOptions::Blank,
-        );
-        let path = format!("{}/{}", ZONE_ZFS_DATASET_MOUNTPOINT, name);
-        cfg.get_global()
-            .set_brand("sparse")
-            .set_path(&path)
-            .set_autoboot(false)
-            .set_ip_type(zone::IpType::Exclusive);
-        for fs in filesystems {
-            cfg.add_fs(&fs);
-        }
-        for device in devices {
-            cfg.add_device(device);
-        }
-        cfg.run().map_err(Error::Configure)?;
-
-        // TODO: This process takes a little while... Consider optimizing.
-        info!(log, "Installing base zone: {}", name);
-        zone::Adm::new(name).install(&[]).map_err(Error::Install)?;
-
-        info!(log, "Seeding base zone: {}", name);
-        let root = format!("{}/{}", path, "root");
-        Self::seed_smf(&log, std::path::Path::new(&root))?;
-
-        Ok(())
-    }
-
-    /// Creates a "base" zone for Propolis, from which other Propolis
-    /// zones may quickly be cloned.
-    pub fn create_propolis_base(log: &Logger) -> Result<(), Error> {
-        Zones::create_base(
-            PROPOLIS_BASE_ZONE,
-            log,
-            &[zone::Fs {
-                ty: "lofs".to_string(),
-                dir: PROPOLIS_SVC_DIRECTORY.to_string(),
-                special: PROPOLIS_SVC_DIRECTORY.to_string(),
-                options: vec!["ro".to_string()],
-                ..Default::default()
-            }],
-            &[
-                zone::Device { name: "/dev/vmm/*".to_string() },
-                zone::Device { name: "/dev/vmmctl".to_string() },
-                zone::Device { name: "/dev/viona".to_string() },
-            ],
-        )
-    }
+//    fn create_base(
+//        name: &str,
+//        log: &Logger,
+//        filesystems: &[zone::Fs],
+//        devices: &[zone::Device],
+//    ) -> Result<(), Error> {
+//        info!(
+//            log,
+//            "create_base zone: Querying for prescence of zone: {}", name
+//        );
+//        if let Some(zone) = Self::find(name)? {
+//            info!(
+//                log,
+//                "Found zone: {} in state {:?}",
+//                zone.name(),
+//                zone.state()
+//            );
+//            if zone.state() == zone::State::Installed {
+//                // TODO: Admittedly, the zone still might be messed up. However,
+//                // for now, we assume that "installed" means "good to go".
+//                return Ok(());
+//            } else {
+//                info!(
+//                    log,
+//                    "Invalid state; uninstalling and deleting zone {}", name
+//                );
+//                Zones::halt_and_remove(log, zone.name())?;
+//            }
+//        }
+//
+//        info!(log, "Creating new base zone: {}", name);
+//        let mut cfg = zone::Config::create(
+//            name,
+//            /* overwrite= */ true,
+//            zone::CreationOptions::Blank,
+//        );
+//        let path = format!("{}/{}", ZONE_ZFS_DATASET_MOUNTPOINT, name);
+//        cfg.get_global()
+//            .set_brand("sparse")
+//            .set_path(&path)
+//            .set_autoboot(false)
+//            .set_ip_type(zone::IpType::Exclusive);
+//        for fs in filesystems {
+//            cfg.add_fs(&fs);
+//        }
+//        for device in devices {
+//            cfg.add_device(device);
+//        }
+//        cfg.run().map_err(Error::Configure)?;
+//
+//        // TODO: This process takes a little while... Consider optimizing.
+//        info!(log, "Installing base zone: {}", name);
+//        zone::Adm::new(name).install(&[]).map_err(Error::Install)?;
+//
+//        info!(log, "Seeding base zone: {}", name);
+//        let root = format!("{}/{}", path, "root");
+//        Self::seed_smf(&log, std::path::Path::new(&root))?;
+//
+//        Ok(())
+//    }
+//
+//    /// Creates a "base" zone for Propolis, from which other Propolis
+//    /// zones may quickly be cloned.
+//    pub fn create_propolis_base(log: &Logger) -> Result<(), Error> {
+//        Zones::create_base(
+//            PROPOLIS_BASE_ZONE,
+//            log,
+//            &[zone::Fs {
+//                ty: "lofs".to_string(),
+//                dir: PROPOLIS_SVC_DIRECTORY.to_string(),
+//                special: PROPOLIS_SVC_DIRECTORY.to_string(),
+//                options: vec!["ro".to_string()],
+//                ..Default::default()
+//            }],
+//            &[
+//                zone::Device { name: "/dev/vmm/*".to_string() },
+//                zone::Device { name: "/dev/vmmctl".to_string() },
+//                zone::Device { name: "/dev/viona".to_string() },
+//            ],
+//        )
+//    }
 
     /// Sets the configuration for a zone.
     pub fn configure_zone(
@@ -369,43 +365,43 @@ impl Zones {
         Ok(())
     }
 
-    /// Sets the configuration for a Propolis zone.
-    ///
-    /// This zone will be cloned as a child of the "base propolis zone".
-    pub fn configure_propolis_zone(
-        log: &Logger,
-        name: &str,
-        vnics: Vec<String>,
-    ) -> Result<(), Error> {
-        Zones::configure_zone(
-            log,
-            name,
-            &[zone::Fs {
-                ty: "lofs".to_string(),
-                dir: PROPOLIS_SVC_DIRECTORY.to_string(),
-                special: PROPOLIS_SVC_DIRECTORY.to_string(),
-                options: vec!["ro".to_string()],
-                ..Default::default()
-            }],
-            &[
-                zone::Device { name: "/dev/vmm/*".to_string() },
-                zone::Device { name: "/dev/vmmctl".to_string() },
-                zone::Device { name: "/dev/viona".to_string() },
-            ],
-            vnics,
-        )
-    }
+//    /// Sets the configuration for a Propolis zone.
+//    ///
+//    /// This zone will be cloned as a child of the "base propolis zone".
+//    pub fn configure_propolis_zone(
+//        log: &Logger,
+//        name: &str,
+//        vnics: Vec<String>,
+//    ) -> Result<(), Error> {
+//        Zones::configure_zone(
+//            log,
+//            name,
+//            &[zone::Fs {
+//                ty: "lofs".to_string(),
+//                dir: PROPOLIS_SVC_DIRECTORY.to_string(),
+//                special: PROPOLIS_SVC_DIRECTORY.to_string(),
+//                options: vec!["ro".to_string()],
+//                ..Default::default()
+//            }],
+//            &[
+//                zone::Device { name: "/dev/vmm/*".to_string() },
+//                zone::Device { name: "/dev/vmmctl".to_string() },
+//                zone::Device { name: "/dev/viona".to_string() },
+//            ],
+//            vnics,
+//        )
+//    }
 
-    /// Clones a zone (named `name`) from the base Propolis zone.
-    fn clone_from_base(name: &str, base: &str) -> Result<(), Error> {
-        zone::Adm::new(name).clone(base).map_err(Error::Clone)?;
-        Ok(())
-    }
+//    /// Clones a zone (named `name`) from the base Propolis zone.
+//    fn clone_from_base(name: &str, base: &str) -> Result<(), Error> {
+//        zone::Adm::new(name).clone(base).map_err(Error::Clone)?;
+//        Ok(())
+//    }
 
-    /// Clones a zone (named `name`) from the base Propolis zone.
-    pub fn clone_from_base_propolis(name: &str) -> Result<(), Error> {
-        Zones::clone_from_base(name, PROPOLIS_BASE_ZONE)
-    }
+//    /// Clones a zone (named `name`) from the base Propolis zone.
+//    pub fn clone_from_base_propolis(name: &str) -> Result<(), Error> {
+//        Zones::clone_from_base(name, PROPOLIS_BASE_ZONE)
+//    }
 
     /// Boots a zone (named `name`).
     pub fn boot(name: &str) -> Result<(), Error> {
@@ -424,18 +420,18 @@ impl Zones {
             .collect())
     }
 
-    /// Identical to [`Self::get`], but filters out "base" zones.
-    pub fn get_non_base_zones() -> Result<Vec<zone::Zone>, Error> {
-        Self::get().map(|zones| {
-            zones
-                .into_iter()
-                .filter(|z| match z.name() {
-                    PROPOLIS_BASE_ZONE | STORAGE_BASE_ZONE => false,
-                    _ => true,
-                })
-                .collect()
-        })
-    }
+//    /// Identical to [`Self::get`], but filters out "base" zones.
+//    pub fn get_non_base_zones() -> Result<Vec<zone::Zone>, Error> {
+//        Self::get().map(|zones| {
+//            zones
+//                .into_iter()
+//                .filter(|z| match z.name() {
+//                    PROPOLIS_BASE_ZONE | STORAGE_BASE_ZONE => false,
+//                    _ => true,
+//                })
+//                .collect()
+//        })
+//    }
 
     /// Finds a zone with a specified name.
     ///

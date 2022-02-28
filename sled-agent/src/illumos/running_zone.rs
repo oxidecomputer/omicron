@@ -8,6 +8,7 @@ use crate::illumos::addrobj::AddrObject;
 use crate::illumos::svc::wait_for_service;
 use crate::illumos::vnic::{Vnic, VnicAllocator};
 use crate::illumos::zone::{AddressRequest, ZONE_PREFIX};
+use ipnetwork::IpNetwork;
 use slog::Logger;
 use std::path::PathBuf;
 
@@ -95,7 +96,7 @@ impl RunningZone {
     pub async fn ensure_address(
         &self,
         addrtype: AddressRequest,
-    ) -> Result<(), Error> {
+    ) -> Result<IpNetwork, Error> {
         info!(self.inner.log, "Adding address: {:?}", addrtype);
         let name = match addrtype {
             AddressRequest::Dhcp => "omicron",
@@ -105,8 +106,8 @@ impl RunningZone {
             },
         };
         let addrobj = AddrObject::new(self.inner.control_vnic.name(), name);
-        Zones::ensure_address(Some(&self.inner.name), &addrobj, addrtype)?;
-        Ok(())
+        let network = Zones::ensure_address(Some(&self.inner.name), &addrobj, addrtype)?;
+        Ok(network)
     }
 
     /// Looks up a running zone based on the `zone_prefix`, if one already exists.
@@ -143,9 +144,13 @@ impl RunningZone {
                 name: zone_name.to_string(),
                 control_vnic: Vnic::wrap_existing(vnic_name),
                 // TODO: How can the sled agent recoup other vnics?
-                _other_vnics: vec![],
+                guest_vnics: vec![],
             },
         })
+    }
+
+    pub fn get_guest_vnics(&self) -> &Vec<Vnic> {
+        &self.inner.guest_vnics
     }
 }
 
@@ -172,7 +177,7 @@ pub struct InstalledZone {
     control_vnic: Vnic,
 
     // Other NICs being used by the zone.
-    _other_vnics: Vec<Vnic>,
+    guest_vnics: Vec<Vnic>,
 }
 
 impl InstalledZone {
@@ -224,7 +229,11 @@ impl InstalledZone {
             log: log.new(o!("zone" => zone_name.clone())),
             name: zone_name,
             control_vnic,
-            _other_vnics: vnics,
+            guest_vnics: vnics,
         })
+    }
+
+    fn get_guest_vnics(&self) -> &Vec<Vnic> {
+        &self.guest_vnics
     }
 }

@@ -1,7 +1,7 @@
 # RSS (Rack Setup Service) "stand-in" configuration.
 
 [[request]]
-sled_address = "127.0.0.1:12345"
+sled_address = "192.168.1.201:12345"
 
 # TODO: Failing; need to supply crucible image. See package-manifest.toml.
 #
@@ -24,6 +24,6 @@ partition_kind.all_addresses = [
 name = "nexus"
 addresses = [ "[fd00:1234::7]:12221", "192.168.1.123:12220" ]
 
-# [[request.service]]
-# name = "oximeter"
-# address = "[fd00:1234::6]:12223"
+[[request.service]]
+name = "oximeter"
+addresses = [ "[fd00:1234::6]:12223" ]

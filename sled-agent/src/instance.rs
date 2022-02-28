@@ -9,6 +9,7 @@ use crate::common::{
     vlan::VlanID,
 };
 use crate::illumos::addrobj::AddrObject;
+use crate::illumos::running_zone::{InstalledZone, RunningZone};
 use crate::illumos::svc::wait_for_service;
 use crate::illumos::vnic::{Vnic, VnicAllocator};
 use crate::illumos::zone::{AddressRequest, PROPOLIS_ZONE_PREFIX};
@@ -63,6 +64,10 @@ pub enum Error {
     // TODO: Add more specific errors
     #[error("Failure during migration: {0}")]
     Migration(anyhow::Error),
+
+    #[error(transparent)]
+    RunningZone(#[from] crate::illumos::running_zone::Error),
+
 }
 
 // Issues read-only, idempotent HTTP requests at propolis until it responds with
@@ -137,6 +142,8 @@ struct RunningState {
     ticket: InstanceTicket,
     // Handle to task monitoring for Propolis state changes.
     monitor_task: Option<JoinHandle<()>>,
+    // Handle to the zone.
+    running_zone: RunningZone,
 }
 
 impl Drop for RunningState {
@@ -164,8 +171,7 @@ impl Drop for RunningState {
 // Named type for values returned during propolis zone creation
 struct PropolisSetup {
     client: Arc<PropolisClient>,
-    control_nic: Vnic,
-    guest_nics: Vec<Vnic>,
+    running_zone: RunningZone,
 }
 
 struct InstanceInner {
@@ -179,7 +185,6 @@ struct InstanceInner {
     // NIC-related properties
     vnic_allocator: VnicAllocator,
     requested_nics: Vec<NetworkInterface>,
-    allocated_nics: Vec<Vnic>,
     vlan: Option<VlanID>,
 
     // Internal State management
@@ -254,7 +259,7 @@ impl InstanceInner {
         setup: PropolisSetup,
         migrate: Option<InstanceMigrateParams>,
     ) -> Result<(), Error> {
-        let PropolisSetup { client, control_nic, guest_nics } = setup;
+        let PropolisSetup { client, running_zone } = setup;
 
         // TODO: Store slot in NetworkInterface, make this more stable.
         let nics = self
@@ -262,7 +267,7 @@ impl InstanceInner {
             .iter()
             .enumerate()
             .map(|(i, _)| propolis_client::api::NetworkInterfaceRequest {
-                name: guest_nics[i].name().to_string(),
+                name: running_zone.get_guest_vnics()[i].name().to_string(),
                 slot: propolis_client::api::Slot(i as u8),
             })
             .collect();
@@ -304,13 +309,7 @@ impl InstanceInner {
         }));
 
         self.running_state =
-            Some(RunningState { client, ticket, monitor_task });
-
-        // Store the VNICs while the instance is running.
-        self.allocated_nics = guest_nics
-            .into_iter()
-            .chain(std::iter::once(control_nic))
-            .collect();
+            Some(RunningState { client, ticket, monitor_task, running_zone });
 
         Ok(())
     }
@@ -418,7 +417,6 @@ impl Instance {
             },
             vnic_allocator,
             requested_nics: initial.nics,
-            allocated_nics: vec![],
             vlan,
             state: InstanceStates::new(initial.runtime),
             running_state: None,
@@ -434,19 +432,6 @@ impl Instance {
         &self,
         inner: &mut MutexGuard<'_, InstanceInner>,
     ) -> Result<PropolisSetup, Error> {
-        // Create the VNIC which will be attached to the zone.
-        //
-        // It would be preferable to use the UUID of the instance as a component
-        // of the "per-Zone, control plane VNIC", but VNIC names are somewhat
-        // restrictive. They must end with numerics, and they must be less than
-        // 32 characters.
-        //
-        // Instead, we just use a per-agent incrementing number. We do the same
-        // for the guest-accessible NICs too.
-        let physical_dl = Dladm::find_physical()?;
-        let control_nic =
-            inner.vnic_allocator.new_control(&physical_dl, None)?;
-
         // Instantiate all guest-requested VNICs.
         //
         // TODO: Ideally, we'd allocate VNICs directly within the Zone.
@@ -454,6 +439,7 @@ impl Instance {
         // doesn't exist in illumos.
         //
         // https://github.com/illumos/ipd/blob/master/ipd/0003/README.md
+        let physical_dl = Dladm::find_physical()?;
         let guest_nics = inner
             .requested_nics
             .clone()
@@ -470,44 +456,57 @@ impl Instance {
         // configured VNICs.
         let zname = propolis_zone_name(inner.propolis_id());
 
-        let nics_to_put_in_zone: Vec<String> = guest_nics
-            .iter()
-            .map(|nic| nic.name().to_string())
-            .chain(std::iter::once(control_nic.name().to_string()))
-            .collect();
-
-        Zones::configure_propolis_zone(
+        let installed_zone = InstalledZone::install(
             &inner.log,
-            &zname,
-            nics_to_put_in_zone,
-        )?;
-        info!(inner.log, "Configured propolis zone: {}", zname);
+            &inner.vnic_allocator,
+            "propolis-server",
+            Some(&inner.propolis_id().to_string()),
+            /* dataset= */ &[],
+            &[
+                zone::Device { name: "/dev/vmm/*".to_string() },
+                zone::Device { name: "/dev/vmmctl".to_string() },
+                zone::Device { name: "/dev/viona".to_string() },
+            ],
+            guest_nics,
+        )
+        .await?;
 
-        // Clone the zone from a base zone (faster than installing) and
-        // boot it up.
-        Zones::clone_from_base_propolis(&zname)?;
-        info!(inner.log, "Cloned child zone: {}", zname);
-        Zones::boot(&zname)?;
-        info!(inner.log, "Booted zone: {}", zname);
-
-        // Wait for the network services to come online, then create an address.
-        let fmri = "svc:/milestone/network:default";
-        wait_for_service(Some(&zname), fmri)
-            .await
-            .map_err(|_| Error::Timeout(fmri.to_string()))?;
-        info!(inner.log, "Network milestone ready for {}", zname);
-
-        let addrobj = AddrObject::new_control(&control_nic.name());
-        let network = Zones::ensure_address(
-            Some(&zname),
-            &addrobj,
-            AddressRequest::Dhcp,
-        )?;
+        let running_zone = RunningZone::boot(installed_zone).await?;
+        let network = running_zone.ensure_address(AddressRequest::Dhcp).await?;
         info!(inner.log, "Created address {} for zone: {}", network, zname);
 
         // Run Propolis in the Zone.
         let server_addr = SocketAddr::new(network.ip(), PROPOLIS_PORT);
-        Zones::run_propolis(&zname, inner.propolis_id(), &server_addr)?;
+
+        running_zone.run_cmd(&[
+            crate::illumos::zone::SVCCFG,
+            "import",
+            "/var/svc/manifest/site/propolis-server/manifest.xml",
+        ])?;
+
+        running_zone.run_cmd(&[
+            crate::illumos::zone::SVCCFG,
+            "-s",
+            "system/illumos/propolis-server",
+            "setprop",
+            &format!("config/server_addr={}", server_addr.to_string()),
+        ])?;
+
+        running_zone.run_cmd(&[
+            crate::illumos::zone::SVCCFG,
+            "-s",
+            "svc:/system/illumos/propolis-server",
+            "add",
+            &format!("vm-{}", inner.propolis_id()),
+        ])?;
+
+        running_zone.run_cmd(&[
+            crate::illumos::zone::SVCADM,
+            "enable",
+            "-t",
+            &format!("svc:/system/illumos/propolis-server:vm-{}", inner.propolis_id()),
+        ])?;
+
         info!(inner.log, "Started propolis in zone: {}", zname);
 
         // This isn't strictly necessary - we wait for the HTTP server below -
@@ -530,7 +529,7 @@ impl Instance {
         // don't need to worry about initialization races.
         wait_for_http_server(&inner.log, &client).await?;
 
-        Ok(PropolisSetup { client, control_nic, guest_nics })
+        Ok(PropolisSetup { client, running_zone })
     }
 
     /// Begins the execution of the instance's service (Propolis).
@@ -559,17 +558,6 @@ impl Instance {
         warn!(inner.log, "Halting and removing zone: {}", zname);
         Zones::halt_and_remove(&inner.log, &zname).unwrap();
 
-        // Explicitly remove NICs.
-        //
-        // The NICs would self-delete on drop anyway, but this allows us
-        // to explicitly record errors.
-        let mut nics = vec![];
-        std::mem::swap(&mut inner.allocated_nics, &mut nics);
-        for mut nic in nics {
-            if let Err(e) = nic.delete() {
-                error!(inner.log, "Failed to delete NIC {:?}: {}", nic, e);
-            }
-        }
         inner.running_state.as_mut().unwrap().ticket.terminate();
 
         Ok(())
@@ -878,29 +866,29 @@ mod test {
                 Ok(())
             });
 
-        let zone_configure_propolis_ctx =
-            MockZones::configure_propolis_zone_context();
-        zone_configure_propolis_ctx
-            .expect()
-            .times(1)
-            .in_sequence(&mut seq)
-            .returning(|_, zone, vnics| {
-                assert_eq!(zone, propolis_zone_name(&test_propolis_uuid()));
-                assert_eq!(vnics.len(), 1);
-                assert_eq!(vnics[0], "oxControlTest0");
-                Ok(())
-            });
-
-        let zone_clone_from_base_propolis_ctx =
-            MockZones::clone_from_base_propolis_context();
-        zone_clone_from_base_propolis_ctx
-            .expect()
-            .times(1)
-            .in_sequence(&mut seq)
-            .returning(|zone| {
-                assert_eq!(zone, propolis_zone_name(&test_propolis_uuid()));
-                Ok(())
-            });
+//        let zone_configure_propolis_ctx =
+//            MockZones::configure_propolis_zone_context();
+//        zone_configure_propolis_ctx
+//            .expect()
+//            .times(1)
+//            .in_sequence(&mut seq)
+//            .returning(|_, zone, vnics| {
+//                assert_eq!(zone, propolis_zone_name(&test_propolis_uuid()));
+//                assert_eq!(vnics.len(), 1);
+//                assert_eq!(vnics[0], "oxControlTest0");
+//                Ok(())
+//            });
+//
+//        let zone_clone_from_base_propolis_ctx =
+//            MockZones::clone_from_base_propolis_context();
+//        zone_clone_from_base_propolis_ctx
+//            .expect()
+//            .times(1)
+//            .in_sequence(&mut seq)
+//            .returning(|zone| {
+//                assert_eq!(zone, propolis_zone_name(&test_propolis_uuid()));
+//                Ok(())
+//            });
 
         let zone_boot_ctx = MockZones::boot_context();
         zone_boot_ctx.expect().times(1).in_sequence(&mut seq).returning(

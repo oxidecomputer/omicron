@@ -15,8 +15,20 @@ nexus_address = "[fd00:1234::7]:12221"
 zpools = [ "d462a7f7-b628-40fe-80ff-4e4189e2d62b" ]
 
 # Address of the Sled Agent itself
+#
+# XXX: With the movement to zones, we no longer can use localhost addresses,
+# as Nexus (within a Zone) is effectively "on a different machine" from the
+# sled agent.
+#
+# This address may be allocated with the following command:
+#
+# pfexec ipadm create-addr -t -T static -a 192.168.1.201 $(dladm show-phys -p -o LINK)/sled4
+# |      |                                               |
+# Please |                                               |
+#        Create a temporary static address               |
+#                                                        On whatever physical datalink I have
 [dropshot]
-bind_address = "127.0.0.1:12345"
+bind_address = "192.168.1.201:12345"
 
 [log]
 level = "info"

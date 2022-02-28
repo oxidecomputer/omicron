@@ -63,8 +63,6 @@ impl InstanceManager {
         nexus_client: Arc<NexusClient>,
     ) -> Result<InstanceManager, Error> {
         // Create a base zone, from which all running instance zones are cloned.
-        Zones::create_propolis_base(&log)?;
-
         Ok(InstanceManager {
             inner: Arc::new(InstanceManagerInternal {
                 log,
@@ -264,12 +262,7 @@ mod test {
         let nexus_client = Arc::new(MockNexusClient::default());
 
         // Creation of the instance manager incurs some "global" system
-        // checks - creation of the base zone, and cleanup of existing
-        // zones + vnics.
-
-        let zones_create_propolis_base_ctx =
-            MockZones::create_propolis_base_context();
-        zones_create_propolis_base_ctx.expect().return_once(|_| Ok(()));
+        // checks: cleanup of existing zones + vnics.
 
         let zones_get_ctx = MockZones::get_context();
         zones_get_ctx.expect().return_once(|| Ok(vec![]));
@@ -345,10 +338,6 @@ mod test {
         let nexus_client = Arc::new(MockNexusClient::default());
 
         // Instance Manager creation.
-
-        let zones_create_propolis_base_ctx =
-            MockZones::create_propolis_base_context();
-        zones_create_propolis_base_ctx.expect().return_once(|_| Ok(()));
 
         let zones_get_ctx = MockZones::get_context();
         zones_get_ctx.expect().return_once(|| Ok(vec![]));
