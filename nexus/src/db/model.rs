@@ -736,6 +736,11 @@ impl Region {
     pub fn extent_count(&self) -> i64 {
         self.extent_count
     }
+    pub fn encrypted(&self) -> bool {
+        // Per RFD 29, data is always encrypted at rest, and support for
+        // external, customer-supplied keys is a non-requirement.
+        true
+    }
 }
 
 /// Describes an organization within the database.
