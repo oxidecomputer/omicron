@@ -491,7 +491,7 @@ impl Instance {
             "-s",
             "system/illumos/propolis-server",
             "setprop",
-            &format!("config/server_addr={}", server_addr.to_string()),
+            &format!("config/server_addr={}", server_addr),
         ])?;
 
         running_zone.run_cmd(&[

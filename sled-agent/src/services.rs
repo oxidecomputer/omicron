@@ -99,11 +99,7 @@ impl ServiceManager {
         for service in services {
             // Before we bother allocating anything for this request, check if
             // this service has already been created.
-            if existing_zones
-                .iter()
-                .find(|z| z.name() == service.name)
-                .is_some()
-            {
+            if existing_zones.iter().any(|z| z.name() == service.name) {
                 info!(self.log, "Service {} already exists", service.name);
                 continue;
             } else {
