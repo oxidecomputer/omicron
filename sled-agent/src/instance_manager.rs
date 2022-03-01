@@ -182,14 +182,6 @@ impl InstanceTicket {
         InstanceTicket { id, inner: Some(inner) }
     }
 
-    // (Test-only) Creates a null ticket that does nothing.
-    //
-    // Useful when testing instances without the an entire instance manager.
-    #[cfg(test)]
-    pub(crate) fn null(id: Uuid) -> Self {
-        InstanceTicket { id, inner: None }
-    }
-
     /// Idempotently removes this instance from the tracked set of
     /// instances. This acts as an "upcall" for instances to remove
     /// themselves after stopping.

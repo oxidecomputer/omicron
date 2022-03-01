@@ -379,6 +379,7 @@ mockall::mock! {
     }
 }
 
+#[cfg_attr(test, allow(dead_code))]
 impl Instance {
     /// Creates a new (not yet running) instance object.
     ///
