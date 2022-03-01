@@ -20,12 +20,10 @@ use crate::mocks::MockNexusClient as NexusClient;
 #[cfg(not(test))]
 use nexus_client::Client as NexusClient;
 
-#[cfg(test)]
-use crate::{
-    illumos::zone::MockZones as Zones, instance::MockInstance as Instance,
-};
 #[cfg(not(test))]
-use crate::{illumos::zone::Zones, instance::Instance};
+use crate::instance::Instance;
+#[cfg(test)]
+use crate::instance::MockInstance as Instance;
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {

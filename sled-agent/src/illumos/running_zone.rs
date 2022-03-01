@@ -106,7 +106,8 @@ impl RunningZone {
             },
         };
         let addrobj = AddrObject::new(self.inner.control_vnic.name(), name);
-        let network = Zones::ensure_address(Some(&self.inner.name), &addrobj, addrtype)?;
+        let network =
+            Zones::ensure_address(Some(&self.inner.name), &addrobj, addrtype)?;
         Ok(network)
     }
 
@@ -231,9 +232,5 @@ impl InstalledZone {
             control_vnic,
             guest_vnics: vnics,
         })
-    }
-
-    fn get_guest_vnics(&self) -> &Vec<Vnic> {
-        &self.guest_vnics
     }
 }
