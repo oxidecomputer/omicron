@@ -66,7 +66,7 @@ async fn instance_put(
             body_args.migrate,
         )
         .await
-        .map_err(|e| Error::from(e))?,
+        .map_err(Error::from)?,
     ))
 }
 
