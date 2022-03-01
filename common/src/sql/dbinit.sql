@@ -829,9 +829,16 @@ CREATE TABLE omicron.public.role_assignment_builtin (
 
 CREATE TABLE omicron.public.db_metadata (
     name  STRING(63) NOT NULL,
-    value STRING(1023) NOT NULL
+    value STRING(1023) NOT NULL,
+
+    PRIMARY KEY(name, value)
 );
 
+/*
+ * This must be the last value inserted in the database when populating.
+ * Nexus checks for this value as a sign that initialization has completed
+ * successfully.
+ */
 INSERT INTO omicron.public.db_metadata (
     name,
     value
