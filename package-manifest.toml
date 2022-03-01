@@ -34,6 +34,12 @@ zone.paths = []
 # (Optional) List of binary blobs to be downloaded from S3.
 blobs = [ "alpine.iso", "OVMF_CODE.fd" ]
 
+[package.clickhouse]
+service_name = "clickhouse"
+[[package.clickhouse.zone.paths]]
+from = "clickhouse"
+to = "/opt/oxide/clickhouse"
+
 [package.cockroachdb]
 service_name = "cockroachdb"
 [[package.cockroachdb.zone.paths]]

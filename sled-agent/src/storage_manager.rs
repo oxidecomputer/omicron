@@ -185,15 +185,18 @@ impl DatasetInfo {
                 address,
                 kind,
             },
+            DatasetKind::Clickhouse { .. } => DatasetInfo {
+                name: "clickhouse".to_string(),
+                data_directory: "/data".to_string(),
+                address,
+                kind,
+            },
             DatasetKind::Crucible { .. } => DatasetInfo {
                 name: "crucible".to_string(),
                 data_directory: "/data".to_string(),
                 address,
                 kind,
             },
-            DatasetKind::Clickhouse { .. } => {
-                unimplemented!();
-            }
         }
     }
 
@@ -303,8 +306,24 @@ impl DatasetInfo {
 
                 Ok(())
             }
+            DatasetKind::Clickhouse { .. } => {
+                info!(log, "Initialiting Clickhouse");
+                zone.run_cmd(&[
+                    crate::illumos::zone::SVCCFG,
+                    "import",
+                    "/var/svc/manifest/site/clickhouse/manifest.xml",
+                ])?;
+
+                zone.run_cmd(&[
+                    crate::illumos::zone::SVCADM,
+                    "enable",
+                    "-t",
+                    "svc:/system/illumos/clickhouse:default",
+                ])?;
+
+                Ok(())
+            }
             DatasetKind::Crucible { .. } => unimplemented!(),
-            DatasetKind::Clickhouse { .. } => unimplemented!(),
         }
     }
 }
