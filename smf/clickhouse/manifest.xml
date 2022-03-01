@@ -18,7 +18,7 @@
     </method_environment>
   </method_context>
   <exec_method type='method' name='start'
-    exec='ctrun -l child -o noorphan,regent /opt/oxide/clickhouse/clickhouse server --log-file /var/tmp/clickhouse-server.log --errorlog-file /var/tmp/clickhouse-server.errlog --config-file /opt/oxide/clickhouse/config.xml -- --http_port 8123 --path /data &amp;'
+    exec='ctrun -l child -o noorphan,regent /opt/oxide/clickhouse/clickhouse server --log-file /var/tmp/clickhouse-server.log --errorlog-file /var/tmp/clickhouse-server.errlog -- --http_port 8123 --path /data &amp;'
     timeout_seconds='0' />
   <exec_method type='method' name='stop' exec=':kill' timeout_seconds='0' />
 
