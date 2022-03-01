@@ -16,12 +16,11 @@ use dropshot::test_util::LogContext;
 use dropshot::test_util::TestContext;
 use dropshot::ApiDescription;
 use dropshot::HttpErrorResponseBody;
+use headers::authorization::Credentials;
 use http::header::HeaderValue;
 use omicron_nexus::authn::external::session_cookie;
+use omicron_nexus::authn::external::spoof;
 use omicron_nexus::authn::external::spoof::HttpAuthnSpoof;
-use omicron_nexus::authn::external::spoof::HTTP_HEADER_OXIDE_AUTHN_SPOOF;
-use omicron_nexus::authn::external::spoof::SPOOF_RESERVED_BAD_ACTOR;
-use omicron_nexus::authn::external::spoof::SPOOF_RESERVED_BAD_CREDS;
 use omicron_nexus::authn::external::spoof::SPOOF_SCHEME_NAME;
 use omicron_nexus::authn::external::HttpAuthnScheme;
 use std::collections::HashMap;
@@ -62,7 +61,8 @@ async fn test_authn_spoof_allowed() {
 
     // Successful authentication
     let valid_uuid = "7f927c86-3371-4295-c34a-e3246a4b9c02";
-    let header = HeaderValue::from_static(valid_uuid);
+    let header =
+        spoof::make_header_value(valid_uuid.parse().unwrap()).0.encode();
     assert_eq!(
         whoami_request(Some(header), None, &testctx).await.unwrap(),
         WhoamiResponse {
@@ -73,7 +73,7 @@ async fn test_authn_spoof_allowed() {
     );
 
     // Bad header value (malformed)
-    let header = HeaderValue::from_static("not-a-uuid");
+    let header = spoof::make_header_value_raw(b"not-a-uuid").unwrap();
     let (status_code, error) =
         whoami_request(Some(header), None, &testctx).await.unwrap_err();
     assert_eq!(error.error_code, None);
@@ -83,13 +83,13 @@ async fn test_authn_spoof_allowed() {
     assert_eq!(status_code, http::StatusCode::BAD_REQUEST);
 
     // Unknown actor
-    let header = HeaderValue::from_static(SPOOF_RESERVED_BAD_ACTOR);
+    let header = spoof::SPOOF_HEADER_BAD_ACTOR.0.encode();
     let (status_code, error) =
         whoami_request(Some(header), None, &testctx).await.unwrap_err();
     assert_authn_failed(status_code, &error);
 
     // Bad credentials
-    let header = HeaderValue::from_static(SPOOF_RESERVED_BAD_CREDS);
+    let header = spoof::SPOOF_HEADER_BAD_CREDS.0.encode();
     let (status_code, error) =
         whoami_request(Some(header), None, &testctx).await.unwrap_err();
     assert_authn_failed(status_code, &error);
@@ -190,10 +190,16 @@ async fn test_authn_spoof_unconfigured() {
 
     let values = [
         None,
-        Some(HeaderValue::from_static("7f927c86-3371-4295-c34a-e3246a4b9c02")),
-        Some(HeaderValue::from_static("not-a-uuid")),
-        Some(HeaderValue::from_static(SPOOF_RESERVED_BAD_ACTOR)),
-        Some(HeaderValue::from_static(SPOOF_RESERVED_BAD_CREDS)),
+        Some(
+            spoof::make_header_value(
+                "7f927c86-3371-4295-c34a-e3246a4b9c02".parse().unwrap(),
+            )
+            .0
+            .encode(),
+        ),
+        Some(spoof::make_header_value_raw(b"not-a-uuid").unwrap()),
+        Some(spoof::SPOOF_HEADER_BAD_ACTOR.0.encode()),
+        Some(spoof::SPOOF_HEADER_BAD_CREDS.0.encode()),
     ];
 
     for v in values {
@@ -222,7 +228,7 @@ async fn whoami_request(
 
     if let Some(spoof_header_value) = spoof_header {
         builder =
-            builder.header(HTTP_HEADER_OXIDE_AUTHN_SPOOF, spoof_header_value);
+            builder.header(http::header::AUTHORIZATION, spoof_header_value);
     }
 
     if let Some(cookie_header_value) = cookie_header {

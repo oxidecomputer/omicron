@@ -8,6 +8,8 @@
 OXAPI_URL="${OXAPI_URL:-http://127.0.0.1:12220}"
 ARG0="$(basename "${BASH_SOURCE[0]}")"
 NO_AUTHENTICATE=false
+AUTH_HEADER="Authorization: Bearer"
+AUTH_HEADER="$AUTH_HEADER oxide-spoof-001de000-05e4-4000-8000-000000004007"
 HELP="$(cat <<EOF
 usage: $ARG0 [-A] [cmd] [args]
 
@@ -158,8 +160,7 @@ function do_curl_authn
 	if [[ $NO_AUTHENTICATE == true ]]; then
 		do_curl "$@"
 	else
-		do_curl "$@" \
-			-H "oxide-authn-spoof: 001de000-05e4-4000-8000-000000004007"
+		do_curl "$@" -H "$AUTH_HEADER"
 	fi
 }
 

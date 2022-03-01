@@ -9,6 +9,8 @@ use anyhow::ensure;
 use anyhow::Context;
 use dropshot::test_util::ClientTestContext;
 use dropshot::ResultsPage;
+use headers::authorization::Credentials;
+use omicron_nexus::authn::external::spoof;
 use std::convert::TryInto;
 use std::fmt::Debug;
 
@@ -435,11 +437,8 @@ impl<'a> NexusRequest<'a> {
         };
 
         self.request_builder = self.request_builder.header(
-            http::header::HeaderName::from_static(
-                authn::external::spoof::HTTP_HEADER_OXIDE_AUTHN_SPOOF,
-            ),
-            http::header::HeaderValue::from_str(&header_value.to_string())
-                .unwrap(),
+            &http::header::AUTHORIZATION,
+            spoof::make_header_value(header_value).0.encode(),
         );
         self
     }

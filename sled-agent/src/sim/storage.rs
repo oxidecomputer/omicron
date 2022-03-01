@@ -59,6 +59,10 @@ impl CrucibleDataInner {
             // NOTE: This is a lie - no server is running.
             port_number: 0,
             state,
+            encrypted: false,
+            cert_pem: None,
+            key_pem: None,
+            root_pem: None,
         };
         let old = self.regions.insert(id, region.clone());
         if let Some(old) = old {

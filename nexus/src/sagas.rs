@@ -650,6 +650,10 @@ async fn ensure_region_in_dataset(
         // NOTE: This'll require updating the crucible agent client.
         id: RegionId(region.id().to_string()),
         volume_id: region.disk_id().to_string(),
+        encrypted: region.encrypted(),
+        cert_pem: None,
+        key_pem: None,
+        root_pem: None,
     };
 
     let create_region = || async {
