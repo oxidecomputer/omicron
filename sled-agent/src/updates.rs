@@ -4,14 +4,10 @@
 
 //! Management of per-sled updates
 
+use crate::nexus::NexusClient;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use std::path::Path;
-
-#[cfg(test)]
-use crate::mocks::MockNexusClient as NexusClient;
-#[cfg(not(test))]
-use nexus_client::Client as NexusClient;
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {

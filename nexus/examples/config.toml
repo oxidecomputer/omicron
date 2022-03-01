@@ -51,7 +51,3 @@ mode = "stderr-terminal"
 # Configuration for interacting with the timeseries database
 [timeseries_db]
 address = "[::1]:8123"
-
-[updates]
-# If not present, accessing the TUF updates repository will fail
-#tuf_trusted_root = ""

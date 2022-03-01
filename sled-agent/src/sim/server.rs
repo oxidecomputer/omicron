@@ -9,9 +9,9 @@
 use super::config::Config;
 use super::http_entrypoints::api as http_api;
 use super::sled_agent::SledAgent;
+use crate::nexus::NexusClient;
 use crucible_agent_client::types::State as RegionState;
 
-use nexus_client::Client as NexusClient;
 use omicron_common::backoff::{
     internal_service_policy, retry_notify, BackoffError,
 };

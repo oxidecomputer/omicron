@@ -23,6 +23,7 @@ mod http_entrypoints;
 mod illumos;
 mod instance;
 mod instance_manager;
+mod nexus;
 mod params;
 mod running_zone;
 pub mod server;

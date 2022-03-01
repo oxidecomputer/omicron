@@ -20,6 +20,7 @@ use crate::populate::populate_start;
 use crate::populate::PopulateStatus;
 use crate::saga_interface::SagaContext;
 use crate::sagas;
+use crate::updates;
 use anyhow::anyhow;
 use anyhow::Context;
 use async_trait::async_trait;
@@ -147,7 +148,8 @@ pub struct Nexus {
     /** Client to the timeseries database. */
     timeseries_client: oximeter_db::Client,
 
-    tuf_trusted_root: Option<Vec<u8>>,
+    /** Contents of the trusted root role for the TUF repository. */
+    updates_config: Option<config::UpdatesConfig>,
 }
 
 /*
@@ -213,10 +215,7 @@ impl Nexus {
             recovery_task: std::sync::Mutex::new(None),
             populate_status,
             timeseries_client,
-            tuf_trusted_root: match &config.updates.tuf_trusted_root {
-                Some(root) => Some(tokio::fs::read(root).await.unwrap()),
-                None => None,
-            },
+            updates_config: config.updates.clone(),
         };
 
         /* TODO-cleanup all the extra Arcs here seems wrong */
@@ -2139,8 +2138,8 @@ impl Nexus {
     fn as_rack(&self) -> db::model::Rack {
         db::model::Rack {
             identity: self.api_rack_identity.clone(),
-            tuf_metadata_base_url: "http://localhost:8000/metadata".to_string(),
-            tuf_targets_base_url: "http://localhost:8000/targets".to_string(),
+            tuf_metadata_base_url: None,
+            tuf_targets_base_url: None,
         }
     }
 
@@ -2483,18 +2482,41 @@ impl Nexus {
         self.db_datastore.session_hard_delete(token).await
     }
 
+    fn tuf_base_urls(&self) -> Option<updates::BaseUrlPair> {
+        self.updates_config.as_ref().map(|c| {
+            let rack = self.as_rack();
+            updates::BaseUrlPair {
+                metadata: rack
+                    .tuf_metadata_base_url
+                    .unwrap_or_else(|| c.default_base_urls.metadata.clone()),
+                targets: rack
+                    .tuf_targets_base_url
+                    .unwrap_or_else(|| c.default_base_urls.targets.clone()),
+            }
+        })
+    }
+
     pub async fn updates_refresh_metadata(&self) -> Result<(), Error> {
-        let rack = self.as_rack();
-        let trust_root = self
-            .tuf_trusted_root
-            .as_ref()
-            .ok_or_else(|| Error::InvalidRequest {
+        let updates_config = self.updates_config.as_ref().ok_or_else(|| {
+            Error::InvalidRequest {
                 message: "updates system not configured".into(),
-            })?
-            .clone();
+            }
+        })?;
+        let base_urls =
+            self.tuf_base_urls().ok_or_else(|| Error::InvalidRequest {
+                message: "updates system not configured".into(),
+            })?;
+        let trusted_root = tokio::fs::read(&updates_config.trusted_root)
+            .await
+            .map_err(|e| Error::InternalError {
+                internal_message: format!(
+                    "error trying to read trusted root: {}",
+                    e
+                ),
+            })?;
 
         let artifacts = tokio::task::spawn_blocking(move || {
-            crate::updates::read_artifacts(&rack, &trust_root)
+            crate::updates::read_artifacts(&trusted_root, base_urls)
         })
         .await
         .unwrap()
@@ -2561,7 +2583,10 @@ impl Nexus {
         &self,
         path: P,
     ) -> Result<Vec<u8>, Error> {
-        let rack = self.as_rack();
+        let base_urls =
+            self.tuf_base_urls().ok_or_else(|| Error::InvalidRequest {
+                message: "updates system not configured".into(),
+            })?;
 
         let path = path.as_ref();
         if !path.starts_with(BASE_ARTIFACT_DIR) {
@@ -2605,9 +2630,7 @@ impl Nexus {
 
             let mut response = reqwest::get(format!(
                 "{}/{}.{}",
-                rack.tuf_targets_base_url,
-                artifact.target_sha256,
-                artifact.target_name
+                base_urls.targets, artifact.target_sha256, artifact.target_name
             ))
             .await
             .map_err(|e| {

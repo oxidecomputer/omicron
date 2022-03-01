@@ -7,7 +7,7 @@
  * configuration
  */
 
-use crate::db;
+use crate::{db, updates};
 use anyhow::anyhow;
 use dropshot::ConfigDropshot;
 use dropshot::ConfigLogging;
@@ -41,11 +41,12 @@ pub struct ConsoleConfig {
     pub session_absolute_timeout_minutes: u32,
 }
 
-#[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct UpdatesConfig {
-    /** Trusted root.json role for the TUF updates repository. If `None`, accessing the TUF
-     * repository will fail. */
-    pub tuf_trusted_root: Option<PathBuf>,
+    /** Trusted root.json role for the TUF updates repository. */
+    pub trusted_root: PathBuf,
+    /** Default base URLs for the TUF repository. */
+    pub default_base_urls: updates::BaseUrlPair,
 }
 
 /**
@@ -77,9 +78,10 @@ pub struct Config {
     pub authn: AuthnConfig,
     /** Timeseries database configuration. */
     pub timeseries_db: TimeseriesDbConfig,
-    /** Updates-related configuration */
+    /// Updates-related configuration. Updates APIs return 400 Bad Request when this is
+    /// unconfigured.
     #[serde(default)]
-    pub updates: UpdatesConfig,
+    pub updates: Option<UpdatesConfig>,
 }
 
 #[derive(Debug)]
@@ -188,6 +190,7 @@ mod test {
         SchemeName, TimeseriesDbConfig, UpdatesConfig,
     };
     use crate::db;
+    use crate::updates;
     use dropshot::ConfigDropshot;
     use dropshot::ConfigLogging;
     use dropshot::ConfigLoggingIfExists;
@@ -317,7 +320,10 @@ mod test {
             [timeseries_db]
             address = "[::1]:8123"
             [updates]
-            tuf_trusted_root = "/path/to/root.json"
+            trusted_root = "/path/to/root.json"
+            [updates.default_base_urls]
+            metadata = "http://example.invalid/metadata/"
+            targets = "http://example.invalid/targets/"
             "##,
         )
         .unwrap();
@@ -358,9 +364,13 @@ mod test {
                 timeseries_db: TimeseriesDbConfig {
                     address: "[::1]:8123".parse().unwrap()
                 },
-                updates: UpdatesConfig {
-                    tuf_trusted_root: Some(PathBuf::from("/path/to/root.json"))
-                },
+                updates: Some(UpdatesConfig {
+                    trusted_root: PathBuf::from("/path/to/root.json"),
+                    default_base_urls: updates::BaseUrlPair {
+                        metadata: "http://example.invalid/metadata/".into(),
+                        targets: "http://example.invalid/targets/".into(),
+                    },
+                }),
             }
         );
 

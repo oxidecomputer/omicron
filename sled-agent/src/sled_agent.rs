@@ -9,6 +9,7 @@ use crate::illumos::zfs::{
     Mountpoint, ZONE_ZFS_DATASET, ZONE_ZFS_DATASET_MOUNTPOINT,
 };
 use crate::instance_manager::InstanceManager;
+use crate::nexus::NexusClient;
 use crate::params::DiskStateRequested;
 use crate::storage_manager::StorageManager;
 use crate::updates;
@@ -23,17 +24,10 @@ use std::sync::Arc;
 use uuid::Uuid;
 
 #[cfg(not(test))]
-use {
-    crate::illumos::{dladm::Dladm, zfs::Zfs, zone::Zones},
-    nexus_client::Client as NexusClient,
-};
+use crate::illumos::{dladm::Dladm, zfs::Zfs, zone::Zones};
 #[cfg(test)]
-use {
-    crate::illumos::{
-        dladm::MockDladm as Dladm, zfs::MockZfs as Zfs,
-        zone::MockZones as Zones,
-    },
-    crate::mocks::MockNexusClient as NexusClient,
+use crate::illumos::{
+    dladm::MockDladm as Dladm, zfs::MockZfs as Zfs, zone::MockZones as Zones,
 };
 
 #[derive(thiserror::Error, Debug)]

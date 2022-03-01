@@ -18,7 +18,7 @@
 
 pub mod authn; // Public only for testing
 pub mod authz;
-mod config;
+pub mod config; // public for testing
 mod context;
 pub mod db; // Public only for some documentation examples
 pub mod external_api; // public for testing
@@ -27,7 +27,7 @@ mod nexus;
 mod populate;
 mod saga_interface;
 mod sagas;
-mod updates;
+pub mod updates; // public for testing
 
 pub use config::Config;
 pub use context::ServerContext;

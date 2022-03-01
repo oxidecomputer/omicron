@@ -7,8 +7,9 @@
 use anyhow::Error;
 use mockall::mock;
 use nexus_client::types::{
-    DatasetPutRequest, DatasetPutResponse, InstanceRuntimeState,
-    SledAgentStartupInfo, ZpoolPutRequest, ZpoolPutResponse,
+    DatasetPutRequest, DatasetPutResponse, DiskRuntimeState,
+    InstanceRuntimeState, SledAgentStartupInfo, ZpoolPutRequest,
+    ZpoolPutResponse,
 };
 use reqwest::Response;
 use slog::Logger;
@@ -26,6 +27,11 @@ mock! {
             &self,
             id: &Uuid,
             new_runtime_state: &InstanceRuntimeState,
+        ) -> Result<(), Error>;
+        pub async fn cpapi_disks_put(
+            &self,
+            disk_id: &Uuid,
+            new_runtime_state: &DiskRuntimeState,
         ) -> Result<(), Error>;
         pub async fn cpapi_artifact_download(
             &self,

@@ -4,24 +4,35 @@
 
 use crate::db;
 use parse_display::Display;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::convert::TryInto;
 
+// Simple metadata base URL + targets base URL pair, useful in several places.
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+pub struct BaseUrlPair {
+    /// The metadata base URL.
+    pub metadata: String,
+    /// The targets base URL.
+    pub targets: String,
+}
+
 // Schema for the `artifacts.json` target in the TUF update repository.
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct ArtifactsDocument {
     pub artifacts: Vec<UpdateArtifact>,
 }
 
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct UpdateArtifact {
     pub name: String,
     pub version: i64,
+    // FIXME(iliana): this needs to have a fallback or else we can never add a new kind of artifact
+    // in production!!
     pub kind: UpdateArtifactKind,
     pub target: String,
 }
 
-#[derive(Clone, Debug, Display, Deserialize)]
+#[derive(Clone, Debug, Display, Deserialize, Serialize)]
 #[display(style = "kebab-case")]
 #[serde(rename_all = "kebab-case")]
 pub enum UpdateArtifactKind {
@@ -30,8 +41,8 @@ pub enum UpdateArtifactKind {
 
 // TODO(iliana): make async/.await. awslabs/tough#213
 pub fn read_artifacts(
-    rack: &db::model::Rack,
-    tuf_trusted_root: &[u8],
+    trusted_root: &[u8],
+    base_urls: BaseUrlPair,
 ) -> Result<
     Vec<db::model::UpdateAvailableArtifact>,
     Box<dyn std::error::Error + Send + Sync>,
@@ -39,9 +50,9 @@ pub fn read_artifacts(
     use std::io::Read;
 
     let repository = tough::RepositoryLoader::new(
-        tuf_trusted_root,
-        rack.tuf_metadata_base_url.parse()?,
-        rack.tuf_targets_base_url.parse()?,
+        trusted_root,
+        base_urls.metadata.parse()?,
+        base_urls.targets.parse()?,
     )
     .load()?;
 

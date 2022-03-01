@@ -119,6 +119,7 @@ nexus-test-utils = { path = "test-utils" }
 omicron-test-utils = { path = "../test-utils" }
 openapiv3 = "1.0"
 subprocess = "0.2.8"
+tempfile = "3.3"
 
 [dev-dependencies.openapi-lint]
 git = "https://github.com/oxidecomputer/openapi-lint"

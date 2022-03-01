@@ -442,8 +442,8 @@ pub struct Rack {
     #[diesel(embed)]
     pub identity: RackIdentity,
 
-    pub tuf_metadata_base_url: String,
-    pub tuf_targets_base_url: String,
+    pub tuf_metadata_base_url: Option<String>,
+    pub tuf_targets_base_url: Option<String>,
 }
 
 /// Database representation of a Sled.

@@ -7,6 +7,7 @@
  */
 
 use crate::params::DiskEnsureBody;
+use crate::updates::UpdateArtifact;
 use dropshot::endpoint;
 use dropshot::ApiDescription;
 use dropshot::HttpError;
@@ -36,6 +37,7 @@ pub fn api() -> SledApiDescription {
         api.register(instance_poke_post)?;
         api.register(disk_put)?;
         api.register(disk_poke_post)?;
+        api.register(update_artifact)?;
         Ok(())
     }
 
@@ -127,5 +129,21 @@ async fn disk_poke_post(
     let sa = rqctx.context();
     let disk_id = path_params.into_inner().disk_id;
     sa.disk_poke(disk_id).await;
+    Ok(HttpResponseUpdatedNoContent())
+}
+
+#[endpoint {
+    method = POST,
+    path = "/update"
+}]
+async fn update_artifact(
+    rqctx: Arc<RequestContext<Arc<SledAgent>>>,
+    artifact: TypedBody<UpdateArtifact>,
+) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+    artifact
+        .into_inner()
+        .download(rqctx.context().nexus_client.as_ref())
+        .await
+        .map_err(|e| HttpError::for_internal_error(e.to_string()))?;
     Ok(HttpResponseUpdatedNoContent())
 }

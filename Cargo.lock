@@ -2080,6 +2080,7 @@ dependencies = [
  "steno",
  "structopt",
  "subprocess",
+ "tempfile",
  "thiserror",
  "tokio",
  "tokio-postgres",
@@ -2504,13 +2505,11 @@ dependencies = [
 
 [[package]]
 name = "pem"
-version = "1.0.1"
+version = "1.0.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "06673860db84d02a63942fa69cd9543f2624a5df3aea7f33173048fa7ad5cf1a"
+checksum = "e9a3b09a20e374558580a4914d3b7d89bd61b954a5a5e1dcbea98753addb1947"
 dependencies = [
  "base64",
- "once_cell",
- "regex",
 ]
 
 [[package]]
@@ -3749,9 +3748,9 @@ dependencies = [
 
 [[package]]
 name = "snafu"
-version = "0.6.10"
+version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "eab12d3c261b2308b0d80c26fffb58d17eba81a4be97890101f416b478c79ca7"
+checksum = "2eba135d2c579aa65364522eb78590cdf703176ef71ad4c32b00f58f7afb2df5"
 dependencies = [
  "doc-comment",
  "snafu-derive",
@@ -3759,10 +3758,11 @@ dependencies = [
 
 [[package]]
 name = "snafu-derive"
-version = "0.6.10"
+version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1508efa03c362e23817f96cde18abed596a25219a8b2c66e8db33c03543d315b"
+checksum = "7a7fe9b0669ef117c5cabc5549638528f36771f058ff977d7689deb517833a75"
 dependencies = [
+ "heck",
  "proc-macro2",
  "quote",
  "syn",
@@ -4257,9 +4257,9 @@ dependencies = [
 
 [[package]]
 name = "tough"
-version = "0.12.0"
+version = "0.12.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "99488309ba53ee931b6ccda1cde07feaab95f214d328e3a7244c0f7563b5909f"
+checksum = "708125a84e70820bccc5fc11d7196664415be2b02b81ba6946e70e10803aa4da"
 dependencies = [
  "chrono",
  "dyn-clone",

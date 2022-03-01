@@ -8,9 +8,9 @@
 
 use super::simulatable::Simulatable;
 
+use crate::nexus::NexusClient;
 use async_trait::async_trait;
 use nexus_client;
-use nexus_client::Client as NexusClient;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::Generation;
 use omicron_common::api::external::InstanceState;

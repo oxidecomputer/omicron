@@ -8,11 +8,11 @@
 
 use super::config::SimMode;
 
+use crate::nexus::NexusClient;
 use futures::channel::mpsc::Receiver;
 use futures::channel::mpsc::Sender;
 use futures::lock::Mutex;
 use futures::stream::StreamExt;
-use nexus_client::Client as NexusClient;
 use omicron_common::api::external::Error;
 use slog::Logger;
 use std::collections::BTreeMap;
