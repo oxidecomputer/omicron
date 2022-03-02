@@ -275,9 +275,7 @@ impl Agent {
                 );
             }
 
-            // Issue the initialization requests to all sleds.
-            //
-            // Perform the requests concurrently.
+            // Issue the partition initialization requests to all sleds.
             futures::future::join_all(
                 rss_config.requests.iter().map(|request| async move {
                     info!(self.log, "observing request: {:#?}", request);
@@ -293,7 +291,7 @@ impl Agent {
                         self.log.new(o!("SledAgentClient" => request.sled_address)),
                     );
 
-                    info!(self.log, "sending requests...");
+                    info!(self.log, "sending partition requests...");
                     for partition in &request.partitions {
                         let filesystem_put = || async {
                             info!(self.log, "creating new filesystem: {:?}", partition);
@@ -310,7 +308,31 @@ impl Agent {
                             log_failure,
                         ).await?;
                     }
+                    Ok(())
+                })
+            ).await.into_iter().collect::<Result<Vec<()>, BootstrapError>>()?;
 
+            // Issue service initialization requests.
+            //
+            // Note that this must happen *after* the partition initialization,
+            // to ensure that CockroachDB has been initialized before Nexus
+            // starts.
+            futures::future::join_all(
+                rss_config.requests.iter().map(|request| async move {
+                    info!(self.log, "observing request: {:#?}", request);
+                    let dur = std::time::Duration::from_secs(60);
+                    let client = reqwest::ClientBuilder::new()
+                        .connect_timeout(dur)
+                        .timeout(dur)
+                        .build()
+                        .map_err(|e| nexus_client::Error::<()>::from(e))?;
+                    let client = sled_agent_client::Client::new_with_client(
+                        &format!("http://{}", request.sled_address),
+                        client,
+                        self.log.new(o!("SledAgentClient" => request.sled_address)),
+                    );
+
+                    info!(self.log, "sending service requests...");
                     let services_put = || async {
                         info!(self.log, "initializing sled services: {:?}", request.services);
                         client.services_put(
