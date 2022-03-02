@@ -26,9 +26,6 @@ pub enum BootstrapError {
     #[error("Cannot deserialize TOML file")]
     Toml(#[from] toml::de::Error),
 
-    #[error("Unexpected digest for service {0}")]
-    UnexpectedDigest(String),
-
     #[error("Error accessing filesystem: {0}")]
     Io(#[from] std::io::Error),
 

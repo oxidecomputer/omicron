@@ -9,6 +9,7 @@ anyhow = "1.0"
 crossbeam = "0.8"
 flate2 = "1.0.22"
 omicron-common = { path = "../common" }
+omicron-zone-package = { version = "0.1" }
 # We depend on the propolis-server here -- a binary, not a library -- to
 # make it visible to the packaging tool, which can compile it and shove
 # it in a tarball.

@@ -2259,6 +2259,7 @@ dependencies = [
  "crossbeam",
  "flate2",
  "omicron-common",
+ "omicron-zone-package",
  "propolis-server",
  "rayon",
  "reqwest",
@@ -2350,6 +2351,24 @@ dependencies = [
  "thiserror",
  "tokio",
  "tokio-postgres",
+]
+
+[[package]]
+name = "omicron-zone-package"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1ee0e68663df26bb102a47a0b9b18932b21ff967329e12bbdfdbf3299ee60ece"
+dependencies = [
+ "anyhow",
+ "flate2",
+ "reqwest",
+ "serde",
+ "serde_derive",
+ "tar",
+ "tempfile",
+ "thiserror",
+ "tokio",
+ "toml",
 ]
 
 [[package]]

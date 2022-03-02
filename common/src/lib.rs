@@ -28,7 +28,6 @@ pub mod api;
 pub mod backoff;
 pub mod cmd;
 pub mod config;
-pub mod packaging;
 
 #[macro_export]
 macro_rules! generate_logging_api {
