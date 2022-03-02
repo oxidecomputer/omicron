@@ -6,11 +6,13 @@ license = "MPL-2.0"
 
 [dependencies]
 anyhow = "1.0"
+crossbeam = "0.8"
 omicron-common = { path = "../common" }
+
 # We depend on the propolis-server here -- a binary, not a library -- to
 # make it visible to the packaging tool, which can compile it and shove
 # it in a tarball.
-propolis-server = { git = "https://github.com/oxidecomputer/propolis", rev = "00ec8cf18f6a2311b0907f0b16b0ff8a327944d1" }
+propolis-server = { git = "https://github.com/oxidecomputer/propolis", rev = "0e3798510ae190131f63b9df767ec01b2beacf91" }
 rayon = "1.5"
 reqwest = { version = "0.11", default-features = false, features = ["rustls-tls"] }
 serde = { version = "1.0", features = [ "derive" ] }
@@ -19,7 +21,7 @@ smf = "0.2"
 structopt = "0.3"
 tar = "0.4"
 thiserror = "1.0"
-tokio = { version = "1.14", features = [ "full" ] }
+tokio = { version = "1.17", features = [ "full" ] }
 toml = "0.5.6"
 walkdir = "2.3"
 
@@ -27,4 +29,8 @@ walkdir = "2.3"
 # rust-lang/cargo#8373.  These docs would not be very useful anyway.
 [[bin]]
 name = "omicron-package"
+doc = false
+
+[[bin]]
+name = "thing-flinger"
 doc = false

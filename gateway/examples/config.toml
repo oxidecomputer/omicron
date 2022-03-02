@@ -1,0 +1,34 @@
+#
+# Oxide API: example configuration file
+#
+
+# Identifier for this instance of MGS
+id = "8afcb12d-f625-4df9-bdf2-f495c3bbd323"
+udp_bind_address = "127.0.0.1:22222"
+ignition_controller_timeout_milliseconds = 1_000
+
+[known_sps]
+# TODO we repeat the ignition_controller IP as a switch; should we specify it as
+# an index into `switches` instead? Punting since this isn't how we want to map
+# our known SPs anyway.
+ignition_controller = "127.0.0.1:23456"
+switches = ["127.0.0.1:23456"]
+sleds = ["127.0.0.1:23457"]
+power_controllers = []
+
+[dropshot]
+# IP address and TCP port on which to listen for the external API
+bind_address = "127.0.0.1:12222"
+#request_body_max_bytes = 1048576
+
+[log]
+# Show log messages of this level and more severe
+level = "debug"
+
+# Example output to a terminal (with colors)
+mode = "stderr-terminal"
+
+# Example output to a file, appending if it already exists.
+#mode = "file"
+#path = "logs/server.log"
+#if_exists = "append"

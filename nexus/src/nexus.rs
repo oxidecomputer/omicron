@@ -14,6 +14,8 @@ use crate::db;
 use crate::db::identity::{Asset, Resource};
 use crate::db::model::DatasetKind;
 use crate::db::model::Name;
+use crate::db::subnet_allocation::SubnetError;
+use crate::defaults;
 use crate::external_api::params;
 use crate::internal_api::params::{OximeterInfo, ZpoolPutRequest};
 use crate::populate::populate_start;
@@ -26,20 +28,14 @@ use async_trait::async_trait;
 use futures::future::ready;
 use futures::StreamExt;
 use hex;
-use ipnetwork::Ipv4Network;
-use ipnetwork::Ipv6Network;
-use lazy_static::lazy_static;
 use omicron_common::api::external;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::DeleteResult;
-use omicron_common::api::external::Disk;
 use omicron_common::api::external::DiskState;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::InstanceState;
-use omicron_common::api::external::Ipv4Net;
-use omicron_common::api::external::Ipv6Net;
 use omicron_common::api::external::ListResult;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
@@ -52,21 +48,24 @@ use omicron_common::api::external::RouterRouteKind;
 use omicron_common::api::external::RouterRouteUpdateParams;
 use omicron_common::api::external::UpdateResult;
 use omicron_common::api::external::VpcFirewallRuleUpdateParams;
-use omicron_common::api::external::VpcFirewallRuleUpdateResult;
 use omicron_common::api::external::VpcRouterKind;
 use omicron_common::api::internal::nexus;
 use omicron_common::api::internal::nexus::DiskRuntimeState;
+use omicron_common::api::internal::sled_agent::InstanceRuntimeStateMigrateParams;
 use omicron_common::api::internal::sled_agent::InstanceRuntimeStateRequested;
 use omicron_common::api::internal::sled_agent::InstanceStateRequested;
 use omicron_common::backoff;
 use omicron_common::bail_unless;
 use oximeter_client::Client as OximeterClient;
+use oximeter_db::TimeseriesSchema;
+use oximeter_db::TimeseriesSchemaPaginationParams;
 use oximeter_producer::register;
 use rand::{rngs::StdRng, RngCore, SeedableRng};
 use sled_agent_client::Client as SledAgentClient;
 use slog::Logger;
 use std::convert::TryInto;
 use std::net::SocketAddr;
+use std::num::NonZeroU32;
 use std::sync::Arc;
 use std::time::Duration;
 use steno::SagaId;
@@ -126,6 +125,9 @@ pub struct Nexus {
     /** persistent storage for resources in the control plane */
     db_datastore: Arc<db::DataStore>,
 
+    /** handle to global authz information */
+    authz: Arc<authz::Authz>,
+
     /** saga execution coordinator */
     sec_client: Arc<steno::SecClient>,
 
@@ -134,6 +136,9 @@ pub struct Nexus {
 
     /** Status of background task to populate database */
     populate_status: tokio::sync::watch::Receiver<PopulateStatus>,
+
+    /** Client to the timeseries database. */
+    timeseries_client: oximeter_db::Client,
 }
 
 /*
@@ -171,6 +176,8 @@ impl Nexus {
             )),
             sec_store,
         ));
+        let timeseries_client =
+            oximeter_db::Client::new(config.timeseries_db.address, &log);
 
         /*
          * TODO-cleanup We may want a first-class subsystem for managing startup
@@ -182,6 +189,7 @@ impl Nexus {
             log.new(o!("component" => "DataLoader")),
             Arc::clone(&authz),
             authn::Context::internal_db_init(),
+            Arc::clone(&db_datastore),
         );
         let populate_status =
             populate_start(populate_ctx, Arc::clone(&db_datastore));
@@ -192,29 +200,37 @@ impl Nexus {
             log: log.new(o!()),
             api_rack_identity: db::model::RackIdentity::new(*rack_id),
             db_datastore: Arc::clone(&db_datastore),
+            authz: Arc::clone(&authz),
             sec_client: Arc::clone(&sec_client),
             recovery_task: std::sync::Mutex::new(None),
             populate_status,
+            timeseries_client,
         };
 
         /* TODO-cleanup all the extra Arcs here seems wrong */
-        let nexus_arc = Arc::new(nexus);
+        let nexus = Arc::new(nexus);
         let opctx = OpContext::for_background(
             log.new(o!("component" => "SagaRecoverer")),
-            authz,
+            Arc::clone(&authz),
             authn::Context::internal_saga_recovery(),
+            Arc::clone(&db_datastore),
         );
+        let saga_logger = nexus.log.new(o!("saga_type" => "recovery"));
         let recovery_task = db::recover(
             opctx,
             my_sec_id,
-            Arc::new(Arc::new(SagaContext::new(Arc::clone(&nexus_arc)))),
+            Arc::new(Arc::new(SagaContext::new(
+                Arc::clone(&nexus),
+                saga_logger,
+                Arc::clone(&authz),
+            ))),
             db_datastore,
             Arc::clone(&sec_client),
             &sagas::ALL_TEMPLATES,
         );
 
-        *nexus_arc.recovery_task.lock().unwrap() = Some(recovery_task);
-        nexus_arc
+        *nexus.recovery_task.lock().unwrap() = Some(recovery_task);
+        nexus
     }
 
     pub async fn wait_for_populate(&self) -> Result<(), anyhow::Error> {
@@ -270,7 +286,7 @@ impl Nexus {
         address: SocketAddr,
         kind: DatasetKind,
     ) -> Result<(), Error> {
-        info!(self.log, "upserting dataset"; "zpool_id" => zpool_id.to_string(), "dataset_id" => id.to_string());
+        info!(self.log, "upserting dataset"; "zpool_id" => zpool_id.to_string(), "dataset_id" => id.to_string(), "address" => address.to_string());
         let dataset = db::model::Dataset::new(id, zpool_id, address, kind);
         self.db_datastore.dataset_upsert(dataset).await?;
         Ok(())
@@ -401,7 +417,7 @@ impl Nexus {
         self.db_datastore.oximeter_list(page_params).await
     }
 
-    pub fn datastore(&self) -> &db::DataStore {
+    pub fn datastore(&self) -> &Arc<db::DataStore> {
         &self.db_datastore
     }
 
@@ -426,8 +442,13 @@ impl Nexus {
         P: serde::Serialize,
     {
         let saga_id = SagaId(Uuid::new_v4());
-        let saga_context =
-            Arc::new(Arc::new(SagaContext::new(Arc::clone(self))));
+        let saga_logger =
+            self.log.new(o!("template_name" => template_name.to_owned()));
+        let saga_context = Arc::new(Arc::new(SagaContext::new(
+            Arc::clone(self),
+            saga_logger,
+            Arc::clone(&self.authz),
+        )));
         let future = self
             .sec_client
             .saga_create(
@@ -478,9 +499,10 @@ impl Nexus {
 
     pub async fn organization_fetch(
         &self,
+        opctx: &OpContext,
         name: &Name,
     ) -> LookupResult<db::model::Organization> {
-        self.db_datastore.organization_fetch(name).await
+        Ok(self.db_datastore.organization_fetch(opctx, name).await?.1)
     }
 
     pub async fn organizations_list_by_name(
@@ -499,17 +521,22 @@ impl Nexus {
         self.db_datastore.organizations_list_by_id(opctx, pagparams).await
     }
 
-    pub async fn organization_delete(&self, name: &Name) -> DeleteResult {
-        self.db_datastore.organization_delete(name).await
+    pub async fn organization_delete(
+        &self,
+        opctx: &OpContext,
+        name: &Name,
+    ) -> DeleteResult {
+        self.db_datastore.organization_delete(opctx, name).await
     }
 
     pub async fn organization_update(
         &self,
+        opctx: &OpContext,
         name: &Name,
         new_params: &params::OrganizationUpdate,
     ) -> UpdateResult<db::model::Organization> {
         self.db_datastore
-            .organization_update(name, new_params.clone().into())
+            .organization_update(opctx, name, new_params.clone().into())
             .await
     }
 
@@ -523,8 +550,10 @@ impl Nexus {
         organization_name: &Name,
         new_project: &params::ProjectCreate,
     ) -> CreateResult<db::model::Project> {
-        let org =
-            self.db_datastore.organization_lookup(organization_name).await?;
+        let org = self
+            .db_datastore
+            .organization_lookup_by_path(organization_name)
+            .await?;
 
         // Create a project.
         let db_project = db::model::Project::new(org.id(), new_project.clone());
@@ -546,8 +575,10 @@ impl Nexus {
                         name: "default".parse().unwrap(),
                         description: "Default VPC".to_string(),
                     },
-                    // TODO-robustness this will need to be None if we decide to handle
-                    // the logic around name and dns_name by making dns_name optional
+                    ipv6_prefix: Some(defaults::random_vpc_ipv6_prefix()?),
+                    // TODO-robustness this will need to be None if we decide to
+                    // handle the logic around name and dns_name by making
+                    // dns_name optional
                     dns_name: "default".parse().unwrap(),
                 },
             )
@@ -558,70 +589,77 @@ impl Nexus {
 
     pub async fn project_fetch(
         &self,
+        opctx: &OpContext,
         organization_name: &Name,
         project_name: &Name,
     ) -> LookupResult<db::model::Project> {
-        let organization_id = self
+        let authz_org = self
             .db_datastore
-            .organization_lookup_id_by_name(organization_name)
+            .organization_lookup_by_path(organization_name)
             .await?;
-        self.db_datastore.project_fetch(&organization_id, project_name).await
+        Ok(self
+            .db_datastore
+            .project_fetch(opctx, &authz_org, project_name)
+            .await?
+            .1)
     }
 
     pub async fn projects_list_by_name(
         &self,
+        opctx: &OpContext,
         organization_name: &Name,
         pagparams: &DataPageParams<'_, Name>,
     ) -> ListResultVec<db::model::Project> {
-        let organization_id = self
+        let authz_org = self
             .db_datastore
-            .organization_lookup_id_by_name(organization_name)
+            .organization_lookup_by_path(organization_name)
             .await?;
         self.db_datastore
-            .projects_list_by_name(&organization_id, pagparams)
+            .projects_list_by_name(opctx, &authz_org, pagparams)
             .await
     }
 
     pub async fn projects_list_by_id(
         &self,
+        opctx: &OpContext,
         organization_name: &Name,
         pagparams: &DataPageParams<'_, Uuid>,
     ) -> ListResultVec<db::model::Project> {
-        let organization_id = self
+        let authz_org = self
             .db_datastore
-            .organization_lookup_id_by_name(organization_name)
+            .organization_lookup_by_path(organization_name)
             .await?;
-        self.db_datastore.projects_list_by_id(&organization_id, pagparams).await
+        self.db_datastore
+            .projects_list_by_id(opctx, &authz_org, pagparams)
+            .await
     }
 
     pub async fn project_delete(
         &self,
+        opctx: &OpContext,
         organization_name: &Name,
         project_name: &Name,
     ) -> DeleteResult {
-        let organization_id = self
+        let authz_project = self
             .db_datastore
-            .organization_lookup_id_by_name(organization_name)
+            .project_lookup_by_path(organization_name, project_name)
             .await?;
-        self.db_datastore.project_delete(&organization_id, project_name).await
+        self.db_datastore.project_delete(opctx, &authz_project).await
     }
 
     pub async fn project_update(
         &self,
+        opctx: &OpContext,
         organization_name: &Name,
         project_name: &Name,
         new_params: &params::ProjectUpdate,
     ) -> UpdateResult<db::model::Project> {
-        let organization_id = self
+        let authz_project = self
             .db_datastore
-            .organization_lookup_id_by_name(organization_name)
+            .project_lookup_by_path(organization_name, project_name)
             .await?;
         self.db_datastore
-            .project_update(
-                &organization_id,
-                project_name,
-                new_params.clone().into(),
-            )
+            .project_update(opctx, &authz_project, new_params.clone().into())
             .await
     }
 
@@ -631,29 +669,36 @@ impl Nexus {
 
     pub async fn project_list_disks(
         &self,
+        opctx: &OpContext,
         organization_name: &Name,
         project_name: &Name,
         pagparams: &DataPageParams<'_, Name>,
     ) -> ListResultVec<db::model::Disk> {
-        let organization_id = self
+        let authz_project = self
             .db_datastore
-            .organization_lookup_id_by_name(organization_name)
+            .project_lookup_by_path(organization_name, project_name)
             .await?;
-        let project_id = self
-            .db_datastore
-            .project_lookup_id_by_name(&organization_id, project_name)
-            .await?;
-        self.db_datastore.project_list_disks(&project_id, pagparams).await
+        self.db_datastore
+            .project_list_disks(opctx, &authz_project, pagparams)
+            .await
     }
 
     pub async fn project_create_disk(
-        &self,
+        self: &Arc<Self>,
+        opctx: &OpContext,
         organization_name: &Name,
         project_name: &Name,
         params: &params::DiskCreate,
     ) -> CreateResult<db::model::Disk> {
-        let project =
-            self.project_fetch(organization_name, project_name).await?;
+        let authz_project = self
+            .db_datastore
+            .project_lookup_by_path(organization_name, project_name)
+            .await?;
+
+        // TODO-security This may need to be revisited once we implement authz
+        // checks for saga actions.  Even then, though, it still will be correct
+        // (if possibly redundant) to check this here.
+        opctx.authorize(authz::Action::CreateChild, &authz_project).await?;
 
         /*
          * Until we implement snapshots, do not allow disks to be created with a
@@ -666,106 +711,74 @@ impl Nexus {
             });
         }
 
-        let disk_id = Uuid::new_v4();
-        let disk = db::model::Disk::new(
-            disk_id,
-            project.id(),
-            params.clone(),
-            db::model::DiskRuntimeState::new(),
-        );
-        let disk_created = self.db_datastore.project_create_disk(disk).await?;
-
-        // TODO: Here, we should ensure the disk is backed by appropriate
-        // regions. This is blocked behind actually having Crucible agents
-        // running in zones for dedicated zpools.
-        //
-        // TODO: Performing this operation, alongside "create" and "update
-        // state from create to detach", should be executed in a Saga.
-
-        /*
-         * This is a little hokey.  We'd like to simulate an asynchronous
-         * transition from "Creating" to "Detached".  For instances, the
-         * simulation lives in a simulated sled agent.  Here, the analog might
-         * be a simulated storage control plane.  But that doesn't exist yet,
-         * and we don't even know what APIs it would provide yet.  So we just
-         * carry out the simplest possible "simulation" here: we'll return to
-         * the client a structure describing a disk in state "Creating", but by
-         * the time we do so, we've already updated the internal representation
-         * to "Created".
-         */
-        self.db_datastore
-            .disk_update_runtime(&disk_id, &disk_created.runtime().detach())
+        let saga_params = Arc::new(sagas::ParamsDiskCreate {
+            serialized_authn: authn::saga::Serialized::for_opctx(opctx),
+            project_id: authz_project.id(),
+            create_params: params.clone(),
+        });
+        let saga_outputs = self
+            .execute_saga(
+                Arc::clone(&sagas::SAGA_DISK_CREATE_TEMPLATE),
+                sagas::SAGA_DISK_CREATE_NAME,
+                saga_params,
+            )
             .await?;
-
+        let disk_created = saga_outputs
+            .lookup_output::<db::model::Disk>("created_disk")
+            .map_err(|e| Error::InternalError {
+                internal_message: e.to_string(),
+            })?;
         Ok(disk_created)
     }
 
-    pub async fn project_lookup_disk(
-        &self,
-        organization_name: &Name,
-        project_name: &Name,
-        disk_name: &Name,
-    ) -> LookupResult<(db::model::Disk, authz::ProjectChild)> {
-        let organization_id = self
-            .db_datastore
-            .organization_lookup_id_by_name(organization_name)
-            .await?;
-        let project_id = self
-            .db_datastore
-            .project_lookup_id_by_name(&organization_id, project_name)
-            .await?;
-        let disk = self
-            .db_datastore
-            .disk_fetch_by_name(&project_id, disk_name)
-            .await?;
-        let disk_id = disk.id();
-        Ok((
-            disk,
-            authz::FLEET
-                .organization(organization_id)
-                .project(project_id)
-                .resource(ResourceType::Disk, disk_id),
-        ))
-    }
-
-    pub async fn project_delete_disk(
+    pub async fn disk_fetch(
         &self,
         opctx: &OpContext,
         organization_name: &Name,
         project_name: &Name,
         disk_name: &Name,
-    ) -> DeleteResult {
-        let (disk, authz_disk) = self
-            .project_lookup_disk(organization_name, project_name, disk_name)
+    ) -> LookupResult<db::model::Disk> {
+        let authz_project = self
+            .db_datastore
+            .project_lookup_by_path(organization_name, project_name)
             .await?;
-        let runtime = disk.runtime();
-        bail_unless!(runtime.state().state() != &DiskState::Destroyed);
+        Ok(self
+            .db_datastore
+            .disk_fetch(opctx, &authz_project, disk_name)
+            .await?
+            .1)
+    }
 
-        if runtime.state().is_attached() {
-            return Err(Error::InvalidRequest {
-                message: String::from("disk is attached"),
-            });
-        }
+    pub async fn project_delete_disk(
+        self: &Arc<Self>,
+        opctx: &OpContext,
+        organization_name: &Name,
+        project_name: &Name,
+        disk_name: &Name,
+    ) -> DeleteResult {
+        let authz_disk = self
+            .db_datastore
+            .disk_lookup_by_path(organization_name, project_name, disk_name)
+            .await?;
 
-        /*
-         * TODO-correctness It's not clear how this handles the case where we
-         * begin this delete operation while some other request is ongoing to
-         * attach the disk.  We won't be able to see that in the state here.  We
-         * might be able to detect this when we go update the disk's state to
-         * Attaching (because a SQL UPDATE will update 0 rows), but we'd sort of
-         * already be in a bad state because the destroyed disk will be
-         * attaching (and eventually attached) on some sled, and if the wrong
-         * combination of components crash at this point, we could wind up not
-         * fixing that state.
-         *
-         * This is a consequence of the choice _not_ to record the Attaching
-         * state in the database before beginning the attach process.  If we did
-         * that, we wouldn't have this problem, but we'd have a similar problem
-         * of dealing with the case of a crash after recording this state and
-         * before actually beginning the attach process.  Sagas can maybe
-         * address that.
-         */
-        self.db_datastore.project_delete_disk(opctx, authz_disk).await
+        // TODO: We need to sort out the authorization checks.
+        //
+        // Normally, this would be coupled alongside access to the
+        // datastore, but now that disk deletion exists within a Saga,
+        // this would require OpContext to be serialized (which is
+        // not trivial).
+        opctx.authorize(authz::Action::Delete, &authz_disk).await?;
+
+        let saga_params =
+            Arc::new(sagas::ParamsDiskDelete { disk_id: authz_disk.id() });
+        self.execute_saga(
+            Arc::clone(&sagas::SAGA_DISK_DELETE_TEMPLATE),
+            sagas::SAGA_DISK_DELETE_NAME,
+            saga_params,
+        )
+        .await?;
+
+        Ok(())
     }
 
     /*
@@ -799,38 +812,36 @@ impl Nexus {
 
     pub async fn project_list_instances(
         &self,
+        opctx: &OpContext,
         organization_name: &Name,
         project_name: &Name,
         pagparams: &DataPageParams<'_, Name>,
     ) -> ListResultVec<db::model::Instance> {
-        let organization_id = self
+        let authz_project = self
             .db_datastore
-            .organization_lookup_id_by_name(organization_name)
+            .project_lookup_by_path(organization_name, project_name)
             .await?;
-        let project_id = self
-            .db_datastore
-            .project_lookup_id_by_name(&organization_id, project_name)
-            .await?;
-        self.db_datastore.project_list_instances(&project_id, pagparams).await
+        self.db_datastore
+            .project_list_instances(opctx, &authz_project, pagparams)
+            .await
     }
 
     pub async fn project_create_instance(
         self: &Arc<Self>,
+        opctx: &OpContext,
         organization_name: &Name,
         project_name: &Name,
         params: &params::InstanceCreate,
     ) -> CreateResult<db::model::Instance> {
-        let organization_id = self
+        let authz_project = self
             .db_datastore
-            .organization_lookup_id_by_name(organization_name)
-            .await?;
-        let project_id = self
-            .db_datastore
-            .project_lookup_id_by_name(&organization_id, project_name)
+            .project_lookup_by_path(organization_name, project_name)
             .await?;
 
+        opctx.authorize(authz::Action::CreateChild, &authz_project).await?;
+
         let saga_params = Arc::new(sagas::ParamsInstanceCreate {
-            project_id,
+            project_id: authz_project.id(),
             create_params: params.clone(),
         });
 
@@ -879,9 +890,13 @@ impl Nexus {
          * dropshot endpoint.  (On the other hand, maybe we _do_ want to do
          * that, for internal interfaces!  Can we do this on a
          * per-dropshot-server-basis?)
+         *
+         * TODO Even worse, post-authz, we do two lookups here instead of one.
+         * Maybe sagas should be able to emit `authz::Instance`-type objects.
          */
-        let instance = self.db_datastore.instance_fetch(&instance_id).await?;
-        Ok(instance)
+        let authz_instance =
+            self.db_datastore.instance_lookup_by_id(instance_id).await?;
+        self.db_datastore.instance_refetch(opctx, &authz_instance).await
     }
 
     /*
@@ -899,6 +914,7 @@ impl Nexus {
      */
     pub async fn project_destroy_instance(
         &self,
+        opctx: &OpContext,
         organization_name: &Name,
         project_name: &Name,
         instance_name: &Name,
@@ -908,50 +924,85 @@ impl Nexus {
          * instances?  Presumably we need to clean them up at some point, but
          * not right away so that callers can see that they've been destroyed.
          */
-        let organization_id = self
+        let authz_instance = self
             .db_datastore
-            .organization_lookup_id_by_name(organization_name)
+            .instance_lookup_by_path(
+                organization_name,
+                project_name,
+                instance_name,
+            )
             .await?;
-        let project_id = self
-            .db_datastore
-            .project_lookup_id_by_name(&organization_id, project_name)
-            .await?;
-        let instance = self
-            .db_datastore
-            .instance_fetch_by_name(&project_id, instance_name)
-            .await?;
-        self.db_datastore.project_delete_instance(&instance.id()).await
+        self.db_datastore.project_delete_instance(opctx, &authz_instance).await
     }
 
-    pub async fn project_lookup_instance(
+    pub async fn project_migrate_instance(
+        self: &Arc<Self>,
+        opctx: &OpContext,
+        organization_name: &Name,
+        project_name: &Name,
+        instance_name: &Name,
+        params: params::InstanceMigrate,
+    ) -> UpdateResult<db::model::Instance> {
+        let authz_instance = self
+            .db_datastore
+            .instance_lookup_by_path(
+                organization_name,
+                project_name,
+                instance_name,
+            )
+            .await?;
+        opctx.authorize(authz::Action::Modify, &authz_instance).await?;
+
+        // Kick off the migration saga
+        let saga_params = Arc::new(sagas::ParamsInstanceMigrate {
+            serialized_authn: authn::saga::Serialized::for_opctx(opctx),
+            instance_id: authz_instance.id(),
+            migrate_params: params,
+        });
+        self.execute_saga(
+            Arc::clone(&sagas::SAGA_INSTANCE_MIGRATE_TEMPLATE),
+            sagas::SAGA_INSTANCE_MIGRATE_NAME,
+            saga_params,
+        )
+        .await?;
+
+        // TODO correctness TODO robustness TODO design
+        // Should we lookup the instance again here?
+        // See comment in project_create_instance.
+        self.db_datastore.instance_refetch(opctx, &authz_instance).await
+    }
+
+    pub async fn instance_fetch(
         &self,
+        opctx: &OpContext,
         organization_name: &Name,
         project_name: &Name,
         instance_name: &Name,
     ) -> LookupResult<db::model::Instance> {
-        let organization_id = self
+        let authz_project = self
             .db_datastore
-            .organization_lookup_id_by_name(organization_name)
+            .project_lookup_by_path(organization_name, project_name)
             .await?;
-        let project_id = self
+        Ok(self
             .db_datastore
-            .project_lookup_id_by_name(&organization_id, project_name)
-            .await?;
-        self.db_datastore
-            .instance_fetch_by_name(&project_id, instance_name)
-            .await
+            .instance_fetch(opctx, &authz_project, instance_name)
+            .await?
+            .1)
     }
 
     fn check_runtime_change_allowed(
         &self,
         runtime: &nexus::InstanceRuntimeState,
+        requested: &InstanceRuntimeStateRequested,
     ) -> Result<(), Error> {
         /*
          * Users are allowed to request a start or stop even if the instance is
          * already in the desired state (or moving to it), and we will issue a
          * request to the SA to make the state change in these cases in case the
          * runtime state we saw here was stale.  However, users are not allowed
-         * to change the state of an instance that's failed or destroyed.
+         * to change the state of an instance that's migrating, failed or
+         * destroyed.  But if we're already migrating, requesting a migration is
+         * allowed to allow for idempotency.
          */
         let allowed = match runtime.run_state {
             InstanceState::Creating => true,
@@ -961,6 +1012,9 @@ impl Nexus {
             InstanceState::Stopped => true,
             InstanceState::Rebooting => true,
 
+            InstanceState::Migrating => {
+                requested.run_state == InstanceStateRequested::Migrating
+            }
             InstanceState::Repairing => false,
             InstanceState::Failed => false,
             InstanceState::Destroyed => false,
@@ -1021,6 +1075,7 @@ impl Nexus {
      */
     pub async fn instance_reboot(
         &self,
+        opctx: &OpContext,
         organization_name: &Name,
         project_name: &Name,
         instance_name: &Name,
@@ -1038,24 +1093,26 @@ impl Nexus {
          * never lose track of the fact that this Instance was supposed to be
          * running.
          */
-        let instance = self
-            .project_lookup_instance(
-                organization_name,
-                project_name,
-                instance_name,
-            )
+        let authz_project = self
+            .db_datastore
+            .project_lookup_by_path(organization_name, project_name)
             .await?;
-
-        self.check_runtime_change_allowed(&instance.runtime().clone().into())?;
+        let (authz_instance, db_instance) = self
+            .db_datastore
+            .instance_fetch(opctx, &authz_project, instance_name)
+            .await?;
+        let requested = InstanceRuntimeStateRequested {
+            run_state: InstanceStateRequested::Reboot,
+            migration_params: None,
+        };
         self.instance_set_runtime(
-            &instance,
-            self.instance_sled(&instance).await?,
-            InstanceRuntimeStateRequested {
-                run_state: InstanceStateRequested::Reboot,
-            },
+            opctx,
+            &authz_instance,
+            &db_instance,
+            requested,
         )
         .await?;
-        self.db_datastore.instance_fetch(&instance.id()).await
+        self.db_datastore.instance_refetch(opctx, &authz_instance).await
     }
 
     /**
@@ -1063,28 +1120,31 @@ impl Nexus {
      */
     pub async fn instance_start(
         &self,
+        opctx: &OpContext,
         organization_name: &Name,
         project_name: &Name,
         instance_name: &Name,
     ) -> UpdateResult<db::model::Instance> {
-        let instance = self
-            .project_lookup_instance(
-                organization_name,
-                project_name,
-                instance_name,
-            )
+        let authz_project = self
+            .db_datastore
+            .project_lookup_by_path(organization_name, project_name)
             .await?;
-
-        self.check_runtime_change_allowed(&instance.runtime().clone().into())?;
+        let (authz_instance, db_instance) = self
+            .db_datastore
+            .instance_fetch(opctx, &authz_project, instance_name)
+            .await?;
+        let requested = InstanceRuntimeStateRequested {
+            run_state: InstanceStateRequested::Running,
+            migration_params: None,
+        };
         self.instance_set_runtime(
-            &instance,
-            self.instance_sled(&instance).await?,
-            InstanceRuntimeStateRequested {
-                run_state: InstanceStateRequested::Running,
-            },
+            opctx,
+            &authz_instance,
+            &db_instance,
+            requested,
         )
         .await?;
-        self.db_datastore.instance_fetch(&instance.id()).await
+        self.db_datastore.instance_refetch(opctx, &authz_instance).await
     }
 
     /**
@@ -1092,28 +1152,62 @@ impl Nexus {
      */
     pub async fn instance_stop(
         &self,
+        opctx: &OpContext,
         organization_name: &Name,
         project_name: &Name,
         instance_name: &Name,
     ) -> UpdateResult<db::model::Instance> {
-        let instance = self
-            .project_lookup_instance(
-                organization_name,
-                project_name,
-                instance_name,
-            )
+        let authz_project = self
+            .db_datastore
+            .project_lookup_by_path(organization_name, project_name)
             .await?;
-
-        self.check_runtime_change_allowed(&instance.runtime().clone().into())?;
+        let (authz_instance, db_instance) = self
+            .db_datastore
+            .instance_fetch(opctx, &authz_project, instance_name)
+            .await?;
+        let requested = InstanceRuntimeStateRequested {
+            run_state: InstanceStateRequested::Stopped,
+            migration_params: None,
+        };
         self.instance_set_runtime(
-            &instance,
-            self.instance_sled(&instance).await?,
-            InstanceRuntimeStateRequested {
-                run_state: InstanceStateRequested::Stopped,
-            },
+            opctx,
+            &authz_instance,
+            &db_instance,
+            requested,
         )
         .await?;
-        self.db_datastore.instance_fetch(&instance.id()).await
+        self.db_datastore.instance_refetch(opctx, &authz_instance).await
+    }
+
+    /**
+     * Idempotently place the instance in a 'Migrating' state.
+     */
+    pub async fn instance_start_migrate(
+        &self,
+        opctx: &OpContext,
+        instance_id: Uuid,
+        migration_id: Uuid,
+        dst_propolis_id: Uuid,
+    ) -> UpdateResult<db::model::Instance> {
+        let authz_instance =
+            self.db_datastore.instance_lookup_by_id(instance_id).await?;
+        let db_instance =
+            self.db_datastore.instance_refetch(opctx, &authz_instance).await?;
+        let requested = InstanceRuntimeStateRequested {
+            run_state: InstanceStateRequested::Migrating,
+            migration_params: Some(InstanceRuntimeStateMigrateParams {
+                migration_id,
+                dst_propolis_id,
+            }),
+        };
+        self.instance_set_runtime(
+            opctx,
+            &authz_instance,
+            &db_instance,
+            requested,
+        )
+        .await?;
+        self.db_datastore.instance_refetch(opctx, &authz_instance).await
     }
 
     /**
@@ -1122,10 +1216,20 @@ impl Nexus {
      */
     async fn instance_set_runtime(
         &self,
-        instance: &db::model::Instance,
-        sa: Arc<SledAgentClient>,
+        opctx: &OpContext,
+        authz_instance: &authz::Instance,
+        db_instance: &db::model::Instance,
         requested: InstanceRuntimeStateRequested,
     ) -> Result<(), Error> {
+        opctx.authorize(authz::Action::Modify, authz_instance).await?;
+
+        self.check_runtime_change_allowed(
+            &db_instance.runtime().clone().into(),
+            &requested,
+        )?;
+
+        let sa = self.instance_sled(&db_instance).await?;
+
         /*
          * Ask the sled agent to begin the state change.  Then update the
          * database to reflect the new intermediate state.  If this update is
@@ -1134,7 +1238,7 @@ impl Nexus {
          */
 
         let runtime: nexus::InstanceRuntimeState =
-            instance.runtime().clone().into();
+            db_instance.runtime().clone().into();
 
         // TODO: Populate this with an appropriate NIC.
         // See also: sic_create_instance_record in sagas.rs for a similar
@@ -1148,19 +1252,21 @@ impl Nexus {
 
         let new_runtime = sa
             .instance_put(
-                &instance.id(),
+                &db_instance.id(),
                 &sled_agent_client::types::InstanceEnsureBody {
                     initial: instance_hardware,
                     target: requested.into(),
+                    migrate: None,
                 },
             )
             .await
             .map_err(Error::from)?;
 
-        let new_runtime: nexus::InstanceRuntimeState = new_runtime.into();
+        let new_runtime: nexus::InstanceRuntimeState =
+            new_runtime.into_inner().into();
 
         self.db_datastore
-            .instance_update_runtime(&instance.id(), &new_runtime.into())
+            .instance_update_runtime(&db_instance.id(), &new_runtime.into())
             .await
             .map(|_| ())
     }
@@ -1170,57 +1276,23 @@ impl Nexus {
      */
     pub async fn instance_list_disks(
         &self,
+        opctx: &OpContext,
         organization_name: &Name,
         project_name: &Name,
         instance_name: &Name,
         pagparams: &DataPageParams<'_, Name>,
     ) -> ListResultVec<db::model::Disk> {
-        let instance = self
-            .project_lookup_instance(
+        let authz_instance = self
+            .db_datastore
+            .instance_lookup_by_path(
                 organization_name,
                 project_name,
                 instance_name,
             )
             .await?;
-        self.db_datastore.instance_list_disks(&instance.id(), pagparams).await
-    }
-
-    /**
-     * Fetch information about whether this disk is attached to this instance.
-     */
-    pub async fn instance_get_disk(
-        &self,
-        organization_name: &Name,
-        project_name: &Name,
-        instance_name: &Name,
-        disk_name: &Name,
-    ) -> LookupResult<Disk> {
-        let instance = self
-            .project_lookup_instance(
-                organization_name,
-                project_name,
-                instance_name,
-            )
-            .await?;
-        // TODO: This shouldn't be looking up multiple database entries by name,
-        // it should resolve names to IDs first.
-        let (disk, _) = self
-            .project_lookup_disk(organization_name, project_name, disk_name)
-            .await?;
-        if let Some(instance_id) = disk.runtime_state.attach_instance_id {
-            if instance_id == instance.id() {
-                return Ok(disk.into());
-            }
-        }
-
-        Err(Error::not_found_other(
-            ResourceType::Disk,
-            format!(
-                "disk \"{}\" is not attached to instance \"{}\"",
-                disk_name.as_str(),
-                instance_name.as_str()
-            ),
-        ))
+        self.db_datastore
+            .instance_list_disks(opctx, &authz_instance, pagparams)
+            .await
     }
 
     /**
@@ -1228,24 +1300,27 @@ impl Nexus {
      */
     pub async fn instance_attach_disk(
         &self,
+        opctx: &OpContext,
         organization_name: &Name,
         project_name: &Name,
         instance_name: &Name,
         disk_name: &Name,
     ) -> UpdateResult<db::model::Disk> {
-        let instance = self
-            .project_lookup_instance(
-                organization_name,
-                project_name,
-                instance_name,
-            )
-            .await?;
         // TODO: This shouldn't be looking up multiple database entries by name,
         // it should resolve names to IDs first.
-        let (disk, _) = self
-            .project_lookup_disk(organization_name, project_name, disk_name)
+        let authz_project = self
+            .db_datastore
+            .project_lookup_by_path(organization_name, project_name)
             .await?;
-        let instance_id = &instance.id();
+        let (authz_disk, db_disk) = self
+            .db_datastore
+            .disk_fetch(opctx, &authz_project, disk_name)
+            .await?;
+        let (authz_instance, db_instance) = self
+            .db_datastore
+            .instance_fetch(opctx, &authz_project, instance_name)
+            .await?;
+        let instance_id = &authz_instance.id();
 
         fn disk_attachment_error(
             disk: &db::model::Disk,
@@ -1280,12 +1355,14 @@ impl Nexus {
             Err(Error::InvalidRequest { message })
         }
 
-        match &disk.state().into() {
+        match &db_disk.state().into() {
             /*
              * If we're already attaching or attached to the requested instance,
              * there's nothing else to do.
+             * TODO-security should it be an error if you're not authorized to
+             * do this and we did not actually have to do anything?
              */
-            DiskState::Attached(id) if id == instance_id => return Ok(disk),
+            DiskState::Attached(id) if id == instance_id => return Ok(db_disk),
 
             /*
              * If the disk is currently attaching or attached to another
@@ -1298,19 +1375,19 @@ impl Nexus {
              */
             DiskState::Attached(id) => {
                 assert_ne!(id, instance_id);
-                return disk_attachment_error(&disk);
+                return disk_attachment_error(&db_disk);
             }
             DiskState::Detaching(_) => {
-                return disk_attachment_error(&disk);
+                return disk_attachment_error(&db_disk);
             }
             DiskState::Attaching(id) if id != instance_id => {
-                return disk_attachment_error(&disk);
+                return disk_attachment_error(&db_disk);
             }
             DiskState::Destroyed => {
-                return disk_attachment_error(&disk);
+                return disk_attachment_error(&db_disk);
             }
             DiskState::Faulted => {
-                return disk_attachment_error(&disk);
+                return disk_attachment_error(&db_disk);
             }
 
             DiskState::Creating => (),
@@ -1321,14 +1398,16 @@ impl Nexus {
         }
 
         self.disk_set_runtime(
-            &disk,
-            self.instance_sled(&instance).await?,
+            opctx,
+            &authz_disk,
+            &db_disk,
+            self.instance_sled(&db_instance).await?,
             sled_agent_client::types::DiskStateRequested::Attached(
                 *instance_id,
             ),
         )
         .await?;
-        self.db_datastore.disk_fetch(&disk.id()).await
+        self.db_datastore.disk_refetch(opctx, &authz_disk).await
     }
 
     /**
@@ -1336,35 +1415,42 @@ impl Nexus {
      */
     pub async fn instance_detach_disk(
         &self,
+        opctx: &OpContext,
         organization_name: &Name,
         project_name: &Name,
         instance_name: &Name,
         disk_name: &Name,
     ) -> UpdateResult<db::model::Disk> {
-        let instance = self
-            .project_lookup_instance(
-                organization_name,
-                project_name,
-                instance_name,
-            )
-            .await?;
         // TODO: This shouldn't be looking up multiple database entries by name,
         // it should resolve names to IDs first.
-        let (disk, _) = self
-            .project_lookup_disk(organization_name, project_name, disk_name)
+        let authz_project = self
+            .db_datastore
+            .project_lookup_by_path(organization_name, project_name)
             .await?;
-        let instance_id = &instance.id();
+        let (authz_disk, db_disk) = self
+            .db_datastore
+            .disk_fetch(opctx, &authz_project, disk_name)
+            .await?;
+        let (authz_instance, db_instance) = self
+            .db_datastore
+            .instance_fetch(opctx, &authz_project, instance_name)
+            .await?;
+        let instance_id = &authz_instance.id();
 
-        match &disk.state().into() {
+        match &db_disk.state().into() {
             /*
              * This operation is a noop if the disk is not attached or already
              * detaching from the same instance.
+             * TODO-security should it be an error if you're not authorized to
+             * do this and we did not actually have to do anything?
              */
-            DiskState::Creating => return Ok(disk),
-            DiskState::Detached => return Ok(disk),
-            DiskState::Destroyed => return Ok(disk),
-            DiskState::Faulted => return Ok(disk),
-            DiskState::Detaching(id) if id == instance_id => return Ok(disk),
+            DiskState::Creating => return Ok(db_disk),
+            DiskState::Detached => return Ok(db_disk),
+            DiskState::Destroyed => return Ok(db_disk),
+            DiskState::Faulted => return Ok(db_disk),
+            DiskState::Detaching(id) if id == instance_id => {
+                return Ok(db_disk)
+            }
 
             /*
              * This operation is not allowed if the disk is attached to some
@@ -1392,12 +1478,14 @@ impl Nexus {
         }
 
         self.disk_set_runtime(
-            &disk,
-            self.instance_sled(&instance).await?,
+            opctx,
+            &authz_disk,
+            &db_disk,
+            self.instance_sled(&db_instance).await?,
             sled_agent_client::types::DiskStateRequested::Detached,
         )
         .await?;
-        Ok(disk)
+        self.db_datastore.disk_refetch(opctx, &authz_disk).await
     }
 
     /**
@@ -1406,19 +1494,23 @@ impl Nexus {
      */
     async fn disk_set_runtime(
         &self,
-        disk: &db::model::Disk,
+        opctx: &OpContext,
+        authz_disk: &authz::Disk,
+        db_disk: &db::model::Disk,
         sa: Arc<SledAgentClient>,
         requested: sled_agent_client::types::DiskStateRequested,
     ) -> Result<(), Error> {
-        let runtime: DiskRuntimeState = disk.runtime().into();
+        let runtime: DiskRuntimeState = db_disk.runtime().into();
+
+        opctx.authorize(authz::Action::Modify, authz_disk).await?;
 
         /*
-         * Ask the SA to begin the state change.  Then update the database to
-         * reflect the new intermediate state.
+         * Ask the Sled Agent to begin the state change.  Then update the
+         * database to reflect the new intermediate state.
          */
         let new_runtime = sa
             .disk_put(
-                &disk.id(),
+                &authz_disk.id(),
                 &sled_agent_client::types::DiskEnsureBody {
                     initial_runtime:
                         sled_agent_client::types::DiskRuntimeState::from(
@@ -1430,10 +1522,10 @@ impl Nexus {
             .await
             .map_err(Error::from)?;
 
-        let new_runtime: DiskRuntimeState = new_runtime.into();
+        let new_runtime: DiskRuntimeState = new_runtime.into_inner().into();
 
         self.db_datastore
-            .disk_update_runtime(&disk.id(), &new_runtime.into())
+            .disk_update_runtime(opctx, authz_disk, &new_runtime.into())
             .await
             .map(|_| ())
     }
@@ -1450,8 +1542,9 @@ impl Nexus {
         subnet_name: &Name,
         params: &params::NetworkInterfaceCreate,
     ) -> CreateResult<db::model::NetworkInterface> {
-        let instance = self
-            .project_lookup_instance(
+        let authz_instance = self
+            .db_datastore
+            .instance_lookup_by_path(
                 organization_name,
                 project_name,
                 instance_name,
@@ -1459,7 +1552,7 @@ impl Nexus {
             .await?;
         let vpc = self
             .db_datastore
-            .vpc_fetch_by_name(&instance.project_id, vpc_name)
+            .vpc_fetch_by_name(&authz_instance.project().id(), vpc_name)
             .await?;
         let subnet = self
             .db_datastore
@@ -1473,7 +1566,7 @@ impl Nexus {
         let ip = None;
         let interface = db::model::IncompleteNetworkInterface::new(
             interface_id,
-            instance.id(),
+            authz_instance.id(),
             // TODO-correctness: vpc_id here is used for name uniqueness. Should
             // interface names be unique to the subnet's VPC or to the
             // VPC associated with the instance's default interface?
@@ -1492,14 +1585,11 @@ impl Nexus {
         project_name: &Name,
         pagparams: &DataPageParams<'_, Name>,
     ) -> ListResultVec<db::model::Vpc> {
-        let organization_id = self
-            .db_datastore
-            .organization_lookup_id_by_name(organization_name)
-            .await?;
         let project_id = self
             .db_datastore
-            .project_lookup_id_by_name(&organization_id, project_name)
-            .await?;
+            .project_lookup_by_path(organization_name, project_name)
+            .await?
+            .id();
         let vpcs =
             self.db_datastore.project_list_vpcs(&project_id, pagparams).await?;
         Ok(vpcs)
@@ -1511,21 +1601,20 @@ impl Nexus {
         project_name: &Name,
         params: &params::VpcCreate,
     ) -> CreateResult<db::model::Vpc> {
-        let organization_id = self
-            .db_datastore
-            .organization_lookup_id_by_name(organization_name)
-            .await?;
         let project_id = self
             .db_datastore
-            .project_lookup_id_by_name(&organization_id, project_name)
-            .await?;
+            .project_lookup_by_path(organization_name, project_name)
+            .await?
+            .id();
         let vpc_id = Uuid::new_v4();
         let system_router_id = Uuid::new_v4();
         let default_route_id = Uuid::new_v4();
         let default_subnet_id = Uuid::new_v4();
-        // TODO: Ultimately when the VPC is created a system router w/ an appropriate setup should also be created.
-        // Given that the underlying systems aren't wired up yet this is a naive implementation to populate the database
-        // with a starting router. Eventually this code should be replaced with a saga that'll handle creating the VPC and
+        // TODO: Ultimately when the VPC is created a system router w/ an
+        // appropriate setup should also be created.  Given that the underlying
+        // systems aren't wired up yet this is a naive implementation to
+        // populate the database with a starting router. Eventually this code
+        // should be replaced with a saga that'll handle creating the VPC and
         // its underlying system
         let router = db::model::VpcRouter::new(
             system_router_id,
@@ -1534,10 +1623,12 @@ impl Nexus {
             params::VpcRouterCreate {
                 identity: IdentityMetadataCreateParams {
                     name: "system".parse().unwrap(),
-                    description: "Routes are automatically added to this router as vpc subnets are created".into()
-                }
-            }
-            );
+                    description: "Routes are automatically added to this \
+                        router as vpc subnets are created"
+                        .into(),
+                },
+            },
+        );
         let _ = self.db_datastore.vpc_create_router(router).await?;
         let route = db::model::RouterRoute::new(
             default_route_id,
@@ -1557,42 +1648,68 @@ impl Nexus {
             },
         );
 
-        // TODO: This is both fake and utter nonsense. It should be eventually replaced with the proper behavior for creating
-        // the default route which may not even happen here. Creating the vpc, its system router, and that routers default route
-        // should all be apart of the same transaction.
+        // TODO: This is both fake and utter nonsense. It should be eventually
+        // replaced with the proper behavior for creating the default route
+        // which may not even happen here. Creating the vpc, its system router,
+        // and that routers default route should all be apart of the same
+        // transaction.
         self.db_datastore.router_create_route(route).await?;
         let vpc = db::model::Vpc::new(
             vpc_id,
             project_id,
             system_router_id,
             params.clone(),
-        );
+        )?;
         let vpc = self.db_datastore.project_create_vpc(vpc).await?;
+
+        // Allocate the first /64 sub-range from the requested or created
+        // prefix.
+        let ipv6_block = external::Ipv6Net(
+            ipnetwork::Ipv6Network::new(vpc.ipv6_prefix.network(), 64)
+                .map_err(|_| {
+                    external::Error::internal_error(
+                        "Failed to allocate default IPv6 subnet",
+                    )
+                })?,
+        );
 
         // TODO: batch this up with everything above
         let subnet = db::model::VpcSubnet::new(
             default_subnet_id,
             vpc_id,
-            params::VpcSubnetCreate {
-                identity: IdentityMetadataCreateParams {
-                    name: "default".parse().unwrap(),
-                    description: format!(
-                        "The default subnet for {}",
-                        params.identity.name
-                    ),
-                },
-                ipv4_block: Some(Ipv4Net(
-                    // TODO: This value should be replaced with the correct ipv4 range for a default subnet
-                    "10.1.9.32/16".parse::<Ipv4Network>().unwrap(),
-                )),
-                ipv6_block: Some(Ipv6Net(
-                    // TODO: This value should be replaced w/ the first `/64` ipv6 from the address block
-                    "2001:db8::0/64".parse::<Ipv6Network>().unwrap(),
-                )),
+            IdentityMetadataCreateParams {
+                name: "default".parse().unwrap(),
+                description: format!(
+                    "The default subnet for {}",
+                    params.identity.name
+                ),
             },
+            *defaults::DEFAULT_VPC_SUBNET_IPV4_BLOCK,
+            ipv6_block,
         );
-        self.db_datastore.vpc_create_subnet(subnet).await?;
 
+        // Create the subnet record in the database. Overlapping IP ranges should be translated
+        // into an internal error. That implies that there's already an existing VPC Subnet, but
+        // we're explicitly creating the _first_ VPC in the project. Something is wrong, and likely
+        // a bug in our code.
+        let _ = self.db_datastore.vpc_create_subnet(subnet).await.map_err(|err| {
+            match err {
+                SubnetError::OverlappingIpRange => {
+                    warn!(
+                        self.log,
+                        "failed to create default VPC Subnet, found overlapping IP address ranges";
+                        "vpc_id" => ?vpc_id,
+                        "subnet_id" => ?default_subnet_id,
+                        "ipv4_block" => ?*defaults::DEFAULT_VPC_SUBNET_IPV4_BLOCK,
+                        "ipv6_block" => ?ipv6_block,
+                    );
+                    external::Error::internal_error(
+                        "Failed to create default VPC Subnet, found overlapping IP address ranges"
+                    )
+                },
+                SubnetError::External(e) => e,
+            }
+        })?;
         self.create_default_vpc_firewall(&vpc_id).await?;
         Ok(vpc)
     }
@@ -1603,7 +1720,7 @@ impl Nexus {
     ) -> CreateResult<()> {
         let rules = db::model::VpcFirewallRule::vec_from_params(
             *vpc_id,
-            DEFAULT_FIREWALL_RULES.clone(),
+            defaults::DEFAULT_FIREWALL_RULES.clone(),
         );
         self.db_datastore.vpc_update_firewall_rules(&vpc_id, rules).await?;
         Ok(())
@@ -1615,14 +1732,11 @@ impl Nexus {
         project_name: &Name,
         vpc_name: &Name,
     ) -> LookupResult<db::model::Vpc> {
-        let organization_id = self
-            .db_datastore
-            .organization_lookup_id_by_name(organization_name)
-            .await?;
         let project_id = self
             .db_datastore
-            .project_lookup_id_by_name(&organization_id, project_name)
-            .await?;
+            .project_lookup_by_path(organization_name, project_name)
+            .await?
+            .id();
         Ok(self.db_datastore.vpc_fetch_by_name(&project_id, vpc_name).await?)
     }
 
@@ -1633,14 +1747,11 @@ impl Nexus {
         vpc_name: &Name,
         params: &params::VpcUpdate,
     ) -> UpdateResult<()> {
-        let organization_id = self
-            .db_datastore
-            .organization_lookup_id_by_name(organization_name)
-            .await?;
         let project_id = self
             .db_datastore
-            .project_lookup_id_by_name(&organization_id, project_name)
-            .await?;
+            .project_lookup_by_path(organization_name, project_name)
+            .await?
+            .id();
         let vpc =
             self.db_datastore.vpc_fetch_by_name(&project_id, vpc_name).await?;
         Ok(self
@@ -1673,16 +1784,13 @@ impl Nexus {
         organization_name: &Name,
         project_name: &Name,
         vpc_name: &Name,
-        pagparams: &DataPageParams<'_, Name>,
     ) -> ListResultVec<db::model::VpcFirewallRule> {
         let vpc = self
             .project_lookup_vpc(organization_name, project_name, vpc_name)
             .await?;
-        let subnets = self
-            .db_datastore
-            .vpc_list_firewall_rules(&vpc.id(), pagparams)
-            .await?;
-        Ok(subnets)
+        let rules =
+            self.db_datastore.vpc_list_firewall_rules(&vpc.id()).await?;
+        Ok(rules)
     }
 
     pub async fn vpc_update_firewall_rules(
@@ -1691,7 +1799,7 @@ impl Nexus {
         project_name: &Name,
         vpc_name: &Name,
         params: &VpcFirewallRuleUpdateParams,
-    ) -> UpdateResult<VpcFirewallRuleUpdateResult> {
+    ) -> UpdateResult<Vec<db::model::VpcFirewallRule>> {
         let vpc = self
             .project_lookup_vpc(organization_name, project_name, vpc_name)
             .await?;
@@ -1699,14 +1807,7 @@ impl Nexus {
             vpc.id(),
             params.clone(),
         );
-        let result = self
-            .db_datastore
-            .vpc_update_firewall_rules(&vpc.id(), rules)
-            .await?
-            .into_iter()
-            .map(|rule| rule.into())
-            .collect();
-        Ok(result)
+        self.db_datastore.vpc_update_firewall_rules(&vpc.id(), rules).await
     }
 
     pub async fn vpc_list_subnets(
@@ -1752,10 +1853,140 @@ impl Nexus {
         let vpc = self
             .project_lookup_vpc(organization_name, project_name, vpc_name)
             .await?;
-        let id = Uuid::new_v4();
-        let subnet = db::model::VpcSubnet::new(id, vpc.id(), params.clone());
-        let subnet = self.db_datastore.vpc_create_subnet(subnet).await?;
-        Ok(subnet)
+
+        // Validate IPv4 range
+        if !params.ipv4_block.network().is_private() {
+            return Err(external::Error::invalid_request(
+                "VPC Subnet IPv4 address ranges must be from a private range",
+            ));
+        }
+        if params.ipv4_block.prefix() < defaults::MIN_VPC_IPV4_SUBNET_PREFIX
+            || params.ipv4_block.prefix() > defaults::MAX_VPC_IPV4_SUBNET_PREFIX
+        {
+            return Err(external::Error::invalid_request(&format!(
+                concat!(
+                    "VPC Subnet IPv4 address ranges must have prefix ",
+                    "length between {} and {}, inclusive"
+                ),
+                defaults::MIN_VPC_IPV4_SUBNET_PREFIX,
+                defaults::MAX_VPC_IPV4_SUBNET_PREFIX
+            )));
+        }
+
+        // Allocate an ID and insert the record.
+        //
+        // If the client provided an IPv6 range, we try to insert that or fail
+        // with a conflict error.
+        //
+        // If they did _not_, we randomly generate a subnet valid for the VPC's
+        // prefix, and the insert that. There's a small retry loop if we get
+        // unlucky and conflict with an existing IPv6 range. In the case we
+        // cannot find a subnet within a small number of retries, we fail the
+        // request with a 503.
+        //
+        // TODO-robustness: We'd really prefer to allocate deterministically.
+        // See <https://github.com/oxidecomputer/omicron/issues/685> for
+        // details.
+        let subnet_id = Uuid::new_v4();
+        match params.ipv6_block {
+            None => {
+                const NUM_RETRIES: usize = 2;
+                let mut retry = 0;
+                let result = loop {
+                    let ipv6_block = vpc
+                        .ipv6_prefix
+                        .random_subnet(
+                            external::Ipv6Net::VPC_SUBNET_IPV6_PREFIX_LENGTH,
+                        )
+                        .map(|block| block.0)
+                        .ok_or_else(|| {
+                            external::Error::internal_error(
+                                "Failed to create random IPv6 subnet",
+                            )
+                        })?;
+                    let subnet = db::model::VpcSubnet::new(
+                        subnet_id,
+                        vpc.id(),
+                        params.identity.clone(),
+                        params.ipv4_block,
+                        ipv6_block,
+                    );
+                    let result =
+                        self.db_datastore.vpc_create_subnet(subnet).await;
+                    match result {
+                        // Allow NUM_RETRIES retries, after the first attempt.
+                        Err(SubnetError::OverlappingIpRange)
+                            if retry <= NUM_RETRIES =>
+                        {
+                            debug!(
+                             self.log, "autogenerated random IPv6 range overlap";
+                            "subnet_id" => ?subnet_id, "ipv6_block" => %ipv6_block.0
+                            );
+                            retry += 1;
+                            continue;
+                        }
+                        other => break other,
+                    }
+                };
+                match result {
+                    Err(SubnetError::OverlappingIpRange) => {
+                        // TODO-monitoring TODO-debugging
+                        //
+                        // We should maintain a counter for this occurrence, and
+                        // export that via `oximeter`, so that we can see these
+                        // failures through the timeseries database. The main
+                        // goal here is for us to notice that this is happening
+                        // before it becomes a major issue for customers.
+                        let vpc_id = vpc.id();
+                        warn!(
+                            self.log,
+                            "failed to generate unique random IPv6 address range in {} retries",
+                            NUM_RETRIES;
+                            "vpc_id" => ?vpc_id,
+                            "subnet_id" => ?subnet_id,
+                        );
+                        Err(external::Error::internal_error(
+                            "Unable to allocate unique IPv6 address range for VPC Subnet"
+                        ))
+                    }
+                    Err(SubnetError::External(e)) => Err(e),
+                    Ok(subnet) => Ok(subnet),
+                }
+            }
+            Some(ipv6_block) => {
+                if !ipv6_block.is_vpc_subnet(&vpc.ipv6_prefix) {
+                    return Err(external::Error::invalid_request(&format!(
+                        concat!(
+                        "VPC Subnet IPv6 address range '{}' is not valid for ",
+                        "VPC with IPv6 prefix '{}'",
+                    ),
+                        ipv6_block, vpc.ipv6_prefix.0 .0,
+                    )));
+                }
+                let subnet = db::model::VpcSubnet::new(
+                    subnet_id,
+                    vpc.id(),
+                    params.identity.clone(),
+                    params.ipv4_block,
+                    ipv6_block,
+                );
+                self.db_datastore.vpc_create_subnet(subnet).await.map_err(
+                    |err| match err {
+                        SubnetError::OverlappingIpRange => {
+                            external::Error::invalid_request(&format!(
+                                concat!(
+                                    "IPv4 block '{}' and/or IPv6 block '{}' ",
+                                    "overlaps with existing VPC Subnet ",
+                                    "IP address ranges"
+                                ),
+                                params.ipv4_block, ipv6_block,
+                            ))
+                        }
+                        SubnetError::External(e) => e,
+                    },
+                )
+            }
+        }
     }
 
     // TODO: When a subnet is deleted it should remove its entry from the VPC's system router.
@@ -2162,6 +2393,26 @@ impl Nexus {
     }
 
     /*
+     * Built-in roles
+     */
+
+    pub async fn roles_builtin_list(
+        &self,
+        opctx: &OpContext,
+        pagparams: &DataPageParams<'_, (String, String)>,
+    ) -> ListResultVec<db::model::RoleBuiltin> {
+        self.db_datastore.roles_builtin_list_by_name(opctx, pagparams).await
+    }
+
+    pub async fn role_builtin_fetch(
+        &self,
+        opctx: &OpContext,
+        name: &str,
+    ) -> LookupResult<db::model::RoleBuiltin> {
+        self.db_datastore.role_builtin_fetch(opctx, name).await
+    }
+
+    /*
      * Internal control plane interfaces.
      */
 
@@ -2185,13 +2436,16 @@ impl Nexus {
             Ok(true) => {
                 info!(log, "instance updated by sled agent";
                     "instance_id" => %id,
+                    "propolis_id" => %new_runtime_state.propolis_uuid,
                     "new_state" => %new_runtime_state.run_state);
                 Ok(())
             }
 
             Ok(false) => {
                 info!(log, "instance update from sled agent ignored (old)";
-                    "instance_id" => %id);
+                    "instance_id" => %id,
+                    "propolis_id" => %new_runtime_state.propolis_uuid,
+                    "requested_state" => %new_runtime_state.run_state);
                 Ok(())
             }
 
@@ -2229,14 +2483,16 @@ impl Nexus {
 
     pub async fn notify_disk_updated(
         &self,
-        id: &Uuid,
+        opctx: &OpContext,
+        id: Uuid,
         new_state: &DiskRuntimeState,
     ) -> Result<(), Error> {
         let log = &self.log;
+        let authz_disk = self.db_datastore.disk_lookup_by_id(id).await?;
 
         let result = self
             .db_datastore
-            .disk_update_runtime(id, &new_state.clone().into())
+            .disk_update_runtime(opctx, &authz_disk, &new_state.clone().into())
             .await;
 
         /* TODO-cleanup commonize with notify_instance_updated() */
@@ -2281,6 +2537,31 @@ impl Nexus {
                 Err(error)
             }
         }
+    }
+
+    /*
+     * Timeseries
+     */
+
+    /**
+     * List existing timeseries schema.
+     */
+    pub async fn timeseries_schema_list(
+        &self,
+        pag_params: &TimeseriesSchemaPaginationParams,
+        limit: NonZeroU32,
+    ) -> Result<dropshot::ResultsPage<TimeseriesSchema>, Error> {
+        self.timeseries_client
+            .timeseries_schema_list(&pag_params.page, limit)
+            .await
+            .map_err(|e| match e {
+                oximeter_db::Error::DatabaseUnavailable(_) => {
+                    Error::ServiceUnavailable {
+                        internal_message: e.to_string(),
+                    }
+                }
+                _ => Error::InternalError { internal_message: e.to_string() },
+            })
     }
 
     /**
@@ -2376,18 +2657,34 @@ impl TestInterfaces for Nexus {
         &self,
         id: &Uuid,
     ) -> Result<Arc<SledAgentClient>, Error> {
-        let instance = self.db_datastore.instance_fetch(id).await?;
-        self.instance_sled(&instance).await
+        let opctx = OpContext::for_tests(
+            self.log.new(o!()),
+            Arc::clone(&self.db_datastore),
+        );
+        let authz_instance =
+            self.db_datastore.instance_lookup_by_id(*id).await?;
+        let db_instance =
+            self.db_datastore.instance_refetch(&opctx, &authz_instance).await?;
+        self.instance_sled(&db_instance).await
     }
 
     async fn disk_sled_by_id(
         &self,
         id: &Uuid,
     ) -> Result<Arc<SledAgentClient>, Error> {
-        let disk = self.db_datastore.disk_fetch(id).await?;
-        let instance_id = disk.runtime().attach_instance_id.unwrap();
-        let instance = self.db_datastore.instance_fetch(&instance_id).await?;
-        self.instance_sled(&instance).await
+        let opctx = OpContext::for_tests(
+            self.log.new(o!()),
+            Arc::clone(&self.db_datastore),
+        );
+        let authz_disk = self.db_datastore.disk_lookup_by_id(*id).await?;
+        let db_disk =
+            self.db_datastore.disk_refetch(&opctx, &authz_disk).await?;
+        let instance_id = db_disk.runtime().attach_instance_id.unwrap();
+        let authz_instance =
+            self.db_datastore.instance_lookup_by_id(instance_id).await?;
+        let db_instance =
+            self.db_datastore.instance_refetch(&opctx, &authz_instance).await?;
+        self.instance_sled(&db_instance).await
     }
 
     async fn session_create_with(
@@ -2396,46 +2693,4 @@ impl TestInterfaces for Nexus {
     ) -> CreateResult<db::model::ConsoleSession> {
         Ok(self.db_datastore.session_create(session).await?)
     }
-}
-
-lazy_static! {
-    static ref DEFAULT_FIREWALL_RULES: external::VpcFirewallRuleUpdateParams =
-        serde_json::from_str(r#"{
-            "allow-internal-inbound": {
-                "status": "enabled",
-                "direction": "inbound",
-                "targets": [ { "type": "vpc", "value": "default" } ],
-                "filters": { "hosts": [ { "type": "vpc", "value": "default" } ] },
-                "action": "allow",
-                "priority": 65534,
-                "description": "allow inbound traffic to all instances within the VPC if originated within the VPC"
-            },
-            "allow-ssh": {
-                "status": "enabled",
-                "direction": "inbound",
-                "targets": [ { "type": "vpc", "value": "default" } ],
-                "filters": { "ports": [ "22" ], "protocols": [ "TCP" ] },
-                "action": "allow",
-                "priority": 65534,
-                "description": "allow inbound TCP connections on port 22 from anywhere"
-            },
-            "allow-icmp": {
-                "status": "enabled",
-                "direction": "inbound",
-                "targets": [ { "type": "vpc", "value": "default" } ],
-                "filters": { "protocols": [ "ICMP" ] },
-                "action": "allow",
-                "priority": 65534,
-                "description": "allow inbound ICMP traffic from anywhere"
-            },
-            "allow-rdp": {
-                "status": "enabled",
-                "direction": "inbound",
-                "targets": [ { "type": "vpc", "value": "default" } ],
-                "filters": { "ports": [ "3389" ], "protocols": [ "TCP" ] },
-                "action": "allow",
-                "priority": 65534,
-                "description": "allow inbound TCP connections on port 3389 from anywhere"
-            }
-        }"#).unwrap();
 }

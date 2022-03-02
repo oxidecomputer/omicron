@@ -9,14 +9,12 @@
  * TODO-coverage add test for racks, sleds
  */
 
-use dropshot::test_util::iter_collection;
-use dropshot::test_util::object_get;
 use dropshot::test_util::objects_list_page;
-use dropshot::test_util::read_json;
 use dropshot::test_util::ClientTestContext;
 use dropshot::HttpErrorResponseBody;
 use http::method::Method;
 use http::StatusCode;
+use nexus_test_utils::resource_helpers::project_get;
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::IdentityMetadataUpdateParams;
 use omicron_common::api::external::Name;
@@ -177,11 +175,11 @@ async fn test_projects_basic(cptestctx: &ControlPlaneTestContext) {
 
     let org_name = "test-org";
     create_organization(&client, &org_name).await;
+    let projects_url = "/organizations/test-org/projects";
 
     /*
      * Verify that there are no projects to begin with.
      */
-    let projects_url = "/organizations/test-org/projects";
     let projects = projects_list(&client, &projects_url).await;
     assert_eq!(0, projects.len());
 
@@ -268,46 +266,49 @@ async fn test_projects_basic(cptestctx: &ControlPlaneTestContext) {
      * Delete "simproject2".  We'll make sure that's reflected in the other
      * requests.
      */
-    client
-        .make_request_no_body(
-            Method::DELETE,
-            "/organizations/test-org/projects/simproject2",
-            StatusCode::NO_CONTENT,
-        )
-        .await
-        .expect("expected success");
+    NexusRequest::object_delete(
+        client,
+        "/organizations/test-org/projects/simproject2",
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .expect("expected request to fail");
 
     /*
      * Having deleted "simproject2", verify "GET", "PUT", and "DELETE" on
      * "/organizations/test-org/projects/simproject2".
      */
-    client
-        .make_request_error(
-            Method::GET,
-            "/organizations/test-org/projects/simproject2",
+    for method in [Method::GET, Method::DELETE] {
+        NexusRequest::expect_failure(
+            client,
             StatusCode::NOT_FOUND,
-        )
-        .await;
-    client
-        .make_request_error(
-            Method::DELETE,
+            method,
             "/organizations/test-org/projects/simproject2",
-            StatusCode::NOT_FOUND,
         )
-        .await;
-    client
-        .make_request_error_body(
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .expect("failed to make request");
+    }
+    NexusRequest::new(
+        RequestBuilder::new(
+            client,
             Method::PUT,
             "/organizations/test-org/projects/simproject2",
-            params::ProjectUpdate {
-                identity: IdentityMetadataUpdateParams {
-                    name: None,
-                    description: None,
-                },
-            },
-            StatusCode::NOT_FOUND,
         )
-        .await;
+        .body(Some(&params::ProjectUpdate {
+            identity: IdentityMetadataUpdateParams {
+                name: None,
+                description: None,
+            },
+        }))
+        .expect_status(Some(StatusCode::NOT_FOUND)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .expect("failed to make request");
 
     /*
      * Similarly, verify "GET /organizations/test-org/projects"
@@ -348,16 +349,17 @@ async fn test_projects_basic(cptestctx: &ControlPlaneTestContext) {
             description: Some("Li'l lightnin'".to_string()),
         },
     };
-    let mut response = client
-        .make_request(
-            Method::PUT,
-            "/organizations/test-org/projects/simproject3",
-            Some(project_update),
-            StatusCode::OK,
-        )
-        .await
-        .expect("expected success");
-    let project: Project = read_json(&mut response).await;
+    let project = NexusRequest::object_put(
+        client,
+        "/organizations/test-org/projects/simproject3",
+        Some(&project_update),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .expect("expected success")
+    .parsed_body::<Project>()
+    .expect("failed to parse Project from PUT response");
     assert_eq!(project.identity.id, new_project_ids[2]);
     assert_eq!(project.identity.name, "simproject3");
     assert_eq!(project.identity.description, "Li'l lightnin'");
@@ -381,27 +383,31 @@ async fn test_projects_basic(cptestctx: &ControlPlaneTestContext) {
             description: Some("little lightning".to_string()),
         },
     };
-    let mut response = client
-        .make_request(
-            Method::PUT,
-            "/organizations/test-org/projects/simproject3",
-            Some(project_update),
-            StatusCode::OK,
-        )
-        .await
-        .expect("failed to make request to server");
-    let project: Project = read_json(&mut response).await;
+    let project = NexusRequest::object_put(
+        client,
+        "/organizations/test-org/projects/simproject3",
+        Some(&project_update),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .expect("expected success")
+    .parsed_body::<Project>()
+    .expect("failed to parse Project from PUT response");
     assert_eq!(project.identity.id, new_project_ids[2]);
     assert_eq!(project.identity.name, "lil-lightnin");
     assert_eq!(project.identity.description, "little lightning");
 
-    client
-        .make_request_error(
-            Method::GET,
-            "/organizations/test-org/projects/simproject3",
-            StatusCode::NOT_FOUND,
-        )
-        .await;
+    NexusRequest::expect_failure(
+        client,
+        StatusCode::NOT_FOUND,
+        Method::GET,
+        "/organizations/test-org/projects/simproject3",
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .expect("expected success");
 
     /*
      * Try to create a project with a name that conflicts with an existing one.
@@ -424,6 +430,8 @@ async fn test_projects_basic(cptestctx: &ControlPlaneTestContext) {
     .parsed_body::<HttpErrorResponseBody>()
     .unwrap();
     assert_eq!("already exists: project \"simproject1\"", error.message);
+
+    // TODO-coverage try to rename it to a name that conflicts
 
     /*
      * Try to create a project with an unsupported name.
@@ -472,25 +480,6 @@ async fn test_projects_basic(cptestctx: &ControlPlaneTestContext) {
             .unwrap();
     assert_eq!(project.identity.name, "honor-roller");
     assert_eq!(project.identity.description, "a soapbox racer");
-
-    /*
-     * Attempt to create a project without authenticating or without privileges.
-     */
-    RequestBuilder::new(client, Method::POST, &projects_url)
-        .expect_status(Some(StatusCode::UNAUTHORIZED))
-        .body(Some(&project_create))
-        .execute()
-        .await
-        .expect("expected request to fail");
-    NexusRequest::new(
-        RequestBuilder::new(client, Method::POST, &projects_url)
-            .body(Some(&project_create))
-            .expect_status(Some(StatusCode::FORBIDDEN)),
-    )
-    .authn_as(AuthnMode::UnprivilegedUser)
-    .execute()
-    .await
-    .expect("expected request to fail");
 
     /*
      * List projects again and verify all of our changes.  We should have:
@@ -556,9 +545,15 @@ async fn test_projects_list(cptestctx: &ControlPlaneTestContext) {
      * increasing order of name.
      */
     let found_projects_by_name =
-        iter_collection::<Project>(&client, projects_url, "", projects_subset)
-            .await
-            .0;
+        NexusRequest::iter_collection_authn::<Project>(
+            &client,
+            projects_url,
+            "",
+            Some(projects_subset),
+        )
+        .await
+        .expect("failed to list projects")
+        .all_items;
     assert_eq!(found_projects_by_name.len(), project_names_by_name.len());
     assert_eq!(
         project_names_by_name,
@@ -572,14 +567,16 @@ async fn test_projects_list(cptestctx: &ControlPlaneTestContext) {
      * Page through all the projects in ascending order by name, which should be
      * the same as above.
      */
-    let found_projects_by_name = iter_collection::<Project>(
-        &client,
-        projects_url,
-        "sort_by=name-ascending",
-        projects_subset,
-    )
-    .await
-    .0;
+    let found_projects_by_name =
+        NexusRequest::iter_collection_authn::<Project>(
+            &client,
+            projects_url,
+            "sort_by=name-ascending",
+            Some(projects_subset),
+        )
+        .await
+        .expect("failed to list projects")
+        .all_items;
     assert_eq!(found_projects_by_name.len(), project_names_by_name.len());
     assert_eq!(
         project_names_by_name,
@@ -593,14 +590,16 @@ async fn test_projects_list(cptestctx: &ControlPlaneTestContext) {
      * Page through all the projects in descending order by name, which should be
      * the reverse of the above.
      */
-    let mut found_projects_by_name = iter_collection::<Project>(
-        &client,
-        projects_url,
-        "sort_by=name-descending",
-        projects_subset,
-    )
-    .await
-    .0;
+    let mut found_projects_by_name =
+        NexusRequest::iter_collection_authn::<Project>(
+            &client,
+            projects_url,
+            "sort_by=name-descending",
+            Some(projects_subset),
+        )
+        .await
+        .expect("failed to list projects")
+        .all_items;
     assert_eq!(found_projects_by_name.len(), project_names_by_name.len());
     found_projects_by_name.reverse();
     assert_eq!(
@@ -614,14 +613,15 @@ async fn test_projects_list(cptestctx: &ControlPlaneTestContext) {
     /*
      * Page through the projects in ascending order by id.
      */
-    let found_projects_by_id = iter_collection::<Project>(
+    let found_projects_by_id = NexusRequest::iter_collection_authn::<Project>(
         &client,
         projects_url,
         "sort_by=id-ascending",
-        projects_subset,
+        Some(projects_subset),
     )
     .await
-    .0;
+    .expect("failed to list projects")
+    .all_items;
     assert_eq!(found_projects_by_id.len(), project_names_by_id.len());
     assert_eq!(
         project_names_by_id,
@@ -671,11 +671,10 @@ async fn projects_list(
     client: &ClientTestContext,
     projects_url: &str,
 ) -> Vec<Project> {
-    objects_list_page::<Project>(client, projects_url).await.items
-}
-
-async fn project_get(client: &ClientTestContext, project_url: &str) -> Project {
-    object_get::<Project>(client, project_url).await
+    NexusRequest::iter_collection_authn(client, projects_url, "", None)
+        .await
+        .expect("failed to list projects")
+        .all_items
 }
 
 async fn sleds_list(client: &ClientTestContext, sleds_url: &str) -> Vec<Sled> {

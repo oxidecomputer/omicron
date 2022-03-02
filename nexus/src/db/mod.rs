@@ -14,12 +14,14 @@ mod config;
 // This is marked public for use by the integration tests
 pub mod datastore;
 mod error;
+mod explain;
+pub mod fixed_data;
 mod pagination;
 mod pool;
 mod saga_recovery;
 mod saga_types;
 mod sec_store;
-mod subnet_allocation;
+pub(crate) mod subnet_allocation;
 mod update_and_check;
 
 #[cfg(test)]

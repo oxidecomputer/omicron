@@ -50,6 +50,7 @@ impl From<types::InstanceState>
             types::InstanceState::Stopping => Self::Stopping,
             types::InstanceState::Stopped => Self::Stopped,
             types::InstanceState::Rebooting => Self::Rebooting,
+            types::InstanceState::Migrating => Self::Migrating,
             types::InstanceState::Repairing => Self::Repairing,
             types::InstanceState::Failed => Self::Failed,
             types::InstanceState::Destroyed => Self::Destroyed,
@@ -67,6 +68,9 @@ impl From<omicron_common::api::internal::nexus::InstanceRuntimeState>
             run_state: s.run_state.into(),
             sled_uuid: s.sled_uuid,
             propolis_uuid: s.propolis_uuid,
+            dst_propolis_uuid: s.dst_propolis_uuid,
+            propolis_addr: s.propolis_addr.map(|addr| addr.to_string()),
+            migration_uuid: s.migration_uuid,
             ncpus: s.ncpus.into(),
             memory: s.memory.into(),
             hostname: s.hostname,
@@ -86,6 +90,9 @@ impl From<&omicron_common::api::internal::nexus::InstanceRuntimeState>
             run_state: s.run_state.into(),
             sled_uuid: s.sled_uuid,
             propolis_uuid: s.propolis_uuid,
+            dst_propolis_uuid: s.dst_propolis_uuid,
+            propolis_addr: s.propolis_addr.map(|addr| addr.to_string()),
+            migration_uuid: s.migration_uuid,
             ncpus: s.ncpus.into(),
             memory: s.memory.into(),
             hostname: s.hostname.clone(),
@@ -117,6 +124,9 @@ impl From<omicron_common::api::external::InstanceState>
             }
             omicron_common::api::external::InstanceState::Rebooting => {
                 Self::Rebooting
+            }
+            omicron_common::api::external::InstanceState::Migrating => {
+                Self::Migrating
             }
             omicron_common::api::external::InstanceState::Repairing => {
                 Self::Repairing
@@ -194,6 +204,7 @@ impl From<&types::InstanceState>
             types::InstanceState::Stopping => Self::Stopping,
             types::InstanceState::Stopped => Self::Stopped,
             types::InstanceState::Rebooting => Self::Rebooting,
+            types::InstanceState::Migrating => Self::Migrating,
             types::InstanceState::Repairing => Self::Repairing,
             types::InstanceState::Failed => Self::Failed,
             types::InstanceState::Destroyed => Self::Destroyed,

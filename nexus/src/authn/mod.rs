@@ -25,94 +25,17 @@
 //! authentication, but they'd all produce the same [`Context`] struct.
 
 pub mod external;
+pub mod saga;
 
-use lazy_static::lazy_static;
-use omicron_common::api;
+pub use crate::db::fixed_data::user_builtin::USER_DB_INIT;
+pub use crate::db::fixed_data::user_builtin::USER_INTERNAL_API;
+pub use crate::db::fixed_data::user_builtin::USER_SAGA_RECOVERY;
+pub use crate::db::fixed_data::user_builtin::USER_TEST_PRIVILEGED;
+pub use crate::db::fixed_data::user_builtin::USER_TEST_UNPRIVILEGED;
+
+use serde::Deserialize;
+use serde::Serialize;
 use uuid::Uuid;
-
-//
-// Special built-in users
-//
-// Here's a proposed convention for choosing uuids that we hardcode into
-// Omicron.
-//
-//   001de000-05e4-4000-8000-000000000000
-//   ^^^^^^^^ ^^^^ ^    ^
-//       +-----|---|----|-------------------- prefix used for all reserved uuids
-//             |   |    |                     (looks a bit like "oxide")
-//             +---|----|-------------------- says what kind of resource it is
-//                 |    |                     ("05e4" looks a bit like "user")
-//                 +----|-------------------- v4
-//                      +-------------------- variant 1 (most common for v4)
-//
-// This way, the uuids stand out a bit.  It's not clear if this convention will
-// be very useful, but it beats a random uuid.  (Is it safe to do this?  Well,
-// these are valid v4 uuids, and they're as unlikely to collide with a future
-// uuid as any random uuid is.)
-//
-
-pub struct UserBuiltinConfig {
-    pub id: Uuid,
-    pub name: api::external::Name,
-    pub description: &'static str,
-}
-
-impl UserBuiltinConfig {
-    fn new_static(
-        id: &str,
-        name: &str,
-        description: &'static str,
-    ) -> UserBuiltinConfig {
-        UserBuiltinConfig {
-            id: id.parse().expect("invalid uuid for builtin user id"),
-            name: name.parse().expect("invalid name for builtin user name"),
-            description,
-        }
-    }
-}
-
-lazy_static! {
-    /// Internal user used for seeding initial database data
-    // NOTE: This uuid and name are duplicated in dbinit.sql.
-    pub static ref USER_DB_INIT: UserBuiltinConfig =
-        UserBuiltinConfig::new_static(
-            // "0001" is the first possible user that wouldn't be confused with
-            // 0, or root.
-            "001de000-05e4-4000-8000-000000000001",
-            "db-init",
-            "used for seeding initial database data",
-        );
-
-    /// Internal user used by Nexus when recovering sagas
-    pub static ref USER_SAGA_RECOVERY: UserBuiltinConfig =
-        UserBuiltinConfig::new_static(
-            // "3a8a" looks a bit like "saga".
-            "001de000-05e4-4000-8000-000000003a8a",
-            "saga-recovery",
-            "used by Nexus when recovering sagas",
-        );
-
-    /// Test user that's granted all privileges, used for automated testing and
-    /// local development
-    // TODO-security This eventually needs to go, maybe replaced with some kind
-    // of deployment-specific customization.
-    pub static ref USER_TEST_PRIVILEGED: UserBuiltinConfig =
-        UserBuiltinConfig::new_static(
-            // "4007" looks a bit like "root".
-            "001de000-05e4-4000-8000-000000004007",
-            "test-privileged",
-            "used for testing with all privileges",
-        );
-
-    /// Test user that's granted no privileges, used for automated testing
-    pub static ref USER_TEST_UNPRIVILEGED: UserBuiltinConfig =
-        UserBuiltinConfig::new_static(
-            // 60001 is the decimal uid for "nobody" on Helios.
-            "001de000-05e4-4000-8000-000000060001",
-            "test-unprivileged",
-            "used for testing with no privileges",
-        );
-}
 
 /// Describes how the actor performing the current operation is authenticated
 ///
@@ -136,9 +59,18 @@ pub struct Context {
 impl Context {
     /// Returns the authenticated actor, if any
     pub fn actor(&self) -> Option<&Actor> {
+        self.actor_required().ok()
+    }
+
+    /// Returns the authenticated actor if present, Unauthenticated error otherwise
+    pub fn actor_required(&self) -> Result<&Actor, dropshot::HttpError> {
         match &self.kind {
-            Kind::Unauthenticated => None,
-            Kind::Authenticated(Details { actor }) => Some(actor),
+            Kind::Authenticated(Details { actor }) => Ok(actor),
+            Kind::Unauthenticated => Err(dropshot::HttpError::from(
+                omicron_common::api::external::Error::Unauthenticated {
+                    internal_message: "Actor required".to_string(),
+                },
+            )),
         }
     }
 
@@ -152,6 +84,11 @@ impl Context {
     /// Returns an unauthenticated context for use internally
     pub fn internal_unauthenticated() -> Context {
         Context { kind: Kind::Unauthenticated, schemes_tried: vec![] }
+    }
+
+    /// Returns an authenticated context for handling internal API contexts
+    pub fn internal_api() -> Context {
+        Context::context_for_actor(USER_INTERNAL_API.id)
     }
 
     /// Returns an authenticated context for saga recovery
@@ -173,15 +110,13 @@ impl Context {
     }
 
     /// Returns an authenticated context for a special testing user
-    #[cfg(test)]
     pub fn internal_test_user() -> Context {
         Context::test_context_for_actor(USER_TEST_PRIVILEGED.id)
     }
 
     /// Returns an authenticated context for a specific user
     ///
-    /// This is used for unit testing the authorization rules.
-    #[cfg(test)]
+    /// This is used for testing.
     pub fn test_context_for_actor(actor_id: Uuid) -> Context {
         Context::context_for_actor(actor_id)
     }
@@ -190,34 +125,10 @@ impl Context {
 #[cfg(test)]
 mod test {
     use super::Context;
-    use super::UserBuiltinConfig;
     use super::USER_DB_INIT;
+    use super::USER_INTERNAL_API;
     use super::USER_SAGA_RECOVERY;
     use super::USER_TEST_PRIVILEGED;
-    use super::USER_TEST_UNPRIVILEGED;
-
-    #[test]
-    fn test_builtin_ids_are_valid() {
-        assert_user_has_valid_id(&*USER_DB_INIT);
-        assert_user_has_valid_id(&*USER_SAGA_RECOVERY);
-        assert_user_has_valid_id(&*USER_TEST_PRIVILEGED);
-        assert_user_has_valid_id(&*USER_TEST_UNPRIVILEGED);
-    }
-
-    fn assert_user_has_valid_id(user: &UserBuiltinConfig) {
-        match user.id.get_version() {
-            Some(uuid::Version::Random) => (),
-            _ => panic!("built-in user's uuid is not v4: {:?}", user.name),
-        };
-
-        match user.id.get_variant() {
-            Some(uuid::Variant::RFC4122) => (),
-            _ => panic!(
-                "built-in user's uuid has unexpected variant: {:?}",
-                user.name
-            ),
-        };
-    }
 
     #[test]
     fn test_internal_users() {
@@ -239,13 +150,17 @@ mod test {
         let authn = Context::internal_saga_recovery();
         let actor = authn.actor().unwrap();
         assert_eq!(actor.0, USER_SAGA_RECOVERY.id);
+
+        let authn = Context::internal_api();
+        let actor = authn.actor().unwrap();
+        assert_eq!(actor.0, USER_INTERNAL_API.id);
     }
 }
 
 /// Describes whether the user is authenticated and provides more information
 /// that's specific to whether they're authenticated (or not)
-#[derive(Debug)]
-pub enum Kind {
+#[derive(Clone, Debug, Deserialize, Serialize)]
+enum Kind {
     /// Client successfully authenticated
     Authenticated(Details),
     /// Client did not attempt to authenticate
@@ -256,14 +171,14 @@ pub enum Kind {
 ///
 /// This could eventually include other information used during authorization,
 /// like a remote IP, the time of authentication, etc.
-#[derive(Debug)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct Details {
     /// the actor performing the request
     actor: Actor,
 }
 
 /// Who is performing an operation
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct Actor(pub Uuid);
 
 /// Label for a particular authentication scheme (used in log messages and

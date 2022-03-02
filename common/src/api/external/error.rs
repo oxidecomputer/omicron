@@ -68,14 +68,32 @@ pub enum Error {
 }
 
 /** Indicates how an object was looked up (for an `ObjectNotFound` error) */
-#[derive(Debug, Deserialize, PartialEq, Serialize)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub enum LookupType {
     /** a specific name was requested */
     ByName(String),
     /** a specific id was requested */
     ById(Uuid),
-    /** some other lookup type was used */
-    Other(String),
+}
+
+impl LookupType {
+    /// Returns an ObjectNotFound error appropriate for the case where this
+    /// lookup failed
+    pub fn into_not_found(self, type_name: ResourceType) -> Error {
+        Error::ObjectNotFound { type_name, lookup_type: self }
+    }
+}
+
+impl From<&str> for LookupType {
+    fn from(name: &str) -> Self {
+        LookupType::ByName(name.to_owned())
+    }
+}
+
+impl From<&Name> for LookupType {
+    fn from(name: &Name) -> Self {
+        LookupType::from(name.as_str())
+    }
 }
 
 impl Error {
@@ -103,28 +121,14 @@ impl Error {
      * name.
      */
     pub fn not_found_by_name(type_name: ResourceType, name: &Name) -> Error {
-        Error::ObjectNotFound {
-            type_name,
-            lookup_type: LookupType::ByName(name.as_str().to_owned()),
-        }
+        LookupType::from(name).into_not_found(type_name)
     }
 
     /**
      * Generates an [`Error::ObjectNotFound`] error for a lookup by object id.
      */
     pub fn not_found_by_id(type_name: ResourceType, id: &Uuid) -> Error {
-        Error::ObjectNotFound { type_name, lookup_type: LookupType::ById(*id) }
-    }
-
-    /**
-     * Generates an [`Error::ObjectNotFound`] error for some other kind of
-     * lookup.
-     */
-    pub fn not_found_other(type_name: ResourceType, message: String) -> Error {
-        Error::ObjectNotFound {
-            type_name,
-            lookup_type: LookupType::Other(message),
-        }
+        LookupType::ById(*id).into_not_found(type_name)
     }
 
     /**
@@ -137,6 +141,16 @@ impl Error {
      */
     pub fn internal_error(internal_message: &str) -> Error {
         Error::InternalError { internal_message: internal_message.to_owned() }
+    }
+
+    /**
+     * Generates an [`Error::InvalidRequest`] error with the specific message
+     *
+     * This should be used for failures due possibly to invalid client input
+     * or malformed requests.
+     */
+    pub fn invalid_request(message: &str) -> Error {
+        Error::InvalidRequest { message: message.to_owned() }
     }
 
     /**
@@ -162,29 +176,20 @@ impl From<Error> for HttpError {
     fn from(error: Error) -> HttpError {
         match error {
             Error::ObjectNotFound { type_name: t, lookup_type: lt } => {
-                if let LookupType::Other(message) = lt {
-                    HttpError::for_client_error(
-                        Some(String::from("ObjectNotFound")),
-                        http::StatusCode::NOT_FOUND,
-                        message,
-                    )
-                } else {
-                    /* TODO-cleanup is there a better way to express this? */
-                    let (lookup_field, lookup_value) = match lt {
-                        LookupType::ByName(name) => ("name", name),
-                        LookupType::ById(id) => ("id", id.to_string()),
-                        LookupType::Other(_) => panic!("unhandled other"),
-                    };
-                    let message = format!(
-                        "not found: {} with {} \"{}\"",
-                        t, lookup_field, lookup_value
-                    );
-                    HttpError::for_client_error(
-                        Some(String::from("ObjectNotFound")),
-                        http::StatusCode::NOT_FOUND,
-                        message,
-                    )
-                }
+                /* TODO-cleanup is there a better way to express this? */
+                let (lookup_field, lookup_value) = match lt {
+                    LookupType::ByName(name) => ("name", name),
+                    LookupType::ById(id) => ("id", id.to_string()),
+                };
+                let message = format!(
+                    "not found: {} with {} \"{}\"",
+                    t, lookup_field, lookup_value
+                );
+                HttpError::for_client_error(
+                    Some(String::from("ObjectNotFound")),
+                    http::StatusCode::NOT_FOUND,
+                    message,
+                )
             }
 
             Error::ObjectAlreadyExists { type_name: t, object_name: n } => {
@@ -250,19 +255,33 @@ impl From<Error> for HttpError {
     }
 }
 
-impl From<anyhow::Error> for crate::api::external::Error {
-    fn from(e: anyhow::Error) -> Self {
-        // TODO this needs to be updated when progenitor gets better error types.
-        if let Some(ee) = e.downcast_ref::<reqwest::Error>() {
-            if let Some(s) = ee.status() {
-                if s.is_client_error() {
-                    return crate::api::external::Error::InvalidRequest {
-                        message: e.to_string(),
-                    };
+impl<T: std::fmt::Debug> From<progenitor::progenitor_client::Error<T>>
+    for crate::api::external::Error
+{
+    fn from(e: progenitor::progenitor_client::Error<T>) -> Self {
+        // TODO this should really be something progenitor provides
+        let status = match &e {
+            progenitor::progenitor_client::Error::CommunicationError(e) => {
+                e.status()
+            }
+            progenitor::progenitor_client::Error::ErrorResponse(rv) => {
+                Some(*rv.status())
+            }
+            progenitor::progenitor_client::Error::InvalidResponsePayload(e) => {
+                e.status()
+            }
+            progenitor::progenitor_client::Error::UnexpectedResponse(r) => {
+                Some(r.status())
+            }
+        };
+        match status {
+            Some(status_code) if status_code.is_client_error() => {
+                crate::api::external::Error::InvalidRequest {
+                    message: e.to_string(),
                 }
             }
+            _ => crate::api::external::Error::internal_error(&e.to_string()),
         }
-        crate::api::external::Error::internal_error(&e.to_string())
     }
 }
 

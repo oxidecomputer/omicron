@@ -5,17 +5,19 @@
 //! API for controlling a single instance.
 
 use crate::common::{
-    instance::{Action as InstanceAction, InstanceStates},
+    instance::{Action as InstanceAction, InstanceStates, PROPOLIS_PORT},
     vlan::VlanID,
 };
 use crate::illumos::svc::wait_for_service;
 use crate::illumos::zone::PROPOLIS_ZONE_PREFIX;
 use crate::instance_manager::InstanceTicket;
 use crate::vnic::{interface_name, IdAllocator, Vnic};
-use futures::lock::Mutex;
+use anyhow::anyhow;
+use futures::lock::{Mutex, MutexGuard};
 use omicron_common::api::external::NetworkInterface;
 use omicron_common::api::internal::nexus::InstanceRuntimeState;
 use omicron_common::api::internal::sled_agent::InstanceHardware;
+use omicron_common::api::internal::sled_agent::InstanceMigrateParams;
 use omicron_common::api::internal::sled_agent::InstanceRuntimeStateRequested;
 use omicron_common::backoff;
 use propolis_client::Client as PropolisClient;
@@ -51,11 +53,15 @@ pub enum Error {
 
     // TODO: Remove this error; prefer to retry notifications.
     #[error("Notifying Nexus failed: {0}")]
-    Notification(anyhow::Error),
+    Notification(nexus_client::Error<()>),
 
     // TODO: This error type could become more specific
     #[error("Error performing a state transition: {0}")]
     Transition(omicron_common::api::external::Error),
+
+    // TODO: Add more specific errors
+    #[error("Failure during migration: {0}")]
+    Migration(anyhow::Error),
 }
 
 // Issues read-only, idempotent HTTP requests at propolis until it responds with
@@ -154,6 +160,13 @@ impl Drop for RunningState {
     }
 }
 
+// Named type for values returned during propolis zone creation
+struct PropolisSetup {
+    client: Arc<PropolisClient>,
+    control_nic: Vnic,
+    guest_nics: Vec<Vnic>,
+}
+
 struct InstanceInner {
     id: Uuid,
 
@@ -233,7 +246,15 @@ impl InstanceInner {
         Ok(())
     }
 
-    async fn ensure(&self, guest_nics: &Vec<Vnic>) -> Result<(), Error> {
+    async fn ensure(
+        &mut self,
+        instance: Instance,
+        ticket: InstanceTicket,
+        setup: PropolisSetup,
+        migrate: Option<InstanceMigrateParams>,
+    ) -> Result<(), Error> {
+        let PropolisSetup { client, control_nic, guest_nics } = setup;
+
         // TODO: Store slot in NetworkInterface, make this more stable.
         let nics = self
             .requested_nics
@@ -245,20 +266,51 @@ impl InstanceInner {
             })
             .collect();
 
+        let migrate = match migrate {
+            Some(params) => {
+                let migration_id =
+                    self.state.current().migration_uuid.ok_or_else(|| {
+                        Error::Migration(anyhow!("Missing Migration UUID"))
+                    })?;
+                Some(propolis_client::api::InstanceMigrateInitiateRequest {
+                    src_addr: params.src_propolis_addr,
+                    src_uuid: params.src_propolis_uuid,
+                    migration_id,
+                })
+            }
+            None => None,
+        };
+
         let request = propolis_client::api::InstanceEnsureRequest {
             properties: self.properties.clone(),
             nics,
             // TODO: Actual disks need to be wired up here.
             disks: vec![],
+            migrate,
         };
 
         info!(self.log, "Sending ensure request to propolis: {:?}", request);
-        self.running_state
-            .as_ref()
-            .expect("Propolis client should be initialized before usage")
-            .client
-            .instance_ensure(&request)
-            .await?;
+        client.instance_ensure(&request).await?;
+
+        // Monitor propolis for state changes in the background.
+        let monitor_task = Some(tokio::task::spawn(async move {
+            let r = instance.monitor_state_task().await;
+            let log = &instance.inner.lock().await.log;
+            match r {
+                Err(e) => warn!(log, "State monitoring task failed: {}", e),
+                Ok(()) => info!(log, "State monitoring task complete"),
+            }
+        }));
+
+        self.running_state =
+            Some(RunningState { client, ticket, monitor_task });
+
+        // Store the VNICs while the instance is running.
+        self.allocated_nics = guest_nics
+            .into_iter()
+            .chain(std::iter::once(control_nic))
+            .collect();
+
         Ok(())
     }
 
@@ -310,7 +362,11 @@ mockall::mock! {
             vlan: Option<VlanID>,
             nexus_client: Arc<NexusClient>,
         ) -> Result<Self, Error>;
-        pub async fn start(&self, ticket: InstanceTicket) -> Result<(), Error>;
+        pub async fn start(
+            &self,
+            ticket: InstanceTicket,
+            migrate: Option<InstanceMigrateParams>,
+        ) -> Result<(), Error>;
         pub async fn transition(
             &self,
             target: InstanceRuntimeStateRequested,
@@ -373,10 +429,10 @@ impl Instance {
         Ok(Instance { inner })
     }
 
-    /// Begins the execution of the instance's service (Propolis).
-    pub async fn start(&self, ticket: InstanceTicket) -> Result<(), Error> {
-        let mut inner = self.inner.lock().await;
-
+    async fn setup_propolis_locked(
+        &self,
+        inner: &mut MutexGuard<'_, InstanceInner>,
+    ) -> Result<PropolisSetup, Error> {
         // Create the VNIC which will be attached to the zone.
         //
         // It would be preferable to use the UUID of the instance as a component
@@ -450,8 +506,7 @@ impl Instance {
         info!(inner.log, "Created address {} for zone: {}", network, zname);
 
         // Run Propolis in the Zone.
-        let port = 12400;
-        let server_addr = SocketAddr::new(network.ip(), port);
+        let server_addr = SocketAddr::new(network.ip(), PROPOLIS_PORT);
         Zones::run_propolis(&zname, inner.propolis_id(), &server_addr)?;
         info!(inner.log, "Started propolis in zone: {}", zname);
 
@@ -463,6 +518,8 @@ impl Instance {
             .await
             .map_err(|_| Error::Timeout(fmri.to_string()))?;
 
+        inner.state.current_mut().propolis_addr = Some(server_addr);
+
         let client = Arc::new(PropolisClient::new(
             server_addr,
             inner.log.new(o!("component" => "propolis-client")),
@@ -473,30 +530,23 @@ impl Instance {
         // don't need to worry about initialization races.
         wait_for_http_server(&inner.log, &client).await?;
 
-        inner.running_state =
-            Some(RunningState { client, ticket, monitor_task: None });
+        Ok(PropolisSetup { client, control_nic, guest_nics })
+    }
+
+    /// Begins the execution of the instance's service (Propolis).
+    pub async fn start(
+        &self,
+        ticket: InstanceTicket,
+        migrate: Option<InstanceMigrateParams>,
+    ) -> Result<(), Error> {
+        let mut inner = self.inner.lock().await;
+
+        // Create the propolis zone and resources
+        let setup = self.setup_propolis_locked(&mut inner).await?;
 
         // Ensure the instance exists in the Propolis Server before we start
         // using it.
-        inner.ensure(&guest_nics).await?;
-
-        // Monitor propolis for state changes in the background.
-        let self_clone = self.clone();
-        inner.running_state.as_mut().unwrap().monitor_task =
-            Some(tokio::task::spawn(async move {
-                let r = self_clone.monitor_state_task().await;
-                let log = &self_clone.inner.lock().await.log;
-                match r {
-                    Err(e) => warn!(log, "State monitoring task failed: {}", e),
-                    Ok(()) => info!(log, "State monitoring task complete"),
-                }
-            }));
-
-        // Store the VNICs while the instance is running.
-        inner.allocated_nics = guest_nics
-            .into_iter()
-            .chain(std::iter::once(control_nic))
-            .collect();
+        inner.ensure(self.clone(), ticket, setup, migrate).await?;
 
         Ok(())
     }
@@ -578,7 +628,7 @@ impl Instance {
         let mut inner = self.inner.lock().await;
         if let Some(action) = inner
             .state
-            .request_transition(target.run_state)
+            .request_transition(&target)
             .map_err(|e| Error::Transition(e))?
         {
             info!(
@@ -651,7 +701,9 @@ mod test {
             ));
         } else {
             *server = Some(FakeInstance { id });
-            return Ok(HttpResponseCreated(api::InstanceEnsureResponse {}));
+            return Ok(HttpResponseCreated(api::InstanceEnsureResponse {
+                migrate: None,
+            }));
         }
     }
 
@@ -916,7 +968,7 @@ mod test {
         );
 
         // This invocation triggers all the aforementioned expectations.
-        inst.start(ticket).await.unwrap();
+        inst.start(ticket, None).await.unwrap();
     }
 
     // Returns a future which resolves when a state transition is reached.
@@ -957,6 +1009,9 @@ mod test {
                 run_state: InstanceState::Creating,
                 sled_uuid: Uuid::new_v4(),
                 propolis_uuid: test_propolis_uuid(),
+                dst_propolis_uuid: None,
+                propolis_addr: None,
+                migration_uuid: None,
                 ncpus: InstanceCpuCount(2),
                 memory: ByteCount::from_mebibytes_u32(512),
                 hostname: "myvm".to_string(),
@@ -1024,6 +1079,7 @@ mod test {
         // Start running the instance.
         inst.transition(InstanceRuntimeStateRequested {
             run_state: InstanceStateRequested::Running,
+            migration_params: None,
         })
         .await
         .unwrap();
@@ -1048,6 +1104,7 @@ mod test {
             });
         inst.transition(InstanceRuntimeStateRequested {
             run_state: InstanceStateRequested::Stopped,
+            migration_params: None,
         })
         .await
         .unwrap();
@@ -1078,6 +1135,7 @@ mod test {
         // result in a panic.
         inst.transition(InstanceRuntimeStateRequested {
             run_state: InstanceStateRequested::Running,
+            migration_params: None,
         })
         .await
         .unwrap();

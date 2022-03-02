@@ -333,6 +333,7 @@ mod test {
     use crate::context::OpContext;
     use crate::db::test_utils::UnpluggableCockroachDbSecStore;
     use lazy_static::lazy_static;
+    use nexus_test_utils::db::test_setup_database;
     use omicron_test_utils::dev;
     use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
     use steno::{
@@ -372,7 +373,7 @@ mod test {
     async fn new_db(
         log: &slog::Logger,
     ) -> (dev::db::CockroachInstance, Arc<db::DataStore>) {
-        let db = dev::test_setup_database(&log).await;
+        let db = test_setup_database(&log).await;
         let cfg = crate::db::Config { url: db.pg_config().clone() };
         let pool = Arc::new(db::Pool::new(&cfg));
         let db_datastore = Arc::new(db::DataStore::new(Arc::clone(&pool)));
@@ -480,7 +481,7 @@ mod test {
         let (storage, sec_client, uctx) =
             create_storage_sec_and_context(&log, db_datastore.clone(), sec_id);
         let sec_log = log.new(o!("component" => "SEC"));
-        let opctx = OpContext::for_unit_tests(log);
+        let opctx = OpContext::for_tests(log, Arc::clone(&db_datastore));
 
         // Create and start a saga.
         //
@@ -554,7 +555,7 @@ mod test {
         let (storage, sec_client, uctx) =
             create_storage_sec_and_context(&log, db_datastore.clone(), sec_id);
         let sec_log = log.new(o!("component" => "SEC"));
-        let opctx = OpContext::for_unit_tests(log);
+        let opctx = OpContext::for_tests(log, Arc::clone(&db_datastore));
 
         // Create and start a saga, which we expect to complete successfully.
         let saga_id = SagaId(Uuid::new_v4());

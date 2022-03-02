@@ -1,0 +1,14 @@
+## Management Gateway Service
+
+The Management Gateway Service (MGS) is the unimaginatively named gateway
+between the control plane and entities on the management network. In
+particular, it passes messages from the control plane to service processors
+(SPs) within sleds, switches, and power shelf controllers, and it routes alert
+messages from those entities to the control plane. It is used for inventory
+inspection both of the rack and its subcomponents. It allows for power
+management both via SPs and the lower-level Ignition subsystem. It is the
+mechanism for updating components. And it is the service for routing errors
+generated from SPs and Ignition.
+
+For further details see https://rfd.shared.oxide.computer/rfd/0210[RFD 210]
+which describes this service, the management network, SPs, etc.

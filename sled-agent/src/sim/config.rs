@@ -10,7 +10,7 @@ use dropshot::ConfigDropshot;
 use dropshot::ConfigLogging;
 use serde::Deserialize;
 use serde::Serialize;
-use std::net::SocketAddr;
+use std::net::{IpAddr, SocketAddr};
 use uuid::Uuid;
 
 /**
@@ -33,6 +33,22 @@ pub enum SimMode {
     Explicit,
 }
 
+/// Configuration for a simulated zpool.
+///
+/// Currently, each zpool will receive a single Crucible Dataset.
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+pub struct ConfigZpool {
+    /// The size of the Zpool in bytes.
+    pub size: u64,
+}
+
+/// Configuration describing simulated storage.
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+pub struct ConfigStorage {
+    pub zpools: Vec<ConfigZpool>,
+    pub ip: IpAddr,
+}
+
 /**
  * Configuration for a sled agent
  */
@@ -48,4 +64,6 @@ pub struct Config {
     pub dropshot: ConfigDropshot,
     /** configuration for the sled agent debug log */
     pub log: ConfigLogging,
+    /** configuration for the sled agent's storage */
+    pub storage: ConfigStorage,
 }

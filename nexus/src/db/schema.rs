@@ -34,11 +34,14 @@ table! {
         time_modified -> Timestamptz,
         time_deleted -> Nullable<Timestamptz>,
         project_id -> Uuid,
-        state -> Text,
+        state -> crate::db::model::InstanceStateEnum,
         time_state_updated -> Timestamptz,
         state_generation -> Int8,
         active_server_id -> Uuid,
         active_propolis_id -> Uuid,
+        target_propolis_id -> Nullable<Uuid>,
+        active_propolis_ip -> Nullable<Inet>,
+        migration_id -> Nullable<Uuid>,
         ncpus -> Int8,
         memory -> Int8,
         hostname -> Text,
@@ -115,7 +118,7 @@ table! {
         template_name -> Text,
         time_created -> Timestamptz,
         saga_params -> Jsonb,
-        saga_state -> Text,
+        saga_state -> crate::db::saga_types::SagaCachedStateEnum,
         current_sec -> Nullable<Uuid>,
         adopt_generation -> Int8,
         adopt_time -> Timestamptz,
@@ -191,6 +194,8 @@ table! {
         port -> Int4,
 
         kind -> crate::db::model::DatasetKindEnum,
+
+        size_used -> Nullable<Int8>,
     }
 }
 
@@ -204,7 +209,7 @@ table! {
         disk_id -> Uuid,
 
         block_size -> Int8,
-        extent_size -> Int8,
+        blocks_per_extent -> Int8,
         extent_count -> Int8,
     }
 }
@@ -219,6 +224,7 @@ table! {
         time_deleted -> Nullable<Timestamptz>,
         project_id -> Uuid,
         system_router_id -> Uuid,
+        ipv6_prefix -> Inet,
         dns_name -> Text,
         firewall_gen -> Int8,
     }
@@ -233,8 +239,8 @@ table! {
         time_modified -> Timestamptz,
         time_deleted -> Nullable<Timestamptz>,
         vpc_id -> Uuid,
-        ipv4_block -> Nullable<Inet>,
-        ipv6_block -> Nullable<Inet>,
+        ipv4_block -> Inet,
+        ipv6_block -> Inet,
     }
 }
 
@@ -301,7 +307,30 @@ table! {
     }
 }
 
+table! {
+    role_builtin (resource_type, role_name) {
+        resource_type -> Text,
+        role_name -> Text,
+        description -> Text,
+    }
+}
+
+table! {
+    role_assignment_builtin (
+        user_builtin_id,
+        resource_type,
+        resource_id,
+        role_name
+    ) {
+        resource_type -> Text,
+        role_name -> Text,
+        resource_id -> Uuid,
+        user_builtin_id -> Uuid,
+    }
+}
+
 allow_tables_to_appear_in_same_query!(
+    dataset,
     disk,
     instance,
     metric_producer,
@@ -309,6 +338,7 @@ allow_tables_to_appear_in_same_query!(
     organization,
     oximeter,
     project,
+    region,
     saga,
     saga_node_event,
     console_session,
@@ -319,4 +349,7 @@ allow_tables_to_appear_in_same_query!(
     vpc_router,
     vpc_firewall_rule,
     user_builtin,
+    role_builtin,
+    role_assignment_builtin,
+    zpool,
 );

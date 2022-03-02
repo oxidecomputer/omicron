@@ -8,6 +8,7 @@ use crate::common::vlan::VlanID;
 use crate::vnic::IdAllocator;
 use omicron_common::api::internal::nexus::InstanceRuntimeState;
 use omicron_common::api::internal::sled_agent::InstanceHardware;
+use omicron_common::api::internal::sled_agent::InstanceMigrateParams;
 use omicron_common::api::internal::sled_agent::InstanceRuntimeStateRequested;
 use slog::Logger;
 use std::collections::BTreeMap;
@@ -42,7 +43,8 @@ struct InstanceManagerInternal {
     // TODO: If we held an object representing an enum of "Created OR Running"
     // instance, we could avoid the methods within "instance.rs" that panic
     // if the Propolis client hasn't been initialized.
-    instances: Mutex<BTreeMap<Uuid, Instance>>,
+    /// A mapping from a Sled Agent "Instance ID" to ("Propolis ID", [Instance]).
+    instances: Mutex<BTreeMap<Uuid, (Uuid, Instance)>>,
 
     vlan: Option<VlanID>,
     nic_id_allocator: IdAllocator,
@@ -82,51 +84,89 @@ impl InstanceManager {
         instance_id: Uuid,
         initial_hardware: InstanceHardware,
         target: InstanceRuntimeStateRequested,
+        migrate: Option<InstanceMigrateParams>,
     ) -> Result<InstanceRuntimeState, Error> {
         info!(
             &self.inner.log,
             "instance_ensure {} -> {:?}", instance_id, target
         );
 
+        let target_propolis_id = initial_hardware.runtime.propolis_uuid;
+
         let (instance, maybe_instance_ticket) = {
             let mut instances = self.inner.instances.lock().unwrap();
-            if let Some(instance) = instances.get_mut(&instance_id) {
-                // Instance already exists.
-                info!(&self.inner.log, "instance already exists");
-                (instance.clone(), None)
-            } else {
-                // Instance does not exist - create it.
-                info!(&self.inner.log, "new instance");
-                let instance_log = self
-                    .inner
-                    .log
-                    .new(o!("instance" => instance_id.to_string()));
-                instances.insert(
-                    instance_id,
-                    Instance::new(
+            match (instances.get(&instance_id), &migrate) {
+                (Some((_, instance)), None) => {
+                    // Instance already exists and we're not performing a migration
+                    info!(&self.inner.log, "instance already exists");
+                    (instance.clone(), None)
+                }
+                (Some((propolis_id, instance)), Some(_))
+                    if *propolis_id == target_propolis_id =>
+                {
+                    // A migration was requested but the given propolis id
+                    // already seems to be the propolis backing this instance
+                    // so just return the instance as is without triggering
+                    // another migration.
+                    info!(
+                        &self.inner.log,
+                        "instance already exists with given dst propolis"
+                    );
+                    (instance.clone(), None)
+                }
+                _ => {
+                    // Instance does not exist or one does but we're performing
+                    // a intra-sled migration. Either way - create an instance
+                    info!(&self.inner.log, "new instance");
+                    let instance_log = self
+                        .inner
+                        .log
+                        .new(o!("instance" => instance_id.to_string()));
+                    let instance = Instance::new(
                         instance_log,
                         instance_id,
                         self.inner.nic_id_allocator.clone(),
                         initial_hardware,
                         self.inner.vlan,
                         self.inner.nexus_client.clone(),
-                    )?,
-                );
-                let instance = instances.get_mut(&instance_id).unwrap().clone();
-                let ticket =
-                    Some(InstanceTicket::new(instance_id, self.inner.clone()));
-                (instance, ticket)
+                    )?;
+                    let instance_clone = instance.clone();
+                    let old_instance = instances
+                        .insert(instance_id, (target_propolis_id, instance));
+                    if let Some((_old_propolis_id, old_instance)) = old_instance
+                    {
+                        // If we had a previous instance, we must be migrating
+                        assert!(migrate.is_some());
+                        // TODO: assert that old_instance.inner.propolis_id() == migrate.src_uuid
+
+                        // We forget the old instance because otherwise if it is the last
+                        // handle, the `InstanceTicket` it holds will also be dropped.
+                        // `InstanceTicket::drop` will try to remove the corresponding
+                        // instance from the instance manager. It does this based off the
+                        // instance's ID. Given that we just replaced said instance using
+                        // the same ID, that would inadvertantly remove our newly created
+                        // instance instead.
+                        // TODO: cleanup source instance properly
+                        std::mem::forget(old_instance);
+                    }
+
+                    let ticket = Some(InstanceTicket::new(
+                        instance_id,
+                        self.inner.clone(),
+                    ));
+                    (instance_clone, ticket)
+                }
             }
         };
 
-        // If we created a new instance, start it - but do so outside
+        // If we created a new instance, start or migrate it - but do so outside
         // the "instances" lock, since initialization may take a while.
         //
         // Additionally, this makes it possible to manage the "instance_ticket",
         // which might need to grab the lock to remove the instance during
         // teardown.
         if let Some(instance_ticket) = maybe_instance_ticket {
-            instance.start(instance_ticket).await?;
+            instance.start(instance_ticket, migrate).await?;
         }
 
         instance.transition(target).await.map_err(|e| e.into())
@@ -204,6 +244,9 @@ mod test {
                 run_state: InstanceState::Creating,
                 sled_uuid: Uuid::new_v4(),
                 propolis_uuid: Uuid::new_v4(),
+                dst_propolis_uuid: None,
+                propolis_addr: None,
+                migration_uuid: None,
                 ncpus: InstanceCpuCount(2),
                 memory: ByteCount::from_mebibytes_u32(512),
                 hostname: "myvm".to_string(),
@@ -255,7 +298,7 @@ mod test {
             let mut inst = MockInstance::default();
             inst.expect_clone().return_once(move || {
                 let mut inst = MockInstance::default();
-                inst.expect_start().return_once(move |t| {
+                inst.expect_start().return_once(move |t, _| {
                     // Grab hold of the ticket, so we don't try to remove the
                     // instance immediately after "start" completes.
                     let mut ticket_guard = ticket_clone.lock().unwrap();
@@ -277,7 +320,9 @@ mod test {
                 new_initial_instance(),
                 InstanceRuntimeStateRequested {
                     run_state: InstanceStateRequested::Running,
+                    migration_params: None,
                 },
+                None,
             )
             .await
             .unwrap();
@@ -323,7 +368,7 @@ mod test {
             inst.expect_clone().times(1).in_sequence(&mut seq).return_once(
                 move || {
                     let mut inst = MockInstance::default();
-                    inst.expect_start().return_once(move |t| {
+                    inst.expect_start().return_once(move |t, _| {
                         let mut ticket_guard = ticket_clone.lock().unwrap();
                         *ticket_guard = Some(t);
                         Ok(())
@@ -355,14 +400,15 @@ mod test {
         let rt = new_initial_instance();
         let target = InstanceRuntimeStateRequested {
             run_state: InstanceStateRequested::Running,
+            migration_params: None,
         };
 
         // Creates instance, start + transition.
-        im.ensure(id, rt.clone(), target.clone()).await.unwrap();
+        im.ensure(id, rt.clone(), target.clone(), None).await.unwrap();
         // Transition only.
-        im.ensure(id, rt.clone(), target.clone()).await.unwrap();
+        im.ensure(id, rt.clone(), target.clone(), None).await.unwrap();
         // Transition only.
-        im.ensure(id, rt, target).await.unwrap();
+        im.ensure(id, rt, target, None).await.unwrap();
 
         assert_eq!(im.inner.instances.lock().unwrap().len(), 1);
         ticket.lock().unwrap().take();

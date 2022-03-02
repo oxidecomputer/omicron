@@ -2,159 +2,183 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! Authorization facilities
+//! # Authorization subsystem
+//!
+//! ## Authorization basics
+//!
+//! Most of our external authorization policy is expressed in terms of
+//! role-based access control (RBAC), meaning that an *actor* can perform
+//! an *action* on a *resource* if the actor is associated with a *role* on the
+//! resource that grants *permissions* for the action.  Let's unpack that.
+//!
+//! - **actor** is a built-in user, a service account, or in the future a user
+//!   from the customer's Identity Provider (IdP, such as company LDAP or Active
+//!   Directory or the like).
+//! - **resource** is usually an API resource, like a Project or Instance
+//! - **action** is usually one of a handful of things like "modify", "delete",
+//!   or "create a child resource".  Actions are nearly the same as
+//!   **permissions**.  The set of actions is fixed by the system.
+//! - **role** is just a set of permissions.  Currently, only built-in roles are
+//!   supported.
+//!
+//! The Oso **policy** determines what roles grant what permissions.  This is
+//! currently baked into Nexus (via the Oso policy file) and cannot be changed
+//! at runtime.
+//!
+//! The Oso policy defines rules saying things like:
+//!
+//! - a user can perform an action on a resource if they have a role that grants
+//!   the corresponding permission on that resource
+//! - for Projects, the "viewer" role is granted the "read" permission
+//! - for Projects, the "viewer" role is granted to anyone with the
+//!   "collaborator" role
+//! - Projects have a "parent" relationship with an Organization, such that
+//!   someone with the "admin" role on the parent Organization automatically
+//!   gets the "viewer" role on the Project
+//!
+//! These are just examples.  To make them more concrete, suppose we have:
+//!
+//! - an Organization "Sesame-Street"
+//! - a Project "monster-foodies"
+//! - three users:
+//!   - "cookie-monster", who has been explicitly granted the "viewer" role on
+//!     Project "monster-foodies"
+//!   - "Gonger", who has been explicitly granted the "collaborator" role on
+//!     Project "monster-foodies"
+//!   - "big-bird", who has been explicitly granted the "admin" role on the
+//!     Organization "Sesame-Street"
+//!
+//! All three users have the "read" permission on the Project by virtue of their
+//! "viewer" role on the Project.  But the path to determining that varies:
+//!
+//! - Cookie Monster has explicitly been granted the "viewer" role on this
+//!   Project.
+//! - Gonger has the "collaborator" role on the Project, which the policy says
+//!   implicitly grants the "viewer" role.
+//! - Big Bird has the "admin" role on the parent Organization, which the policy
+//!   says implicitly grants the "collaborator" role on the Project, which
+//!   (again) is granted the "viewer" role on the Project.
+//!
+//! So to determine if someone has access, we wind up checking for a variety of
+//! roles on several different objects.  Oso does the tricky parts.  We plug
+//! into the Oso policy at various points.  A key integration point is
+//! determining whether an actor has a _particular_ role on a _particular_
+//! resource.
+//!
+//! ## Role lookup
+//!
+//! Users, roles, and API resources are all stored in the database.  Naturally,
+//! so is the relationship that says a particular user has a particular role for
+//! a particular resource.
+//!
+//! Suppose a built-in user "cookie-monster" has the "viewer" role for a Project
+//! "monster-foodies".  It looks like this:
+//!
+//! ```text
+//! +---> table: "project"
+//! |     +-------------------------+-----+
+//! |     |  id | name              | ... |
+//! |     +-------------------------------+
+//! |   +-> 123 | "monster-foodies" | ... |
+//! |   | +-------------------------+-----+
+//! |   |
+//! |   | table: "user_builtin"
+//! |   | +------------------------------+
+//! |   | |  id | name             | ... |
+//! |   | +------------------------------|
+//! |   | | 234 | "cookie-monster" | ... |
+//! |   | +--^---------------------------+
+//! |   |    |
+//! |   |    +---------------------------------------------------------------+
+//! |   |                                                                    |
+//! |   | table: "role_builtin"                                              |
+//! |   | primary key: (resource_type, role_name)
+//! |   | +---------------+-----------+-----+                                |
+//! |   | | resource_type | role_name | ... |                                |
+//! |   | +---------------+-----------+-----+                                |
+//! +---|-> "project "    | "viewer"  | ... |                                |
+//! |   | +---------------+--^--------+-----+                                |
+//! |   |                    |
+//! | +-|--------------------+                                               |
+//! | | |                                                                    |
+//! | | | table: "role_assignment_builtin"                                   |
+//! | | | (assigns built-in roles to built-in users on arbitrary resources)  |
+//! | | | +---------------+-----------+-------------+-----------------+      |
+//! | | | | resource_type | role_name | resource_id | user_builtin_id |      |
+//! | | | +---------------+-----------+-------------+-----------------+      |
+//! | | | | "project "    | "viewer"  |         234 |             123 <------+
+//! | | | +--^------------+--^--------+----------^--+-----------------+
+//! | | |    |               |                   |
+//! +-|-|----+               |                   |
+//!   +-|--------------------+                   |
+//!     +----------------------------------------+
+//! ```
+//!
+//! This record means that user "cookie-monster" has the "viewer" role on the
+//! "project" with id 123.  (Note that ids are really uuids, and some of these
+//! tables have other columns.)  See the [`roles`] module for more details on
+//! how we find these records and make them available for the authz check.
+//!
+//! ## Authorization control flow
+//!
+//! Suppose we receive a request from Abby to modify Project "monster-foodies".
+//! How do we know if the request is authorized?  The project fetch code checks
+//! whether the actor (`Abby`) can perform the "modify" [`crate::authz::Action`]
+//! for a resource of type `Project` with id `234` (the id of the
+//! "monster-foodies" Project).  Then:
+//!
+//! 1. The authorization subsystem loads all of Abby's roles related to this
+//!    resource.  Much more on this in the [`roles`] submodule.
+//! 2. The authorization subsystem asks Oso whether the action should be
+//!    allowed.  Oso answers this based on the policy we've defined.  As part of
+//!    evaluating this:
+//!    1. The policy determines which permission is required for
+//!       this action.  Currently, actions and permissions are nearly
+//!       identical -- to perform the "modify" action, you need the "modify"
+//!       permission.
+//!    2. The policy says that the actor can perform this action on the
+//!       resource if they have a role granting the corresponding permission
+//!       on the resource.
+//!    3. Oso checks:
+//!       1. whether the user has any role for this resource that grants
+//!          the permission (e.g., does the user have a "collaborator"
+//!          role that grants the "modify" permission?)
+//!       2. whether the user has a role for this resource that grants
+//!          another role that grants the permission (e.g., does the
+//!          user have an "admin" role that grants the "collaborator"
+//!          role that grants the "modify" permission?)
+//!       3. for every relationship between this resource and another
+//!          resource, whether the user has a role on the other resource
+//!          that grants the permission on this resource (e.g., does
+//!          the user have an "organization admin" role on the parent
+//!          organization that grants the "admin" role on the Project
+//!          that grants the "modify" permission)
+//!
+//! Each of these role lookups uses data that we provide to Oso.  (Again, more
+//! in [`roles`] about how this is set up.)  If Oso finds a role granting this
+//! permission that's associated with this actor and resource, the action is
+//! allowed.  Otherwise, it's not.
+//!
 
-use crate::authn;
-use omicron_common::api::external::Error;
-use oso::Oso;
-use std::sync::Arc;
+mod actor;
 
-mod oso_types;
-pub use oso_types::Action;
-pub use oso_types::Organization;
-pub use oso_types::Project;
-pub use oso_types::ProjectChild;
-pub use oso_types::DATABASE;
-pub use oso_types::FLEET;
+mod api_resources;
+pub use api_resources::ApiResourceError;
+pub use api_resources::Disk;
+pub use api_resources::Fleet;
+pub use api_resources::FleetChild;
+pub use api_resources::Instance;
+pub use api_resources::Organization;
+pub use api_resources::Project;
+pub use api_resources::FLEET;
 
-/// Server-wide authorization context
-pub struct Authz {
-    oso: Oso,
-}
+mod context;
+pub use context::AuthorizedResource;
+pub use context::Authz;
+pub use context::Context;
 
-impl Authz {
-    /// Construct an authorization context
-    ///
-    /// # Panics
-    ///
-    /// This function panics if we could not load the compiled-in Polar
-    /// configuration.  That should be impossible outside of development.
-    pub fn new() -> Authz {
-        let oso = oso_types::make_omicron_oso().expect("initializing Oso");
-        Authz { oso }
-    }
-}
+mod oso_generic;
+pub use oso_generic::Action;
+pub use oso_generic::DATABASE;
 
-/// Operation-specific authorization context
-pub struct Context {
-    authn: Arc<authn::Context>,
-    authz: Arc<Authz>,
-}
-
-impl Context {
-    pub fn new(authn: Arc<authn::Context>, authz: Arc<Authz>) -> Context {
-        Context { authn, authz }
-    }
-
-    /// Check whether the actor performing this request is authorized for
-    /// `action` on `resource`.
-    pub fn authorize<Resource>(
-        &self,
-        action: Action,
-        resource: Resource,
-    ) -> Result<(), Error>
-    where
-        Resource: oso::ToPolar,
-    {
-        // TODO-security For Action::Read (and any other "read" action),
-        // this should return NotFound rather than Forbidden.  But we cannot
-        // construct the appropriate NotFound here without more information:
-        // the resource type and how it was looked up.  In practice, it's
-        // quite possible that all such cases should really use query
-        // filtering instead of an explicit is_allowed() check, in which
-        // case we could safely assume Forbidden here.
-        //
-        // Alternatively, we could let the caller produce the appropriate
-        // "NotFound", but it would add a lot of boilerplate to a lot of
-        // callers if we didn't return api::external::Error here.
-        let actor = oso_types::AnyActor::from(&*self.authn);
-        let is_authn = self.authn.actor().is_some();
-        match self.authz.oso.is_allowed(actor, action, resource) {
-            Err(error) => Err(Error::internal_error(&format!(
-                "failed to compute authorization: {:#}",
-                error
-            ))),
-            // If the user did not authenticate successfully, this will become a
-            // 401 rather than a 403.
-            Ok(false) if !is_authn => Err(Error::Unauthenticated {
-                internal_message: String::from(
-                    "authorization failed for unauthenticated request",
-                ),
-            }),
-            Ok(false) => Err(Error::Forbidden),
-            Ok(true) => Ok(()),
-        }
-    }
-}
-
-#[cfg(test)]
-mod test {
-    /*
-     * These are essentially unit tests for the policy itself.
-     * TODO-coverage This is just a start.  But we need roles to do a more
-     * comprehensive test.
-     * TODO If this gets any more complicated, we could consider automatically
-     * generating the test cases.  We could precreate a bunch of resources and
-     * some users with different roles.  Then we could run through a table that
-     * says exactly which users should be able to do what to each resource.
-     */
-    use super::Action;
-    use super::Authz;
-    use super::Context;
-    use super::DATABASE;
-    use super::FLEET;
-    use crate::authn;
-    use std::sync::Arc;
-
-    fn authz_context_for_actor(authn: authn::Context) -> Context {
-        let authz = Authz::new();
-        Context::new(Arc::new(authn), Arc::new(authz))
-    }
-
-    fn authz_context_noauth() -> Context {
-        let authn = authn::Context::internal_unauthenticated();
-        let authz = Authz::new();
-        Context::new(Arc::new(authn), Arc::new(authz))
-    }
-
-    #[test]
-    fn test_database() {
-        let authz_privileged =
-            authz_context_for_actor(authn::Context::internal_test_user());
-        authz_privileged
-            .authorize(Action::Query, DATABASE)
-            .expect("expected privileged user to be able to query database");
-        let authz_nobody =
-            authz_context_for_actor(authn::Context::test_context_for_actor(
-                authn::USER_TEST_UNPRIVILEGED.id,
-            ));
-        authz_nobody
-            .authorize(Action::Query, DATABASE)
-            .expect("expected unprivileged user to be able to query database");
-        let authz_noauth = authz_context_noauth();
-        authz_noauth.authorize(Action::Query, DATABASE).expect_err(
-            "expected unauthenticated user not to be able to query database",
-        );
-    }
-
-    #[test]
-    fn test_organization() {
-        let authz_privileged =
-            authz_context_for_actor(authn::Context::internal_test_user());
-        authz_privileged.authorize(Action::CreateChild, FLEET).expect(
-            "expected privileged user to be able to create organization",
-        );
-        let authz_nobody =
-            authz_context_for_actor(authn::Context::test_context_for_actor(
-                authn::USER_TEST_UNPRIVILEGED.id,
-            ));
-        authz_nobody.authorize(Action::CreateChild, FLEET).expect_err(
-            "expected unprivileged user not to be able to create organization",
-        );
-        let authz_noauth = authz_context_noauth();
-        authz_noauth.authorize(Action::Query, DATABASE).expect_err(
-            "expected unauthenticated user not to be able \
-            to create organization",
-        );
-    }
-}
+mod roles;

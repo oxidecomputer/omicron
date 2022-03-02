@@ -6,11 +6,12 @@
  * Views are response bodies, most of which are public lenses onto DB models.
  */
 
+use crate::authn;
 use crate::db::identity::{Asset, Resource};
 use crate::db::model;
 use api_identity::ObjectIdentity;
 use omicron_common::api::external::{
-    IdentityMetadata, Ipv4Net, Ipv6Net, Name, ObjectIdentity,
+    IdentityMetadata, Ipv4Net, Ipv6Net, Name, ObjectIdentity, RoleName,
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -25,7 +26,6 @@ use uuid::Uuid;
  * Client view of an [`Organization`]
  */
 #[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
 pub struct Organization {
     #[serde(flatten)]
     pub identity: IdentityMetadata,
@@ -45,7 +45,6 @@ impl Into<Organization> for model::Organization {
  * Client view of a [`Project`]
  */
 #[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
 pub struct Project {
     /*
      * TODO-correctness is flattening here (and in all the other types) the
@@ -73,7 +72,6 @@ impl Into<Project> for model::Project {
  * Client view of a [`Vpc`]
  */
 #[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
 pub struct Vpc {
     #[serde(flatten)]
     pub identity: IdentityMetadata,
@@ -83,6 +81,9 @@ pub struct Vpc {
 
     /// id for the system router where subnet default routes are registered
     pub system_router_id: Uuid,
+
+    /// The unique local IPv6 address range for subnets in this VPC
+    pub ipv6_prefix: Ipv6Net,
 
     // TODO-design should this be optional?
     /** The name used for the VPC in DNS. */
@@ -95,6 +96,7 @@ impl Into<Vpc> for model::Vpc {
             identity: self.identity(),
             project_id: self.project_id,
             system_router_id: self.system_router_id,
+            ipv6_prefix: *self.ipv6_prefix,
             dns_name: self.dns_name.0,
         }
     }
@@ -105,23 +107,17 @@ impl Into<Vpc> for model::Vpc {
 #[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct VpcSubnet {
     /** common identifying metadata */
+    #[serde(flatten)]
     pub identity: IdentityMetadata,
 
     /** The VPC to which the subnet belongs. */
     pub vpc_id: Uuid,
 
-    // TODO-design: RFD 21 says that V4 subnets are currently required, and V6 are optional. If a
-    // V6 address is _not_ specified, one is created with a prefix that depends on the VPC and a
-    // unique subnet-specific portion of the prefix (40 and 16 bits for each, respectively).
-    //
-    // We're leaving out the "view" types here for the external HTTP API for now, so it's not clear
-    // how to do the validation of user-specified CIDR blocks, or how to create a block if one is
-    // not given.
     /** The IPv4 subnet CIDR block. */
-    pub ipv4_block: Option<Ipv4Net>,
+    pub ipv4_block: Ipv4Net,
 
     /** The IPv6 subnet CIDR block. */
-    pub ipv6_block: Option<Ipv6Net>,
+    pub ipv6_block: Ipv6Net,
 }
 
 impl Into<VpcSubnet> for model::VpcSubnet {
@@ -129,8 +125,8 @@ impl Into<VpcSubnet> for model::VpcSubnet {
         VpcSubnet {
             identity: self.identity(),
             vpc_id: self.vpc_id,
-            ipv4_block: self.ipv4_block.map(|ip| ip.into()),
-            ipv6_block: self.ipv6_block.map(|ip| ip.into()),
+            ipv4_block: self.ipv4_block.0,
+            ipv6_block: self.ipv6_block.0,
         }
     }
 }
@@ -143,8 +139,8 @@ impl Into<VpcSubnet> for model::VpcSubnet {
  * Client view of an [`Rack`]
  */
 #[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
 pub struct Rack {
+    #[serde(flatten)]
     pub identity: IdentityMetadata,
 }
 
@@ -162,7 +158,6 @@ impl Into<Rack> for model::Rack {
  * Client view of an [`Sled`]
  */
 #[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
 pub struct Sled {
     #[serde(flatten)]
     pub identity: IdentityMetadata,
@@ -183,7 +178,6 @@ impl Into<Sled> for model::Sled {
  * Client view of a [`User`]
  */
 #[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
 pub struct User {
     /*
      * TODO-correctness is flattening here (and in all the other types) the
@@ -196,5 +190,43 @@ pub struct User {
 impl Into<User> for model::UserBuiltin {
     fn into(self) -> User {
         User { identity: self.identity() }
+    }
+}
+
+/**
+ * Client view of currently authed user.
+ */
+// TODO: this may end up merged with User once more details about the user are
+// stored in the auth context. Right now there is only the ID.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
+pub struct SessionUser {
+    pub id: Uuid,
+}
+
+impl Into<SessionUser> for authn::Actor {
+    fn into(self) -> SessionUser {
+        SessionUser { id: self.0 }
+    }
+}
+
+/*
+ * ROLES
+ */
+
+/**
+ * Client view of a [`Role`]
+ */
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
+pub struct Role {
+    pub name: RoleName,
+    pub description: String,
+}
+
+impl Into<Role> for model::RoleBuiltin {
+    fn into(self) -> Role {
+        Role {
+            name: RoleName::new(&self.resource_type, &self.role_name),
+            description: self.description,
+        }
     }
 }

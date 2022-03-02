@@ -352,46 +352,6 @@
         "format": "uint64",
         "minimum": 0
       },
-      "IdentityMetadata": {
-        "description": "Identity-related metadata that's included in nearly all public API objects",
-        "type": "object",
-        "properties": {
-          "description": {
-            "description": "human-readable free-form text about a resource",
-            "type": "string"
-          },
-          "id": {
-            "description": "unique, immutable, system-controlled identifier for each resource",
-            "type": "string",
-            "format": "uuid"
-          },
-          "name": {
-            "description": "unique, mutable, user-controlled identifier for each resource",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/Name"
-              }
-            ]
-          },
-          "timeCreated": {
-            "description": "timestamp when this resource was created",
-            "type": "string",
-            "format": "date-time"
-          },
-          "timeModified": {
-            "description": "timestamp when this resource was last modified",
-            "type": "string",
-            "format": "date-time"
-          }
-        },
-        "required": [
-          "description",
-          "id",
-          "name",
-          "timeCreated",
-          "timeModified"
-        ]
-      },
       "InstanceCpuCount": {
         "description": "The number of CPUs in an Instance",
         "type": "integer",
@@ -407,6 +367,15 @@
             "allOf": [
               {
                 "$ref": "#/components/schemas/InstanceHardware"
+              }
+            ]
+          },
+          "migrate": {
+            "nullable": true,
+            "description": "If we're migrating this instance, the details needed to drive the migration",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/InstanceMigrateParams"
               }
             ]
           },
@@ -443,10 +412,32 @@
           "runtime"
         ]
       },
+      "InstanceMigrateParams": {
+        "type": "object",
+        "properties": {
+          "src_propolis_addr": {
+            "type": "string"
+          },
+          "src_propolis_uuid": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "required": [
+          "src_propolis_addr",
+          "src_propolis_uuid"
+        ]
+      },
       "InstanceRuntimeState": {
         "description": "Runtime state of the Instance, including the actual running state and minimal metadata\n\nThis state is owned by the sled agent running that Instance.",
         "type": "object",
         "properties": {
+          "dst_propolis_uuid": {
+            "nullable": true,
+            "description": "the target propolis-server during a migration of this Instance",
+            "type": "string",
+            "format": "uuid"
+          },
           "gen": {
             "description": "generation number for this state",
             "allOf": [
@@ -467,6 +458,12 @@
               }
             ]
           },
+          "migration_uuid": {
+            "nullable": true,
+            "description": "migration id (if one in process)",
+            "type": "string",
+            "format": "uuid"
+          },
           "ncpus": {
             "description": "number of CPUs allocated for this Instance",
             "allOf": [
@@ -474,6 +471,11 @@
                 "$ref": "#/components/schemas/InstanceCpuCount"
               }
             ]
+          },
+          "propolis_addr": {
+            "nullable": true,
+            "description": "address of propolis-server running this Instance",
+            "type": "string"
           },
           "propolis_uuid": {
             "description": "which propolis-server is running this Instance",
@@ -510,10 +512,36 @@
           "time_updated"
         ]
       },
-      "InstanceRuntimeStateRequested": {
-        "description": "Used to request an Instance state change from a sled agent\n\nRight now, it's only the run state that can be changed, though we might want to support changing properties like \"ncpus\" here.",
+      "InstanceRuntimeStateMigrateParams": {
+        "description": "Instance runtime state to update for a migration.",
         "type": "object",
         "properties": {
+          "dst_propolis_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "migration_id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "required": [
+          "dst_propolis_id",
+          "migration_id"
+        ]
+      },
+      "InstanceRuntimeStateRequested": {
+        "description": "Used to request an Instance state change from a sled agent\n\nRight now, it's only the run state and migration id that can be changed, though we might want to support changing properties like \"ncpus\" here.",
+        "type": "object",
+        "properties": {
+          "migration_params": {
+            "nullable": true,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/InstanceRuntimeStateMigrateParams"
+              }
+            ]
+          },
           "run_state": {
             "$ref": "#/components/schemas/InstanceStateRequested"
           }
@@ -532,18 +560,20 @@
           "stopping",
           "stopped",
           "rebooting",
+          "migrating",
           "repairing",
           "failed",
           "destroyed"
         ]
       },
       "InstanceStateRequested": {
-        "description": "Requestable running state of an Instance.\n\nA subset of [`InstanceState`].",
+        "description": "Requestable running state of an Instance.\n\nA subset of [`external::InstanceState`].",
         "type": "string",
         "enum": [
           "running",
           "stopped",
           "reboot",
+          "migrating",
           "destroyed"
         ]
       },
@@ -566,13 +596,14 @@
         "description": "A `NetworkInterface` represents a virtual network interface device.",
         "type": "object",
         "properties": {
-          "identity": {
-            "description": "common identifying metadata",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/IdentityMetadata"
-              }
-            ]
+          "description": {
+            "description": "human-readable free-form text about a resource",
+            "type": "string"
+          },
+          "id": {
+            "description": "unique, immutable, system-controlled identifier for each resource",
+            "type": "string",
+            "format": "uuid"
           },
           "instance_id": {
             "description": "The Instance to which the interface belongs.",
@@ -592,10 +623,28 @@
               }
             ]
           },
+          "name": {
+            "description": "unique, mutable, user-controlled identifier for each resource",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Name"
+              }
+            ]
+          },
           "subnet_id": {
             "description": "The subnet to which the interface belongs.",
             "type": "string",
             "format": "uuid"
+          },
+          "time_created": {
+            "description": "timestamp when this resource was created",
+            "type": "string",
+            "format": "date-time"
+          },
+          "time_modified": {
+            "description": "timestamp when this resource was last modified",
+            "type": "string",
+            "format": "date-time"
           },
           "vpc_id": {
             "description": "The VPC to which the interface belongs.",
@@ -604,11 +653,15 @@
           }
         },
         "required": [
-          "identity",
+          "description",
+          "id",
           "instance_id",
           "ip",
           "mac",
+          "name",
           "subnet_id",
+          "time_created",
+          "time_modified",
           "vpc_id"
         ]
       }

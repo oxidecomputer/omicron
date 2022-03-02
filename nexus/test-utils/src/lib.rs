@@ -11,16 +11,18 @@ use dropshot::ConfigLogging;
 use dropshot::ConfigLoggingLevel;
 use omicron_common::api::external::IdentityMetadata;
 use omicron_common::api::internal::nexus::ProducerEndpoint;
+use omicron_sled_agent::sim;
 use omicron_test_utils::dev;
 use oximeter_collector::Oximeter;
 use oximeter_producer::Server as ProducerServer;
 use slog::o;
 use slog::Logger;
-use std::net::SocketAddr;
+use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::path::Path;
 use std::time::Duration;
 use uuid::Uuid;
 
+pub mod db;
 pub mod http_testing;
 pub mod resource_helpers;
 
@@ -36,7 +38,7 @@ pub struct ControlPlaneTestContext {
     pub database: dev::db::CockroachInstance,
     pub clickhouse: dev::clickhouse::ClickHouseInstance,
     pub logctx: LogContext,
-    pub sled_agent: omicron_sled_agent::sim::Server,
+    pub sled_agent: sim::Server,
     pub oximeter: Oximeter,
     pub producer: ProducerServer,
 }
@@ -93,12 +95,15 @@ pub async fn test_setup_with_config(
     let log = &logctx.log;
 
     /* Start up CockroachDB. */
-    let database = dev::test_setup_database(log).await;
+    let database = db::test_setup_database(log).await;
 
     /* Start ClickHouse database server. */
     let clickhouse = dev::clickhouse::ClickHouseInstance::new(0).await.unwrap();
 
+    /* Store actual address/port information for the databases after they start. */
     config.database.url = database.pg_config().clone();
+    config.timeseries_db.address.set_port(clickhouse.port());
+
     let server = omicron_nexus::Server::start(&config, &rack_id, &logctx.log)
         .await
         .unwrap();
@@ -120,7 +125,7 @@ pub async fn test_setup_with_config(
 
     /* Set up a single sled agent. */
     let sa_id = Uuid::parse_str(SLED_AGENT_UUID).unwrap();
-    let sa = start_sled_agent(
+    let sled_agent = start_sled_agent(
         logctx.log.new(o!(
             "component" => "omicron_sled_agent::sim::Server",
             "sled_id" => sa_id.to_string(),
@@ -156,7 +161,7 @@ pub async fn test_setup_with_config(
         internal_client: testctx_internal,
         database,
         clickhouse,
-        sled_agent: sa,
+        sled_agent,
         oximeter,
         producer,
         logctx,
@@ -167,10 +172,10 @@ pub async fn start_sled_agent(
     log: Logger,
     nexus_address: SocketAddr,
     id: Uuid,
-) -> Result<omicron_sled_agent::sim::Server, String> {
-    let config = omicron_sled_agent::sim::Config {
+) -> Result<sim::Server, String> {
+    let config = sim::Config {
         id,
-        sim_mode: omicron_sled_agent::sim::SimMode::Explicit,
+        sim_mode: sim::SimMode::Explicit,
         nexus_address,
         dropshot: ConfigDropshot {
             bind_address: SocketAddr::new("127.0.0.1".parse().unwrap(), 0),
@@ -178,9 +183,13 @@ pub async fn start_sled_agent(
         },
         /* TODO-cleanup this is unused */
         log: ConfigLogging::StderrTerminal { level: ConfigLoggingLevel::Debug },
+        storage: sim::ConfigStorage {
+            zpools: vec![],
+            ip: IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)),
+        },
     };
 
-    omicron_sled_agent::sim::Server::start(&config, &log).await
+    sim::Server::start(&config, &log).await
 }
 
 pub async fn start_oximeter(

@@ -59,9 +59,14 @@ async fn instance_put(
     let instance_id = path_params.into_inner().instance_id;
     let body_args = body.into_inner();
     Ok(HttpResponseOk(
-        sa.instance_ensure(instance_id, body_args.initial, body_args.target)
-            .await
-            .map_err(|e| Error::from(e))?,
+        sa.instance_ensure(
+            instance_id,
+            body_args.initial,
+            body_args.target,
+            body_args.migrate,
+        )
+        .await
+        .map_err(|e| Error::from(e))?,
     ))
 }
 

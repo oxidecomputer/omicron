@@ -7,6 +7,7 @@
  */
 
 use crate::params::DiskStateRequested;
+use futures::lock::Mutex;
 use nexus_client::Client as NexusClient;
 use omicron_common::api::external::Error;
 use omicron_common::api::internal::nexus::DiskRuntimeState;
@@ -18,9 +19,10 @@ use std::sync::Arc;
 use uuid::Uuid;
 
 use super::collection::SimCollection;
-use super::config::SimMode;
+use super::config::Config;
 use super::disk::SimDisk;
 use super::instance::SimInstance;
+use super::storage::{CrucibleData, Storage};
 
 /**
  * Simulates management of the control plane on a sled
@@ -32,13 +34,11 @@ use super::instance::SimInstance;
  * move later.
  */
 pub struct SledAgent {
-    /** unique id for this server */
-    pub id: Uuid,
-
     /** collection of simulated instances, indexed by instance uuid */
     instances: Arc<SimCollection<SimInstance>>,
     /** collection of simulated disks, indexed by disk uuid */
     disks: Arc<SimCollection<SimDisk>>,
+    storage: Mutex<Storage>,
 }
 
 impl SledAgent {
@@ -48,27 +48,34 @@ impl SledAgent {
      */
     /** Constructs a simulated SledAgent with the given uuid. */
     pub fn new_simulated_with_id(
-        id: &Uuid,
-        sim_mode: SimMode,
+        config: &Config,
         log: Logger,
-        ctlsc: Arc<NexusClient>,
+        nexus_client: Arc<NexusClient>,
     ) -> SledAgent {
+        let id = config.id;
+        let sim_mode = config.sim_mode;
         info!(&log, "created simulated sled agent"; "sim_mode" => ?sim_mode);
 
         let instance_log = log.new(o!("kind" => "instances"));
         let disk_log = log.new(o!("kind" => "disks"));
+        let storage_log = log.new(o!("kind" => "storage"));
 
         SledAgent {
-            id: *id,
             instances: Arc::new(SimCollection::new(
-                Arc::clone(&ctlsc),
+                Arc::clone(&nexus_client),
                 instance_log,
                 sim_mode,
             )),
             disks: Arc::new(SimCollection::new(
-                Arc::clone(&ctlsc),
+                Arc::clone(&nexus_client),
                 disk_log,
                 sim_mode,
+            )),
+            storage: Mutex::new(Storage::new(
+                id,
+                Arc::clone(&nexus_client),
+                config.storage.ip,
+                storage_log,
             )),
         }
     }
@@ -110,5 +117,28 @@ impl SledAgent {
 
     pub async fn disk_poke(&self, id: Uuid) {
         self.disks.sim_poke(id).await;
+    }
+
+    /// Adds a Zpool to the simulated sled agent.
+    pub async fn create_zpool(&self, id: Uuid, size: u64) {
+        self.storage.lock().await.insert_zpool(id, size).await;
+    }
+
+    /// Adds a Crucible Dataset within a zpool.
+    pub async fn create_crucible_dataset(
+        &self,
+        zpool_id: Uuid,
+        dataset_id: Uuid,
+    ) {
+        self.storage.lock().await.insert_dataset(zpool_id, dataset_id).await;
+    }
+
+    /// Returns a crucible dataset within a particular zpool.
+    pub async fn get_crucible_dataset(
+        &self,
+        zpool_id: Uuid,
+        dataset_id: Uuid,
+    ) -> Arc<CrucibleData> {
+        self.storage.lock().await.get_dataset(zpool_id, dataset_id).await
     }
 }

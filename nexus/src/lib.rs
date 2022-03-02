@@ -17,10 +17,11 @@
 #![allow(clippy::style)]
 
 pub mod authn; // Public only for testing
-mod authz;
+pub mod authz;
 mod config;
 mod context;
 pub mod db; // Public only for some documentation examples
+mod defaults;
 pub mod external_api; // public for testing
 pub mod internal_api; // public for testing
 mod nexus;
@@ -30,6 +31,7 @@ mod sagas;
 
 pub use config::Config;
 pub use context::ServerContext;
+pub use crucible_agent_client;
 use external_api::http_entrypoints::external_api;
 use internal_api::http_entrypoints::internal_api;
 pub use nexus::Nexus;

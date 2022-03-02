@@ -105,12 +105,20 @@ CREATE TABLE omicron.public.Dataset (
     /* FK into the Pool table */
     pool_id UUID NOT NULL,
 
-    /* Contact information for the downstairs region */
+    /* Contact information for the dataset */
     ip INET NOT NULL,
     port INT4 NOT NULL,
 
-    kind omicron.public.dataset_kind NOT NULL
+    kind omicron.public.dataset_kind NOT NULL,
+
+    /* An upper bound on the amount of space that might be in-use */
+    size_used INT
 );
+
+/* Create an index on the size usage for Crucible's allocation */
+CREATE INDEX on omicron.public.Dataset (
+    size_used
+) WHERE size_used IS NOT NULL AND time_deleted IS NULL AND kind = 'crucible';
 
 /*
  * A region of space allocated to Crucible Downstairs, within a dataset.
@@ -129,8 +137,15 @@ CREATE TABLE omicron.public.Region (
 
     /* Metadata describing the region */
     block_size INT NOT NULL,
-    extent_size INT NOT NULL,
+    blocks_per_extent INT NOT NULL,
     extent_count INT NOT NULL
+);
+
+/*
+ * Allow all regions belonging to a disk to be accessed quickly.
+ */
+CREATE INDEX on omicron.public.Region (
+    disk_id
 );
 
 /*
@@ -184,21 +199,18 @@ CREATE UNIQUE INDEX ON omicron.public.project (
  * Instances
  */
 
-/*
- * TODO We'd like to use this enum for Instance.instance_state.  This doesn't
- * currently work due to cockroachdb/cockroach#57411 /
- * cockroachdb/cockroach#58084.
- */
--- CREATE TYPE omicron.public.InstanceState AS ENUM (
---     'creating',
---     'starting',
---     'running',
---     'stopping',
---     'stopped',
---     'repairing',
---     'failed',
---     'destroyed'
--- );
+CREATE TYPE omicron.public.instance_state AS ENUM (
+    'creating',
+    'starting',
+    'running',
+    'stopping',
+    'stopped',
+    'rebooting',
+    'migrating',
+    'repairing',
+    'failed',
+    'destroyed'
+);
 
 /*
  * TODO consider how we want to manage multiple sagas operating on the same
@@ -224,8 +236,7 @@ CREATE TABLE omicron.public.instance (
      * table?
      */
     /* Runtime state */
-    -- state omicron.public.InstanceState NOT NULL, // TODO see above
-    state TEXT NOT NULL,
+    state omicron.public.instance_state NOT NULL,
     time_state_updated TIMESTAMPTZ NOT NULL,
     state_generation INT NOT NULL,
     /*
@@ -237,7 +248,16 @@ CREATE TABLE omicron.public.instance (
      */
     active_server_id UUID,
     /* Identifies the underlying propolis-server backing the instance. */
-    active_propolis_id UUID,
+    active_propolis_id UUID NOT NULL,
+    active_propolis_ip INET,
+
+    /* Identifies the target propolis-server during a migration of the instance. */
+    target_propolis_id UUID,
+
+    /*
+     * Identifies an ongoing migration for this instance.
+     */
+    migration_id UUID,
 
     /* Instance configuration */
     ncpus INT NOT NULL,
@@ -257,7 +277,15 @@ CREATE UNIQUE INDEX ON omicron.public.instance (
  */
 
 /*
- * TODO See the note on InstanceState above.
+ * TODO The Rust enum to which this type is converted
+ * carries data in some of its variants, such as the UUID
+ * of the instance to which a disk is attached.
+ *
+ * This makes the conversion to/from this enum type here much
+ * more difficult, since we need a way to manage that data
+ * coherently.
+ *
+ * See <https://github.com/oxidecomputer/omicron/issues/312>.
  */
 -- CREATE TYPE omicron.public.DiskState AS ENUM (
 --     'creating',
@@ -366,6 +394,9 @@ CREATE TABLE omicron.public.vpc (
     system_router_id UUID NOT NULL,
     dns_name STRING(63) NOT NULL,
 
+    /* The IPv6 prefix allocated to subnets. */
+    ipv6_prefix INET NOT NULL,
+
     /* Used to ensure that two requests do not concurrently modify the
        VPC's firewall */
     firewall_gen INT NOT NULL
@@ -387,8 +418,8 @@ CREATE TABLE omicron.public.vpc_subnet (
     /* Indicates that the object has been deleted */
     time_deleted TIMESTAMPTZ,
     vpc_id UUID NOT NULL,
-    ipv4_block INET,
-    ipv6_block INET
+    ipv4_block INET NOT NULL,
+    ipv6_block INET NOT NULL
 );
 
 /* Subnet and network interface names are unique per VPC, not project */
@@ -559,15 +590,13 @@ CREATE UNIQUE INDEX ON omicron.public.router_route (
  */
 
 /*
- * TODO See notes above about cockroachdb/cockroach#57411 /
- * cockroachdb/cockroach#58084.
  * TODO This may eventually have 'paused', 'needs-operator', and 'needs-support'
  */
--- CREATE TYPE omicron.public.SagaState AS ENUM (
---     'running',
---     'unwinding',
---     'done'
--- );
+CREATE TYPE omicron.public.saga_state AS ENUM (
+    'running',
+    'unwinding',
+    'done'
+);
 
 
 CREATE TABLE omicron.public.saga (
@@ -591,7 +620,7 @@ CREATE TABLE omicron.public.saga (
      * - previous SEC? previous adoption time?
      * - number of adoptions?
      */
-    saga_state STRING(31) NOT NULL, /* see SagaState above */
+    saga_state omicron.public.saga_state NOT NULL,
     current_sec UUID,
     adopt_generation INT NOT NULL,
     adopt_time TIMESTAMPTZ NOT NULL
@@ -609,23 +638,24 @@ CREATE UNIQUE INDEX ON omicron.public.saga (
  * TODO more indexes for Saga?
  * - Debugging and/or reporting: saga_template_name? creator?
  */
-
 /*
- * TODO See notes above about cockroachdb/cockroach#57411 /
- * cockroachdb/cockroach#58084.
+ * TODO: This is a data-carrying enum, see note on disk_state.
+ *
+ * See <https://github.com/oxidecomputer/omicron/issues/312>.
  */
--- CREATE TYPE omicron.public.SagaNodeEventType AS ENUM (
---     'started',
---     'succeeded',
---     'failed'
---     'undo_started'
---     'undo_finished'
+-- CREATE TYPE omicron.public.saga_node_event_type AS ENUM (
+--    'started',
+--    'succeeded',
+--    'failed'
+--    'undo_started'
+--    'undo_finished'
 -- );
 
 CREATE TABLE omicron.public.saga_node_event (
     saga_id UUID NOT NULL,
     node_id INT NOT NULL,
-    event_type STRING(31) NOT NULL, /* see SagaNodeEventType above */
+    -- event_type omicron.public.saga_node_event_type NOT NULL,
+    event_type STRING(31) NOT NULL,
     data JSONB,
     event_time TIMESTAMPTZ NOT NULL,
     creator UUID NOT NULL,
@@ -663,7 +693,10 @@ CREATE INDEX ON omicron.public.console_session (
 /*******************************************************************/
 
 /*
- * IAM
+ * Identity and Access Management (IAM)
+ *
+ * **For more details and a worked example using the tables here, see the
+ * documentation for the omicron_nexus crate, "authz" module.**
  */
 
 /*
@@ -706,6 +739,86 @@ INSERT INTO omicron.public.user_builtin (
     NOW()
 );
 
+
+/*
+ * Roles built into the system
+ *
+ * You can think of a built-in role as an opaque token to which we assign a
+ * hardcoded set of permissions.  The role that we call "project.viewer"
+ * corresponds to the "viewer" role on the "project" resource.  A user that has
+ * this role on a particular Project is granted various read-only permissions on
+ * that Project.  The specific permissions associated with the role are defined
+ * in Omicron's Polar (Oso) policy file.
+ *
+ * A built-in role like "project.viewer" has four parts:
+ *
+ * * resource type: "project"
+ * * role name: "viewer"
+ * * full name: "project.viewer"
+ * * description: "Project Viewer"
+ *
+ * Internally, we can treat the tuple (resource type, role name) as a composite
+ * primary key.  Externally, we expose this as the full name.  This is
+ * consistent with RFD 43 and other IAM systems.
+ *
+ * These fields look awfully close to the identity metadata that we use for most
+ * other tables.  But they're just different enough that we can't use most of
+ * the same abstractions:
+ *
+ * * "id": We have no need for a uuid because the (resource_type, role_name) is
+ *   already unique and immutable.
+ * * "name": What we call "full name" above could instead be called "name",
+ *   which would be consistent with other identity metadata.  But it's not a
+ *   legal "name" because of the period, and it would be confusing to have
+ *   "resource type", "role name", and "name".
+ * * "time_created": not that useful because it's whenever the system was
+ *   initialized, and we have plenty of other timestamps for that
+ * * "time_modified": does not apply because the role cannot be changed
+ * * "time_deleted" does not apply because the role cannot be deleted
+ *
+ * If the set of roles and their permissions are fixed, why store them in the
+ * database at all?  Because what's dynamic is the assignment of roles to users.
+ * We [will] have a separate table that says "user U has role ROLE on resource
+ * RESOURCE".  How do we represent the ROLE part of this association?  We use a
+ * foreign key into this "role_builtin" table.
+ */
+CREATE TABLE omicron.public.role_builtin (
+    resource_type STRING(63),
+    role_name STRING(63),
+    description STRING(512),
+
+    PRIMARY KEY(resource_type, role_name)
+);
+
+/*
+ * Assignments between users, roles, and resources
+ *
+ * A built-in user has role on a resource if there's a record in this table that
+ * points to that user, role, and resource.
+ *
+ * For more details and a worked example, see the omicron_nexus::authz
+ * module-level documentation.
+ */
+
+CREATE TABLE omicron.public.role_assignment_builtin (
+    /* Composite foreign key into "role_builtin" table */
+    resource_type STRING(63) NOT NULL,
+    role_name STRING(63) NOT NULL,
+
+    /*
+     * Foreign key into some other resource table.  Which table?  This is
+     * identified implicitly by "resource_type" above.
+     */
+    resource_id UUID NOT NULL,
+
+    /*
+     * Foreign key into table of built-in users.
+     */
+    user_builtin_id UUID NOT NULL,
+
+    /* The entire row is the primary key. */
+    PRIMARY KEY(user_builtin_id, resource_type, resource_id, role_name)
+);
 
 /*******************************************************************/
 

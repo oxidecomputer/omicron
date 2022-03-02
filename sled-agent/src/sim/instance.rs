@@ -45,7 +45,7 @@ impl Simulatable for SimInstance {
         &mut self,
         target: &InstanceRuntimeStateRequested,
     ) -> Result<Option<InstanceAction>, Error> {
-        self.state.request_transition(target.run_state)
+        self.state.request_transition(target)
     }
 
     fn execute_desired_transition(&mut self) -> Option<InstanceAction> {
@@ -102,6 +102,7 @@ impl Simulatable for SimInstance {
                 &nexus_client::types::InstanceRuntimeState::from(current),
             )
             .await
+            .map(|_| ())
             .map_err(Error::from)
     }
 }

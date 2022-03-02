@@ -9,12 +9,13 @@ use omicron_common::api::external::{
     VpcFirewallRuleAction, VpcFirewallRuleDirection, VpcFirewallRuleFilter,
     VpcFirewallRuleHostFilter, VpcFirewallRulePriority,
     VpcFirewallRuleProtocol, VpcFirewallRuleStatus, VpcFirewallRuleTarget,
-    VpcFirewallRuleUpdate, VpcFirewallRuleUpdateParams,
+    VpcFirewallRuleUpdate, VpcFirewallRuleUpdateParams, VpcFirewallRules,
 };
-use std::collections::HashMap;
+use omicron_nexus::external_api::views::Vpc;
 use std::convert::TryFrom;
+use uuid::Uuid;
 
-use dropshot::test_util::{object_delete, objects_list_page};
+use dropshot::test_util::{object_delete, object_get};
 
 use nexus_test_utils::resource_helpers::{
     create_organization, create_project, create_vpc,
@@ -35,29 +36,30 @@ async fn test_vpc_firewall(cptestctx: &ControlPlaneTestContext) {
     create_project(&client, &org_name, &project_name).await;
 
     // Each project has a default VPC. Make sure it has the default rules.
-    let default_vpc_firewall = format!("{}/default/firewall/rules", vpcs_url);
-    let rules =
-        objects_list_page::<VpcFirewallRule>(client, &default_vpc_firewall)
-            .await
-            .items;
+    let default_vpc_url = format!("{}/default", vpcs_url);
+    let default_vpc = object_get::<Vpc>(client, &default_vpc_url).await;
+
+    let default_vpc_firewall = format!("{}/firewall/rules", default_vpc_url);
+    let rules = object_get::<VpcFirewallRules>(client, &default_vpc_firewall)
+        .await
+        .rules;
+    assert!(rules.iter().all(|r| r.vpc_id == default_vpc.identity.id));
     assert!(is_default_firewall_rules(&rules));
 
     // Create another VPC and make sure it gets the default rules.
     let other_vpc = "second-vpc";
     let other_vpc_firewall =
         format!("{}/{}/firewall/rules", vpcs_url, other_vpc);
-    create_vpc(&client, &org_name, &project_name, &other_vpc).await;
+    let vpc2 = create_vpc(&client, &org_name, &project_name, &other_vpc).await;
     let rules =
-        objects_list_page::<VpcFirewallRule>(client, &other_vpc_firewall)
-            .await
-            .items;
+        object_get::<VpcFirewallRules>(client, &other_vpc_firewall).await.rules;
+    assert!(rules.iter().all(|r| r.vpc_id == vpc2.identity.id));
     assert!(is_default_firewall_rules(&rules));
 
     // Modify one VPC's firewall
-    let mut new_rules = HashMap::new();
-    new_rules.insert(
-        "deny-all-incoming".parse().unwrap(),
+    let new_rules = vec![
         VpcFirewallRuleUpdate {
+            name: "deny-all-incoming".parse().unwrap(),
             action: VpcFirewallRuleAction::Deny,
             description: "test desc".to_string(),
             status: VpcFirewallRuleStatus::Disabled,
@@ -72,10 +74,8 @@ async fn test_vpc_firewall(cptestctx: &ControlPlaneTestContext) {
             direction: VpcFirewallRuleDirection::Inbound,
             priority: VpcFirewallRulePriority(100),
         },
-    );
-    new_rules.insert(
-        "allow-icmp".parse().unwrap(),
         VpcFirewallRuleUpdate {
+            name: "allow-icmp".parse().unwrap(),
             action: VpcFirewallRuleAction::Allow,
             description: "allow icmp".to_string(),
             status: VpcFirewallRuleStatus::Enabled,
@@ -90,7 +90,7 @@ async fn test_vpc_firewall(cptestctx: &ControlPlaneTestContext) {
             direction: VpcFirewallRuleDirection::Inbound,
             priority: VpcFirewallRulePriority(10),
         },
-    );
+    ];
     let update_params =
         VpcFirewallRuleUpdateParams { rules: new_rules.clone() };
     client
@@ -104,10 +104,9 @@ async fn test_vpc_firewall(cptestctx: &ControlPlaneTestContext) {
         .unwrap();
 
     // Make sure the firewall is changed
-    let rules =
-        objects_list_page::<VpcFirewallRule>(client, &default_vpc_firewall)
-            .await
-            .items;
+    let rules = object_get::<VpcFirewallRules>(client, &default_vpc_firewall)
+        .await
+        .rules;
     assert!(!is_default_firewall_rules(&rules));
     assert_eq!(rules.len(), new_rules.len());
     assert_eq!(rules[0].identity.name, "allow-icmp");
@@ -115,9 +114,7 @@ async fn test_vpc_firewall(cptestctx: &ControlPlaneTestContext) {
 
     // Make sure the other firewall is unchanged
     let rules =
-        objects_list_page::<VpcFirewallRule>(client, &other_vpc_firewall)
-            .await
-            .items;
+        object_get::<VpcFirewallRules>(client, &other_vpc_firewall).await.rules;
     assert!(is_default_firewall_rules(&rules));
 
     // DELETE is unspported
@@ -163,6 +160,7 @@ fn is_default_firewall_rules(rules: &Vec<VpcFirewallRule>) -> bool {
             },
             action: VpcFirewallRuleAction::Allow,
             priority: VpcFirewallRulePriority(65534),
+            vpc_id: Uuid::new_v4(), // placeholder, not used in comparison
         },
         VpcFirewallRule {
             identity: IdentityMetadata {
@@ -189,6 +187,7 @@ fn is_default_firewall_rules(rules: &Vec<VpcFirewallRule>) -> bool {
             },
             action: VpcFirewallRuleAction::Allow,
             priority: VpcFirewallRulePriority(65534),
+            vpc_id: Uuid::new_v4(),
         },
         VpcFirewallRule {
             identity: IdentityMetadata {
@@ -215,6 +214,7 @@ fn is_default_firewall_rules(rules: &Vec<VpcFirewallRule>) -> bool {
             },
             action: VpcFirewallRuleAction::Allow,
             priority: VpcFirewallRulePriority(65534),
+            vpc_id: Uuid::new_v4(),
         },
         VpcFirewallRule {
             identity: IdentityMetadata {
@@ -241,6 +241,7 @@ fn is_default_firewall_rules(rules: &Vec<VpcFirewallRule>) -> bool {
             },
             action: VpcFirewallRuleAction::Allow,
             priority: VpcFirewallRulePriority(65534),
+            vpc_id: Uuid::new_v4(),
         },
     ];
 

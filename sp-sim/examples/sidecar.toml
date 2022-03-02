@@ -1,0 +1,22 @@
+#
+# SP simulator: example config file
+#
+
+sp_type = "sidecar"
+bind_address = "127.0.0.1:23456"
+gateway_address = "127.0.0.1:22222"
+
+[components]
+serial_console = []
+
+[log]
+# Show log messages of this level and more severe
+level = "debug"
+
+# Example output to a terminal (with colors)
+mode = "stderr-terminal"
+
+# Example output to a file, appending if it already exists.
+#mode = "file"
+#path = "logs/server.log"
+#if_exists = "append"

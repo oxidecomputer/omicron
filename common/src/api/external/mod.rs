@@ -28,13 +28,12 @@ use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
 use serde_with::{DeserializeFromStr, SerializeDisplay};
-use std::collections::{BTreeMap, HashMap};
+use std::collections::BTreeMap;
 use std::convert::TryFrom;
 use std::fmt::Debug;
 use std::fmt::Display;
 use std::fmt::Formatter;
 use std::fmt::Result as FormatResult;
-use std::iter::FromIterator;
 use std::net::IpAddr;
 use std::num::{NonZeroU16, NonZeroU32};
 use std::str::FromStr;
@@ -297,6 +296,90 @@ impl Name {
 }
 
 /**
+ * Name for a built-in role
+ */
+#[derive(
+    Clone,
+    Debug,
+    DeserializeFromStr,
+    Display,
+    Eq,
+    FromStr,
+    Ord,
+    PartialEq,
+    PartialOrd,
+    SerializeDisplay,
+)]
+#[display("{resource_type}.{role_name}")]
+pub struct RoleName {
+    // "resource_type" is generally the String value of one of the
+    // `ResourceType` variants.  We could store the parsed `ResourceType`
+    // instead, but it's useful to be able to represent RoleNames for resource
+    // types that we don't know about.  That could happen if we happen to find
+    // them in the database, for example.
+    #[from_str(regex = "[a-z-]+")]
+    resource_type: String,
+    #[from_str(regex = "[a-z-]+")]
+    role_name: String,
+}
+
+impl RoleName {
+    pub fn new(resource_type: &str, role_name: &str) -> RoleName {
+        RoleName {
+            resource_type: String::from(resource_type),
+            role_name: String::from(role_name),
+        }
+    }
+}
+
+/**
+ * Custom JsonSchema implementation to encode the constraints on Name
+ */
+/* TODO see TODOs on Name above */
+impl JsonSchema for RoleName {
+    fn schema_name() -> String {
+        "RoleName".to_string()
+    }
+    fn json_schema(
+        _gen: &mut schemars::gen::SchemaGenerator,
+    ) -> schemars::schema::Schema {
+        schemars::schema::Schema::Object(schemars::schema::SchemaObject {
+            metadata: Some(Box::new(schemars::schema::Metadata {
+                id: None,
+                title: Some("A name for a built-in role".to_string()),
+                description: Some(
+                    "Role names consist of two string components \
+                     separated by dot (\".\")."
+                        .to_string(),
+                ),
+                default: None,
+                deprecated: false,
+                read_only: false,
+                write_only: false,
+                examples: vec![],
+            })),
+            instance_type: Some(schemars::schema::SingleOrVec::Single(
+                Box::new(schemars::schema::InstanceType::String),
+            )),
+            format: None,
+            enum_values: None,
+            const_value: None,
+            subschemas: None,
+            number: None,
+            string: Some(Box::new(schemars::schema::StringValidation {
+                max_length: Some(63),
+                min_length: None,
+                pattern: Some("[a-z-]+\\.[a-z-]+".to_string()),
+            })),
+            array: None,
+            object: None,
+            reference: None,
+            extensions: BTreeMap::new(),
+        })
+    }
+}
+
+/**
  * A count of bytes, typically used either for memory or storage capacity
  *
  * The maximum supported byte count is [`i64::MAX`].  This makes it somewhat
@@ -315,7 +398,7 @@ impl Name {
  * the database as an i64.  Constraining it here ensures that we can't fail to
  * serialize the value.
  */
-#[derive(Copy, Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[derive(Copy, Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
 pub struct ByteCount(u64);
 
 impl ByteCount {
@@ -384,8 +467,8 @@ impl From<u32> for ByteCount {
     }
 }
 
-impl From<&ByteCount> for i64 {
-    fn from(b: &ByteCount) -> Self {
+impl From<ByteCount> for i64 {
+    fn from(b: ByteCount) -> Self {
         /* We have already validated that this value is in range. */
         i64::try_from(b.0).unwrap()
     }
@@ -465,8 +548,22 @@ impl TryFrom<i64> for Generation {
 /**
  * Identifies a type of API resource
  */
-#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    DeserializeFromStr,
+    Display,
+    Eq,
+    FromStr,
+    Ord,
+    PartialEq,
+    PartialOrd,
+    SerializeDisplay,
+)]
+#[display(style = "kebab-case")]
 pub enum ResourceType {
+    Fleet,
     Organization,
     Project,
     Dataset,
@@ -483,37 +580,9 @@ pub enum ResourceType {
     RouterRoute,
     Oximeter,
     MetricProducer,
+    Role,
     User,
     Zpool,
-}
-
-impl Display for ResourceType {
-    fn fmt(&self, f: &mut Formatter) -> FormatResult {
-        write!(
-            f,
-            "{}",
-            match self {
-                ResourceType::Organization => "organization",
-                ResourceType::Project => "project",
-                ResourceType::Dataset => "dataset",
-                ResourceType::Disk => "disk",
-                ResourceType::Instance => "instance",
-                ResourceType::NetworkInterface => "network interface",
-                ResourceType::Rack => "rack",
-                ResourceType::Sled => "sled",
-                ResourceType::SagaDbg => "saga_dbg",
-                ResourceType::Vpc => "vpc",
-                ResourceType::VpcFirewallRule => "vpc firewall rule",
-                ResourceType::VpcSubnet => "vpc subnet",
-                ResourceType::VpcRouter => "vpc router",
-                ResourceType::RouterRoute => "vpc router route",
-                ResourceType::Oximeter => "oximeter",
-                ResourceType::MetricProducer => "metric producer",
-                ResourceType::User => "user",
-                ResourceType::Zpool => "zpool",
-            }
-        )
-    }
 }
 
 pub async fn to_list<T, U>(object_stream: ObjectStream<T>) -> Vec<U>
@@ -535,7 +604,6 @@ where
  * Identity-related metadata that's included in nearly all public API objects
  */
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
 pub struct IdentityMetadata {
     /** unique, immutable, system-controlled identifier for each resource */
     pub id: Uuid,
@@ -553,7 +621,6 @@ pub struct IdentityMetadata {
  * Create-time identity-related parameters
  */
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
 pub struct IdentityMetadataCreateParams {
     pub name: Name,
     pub description: String,
@@ -563,7 +630,6 @@ pub struct IdentityMetadataCreateParams {
  * Updateable identity-related parameters
  */
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
 pub struct IdentityMetadataUpdateParams {
     pub name: Option<Name>,
     pub description: Option<String>,
@@ -595,7 +661,7 @@ pub struct IdentityMetadataUpdateParams {
     Serialize,
     JsonSchema,
 )]
-#[serde(rename_all = "lowercase")]
+#[serde(rename_all = "snake_case")]
 pub enum InstanceState {
     Creating, /* TODO-polish: paper over Creating in the API with Starting? */
     Starting,
@@ -607,6 +673,10 @@ pub enum InstanceState {
     /// The instance is in the process of rebooting - it will remain
     /// in the "rebooting" state until the VM is starting once more.
     Rebooting,
+    /// The instance is in the process of migrating - it will remain
+    /// in the "migrating" state until the migration process is complete
+    /// and the destination propolis is ready to continue execution.
+    Migrating,
     Repairing,
     Failed,
     Destroyed,
@@ -635,6 +705,7 @@ impl TryFrom<&str> for InstanceState {
             "stopping" => InstanceState::Stopping,
             "stopped" => InstanceState::Stopped,
             "rebooting" => InstanceState::Rebooting,
+            "migrating" => InstanceState::Migrating,
             "repairing" => InstanceState::Repairing,
             "failed" => InstanceState::Failed,
             "destroyed" => InstanceState::Destroyed,
@@ -653,6 +724,7 @@ impl InstanceState {
             InstanceState::Stopping => "stopping",
             InstanceState::Stopped => "stopped",
             InstanceState::Rebooting => "rebooting",
+            InstanceState::Migrating => "migrating",
             InstanceState::Repairing => "repairing",
             InstanceState::Failed => "failed",
             InstanceState::Destroyed => "destroyed",
@@ -670,6 +742,7 @@ impl InstanceState {
             InstanceState::Running => false,
             InstanceState::Stopping => false,
             InstanceState::Rebooting => false,
+            InstanceState::Migrating => false,
 
             InstanceState::Creating => true,
             InstanceState::Stopped => true,
@@ -702,7 +775,6 @@ impl From<&InstanceCpuCount> for i64 {
  * Client view of an [`InstanceRuntimeState`]
  */
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
 pub struct InstanceRuntimeState {
     pub run_state: InstanceState,
     pub time_run_state_updated: DateTime<Utc>,
@@ -723,7 +795,6 @@ impl From<crate::api::internal::nexus::InstanceRuntimeState>
  * Client view of an [`Instance`]
  */
 #[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
 pub struct Instance {
     /* TODO is flattening here the intent in RFD 4? */
     #[serde(flatten)]
@@ -751,7 +822,6 @@ pub struct Instance {
  * Client view of an [`Disk`]
  */
 #[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
 pub struct Disk {
     #[serde(flatten)]
     pub identity: IdentityMetadata,
@@ -776,8 +846,7 @@ pub struct Disk {
     Serialize,
     JsonSchema,
 )]
-#[serde(rename_all = "lowercase")]
-#[serde(tag = "state", content = "instance")]
+#[serde(tag = "state", content = "instance", rename_all = "snake_case")]
 pub enum DiskState {
     /** Disk is being initialized */
     Creating,
@@ -916,8 +985,7 @@ impl From<steno::SagaView> for Saga {
 }
 
 #[derive(Clone, Debug, Serialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
-#[serde(tag = "state")]
+#[serde(tag = "state", rename_all = "snake_case")]
 pub enum SagaState {
     Running,
     Succeeded,
@@ -925,8 +993,7 @@ pub enum SagaState {
 }
 
 #[derive(Clone, Debug, Serialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
-#[serde(tag = "error")]
+#[serde(tag = "error", rename_all = "snake_case")]
 pub enum SagaErrorInfo {
     ActionFailed { source_error: serde_json::Value },
     DeserializeFailed { message: String },
@@ -974,6 +1041,14 @@ impl From<steno::SagaStateView> for SagaState {
 /// An `Ipv4Net` represents a IPv4 subnetwork, including the address and network mask.
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Serialize)]
 pub struct Ipv4Net(pub ipnetwork::Ipv4Network);
+
+impl Ipv4Net {
+    /// Return `true` if this IPv4 subnetwork is from an RFC 1918 private
+    /// address space.
+    pub fn is_private(&self) -> bool {
+        self.0.network().is_private()
+    }
+}
 
 impl std::ops::Deref for Ipv4Net {
     type Target = ipnetwork::Ipv4Network;
@@ -1031,6 +1106,38 @@ impl JsonSchema for Ipv4Net {
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Serialize)]
 pub struct Ipv6Net(pub ipnetwork::Ipv6Network);
 
+impl Ipv6Net {
+    /// The length for all VPC IPv6 prefixes
+    pub const VPC_IPV6_PREFIX_LENGTH: u8 = 48;
+
+    /// The prefix length for all VPC Sunets
+    pub const VPC_SUBNET_IPV6_PREFIX_LENGTH: u8 = 64;
+
+    /// Return `true` if this subnetwork is in the IPv6 Unique Local Address
+    /// range defined in RFC 4193, e.g., `fd00:/8`
+    pub fn is_unique_local(&self) -> bool {
+        // TODO: Delegate to `Ipv6Addr::is_unique_local()` when stabilized.
+        self.0.network().octets()[0] == 0xfd
+    }
+
+    /// Return `true` if this subnetwork is a valid VPC prefix.
+    ///
+    /// This checks that the subnet is a unique local address, and has the VPC
+    /// prefix length required.
+    pub fn is_vpc_prefix(&self) -> bool {
+        self.is_unique_local()
+            && self.0.prefix() == Self::VPC_IPV6_PREFIX_LENGTH
+    }
+
+    /// Return `true` if this subnetwork is a valid VPC Subnet, given the VPC's
+    /// prefix.
+    pub fn is_vpc_subnet(&self, vpc_prefix: &Ipv6Net) -> bool {
+        self.is_unique_local()
+            && self.is_subnet_of(vpc_prefix.0)
+            && self.prefix() == Self::VPC_SUBNET_IPV6_PREFIX_LENGTH
+    }
+}
+
 impl std::ops::Deref for Ipv6Net {
     type Target = ipnetwork::Ipv6Network;
     fn deref(&self) -> &Self::Target {
@@ -1067,9 +1174,9 @@ impl JsonSchema for Ipv6Net {
                     max_length: Some(43),
                     min_length: None,
                     pattern: Some(
-                        // Conforming to unique local addressing scheme, `fd00::/8`
+                        // Conforming to unique local addressing scheme, `fd00::/8`.
                         concat!(
-                            r#"^(fd|FD)00:((([0-9a-fA-F]{1,4}\:){6}[0-9a-fA-F]{1,4})|(([0-9a-fA-F]{1,4}:){1,6}:))/(6[4-9]|[7-9][0-9]|1[0-1][0-9]|12[0-6])$"#,
+                            r#"^(fd|FD)[0-9a-fA-F]{2}:((([0-9a-fA-F]{1,4}\:){6}[0-9a-fA-F]{1,4})|(([0-9a-fA-F]{1,4}:){1,6}:))/(6[4-9]|[7-9][0-9]|1[0-1][0-9]|12[0-6])$"#,
                         ).to_string(),
                     ),
                 })),
@@ -1080,7 +1187,7 @@ impl JsonSchema for Ipv6Net {
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, JsonSchema)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "snake_case")]
 pub enum VpcRouterKind {
     System,
     Custom,
@@ -1091,6 +1198,7 @@ pub enum VpcRouterKind {
 #[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct VpcRouter {
     /// common identifying metadata
+    #[serde(flatten)]
     pub identity: IdentityMetadata,
 
     pub kind: VpcRouterKind,
@@ -1103,7 +1211,7 @@ pub struct VpcRouter {
 /// This enum itself isn't intended to be used directly but rather as a
 /// delegate for subset enums to not have to re-implement all the base type conversions.
 ///
-/// See https://rfd.shared.oxide.computer/rfd/0021#api-target-strings
+/// See <https://rfd.shared.oxide.computer/rfd/0021#api-target-strings>
 #[derive(Debug, PartialEq, Display, FromStr)]
 pub enum NetworkTarget {
     #[display("vpc:{0}")]
@@ -1125,8 +1233,7 @@ pub enum NetworkTarget {
 /// A subset of [`NetworkTarget`], `RouteTarget` specifies all
 /// possible targets that a route can forward to.
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, JsonSchema)]
-#[serde(rename_all = "camelCase")]
-#[serde(tag = "type", content = "value")]
+#[serde(tag = "type", content = "value", rename_all = "snake_case")]
 pub enum RouteTarget {
     Ip(IpAddr),
     Vpc(Name),
@@ -1198,8 +1305,7 @@ impl Display for RouteTarget {
 /// the kind of network traffic that will be matched to be forwarded
 /// to the [`RouteTarget`].
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, JsonSchema)]
-#[serde(rename_all = "camelCase")]
-#[serde(tag = "type", content = "value")]
+#[serde(tag = "type", content = "value", rename_all = "snake_case")]
 pub enum RouteDestination {
     Ip(IpAddr),
     Vpc(Name),
@@ -1266,6 +1372,7 @@ impl Display for RouteDestination {
     Clone, Copy, Debug, PartialEq, Deserialize, Serialize, Display, JsonSchema,
 )]
 #[display("{}")]
+#[serde(rename_all = "snake_case")]
 pub enum RouterRouteKind {
     /// Determines the default destination of traffic, such as whether it goes to the internet or not.
     ///
@@ -1294,6 +1401,7 @@ pub enum RouterRouteKind {
 #[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct RouterRoute {
     /// common identifying metadata
+    #[serde(flatten)]
     pub identity: IdentityMetadata,
 
     /// The VPC Router to which the route belongs.
@@ -1308,7 +1416,6 @@ pub struct RouterRoute {
 
 /// Create-time parameters for a [`RouterRoute`]
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
 pub struct RouterRouteCreateParams {
     #[serde(flatten)]
     pub identity: IdentityMetadataCreateParams,
@@ -1318,7 +1425,6 @@ pub struct RouterRouteCreateParams {
 
 /// Updateable properties of a [`RouterRoute`]
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
 pub struct RouterRouteUpdateParams {
     #[serde(flatten)]
     pub identity: IdentityMetadataUpdateParams,
@@ -1330,6 +1436,7 @@ pub struct RouterRouteUpdateParams {
 #[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct VpcFirewallRule {
     /// common identifying metadata
+    #[serde(flatten)]
     pub identity: IdentityMetadata,
     /// whether this rule is in effect
     pub status: VpcFirewallRuleStatus,
@@ -1343,13 +1450,23 @@ pub struct VpcFirewallRule {
     pub action: VpcFirewallRuleAction,
     /// the relative priority of this rule
     pub priority: VpcFirewallRulePriority,
+    /// the VPC to which this rule belongs
+    pub vpc_id: Uuid,
+}
+
+/**
+ * Collection of a [`Vpc`]'s firewall rules
+ */
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct VpcFirewallRules {
+    pub rules: Vec<VpcFirewallRule>,
 }
 
 /// A single rule in a VPC firewall
-#[derive(Clone, Debug, PartialEq, Deserialize, Serialize, JsonSchema)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize, JsonSchema)]
 pub struct VpcFirewallRuleUpdate {
-    // In an update, the name is encoded as a key in the JSON object, so we
-    // don't include one here
+    /// name of the rule, unique to this VPC
+    pub name: Name,
     /// human-readable free-form text about a resource
     pub description: String,
     /// whether this rule is in effect
@@ -1367,43 +1484,13 @@ pub struct VpcFirewallRuleUpdate {
 }
 
 /**
- * Updateable properties of a [`Vpc`]'s firewall
+ * Updateable properties of a `Vpc`'s firewall
  * Note that VpcFirewallRules are implicitly created along with a Vpc,
  * so there is no explicit creation.
  */
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-// TODO we're controlling the schemars output, but not the serde
-// deserialization here because of surprising behavior; see #449
-#[schemars(deny_unknown_fields)]
 pub struct VpcFirewallRuleUpdateParams {
-    #[serde(flatten)]
-    pub rules: HashMap<Name, VpcFirewallRuleUpdate>,
-}
-
-/**
- * Response to an update replacing [`Vpc`]'s firewall
- */
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-// TODO we're controlling the schemars output, but not the serde
-// deserialization here because of surprising behavior; see #449
-#[schemars(deny_unknown_fields)]
-pub struct VpcFirewallRuleUpdateResult {
-    #[serde(flatten)]
-    pub rules: HashMap<Name, VpcFirewallRule>,
-}
-
-impl FromIterator<VpcFirewallRule> for VpcFirewallRuleUpdateResult {
-    fn from_iter<T>(iter: T) -> Self
-    where
-        T: IntoIterator<Item = VpcFirewallRule>,
-    {
-        Self {
-            rules: iter
-                .into_iter()
-                .map(|rule| (rule.identity.name.clone(), rule))
-                .collect(),
-        }
-    }
+    pub rules: Vec<VpcFirewallRuleUpdate>,
 }
 
 /// Firewall rule priority. This is a value from 0 to 65535, with rules with
@@ -1448,21 +1535,21 @@ pub enum VpcFirewallRuleProtocol {
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, JsonSchema)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "snake_case")]
 pub enum VpcFirewallRuleStatus {
     Disabled,
     Enabled,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, JsonSchema)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "snake_case")]
 pub enum VpcFirewallRuleDirection {
     Inbound,
     Outbound,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, JsonSchema)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "snake_case")]
 pub enum VpcFirewallRuleAction {
     Allow,
     Deny,
@@ -1471,8 +1558,7 @@ pub enum VpcFirewallRuleAction {
 /// A subset of [`NetworkTarget`], `VpcFirewallRuleTarget` specifies all
 /// possible targets that a firewall rule can be attached to.
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, JsonSchema)]
-#[serde(rename_all = "camelCase")]
-#[serde(tag = "type", content = "value")]
+#[serde(tag = "type", content = "value", rename_all = "snake_case")]
 pub enum VpcFirewallRuleTarget {
     Vpc(Name),
     Subnet(Name),
@@ -1542,8 +1628,7 @@ impl Display for VpcFirewallRuleTarget {
 /// A subset of [`NetworkTarget`], `VpcFirewallRuleHostFilter` specifies all
 /// possible targets that a route can forward to.
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, JsonSchema)]
-#[serde(rename_all = "camelCase")]
-#[serde(tag = "type", content = "value")]
+#[serde(tag = "type", content = "value", rename_all = "snake_case")]
 pub enum VpcFirewallRuleHostFilter {
     Vpc(Name),
     Subnet(Name),
@@ -1819,7 +1904,8 @@ impl JsonSchema for MacAddr {
 /// A `NetworkInterface` represents a virtual network interface device.
 #[derive(ObjectIdentity, Clone, Debug, Deserialize, JsonSchema, Serialize)]
 pub struct NetworkInterface {
-    /** common identifying metadata */
+    /// common identifying metadata
+    #[serde(flatten)]
     pub identity: IdentityMetadata,
 
     /** The Instance to which the interface belongs. */
@@ -1841,13 +1927,14 @@ pub struct NetworkInterface {
 #[cfg(test)]
 mod test {
     use super::{
-        ByteCount, L4Port, L4PortRange, Name, NetworkTarget,
+        ByteCount, L4Port, L4PortRange, Name, NetworkTarget, RoleName,
         VpcFirewallRuleAction, VpcFirewallRuleDirection, VpcFirewallRuleFilter,
         VpcFirewallRuleHostFilter, VpcFirewallRulePriority,
         VpcFirewallRuleProtocol, VpcFirewallRuleStatus, VpcFirewallRuleTarget,
         VpcFirewallRuleUpdate, VpcFirewallRuleUpdateParams,
     };
     use crate::api::external::Error;
+    use crate::api::external::ResourceType;
     use std::convert::TryFrom;
     use std::net::IpAddr;
     use std::net::Ipv4Addr;
@@ -1901,6 +1988,83 @@ mod test {
     }
 
     #[test]
+    fn test_role_name_parse() {
+        // Error cases
+        let bad_inputs = vec![
+            // empty string is always worth testing
+            "",
+            // missing dot
+            "project",
+            // extra dot (or, illegal character in the second component)
+            "project.admin.super",
+            // missing resource type (or, another bogus resource type)
+            ".admin",
+            // missing role name
+            "project.",
+            // illegal characters in role name
+            "project.not_good",
+        ];
+
+        for input in bad_inputs {
+            eprintln!("check name {:?} (expecting error)", input);
+            let result =
+                input.parse::<RoleName>().expect_err("unexpectedly succeeded");
+            eprintln!("(expected) error: {:?}", result);
+        }
+
+        eprintln!("check name \"project.admin\" (expecting success)");
+        let role_name =
+            "project.admin".parse::<RoleName>().expect("failed to parse");
+        assert_eq!(role_name.to_string(), "project.admin");
+        assert_eq!(role_name.resource_type, "project");
+        assert_eq!(role_name.role_name, "admin");
+
+        eprintln!("check name \"barf.admin\" (expecting success)");
+        let role_name =
+            "barf.admin".parse::<RoleName>().expect("failed to parse");
+        assert_eq!(role_name.to_string(), "barf.admin");
+        assert_eq!(role_name.resource_type, "barf");
+        assert_eq!(role_name.role_name, "admin");
+
+        eprintln!("check name \"organization.super-user\" (expecting success)");
+        let role_name = "organization.super-user"
+            .parse::<RoleName>()
+            .expect("failed to parse");
+        assert_eq!(role_name.to_string(), "organization.super-user");
+        assert_eq!(role_name.resource_type, "organization");
+        assert_eq!(role_name.role_name, "super-user");
+    }
+
+    #[test]
+    fn test_resource_name_parse() {
+        let bad_inputs = vec![
+            "bogus",
+            "",
+            "Project",
+            "oRgAnIzAtIoN",
+            "organisation",
+            "vpc subnet",
+            "vpc_subnet",
+        ];
+        for input in bad_inputs {
+            eprintln!("check resource type {:?} (expecting error)", input);
+            let result = input
+                .parse::<ResourceType>()
+                .expect_err("unexpectedly succeeded");
+            eprintln!("(expected) error: {:?}", result);
+        }
+
+        assert_eq!(
+            ResourceType::Project,
+            "project".parse::<ResourceType>().unwrap()
+        );
+        assert_eq!(
+            ResourceType::VpcSubnet,
+            "vpc-subnet".parse::<ResourceType>().unwrap()
+        );
+    }
+
+    #[test]
     fn test_name_parse_from_param() {
         let result = Name::from_param(String::from("my-name"), "the_name");
         assert!(result.is_ok());
@@ -1934,12 +2098,12 @@ mod test {
         /* Largest supported value: both constructors that support it. */
         let max = ByteCount::try_from(i64::MAX).unwrap();
         assert_eq!(i64::MAX, max.to_bytes() as i64);
-        assert_eq!(i64::MAX, i64::from(&max));
+        assert_eq!(i64::MAX, i64::from(max));
 
         let maxu64 = u64::try_from(i64::MAX).unwrap();
         let max = ByteCount::try_from(maxu64).unwrap();
         assert_eq!(i64::MAX, max.to_bytes() as i64);
-        assert_eq!(i64::MAX, i64::from(&max));
+        assert_eq!(i64::MAX, i64::from(max));
         assert_eq!(
             (i64::MAX / 1024 / 1024 / 1024 / 1024) as u64,
             max.to_whole_tebibytes()
@@ -2044,9 +2208,10 @@ mod test {
 
     #[test]
     fn test_firewall_deserialization() {
-        let json = r#"
-            {
-            "allow-internal-inbound": {
+        let json = r#"{
+            "rules": [
+              {
+                "name": "allow-internal-inbound",
                 "status": "enabled",
                 "direction": "inbound",
                 "targets": [ { "type": "vpc", "value": "default" } ],
@@ -2054,8 +2219,9 @@ mod test {
                 "action": "allow",
                 "priority": 65534,
                 "description": "allow inbound traffic between instances"
-            },
-            "rule2": {
+              },
+              {
+                "name": "rule2",
                 "status": "disabled",
                 "direction": "outbound",
                 "targets": [ { "type": "vpc", "value": "default" } ],
@@ -2063,16 +2229,17 @@ mod test {
                 "action": "deny",
                 "priority": 65533,
                 "description": "second rule"
-            }
-            }
-            "#;
+              }
+            ]
+          }"#;
         let params =
             serde_json::from_str::<VpcFirewallRuleUpdateParams>(json).unwrap();
         assert_eq!(params.rules.len(), 2);
         assert_eq!(
-            params.rules[&Name::try_from("allow-internal-inbound".to_string())
-                .unwrap()],
+            params.rules[0],
             VpcFirewallRuleUpdate {
+                name: Name::try_from("allow-internal-inbound".to_string())
+                    .unwrap(),
                 status: VpcFirewallRuleStatus::Enabled,
                 direction: VpcFirewallRuleDirection::Inbound,
                 targets: vec![VpcFirewallRuleTarget::Vpc(
@@ -2092,8 +2259,9 @@ mod test {
             }
         );
         assert_eq!(
-            params.rules[&Name::try_from("rule2".to_string()).unwrap()],
+            params.rules[1],
             VpcFirewallRuleUpdate {
+                name: Name::try_from("rule2".to_string()).unwrap(),
                 status: VpcFirewallRuleStatus::Disabled,
                 direction: VpcFirewallRuleDirection::Outbound,
                 targets: vec![VpcFirewallRuleTarget::Vpc(
@@ -2159,6 +2327,28 @@ mod test {
         assert_eq!(
             "nope:this-should-error".parse::<NetworkTarget>().unwrap_err(),
             parse_display::ParseError::new()
+        );
+    }
+
+    #[test]
+    fn test_ipv6_net_operations() {
+        use super::Ipv6Net;
+        assert!(Ipv6Net("fd00::/8".parse().unwrap()).is_unique_local());
+        assert!(!Ipv6Net("fe00::/8".parse().unwrap()).is_unique_local());
+
+        assert!(Ipv6Net("fd00::/48".parse().unwrap()).is_vpc_prefix());
+        assert!(!Ipv6Net("fe00::/48".parse().unwrap()).is_vpc_prefix());
+        assert!(!Ipv6Net("fd00::/40".parse().unwrap()).is_vpc_prefix());
+
+        let vpc_prefix = Ipv6Net("fd00::/48".parse().unwrap());
+        assert!(
+            Ipv6Net("fd00::/64".parse().unwrap()).is_vpc_subnet(&vpc_prefix)
+        );
+        assert!(
+            !Ipv6Net("fd10::/64".parse().unwrap()).is_vpc_subnet(&vpc_prefix)
+        );
+        assert!(
+            !Ipv6Net("fd00::/63".parse().unwrap()).is_vpc_subnet(&vpc_prefix)
         );
     }
 }

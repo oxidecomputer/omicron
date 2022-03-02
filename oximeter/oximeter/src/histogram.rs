@@ -73,6 +73,7 @@ pub enum HistogramError {
 /// This type supports ranges similar to the `RangeTo`, `Range` and `RangeFrom` types in the
 /// standard library. Those cover `(..end)`, `(start..end)`, and `(start..)` respectively.
 #[derive(Debug, Clone, Copy, PartialEq, Deserialize, Serialize, JsonSchema)]
+#[schemars(rename = "BinRange{T}")]
 pub enum BinRange<T> {
     /// A range unbounded below and exclusively above, `..end`.
     RangeTo(T),
@@ -180,6 +181,7 @@ where
 
 /// Type storing bin edges and a count of samples within it.
 #[derive(Debug, Clone, Copy, PartialEq, Deserialize, Serialize, JsonSchema)]
+#[schemars(rename = "Bin{T}")]
 pub struct Bin<T> {
     /// The range of the support covered by this bin.
     pub range: BinRange<T>,
@@ -234,6 +236,7 @@ pub struct Bin<T> {
 /// _always_ a `Bin::Range` or a `Bin::RangeFrom` after construction. In fact, every bin is one of
 /// those variants, the `BinRange::RangeTo` is only provided as a convenience during construction.
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize, JsonSchema)]
+#[schemars(rename = "Histogram{T}")]
 pub struct Histogram<T> {
     start_time: DateTime<Utc>,
     bins: Vec<Bin<T>>,

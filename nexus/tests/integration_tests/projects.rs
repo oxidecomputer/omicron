@@ -2,10 +2,9 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+use nexus_test_utils::http_testing::NexusRequest;
+use nexus_test_utils::resource_helpers::project_get;
 use omicron_nexus::external_api::views::Project;
-
-use dropshot::test_util::object_get;
-use dropshot::test_util::objects_list_page;
 
 use nexus_test_utils::resource_helpers::{create_organization, create_project};
 use nexus_test_utils::ControlPlaneTestContext;
@@ -27,19 +26,24 @@ async fn test_projects(cptestctx: &ControlPlaneTestContext) {
     create_project(&client, &org_name, &p2_name).await;
 
     let p1_url = format!("/organizations/{}/projects/{}", org_name, p1_name);
-    let project: Project = object_get(&client, &p1_url).await;
+    let project: Project = project_get(&client, &p1_url).await;
     assert_eq!(project.identity.name, p1_name);
 
     let p2_url = format!("/organizations/{}/projects/{}", org_name, p2_name);
-    let project: Project = object_get(&client, &p2_url).await;
+    let project: Project = project_get(&client, &p2_url).await;
     assert_eq!(project.identity.name, p2_name);
 
-    let projects = objects_list_page::<Project>(
-        client,
-        &format!("/organizations/{}/projects", org_name),
+    /* Verify the list of Projects. */
+    let projects_url = format!("/organizations/{}/projects", org_name);
+    let projects = NexusRequest::iter_collection_authn::<Project>(
+        &client,
+        &projects_url,
+        "",
+        None,
     )
     .await
-    .items;
+    .expect("failed to list projects")
+    .all_items;
     assert_eq!(projects.len(), 2);
     // alphabetical order for now
     assert_eq!(projects[0].identity.name, p2_name);
@@ -54,12 +58,15 @@ async fn test_projects(cptestctx: &ControlPlaneTestContext) {
     assert_ne!(org_p1_id, org2_p1_id);
 
     // Make sure the list projects results for the new org make sense
-    let projects = objects_list_page::<Project>(
-        client,
+    let projects = NexusRequest::iter_collection_authn::<Project>(
+        &client,
         &format!("/organizations/{}/projects", org2_name),
+        "",
+        None,
     )
     .await
-    .items;
+    .expect("failed to list projects")
+    .all_items;
     assert_eq!(projects.len(), 1);
     assert_eq!(projects[0].identity.name, p1_name);
 }

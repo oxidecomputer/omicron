@@ -2,6 +2,8 @@
 
 use crate::context::OpContext;
 use crate::db::DataStore;
+use futures::future::BoxFuture;
+use futures::FutureExt;
 use omicron_common::backoff;
 use std::sync::Arc;
 
@@ -19,7 +21,7 @@ pub fn populate_start(
     let (tx, rx) = tokio::sync::watch::channel(PopulateStatus::NotDone);
 
     tokio::spawn(async move {
-        let result = populate(&opctx, datastore).await;
+        let result = populate(&opctx, &datastore).await;
         if let Err(error) = tx.send(match result {
             Ok(()) => PopulateStatus::Done,
             Err(message) => PopulateStatus::Failed(message),
@@ -33,42 +35,67 @@ pub fn populate_start(
 
 async fn populate(
     opctx: &OpContext,
-    datastore: Arc<DataStore>,
+    datastore: &DataStore,
 ) -> Result<(), String> {
-    let db_result = backoff::retry_notify(
-        backoff::internal_service_policy(),
-        || async {
-            datastore.load_builtin_users(&opctx).await.map_err(|error| {
-                use omicron_common::api::external::Error;
-                match &error {
+    use omicron_common::api::external::Error;
+    struct Populator<'a> {
+        name: &'static str,
+        func: &'a (dyn Fn() -> BoxFuture<'a, Result<(), Error>> + Send + Sync),
+    }
+
+    let populate_users = || {
+        async { datastore.load_builtin_users(opctx).await.map(|_| ()) }.boxed()
+    };
+    let populate_roles = || {
+        async { datastore.load_builtin_roles(opctx).await.map(|_| ()) }.boxed()
+    };
+    let populate_role_asgns = || {
+        async { datastore.load_builtin_role_asgns(opctx).await.map(|_| ()) }
+            .boxed()
+    };
+    let populators = [
+        Populator { name: "users", func: &populate_users },
+        Populator { name: "roles", func: &populate_roles },
+        Populator { name: "role assignments", func: &populate_role_asgns },
+    ];
+
+    for p in populators {
+        let db_result = backoff::retry_notify(
+            backoff::internal_service_policy(),
+            || async {
+                (p.func)().await.map_err(|error| match &error {
                     Error::ServiceUnavailable { .. } => {
                         backoff::BackoffError::Transient(error)
                     }
                     _ => backoff::BackoffError::Permanent(error),
-                }
-            })
-        },
-        |error, delay| {
-            warn!(
-                opctx.log,
-                "failed to load builtin users; will retry in {:?}", delay;
-                "error_message" => ?error,
-            );
-        },
-    )
-    .await;
+                })
+            },
+            |error, delay| {
+                warn!(
+                    opctx.log,
+                    "failed to populate built-in {}; will retry in {:?}",
+                    p.name,
+                    delay;
+                    "error_message" => ?error,
+                );
+            },
+        )
+        .await;
 
-    if let Err(error) = &db_result {
-        /*
-         * TODO-autonomy this should raise an alert, bump a counter, or raise
-         * some other red flag that something is wrong.  (This should be
-         * unlikely in practice.)
-         */
-        error!(opctx.log,
-            "gave up trying to load builtin users";
-            "error_message" => ?error
-        );
+        if let Err(error) = &db_result {
+            /*
+             * TODO-autonomy this should raise an alert, bump a counter, or raise
+             * some other red flag that something is wrong.  (This should be
+             * unlikely in practice.)
+             */
+            error!(opctx.log,
+                "gave up trying to populate built-in {}", p.name;
+                "error_message" => ?error
+            );
+        }
+
+        db_result.map_err(|error| error.to_string())?;
     }
 
-    db_result.map_err(|error| error.to_string())
+    Ok(())
 }

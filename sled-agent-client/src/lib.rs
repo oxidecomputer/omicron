@@ -23,6 +23,9 @@ impl From<omicron_common::api::internal::nexus::InstanceRuntimeState>
             run_state: s.run_state.into(),
             sled_uuid: s.sled_uuid,
             propolis_uuid: s.propolis_uuid,
+            dst_propolis_uuid: s.dst_propolis_uuid,
+            propolis_addr: s.propolis_addr.map(|addr| addr.to_string()),
+            migration_uuid: s.migration_uuid,
             ncpus: s.ncpus.into(),
             memory: s.memory.into(),
             hostname: s.hostname,
@@ -54,6 +57,9 @@ impl From<omicron_common::api::external::InstanceState>
             }
             omicron_common::api::external::InstanceState::Rebooting => {
                 Self::Rebooting
+            }
+            omicron_common::api::external::InstanceState::Migrating => {
+                Self::Migrating
             }
             omicron_common::api::external::InstanceState::Repairing => {
                 Self::Repairing
@@ -88,13 +94,23 @@ impl From<omicron_common::api::external::Generation> for types::Generation {
     }
 }
 
+impl From<omicron_common::api::internal::sled_agent::InstanceRuntimeStateMigrateParams>
+    for types::InstanceRuntimeStateMigrateParams
+{
+    fn from(
+        s: omicron_common::api::internal::sled_agent::InstanceRuntimeStateMigrateParams,
+    ) -> Self {
+        Self { migration_id: s.migration_id, dst_propolis_id: s.dst_propolis_id }
+    }
+}
+
 impl From<omicron_common::api::internal::sled_agent::InstanceRuntimeStateRequested>
     for types::InstanceRuntimeStateRequested
 {
     fn from(
         s: omicron_common::api::internal::sled_agent::InstanceRuntimeStateRequested,
     ) -> Self {
-        Self { run_state: s.run_state.into() }
+        Self { run_state: s.run_state.into(), migration_params: s.migration_params.map(|p| p.into()) }
     }
 }
 
@@ -108,6 +124,7 @@ impl From<omicron_common::api::internal::sled_agent::InstanceStateRequested>
             omicron_common::api::internal::sled_agent::InstanceStateRequested::Running => Self::Running,
             omicron_common::api::internal::sled_agent::InstanceStateRequested::Stopped => Self::Stopped,
             omicron_common::api::internal::sled_agent::InstanceStateRequested::Reboot => Self::Reboot,
+            omicron_common::api::internal::sled_agent::InstanceStateRequested::Migrating => Self::Migrating,
             omicron_common::api::internal::sled_agent::InstanceStateRequested::Destroyed => Self::Destroyed,
         }
     }
@@ -121,6 +138,9 @@ impl From<types::InstanceRuntimeState>
             run_state: s.run_state.into(),
             sled_uuid: s.sled_uuid,
             propolis_uuid: s.propolis_uuid,
+            dst_propolis_uuid: s.dst_propolis_uuid,
+            propolis_addr: s.propolis_addr.map(|addr| addr.parse().unwrap()),
+            migration_uuid: s.migration_uuid,
             ncpus: s.ncpus.into(),
             memory: s.memory.into(),
             hostname: s.hostname,
@@ -141,6 +161,7 @@ impl From<types::InstanceState>
             types::InstanceState::Stopping => Self::Stopping,
             types::InstanceState::Stopped => Self::Stopped,
             types::InstanceState::Rebooting => Self::Rebooting,
+            types::InstanceState::Migrating => Self::Migrating,
             types::InstanceState::Repairing => Self::Repairing,
             types::InstanceState::Failed => Self::Failed,
             types::InstanceState::Destroyed => Self::Destroyed,
@@ -244,31 +265,35 @@ impl From<omicron_common::api::internal::sled_agent::InstanceHardware>
         }
     }
 }
+
+impl From<omicron_common::api::internal::sled_agent::InstanceMigrateParams>
+    for types::InstanceMigrateParams
+{
+    fn from(
+        s: omicron_common::api::internal::sled_agent::InstanceMigrateParams,
+    ) -> Self {
+        Self {
+            src_propolis_addr: s.src_propolis_addr.to_string(),
+            src_propolis_uuid: s.src_propolis_uuid,
+        }
+    }
+}
+
 impl From<&omicron_common::api::external::NetworkInterface>
     for types::NetworkInterface
 {
     fn from(s: &omicron_common::api::external::NetworkInterface) -> Self {
         Self {
-            identity: (&s.identity).into(),
+            description: s.identity.description.clone(),
+            id: s.identity.id,
+            name: (&s.identity.name).into(),
+            time_created: s.identity.time_created,
+            time_modified: s.identity.time_modified,
             ip: s.ip.to_string(),
             instance_id: s.instance_id,
             mac: s.mac.into(),
             subnet_id: s.subnet_id,
             vpc_id: s.vpc_id,
-        }
-    }
-}
-
-impl From<&omicron_common::api::external::IdentityMetadata>
-    for types::IdentityMetadata
-{
-    fn from(s: &omicron_common::api::external::IdentityMetadata) -> Self {
-        Self {
-            description: s.description.clone(),
-            id: s.id,
-            name: (&s.name).into(),
-            time_created: s.time_created,
-            time_modified: s.time_modified,
         }
     }
 }
