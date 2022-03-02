@@ -25,7 +25,7 @@ pub use client::{Client, DbWrite};
 #[derive(Clone, Debug, Error)]
 pub enum Error {
     #[error("Oximeter core error: {0}")]
-    Oximeter(#[from] oximeter::Error),
+    Oximeter(#[from] oximeter::MetricsError),
 
     /// The telemetry database could not be reached.
     #[error("Telemetry database unavailable: {0}")]

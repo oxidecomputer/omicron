@@ -728,7 +728,11 @@ async fn delete_regions(
             let url = format!("http://{}", dataset.address());
             let client = CrucibleAgentClient::new(&url);
             let id = RegionId(region.id().to_string());
-            client.region_delete(&id).await
+            client.region_delete(&id).await.map_err(|_| {
+                // TODO we may want to more carefully consider errors from
+                // crucible agent.
+                Error::internal_error("Error from Crucible Agent")
+            })
         })
         // Execute the allocation requests concurrently.
         .buffer_unordered(std::cmp::min(

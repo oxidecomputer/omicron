@@ -910,96 +910,22 @@
         ]
       },
       "Error": {
-        "description": "Errors related to the generation or collection of metrics.",
-        "oneOf": [
-          {
-            "description": "An error related to generating metric data points",
-            "type": "object",
-            "properties": {
-              "content": {
-                "type": "string"
-              },
-              "type": {
-                "type": "string",
-                "enum": [
-                  "DatumError"
-                ]
-              }
-            },
-            "required": [
-              "content",
-              "type"
-            ]
+        "description": "Error information from a response.",
+        "type": "object",
+        "properties": {
+          "error_code": {
+            "type": "string"
           },
-          {
-            "description": "An error running an `Oximeter` server",
-            "type": "object",
-            "properties": {
-              "content": {
-                "type": "string"
-              },
-              "type": {
-                "type": "string",
-                "enum": [
-                  "OximeterServer"
-                ]
-              }
-            },
-            "required": [
-              "content",
-              "type"
-            ]
+          "message": {
+            "type": "string"
           },
-          {
-            "description": "An error related to creating or sampling a [`histogram::Histogram`] metric.",
-            "type": "object",
-            "properties": {
-              "content": {
-                "$ref": "#/components/schemas/HistogramError"
-              },
-              "type": {
-                "type": "string",
-                "enum": [
-                  "HistogramError"
-                ]
-              }
-            },
-            "required": [
-              "content",
-              "type"
-            ]
-          },
-          {
-            "description": "An error parsing a field or measurement from a string.",
-            "type": "object",
-            "properties": {
-              "content": {
-                "type": "object",
-                "properties": {
-                  "src": {
-                    "type": "string"
-                  },
-                  "typ": {
-                    "type": "string"
-                  }
-                },
-                "required": [
-                  "src",
-                  "typ"
-                ]
-              },
-              "type": {
-                "type": "string",
-                "enum": [
-                  "ParseError"
-                ]
-              }
-            },
-            "required": [
-              "content",
-              "type"
-            ]
+          "request_id": {
+            "type": "string"
           }
+        },
+        "required": [
+          "message",
+          "request_id"
         ]
       },
       "Field": {
@@ -1405,6 +1331,99 @@
           "timestamp"
         ]
       },
+      "MetricsError": {
+        "description": "Errors related to the generation or collection of metrics.",
+        "oneOf": [
+          {
+            "description": "An error related to generating metric data points",
+            "type": "object",
+            "properties": {
+              "content": {
+                "type": "string"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "DatumError"
+                ]
+              }
+            },
+            "required": [
+              "content",
+              "type"
+            ]
+          },
+          {
+            "description": "An error running an `Oximeter` server",
+            "type": "object",
+            "properties": {
+              "content": {
+                "type": "string"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "OximeterServer"
+                ]
+              }
+            },
+            "required": [
+              "content",
+              "type"
+            ]
+          },
+          {
+            "description": "An error related to creating or sampling a [`histogram::Histogram`] metric.",
+            "type": "object",
+            "properties": {
+              "content": {
+                "$ref": "#/components/schemas/HistogramError"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "HistogramError"
+                ]
+              }
+            },
+            "required": [
+              "content",
+              "type"
+            ]
+          },
+          {
+            "description": "An error parsing a field or measurement from a string.",
+            "type": "object",
+            "properties": {
+              "content": {
+                "type": "object",
+                "properties": {
+                  "src": {
+                    "type": "string"
+                  },
+                  "typ": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "src",
+                  "typ"
+                ]
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "ParseError"
+                ]
+              }
+            },
+            "required": [
+              "content",
+              "type"
+            ]
+          }
+        ]
+      },
       "OximeterInfo": {
         "description": "Message used to notify Nexus that this oximeter instance is up and running.",
         "type": "object",
@@ -1470,7 +1489,7 @@
             "type": "object",
             "properties": {
               "Err": {
-                "$ref": "#/components/schemas/Error"
+                "$ref": "#/components/schemas/MetricsError"
               }
             },
             "required": [

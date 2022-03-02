@@ -93,8 +93,8 @@ impl FieldValue {
     pub fn parse_as_type(
         s: &str,
         field_type: FieldType,
-    ) -> Result<Self, Error> {
-        let make_err = || Error::ParseError {
+    ) -> Result<Self, MetricsError> {
+        let make_err = || MetricsError::ParseError {
             src: s.to_string(),
             typ: field_type.to_string(),
         };
@@ -385,7 +385,7 @@ impl Measurement {
 /// Errors related to the generation or collection of metrics.
 #[derive(Debug, Clone, Error, JsonSchema, Serialize, Deserialize)]
 #[serde(tag = "type", content = "content")]
-pub enum Error {
+pub enum MetricsError {
     /// An error related to generating metric data points
     #[error("Metric data error: {0}")]
     DatumError(String),
@@ -577,7 +577,7 @@ type ProducerList = Vec<Box<dyn Producer>>;
 #[derive(Debug, Clone, JsonSchema, Deserialize, Serialize)]
 pub enum ProducerResultsItem {
     Ok(Vec<Sample>),
-    Err(Error),
+    Err(MetricsError),
 }
 pub type ProducerResults = Vec<ProducerResultsItem>;
 
@@ -606,7 +606,7 @@ impl ProducerRegistry {
     }
 
     /// Add a new [`Producer`] object to the registry.
-    pub fn register_producer<P>(&self, producer: P) -> Result<(), Error>
+    pub fn register_producer<P>(&self, producer: P) -> Result<(), MetricsError>
     where
         P: Producer,
     {
