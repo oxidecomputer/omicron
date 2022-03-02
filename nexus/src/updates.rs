@@ -3,8 +3,8 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use crate::db;
-use parse_display::Display;
-use serde::{Deserialize, Serialize};
+use omicron_common::api::internal::nexus::UpdateArtifactKind;
+use serde::{Deserialize, Deserializer, Serialize};
 use std::convert::TryInto;
 
 // Simple metadata base URL + targets base URL pair, useful in several places.
@@ -26,17 +26,21 @@ pub struct ArtifactsDocument {
 pub struct UpdateArtifact {
     pub name: String,
     pub version: i64,
-    // FIXME(iliana): this needs to have a fallback or else we can never add a new kind of artifact
-    // in production!!
-    pub kind: UpdateArtifactKind,
+    // Future versions of artifacts.json might contain artifact kinds we're not aware of yet. This
+    // shouldn't stop us from updating, say, Nexus or the ramdisk that contains sled-agent. When
+    // adding artifacts to the database, we skip any unknown kinds.
+    #[serde(deserialize_with = "deserialize_fallback_kind")]
+    pub kind: Option<UpdateArtifactKind>,
     pub target: String,
 }
 
-#[derive(Clone, Debug, Display, Deserialize, Serialize)]
-#[display(style = "kebab-case")]
-#[serde(rename_all = "kebab-case")]
-pub enum UpdateArtifactKind {
-    Zone,
+fn deserialize_fallback_kind<'de, D>(
+    deserializer: D,
+) -> Result<Option<UpdateArtifactKind>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    Ok(UpdateArtifactKind::deserialize(deserializer).ok())
 }
 
 // TODO(iliana): make async/.await. awslabs/tough#213
@@ -74,25 +78,59 @@ pub fn read_artifacts(
 
     let mut v = Vec::new();
     for artifact in artifacts.artifacts {
-        if let Some(target) =
-            repository.targets().signed.targets.get(&artifact.target.parse()?)
-        {
-            v.push(db::model::UpdateAvailableArtifact {
-                name: artifact.name,
-                version: artifact.version,
-                kind: db::model::UpdateArtifactKind(artifact.kind),
-                targets_role_version: repository
-                    .targets()
-                    .signed
-                    .version
-                    .get()
-                    .try_into()?,
-                valid_until,
-                target_name: artifact.target,
-                target_sha256: hex::encode(&target.hashes.sha256),
-                target_length: target.length.try_into()?,
-            });
-        }
+        // Skip any artifacts where we don't recognize its kind or the target
+        // name isn't in the repository
+        let target =
+            repository.targets().signed.targets.get(&artifact.target.parse()?);
+        let (kind, target) = match (artifact.kind, target) {
+            (Some(kind), Some(target)) => (kind, target),
+            _ => break,
+        };
+
+        v.push(db::model::UpdateAvailableArtifact {
+            name: artifact.name,
+            version: artifact.version,
+            kind: db::model::UpdateArtifactKind(kind),
+            targets_role_version: repository
+                .targets()
+                .signed
+                .version
+                .get()
+                .try_into()?,
+            valid_until,
+            target_name: artifact.target,
+            target_sha256: hex::encode(&target.hashes.sha256),
+            target_length: target.length.try_into()?,
+        });
     }
     Ok(v)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{ArtifactsDocument, UpdateArtifactKind};
+
+    #[test]
+    fn test_fallback_kind() {
+        let document: ArtifactsDocument =
+            serde_json::from_value(serde_json::json!({
+                "artifacts": [
+                    {
+                        "name": "fksdfjslkfjlsj",
+                        "version": 1u8,
+                        "kind": "sdkfslfjadkfjasl",
+                        "target": "ksdjdslfjljk",
+                    },
+                    {
+                        "name": "kdsfjdljfdlkj",
+                        "version": 1u8,
+                        "kind": "zone",
+                        "target": "sldkfjasldfj",
+                    },
+                ],
+            }))
+            .unwrap();
+        assert!(document.artifacts[0].kind.is_none());
+        assert_eq!(document.artifacts[1].kind, Some(UpdateArtifactKind::Zone));
+    }
 }

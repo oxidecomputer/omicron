@@ -5,6 +5,7 @@
 //! Management of per-sled updates
 
 use crate::nexus::NexusClient;
+use omicron_common::api::internal::nexus::UpdateArtifactKind;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use std::path::Path;
@@ -21,9 +22,6 @@ pub enum Error {
     Response(reqwest::Error),
 }
 
-// TODO: De-duplicate this struct with the one in iliana's PR?
-//
-// This should likely be a wrapper around that type.
 #[derive(Clone, Debug, Deserialize, JsonSchema)]
 pub struct UpdateArtifact {
     pub name: String,
@@ -31,15 +29,11 @@ pub struct UpdateArtifact {
     pub kind: UpdateArtifactKind,
 }
 
-// TODO: De-dup me too.
-#[derive(Clone, Debug, Deserialize, JsonSchema)]
-pub enum UpdateArtifactKind {
-    Zone,
-}
-
 impl UpdateArtifact {
     fn artifact_directory(&self) -> &'static Path {
         match self.kind {
+            // TODO flesh this out
+            UpdateArtifactKind::GimletRamdisk => Path::new("/var/tmp/zones"),
             UpdateArtifactKind::Zone => Path::new("/var/tmp/zones"),
         }
     }

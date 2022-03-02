@@ -697,6 +697,7 @@ CREATE INDEX ON omicron.public.console_session (
 /*******************************************************************/
 
 CREATE TYPE omicron.public.update_artifact_kind AS ENUM (
+    'gimlet-ramdisk',
     'zone'
 );
 

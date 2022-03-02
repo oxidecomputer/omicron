@@ -2096,9 +2096,10 @@ impl_enum_type!(
     #[derive(Clone, Debug, Display, AsExpression, FromSqlRow)]
     #[display("{0}")]
     #[sql_type = "UpdateArtifactKindEnum"]
-    pub struct UpdateArtifactKind(pub crate::updates::UpdateArtifactKind);
+    pub struct UpdateArtifactKind(pub internal::nexus::UpdateArtifactKind);
 
     // Enum values
+    GimletRamdisk => b"gimlet-ramdisk"
     Zone => b"zone"
 );
 

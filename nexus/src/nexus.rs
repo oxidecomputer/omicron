@@ -2735,9 +2735,7 @@ impl Nexus {
                         &sled_agent_client::types::UpdateArtifact {
                             name: artifact.name.clone(),
                             version: artifact.version,
-                            // TODO: de-duplicate these structs between nexus and sled-agent so
-                            // that we don't have to assume there is one kind of artifact
-                            kind: sled_agent_client::types::UpdateArtifactKind::Zone,
+                            kind: artifact.kind.0.into(),
                         },
                     )
                     .await?;

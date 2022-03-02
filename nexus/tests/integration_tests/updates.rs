@@ -11,10 +11,9 @@ use dropshot::{
 use http::{Method, Response, StatusCode};
 use hyper::Body;
 use nexus_test_utils::{load_test_config, test_setup_with_config};
+use omicron_common::api::internal::nexus::UpdateArtifactKind;
 use omicron_nexus::config::UpdatesConfig;
-use omicron_nexus::updates::{
-    ArtifactsDocument, BaseUrlPair, UpdateArtifact, UpdateArtifactKind,
-};
+use omicron_nexus::updates::{ArtifactsDocument, BaseUrlPair, UpdateArtifact};
 use ring::pkcs8::Document;
 use ring::rand::{SecureRandom, SystemRandom};
 use ring::signature::Ed25519KeyPair;
@@ -224,7 +223,7 @@ fn generate_targets() -> (TempDir, Vec<&'static str>) {
         artifacts: vec![UpdateArtifact {
             name: "cockroachdb".into(),
             version: 1,
-            kind: UpdateArtifactKind::Zone,
+            kind: Some(UpdateArtifactKind::Zone),
             target: "cockroachdb-1".into(),
         }],
     };

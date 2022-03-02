@@ -8,6 +8,7 @@ use crate::api::external::{
     ByteCount, DiskState, Generation, InstanceCpuCount, InstanceState,
 };
 use chrono::{DateTime, Utc};
+use parse_display::Display;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::net::SocketAddr;
@@ -76,4 +77,16 @@ impl ProducerEndpoint {
     pub fn collection_route(&self) -> String {
         format!("{}/{}", &self.base_route, &self.id)
     }
+}
+
+/// Kinds of update artifacts, as used by Nexus to determine what updates are available and by
+/// sled-agent to determine how to apply an update when asked.
+#[derive(
+    Clone, Copy, Debug, PartialEq, Display, Deserialize, Serialize, JsonSchema,
+)]
+#[display(style = "kebab-case")]
+#[serde(rename_all = "kebab-case")]
+pub enum UpdateArtifactKind {
+    GimletRamdisk,
+    Zone,
 }
