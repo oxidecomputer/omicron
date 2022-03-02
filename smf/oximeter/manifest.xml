@@ -7,9 +7,9 @@
   <create_default_instance enabled='false' />
   <single_instance />
 
-  <dependency name='sled-agent' grouping='require_all' restart_on='none'
+  <dependency name='multi_user' grouping='require_all' restart_on='none'
     type='service'>
-  <service_fmri value='svc:/system/illumos/sled-agent' />
+  <service_fmri value='svc:/milestone/multi-user:default' />
   </dependency>
 
   <method_context>
