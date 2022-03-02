@@ -474,7 +474,7 @@ version = "0.16.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "94d4706de1b0fa5b132270cddffa8585166037822e260a944fe161acd137ca05"
 dependencies = [
- "time 0.3.5",
+ "time 0.3.7",
  "version_check",
 ]
 
@@ -985,7 +985,7 @@ checksum = "1435fa1053d8b2fbbe9be7e97eca7f33d37b28409959813daefc1446a14247f1"
 [[package]]
 name = "dropshot"
 version = "0.6.1-dev"
-source = "git+https://github.com/oxidecomputer/dropshot?branch=main#b562f4f2c621056bb668f3651a7f431752a5da0a"
+source = "git+https://github.com/oxidecomputer/dropshot?branch=main#fef3a0e5b0e0386aaf5c1e07159e127c0b2fc09a"
 dependencies = [
  "async-stream",
  "async-trait",
@@ -1023,7 +1023,7 @@ dependencies = [
 [[package]]
 name = "dropshot_endpoint"
 version = "0.6.1-dev"
-source = "git+https://github.com/oxidecomputer/dropshot?branch=main#b562f4f2c621056bb668f3651a7f431752a5da0a"
+source = "git+https://github.com/oxidecomputer/dropshot?branch=main#fef3a0e5b0e0386aaf5c1e07159e127c0b2fc09a"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -2089,6 +2089,15 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn",
+]
+
+[[package]]
+name = "num_threads"
+version = "0.1.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "97ba99ba6393e2c3734791401b66902d981cb03bf190af674ca69949b6d5fb15"
+dependencies = [
+ "libc",
 ]
 
 [[package]]
@@ -3847,14 +3856,14 @@ dependencies = [
 
 [[package]]
 name = "slog-bunyan"
-version = "2.3.0"
+version = "2.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "924f5e8b5a1069e484f6ad80024322990e21ee8399f12ba289e48cd30bc0dda0"
+checksum = "440fd32d0423c31e4f98d76c0b62ebdb847f905aa07357197e9b41ac620af97d"
 dependencies = [
- "chrono",
  "hostname",
  "slog",
  "slog-json",
+ "time 0.3.7",
 ]
 
 [[package]]
@@ -3872,14 +3881,14 @@ dependencies = [
 
 [[package]]
 name = "slog-json"
-version = "2.5.0"
+version = "2.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0f7f7a952ce80fca9da17bf0a53895d11f8aa1ba063668ca53fc72e7869329e9"
+checksum = "70f825ce7346f40aa318111df5d3a94945a7fdca9081584cb9b05692fb3dfcb4"
 dependencies = [
- "chrono",
  "serde",
  "serde_json",
  "slog",
+ "time 0.3.7",
 ]
 
 [[package]]
@@ -3892,7 +3901,7 @@ dependencies = [
  "slog",
  "term",
  "thread_local",
- "time 0.3.5",
+ "time 0.3.7",
 ]
 
 [[package]]
@@ -4254,12 +4263,13 @@ dependencies = [
 
 [[package]]
 name = "time"
-version = "0.3.5"
+version = "0.3.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "41effe7cfa8af36f439fac33861b66b049edc6f9a32331e2312660529c1c24ad"
+checksum = "004cbc98f30fa233c61a38bc77e96a9106e65c88f2d3bef182ae952027e5753d"
 dependencies = [
- "itoa 0.4.8",
+ "itoa 1.0.1",
  "libc",
+ "num_threads",
  "time-macros",
 ]
 
