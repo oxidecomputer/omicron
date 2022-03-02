@@ -98,8 +98,6 @@ impl Server {
 
         let ctxlog = log.new(o!("component" => "ServerContext"));
         let pool = db::Pool::new(&config.database);
-        pool.wait_for_cockroachdb(&log).await;
-
         let apictx = ServerContext::new(rack_id, ctxlog, pool, &config)?;
 
         let http_server_starter_external = dropshot::HttpServerStarter::new(

@@ -329,13 +329,6 @@ table! {
     }
 }
 
-table! {
-    db_metadata (name, value) {
-        name -> Text,
-        value -> Text,
-    }
-}
-
 allow_tables_to_appear_in_same_query!(
     dataset,
     disk,
