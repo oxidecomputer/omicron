@@ -192,10 +192,10 @@ impl SpCommunicator {
 /// Handle for the background tokio task responsible for receiving incoming UDP
 /// messages.
 ///
-/// We currently assume that we know (before this task is spawned) the IP
+/// TODO We currently assume that we know (before this task is spawned) the IP
 /// address of all SPs with which we want to communicate, and that those IP
-/// addresses will not change while we're running. Either or both of those may
-/// end up being wrong.
+/// addresses will not change while we're running. These assumptions are wrong -
+/// hot swapping sleds will lead to both being violated.
 ///
 /// This task is spawned when `SpCommunicator` is created, and runs until it is
 /// dropped. When the communicator wants to send a request on behalf of an HTTP

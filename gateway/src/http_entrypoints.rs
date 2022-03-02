@@ -325,12 +325,13 @@ async fn sp_component_serial_console_get(
         .map_err(|_| Error::InvalidSpComponentId(component))?;
     let contents = comms.serial_console_get(sp, &component)?;
 
-    // TODO we can't tell the difference between "this component has no serial
-    // console" and "we haven't received any serial console data for this
-    // component". Is that okay? For now both cases send back empty contents.
-    Ok(HttpResponseOk(
-        contents.unwrap_or_else(|| SerialConsoleContents::default()),
-    ))
+    // TODO With `unwrap_or_default()`, our caller can't tell the difference
+    // between "this component hasn't sent us any console information yet" and
+    // "this component does not have a serial console and will never send data"
+    // - both cases send back an empty `SerialConsoleContents`. To handle this
+    // more gracefully, we will need to know which components have a serial
+    // console.
+    Ok(HttpResponseOk(contents.unwrap_or_default()))
 }
 
 // TODO: how can we make this generic enough to support any update mechanism?
