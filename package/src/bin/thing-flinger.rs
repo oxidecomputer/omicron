@@ -204,10 +204,7 @@ fn do_build_minimal(config: &Config) -> Result<()> {
     ssh_exec(&server, &cmd, false)
 }
 
-fn do_package(
-    config: &Config,
-    artifact_dir: PathBuf,
-) -> Result<()> {
+fn do_package(config: &Config, artifact_dir: PathBuf) -> Result<()> {
     let server = &config.servers[&config.builder.server];
     let mut cmd = String::new();
     let cmd_path = "./target/debug/omicron-package";
@@ -603,9 +600,7 @@ fn main() -> Result<()> {
         }
         SubCommand::Sync => do_sync(&config)?,
         SubCommand::BuildMinimal => do_build_minimal(&config)?,
-        SubCommand::Package(PackageSubCommand::Package {
-            artifact_dir,
-        }) => {
+        SubCommand::Package(PackageSubCommand::Package { artifact_dir }) => {
             do_package(&config, artifact_dir)?;
         }
         SubCommand::Package(PackageSubCommand::Install {

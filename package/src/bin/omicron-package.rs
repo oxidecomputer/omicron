@@ -7,9 +7,9 @@
  */
 
 use anyhow::{anyhow, bail, Context, Result};
+use omicron_package::{parse, SubCommand};
 use omicron_zone_package::config::Config;
 use omicron_zone_package::package::Package;
-use omicron_package::{parse, SubCommand};
 use rayon::prelude::*;
 use std::env;
 use std::fs::create_dir_all;
@@ -66,10 +66,7 @@ async fn do_check(config: &Config) -> Result<()> {
     Ok(())
 }
 
-async fn do_package(
-    config: &Config,
-    output_directory: &Path,
-) -> Result<()> {
+async fn do_package(config: &Config, output_directory: &Path) -> Result<()> {
     create_dir_all(&output_directory)
         .map_err(|err| anyhow!("Cannot create output directory: {}", err))?;
 
@@ -134,7 +131,10 @@ fn do_install(
         let mut archive = tar::Archive::new(tar_file);
         archive.unpack(&service_path)?;
 
-        let manifest_path = install_dir.join(&package.service_name).join("pkg").join("manifest.xml");
+        let manifest_path = install_dir
+            .join(&package.service_name)
+            .join("pkg")
+            .join("manifest.xml");
         println!(
             "Installing bootstrap service from {}",
             manifest_path.to_string_lossy()
