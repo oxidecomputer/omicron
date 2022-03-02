@@ -315,6 +315,30 @@ impl DatasetInfo {
                 ])?;
 
                 zone.run_cmd(&[
+                    crate::illumos::zone::SVCCFG,
+                    "-s",
+                    "svc:system/illumos/clickhouse",
+                    "setprop",
+                    &format!("config/listen_host={}", address.ip()),
+                ])?;
+                zone.run_cmd(&[
+                    crate::illumos::zone::SVCCFG,
+                    "-s",
+                    "svc:system/illumos/clickhouse",
+                    "setprop",
+                    &format!("config/store={}", self.data_directory),
+                ])?;
+
+                // Refresh the manifest with the new properties we set,
+                // so they become "effective" properties when the service is enabled.
+                zone.run_cmd(&[
+                    crate::illumos::zone::SVCCFG,
+                    "-s",
+                    "svc:system/illumos/clickhouse:default",
+                    "refresh",
+                ])?;
+
+                zone.run_cmd(&[
                     crate::illumos::zone::SVCADM,
                     "enable",
                     "-t",

@@ -2355,9 +2355,9 @@ dependencies = [
 
 [[package]]
 name = "omicron-zone-package"
-version = "0.1.0"
+version = "0.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1ee0e68663df26bb102a47a0b9b18932b21ff967329e12bbdfdbf3299ee60ece"
+checksum = "efd2e4dbdcf6781c86cee71b7d30a7fed585fd1653dd896c2347ff2239b553aa"
 dependencies = [
  "anyhow",
  "flate2",

@@ -4,7 +4,7 @@
 
 [package.omicron-sled-agent]
 service_name = "sled-agent"
-rust.binary_name = "sled-agent"
+rust.binary_names = ["sled-agent"]
 rust.release = true
 zone = false
 [[package.omicron-sled-agent.paths]]
@@ -12,7 +12,7 @@ from = "smf/sled-agent"
 to = "pkg"
 
 [package.omicron-nexus]
-rust.binary_name = "nexus"
+rust.binary_names = ["nexus"]
 rust.release = true
 service_name = "nexus"
 zone = true
@@ -24,7 +24,7 @@ from = "smf/nexus"
 to = "/var/svc/manifest/site/nexus"
 
 [package.oximeter-collector]
-rust.binary_name = "oximeter"
+rust.binary_names = ["oximeter"]
 rust.release = true
 service_name = "oximeter"
 zone = true
@@ -33,7 +33,7 @@ from = "smf/oximeter"
 to = "/var/svc/manifest/site/oximeter"
 
 [package.propolis-server]
-rust.binary_name = "propolis-server"
+rust.binary_names = ["propolis-server"]
 rust.release = true
 service_name = "propolis-server"
 zone = true
