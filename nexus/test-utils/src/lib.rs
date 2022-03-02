@@ -238,7 +238,7 @@ impl oximeter::Producer for IntegrationProducer {
         &mut self,
     ) -> Result<
         Box<(dyn Iterator<Item = oximeter::types::Sample> + 'static)>,
-        oximeter::Error,
+        oximeter::MetricsError,
     > {
         use oximeter::Metric;
         let sample = oximeter::types::Sample::new(&self.target, &self.metric);

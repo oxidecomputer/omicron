@@ -9,9 +9,13 @@ use nexus_client::types::{
     DatasetPutRequest, DatasetPutResponse, InstanceRuntimeState,
     SledAgentStartupInfo, ZpoolPutRequest, ZpoolPutResponse,
 };
-use progenitor::progenitor_client::Error;
 use slog::Logger;
 use uuid::Uuid;
+
+type Result<T> = std::result::Result<
+    T,
+    progenitor::progenitor_client::Error<nexus_client::types::Error>,
+>;
 
 mock! {
     pub NexusClient {
@@ -20,23 +24,23 @@ mock! {
             &self,
             id: &Uuid,
             info: &SledAgentStartupInfo,
-        ) -> Result<(), Error<()>>;
+        ) -> Result<()>;
         pub async fn cpapi_instances_put(
             &self,
             id: &Uuid,
             new_runtime_state: &InstanceRuntimeState,
-        ) -> Result<(), Error<()>>;
+        ) -> Result<()>;
         pub async fn zpool_put(
             &self,
             sled_id: &Uuid,
             zpool_id: &Uuid,
             info: &ZpoolPutRequest,
-        ) -> Result<ZpoolPutResponse, Error<()>>;
+        ) -> Result<ZpoolPutResponse>;
         pub async fn dataset_put(
             &self,
             zpool_id: &Uuid,
             dataset_id: &Uuid,
             info: &DatasetPutRequest,
-        ) -> Result<DatasetPutResponse, Error<()>>;
+        ) -> Result<DatasetPutResponse>;
     }
 }

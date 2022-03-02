@@ -8,7 +8,7 @@
 use crate::histogram::Histogram;
 use crate::types;
 use crate::types::{Measurement, Sample};
-use crate::{DatumType, Error, Field, FieldType, FieldValue};
+use crate::{DatumType, Field, FieldType, FieldValue, MetricsError};
 use bytes::Bytes;
 use chrono::{DateTime, Utc};
 use num_traits::{One, Zero};
@@ -384,15 +384,17 @@ pub use crate::histogram::HistogramSupport;
 /// ```
 pub trait Producer: Send + Sync + std::fmt::Debug + 'static {
     /// Return the currently available samples from the monitored targets and metrics.
-    fn produce(&mut self) -> Result<Box<dyn Iterator<Item = Sample>>, Error>;
+    fn produce(
+        &mut self,
+    ) -> Result<Box<dyn Iterator<Item = Sample>>, MetricsError>;
 }
 
 #[cfg(test)]
 mod tests {
     use crate::types;
     use crate::{
-        Datum, DatumType, Error, FieldType, FieldValue, Metric, Producer,
-        Target,
+        Datum, DatumType, FieldType, FieldValue, Metric, MetricsError,
+        Producer, Target,
     };
     use std::boxed::Box;
 
@@ -418,7 +420,8 @@ mod tests {
     impl Producer for Prod {
         fn produce(
             &mut self,
-        ) -> Result<Box<dyn Iterator<Item = types::Sample>>, Error> {
+        ) -> Result<Box<dyn Iterator<Item = types::Sample>>, MetricsError>
+        {
             Ok(Box::new(
                 vec![types::Sample::new(&self.target, &self.metric)]
                     .into_iter(),

@@ -255,33 +255,91 @@ impl From<Error> for HttpError {
     }
 }
 
-impl<T: std::fmt::Debug> From<progenitor::progenitor_client::Error<T>>
+pub trait ClientError: std::fmt::Debug {
+    fn message(&self) -> String;
+}
+
+// TODO this From may give us a shortcut in situtations where we want more
+// robust consideration of errors. For example, while some errors from other
+// services may directly result in errors that percolate to the external
+// client, others may required, for example, retries with an alternate service
+// instance or additional interpretation to sanitize the output error.
+//
+// ***********************************************************************
+// * THIS FROM SHOULD BE REMOVED PRIOR TO SHIPPING TO AVOID LEAKING DATA *
+// ***********************************************************************
+impl<T: ClientError> From<progenitor::progenitor_client::Error<T>>
     for crate::api::external::Error
 {
     fn from(e: progenitor::progenitor_client::Error<T>) -> Self {
-        // TODO this should really be something progenitor provides
-        let status = match &e {
-            progenitor::progenitor_client::Error::CommunicationError(e) => {
-                e.status()
+        match e {
+            // This error indicates a problem with the request to the remote
+            // service that did not result in an HTTP response code, but rather
+            // pertained local (i.e. client-side) encoding or network
+            // communication.
+            progenitor::progenitor_client::Error::CommunicationError(ee) => {
+                Error::internal_error(&format!("CommunicationError: {}", ee))
             }
+
+            // This error represents an expected error from the remote service.
             progenitor::progenitor_client::Error::ErrorResponse(rv) => {
-                Some(*rv.status())
-            }
-            progenitor::progenitor_client::Error::InvalidResponsePayload(e) => {
-                e.status()
-            }
-            progenitor::progenitor_client::Error::UnexpectedResponse(r) => {
-                Some(r.status())
-            }
-        };
-        match status {
-            Some(status_code) if status_code.is_client_error() => {
-                crate::api::external::Error::InvalidRequest {
-                    message: e.to_string(),
+                let message = rv.message();
+
+                if rv.status().is_client_error() {
+                    Error::invalid_request(&message)
+                } else {
+                    Error::internal_error(&message)
                 }
             }
-            _ => crate::api::external::Error::internal_error(&e.to_string()),
+
+            // This error indicates that the body returned by the client didn't
+            // match what was documented in the OpenAPI description for the
+            // service. This could only happen for us in the case of a severe
+            // logic/encoding bug in the remote service or due to a failure of
+            // our version constraints (i.e. that the call was to a newer
+            // service with an incompatible response).
+            progenitor::progenitor_client::Error::InvalidResponsePayload(
+                ee,
+            ) => Error::internal_error(&format!(
+                "InvalidResponsePayload: {}",
+                ee,
+            )),
+
+            // This error indicates that the client generated a response code
+            // that was not described in the OpenAPI description for the
+            // service; this could be a success or failure response, but either
+            // way it indicates a logic or version error as above.
+            progenitor::progenitor_client::Error::UnexpectedResponse(r) => {
+                Error::internal_error(&format!(
+                    "UnexpectedResponse: status code {}",
+                    r.status(),
+                ))
+            }
         }
+
+        // // TODO this should really be something progenitor provides
+        // let status = match &e {
+        //     progenitor::progenitor_client::Error::CommunicationError(e) => {
+        //         e.status()
+        //     }
+        //     progenitor::progenitor_client::Error::ErrorResponse(rv) => {
+        //         Some(*rv.status())
+        //     }
+        //     progenitor::progenitor_client::Error::InvalidResponsePayload(e) => {
+        //         e.status()
+        //     }
+        //     progenitor::progenitor_client::Error::UnexpectedResponse(r) => {
+        //         Some(r.status())
+        //     }
+        // };
+        // match status {
+        //     Some(status_code) if status_code.is_client_error() => {
+        //         crate::api::external::Error::InvalidRequest {
+        //             message: e.to_string(),
+        //         }
+        //     }
+        //     _ => crate::api::external::Error::internal_error(&e.to_string()),
+        // }
     }
 }
 
