@@ -7,11 +7,16 @@
 
 //! Inteface for communicating with SPs over UDP on the management network.
 
+mod serial_console_history;
+
+pub(crate) use serial_console_history::SerialConsoleContents;
+use serial_console_history::SerialConsoleHistory;
+
 use crate::config::KnownSps;
 use dropshot::HttpError;
 use gateway_messages::{
-    version, IgnitionState, Request, RequestKind, Response, ResponseKind,
-    SerializedSize,
+    version, IgnitionState, Request, RequestKind, ResponseKind, SerialConsole,
+    SerializedSize, SpComponent, SpMessage, SpMessageKind,
 };
 use slog::{debug, error, info, o, Logger};
 use std::{
@@ -34,12 +39,18 @@ pub enum StartupError {
     UdpBind { addr: SocketAddr, err: io::Error },
 }
 
+// TODO This has some duplication with `gateway::error::Error`. This might be
+// right if these comms are going to move to their own crate, but at the moment
+// it's confusing. For now we'll keep them separate, but maybe we should split
+// this module out into its own crate sooner rather than later.
 #[derive(Debug, Error)]
 pub enum Error {
     #[error("error sending to UDP address {addr}: {err}")]
     UdpSend { addr: SocketAddr, err: io::Error },
     #[error("timeout")]
     Timeout(#[from] tokio::time::error::Elapsed),
+    #[error("no known SP at {0}")]
+    SpDoesNotExist(IpAddr),
 }
 
 impl From<Error> for HttpError {
@@ -55,7 +66,7 @@ pub struct SpCommunicator {
     log: Logger,
     socket: Arc<UdpSocket>,
     known_sps: KnownSps,
-    outstanding_requests: Arc<OutstandingRequests>,
+    sp_state: Arc<SpState>,
     request_id: AtomicU32,
     recv_task: JoinHandle<()>,
 }
@@ -82,11 +93,13 @@ impl SpCommunicator {
             "componennt" => "SpCommunicator",
             "local_addr" => bind_addr,
         ));
-        let outstanding_requests =
-            Arc::new(OutstandingRequests::new(&known_sps));
+
+        // build our fixed-keys-after-this-point map of known SP IPs
+        let sp_state = Arc::new(SpState::new(&known_sps));
+
         let recv_task = RecvTask::new(
             Arc::clone(&socket),
-            Arc::clone(&outstanding_requests),
+            Arc::clone(&sp_state),
             log.clone(),
         );
         let recv_task = tokio::spawn(recv_task.run());
@@ -95,7 +108,7 @@ impl SpCommunicator {
             log,
             socket,
             known_sps,
-            outstanding_requests,
+            sp_state,
             request_id: AtomicU32::new(0),
             recv_task,
         })
@@ -103,6 +116,16 @@ impl SpCommunicator {
 
     pub fn placeholder_known_sps(&self) -> &KnownSps {
         &self.known_sps
+    }
+
+    pub(crate) fn serial_console_get(
+        &self,
+        sp: IpAddr,
+        component: &SpComponent,
+    ) -> Result<Option<SerialConsoleContents>, Error> {
+        let sp =
+            self.sp_state.all_sps.get(&sp).ok_or(Error::SpDoesNotExist(sp))?;
+        Ok(sp.serial_console.lock().unwrap().contents(component))
     }
 
     // How do we want to describe ignition targets? Currently we want to
@@ -133,7 +156,7 @@ impl SpCommunicator {
 
         // tell our background receiver to expect a response to this request
         let response =
-            self.outstanding_requests.insert(controller.ip(), request_id);
+            self.sp_state.insert_expected_response(controller.ip(), request_id);
 
         // Serialize and send our request. We know `buf` is large enough for any
         // `Request`, so unwrapping here is fine.
@@ -169,10 +192,10 @@ impl SpCommunicator {
 /// Handle for the background tokio task responsible for receiving incoming UDP
 /// messages.
 ///
-/// We currently assume that we know (before this task is spawned) the IP
+/// TODO We currently assume that we know (before this task is spawned) the IP
 /// address of all SPs with which we want to communicate, and that those IP
-/// addresses will not change while we're running. Either or both of those may
-/// end up being wrong.
+/// addresses will not change while we're running. These assumptions are wrong -
+/// hot swapping sleds will lead to both being violated.
 ///
 /// This task is spawned when `SpCommunicator` is created, and runs until it is
 /// dropped. When the communicator wants to send a request on behalf of an HTTP
@@ -196,26 +219,30 @@ impl SpCommunicator {
 /// If a timeout or other error occurs between step 2 and the end of step 4, the
 /// `ResponseReceiver` wrapper below is responsible for cleaning up the entry in
 /// `outstanding_requests` (via its `Drop` impl).
+///
+/// We can also receive messages from SPs that are not responses to oustanding
+/// requests. These are handled on a case-by-case basis; e.g., serial console
+/// data is pushed into the in-memory ringbuffer corresponding to the source.
 struct RecvTask {
     socket: Arc<UdpSocket>,
-    outstanding_requests: Arc<OutstandingRequests>,
+    sp_state: Arc<SpState>,
     log: Logger,
 }
 
 impl RecvTask {
     fn new(
         socket: Arc<UdpSocket>,
-        outstanding_requests: Arc<OutstandingRequests>,
+        sp_state: Arc<SpState>,
         log: Logger,
     ) -> Self {
-        Self { socket, outstanding_requests, log }
+        Self { socket, sp_state, log }
     }
 
     async fn run(self) {
-        let mut resp_buf = [0; Response::MAX_SIZE];
+        let mut buf = [0; SpMessage::MAX_SIZE];
         loop {
             // raw recv
-            let (n, addr) = match self.socket.recv_from(&mut resp_buf).await {
+            let (n, addr) = match self.socket.recv_from(&mut buf).await {
                 Ok((n, addr)) => (n, addr),
                 Err(err) => {
                     error!(&self.log, "recv_from() failed: {}", err);
@@ -224,130 +251,186 @@ impl RecvTask {
             };
             debug!(&self.log, "received {} bytes from {}", n, addr);
 
-            // parse into a `Response`
-            let resp =
-                match gateway_messages::deserialize::<Response>(&resp_buf[..n])
-                {
-                    Ok((resp, _extra)) => {
+            // parse into an `SpMessage`
+            let sp_msg =
+                match gateway_messages::deserialize::<SpMessage>(&buf[..n]) {
+                    Ok((msg, _extra)) => {
                         // TODO should we check that `extra` is empty? if the
                         // response is maximal size any extra data is silently
                         // discarded anyway, so probably not?
-                        resp
+                        msg
                     }
                     Err(err) => {
                         error!(
                             &self.log,
-                            "discarding malformed response ({})", err
+                            "discarding malformed message ({})", err
                         );
                         continue;
                     }
                 };
-            debug!(&self.log, "received {:?} from {}", resp, addr);
+            debug!(&self.log, "received {:?} from {}", sp_msg, addr);
 
             // `version` is intentionally the first 4 bytes of the packet; we
             // could check it before trying to deserialize?
-            if resp.version != version::V1 {
+            if sp_msg.version != version::V1 {
                 error!(
                     &self.log,
                     "discarding message with unsupported version {}",
-                    resp.version
+                    sp_msg.version
                 );
                 continue;
             }
 
-            // see if we know who to send the response to
-            let tx = match self
-                .outstanding_requests
-                .remove(addr.ip(), resp.request_id)
-            {
-                Some(tx) => tx,
-                None => {
-                    error!(&self.log,
-                        "discarding unexpected response {} from {} (possibly past timeout?)",
-                        resp.request_id,
-                        addr,
-                    );
-                    continue;
+            // decide whether this is a response to an outstanding request or an
+            // unprompted message
+            match sp_msg.kind {
+                SpMessageKind::Response { request_id, kind } => {
+                    self.handle_response(addr, request_id, kind);
                 }
-            };
-
-            // actually send it
-            if tx.send(resp.kind).is_err() {
-                // This can only fail if the receiving half has been dropped.
-                // That's held in the relevant `SpCommunicator` method above
-                // that initiated this request; they should only have dropped
-                // the rx half if they've been dropped (in which case we've been
-                // aborted and can't get here) or if we landed in a race where
-                // the `SpCommunicator` task was cancelled (presumably by
-                // timeout) in between us pulling `tx` out of
-                // `outstanding_requests` and actually sending the response on
-                // it. But that window does exist, so log when we fail to send.
-                // I believe these should be interpreted as timeout failures;
-                // most of the time failing to get a `tx` at all (above) is also
-                // caused by a timeout, but that path is also invoked if we get
-                // a garbage response somehow.
-                error!(
-                    &self.log,
-                    "discarding unexpected response {} from {} (receiver gone)",
-                    resp.request_id,
-                    addr,
-                );
+                SpMessageKind::SerialConsole(serial_console) => {
+                    self.handle_serial_console(addr, serial_console);
+                }
             }
         }
+    }
+
+    fn handle_response(
+        &self,
+        addr: SocketAddr,
+        request_id: u32,
+        kind: ResponseKind,
+    ) {
+        // see if we know who to send the response to
+        let tx = match self
+            .sp_state
+            .remove_expected_response(addr.ip(), request_id)
+        {
+            Some(tx) => tx,
+            None => {
+                error!(&self.log,
+                        "discarding unexpected response {} from {} (possibly past timeout?)",
+                        request_id,
+                        addr,
+                    );
+                return;
+            }
+        };
+
+        // actually send it
+        if tx.send(kind).is_err() {
+            // This can only fail if the receiving half has been dropped.
+            // That's held in the relevant `SpCommunicator` method above
+            // that initiated this request; they should only have dropped
+            // the rx half if they've been dropped (in which case we've been
+            // aborted and can't get here) or if we landed in a race where
+            // the `SpCommunicator` task was cancelled (presumably by
+            // timeout) in between us pulling `tx` out of
+            // `outstanding_requests` and actually sending the response on
+            // it. But that window does exist, so log when we fail to send.
+            // I believe these should be interpreted as timeout failures;
+            // most of the time failing to get a `tx` at all (above) is also
+            // caused by a timeout, but that path is also invoked if we get
+            // a garbage response somehow.
+            error!(
+                &self.log,
+                "discarding unexpected response {} from {} (receiver gone)",
+                request_id,
+                addr,
+            );
+        }
+    }
+
+    fn handle_serial_console(&self, addr: SocketAddr, packet: SerialConsole) {
+        debug!(
+            &self.log,
+            "received serial console data from {}: {:?}", addr, packet
+        );
+        self.sp_state.push_serial_console(addr.ip(), packet, &self.log);
     }
 }
 
 #[derive(Debug)]
-struct OutstandingRequests {
-    // map of SP -> request ID -> receiving oneshot channel
-    requests_by_sp: HashMap<IpAddr, Mutex<HashMap<u32, Sender<ResponseKind>>>>,
+struct SpState {
+    all_sps: HashMap<IpAddr, SingleSpState>,
 }
 
-impl OutstandingRequests {
+impl SpState {
     fn new(known_sps: &KnownSps) -> Self {
-        let mut requests_by_sp = HashMap::new();
+        let mut all_sps = HashMap::new();
         for sp_list in [
             &known_sps.switches,
             &known_sps.sleds,
             &known_sps.power_controllers,
         ] {
             for sp in sp_list {
-                requests_by_sp.insert(sp.ip(), Mutex::default());
+                all_sps.insert(sp.ip(), SingleSpState::default());
             }
         }
-        Self { requests_by_sp }
+        Self { all_sps }
     }
 
-    fn insert(
-        self: &Arc<Self>,
+    fn push_serial_console(
+        &self,
+        sp: IpAddr,
+        packet: SerialConsole,
+        log: &Logger,
+    ) {
+        // caller should never try to send a request to an SP we don't know
+        // about, since it created us with all SPs it knows.
+        let state = self.all_sps.get(&sp).expect("nonexistent SP");
+        state.serial_console.lock().unwrap().push(packet, log);
+    }
+
+    fn insert_expected_response(
+        &self,
         sp: IpAddr,
         request_id: u32,
     ) -> ResponseReceiver {
         // caller should never try to send a request to an SP we don't know
         // about, since it created us with all SPs it knows.
-        let requests = self.requests_by_sp.get(&sp).expect("nonexistent SP");
-
-        let (tx, rx) = oneshot::channel();
-        requests.lock().unwrap().insert(request_id, tx);
-
-        ResponseReceiver {
-            parent: Arc::clone(self),
-            sp,
-            request_id,
-            rx,
-            removed_from_parent: false,
-        }
+        let state = self.all_sps.get(&sp).expect("nonexistent SP");
+        state.outstanding_requests.insert(request_id)
     }
 
-    fn remove(
+    fn remove_expected_response(
         &self,
         sp: IpAddr,
         request_id: u32,
     ) -> Option<Sender<ResponseKind>> {
         // caller should never try to send a request to an SP we don't know
         // about, since it created us with all SPs it knows.
-        let requests = self.requests_by_sp.get(&sp).expect("nonexistent SP");
-        requests.lock().unwrap().remove(&request_id)
+        let state = self.all_sps.get(&sp).expect("nonexistent SP");
+        state.outstanding_requests.remove(request_id)
+    }
+}
+
+#[derive(Debug, Default)]
+struct SingleSpState {
+    outstanding_requests: Arc<OutstandingRequests>,
+    serial_console: Mutex<SerialConsoleHistory>,
+}
+
+#[derive(Debug, Default)]
+struct OutstandingRequests {
+    // map of request ID -> receiving oneshot channel
+    requests: Mutex<HashMap<u32, Sender<ResponseKind>>>,
+}
+
+impl OutstandingRequests {
+    fn insert(self: &Arc<Self>, request_id: u32) -> ResponseReceiver {
+        let (tx, rx) = oneshot::channel();
+        self.requests.lock().unwrap().insert(request_id, tx);
+
+        ResponseReceiver {
+            parent: Arc::clone(self),
+            request_id,
+            rx,
+            removed_from_parent: false,
+        }
+    }
+
+    fn remove(&self, request_id: u32) -> Option<Sender<ResponseKind>> {
+        self.requests.lock().unwrap().remove(&request_id)
     }
 }
 
@@ -357,7 +440,6 @@ impl OutstandingRequests {
 // error/cancellation)
 struct ResponseReceiver {
     parent: Arc<OutstandingRequests>,
-    sp: IpAddr,
     request_id: u32,
     rx: Receiver<ResponseKind>,
     removed_from_parent: bool,
@@ -383,12 +465,7 @@ impl ResponseReceiver {
             return;
         }
 
-        // we should never have an SP IP address that doesn't exist in our
-        // parent
-        let map =
-            self.parent.requests_by_sp.get(&self.sp).expect("nonexistent SP");
-
-        map.lock().unwrap().remove(&self.request_id);
+        self.parent.requests.lock().unwrap().remove(&self.request_id);
         self.removed_from_parent = true;
     }
 }

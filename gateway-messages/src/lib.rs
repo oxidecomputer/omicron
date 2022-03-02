@@ -2,6 +2,8 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+#![cfg_attr(not(test), no_std)]
+
 pub mod sp_impl;
 
 use bitflags::bitflags;
@@ -34,14 +36,6 @@ pub enum RequestKind {
     IgnitionCommand { target: u8, command: IgnitionCommand },
 }
 
-/// Messages from an SP to a gateway, specifically responding to a [Request].
-#[derive(Debug, Clone, Copy, SerializedSize, Serialize, Deserialize)]
-pub struct Response {
-    pub version: u32,
-    pub request_id: u32,
-    pub kind: ResponseKind,
-}
-
 // TODO: Not all SPs are capable of crafting all these response kinds, but the
 // way we're using hubpack requires everyone to allocate Response::MAX_SIZE. Is
 // that okay, or should we break this up more?
@@ -60,26 +54,25 @@ pub enum ResponseError {
     RequestUnsupported,
 }
 
-/* IGNORE - treat these as notes; will flesh this out in the near future
-
-/// Messages from an SP to a gateway, prompted by the SP itself; e.g., ignition
-/// state change or serial console output.
+/// Messages from an SP to a gateway. Includes both responses to [`Request`]s as
+/// well as SP-initiated messages like serial console output.
 #[derive(Debug, Clone, Copy, SerializedSize, Serialize, Deserialize)]
 pub struct SpMessage {
-    // TODO: expections on this field? E.g. for serial console, does it imply
-    // ordering, or can we live with "wait to send more console data until we
-    // get an ack" with just a single outstanding message?
-    pub msg_id: u32,
+    pub version: u32,
     pub kind: SpMessageKind,
 }
 
 #[derive(Debug, Clone, Copy, SerializedSize, Serialize, Deserialize)]
 pub enum SpMessageKind {
     // TODO: Is only sending the new state sufficient?
-    IgnitionChange { target: u8, new_state: IgnitionState },
+    // IgnitionChange { target: u8, new_state: IgnitionState },
+    /// Response to a [`Request`] from MGS.
+    Response { request_id: u32, kind: ResponseKind },
+
+    /// Data traveling from an SP-attached component (in practice, a CPU) on the
+    /// component's serial console.
     SerialConsole(SerialConsole),
 }
-*/
 
 #[derive(Debug, Clone, Copy, SerializedSize, Serialize, Deserialize)]
 pub struct IgnitionState {
@@ -110,19 +103,82 @@ pub enum IgnitionCommand {
     PowerOff,
 }
 
-/* IGNORE - treat these as notes; will flesh this out in the near future
+/// Identifier for a single component managed by an SP.
 #[derive(
-    Debug, Clone, Copy, Default, SerializedSize, Serialize, Deserialize,
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Hash,
+    SerializedSize,
+    Serialize,
+    Deserialize,
 )]
+pub struct SpComponent {
+    /// The ID of the component.
+    ///
+    /// TODO This may need some thought. Currently we expect this to contain
+    /// up to `MAX_ID_LENGTH` nonzero utf8 bytes followed by nul bytes as
+    /// padding.
+    ///
+    /// An `SpComponent` can be created via its `TryFrom<&str>` implementation,
+    /// which appends the appropriate padding.
+    pub id: [u8; Self::MAX_ID_LENGTH],
+}
+
+impl SpComponent {
+    /// Maximum number of bytes for a component ID.
+    pub const MAX_ID_LENGTH: usize = 16;
+}
+
+/// Error type returned from `TryFrom<&str> for SpComponent` if the provided ID
+/// is too long.
+pub struct SpComponentIdTooLong;
+
+impl TryFrom<&str> for SpComponent {
+    type Error = SpComponentIdTooLong;
+
+    fn try_from(value: &str) -> Result<Self, Self::Error> {
+        if value.len() > Self::MAX_ID_LENGTH {
+            return Err(SpComponentIdTooLong);
+        }
+
+        let mut component = SpComponent { id: [0; Self::MAX_ID_LENGTH] };
+
+        // should we sanity check that `value` doesn't contain any nul bytes?
+        // seems like overkill; probably fine to omit
+        component.id[..value.len()].copy_from_slice(value.as_bytes());
+
+        Ok(component)
+    }
+}
+
+#[derive(Debug, Clone, Copy, SerializedSize, Serialize, Deserialize)]
 pub struct SerialConsole {
-    len: u8,
-    // TODO: What's a reasonable chunk size? Or do we want some variability
-    // here (subject to hubpack limitations or outside-of-hubpack encoding)?
-    //
-    // Another minor annoyance - serde doesn't support arbitrary array sizes,
-    // and only implements up to [T; 32], so we'd need a wrapper of some kind to
-    // go higher. See https://github.com/serde-rs/serde/issues/1937
-    data: [u8; 32],
+    /// Source component of this serial console data.
+    pub component: SpComponent,
+
+    /// Offset of this chunk of data relative to all console ouput this
+    /// SP+component has seen since it booted. MGS can determine if it's missed
+    /// data and reconstruct out-of-order packets based on this value plus
+    /// `len`.
+    pub offset: u64,
+
+    /// Number of bytes in `data`.
+    pub len: u8,
+
+    /// TODO: What's a reasonable chunk size? Or do we want some variability
+    /// here (subject to hubpack limitations or outside-of-hubpack encoding)?
+    ///
+    /// Another minor annoyance - serde doesn't support arbitrary array sizes
+    /// and only implements up to [T; 32], so we'd need a wrapper of some kind to
+    /// go higher. See https://github.com/serde-rs/serde/issues/1937
+    pub data: [u8; Self::MAX_DATA_PER_PACKET],
+}
+
+impl SerialConsole {
+    pub const MAX_DATA_PER_PACKET: usize = 32;
 }
 
 #[cfg(test)]
@@ -132,8 +188,12 @@ mod tests {
     #[test]
     fn roundtrip_serial_console() {
         let line = "hello world\n";
-        let mut console = SerialConsole::default();
-        console.len = line.len() as u8;
+        let mut console = SerialConsole {
+            component: SpComponent { id: *b"0000111122223333" },
+            offset: 12345,
+            len: line.len() as u8,
+            data: [0xff; 32],
+        };
         console.data[..line.len()].copy_from_slice(line.as_bytes());
 
         let mut serialized = [0; SerialConsole::MAX_SIZE];
@@ -145,4 +205,3 @@ mod tests {
         assert_eq!(deserialized.data, console.data);
     }
 }
-*/

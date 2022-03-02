@@ -2,8 +2,8 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+use crate::config::Config;
 use crate::server::{self, UdpServer};
-use crate::Config;
 use anyhow::Result;
 use gateway_messages::sp_impl::{SpHandler, SpServer};
 use gateway_messages::{IgnitionFlags, IgnitionState, ResponseKind};
@@ -95,8 +95,6 @@ impl Inner {
 
                     let resp = match self.server.dispatch(data) {
                         Ok(resp) => resp,
-                        // TODO: should we send back an error here? may not be
-                        // able to say anything meaningful, depending on `err`
                         Err(err) => {
                             error!(
                                 self.server.handler().log,
