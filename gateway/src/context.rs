@@ -13,6 +13,7 @@ use std::{sync::Arc, time::Duration};
 pub struct ServerContext {
     pub sp_comms: SpCommunicator,
     pub ignition_controller_timeout: Duration,
+    pub sp_request_timeout: Duration,
 }
 
 impl ServerContext {
@@ -29,7 +30,10 @@ impl ServerContext {
         Ok(Arc::new(ServerContext {
             sp_comms,
             ignition_controller_timeout: Duration::from_millis(
-                config.ignition_controller_timeout_milliseconds,
+                config.timeouts.ignition_controller_milliseconds,
+            ),
+            sp_request_timeout: Duration::from_millis(
+                config.timeouts.sp_request_milliseconds,
             ),
         }))
     }

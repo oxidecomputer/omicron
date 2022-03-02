@@ -6,8 +6,10 @@ use crate::config::Config;
 use crate::server::{self, UdpServer};
 use anyhow::Result;
 use gateway_messages::sp_impl::{SpHandler, SpServer};
-use gateway_messages::{IgnitionFlags, IgnitionState, ResponseKind};
-use slog::{debug, error, info, Logger};
+use gateway_messages::{
+    IgnitionFlags, IgnitionState, ResponseError, ResponseKind,
+};
+use slog::{debug, error, info, warn, Logger};
 use tokio::{
     select,
     task::{self, JoinHandle},
@@ -32,6 +34,41 @@ impl Sidecar {
         let inner = Inner::new(server, log);
         let inner_task = task::spawn(async move { inner.run().await.unwrap() });
         Ok(Self { inner_task })
+    }
+}
+
+struct Inner {
+    handler: Handler,
+    udp: UdpServer,
+}
+
+impl Inner {
+    fn new(server: UdpServer, log: Logger) -> Self {
+        Self { handler: Handler { log }, udp: server }
+    }
+
+    async fn run(mut self) -> Result<()> {
+        let mut server = SpServer::default();
+        loop {
+            select! {
+                recv = self.udp.recv_from() => {
+                    let (data, addr) = recv?;
+
+                    let resp = match server.dispatch(data, &mut self.handler) {
+                        Ok(resp) => resp,
+                        Err(err) => {
+                            error!(
+                                self.handler.log,
+                                "dispatching message failed: {:?}", err,
+                            );
+                            continue;
+                        }
+                    };
+
+                    self.udp.send_to(resp, addr).await?;
+                }
+            }
+        }
     }
 }
 
@@ -75,38 +112,12 @@ impl SpHandler for Handler {
         );
         ResponseKind::IgnitionCommandAck
     }
-}
 
-struct Inner {
-    udp: UdpServer,
-    server: SpServer<Handler>,
-}
-
-impl Inner {
-    fn new(server: UdpServer, log: Logger) -> Self {
-        Self { udp: server, server: SpServer::new(Handler { log }) }
-    }
-
-    async fn run(mut self) -> Result<()> {
-        loop {
-            select! {
-                recv = self.udp.recv_from() => {
-                    let (data, addr) = recv?;
-
-                    let resp = match self.server.dispatch(data) {
-                        Ok(resp) => resp,
-                        Err(err) => {
-                            error!(
-                                self.server.handler().log,
-                                "dispatching message failed: {:?}", err,
-                            );
-                            continue;
-                        }
-                    };
-
-                    self.udp.send_to(resp, addr).await?;
-                }
-            }
-        }
+    fn serial_console_write(
+        &mut self,
+        _packet: gateway_messages::SerialConsole,
+    ) -> ResponseKind {
+        warn!(&self.log, "received request to write to serial console (unsupported on sidecar)");
+        ResponseKind::Error(ResponseError::RequestUnsupported)
     }
 }

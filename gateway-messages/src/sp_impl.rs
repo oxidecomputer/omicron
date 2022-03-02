@@ -20,6 +20,8 @@ pub trait SpHandler {
         target: u8,
         command: IgnitionCommand,
     ) -> ResponseKind;
+
+    fn serial_console_write(&mut self, packet: SerialConsole) -> ResponseKind;
 }
 
 #[derive(Debug)]
@@ -71,15 +73,10 @@ pub struct SerialConsolePackets<'a, 'b> {
     data: &'b [u8],
 }
 
-impl SerialConsolePackets<'_, '_> {
-    /// Get the next packet of serial console data, if one exists.
-    ///
-    /// Returns `Some(data)` with a packet to be sent if any data remains, or
-    /// `None` if all data has been previously returned.
-    pub fn next_packet<'a>(
-        &mut self,
-        out: &'a mut [u8; SpMessage::MAX_SIZE],
-    ) -> Option<&'a [u8]> {
+impl Iterator for SerialConsolePackets<'_, '_> {
+    type Item = SerialConsole;
+
+    fn next(&mut self) -> Option<Self::Item> {
         if self.data.is_empty() {
             return None;
         }
@@ -89,61 +86,44 @@ impl SerialConsolePackets<'_, '_> {
             SerialConsole::MAX_DATA_PER_PACKET,
         ));
 
-        let mut message = SerialConsole {
+        let mut packet = SerialConsole {
             component: self.parent.component,
             offset: self.parent.offset,
             len: this_packet.len() as u8,
             data: [0; SerialConsole::MAX_DATA_PER_PACKET],
         };
-        message.data[..this_packet.len()].copy_from_slice(this_packet);
-        let message = SpMessage {
-            version: version::V1,
-            kind: SpMessageKind::SerialConsole(message),
-        };
-
-        // We know `out` is big enough for any `SpMessage`, so no need to bubble
-        // up an error here.
-        let n = match hubpack::serialize(&mut out[..], &message) {
-            Ok(n) => n,
-            Err(_) => panic!(),
-        };
+        packet.data[..this_packet.len()].copy_from_slice(this_packet);
 
         self.data = remaining;
         self.parent.offset += this_packet.len() as u64;
 
-        Some(&out[..n])
+        Some(packet)
     }
 }
 
 #[derive(Debug)]
-pub struct SpServer<Handler> {
+pub struct SpServer {
     buf: [u8; SpMessage::MAX_SIZE],
-    handler: Handler,
 }
 
-impl<Handler> SpServer<Handler>
-where
-    Handler: SpHandler,
-{
-    pub fn new(handler: Handler) -> Self {
-        Self { buf: [0; SpMessage::MAX_SIZE], handler }
+impl Default for SpServer {
+    fn default() -> Self {
+        Self { buf: [0; SpMessage::MAX_SIZE] }
     }
+}
 
-    pub fn handler(&self) -> &Handler {
-        &self.handler
-    }
-
-    pub fn handler_mut(&mut self) -> &mut Handler {
-        &mut self.handler
-    }
-
+impl SpServer {
     /// Handler for incoming UDP requests.
     ///
     /// `data` should be a UDP packet that has arrived for the current SP. It
     /// will be parsed (into a [`Request`]), the appropriate method will be
-    /// called on the underlying message handler, and a serialized response will
+    /// called on `handler`, and a serialized response will
     /// be returned, which the caller should send back to the requester.
-    pub fn dispatch(&mut self, data: &[u8]) -> Result<&[u8], Error> {
+    pub fn dispatch<H: SpHandler>(
+        &mut self,
+        data: &[u8],
+        handler: &mut H,
+    ) -> Result<&[u8], Error> {
         // parse request, with sanity checks on sizes
         if data.len() > Request::MAX_SIZE {
             return Err(Error::DataTooLarge);
@@ -161,12 +141,15 @@ where
 
         // call out to handler to provide response
         let response_kind = match request.kind {
-            RequestKind::Ping => self.handler.ping(),
+            RequestKind::Ping => handler.ping(),
             RequestKind::IgnitionState { target } => {
-                self.handler.ignition_state(target)
+                handler.ignition_state(target)
             }
             RequestKind::IgnitionCommand { target, command } => {
-                self.handler.ignition_command(target, command)
+                handler.ignition_command(target, command)
+            }
+            RequestKind::SerialConsoleWrite(packet) => {
+                handler.serial_console_write(packet)
             }
         };
 
