@@ -8,7 +8,6 @@
 //!
 
 use dropshot::ConfigLogging;
-use gateway_messages::IgnitionState;
 use serde::{Deserialize, Serialize};
 use std::{
     net::SocketAddr,
@@ -16,6 +15,7 @@ use std::{
 };
 use thiserror::Error;
 
+/*
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct SidecarConfig {
     pub ignition_targets: Vec<IgnitionState>,
@@ -37,20 +37,60 @@ pub struct SpComponents {
     /// List of components with a serial console.
     pub serial_console: Vec<String>,
 }
+*/
 
-/// Configuration for a simulated SP
+/// Configuration of a simulated sidecar SP
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+pub struct SidecarConfig {
+    /// UDP address
+    pub bind_address: SocketAddr,
+}
+
+/// Configuration of a simulated gimlet SP
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+pub struct GimletConfig {
+    /// UDP address
+    pub bind_address: SocketAddr,
+    /// Attached components
+    pub components: Vec<SpComponentConfig>,
+}
+
+/// Configuration of a simulated gimlet SP
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+pub struct SpComponentConfig {
+    /// Name of the component
+    pub name: String,
+    /// Socket address we'll use to expose this component's serial console
+    /// via TCP.
+    pub serial_console: Option<SocketAddr>,
+}
+
+/// Configuration of a set of simulated SPs
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+pub struct SimulatedSps {
+    /// Simulated sidecar(s)
+    pub sidecar: Vec<SidecarConfig>,
+    /// Simulated gimlet(s)
+    pub gimlet: Vec<GimletConfig>,
+}
+
+/// Configuration for a sp-sim
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct Config {
+    /// UDP address of MGS.
+    pub gateway_address: SocketAddr,
+    /// List of SPs to simulate.
+    pub simulated_sps: SimulatedSps,
+    /// Server-wide logging configuration.
+    pub log: ConfigLogging,
+    /*
     /// Type of SP to simulate.
     pub sp_type: SpType,
     /// Components to simulate.
     pub components: SpComponents,
     /// UDP listen address.
     pub bind_address: SocketAddr,
-    /// UDP address of MGS.
-    pub gateway_address: SocketAddr,
-    /// Server-wide logging configuration.
-    pub log: ConfigLogging,
+    */
 }
 
 impl Config {

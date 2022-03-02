@@ -320,8 +320,7 @@ async fn sp_component_serial_console_get(
     let sp = comms
         .placeholder_known_sps()
         .addr_for(&sp)
-        .ok_or(Error::SpDoesNotExist(sp))?
-        .ip();
+        .ok_or(Error::SpDoesNotExist(sp))?;
     let component = SpComponent::try_from(component.as_str())
         .map_err(|_| Error::InvalidSpComponentId(component))?;
     let contents = comms.serial_console_get(sp, &component)?;

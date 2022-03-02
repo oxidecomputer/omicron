@@ -51,9 +51,13 @@ pub enum ResponseKind {
 
 #[derive(Debug, Clone, Copy, SerializedSize, Serialize, Deserialize)]
 pub enum ResponseError {
-    /// The [RequestKind] is not supported by the receiving SP; e.g., asking an
+    /// The [`RequestKind`] is not supported by the receiving SP; e.g., asking an
     /// SP without an attached ignition controller for ignition state.
-    RequestUnsupported,
+    RequestUnsupportedForSp,
+    /// The [`RequestKind`] is not supported by the receiving component of the
+    /// SP; e.g., asking for the serial console of a component that does not
+    /// have one.
+    RequestUnsupportedForComponent,
     /// The specified ignition target does not exist.
     IgnitionTargetDoesNotExist(u8),
 }

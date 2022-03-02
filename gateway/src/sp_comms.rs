@@ -23,7 +23,7 @@ use slog::{debug, error, info, o, Logger};
 use std::{
     collections::HashMap,
     io,
-    net::{IpAddr, SocketAddr},
+    net::SocketAddr,
     sync::{atomic::AtomicU32, Arc, Mutex},
     time::Duration,
 };
@@ -57,7 +57,7 @@ pub enum Error {
     #[error("timeout")]
     Timeout(#[from] tokio::time::error::Elapsed),
     #[error("no known SP at {0}")]
-    SpDoesNotExist(IpAddr),
+    SpDoesNotExist(SocketAddr),
 }
 
 impl From<Error> for HttpError {
@@ -92,8 +92,11 @@ impl Error {
         // stringify all its cases. Can we do something better, or make it impl
         // `Error` if compiled in a std environment?
         let msg = match err {
-            ResponseError::RequestUnsupported => {
-                String::from("unsupported request")
+            ResponseError::RequestUnsupportedForSp => {
+                String::from("unsupported request for this SP")
+            }
+            ResponseError::RequestUnsupportedForComponent => {
+                String::from("unsupported request for this SP component")
             }
             ResponseError::IgnitionTargetDoesNotExist(target) => {
                 format!("nonexistent ignition target {}", target)
@@ -187,7 +190,7 @@ impl SpCommunicator {
 
     pub(crate) fn serial_console_get(
         &self,
-        sp: IpAddr,
+        sp: SocketAddr,
         component: &SpComponent,
     ) -> Result<Option<SerialConsoleContents>, Error> {
         let sp =
@@ -218,8 +221,8 @@ impl SpCommunicator {
         let sp_state = self
             .sp_state
             .all_sps
-            .get(&sp.ip())
-            .ok_or_else(|| Error::SpDoesNotExist(sp.ip()))?;
+            .get(&sp)
+            .ok_or_else(|| Error::SpDoesNotExist(sp))?;
 
         let mut packetizers = sp_state.serial_console_to_sp.lock().await;
         let packetizer = packetizers
@@ -329,8 +332,7 @@ impl SpCommunicator {
             self.request_id.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
 
         // tell our background receiver to expect a response to this request
-        let response =
-            self.sp_state.insert_expected_response(sp.ip(), request_id);
+        let response = self.sp_state.insert_expected_response(sp, request_id);
 
         // Serialize and send our request. We know `buf` is large enough for any
         // `Request`, so unwrapping here is fine.
@@ -464,9 +466,7 @@ impl RecvTask {
         kind: ResponseKind,
     ) {
         // see if we know who to send the response to
-        let tx = match self
-            .sp_state
-            .remove_expected_response(addr.ip(), request_id)
+        let tx = match self.sp_state.remove_expected_response(addr, request_id)
         {
             Some(tx) => tx,
             None => {
@@ -508,13 +508,13 @@ impl RecvTask {
             &self.log,
             "received serial console data from {}: {:?}", addr, packet
         );
-        self.sp_state.push_serial_console(addr.ip(), packet, &self.log);
+        self.sp_state.push_serial_console(addr, packet, &self.log);
     }
 }
 
 #[derive(Debug)]
 struct SpState {
-    all_sps: HashMap<IpAddr, SingleSpState>,
+    all_sps: HashMap<SocketAddr, SingleSpState>,
 }
 
 impl SpState {
@@ -525,8 +525,8 @@ impl SpState {
             &known_sps.sleds,
             &known_sps.power_controllers,
         ] {
-            for sp in sp_list {
-                all_sps.insert(sp.ip(), SingleSpState::default());
+            for &sp in sp_list {
+                all_sps.insert(sp, SingleSpState::default());
             }
         }
         Self { all_sps }
@@ -534,7 +534,7 @@ impl SpState {
 
     fn push_serial_console(
         &self,
-        sp: IpAddr,
+        sp: SocketAddr,
         packet: SerialConsole,
         log: &Logger,
     ) {
@@ -546,7 +546,7 @@ impl SpState {
 
     fn insert_expected_response(
         &self,
-        sp: IpAddr,
+        sp: SocketAddr,
         request_id: u32,
     ) -> ResponseReceiver {
         // caller should never try to send a request to an SP we don't know
@@ -557,7 +557,7 @@ impl SpState {
 
     fn remove_expected_response(
         &self,
-        sp: IpAddr,
+        sp: SocketAddr,
         request_id: u32,
     ) -> Option<Sender<ResponseKind>> {
         // caller should never try to send a request to an SP we don't know
