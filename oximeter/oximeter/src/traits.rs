@@ -295,7 +295,7 @@ pub use crate::histogram::HistogramSupport;
 /// Example
 /// -------
 /// ```rust
-/// use oximeter::{Datum, Error, Metric, Producer, Target};
+/// use oximeter::{Datum, MetricsError, Metric, Producer, Target};
 /// use oximeter::types::{Measurement, Sample, Cumulative};
 ///
 /// // The `Server` target identifies some HTTP service being monitored.
@@ -342,7 +342,7 @@ pub use crate::histogram::HistogramSupport;
 /// }
 ///
 /// impl Producer for RequestCounter {
-///     fn produce(&mut self) -> Result<Box<dyn Iterator<Item = Sample>>, Error> {
+///     fn produce(&mut self) -> Result<Box<dyn Iterator<Item = Sample>>, MetricsError> {
 ///         let sample = Sample::new(&self.target, &self.metric);
 ///         Ok(Box::new(vec![sample].into_iter()))
 ///     }
