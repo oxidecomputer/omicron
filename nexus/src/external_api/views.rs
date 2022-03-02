@@ -82,6 +82,9 @@ pub struct Vpc {
     /// id for the system router where subnet default routes are registered
     pub system_router_id: Uuid,
 
+    /// The unique local IPv6 address range for subnets in this VPC
+    pub ipv6_prefix: Ipv6Net,
+
     // TODO-design should this be optional?
     /** The name used for the VPC in DNS. */
     pub dns_name: Name,
@@ -93,6 +96,7 @@ impl Into<Vpc> for model::Vpc {
             identity: self.identity(),
             project_id: self.project_id,
             system_router_id: self.system_router_id,
+            ipv6_prefix: *self.ipv6_prefix,
             dns_name: self.dns_name.0,
         }
     }
@@ -109,18 +113,11 @@ pub struct VpcSubnet {
     /** The VPC to which the subnet belongs. */
     pub vpc_id: Uuid,
 
-    // TODO-design: RFD 21 says that V4 subnets are currently required, and V6 are optional. If a
-    // V6 address is _not_ specified, one is created with a prefix that depends on the VPC and a
-    // unique subnet-specific portion of the prefix (40 and 16 bits for each, respectively).
-    //
-    // We're leaving out the "view" types here for the external HTTP API for now, so it's not clear
-    // how to do the validation of user-specified CIDR blocks, or how to create a block if one is
-    // not given.
     /** The IPv4 subnet CIDR block. */
-    pub ipv4_block: Option<Ipv4Net>,
+    pub ipv4_block: Ipv4Net,
 
     /** The IPv6 subnet CIDR block. */
-    pub ipv6_block: Option<Ipv6Net>,
+    pub ipv6_block: Ipv6Net,
 }
 
 impl Into<VpcSubnet> for model::VpcSubnet {
@@ -128,8 +125,8 @@ impl Into<VpcSubnet> for model::VpcSubnet {
         VpcSubnet {
             identity: self.identity(),
             vpc_id: self.vpc_id,
-            ipv4_block: self.ipv4_block.map(|ip| ip.into()),
-            ipv6_block: self.ipv6_block.map(|ip| ip.into()),
+            ipv4_block: self.ipv4_block.0,
+            ipv6_block: self.ipv6_block.0,
         }
     }
 }

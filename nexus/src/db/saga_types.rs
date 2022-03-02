@@ -147,38 +147,47 @@ where
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, SqlType)]
+#[postgres(type_name = "saga_state", type_schema = "public")]
+pub struct SagaCachedStateEnum;
+
 /// Newtype wrapper around [`steno::SagaCachedState`] which implements
 /// Diesel traits.
 ///
 /// This exists because Omicron cannot implement foreign traits
 /// for foreign types.
 #[derive(AsExpression, FromSqlRow, Clone, Copy, Debug, PartialEq)]
-#[sql_type = "sql_types::Text"]
+#[sql_type = "SagaCachedStateEnum"]
 pub struct SagaCachedState(pub steno::SagaCachedState);
 
 NewtypeFrom! { () pub struct SagaCachedState(steno::SagaCachedState); }
 
-impl<DB> ToSql<sql_types::Text, DB> for SagaCachedState
+impl<DB> ToSql<SagaCachedStateEnum, DB> for SagaCachedState
 where
     DB: Backend,
-    String: ToSql<sql_types::Text, DB>,
 {
     fn to_sql<W: std::io::Write>(
         &self,
         out: &mut serialize::Output<'_, W, DB>,
     ) -> serialize::Result {
-        (&self.0.to_string() as &String).to_sql(out)
+        use steno::SagaCachedState;
+        out.write_all(match self.0 {
+            SagaCachedState::Running => b"running",
+            SagaCachedState::Unwinding => b"unwinding",
+            SagaCachedState::Done => b"done",
+        })?;
+        Ok(serialize::IsNull::No)
     }
 }
 
-impl<DB> FromSql<sql_types::Text, DB> for SagaCachedState
+impl<DB> FromSql<SagaCachedStateEnum, DB> for SagaCachedState
 where
-    DB: Backend,
-    String: FromSql<sql_types::Text, DB>,
+    DB: Backend + for<'a> diesel::backend::BinaryRawValue<'a>,
 {
-    fn from_sql(bytes: RawValue<'_, DB>) -> deserialize::Result<Self> {
-        let s = String::from_sql(bytes)?;
-        let state = steno::SagaCachedState::try_from(s.as_str())?;
+    fn from_sql(bytes: RawValue<DB>) -> deserialize::Result<Self> {
+        let bytes = DB::as_bytes(bytes);
+        let s = std::str::from_utf8(bytes)?;
+        let state = steno::SagaCachedState::try_from(s)?;
         Ok(Self(state))
     }
 }

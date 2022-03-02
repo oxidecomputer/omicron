@@ -19,7 +19,7 @@ use uuid::Uuid;
  */
 
 /**
- * Create-time parameters for an [`Organization`]
+ * Create-time parameters for an [`Organization`](crate::external_api::views::Organization)
  */
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct OrganizationCreate {
@@ -28,7 +28,7 @@ pub struct OrganizationCreate {
 }
 
 /**
- * Updateable properties of an [`Organization`]
+ * Updateable properties of an [`Organization`](crate::external_api::views::Organization)
  */
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct OrganizationUpdate {
@@ -41,7 +41,7 @@ pub struct OrganizationUpdate {
  */
 
 /**
- * Create-time parameters for a [`Project`]
+ * Create-time parameters for a [`Project`](crate::external_api::views::Project)
  */
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct ProjectCreate {
@@ -50,7 +50,7 @@ pub struct ProjectCreate {
 }
 
 /**
- * Updateable properties of a [`Project`]
+ * Updateable properties of a [`Project`](crate::external_api::views::Project)
  */
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct ProjectUpdate {
@@ -63,7 +63,8 @@ pub struct ProjectUpdate {
  */
 
 /**
- * Create-time parameters for a [`NetworkInterface`]
+ * Create-time parameters for a
+ * [`NetworkInterface`](omicron_common::api::external::NetworkInterface)
  */
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct NetworkInterfaceCreate {
@@ -76,7 +77,7 @@ pub struct NetworkInterfaceCreate {
  */
 
 /**
- * Create-time parameters for an [`Instance`]
+ * Create-time parameters for an [`Instance`](omicron_common::api::external::Instance)
  */
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct InstanceCreate {
@@ -88,7 +89,7 @@ pub struct InstanceCreate {
 }
 
 /**
- * Migration parameters for an [`Instance`]
+ * Migration parameters for an [`Instance`](omicron_common::api::external::Instance)
  */
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct InstanceMigrate {
@@ -100,17 +101,25 @@ pub struct InstanceMigrate {
  */
 
 /**
- * Create-time parameters for a [`Vpc`]
+ * Create-time parameters for a [`Vpc`](crate::external_api::views::Vpc)
  */
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct VpcCreate {
     #[serde(flatten)]
     pub identity: IdentityMetadataCreateParams,
+
+    /// The IPv6 prefix for this VPC.
+    ///
+    /// All IPv6 subnets created from this VPC must be taken from this range,
+    /// which sould be a Unique Local Address in the range `fd00::/48`. The
+    /// default VPC Subnet will have the first `/64` range from this prefix.
+    pub ipv6_prefix: Option<Ipv6Net>,
+
     pub dns_name: Name,
 }
 
 /**
- * Updateable properties of a [`Vpc`]
+ * Updateable properties of a [`Vpc`](crate::external_api::views::Vpc)
  */
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct VpcUpdate {
@@ -120,23 +129,37 @@ pub struct VpcUpdate {
 }
 
 /**
- * Create-time parameters for a [`VpcSubnet`]
+ * Create-time parameters for a [`VpcSubnet`](crate::external_api::views::VpcSubnet)
  */
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct VpcSubnetCreate {
     #[serde(flatten)]
     pub identity: IdentityMetadataCreateParams,
-    pub ipv4_block: Option<Ipv4Net>,
+
+    /// The IPv4 address range for this subnet.
+    ///
+    /// It must be allocated from an RFC 1918 private address range, and must
+    /// not overlap with any other existing subnet in the VPC.
+    pub ipv4_block: Ipv4Net,
+
+    /// The IPv6 address range for this subnet.
+    ///
+    /// It must be allocated from the RFC 4193 Unique Local Address range, with
+    /// the prefix equal to the parent VPC's prefix. A random `/64` block will
+    /// be assigned if one is not provided. It must not overlap with any
+    /// existing subnet in the VPC.
     pub ipv6_block: Option<Ipv6Net>,
 }
 
 /**
- * Updateable properties of a [`VpcSubnet`]
+ * Updateable properties of a [`VpcSubnet`](crate::external_api::views::VpcSubnet)
  */
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct VpcSubnetUpdate {
     #[serde(flatten)]
     pub identity: IdentityMetadataUpdateParams,
+    // TODO-correctness: It seems fraught to allow changing these, since it can
+    // invalidate arbitrary sub-resources (e.g., network interfaces).
     pub ipv4_block: Option<Ipv4Net>,
     pub ipv6_block: Option<Ipv6Net>,
 }
@@ -145,14 +168,14 @@ pub struct VpcSubnetUpdate {
  * VPC ROUTERS
  */
 
-/// Create-time parameters for a [`VpcRouter`]
+/// Create-time parameters for a [`VpcRouter`](omicron_common::api::external::VpcRouter)
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct VpcRouterCreate {
     #[serde(flatten)]
     pub identity: IdentityMetadataCreateParams,
 }
 
-/// Updateable properties of a [`VpcRouter`]
+/// Updateable properties of a [`VpcRouter`](omicron_common::api::external::VpcRouter)
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct VpcRouterUpdate {
     #[serde(flatten)]
@@ -164,7 +187,7 @@ pub struct VpcRouterUpdate {
  */
 
 /**
- * Create-time parameters for a [`Disk`]
+ * Create-time parameters for a [`Disk`](omicron_common::api::external::Disk)
  */
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct DiskCreate {
@@ -198,7 +221,8 @@ impl DiskCreate {
 }
 
 /**
- * Parameters for the [`Disk`] to be attached or detached to an instance
+ * Parameters for the [`Disk`](omicron_common::api::external::Disk) to be
+ * attached or detached to an instance
  */
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct DiskIdentifier {
@@ -214,7 +238,7 @@ pub struct DiskIdentifier {
  */
 
 /**
- * Create-time parameters for a [`UserBuiltin`]
+ * Create-time parameters for a [`UserBuiltin`](crate::db::model::UserBuiltin)
  */
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct UserBuiltinCreate {

@@ -9,6 +9,8 @@ use anyhow::ensure;
 use anyhow::Context;
 use dropshot::test_util::ClientTestContext;
 use dropshot::ResultsPage;
+use headers::authorization::Credentials;
+use omicron_nexus::authn::external::spoof;
 use std::convert::TryInto;
 use std::fmt::Debug;
 
@@ -435,11 +437,8 @@ impl<'a> NexusRequest<'a> {
         };
 
         self.request_builder = self.request_builder.header(
-            http::header::HeaderName::from_static(
-                authn::external::spoof::HTTP_HEADER_OXIDE_AUTHN_SPOOF,
-            ),
-            http::header::HeaderValue::from_str(&header_value.to_string())
-                .unwrap(),
+            &http::header::AUTHORIZATION,
+            spoof::make_header_value(header_value).0.encode(),
         );
         self
     }
@@ -514,15 +513,17 @@ impl<'a> NexusRequest<'a> {
         testctx: &'a ClientTestContext,
         collection_url: &str,
         initial_params: &str,
-        limit: usize,
+        limit: Option<usize>,
     ) -> Result<Collection<T>, anyhow::Error>
     where
         T: Clone + serde::de::DeserializeOwned,
     {
-        let url_base = format!("{}?limit={}&", collection_url, limit);
         let mut npages = 0;
         let mut all_items = Vec::new();
         let mut next_token: Option<String> = None;
+        const DEFAULT_PAGE_SIZE: usize = 10;
+        let limit = limit.unwrap_or(DEFAULT_PAGE_SIZE);
+        let url_base = format!("{}?limit={}&", collection_url, limit);
 
         loop {
             let url = if let Some(next_token) = &next_token {

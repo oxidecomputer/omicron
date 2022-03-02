@@ -240,6 +240,7 @@ mod test {
                 run_state: InstanceState::Creating,
                 sled_uuid: Uuid::new_v4(),
                 propolis_uuid: Uuid::new_v4(),
+                dst_propolis_uuid: None,
                 propolis_addr: None,
                 migration_uuid: None,
                 ncpus: InstanceCpuCount(2),
@@ -315,7 +316,7 @@ mod test {
                 new_initial_instance(),
                 InstanceRuntimeStateRequested {
                     run_state: InstanceStateRequested::Running,
-                    migration_id: None,
+                    migration_params: None,
                 },
                 None,
             )
@@ -395,7 +396,7 @@ mod test {
         let rt = new_initial_instance();
         let target = InstanceRuntimeStateRequested {
             run_state: InstanceStateRequested::Running,
-            migration_id: None,
+            migration_params: None,
         };
 
         // Creates instance, start + transition.

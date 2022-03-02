@@ -52,9 +52,8 @@ use omicron_common::api::external::RouterRouteCreateParams;
 use omicron_common::api::external::RouterRouteKind;
 use omicron_common::api::external::RouterRouteUpdateParams;
 use omicron_common::api::external::Saga;
-use omicron_common::api::external::VpcFirewallRule;
 use omicron_common::api::external::VpcFirewallRuleUpdateParams;
-use omicron_common::api::external::VpcFirewallRuleUpdateResult;
+use omicron_common::api::external::VpcFirewallRules;
 use omicron_common::api::external::VpcRouter;
 use omicron_common::api::external::VpcRouterKind;
 use ref_cast::RefCast;
@@ -579,8 +578,10 @@ async fn project_disks_get(
     let organization_name = &path.organization_name;
     let project_name = &path.project_name;
     let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
         let disks = nexus
             .project_list_disks(
+                &opctx,
                 organization_name,
                 project_name,
                 &data_page_params_for(&rqctx, &query)?
@@ -618,8 +619,10 @@ async fn project_disks_post(
     let project_name = &path.project_name;
     let new_disk_params = &new_disk.into_inner();
     let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
         let disk = nexus
             .project_create_disk(
+                &opctx,
                 &organization_name,
                 &project_name,
                 &new_disk_params,
@@ -659,8 +662,9 @@ async fn project_disks_get_disk(
     let project_name = &path.project_name;
     let disk_name = &path.disk_name;
     let handler = async {
-        let (disk, _) = nexus
-            .project_lookup_disk(&organization_name, &project_name, &disk_name)
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let disk = nexus
+            .disk_fetch(&opctx, &organization_name, &project_name, &disk_name)
             .await?;
         Ok(HttpResponseOk(disk.into()))
     };
@@ -724,8 +728,10 @@ async fn project_instances_get(
     let organization_name = &path.organization_name;
     let project_name = &path.project_name;
     let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
         let instances = nexus
             .project_list_instances(
+                &opctx,
                 &organization_name,
                 &project_name,
                 &data_page_params_for(&rqctx, &query)?
@@ -769,8 +775,10 @@ async fn project_instances_post(
     let project_name = &path.project_name;
     let new_instance_params = &new_instance.into_inner();
     let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
         let instance = nexus
             .project_create_instance(
+                &opctx,
                 &organization_name,
                 &project_name,
                 &new_instance_params,
@@ -810,8 +818,10 @@ async fn project_instances_get_instance(
     let project_name = &path.project_name;
     let instance_name = &path.instance_name;
     let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
         let instance = nexus
-            .project_lookup_instance(
+            .instance_fetch(
+                &opctx,
                 &organization_name,
                 &project_name,
                 &instance_name,
@@ -841,8 +851,10 @@ async fn project_instances_delete_instance(
     let project_name = &path.project_name;
     let instance_name = &path.instance_name;
     let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
         nexus
             .project_destroy_instance(
+                &opctx,
                 &organization_name,
                 &project_name,
                 &instance_name,
@@ -874,8 +886,10 @@ async fn project_instances_migrate_instance(
     let instance_name = &path.instance_name;
     let migrate_instance_params = migrate_params.into_inner();
     let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
         let instance = nexus
             .project_migrate_instance(
+                &opctx,
                 &organization_name,
                 &project_name,
                 &instance_name,
@@ -906,8 +920,14 @@ async fn project_instances_instance_reboot(
     let project_name = &path.project_name;
     let instance_name = &path.instance_name;
     let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
         let instance = nexus
-            .instance_reboot(&organization_name, &project_name, &instance_name)
+            .instance_reboot(
+                &opctx,
+                &organization_name,
+                &project_name,
+                &instance_name,
+            )
             .await?;
         Ok(HttpResponseAccepted(instance.into()))
     };
@@ -933,8 +953,14 @@ async fn project_instances_instance_start(
     let project_name = &path.project_name;
     let instance_name = &path.instance_name;
     let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
         let instance = nexus
-            .instance_start(&organization_name, &project_name, &instance_name)
+            .instance_start(
+                &opctx,
+                &organization_name,
+                &project_name,
+                &instance_name,
+            )
             .await?;
         Ok(HttpResponseAccepted(instance.into()))
     };
@@ -961,8 +987,14 @@ async fn project_instances_instance_stop(
     let project_name = &path.project_name;
     let instance_name = &path.instance_name;
     let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
         let instance = nexus
-            .instance_stop(&organization_name, &project_name, &instance_name)
+            .instance_stop(
+                &opctx,
+                &organization_name,
+                &project_name,
+                &instance_name,
+            )
             .await?;
         Ok(HttpResponseAccepted(instance.into()))
     };
@@ -991,8 +1023,10 @@ async fn instance_disks_get(
     let project_name = &path.project_name;
     let instance_name = &path.instance_name;
     let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
         let disks = nexus
             .instance_list_disks(
+                &opctx,
                 &organization_name,
                 &project_name,
                 &instance_name,
@@ -1025,8 +1059,10 @@ async fn instance_disks_attach(
     let project_name = &path.project_name;
     let instance_name = &path.instance_name;
     let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
         let disk = nexus
             .instance_attach_disk(
+                &opctx,
                 &organization_name,
                 &project_name,
                 &instance_name,
@@ -1055,8 +1091,10 @@ async fn instance_disks_detach(
     let project_name = &path.project_name;
     let instance_name = &path.instance_name;
     let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
         let disk = nexus
             .instance_detach_disk(
+                &opctx,
                 &organization_name,
                 &project_name,
                 &instance_name,
@@ -1453,15 +1491,13 @@ async fn subnets_ips_get(
 }]
 async fn vpc_firewall_rules_get(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
-    query_params: Query<PaginatedByName>,
     path_params: Path<VpcPathParam>,
-) -> Result<HttpResponseOk<ResultsPage<VpcFirewallRule>>, HttpError> {
+) -> Result<HttpResponseOk<VpcFirewallRules>, HttpError> {
     // TODO: Check If-Match and fail if the ETag doesn't match anymore.
     // Without this check, if firewall rules change while someone is listing
     // the rules, they will see a mix of the old and new rules.
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
-    let query = query_params.into_inner();
     let path = path_params.into_inner();
     let handler = async {
         let rules = nexus
@@ -1469,14 +1505,11 @@ async fn vpc_firewall_rules_get(
                 &path.organization_name,
                 &path.project_name,
                 &path.vpc_name,
-                &data_page_params_for(&rqctx, &query)?
-                    .map_name(|n| Name::ref_cast(n)),
             )
-            .await?
-            .into_iter()
-            .map(|rule| rule.into())
-            .collect();
-        Ok(HttpResponseOk(ScanByName::results_page(&query, rules)?))
+            .await?;
+        Ok(HttpResponseOk(VpcFirewallRules {
+            rules: rules.into_iter().map(|rule| rule.into()).collect(),
+        }))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
@@ -1493,8 +1526,9 @@ async fn vpc_firewall_rules_put(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<VpcPathParam>,
     router_params: TypedBody<VpcFirewallRuleUpdateParams>,
-) -> Result<HttpResponseOk<VpcFirewallRuleUpdateResult>, HttpError> {
+) -> Result<HttpResponseOk<VpcFirewallRules>, HttpError> {
     // TODO: Check If-Match and fail if the ETag doesn't match anymore.
+    // TODO: limit size of the ruleset because the GET endpoint is not paginated
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
     let path = path_params.into_inner();
@@ -1507,7 +1541,9 @@ async fn vpc_firewall_rules_put(
                 &router_params.into_inner(),
             )
             .await?;
-        Ok(HttpResponseOk(rules))
+        Ok(HttpResponseOk(VpcFirewallRules {
+            rules: rules.into_iter().map(|rule| rule.into()).collect(),
+        }))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }

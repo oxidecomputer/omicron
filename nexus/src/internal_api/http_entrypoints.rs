@@ -2,10 +2,11 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use crate::nexus::BASE_ARTIFACT_DIR;
 /**
  * Handler functions (entrypoints) for HTTP APIs internal to the control plane
  */
+use crate::context::OpContext;
+use crate::nexus::BASE_ARTIFACT_DIR;
 use crate::ServerContext;
 
 use super::params::{
@@ -211,7 +212,8 @@ async fn cpapi_disks_put(
     let path = path_params.into_inner();
     let new_state = new_runtime_state.into_inner();
     let handler = async {
-        nexus.notify_disk_updated(&path.disk_id, &new_state).await?;
+        let opctx = OpContext::for_internal_api(&rqctx).await;
+        nexus.notify_disk_updated(&opctx, path.disk_id, &new_state).await?;
         Ok(HttpResponseUpdatedNoContent())
     };
     apictx.internal_latencies.instrument_dropshot_handler(&rqctx, handler).await

@@ -1,6 +1,8 @@
 [workspace]
 members = [
     "common",
+    "gateway",
+    "gateway-messages",
     "nexus",
     "nexus/src/db/db-macros",
     "nexus/test-utils",
@@ -10,6 +12,7 @@ members = [
     "rpaths",
     "sled-agent",
     "sled-agent-client",
+    "sp-sim",
     "oximeter/oximeter",
     "oximeter/collector",
     "oximeter/db",
@@ -22,12 +25,15 @@ members = [
 
 default-members = [
     "common",
+    "gateway",
+    "gateway-messages",
     "nexus",
     "nexus/src/db/db-macros",
     "package",
     "rpaths",
     "sled-agent",
     "sled-agent-client",
+    "sp-sim",
     "oximeter/oximeter",
     "oximeter/collector",
     "oximeter/db",

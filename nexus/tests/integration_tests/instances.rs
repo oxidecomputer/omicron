@@ -8,7 +8,9 @@
 
 use http::method::Method;
 use http::StatusCode;
-use omicron_common::api::external::ByteCount;
+use nexus_test_utils::http_testing::AuthnMode;
+use nexus_test_utils::http_testing::NexusRequest;
+use nexus_test_utils::http_testing::RequestBuilder;
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::Instance;
 use omicron_common::api::external::InstanceCpuCount;
@@ -21,15 +23,14 @@ use sled_agent_client::TestInterfaces as _;
 use std::sync::Arc;
 use uuid::Uuid;
 
-use dropshot::test_util::object_delete;
-use dropshot::test_util::object_get;
 use dropshot::test_util::objects_list_page;
-use dropshot::test_util::objects_post;
-use dropshot::test_util::read_json;
 use dropshot::test_util::ClientTestContext;
+use dropshot::HttpErrorResponseBody;
 
 use nexus_test_utils::identity_eq;
-use nexus_test_utils::resource_helpers::{create_organization, create_project};
+use nexus_test_utils::resource_helpers::{
+    create_instance, create_organization, create_project,
+};
 use nexus_test_utils::ControlPlaneTestContext;
 use nexus_test_utils_macros::nexus_test;
 
@@ -56,22 +57,36 @@ async fn test_instances_access_before_create_returns_not_found(
 
     /* Make sure we get a 404 if we fetch one. */
     let instance_url = format!("{}/just-rainsticks", url_instances);
-    let error = client
-        .make_request_error(Method::GET, &instance_url, StatusCode::NOT_FOUND)
-        .await;
+    let error: HttpErrorResponseBody = NexusRequest::expect_failure(
+        client,
+        StatusCode::NOT_FOUND,
+        Method::GET,
+        &instance_url,
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap()
+    .parsed_body()
+    .unwrap();
     assert_eq!(
         error.message,
         "not found: instance with name \"just-rainsticks\""
     );
 
     /* Ditto if we try to delete one. */
-    let error = client
-        .make_request_error(
-            Method::DELETE,
-            &instance_url,
-            StatusCode::NOT_FOUND,
-        )
-        .await;
+    let error: HttpErrorResponseBody = NexusRequest::expect_failure(
+        client,
+        StatusCode::NOT_FOUND,
+        Method::DELETE,
+        &instance_url,
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap()
+    .parsed_body()
+    .unwrap();
     assert_eq!(
         error.message,
         "not found: instance with name \"just-rainsticks\""
@@ -96,34 +111,45 @@ async fn test_instances_create_reboot_halt(
 
     /* Create an instance. */
     let instance_url = format!("{}/just-rainsticks", url_instances);
-    let new_instance = params::InstanceCreate {
-        identity: IdentityMetadataCreateParams {
-            name: "just-rainsticks".parse().unwrap(),
-            description: "sells rainsticks".to_string(),
-        },
-        ncpus: InstanceCpuCount(4),
-        memory: ByteCount::from_mebibytes_u32(256),
-        hostname: "rainsticks".to_string(),
-    };
-    let instance: Instance =
-        objects_post(&client, &url_instances, new_instance.clone()).await;
+    let instance = create_instance(
+        client,
+        ORGANIZATION_NAME,
+        PROJECT_NAME,
+        "just-rainsticks",
+    )
+    .await;
     assert_eq!(instance.identity.name, "just-rainsticks");
-    assert_eq!(instance.identity.description, "sells rainsticks");
+    assert_eq!(instance.identity.description, "instance \"just-rainsticks\"");
     let InstanceCpuCount(nfoundcpus) = instance.ncpus;
+    /* These particulars are hardcoded in create_instance(). */
     assert_eq!(nfoundcpus, 4);
     assert_eq!(instance.memory.to_whole_mebibytes(), 256);
-    assert_eq!(instance.hostname, "rainsticks");
+    assert_eq!(instance.hostname, "the_host");
     assert_eq!(instance.runtime.run_state, InstanceState::Starting);
 
     /* Attempt to create a second instance with a conflicting name. */
-    let error = client
-        .make_request_error_body(
-            Method::POST,
-            &url_instances,
-            new_instance,
-            StatusCode::BAD_REQUEST,
-        )
-        .await;
+    let error: HttpErrorResponseBody = NexusRequest::new(
+        RequestBuilder::new(client, Method::POST, &url_instances)
+            .body(Some(&params::InstanceCreate {
+                identity: IdentityMetadataCreateParams {
+                    name: instance.identity.name.clone(),
+                    description: format!(
+                        "instance {:?}",
+                        &instance.identity.name
+                    ),
+                },
+                ncpus: instance.ncpus,
+                memory: instance.memory,
+                hostname: instance.hostname.clone(),
+            }))
+            .expect_status(Some(StatusCode::BAD_REQUEST)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap()
+    .parsed_body()
+    .unwrap();
     assert_eq!(error.message, "already exists: instance \"just-rainsticks\"");
 
     /* List instances again and expect to find the one we just created. */
@@ -238,13 +264,18 @@ async fn test_instances_create_reboot_halt(
     /*
      * Attempt to reboot the halted instance.  This should fail.
      */
-    let _error = client
-        .make_request_error(
-            Method::POST,
-            &format!("{}/reboot", instance_url),
-            StatusCode::BAD_REQUEST,
-        )
-        .await;
+    let _error: HttpErrorResponseBody = NexusRequest::expect_failure(
+        client,
+        StatusCode::BAD_REQUEST,
+        Method::POST,
+        &format!("{}/reboot", &instance_url),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap()
+    .parsed_body()
+    .unwrap();
     // TODO communicating this error message through requires exporting error
     // types from dropshot, translating that into a component of the generated
     // client, and expressing that as a rich error type.
@@ -304,13 +335,18 @@ async fn test_instances_create_reboot_halt(
             > instance.runtime.time_run_state_updated
     );
 
-    let _error = client
-        .make_request_error(
-            Method::POST,
-            &format!("{}/reboot", instance_url),
-            StatusCode::BAD_REQUEST,
-        )
-        .await;
+    let _error: HttpErrorResponseBody = NexusRequest::expect_failure(
+        client,
+        StatusCode::BAD_REQUEST,
+        Method::POST,
+        &format!("{}/reboot", instance_url),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap()
+    .parsed_body()
+    .unwrap();
     //assert_eq!(error.message, "cannot reboot instance in state \"stopping\"");
     let instance = instance_next;
     instance_simulate(nexus, &instance.identity.id).await;
@@ -324,12 +360,9 @@ async fn test_instances_create_reboot_halt(
     /* TODO-coverage add a test to try to delete the project at this point. */
 
     /* Delete the instance. */
-    client
-        .make_request_no_body(
-            Method::DELETE,
-            &instance_url,
-            StatusCode::NO_CONTENT,
-        )
+    NexusRequest::object_delete(client, &instance_url)
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
         .await
         .unwrap();
 
@@ -343,32 +376,40 @@ async fn test_instances_create_reboot_halt(
      * Once more, try to reboot it.  This should not work on a destroyed
      * instance.
      */
-    client
-        .make_request_error(
-            Method::POST,
-            &format!("{}/reboot", instance_url),
-            StatusCode::NOT_FOUND,
-        )
-        .await;
+    NexusRequest::expect_failure(
+        client,
+        StatusCode::NOT_FOUND,
+        Method::POST,
+        &format!("{}/reboot", instance_url),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap();
 
     /*
      * Similarly, we should not be able to start or stop the instance.
      */
-    client
-        .make_request_error(
-            Method::POST,
-            &format!("{}/start", instance_url),
-            StatusCode::NOT_FOUND,
-        )
-        .await;
-
-    client
-        .make_request_error(
-            Method::POST,
-            &format!("{}/stop", instance_url),
-            StatusCode::NOT_FOUND,
-        )
-        .await;
+    NexusRequest::expect_failure(
+        client,
+        StatusCode::NOT_FOUND,
+        Method::POST,
+        &format!("{}/start", instance_url),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap();
+    NexusRequest::expect_failure(
+        client,
+        StatusCode::NOT_FOUND,
+        Method::POST,
+        &format!("{}/stop", instance_url),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap();
 }
 
 #[nexus_test]
@@ -389,17 +430,13 @@ async fn test_instances_delete_fails_when_running_succeeds_when_stopped(
 
     // Create an instance.
     let instance_url = format!("{}/just-rainsticks", url_instances);
-    let new_instance = params::InstanceCreate {
-        identity: IdentityMetadataCreateParams {
-            name: "just-rainsticks".parse().unwrap(),
-            description: "sells rainsticks".to_string(),
-        },
-        ncpus: InstanceCpuCount(4),
-        memory: ByteCount::from_mebibytes_u32(256),
-        hostname: String::from("rainsticks"),
-    };
-    let instance: Instance =
-        objects_post(&client, &url_instances, new_instance.clone()).await;
+    let instance = create_instance(
+        client,
+        ORGANIZATION_NAME,
+        PROJECT_NAME,
+        "just-rainsticks",
+    )
+    .await;
 
     // Simulate the instance booting.
     instance_simulate(nexus, &instance.identity.id).await;
@@ -408,13 +445,18 @@ async fn test_instances_delete_fails_when_running_succeeds_when_stopped(
     assert_eq!(instance_next.runtime.run_state, InstanceState::Running);
 
     // Attempt to delete a running instance. This should fail.
-    let error = client
-        .make_request_error(
-            Method::DELETE,
-            &instance_url,
-            StatusCode::BAD_REQUEST,
-        )
-        .await;
+    let error: HttpErrorResponseBody = NexusRequest::expect_failure(
+        client,
+        StatusCode::BAD_REQUEST,
+        Method::DELETE,
+        &instance_url,
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap()
+    .parsed_body()
+    .unwrap();
     assert_eq!(
         error.message,
         "instance cannot be deleted in state \"running\""
@@ -428,7 +470,11 @@ async fn test_instances_delete_fails_when_running_succeeds_when_stopped(
     assert_eq!(instance.runtime.run_state, InstanceState::Stopped);
 
     // Now deletion should succeed.
-    object_delete(&client, &instance_url).await;
+    NexusRequest::object_delete(&client, &instance_url)
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .unwrap();
 }
 
 #[nexus_test]
@@ -488,14 +534,23 @@ async fn instance_get(
     client: &ClientTestContext,
     instance_url: &str,
 ) -> Instance {
-    object_get::<Instance>(client, instance_url).await
+    NexusRequest::object_get(client, instance_url)
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .unwrap()
+        .parsed_body()
+        .unwrap()
 }
 
 async fn instances_list(
     client: &ClientTestContext,
     instances_url: &str,
 ) -> Vec<Instance> {
-    objects_list_page::<Instance>(client, instances_url).await.items
+    NexusRequest::iter_collection_authn(client, instances_url, "", None)
+        .await
+        .expect("failed to list Instances")
+        .all_items
 }
 
 /**
@@ -520,16 +575,17 @@ async fn instance_post(
             InstanceOp::Reboot => "reboot",
         }
     );
-    let mut response = client
-        .make_request_with_body(
-            Method::POST,
-            &url,
-            "".into(),
-            StatusCode::ACCEPTED,
-        )
-        .await
-        .unwrap();
-    read_json::<Instance>(&mut response).await
+    NexusRequest::new(
+        RequestBuilder::new(client, Method::POST, &url)
+            .body(None as Option<&serde_json::Value>)
+            .expect_status(Some(StatusCode::ACCEPTED)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap()
+    .parsed_body()
+    .unwrap()
 }
 
 fn instances_eq(instance1: &Instance, instance2: &Instance) {

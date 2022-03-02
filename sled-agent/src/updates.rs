@@ -63,7 +63,7 @@ impl UpdateArtifact {
         let response = nexus
             .cpapi_artifact_download(&file_name)
             .await
-            .map_err(|e| Error::Nexus(e))?;
+            .map_err(|e| Error::Nexus(e.into()))?;
 
         let mut path = self.artifact_directory().to_path_buf();
         tokio::fs::create_dir_all(&path).await?;

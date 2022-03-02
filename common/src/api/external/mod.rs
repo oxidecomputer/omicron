@@ -28,13 +28,12 @@ use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
 use serde_with::{DeserializeFromStr, SerializeDisplay};
-use std::collections::{BTreeMap, HashMap};
+use std::collections::BTreeMap;
 use std::convert::TryFrom;
 use std::fmt::Debug;
 use std::fmt::Display;
 use std::fmt::Formatter;
 use std::fmt::Result as FormatResult;
-use std::iter::FromIterator;
 use std::net::IpAddr;
 use std::num::{NonZeroU16, NonZeroU32};
 use std::str::FromStr;
@@ -1045,6 +1044,14 @@ impl From<steno::SagaStateView> for SagaState {
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Serialize)]
 pub struct Ipv4Net(pub ipnetwork::Ipv4Network);
 
+impl Ipv4Net {
+    /// Return `true` if this IPv4 subnetwork is from an RFC 1918 private
+    /// address space.
+    pub fn is_private(&self) -> bool {
+        self.0.network().is_private()
+    }
+}
+
 impl std::ops::Deref for Ipv4Net {
     type Target = ipnetwork::Ipv4Network;
     fn deref(&self) -> &Self::Target {
@@ -1101,6 +1108,38 @@ impl JsonSchema for Ipv4Net {
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Serialize)]
 pub struct Ipv6Net(pub ipnetwork::Ipv6Network);
 
+impl Ipv6Net {
+    /// The length for all VPC IPv6 prefixes
+    pub const VPC_IPV6_PREFIX_LENGTH: u8 = 48;
+
+    /// The prefix length for all VPC Sunets
+    pub const VPC_SUBNET_IPV6_PREFIX_LENGTH: u8 = 64;
+
+    /// Return `true` if this subnetwork is in the IPv6 Unique Local Address
+    /// range defined in RFC 4193, e.g., `fd00:/8`
+    pub fn is_unique_local(&self) -> bool {
+        // TODO: Delegate to `Ipv6Addr::is_unique_local()` when stabilized.
+        self.0.network().octets()[0] == 0xfd
+    }
+
+    /// Return `true` if this subnetwork is a valid VPC prefix.
+    ///
+    /// This checks that the subnet is a unique local address, and has the VPC
+    /// prefix length required.
+    pub fn is_vpc_prefix(&self) -> bool {
+        self.is_unique_local()
+            && self.0.prefix() == Self::VPC_IPV6_PREFIX_LENGTH
+    }
+
+    /// Return `true` if this subnetwork is a valid VPC Subnet, given the VPC's
+    /// prefix.
+    pub fn is_vpc_subnet(&self, vpc_prefix: &Ipv6Net) -> bool {
+        self.is_unique_local()
+            && self.is_subnet_of(vpc_prefix.0)
+            && self.prefix() == Self::VPC_SUBNET_IPV6_PREFIX_LENGTH
+    }
+}
+
 impl std::ops::Deref for Ipv6Net {
     type Target = ipnetwork::Ipv6Network;
     fn deref(&self) -> &Self::Target {
@@ -1137,9 +1176,9 @@ impl JsonSchema for Ipv6Net {
                     max_length: Some(43),
                     min_length: None,
                     pattern: Some(
-                        // Conforming to unique local addressing scheme, `fd00::/8`
+                        // Conforming to unique local addressing scheme, `fd00::/8`.
                         concat!(
-                            r#"^(fd|FD)00:((([0-9a-fA-F]{1,4}\:){6}[0-9a-fA-F]{1,4})|(([0-9a-fA-F]{1,4}:){1,6}:))/(6[4-9]|[7-9][0-9]|1[0-1][0-9]|12[0-6])$"#,
+                            r#"^(fd|FD)[0-9a-fA-F]{2}:((([0-9a-fA-F]{1,4}\:){6}[0-9a-fA-F]{1,4})|(([0-9a-fA-F]{1,4}:){1,6}:))/(6[4-9]|[7-9][0-9]|1[0-1][0-9]|12[0-6])$"#,
                         ).to_string(),
                     ),
                 })),
@@ -1174,7 +1213,7 @@ pub struct VpcRouter {
 /// This enum itself isn't intended to be used directly but rather as a
 /// delegate for subset enums to not have to re-implement all the base type conversions.
 ///
-/// See https://rfd.shared.oxide.computer/rfd/0021#api-target-strings
+/// See <https://rfd.shared.oxide.computer/rfd/0021#api-target-strings>
 #[derive(Debug, PartialEq, Display, FromStr)]
 pub enum NetworkTarget {
     #[display("vpc:{0}")]
@@ -1413,13 +1452,23 @@ pub struct VpcFirewallRule {
     pub action: VpcFirewallRuleAction,
     /// the relative priority of this rule
     pub priority: VpcFirewallRulePriority,
+    /// the VPC to which this rule belongs
+    pub vpc_id: Uuid,
+}
+
+/**
+ * Collection of a [`Vpc`]'s firewall rules
+ */
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct VpcFirewallRules {
+    pub rules: Vec<VpcFirewallRule>,
 }
 
 /// A single rule in a VPC firewall
-#[derive(Clone, Debug, PartialEq, Deserialize, Serialize, JsonSchema)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize, JsonSchema)]
 pub struct VpcFirewallRuleUpdate {
-    // In an update, the name is encoded as a key in the JSON object, so we
-    // don't include one here
+    /// name of the rule, unique to this VPC
+    pub name: Name,
     /// human-readable free-form text about a resource
     pub description: String,
     /// whether this rule is in effect
@@ -1437,43 +1486,13 @@ pub struct VpcFirewallRuleUpdate {
 }
 
 /**
- * Updateable properties of a [`Vpc`]'s firewall
+ * Updateable properties of a `Vpc`'s firewall
  * Note that VpcFirewallRules are implicitly created along with a Vpc,
  * so there is no explicit creation.
  */
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-// TODO we're controlling the schemars output, but not the serde
-// deserialization here because of surprising behavior; see #449
-#[schemars(deny_unknown_fields)]
 pub struct VpcFirewallRuleUpdateParams {
-    #[serde(flatten)]
-    pub rules: HashMap<Name, VpcFirewallRuleUpdate>,
-}
-
-/**
- * Response to an update replacing [`Vpc`]'s firewall
- */
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-// TODO we're controlling the schemars output, but not the serde
-// deserialization here because of surprising behavior; see #449
-#[schemars(deny_unknown_fields)]
-pub struct VpcFirewallRuleUpdateResult {
-    #[serde(flatten)]
-    pub rules: HashMap<Name, VpcFirewallRule>,
-}
-
-impl FromIterator<VpcFirewallRule> for VpcFirewallRuleUpdateResult {
-    fn from_iter<T>(iter: T) -> Self
-    where
-        T: IntoIterator<Item = VpcFirewallRule>,
-    {
-        Self {
-            rules: iter
-                .into_iter()
-                .map(|rule| (rule.identity.name.clone(), rule))
-                .collect(),
-        }
-    }
+    pub rules: Vec<VpcFirewallRuleUpdate>,
 }
 
 /// Firewall rule priority. This is a value from 0 to 65535, with rules with
@@ -2191,9 +2210,10 @@ mod test {
 
     #[test]
     fn test_firewall_deserialization() {
-        let json = r#"
-            {
-            "allow-internal-inbound": {
+        let json = r#"{
+            "rules": [
+              {
+                "name": "allow-internal-inbound",
                 "status": "enabled",
                 "direction": "inbound",
                 "targets": [ { "type": "vpc", "value": "default" } ],
@@ -2201,8 +2221,9 @@ mod test {
                 "action": "allow",
                 "priority": 65534,
                 "description": "allow inbound traffic between instances"
-            },
-            "rule2": {
+              },
+              {
+                "name": "rule2",
                 "status": "disabled",
                 "direction": "outbound",
                 "targets": [ { "type": "vpc", "value": "default" } ],
@@ -2210,16 +2231,17 @@ mod test {
                 "action": "deny",
                 "priority": 65533,
                 "description": "second rule"
-            }
-            }
-            "#;
+              }
+            ]
+          }"#;
         let params =
             serde_json::from_str::<VpcFirewallRuleUpdateParams>(json).unwrap();
         assert_eq!(params.rules.len(), 2);
         assert_eq!(
-            params.rules[&Name::try_from("allow-internal-inbound".to_string())
-                .unwrap()],
+            params.rules[0],
             VpcFirewallRuleUpdate {
+                name: Name::try_from("allow-internal-inbound".to_string())
+                    .unwrap(),
                 status: VpcFirewallRuleStatus::Enabled,
                 direction: VpcFirewallRuleDirection::Inbound,
                 targets: vec![VpcFirewallRuleTarget::Vpc(
@@ -2239,8 +2261,9 @@ mod test {
             }
         );
         assert_eq!(
-            params.rules[&Name::try_from("rule2".to_string()).unwrap()],
+            params.rules[1],
             VpcFirewallRuleUpdate {
+                name: Name::try_from("rule2".to_string()).unwrap(),
                 status: VpcFirewallRuleStatus::Disabled,
                 direction: VpcFirewallRuleDirection::Outbound,
                 targets: vec![VpcFirewallRuleTarget::Vpc(
@@ -2306,6 +2329,28 @@ mod test {
         assert_eq!(
             "nope:this-should-error".parse::<NetworkTarget>().unwrap_err(),
             parse_display::ParseError::new()
+        );
+    }
+
+    #[test]
+    fn test_ipv6_net_operations() {
+        use super::Ipv6Net;
+        assert!(Ipv6Net("fd00::/8".parse().unwrap()).is_unique_local());
+        assert!(!Ipv6Net("fe00::/8".parse().unwrap()).is_unique_local());
+
+        assert!(Ipv6Net("fd00::/48".parse().unwrap()).is_vpc_prefix());
+        assert!(!Ipv6Net("fe00::/48".parse().unwrap()).is_vpc_prefix());
+        assert!(!Ipv6Net("fd00::/40".parse().unwrap()).is_vpc_prefix());
+
+        let vpc_prefix = Ipv6Net("fd00::/48".parse().unwrap());
+        assert!(
+            Ipv6Net("fd00::/64".parse().unwrap()).is_vpc_subnet(&vpc_prefix)
+        );
+        assert!(
+            !Ipv6Net("fd10::/64".parse().unwrap()).is_vpc_subnet(&vpc_prefix)
+        );
+        assert!(
+            !Ipv6Net("fd00::/63".parse().unwrap()).is_vpc_subnet(&vpc_prefix)
         );
     }
 }

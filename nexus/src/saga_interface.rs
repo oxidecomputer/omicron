@@ -6,9 +6,9 @@
  * Interfaces available to saga actions and undo actions
  */
 
-use crate::db;
 use crate::external_api::params;
 use crate::Nexus;
+use crate::{authz, db};
 use omicron_common::api::external::Error;
 use sled_agent_client::Client as SledAgentClient;
 use slog::Logger;
@@ -24,6 +24,7 @@ use uuid::Uuid;
 pub struct SagaContext {
     nexus: Arc<Nexus>,
     log: Logger,
+    authz: Arc<authz::Authz>,
 }
 
 impl fmt::Debug for SagaContext {
@@ -33,8 +34,12 @@ impl fmt::Debug for SagaContext {
 }
 
 impl SagaContext {
-    pub fn new(nexus: Arc<Nexus>, log: Logger) -> SagaContext {
-        SagaContext { nexus, log }
+    pub fn new(
+        nexus: Arc<Nexus>,
+        log: Logger,
+        authz: Arc<authz::Authz>,
+    ) -> SagaContext {
+        SagaContext { authz, nexus, log }
     }
 
     pub fn log(&self) -> &Logger {
@@ -57,6 +62,10 @@ impl SagaContext {
         _params: &params::InstanceCreate,
     ) -> Result<Uuid, Error> {
         self.nexus.sled_allocate().await
+    }
+
+    pub fn authz(&self) -> &Arc<authz::Authz> {
+        &self.authz
     }
 
     pub fn nexus(&self) -> &Arc<Nexus> {

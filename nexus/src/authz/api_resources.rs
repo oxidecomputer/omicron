@@ -48,13 +48,22 @@ pub trait ApiResource: Clone + Send + Sync + 'static {
     /// can affect access to this resource, return the parent resource.
     /// Otherwise, returns `None`.
     fn parent(&self) -> Option<&dyn AuthorizedResource>;
+}
 
+/// Practically, all objects which implement [`ApiResourceError`]
+/// also implement [`ApiResource`]. However, [`ApiResource`] is not object
+/// safe because it implements [`std::clone::Clone`].
+///
+/// This allows callers to use [`ApiResourceError`] as a trait object.
+pub trait ApiResourceError {
     /// Returns an error as though this resource were not found, suitable for
     /// use when an actor should not be able to see that this resource exists
     fn not_found(&self) -> Error;
 }
 
-impl<T: ApiResource + oso::PolarClass> AuthorizedResource for T {
+impl<T: ApiResource + ApiResourceError + oso::PolarClass> AuthorizedResource
+    for T
+{
     fn load_roles<'a, 'b, 'c, 'd, 'e, 'f>(
         &'a self,
         opctx: &'b OpContext,
@@ -238,7 +247,9 @@ impl ApiResource for FleetChild {
     fn parent(&self) -> Option<&dyn AuthorizedResource> {
         Some(&FLEET)
     }
+}
 
+impl ApiResourceError for FleetChild {
     fn not_found(&self) -> Error {
         self.lookup_type.clone().into_not_found(self.resource_type)
     }
@@ -309,7 +320,9 @@ impl ApiResource for Organization {
     fn parent(&self) -> Option<&dyn AuthorizedResource> {
         Some(&FLEET)
     }
+}
 
+impl ApiResourceError for Organization {
     fn not_found(&self) -> Error {
         self.lookup_type.clone().into_not_found(ResourceType::Organization)
     }
@@ -393,7 +406,9 @@ impl ApiResource for Project {
     fn parent(&self) -> Option<&dyn AuthorizedResource> {
         Some(&self.parent)
     }
+}
 
+impl ApiResourceError for Project {
     fn not_found(&self) -> Error {
         self.lookup_type.clone().into_not_found(ResourceType::Project)
     }
@@ -417,8 +432,12 @@ pub struct ProjectChild {
 }
 
 impl ProjectChild {
-    pub fn id(&self) -> &Uuid {
-        &self.resource_id
+    pub fn id(&self) -> Uuid {
+        self.resource_id
+    }
+
+    pub fn project(&self) -> &Project {
+        &self.parent
     }
 }
 
@@ -450,8 +469,13 @@ impl ApiResource for ProjectChild {
     fn parent(&self) -> Option<&dyn AuthorizedResource> {
         Some(&self.parent)
     }
+}
 
+impl ApiResourceError for ProjectChild {
     fn not_found(&self) -> Error {
         self.lookup_type.clone().into_not_found(self.resource_type)
     }
 }
+
+pub type Disk = ProjectChild;
+pub type Instance = ProjectChild;

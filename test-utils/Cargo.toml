@@ -6,8 +6,8 @@ license = "MPL-2.0"
 
 [dependencies]
 anyhow = "1.0"
-futures = "0.3.18"
-libc = "0.2.114"
+futures = "0.3.21"
+libc = "0.2.119"
 omicron-common = { path = "../common" }
 postgres-protocol = "0.6.3"
 signal-hook = "0.3"
@@ -29,7 +29,7 @@ version = "2.5"
 features = [ "max_level_trace", "release_max_level_debug" ]
 
 [dependencies.tokio]
-version = "1.15"
+version = "1.17"
 features = [ "full" ]
 
 [dependencies.tokio-postgres]

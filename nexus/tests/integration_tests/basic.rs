@@ -177,27 +177,6 @@ async fn test_projects_basic(cptestctx: &ControlPlaneTestContext) {
     create_organization(&client, &org_name).await;
     let projects_url = "/organizations/test-org/projects";
 
-    /* Unauthenticated and unauthorized users cannot list projects. */
-    NexusRequest::expect_failure(
-        client,
-        http::StatusCode::NOT_FOUND,
-        http::Method::GET,
-        projects_url,
-    )
-    .execute()
-    .await
-    .expect("failed to make request");
-    NexusRequest::expect_failure(
-        client,
-        http::StatusCode::NOT_FOUND,
-        http::Method::GET,
-        projects_url,
-    )
-    .authn_as(AuthnMode::UnprivilegedUser)
-    .execute()
-    .await
-    .expect("failed to make request");
-
     /*
      * Verify that there are no projects to begin with.
      */
@@ -239,30 +218,6 @@ async fn test_projects_basic(cptestctx: &ControlPlaneTestContext) {
 
         project_ids
     };
-
-    /*
-     * Unauthenticated and unauthorized users cannot fetch the Project.
-     */
-    let simproject1_url = "/organizations/test-org/projects/simproject1";
-    NexusRequest::expect_failure(
-        client,
-        http::StatusCode::NOT_FOUND,
-        http::Method::GET,
-        simproject1_url,
-    )
-    .execute()
-    .await
-    .expect("failed to make request");
-    NexusRequest::expect_failure(
-        client,
-        http::StatusCode::NOT_FOUND,
-        http::Method::GET,
-        simproject1_url,
-    )
-    .authn_as(AuthnMode::UnprivilegedUser)
-    .execute()
-    .await
-    .expect("failed to make request");
 
     /*
      * Error case: GET /organizations/test-org/projects/simproject1/nonexistent
@@ -385,41 +340,6 @@ async fn test_projects_basic(cptestctx: &ControlPlaneTestContext) {
     );
 
     /*
-     * Unprivileged users should not be able to update a Project.
-     */
-    let project_update = params::ProjectUpdate {
-        identity: IdentityMetadataUpdateParams {
-            name: None,
-            description: None,
-        },
-    };
-    NexusRequest::new(
-        RequestBuilder::new(
-            client,
-            Method::PUT,
-            "/organizations/test-org/projects/simproject3",
-        )
-        .body(Some(&project_update))
-        .expect_status(Some(StatusCode::NOT_FOUND)),
-    )
-    .execute()
-    .await
-    .expect("failed to make request");
-    NexusRequest::new(
-        RequestBuilder::new(
-            client,
-            Method::PUT,
-            "/organizations/test-org/projects/simproject3",
-        )
-        .body(Some(&project_update))
-        .expect_status(Some(StatusCode::NOT_FOUND)),
-    )
-    .authn_as(AuthnMode::UnprivilegedUser)
-    .execute()
-    .await
-    .expect("failed to make request");
-
-    /*
      * Update "simproject3".  We'll make sure that's reflected in the other
      * requests.
      */
@@ -511,6 +431,8 @@ async fn test_projects_basic(cptestctx: &ControlPlaneTestContext) {
     .unwrap();
     assert_eq!("already exists: project \"simproject1\"", error.message);
 
+    // TODO-coverage try to rename it to a name that conflicts
+
     /*
      * Try to create a project with an unsupported name.
      * TODO-polish why doesn't serde include the field name in this error?
@@ -558,33 +480,6 @@ async fn test_projects_basic(cptestctx: &ControlPlaneTestContext) {
             .unwrap();
     assert_eq!(project.identity.name, "honor-roller");
     assert_eq!(project.identity.description, "a soapbox racer");
-
-    /*
-     * Attempt to create a project without authenticating or without privileges.
-     * TODO-security TODO-correctness One thing that's a little strange here: we
-     * currently return a 404 if you attempt to create a Project inside an
-     * Organization and you're not authorized to do that.  In an ideal world,
-     * we'd return a 403 if you can _see_ the Organization and a 404 if not.
-     * But we don't really know if you should be able to see the Organization.
-     * Right now, the only real way to tell that is if you have permissions on
-     * anything _inside_ the Organization, which is incredibly expensive to
-     * determine in general.
-     */
-    RequestBuilder::new(client, Method::POST, &projects_url)
-        .expect_status(Some(StatusCode::NOT_FOUND))
-        .body(Some(&project_create))
-        .execute()
-        .await
-        .expect("expected request to fail");
-    NexusRequest::new(
-        RequestBuilder::new(client, Method::POST, &projects_url)
-            .body(Some(&project_create))
-            .expect_status(Some(StatusCode::NOT_FOUND)),
-    )
-    .authn_as(AuthnMode::UnprivilegedUser)
-    .execute()
-    .await
-    .expect("expected request to fail");
 
     /*
      * List projects again and verify all of our changes.  We should have:
@@ -654,7 +549,7 @@ async fn test_projects_list(cptestctx: &ControlPlaneTestContext) {
             &client,
             projects_url,
             "",
-            projects_subset,
+            Some(projects_subset),
         )
         .await
         .expect("failed to list projects")
@@ -677,7 +572,7 @@ async fn test_projects_list(cptestctx: &ControlPlaneTestContext) {
             &client,
             projects_url,
             "sort_by=name-ascending",
-            projects_subset,
+            Some(projects_subset),
         )
         .await
         .expect("failed to list projects")
@@ -700,7 +595,7 @@ async fn test_projects_list(cptestctx: &ControlPlaneTestContext) {
             &client,
             projects_url,
             "sort_by=name-descending",
-            projects_subset,
+            Some(projects_subset),
         )
         .await
         .expect("failed to list projects")
@@ -722,7 +617,7 @@ async fn test_projects_list(cptestctx: &ControlPlaneTestContext) {
         &client,
         projects_url,
         "sort_by=id-ascending",
-        projects_subset,
+        Some(projects_subset),
     )
     .await
     .expect("failed to list projects")
@@ -776,7 +671,7 @@ async fn projects_list(
     client: &ClientTestContext,
     projects_url: &str,
 ) -> Vec<Project> {
-    NexusRequest::iter_collection_authn(client, projects_url, "", 10)
+    NexusRequest::iter_collection_authn(client, projects_url, "", None)
         .await
         .expect("failed to list projects")
         .all_items

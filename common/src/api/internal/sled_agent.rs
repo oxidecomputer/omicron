@@ -38,7 +38,7 @@ pub struct InstanceMigrateParams {
 
 /// Requestable running state of an Instance.
 ///
-/// A subset of [`InstanceState`].
+/// A subset of [`external::InstanceState`].
 #[derive(
     Copy,
     Clone,
@@ -91,6 +91,13 @@ impl InstanceStateRequested {
     }
 }
 
+/// Instance runtime state to update for a migration.
+#[derive(Copy, Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct InstanceRuntimeStateMigrateParams {
+    pub migration_id: Uuid,
+    pub dst_propolis_id: Uuid,
+}
+
 /// Used to request an Instance state change from a sled agent
 ///
 /// Right now, it's only the run state and migration id that can
@@ -99,5 +106,5 @@ impl InstanceStateRequested {
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct InstanceRuntimeStateRequested {
     pub run_state: InstanceStateRequested,
-    pub migration_id: Option<Uuid>,
+    pub migration_params: Option<InstanceRuntimeStateMigrateParams>,
 }

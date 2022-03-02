@@ -15,6 +15,7 @@ use crate::authn::Actor;
 use crate::authz::AuthorizedResource;
 use crate::db::model::ConsoleSession;
 use crate::db::DataStore;
+use crate::saga_interface::SagaContext;
 use async_trait::async_trait;
 use authn::external::session_cookie::HttpAuthnSessionCookie;
 use authn::external::spoof::HttpAuthnSpoof;
@@ -43,6 +44,8 @@ pub struct ServerContext {
     pub log: Logger,
     /** authenticator for external HTTP requests */
     pub external_authn: authn::external::Authenticator<Arc<ServerContext>>,
+    /** authentication context used for internal HTTP requests */
+    pub internal_authn: Arc<authn::Context>,
     /** authorizer */
     pub authz: Arc<authz::Authz>,
     /** internal API request latency tracker */
@@ -91,6 +94,7 @@ impl ServerContext {
             })
             .collect();
         let external_authn = authn::external::Authenticator::new(nexus_schemes);
+        let internal_authn = Arc::new(authn::Context::internal_api());
         let authz = Arc::new(authz::Authz::new());
         let create_tracker = |name: &str| {
             let target = HttpService { name: name.to_string(), id: config.id };
@@ -146,6 +150,7 @@ impl ServerContext {
             .await,
             log,
             external_authn,
+            internal_authn,
             authz,
             internal_latencies,
             external_latencies,
@@ -194,14 +199,17 @@ pub struct OpContext {
     kind: OpKind,
 }
 
-pub enum OpKind {
+enum OpKind {
     /// Handling an external API request
     ExternalApiRequest,
+    /// Handling an internal API request
+    InternalApiRequest,
+    /// Executing a saga activity
+    Saga,
     /// Background operations in Nexus
     Background,
-    #[cfg(test)]
-    /// Unit tests
-    UnitTest,
+    /// Automated testing (unit tests and integration tests)
+    Test,
 }
 
 impl OpContext {
@@ -221,25 +229,9 @@ impl OpContext {
             datastore,
         );
 
-        let request = rqctx.request.lock().await;
-        let mut metadata = BTreeMap::new();
-        metadata.insert(String::from("request_id"), rqctx.request_id.clone());
-        metadata
-            .insert(String::from("http_method"), request.method().to_string());
-        metadata.insert(String::from("http_uri"), request.uri().to_string());
-
-        let log = if let Some(Actor(actor_id)) = authn.actor() {
-            metadata
-                .insert(String::from("authenticated"), String::from("true"));
-            metadata.insert(String::from("actor"), actor_id.to_string());
-            rqctx.log.new(
-                o!("authenticated" => true, "actor" => actor_id.to_string()),
-            )
-        } else {
-            metadata
-                .insert(String::from("authenticated"), String::from("false"));
-            rqctx.log.new(o!("authenticated" => false))
-        };
+        let (log, mut metadata) =
+            OpContext::log_and_metadata_for_authn(&rqctx.log, &authn);
+        OpContext::load_request_metadata(rqctx, &mut metadata).await;
 
         Ok(OpContext {
             log,
@@ -250,6 +242,114 @@ impl OpContext {
             metadata,
             kind: OpKind::ExternalApiRequest,
         })
+    }
+
+    /// Returns a context suitable for use in handling internal API operations
+    // TODO-security this should eventually do some kind of authentication
+    pub async fn for_internal_api(
+        rqctx: &dropshot::RequestContext<Arc<ServerContext>>,
+    ) -> OpContext {
+        let created_instant = Instant::now();
+        let created_walltime = SystemTime::now();
+        let apictx = rqctx.context();
+        let authn = Arc::clone(&apictx.internal_authn);
+        let datastore = Arc::clone(apictx.nexus.datastore());
+        let authz = authz::Context::new(
+            Arc::clone(&authn),
+            Arc::clone(&apictx.authz),
+            datastore,
+        );
+
+        let (log, mut metadata) =
+            OpContext::log_and_metadata_for_authn(&rqctx.log, &authn);
+        OpContext::load_request_metadata(rqctx, &mut metadata).await;
+
+        OpContext {
+            log,
+            authz,
+            authn,
+            created_instant,
+            created_walltime,
+            metadata,
+            kind: OpKind::InternalApiRequest,
+        }
+    }
+
+    fn log_and_metadata_for_authn(
+        log: &slog::Logger,
+        authn: &authn::Context,
+    ) -> (slog::Logger, BTreeMap<String, String>) {
+        let mut metadata = BTreeMap::new();
+
+        let log = if let Some(Actor(actor_id)) = authn.actor() {
+            metadata
+                .insert(String::from("authenticated"), String::from("true"));
+            metadata.insert(String::from("actor"), actor_id.to_string());
+            log.new(
+                o!("authenticated" => true, "actor" => actor_id.to_string()),
+            )
+        } else {
+            metadata
+                .insert(String::from("authenticated"), String::from("false"));
+            log.new(o!("authenticated" => false))
+        };
+
+        (log, metadata)
+    }
+
+    async fn load_request_metadata<T: Send + Sync + 'static>(
+        rqctx: &dropshot::RequestContext<T>,
+        metadata: &mut BTreeMap<String, String>,
+    ) {
+        let request = rqctx.request.lock().await;
+        metadata.insert(String::from("request_id"), rqctx.request_id.clone());
+        metadata
+            .insert(String::from("http_method"), request.method().to_string());
+        metadata.insert(String::from("http_uri"), request.uri().to_string());
+    }
+
+    pub fn for_saga_action<T>(
+        sagactx: &steno::ActionContext<T>,
+        serialized_authn: &authn::saga::Serialized,
+    ) -> OpContext
+    where
+        T: steno::SagaType<ExecContextType = Arc<SagaContext>>,
+    {
+        let created_instant = Instant::now();
+        let created_walltime = SystemTime::now();
+        let osagactx = sagactx.user_data();
+        let nexus = osagactx.nexus();
+        let datastore = Arc::clone(nexus.datastore());
+        let authn = Arc::new(serialized_authn.to_authn());
+        let authz = authz::Context::new(
+            Arc::clone(&authn),
+            Arc::clone(&osagactx.authz()),
+            datastore,
+        );
+        let (log, mut metadata) =
+            OpContext::log_and_metadata_for_authn(osagactx.log(), &authn);
+
+        // TODO-debugging This would be a good place to put the saga template
+        // name, but we don't have it available here.  This log maybe should
+        // come from steno, prepopulated with useful metadata similar to the
+        // way dropshot::RequestContext does.
+        let log = log.new(o!(
+            "saga_node" => sagactx.node_label().to_string(),
+        ));
+        metadata.insert(
+            String::from("saga_node"),
+            sagactx.node_label().to_string(),
+        );
+
+        OpContext {
+            log,
+            authz,
+            authn,
+            created_instant,
+            created_walltime,
+            metadata,
+            kind: OpKind::Saga,
+        }
     }
 
     /// Returns a context suitable for use in background operations in Nexus
@@ -278,10 +378,9 @@ impl OpContext {
         }
     }
 
-    /// Returns a context suitable for automated unit tests where an OpContext
-    /// is needed outside of a Dropshot context
-    #[cfg(test)]
-    pub fn for_unit_tests(
+    /// Returns a context suitable for automated tests where an OpContext is
+    /// needed outside of a Dropshot context
+    pub fn for_tests(
         log: slog::Logger,
         datastore: Arc<DataStore>,
     ) -> OpContext {
@@ -300,7 +399,7 @@ impl OpContext {
             created_instant,
             created_walltime,
             metadata: BTreeMap::new(),
-            kind: OpKind::UnitTest,
+            kind: OpKind::Test,
         }
     }
 
@@ -385,7 +484,7 @@ mod test {
         let mut db = test_setup_database(&logctx.log).await;
         let (_, datastore) =
             crate::db::datastore::datastore_test(&logctx, &db).await;
-        let opctx = OpContext::for_unit_tests(logctx.log.new(o!()), datastore);
+        let opctx = OpContext::for_tests(logctx.log.new(o!()), datastore);
 
         // Like in test_background_context(), this is essentially a test of the
         // authorization policy.  The unit tests assume this user can do

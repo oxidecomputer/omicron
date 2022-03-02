@@ -617,8 +617,8 @@ impl ProducerRegistry {
     /// Collect available samples from all registered producers.
     ///
     /// This method returns a vector of results, one from each producer. If the producer generates
-    /// an error, that's propagated here. Successfully produced samples are returned in a set,
-    /// ordered by the [`Sample::cmp`] method.
+    /// an error, that's propagated here. Successfully produced samples are returned in a vector,
+    /// ordered in the way they're produced internally.
     pub fn collect(&self) -> ProducerResults {
         let mut producers = self.producers.lock().unwrap();
         let mut results = Vec::with_capacity(producers.len());

@@ -34,11 +34,12 @@ table! {
         time_modified -> Timestamptz,
         time_deleted -> Nullable<Timestamptz>,
         project_id -> Uuid,
-        state -> Text,
+        state -> crate::db::model::InstanceStateEnum,
         time_state_updated -> Timestamptz,
         state_generation -> Int8,
         active_server_id -> Uuid,
         active_propolis_id -> Uuid,
+        target_propolis_id -> Nullable<Uuid>,
         active_propolis_ip -> Nullable<Inet>,
         migration_id -> Nullable<Uuid>,
         ncpus -> Int8,
@@ -117,7 +118,7 @@ table! {
         template_name -> Text,
         time_created -> Timestamptz,
         saga_params -> Jsonb,
-        saga_state -> Text,
+        saga_state -> crate::db::saga_types::SagaCachedStateEnum,
         current_sec -> Nullable<Uuid>,
         adopt_generation -> Int8,
         adopt_time -> Timestamptz,
@@ -225,6 +226,7 @@ table! {
         time_deleted -> Nullable<Timestamptz>,
         project_id -> Uuid,
         system_router_id -> Uuid,
+        ipv6_prefix -> Inet,
         dns_name -> Text,
         firewall_gen -> Int8,
     }
@@ -239,8 +241,8 @@ table! {
         time_modified -> Timestamptz,
         time_deleted -> Nullable<Timestamptz>,
         vpc_id -> Uuid,
-        ipv4_block -> Nullable<Inet>,
-        ipv6_block -> Nullable<Inet>,
+        ipv4_block -> Inet,
+        ipv6_block -> Inet,
     }
 }
 

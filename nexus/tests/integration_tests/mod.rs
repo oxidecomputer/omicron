@@ -5,7 +5,6 @@
 
 mod artifact_download;
 mod authn_http;
-mod authz;
 mod basic;
 mod commands;
 mod console_api;
@@ -19,6 +18,7 @@ mod roles_builtin;
 mod router_routes;
 mod subnet_allocation;
 mod timeseries;
+mod unauthorized;
 mod updates;
 mod users_builtin;
 mod vpc_firewall;
