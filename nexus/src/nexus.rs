@@ -22,7 +22,6 @@ use crate::populate::populate_start;
 use crate::populate::PopulateStatus;
 use crate::saga_interface::SagaContext;
 use crate::sagas;
-use crate::updates;
 use anyhow::anyhow;
 use anyhow::Context;
 use async_trait::async_trait;
@@ -2302,8 +2301,7 @@ impl Nexus {
     fn as_rack(&self) -> db::model::Rack {
         db::model::Rack {
             identity: self.api_rack_identity.clone(),
-            tuf_metadata_base_url: None,
-            tuf_targets_base_url: None,
+            tuf_base_url: None,
         }
     }
 
@@ -2651,17 +2649,10 @@ impl Nexus {
         self.db_datastore.session_hard_delete(token).await
     }
 
-    fn tuf_base_urls(&self) -> Option<updates::BaseUrlPair> {
+    fn tuf_base_url(&self) -> Option<String> {
         self.updates_config.as_ref().map(|c| {
             let rack = self.as_rack();
-            updates::BaseUrlPair {
-                metadata: rack
-                    .tuf_metadata_base_url
-                    .unwrap_or_else(|| c.default_base_urls.metadata.clone()),
-                targets: rack
-                    .tuf_targets_base_url
-                    .unwrap_or_else(|| c.default_base_urls.targets.clone()),
-            }
+            rack.tuf_base_url.unwrap_or_else(|| c.default_base_url.clone())
         })
     }
 
@@ -2671,8 +2662,8 @@ impl Nexus {
                 message: "updates system not configured".into(),
             }
         })?;
-        let base_urls =
-            self.tuf_base_urls().ok_or_else(|| Error::InvalidRequest {
+        let base_url =
+            self.tuf_base_url().ok_or_else(|| Error::InvalidRequest {
                 message: "updates system not configured".into(),
             })?;
         let trusted_root = tokio::fs::read(&updates_config.trusted_root)
@@ -2685,7 +2676,7 @@ impl Nexus {
             })?;
 
         let artifacts = tokio::task::spawn_blocking(move || {
-            crate::updates::read_artifacts(&trusted_root, base_urls)
+            crate::updates::read_artifacts(&trusted_root, base_url)
         })
         .await
         .unwrap()
@@ -2750,10 +2741,13 @@ impl Nexus {
         &self,
         path: P,
     ) -> Result<Vec<u8>, Error> {
-        let base_urls =
-            self.tuf_base_urls().ok_or_else(|| Error::InvalidRequest {
+        let mut base_url =
+            self.tuf_base_url().ok_or_else(|| Error::InvalidRequest {
                 message: "updates system not configured".into(),
             })?;
+        if !base_url.ends_with('/') {
+            base_url.push('/');
+        }
 
         let path = path.as_ref();
         if !path.starts_with(BASE_ARTIFACT_DIR) {
@@ -2796,8 +2790,8 @@ impl Nexus {
             }
 
             let mut response = reqwest::get(format!(
-                "{}/{}.{}",
-                base_urls.targets, artifact.target_sha256, artifact.target_name
+                "{}targets/{}.{}",
+                base_url, artifact.target_sha256, artifact.target_name
             ))
             .await
             .map_err(|e| {

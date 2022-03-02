@@ -7,15 +7,6 @@ use omicron_common::api::internal::nexus::UpdateArtifactKind;
 use serde::{Deserialize, Deserializer, Serialize};
 use std::convert::TryInto;
 
-// Simple metadata base URL + targets base URL pair, useful in several places.
-#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
-pub struct BaseUrlPair {
-    /// The metadata base URL.
-    pub metadata: String,
-    /// The targets base URL.
-    pub targets: String,
-}
-
 // Schema for the `artifacts.json` target in the TUF update repository.
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct ArtifactsDocument {
@@ -46,17 +37,21 @@ where
 // TODO(iliana): make async/.await. awslabs/tough#213
 pub fn read_artifacts(
     trusted_root: &[u8],
-    base_urls: BaseUrlPair,
+    mut base_url: String,
 ) -> Result<
     Vec<db::model::UpdateAvailableArtifact>,
     Box<dyn std::error::Error + Send + Sync>,
 > {
     use std::io::Read;
 
+    if !base_url.ends_with('/') {
+        base_url.push('/');
+    }
+
     let repository = tough::RepositoryLoader::new(
         trusted_root,
-        base_urls.metadata.parse()?,
-        base_urls.targets.parse()?,
+        format!("{}metadata/", base_url).parse()?,
+        format!("{}targets/", base_url).parse()?,
     )
     .load()?;
 

@@ -48,9 +48,8 @@ CREATE TABLE omicron.public.rack (
     time_created TIMESTAMPTZ NOT NULL,
     time_modified TIMESTAMPTZ NOT NULL,
 
-    /* Used to configure the updates service URLs */
-    tuf_metadata_base_url STRING(512),
-    tuf_targets_base_url STRING(512)
+    /* Used to configure the updates service URL */
+    tuf_base_url STRING(512)
 );
 
 /*

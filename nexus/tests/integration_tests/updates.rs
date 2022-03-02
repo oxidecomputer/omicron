@@ -13,7 +13,7 @@ use hyper::Body;
 use nexus_test_utils::{load_test_config, test_setup_with_config};
 use omicron_common::api::internal::nexus::UpdateArtifactKind;
 use omicron_nexus::config::UpdatesConfig;
-use omicron_nexus::updates::{ArtifactsDocument, BaseUrlPair, UpdateArtifact};
+use omicron_nexus::updates::{ArtifactsDocument, UpdateArtifact};
 use ring::pkcs8::Document;
 use ring::rand::{SecureRandom, SystemRandom};
 use ring::signature::Ed25519KeyPair;
@@ -61,10 +61,7 @@ async fn test_update_end_to_end() {
     // stand up the test environment
     config.updates = Some(UpdatesConfig {
         trusted_root: tuf_repo.path().join("metadata").join("1.root.json"),
-        default_base_urls: BaseUrlPair {
-            metadata: format!("http://{}/metadata/", local_addr),
-            targets: format!("http://{}/targets/", local_addr),
-        },
+        default_base_url: format!("http://{}/", local_addr),
     });
     let cptestctx =
         test_setup_with_config("test_update_end_to_end", &mut config).await;

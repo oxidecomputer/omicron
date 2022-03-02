@@ -7,7 +7,7 @@
  * configuration
  */
 
-use crate::{db, updates};
+use crate::db;
 use anyhow::anyhow;
 use dropshot::ConfigDropshot;
 use dropshot::ConfigLogging;
@@ -46,7 +46,7 @@ pub struct UpdatesConfig {
     /** Trusted root.json role for the TUF updates repository. */
     pub trusted_root: PathBuf,
     /** Default base URLs for the TUF repository. */
-    pub default_base_urls: updates::BaseUrlPair,
+    pub default_base_url: String,
 }
 
 /**
@@ -190,7 +190,6 @@ mod test {
         SchemeName, TimeseriesDbConfig, UpdatesConfig,
     };
     use crate::db;
-    use crate::updates;
     use dropshot::ConfigDropshot;
     use dropshot::ConfigLogging;
     use dropshot::ConfigLoggingIfExists;
@@ -321,9 +320,7 @@ mod test {
             address = "[::1]:8123"
             [updates]
             trusted_root = "/path/to/root.json"
-            [updates.default_base_urls]
-            metadata = "http://example.invalid/metadata/"
-            targets = "http://example.invalid/targets/"
+            default_base_url = "http://example.invalid/"
             "##,
         )
         .unwrap();
@@ -366,10 +363,7 @@ mod test {
                 },
                 updates: Some(UpdatesConfig {
                     trusted_root: PathBuf::from("/path/to/root.json"),
-                    default_base_urls: updates::BaseUrlPair {
-                        metadata: "http://example.invalid/metadata/".into(),
-                        targets: "http://example.invalid/targets/".into(),
-                    },
+                    default_base_url: "http://example.invalid/".into(),
                 }),
             }
         );

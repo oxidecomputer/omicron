@@ -141,8 +141,7 @@ table! {
         id -> Uuid,
         time_created -> Timestamptz,
         time_modified -> Timestamptz,
-        tuf_metadata_base_url -> Text,
-        tuf_targets_base_url -> Text,
+        tuf_base_url -> Text,
     }
 }
 
