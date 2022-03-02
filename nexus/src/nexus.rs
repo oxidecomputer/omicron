@@ -847,9 +847,6 @@ impl Nexus {
             }
         }
         match params.network_interface {
-            params::InstanceNetworkInterfaceAttachment::Attach(ref attach) => {
-                fail_if_empty_interfaces(&attach.interface_names)?;
-            }
             params::InstanceNetworkInterfaceAttachment::Create(ref create) => {
                 fail_if_empty_interfaces(&create.interface_params)?;
             }

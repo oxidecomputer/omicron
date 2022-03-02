@@ -192,23 +192,12 @@ async fn sic_create_network_interfaces(
         params::InstanceNetworkInterfaceAttachment::Default => {
             sic_create_default_network_interface(&sagactx).await
         }
-        params::InstanceNetworkInterfaceAttachment::Attach(
-            ref attach_params,
-        ) => sic_attach_network_interface(&sagactx, attach_params).await,
         params::InstanceNetworkInterfaceAttachment::Create(
             ref create_params,
         ) => {
             sic_create_custom_network_interfaces(&sagactx, create_params).await
         }
     }
-}
-
-/// Attach one or more existing network interfaces to the provided instance.
-async fn sic_attach_network_interface(
-    _sagactx: &ActionContext<SagaInstanceCreate>,
-    _attach: &params::InstanceAttachNetworkInterface,
-) -> Result<Option<Vec<NetworkInterface>>, ActionError> {
-    todo!();
 }
 
 /// Create one or more custom (non-default) network interfaces for the provided

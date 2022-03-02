@@ -607,7 +607,7 @@
           },
           "instance_id": {
             "nullable": true,
-            "description": "The Instance to which the interface belongs. * * An interface may not be attached to any instance, in which case this is * None.",
+            "description": "The Instance to which the interface belongs.\n\nAn interface may not be attached to any instance, in which case this is None.",
             "type": "string",
             "format": "uuid"
           },

@@ -3599,30 +3599,6 @@
           "time_run_state_updated"
         ]
       },
-      "InstanceAttachNetworkInterface": {
-        "type": "object",
-        "properties": {
-          "interface_names": {
-            "description": "The names of the interfaces to attach to the instance.",
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/Name"
-            }
-          },
-          "vpc_name": {
-            "description": "The name of the VPC containing the interface to attach to",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/Name"
-              }
-            ]
-          }
-        },
-        "required": [
-          "interface_names",
-          "vpc_name"
-        ]
-      },
       "InstanceCpuCount": {
         "description": "The number of CPUs in an Instance",
         "type": "integer",
@@ -3730,25 +3706,6 @@
       "InstanceNetworkInterfaceAttachment": {
         "description": "Describes an attachment of a `NetworkInterface` to an `Instance`, at the time the instance is created.",
         "oneOf": [
-          {
-            "description": "Attach to an existing network interface.",
-            "type": "object",
-            "properties": {
-              "params": {
-                "$ref": "#/components/schemas/InstanceAttachNetworkInterface"
-              },
-              "type": {
-                "type": "string",
-                "enum": [
-                  "Attach"
-                ]
-              }
-            },
-            "required": [
-              "params",
-              "type"
-            ]
-          },
           {
             "description": "Create a new `NetworkInterface` for the `Instance`",
             "type": "object",
@@ -3900,7 +3857,7 @@
           },
           "instance_id": {
             "nullable": true,
-            "description": "The Instance to which the interface belongs. * * An interface may not be attached to any instance, in which case this is * None.",
+            "description": "The Instance to which the interface belongs.\n\nAn interface may not be attached to any instance, in which case this is None.",
             "type": "string",
             "format": "uuid"
           },

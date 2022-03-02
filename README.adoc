@@ -633,10 +633,11 @@ documents being checked in.
 In general, changes any service API **require the following set of build steps**:
 
 * Make changes to the service API
-* Change directories to the package for the modified service. This is step is
-  important, to avoid the circular dependency at this point. One needs to update
-  this one OpenAPI document, without rebuilding the other components that depend
-  on a now-outdated spec.
+* Build the package for the modified service alone. This can be done by changing
+  directories there, or `cargo build -p <package>`. This is step is important,
+  to avoid the circular dependency at this point. One needs to update this one
+  OpenAPI document, without rebuilding the other components that depend on a
+  now-outdated spec.
 * Update the OpenAPI document by running the relevant test with overwrite set:
   `EXPECTORATE=overwrite cargo test test_nexus_openapi_internal` (changing the
   test name as necessary)

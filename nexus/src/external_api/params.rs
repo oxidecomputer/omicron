@@ -97,8 +97,7 @@ pub struct NetworkInterfaceCreate {
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(tag = "type", content = "params")]
 pub enum InstanceNetworkInterfaceAttachment {
-    /// Attach to an existing network interface.
-    Attach(InstanceAttachNetworkInterface),
+    // TODO-completeness: Add variant for attaching to existing interface
     /// Create a new `NetworkInterface` for the `Instance`
     Create(InstanceCreateNetworkInterface),
     /// Default networking setup, which creates a single interface with an
@@ -107,15 +106,6 @@ pub enum InstanceNetworkInterfaceAttachment {
     Default,
     /// No network interfaces at all will be created for the instance.
     None,
-}
-
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-pub struct InstanceAttachNetworkInterface {
-    /// The name of the VPC containing the interface to attach to
-    pub vpc_name: Name,
-
-    /// The names of the interfaces to attach to the instance.
-    pub interface_names: Vec<Name>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
