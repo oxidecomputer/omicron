@@ -126,11 +126,6 @@ impl Pool {
     /// dataset within the pool. This configuration file provides
     /// the necessary information for zones to "launch themselves"
     /// after a reboot.
-    // TODO: We need a better location for this.
-    //
-    // Currently, we store this configuration information in:
-    //
-    //  /var/tmp/<Pool UUID>/<Dataset UUID>
     async fn dataset_config_path(
         &self,
         dataset_id: Uuid,
@@ -144,7 +139,7 @@ impl Pool {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Serialize, Deserialize, JsonSchema, Clone)]
 struct DatasetName {
     // A unique identifier for the Zpool on which the dataset is stored.
     pool_name: String,
@@ -169,7 +164,7 @@ impl DatasetName {
 // by the Sled Agent.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 struct DatasetInfo {
-    name: String,
+    name: DatasetName,
     // TODO: Is this always "/data"?
     data_directory: String,
     address: SocketAddr,
@@ -177,22 +172,22 @@ struct DatasetInfo {
 }
 
 impl DatasetInfo {
-    fn new(kind: DatasetKind, address: SocketAddr) -> DatasetInfo {
+    fn new(pool: &str, kind: DatasetKind, address: SocketAddr) -> DatasetInfo {
         match kind {
             DatasetKind::CockroachDb { .. } => DatasetInfo {
-                name: "cockroachdb".to_string(),
+                name: DatasetName::new(pool, "cockroachdb"),
                 data_directory: "/data".to_string(),
                 address,
                 kind,
             },
             DatasetKind::Clickhouse { .. } => DatasetInfo {
-                name: "clickhouse".to_string(),
+                name: DatasetName::new(pool, "clickhouse"),
                 data_directory: "/data".to_string(),
                 address,
                 kind,
             },
             DatasetKind::Crucible { .. } => DatasetInfo {
-                name: "crucible".to_string(),
+                name: DatasetName::new(pool, "crucible"),
                 data_directory: "/data".to_string(),
                 address,
                 kind,
@@ -201,7 +196,7 @@ impl DatasetInfo {
     }
 
     fn zone_prefix(&self) -> String {
-        format!("{}{}_", ZONE_PREFIX, self.name)
+        format!("{}{}_", ZONE_PREFIX, self.name.dataset_name)
     }
 
     async fn start_zone(
@@ -347,7 +342,49 @@ impl DatasetInfo {
 
                 Ok(())
             }
-            DatasetKind::Crucible { .. } => unimplemented!(),
+            DatasetKind::Crucible { .. } => {
+                info!(log, "Initializing Crucible");
+
+                zone.run_cmd(&[
+                    crate::illumos::zone::SVCCFG,
+                    "import",
+                    "/var/svc/manifest/site/crucible/agent.xml",
+                ])?;
+
+                zone.run_cmd(&[
+                    crate::illumos::zone::SVCCFG,
+                    "-s",
+                    "svc:system/illumos/crucible:default",
+                    "setprop",
+                    &format!("config/listen={}", address.to_string()),
+                ])?;
+
+                zone.run_cmd(&[
+                    crate::illumos::zone::SVCCFG,
+                    "-s",
+                    "svc:system/illumos/crucible:default",
+                    "setprop",
+                    &format!("config/dataset={}", self.name.full()),
+                ])?;
+
+                // Refresh the manifest with the new properties we set,
+                // so they become "effective" properties when the service is enabled.
+                zone.run_cmd(&[
+                    crate::illumos::zone::SVCCFG,
+                    "-s",
+                    "svc:system/illumos/crucible:default",
+                    "refresh",
+                ])?;
+
+                zone.run_cmd(&[
+                    crate::illumos::zone::SVCADM,
+                    "enable",
+                    "-t",
+                    "svc:/system/illumos/crucible:default",
+                ])?;
+
+                Ok(())
+            }
         }
     }
 }
@@ -376,7 +413,7 @@ async fn ensure_running_zone(
             let installed_zone = InstalledZone::install(
                 log,
                 vnic_allocator,
-                &dataset_info.name,
+                &dataset_info.name.dataset_name,
                 Some(&dataset_name.pool_name),
                 &[zone::Dataset { name: dataset_name.full() }],
                 &[],
@@ -468,8 +505,7 @@ impl StorageWorker {
         do_format: bool,
     ) -> Result<(bool, Uuid), Error> {
         // Ensure the underlying dataset exists before trying to poke at zones.
-        let dataset_name =
-            DatasetName::new(pool.info.name(), &dataset_info.name);
+        let dataset_name = &dataset_info.name;
         info!(&self.log, "Ensuring dataset {} exists", dataset_name.full());
         let id =
             StorageWorker::ensure_dataset_with_id(&dataset_name, do_format)?;
@@ -601,8 +637,11 @@ impl StorageWorker {
                 Error::NotFound(format!("zpool: {}", request.zpool_id))
             })?;
 
-        let dataset_info =
-            DatasetInfo::new(request.dataset_kind.clone(), request.address);
+        let dataset_info = DatasetInfo::new(
+            pool.info.name(),
+            request.dataset_kind.clone(),
+            request.address,
+        );
         let (is_new_dataset, id) = self
             .initialize_dataset_and_zone(
                 pool,
@@ -705,13 +744,6 @@ impl StorageWorker {
                             Err(e) => warn!(&self.log, "StorageWorker Failed to load dataset: {}", e),
                         }
                     }
-
-                    // TODO: Add this to the RSS Config.
-                    //
-                    // self.initialize_dataset_and_zone(
-                    //      pool,
-                    //      PARTITIONS.get("crucible").unwrap()
-                    // ).await?
 
                     // Notify Nexus of the zpool and all datasets within.
                     self.add_zpool_notify(

@@ -9,9 +9,6 @@ nexus_address = "[fd00:1234::7]:12221"
 # TODO: A file-backed zpool can be manually created with the following:
 # $ truncate -s 10GB testpool.vdev
 # $ zpool create d462a7f7-b628-40fe-80ff-4e4189e2d62b testpool.vdev
-#
-# Plus adding the "\-\-zpools d462a7f7-b628-40fe-80ff-4e4189e2d62b" argument
-# when initializing the sled agent.
 zpools = [ "d462a7f7-b628-40fe-80ff-4e4189e2d62b" ]
 
 # Address of the Sled Agent itself

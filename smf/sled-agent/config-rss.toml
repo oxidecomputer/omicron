@@ -3,14 +3,10 @@
 [[request]]
 sled_address = "192.168.1.201:12345"
 
-# TODO: Failing; need to supply crucible image. See package-manifest.toml.
-#
-# [[request.partition]]
-# zpool_uuid = "d462a7f7-b628-40fe-80ff-4e4189e2d62b"
-# address = "[fd00:1234::]:32345"
-# partition_kind.type = "crucible"
-
-# TODO: Add a partition for Clickhouse too
+[[request.partition]]
+zpool_uuid = "d462a7f7-b628-40fe-80ff-4e4189e2d62b"
+address = "[fd00:1234::9]:32345"
+partition_kind.type = "crucible"
 
 [[request.partition]]
 zpool_uuid = "d462a7f7-b628-40fe-80ff-4e4189e2d62b"

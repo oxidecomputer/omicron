@@ -8,14 +8,28 @@
 
 use anyhow::{anyhow, bail, Context, Result};
 use omicron_package::{parse, SubCommand};
-use omicron_zone_package::config::Config;
 use omicron_zone_package::package::Package;
 use rayon::prelude::*;
+use serde_derive::Deserialize;
+use std::collections::BTreeMap;
 use std::env;
 use std::fs::create_dir_all;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use structopt::StructOpt;
+
+/// Describes the configuration for a set of packages.
+#[derive(Deserialize, Debug)]
+pub struct Config {
+    /// Packages to be built and installed.
+    #[serde(default, rename = "package")]
+    pub packages: BTreeMap<String, Package>,
+
+    /// Packages to be installed, but which have been created outside this
+    /// repository.
+    #[serde(default, rename = "external_package")]
+    pub external_packages: BTreeMap<String, Package>,
+}
 
 #[derive(Debug, StructOpt)]
 #[structopt(name = "packaging tool")]
@@ -78,6 +92,26 @@ async fn do_package(config: &Config, output_directory: &Path) -> Result<()> {
         package.create(&output_directory).await?;
     }
 
+    for (package_name, package) in &config.external_packages {
+        let path = package.get_output_path(&output_directory);
+        if !path.exists() {
+            bail!(
+                "The package for {} (expected at {}) does not exist.
+Omicron can build all packages that exist within the repository, but packages
+from outside the repository must be created manually, and copied to the output
+directory (which is currently: {}).
+
+This is currently a shortcoming with the build system - if you have an interest
+in improving the cross-repository meta-build system, please contact sean@.",
+                package_name,
+                path.to_string_lossy(),
+                std::fs::canonicalize(output_directory)
+                    .unwrap()
+                    .to_string_lossy(),
+            );
+        }
+    }
+
     Ok(())
 }
 
@@ -91,7 +125,8 @@ fn do_install(
     })?;
 
     // Copy all packages to the install location in parallel.
-    let packages: Vec<(&String, &Package)> = config.packages.iter().collect();
+    let packages: Vec<(&String, &Package)> =
+        config.packages.iter().chain(config.external_packages.iter()).collect();
     packages.into_par_iter().try_for_each(|(_, package)| -> Result<()> {
         let tarfile = if package.zone {
             artifact_dir.join(format!("{}.tar.gz", package.service_name))
@@ -147,7 +182,9 @@ fn do_install(
 
 // Attempts to both disable and delete all requested packages.
 fn uninstall_all_packages(config: &Config) {
-    for package in config.packages.values() {
+    for package in
+        config.packages.values().chain(config.external_packages.values())
+    {
         if package.zone {
             // TODO: At the moment, zones are entirely managed by the sled
             // agent.

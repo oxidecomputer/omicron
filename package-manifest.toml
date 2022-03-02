@@ -64,3 +64,9 @@ to = "/opt/oxide/cockroachdb/sql"
 [[package.cockroachdb.paths]]
 from = "smf/cockroachdb"
 to = "/var/svc/manifest/site/cockroachdb"
+
+# Packages not built within Omicron, but which must be imported.
+
+[external_package.crucible]
+service_name = "crucible"
+zone = true
