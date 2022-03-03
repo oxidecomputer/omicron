@@ -7,6 +7,7 @@
 pub mod sp_impl;
 
 use bitflags::bitflags;
+use core::{fmt, str};
 use serde::{Deserialize, Serialize};
 
 pub use hubpack::error::Error as HubpackError;
@@ -115,15 +116,7 @@ pub enum IgnitionCommand {
 
 /// Identifier for a single component managed by an SP.
 #[derive(
-    Debug,
-    Clone,
-    Copy,
-    PartialEq,
-    Eq,
-    Hash,
-    SerializedSize,
-    Serialize,
-    Deserialize,
+    Clone, Copy, PartialEq, Eq, Hash, SerializedSize, Serialize, Deserialize,
 )]
 pub struct SpComponent {
     /// The ID of the component.
@@ -140,6 +133,30 @@ pub struct SpComponent {
 impl SpComponent {
     /// Maximum number of bytes for a component ID.
     pub const MAX_ID_LENGTH: usize = 16;
+
+    /// Interpret the component name as a human-readable string.
+    ///
+    /// Our current expectation of component names is that this should never
+    /// fail (i.e., we're always storing component names as human-readable
+    /// strings), but because we reconstitute components from network messages
+    /// we still need to check.
+    pub fn as_str(&self) -> Option<&str> {
+        let n =
+            self.id.iter().position(|&c| c == 0).unwrap_or(Self::MAX_ID_LENGTH);
+        str::from_utf8(&self.id[..n]).ok()
+    }
+}
+
+impl fmt::Debug for SpComponent {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let mut debug = f.debug_struct("SpComponent");
+        if let Some(s) = self.as_str() {
+            debug.field("id", &s);
+        } else {
+            debug.field("id", &self.id);
+        }
+        debug.finish()
+    }
 }
 
 /// Error type returned from `TryFrom<&str> for SpComponent` if the provided ID
