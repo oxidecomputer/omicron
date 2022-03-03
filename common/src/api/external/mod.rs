@@ -568,7 +568,6 @@ pub enum ResourceType {
     Project,
     Dataset,
     Disk,
-    DownloadArtifact,
     Instance,
     NetworkInterface,
     Rack,
@@ -584,7 +583,6 @@ pub enum ResourceType {
     Role,
     User,
     Zpool,
-    UpdateAvailableArtifact,
 }
 
 pub async fn to_list<T, U>(object_stream: ObjectStream<T>) -> Vec<U>
