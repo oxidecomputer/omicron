@@ -2,6 +2,11 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+// TODO(iliana):
+// - refactor `test_update_end_to_end` into a test setup function
+// - test that an unknown artifact returns 404, not 500
+// - tests around target names and artifact names that contain dangerous paths like `../`
+
 use chrono::{Duration, Utc};
 use dropshot::test_util::LogContext;
 use dropshot::{
@@ -10,7 +15,7 @@ use dropshot::{
 };
 use http::{Method, Response, StatusCode};
 use hyper::Body;
-use nexus_test_utils::{load_test_config, test_setup_with_config};
+use nexus_test_utils::{load_test_config, test_setup, test_setup_with_config};
 use omicron_common::api::internal::nexus::UpdateArtifactKind;
 use omicron_nexus::config::UpdatesConfig;
 use omicron_nexus::updates::{ArtifactsDocument, UpdateArtifact};
@@ -259,4 +264,26 @@ impl KeySource for KeyKeySource {
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync + 'static>> {
         unimplemented!();
     }
+}
+
+// =^..^=   =^..^=   =^..^=   =^..^=   =^..^=   =^..^=   =^..^=   =^..^=
+
+// Tests that ".." paths are disallowed by dropshot.
+#[tokio::test]
+async fn test_download_with_dots_fails() {
+    let cptestctx = test_setup("test_download_with_dots_fails").await;
+    let client = &cptestctx.internal_client;
+
+    let filename = "hey/can/you/look/../../../../up/the/directory/tree";
+    let artifact_get_url = format!("/artifacts/{}", filename);
+
+    client
+        .make_request_error(
+            Method::GET,
+            &artifact_get_url,
+            StatusCode::BAD_REQUEST,
+        )
+        .await;
+
+    cptestctx.teardown().await;
 }

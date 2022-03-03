@@ -3,7 +3,6 @@
 //! See the driver in the parent directory for how and why this is structured
 //! the way it is.
 
-mod artifact_download;
 mod authn_http;
 mod basic;
 mod commands;
