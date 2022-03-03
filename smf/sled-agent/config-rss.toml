@@ -9,6 +9,16 @@ address = "[fd00:1234::9]:32345"
 partition_kind.type = "crucible"
 
 [[request.partition]]
+zpool_uuid = "e4b4dc87-ab46-49fb-a4b4-d361ae214c03"
+address = "[fd00:1234::10]:32345"
+partition_kind.type = "crucible"
+
+[[request.partition]]
+zpool_uuid = "f4b4dc87-ab46-49fb-a4b4-d361ae214c03"
+address = "[fd00:1234::11]:32345"
+partition_kind.type = "crucible"
+
+[[request.partition]]
 zpool_uuid = "d462a7f7-b628-40fe-80ff-4e4189e2d62b"
 address = "[fd00:1234::5]:32221"
 partition_kind.type = "cockroach_db"

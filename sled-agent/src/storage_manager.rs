@@ -196,7 +196,7 @@ impl DatasetInfo {
     }
 
     fn zone_prefix(&self) -> String {
-        format!("{}{}_", ZONE_PREFIX, self.name.dataset_name)
+        format!("{}{}_", ZONE_PREFIX, self.name.full())
     }
 
     async fn start_zone(
@@ -353,8 +353,14 @@ impl DatasetInfo {
 
                 zone.run_cmd(&[
                     crate::illumos::zone::SVCCFG,
+                    "import",
+                    "/var/svc/manifest/site/crucible/downstairs.xml",
+                ])?;
+
+                zone.run_cmd(&[
+                    crate::illumos::zone::SVCCFG,
                     "-s",
-                    "svc:system/illumos/crucible:default",
+                    "svc:oxide/crucible/agent",
                     "setprop",
                     &format!("config/listen={}", address.to_string()),
                 ])?;
@@ -362,9 +368,17 @@ impl DatasetInfo {
                 zone.run_cmd(&[
                     crate::illumos::zone::SVCCFG,
                     "-s",
-                    "svc:system/illumos/crucible:default",
+                    "svc:oxide/crucible/agent",
                     "setprop",
                     &format!("config/dataset={}", self.name.full()),
+                ])?;
+
+                zone.run_cmd(&[
+                    crate::illumos::zone::SVCCFG,
+                    "-s",
+                    "svc:oxide/crucible/agent",
+                    "setprop",
+                    &format!("config/uuid={}", Uuid::new_v4()),
                 ])?;
 
                 // Refresh the manifest with the new properties we set,
@@ -372,7 +386,7 @@ impl DatasetInfo {
                 zone.run_cmd(&[
                     crate::illumos::zone::SVCCFG,
                     "-s",
-                    "svc:system/illumos/crucible:default",
+                    "svc:oxide/crucible/agent:default",
                     "refresh",
                 ])?;
 
@@ -380,11 +394,12 @@ impl DatasetInfo {
                     crate::illumos::zone::SVCADM,
                     "enable",
                     "-t",
-                    "svc:/system/illumos/crucible:default",
+                    "svc:/oxide/crucible/agent:default",
                 ])?;
 
                 Ok(())
-            }
+
+            },
         }
     }
 }
@@ -637,11 +652,8 @@ impl StorageWorker {
                 Error::NotFound(format!("zpool: {}", request.zpool_id))
             })?;
 
-        let dataset_info = DatasetInfo::new(
-            pool.info.name(),
-            request.dataset_kind.clone(),
-            request.address,
-        );
+        let dataset_info =
+            DatasetInfo::new(pool.info.name(), request.dataset_kind.clone(), request.address);
         let (is_new_dataset, id) = self
             .initialize_dataset_and_zone(
                 pool,
