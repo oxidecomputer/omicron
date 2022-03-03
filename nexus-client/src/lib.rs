@@ -227,6 +227,20 @@ impl From<&omicron_common::api::internal::nexus::ProducerEndpoint>
     }
 }
 
+impl From<omicron_common::api::internal::nexus::UpdateArtifactKind>
+    for types::UpdateArtifactKind
+{
+    fn from(
+        s: omicron_common::api::internal::nexus::UpdateArtifactKind,
+    ) -> Self {
+        use omicron_common::api::internal::nexus::UpdateArtifactKind;
+
+        match s {
+            UpdateArtifactKind::Zone => types::UpdateArtifactKind::Zone,
+        }
+    }
+}
+
 impl From<std::time::Duration> for types::Duration {
     fn from(s: std::time::Duration) -> Self {
         Self { secs: s.as_secs(), nanos: s.subsec_nanos() }

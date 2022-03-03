@@ -79,6 +79,14 @@ impl ProducerEndpoint {
     }
 }
 
+/// Description of a single update artifact.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct UpdateArtifact {
+    pub name: String,
+    pub version: i64,
+    pub kind: UpdateArtifactKind,
+}
+
 /// Kinds of update artifacts, as used by Nexus to determine what updates are available and by
 /// sled-agent to determine how to apply an update when asked.
 #[derive(
@@ -87,6 +95,5 @@ impl ProducerEndpoint {
 #[display(style = "kebab-case")]
 #[serde(rename_all = "kebab-case")]
 pub enum UpdateArtifactKind {
-    GimletRamdisk,
     Zone,
 }

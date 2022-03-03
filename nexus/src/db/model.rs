@@ -2088,7 +2088,7 @@ impl RoleAssignmentBuiltin {
 }
 
 impl_enum_type!(
-    #[derive(SqlType, Debug)]
+    #[derive(SqlType, Debug, QueryId)]
     #[postgres(type_name = "update_artifact_kind", type_schema = "public")]
     pub struct UpdateArtifactKindEnum;
 
@@ -2098,7 +2098,6 @@ impl_enum_type!(
     pub struct UpdateArtifactKind(pub internal::nexus::UpdateArtifactKind);
 
     // Enum values
-    GimletRamdisk => b"gimlet-ramdisk"
     Zone => b"zone"
 );
 

@@ -310,6 +310,18 @@ impl From<omicron_common::api::external::MacAddr> for types::MacAddr {
     }
 }
 
+impl From<omicron_common::api::internal::nexus::UpdateArtifact>
+    for types::UpdateArtifact
+{
+    fn from(s: omicron_common::api::internal::nexus::UpdateArtifact) -> Self {
+        types::UpdateArtifact {
+            name: s.name,
+            version: s.version,
+            kind: s.kind.into(),
+        }
+    }
+}
+
 impl From<omicron_common::api::internal::nexus::UpdateArtifactKind>
     for types::UpdateArtifactKind
 {
@@ -319,9 +331,6 @@ impl From<omicron_common::api::internal::nexus::UpdateArtifactKind>
         use omicron_common::api::internal::nexus::UpdateArtifactKind;
 
         match s {
-            UpdateArtifactKind::GimletRamdisk => {
-                types::UpdateArtifactKind::GimletRamdisk
-            }
             UpdateArtifactKind::Zone => types::UpdateArtifactKind::Zone,
         }
     }

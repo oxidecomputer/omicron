@@ -7,7 +7,6 @@
  */
 
 use crate::params::DiskEnsureBody;
-use crate::updates::UpdateArtifact;
 use dropshot::endpoint;
 use dropshot::ApiDescription;
 use dropshot::HttpError;
@@ -18,6 +17,7 @@ use dropshot::RequestContext;
 use dropshot::TypedBody;
 use omicron_common::api::internal::nexus::DiskRuntimeState;
 use omicron_common::api::internal::nexus::InstanceRuntimeState;
+use omicron_common::api::internal::nexus::UpdateArtifact;
 use omicron_common::api::internal::sled_agent::InstanceEnsureBody;
 use schemars::JsonSchema;
 use serde::Deserialize;
@@ -140,10 +140,11 @@ async fn update_artifact(
     rqctx: Arc<RequestContext<Arc<SledAgent>>>,
     artifact: TypedBody<UpdateArtifact>,
 ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
-    artifact
-        .into_inner()
-        .download(rqctx.context().nexus_client.as_ref())
-        .await
-        .map_err(|e| HttpError::for_internal_error(e.to_string()))?;
+    crate::updates::download_artifact(
+        artifact.into_inner(),
+        rqctx.context().nexus_client.as_ref(),
+    )
+    .await
+    .map_err(|e| HttpError::for_internal_error(e.to_string()))?;
     Ok(HttpResponseUpdatedNoContent())
 }

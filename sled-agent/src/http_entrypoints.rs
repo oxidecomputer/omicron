@@ -5,7 +5,6 @@
 //! HTTP entrypoint functions for the sled agent's exposed API
 
 use super::params::DiskEnsureBody;
-use super::updates::UpdateArtifact;
 use dropshot::{
     endpoint, ApiDescription, HttpError, HttpResponseOk,
     HttpResponseUpdatedNoContent, Path, RequestContext, TypedBody,
@@ -13,6 +12,7 @@ use dropshot::{
 use omicron_common::api::external::Error;
 use omicron_common::api::internal::nexus::DiskRuntimeState;
 use omicron_common::api::internal::nexus::InstanceRuntimeState;
+use omicron_common::api::internal::nexus::UpdateArtifact;
 use omicron_common::api::internal::sled_agent::InstanceEnsureBody;
 use schemars::JsonSchema;
 use serde::Deserialize;
@@ -107,8 +107,6 @@ async fn update_artifact(
     artifact: TypedBody<UpdateArtifact>,
 ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
     let sa = rqctx.context();
-    let artifact = artifact.into_inner();
-
-    sa.update_artifact(&artifact).await.map_err(Error::from)?;
+    sa.update_artifact(artifact.into_inner()).await.map_err(Error::from)?;
     Ok(HttpResponseUpdatedNoContent())
 }

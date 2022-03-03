@@ -12,10 +12,9 @@ use crate::instance_manager::InstanceManager;
 use crate::nexus::NexusClient;
 use crate::params::DiskStateRequested;
 use crate::storage_manager::StorageManager;
-use crate::updates;
 use omicron_common::api::{
     internal::nexus::DiskRuntimeState, internal::nexus::InstanceRuntimeState,
-    internal::sled_agent::InstanceHardware,
+    internal::nexus::UpdateArtifact, internal::sled_agent::InstanceHardware,
     internal::sled_agent::InstanceMigrateParams,
     internal::sled_agent::InstanceRuntimeStateRequested,
 };
@@ -155,11 +154,10 @@ impl SledAgent {
     /// Downloads and applies an artifact.
     pub async fn update_artifact(
         &self,
-        artifact: &updates::UpdateArtifact,
+        artifact: UpdateArtifact,
     ) -> Result<(), Error> {
-        artifact
-            .download(self.nexus_client.as_ref())
-            .await
-            .map_err(|e| Error::Download(e))
+        crate::updates::download_artifact(artifact, self.nexus_client.as_ref())
+            .await?;
+        Ok(())
     }
 }

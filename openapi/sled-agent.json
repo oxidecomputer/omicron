@@ -686,6 +686,7 @@
         ]
       },
       "UpdateArtifact": {
+        "description": "Description of a single update artifact.",
         "type": "object",
         "properties": {
           "kind": {
@@ -709,7 +710,6 @@
         "description": "Kinds of update artifacts, as used by Nexus to determine what updates are available and by sled-agent to determine how to apply an update when asked.",
         "type": "string",
         "enum": [
-          "gimlet-ramdisk",
           "zone"
         ]
       }

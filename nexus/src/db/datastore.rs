@@ -58,6 +58,7 @@ use omicron_common::api::external::UpdateResult;
 use omicron_common::api::external::{
     CreateResult, IdentityMetadataCreateParams,
 };
+use omicron_common::api::internal::nexus::UpdateArtifact;
 use omicron_common::bail_unless;
 use std::convert::{TryFrom, TryInto};
 use std::sync::Arc;
@@ -72,9 +73,9 @@ use crate::db::{
         Name, NetworkInterface, Organization, OrganizationUpdate, OximeterInfo,
         ProducerEndpoint, Project, ProjectUpdate, Region,
         RoleAssignmentBuiltin, RoleBuiltin, RouterRoute, RouterRouteUpdate,
-        Sled, UpdateAvailableArtifact, UserBuiltin, Vpc, VpcFirewallRule,
-        VpcRouter, VpcRouterUpdate, VpcSubnet, VpcSubnetUpdate, VpcUpdate,
-        Zpool,
+        Sled, UpdateArtifactKind, UpdateAvailableArtifact, UserBuiltin, Vpc,
+        VpcFirewallRule, VpcRouter, VpcRouterUpdate, VpcSubnet,
+        VpcSubnetUpdate, VpcUpdate, Zpool,
     },
     pagination::paginated,
     pagination::paginated_multicolumn,
@@ -2964,13 +2965,16 @@ impl DataStore {
 
     pub async fn update_available_artifact_fetch(
         &self,
-        // TODO(iliana or sean): change this to look up the artifact by name/version/kind instead
-        // of the target_name
-        target_name: String,
+        artifact: &UpdateArtifact,
     ) -> LookupResult<UpdateAvailableArtifact> {
         use db::schema::update_available_artifact::dsl;
         dsl::update_available_artifact
-            .filter(dsl::target_name.eq(target_name.clone()))
+            .filter(
+                dsl::name
+                    .eq(artifact.name.clone())
+                    .and(dsl::version.eq(artifact.version))
+                    .and(dsl::kind.eq(UpdateArtifactKind(artifact.kind))),
+            )
             .select(UpdateAvailableArtifact::as_select())
             .first_async(self.pool())
             .await

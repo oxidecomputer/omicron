@@ -6,7 +6,6 @@
  * Handler functions (entrypoints) for HTTP APIs internal to the control plane
  */
 use crate::context::OpContext;
-use crate::nexus::BASE_ARTIFACT_DIR;
 use crate::ServerContext;
 
 use super::params::{
@@ -26,11 +25,11 @@ use hyper::Body;
 use omicron_common::api::internal::nexus::DiskRuntimeState;
 use omicron_common::api::internal::nexus::InstanceRuntimeState;
 use omicron_common::api::internal::nexus::ProducerEndpoint;
+use omicron_common::api::internal::nexus::UpdateArtifact;
 use oximeter::types::ProducerResults;
 use oximeter_producer::{collect, ProducerIdPathParams};
 use schemars::JsonSchema;
 use serde::Deserialize;
-use std::path::PathBuf;
 use std::sync::Arc;
 use uuid::Uuid;
 
@@ -288,75 +287,19 @@ async fn cpapi_metrics_collect(
         .await
 }
 
-#[derive(Deserialize, JsonSchema)]
-struct AllPath {
-    path: String,
-}
-
 /// Endpoint used by Sled Agents to download cached artifacts.
 #[endpoint {
     method = GET,
-    path = "/artifacts/{path}",
+    path = "/artifacts/{kind}/{name}/{version}",
 }]
 async fn cpapi_artifact_download(
     request_context: Arc<RequestContext<Arc<ServerContext>>>,
-    path: Path<AllPath>,
+    path_params: Path<UpdateArtifact>,
 ) -> Result<Response<Body>, HttpError> {
     let context = request_context.context();
     let nexus = &context.nexus;
-    let mut entry = PathBuf::from(BASE_ARTIFACT_DIR);
+    // TODO: return 404 if the error we get here says that the record isn't found
+    let body = nexus.download_artifact(path_params.into_inner()).await?;
 
-    // TODO: Most of the below code is ready to accept a multi-component path,
-    // such as in:
-    // https://github.com/oxidecomputer/dropshot/blob/78be3deda556a9339ea09f3a9961fd91389f8757/dropshot/examples/file_server.rs#L86-L89
-    //
-    // However, openapi does *not* like that currently, so we limit the endpoint
-    // to only accepting single-component paths.
-    let path = vec![path.into_inner().path];
-
-    for component in &path {
-        // Dropshot should not provide "." and ".." components.
-        assert_ne!(component, ".");
-        assert_ne!(component, "..");
-        entry.push(component);
-
-        if entry.exists() {
-            // We explicitly prohibit consumers from following symlinks to prevent
-            // showing data outside of the intended directory.
-            let m = entry.symlink_metadata().map_err(|e| {
-                HttpError::for_bad_request(
-                    None,
-                    format!("Failed to query file metadata: {}", e),
-                )
-            })?;
-            if m.file_type().is_symlink() {
-                return Err(HttpError::for_bad_request(
-                    None,
-                    "Cannot traverse symlinks".to_string(),
-                ));
-            }
-        }
-    }
-
-    // Note - at this point, "entry" may or may not actually exist.
-    // We try to avoid creating intermediate artifacts until we know there
-    // is something "real" to download, as this would let malformed paths
-    // create defunct intermediate directories.
-    if entry.is_dir() {
-        return Err(HttpError::for_bad_request(
-            None,
-            "Directory download not supported".to_string(),
-        ));
-    }
-    let body = nexus.download_artifact(&entry).await?;
-
-    // Derive the MIME type from the file name
-    let content_type = mime_guess::from_path(&entry)
-        .first()
-        .map_or_else(|| "text/plain".to_string(), |m| m.to_string());
-
-    Ok(Response::builder()
-        .status(StatusCode::OK)
-        .header(http::header::CONTENT_TYPE, content_type)
-        .body(body.into())?)
+    Ok(Response::builder().status(StatusCode::OK).body(body.into())?)
 }

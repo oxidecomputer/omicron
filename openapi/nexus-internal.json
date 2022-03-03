@@ -10,17 +10,36 @@
     "version": "0.0.1"
   },
   "paths": {
-    "/artifacts/{path}": {
+    "/artifacts/{kind}/{name}/{version}": {
       "get": {
         "summary": "Endpoint used by Sled Agents to download cached artifacts.",
         "operationId": "cpapi_artifact_download",
         "parameters": [
           {
             "in": "path",
-            "name": "path",
+            "name": "kind",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/UpdateArtifactKind"
+            },
+            "style": "simple"
+          },
+          {
+            "in": "path",
+            "name": "name",
             "required": true,
             "schema": {
               "type": "string"
+            },
+            "style": "simple"
+          },
+          {
+            "in": "path",
+            "name": "version",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
             },
             "style": "simple"
           }
@@ -1500,6 +1519,13 @@
       },
       "ZpoolPutResponse": {
         "type": "object"
+      },
+      "UpdateArtifactKind": {
+        "description": "Kinds of update artifacts, as used by Nexus to determine what updates are available and by sled-agent to determine how to apply an update when asked.",
+        "type": "string",
+        "enum": [
+          "zone"
+        ]
       }
     }
   }

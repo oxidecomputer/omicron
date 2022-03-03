@@ -51,6 +51,7 @@ use omicron_common::api::external::VpcFirewallRuleUpdateParams;
 use omicron_common::api::external::VpcRouterKind;
 use omicron_common::api::internal::nexus;
 use omicron_common::api::internal::nexus::DiskRuntimeState;
+use omicron_common::api::internal::nexus::UpdateArtifact;
 use omicron_common::api::internal::sled_agent::InstanceRuntimeStateMigrateParams;
 use omicron_common::api::internal::sled_agent::InstanceRuntimeStateRequested;
 use omicron_common::api::internal::sled_agent::InstanceStateRequested;
@@ -2737,9 +2738,9 @@ impl Nexus {
     }
 
     /// Downloads a file from within [`BASE_ARTIFACT_DIR`].
-    pub async fn download_artifact<P: AsRef<Path>>(
+    pub async fn download_artifact(
         &self,
-        path: P,
+        artifact: UpdateArtifact,
     ) -> Result<Vec<u8>, Error> {
         let mut base_url =
             self.tuf_base_url().ok_or_else(|| Error::InvalidRequest {
@@ -2749,49 +2750,42 @@ impl Nexus {
             base_url.push('/');
         }
 
-        let path = path.as_ref();
-        if !path.starts_with(BASE_ARTIFACT_DIR) {
-            return Err(Error::internal_error(
-                "Cannot access path outside artifact directory",
-            ));
-        }
+        // We cache the artifact based on its checksum, so fetch that from the database.
+        let artifact_entry = self
+            .db_datastore
+            .update_available_artifact_fetch(&artifact)
+            .await?;
+        let filename = format!(
+            "{}.{}.{}-{}",
+            artifact_entry.target_sha256,
+            artifact.kind,
+            artifact.name,
+            artifact.version
+        );
+        let path = Path::new(BASE_ARTIFACT_DIR).join(&filename);
 
         if !path.exists() {
-            info!(
-                self.log,
-                "Accessing {} - needs to be downloaded",
-                path.display()
-            );
             // If the artifact doesn't exist, we should download it.
             //
             // TODO: There also exists the question of "when should we *remove*
             // things from BASE_ARTIFACT_DIR", which we should also resolve.
             // Demo-quality solution could be "destroy it on boot" or something?
             // (we aren't doing that yet).
-
-            let file_name = path.strip_prefix(BASE_ARTIFACT_DIR).unwrap();
-            let artifact = self
-                .db_datastore
-                .update_available_artifact_fetch(
-                    file_name.to_str().unwrap().into(),
-                )
-                .await?;
-
-            // We should only create the intermediate directories
-            // after validating that this is a real artifact that
-            // can (and should) be downloaded.
-            if let Some(parent) = path.parent() {
-                tokio::fs::create_dir_all(parent).await.map_err(|e| {
+            info!(self.log, "Accessing {} - needs to be downloaded", filename);
+            tokio::fs::create_dir_all(BASE_ARTIFACT_DIR).await.map_err(
+                |e| {
                     Error::internal_error(&format!(
-                        "Failed to create intermediate directory: {}",
+                        "Failed to create artifacts directory: {}",
                         e
                     ))
-                })?;
-            }
+                },
+            )?;
 
             let mut response = reqwest::get(format!(
                 "{}targets/{}.{}",
-                base_url, artifact.target_sha256, artifact.target_name
+                base_url,
+                artifact_entry.target_sha256,
+                artifact_entry.target_name
             ))
             .await
             .map_err(|e| {
@@ -2804,10 +2798,9 @@ impl Nexus {
             // To ensure another request isn't trying to use this target while we're downloading it
             // or before we've verified it, write to a random path in the same directory, then move
             // it to the correct path after verification.
-            // FIXME(iliana): replace this with the tempfile crate
             let temp_path = path.with_file_name(format!(
                 ".{}.{:x}",
-                artifact.target_name,
+                filename,
                 rand::thread_rng().gen::<u64>()
             ));
             let mut file =
@@ -2835,19 +2828,19 @@ impl Nexus {
                 context.update(&chunk);
                 length += i64::try_from(chunk.len()).unwrap();
 
-                if length > artifact.target_length {
+                if length > artifact_entry.target_length {
                     return Err(Error::internal_error(&format!(
                         "target {} is larger than expected",
-                        artifact.target_name
+                        artifact_entry.target_name
                     )));
                 }
             }
             drop(file);
 
-            if hex::encode(context.finish()) == artifact.target_sha256
-                && length == artifact.target_length
+            if hex::encode(context.finish()) == artifact_entry.target_sha256
+                && length == artifact_entry.target_length
             {
-                tokio::fs::rename(temp_path, path).await.map_err(|e| {
+                tokio::fs::rename(temp_path, &path).await.map_err(|e| {
                     Error::internal_error(&format!(
                         "Failed to rename file after verification: {}",
                         e
@@ -2856,11 +2849,14 @@ impl Nexus {
             } else {
                 return Err(Error::internal_error(&format!(
                     "failed to verify target {}",
-                    artifact.target_name
+                    artifact_entry.target_name
                 )));
             }
 
-            info!(self.log, "wrote {} to artifact dir", artifact.target_name);
+            info!(
+                self.log,
+                "wrote {} to artifact dir", artifact_entry.target_name
+            );
         } else {
             info!(self.log, "Accessing {} - already exists", path.display());
         }

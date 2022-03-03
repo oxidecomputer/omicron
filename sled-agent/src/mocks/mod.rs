@@ -7,8 +7,8 @@
 use mockall::mock;
 use nexus_client::types::{
     DatasetPutRequest, DatasetPutResponse, DiskRuntimeState,
-    InstanceRuntimeState, SledAgentStartupInfo, ZpoolPutRequest,
-    ZpoolPutResponse,
+    InstanceRuntimeState, SledAgentStartupInfo, UpdateArtifactKind,
+    ZpoolPutRequest, ZpoolPutResponse,
 };
 use progenitor::progenitor_client::Error;
 use reqwest::Response;
@@ -35,7 +35,9 @@ mock! {
         ) -> Result<(), Error<()>>;
         pub async fn cpapi_artifact_download(
             &self,
-            name: &str
+            kind: UpdateArtifactKind,
+            name: &str,
+            version: i64,
         ) -> Result<Response, Error<()>>;
         pub async fn zpool_put(
             &self,

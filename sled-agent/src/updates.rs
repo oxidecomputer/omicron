@@ -5,10 +5,10 @@
 //! Management of per-sled updates
 
 use crate::nexus::NexusClient;
-use omicron_common::api::internal::nexus::UpdateArtifactKind;
-use schemars::JsonSchema;
-use serde::Deserialize;
-use std::path::Path;
+use omicron_common::api::internal::nexus::{
+    UpdateArtifact, UpdateArtifactKind,
+};
+use std::path::PathBuf;
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
@@ -22,61 +22,40 @@ pub enum Error {
     Response(reqwest::Error),
 }
 
-#[derive(Clone, Debug, Deserialize, JsonSchema)]
-pub struct UpdateArtifact {
-    pub name: String,
-    pub version: i64,
-    pub kind: UpdateArtifactKind,
-}
+pub async fn download_artifact(
+    artifact: UpdateArtifact,
+    nexus: &NexusClient,
+) -> Result<(), Error> {
+    match artifact.kind {
+        UpdateArtifactKind::Zone => {
+            let directory = PathBuf::from("/var/tmp/zones");
+            tokio::fs::create_dir_all(&directory).await?;
 
-impl UpdateArtifact {
-    fn artifact_directory(&self) -> &'static Path {
-        match self.kind {
-            // TODO flesh this out
-            UpdateArtifactKind::GimletRamdisk => Path::new("/var/tmp/zones"),
-            UpdateArtifactKind::Zone => Path::new("/var/tmp/zones"),
+            // We download the file to a location named "<artifact-name>-<version>".
+            // We then rename it to "<artifact-name>" after it has successfully
+            // downloaded, to signify that it is ready for usage.
+            let tmp_path = directory
+                .join(format!("{}-{}", artifact.name, artifact.version));
+
+            // Fetch the artifact and write to the file in its entirety,
+            // replacing it if it exists.
+            // TODO: Would love to stream this instead.
+            let response = nexus
+                .cpapi_artifact_download(
+                    artifact.kind.into(),
+                    &artifact.name,
+                    artifact.version,
+                )
+                .await
+                .map_err(|e| Error::Nexus(e.into()))?;
+            let contents =
+                response.bytes().await.map_err(|e| Error::Response(e))?;
+            tokio::fs::write(&tmp_path, contents).await?;
+
+            // Write the file to its final path.
+            tokio::fs::rename(&tmp_path, directory.join(artifact.name)).await?;
+            Ok(())
         }
-    }
-
-    /// Downloads an update artifact.
-    ///
-    /// The artifact is eventually stored in the path:
-    ///     <artifact_directory()> / <artifact name>
-    ///
-    /// Such as:
-    ///     /var/tmp/zones/myzone
-    ///
-    /// While being downloaded, it is stored in a path also containing the
-    /// version:
-    ///     <artifact_directory()> / <artifact name> - <version>
-    ///
-    /// Such as:
-    ///     /var/tmp/zones/myzone-3
-    pub async fn download(&self, nexus: &NexusClient) -> Result<(), Error> {
-        let file_name = format!("{}-{}", self.name, self.version);
-        let response = nexus
-            .cpapi_artifact_download(&file_name)
-            .await
-            .map_err(|e| Error::Nexus(e.into()))?;
-
-        let mut path = self.artifact_directory().to_path_buf();
-        tokio::fs::create_dir_all(&path).await?;
-
-        // We download the file to a location named "<artifact-name>-<version>".
-        // We then rename it to "<artifact-name>" after it has successfully
-        // downloaded, to signify that it is ready for usage.
-        let mut tmp_path = path.clone();
-        tmp_path.push(file_name);
-        path.push(&self.name);
-
-        // Write the file in its entirety, replacing it if it exists.
-        // TODO: Would love to stream this instead.
-        let contents =
-            response.bytes().await.map_err(|e| Error::Response(e))?;
-        tokio::fs::write(&tmp_path, contents).await?;
-        tokio::fs::rename(&tmp_path, &path).await?;
-
-        Ok(())
     }
 }
 
@@ -97,7 +76,7 @@ mod test {
             version: 3,
             kind: UpdateArtifactKind::Zone,
         };
-        let expected_path = artifact.artifact_directory().join(expected_name);
+        let expected_path = PathBuf::from("/var/tmp/zones").join(expected_name);
 
         // Remove the file if it already exists.
         let _ = tokio::fs::remove_file(&expected_path).await;
@@ -105,8 +84,10 @@ mod test {
         // Let's pretend this is an artifact Nexus can actually give us.
         let mut nexus_client = MockNexusClient::default();
         nexus_client.expect_cpapi_artifact_download().times(1).return_once(
-            move |name| {
-                assert_eq!(name, "test_artifact-3");
+            move |kind, name, version| {
+                assert_eq!(name, "test_artifact");
+                assert_eq!(version, 3);
+                assert_eq!(kind.to_string(), "zone");
                 let response = Response::builder()
                     .status(StatusCode::OK)
                     .body(expected_contents)
@@ -116,7 +97,7 @@ mod test {
         );
 
         // This should download the file to our local filesystem.
-        artifact.download(&nexus_client).await.unwrap();
+        download_artifact(artifact, &nexus_client).await.unwrap();
 
         // Confirm the download succeeded.
         assert!(expected_path.exists());
