@@ -99,7 +99,7 @@ impl Server {
 
         let ctxlog = log.new(o!("component" => "ServerContext"));
         let pool = db::Pool::new(&config.database);
-        let apictx = ServerContext::new(rack_id, ctxlog, pool, &config).await?;
+        let apictx = ServerContext::new(rack_id, ctxlog, pool, &config)?;
 
         let http_server_starter_external = dropshot::HttpServerStarter::new(
             &config.dropshot_external,

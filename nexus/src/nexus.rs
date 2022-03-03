@@ -163,7 +163,7 @@ impl Nexus {
      * Create a new Nexus instance for the given rack id `rack_id`
      */
     /* TODO-polish revisit rack metadata */
-    pub async fn new_with_id(
+    pub fn new_with_id(
         rack_id: Uuid,
         log: Logger,
         pool: db::Pool,
