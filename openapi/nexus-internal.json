@@ -44,7 +44,11 @@
             "style": "simple"
           }
         ],
-        "responses": {}
+        "responses": {
+          "default": {
+            "description": ""
+          }
+        }
       }
     },
     "/disks/{disk_id}": {
