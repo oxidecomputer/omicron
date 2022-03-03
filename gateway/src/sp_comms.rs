@@ -12,7 +12,7 @@ mod serial_console_history;
 pub(crate) use serial_console_history::SerialConsoleContents;
 use serial_console_history::SerialConsoleHistory;
 
-use crate::config::KnownSps;
+use crate::{config::KnownSps, http_entrypoints::SpState};
 use dropshot::HttpError;
 use gateway_messages::{
     sp_impl::SerialConsolePacketizer, version, IgnitionCommand, IgnitionState,
@@ -112,6 +112,7 @@ mod response_kind_names {
     pub(super) const PONG: &str = "pong";
     pub(super) const IGNITION_STATE: &str = "ignition_state";
     pub(super) const IGNITION_COMMAND_ACK: &str = "ignition_command_ack";
+    pub(super) const SP_STATE: &str = "sp_state";
     pub(super) const SERIAL_CONSOLE_WRITE_ACK: &str =
         "serial_console_write_ack";
     pub(super) const ERROR: &str = "error";
@@ -124,6 +125,7 @@ fn response_kind_name(kind: &ResponseKind) -> &'static str {
         ResponseKind::IgnitionCommandAck => {
             response_kind_names::IGNITION_COMMAND_ACK
         }
+        ResponseKind::SpState(_) => response_kind_names::SP_STATE,
         ResponseKind::SerialConsoleWriteAck => {
             response_kind_names::SERIAL_CONSOLE_WRITE_ACK
         }
@@ -136,7 +138,7 @@ pub struct SpCommunicator {
     log: Logger,
     socket: Arc<UdpSocket>,
     known_sps: KnownSps,
-    sp_state: Arc<SpState>,
+    sp_state: Arc<AllSpState>,
     request_id: AtomicU32,
     recv_task: JoinHandle<()>,
 }
@@ -165,7 +167,7 @@ impl SpCommunicator {
         ));
 
         // build our fixed-keys-after-this-point map of known SP IPs
-        let sp_state = Arc::new(SpState::new(&known_sps));
+        let sp_state = Arc::new(AllSpState::new(&known_sps));
 
         let recv_task = RecvTask::new(
             Arc::clone(&socket),
@@ -186,6 +188,29 @@ impl SpCommunicator {
 
     pub fn placeholder_known_sps(&self) -> &KnownSps {
         &self.known_sps
+    }
+
+    pub(crate) async fn state_get(
+        &self,
+        sp: SocketAddr,
+        timeout: Duration,
+    ) -> Result<SpState, Error> {
+        tokio::time::timeout(timeout, self.state_get_impl(sp)).await?
+    }
+
+    pub(crate) async fn state_get_impl(
+        &self,
+        sp: SocketAddr,
+    ) -> Result<SpState, Error> {
+        match self.request_response(sp, RequestKind::SpState).await? {
+            ResponseKind::SpState(state) => Ok(SpState::Enabled {
+                serial_number: hex::encode(&state.serial_number[..]),
+            }),
+            other => Err(Error::from_unhandled_response_kind(
+                &other,
+                response_kind_names::SP_STATE,
+            )),
+        }
     }
 
     pub(crate) fn serial_console_get(
@@ -390,14 +415,14 @@ impl SpCommunicator {
 /// data is pushed into the in-memory ringbuffer corresponding to the source.
 struct RecvTask {
     socket: Arc<UdpSocket>,
-    sp_state: Arc<SpState>,
+    sp_state: Arc<AllSpState>,
     log: Logger,
 }
 
 impl RecvTask {
     fn new(
         socket: Arc<UdpSocket>,
-        sp_state: Arc<SpState>,
+        sp_state: Arc<AllSpState>,
         log: Logger,
     ) -> Self {
         Self { socket, sp_state, log }
@@ -513,11 +538,11 @@ impl RecvTask {
 }
 
 #[derive(Debug)]
-struct SpState {
+struct AllSpState {
     all_sps: HashMap<SocketAddr, SingleSpState>,
 }
 
-impl SpState {
+impl AllSpState {
     fn new(known_sps: &KnownSps) -> Self {
         let mut all_sps = HashMap::new();
         for sp_list in [

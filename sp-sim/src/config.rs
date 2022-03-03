@@ -8,6 +8,7 @@
 //!
 
 use dropshot::ConfigLogging;
+use gateway_messages::SerialNumber;
 use serde::{Deserialize, Serialize};
 use std::{
     net::SocketAddr,
@@ -15,35 +16,13 @@ use std::{
 };
 use thiserror::Error;
 
-/*
-#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
-pub struct SidecarConfig {
-    pub ignition_targets: Vec<IgnitionState>,
-}
-
-#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
-#[serde(rename_all = "lowercase", tag = "type")]
-pub enum SpType {
-    Sidecar(SidecarConfig),
-    Gimlet,
-}
-
-/// Description of a simulated SP's components.
-// TODO should reorganize this once we have more to do with components than just
-// a serial console - maybe a list of components with flags for which operations
-// they support (serial console, power on/off, etc)
-#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
-pub struct SpComponents {
-    /// List of components with a serial console.
-    pub serial_console: Vec<String>,
-}
-*/
-
 /// Configuration of a simulated sidecar SP
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct SidecarConfig {
     /// UDP address
     pub bind_address: SocketAddr,
+    /// Fake serial number
+    pub serial_number: SerialNumber,
 }
 
 /// Configuration of a simulated gimlet SP
@@ -51,6 +30,8 @@ pub struct SidecarConfig {
 pub struct GimletConfig {
     /// UDP address
     pub bind_address: SocketAddr,
+    /// Fake serial number
+    pub serial_number: SerialNumber,
     /// Attached components
     pub components: Vec<SpComponentConfig>,
 }

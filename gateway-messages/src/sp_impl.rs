@@ -21,6 +21,8 @@ pub trait SpHandler {
         command: IgnitionCommand,
     ) -> ResponseKind;
 
+    fn sp_state(&mut self) -> ResponseKind;
+
     fn serial_console_write(&mut self, packet: SerialConsole) -> ResponseKind;
 }
 
@@ -147,6 +149,9 @@ impl SpServer {
             }
             RequestKind::IgnitionCommand { target, command } => {
                 handler.ignition_command(target, command)
+            }
+            RequestKind::SpState => {
+                handler.sp_state()
             }
             RequestKind::SerialConsoleWrite(packet) => {
                 handler.serial_console_write(packet)

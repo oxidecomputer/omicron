@@ -8,6 +8,7 @@ use anyhow::Result;
 use gateway_messages::sp_impl::{SpHandler, SpServer};
 use gateway_messages::{
     IgnitionCommand, IgnitionFlags, IgnitionState, ResponseError, ResponseKind,
+    SerialNumber, SpState,
 };
 use slog::{debug, error, info, warn, Logger};
 use tokio::{
@@ -52,7 +53,12 @@ impl Sidecar {
             });
         }
 
-        let inner = Inner::new(server, ignition_targets, log);
+        let inner = Inner::new(
+            server,
+            sidecar_config.serial_number,
+            ignition_targets,
+            log,
+        );
         let inner_task = task::spawn(async move { inner.run().await.unwrap() });
         Ok(Self { inner_task })
     }
@@ -66,10 +72,14 @@ struct Inner {
 impl Inner {
     fn new(
         server: UdpServer,
+        serial_number: SerialNumber,
         ignition_targets: Vec<IgnitionState>,
         log: Logger,
     ) -> Self {
-        Self { handler: Handler { log, ignition_targets }, udp: server }
+        Self {
+            handler: Handler { log, serial_number, ignition_targets },
+            udp: server,
+        }
     }
 
     async fn run(mut self) -> Result<()> {
@@ -99,6 +109,7 @@ impl Inner {
 
 struct Handler {
     log: Logger,
+    serial_number: SerialNumber,
     ignition_targets: Vec<IgnitionState>,
 }
 
@@ -173,5 +184,11 @@ impl SpHandler for Handler {
     ) -> ResponseKind {
         warn!(&self.log, "received request to write to serial console (unsupported on sidecar)");
         ResponseKind::Error(ResponseError::RequestUnsupportedForSp)
+    }
+
+    fn sp_state(&mut self) -> ResponseKind {
+        let state = SpState { serial_number: self.serial_number };
+        debug!(&self.log, "received state request; sending {:?}", state);
+        ResponseKind::SpState(state)
     }
 }

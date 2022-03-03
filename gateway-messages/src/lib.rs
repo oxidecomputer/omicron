@@ -35,6 +35,7 @@ pub enum RequestKind {
     // one message?
     IgnitionState { target: u8 },
     IgnitionCommand { target: u8, command: IgnitionCommand },
+    SpState,
     SerialConsoleWrite(SerialConsole),
 }
 
@@ -46,8 +47,17 @@ pub enum ResponseKind {
     Pong,
     IgnitionState(IgnitionState),
     IgnitionCommandAck,
+    SpState(SpState),
     SerialConsoleWriteAck,
     Error(ResponseError),
+}
+
+// TODO how is this reported? Same/different for components?
+pub type SerialNumber = [u8; 16];
+
+#[derive(Debug, Clone, Copy, SerializedSize, Serialize, Deserialize)]
+pub struct SpState {
+    pub serial_number: SerialNumber,
 }
 
 #[derive(Debug, Clone, Copy, SerializedSize, Serialize, Deserialize)]

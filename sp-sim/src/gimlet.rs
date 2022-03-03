@@ -7,8 +7,8 @@ use crate::server::UdpServer;
 use anyhow::{anyhow, Context, Result};
 use gateway_messages::sp_impl::{SerialConsolePacketizer, SpHandler, SpServer};
 use gateway_messages::{
-    version, ResponseError, ResponseKind, SerialConsole, SerializedSize,
-    SpComponent, SpMessage, SpMessageKind,
+    version, ResponseError, ResponseKind, SerialConsole, SerialNumber,
+    SerializedSize, SpComponent, SpMessage, SpMessageKind, SpState,
 };
 use slog::{debug, error, info, warn, Logger};
 use std::collections::HashMap;
@@ -74,13 +74,16 @@ impl Gimlet {
             }
         }
 
-        let inner = UdpTask::new(server, incoming_console_tx, log);
+        let inner = UdpTask::new(
+            server,
+            gimlet.serial_number,
+            incoming_console_tx,
+            log,
+        );
         inner_tasks
             .push(task::spawn(async move { inner.run().await.unwrap() }));
 
-        Ok(Self {
-            inner_tasks,
-        })
+        Ok(Self { inner_tasks })
     }
 }
 
@@ -216,13 +219,17 @@ struct UdpTask {
 impl UdpTask {
     fn new(
         server: UdpServer,
+        serial_number: SerialNumber,
         incoming_serial_console: HashMap<
             SpComponent,
             UnboundedSender<SerialConsole>,
         >,
         log: Logger,
     ) -> Self {
-        Self { udp: server, handler: Handler { log, incoming_serial_console } }
+        Self {
+            udp: server,
+            handler: Handler { log, serial_number, incoming_serial_console },
+        }
     }
 
     async fn run(mut self) -> Result<()> {
@@ -252,6 +259,7 @@ impl UdpTask {
 
 struct Handler {
     log: Logger,
+    serial_number: SerialNumber,
     incoming_serial_console:
         HashMap<SpComponent, UnboundedSender<SerialConsole>>,
 }
@@ -315,5 +323,11 @@ impl SpHandler for Handler {
         let _ = incoming_serial_console.send(packet);
 
         ResponseKind::SerialConsoleWriteAck
+    }
+
+    fn sp_state(&mut self) -> ResponseKind {
+        let state = SpState { serial_number: self.serial_number };
+        debug!(&self.log, "received state request; sending {:?}", state);
+        ResponseKind::SpState(state)
     }
 }
