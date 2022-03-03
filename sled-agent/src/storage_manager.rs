@@ -164,11 +164,11 @@ impl DatasetName {
 // by the Sled Agent.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 struct DatasetInfo {
-    name: DatasetName,
     // TODO: Is this always "/data"?
     data_directory: String,
     address: SocketAddr,
     kind: DatasetKind,
+    name: DatasetName,
 }
 
 impl DatasetInfo {
@@ -624,7 +624,7 @@ impl StorageWorker {
         let log_post_failure = move |_, delay| {
             warn!(
                 log,
-                "failed to notify nexus, will retry in {:?}", delay;
+                "failed to notify nexus about datasets, will retry in {:?}", delay;
             );
         };
         nexus_notifications.push(
@@ -880,5 +880,22 @@ impl Drop for StorageManager {
         // task to ensure it does not remain alive beyond the StorageManager
         // itself.
         self.task.abort();
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn serialize_dataset_info() {
+        let dataset_info = DatasetInfo {
+            data_directory: "/here/is/my/path".to_string(),
+            address: "127.0.0.1:8080".parse().unwrap(),
+            kind: DatasetKind::Crucible,
+            name: DatasetName::new("pool", "dataset"),
+        };
+
+        toml::to_string(&dataset_info).unwrap();
     }
 }

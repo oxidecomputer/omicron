@@ -272,7 +272,7 @@ impl Agent {
                 );
             }
 
-            // Issue the partition initialization requests to all sleds.
+            // Issue the dataset initialization requests to all sleds.
             futures::future::join_all(
                 rss_config.requests.iter().map(|request| async move {
                     info!(self.log, "observing request: {:#?}", request);
