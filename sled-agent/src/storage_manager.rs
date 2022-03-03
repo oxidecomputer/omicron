@@ -362,7 +362,7 @@ impl DatasetInfo {
                     "-s",
                     "svc:oxide/crucible/agent",
                     "setprop",
-                    &format!("config/listen={}", address.to_string()),
+                    &format!("config/listen={}", address),
                 ])?;
 
                 zone.run_cmd(&[
@@ -398,8 +398,7 @@ impl DatasetInfo {
                 ])?;
 
                 Ok(())
-
-            },
+            }
         }
     }
 }
@@ -652,8 +651,11 @@ impl StorageWorker {
                 Error::NotFound(format!("zpool: {}", request.zpool_id))
             })?;
 
-        let dataset_info =
-            DatasetInfo::new(pool.info.name(), request.dataset_kind.clone(), request.address);
+        let dataset_info = DatasetInfo::new(
+            pool.info.name(),
+            request.dataset_kind.clone(),
+            request.address,
+        );
         let (is_new_dataset, id) = self
             .initialize_dataset_and_zone(
                 pool,
