@@ -275,7 +275,7 @@ impl<T: ClientError> From<progenitor::progenitor_client::Error<T>>
         match e {
             // This error indicates a problem with the request to the remote
             // service that did not result in an HTTP response code, but rather
-            // pertained local (i.e. client-side) encoding or network
+            // pertained to local (i.e. client-side) encoding or network
             // communication.
             progenitor::progenitor_client::Error::CommunicationError(ee) => {
                 Error::internal_error(&format!("CommunicationError: {}", ee))
