@@ -209,7 +209,7 @@ impl<'de> Deserialize<'de> for ZpoolName {
 
 impl ToString for ZpoolName {
     fn to_string(&self) -> String {
-        format!("oxp_{}", self.0.to_string())
+        format!("oxp_{}", self.0)
     }
 }
 
