@@ -90,6 +90,10 @@ IAM
     users_get    USER_NAME
     roles_list
     role_get     ROLE_NAME
+
+UPDATES
+
+    updates_refresh
 EOF
 )"
 
@@ -435,6 +439,11 @@ function cmd_role_get
 {
 	[[ $# != 1 ]] && usage "expected ROLE_NAME"
 	do_curl_authn "/roles/$1"
+}
+
+function cmd_updates_refresh
+{
+	do_curl /updates/refresh -X POST
 }
 
 main "$@"

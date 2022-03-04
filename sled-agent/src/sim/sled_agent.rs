@@ -6,9 +6,9 @@
  * Simulated sled agent implementation
  */
 
+use crate::nexus::NexusClient;
 use crate::params::DiskStateRequested;
 use futures::lock::Mutex;
-use nexus_client::Client as NexusClient;
 use omicron_common::api::external::Error;
 use omicron_common::api::internal::nexus::DiskRuntimeState;
 use omicron_common::api::internal::nexus::InstanceRuntimeState;
@@ -39,6 +39,7 @@ pub struct SledAgent {
     /** collection of simulated disks, indexed by disk uuid */
     disks: Arc<SimCollection<SimDisk>>,
     storage: Mutex<Storage>,
+    pub nexus_client: Arc<NexusClient>,
 }
 
 impl SledAgent {
@@ -77,6 +78,7 @@ impl SledAgent {
                 config.storage.ip,
                 storage_log,
             )),
+            nexus_client,
         }
     }
 

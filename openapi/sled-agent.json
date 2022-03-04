@@ -87,6 +87,26 @@
           }
         }
       }
+    },
+    "/update": {
+      "post": {
+        "operationId": "update_artifact",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateArtifact"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          }
+        }
+      }
     }
   },
   "components": {
@@ -663,6 +683,34 @@
           "time_created",
           "time_modified",
           "vpc_id"
+        ]
+      },
+      "UpdateArtifact": {
+        "description": "Description of a single update artifact.",
+        "type": "object",
+        "properties": {
+          "kind": {
+            "$ref": "#/components/schemas/UpdateArtifactKind"
+          },
+          "name": {
+            "type": "string"
+          },
+          "version": {
+            "type": "integer",
+            "format": "int64"
+          }
+        },
+        "required": [
+          "kind",
+          "name",
+          "version"
+        ]
+      },
+      "UpdateArtifactKind": {
+        "description": "Kinds of update artifacts, as used by Nexus to determine what updates are available and by sled-agent to determine how to apply an update when asked.",
+        "type": "string",
+        "enum": [
+          "zone"
         ]
       }
     }
