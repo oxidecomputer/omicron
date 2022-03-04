@@ -15,7 +15,8 @@ use serial_console_history::SerialConsoleHistory;
 use crate::config::KnownSps;
 use dropshot::HttpError;
 use gateway_messages::{
-    version, IgnitionState, Request, RequestKind, ResponseKind, SerialConsole,
+    sp_impl::SerialConsolePacketizer, version, IgnitionCommand, IgnitionState,
+    Request, RequestKind, ResponseError, ResponseKind, SerialConsole,
     SerializedSize, SpComponent, SpMessage, SpMessageKind,
 };
 use slog::{debug, error, info, o, Logger};
@@ -47,6 +48,12 @@ pub enum StartupError {
 pub enum Error {
     #[error("error sending to UDP address {addr}: {err}")]
     UdpSend { addr: SocketAddr, err: io::Error },
+    #[error(
+        "SP sent a bogus response type (got `{got}`; expected `{expected}`)"
+    )]
+    BogusResponseType { got: &'static str, expected: &'static str },
+    #[error("error from SP: {0}")]
+    SpError(String),
     #[error("timeout")]
     Timeout(#[from] tokio::time::error::Elapsed),
     #[error("no known SP at {0}")]
@@ -58,6 +65,66 @@ impl From<Error> for HttpError {
         // none of `Error`'s cases are caused by the client; they're all
         // internal to gateway <-> SP failures
         HttpError::for_internal_error(err.to_string())
+    }
+}
+
+impl Error {
+    fn from_unhandled_response_kind(
+        kind: &ResponseKind,
+        expected: &'static str,
+    ) -> Self {
+        // Our caller couldn't handle `kind`; most likely case is that it's a
+        // `ResponseError`, which we'll handle below. It could also be that we
+        // got a response kind that doesn't match the request we sent - peel
+        // that out here.
+        let err = match kind {
+            ResponseKind::Error(err) => err,
+            other => {
+                return Self::BogusResponseType {
+                    got: response_kind_name(other),
+                    expected,
+                }
+            }
+        };
+
+        // `ResponseError` is defined in a `no_std` crate and therefore doesn't
+        // implement `Display` or `std::error::Error`; for now we'll just
+        // stringify all its cases. Can we do something better, or make it impl
+        // `Error` if compiled in a std environment?
+        let msg = match err {
+            ResponseError::RequestUnsupported => {
+                String::from("unsupported request")
+            }
+            ResponseError::IgnitionTargetDoesNotExist(target) => {
+                format!("nonexistent ignition target {}", target)
+            }
+        };
+        Self::SpError(msg)
+    }
+}
+
+// helper constants mapping SP response kinds to stringy names for error
+// messages
+mod response_kind_names {
+    pub(super) const PONG: &str = "pong";
+    pub(super) const IGNITION_STATE: &str = "ignition_state";
+    pub(super) const IGNITION_COMMAND_ACK: &str = "ignition_command_ack";
+    pub(super) const SERIAL_CONSOLE_WRITE_ACK: &str =
+        "serial_console_write_ack";
+    pub(super) const ERROR: &str = "error";
+}
+
+fn response_kind_name(kind: &ResponseKind) -> &'static str {
+    match kind {
+        ResponseKind::Pong => response_kind_names::PONG,
+        ResponseKind::IgnitionState(_) => response_kind_names::IGNITION_STATE,
+        ResponseKind::IgnitionCommandAck => {
+            response_kind_names::IGNITION_COMMAND_ACK
+        }
+        ResponseKind::SerialConsoleWriteAck => {
+            response_kind_names::SERIAL_CONSOLE_WRITE_ACK
+        }
+        ResponseKind::Error(_) => response_kind_names::ERROR,
     }
 }
 
@@ -125,7 +192,54 @@ impl SpCommunicator {
     ) -> Result<Option<SerialConsoleContents>, Error> {
         let sp =
             self.sp_state.all_sps.get(&sp).ok_or(Error::SpDoesNotExist(sp))?;
-        Ok(sp.serial_console.lock().unwrap().contents(component))
+        Ok(sp.serial_console_from_sp.lock().unwrap().contents(component))
+    }
+
+    pub(crate) async fn serial_console_post(
+        &self,
+        sp: SocketAddr,
+        component: SpComponent,
+        data: &[u8],
+        timeout: Duration,
+    ) -> Result<(), Error> {
+        tokio::time::timeout(
+            timeout,
+            self.serial_console_post_impl(sp, component, data),
+        )
+        .await?
+    }
+
+    pub(crate) async fn serial_console_post_impl(
+        &self,
+        sp: SocketAddr,
+        component: SpComponent,
+        data: &[u8],
+    ) -> Result<(), Error> {
+        let sp_state = self
+            .sp_state
+            .all_sps
+            .get(&sp.ip())
+            .ok_or_else(|| Error::SpDoesNotExist(sp.ip()))?;
+
+        let mut packetizers = sp_state.serial_console_to_sp.lock().await;
+        let packetizer = packetizers
+            .entry(component)
+            .or_insert_with(|| SerialConsolePacketizer::new(component));
+
+        for packet in packetizer.packetize(data) {
+            let request = RequestKind::SerialConsoleWrite(packet);
+            match self.request_response(sp, request).await? {
+                ResponseKind::SerialConsoleWriteAck => (),
+                other => {
+                    return Err(Error::from_unhandled_response_kind(
+                        &other,
+                        response_kind_names::SERIAL_CONSOLE_WRITE_ACK,
+                    ))
+                }
+            }
+        }
+
+        Ok(())
     }
 
     // How do we want to describe ignition targets? Currently we want to
@@ -138,9 +252,6 @@ impl SpCommunicator {
         tokio::time::timeout(timeout, self.ignition_get_impl(target)).await?
     }
 
-    // TODO As we add additional methods, it's likely this should be cleaned up
-    // to extract common logic, as most methods will only vary by the type of
-    // request/response they're sending. For now we only have this one method.
     async fn ignition_get_impl(
         &self,
         target: u8,
@@ -149,6 +260,69 @@ impl SpCommunicator {
         // local one, and only use it for ignition interactions.
         let controller = self.known_sps.ignition_controller;
 
+        let request = RequestKind::IgnitionState { target };
+
+        match self.request_response(controller, request).await? {
+            ResponseKind::IgnitionState(state) => Ok(state),
+            other => {
+                return Err(Error::from_unhandled_response_kind(
+                    &other,
+                    response_kind_names::IGNITION_STATE,
+                ))
+            }
+        }
+    }
+
+    pub async fn ignition_power_on(
+        &self,
+        target: u8,
+        timeout: Duration,
+    ) -> Result<(), Error> {
+        tokio::time::timeout(
+            timeout,
+            self.ignition_command(target, IgnitionCommand::PowerOn),
+        )
+        .await?
+    }
+
+    pub async fn ignition_power_off(
+        &self,
+        target: u8,
+        timeout: Duration,
+    ) -> Result<(), Error> {
+        tokio::time::timeout(
+            timeout,
+            self.ignition_command(target, IgnitionCommand::PowerOff),
+        )
+        .await?
+    }
+
+    async fn ignition_command(
+        &self,
+        target: u8,
+        command: IgnitionCommand,
+    ) -> Result<(), Error> {
+        // XXX We currently assume we're know which ignition controller is our
+        // local one, and only use it for ignition interactions.
+        let controller = self.known_sps.ignition_controller;
+        let request = RequestKind::IgnitionCommand { target, command };
+
+        match self.request_response(controller, request).await? {
+            ResponseKind::IgnitionCommandAck => Ok(()),
+            other => {
+                return Err(Error::from_unhandled_response_kind(
+                    &other,
+                    response_kind_names::IGNITION_COMMAND_ACK,
+                ))
+            }
+        }
+    }
+
+    async fn request_response(
+        &self,
+        sp: SocketAddr,
+        request: RequestKind,
+    ) -> Result<ResponseKind, Error> {
         // request IDs will eventually roll over; since we enforce timeouts
         // this should be a non-issue in practice. does this need testing?
         let request_id =
@@ -156,36 +330,25 @@ impl SpCommunicator {
 
         // tell our background receiver to expect a response to this request
         let response =
-            self.sp_state.insert_expected_response(controller.ip(), request_id);
+            self.sp_state.insert_expected_response(sp.ip(), request_id);
 
         // Serialize and send our request. We know `buf` is large enough for any
         // `Request`, so unwrapping here is fine.
-        let request = Request {
-            version: version::V1,
-            request_id,
-            kind: RequestKind::IgnitionState { target },
-        };
+        let request =
+            Request { version: version::V1, request_id, kind: request };
         let mut buf = [0; Request::MAX_SIZE];
         let n = gateway_messages::serialize(&mut buf, &request).unwrap();
 
         let serialized_request = &buf[..n];
-        debug!(
-            &self.log,
-            "sending {:?} to igntition controller {}", request, controller
-        );
+        debug!(&self.log, "sending {:?} to SP {}", request, sp);
         self.socket
-            .send_to(serialized_request, controller)
+            .send_to(serialized_request, sp)
             .await
-            .map_err(|err| Error::UdpSend { addr: controller, err })?;
+            .map_err(|err| Error::UdpSend { addr: sp, err })?;
 
         // recv() can only fail if the sender is dropped, but we're holding it
         // in `self.outstanding_requests`; unwrap() is fine.
-        let response_kind = response.recv().await.unwrap();
-
-        match response_kind {
-            ResponseKind::IgnitionState(state) => Ok(state),
-            other => panic!("bogus response kind {:?}", other),
-        }
+        Ok(response.recv().await.unwrap())
     }
 }
 
@@ -378,7 +541,7 @@ impl SpState {
         // caller should never try to send a request to an SP we don't know
         // about, since it created us with all SPs it knows.
         let state = self.all_sps.get(&sp).expect("nonexistent SP");
-        state.serial_console.lock().unwrap().push(packet, log);
+        state.serial_console_from_sp.lock().unwrap().push(packet, log);
     }
 
     fn insert_expected_response(
@@ -406,8 +569,15 @@ impl SpState {
 
 #[derive(Debug, Default)]
 struct SingleSpState {
+    // map of requests we're waiting to receive
     outstanding_requests: Arc<OutstandingRequests>,
-    serial_console: Mutex<SerialConsoleHistory>,
+    // ringbuffer of serial console data from the SP
+    serial_console_from_sp: Mutex<SerialConsoleHistory>,
+    // counter of bytes we've sent per SP component; we want to hold this mutex
+    // across await points as we packetize data, so we have to use a tokio mutex
+    // here instead of a `std::sync::Mutex`
+    serial_console_to_sp:
+        tokio::sync::Mutex<HashMap<SpComponent, SerialConsolePacketizer>>,
 }
 
 #[derive(Debug, Default)]

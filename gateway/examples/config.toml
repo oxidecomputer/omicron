@@ -5,7 +5,6 @@
 # Identifier for this instance of MGS
 id = "8afcb12d-f625-4df9-bdf2-f495c3bbd323"
 udp_bind_address = "127.0.0.1:22222"
-ignition_controller_timeout_milliseconds = 1_000
 
 [known_sps]
 # TODO we repeat the ignition_controller IP as a switch; should we specify it as
@@ -15,6 +14,10 @@ ignition_controller = "127.0.0.1:23456"
 switches = ["127.0.0.1:23456"]
 sleds = ["127.0.0.1:23457"]
 power_controllers = []
+
+[timeouts]
+ignition_controller_milliseconds = 1_000
+sp_request_milliseconds = 1_000
 
 [dropshot]
 # IP address and TCP port on which to listen for the external API

@@ -13,7 +13,7 @@ use crate::ServerContext;
 use dropshot::{
     endpoint, ApiDescription, EmptyScanParams, HttpError, HttpResponseOk,
     HttpResponseUpdatedNoContent, PaginationParams, Path, Query,
-    RequestContext, ResultsPage, TypedBody,
+    RequestContext, ResultsPage, TypedBody, UntypedBody,
 };
 use gateway_messages::SpComponent;
 use schemars::JsonSchema;
@@ -319,8 +319,9 @@ async fn sp_component_serial_console_get(
 
     let sp = comms
         .placeholder_known_sps()
-        .ip_for(&sp)
-        .ok_or(Error::SpDoesNotExist(sp))?;
+        .addr_for(&sp)
+        .ok_or(Error::SpDoesNotExist(sp))?
+        .ip();
     let component = SpComponent::try_from(component.as_str())
         .map_err(|_| Error::InvalidSpComponentId(component))?;
     let contents = comms.serial_console_get(sp, &component)?;
@@ -332,6 +333,51 @@ async fn sp_component_serial_console_get(
     // more gracefully, we will need to know which components have a serial
     // console.
     Ok(HttpResponseOk(contents.unwrap_or_default()))
+}
+
+/// Send data to an SP component's serial console.
+///
+/// If this request returns successfully, the SP acknowledged that the data
+/// arrived. If it fails, we do not know whether or not the data arrived (or
+/// will eventually arrive).
+#[endpoint {
+    method = POST,
+    path = "/sp/{type}/{slot}/component/{component}/serial_console",
+}]
+async fn sp_component_serial_console_post(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    path: Path<PathSpComponent>,
+    data: UntypedBody,
+) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+    let apictx = rqctx.context();
+    let comms = &apictx.sp_comms;
+    let PathSpComponent { sp, component } = path.into_inner();
+
+    let sp = comms
+        .placeholder_known_sps()
+        .addr_for(&sp)
+        .ok_or(Error::SpDoesNotExist(sp))?;
+    let component = SpComponent::try_from(component.as_str())
+        .map_err(|_| Error::InvalidSpComponentId(component))?;
+
+    // TODO What is our recourse if we hit a timeout here? We don't know whether
+    // the SP received none, some, or all of the data we sent, only that it
+    // failed to ack (at least) the last packet in time. Hopefully the user can
+    // manually detect this by inspecting the serial console output from this
+    // component (if whatever they sent triggers some kind of output)? But maybe
+    // we should try to do a little better - if we had to packetize `data`, for
+    // example, we could at least report how much data was ack'd and how much we
+    // sent that hasn't been ack'd yet?
+    comms
+        .serial_console_post(
+            sp,
+            component,
+            data.as_bytes(),
+            apictx.sp_request_timeout,
+        )
+        .await?;
+
+    Ok(HttpResponseUpdatedNoContent {})
 }
 
 // TODO: how can we make this generic enough to support any update mechanism?
@@ -445,10 +491,21 @@ async fn ignition_get(
     path = "/sp/{type}/{slot}/power_on",
 }]
 async fn ignition_power_on(
-    _rqctx: Arc<RequestContext<Arc<ServerContext>>>,
-    _path: Path<PathSp>,
-) -> Result<HttpResponseOk<SpIgnitionInfo>, HttpError> {
-    todo!()
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    path: Path<PathSp>,
+) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+    let apictx = rqctx.context();
+    let sp = path.into_inner().sp;
+
+    let target =
+        sp.placeholder_map_to_target(apictx.sp_comms.placeholder_known_sps())?;
+
+    apictx
+        .sp_comms
+        .ignition_power_on(target, apictx.ignition_controller_timeout)
+        .await?;
+
+    Ok(HttpResponseUpdatedNoContent {})
 }
 
 /// Power off an SP via Ignition
@@ -457,10 +514,21 @@ async fn ignition_power_on(
     path = "/sp/{type}/{slot}/power_off",
 }]
 async fn ignition_power_off(
-    _rqctx: Arc<RequestContext<Arc<ServerContext>>>,
-    _path: Path<PathSp>,
-) -> Result<HttpResponseOk<SpIgnitionInfo>, HttpError> {
-    todo!()
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    path: Path<PathSp>,
+) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+    let apictx = rqctx.context();
+    let sp = path.into_inner().sp;
+
+    let target =
+        sp.placeholder_map_to_target(apictx.sp_comms.placeholder_known_sps())?;
+
+    apictx
+        .sp_comms
+        .ignition_power_off(target, apictx.ignition_controller_timeout)
+        .await?;
+
+    Ok(HttpResponseUpdatedNoContent {})
 }
 
 // TODO
@@ -486,6 +554,7 @@ pub fn api() -> GatewayApiDescription {
         api.register(sp_component_list)?;
         api.register(sp_component_get)?;
         api.register(sp_component_serial_console_get)?;
+        api.register(sp_component_serial_console_post)?;
         api.register(sp_component_update)?;
         api.register(sp_component_power_on)?;
         api.register(sp_component_power_off)?;

@@ -34,6 +34,7 @@ pub enum RequestKind {
     // one message?
     IgnitionState { target: u8 },
     IgnitionCommand { target: u8, command: IgnitionCommand },
+    SerialConsoleWrite(SerialConsole),
 }
 
 // TODO: Not all SPs are capable of crafting all these response kinds, but the
@@ -44,6 +45,7 @@ pub enum ResponseKind {
     Pong,
     IgnitionState(IgnitionState),
     IgnitionCommandAck,
+    SerialConsoleWriteAck,
     Error(ResponseError),
 }
 
@@ -52,6 +54,8 @@ pub enum ResponseError {
     /// The [RequestKind] is not supported by the receiving SP; e.g., asking an
     /// SP without an attached ignition controller for ignition state.
     RequestUnsupported,
+    /// The specified ignition target does not exist.
+    IgnitionTargetDoesNotExist(u8),
 }
 
 /// Messages from an SP to a gateway. Includes both responses to [`Request`]s as
@@ -74,7 +78,9 @@ pub enum SpMessageKind {
     SerialConsole(SerialConsole),
 }
 
-#[derive(Debug, Clone, Copy, SerializedSize, Serialize, Deserialize)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, SerializedSize, Serialize, Deserialize,
+)]
 pub struct IgnitionState {
     pub id: u16,
     pub flags: IgnitionFlags,
@@ -156,13 +162,13 @@ impl TryFrom<&str> for SpComponent {
 
 #[derive(Debug, Clone, Copy, SerializedSize, Serialize, Deserialize)]
 pub struct SerialConsole {
-    /// Source component of this serial console data.
+    /// Source component with an attached serial console.
     pub component: SpComponent,
 
-    /// Offset of this chunk of data relative to all console ouput this
-    /// SP+component has seen since it booted. MGS can determine if it's missed
-    /// data and reconstruct out-of-order packets based on this value plus
-    /// `len`.
+    /// Offset of this chunk of data relative to all console data this
+    /// source has sent since it booted. The receiver can determine if it's
+    /// missed data and reconstruct out-of-order packets based on this value
+    /// plus `len`.
     pub offset: u64,
 
     /// Number of bytes in `data`.
@@ -172,8 +178,8 @@ pub struct SerialConsole {
     /// here (subject to hubpack limitations or outside-of-hubpack encoding)?
     ///
     /// Another minor annoyance - serde doesn't support arbitrary array sizes
-    /// and only implements up to [T; 32], so we'd need a wrapper of some kind to
-    /// go higher. See https://github.com/serde-rs/serde/issues/1937
+    /// and only implements up to [T; 32], so we'd need a wrapper of some kind
+    /// to go higher. See https://github.com/serde-rs/serde/issues/1937
     pub data: [u8; Self::MAX_DATA_PER_PACKET],
 }
 
@@ -203,5 +209,12 @@ mod tests {
             deserialize::<SerialConsole>(&serialized[..n]).unwrap();
         assert_eq!(deserialized.len, console.len);
         assert_eq!(deserialized.data, console.data);
+    }
+
+    #[test]
+    fn serial_console_data_length_fits_in_u8() {
+        // this is just a sanity check that if we bump `MAX_DATA_PER_PACKET`
+        // above 256 we also need to change the type of `SerialConsole::len`
+        assert!(SerialConsole::MAX_DATA_PER_PACKET <= usize::from(u8::MAX));
     }
 }
