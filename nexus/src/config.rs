@@ -45,7 +45,7 @@ pub struct ConsoleConfig {
 pub struct UpdatesConfig {
     /** Trusted root.json role for the TUF updates repository. */
     pub trusted_root: PathBuf,
-    /** Default base URLs for the TUF repository. */
+    /** Default base URL for the TUF repository. */
     pub default_base_url: String,
 }
 
