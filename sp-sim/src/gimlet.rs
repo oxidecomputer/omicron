@@ -7,8 +7,8 @@ use crate::server::UdpServer;
 use anyhow::{anyhow, Context, Result};
 use gateway_messages::sp_impl::{SerialConsolePacketizer, SpHandler, SpServer};
 use gateway_messages::{
-    version, ResponseError, ResponseKind, SerialConsole, SerialNumber,
-    SerializedSize, SpComponent, SpMessage, SpMessageKind, SpState,
+    version, ResponseError, SerialConsole, SerialNumber, SerializedSize,
+    SpComponent, SpMessage, SpMessageKind, SpState,
 };
 use slog::{debug, error, info, warn, Logger};
 use std::collections::HashMap;
@@ -265,38 +265,41 @@ struct Handler {
 }
 
 impl SpHandler for Handler {
-    fn ping(&mut self) -> ResponseKind {
+    fn ping(&mut self) -> Result<(), ResponseError> {
         debug!(&self.log, "received ping; sending pong");
-        ResponseKind::Pong
+        Ok(())
     }
 
-    fn ignition_state(&mut self, target: u8) -> ResponseKind {
+    fn ignition_state(
+        &mut self,
+        target: u8,
+    ) -> Result<gateway_messages::IgnitionState, ResponseError> {
         warn!(
             &self.log,
             "received ignition state request for {}; not supported by gimlet",
             target,
         );
-        ResponseKind::Error(ResponseError::RequestUnsupportedForSp)
+        Err(ResponseError::RequestUnsupportedForSp)
     }
 
     fn ignition_command(
         &mut self,
         target: u8,
         command: gateway_messages::IgnitionCommand,
-    ) -> ResponseKind {
+    ) -> Result<(), ResponseError> {
         warn!(
             &self.log,
             "received ignition command {:?} for target {}; not supported by gimlet",
             command,
             target
         );
-        ResponseKind::Error(ResponseError::RequestUnsupportedForSp)
+        Err(ResponseError::RequestUnsupportedForSp)
     }
 
     fn serial_console_write(
         &mut self,
         packet: gateway_messages::SerialConsole,
-    ) -> ResponseKind {
+    ) -> Result<(), ResponseError> {
         debug!(
             &self.log,
             "received serial console packet with {} bytes at offset {} for component {:?}",
@@ -305,15 +308,10 @@ impl SpHandler for Handler {
             packet.component,
         );
 
-        let incoming_serial_console =
-            match self.incoming_serial_console.get(&packet.component) {
-                Some(console) => console,
-                None => {
-                    return ResponseKind::Error(
-                        ResponseError::RequestUnsupportedForComponent,
-                    )
-                }
-            };
+        let incoming_serial_console = self
+            .incoming_serial_console
+            .get(&packet.component)
+            .ok_or(ResponseError::RequestUnsupportedForComponent)?;
 
         // should we sanity check `offset`? for now just assume everything
         // comes in order; we're just a simulator anyway
@@ -322,12 +320,12 @@ impl SpHandler for Handler {
         // ignore errors here
         let _ = incoming_serial_console.send(packet);
 
-        ResponseKind::SerialConsoleWriteAck
+        Ok(())
     }
 
-    fn sp_state(&mut self) -> ResponseKind {
+    fn sp_state(&mut self) -> Result<SpState, ResponseError> {
         let state = SpState { serial_number: self.serial_number };
         debug!(&self.log, "received state request; sending {:?}", state);
-        ResponseKind::SpState(state)
+        Ok(state)
     }
 }

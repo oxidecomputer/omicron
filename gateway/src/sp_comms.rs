@@ -53,7 +53,7 @@ pub enum Error {
     )]
     BogusResponseType { got: &'static str, expected: &'static str },
     #[error("error from SP: {0}")]
-    SpError(String),
+    SpError(#[from] ResponseError),
     #[error("timeout")]
     Timeout(#[from] tokio::time::error::Elapsed),
     #[error("no known SP at {0}")]
@@ -73,36 +73,20 @@ impl Error {
         kind: &ResponseKind,
         expected: &'static str,
     ) -> Self {
-        // Our caller couldn't handle `kind`; most likely case is that it's a
-        // `ResponseError`, which we'll handle below. It could also be that we
-        // got a response kind that doesn't match the request we sent - peel
-        // that out here.
-        let err = match kind {
-            ResponseKind::Error(err) => err,
-            other => {
-                return Self::BogusResponseType {
-                    got: response_kind_name(other),
-                    expected,
-                }
+        let got = match kind {
+            ResponseKind::Pong => response_kind_names::PONG,
+            ResponseKind::IgnitionState(_) => {
+                response_kind_names::IGNITION_STATE
+            }
+            ResponseKind::IgnitionCommandAck => {
+                response_kind_names::IGNITION_COMMAND_ACK
+            }
+            ResponseKind::SpState(_) => response_kind_names::SP_STATE,
+            ResponseKind::SerialConsoleWriteAck => {
+                response_kind_names::SERIAL_CONSOLE_WRITE_ACK
             }
         };
-
-        // `ResponseError` is defined in a `no_std` crate and therefore doesn't
-        // implement `Display` or `std::error::Error`; for now we'll just
-        // stringify all its cases. Can we do something better, or make it impl
-        // `Error` if compiled in a std environment?
-        let msg = match err {
-            ResponseError::RequestUnsupportedForSp => {
-                String::from("unsupported request for this SP")
-            }
-            ResponseError::RequestUnsupportedForComponent => {
-                String::from("unsupported request for this SP component")
-            }
-            ResponseError::IgnitionTargetDoesNotExist(target) => {
-                format!("nonexistent ignition target {}", target)
-            }
-        };
-        Self::SpError(msg)
+        Self::BogusResponseType { got, expected }
     }
 }
 
@@ -115,22 +99,6 @@ mod response_kind_names {
     pub(super) const SP_STATE: &str = "sp_state";
     pub(super) const SERIAL_CONSOLE_WRITE_ACK: &str =
         "serial_console_write_ack";
-    pub(super) const ERROR: &str = "error";
-}
-
-fn response_kind_name(kind: &ResponseKind) -> &'static str {
-    match kind {
-        ResponseKind::Pong => response_kind_names::PONG,
-        ResponseKind::IgnitionState(_) => response_kind_names::IGNITION_STATE,
-        ResponseKind::IgnitionCommandAck => {
-            response_kind_names::IGNITION_COMMAND_ACK
-        }
-        ResponseKind::SpState(_) => response_kind_names::SP_STATE,
-        ResponseKind::SerialConsoleWriteAck => {
-            response_kind_names::SERIAL_CONSOLE_WRITE_ACK
-        }
-        ResponseKind::Error(_) => response_kind_names::ERROR,
-    }
 }
 
 #[derive(Debug)]
@@ -375,7 +343,7 @@ impl SpCommunicator {
 
         // recv() can only fail if the sender is dropped, but we're holding it
         // in `self.outstanding_requests`; unwrap() is fine.
-        Ok(response.recv().await.unwrap())
+        Ok(response.recv().await.unwrap()?)
     }
 }
 
@@ -474,8 +442,8 @@ impl RecvTask {
             // decide whether this is a response to an outstanding request or an
             // unprompted message
             match sp_msg.kind {
-                SpMessageKind::Response { request_id, kind } => {
-                    self.handle_response(addr, request_id, kind);
+                SpMessageKind::Response { request_id, result } => {
+                    self.handle_response(addr, request_id, result);
                 }
                 SpMessageKind::SerialConsole(serial_console) => {
                     self.handle_serial_console(addr, serial_console);
@@ -488,7 +456,7 @@ impl RecvTask {
         &self,
         addr: SocketAddr,
         request_id: u32,
-        kind: ResponseKind,
+        result: Result<ResponseKind, ResponseError>,
     ) {
         // see if we know who to send the response to
         let tx = match self.sp_state.remove_expected_response(addr, request_id)
@@ -505,7 +473,7 @@ impl RecvTask {
         };
 
         // actually send it
-        if tx.send(kind).is_err() {
+        if tx.send(result).is_err() {
             // This can only fail if the receiving half has been dropped.
             // That's held in the relevant `SpCommunicator` method above
             // that initiated this request; they should only have dropped
@@ -584,7 +552,7 @@ impl AllSpState {
         &self,
         sp: SocketAddr,
         request_id: u32,
-    ) -> Option<Sender<ResponseKind>> {
+    ) -> Option<Sender<Result<ResponseKind, ResponseError>>> {
         // caller should never try to send a request to an SP we don't know
         // about, since it created us with all SPs it knows.
         let state = self.all_sps.get(&sp).expect("nonexistent SP");
@@ -608,7 +576,7 @@ struct SingleSpState {
 #[derive(Debug, Default)]
 struct OutstandingRequests {
     // map of request ID -> receiving oneshot channel
-    requests: Mutex<HashMap<u32, Sender<ResponseKind>>>,
+    requests: Mutex<HashMap<u32, Sender<Result<ResponseKind, ResponseError>>>>,
 }
 
 impl OutstandingRequests {
@@ -624,7 +592,10 @@ impl OutstandingRequests {
         }
     }
 
-    fn remove(&self, request_id: u32) -> Option<Sender<ResponseKind>> {
+    fn remove(
+        &self,
+        request_id: u32,
+    ) -> Option<Sender<Result<ResponseKind, ResponseError>>> {
         self.requests.lock().unwrap().remove(&request_id)
     }
 }
@@ -636,7 +607,7 @@ impl OutstandingRequests {
 struct ResponseReceiver {
     parent: Arc<OutstandingRequests>,
     request_id: u32,
-    rx: Receiver<ResponseKind>,
+    rx: Receiver<Result<ResponseKind, ResponseError>>,
     removed_from_parent: bool,
 }
 
@@ -647,7 +618,9 @@ impl Drop for ResponseReceiver {
 }
 
 impl ResponseReceiver {
-    async fn recv(mut self) -> Result<ResponseKind, RecvError> {
+    async fn recv(
+        mut self,
+    ) -> Result<Result<ResponseKind, ResponseError>, RecvError> {
         let result = (&mut self.rx).await;
         self.remove_from_parent();
         result

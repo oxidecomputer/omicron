@@ -11,3 +11,7 @@ serde_repr = { version = "0.1" }
 
 # Should point to cbiffle's repo, but need https://github.com/cbiffle/hubpack/pull/1
 hubpack = { git = "https://github.com/jgallagher/hubpack", rev = "36b13ad37a3b9606ea9f7f4d74f4d93ae83f4004" }
+
+[features]
+default = []
+std = []

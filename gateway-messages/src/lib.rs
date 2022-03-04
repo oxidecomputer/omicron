@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-#![cfg_attr(not(test), no_std)]
+#![cfg_attr(all(not(test), not(feature = "std")), no_std)]
 
 pub mod sp_impl;
 
@@ -49,7 +49,6 @@ pub enum ResponseKind {
     IgnitionCommandAck,
     SpState(SpState),
     SerialConsoleWriteAck,
-    Error(ResponseError),
 }
 
 // TODO how is this reported? Same/different for components?
@@ -73,6 +72,25 @@ pub enum ResponseError {
     IgnitionTargetDoesNotExist(u8),
 }
 
+impl fmt::Display for ResponseError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            ResponseError::RequestUnsupportedForSp => {
+                write!(f, "unsupported request for this SP")
+            }
+            ResponseError::RequestUnsupportedForComponent => {
+                write!(f, "unsupported request for this SP component")
+            }
+            ResponseError::IgnitionTargetDoesNotExist(target) => {
+                write!(f, "nonexistent ignition target {}", target)
+            }
+        }
+    }
+}
+
+#[cfg(feature = "std")]
+impl std::error::Error for ResponseError {}
+
 /// Messages from an SP to a gateway. Includes both responses to [`Request`]s as
 /// well as SP-initiated messages like serial console output.
 #[derive(Debug, Clone, Copy, SerializedSize, Serialize, Deserialize)]
@@ -86,7 +104,7 @@ pub enum SpMessageKind {
     // TODO: Is only sending the new state sufficient?
     // IgnitionChange { target: u8, new_state: IgnitionState },
     /// Response to a [`Request`] from MGS.
-    Response { request_id: u32, kind: ResponseKind },
+    Response { request_id: u32, result: Result<ResponseKind, ResponseError> },
 
     /// Data traveling from an SP-attached component (in practice, a CPU) on the
     /// component's serial console.
