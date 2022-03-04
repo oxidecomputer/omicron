@@ -1357,6 +1357,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "gateway-client"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "futures",
+ "omicron-common",
+ "progenitor",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "slog",
+ "uuid",
+]
+
+[[package]]
 name = "gateway-messages"
 version = "0.1.0"
 dependencies = [
@@ -2209,15 +2224,21 @@ version = "0.1.0"
 dependencies = [
  "clap 3.1.5",
  "dropshot",
+ "expectorate",
  "gateway-messages",
  "hex",
  "omicron-common",
+ "omicron-test-utils",
+ "openapi-lint",
+ "openapiv3",
  "ringbuffer",
  "schemars",
  "serde",
+ "serde_json",
  "slog",
  "slog-dtrace",
  "structopt",
+ "subprocess",
  "thiserror",
  "tokio",
  "toml",
@@ -3097,7 +3118,7 @@ dependencies = [
 [[package]]
 name = "progenitor"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/progenitor#305635e779f29321878c6ea737c2348c5b521647"
+source = "git+https://github.com/oxidecomputer/progenitor#ae7c178e21b321b0f88a9fa886a59fb98defa21a"
 dependencies = [
  "anyhow",
  "getopts",
@@ -3112,7 +3133,7 @@ dependencies = [
 [[package]]
 name = "progenitor-client"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/progenitor#305635e779f29321878c6ea737c2348c5b521647"
+source = "git+https://github.com/oxidecomputer/progenitor#ae7c178e21b321b0f88a9fa886a59fb98defa21a"
 dependencies = [
  "percent-encoding",
  "reqwest",
@@ -3123,7 +3144,7 @@ dependencies = [
 [[package]]
 name = "progenitor-impl"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/progenitor#305635e779f29321878c6ea737c2348c5b521647"
+source = "git+https://github.com/oxidecomputer/progenitor#ae7c178e21b321b0f88a9fa886a59fb98defa21a"
 dependencies = [
  "convert_case 0.4.0",
  "getopts",
@@ -3145,7 +3166,7 @@ dependencies = [
 [[package]]
 name = "progenitor-macro"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/progenitor#305635e779f29321878c6ea737c2348c5b521647"
+source = "git+https://github.com/oxidecomputer/progenitor#ae7c178e21b321b0f88a9fa886a59fb98defa21a"
 dependencies = [
  "openapiv3",
  "proc-macro2",

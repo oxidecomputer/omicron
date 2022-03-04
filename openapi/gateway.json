@@ -1,0 +1,991 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "Oxide Management Gateway Service API",
+    "description": "API for interacting with the Oxide control plane's gateway service",
+    "contact": {
+      "url": "https://oxide.computer",
+      "email": "api@oxide.computer"
+    },
+    "version": "0.0.1"
+  },
+  "paths": {
+    "/ignition": {
+      "get": {
+        "summary": "List SPs via Ignition",
+        "description": "List the SPs via the Ignition controller. This mechanism retrieves less information than over the management network, however it is lower latency and has fewer moving pieces that could result in delayed responses or unknown states.\nThis interface queries ignition via its associated SP. As this interface may be unreliable, consumers may optionally override the default.",
+        "operationId": "ignition_list",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "nullable": true,
+              "description": "Maximum number of items returned by a single call",
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 1
+            },
+            "style": "form"
+          },
+          {
+            "in": "query",
+            "name": "page_token",
+            "schema": {
+              "nullable": true,
+              "description": "Token returned by previous call to retreive the subsequent page",
+              "type": "string"
+            },
+            "style": "form"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SpIgnitionInfoResultsPage"
+                }
+              }
+            }
+          }
+        },
+        "x-dropshot-pagination": true
+      }
+    },
+    "/ignition/{type}/{slot}": {
+      "get": {
+        "summary": "Get SP info via Ignition",
+        "description": "Retreive information for an SP via the Ignition controller. This is lower latency and has fewer possible failure modes than querying the SP over the management network.",
+        "operationId": "ignition_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slot",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            },
+            "style": "simple"
+          },
+          {
+            "in": "path",
+            "name": "type",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/SpType"
+            },
+            "style": "simple"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SpIgnitionInfo"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/sp": {
+      "get": {
+        "summary": "List SPs",
+        "description": "Since communication with SPs may be unreliable, consumers may specify an optional timeout to override the default.\nThis interface may return a page of SPs prior to reaching either the timeout with the expectation that callers will keep calling this interface until the terminal page is reached. If the timeout is reached, the final call will result in an error.\nThis interface makes use of Ignition as well as the management network. SPs that are powered off (and therefore cannot respond over the management network) are represented in the output set. SPs that Ignition reports as powered on, but that do not respond within the allotted timeout will similarly be represented in the output; these will only be included in the terminal output page when the allotted timeout has expired.\nNote that Ignition provides the full set of SPs that are plugged into the system so the gateway service knows prior to waiting for responses the expected cardinality.",
+        "operationId": "sp_list",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "nullable": true,
+              "description": "Maximum number of items returned by a single call",
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 1
+            },
+            "style": "form"
+          },
+          {
+            "in": "query",
+            "name": "page_token",
+            "schema": {
+              "nullable": true,
+              "description": "Token returned by previous call to retreive the subsequent page",
+              "type": "string"
+            },
+            "style": "form"
+          },
+          {
+            "in": "query",
+            "name": "timeout",
+            "schema": {
+              "nullable": true,
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            },
+            "style": "form"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SpInfoResultsPage"
+                }
+              }
+            }
+          }
+        },
+        "x-dropshot-pagination": true
+      }
+    },
+    "/sp/{type}/{slot}": {
+      "get": {
+        "summary": "Get info on an SP",
+        "description": "As communication with SPs may be unreliable, consumers may specify an optional timeout to override the default.",
+        "operationId": "sp_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slot",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            },
+            "style": "simple"
+          },
+          {
+            "in": "path",
+            "name": "type",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/SpType"
+            },
+            "style": "simple"
+          },
+          {
+            "in": "query",
+            "name": "timeout",
+            "schema": {
+              "nullable": true,
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            },
+            "style": "form"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SpInfo"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/sp/{type}/{slot}/component": {
+      "get": {
+        "summary": "List components of an SP",
+        "description": "A component is a distinct entity under an SP's direct control. This lists all those components for a given SP.\nAs communication with SPs may be unreliable, consumers may optionally override the timeout. This interface may return a page of components prior to reaching either the timeout with the expectation that callers will keep calling this interface until the terminal page is reached. If the timeout is reached, the final call will result in an error.",
+        "operationId": "sp_component_list",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slot",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            },
+            "style": "simple"
+          },
+          {
+            "in": "path",
+            "name": "type",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/SpType"
+            },
+            "style": "simple"
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "nullable": true,
+              "description": "Maximum number of items returned by a single call",
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 1
+            },
+            "style": "form"
+          },
+          {
+            "in": "query",
+            "name": "page_token",
+            "schema": {
+              "nullable": true,
+              "description": "Token returned by previous call to retreive the subsequent page",
+              "type": "string"
+            },
+            "style": "form"
+          },
+          {
+            "in": "query",
+            "name": "timeout",
+            "schema": {
+              "nullable": true,
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            },
+            "style": "form"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SpComponentInfoResultsPage"
+                }
+              }
+            }
+          }
+        },
+        "x-dropshot-pagination": true
+      }
+    },
+    "/sp/{type}/{slot}/component/{component}": {
+      "get": {
+        "summary": "Get info for an SP component",
+        "description": "This can be useful, for example, to poll the state of a component if another interface has changed the power state of a component or updated a component.\nAs communication with SPs maybe unreliable, consumers may specify a timeout to override the default. This interface will return an error when the timeout is reached.",
+        "operationId": "sp_component_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "component",
+            "required": true,
+            "schema": {
+              "description": "ID for the component of the SP; this is the internal identifier used by the SP itself to identify its components.",
+              "type": "string"
+            },
+            "style": "simple"
+          },
+          {
+            "in": "path",
+            "name": "slot",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            },
+            "style": "simple"
+          },
+          {
+            "in": "path",
+            "name": "type",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/SpType"
+            },
+            "style": "simple"
+          },
+          {
+            "in": "query",
+            "name": "timeout",
+            "schema": {
+              "nullable": true,
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            },
+            "style": "form"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SpComponentInfo"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/sp/{type}/{slot}/component/{component}/power_off": {
+      "post": {
+        "summary": "Power off an SP component",
+        "description": "Components whose power state cannot be changed will always return an error.",
+        "operationId": "sp_component_power_off",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "component",
+            "required": true,
+            "schema": {
+              "description": "ID for the component of the SP; this is the internal identifier used by the SP itself to identify its components.",
+              "type": "string"
+            },
+            "style": "simple"
+          },
+          {
+            "in": "path",
+            "name": "slot",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            },
+            "style": "simple"
+          },
+          {
+            "in": "path",
+            "name": "type",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/SpType"
+            },
+            "style": "simple"
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          }
+        }
+      }
+    },
+    "/sp/{type}/{slot}/component/{component}/power_on": {
+      "post": {
+        "summary": "Power on an SP component",
+        "description": "Components whose power state cannot be changed will always return an error.",
+        "operationId": "sp_component_power_on",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "component",
+            "required": true,
+            "schema": {
+              "description": "ID for the component of the SP; this is the internal identifier used by the SP itself to identify its components.",
+              "type": "string"
+            },
+            "style": "simple"
+          },
+          {
+            "in": "path",
+            "name": "slot",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            },
+            "style": "simple"
+          },
+          {
+            "in": "path",
+            "name": "type",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/SpType"
+            },
+            "style": "simple"
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          }
+        }
+      }
+    },
+    "/sp/{type}/{slot}/component/{component}/serial_console": {
+      "get": {
+        "summary": "Get the currently-buffered data for an SP component's serial console.",
+        "description": "This does not require any communication with the target SP; it returns any buffered data we have received from that SP (subject to limitations on how much we keep around; see [`SerialConsoleContents`] for details.",
+        "operationId": "sp_component_serial_console_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "component",
+            "required": true,
+            "schema": {
+              "description": "ID for the component of the SP; this is the internal identifier used by the SP itself to identify its components.",
+              "type": "string"
+            },
+            "style": "simple"
+          },
+          {
+            "in": "path",
+            "name": "slot",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            },
+            "style": "simple"
+          },
+          {
+            "in": "path",
+            "name": "type",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/SpType"
+            },
+            "style": "simple"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SerialConsoleContents"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "summary": "Send data to an SP component's serial console.",
+        "description": "If this request returns successfully, the SP acknowledged that the data arrived. If it fails, we do not know whether or not the data arrived (or will eventually arrive).",
+        "operationId": "sp_component_serial_console_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "component",
+            "required": true,
+            "schema": {
+              "description": "ID for the component of the SP; this is the internal identifier used by the SP itself to identify its components.",
+              "type": "string"
+            },
+            "style": "simple"
+          },
+          {
+            "in": "path",
+            "name": "slot",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            },
+            "style": "simple"
+          },
+          {
+            "in": "path",
+            "name": "type",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/SpType"
+            },
+            "style": "simple"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/octet-stream": {
+              "schema": {
+                "type": "string",
+                "format": "binary"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          }
+        }
+      }
+    },
+    "/sp/{type}/{slot}/component/{component}/update": {
+      "post": {
+        "summary": "Update an SP component",
+        "description": "Update a component of an SP according to its specific update mechanism. This interface is generic for all component types, but resolves to a mechanism specific to the given component type. This may fail for a variety of reasons including the update bundle being invalid or improperly specified or due to an error originating from the SP itself.\nNote that not all components may be updated; components without known update mechanisms will return an error without any inspection of the update bundle.",
+        "operationId": "sp_component_update",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "component",
+            "required": true,
+            "schema": {
+              "description": "ID for the component of the SP; this is the internal identifier used by the SP itself to identify its components.",
+              "type": "string"
+            },
+            "style": "simple"
+          },
+          {
+            "in": "path",
+            "name": "slot",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            },
+            "style": "simple"
+          },
+          {
+            "in": "path",
+            "name": "type",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/SpType"
+            },
+            "style": "simple"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SpComponentInfoResultsPage"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/sp/{type}/{slot}/power_off": {
+      "post": {
+        "summary": "Power off an SP via Ignition",
+        "operationId": "ignition_power_off",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slot",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            },
+            "style": "simple"
+          },
+          {
+            "in": "path",
+            "name": "type",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/SpType"
+            },
+            "style": "simple"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SpIgnitionInfo"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/sp/{type}/{slot}/power_on": {
+      "post": {
+        "summary": "Power on an SP via Ignition",
+        "operationId": "ignition_power_on",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slot",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            },
+            "style": "simple"
+          },
+          {
+            "in": "path",
+            "name": "type",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/SpType"
+            },
+            "style": "simple"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SpIgnitionInfo"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "SerialConsoleChunk": {
+        "description": "A chunk of serial console data: either actual data, or an amount of data we missed (presumably due to dropped packets or something similar).",
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "bytes": {
+                "type": "array",
+                "items": {
+                  "type": "integer",
+                  "format": "uint8",
+                  "minimum": 0
+                }
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "data"
+                ]
+              }
+            },
+            "required": [
+              "bytes",
+              "kind"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "missing"
+                ]
+              },
+              "len": {
+                "type": "integer",
+                "format": "uint64",
+                "minimum": 0
+              }
+            },
+            "required": [
+              "kind",
+              "len"
+            ]
+          }
+        ]
+      },
+      "SerialConsoleContents": {
+        "description": "Current in-memory contents of an SP component's serial console.\n\nIf we have not received any serial console data from this SP component, `start` will be `0` and `chunks` will be empty.",
+        "type": "object",
+        "properties": {
+          "chunks": {
+            "description": "Chunks of serial console data.\n\nWe collapse contiguous regions of data (present or missing) into a single chunk: any two consecutive elements of `chunks` are guaranteed to be different (i.e., one will be [`SerialConsoleChunk::Missing`] and the other will be [`SerialConsoleChunk::Data`]). If `chunks` is not empty, its final element is guaranteed to be a [`SerialConsoleChunk::Data`].",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SerialConsoleChunk"
+            }
+          },
+          "start": {
+            "description": "Position since SP component start of the first byte of the first element of `chunks`.\n\nThis is equal to the number of bytes that we've discarded since the SP started.",
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "chunks",
+          "start"
+        ]
+      },
+      "SpComponentInfo": {
+        "type": "object"
+      },
+      "SpComponentInfoResultsPage": {
+        "description": "A single page of results",
+        "type": "object",
+        "properties": {
+          "items": {
+            "description": "list of items on this page of results",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SpComponentInfo"
+            }
+          },
+          "next_page": {
+            "nullable": true,
+            "description": "token used to fetch the next page of results (if any)",
+            "type": "string"
+          }
+        },
+        "required": [
+          "items"
+        ]
+      },
+      "SpIdentifier": {
+        "type": "object",
+        "properties": {
+          "slot": {
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          },
+          "type": {
+            "$ref": "#/components/schemas/SpType"
+          }
+        },
+        "required": [
+          "slot",
+          "type"
+        ]
+      },
+      "SpIgnition": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "present": {
+                "type": "string",
+                "enum": [
+                  "no"
+                ]
+              }
+            },
+            "required": [
+              "present"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "ctrl_detect_0": {
+                "type": "boolean"
+              },
+              "ctrl_detect_1": {
+                "type": "boolean"
+              },
+              "flt_a2": {
+                "type": "boolean"
+              },
+              "flt_a3": {
+                "type": "boolean"
+              },
+              "flt_rot": {
+                "type": "boolean"
+              },
+              "flt_sp": {
+                "type": "boolean"
+              },
+              "id": {
+                "type": "integer",
+                "format": "uint16",
+                "minimum": 0
+              },
+              "power": {
+                "type": "boolean"
+              },
+              "present": {
+                "type": "string",
+                "enum": [
+                  "yes"
+                ]
+              }
+            },
+            "required": [
+              "ctrl_detect_0",
+              "ctrl_detect_1",
+              "flt_a2",
+              "flt_a3",
+              "flt_rot",
+              "flt_sp",
+              "id",
+              "power",
+              "present"
+            ]
+          }
+        ]
+      },
+      "SpIgnitionInfo": {
+        "type": "object",
+        "properties": {
+          "details": {
+            "$ref": "#/components/schemas/SpIgnition"
+          },
+          "id": {
+            "$ref": "#/components/schemas/SpIdentifier"
+          }
+        },
+        "required": [
+          "details",
+          "id"
+        ]
+      },
+      "SpIgnitionInfoResultsPage": {
+        "description": "A single page of results",
+        "type": "object",
+        "properties": {
+          "items": {
+            "description": "list of items on this page of results",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SpIgnitionInfo"
+            }
+          },
+          "next_page": {
+            "nullable": true,
+            "description": "token used to fetch the next page of results (if any)",
+            "type": "string"
+          }
+        },
+        "required": [
+          "items"
+        ]
+      },
+      "SpInfo": {
+        "type": "object",
+        "properties": {
+          "details": {
+            "$ref": "#/components/schemas/SpState"
+          },
+          "info": {
+            "$ref": "#/components/schemas/SpIgnitionInfo"
+          }
+        },
+        "required": [
+          "details",
+          "info"
+        ]
+      },
+      "SpInfoResultsPage": {
+        "description": "A single page of results",
+        "type": "object",
+        "properties": {
+          "items": {
+            "description": "list of items on this page of results",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SpInfo"
+            }
+          },
+          "next_page": {
+            "nullable": true,
+            "description": "token used to fetch the next page of results (if any)",
+            "type": "string"
+          }
+        },
+        "required": [
+          "items"
+        ]
+      },
+      "SpState": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "state": {
+                "type": "string",
+                "enum": [
+                  "Disabled"
+                ]
+              }
+            },
+            "required": [
+              "state"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "state": {
+                "type": "string",
+                "enum": [
+                  "Unresponsive"
+                ]
+              }
+            },
+            "required": [
+              "state"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "serial_number": {
+                "type": "string"
+              },
+              "state": {
+                "type": "string",
+                "enum": [
+                  "Enabled"
+                ]
+              }
+            },
+            "required": [
+              "serial_number",
+              "state"
+            ]
+          }
+        ]
+      },
+      "SpType": {
+        "type": "string",
+        "enum": [
+          "sled",
+          "power",
+          "switch"
+        ]
+      },
+      "UpdateBody": {
+        "type": "object"
+      }
+    }
+  }
+}

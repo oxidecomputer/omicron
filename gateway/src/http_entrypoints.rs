@@ -81,7 +81,7 @@ impl From<gateway_messages::IgnitionState> for SpIgnition {
 }
 
 #[derive(Serialize, JsonSchema)]
-struct SpComponentInfo;
+struct SpComponentInfo {}
 
 #[derive(Deserialize, JsonSchema)]
 struct Timeout {
@@ -435,7 +435,7 @@ async fn sp_component_serial_console_post(
 
 // TODO: how can we make this generic enough to support any update mechanism?
 #[derive(Deserialize, JsonSchema)]
-struct UpdateBody;
+struct UpdateBody {}
 
 /// Update an SP component
 ///
