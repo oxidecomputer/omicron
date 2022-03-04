@@ -6,6 +6,7 @@
 
 use crate::common::vlan::VlanID;
 use crate::illumos::vnic::VnicAllocator;
+use crate::nexus::NexusClient;
 use omicron_common::api::internal::nexus::InstanceRuntimeState;
 use omicron_common::api::internal::sled_agent::InstanceHardware;
 use omicron_common::api::internal::sled_agent::InstanceMigrateParams;
@@ -14,11 +15,6 @@ use slog::Logger;
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 use uuid::Uuid;
-
-#[cfg(test)]
-use crate::mocks::MockNexusClient as NexusClient;
-#[cfg(not(test))]
-use nexus_client::Client as NexusClient;
 
 #[cfg(not(test))]
 use crate::instance::Instance;

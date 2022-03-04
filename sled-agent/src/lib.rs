@@ -25,11 +25,13 @@ mod http_entrypoints;
 mod illumos;
 mod instance;
 mod instance_manager;
+mod nexus;
 mod params;
 pub mod server;
 mod services;
 mod sled_agent;
 mod storage_manager;
+mod updates;
 
 #[cfg(test)]
 mod mocks;

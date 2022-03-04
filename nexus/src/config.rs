@@ -41,6 +41,14 @@ pub struct ConsoleConfig {
     pub session_absolute_timeout_minutes: u32,
 }
 
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+pub struct UpdatesConfig {
+    /** Trusted root.json role for the TUF updates repository. */
+    pub trusted_root: PathBuf,
+    /** Default base URL for the TUF repository. */
+    pub default_base_url: String,
+}
+
 /**
  * Configuration for the timeseries database.
  */
@@ -70,6 +78,10 @@ pub struct Config {
     pub authn: AuthnConfig,
     /** Timeseries database configuration. */
     pub timeseries_db: TimeseriesDbConfig,
+    /// Updates-related configuration. Updates APIs return 400 Bad Request when this is
+    /// unconfigured.
+    #[serde(default)]
+    pub updates: Option<UpdatesConfig>,
 }
 
 #[derive(Debug)]
@@ -175,7 +187,7 @@ impl Config {
 mod test {
     use super::{
         AuthnConfig, Config, ConsoleConfig, LoadError, LoadErrorKind,
-        SchemeName, TimeseriesDbConfig,
+        SchemeName, TimeseriesDbConfig, UpdatesConfig,
     };
     use crate::db;
     use dropshot::ConfigDropshot;
@@ -306,6 +318,9 @@ mod test {
             if_exists = "fail"
             [timeseries_db]
             address = "[::1]:8123"
+            [updates]
+            trusted_root = "/path/to/root.json"
+            default_base_url = "http://example.invalid/"
             "##,
         )
         .unwrap();
@@ -346,6 +361,10 @@ mod test {
                 timeseries_db: TimeseriesDbConfig {
                     address: "[::1]:8123".parse().unwrap()
                 },
+                updates: Some(UpdatesConfig {
+                    trusted_root: PathBuf::from("/path/to/root.json"),
+                    default_base_url: "http://example.invalid/".into(),
+                }),
             }
         );
 

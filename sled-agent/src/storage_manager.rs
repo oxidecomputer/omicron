@@ -11,6 +11,7 @@ use crate::illumos::vnic::VnicAllocator;
 use crate::illumos::zone::AddressRequest;
 use crate::illumos::zpool::ZpoolName;
 use crate::illumos::{zfs::Mountpoint, zone::ZONE_PREFIX, zpool::ZpoolInfo};
+use crate::nexus::NexusClient;
 use futures::stream::FuturesOrdered;
 use futures::FutureExt;
 use futures::StreamExt;
@@ -38,11 +39,6 @@ use uuid::Uuid;
 use crate::illumos::{zfs::MockZfs as Zfs, zpool::MockZpool as Zpool};
 #[cfg(not(test))]
 use crate::illumos::{zfs::Zfs, zpool::Zpool};
-
-#[cfg(test)]
-use crate::mocks::MockNexusClient as NexusClient;
-#[cfg(not(test))]
-use nexus_client::Client as NexusClient;
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {

@@ -352,6 +352,32 @@ impl From<omicron_common::api::internal::sled_agent::ServiceRequest>
     }
 }
 
+impl From<omicron_common::api::internal::nexus::UpdateArtifact>
+    for types::UpdateArtifact
+{
+    fn from(s: omicron_common::api::internal::nexus::UpdateArtifact) -> Self {
+        types::UpdateArtifact {
+            name: s.name,
+            version: s.version,
+            kind: s.kind.into(),
+        }
+    }
+}
+
+impl From<omicron_common::api::internal::nexus::UpdateArtifactKind>
+    for types::UpdateArtifactKind
+{
+    fn from(
+        s: omicron_common::api::internal::nexus::UpdateArtifactKind,
+    ) -> Self {
+        use omicron_common::api::internal::nexus::UpdateArtifactKind;
+
+        match s {
+            UpdateArtifactKind::Zone => types::UpdateArtifactKind::Zone,
+        }
+    }
+}
+
 /**
  * Exposes additional [`Client`] interfaces for use by the test suite. These
  * are bonus endpoints, not generated in the real client.

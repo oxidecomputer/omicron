@@ -13,6 +13,7 @@ use crate::illumos::svc::wait_for_service;
 use crate::illumos::vnic::VnicAllocator;
 use crate::illumos::zone::{AddressRequest, PROPOLIS_ZONE_PREFIX};
 use crate::instance_manager::InstanceTicket;
+use crate::nexus::NexusClient;
 use anyhow::anyhow;
 use futures::lock::{Mutex, MutexGuard};
 use omicron_common::api::external::NetworkInterface;
@@ -32,11 +33,6 @@ use uuid::Uuid;
 use crate::illumos::{dladm::Dladm, zone::Zones};
 #[cfg(test)]
 use crate::illumos::{dladm::MockDladm as Dladm, zone::MockZones as Zones};
-
-#[cfg(test)]
-use crate::mocks::MockNexusClient as NexusClient;
-#[cfg(not(test))]
-use nexus_client::Client as NexusClient;
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {

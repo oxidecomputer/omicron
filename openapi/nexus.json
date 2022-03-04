@@ -3121,6 +3121,20 @@
         "x-dropshot-pagination": true
       }
     },
+    "/updates/refresh": {
+      "post": {
+        "tags": [
+          "updates"
+        ],
+        "summary": "Refresh update metadata",
+        "operationId": "updates_refresh",
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          }
+        }
+      }
+    },
     "/users": {
       "get": {
         "tags": [
