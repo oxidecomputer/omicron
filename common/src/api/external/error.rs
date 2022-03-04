@@ -262,7 +262,7 @@ pub trait ClientError: std::fmt::Debug {
 // TODO this From may give us a shortcut in situtations where we want more
 // robust consideration of errors. For example, while some errors from other
 // services may directly result in errors that percolate to the external
-// client, others may required, for example, retries with an alternate service
+// client, others may require, for example, retries with an alternate service
 // instance or additional interpretation to sanitize the output error.
 //
 // ***********************************************************************
