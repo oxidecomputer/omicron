@@ -2,9 +2,17 @@
 # SP simulator: example config file
 #
 
-sp_type = "sidecar"
 bind_address = "127.0.0.1:23456"
 gateway_address = "127.0.0.1:22222"
+
+[sp_type]
+type = "sidecar"
+ignition_targets = [
+    # sidecar, power | ctrl_detect_0
+    { id = 0b01_0010, flags = { bits = 0b000_0011 } },
+    # gimlet, power | ctrl_detect_0
+    { id = 0b01_0001, flags = { bits = 0b000_0011 } },
+]
 
 [components]
 serial_console = []
