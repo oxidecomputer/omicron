@@ -259,7 +259,7 @@ pub trait ClientError: std::fmt::Debug {
     fn message(&self) -> String;
 }
 
-// TODO this From may give us a shortcut in situtations where we want more
+// TODO this `From` may give us a shortcut in situtations where we want more
 // robust consideration of errors. For example, while some errors from other
 // services may directly result in errors that percolate to the external
 // client, others may require, for example, retries with an alternate service
