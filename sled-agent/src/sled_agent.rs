@@ -134,7 +134,8 @@ impl SledAgent {
             for pool in pools {
                 info!(
                     log,
-                    "Sled Agent upserting zpool to Storage Manager: {}", pool
+                    "Sled Agent upserting zpool to Storage Manager: {}",
+                    pool.to_string()
                 );
                 storage.upsert_zpool(pool).await?;
             }

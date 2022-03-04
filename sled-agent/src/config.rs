@@ -5,6 +5,7 @@
 //! Interfaces for working with sled agent configuration
 
 use crate::common::vlan::VlanID;
+use crate::illumos::zpool::ZpoolName;
 use dropshot::ConfigDropshot;
 use dropshot::ConfigLogging;
 use serde::Deserialize;
@@ -31,7 +32,7 @@ pub struct Config {
     ///
     /// TODO: Can we make one from the local fs, to keep the "with/without"
     /// zpool cases similar?
-    pub zpools: Option<Vec<String>>,
+    pub zpools: Option<Vec<ZpoolName>>,
 }
 
 #[derive(Debug, thiserror::Error)]

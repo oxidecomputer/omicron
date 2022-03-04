@@ -6,7 +6,9 @@
 
 use crate::illumos::execute;
 use omicron_common::api::external::Error as ExternalError;
+use serde::{Deserialize, Deserializer};
 use std::str::FromStr;
+use uuid::Uuid;
 
 const ZPOOL: &str = "/usr/sbin/zpool";
 
@@ -171,9 +173,93 @@ impl Zpool {
     }
 }
 
+/// A wrapper around a zpool name.
+///
+/// This expects that the format will be: oxp_<UUID> - we parse
+/// the prefix when reading the structure, and validate that the UUID
+/// can be utilized.
+#[derive(Clone, Debug, Hash, PartialEq, Eq)]
+pub struct ZpoolName(Uuid);
+
+impl ZpoolName {
+    pub fn new(id: Uuid) -> Self {
+        Self(id)
+    }
+
+    pub fn id(&self) -> Uuid {
+        self.0
+    }
+}
+
+impl<'de> Deserialize<'de> for ZpoolName {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let s = String::deserialize(deserializer)?;
+        let s = s.strip_prefix("oxp_").ok_or_else(|| {
+            serde::de::Error::custom(
+                "Bad zpool prefix - must start with 'oxp_'",
+            )
+        })?;
+        let id = Uuid::from_str(&s).map_err(serde::de::Error::custom)?;
+        Ok(ZpoolName(id))
+    }
+}
+
+impl ToString for ZpoolName {
+    fn to_string(&self) -> String {
+        format!("oxp_{}", self.0.to_string())
+    }
+}
+
 #[cfg(test)]
 mod test {
     use super::*;
+
+    fn toml_string(s: &str) -> String {
+        format!("zpool_name = \"{}\"", s)
+    }
+
+    fn parse_name(s: &str) -> Result<ZpoolName, toml::de::Error> {
+        toml_string(&s)
+            .parse::<toml::Value>()
+            .expect("Cannot parse as TOML value")
+            .get("zpool_name")
+            .expect("Missing key")
+            .clone()
+            .try_into::<ZpoolName>()
+    }
+
+    #[test]
+    fn test_parse_zpool_name() {
+        let uuid: Uuid =
+            "d462a7f7-b628-40fe-80ff-4e4189e2d62b".parse().unwrap();
+        let good_name = format!("oxp_{}", uuid);
+
+        let name = parse_name(&good_name).expect("Cannot parse as ZpoolName");
+        assert_eq!(uuid, name.id());
+    }
+
+    #[test]
+    fn test_parse_bad_zpool_names() {
+        let bad_names = vec![
+            // Nonsense string
+            "this string is GARBAGE",
+            // Missing prefix
+            "d462a7f7-b628-40fe-80ff-4e4189e2d62b",
+            // Underscores
+            "oxp_d462a7f7_b628_40fe_80ff_4e4189e2d62b",
+        ];
+
+        for bad_name in &bad_names {
+            assert!(
+                parse_name(&bad_name).is_err(),
+                "Parsing {} should fail",
+                bad_name
+            );
+        }
+    }
 
     #[test]
     fn test_parse_zpool() {

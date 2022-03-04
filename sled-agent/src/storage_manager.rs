@@ -9,6 +9,7 @@ use crate::illumos::running_zone::{
 };
 use crate::illumos::vnic::VnicAllocator;
 use crate::illumos::zone::AddressRequest;
+use crate::illumos::zpool::ZpoolName;
 use crate::illumos::{zfs::Mountpoint, zone::ZONE_PREFIX, zpool::ZpoolInfo};
 use futures::stream::FuturesOrdered;
 use futures::FutureExt;
@@ -94,13 +95,12 @@ impl Pool {
     /// Queries for an existing Zpool by name.
     ///
     /// Returns Ok if the pool exists.
-    fn new(name: &str) -> Result<Pool, Error> {
-        let info = Zpool::get_info(name)?;
+    fn new(name: &ZpoolName) -> Result<Pool, Error> {
+        let info = Zpool::get_info(&name.to_string())?;
 
         // NOTE: This relies on the name being a UUID exactly.
         // We could be more flexible...
-        let id: Uuid = info.name().parse().map_err(|e| Error::Parse(e))?;
-        Ok(Pool { id, info, zones: HashMap::new() })
+        Ok(Pool { id: name.id(), info, zones: HashMap::new() })
     }
 
     /// Associate an already running zone with this pool object.
@@ -473,8 +473,8 @@ struct StorageWorker {
     log: Logger,
     sled_id: Uuid,
     nexus_client: Arc<NexusClient>,
-    pools: Arc<Mutex<HashMap<String, Pool>>>,
-    new_pools_rx: mpsc::Receiver<String>,
+    pools: Arc<Mutex<HashMap<ZpoolName, Pool>>>,
+    new_pools_rx: mpsc::Receiver<ZpoolName>,
     new_filesystems_rx: mpsc::Receiver<NewFilesystemRequest>,
     vnic_allocator: VnicAllocator,
 }
@@ -646,10 +646,10 @@ impl StorageWorker {
         request: &NewFilesystemRequest,
     ) -> Result<(), Error> {
         let mut pools = self.pools.lock().await;
-        let pool =
-            pools.get_mut(&request.zpool_id.to_string()).ok_or_else(|| {
-                Error::NotFound(format!("zpool: {}", request.zpool_id))
-            })?;
+        let name = ZpoolName::new(request.zpool_id);
+        let pool = pools.get_mut(&name).ok_or_else(|| {
+            Error::NotFound(format!("zpool: {}", request.zpool_id))
+        })?;
 
         let dataset_info = DatasetInfo::new(
             pool.info.name(),
@@ -743,15 +743,15 @@ impl StorageWorker {
                     // If we find filesystems within our datasets, ensure their
                     // zones are up-and-running.
                     let mut datasets = vec![];
-                    let existing_filesystems = Zfs::list_filesystems(&pool_name)?;
+                    let existing_filesystems = Zfs::list_filesystems(&pool_name.to_string())?;
                     for fs_name in existing_filesystems {
-                        info!(&self.log, "StorageWorker loading fs {} on zpool {}", fs_name, pool_name);
+                        info!(&self.log, "StorageWorker loading fs {} on zpool {}", fs_name, pool_name.to_string());
                         // We intentionally do not exit on error here -
                         // otherwise, the failure of a single dataset would
                         // stop the storage manager from processing all storage.
                         //
                         // Instead, we opt to log the failure.
-                        let dataset_name = DatasetName::new(&pool_name, &fs_name);
+                        let dataset_name = DatasetName::new(&pool_name.to_string(), &fs_name);
                         let result = self.load_dataset(pool, &dataset_name).await;
                         match result {
                             Ok(dataset) => datasets.push(dataset),
@@ -784,8 +784,8 @@ impl StorageWorker {
 /// A sled-local view of all attached storage.
 pub struct StorageManager {
     // A map of "zpool name" to "pool".
-    pools: Arc<Mutex<HashMap<String, Pool>>>,
-    new_pools_tx: mpsc::Sender<String>,
+    pools: Arc<Mutex<HashMap<ZpoolName, Pool>>>,
+    new_pools_tx: mpsc::Sender<ZpoolName>,
     new_filesystems_tx: mpsc::Sender<NewFilesystemRequest>,
 
     // A handle to a worker which updates "pools".
@@ -821,12 +821,12 @@ impl StorageManager {
     }
 
     /// Adds a zpool to the storage manager.
-    pub async fn upsert_zpool(&self, name: &str) -> Result<(), Error> {
+    pub async fn upsert_zpool(&self, name: &ZpoolName) -> Result<(), Error> {
         let zpool = Pool::new(name)?;
 
         let is_new = {
             let mut pools = self.pools.lock().await;
-            let entry = pools.entry(name.to_string());
+            let entry = pools.entry(name.clone());
             let is_new =
                 matches!(entry, std::collections::hash_map::Entry::Vacant(_));
 
@@ -842,7 +842,7 @@ impl StorageManager {
         // If we hadn't previously been handling this zpool, hand it off to the
         // worker for management (zone creation).
         if is_new {
-            self.new_pools_tx.send(name.to_string()).await.unwrap();
+            self.new_pools_tx.send(name.clone()).await.unwrap();
         }
         Ok(())
     }
