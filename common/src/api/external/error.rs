@@ -259,22 +259,7 @@ impl<T: std::fmt::Debug> From<progenitor::progenitor_client::Error<T>>
     for crate::api::external::Error
 {
     fn from(e: progenitor::progenitor_client::Error<T>) -> Self {
-        // TODO this should really be something progenitor provides
-        let status = match &e {
-            progenitor::progenitor_client::Error::CommunicationError(e) => {
-                e.status()
-            }
-            progenitor::progenitor_client::Error::ErrorResponse(rv) => {
-                Some(*rv.status())
-            }
-            progenitor::progenitor_client::Error::InvalidResponsePayload(e) => {
-                e.status()
-            }
-            progenitor::progenitor_client::Error::UnexpectedResponse(r) => {
-                Some(r.status())
-            }
-        };
-        match status {
+        match e.status() {
             Some(status_code) if status_code.is_client_error() => {
                 crate::api::external::Error::InvalidRequest {
                     message: e.to_string(),
