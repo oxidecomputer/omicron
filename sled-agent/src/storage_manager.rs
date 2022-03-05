@@ -672,7 +672,7 @@ impl StorageWorker {
 
         self.add_datasets_notify(
             nexus_notifications,
-            vec![(id, dataset_info.address, dataset_info.kind.into())],
+            vec![(id, dataset_info.address, dataset_info.kind)],
             pool.id(),
         );
 
@@ -701,7 +701,7 @@ impl StorageWorker {
         )
         .await?;
 
-        Ok((id, dataset_info.address, dataset_info.kind.into()))
+        Ok((id, dataset_info.address, dataset_info.kind))
     }
 
     // Small wrapper around `Self::do_work_internal` that ensures we always
