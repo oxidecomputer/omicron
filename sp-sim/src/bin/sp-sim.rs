@@ -6,10 +6,12 @@ use anyhow::Result;
 use omicron_common::cmd::{fatal, CmdError};
 use sp_sim::config::{Config, SpType};
 use sp_sim::{Gimlet, Sidecar};
+use std::io::Write;
 use std::path::PathBuf;
 use std::time::Duration;
 use structopt::StructOpt;
 use tokio::io::AsyncReadExt;
+use tokio::select;
 
 #[derive(Debug, StructOpt)]
 #[structopt(name = "sp-sim", about = "See README.adoc for more information")]
@@ -58,15 +60,24 @@ async fn run_gimlet(config: &Config) -> Result<(), CmdError> {
     // tokio docs warn against using its stdin handle for user-interactive
     // input; we'll live dangerously in this simulator
     let mut stdin = tokio::io::stdin();
+    let mut stdout = std::io::stdout();
     let mut buf = [0; 512];
 
     loop {
-        let n = stdin.read(&mut buf).await.map_err(|e| {
-            CmdError::Failure(format!("failed to read stdin: {}", e))
-        })?;
-        gimlet
-            .send_serial_console(&buf[..n])
-            .await
-            .map_err(|e| CmdError::Failure(e.to_string()))?;
+        select! {
+            res = stdin.read(&mut buf) => {
+                let n = res.map_err(|e| {
+                    CmdError::Failure(format!("failed to read stdin: {}", e))
+                })?;
+                gimlet
+                    .send_serial_console(&buf[..n])
+                    .await
+                    .map_err(|e| CmdError::Failure(e.to_string()))?;
+            }
+            incoming = gimlet.incoming_serial_console() => {
+                write!(stdout, "{}", String::from_utf8_lossy(&incoming)).unwrap();
+                stdout.flush().unwrap();
+            }
+        }
     }
 }
