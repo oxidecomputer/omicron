@@ -122,14 +122,15 @@ pub enum DatasetKind {
     Clickhouse,
 }
 
-impl From<DatasetKind> for internal::nexus::DatasetKind {
-    fn from(d: DatasetKind) -> Self {
+impl std::fmt::Display for DatasetKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         use DatasetKind::*;
-        match d {
-            CockroachDb { .. } => internal::nexus::DatasetKind::Cockroach,
-            Crucible { .. } => internal::nexus::DatasetKind::Crucible,
-            Clickhouse { .. } => internal::nexus::DatasetKind::Clickhouse,
-        }
+        let s = match self {
+            Crucible => "crucible",
+            CockroachDb { .. } => "cockroach",
+            Clickhouse => "clickhouse",
+        };
+        write!(f, "{}", s)
     }
 }
 

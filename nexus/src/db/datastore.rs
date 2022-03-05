@@ -306,7 +306,7 @@ impl DataStore {
             .filter(dsl::size_used.is_not_null())
             .filter(dsl::time_deleted.is_null())
             .filter(dsl::kind.eq(DatasetKind(
-                omicron_common::api::internal::nexus::DatasetKind::Crucible,
+                crate::internal_api::params::DatasetKind::Crucible,
             )))
             .order(dsl::size_used.asc())
             // TODO: We admittedly don't actually *fail* any request for
@@ -3190,9 +3190,8 @@ mod test {
         let dataset_count = REGION_REDUNDANCY_THRESHOLD * 2;
         let bogus_addr =
             SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 8080);
-        let kind = DatasetKind(
-            omicron_common::api::internal::nexus::DatasetKind::Crucible,
-        );
+        let kind =
+            DatasetKind(crate::internal_api::params::DatasetKind::Crucible);
         let dataset_ids: Vec<Uuid> =
             (0..dataset_count).map(|_| Uuid::new_v4()).collect();
         for id in &dataset_ids {
@@ -3267,9 +3266,8 @@ mod test {
         let dataset_count = REGION_REDUNDANCY_THRESHOLD;
         let bogus_addr =
             SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 8080);
-        let kind = DatasetKind(
-            omicron_common::api::internal::nexus::DatasetKind::Crucible,
-        );
+        let kind =
+            DatasetKind(crate::internal_api::params::DatasetKind::Crucible);
         let dataset_ids: Vec<Uuid> =
             (0..dataset_count).map(|_| Uuid::new_v4()).collect();
         for id in &dataset_ids {
@@ -3329,9 +3327,8 @@ mod test {
         let dataset_count = REGION_REDUNDANCY_THRESHOLD - 1;
         let bogus_addr =
             SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 8080);
-        let kind = DatasetKind(
-            omicron_common::api::internal::nexus::DatasetKind::Crucible,
-        );
+        let kind =
+            DatasetKind(crate::internal_api::params::DatasetKind::Crucible);
         let dataset_ids: Vec<Uuid> =
             (0..dataset_count).map(|_| Uuid::new_v4()).collect();
         for id in &dataset_ids {
@@ -3378,9 +3375,8 @@ mod test {
         let dataset_count = REGION_REDUNDANCY_THRESHOLD;
         let bogus_addr =
             SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 8080);
-        let kind = DatasetKind(
-            omicron_common::api::internal::nexus::DatasetKind::Crucible,
-        );
+        let kind =
+            DatasetKind(crate::internal_api::params::DatasetKind::Crucible);
         let dataset_ids: Vec<Uuid> =
             (0..dataset_count).map(|_| Uuid::new_v4()).collect();
         for id in &dataset_ids {

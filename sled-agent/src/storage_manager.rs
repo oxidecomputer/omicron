@@ -17,7 +17,6 @@ use futures::FutureExt;
 use futures::StreamExt;
 use nexus_client::types::{DatasetPutRequest, ZpoolPutRequest};
 use omicron_common::api::external::{ByteCount, ByteCountRangeError};
-use omicron_common::api::internal::nexus::DatasetKind as NexusDatasetKind;
 use omicron_common::api::internal::sled_agent::DatasetKind;
 use omicron_common::backoff;
 use schemars::JsonSchema;
@@ -593,7 +592,7 @@ impl StorageWorker {
     fn add_datasets_notify(
         &self,
         nexus_notifications: &mut FuturesOrdered<Pin<Box<NotifyFut>>>,
-        datasets: Vec<(Uuid, SocketAddr, NexusDatasetKind)>,
+        datasets: Vec<(Uuid, SocketAddr, DatasetKind)>,
         pool_id: Uuid,
     ) {
         let nexus = self.nexus_client.clone();
@@ -684,7 +683,7 @@ impl StorageWorker {
         &self,
         pool: &mut Pool,
         dataset_name: &DatasetName,
-    ) -> Result<(Uuid, SocketAddr, NexusDatasetKind), Error> {
+    ) -> Result<(Uuid, SocketAddr, DatasetKind), Error> {
         let id = Zfs::get_oxide_value(&dataset_name.full(), "uuid")?
             .parse::<Uuid>()?;
         let config_path = pool.dataset_config_path(id).await?;

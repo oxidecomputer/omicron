@@ -58,28 +58,15 @@ impl From<types::InstanceState>
     }
 }
 
-impl From<types::DatasetKind>
-    for omicron_common::api::internal::nexus::DatasetKind
-{
-    fn from(s: types::DatasetKind) -> Self {
-        use types::DatasetKind::*;
-        match s {
-            Crucible => Self::Crucible,
-            Cockroach => Self::Cockroach,
-            Clickhouse => Self::Clickhouse,
-        }
-    }
-}
-
-impl From<omicron_common::api::internal::nexus::DatasetKind>
+impl From<omicron_common::api::internal::sled_agent::DatasetKind>
     for types::DatasetKind
 {
-    fn from(s: omicron_common::api::internal::nexus::DatasetKind) -> Self {
-        use omicron_common::api::internal::nexus::DatasetKind::*;
-        match s {
-            Crucible => Self::Crucible,
-            Cockroach => Self::Cockroach,
-            Clickhouse => Self::Clickhouse,
+    fn from(d: omicron_common::api::internal::sled_agent::DatasetKind) -> Self {
+        use omicron_common::api::internal::sled_agent::DatasetKind::*;
+        match d {
+            CockroachDb { .. } => types::DatasetKind::Cockroach,
+            Crucible { .. } => types::DatasetKind::Crucible,
+            Clickhouse { .. } => types::DatasetKind::Clickhouse,
         }
     }
 }

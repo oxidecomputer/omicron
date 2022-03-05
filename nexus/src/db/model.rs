@@ -588,7 +588,7 @@ impl_enum_type!(
 
     #[derive(Clone, Debug, AsExpression, FromSqlRow, Serialize, Deserialize, PartialEq)]
     #[sql_type = "DatasetKindEnum"]
-    pub struct DatasetKind(pub omicron_common::api::internal::nexus::DatasetKind);
+    pub struct DatasetKind(pub internal_api::params::DatasetKind);
 
     // Enum values
     Crucible => b"crucible"
@@ -596,8 +596,8 @@ impl_enum_type!(
     Clickhouse => b"clickhouse"
 );
 
-impl From<omicron_common::api::internal::nexus::DatasetKind> for DatasetKind {
-    fn from(k: omicron_common::api::internal::nexus::DatasetKind) -> Self {
+impl From<internal_api::params::DatasetKind> for DatasetKind {
+    fn from(k: internal_api::params::DatasetKind) -> Self {
         Self(k)
     }
 }
@@ -641,9 +641,7 @@ impl Dataset {
         kind: DatasetKind,
     ) -> Self {
         let size_used = match kind {
-            DatasetKind(
-                omicron_common::api::internal::nexus::DatasetKind::Crucible,
-            ) => Some(0),
+            DatasetKind(internal_api::params::DatasetKind::Crucible) => Some(0),
             _ => None,
         };
         Self {

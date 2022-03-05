@@ -11,9 +11,7 @@ use chrono::{DateTime, Utc};
 use parse_display::Display;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use std::fmt;
 use std::net::SocketAddr;
-use std::str::FromStr;
 use std::time::Duration;
 use uuid::Uuid;
 
@@ -78,42 +76,6 @@ impl ProducerEndpoint {
      */
     pub fn collection_route(&self) -> String {
         format!("{}/{}", &self.base_route, &self.id)
-    }
-}
-
-/// Describes the purpose of a dataset.
-#[derive(Debug, Serialize, Deserialize, JsonSchema, Clone, Copy, PartialEq)]
-pub enum DatasetKind {
-    Crucible,
-    Cockroach,
-    Clickhouse,
-}
-
-impl fmt::Display for DatasetKind {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        use DatasetKind::*;
-        let s = match self {
-            Crucible => "crucible",
-            Cockroach => "cockroach",
-            Clickhouse => "clickhouse",
-        };
-        write!(f, "{}", s)
-    }
-}
-
-impl FromStr for DatasetKind {
-    type Err = crate::api::external::Error;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        use DatasetKind::*;
-        match s {
-            "crucible" => Ok(Crucible),
-            "cockroach" => Ok(Cockroach),
-            "clickhouse" => Ok(Clickhouse),
-            _ => Err(Self::Err::InternalError {
-                internal_message: format!("Unknown dataset kind: {}", s),
-            }),
-        }
     }
 }
 
