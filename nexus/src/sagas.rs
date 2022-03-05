@@ -25,7 +25,6 @@ use crucible_agent_client::{
     Client as CrucibleAgentClient,
 };
 use futures::StreamExt;
-use http::StatusCode;
 use lazy_static::lazy_static;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::Generation;
@@ -736,7 +735,7 @@ async fn delete_regions(
             client.region_delete(&id).await.map_err(|e| match e {
                 crucible_agent_client::Error::ErrorResponse(rv) => {
                     match rv.status() {
-                        StatusCode::SERVICE_UNAVAILABLE => {
+                        http::StatusCode::SERVICE_UNAVAILABLE => {
                             Error::unavail(&rv.message)
                         }
                         status if status.is_client_error() => {
