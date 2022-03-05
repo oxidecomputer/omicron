@@ -11,6 +11,7 @@
 use crate::api::external::Name;
 use crate::api::external::ResourceType;
 use dropshot::HttpError;
+use http::StatusCode;
 use serde::Deserialize;
 use serde::Serialize;
 use uuid::Uuid;
@@ -259,15 +260,12 @@ pub trait ClientError: std::fmt::Debug {
     fn message(&self) -> String;
 }
 
-// TODO this `From` may give us a shortcut in situtations where we want more
-// robust consideration of errors. For example, while some errors from other
-// services may directly result in errors that percolate to the external
-// client, others may require, for example, retries with an alternate service
-// instance or additional interpretation to sanitize the output error.
-//
-// ***********************************************************************
-// * THIS FROM SHOULD BE REMOVED PRIOR TO SHIPPING TO AVOID LEAKING DATA *
-// ***********************************************************************
+// TODO-security this `From` may give us a shortcut in situtations where we
+// want more robust consideration of errors. For example, while some errors
+// from other services may directly result in errors that percolate to the
+// external client, others may require, for example, retries with an alternate
+// service instance or additional interpretation to sanitize the output error.
+// This should be removed to avoid leaking data.
 impl<T: ClientError> From<progenitor::progenitor_client::Error<T>>
     for crate::api::external::Error
 {
@@ -285,10 +283,12 @@ impl<T: ClientError> From<progenitor::progenitor_client::Error<T>>
             progenitor::progenitor_client::Error::ErrorResponse(rv) => {
                 let message = rv.message();
 
-                if rv.status().is_client_error() {
-                    Error::invalid_request(&message)
-                } else {
-                    Error::internal_error(&message)
+                match rv.status() {
+                    StatusCode::SERVICE_UNAVAILABLE => Error::unavail(&message),
+                    status if status.is_client_error() => {
+                        Error::invalid_request(&message)
+                    }
+                    _ => Error::internal_error(&message),
                 }
             }
 

@@ -645,7 +645,7 @@ dependencies = [
 [[package]]
 name = "crucible-agent-client"
 version = "0.0.1"
-source = "git+https://github.com/oxidecomputer/crucible?rev=79e30b132f398351213d929402173d37cdc60b81#79e30b132f398351213d929402173d37cdc60b81"
+source = "git+https://github.com/oxidecomputer/crucible?rev=3e7e49eeb88fa8ad74375b0642aabd4224b1f2cb#3e7e49eeb88fa8ad74375b0642aabd4224b1f2cb"
 dependencies = [
  "anyhow",
  "chrono",
@@ -2976,7 +2976,7 @@ dependencies = [
 [[package]]
 name = "progenitor"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/progenitor#24aa57a243b7eb0faf631c9276c4dec0281cdf5c"
+source = "git+https://github.com/oxidecomputer/progenitor#579260a943e3c14f2239b1ea9730a20961fbc6bd"
 dependencies = [
  "anyhow",
  "getopts",
@@ -2991,7 +2991,7 @@ dependencies = [
 [[package]]
 name = "progenitor-client"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/progenitor#24aa57a243b7eb0faf631c9276c4dec0281cdf5c"
+source = "git+https://github.com/oxidecomputer/progenitor#579260a943e3c14f2239b1ea9730a20961fbc6bd"
 dependencies = [
  "percent-encoding",
  "reqwest",
@@ -3002,7 +3002,7 @@ dependencies = [
 [[package]]
 name = "progenitor-impl"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/progenitor#24aa57a243b7eb0faf631c9276c4dec0281cdf5c"
+source = "git+https://github.com/oxidecomputer/progenitor#579260a943e3c14f2239b1ea9730a20961fbc6bd"
 dependencies = [
  "convert_case 0.4.0",
  "getopts",
@@ -3024,7 +3024,7 @@ dependencies = [
 [[package]]
 name = "progenitor-macro"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/progenitor#24aa57a243b7eb0faf631c9276c4dec0281cdf5c"
+source = "git+https://github.com/oxidecomputer/progenitor#579260a943e3c14f2239b1ea9730a20961fbc6bd"
 dependencies = [
  "openapiv3",
  "proc-macro2",

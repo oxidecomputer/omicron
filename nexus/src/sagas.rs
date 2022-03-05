@@ -25,6 +25,7 @@ use crucible_agent_client::{
     Client as CrucibleAgentClient,
 };
 use futures::StreamExt;
+use http::StatusCode;
 use lazy_static::lazy_static;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::Generation;
@@ -732,10 +733,21 @@ async fn delete_regions(
             let url = format!("http://{}", dataset.address());
             let client = CrucibleAgentClient::new(&url);
             let id = RegionId(region.id().to_string());
-            client.region_delete(&id).await.map_err(|_| {
-                // TODO we may want to more carefully consider errors from
-                // crucible agent.
-                Error::internal_error("Error from Crucible Agent")
+            client.region_delete(&id).await.map_err(|e| match e {
+                crucible_agent_client::Error::ErrorResponse(rv) => {
+                    match rv.status() {
+                        StatusCode::SERVICE_UNAVAILABLE => {
+                            Error::unavail(&rv.message)
+                        }
+                        status if status.is_client_error() => {
+                            Error::invalid_request(&rv.message)
+                        }
+                        _ => Error::internal_error(&rv.message),
+                    }
+                }
+                _ => Error::internal_error(
+                    "unexpected failure during `region_delete`",
+                ),
             })
         })
         // Execute the allocation requests concurrently.
