@@ -182,7 +182,6 @@ impl Zones {
         }
         cfg.run().map_err(Error::Configure)?;
 
-        // TODO: This process takes a little while... Consider optimizing.
         info!(log, "Installing Omicron zone: {}", zone_name);
 
         zone::Adm::new(zone_name)

@@ -450,6 +450,14 @@ in a format which lets them be transferred to a Helios machine.
 This tool acts on a `package-manifest.toml` file which describes the packages to be
 bundled in the build.
 
+Configuration files are used to select IP addresses, and to manage Zpools
+utilized by the Sled Agent. These configuration files are located within
+`smf/`, and likely need to be modified to use addresses and zpools which match
+your hardware. Much of this configuration will be automated in the future
+(e.g., IP addresses will be inferred and posted to a DNS system, Zpools will
+automatically be detected on discovered disks), but for now it remains
+hard-coded.
+
 [source,text]
 ----
 $ cargo build

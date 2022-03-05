@@ -9,8 +9,6 @@ nexus_address = "[fd00:1234::7]:12221"
 # TODO: A file-backed zpool can be manually created with the following:
 # $ truncate -s 10GB testpool.vdev
 # $ zpool create oxp_d462a7f7-b628-40fe-80ff-4e4189e2d62b testpool.vdev
-#
-# TODO TODO TODO: Use a letter-based prefix pls
 zpools = [
   "oxp_d462a7f7-b628-40fe-80ff-4e4189e2d62b",
   "oxp_e4b4dc87-ab46-49fb-a4b4-d361ae214c03",
@@ -19,7 +17,7 @@ zpools = [
 
 # Address of the Sled Agent itself
 #
-# XXX: With the movement to zones, we no longer can use localhost addresses,
+# With the usage of non-global zones, we no longer can use localhost addresses,
 # as Nexus (within a Zone) is effectively "on a different machine" from the
 # sled agent.
 #
