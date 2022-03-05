@@ -479,8 +479,10 @@ initialize other service as part of its setup sequence anyway.
 ----
 # List all services:
 $ svcs
+# View zones managed by Omicron (prefixed with "oxz_"):
+$ zoneadm list -cv
 # View logs for a service:
-$ tail -f $(svcs -L nexus)
+$ pfexec tail -f $(pfexec svcs -z oxz_nexus -L nexus)
 ----
 
 To uninstall all Omicron services from a machine, the following may be
