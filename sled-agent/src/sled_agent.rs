@@ -94,7 +94,7 @@ impl SledAgent {
 
         // Before we start creating zones, we need to ensure that the
         // necessary ZFS and Zone resources are ready.
-        Zfs::ensure_filesystem(
+        Zfs::ensure_zoned_filesystem(
             ZONE_ZFS_DATASET,
             Mountpoint::Path(std::path::PathBuf::from(
                 ZONE_ZFS_DATASET_MOUNTPOINT,
@@ -105,7 +105,8 @@ impl SledAgent {
         // Identify all existing zones which should be managed by the Sled
         // Agent.
         //
-        // NOTE: Currently, we're removing these zones. In the future, we should
+        // TODO(https://github.com/oxidecomputer/omicron/issues/725):
+        // Currently, we're removing these zones. In the future, we should
         // re-establish contact (i.e., if the Sled Agent crashed, but we wanted
         // to leave the running Zones intact).
         let zones = Zones::get()?;
@@ -116,7 +117,8 @@ impl SledAgent {
 
         // Identify all VNICs which should be managed by the Sled Agent.
         //
-        // NOTE: Currently, we're removing these VNICs. In the future, we should
+        // TODO(https://github.com/oxidecomputer/omicron/issues/725)
+        // Currently, we're removing these VNICs. In the future, we should
         // identify if they're being used by the aforementioned existing zones,
         // and track them once more.
         //

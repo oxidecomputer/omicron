@@ -186,8 +186,9 @@ fn uninstall_all_packages(config: &Config) {
         config.packages.values().chain(config.external_packages.values())
     {
         if package.zone {
-            // TODO: At the moment, zones are entirely managed by the sled
-            // agent.
+            // TODO(https://github.com/oxidecomputer/omicron/issues/723):
+            // At the moment, zones are entirely managed by the sled agent,
+            // but could be removed here.
         } else {
             let _ = smf::Adm::new()
                 .disable()

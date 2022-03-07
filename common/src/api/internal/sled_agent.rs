@@ -109,7 +109,7 @@ pub struct InstanceRuntimeStateRequested {
     pub migration_params: Option<InstanceRuntimeStateMigrateParams>,
 }
 
-/// The type of a dataset, and an axuiliary information necessary
+/// The type of a dataset, and an auxiliary information necessary
 /// to successfully launch a zone managing the associated data.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
 #[serde(tag = "type", rename_all = "snake_case")]
@@ -146,9 +146,14 @@ pub struct DatasetEnsureBody {
     pub partition_kind: DatasetKind,
     // The address on which the zone will listen for requests.
     pub address: SocketAddr,
-    // TODO: We could insert a UUID here, if we want that to be set by the
+    // NOTE: We could insert a UUID here, if we want that to be set by the
     // caller explicitly? Currently, the lack of a UUID implies that
     // "at most one partition type" exists within a zpool.
+    //
+    // It's unclear if this is actually necessary - making this change
+    // would also require the RSS to query existing datasets before
+    // requesting new ones (after all, we generally wouldn't want to
+    // create two CRDB datasets with different UUIDs on the same zpool).
 }
 
 #[derive(

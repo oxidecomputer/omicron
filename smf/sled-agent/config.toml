@@ -6,7 +6,7 @@ bootstrap_address = "[::]:12346"
 # Internal address of Nexus
 nexus_address = "[fd00:1234::7]:12221"
 
-# TODO: A file-backed zpool can be manually created with the following:
+# A file-backed zpool can be manually created with the following:
 # $ truncate -s 10GB testpool.vdev
 # $ zpool create oxp_d462a7f7-b628-40fe-80ff-4e4189e2d62b testpool.vdev
 zpools = [

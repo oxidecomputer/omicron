@@ -67,7 +67,7 @@ impl Zfs {
     }
 
     /// Creates a new ZFS filesystem named `name`, unless one already exists.
-    pub fn ensure_filesystem(
+    pub fn ensure_zoned_filesystem(
         name: &str,
         mountpoint: Mountpoint,
         do_format: bool,

@@ -19,20 +19,30 @@ pub struct AddrObject {
     name: String,
 }
 
+/// Errors which may be returned from constructing an [`AddrObject`].
+#[derive(Debug, thiserror::Error)]
+pub enum Error {
+    #[error("Failed to parse addrobj name: {0}")]
+    Parse(String),
+}
+
 impl AddrObject {
-    pub fn new_control(interface: &str) -> Self {
+    pub fn new_control(interface: &str) -> Result<Self, Error> {
         Self::new(interface, "omicron")
     }
 
-    pub fn on_same_interface(&self, name: &str) -> Self {
+    pub fn on_same_interface(&self, name: &str) -> Result<Self, Error> {
         Self::new(&self.interface, name)
     }
 
-    pub fn new(interface: &str, name: &str) -> Self {
-        // TODO: These could be checked / returned as a Result.
-        assert!(!interface.contains('/'));
-        assert!(!name.contains('/'));
-        Self { interface: interface.to_string(), name: name.to_string() }
+    pub fn new(interface: &str, name: &str) -> Result<Self, Error> {
+        if interface.contains('/') {
+            return Err(Error::Parse(interface.to_string()));
+        }
+        if name.contains('/') {
+            return Err(Error::Parse(name.to_string()));
+        }
+        Ok(Self { interface: interface.to_string(), name: name.to_string() })
     }
 }
 

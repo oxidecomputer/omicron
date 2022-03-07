@@ -39,6 +39,15 @@ use crate::illumos::{zfs::MockZfs as Zfs, zpool::MockZpool as Zpool};
 #[cfg(not(test))]
 use crate::illumos::{zfs::Zfs, zpool::Zpool};
 
+const COCKROACH_SVC: &str = "svc:/system/illumos/cockroachdb";
+const COCKROACH_DEFAULT_SVC: &str = "svc:/system/illumos/cockroachdb:default";
+
+const CLICKHOUSE_SVC: &str = "svc:/system/illumos/clickhouse";
+const CLICKHOUSE_DEFAULT_SVC: &str = "svc:/system/illumos/clickhouse:default";
+
+const CRUCIBLE_AGENT_SVC: &str = "svc:/oxide/crucible/agent";
+const CRUCIBLE_AGENT_DEFAULT_SVC: &str = "svc:/oxide/crucible/agent:default";
+
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
     #[error(transparent)]
@@ -159,8 +168,6 @@ impl DatasetName {
 // by the Sled Agent.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 struct DatasetInfo {
-    // TODO: Is this always "/data"?
-    data_directory: String,
     address: SocketAddr,
     kind: DatasetKind,
     name: DatasetName,
@@ -171,19 +178,16 @@ impl DatasetInfo {
         match kind {
             DatasetKind::CockroachDb { .. } => DatasetInfo {
                 name: DatasetName::new(pool, "cockroachdb"),
-                data_directory: "/data".to_string(),
                 address,
                 kind,
             },
             DatasetKind::Clickhouse { .. } => DatasetInfo {
                 name: DatasetName::new(pool, "clickhouse"),
-                data_directory: "/data".to_string(),
                 address,
                 kind,
             },
             DatasetKind::Crucible { .. } => DatasetInfo {
                 name: DatasetName::new(pool, "crucible"),
-                data_directory: "/data".to_string(),
                 address,
                 kind,
             },
@@ -214,23 +218,25 @@ impl DatasetInfo {
                 zone.run_cmd(&[
                     crate::illumos::zone::SVCCFG,
                     "-s",
-                    "svc:system/illumos/cockroachdb",
+                    COCKROACH_SVC,
                     "setprop",
                     &format!("config/listen_addr={}", address),
                 ])?;
                 zone.run_cmd(&[
                     crate::illumos::zone::SVCCFG,
                     "-s",
-                    "svc:system/illumos/cockroachdb",
+                    COCKROACH_SVC,
                     "setprop",
-                    &format!("config/store={}", self.data_directory),
+                    "config/store=/data",
                 ])?;
-                // TODO: Set these addresses, use "start" instead of
+                // TODO(https://github.com/oxidecomputer/omicron/issues/727)
+                //
+                // Set these addresses, use "start" instead of
                 // "start-single-node".
                 zone.run_cmd(&[
                     crate::illumos::zone::SVCCFG,
                     "-s",
-                    "svc:system/illumos/cockroachdb",
+                    COCKROACH_SVC,
                     "setprop",
                     &format!("config/join_addrs={}", "unknown"),
                 ])?;
@@ -240,7 +246,7 @@ impl DatasetInfo {
                 zone.run_cmd(&[
                     crate::illumos::zone::SVCCFG,
                     "-s",
-                    "svc:system/illumos/cockroachdb:default",
+                    COCKROACH_DEFAULT_SVC,
                     "refresh",
                 ])?;
 
@@ -248,7 +254,7 @@ impl DatasetInfo {
                     crate::illumos::zone::SVCADM,
                     "enable",
                     "-t",
-                    "svc:/system/illumos/cockroachdb:default",
+                    COCKROACH_DEFAULT_SVC,
                 ])?;
 
                 // Await liveness of the cluster.
@@ -307,16 +313,16 @@ impl DatasetInfo {
                 zone.run_cmd(&[
                     crate::illumos::zone::SVCCFG,
                     "-s",
-                    "svc:system/illumos/clickhouse",
+                    CLICKHOUSE_SVC,
                     "setprop",
                     &format!("config/listen_host={}", address.ip()),
                 ])?;
                 zone.run_cmd(&[
                     crate::illumos::zone::SVCCFG,
                     "-s",
-                    "svc:system/illumos/clickhouse",
+                    CLICKHOUSE_SVC,
                     "setprop",
-                    &format!("config/store={}", self.data_directory),
+                    "config/store=/data",
                 ])?;
 
                 // Refresh the manifest with the new properties we set,
@@ -324,7 +330,7 @@ impl DatasetInfo {
                 zone.run_cmd(&[
                     crate::illumos::zone::SVCCFG,
                     "-s",
-                    "svc:system/illumos/clickhouse:default",
+                    CLICKHOUSE_DEFAULT_SVC,
                     "refresh",
                 ])?;
 
@@ -332,7 +338,7 @@ impl DatasetInfo {
                     crate::illumos::zone::SVCADM,
                     "enable",
                     "-t",
-                    "svc:/system/illumos/clickhouse:default",
+                    CLICKHOUSE_DEFAULT_SVC,
                 ])?;
 
                 Ok(())
@@ -355,7 +361,7 @@ impl DatasetInfo {
                 zone.run_cmd(&[
                     crate::illumos::zone::SVCCFG,
                     "-s",
-                    "svc:oxide/crucible/agent",
+                    CRUCIBLE_AGENT_SVC,
                     "setprop",
                     &format!("config/listen={}", address),
                 ])?;
@@ -363,7 +369,7 @@ impl DatasetInfo {
                 zone.run_cmd(&[
                     crate::illumos::zone::SVCCFG,
                     "-s",
-                    "svc:oxide/crucible/agent",
+                    CRUCIBLE_AGENT_SVC,
                     "setprop",
                     &format!("config/dataset={}", self.name.full()),
                 ])?;
@@ -371,7 +377,7 @@ impl DatasetInfo {
                 zone.run_cmd(&[
                     crate::illumos::zone::SVCCFG,
                     "-s",
-                    "svc:oxide/crucible/agent",
+                    CRUCIBLE_AGENT_SVC,
                     "setprop",
                     &format!("config/uuid={}", Uuid::new_v4()),
                 ])?;
@@ -381,7 +387,7 @@ impl DatasetInfo {
                 zone.run_cmd(&[
                     crate::illumos::zone::SVCCFG,
                     "-s",
-                    "svc:oxide/crucible/agent:default",
+                    CRUCIBLE_AGENT_DEFAULT_SVC,
                     "refresh",
                 ])?;
 
@@ -389,7 +395,7 @@ impl DatasetInfo {
                     crate::illumos::zone::SVCADM,
                     "enable",
                     "-t",
-                    "svc:/oxide/crucible/agent:default",
+                    CRUCIBLE_AGENT_DEFAULT_SVC,
                 ])?;
 
                 Ok(())
@@ -440,11 +446,11 @@ async fn ensure_running_zone(
             Ok(zone)
         }
         Err(RunningZoneError::NotRunning(_state)) => {
-            // TODO:
+            // TODO(https://github.com/oxidecomputer/omicron/issues/725):
             unimplemented!("Handle a zone which exists, but is not running");
         }
         Err(_) => {
-            // TODO:
+            // TODO(https://github.com/oxidecomputer/omicron/issues/725):
             unimplemented!(
                 "Handle a zone which exists, has some other problem"
             );
@@ -484,7 +490,7 @@ impl StorageWorker {
         do_format: bool,
     ) -> Result<Uuid, Error> {
         let fs_name = &dataset_name.full();
-        Zfs::ensure_filesystem(
+        Zfs::ensure_zoned_filesystem(
             &fs_name,
             Mountpoint::Path(PathBuf::from("/data")),
             do_format,
@@ -523,7 +529,7 @@ impl StorageWorker {
         if let Some(_) = pool.get_zone(id) {
             return Ok((false, id));
         }
-        // Otherwise, the zone may or may not exit.
+        // Otherwise, the zone may or may not exist.
         // We need to either look up or create the zone.
         info!(
             &self.log,
@@ -887,7 +893,6 @@ mod test {
     #[test]
     fn serialize_dataset_info() {
         let dataset_info = DatasetInfo {
-            data_directory: "/here/is/my/path".to_string(),
             address: "127.0.0.1:8080".parse().unwrap(),
             kind: DatasetKind::Crucible,
             name: DatasetName::new("pool", "dataset"),

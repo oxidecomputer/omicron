@@ -37,6 +37,9 @@ pub enum Error {
     #[error("Zone error accessing datalink: {0}")]
     Datalink(#[from] crate::illumos::dladm::Error),
 
+    #[error(transparent)]
+    AddrObject(#[from] crate::illumos::addrobj::Error),
+
     #[error("Timeout waiting for a service: {0}")]
     Timeout(String),
 }
@@ -80,7 +83,6 @@ impl RunningZone {
         // Boot the zone.
         info!(zone.log, "Zone booting");
 
-        // TODO: "Ensure booted", to make this more idempotent?
         Zones::boot(&zone.name)?;
 
         // Wait for the network services to come online, so future
@@ -105,7 +107,7 @@ impl RunningZone {
                 std::net::IpAddr::V6(_) => "omicron6",
             },
         };
-        let addrobj = AddrObject::new(self.inner.control_vnic.name(), name);
+        let addrobj = AddrObject::new(self.inner.control_vnic.name(), name)?;
         let network =
             Zones::ensure_address(Some(&self.inner.name), &addrobj, addrtype)?;
         Ok(network)
@@ -118,7 +120,7 @@ impl RunningZone {
     /// - If the zone was not found `Error::NotFound` is returned.
     /// - If the zone was found, but not running, `Error::NotRunning` is
     /// returned.
-    /// - Other errors may be returned attemping to look up and accessing an
+    /// - Other errors may be returned attempting to look up and accessing an
     /// address on the zone.
     pub async fn get(
         log: &Logger,
@@ -136,7 +138,7 @@ impl RunningZone {
 
         let zone_name = zone_info.name();
         let vnic_name = Zones::get_control_interface(zone_name)?;
-        let addrobj = AddrObject::new_control(&vnic_name);
+        let addrobj = AddrObject::new_control(&vnic_name)?;
         Zones::ensure_address(Some(zone_name), &addrobj, addrtype)?;
 
         Ok(Self {
@@ -144,7 +146,9 @@ impl RunningZone {
                 log: log.new(o!("zone" => zone_name.to_string())),
                 name: zone_name.to_string(),
                 control_vnic: Vnic::wrap_existing(vnic_name),
-                // TODO: How can the sled agent recoup other vnics?
+                // TODO(https://github.com/oxidecomputer/omicron/issues/725)
+                //
+                // Re-initialize guest_vnic state by inspecting the zone.
                 guest_vnics: vec![],
             },
         })
@@ -182,8 +186,6 @@ pub struct InstalledZone {
 }
 
 impl InstalledZone {
-    // TODO: Maybe should have a "get" method, like "RunningZone"?
-
     pub async fn install(
         log: &Logger,
         vnic_allocator: &VnicAllocator,

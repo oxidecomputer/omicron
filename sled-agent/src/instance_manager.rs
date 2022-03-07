@@ -56,7 +56,6 @@ impl InstanceManager {
         vlan: Option<VlanID>,
         nexus_client: Arc<NexusClient>,
     ) -> Result<InstanceManager, Error> {
-        // Create a base zone, from which all running instance zones are cloned.
         Ok(InstanceManager {
             inner: Arc::new(InstanceManagerInternal {
                 log,

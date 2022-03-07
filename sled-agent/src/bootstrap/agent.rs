@@ -248,7 +248,8 @@ impl Agent {
                     return Ok(());
                 }
 
-                // TODO: We could potentially handle this case by deleting all
+                // TODO(https://github.com/oxidecomputer/omicron/issues/724):
+                // We could potentially handle this case by deleting all
                 // partitions (in preparation for applying the new
                 // configuration), but at the moment it's an error.
                 warn!(

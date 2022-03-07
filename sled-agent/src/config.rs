@@ -29,9 +29,6 @@ pub struct Config {
     /// Optional VLAN ID to be used for tagging guest VNICs.
     pub vlan: Option<VlanID>,
     /// Optional list of zpools to be used as "discovered disks".
-    ///
-    /// TODO: Can we make one from the local fs, to keep the "with/without"
-    /// zpool cases similar?
     pub zpools: Option<Vec<ZpoolName>>,
 }
 

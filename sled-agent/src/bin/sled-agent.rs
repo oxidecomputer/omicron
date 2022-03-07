@@ -84,8 +84,6 @@ async fn do_run() -> Result<(), CmdError> {
             let config = SledConfig::from_file(&config_path)
                 .map_err(|e| CmdError::Failure(e.to_string()))?;
 
-            // TODO: I don't love this, but...
-            //
             // - Sled agent starts with the normal config file - typically
             // called "config.toml".
             // - Thing-flinger likes allowing "sled-specific" configs to arrive
@@ -93,13 +91,11 @@ async fn do_run() -> Result<(), CmdError> {
             // - ... so we need a way to *possibly* supply this extra config,
             // without otherwise changing the package.
             //
-            // This means we gotta (maybe) ingest a config file, without
+            // This means we must possibly ingest a config file, without
             // *explicitly* being told about it.
             //
             // Hence, this approach: look around in the same directory as the
             // expected config file.
-            //
-            // Better ideas are welcome.
             let rss_config_path = {
                 let mut rss_config_path = config_path.clone();
                 rss_config_path.pop();

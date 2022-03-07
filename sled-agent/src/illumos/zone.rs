@@ -60,6 +60,9 @@ pub enum Error {
     #[error(transparent)]
     Dladm(#[from] crate::illumos::dladm::Error),
 
+    #[error(transparent)]
+    AddrObject(#[from] crate::illumos::addrobj::Error),
+
     #[error("Error accessing filesystem: {0}")]
     Filesystem(std::io::Error),
 
@@ -242,6 +245,9 @@ impl Zones {
     }
 
     /// Gets the address if one exists, creates one if one does not exist.
+    ///
+    /// This address may be optionally within a zone `zone`.
+    /// If `None` is supplied, the address is queried from the Global Zone.
     #[allow(clippy::needless_lifetimes)]
     pub fn ensure_address<'a>(
         zone: Option<&'a str>,
@@ -261,7 +267,10 @@ impl Zones {
         }
     }
 
-    /// Gets the IP address of an interface within a Zone.
+    /// Gets the IP address of an interface.
+    ///
+    /// This address may optionally be within a zone named `zone`.
+    /// If `None` is supplied, the address is queried from the Global Zone.
     #[allow(clippy::needless_lifetimes)]
     fn get_address<'a>(
         zone: Option<&'a str>,
@@ -365,7 +374,7 @@ impl Zones {
         zone: Option<&'a str>,
         addrobj: &AddrObject,
     ) -> Result<(), Error> {
-        let link_local_addrobj = addrobj.on_same_interface("linklocal");
+        let link_local_addrobj = addrobj.on_same_interface("linklocal")?;
 
         if let Ok(()) =
             Self::has_link_local_v6_address(zone, &link_local_addrobj)
@@ -416,7 +425,7 @@ impl Zones {
                         let gz_link_local_addrobj = AddrObject::new(
                             &Dladm::find_physical()?.0,
                             "linklocal",
-                        );
+                        )?;
                         Self::ensure_has_link_local_v6_address(
                             None,
                             &gz_link_local_addrobj,
@@ -428,7 +437,8 @@ impl Zones {
                         // the non-GZ.
                         Self::ensure_address(
                             None,
-                            &gz_link_local_addrobj.on_same_interface("v6route"),
+                            &gz_link_local_addrobj
+                                .on_same_interface("v6route")?,
                             AddressRequest::new_static(
                                 "fd00:1234::".parse().unwrap(),
                                 Some(16),

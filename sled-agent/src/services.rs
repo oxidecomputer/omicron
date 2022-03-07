@@ -94,7 +94,8 @@ impl ServiceManager {
         services: &Vec<ServiceRequest>,
     ) -> Result<(), Error> {
         info!(self.log, "Ensuring services are initialized: {:?}", services);
-        // TODO: As long as we ensure the requests don't overlap, we could
+        // TODO(https://github.com/oxidecomputer/omicron/issues/726):
+        // As long as we ensure the requests don't overlap, we could
         // parallelize this request.
         for service in services {
             // Before we bother allocating anything for this request, check if
