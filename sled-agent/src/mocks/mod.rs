@@ -10,6 +10,7 @@ use nexus_client::types::{
     InstanceRuntimeState, SledAgentStartupInfo, UpdateArtifactKind,
     ZpoolPutRequest, ZpoolPutResponse,
 };
+use reqwest::Response;
 use slog::Logger;
 use uuid::Uuid;
 
