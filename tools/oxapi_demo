@@ -51,6 +51,13 @@ INSTANCES
     instance_detach_disk ORGANIZATION_NAME PROJECT_NAME INSTANCE_NAME DISK_NAME
     instance_list_disks  ORGANIZATION_NAME PROJECT_NAME INSTANCE_NAME
 
+    instance_create_nic ORGANIZATION_NAME PROJECT_NAME INSTANCE_NAME VPC_NAME
+    SUBNET_NAME INTERFACE_NAME
+    instance_delete_nic ORGANIZATION_NAME PROJECT_NAME INTERFACE_NAME VPC_NAME
+    SUBNET_NAME INTERFACE_NAME
+    instance_list_nics ORGANIZATION_NAME PROJECT_NAME INSTANCE_NAME
+    instance_get_nic ORGANIZATION_NAME PROJECT_NAME INSTANCE_NAME
+
 DISKS
 
     disk_create_demo ORGANIZATION_NAME PROJECT_NAME DISK_NAME
@@ -67,10 +74,12 @@ VPC SUBNETS
 
     vpc_subnets_list ORGANIZATION_NAME PROJECT_NAME VPC_NAME
     vpc_subnet_get ORGANIZATION_NAME PROJECT_NAME VPC_NAME SUBNET_NAME
+    vpc_subnet_create_demo ORGANIZATION_NAME PROJECT_NAME VPC_NAME SUBNET_NAME
+    IPV4_NET
 
-VPC SUBNETS IPS
+VPC SUBNET NETWORK INTERFACES
 
-    subnet_ips_list ORGANIZATION_NAME PROJECT_NAME VPC_NAME SUBNET_NAME
+    subnet_list_nics ORGANIZATION_NAME PROJECT_NAME VPC_NAME SUBNET_NAME
 
 VPC FIREWALL
 
@@ -377,10 +386,47 @@ function cmd_vpc_subnet_get
 	do_curl "/organizations/$1/projects/$2/vpcs/$3/subnets/$4"
 }
 
-function cmd_subnet_ips_list
+function cmd_instance_create_nic
+{
+	[[ $# != 6 ]] && usage "expected ORGANIZATION_NAME PROJECT_NAME INSTANCE_NAME
+    VPC_NAME SUBNET_NAME INTERFACE_NAME"
+	mkjson \
+        name="$6" \
+        description="an interface called $6" \
+        vpc_name="$4" \
+        subnet_name="$5" |
+		do_curl_authn \
+            "/organizations/$1/projects/$2/instances/$3/network-interfaces" \
+            -X POST -T -
+}
+
+function cmd_instance_delete_nic
+{
+	[[ $# != 4 ]] && usage "expected ORGANIZATION_NAME PROJECT_NAME INSTANCE_NAME
+    INTERFACE_NAME"
+	do_curl_authn \
+        "/organizations/$1/projects/$2/instances/$3/network-interfaces/$4" -X \
+        DELETE
+}
+
+function cmd_subnet_list_nics
 {
 	[[ $# != 4 ]] && usage "expected ORGANIZATION_NAME PROJECT_NAME VPC_NAME SUBNET_NAME"
-	do_curl "/organizations/$1/projects/$2/vpcs/$3/subnets/$4/ips"
+	do_curl "/organizations/$1/projects/$2/vpcs/$3/subnets/$4/network-interfaces"
+}
+
+function cmd_instance_get_nic
+{
+	[[ $# != 5 ]] && usage "expected ORGANIZATION_NAME PROJECT_NAME INSTANCE_NAME INTERFACE_NAME"
+	do_curl \
+        "/organizations/$1/projects/$2/instances/$3/network-interfaces/$4"
+}
+
+function cmd_instance_list_nics
+{
+	[[ $# != 3 ]] && usage "expected ORGANIZATION_NAME PROJECT_NAME INSTANCE_NAME"
+    do_curl_authn \
+        "/organizations/$1/projects/$2/instances/$3/network-interfaces"
 }
 
 function cmd_vpc_firewall_rules_get

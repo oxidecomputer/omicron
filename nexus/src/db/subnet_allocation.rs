@@ -363,7 +363,7 @@ impl NetworkInterfaceError {
                 Error::DatabaseError(DatabaseErrorKind::Unknown, info),
             )) if info.message() == MULTIPLE_VPC_ERROR_MESSAGE => {
                 NetworkInterfaceError::InstanceSpansMultipleVpcs(
-                    interface.instance_id.unwrap_or_default(),
+                    interface.instance_id,
                 )
             }
 
@@ -446,20 +446,36 @@ impl NetworkInterfaceError {
 /// As described in RFD 21, an Instance's networking is confined to a single
 /// VPC. That is, any NetworkInterfaces attached to an Instance must all have
 /// the same VPC ID. This function adds a subquery, shown below, that fails in a
-/// specific way (parsing error) if that invariant is violated.
+/// specific way (parsing error) if that invariant is violated. The basic
+/// structure of the query is:
+///
+/// ```text
+/// CAST(IF(<instance is in one VPC>, '<vpc_id>', '') AS UUID)
+/// ```
+///
+/// This selects either the actual VPC UUID (as a string) or the empty string,
+/// if any existing VPC IDs for this instance are the same. If true, we cast the
+/// VPC ID string back to a UUID. If false, we try to cast the empty string,
+/// which fails in a detectable way.
+///
+/// Details
+/// -------
+///
+/// The exact query generated looks like this:
 ///
 /// ```sql
-/// CAST(IF(COALESCE(
-///      (
-///         SELECT vpc_id
-///         FROM network_interface
-///         WHERE
-///             time_deleted IS NULL AND
-///             instance_id IS NOT NULL AND
-///             instance_id = <instance_id>
-///         LIMIT 1
-///      )), <vpc_id>,
-///      = <vpc_id>,
+/// CAST(IF(
+///      COALESCE(
+///          (
+///             SELECT vpc_id
+///             FROM network_interface
+///             WHERE
+///                 time_deleted IS NULL AND
+///                 instance_id = <instance_id>
+///             LIMIT 1
+///          ),
+///          <vpc_id>
+///      ) = <vpc_id>,
 ///      '<vpc_id>', -- UUID as a string
 ///      ''
 /// ) AS UUID)
@@ -475,13 +491,6 @@ impl NetworkInterfaceError {
 /// Note that the `COALESCE` expression is there to handle the case where there
 /// _is_ no record with the given `instance_id`. In that case, the `vpc_id`
 /// provided is returned directly, so everything works as if the IDs matched.
-///
-/// Also note that while the filtering expressions appear redundant, checking
-/// for both the instance_id being non-NULL and equal to a specific value, they
-/// are required to ensure that Cockroach can use the index on instance IDs for
-/// this table. Without the `instance_id is NOT NULL`, for example, the
-/// optimizer appears unable to prove that the index is actually sufficient,
-/// even though we're explicitly testing against a non-NULL instance ID.
 // TODO-completeness: Use this when implementing NIC attachment.
 fn push_ensure_unique_vpc_expression(
     mut out: AstPass<Pg>,
@@ -497,8 +506,6 @@ fn push_ensure_unique_vpc_expression(
     out.push_sql(" WHERE ");
     out.push_identifier(dsl::time_deleted::NAME)?;
     out.push_sql(" IS NULL AND ");
-    out.push_identifier(dsl::instance_id::NAME)?;
-    out.push_sql(" IS NOT NULL AND ");
     out.push_identifier(dsl::instance_id::NAME)?;
     out.push_sql(" = ");
     out.push_bind_param::<sql_types::Uuid, Uuid>(instance_id)?;
@@ -611,12 +618,11 @@ fn push_select_next_available_ip_subquery(
 ///
 /// This type is used to construct a query that allows inserting a
 /// `NetworkInterface`, supporting both optionally allocating a new IP address and
-/// optionally attaching to an existing Instance. The query contains different
-/// subqueries designed to handle each of these two cases. In general the query
-/// looks like:
+/// verifying that the attached instance's networking is contained within a
+/// single VPC. The general query looks like:
 ///
 /// ```sql
-/// <maybe instance validation CTE>
+/// <instance validation CTE>
 /// SELECT <id> AS id, <name> AS name, <description> AS description,
 ///        <time_created> AS time_created, <time_modified> AS time_modified,
 ///        NULL AS time_deleted, <instance_id> AS instance_id, <vpc_id> AS vpc_id,
@@ -627,16 +633,12 @@ fn push_select_next_available_ip_subquery(
 /// Instance validation
 /// -------------------
 ///
-/// If the user does not provide an instance name, then `<instance_id>` is NULL,
-/// and this part of the query is omitted.
-///
-/// If a user does provide an instance name, then this generates a CTE that
-/// checks that the requested instance is not already associated with another
-/// VPC (since an instance's networking cannot span multiple VPCs). This query
-/// is designed to fail in a particular way if that invariant is violated, so
-/// that we can detect and report that case to the user. See
-/// `push_ensure_unique_vpc_expression` for details of that subquery, including
-/// how it fails.
+/// This type generates a CTE that checks that the requested instance is not
+/// already associated with another VPC (since an instance's networking cannot
+/// span multiple VPCs). This query is designed to fail in a particular way if
+/// that invariant is violated, so that we can detect and report that case to
+/// the user. See `push_ensure_unique_vpc_expression` for details of that
+/// subquery, including how it fails.
 ///
 /// IP allocation subquery
 /// ----------------------
@@ -707,26 +709,20 @@ impl Insertable<db::schema::network_interface::table>
 impl QueryFragment<Pg> for InsertNetworkInterfaceQuery {
     fn walk_ast(&self, mut out: AstPass<Pg>) -> diesel::QueryResult<()> {
         use db::schema::network_interface::dsl;
-        // If we're attaching to an instance, push the CTE that ensures
-        // that any other interface with the same instance_id also has the same
-        // vpc_id. See `push_ensure_unique_vpc_expression` for more details.
-        // This ultimately fails the query if the requested instance is already
-        // associated with a different VPC.
+        // Push the CTE that ensures that any other interface with the same
+        // instance_id also has the same vpc_id. See
+        // `push_ensure_unique_vpc_expression` for more details. This ultimately
+        // fails the query if the requested instance is already associated with
+        // a different VPC.
         out.push_sql("WITH vpc(");
         out.push_identifier(dsl::vpc_id::NAME)?;
         out.push_sql(") AS ");
         out.push_sql("(SELECT ");
-        if let Some(ref instance_id) = self.interface.instance_id {
-            push_ensure_unique_vpc_expression(
-                out.reborrow(),
-                &self.interface.vpc_id,
-                instance_id,
-            )?;
-        } else {
-            out.push_bind_param::<sql_types::Uuid, Uuid>(
-                &self.interface.vpc_id,
-            )?;
-        }
+        push_ensure_unique_vpc_expression(
+            out.reborrow(),
+            &self.interface.vpc_id,
+            &self.interface.instance_id,
+        )?;
         out.push_sql(") ");
 
         // Push the columns, values and names, that are named directly. These
@@ -773,7 +769,9 @@ impl QueryFragment<Pg> for InsertNetworkInterfaceQuery {
         out.push_identifier(dsl::time_deleted::NAME)?;
         out.push_sql(", ");
 
-        out.push_bind_param::<sql_types::Nullable<sql_types::Uuid>, Option<Uuid>>(&self.interface.instance_id)?;
+        out.push_bind_param::<sql_types::Uuid, Uuid>(
+            &self.interface.instance_id,
+        )?;
         out.push_sql(" AS ");
         out.push_identifier(dsl::instance_id::NAME)?;
         out.push_sql(", ");
@@ -876,7 +874,6 @@ mod test {
     use crate::db::model::{
         self, IncompleteNetworkInterface, NetworkInterface, VpcSubnet,
     };
-    use crate::external_api::params;
     use diesel::pg::Pg;
     use nexus_test_utils::db::test_setup_database;
     use omicron_common::api::external::{
@@ -1109,27 +1106,25 @@ mod test {
         );
 
         // Insert a network interface with a known valid IP address, attached to
-        // a specific instance. (Attach, no-alloc)
+        // a specific instance.
         let instance_id =
             "90d8542f-52dc-cacb-fa2b-ea0940d6bcb7".parse().unwrap();
         let requested_ip = "172.30.0.5".parse().unwrap();
         let interface = IncompleteNetworkInterface::new(
             Uuid::new_v4(),
-            Some(instance_id),
+            instance_id,
             vpc_id,
             subnet.clone(),
             model::MacAddr::new().unwrap(),
-            params::NetworkInterfaceCreate {
-                identity: IdentityMetadataCreateParams {
-                    name: "interface-a".parse().unwrap(),
-                    description: String::from("description"),
-                },
-                ip: Some(requested_ip),
+            IdentityMetadataCreateParams {
+                name: "interface-a".parse().unwrap(),
+                description: String::from("description"),
             },
+            Some(requested_ip),
         )
         .unwrap();
         let inserted_interface = db_datastore
-            .vpc_subnet_create_network_interface(interface.clone())
+            .instance_create_network_interface(interface.clone())
             .await
             .expect("Failed to insert interface with known-good IP address");
         assert_interfaces_eq(&interface, &inserted_interface);
@@ -1138,11 +1133,6 @@ mod test {
             requested_ip,
             "The requested IP address should be available when no interfaces exist in the table"
         );
-        assert_eq!(
-            inserted_interface.instance_id,
-            Some(instance_id),
-            "The inserted interface should be attached to the requested instance"
-        );
 
         // Insert an interface on the same instance, but with an
         // automatically-assigned IP address. It should have the next address.
@@ -1150,21 +1140,19 @@ mod test {
             "172.30.0.6".parse::<std::net::IpAddr>().unwrap();
         let interface = IncompleteNetworkInterface::new(
             Uuid::new_v4(),
-            Some(instance_id),
+            instance_id,
             vpc_id,
             subnet.clone(),
             model::MacAddr::new().unwrap(),
-            params::NetworkInterfaceCreate {
-                identity: IdentityMetadataCreateParams {
-                    name: "interface-b".parse().unwrap(),
-                    description: String::from("description"),
-                },
-                ip: None,
+            IdentityMetadataCreateParams {
+                name: "interface-b".parse().unwrap(),
+                description: String::from("description"),
             },
+            None,
         )
         .unwrap();
         let inserted_interface = db_datastore
-            .vpc_subnet_create_network_interface(interface.clone())
+            .instance_create_network_interface(interface.clone())
             .await
             .expect("Failed to insert interface with known-good IP address");
         assert_interfaces_eq(&interface, &inserted_interface);
@@ -1173,94 +1161,54 @@ mod test {
             expected_address,
             "Failed to automatically assign the next available IP address"
         );
-        assert_eq!(
-            inserted_interface.instance_id,
-            Some(instance_id),
-            "The inserted interface should be attached to the requested instance"
-        );
 
-        // Inserting an interface with the same IP should fail, regardless of
-        // whether it's attached to an instance.
-        for (i, inst) in [Some(instance_id), None].iter().enumerate() {
-            let name = format!("interface-{}", i);
-            let interface = IncompleteNetworkInterface::new(
-                Uuid::new_v4(),
-                *inst,
-                vpc_id,
-                subnet.clone(),
-                model::MacAddr::new().unwrap(),
-                params::NetworkInterfaceCreate {
-                    identity: IdentityMetadataCreateParams {
-                        name: name.try_into().unwrap(),
-                        description: String::from("description"),
-                    },
-                    ip: Some(requested_ip),
-                },
-            )
-            .unwrap();
-            let result = db_datastore
-                .vpc_subnet_create_network_interface(interface)
-                .await;
-            assert!(
-                matches!(
-                    result,
-                    Err(NetworkInterfaceError::IpAddressNotAvailable(_))
-                ),
-                "Requesting an interface with an existing IP should fail"
-            );
-        }
+        // Inserting an interface with the same IP should fail.
+        let interface = IncompleteNetworkInterface::new(
+            Uuid::new_v4(),
+            instance_id,
+            vpc_id,
+            subnet.clone(),
+            model::MacAddr::new().unwrap(),
+            IdentityMetadataCreateParams {
+                name: "interface-c".parse().unwrap(),
+                description: String::from("description"),
+            },
+            Some(requested_ip),
+        )
+        .unwrap();
+        let result =
+            db_datastore.instance_create_network_interface(interface).await;
+        assert!(
+            matches!(
+                result,
+                Err(NetworkInterfaceError::IpAddressNotAvailable(_))
+            ),
+            "Requesting an interface with an existing IP should fail"
+        );
 
         // Inserting an interface that is attached to the same instance, but in a different VPC,
         // should fail regardless of whether the IP is explicitly requested or allocated.
         for addr in [Some(expected_address), None] {
             let interface = IncompleteNetworkInterface::new(
                 Uuid::new_v4(),
-                Some(instance_id),
+                instance_id,
                 other_vpc_id,
                 other_subnet.clone(),
                 model::MacAddr::new().unwrap(),
-                params::NetworkInterfaceCreate {
-                    identity: IdentityMetadataCreateParams {
-                        name: "interface-a".parse().unwrap(),
-                        description: String::from("description"),
-                    },
-                    ip: addr,
+                IdentityMetadataCreateParams {
+                    name: "interface-a".parse().unwrap(),
+                    description: String::from("description"),
                 },
+                addr,
             )
             .unwrap();
-            let result = db_datastore
-                .vpc_subnet_create_network_interface(interface)
-                .await;
+            let result =
+                db_datastore.instance_create_network_interface(interface).await;
             assert!(
                 matches!(result, Err(NetworkInterfaceError::InstanceSpansMultipleVpcs(_))),
                 "Attaching an interface to an instance which already has one in a different VPC should fail"
             );
         }
-
-        // Inserting an interface with the same IP address, but in a different
-        // VPC, should succeed if there's no associated instance.
-        let interface = IncompleteNetworkInterface::new(
-            Uuid::new_v4(),
-            None,
-            other_vpc_id,
-            other_subnet.clone(),
-            model::MacAddr::new().unwrap(),
-            params::NetworkInterfaceCreate {
-                identity: IdentityMetadataCreateParams {
-                    name: "interface-a".parse().unwrap(),
-                    description: String::from("description"),
-                },
-                ip: Some(requested_ip),
-            },
-        )
-        .unwrap();
-        let inserted_interface = db_datastore
-            .vpc_subnet_create_network_interface(interface.clone())
-            .await
-            .expect("Should be able to create an interface with the same parameters in a new VPC");
-        assert_interfaces_eq(&interface, &inserted_interface);
-        assert_eq!(inserted_interface.ip.ip(), requested_ip);
-        assert_eq!(inserted_interface.instance_id, None);
 
         // At this point, we should have allocated 2 addresses in this VPC
         // Subnet. That has a subnet of 172.30.0.0/29, so 8 total addresses are
@@ -1268,22 +1216,19 @@ mod test {
         // fail with an address exhaustion error.
         let interface = IncompleteNetworkInterface::new(
             Uuid::new_v4(),
-            None,
+            instance_id,
             vpc_id,
             subnet.clone(),
             model::MacAddr::new().unwrap(),
-            params::NetworkInterfaceCreate {
-                identity: IdentityMetadataCreateParams {
-                    name: "interface-a".parse().unwrap(),
-                    description: String::from("description"),
-                },
-                ip: None,
+            IdentityMetadataCreateParams {
+                name: "interface-d".parse().unwrap(),
+                description: String::from("description"),
             },
+            None,
         )
         .unwrap();
         let result =
-            db_datastore.vpc_subnet_create_network_interface(interface).await;
-        println!("{:#?}", result);
+            db_datastore.instance_create_network_interface(interface).await;
         assert!(
             matches!(
                 result,
@@ -1305,6 +1250,7 @@ mod test {
         assert_eq!(inserted.id(), incomplete.identity.id);
         assert_eq!(inserted.name(), &incomplete.identity.name);
         assert_eq!(inserted.description(), incomplete.identity.description);
+        assert_eq!(inserted.instance_id, incomplete.instance_id);
         assert_eq!(inserted.vpc_id, incomplete.vpc_id);
         assert_eq!(inserted.subnet_id, incomplete.subnet.id());
         assert_eq!(inserted.mac, incomplete.mac);

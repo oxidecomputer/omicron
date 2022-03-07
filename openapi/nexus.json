@@ -1308,6 +1308,254 @@
         }
       }
     },
+    "/organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/network-interfaces": {
+      "get": {
+        "tags": [
+          "instances"
+        ],
+        "summary": "List network interfaces attached to this instance.",
+        "operationId": "instance_network_interfaces_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "nullable": true,
+              "description": "Maximum number of items returned by a single call",
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 1
+            },
+            "style": "form"
+          },
+          {
+            "in": "query",
+            "name": "page_token",
+            "schema": {
+              "nullable": true,
+              "description": "Token returned by previous call to retreive the subsequent page",
+              "type": "string"
+            },
+            "style": "form"
+          },
+          {
+            "in": "query",
+            "name": "sort_by",
+            "schema": {
+              "$ref": "#/components/schemas/NameSortMode"
+            },
+            "style": "form"
+          },
+          {
+            "in": "path",
+            "name": "instance_name",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Name"
+            },
+            "style": "simple"
+          },
+          {
+            "in": "path",
+            "name": "organization_name",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Name"
+            },
+            "style": "simple"
+          },
+          {
+            "in": "path",
+            "name": "project_name",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Name"
+            },
+            "style": "simple"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NetworkInterfaceResultsPage"
+                }
+              }
+            }
+          }
+        },
+        "x-dropshot-pagination": true
+      },
+      "post": {
+        "tags": [
+          "instances"
+        ],
+        "summary": "Create a network interface for an instance.",
+        "operationId": "instance_network_interfaces_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "instance_name",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Name"
+            },
+            "style": "simple"
+          },
+          {
+            "in": "path",
+            "name": "organization_name",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Name"
+            },
+            "style": "simple"
+          },
+          {
+            "in": "path",
+            "name": "project_name",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Name"
+            },
+            "style": "simple"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NetworkInterfaceCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "description": "successfully enqueued operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NetworkInterface"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/network-interfaces/{interface_name}": {
+      "get": {
+        "tags": [
+          "instances"
+        ],
+        "summary": "Get an interface attached to an instance.",
+        "operationId": "instance_network_interfaces_get_interface",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "instance_name",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Name"
+            },
+            "style": "simple"
+          },
+          {
+            "in": "path",
+            "name": "interface_name",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Name"
+            },
+            "style": "simple"
+          },
+          {
+            "in": "path",
+            "name": "organization_name",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Name"
+            },
+            "style": "simple"
+          },
+          {
+            "in": "path",
+            "name": "project_name",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Name"
+            },
+            "style": "simple"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NetworkInterface"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "instances"
+        ],
+        "summary": "Detach a network interface from an instance.",
+        "operationId": "instance_network_interfaces_delete_interface",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "instance_name",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Name"
+            },
+            "style": "simple"
+          },
+          {
+            "in": "path",
+            "name": "interface_name",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Name"
+            },
+            "style": "simple"
+          },
+          {
+            "in": "path",
+            "name": "organization_name",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Name"
+            },
+            "style": "simple"
+          },
+          {
+            "in": "path",
+            "name": "project_name",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Name"
+            },
+            "style": "simple"
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "successful deletion"
+          }
+        }
+      }
+    },
     "/organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/reboot": {
       "post": {
         "tags": [
@@ -2798,13 +3046,13 @@
         }
       }
     },
-    "/organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/subnets/{subnet_name}/ips": {
+    "/organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/subnets/{subnet_name}/network-interfaces": {
       "get": {
         "tags": [
           "subnets"
         ],
-        "summary": "List IP addresses on a VPC subnet.",
-        "operationId": "subnets_ips_get",
+        "summary": "List network interfaces in a VPC subnet.",
+        "operationId": "subnet_network_interfaces_get",
         "parameters": [
           {
             "in": "query",
@@ -3624,8 +3872,8 @@
           "ncpus": {
             "$ref": "#/components/schemas/InstanceCpuCount"
           },
-          "network_interface": {
-            "description": "The network interface to create or attach for this instance. If not provided, a default interface will be created.",
+          "network_interfaces": {
+            "description": "The network interfaces to be created for this instance.",
             "allOf": [
               {
                 "$ref": "#/components/schemas/InstanceNetworkInterfaceAttachment"
@@ -3639,55 +3887,6 @@
           "memory",
           "name",
           "ncpus"
-        ]
-      },
-      "InstanceCreateNetworkInterface": {
-        "type": "object",
-        "properties": {
-          "interface_params": {
-            "description": "The parameters used to create each interface.",
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/InstanceCreateNetworkInterfaceParams"
-            }
-          },
-          "vpc_name": {
-            "description": "The name of the VPC in which to create the interface",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/Name"
-              }
-            ]
-          }
-        },
-        "required": [
-          "interface_params",
-          "vpc_name"
-        ]
-      },
-      "InstanceCreateNetworkInterfaceParams": {
-        "type": "object",
-        "properties": {
-          "params": {
-            "description": "Create-time parameters for the interface.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/NetworkInterfaceCreate"
-              }
-            ]
-          },
-          "vpc_subnet_name": {
-            "description": "The name of the VPC Subnet in which to create the instance",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/Name"
-              }
-            ]
-          }
-        },
-        "required": [
-          "params",
-          "vpc_subnet_name"
         ]
       },
       "InstanceMigrate": {
@@ -3707,11 +3906,11 @@
         "description": "Describes an attachment of a `NetworkInterface` to an `Instance`, at the time the instance is created.",
         "oneOf": [
           {
-            "description": "Create a new `NetworkInterface` for the `Instance`",
+            "description": "Create one or more `NetworkInterface`s for the `Instance`",
             "type": "object",
             "properties": {
               "params": {
-                "$ref": "#/components/schemas/InstanceCreateNetworkInterface"
+                "$ref": "#/components/schemas/InstanceNetworkInterfaceCreate"
               },
               "type": {
                 "type": "string",
@@ -3755,6 +3954,20 @@
               "type"
             ]
           }
+        ]
+      },
+      "InstanceNetworkInterfaceCreate": {
+        "type": "object",
+        "properties": {
+          "params": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/NetworkInterfaceCreate"
+            }
+          }
+        },
+        "required": [
+          "params"
         ]
       },
       "InstanceResultsPage": {
@@ -3856,8 +4069,7 @@
             "format": "uuid"
           },
           "instance_id": {
-            "nullable": true,
-            "description": "The Instance to which the interface belongs.\n\nAn interface may not be attached to any instance, in which case this is None.",
+            "description": "The Instance to which the interface belongs.",
             "type": "string",
             "format": "uuid"
           },
@@ -3906,6 +4118,7 @@
         "required": [
           "description",
           "id",
+          "instance_id",
           "ip",
           "mac",
           "name",
@@ -3924,16 +4137,35 @@
           },
           "ip": {
             "nullable": true,
+            "description": "The IP address for the interface. One will be auto-assigned if not provided.",
             "type": "string",
             "format": "ip"
           },
           "name": {
             "$ref": "#/components/schemas/Name"
+          },
+          "subnet_name": {
+            "description": "The VPC Subnet in which to create the interface.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Name"
+              }
+            ]
+          },
+          "vpc_name": {
+            "description": "The VPC in which to create the interface.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Name"
+              }
+            ]
           }
         },
         "required": [
           "description",
-          "name"
+          "name",
+          "subnet_name",
+          "vpc_name"
         ]
       },
       "NetworkInterfaceResultsPage": {

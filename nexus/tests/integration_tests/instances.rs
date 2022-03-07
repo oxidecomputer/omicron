@@ -144,7 +144,7 @@ async fn test_instances_create_reboot_halt(
                 ncpus: instance.ncpus,
                 memory: instance.memory,
                 hostname: instance.hostname.clone(),
-                network_interface:
+                network_interfaces:
                     params::InstanceNetworkInterfaceAttachment::Default,
             }))
             .expect_status(Some(StatusCode::BAD_REQUEST)),
@@ -169,13 +169,13 @@ async fn test_instances_create_reboot_halt(
 
     /* Check that the instance got a network interface */
     let ips_url = format!(
-        "/organizations/{}/projects/{}/vpcs/default/subnets/default/ips",
+        "/organizations/{}/projects/{}/vpcs/default/subnets/default/network-interfaces",
         ORGANIZATION_NAME, PROJECT_NAME
     );
     let network_interfaces =
         objects_list_page::<NetworkInterface>(client, &ips_url).await.items;
     assert_eq!(network_interfaces.len(), 1);
-    assert_eq!(network_interfaces[0].instance_id, Some(instance.identity.id));
+    assert_eq!(network_interfaces[0].instance_id, instance.identity.id);
     assert_eq!(
         network_interfaces[0].identity.name,
         format!("default-{}", instance.identity.id).parse::<Name>().unwrap()
@@ -535,6 +535,7 @@ async fn test_instances_invalid_creation_returns_bad_request(
         .starts_with("unable to parse body: invalid value: integer `-3`"));
 }
 
+// Test creating two new interfaces for an instance, at creation time.
 #[nexus_test]
 async fn test_instance_with_new_custom_network_interfaces(
     cptestctx: &ControlPlaneTestContext,
@@ -591,6 +592,8 @@ async fn test_instance_with_new_custom_network_interfaces(
             name: Name::try_from(String::from("if0")).unwrap(),
             description: String::from("first custom interface"),
         },
+        vpc_name: default_name.clone(),
+        subnet_name: default_name.clone(),
         ip: None,
     };
     let if1_params = params::NetworkInterfaceCreate {
@@ -598,21 +601,13 @@ async fn test_instance_with_new_custom_network_interfaces(
             name: Name::try_from(String::from("if1")).unwrap(),
             description: String::from("second custom interface"),
         },
+        vpc_name: default_name.clone(),
+        subnet_name: non_default_subnet_name.clone(),
         ip: None,
     };
     let interface_params = params::InstanceNetworkInterfaceAttachment::Create(
-        params::InstanceCreateNetworkInterface {
-            vpc_name: default_name.clone(),
-            interface_params: vec![
-                params::InstanceCreateNetworkInterfaceParams {
-                    vpc_subnet_name: default_name.clone(),
-                    params: if0_params.clone(),
-                },
-                params::InstanceCreateNetworkInterfaceParams {
-                    vpc_subnet_name: non_default_subnet_name.clone(),
-                    params: if1_params.clone(),
-                },
-            ],
+        params::InstanceNetworkInterfaceCreate {
+            params: vec![if0_params.clone(), if1_params.clone()],
         },
     );
 
@@ -625,7 +620,7 @@ async fn test_instance_with_new_custom_network_interfaces(
         ncpus: InstanceCpuCount::try_from(2).unwrap(),
         memory: ByteCount::from_mebibytes_u32(4),
         hostname: String::from("nic-test"),
-        network_interface: interface_params,
+        network_interfaces: interface_params,
     };
     let response =
         NexusRequest::objects_post(client, &url_instances, &instance_params)
@@ -638,7 +633,7 @@ async fn test_instance_with_new_custom_network_interfaces(
     // Check that both interfaces actually appear correct.
     let ip_url = |subnet_name: &Name| {
         format!(
-            "/organizations/{}/projects/{}/vpcs/{}/subnets/{}/ips",
+            "/organizations/{}/projects/{}/vpcs/{}/subnets/{}/network-interfaces",
             ORGANIZATION_NAME, PROJECT_NAME, "default", subnet_name
         )
     };
@@ -660,7 +655,7 @@ async fn test_instance_with_new_custom_network_interfaces(
     let if0 = &interfaces.all_items[0];
     assert_eq!(if0.identity.name, if0_params.identity.name);
     assert_eq!(if0.identity.description, if0_params.identity.description);
-    assert_eq!(if0.instance_id, Some(instance.identity.id));
+    assert_eq!(if0.instance_id, instance.identity.id);
     assert_eq!(if0.ip, std::net::IpAddr::V4("172.30.0.5".parse().unwrap()));
 
     let interfaces1 = NexusRequest::iter_collection_authn::<NetworkInterface>(
@@ -685,12 +680,166 @@ async fn test_instance_with_new_custom_network_interfaces(
     assert_eq!(if1.identity.name, if1_params.identity.name);
     assert_eq!(if1.identity.description, if1_params.identity.description);
     assert_eq!(if1.ip, std::net::IpAddr::V4("172.31.0.5".parse().unwrap()));
-    assert_eq!(if1.instance_id, Some(instance.identity.id));
+    assert_eq!(if1.instance_id, instance.identity.id);
     assert_eq!(if0.vpc_id, if1.vpc_id);
     assert_ne!(
         if0.subnet_id, if1.subnet_id,
         "Two interfaces should be created in different subnets"
     );
+}
+
+#[nexus_test]
+async fn test_instance_create_delete_network_interface(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+    let nexus = &cptestctx.server.apictx.nexus;
+
+    // Create test organization and project
+    create_organization(&client, ORGANIZATION_NAME).await;
+    let url_instances = format!(
+        "/organizations/{}/projects/{}/instances",
+        ORGANIZATION_NAME, PROJECT_NAME
+    );
+    let _ = create_project(&client, ORGANIZATION_NAME, PROJECT_NAME).await;
+
+    // Create an instance with no network interfaces
+    let instance_params = params::InstanceCreate {
+        identity: IdentityMetadataCreateParams {
+            name: Name::try_from(String::from("nic-attach-test-inst")).unwrap(),
+            description: String::from("instance to test attaching new nic"),
+        },
+        ncpus: InstanceCpuCount::try_from(2).unwrap(),
+        memory: ByteCount::from_mebibytes_u32(4),
+        hostname: String::from("nic-test"),
+        network_interfaces: params::InstanceNetworkInterfaceAttachment::None,
+    };
+    let response =
+        NexusRequest::objects_post(client, &url_instances, &instance_params)
+            .authn_as(AuthnMode::PrivilegedUser)
+            .execute()
+            .await
+            .expect("Failed to create instance with two network interfaces");
+    let instance = response.parsed_body::<Instance>().unwrap();
+    let url_instance =
+        format!("{}/{}", url_instances, instance.identity.name.as_str());
+
+    // Verify there are no interfaces
+    let url_interfaces = format!(
+        "/organizations/{}/projects/{}/instances/{}/network-interfaces",
+        ORGANIZATION_NAME, PROJECT_NAME, instance.identity.name,
+    );
+    let interfaces = NexusRequest::iter_collection_authn::<NetworkInterface>(
+        client,
+        url_interfaces.as_str(),
+        "",
+        Some(100),
+    )
+    .await
+    .expect("Failed to get interfaces for instance");
+    assert!(
+        interfaces.all_items.is_empty(),
+        "Expected no network interfaces for instance"
+    );
+
+    // Parameters for the interface to create/attach
+    let if_params = params::NetworkInterfaceCreate {
+        identity: IdentityMetadataCreateParams {
+            name: "if0".parse().unwrap(),
+            description: String::from("a new nic"),
+        },
+        vpc_name: "default".parse().unwrap(),
+        subnet_name: "default".parse().unwrap(),
+        ip: Some("172.30.0.10".parse().unwrap()),
+    };
+    let url_interface =
+        format!("{}/{}", url_interfaces, if_params.identity.name.as_str());
+
+    // We should not be able to create an interface while the instance is running.
+    //
+    // NOTE: Need to use RequestBuilder manually because `expect_failure` does not allow setting
+    // the body.
+    let builder = RequestBuilder::new(
+        client,
+        http::Method::POST,
+        url_interfaces.as_str(),
+    )
+    .body(Some(&if_params))
+    .expect_status(Some(http::StatusCode::BAD_REQUEST));
+    let err = NexusRequest::new(builder)
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .expect("Should not be able to create network interface on running instance")
+        .parsed_body::<HttpErrorResponseBody>()
+        .expect("Failed to parse error response body");
+    assert_eq!(
+        err.message,
+        "Instance must be stopped to attach a new network interface",
+        "Expected an InvalidRequest response when creating an interface on a running instance"
+    );
+
+    // Stop the instance
+    let instance =
+        instance_post(client, url_instance.as_str(), InstanceOp::Stop).await;
+    instance_simulate(nexus, &instance.identity.id).await;
+
+    // Verify we can now make the request again
+    let response =
+        NexusRequest::objects_post(client, url_interfaces.as_str(), &if_params)
+            .authn_as(AuthnMode::PrivilegedUser)
+            .execute()
+            .await
+            .expect("Failed to create network interface on stopped instance");
+    let iface = response.parsed_body::<NetworkInterface>().unwrap();
+    assert_eq!(iface.identity.name, if_params.identity.name);
+    assert_eq!(iface.ip, if_params.ip.unwrap());
+
+    // Restart the instance, verify the interface is still correct.
+    let instance =
+        instance_post(client, url_instance.as_str(), InstanceOp::Start).await;
+    instance_simulate(nexus, &instance.identity.id).await;
+
+    let iface0 = NexusRequest::object_get(client, url_interface.as_str())
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .expect("Failed to get interface")
+        .parsed_body::<NetworkInterface>()
+        .expect("Failed to parse network interface from body");
+    assert_eq!(iface.identity.id, iface0.identity.id);
+    assert_eq!(iface.ip, iface0.ip);
+
+    // Verify we cannot delete the interface while the instance is running
+    let err = NexusRequest::expect_failure(
+        client,
+        http::StatusCode::BAD_REQUEST,
+        http::Method::DELETE,
+        url_interface.as_str(),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .expect(
+        "Should not be able to delete network interface on running instance",
+    )
+    .parsed_body::<HttpErrorResponseBody>()
+    .expect("Failed to parse error response body");
+    assert_eq!(
+        err.message,
+        "Instance must be stopped to detach a network interface",
+        "Expected an InvalidRequest response when detaching an interface from a running instance"
+    );
+
+    // Stop the instance and verify we can delete the interface
+    let instance =
+        instance_post(client, url_instance.as_str(), InstanceOp::Stop).await;
+    instance_simulate(nexus, &instance.identity.id).await;
+    NexusRequest::object_delete(client, url_interface.as_str())
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .expect("Failed to delete interface from stopped instance");
 }
 
 async fn instance_get(

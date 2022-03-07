@@ -187,7 +187,7 @@ async fn sic_alloc_server(
 async fn sic_create_network_interfaces(
     sagactx: ActionContext<SagaInstanceCreate>,
 ) -> Result<Option<Vec<NetworkInterface>>, ActionError> {
-    match sagactx.saga_params().create_params.network_interface {
+    match sagactx.saga_params().create_params.network_interfaces {
         params::InstanceNetworkInterfaceAttachment::None => Ok(None),
         params::InstanceNetworkInterfaceAttachment::Default => {
             sic_create_default_network_interface(&sagactx).await
@@ -195,7 +195,11 @@ async fn sic_create_network_interfaces(
         params::InstanceNetworkInterfaceAttachment::Create(
             ref create_params,
         ) => {
-            sic_create_custom_network_interfaces(&sagactx, create_params).await
+            sic_create_custom_network_interfaces(
+                &sagactx,
+                &create_params.params,
+            )
+            .await
         }
     }
 }
@@ -204,8 +208,12 @@ async fn sic_create_network_interfaces(
 /// instance.
 async fn sic_create_custom_network_interfaces(
     sagactx: &ActionContext<SagaInstanceCreate>,
-    interface_params: &params::InstanceCreateNetworkInterface,
+    interface_params: &[params::NetworkInterfaceCreate],
 ) -> Result<Option<Vec<NetworkInterface>>, ActionError> {
+    if interface_params.is_empty() {
+        return Ok(Some(vec![]));
+    }
+
     let osagactx = sagactx.user_data();
     let saga_params = sagactx.saga_params();
     let instance_id = sagactx.lookup::<Uuid>("instance_id")?;
@@ -213,24 +221,33 @@ async fn sic_create_custom_network_interfaces(
         .datastore()
         .vpc_fetch_by_name(
             &saga_params.project_id,
-            &db::model::Name::from(interface_params.vpc_name.clone()),
+            &db::model::Name::from(interface_params[0].vpc_name.clone()),
         )
         .await
         .map_err(ActionError::action_failed)?;
 
-    let mut interfaces =
-        Vec::with_capacity(interface_params.interface_params.len());
-    for params in interface_params.interface_params.iter() {
+    // Check that all VPC names are the same.
+    //
+    // This isn't strictly necessary, as the queries would fail below, but it's
+    // easier to handle here.
+    if interface_params.iter().any(|p| p.vpc_name != vpc.name().0) {
+        return Err(ActionError::action_failed(Error::invalid_request(
+            "All interfaces must be in the same VPC",
+        )));
+    }
+
+    let mut interfaces = Vec::with_capacity(interface_params.len());
+    for params in interface_params.iter() {
         // TODO-correctness: It seems racy to fetch the subnet and create the
         // interface in separate requests, but outside of a transaction. This
         // should probably either be in a transaction, or the
-        // `vpc_subnet_create_network_interface` function/query needs some JOIN
+        // `subnet_create_network_interface` function/query needs some JOIN
         // on the `vpc_subnet` table.
         let subnet = osagactx
             .datastore()
             .vpc_subnet_fetch_by_name(
                 &vpc.id(),
-                &db::model::Name::from(params.vpc_subnet_name.clone()),
+                &db::model::Name::from(params.subnet_name.clone()),
             )
             .await
             .map_err(ActionError::action_failed)?;
@@ -239,16 +256,17 @@ async fn sic_create_custom_network_interfaces(
         let interface_id = Uuid::new_v4();
         let interface = db::model::IncompleteNetworkInterface::new(
             interface_id,
-            Some(instance_id),
+            instance_id,
             vpc.id(),
             subnet.clone(),
             mac,
-            params.params.clone(),
+            params.identity.clone(),
+            params.ip,
         )
         .map_err(ActionError::action_failed)?;
         let interface = osagactx
             .datastore()
-            .vpc_subnet_create_network_interface(interface)
+            .instance_create_network_interface(interface)
             .await
             .map_err(
                 db::subnet_allocation::NetworkInterfaceError::into_external,
@@ -266,8 +284,8 @@ async fn sic_create_default_network_interface(
     let osagactx = sagactx.user_data();
     let saga_params = sagactx.saga_params();
     let instance_id = sagactx.lookup::<Uuid>("instance_id")?;
-    let default_name =
-        db::model::Name(Name::try_from("default".to_string()).unwrap());
+    let default_name = Name::try_from("default".to_string()).unwrap();
+    let internal_default_name = db::model::Name::from(default_name.clone());
     let interface_params = params::NetworkInterfaceCreate {
         identity: IdentityMetadataCreateParams {
             // By naming the interface after the instance id, we should
@@ -278,16 +296,21 @@ async fn sic_create_default_network_interface(
                 saga_params.create_params.identity.name,
             ),
         },
+        vpc_name: default_name.clone(),
+        subnet_name: default_name.clone(),
         ip: None, // Request an IP address allocation
     };
     let vpc = osagactx
         .datastore()
-        .vpc_fetch_by_name(&saga_params.project_id, &default_name)
+        .vpc_fetch_by_name(
+            &saga_params.project_id,
+            &internal_default_name.clone(),
+        )
         .await
         .map_err(ActionError::action_failed)?;
     let subnet = osagactx
         .datastore()
-        .vpc_subnet_fetch_by_name(&vpc.id(), &default_name)
+        .vpc_subnet_fetch_by_name(&vpc.id(), &internal_default_name)
         .await
         .map_err(ActionError::action_failed)?;
 
@@ -295,16 +318,17 @@ async fn sic_create_default_network_interface(
     let interface_id = Uuid::new_v4();
     let interface = db::model::IncompleteNetworkInterface::new(
         interface_id,
-        Some(instance_id),
+        instance_id,
         vpc.id(),
         subnet.clone(),
         mac,
-        interface_params,
+        interface_params.identity.clone(),
+        interface_params.ip,
     )
     .map_err(ActionError::action_failed)?;
     let interface = osagactx
         .datastore()
-        .vpc_subnet_create_network_interface(interface)
+        .instance_create_network_interface(interface)
         .await
         .map_err(db::subnet_allocation::NetworkInterfaceError::into_external)
         .map_err(ActionError::action_failed)?;
@@ -317,18 +341,30 @@ async fn sic_create_network_interfaces_undo(
     let osagactx = sagactx.user_data();
     let network_interfaces = sagactx
         .lookup::<Option<Vec<NetworkInterface>>>("network_interfaces")?;
-    if let Some(interfaces) = network_interfaces {
-        // TODO-correctness: Does it matter that this is a sequence of requests
-        // for each interface, rather than one batch request for all of them?
-        for interface in interfaces.iter() {
-            osagactx
-                .datastore()
-                .vpc_subnet_delete_network_interface(
-                    &interface.vpc_id,
-                    &db::model::Name(interface.identity.name.clone()),
-                )
-                .await?;
+
+    // No networking at all created
+    if network_interfaces.is_none() {
+        return Ok(());
+    }
+
+    // Collect the parameters of the saga. If we were asked to create
+    // interfaces, delete them. If we're only asked to attach, detach them.
+    let network_interfaces = network_interfaces.as_ref().unwrap();
+    let create_params = &sagactx.saga_params().create_params;
+    match create_params.network_interfaces {
+        params::InstanceNetworkInterfaceAttachment::Create(_)
+        | params::InstanceNetworkInterfaceAttachment::Default => {
+            // TODO-correctness: Does it matter that this is a sequence of requests
+            // for each interface, rather than one batch request for all of them?
+            for interface in network_interfaces.iter() {
+                osagactx
+                    .datastore()
+                    .instance_delete_network_interface(&interface.identity.id)
+                    .await
+                    .map_err(ActionError::action_failed)?;
+            }
         }
+        params::InstanceNetworkInterfaceAttachment::None => {}
     }
     Ok(())
 }

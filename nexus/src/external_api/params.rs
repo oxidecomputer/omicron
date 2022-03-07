@@ -71,6 +71,11 @@ pub struct ProjectUpdate {
 pub struct NetworkInterfaceCreate {
     #[serde(flatten)]
     pub identity: IdentityMetadataCreateParams,
+    /// The VPC in which to create the interface.
+    pub vpc_name: Name,
+    /// The VPC Subnet in which to create the interface.
+    pub subnet_name: Name,
+    /// The IP address for the interface. One will be auto-assigned if not provided.
     pub ip: Option<IpAddr>,
 }
 
@@ -97,33 +102,21 @@ pub struct NetworkInterfaceCreate {
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(tag = "type", content = "params")]
 pub enum InstanceNetworkInterfaceAttachment {
-    // TODO-completeness: Add variant for attaching to existing interface
-    /// Create a new `NetworkInterface` for the `Instance`
-    Create(InstanceCreateNetworkInterface),
+    /// Create one or more `NetworkInterface`s for the `Instance`
+    Create(InstanceNetworkInterfaceCreate),
+
     /// Default networking setup, which creates a single interface with an
     /// auto-assigned IP address from project's "default" VPC and "default" VPC
     /// Subnet.
     Default,
+
     /// No network interfaces at all will be created for the instance.
     None,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-pub struct InstanceCreateNetworkInterface {
-    /// The name of the VPC in which to create the interface
-    pub vpc_name: Name,
-
-    /// The parameters used to create each interface.
-    pub interface_params: Vec<InstanceCreateNetworkInterfaceParams>,
-}
-
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-pub struct InstanceCreateNetworkInterfaceParams {
-    /// The name of the VPC Subnet in which to create the instance
-    pub vpc_subnet_name: Name,
-
-    /// Create-time parameters for the interface.
-    pub params: NetworkInterfaceCreate,
+pub struct InstanceNetworkInterfaceCreate {
+    pub params: Vec<NetworkInterfaceCreate>,
 }
 
 impl Default for InstanceNetworkInterfaceAttachment {
@@ -142,10 +135,10 @@ pub struct InstanceCreate {
     pub ncpus: InstanceCpuCount,
     pub memory: ByteCount,
     pub hostname: String, /* TODO-cleanup different type? */
-    /// The network interface to create or attach for this instance. If not
-    /// provided, a default interface will be created.
+
+    /// The network interfaces to be created for this instance.
     #[serde(default)]
-    pub network_interface: InstanceNetworkInterfaceAttachment,
+    pub network_interfaces: InstanceNetworkInterfaceAttachment,
 }
 
 /**
@@ -288,6 +281,14 @@ impl DiskCreate {
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct DiskIdentifier {
     pub disk: Name,
+}
+
+/// Parameters for the
+/// [`NetworkInterface`](omicron_common::api::external::NetworkInterface) to be
+/// attached or detached to an instance.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct NetworkInterfaceIdentifier {
+    pub interface_name: Name,
 }
 
 /*

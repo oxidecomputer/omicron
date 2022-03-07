@@ -998,7 +998,7 @@ impl_enum_type!(
     #[postgres(type_name = "instance_state", type_schema = "public")]
     pub struct InstanceStateEnum;
 
-    #[derive(Clone, Debug, AsExpression, FromSqlRow)]
+    #[derive(Clone, Debug, PartialEq, AsExpression, FromSqlRow)]
     #[sql_type = "InstanceStateEnum"]
     pub struct InstanceState(pub external::InstanceState);
 
@@ -1980,7 +1980,7 @@ impl Into<external::VpcFirewallRule> for VpcFirewallRule {
 pub struct IncompleteNetworkInterface {
     pub identity: NetworkInterfaceIdentity,
 
-    pub instance_id: Option<Uuid>,
+    pub instance_id: Uuid,
     pub vpc_id: Uuid,
     pub subnet: VpcSubnet,
     pub mac: MacAddr,
@@ -1990,18 +1990,18 @@ pub struct IncompleteNetworkInterface {
 impl IncompleteNetworkInterface {
     pub fn new(
         interface_id: Uuid,
-        instance_id: Option<Uuid>,
+        instance_id: Uuid,
         vpc_id: Uuid,
         subnet: VpcSubnet,
         mac: MacAddr,
-        params: params::NetworkInterfaceCreate,
+        identity: external::IdentityMetadataCreateParams,
+        ip: Option<std::net::IpAddr>,
     ) -> Result<Self, external::Error> {
-        if let Some(ip) = params.ip {
+        if let Some(ip) = ip {
             subnet.is_requestable_addr(ip)?;
         };
-        let identity =
-            NetworkInterfaceIdentity::new(interface_id, params.identity);
-        Ok(Self { identity, instance_id, subnet, vpc_id, mac, ip: params.ip })
+        let identity = NetworkInterfaceIdentity::new(interface_id, identity);
+        Ok(Self { identity, instance_id, subnet, vpc_id, mac, ip })
     }
 }
 
@@ -2011,7 +2011,7 @@ pub struct NetworkInterface {
     #[diesel(embed)]
     pub identity: NetworkInterfaceIdentity,
 
-    pub instance_id: Option<Uuid>,
+    pub instance_id: Uuid,
     pub vpc_id: Uuid,
     pub subnet_id: Uuid,
     pub mac: MacAddr,

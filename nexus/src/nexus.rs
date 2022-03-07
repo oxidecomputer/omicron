@@ -834,21 +834,13 @@ impl Nexus {
         project_name: &Name,
         params: &params::InstanceCreate,
     ) -> CreateResult<db::model::Instance> {
-        // Quickly fail the request if the networking parameters are invalid.
-        fn fail_if_empty_interfaces<T>(
-            interfaces: &[T],
-        ) -> Result<(), external::Error> {
-            if interfaces.is_empty() {
-                Err(external::Error::invalid_request(
-                    "At least one networking interface must be specified",
-                ))
-            } else {
-                Ok(())
-            }
-        }
-        match params.network_interface {
+        match params.network_interfaces {
             params::InstanceNetworkInterfaceAttachment::Create(ref create) => {
-                fail_if_empty_interfaces(&create.interface_params)?;
+                if create.params.is_empty() {
+                    return Err(external::Error::invalid_request(
+                        "At least one networking interface must be specified",
+                    ));
+                }
             }
             params::InstanceNetworkInterfaceAttachment::Default
             | params::InstanceNetworkInterfaceAttachment::None => {}
@@ -1551,59 +1543,156 @@ impl Nexus {
             .map(|_| ())
     }
 
-    pub async fn vpc_subnet_create_network_interface(
+    ///  Lists network interfaces attached to the instance.
+    pub async fn instance_list_network_interfaces(
         &self,
+        opctx: &OpContext,
         organization_name: &Name,
         project_name: &Name,
-        vpc_name: &Name,
-        subnet_name: &Name,
+        instance_name: &Name,
+        pagparams: &DataPageParams<'_, Name>,
+    ) -> ListResultVec<db::model::NetworkInterface> {
+        let authz_instance = self
+            .db_datastore
+            .instance_lookup_by_path(
+                organization_name,
+                project_name,
+                instance_name,
+            )
+            .await?;
+        opctx.authorize(authz::Action::ListChildren, &authz_instance).await?;
+        self.db_datastore
+            .instance_list_network_interfaces(&authz_instance.id(), pagparams)
+            .await
+    }
+
+    /// Create a network interface attached to the provided instance.
+    pub async fn instance_create_network_interface(
+        &self,
+        opctx: &OpContext,
+        organization_name: &Name,
+        project_name: &Name,
+        instance_name: &Name,
         params: &params::NetworkInterfaceCreate,
     ) -> CreateResult<db::model::NetworkInterface> {
+        let authz_project = self
+            .db_datastore
+            .project_lookup_by_path(organization_name, project_name)
+            .await?;
+        let (authz_instance, db_instance) = self
+            .db_datastore
+            .instance_fetch(opctx, &authz_project, instance_name)
+            .await?;
+        opctx.authorize(authz::Action::Modify, &authz_instance).await?;
+
+        // TODO-completeness: We'd like to relax this once hot-plug is supported
+        let stopped =
+            db::model::InstanceState::new(external::InstanceState::Stopped);
+        if db_instance.runtime_state.state != stopped {
+            return Err(external::Error::invalid_request(
+                "Instance must be stopped to attach a new network interface",
+            ));
+        }
+
+        // Lookup both the VPC and VPC Subnet, since we need both IDs to create
+        // an interface.
+        let vpc_name = db::model::Name(params.vpc_name.clone());
+        let subnet_name = db::model::Name(params.subnet_name.clone());
         let vpc = self
-            .project_lookup_vpc(organization_name, project_name, vpc_name)
+            .project_lookup_vpc(organization_name, project_name, &vpc_name)
             .await?;
         let subnet = self
             .db_datastore
-            .vpc_subnet_fetch_by_name(&vpc.id(), subnet_name)
+            .vpc_subnet_fetch_by_name(&vpc.id(), &subnet_name)
             .await?;
         let mac = db::model::MacAddr::new()?;
         let interface_id = Uuid::new_v4();
         let interface = db::model::IncompleteNetworkInterface::new(
             interface_id,
-            None, // Do not attach to an instance
+            authz_instance.id(),
             vpc.id(),
             subnet,
             mac,
-            params.clone(),
+            params.identity.clone(),
+            params.ip,
         )?;
         let interface = self
             .db_datastore
-            .vpc_subnet_create_network_interface(interface)
+            .instance_create_network_interface(interface)
             .await
             .map_err(NetworkInterfaceError::into_external)?;
-        // TODO: Notify the sled for the instance, if an instance was specified in the request.
         Ok(interface)
     }
 
-    pub async fn vpc_subnet_delete_network_interface(
+    /// Delete a network interface from the provided instance.
+    pub async fn instance_delete_network_interface(
         &self,
+        opctx: &OpContext,
         organization_name: &Name,
         project_name: &Name,
-        vpc_name: &Name,
+        instance_name: &Name,
         interface_name: &Name,
     ) -> DeleteResult {
-        let vpc = self
-            .project_lookup_vpc(organization_name, project_name, vpc_name)
+        let authz_project = self
+            .db_datastore
+            .project_lookup_by_path(organization_name, project_name)
+            .await?;
+        let (authz_instance, db_instance) = self
+            .db_datastore
+            .instance_fetch(opctx, &authz_project, instance_name)
+            .await?;
+        opctx.authorize(authz::Action::Modify, &authz_instance).await?;
+
+        // TODO-completeness: We'd like to relax this once hot-plug is supported
+        let stopped =
+            db::model::InstanceState::new(external::InstanceState::Stopped);
+        if db_instance.runtime_state.state != stopped {
+            return Err(external::Error::invalid_request(
+                "Instance must be stopped to detach a network interface",
+            ));
+        }
+        // TODO-cleanup: It's annoying that we need to look up the interface by
+        // name, which gets a single record, and then soft-delete that one
+        // record. We should be able to do both at once, but the
+        // `update_and_check` tools only operate on the primary key. That means
+        // we need to fetch the whole record first.
+        let interface = self
+            .db_datastore
+            .instance_lookup_network_interface(
+                &authz_instance.id(),
+                interface_name,
+            )
             .await?;
         self.db_datastore
-            .vpc_subnet_delete_network_interface(&vpc.id(), interface_name)
+            .instance_delete_network_interface(&interface.id())
             .await
     }
 
-    // TODO-completeness: Add instance_{attach,detach}_network_interface, once
-    // hotplug is supported in Propolis and the sled agent supports updating the
-    // hardware of an instance, i.e., its `instance_ensure` endpoint compares
-    // the requested and actual hardware and udpates as needed.
+    /// Fetch a network interface attached to the given instance.
+    pub async fn instance_lookup_network_interface(
+        &self,
+        opctx: &OpContext,
+        organization_name: &Name,
+        project_name: &Name,
+        instance_name: &Name,
+        interface_name: &Name,
+    ) -> LookupResult<db::model::NetworkInterface> {
+        let authz_instance = self
+            .db_datastore
+            .instance_lookup_by_path(
+                organization_name,
+                project_name,
+                instance_name,
+            )
+            .await?;
+        opctx.authorize(authz::Action::ListChildren, &authz_instance).await?;
+        self.db_datastore
+            .instance_lookup_network_interface(
+                &authz_instance.id(),
+                interface_name,
+            )
+            .await
+    }
 
     pub async fn project_list_vpcs(
         &self,
@@ -1858,7 +1947,6 @@ impl Nexus {
         vpc_name: &Name,
         subnet_name: &Name,
     ) -> LookupResult<db::model::VpcSubnet> {
-        // TODO: join projects, vpcs, and subnets and do this in one query
         let vpc = self
             .project_lookup_vpc(organization_name, project_name, vpc_name)
             .await?;

@@ -440,12 +440,10 @@ CREATE TABLE omicron.public.network_interface (
     time_deleted TIMESTAMPTZ,
 
     /* FK into Instance table.
-     *
-     * Note that it's possible for an interface to not be attached
-     * to any instance, in which case this is NULL. However, an
-     * interface will only be attached to at most one instance.
+     * Note that interfaces are always attached to a particular instance.
+     * IP addresses may be reserved, but this is a different resource.
      */
-    instance_id UUID,
+    instance_id UUID NOT NULL,
 
     /* FK into VPC table */
     vpc_id UUID NOT NULL,
@@ -462,12 +460,6 @@ CREATE TABLE omicron.public.network_interface (
  * refer to them here, most notably to support multiple IPs per NIC, as well
  * as moving IPs between NICs on different instances, etc.
  */
-
-CREATE UNIQUE INDEX ON omicron.public.network_interface (
-    vpc_id,
-    name
-) WHERE
-    time_deleted IS NULL;
 
 /* Ensure we do not assign the same address twice within a subnet */
 CREATE UNIQUE INDEX ON omicron.public.network_interface (
@@ -487,15 +479,15 @@ CREATE UNIQUE INDEX ON omicron.public.network_interface (
 
 /*
  * Index used to verify that an Instance's networking is contained
- * within a single VPC. Note that this index is not unique, since
- * there be multiple interfaces for a single instance. 
+ * within a single VPC.
  */
-CREATE INDEX ON omicron.public.network_interface (
-    instance_id
+CREATE UNIQUE INDEX ON omicron.public.network_interface (
+    instance_id,
+    name
 )
 STORING (vpc_id)
 WHERE
-    time_deleted IS NULL AND instance_id IS NOT NULL;
+    time_deleted IS NULL;
 
 CREATE TYPE omicron.public.vpc_router_kind AS ENUM (
     'system',

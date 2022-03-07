@@ -1909,10 +1909,7 @@ pub struct NetworkInterface {
     pub identity: IdentityMetadata,
 
     /// The Instance to which the interface belongs.
-    ///
-    /// An interface may not be attached to any instance, in which case this is
-    /// None.
-    pub instance_id: Option<Uuid>,
+    pub instance_id: Uuid,
 
     /// The VPC to which the interface belongs.
     pub vpc_id: Uuid,

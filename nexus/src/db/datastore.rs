@@ -1642,7 +1642,7 @@ impl DataStore {
     /*
      * Network interfaces
      */
-    pub async fn vpc_subnet_create_network_interface(
+    pub async fn instance_create_network_interface(
         &self,
         interface: IncompleteNetworkInterface,
     ) -> Result<NetworkInterface, NetworkInterfaceError> {
@@ -1659,23 +1659,57 @@ impl DataStore {
             .map_err(|e| NetworkInterfaceError::from_pool(e, &interface))
     }
 
-    pub async fn vpc_subnet_delete_network_interface(
+    pub async fn instance_delete_network_interface(
         &self,
-        vpc_id: &Uuid,
-        interface_name: &Name,
+        interface_id: &Uuid,
     ) -> DeleteResult {
         use db::schema::network_interface::dsl;
-
-        // TODO-correctness: Do not allow deleting interfaces on running
-        // instances until we support hotplug
-
         let now = Utc::now();
-        diesel::update(dsl::network_interface)
+        let result = diesel::update(dsl::network_interface)
+            .filter(dsl::id.eq(*interface_id))
             .filter(dsl::time_deleted.is_null())
-            .filter(dsl::vpc_id.eq(*vpc_id))
+            .set((dsl::time_deleted.eq(now),))
+            .check_if_exists::<db::model::NetworkInterface>(*interface_id)
+            .execute_and_check(self.pool())
+            .await
+            .map_err(|e| {
+                public_error_from_diesel_pool(
+                    e,
+                    ErrorHandler::NotFoundByLookup(
+                        ResourceType::NetworkInterface,
+                        LookupType::ById(*interface_id),
+                    ),
+                )
+            })?;
+        match result.status {
+            UpdateStatus::Updated => Ok(()),
+            UpdateStatus::NotUpdatedButExists => {
+                let interface = &result.found;
+                if interface.time_deleted().is_some() {
+                    // Already deleted
+                    Ok(())
+                } else {
+                    Err(Error::internal_error(&format!(
+                        "failed to delete network interface: {}",
+                        interface_id
+                    )))
+                }
+            }
+        }
+    }
+
+    pub async fn subnet_lookup_network_interface(
+        &self,
+        subnet_id: &Uuid,
+        interface_name: &Name,
+    ) -> LookupResult<db::model::NetworkInterface> {
+        use db::schema::network_interface::dsl;
+
+        dsl::network_interface
+            .filter(dsl::subnet_id.eq(*subnet_id))
+            .filter(dsl::time_deleted.is_null())
             .filter(dsl::name.eq(interface_name.clone()))
-            .set(dsl::time_deleted.eq(now))
-            .returning(NetworkInterface::as_returning())
+            .select(db::model::NetworkInterface::as_select())
             .get_result_async(self.pool())
             .await
             .map_err(|e| {
@@ -1686,8 +1720,48 @@ impl DataStore {
                         LookupType::ByName(interface_name.to_string()),
                     ),
                 )
-            })?;
-        Ok(())
+            })
+    }
+
+    /// List network interfaces associated with a given instance.
+    pub async fn instance_list_network_interfaces(
+        &self,
+        instance_id: &Uuid,
+        pagparams: &DataPageParams<'_, Name>,
+    ) -> ListResultVec<NetworkInterface> {
+        use db::schema::network_interface::dsl;
+        paginated(dsl::network_interface, dsl::name, &pagparams)
+            .filter(dsl::time_deleted.is_null())
+            .filter(dsl::instance_id.eq(*instance_id))
+            .select(NetworkInterface::as_select())
+            .load_async::<NetworkInterface>(self.pool())
+            .await
+            .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
+    }
+
+    /// Get a network interface by name attached to an instance
+    pub async fn instance_lookup_network_interface(
+        &self,
+        instance_id: &Uuid,
+        interface_name: &Name,
+    ) -> LookupResult<NetworkInterface> {
+        use db::schema::network_interface::dsl;
+        dsl::network_interface
+            .filter(dsl::instance_id.eq(*instance_id))
+            .filter(dsl::name.eq(interface_name.clone()))
+            .filter(dsl::time_deleted.is_null())
+            .select(NetworkInterface::as_select())
+            .get_result_async(self.pool())
+            .await
+            .map_err(|e| {
+                public_error_from_diesel_pool(
+                    e,
+                    ErrorHandler::NotFoundByLookup(
+                        ResourceType::NetworkInterface,
+                        LookupType::ByName(interface_name.to_string()),
+                    ),
+                )
+            })
     }
 
     // Create a record for a new Oximeter instance

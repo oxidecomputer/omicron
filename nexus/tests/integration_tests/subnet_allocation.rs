@@ -41,7 +41,7 @@ async fn create_instance_expect_failure(
         ncpus: InstanceCpuCount(1),
         memory: ByteCount::from_mebibytes_u32(256),
         hostname: name.to_string(),
-        network_interface: params::InstanceNetworkInterfaceAttachment::Default,
+        network_interfaces: params::InstanceNetworkInterfaceAttachment::Default,
     };
 
     NexusRequest::new(
@@ -108,7 +108,7 @@ async fn test_subnet_allocation(cptestctx: &ControlPlaneTestContext) {
     assert_eq!(error.message, "No available IP addresses for interface");
 
     // Verify the subnet lists the two addresses as in use
-    let url_ips = format!("{}/ips", url_subnet);
+    let url_ips = format!("{}/network-interfaces", url_subnet);
     let mut network_interfaces =
         objects_list_page::<NetworkInterface>(client, &url_ips).await.items;
     assert_eq!(network_interfaces.len(), 2);
