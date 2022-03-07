@@ -458,8 +458,9 @@ async fn ensure_running_zone(
     }
 }
 
-type NotifyFut =
-    dyn futures::Future<Output = Result<(), nexus_client::Error<()>>> + Send;
+type NotifyFut = dyn futures::Future<
+        Output = Result<(), nexus_client::Error<nexus_client::types::Error>>,
+    > + Send;
 
 #[derive(Debug)]
 struct NewFilesystemRequest {
@@ -573,7 +574,12 @@ impl StorageWorker {
                     .zpool_put(&sled_id, &pool_id, &zpool_request)
                     .await
                     .map_err(backoff::BackoffError::Transient)?;
-                Ok::<(), backoff::BackoffError<nexus_client::Error<()>>>(())
+                Ok::<
+                    (),
+                    backoff::BackoffError<
+                        nexus_client::Error<nexus_client::types::Error>,
+                    >,
+                >(())
             }
         };
         let log = self.log.clone();
@@ -617,7 +623,12 @@ impl StorageWorker {
                         .map_err(backoff::BackoffError::Transient)?;
                 }
 
-                Ok::<(), backoff::BackoffError<nexus_client::Error<()>>>(())
+                Ok::<
+                    (),
+                    backoff::BackoffError<
+                        nexus_client::Error<nexus_client::types::Error>,
+                    >,
+                >(())
             }
         };
         let log = self.log.clone();

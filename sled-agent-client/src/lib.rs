@@ -13,6 +13,12 @@ use uuid::Uuid;
 
 generate_logging_api!("../openapi/sled-agent.json");
 
+impl omicron_common::api::external::ClientError for types::Error {
+    fn message(&self) -> String {
+        self.message.clone()
+    }
+}
+
 impl From<omicron_common::api::internal::nexus::InstanceRuntimeState>
     for types::InstanceRuntimeState
 {

@@ -113,7 +113,8 @@ pub mod traits;
 pub mod types;
 pub use traits::{Metric, Producer, Target};
 pub use types::{
-    Datum, DatumType, Error, Field, FieldType, FieldValue, Measurement, Sample,
+    Datum, DatumType, Field, FieldType, FieldValue, Measurement, MetricsError,
+    Sample,
 };
 
 /// Construct the timeseries name for a Target and Metric.
