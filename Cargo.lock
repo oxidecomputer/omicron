@@ -2164,6 +2164,7 @@ dependencies = [
  "clap 3.1.5",
  "dropshot",
  "gateway-messages",
+ "hex",
  "omicron-common",
  "ringbuffer",
  "schemars",

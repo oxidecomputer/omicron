@@ -3,11 +3,12 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use crate::config::{Config, SidecarConfig};
-use crate::server::{self, UdpServer};
+use crate::server::UdpServer;
 use anyhow::Result;
 use gateway_messages::sp_impl::{SpHandler, SpServer};
 use gateway_messages::{
-    IgnitionCommand, IgnitionFlags, IgnitionState, ResponseError, ResponseKind,
+    IgnitionCommand, IgnitionFlags, IgnitionState, ResponseError, SerialNumber,
+    SpState,
 };
 use slog::{debug, error, info, warn, Logger};
 use tokio::{
@@ -30,11 +31,34 @@ impl Sidecar {
     pub async fn spawn(
         config: &Config,
         sidecar_config: &SidecarConfig,
+        log: Logger,
     ) -> Result<Self> {
-        let log = server::logger(&config, "sidecar")?;
+        const ID_GIMLET: u16 = 0b0000_0000_0001_0001;
+        const ID_SIDECAR: u16 = 0b0000_0000_0001_0010;
+
         info!(log, "setting up simualted sidecar");
-        let server = UdpServer::new(config).await?;
-        let inner = Inner::new(server, sidecar_config.clone(), log);
+        let server = UdpServer::new(sidecar_config.bind_address).await?;
+
+        let mut ignition_targets = Vec::new();
+        for _ in &config.simulated_sps.sidecar {
+            ignition_targets.push(IgnitionState {
+                id: ID_SIDECAR,
+                flags: IgnitionFlags::POWER | IgnitionFlags::CTRL_DETECT_0,
+            });
+        }
+        for _ in &config.simulated_sps.gimlet {
+            ignition_targets.push(IgnitionState {
+                id: ID_GIMLET,
+                flags: IgnitionFlags::POWER | IgnitionFlags::CTRL_DETECT_0,
+            });
+        }
+
+        let inner = Inner::new(
+            server,
+            sidecar_config.serial_number,
+            ignition_targets,
+            log,
+        );
         let inner_task = task::spawn(async move { inner.run().await.unwrap() });
         Ok(Self { inner_task })
     }
@@ -48,10 +72,14 @@ struct Inner {
 impl Inner {
     fn new(
         server: UdpServer,
-        sidecar_config: SidecarConfig,
+        serial_number: SerialNumber,
+        ignition_targets: Vec<IgnitionState>,
         log: Logger,
     ) -> Self {
-        Self { handler: Handler { log, sidecar_config }, udp: server }
+        Self {
+            handler: Handler { log, serial_number, ignition_targets },
+            udp: server,
+        }
     }
 
     async fn run(mut self) -> Result<()> {
@@ -81,13 +109,13 @@ impl Inner {
 
 struct Handler {
     log: Logger,
-    sidecar_config: SidecarConfig,
+    serial_number: SerialNumber,
+    ignition_targets: Vec<IgnitionState>,
 }
 
 impl Handler {
     fn get_target(&self, target: u8) -> Result<&IgnitionState, ResponseError> {
-        self.sidecar_config
-            .ignition_targets
+        self.ignition_targets
             .get(usize::from(target))
             .ok_or(ResponseError::IgnitionTargetDoesNotExist(target))
     }
@@ -96,43 +124,38 @@ impl Handler {
         &mut self,
         target: u8,
     ) -> Result<&mut IgnitionState, ResponseError> {
-        self.sidecar_config
-            .ignition_targets
+        self.ignition_targets
             .get_mut(usize::from(target))
             .ok_or(ResponseError::IgnitionTargetDoesNotExist(target))
     }
 }
 
 impl SpHandler for Handler {
-    fn ping(&mut self) -> ResponseKind {
+    fn ping(&mut self) -> Result<(), ResponseError> {
         debug!(&self.log, "received ping; sending pong");
-        ResponseKind::Pong
+        Ok(())
     }
 
-    fn ignition_state(&mut self, target: u8) -> ResponseKind {
-        let state = match self.get_target(target) {
-            Ok(state) => *state,
-            Err(err) => return ResponseKind::Error(err),
-        };
-
+    fn ignition_state(
+        &mut self,
+        target: u8,
+    ) -> Result<IgnitionState, ResponseError> {
+        let state = self.get_target(target)?;
         debug!(
             &self.log,
             "received ignition state request for {}; sending {:?}",
             target,
             state
         );
-        ResponseKind::IgnitionState(state)
+        Ok(*state)
     }
 
     fn ignition_command(
         &mut self,
         target: u8,
         command: IgnitionCommand,
-    ) -> ResponseKind {
-        let state = match self.get_target_mut(target) {
-            Ok(state) => state,
-            Err(err) => return ResponseKind::Error(err),
-        };
+    ) -> Result<(), ResponseError> {
+        let state = self.get_target_mut(target)?;
         match command {
             IgnitionCommand::PowerOn => {
                 state.flags.set(IgnitionFlags::POWER, true)
@@ -148,14 +171,20 @@ impl SpHandler for Handler {
             command,
             target
         );
-        ResponseKind::IgnitionCommandAck
+        Ok(())
     }
 
     fn serial_console_write(
         &mut self,
         _packet: gateway_messages::SerialConsole,
-    ) -> ResponseKind {
+    ) -> Result<(), ResponseError> {
         warn!(&self.log, "received request to write to serial console (unsupported on sidecar)");
-        ResponseKind::Error(ResponseError::RequestUnsupported)
+        Err(ResponseError::RequestUnsupportedForSp)
+    }
+
+    fn sp_state(&mut self) -> Result<SpState, ResponseError> {
+        let state = SpState { serial_number: self.serial_number };
+        debug!(&self.log, "received state request; sending {:?}", state);
+        Ok(state)
     }
 }

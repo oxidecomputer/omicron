@@ -5,23 +5,35 @@
 //! Behavior implemented by both real and simulated SPs.
 
 use crate::{
-    version, IgnitionCommand, Request, RequestKind, ResponseKind,
-    SerialConsole, SpComponent, SpMessage, SpMessageKind,
+    version, IgnitionCommand, IgnitionState, Request, RequestKind,
+    ResponseError, ResponseKind, SerialConsole, SpComponent, SpMessage,
+    SpMessageKind, SpState,
 };
 use hubpack::SerializedSize;
 
 pub trait SpHandler {
-    fn ping(&mut self) -> ResponseKind;
+    fn ping(&mut self) -> Result<(), ResponseError>;
 
-    fn ignition_state(&mut self, target: u8) -> ResponseKind;
+    fn ignition_state(
+        &mut self,
+        target: u8,
+    ) -> Result<IgnitionState, ResponseError>;
 
     fn ignition_command(
         &mut self,
         target: u8,
         command: IgnitionCommand,
-    ) -> ResponseKind;
+    ) -> Result<(), ResponseError>;
 
-    fn serial_console_write(&mut self, packet: SerialConsole) -> ResponseKind;
+    fn sp_state(&mut self) -> Result<SpState, ResponseError>;
+
+    // TODO Should we return "number of bytes written" here, or is it sufficient
+    // to say "all or none"? Would be nice for the caller to not have to resend
+    // UDP chunks; can SP ensure it writes all data locally?
+    fn serial_console_write(
+        &mut self,
+        packet: SerialConsole,
+    ) -> Result<(), ResponseError>;
 }
 
 #[derive(Debug)]
@@ -140,17 +152,20 @@ impl SpServer {
         }
 
         // call out to handler to provide response
-        let response_kind = match request.kind {
-            RequestKind::Ping => handler.ping(),
+        let result = match request.kind {
+            RequestKind::Ping => handler.ping().map(|()| ResponseKind::Pong),
             RequestKind::IgnitionState { target } => {
-                handler.ignition_state(target)
+                handler.ignition_state(target).map(ResponseKind::IgnitionState)
             }
-            RequestKind::IgnitionCommand { target, command } => {
-                handler.ignition_command(target, command)
+            RequestKind::IgnitionCommand { target, command } => handler
+                .ignition_command(target, command)
+                .map(|()| ResponseKind::IgnitionCommandAck),
+            RequestKind::SpState => {
+                handler.sp_state().map(ResponseKind::SpState)
             }
-            RequestKind::SerialConsoleWrite(packet) => {
-                handler.serial_console_write(packet)
-            }
+            RequestKind::SerialConsoleWrite(packet) => handler
+                .serial_console_write(packet)
+                .map(|()| ResponseKind::SerialConsoleWriteAck),
         };
 
         // we control `SpMessage` and know all cases can successfully serialize
@@ -159,7 +174,7 @@ impl SpServer {
             version: version::V1,
             kind: SpMessageKind::Response {
                 request_id: request.request_id,
-                kind: response_kind,
+                result,
             },
         };
         let n = match hubpack::serialize(&mut self.buf, &response) {

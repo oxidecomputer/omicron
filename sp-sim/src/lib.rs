@@ -8,4 +8,5 @@ mod server;
 mod sidecar;
 
 pub use gimlet::Gimlet;
+pub use server::logger;
 pub use sidecar::Sidecar;

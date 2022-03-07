@@ -8,18 +8,19 @@
 
 use crate::config::KnownSps;
 use crate::error::Error;
-use crate::sp_comms::SerialConsoleContents;
+use crate::sp_comms::{self, SerialConsoleContents};
 use crate::ServerContext;
 use dropshot::{
     endpoint, ApiDescription, EmptyScanParams, HttpError, HttpResponseOk,
     HttpResponseUpdatedNoContent, PaginationParams, Path, Query,
     RequestContext, ResultsPage, TypedBody, UntypedBody,
 };
-use gateway_messages::SpComponent;
+use gateway_messages::{IgnitionFlags, SpComponent};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::convert::TryFrom;
 use std::sync::Arc;
+use std::time::Duration;
 
 #[derive(Serialize, JsonSchema)]
 struct SpInfo {
@@ -29,8 +30,7 @@ struct SpInfo {
 
 #[derive(Serialize, JsonSchema)]
 #[serde(tag = "state")]
-#[allow(dead_code)] // TODO remove once this is used
-enum SpState {
+pub(crate) enum SpState {
     Disabled,
     Unresponsive,
     Enabled {
@@ -66,7 +66,6 @@ enum SpIgnition {
 
 impl From<gateway_messages::IgnitionState> for SpIgnition {
     fn from(state: gateway_messages::IgnitionState) -> Self {
-        use gateway_messages::IgnitionFlags;
         // if we have a state, the SP was present
         Self::Present {
             id: state.id,
@@ -85,9 +84,8 @@ impl From<gateway_messages::IgnitionState> for SpIgnition {
 struct SpComponentInfo;
 
 #[derive(Deserialize, JsonSchema)]
-#[allow(dead_code)] // TODO remove once this is used
 struct Timeout {
-    timeout: Option<u32>,
+    timeout_millis: Option<u32>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -104,7 +102,7 @@ pub(crate) enum SpType {
     Switch,
 }
 
-#[derive(Serialize, Deserialize, JsonSchema, PartialEq, Debug, Clone)]
+#[derive(Serialize, Deserialize, JsonSchema, PartialEq, Debug, Clone, Copy)]
 pub(crate) struct SpIdentifier {
     #[serde(rename = "type")]
     pub(crate) typ: SpType,
@@ -158,7 +156,7 @@ impl SpIdentifier {
         // controllers.
 
         let slot: usize = usize::try_from(self.slot)
-            .map_err(|_| Error::SpDoesNotExist(self.clone()))?;
+            .map_err(|_| Error::SpDoesNotExist(*self))?;
 
         let mut base = 0;
         for (typ, count) in [
@@ -181,7 +179,7 @@ impl SpIdentifier {
                 })?;
                 return Ok(slot);
             } else {
-                return Err(Error::SpDoesNotExist(self.clone()));
+                return Err(Error::SpDoesNotExist(*self));
             }
         }
 
@@ -251,11 +249,47 @@ async fn sp_list(
     path = "/sp/{type}/{slot}",
 }]
 async fn sp_get(
-    _rqctx: Arc<RequestContext<Arc<ServerContext>>>,
-    _path: Path<PathSp>,
-    _query: Query<Timeout>,
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    path: Path<PathSp>,
+    query: Query<Timeout>,
 ) -> Result<HttpResponseOk<SpInfo>, HttpError> {
-    todo!()
+    let apictx = rqctx.context();
+    let comms = &apictx.sp_comms;
+    let sp = path.into_inner().sp;
+
+    let target = sp.placeholder_map_to_target(comms.placeholder_known_sps())?;
+    let sp_addr = comms
+        .placeholder_known_sps()
+        .addr_for(&sp)
+        .ok_or(Error::SpDoesNotExist(sp))?;
+
+    // ping the ignition controller first; if it says the SP is off or otherwise
+    // unavailable, we're done.
+    let state =
+        comms.ignition_get(target, apictx.ignition_controller_timeout).await?;
+
+    let details = if state.flags.intersects(IgnitionFlags::POWER) {
+        // ignition indicates the SP is on; ask it for its state
+        let timeout = query
+            .into_inner()
+            .timeout_millis
+            .map(|n| Duration::from_millis(u64::from(n)))
+            .unwrap_or(apictx.sp_request_timeout);
+        match comms.state_get(sp_addr, timeout).await {
+            Ok(state) => state,
+            Err(sp_comms::Error::Timeout(_)) => SpState::Unresponsive,
+            Err(other) => return Err(other.into()),
+        }
+    } else {
+        SpState::Disabled
+    };
+
+    let info = SpInfo {
+        info: SpIgnitionInfo { id: sp, details: state.into() },
+        details,
+    };
+
+    Ok(HttpResponseOk(info))
 }
 
 /// List components of an SP
@@ -320,8 +354,7 @@ async fn sp_component_serial_console_get(
     let sp = comms
         .placeholder_known_sps()
         .addr_for(&sp)
-        .ok_or(Error::SpDoesNotExist(sp))?
-        .ip();
+        .ok_or(Error::SpDoesNotExist(sp))?;
     let component = SpComponent::try_from(component.as_str())
         .map_err(|_| Error::InvalidSpComponentId(component))?;
     let contents = comms.serial_console_get(sp, &component)?;

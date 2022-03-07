@@ -4,14 +4,12 @@
 
 use anyhow::Result;
 use omicron_common::cmd::{fatal, CmdError};
-use sp_sim::config::{Config, SidecarConfig, SpType};
+use slog::Logger;
+use sp_sim::config::{Config, GimletConfig, SidecarConfig};
 use sp_sim::{Gimlet, Sidecar};
-use std::io::Write;
 use std::path::PathBuf;
 use std::time::Duration;
 use structopt::StructOpt;
-use tokio::io::AsyncReadExt;
-use tokio::select;
 
 #[derive(Debug, StructOpt)]
 #[structopt(name = "sp-sim", about = "See README.adoc for more information")]
@@ -34,55 +32,54 @@ async fn do_run() -> Result<(), CmdError> {
     let config = Config::from_file(args.config_file_path)
         .map_err(|e| CmdError::Failure(e.to_string()))?;
 
-    match &config.sp_type {
-        SpType::Sidecar(sidecar_config) => {
-            run_sidecar(&config, sidecar_config).await
-        }
-        SpType::Gimlet => run_gimlet(&config).await,
+    let mut sidecar_handles = Vec::new();
+    let mut gimlet_handles = Vec::new();
+
+    for (i, sidecar) in config.simulated_sps.sidecar.iter().enumerate() {
+        sidecar_handles.push(
+            spawn_sidecar(
+                &config,
+                sidecar,
+                sp_sim::logger(&config, format!("sidecar {}", i)).unwrap(),
+            )
+            .await?,
+        );
+    }
+    for (i, gimlet) in config.simulated_sps.gimlet.iter().enumerate() {
+        gimlet_handles.push(
+            spawn_gimlet(
+                &config,
+                gimlet,
+                sp_sim::logger(&config, format!("gimlet {}", i)).unwrap(),
+            )
+            .await?,
+        );
+    }
+
+    // for now, do nothing except let the spawned tasks run. in the future
+    // (or when used as a library), the expectation is that a caller can
+    // poke the simulated SPs via the handles to inject state changes, etc.
+    loop {
+        tokio::time::sleep(Duration::MAX).await;
     }
 }
 
-async fn run_sidecar(
+async fn spawn_sidecar(
     config: &Config,
     sidecar_config: &SidecarConfig,
-) -> Result<(), CmdError> {
-    let _sidecar = Sidecar::spawn(config, sidecar_config)
+    log: Logger,
+) -> Result<Sidecar, CmdError> {
+    Sidecar::spawn(config, sidecar_config, log)
         .await
-        .map_err(|e| CmdError::Failure(e.to_string()))?;
-
-    // for now, do nothing except respond to incoming messages. in the future,
-    // maybe we respond to external input (signals?) to change ignition state,
-    // or maybe that's limited to library use.
-    tokio::time::sleep(Duration::MAX).await;
-    Ok(())
+        .map_err(|e| CmdError::Failure(e.to_string()))
 }
 
-async fn run_gimlet(config: &Config) -> Result<(), CmdError> {
-    let mut gimlet = Gimlet::spawn(config)
+async fn spawn_gimlet(
+    config: &Config,
+    gimlet_config: &GimletConfig,
+    log: Logger,
+) -> Result<Gimlet, CmdError> {
+    Gimlet::spawn(config, gimlet_config, log)
         .await
-        .map_err(|e| CmdError::Failure(e.to_string()))?;
-
-    // tokio docs warn against using its stdin handle for user-interactive
-    // input; we'll live dangerously in this simulator
-    let mut stdin = tokio::io::stdin();
-    let mut stdout = std::io::stdout();
-    let mut buf = [0; 512];
-
-    loop {
-        select! {
-            res = stdin.read(&mut buf) => {
-                let n = res.map_err(|e| {
-                    CmdError::Failure(format!("failed to read stdin: {}", e))
-                })?;
-                gimlet
-                    .send_serial_console(&buf[..n])
-                    .await
-                    .map_err(|e| CmdError::Failure(e.to_string()))?;
-            }
-            incoming = gimlet.incoming_serial_console() => {
-                write!(stdout, "{}", String::from_utf8_lossy(&incoming)).unwrap();
-                stdout.flush().unwrap();
-            }
-        }
-    }
+        .map_err(|e| CmdError::Failure(e.to_string()))
 }
