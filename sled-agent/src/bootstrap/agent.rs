@@ -35,8 +35,11 @@ pub enum BootstrapError {
     #[error("Error modifying SMF service: {0}")]
     SmfAdm(#[from] smf::AdmError),
 
-    #[error("Error making HTTP request")]
-    Api(#[from] nexus_client::Error<()>),
+    #[error("Error making HTTP request to Sled Agent: {0}")]
+    SledApi(#[from] sled_agent_client::Error<sled_agent_client::types::Error>),
+
+    #[error("Error making HTTP request to Nexus: {0}")]
+    NexusApi(#[from] nexus_client::Error<nexus_client::types::Error>),
 
     #[error(transparent)]
     TrustQuorum(#[from] TrustQuorumError),
@@ -282,7 +285,7 @@ impl Agent {
                         .connect_timeout(dur)
                         .timeout(dur)
                         .build()
-                        .map_err(|e| nexus_client::Error::<()>::from(e))?;
+                        .map_err(|e| nexus_client::Error::<nexus_client::types::Error>::from(e))?;
                     let client = sled_agent_client::Client::new_with_client(
                         &format!("http://{}", request.sled_address),
                         client,
@@ -295,7 +298,13 @@ impl Agent {
                             info!(self.log, "creating new filesystem: {:?}", partition);
                             client.filesystem_put(&partition.clone().into())
                                 .await
-                                .map_err(BackoffError::Transient)
+                                .map_err(BackoffError::Transient)?;
+                            Ok::<
+                                (),
+                                BackoffError<
+                                    sled_agent_client::Error<sled_agent_client::types::Error>,
+                                >,
+                            >(())
                         };
                         let log_failure = |error, _| {
                             warn!(self.log, "failed to create filesystem"; "error" => ?error);
@@ -323,7 +332,7 @@ impl Agent {
                         .connect_timeout(dur)
                         .timeout(dur)
                         .build()
-                        .map_err(|e| nexus_client::Error::<()>::from(e))?;
+                        .map_err(|e| nexus_client::Error::<nexus_client::types::Error>::from(e))?;
                     let client = sled_agent_client::Client::new_with_client(
                         &format!("http://{}", request.sled_address),
                         client,
@@ -338,7 +347,13 @@ impl Agent {
                                 services: request.services.iter().map(|s| s.clone().into()).collect()
                             })
                             .await
-                            .map_err(BackoffError::Transient)
+                            .map_err(BackoffError::Transient)?;
+                        Ok::<
+                            (),
+                            BackoffError<
+                                sled_agent_client::Error<sled_agent_client::types::Error>,
+                            >,
+                        >(())
                     };
                     let log_failure = |error, _| {
                         warn!(self.log, "failed to initialize services"; "error" => ?error);
