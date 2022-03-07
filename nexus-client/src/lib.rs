@@ -13,6 +13,12 @@ use omicron_common::generate_logging_api;
 
 generate_logging_api!("../openapi/nexus-internal.json");
 
+impl omicron_common::api::external::ClientError for types::Error {
+    fn message(&self) -> String {
+        self.message.clone()
+    }
+}
+
 impl From<types::Generation> for omicron_common::api::external::Generation {
     fn from(s: types::Generation) -> Self {
         Self::try_from(s.0 as i64).unwrap()

@@ -8,6 +8,12 @@
 
 omicron_common::generate_logging_api!("../openapi/oximeter.json");
 
+impl omicron_common::api::external::ClientError for types::Error {
+    fn message(&self) -> String {
+        self.message.clone()
+    }
+}
+
 impl From<std::time::Duration> for types::Duration {
     fn from(s: std::time::Duration) -> Self {
         Self { nanos: s.subsec_nanos(), secs: s.as_secs() }

@@ -10,7 +10,7 @@ use dropshot::{ConfigDropshot, ConfigLogging, ConfigLoggingLevel};
 use omicron_common::api::internal::nexus::ProducerEndpoint;
 use oximeter::{
     types::{Cumulative, Sample},
-    Error, Metric, Producer, Target,
+    Metric, MetricsError, Producer, Target,
 };
 use oximeter_producer::{Config, Server};
 use std::time::Duration;
@@ -62,7 +62,7 @@ impl CpuBusyProducer {
 impl Producer for CpuBusyProducer {
     fn produce(
         &mut self,
-    ) -> Result<Box<dyn Iterator<Item = Sample> + 'static>, Error> {
+    ) -> Result<Box<dyn Iterator<Item = Sample> + 'static>, MetricsError> {
         let timestamp = Utc::now();
         let mut data = Vec::with_capacity(self.cpu.len());
         for cpu in self.cpu.iter_mut() {
@@ -72,7 +72,7 @@ impl Producer for CpuBusyProducer {
             // is part of how we get type-safety in producing metrics, but it may need some work.
             let elapsed = (timestamp - self.start_time)
                 .to_std()
-                .map_err(|e| Error::DatumError(e.to_string()))?
+                .map_err(|e| MetricsError::DatumError(e.to_string()))?
                 .as_secs_f64();
             let datum = cpu.datum_mut();
             *datum += elapsed - datum.value();

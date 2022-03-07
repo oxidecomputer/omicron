@@ -10,7 +10,7 @@ use dropshot::{HttpError, HttpResponse, RequestContext, ServerContext};
 use futures::Future;
 use http::{Request, StatusCode};
 use oximeter::histogram::Histogram;
-use oximeter::{Error, Metric, Producer, Sample, Target};
+use oximeter::{Metric, MetricsError, Producer, Sample, Target};
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -64,7 +64,7 @@ impl RequestLatencyHistogram {
         status_code: StatusCode,
         start_decade: i8,
         end_decade: i8,
-    ) -> Result<Self, Error> {
+    ) -> Result<Self, MetricsError> {
         Ok(Self::new(
             request,
             status_code,
@@ -117,7 +117,7 @@ impl LatencyTracker {
         service: HttpService,
         start_decade: i8,
         end_decade: i8,
-    ) -> Result<Self, Error> {
+    ) -> Result<Self, MetricsError> {
         Ok(Self::new(
             service,
             Histogram::span_decades(start_decade, end_decade)?,
@@ -133,7 +133,7 @@ impl LatencyTracker {
         request: &Request<T>,
         status_code: StatusCode,
         latency: Duration,
-    ) -> Result<(), Error> {
+    ) -> Result<(), MetricsError> {
         let key = RequestLatencyHistogram::key_for(request, status_code);
         let mut latencies = self.latencies.lock().unwrap();
         let entry = latencies.entry(key).or_insert_with(|| {
@@ -143,7 +143,7 @@ impl LatencyTracker {
                 self.histogram.clone(),
             )
         });
-        entry.latency.sample(latency.as_secs_f64()).map_err(Error::from)
+        entry.latency.sample(latency.as_secs_f64()).map_err(MetricsError::from)
     }
 
     /// Instrument the given Dropshot endpoint handler function.
@@ -185,7 +185,8 @@ impl LatencyTracker {
 impl Producer for LatencyTracker {
     fn produce(
         &mut self,
-    ) -> Result<Box<(dyn Iterator<Item = Sample> + 'static)>, Error> {
+    ) -> Result<Box<(dyn Iterator<Item = Sample> + 'static)>, MetricsError>
+    {
         // Clippy isn't correct here. It recommends using the iterator
         // over the latencies directly, but there is a lifetime mismatch
         // in that case: '_ would have to be 'static. The point is that
