@@ -5,6 +5,7 @@
 //! API for controlling multiple instances on a sled.
 
 use crate::common::vlan::VlanID;
+use crate::nexus::NexusClient;
 use crate::vnic::IdAllocator;
 use omicron_common::api::internal::nexus::InstanceRuntimeState;
 use omicron_common::api::internal::sled_agent::InstanceHardware;
@@ -14,11 +15,6 @@ use slog::Logger;
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 use uuid::Uuid;
-
-#[cfg(test)]
-use crate::mocks::MockNexusClient as NexusClient;
-#[cfg(not(test))]
-use nexus_client::Client as NexusClient;
 
 #[cfg(test)]
 use crate::{

@@ -5,16 +5,14 @@
 //! HTTP entrypoint functions for the sled agent's exposed API
 
 use super::params::DiskEnsureBody;
-use dropshot::endpoint;
-use dropshot::ApiDescription;
-use dropshot::HttpError;
-use dropshot::HttpResponseOk;
-use dropshot::Path;
-use dropshot::RequestContext;
-use dropshot::TypedBody;
+use dropshot::{
+    endpoint, ApiDescription, HttpError, HttpResponseOk,
+    HttpResponseUpdatedNoContent, Path, RequestContext, TypedBody,
+};
 use omicron_common::api::external::Error;
 use omicron_common::api::internal::nexus::DiskRuntimeState;
 use omicron_common::api::internal::nexus::InstanceRuntimeState;
+use omicron_common::api::internal::nexus::UpdateArtifact;
 use omicron_common::api::internal::sled_agent::InstanceEnsureBody;
 use schemars::JsonSchema;
 use serde::Deserialize;
@@ -30,6 +28,7 @@ pub fn api() -> SledApiDescription {
     fn register_endpoints(api: &mut SledApiDescription) -> Result<(), String> {
         api.register(instance_put)?;
         api.register(disk_put)?;
+        api.register(update_artifact)?;
         Ok(())
     }
 
@@ -97,4 +96,17 @@ async fn disk_put(
         .await
         .map_err(|e| Error::from(e))?,
     ))
+}
+
+#[endpoint {
+    method = POST,
+    path = "/update"
+}]
+async fn update_artifact(
+    rqctx: Arc<RequestContext<SledAgent>>,
+    artifact: TypedBody<UpdateArtifact>,
+) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+    let sa = rqctx.context();
+    sa.update_artifact(artifact.into_inner()).await.map_err(Error::from)?;
+    Ok(HttpResponseUpdatedNoContent())
 }

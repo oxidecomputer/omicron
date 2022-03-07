@@ -6,8 +6,9 @@
 
 use mockall::mock;
 use nexus_client::types::{
-    DatasetPutRequest, DatasetPutResponse, InstanceRuntimeState,
-    SledAgentStartupInfo, ZpoolPutRequest, ZpoolPutResponse,
+    DatasetPutRequest, DatasetPutResponse, DiskRuntimeState,
+    InstanceRuntimeState, SledAgentStartupInfo, UpdateArtifactKind,
+    ZpoolPutRequest, ZpoolPutResponse,
 };
 use slog::Logger;
 use uuid::Uuid;
@@ -20,6 +21,8 @@ type Result<T> = std::result::Result<
 mock! {
     pub NexusClient {
         pub fn new(server_addr: &str, log: Logger) -> Self;
+        pub fn client(&self) -> reqwest::Client;
+        pub fn baseurl(&self) -> &'static str;
         pub async fn cpapi_sled_agents_post(
             &self,
             id: &Uuid,
@@ -30,6 +33,17 @@ mock! {
             id: &Uuid,
             new_runtime_state: &InstanceRuntimeState,
         ) -> Result<()>;
+        pub async fn cpapi_disks_put(
+            &self,
+            disk_id: &Uuid,
+            new_runtime_state: &DiskRuntimeState,
+            ) -> Result<()>;
+        pub async fn cpapi_artifact_download(
+            &self,
+            kind: UpdateArtifactKind,
+            name: &str,
+            version: i64,
+        ) -> Result<Response>;
         pub async fn zpool_put(
             &self,
             sled_id: &Uuid,

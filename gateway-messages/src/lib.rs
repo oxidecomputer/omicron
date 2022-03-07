@@ -2,11 +2,12 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-#![cfg_attr(not(test), no_std)]
+#![cfg_attr(all(not(test), not(feature = "std")), no_std)]
 
 pub mod sp_impl;
 
 use bitflags::bitflags;
+use core::{fmt, str};
 use serde::{Deserialize, Serialize};
 
 pub use hubpack::error::Error as HubpackError;
@@ -34,6 +35,7 @@ pub enum RequestKind {
     // one message?
     IgnitionState { target: u8 },
     IgnitionCommand { target: u8, command: IgnitionCommand },
+    SpState,
     SerialConsoleWrite(SerialConsole),
 }
 
@@ -45,16 +47,49 @@ pub enum ResponseKind {
     Pong,
     IgnitionState(IgnitionState),
     IgnitionCommandAck,
+    SpState(SpState),
     SerialConsoleWriteAck,
-    Error(ResponseError),
+}
+
+// TODO how is this reported? Same/different for components?
+pub type SerialNumber = [u8; 16];
+
+#[derive(Debug, Clone, Copy, SerializedSize, Serialize, Deserialize)]
+pub struct SpState {
+    pub serial_number: SerialNumber,
 }
 
 #[derive(Debug, Clone, Copy, SerializedSize, Serialize, Deserialize)]
 pub enum ResponseError {
-    /// The [RequestKind] is not supported by the receiving SP; e.g., asking an
+    /// The [`RequestKind`] is not supported by the receiving SP; e.g., asking an
     /// SP without an attached ignition controller for ignition state.
-    RequestUnsupported,
+    RequestUnsupportedForSp,
+    /// The [`RequestKind`] is not supported by the receiving component of the
+    /// SP; e.g., asking for the serial console of a component that does not
+    /// have one.
+    RequestUnsupportedForComponent,
+    /// The specified ignition target does not exist.
+    IgnitionTargetDoesNotExist(u8),
 }
+
+impl fmt::Display for ResponseError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            ResponseError::RequestUnsupportedForSp => {
+                write!(f, "unsupported request for this SP")
+            }
+            ResponseError::RequestUnsupportedForComponent => {
+                write!(f, "unsupported request for this SP component")
+            }
+            ResponseError::IgnitionTargetDoesNotExist(target) => {
+                write!(f, "nonexistent ignition target {}", target)
+            }
+        }
+    }
+}
+
+#[cfg(feature = "std")]
+impl std::error::Error for ResponseError {}
 
 /// Messages from an SP to a gateway. Includes both responses to [`Request`]s as
 /// well as SP-initiated messages like serial console output.
@@ -69,14 +104,16 @@ pub enum SpMessageKind {
     // TODO: Is only sending the new state sufficient?
     // IgnitionChange { target: u8, new_state: IgnitionState },
     /// Response to a [`Request`] from MGS.
-    Response { request_id: u32, kind: ResponseKind },
+    Response { request_id: u32, result: Result<ResponseKind, ResponseError> },
 
     /// Data traveling from an SP-attached component (in practice, a CPU) on the
     /// component's serial console.
     SerialConsole(SerialConsole),
 }
 
-#[derive(Debug, Clone, Copy, SerializedSize, Serialize, Deserialize)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, SerializedSize, Serialize, Deserialize,
+)]
 pub struct IgnitionState {
     pub id: u16,
     pub flags: IgnitionFlags,
@@ -107,15 +144,7 @@ pub enum IgnitionCommand {
 
 /// Identifier for a single component managed by an SP.
 #[derive(
-    Debug,
-    Clone,
-    Copy,
-    PartialEq,
-    Eq,
-    Hash,
-    SerializedSize,
-    Serialize,
-    Deserialize,
+    Clone, Copy, PartialEq, Eq, Hash, SerializedSize, Serialize, Deserialize,
 )]
 pub struct SpComponent {
     /// The ID of the component.
@@ -132,6 +161,30 @@ pub struct SpComponent {
 impl SpComponent {
     /// Maximum number of bytes for a component ID.
     pub const MAX_ID_LENGTH: usize = 16;
+
+    /// Interpret the component name as a human-readable string.
+    ///
+    /// Our current expectation of component names is that this should never
+    /// fail (i.e., we're always storing component names as human-readable
+    /// strings), but because we reconstitute components from network messages
+    /// we still need to check.
+    pub fn as_str(&self) -> Option<&str> {
+        let n =
+            self.id.iter().position(|&c| c == 0).unwrap_or(Self::MAX_ID_LENGTH);
+        str::from_utf8(&self.id[..n]).ok()
+    }
+}
+
+impl fmt::Debug for SpComponent {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let mut debug = f.debug_struct("SpComponent");
+        if let Some(s) = self.as_str() {
+            debug.field("id", &s);
+        } else {
+            debug.field("id", &self.id);
+        }
+        debug.finish()
+    }
 }
 
 /// Error type returned from `TryFrom<&str> for SpComponent` if the provided ID

@@ -9,8 +9,9 @@ use crate::db::identity::{Asset, Resource};
 use crate::db::schema::{
     console_session, dataset, disk, instance, metric_producer,
     network_interface, organization, oximeter, project, rack, region,
-    role_assignment_builtin, role_builtin, router_route, sled, user_builtin,
-    vpc, vpc_firewall_rule, vpc_router, vpc_subnet, zpool,
+    role_assignment_builtin, role_builtin, router_route, sled,
+    update_available_artifact, user_builtin, vpc, vpc_firewall_rule,
+    vpc_router, vpc_subnet, zpool,
 };
 use crate::defaults;
 use crate::external_api::params;
@@ -494,6 +495,8 @@ where
 pub struct Rack {
     #[diesel(embed)]
     pub identity: RackIdentity,
+
+    pub tuf_base_url: Option<String>,
 }
 
 /// Database representation of a Sled.
@@ -2082,6 +2085,41 @@ impl RoleAssignmentBuiltin {
             role_name: String::from(role_name),
         }
     }
+}
+
+impl_enum_type!(
+    #[derive(SqlType, Debug, QueryId)]
+    #[postgres(type_name = "update_artifact_kind", type_schema = "public")]
+    pub struct UpdateArtifactKindEnum;
+
+    #[derive(Clone, Debug, Display, AsExpression, FromSqlRow)]
+    #[display("{0}")]
+    #[sql_type = "UpdateArtifactKindEnum"]
+    pub struct UpdateArtifactKind(pub internal::nexus::UpdateArtifactKind);
+
+    // Enum values
+    Zone => b"zone"
+);
+
+#[derive(
+    Queryable, Insertable, Clone, Debug, Display, Selectable, AsChangeset,
+)]
+#[table_name = "update_available_artifact"]
+#[display("{kind} \"{name}\" v{version}")]
+pub struct UpdateAvailableArtifact {
+    pub name: String,
+    /// Version of the artifact itself
+    pub version: i64,
+    pub kind: UpdateArtifactKind,
+    /// `version` field of targets.json from the repository
+    // FIXME this *should* be a NonZeroU64
+    pub targets_role_version: i64,
+    pub valid_until: DateTime<Utc>,
+    pub target_name: String,
+    // FIXME should this be [u8; 32]?
+    pub target_sha256: String,
+    // FIXME this *should* be a u64
+    pub target_length: i64,
 }
 
 #[cfg(test)]

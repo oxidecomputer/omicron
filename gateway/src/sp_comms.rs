@@ -12,18 +12,18 @@ mod serial_console_history;
 pub(crate) use serial_console_history::SerialConsoleContents;
 use serial_console_history::SerialConsoleHistory;
 
-use crate::config::KnownSps;
+use crate::{config::KnownSps, http_entrypoints::SpState};
 use dropshot::HttpError;
 use gateway_messages::{
-    sp_impl::SerialConsolePacketizer, version, IgnitionState, Request,
-    RequestKind, ResponseKind, SerialConsole, SerializedSize, SpComponent,
-    SpMessage, SpMessageKind,
+    sp_impl::SerialConsolePacketizer, version, IgnitionCommand, IgnitionState,
+    Request, RequestKind, ResponseError, ResponseKind, SerialConsole,
+    SerializedSize, SpComponent, SpMessage, SpMessageKind,
 };
 use slog::{debug, error, info, o, Logger};
 use std::{
     collections::HashMap,
     io,
-    net::{IpAddr, SocketAddr},
+    net::SocketAddr,
     sync::{atomic::AtomicU32, Arc, Mutex},
     time::Duration,
 };
@@ -52,10 +52,12 @@ pub enum Error {
         "SP sent a bogus response type (got `{got}`; expected `{expected}`)"
     )]
     BogusResponseType { got: &'static str, expected: &'static str },
+    #[error("error from SP: {0}")]
+    SpError(#[from] ResponseError),
     #[error("timeout")]
     Timeout(#[from] tokio::time::error::Elapsed),
     #[error("no known SP at {0}")]
-    SpDoesNotExist(IpAddr),
+    SpDoesNotExist(SocketAddr),
 }
 
 impl From<Error> for HttpError {
@@ -67,11 +69,24 @@ impl From<Error> for HttpError {
 }
 
 impl Error {
-    fn bogus_response_type(
+    fn from_unhandled_response_kind(
         kind: &ResponseKind,
         expected: &'static str,
     ) -> Self {
-        Self::BogusResponseType { got: response_kind_name(kind), expected }
+        let got = match kind {
+            ResponseKind::Pong => response_kind_names::PONG,
+            ResponseKind::IgnitionState(_) => {
+                response_kind_names::IGNITION_STATE
+            }
+            ResponseKind::IgnitionCommandAck => {
+                response_kind_names::IGNITION_COMMAND_ACK
+            }
+            ResponseKind::SpState(_) => response_kind_names::SP_STATE,
+            ResponseKind::SerialConsoleWriteAck => {
+                response_kind_names::SERIAL_CONSOLE_WRITE_ACK
+            }
+        };
+        Self::BogusResponseType { got, expected }
     }
 }
 
@@ -81,23 +96,9 @@ mod response_kind_names {
     pub(super) const PONG: &str = "pong";
     pub(super) const IGNITION_STATE: &str = "ignition_state";
     pub(super) const IGNITION_COMMAND_ACK: &str = "ignition_command_ack";
+    pub(super) const SP_STATE: &str = "sp_state";
     pub(super) const SERIAL_CONSOLE_WRITE_ACK: &str =
         "serial_console_write_ack";
-    pub(super) const ERROR: &str = "error";
-}
-
-fn response_kind_name(kind: &ResponseKind) -> &'static str {
-    match kind {
-        ResponseKind::Pong => response_kind_names::PONG,
-        ResponseKind::IgnitionState(_) => response_kind_names::IGNITION_STATE,
-        ResponseKind::IgnitionCommandAck => {
-            response_kind_names::IGNITION_COMMAND_ACK
-        }
-        ResponseKind::SerialConsoleWriteAck => {
-            response_kind_names::SERIAL_CONSOLE_WRITE_ACK
-        }
-        ResponseKind::Error(_) => response_kind_names::ERROR,
-    }
 }
 
 #[derive(Debug)]
@@ -105,7 +106,7 @@ pub struct SpCommunicator {
     log: Logger,
     socket: Arc<UdpSocket>,
     known_sps: KnownSps,
-    sp_state: Arc<SpState>,
+    sp_state: Arc<AllSpState>,
     request_id: AtomicU32,
     recv_task: JoinHandle<()>,
 }
@@ -134,7 +135,7 @@ impl SpCommunicator {
         ));
 
         // build our fixed-keys-after-this-point map of known SP IPs
-        let sp_state = Arc::new(SpState::new(&known_sps));
+        let sp_state = Arc::new(AllSpState::new(&known_sps));
 
         let recv_task = RecvTask::new(
             Arc::clone(&socket),
@@ -157,9 +158,32 @@ impl SpCommunicator {
         &self.known_sps
     }
 
+    pub(crate) async fn state_get(
+        &self,
+        sp: SocketAddr,
+        timeout: Duration,
+    ) -> Result<SpState, Error> {
+        tokio::time::timeout(timeout, self.state_get_impl(sp)).await?
+    }
+
+    pub(crate) async fn state_get_impl(
+        &self,
+        sp: SocketAddr,
+    ) -> Result<SpState, Error> {
+        match self.request_response(sp, RequestKind::SpState).await? {
+            ResponseKind::SpState(state) => Ok(SpState::Enabled {
+                serial_number: hex::encode(&state.serial_number[..]),
+            }),
+            other => Err(Error::from_unhandled_response_kind(
+                &other,
+                response_kind_names::SP_STATE,
+            )),
+        }
+    }
+
     pub(crate) fn serial_console_get(
         &self,
-        sp: IpAddr,
+        sp: SocketAddr,
         component: &SpComponent,
     ) -> Result<Option<SerialConsoleContents>, Error> {
         let sp =
@@ -190,8 +214,8 @@ impl SpCommunicator {
         let sp_state = self
             .sp_state
             .all_sps
-            .get(&sp.ip())
-            .ok_or_else(|| Error::SpDoesNotExist(sp.ip()))?;
+            .get(&sp)
+            .ok_or_else(|| Error::SpDoesNotExist(sp))?;
 
         let mut packetizers = sp_state.serial_console_to_sp.lock().await;
         let packetizer = packetizers
@@ -203,7 +227,7 @@ impl SpCommunicator {
             match self.request_response(sp, request).await? {
                 ResponseKind::SerialConsoleWriteAck => (),
                 other => {
-                    return Err(Error::bogus_response_type(
+                    return Err(Error::from_unhandled_response_kind(
                         &other,
                         response_kind_names::SERIAL_CONSOLE_WRITE_ACK,
                     ))
@@ -224,9 +248,6 @@ impl SpCommunicator {
         tokio::time::timeout(timeout, self.ignition_get_impl(target)).await?
     }
 
-    // TODO As we add additional methods, it's likely this should be cleaned up
-    // to extract common logic, as most methods will only vary by the type of
-    // request/response they're sending. For now we only have this one method.
     async fn ignition_get_impl(
         &self,
         target: u8,
@@ -240,9 +261,54 @@ impl SpCommunicator {
         match self.request_response(controller, request).await? {
             ResponseKind::IgnitionState(state) => Ok(state),
             other => {
-                return Err(Error::bogus_response_type(
+                return Err(Error::from_unhandled_response_kind(
                     &other,
                     response_kind_names::IGNITION_STATE,
+                ))
+            }
+        }
+    }
+
+    pub async fn ignition_power_on(
+        &self,
+        target: u8,
+        timeout: Duration,
+    ) -> Result<(), Error> {
+        tokio::time::timeout(
+            timeout,
+            self.ignition_command(target, IgnitionCommand::PowerOn),
+        )
+        .await?
+    }
+
+    pub async fn ignition_power_off(
+        &self,
+        target: u8,
+        timeout: Duration,
+    ) -> Result<(), Error> {
+        tokio::time::timeout(
+            timeout,
+            self.ignition_command(target, IgnitionCommand::PowerOff),
+        )
+        .await?
+    }
+
+    async fn ignition_command(
+        &self,
+        target: u8,
+        command: IgnitionCommand,
+    ) -> Result<(), Error> {
+        // XXX We currently assume we're know which ignition controller is our
+        // local one, and only use it for ignition interactions.
+        let controller = self.known_sps.ignition_controller;
+        let request = RequestKind::IgnitionCommand { target, command };
+
+        match self.request_response(controller, request).await? {
+            ResponseKind::IgnitionCommandAck => Ok(()),
+            other => {
+                return Err(Error::from_unhandled_response_kind(
+                    &other,
+                    response_kind_names::IGNITION_COMMAND_ACK,
                 ))
             }
         }
@@ -259,8 +325,7 @@ impl SpCommunicator {
             self.request_id.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
 
         // tell our background receiver to expect a response to this request
-        let response =
-            self.sp_state.insert_expected_response(sp.ip(), request_id);
+        let response = self.sp_state.insert_expected_response(sp, request_id);
 
         // Serialize and send our request. We know `buf` is large enough for any
         // `Request`, so unwrapping here is fine.
@@ -278,7 +343,7 @@ impl SpCommunicator {
 
         // recv() can only fail if the sender is dropped, but we're holding it
         // in `self.outstanding_requests`; unwrap() is fine.
-        Ok(response.recv().await.unwrap())
+        Ok(response.recv().await.unwrap()?)
     }
 }
 
@@ -318,14 +383,14 @@ impl SpCommunicator {
 /// data is pushed into the in-memory ringbuffer corresponding to the source.
 struct RecvTask {
     socket: Arc<UdpSocket>,
-    sp_state: Arc<SpState>,
+    sp_state: Arc<AllSpState>,
     log: Logger,
 }
 
 impl RecvTask {
     fn new(
         socket: Arc<UdpSocket>,
-        sp_state: Arc<SpState>,
+        sp_state: Arc<AllSpState>,
         log: Logger,
     ) -> Self {
         Self { socket, sp_state, log }
@@ -377,8 +442,8 @@ impl RecvTask {
             // decide whether this is a response to an outstanding request or an
             // unprompted message
             match sp_msg.kind {
-                SpMessageKind::Response { request_id, kind } => {
-                    self.handle_response(addr, request_id, kind);
+                SpMessageKind::Response { request_id, result } => {
+                    self.handle_response(addr, request_id, result);
                 }
                 SpMessageKind::SerialConsole(serial_console) => {
                     self.handle_serial_console(addr, serial_console);
@@ -391,12 +456,10 @@ impl RecvTask {
         &self,
         addr: SocketAddr,
         request_id: u32,
-        kind: ResponseKind,
+        result: Result<ResponseKind, ResponseError>,
     ) {
         // see if we know who to send the response to
-        let tx = match self
-            .sp_state
-            .remove_expected_response(addr.ip(), request_id)
+        let tx = match self.sp_state.remove_expected_response(addr, request_id)
         {
             Some(tx) => tx,
             None => {
@@ -410,7 +473,7 @@ impl RecvTask {
         };
 
         // actually send it
-        if tx.send(kind).is_err() {
+        if tx.send(result).is_err() {
             // This can only fail if the receiving half has been dropped.
             // That's held in the relevant `SpCommunicator` method above
             // that initiated this request; they should only have dropped
@@ -438,16 +501,16 @@ impl RecvTask {
             &self.log,
             "received serial console data from {}: {:?}", addr, packet
         );
-        self.sp_state.push_serial_console(addr.ip(), packet, &self.log);
+        self.sp_state.push_serial_console(addr, packet, &self.log);
     }
 }
 
 #[derive(Debug)]
-struct SpState {
-    all_sps: HashMap<IpAddr, SingleSpState>,
+struct AllSpState {
+    all_sps: HashMap<SocketAddr, SingleSpState>,
 }
 
-impl SpState {
+impl AllSpState {
     fn new(known_sps: &KnownSps) -> Self {
         let mut all_sps = HashMap::new();
         for sp_list in [
@@ -455,8 +518,8 @@ impl SpState {
             &known_sps.sleds,
             &known_sps.power_controllers,
         ] {
-            for sp in sp_list {
-                all_sps.insert(sp.ip(), SingleSpState::default());
+            for &sp in sp_list {
+                all_sps.insert(sp, SingleSpState::default());
             }
         }
         Self { all_sps }
@@ -464,7 +527,7 @@ impl SpState {
 
     fn push_serial_console(
         &self,
-        sp: IpAddr,
+        sp: SocketAddr,
         packet: SerialConsole,
         log: &Logger,
     ) {
@@ -476,7 +539,7 @@ impl SpState {
 
     fn insert_expected_response(
         &self,
-        sp: IpAddr,
+        sp: SocketAddr,
         request_id: u32,
     ) -> ResponseReceiver {
         // caller should never try to send a request to an SP we don't know
@@ -487,9 +550,9 @@ impl SpState {
 
     fn remove_expected_response(
         &self,
-        sp: IpAddr,
+        sp: SocketAddr,
         request_id: u32,
-    ) -> Option<Sender<ResponseKind>> {
+    ) -> Option<Sender<Result<ResponseKind, ResponseError>>> {
         // caller should never try to send a request to an SP we don't know
         // about, since it created us with all SPs it knows.
         let state = self.all_sps.get(&sp).expect("nonexistent SP");
@@ -513,7 +576,7 @@ struct SingleSpState {
 #[derive(Debug, Default)]
 struct OutstandingRequests {
     // map of request ID -> receiving oneshot channel
-    requests: Mutex<HashMap<u32, Sender<ResponseKind>>>,
+    requests: Mutex<HashMap<u32, Sender<Result<ResponseKind, ResponseError>>>>,
 }
 
 impl OutstandingRequests {
@@ -529,7 +592,10 @@ impl OutstandingRequests {
         }
     }
 
-    fn remove(&self, request_id: u32) -> Option<Sender<ResponseKind>> {
+    fn remove(
+        &self,
+        request_id: u32,
+    ) -> Option<Sender<Result<ResponseKind, ResponseError>>> {
         self.requests.lock().unwrap().remove(&request_id)
     }
 }
@@ -541,7 +607,7 @@ impl OutstandingRequests {
 struct ResponseReceiver {
     parent: Arc<OutstandingRequests>,
     request_id: u32,
-    rx: Receiver<ResponseKind>,
+    rx: Receiver<Result<ResponseKind, ResponseError>>,
     removed_from_parent: bool,
 }
 
@@ -552,7 +618,9 @@ impl Drop for ResponseReceiver {
 }
 
 impl ResponseReceiver {
-    async fn recv(mut self) -> Result<ResponseKind, RecvError> {
+    async fn recv(
+        mut self,
+    ) -> Result<Result<ResponseKind, ResponseError>, RecvError> {
         let result = (&mut self.rx).await;
         self.remove_from_parent();
         result

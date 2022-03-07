@@ -8,12 +8,12 @@
 //! than the representation of "virtual disks" which would be presented
 //! through Nexus' external API.
 
+use crate::nexus::NexusClient;
 use crucible_agent_client::types::{CreateRegion, Region, RegionId, State};
 use futures::lock::Mutex;
 use nexus_client::types::{
     ByteCount, DatasetKind, DatasetPutRequest, ZpoolPutRequest,
 };
-use nexus_client::Client as NexusClient;
 use slog::Logger;
 use std::collections::HashMap;
 use std::net::{IpAddr, SocketAddr};

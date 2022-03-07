@@ -9,11 +9,12 @@ use crate::illumos::zfs::{
     Mountpoint, ZONE_ZFS_DATASET, ZONE_ZFS_DATASET_MOUNTPOINT,
 };
 use crate::instance_manager::InstanceManager;
+use crate::nexus::NexusClient;
 use crate::params::DiskStateRequested;
 use crate::storage_manager::StorageManager;
 use omicron_common::api::{
     internal::nexus::DiskRuntimeState, internal::nexus::InstanceRuntimeState,
-    internal::sled_agent::InstanceHardware,
+    internal::nexus::UpdateArtifact, internal::sled_agent::InstanceHardware,
     internal::sled_agent::InstanceMigrateParams,
     internal::sled_agent::InstanceRuntimeStateRequested,
 };
@@ -22,17 +23,10 @@ use std::sync::Arc;
 use uuid::Uuid;
 
 #[cfg(not(test))]
-use {
-    crate::illumos::{dladm::Dladm, zfs::Zfs, zone::Zones},
-    nexus_client::Client as NexusClient,
-};
+use crate::illumos::{dladm::Dladm, zfs::Zfs, zone::Zones};
 #[cfg(test)]
-use {
-    crate::illumos::{
-        dladm::MockDladm as Dladm, zfs::MockZfs as Zfs,
-        zone::MockZones as Zones,
-    },
-    crate::mocks::MockNexusClient as NexusClient,
+use crate::illumos::{
+    dladm::MockDladm as Dladm, zfs::MockZfs as Zfs, zone::MockZones as Zones,
 };
 
 #[derive(thiserror::Error, Debug)]
@@ -51,6 +45,9 @@ pub enum Error {
 
     #[error("Error managing storage: {0}")]
     Storage(#[from] crate::storage_manager::Error),
+
+    #[error("Error updating: {0}")]
+    Download(#[from] crate::updates::Error),
 }
 
 impl From<Error> for omicron_common::api::external::Error {
@@ -65,6 +62,7 @@ impl From<Error> for omicron_common::api::external::Error {
 ///
 /// Contains both a connection to the Nexus, as well as managed instances.
 pub struct SledAgent {
+    nexus_client: Arc<NexusClient>,
     _storage: StorageManager,
     instances: InstanceManager,
 }
@@ -123,7 +121,7 @@ impl SledAgent {
         }
         let instances = InstanceManager::new(log, vlan, nexus_client.clone())?;
 
-        Ok(SledAgent { _storage: storage, instances })
+        Ok(SledAgent { nexus_client, _storage: storage, instances })
     }
 
     /// Idempotently ensures that a given Instance is running on the sled.
@@ -151,5 +149,15 @@ impl SledAgent {
         _target: DiskStateRequested,
     ) -> Result<DiskRuntimeState, Error> {
         todo!("Disk attachment not yet implemented");
+    }
+
+    /// Downloads and applies an artifact.
+    pub async fn update_artifact(
+        &self,
+        artifact: UpdateArtifact,
+    ) -> Result<(), Error> {
+        crate::updates::download_artifact(artifact, self.nexus_client.as_ref())
+            .await?;
+        Ok(())
     }
 }

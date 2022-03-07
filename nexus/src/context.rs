@@ -75,7 +75,7 @@ impl ServerContext {
      * underlying nexus as well.
      */
     pub fn new(
-        rack_id: &Uuid,
+        rack_id: Uuid,
         log: Logger,
         pool: db::Pool,
         config: &config::Config,

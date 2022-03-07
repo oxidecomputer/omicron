@@ -16,10 +16,10 @@ pub(crate) struct UdpServer {
 }
 
 impl UdpServer {
-    pub(crate) async fn new(config: &Config) -> Result<Self> {
+    pub(crate) async fn new(bind_address: SocketAddr) -> Result<Self> {
         let sock =
-            Arc::new(UdpSocket::bind(config.bind_address).await.with_context(
-                || format!("failed to bind to {}", config.bind_address),
+            Arc::new(UdpSocket::bind(bind_address).await.with_context(
+                || format!("failed to bind to {}", bind_address),
             )?);
 
         Ok(Self { sock, buf: [0; Request::MAX_SIZE] })
@@ -44,12 +44,12 @@ impl UdpServer {
     }
 }
 
-pub(crate) fn logger(config: &Config, name: &str) -> Result<Logger> {
+pub fn logger(config: &Config, name: String) -> Result<Logger> {
     use slog::Drain;
     let (drain, registration) = slog_dtrace::with_drain(
-        config.log.to_logger(name).with_context(|| "initializing logger")?,
+        config.log.to_logger(&name).with_context(|| "initializing logger")?,
     );
-    let log = slog::Logger::root(drain.fuse(), slog::o!());
+    let log = slog::Logger::root(drain.fuse(), slog::o!("component" => name));
     if let slog_dtrace::ProbeRegistration::Failed(e) = registration {
         let msg = format!("failed to register DTrace probes: {}", e);
         error!(log, "{}", msg);

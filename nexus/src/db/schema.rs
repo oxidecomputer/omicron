@@ -141,6 +141,7 @@ table! {
         id -> Uuid,
         time_created -> Timestamptz,
         time_modified -> Timestamptz,
+        tuf_base_url -> Text,
     }
 }
 
@@ -326,6 +327,19 @@ table! {
         role_name -> Text,
         resource_id -> Uuid,
         user_builtin_id -> Uuid,
+    }
+}
+
+table! {
+    update_available_artifact (name, version, kind) {
+        name -> Text,
+        version -> Int8,
+        kind -> crate::db::model::UpdateArtifactKindEnum,
+        targets_role_version -> Int8,
+        valid_until -> Timestamptz,
+        target_name -> Text,
+        target_sha256 -> Text,
+        target_length -> Int8,
     }
 }
 

@@ -12,6 +12,7 @@ use crate::illumos::{
     },
     zpool::ZpoolInfo,
 };
+use crate::nexus::NexusClient;
 use crate::running_zone::RunningZone;
 use crate::vnic::{IdAllocator, Vnic};
 use futures::stream::FuturesOrdered;
@@ -34,11 +35,6 @@ use crate::illumos::{
     dladm::MockDladm as Dladm, zfs::MockZfs as Zfs, zone::MockZones as Zones,
     zpool::MockZpool as Zpool,
 };
-
-#[cfg(test)]
-use crate::mocks::MockNexusClient as NexusClient;
-#[cfg(not(test))]
-use nexus_client::Client as NexusClient;
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {

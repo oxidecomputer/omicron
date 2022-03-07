@@ -2,8 +2,8 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+use crate::nexus::NexusClient;
 use async_trait::async_trait;
-use nexus_client::Client as NexusClient;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::Generation;
 use std::fmt;

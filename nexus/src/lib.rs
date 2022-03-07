@@ -18,7 +18,7 @@
 
 pub mod authn; // Public only for testing
 pub mod authz;
-mod config;
+pub mod config; // public for testing
 mod context;
 pub mod db; // Public only for some documentation examples
 mod defaults;
@@ -28,6 +28,7 @@ mod nexus;
 mod populate;
 mod saga_interface;
 mod sagas;
+pub mod updates; // public for testing
 
 pub use config::Config;
 pub use context::ServerContext;
@@ -90,7 +91,7 @@ impl Server {
      */
     pub async fn start(
         config: &Config,
-        rack_id: &Uuid,
+        rack_id: Uuid,
         log: &Logger,
     ) -> Result<Server, String> {
         let log = log.new(o!("name" => config.id.to_string()));
@@ -182,7 +183,7 @@ pub async fn run_server(config: &Config) -> Result<(), String> {
         debug!(log, "registered DTrace probes");
     }
     let rack_id = Uuid::new_v4();
-    let server = Server::start(config, &rack_id, &log).await?;
+    let server = Server::start(config, rack_id, &log).await?;
     server.register_as_producer().await;
     server.wait_for_finish().await
 }
