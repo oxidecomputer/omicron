@@ -22,7 +22,7 @@ sp_request_milliseconds = 1_000
 [dropshot]
 # IP address and TCP port on which to listen for the external API
 bind_address = "127.0.0.1:12222"
-#request_body_max_bytes = 1048576
+request_body_max_bytes = 1048576
 
 [log]
 # Show log messages of this level and more severe

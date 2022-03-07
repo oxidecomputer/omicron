@@ -21,14 +21,14 @@ pub mod version {
 // other messages need?
 
 /// Messages from a gateway to an SP.
-#[derive(Debug, Clone, Copy, SerializedSize, Serialize, Deserialize)]
+#[derive(Debug, Clone, SerializedSize, Serialize, Deserialize)]
 pub struct Request {
     pub version: u32,
     pub request_id: u32,
     pub kind: RequestKind,
 }
 
-#[derive(Debug, Clone, Copy, SerializedSize, Serialize, Deserialize)]
+#[derive(Debug, Clone, SerializedSize, Serialize, Deserialize)]
 pub enum RequestKind {
     Ping,
     // TODO do we want to be able to request IgnitionState for all targets in
@@ -93,13 +93,13 @@ impl std::error::Error for ResponseError {}
 
 /// Messages from an SP to a gateway. Includes both responses to [`Request`]s as
 /// well as SP-initiated messages like serial console output.
-#[derive(Debug, Clone, Copy, SerializedSize, Serialize, Deserialize)]
+#[derive(Debug, Clone, SerializedSize, Serialize, Deserialize)]
 pub struct SpMessage {
     pub version: u32,
     pub kind: SpMessageKind,
 }
 
-#[derive(Debug, Clone, Copy, SerializedSize, Serialize, Deserialize)]
+#[derive(Debug, Clone, SerializedSize, Serialize, Deserialize)]
 pub enum SpMessageKind {
     // TODO: Is only sending the new state sufficient?
     // IgnitionChange { target: u8, new_state: IgnitionState },
@@ -209,7 +209,9 @@ impl TryFrom<&str> for SpComponent {
     }
 }
 
-#[derive(Debug, Clone, Copy, SerializedSize, Serialize, Deserialize)]
+// We could derive `Copy`, but `data` is large-ish so we want callers to think
+// abount cloning.
+#[derive(Clone, SerializedSize)]
 pub struct SerialConsole {
     /// Source component with an attached serial console.
     pub component: SpComponent,
@@ -221,19 +223,133 @@ pub struct SerialConsole {
     pub offset: u64,
 
     /// Number of bytes in `data`.
-    pub len: u8,
+    pub len: u16,
 
-    /// TODO: What's a reasonable chunk size? Or do we want some variability
-    /// here (subject to hubpack limitations or outside-of-hubpack encoding)?
-    ///
-    /// Another minor annoyance - serde doesn't support arbitrary array sizes
-    /// and only implements up to [T; 32], so we'd need a wrapper of some kind
-    /// to go higher. See https://github.com/serde-rs/serde/issues/1937
+    /// Actual serial console data.
     pub data: [u8; Self::MAX_DATA_PER_PACKET],
 }
 
+impl fmt::Debug for SerialConsole {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let mut debug = f.debug_struct("SerialConsole");
+        debug.field("component", &self.component);
+        debug.field("offset", &self.offset);
+        debug.field("len", &self.len);
+        let data = &self.data
+            [..usize::min(usize::from(self.len), Self::MAX_DATA_PER_PACKET)];
+        if let Ok(s) = str::from_utf8(data) {
+            debug.field("data", &s);
+        } else {
+            debug.field("data", &data);
+        }
+        debug.finish()
+    }
+}
+
 impl SerialConsole {
-    pub const MAX_DATA_PER_PACKET: usize = 32;
+    /// TODO: What do we want our max size to be? We only actually encode the
+    /// amount of data present, so this determines the max packet size and the
+    /// size of `SerialConsole` in memory.
+    ///
+    /// Note: This does not include the header overhead! If we want to know the
+    /// exact max packet size, we should derive a value here that includes the
+    /// header size (`sizeof(SpComponent) + sizeof(u64) + sizeof(u16)`).
+    pub const MAX_DATA_PER_PACKET: usize = 128;
+}
+
+mod serial_console_serde {
+    use super::*;
+    use serde::de::{Error, Visitor};
+    use serde::ser::SerializeTuple;
+
+    #[derive(Debug, Deserialize, Serialize)]
+    struct Header {
+        component: SpComponent,
+        offset: u64,
+        len: u16,
+    }
+
+    impl Serialize for SerialConsole {
+        fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+        where
+            S: serde::Serializer,
+        {
+            let header = Header {
+                component: self.component,
+                offset: self.offset,
+                len: self.len,
+            };
+
+            let len = usize::from(self.len);
+            let mut tup = serializer.serialize_tuple(1 + len)?;
+            tup.serialize_element(&header)?;
+            for b in &self.data[..len] {
+                tup.serialize_element(b)?;
+            }
+            tup.end()
+        }
+    }
+
+    impl<'de> Deserialize<'de> for SerialConsole {
+        fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+        where
+            D: serde::Deserializer<'de>,
+        {
+            struct TupleVisitor;
+
+            impl<'de> Visitor<'de> for TupleVisitor {
+                type Value = SerialConsole;
+
+                fn expecting(
+                    &self,
+                    formatter: &mut std::fmt::Formatter,
+                ) -> std::fmt::Result {
+                    write!(formatter, "a serial console packet")
+                }
+
+                fn visit_seq<A>(
+                    self,
+                    mut seq: A,
+                ) -> Result<Self::Value, A::Error>
+                where
+                    A: serde::de::SeqAccess<'de>,
+                {
+                    let header: Header = match seq.next_element()? {
+                        Some(header) => header,
+                        None => {
+                            return Err(A::Error::custom(
+                                "missing packet header",
+                            ))
+                        }
+                    };
+                    let mut out = SerialConsole {
+                        component: header.component,
+                        offset: header.offset,
+                        len: header.len,
+                        data: [0; SerialConsole::MAX_DATA_PER_PACKET],
+                    };
+                    let len = usize::from(out.len);
+                    if len > SerialConsole::MAX_DATA_PER_PACKET {
+                        return Err(A::Error::custom("packet length too long"));
+                    }
+                    for b in &mut out.data[..len] {
+                        *b = match seq.next_element()? {
+                            Some(b) => b,
+                            None => {
+                                return Err(A::Error::custom(
+                                    "invalid packet length",
+                                ))
+                            }
+                        };
+                    }
+                    Ok(out)
+                }
+            }
+
+            deserializer
+                .deserialize_tuple(1 + Self::MAX_DATA_PER_PACKET, TupleVisitor)
+        }
+    }
 }
 
 #[cfg(test)]
@@ -242,28 +358,35 @@ mod tests {
 
     #[test]
     fn roundtrip_serial_console() {
-        let line = "hello world\n";
+        let line = b"hello world\n";
         let mut console = SerialConsole {
             component: SpComponent { id: *b"0000111122223333" },
             offset: 12345,
-            len: line.len() as u8,
-            data: [0xff; 32],
+            len: line.len() as u16,
+            data: [0xff; SerialConsole::MAX_DATA_PER_PACKET],
         };
-        console.data[..line.len()].copy_from_slice(line.as_bytes());
+        console.data[..line.len()].copy_from_slice(line);
 
         let mut serialized = [0; SerialConsole::MAX_SIZE];
         let n = serialize(&mut serialized, &console).unwrap();
 
+        // serialized size should be limited to actual line length, not
+        // the size of `console.data` (`MAX_DATA_PER_PACKET`)
+        assert_eq!(
+            n,
+            SpComponent::MAX_SIZE + u64::MAX_SIZE + u16::MAX_SIZE + line.len()
+        );
+
         let (deserialized, _) =
             deserialize::<SerialConsole>(&serialized[..n]).unwrap();
         assert_eq!(deserialized.len, console.len);
-        assert_eq!(deserialized.data, console.data);
+        assert_eq!(&deserialized.data[..line.len()], line);
     }
 
     #[test]
-    fn serial_console_data_length_fits_in_u8() {
+    fn serial_console_data_length_fits_in_u16() {
         // this is just a sanity check that if we bump `MAX_DATA_PER_PACKET`
-        // above 256 we also need to change the type of `SerialConsole::len`
-        assert!(SerialConsole::MAX_DATA_PER_PACKET <= usize::from(u8::MAX));
+        // above 65535 we also need to change the type of `SerialConsole::len`
+        assert!(SerialConsole::MAX_DATA_PER_PACKET <= usize::from(u16::MAX));
     }
 }

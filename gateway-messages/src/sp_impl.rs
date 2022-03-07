@@ -101,7 +101,7 @@ impl Iterator for SerialConsolePackets<'_, '_> {
         let mut packet = SerialConsole {
             component: self.parent.component,
             offset: self.parent.offset,
-            len: this_packet.len() as u8,
+            len: this_packet.len() as u16,
             data: [0; SerialConsole::MAX_DATA_PER_PACKET],
         };
         packet.data[..this_packet.len()].copy_from_slice(this_packet);
