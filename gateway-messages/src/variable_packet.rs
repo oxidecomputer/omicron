@@ -53,6 +53,11 @@ pub(crate) trait VariablePacket {
         // serialize ourselves as a tuple containing our header + each element
         let mut tup = serializer.serialize_tuple(1 + num_elements)?;
         tup.serialize_element(&header)?;
+
+        // This is the same as what serde's default serialize implementation
+        // does, but we should confirm this generates reasonable code if
+        // `Self::Element == u8`. Ideally rustc/llvm will reduce this loop to
+        // something approximating memcpy; TODO check this on the stm32.
         for element in &self.elements()[..num_elements] {
             tup.serialize_element(element)?;
         }

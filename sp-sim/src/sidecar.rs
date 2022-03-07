@@ -160,8 +160,7 @@ impl SpHandler for Handler {
             BulkIgnitionState::MAX_IGNITION_TARGETS
         );
         let mut out = BulkIgnitionState {
-            num_targets: u16::try_from(num_targets)
-                .expect("more than 65535 ignition targets"),
+            num_targets: u16::try_from(num_targets).unwrap(),
             targets: [IgnitionState::default();
                 BulkIgnitionState::MAX_IGNITION_TARGETS],
         };
