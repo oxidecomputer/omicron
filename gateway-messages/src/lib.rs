@@ -5,6 +5,7 @@
 #![cfg_attr(all(not(test), not(feature = "std")), no_std)]
 
 pub mod sp_impl;
+mod variable_packet;
 
 use bitflags::bitflags;
 use core::{fmt, str};
@@ -34,6 +35,7 @@ pub enum RequestKind {
     // TODO do we want to be able to request IgnitionState for all targets in
     // one message?
     IgnitionState { target: u8 },
+    BulkIgnitionState,
     IgnitionCommand { target: u8, command: IgnitionCommand },
     SpState,
     SerialConsoleWrite(SerialConsole),
@@ -42,10 +44,11 @@ pub enum RequestKind {
 // TODO: Not all SPs are capable of crafting all these response kinds, but the
 // way we're using hubpack requires everyone to allocate Response::MAX_SIZE. Is
 // that okay, or should we break this up more?
-#[derive(Debug, Clone, Copy, SerializedSize, Serialize, Deserialize)]
+#[derive(Debug, Clone, SerializedSize, Serialize, Deserialize)]
 pub enum ResponseKind {
     Pong,
     IgnitionState(IgnitionState),
+    BulkIgnitionState(BulkIgnitionState),
     IgnitionCommandAck,
     SpState(SpState),
     SerialConsoleWriteAck,
@@ -112,7 +115,14 @@ pub enum SpMessageKind {
 }
 
 #[derive(
-    Debug, Clone, Copy, PartialEq, SerializedSize, Serialize, Deserialize,
+    Debug,
+    Default,
+    Clone,
+    Copy,
+    PartialEq,
+    SerializedSize,
+    Serialize,
+    Deserialize,
 )]
 pub struct IgnitionState {
     pub id: u16,
@@ -120,7 +130,7 @@ pub struct IgnitionState {
 }
 
 bitflags! {
-    #[derive(SerializedSize, Serialize, Deserialize)]
+    #[derive(Default, SerializedSize, Serialize, Deserialize)]
     pub struct IgnitionFlags: u8 {
         // RFD 142, 5.2.4 status bits
         const POWER = 0b0000_0001;
@@ -133,6 +143,96 @@ bitflags! {
         const FLT_A2 = 0b0010_0000;
         const FLT_ROT = 0b0100_0000;
         const FLT_SP = 0b1000_0000;
+    }
+}
+
+#[derive(Clone, PartialEq, SerializedSize)]
+pub struct BulkIgnitionState {
+    /// Number of ignition targets present in `targets`.
+    pub num_targets: u16,
+    /// Ignition state for each target.
+    ///
+    /// TODO The ignition target is implicitly the array index; is that
+    /// reasonable or should we specify target indices explicitly?
+    pub targets: [IgnitionState; Self::MAX_IGNITION_TARGETS],
+}
+
+impl fmt::Debug for BulkIgnitionState {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let mut debug = f.debug_struct("BulkIgnitionState");
+        debug.field("num_targets", &self.num_targets);
+        let targets = &self.targets[..usize::from(self.num_targets)];
+        debug.field("targets", &targets);
+        debug.finish()
+    }
+}
+
+impl BulkIgnitionState {
+    // TODO should we set the max to something higher than we expect in rack v1
+    // so we have room to grow without increasing it? Need to think about how
+    // bumping the max affects versioning; higher max doesn't necessarily mean
+    // incompatible messages, but actually sending a packet with a length
+    // greater than the "old" max would fail to parse on an old build.
+    pub const MAX_IGNITION_TARGETS: usize = 36;
+}
+
+mod bulk_ignition_state_serde {
+    use super::variable_packet::VariablePacket;
+    use super::*;
+
+    #[derive(Debug, Deserialize, Serialize)]
+    pub(crate) struct Header {
+        num_targets: u16,
+    }
+
+    impl VariablePacket for BulkIgnitionState {
+        type Header = Header;
+        type Element = IgnitionState;
+
+        const MAX_ELEMENTS: usize = Self::MAX_IGNITION_TARGETS;
+        const DESERIALIZE_NAME: &'static str = "bulk ignition state packet";
+
+        fn header(&self) -> Self::Header {
+            Header { num_targets: self.num_targets }
+        }
+
+        fn num_elements(&self) -> u16 {
+            self.num_targets
+        }
+
+        fn elements(&self) -> &[Self::Element] {
+            &self.targets
+        }
+
+        fn elements_mut(&mut self) -> &mut [Self::Element] {
+            &mut self.targets
+        }
+
+        fn from_header(header: Self::Header) -> Self {
+            Self {
+                num_targets: header.num_targets,
+                targets: [IgnitionState::default();
+                    BulkIgnitionState::MAX_IGNITION_TARGETS],
+            }
+        }
+    }
+
+    impl Serialize for BulkIgnitionState {
+        fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+        where
+            S: serde::Serializer,
+        {
+            VariablePacket::serialize(self, serializer)
+        }
+    }
+
+    impl<'de> Deserialize<'de> for BulkIgnitionState {
+        fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+        where
+            D: serde::Deserializer<'de>,
+        {
+            VariablePacket::deserialize(deserializer)
+        }
     }
 }
 
@@ -235,8 +335,7 @@ impl fmt::Debug for SerialConsole {
         debug.field("component", &self.component);
         debug.field("offset", &self.offset);
         debug.field("len", &self.len);
-        let data = &self.data
-            [..usize::min(usize::from(self.len), Self::MAX_DATA_PER_PACKET)];
+        let data = &self.data[..usize::from(self.len)];
         if let Ok(s) = str::from_utf8(data) {
             debug.field("data", &s);
         } else {
@@ -258,15 +357,51 @@ impl SerialConsole {
 }
 
 mod serial_console_serde {
+    use super::variable_packet::VariablePacket;
     use super::*;
-    use serde::de::{Error, Visitor};
-    use serde::ser::SerializeTuple;
 
     #[derive(Debug, Deserialize, Serialize)]
-    struct Header {
+    pub(crate) struct Header {
         component: SpComponent,
         offset: u64,
         len: u16,
+    }
+
+    impl VariablePacket for SerialConsole {
+        type Header = Header;
+        type Element = u8;
+
+        const MAX_ELEMENTS: usize = Self::MAX_DATA_PER_PACKET;
+        const DESERIALIZE_NAME: &'static str = "serial console packet";
+
+        fn header(&self) -> Self::Header {
+            Header {
+                component: self.component,
+                offset: self.offset,
+                len: self.len,
+            }
+        }
+
+        fn num_elements(&self) -> u16 {
+            self.len
+        }
+
+        fn elements(&self) -> &[Self::Element] {
+            &self.data
+        }
+
+        fn elements_mut(&mut self) -> &mut [Self::Element] {
+            &mut self.data
+        }
+
+        fn from_header(header: Self::Header) -> Self {
+            Self {
+                component: header.component,
+                offset: header.offset,
+                len: header.len,
+                data: [0; Self::MAX_DATA_PER_PACKET],
+            }
+        }
     }
 
     impl Serialize for SerialConsole {
@@ -274,19 +409,7 @@ mod serial_console_serde {
         where
             S: serde::Serializer,
         {
-            let header = Header {
-                component: self.component,
-                offset: self.offset,
-                len: self.len,
-            };
-
-            let len = usize::from(self.len);
-            let mut tup = serializer.serialize_tuple(1 + len)?;
-            tup.serialize_element(&header)?;
-            for b in &self.data[..len] {
-                tup.serialize_element(b)?;
-            }
-            tup.end()
+            VariablePacket::serialize(self, serializer)
         }
     }
 
@@ -295,59 +418,7 @@ mod serial_console_serde {
         where
             D: serde::Deserializer<'de>,
         {
-            struct TupleVisitor;
-
-            impl<'de> Visitor<'de> for TupleVisitor {
-                type Value = SerialConsole;
-
-                fn expecting(
-                    &self,
-                    formatter: &mut std::fmt::Formatter,
-                ) -> std::fmt::Result {
-                    write!(formatter, "a serial console packet")
-                }
-
-                fn visit_seq<A>(
-                    self,
-                    mut seq: A,
-                ) -> Result<Self::Value, A::Error>
-                where
-                    A: serde::de::SeqAccess<'de>,
-                {
-                    let header: Header = match seq.next_element()? {
-                        Some(header) => header,
-                        None => {
-                            return Err(A::Error::custom(
-                                "missing packet header",
-                            ))
-                        }
-                    };
-                    let mut out = SerialConsole {
-                        component: header.component,
-                        offset: header.offset,
-                        len: header.len,
-                        data: [0; SerialConsole::MAX_DATA_PER_PACKET],
-                    };
-                    let len = usize::from(out.len);
-                    if len > SerialConsole::MAX_DATA_PER_PACKET {
-                        return Err(A::Error::custom("packet length too long"));
-                    }
-                    for b in &mut out.data[..len] {
-                        *b = match seq.next_element()? {
-                            Some(b) => b,
-                            None => {
-                                return Err(A::Error::custom(
-                                    "invalid packet length",
-                                ))
-                            }
-                        };
-                    }
-                    Ok(out)
-                }
-            }
-
-            deserializer
-                .deserialize_tuple(1 + Self::MAX_DATA_PER_PACKET, TupleVisitor)
+            VariablePacket::deserialize(deserializer)
         }
     }
 }
