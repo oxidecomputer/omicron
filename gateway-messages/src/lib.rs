@@ -168,11 +168,27 @@ impl fmt::Debug for BulkIgnitionState {
 }
 
 impl BulkIgnitionState {
-    // TODO should we set the max to something higher than we expect in rack v1
-    // so we have room to grow without increasing it? Need to think about how
-    // bumping the max affects versioning; higher max doesn't necessarily mean
-    // incompatible messages, but actually sending a packet with a length
-    // greater than the "old" max would fail to parse on an old build.
+    // TODO We need to decide how to set max sizes for packets that may contain
+    // a variable amount of data. There are (at least) three concerns:
+    //
+    // 1. It determines a max packet size; we need to make sure this stays under
+    //    whatever limit is in place on the management network.
+    // 2. It determines the size of the relevant structs/enums (and
+    //    corresponding serialization/deserialization buffers). This is almost
+    //    certainly irrelevant for MGS, but is very relevant for SPs.
+    // 3. What are the implications on versioning of changing the size? It
+    //    doesn't actually affect the packet format on the wire, but a receiver
+    //    with a lower compiled-in max size will reject packets it receives with
+    //    more data than its max size.
+    //
+    // plus one note: these max sizes do not include the header overhead for the
+    // packets; that needs to be accounted for (particularly for point 1 above).
+    //
+    // Another question specific to `BulkIgnitionState`: Will we always send
+    // "max number of targets in the rack" states, even if some slots are
+    // unpopulated? Maybe this message shouldn't be variable at all. For now we
+    // leave it like it is; it's certainly "variable" in the sense that our
+    // simulated racks for tests have fewer than 36 targets.
     pub const MAX_IGNITION_TARGETS: usize = 36;
 }
 
@@ -346,13 +362,17 @@ impl fmt::Debug for SerialConsole {
 }
 
 impl SerialConsole {
-    /// TODO: What do we want our max size to be? We only actually encode the
-    /// amount of data present, so this determines the max packet size and the
-    /// size of `SerialConsole` in memory.
-    ///
-    /// Note: This does not include the header overhead! If we want to know the
-    /// exact max packet size, we should derive a value here that includes the
-    /// header size (`sizeof(SpComponent) + sizeof(u64) + sizeof(u16)`).
+    // TODO: See discussion on `BulkIgnitionState::MAX_IGNITION_TARGETS` for
+    // concerns about setting this limit.
+    //
+    // A concern specific to `SerialConsole`: What should we do (if anything) to
+    // account for something like "user `cat`s a large file, which is now
+    // streaming across the management network"? A couple possibilities:
+    //
+    // 1. One packet per line, and truncate any lines longer than
+    //    `MAX_DATA_PER_PACKET` (seems like this could be _very_ annoying if a
+    //    user bumped into it without realizing it).
+    // 2. Rate limiting (enforced where?)
     pub const MAX_DATA_PER_PACKET: usize = 128;
 }
 
