@@ -5,9 +5,9 @@
 //! Behavior implemented by both real and simulated SPs.
 
 use crate::{
-    version, IgnitionCommand, IgnitionState, Request, RequestKind,
-    ResponseError, ResponseKind, SerialConsole, SpComponent, SpMessage,
-    SpMessageKind, SpState,
+    version, BulkIgnitionState, IgnitionCommand, IgnitionState, Request,
+    RequestKind, ResponseError, ResponseKind, SerialConsole, SpComponent,
+    SpMessage, SpMessageKind, SpState,
 };
 use hubpack::SerializedSize;
 
@@ -18,6 +18,10 @@ pub trait SpHandler {
         &mut self,
         target: u8,
     ) -> Result<IgnitionState, ResponseError>;
+
+    fn bulk_ignition_state(
+        &mut self,
+    ) -> Result<BulkIgnitionState, ResponseError>;
 
     fn ignition_command(
         &mut self,
@@ -101,7 +105,7 @@ impl Iterator for SerialConsolePackets<'_, '_> {
         let mut packet = SerialConsole {
             component: self.parent.component,
             offset: self.parent.offset,
-            len: this_packet.len() as u8,
+            len: this_packet.len() as u16,
             data: [0; SerialConsole::MAX_DATA_PER_PACKET],
         };
         packet.data[..this_packet.len()].copy_from_slice(this_packet);
@@ -157,6 +161,9 @@ impl SpServer {
             RequestKind::IgnitionState { target } => {
                 handler.ignition_state(target).map(ResponseKind::IgnitionState)
             }
+            RequestKind::BulkIgnitionState => handler
+                .bulk_ignition_state()
+                .map(ResponseKind::BulkIgnitionState),
             RequestKind::IgnitionCommand { target, command } => handler
                 .ignition_command(target, command)
                 .map(|()| ResponseKind::IgnitionCommandAck),

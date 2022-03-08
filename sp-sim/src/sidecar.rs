@@ -7,8 +7,8 @@ use crate::server::UdpServer;
 use anyhow::Result;
 use gateway_messages::sp_impl::{SpHandler, SpServer};
 use gateway_messages::{
-    IgnitionCommand, IgnitionFlags, IgnitionState, ResponseError, SerialNumber,
-    SpState,
+    BulkIgnitionState, IgnitionCommand, IgnitionFlags, IgnitionState,
+    ResponseError, SerialNumber, SpState,
 };
 use slog::{debug, error, info, warn, Logger};
 use tokio::{
@@ -148,6 +148,30 @@ impl SpHandler for Handler {
             state
         );
         Ok(*state)
+    }
+
+    fn bulk_ignition_state(
+        &mut self,
+    ) -> Result<BulkIgnitionState, ResponseError> {
+        let num_targets = self.ignition_targets.len();
+        assert!(
+            num_targets <= BulkIgnitionState::MAX_IGNITION_TARGETS,
+            "too many configured ignition targets (max is {})",
+            BulkIgnitionState::MAX_IGNITION_TARGETS
+        );
+        let mut out = BulkIgnitionState {
+            num_targets: u16::try_from(num_targets).unwrap(),
+            targets: [IgnitionState::default();
+                BulkIgnitionState::MAX_IGNITION_TARGETS],
+        };
+        out.targets[..num_targets].copy_from_slice(&self.ignition_targets);
+
+        debug!(
+            &self.log,
+            "received bulk ignition state request; sending state for {} targets",
+            num_targets,
+        );
+        Ok(out)
     }
 
     fn ignition_command(

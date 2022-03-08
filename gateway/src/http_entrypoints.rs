@@ -11,7 +11,7 @@ use crate::error::Error;
 use crate::sp_comms::{self, SerialConsoleContents};
 use crate::ServerContext;
 use dropshot::{
-    endpoint, ApiDescription, EmptyScanParams, HttpError, HttpResponseOk,
+    endpoint, ApiDescription, HttpError, HttpResponseOk,
     HttpResponseUpdatedNoContent, PaginationParams, Path, Query,
     RequestContext, ResultsPage, TypedBody, UntypedBody,
 };
@@ -186,6 +186,26 @@ impl SpIdentifier {
         // above loop returns once we match on `typ`
         unreachable!()
     }
+}
+
+fn placeholder_map_from_target(
+    known_sps: &KnownSps,
+    mut target: usize,
+) -> Result<SpIdentifier, Error> {
+    for (typ, count) in [
+        (SpType::Switch, known_sps.switches.len()),
+        (SpType::Sled, known_sps.sleds.len()),
+        (SpType::Power, known_sps.power_controllers.len()),
+    ] {
+        if target < count {
+            return Ok(SpIdentifier { typ, slot: target as u32 });
+        }
+        target -= count;
+    }
+
+    Err(Error::InternalError {
+        internal_message: format!("invalid ignition target index {}", target),
+    })
 }
 
 type TimeoutPaginationParams<T> = PaginationParams<Timeout, TimeoutSelector<T>>;
@@ -472,22 +492,34 @@ async fn sp_component_power_off(
 
 /// List SPs via Ignition
 ///
-/// List the SPs via the Ignition controller. This mechanism retrieves less
-/// information than over the management network, however it is lower latency
-/// and has fewer moving pieces that could result in delayed responses or
-/// unknown states.
-///
-/// This interface queries ignition via its associated SP. As this interface
-/// may be unreliable, consumers may optionally override the default.
+/// Retreive information for all SPs via the Ignition controller. This is lower
+/// latency and has fewer possible failure modes than querying the SP over the
+/// management network.
 #[endpoint {
     method = GET,
     path = "/ignition",
 }]
 async fn ignition_list(
-    _rqctx: Arc<RequestContext<Arc<ServerContext>>>,
-    _query: Query<PaginationParams<EmptyScanParams, SpIdentifier>>,
-) -> Result<HttpResponseOk<ResultsPage<SpIgnitionInfo>>, HttpError> {
-    todo!()
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+) -> Result<HttpResponseOk<Vec<SpIgnitionInfo>>, HttpError> {
+    let apictx = rqctx.context();
+
+    let all_state = apictx
+        .sp_comms
+        .bulk_ignition_get(apictx.ignition_controller_timeout)
+        .await?;
+
+    let mut out = Vec::with_capacity(all_state.len());
+    for (i, state) in all_state.into_iter().enumerate() {
+        out.push(SpIgnitionInfo {
+            id: placeholder_map_from_target(
+                apictx.sp_comms.placeholder_known_sps(),
+                i,
+            )?,
+            details: state.into(),
+        });
+    }
+    Ok(HttpResponseOk(out))
 }
 
 /// Get SP info via Ignition

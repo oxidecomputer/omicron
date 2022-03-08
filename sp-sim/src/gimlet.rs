@@ -282,6 +282,16 @@ impl SpHandler for Handler {
         Err(ResponseError::RequestUnsupportedForSp)
     }
 
+    fn bulk_ignition_state(
+        &mut self,
+    ) -> Result<gateway_messages::BulkIgnitionState, ResponseError> {
+        warn!(
+            &self.log,
+            "received bulk ignition state request; not supported by gimlet",
+        );
+        Err(ResponseError::RequestUnsupportedForSp)
+    }
+
     fn ignition_command(
         &mut self,
         target: u8,

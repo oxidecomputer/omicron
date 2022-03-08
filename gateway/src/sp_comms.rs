@@ -78,6 +78,9 @@ impl Error {
             ResponseKind::IgnitionState(_) => {
                 response_kind_names::IGNITION_STATE
             }
+            ResponseKind::BulkIgnitionState(_) => {
+                response_kind_names::BULK_IGNITION_STATE
+            }
             ResponseKind::IgnitionCommandAck => {
                 response_kind_names::IGNITION_COMMAND_ACK
             }
@@ -95,6 +98,7 @@ impl Error {
 mod response_kind_names {
     pub(super) const PONG: &str = "pong";
     pub(super) const IGNITION_STATE: &str = "ignition_state";
+    pub(super) const BULK_IGNITION_STATE: &str = "bulk_ignition_state";
     pub(super) const IGNITION_COMMAND_ACK: &str = "ignition_command_ack";
     pub(super) const SP_STATE: &str = "sp_state";
     pub(super) const SERIAL_CONSOLE_WRITE_ACK: &str =
@@ -238,6 +242,37 @@ impl SpCommunicator {
         Ok(())
     }
 
+    pub async fn bulk_ignition_get(
+        &self,
+        timeout: Duration,
+    ) -> Result<Vec<IgnitionState>, Error> {
+        tokio::time::timeout(timeout, self.bulk_ignition_get_impl()).await?
+    }
+
+    async fn bulk_ignition_get_impl(
+        &self,
+    ) -> Result<Vec<IgnitionState>, Error> {
+        // XXX We currently assume we know which ignition controller is our
+        // local one, and only use it for ignition interactions.
+        let controller = self.known_sps.ignition_controller;
+
+        let request = RequestKind::BulkIgnitionState;
+
+        match self.request_response(controller, request).await? {
+            ResponseKind::BulkIgnitionState(state) => Ok(state.targets
+                [..usize::from(state.num_targets)]
+                .iter()
+                .copied()
+                .collect()),
+            other => {
+                return Err(Error::from_unhandled_response_kind(
+                    &other,
+                    response_kind_names::BULK_IGNITION_STATE,
+                ))
+            }
+        }
+    }
+
     // How do we want to describe ignition targets? Currently we want to
     // send a u8 in the UDP message, so just take that for now.
     pub async fn ignition_get(
@@ -252,7 +287,7 @@ impl SpCommunicator {
         &self,
         target: u8,
     ) -> Result<IgnitionState, Error> {
-        // XXX We currently assume we're know which ignition controller is our
+        // XXX We currently assume we know which ignition controller is our
         // local one, and only use it for ignition interactions.
         let controller = self.known_sps.ignition_controller;
 
@@ -298,7 +333,7 @@ impl SpCommunicator {
         target: u8,
         command: IgnitionCommand,
     ) -> Result<(), Error> {
-        // XXX We currently assume we're know which ignition controller is our
+        // XXX We currently assume we know which ignition controller is our
         // local one, and only use it for ignition interactions.
         let controller = self.known_sps.ignition_controller;
         let request = RequestKind::IgnitionCommand { target, command };

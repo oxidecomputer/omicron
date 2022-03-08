@@ -157,7 +157,7 @@ enum Slot {
     // an in-order serial console packet
     Valid {
         offset: u64,
-        len: u8,
+        len: u16,
         data: [u8; SerialConsole::MAX_DATA_PER_PACKET],
     },
 }
