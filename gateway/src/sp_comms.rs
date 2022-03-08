@@ -252,7 +252,7 @@ impl SpCommunicator {
     async fn bulk_ignition_get_impl(
         &self,
     ) -> Result<Vec<IgnitionState>, Error> {
-        // XXX We currently assume we're know which ignition controller is our
+        // XXX We currently assume we know which ignition controller is our
         // local one, and only use it for ignition interactions.
         let controller = self.known_sps.ignition_controller;
 
