@@ -287,7 +287,7 @@ impl SpCommunicator {
         &self,
         target: u8,
     ) -> Result<IgnitionState, Error> {
-        // XXX We currently assume we're know which ignition controller is our
+        // XXX We currently assume we know which ignition controller is our
         // local one, and only use it for ignition interactions.
         let controller = self.known_sps.ignition_controller;
 
@@ -333,7 +333,7 @@ impl SpCommunicator {
         target: u8,
         command: IgnitionCommand,
     ) -> Result<(), Error> {
-        // XXX We currently assume we're know which ignition controller is our
+        // XXX We currently assume we know which ignition controller is our
         // local one, and only use it for ignition interactions.
         let controller = self.known_sps.ignition_controller;
         let request = RequestKind::IgnitionCommand { target, command };
