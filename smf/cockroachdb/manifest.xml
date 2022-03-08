@@ -1,9 +1,9 @@
 <?xml version="1.0"?>
 <!DOCTYPE service_bundle SYSTEM "/usr/share/lib/xml/dtd/service_bundle.dtd.1">
 
-<service_bundle type='manifest' name='nexus'>
+<service_bundle type='manifest' name='cockroachdb'>
 
-<service name='system/illumos/nexus' type='service' version='1'>
+  <service name='system/illumos/cockroachdb' type='service' version='1'>
   <create_default_instance enabled='false' />
   <single_instance />
 
@@ -17,10 +17,20 @@
       <envvar name="LD_LIBRARY_PATH" value="/opt/ooce/pgsql-13/lib/amd64" />
     </method_environment>
   </method_context>
+  <!--
+    TODO(https://github.com/oxidecomputer/omicron/issues/727)
+    Call "start", joining with other crdb instances
+  -->
   <exec_method type='method' name='start'
-    exec='ctrun -l child -o noorphan,regent /opt/oxide/nexus/bin/nexus /var/svc/manifest/site/nexus/config.toml &amp;'
+    exec='ctrun -l child -o noorphan,regent /opt/oxide/cockroachdb/bin/cockroach start-single-node --insecure --listen-addr=%{config/listen_addr} --store=%{config/store} &amp;'
     timeout_seconds='0' />
   <exec_method type='method' name='stop' exec=':kill' timeout_seconds='0' />
+
+  <property_group name='config' type='application'>
+    <propval name='listen_addr' type='astring' value='unknown' />
+    <propval name='store' type='astring' value='unknown' />
+    <propval name='join_addrs' type='astring' value='unknown' />
+  </property_group>
 
   <property_group name='startd' type='framework'>
     <propval name='duration' type='astring' value='contract' />
@@ -30,10 +40,10 @@
 
   <template>
     <common_name>
-      <loctext xml:lang='C'>Oxide Controller</loctext>
+      <loctext xml:lang='C'>CockroachDB</loctext>
     </common_name>
     <description>
-      <loctext xml:lang='C'>Oxide Control Plane Instance</loctext>
+      <loctext xml:lang='C'>Oxide's Distributed Database</loctext>
     </description>
   </template>
 </service>

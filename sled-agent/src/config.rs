@@ -5,17 +5,22 @@
 //! Interfaces for working with sled agent configuration
 
 use crate::common::vlan::VlanID;
+use crate::illumos::zpool::ZpoolName;
 use dropshot::ConfigDropshot;
 use dropshot::ConfigLogging;
+use serde::Deserialize;
 use std::net::SocketAddr;
+use std::path::Path;
 use uuid::Uuid;
 
 /// Configuration for a sled agent
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Deserialize)]
 pub struct Config {
     /// Unique id for the sled
     pub id: Uuid,
-    /// IP address and TCP port for Nexus instance
+    /// Address of the Bootstrap Agent interface.
+    pub bootstrap_address: SocketAddr,
+    /// Address of Nexus instance
     pub nexus_address: SocketAddr,
     /// Configuration for the sled agent dropshot server
     pub dropshot: ConfigDropshot,
@@ -24,5 +29,22 @@ pub struct Config {
     /// Optional VLAN ID to be used for tagging guest VNICs.
     pub vlan: Option<VlanID>,
     /// Optional list of zpools to be used as "discovered disks".
-    pub zpools: Option<Vec<String>>,
+    pub zpools: Option<Vec<ZpoolName>>,
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum ConfigError {
+    #[error("Failed to read config: {0}")]
+    Io(#[from] std::io::Error),
+    #[error("Failed to parse config: {0}")]
+    Parse(#[from] toml::de::Error),
+}
+
+impl Config {
+    pub fn from_file<P: AsRef<Path>>(path: P) -> Result<Self, ConfigError> {
+        let path = path.as_ref();
+        let contents = std::fs::read_to_string(path)?;
+        let config = toml::from_str(&contents)?;
+        Ok(config)
+    }
 }

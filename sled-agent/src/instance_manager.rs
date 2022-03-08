@@ -5,8 +5,8 @@
 //! API for controlling multiple instances on a sled.
 
 use crate::common::vlan::VlanID;
+use crate::illumos::vnic::VnicAllocator;
 use crate::nexus::NexusClient;
-use crate::vnic::IdAllocator;
 use omicron_common::api::internal::nexus::InstanceRuntimeState;
 use omicron_common::api::internal::sled_agent::InstanceHardware;
 use omicron_common::api::internal::sled_agent::InstanceMigrateParams;
@@ -16,12 +16,10 @@ use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 use uuid::Uuid;
 
-#[cfg(test)]
-use crate::{
-    illumos::zone::MockZones as Zones, instance::MockInstance as Instance,
-};
 #[cfg(not(test))]
-use crate::{illumos::zone::Zones, instance::Instance};
+use crate::instance::Instance;
+#[cfg(test)]
+use crate::instance::MockInstance as Instance;
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
@@ -43,7 +41,7 @@ struct InstanceManagerInternal {
     instances: Mutex<BTreeMap<Uuid, (Uuid, Instance)>>,
 
     vlan: Option<VlanID>,
-    nic_id_allocator: IdAllocator,
+    vnic_allocator: VnicAllocator,
 }
 
 /// All instances currently running on the sled.
@@ -58,16 +56,13 @@ impl InstanceManager {
         vlan: Option<VlanID>,
         nexus_client: Arc<NexusClient>,
     ) -> Result<InstanceManager, Error> {
-        // Create a base zone, from which all running instance zones are cloned.
-        Zones::create_propolis_base(&log)?;
-
         Ok(InstanceManager {
             inner: Arc::new(InstanceManagerInternal {
                 log,
                 nexus_client,
                 instances: Mutex::new(BTreeMap::new()),
                 vlan,
-                nic_id_allocator: IdAllocator::new(),
+                vnic_allocator: VnicAllocator::new("Instance"),
             }),
         })
     }
@@ -121,7 +116,7 @@ impl InstanceManager {
                     let instance = Instance::new(
                         instance_log,
                         instance_id,
-                        self.inner.nic_id_allocator.clone(),
+                        self.inner.vnic_allocator.clone(),
                         initial_hardware,
                         self.inner.vlan,
                         self.inner.nexus_client.clone(),
@@ -180,14 +175,6 @@ impl InstanceTicket {
     // from "inner" on destruction.
     fn new(id: Uuid, inner: Arc<InstanceManagerInternal>) -> Self {
         InstanceTicket { id, inner: Some(inner) }
-    }
-
-    // (Test-only) Creates a null ticket that does nothing.
-    //
-    // Useful when testing instances without the an entire instance manager.
-    #[cfg(test)]
-    pub(crate) fn null(id: Uuid) -> Self {
-        InstanceTicket { id, inner: None }
     }
 
     /// Idempotently removes this instance from the tracked set of
@@ -260,12 +247,7 @@ mod test {
         let nexus_client = Arc::new(MockNexusClient::default());
 
         // Creation of the instance manager incurs some "global" system
-        // checks - creation of the base zone, and cleanup of existing
-        // zones + vnics.
-
-        let zones_create_propolis_base_ctx =
-            MockZones::create_propolis_base_context();
-        zones_create_propolis_base_ctx.expect().return_once(|_| Ok(()));
+        // checks: cleanup of existing zones + vnics.
 
         let zones_get_ctx = MockZones::get_context();
         zones_get_ctx.expect().return_once(|| Ok(vec![]));
@@ -341,10 +323,6 @@ mod test {
         let nexus_client = Arc::new(MockNexusClient::default());
 
         // Instance Manager creation.
-
-        let zones_create_propolis_base_ctx =
-            MockZones::create_propolis_base_context();
-        zones_create_propolis_base_ctx.expect().return_once(|_| Ok(()));
 
         let zones_get_ctx = MockZones::get_context();
         zones_get_ctx.expect().return_once(|| Ok(vec![]));

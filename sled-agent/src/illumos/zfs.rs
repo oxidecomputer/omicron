@@ -32,6 +32,7 @@ pub struct Zfs {}
 
 /// Describes a mountpoint for a ZFS filesystem.
 pub enum Mountpoint {
+    #[allow(dead_code)]
     Legacy,
     Path(PathBuf),
 }
@@ -47,10 +48,29 @@ impl fmt::Display for Mountpoint {
 
 #[cfg_attr(test, mockall::automock, allow(dead_code))]
 impl Zfs {
+    /// Lists all filesystems within a dataset.
+    pub fn list_filesystems(name: &str) -> Result<Vec<String>, Error> {
+        let mut command = std::process::Command::new(ZFS);
+        let cmd = command.args(&["list", "-d", "1", "-rHpo", "name", name]);
+
+        let output = execute(cmd)?;
+        let stdout = String::from_utf8(output.stdout)?;
+        let filesystems: Vec<String> = stdout
+            .trim()
+            .split('\n')
+            .filter(|n| *n != name)
+            .map(|s| {
+                String::from(s.strip_prefix(&format!("{}/", name)).unwrap())
+            })
+            .collect();
+        Ok(filesystems)
+    }
+
     /// Creates a new ZFS filesystem named `name`, unless one already exists.
-    pub fn ensure_filesystem(
+    pub fn ensure_zoned_filesystem(
         name: &str,
         mountpoint: Mountpoint,
+        do_format: bool,
     ) -> Result<(), Error> {
         // If the dataset exists, we're done.
         let mut command = std::process::Command::new(ZFS);
@@ -66,11 +86,21 @@ impl Zfs {
             return Ok(());
         }
 
+        if !do_format {
+            return Err(Error::NotFound(format!(
+                "Filesystem {} not found",
+                name
+            )));
+        }
+
         // If it doesn't exist, make it.
         let mut command = std::process::Command::new(PFEXEC);
         let cmd = command.args(&[
             ZFS,
             "create",
+            // The filesystem is managed from the Global Zone.
+            "-o",
+            "zoned=on",
             "-o",
             &format!("mountpoint={}", mountpoint),
             name,

@@ -55,6 +55,32 @@
         }
       }
     },
+    "/filesystem": {
+      "put": {
+        "operationId": "filesystem_put",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DatasetEnsureBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/instances/{instance_id}": {
       "put": {
         "operationId": "instance_put",
@@ -90,6 +116,32 @@
                 }
               }
             }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/services": {
+      "put": {
+        "operationId": "services_put",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ServiceEnsureBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "resource updated"
           },
           "4XX": {
             "$ref": "#/components/responses/Error"
@@ -146,6 +198,82 @@
         "type": "integer",
         "format": "uint64",
         "minimum": 0
+      },
+      "DatasetEnsureBody": {
+        "description": "Used to request a new partition kind exists within a zpool.\n\nMany partition types are associated with services that will be instantiated when the partition is detected.",
+        "type": "object",
+        "properties": {
+          "address": {
+            "type": "string"
+          },
+          "partition_kind": {
+            "$ref": "#/components/schemas/DatasetKind"
+          },
+          "zpool_uuid": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "required": [
+          "address",
+          "partition_kind",
+          "zpool_uuid"
+        ]
+      },
+      "DatasetKind": {
+        "description": "The type of a dataset, and an auxiliary information necessary to successfully launch a zone managing the associated data.",
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "all_addresses": {
+                "description": "The addresses of all nodes within the cluster.",
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "cockroach_db"
+                ]
+              }
+            },
+            "required": [
+              "all_addresses",
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "crucible"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "clickhouse"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          }
+        ]
       },
       "DiskEnsureBody": {
         "description": "Sent from to a sled agent to establish the runtime state of a Disk",
@@ -732,6 +860,39 @@
           "time_created",
           "time_modified",
           "vpc_id"
+        ]
+      },
+      "ServiceEnsureBody": {
+        "description": "Used to request that the Sled initialize certain services on initialization.\n\nThis may be used to record that certain sleds are responsible for launching services which may not be associated with a partition, such as Nexus.",
+        "type": "object",
+        "properties": {
+          "services": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ServiceRequest"
+            }
+          }
+        },
+        "required": [
+          "services"
+        ]
+      },
+      "ServiceRequest": {
+        "type": "object",
+        "properties": {
+          "addresses": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "name": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "addresses",
+          "name"
         ]
       },
       "UpdateArtifact": {

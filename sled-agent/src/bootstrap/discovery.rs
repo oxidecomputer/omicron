@@ -37,7 +37,7 @@ async fn monitor_worker(
         let mut buf = vec![0u8; 128];
         tokio::select! {
             _ = tokio::time::sleep(tokio::time::Duration::from_millis(5000)) => {
-                info!(log, "Bootstrap Peer Monitor: Broadcasting our own address: {}", address);
+                trace!(log, "Bootstrap Peer Monitor: Broadcasting our own address: {}", address);
                 if let Err(e) = sender.try_send_to(message, address.into()) {
                     warn!(log, "PeerMonitor failed to broadcast: {}", e);
                 }

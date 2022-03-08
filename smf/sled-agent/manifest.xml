@@ -34,24 +34,10 @@
       <envvar name="LD_LIBRARY_PATH" value="/opt/ooce/pgsql-13/lib/amd64" />
     </method_environment>
   </method_context>
-  <!-- TODO: A file-backed zpool can be manually created with the following:
-    $ truncate -s 10GB testpool.vdev
-    $ zpool create d462a7f7-b628-40fe-80ff-4e4189e2d62b testpool.vdev
-
-    Plus adding the "\-\-zpools d462a7f7-b628-40fe-80ff-4e4189e2d62b" argument
-    when initializing the sled agent.
-  -->
   <exec_method type='method' name='start'
-    exec='ctrun -l child -o noorphan,regent /opt/oxide/sled-agent/sled-agent run %{config/server_id} %{config/bootstrap_addr} %{config/server_addr} %{config/nexus_addr} &amp;'
+    exec='ctrun -l child -o noorphan,regent /opt/oxide/sled-agent/sled-agent run /opt/oxide/sled-agent/pkg/config.toml &amp;'
     timeout_seconds='0' />
   <exec_method type='method' name='stop' exec=':kill' timeout_seconds='0' />
-
-  <property_group name='config' type='application'>
-    <propval name='server_id' type='astring' value='fb0f7546-4d46-40ca-9d56-cbb810684ca7' />
-    <propval name='bootstrap_addr' type='astring' value='[::]:12346' />
-    <propval name='server_addr' type='astring' value='127.0.0.1:12345' />
-    <propval name='nexus_addr' type='astring' value='127.0.0.1:12221' />
-  </property_group>
 
   <property_group name='startd' type='framework'>
     <propval name='duration' type='astring' value='contract' />

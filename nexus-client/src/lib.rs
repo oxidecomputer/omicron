@@ -64,6 +64,19 @@ impl From<types::InstanceState>
     }
 }
 
+impl From<omicron_common::api::internal::sled_agent::DatasetKind>
+    for types::DatasetKind
+{
+    fn from(d: omicron_common::api::internal::sled_agent::DatasetKind) -> Self {
+        use omicron_common::api::internal::sled_agent::DatasetKind::*;
+        match d {
+            CockroachDb { .. } => types::DatasetKind::Cockroach,
+            Crucible { .. } => types::DatasetKind::Crucible,
+            Clickhouse { .. } => types::DatasetKind::Clickhouse,
+        }
+    }
+}
+
 impl From<omicron_common::api::internal::nexus::InstanceRuntimeState>
     for types::InstanceRuntimeState
 {

@@ -15,12 +15,12 @@
     </method_environment>
   </method_context>
   <exec_method type='method' name='start'
-    exec='ctrun -l child -o noorphan,regent /opt/oxide/propolis-server/propolis-server run /opt/oxide/propolis-server/pkg/config.toml %{config/server_addr} &amp;'
+    exec='ctrun -l child -o noorphan,regent /opt/oxide/propolis-server/bin/propolis-server run /var/svc/manifest/site/propolis-server/config.toml %{config/server_addr} &amp;'
     timeout_seconds='0' />
   <exec_method type='method' name='stop' exec=':kill' timeout_seconds='0' />
 
   <property_group name='config' type='application'>
-    <propval name='server_addr' type='astring' value='127.0.0.1:12400' />
+    <propval name='server_addr' type='astring' value='unknown' />
   </property_group>
 
   <property_group name='startd' type='framework'>

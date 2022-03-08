@@ -536,7 +536,7 @@ impl CockroachInstance {
             let success =
                 0 == unsafe { libc::kill(pid as libc::pid_t, libc::SIGTERM) };
             if !success {
-                anyhow!("Failed to send SIGTERM to DB");
+                bail!("Failed to send SIGTERM to DB");
             }
             child_process.wait().await.context("waiting for child process")?;
             self.child_process = None;
