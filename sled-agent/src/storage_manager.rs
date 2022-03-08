@@ -319,7 +319,7 @@ impl StorageWorker {
                         let id = self.initialize_partition(pool, partition).await?;
                         // Unwrap safety: We just put this zone in the pool.
                         let zone = pool.get_zone(id).unwrap();
-                        partitions.push((id, zone.address(), partition.kind.clone()));
+                        partitions.push((id, zone.address(), partition.kind));
                     }
 
                     // Notify Nexus of the zpool and all datasets within.
