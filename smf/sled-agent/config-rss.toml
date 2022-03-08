@@ -1,0 +1,40 @@
+# RSS (Rack Setup Service) "stand-in" configuration.
+
+[[request]]
+sled_address = "192.168.1.201:12345"
+
+[[request.partition]]
+zpool_uuid = "d462a7f7-b628-40fe-80ff-4e4189e2d62b"
+address = "[fd00:1234::9]:32345"
+partition_kind.type = "crucible"
+
+[[request.partition]]
+zpool_uuid = "e4b4dc87-ab46-49fb-a4b4-d361ae214c03"
+address = "[fd00:1234::10]:32345"
+partition_kind.type = "crucible"
+
+[[request.partition]]
+zpool_uuid = "f4b4dc87-ab46-49fb-a4b4-d361ae214c03"
+address = "[fd00:1234::11]:32345"
+partition_kind.type = "crucible"
+
+[[request.partition]]
+zpool_uuid = "d462a7f7-b628-40fe-80ff-4e4189e2d62b"
+address = "[fd00:1234::5]:32221"
+partition_kind.type = "cockroach_db"
+partition_kind.all_addresses = [
+  "[fd00:1234::5]:32221",
+]
+
+[[request.partition]]
+zpool_uuid = "d462a7f7-b628-40fe-80ff-4e4189e2d62b"
+address = "[fd00:1234::8]:8123"
+partition_kind.type = "clickhouse"
+
+[[request.service]]
+name = "nexus"
+addresses = [ "[fd00:1234::7]:12221", "192.168.1.123:12220" ]
+
+[[request.service]]
+name = "oximeter"
+addresses = [ "[fd00:1234::6]:12223" ]

@@ -204,17 +204,9 @@ fn do_build_minimal(config: &Config) -> Result<()> {
     ssh_exec(&server, &cmd, false)
 }
 
-fn do_package(
-    config: &Config,
-    artifact_dir: PathBuf,
-    release: bool,
-) -> Result<()> {
+fn do_package(config: &Config, artifact_dir: PathBuf) -> Result<()> {
     let server = &config.servers[&config.builder.server];
     let mut cmd = String::new();
-    let mut release_flag = "";
-    if release {
-        release_flag = "--release";
-    }
     let cmd_path = "./target/debug/omicron-package";
     let artifact_dir = artifact_dir
         .to_str()
@@ -227,12 +219,11 @@ fn do_package(
     // See https://github.com/oxidecomputer/omicron/blob/8757ec542ea4ffbadd6f26094ed4ba357715d70d/rpaths/src/lib.rs
     write!(
         &mut cmd,
-        "bash -lc 'cd {} && git checkout {} && {} package --out {} {}'",
+        "bash -lc 'cd {} && git checkout {} && {} package --out {}'",
         config.builder.omicron_path.to_string_lossy(),
         config.builder.git_treeish,
         cmd_path,
         &artifact_dir,
-        release_flag
     )?;
 
     ssh_exec(&server, &cmd, false)
@@ -609,11 +600,8 @@ fn main() -> Result<()> {
         }
         SubCommand::Sync => do_sync(&config)?,
         SubCommand::BuildMinimal => do_build_minimal(&config)?,
-        SubCommand::Package(PackageSubCommand::Package {
-            artifact_dir,
-            release,
-        }) => {
-            do_package(&config, artifact_dir, release)?;
+        SubCommand::Package(PackageSubCommand::Package { artifact_dir }) => {
+            do_package(&config, artifact_dir)?;
         }
         SubCommand::Package(PackageSubCommand::Install {
             artifact_dir,

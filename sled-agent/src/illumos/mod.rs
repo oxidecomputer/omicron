@@ -4,8 +4,11 @@
 
 //! Wrappers around illumos-specific commands.
 
+pub mod addrobj;
 pub mod dladm;
+pub mod running_zone;
 pub mod svc;
+pub mod vnic;
 pub mod zfs;
 pub mod zone;
 pub mod zpool;

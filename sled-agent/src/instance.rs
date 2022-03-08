@@ -8,11 +8,12 @@ use crate::common::{
     instance::{Action as InstanceAction, InstanceStates, PROPOLIS_PORT},
     vlan::VlanID,
 };
+use crate::illumos::running_zone::{InstalledZone, RunningZone};
 use crate::illumos::svc::wait_for_service;
-use crate::illumos::zone::PROPOLIS_ZONE_PREFIX;
+use crate::illumos::vnic::VnicAllocator;
+use crate::illumos::zone::{AddressRequest, PROPOLIS_ZONE_PREFIX};
 use crate::instance_manager::InstanceTicket;
 use crate::nexus::NexusClient;
-use crate::vnic::{interface_name, IdAllocator, Vnic};
 use anyhow::anyhow;
 use futures::lock::{Mutex, MutexGuard};
 use omicron_common::api::external::NetworkInterface;
@@ -58,6 +59,9 @@ pub enum Error {
     // TODO: Add more specific errors
     #[error("Failure during migration: {0}")]
     Migration(anyhow::Error),
+
+    #[error(transparent)]
+    RunningZone(#[from] crate::illumos::running_zone::Error),
 }
 
 // Issues read-only, idempotent HTTP requests at propolis until it responds with
@@ -132,6 +136,8 @@ struct RunningState {
     ticket: InstanceTicket,
     // Handle to task monitoring for Propolis state changes.
     monitor_task: Option<JoinHandle<()>>,
+    // Handle to the zone.
+    _running_zone: RunningZone,
 }
 
 impl Drop for RunningState {
@@ -159,8 +165,7 @@ impl Drop for RunningState {
 // Named type for values returned during propolis zone creation
 struct PropolisSetup {
     client: Arc<PropolisClient>,
-    control_nic: Vnic,
-    guest_nics: Vec<Vnic>,
+    running_zone: RunningZone,
 }
 
 struct InstanceInner {
@@ -172,9 +177,8 @@ struct InstanceInner {
     properties: propolis_client::api::InstanceProperties,
 
     // NIC-related properties
-    nic_id_allocator: IdAllocator,
+    vnic_allocator: VnicAllocator,
     requested_nics: Vec<NetworkInterface>,
-    allocated_nics: Vec<Vnic>,
     vlan: Option<VlanID>,
 
     // Internal State management
@@ -249,7 +253,7 @@ impl InstanceInner {
         setup: PropolisSetup,
         migrate: Option<InstanceMigrateParams>,
     ) -> Result<(), Error> {
-        let PropolisSetup { client, control_nic, guest_nics } = setup;
+        let PropolisSetup { client, running_zone } = setup;
 
         // TODO: Store slot in NetworkInterface, make this more stable.
         let nics = self
@@ -257,7 +261,7 @@ impl InstanceInner {
             .iter()
             .enumerate()
             .map(|(i, _)| propolis_client::api::NetworkInterfaceRequest {
-                name: guest_nics[i].name().to_string(),
+                name: running_zone.get_guest_vnics()[i].name().to_string(),
                 slot: propolis_client::api::Slot(i as u8),
             })
             .collect();
@@ -298,14 +302,12 @@ impl InstanceInner {
             }
         }));
 
-        self.running_state =
-            Some(RunningState { client, ticket, monitor_task });
-
-        // Store the VNICs while the instance is running.
-        self.allocated_nics = guest_nics
-            .into_iter()
-            .chain(std::iter::once(control_nic))
-            .collect();
+        self.running_state = Some(RunningState {
+            client,
+            ticket,
+            monitor_task,
+            _running_zone: running_zone,
+        });
 
         Ok(())
     }
@@ -353,7 +355,7 @@ mockall::mock! {
         pub fn new(
             log: Logger,
             id: Uuid,
-            nic_id_allocator: IdAllocator,
+            vnic_allocator: VnicAllocator,
             initial: InstanceHardware,
             vlan: Option<VlanID>,
             nexus_client: Arc<NexusClient>,
@@ -373,13 +375,14 @@ mockall::mock! {
     }
 }
 
+#[cfg_attr(test, allow(dead_code))]
 impl Instance {
     /// Creates a new (not yet running) instance object.
     ///
     /// Arguments:
     /// * `log`: Logger for dumping debug information.
     /// * `id`: UUID of the instance to be created.
-    /// * `nic_id_allocator`: A unique (to the sled) ID generator to
+    /// * `vnic_allocator`: A unique (to the sled) ID generator to
     /// refer to a VNIC. (This exists because of a restriction on VNIC name
     /// lengths, otherwise the UUID would be used instead).
     /// * `initial`: State of the instance at initialization time.
@@ -389,7 +392,7 @@ impl Instance {
     pub fn new(
         log: Logger,
         id: Uuid,
-        nic_id_allocator: IdAllocator,
+        vnic_allocator: VnicAllocator,
         initial: InstanceHardware,
         vlan: Option<VlanID>,
         nexus_client: Arc<NexusClient>,
@@ -411,9 +414,8 @@ impl Instance {
                 // InstanceCpuCount here, to avoid any casting...
                 vcpus: initial.runtime.ncpus.0 as u8,
             },
-            nic_id_allocator,
+            vnic_allocator,
             requested_nics: initial.nics,
-            allocated_nics: vec![],
             vlan,
             state: InstanceStates::new(initial.runtime),
             running_state: None,
@@ -429,19 +431,6 @@ impl Instance {
         &self,
         inner: &mut MutexGuard<'_, InstanceInner>,
     ) -> Result<PropolisSetup, Error> {
-        // Create the VNIC which will be attached to the zone.
-        //
-        // It would be preferable to use the UUID of the instance as a component
-        // of the "per-Zone, control plane VNIC", but VNIC names are somewhat
-        // restrictive. They must end with numerics, and they must be less than
-        // 32 characters.
-        //
-        // Instead, we just use a per-agent incrementing number. We do the same
-        // for the guest-accessible NICs too.
-        let physical_dl = Dladm::find_physical()?;
-        let control_nic =
-            Vnic::new_control(&inner.nic_id_allocator, &physical_dl, None)?;
-
         // Instantiate all guest-requested VNICs.
         //
         // TODO: Ideally, we'd allocate VNICs directly within the Zone.
@@ -449,18 +438,16 @@ impl Instance {
         // doesn't exist in illumos.
         //
         // https://github.com/illumos/ipd/blob/master/ipd/0003/README.md
+        let physical_dl = Dladm::find_physical()?;
         let guest_nics = inner
             .requested_nics
             .clone()
             .into_iter()
             .map(|nic| {
-                Vnic::new_guest(
-                    &inner.nic_id_allocator,
-                    &physical_dl,
-                    Some(nic.mac),
-                    inner.vlan,
-                )
-                .map_err(|e| e.into())
+                inner
+                    .vnic_allocator
+                    .new_guest(&physical_dl, Some(nic.mac), inner.vlan)
+                    .map_err(|e| e.into())
             })
             .collect::<Result<Vec<_>, Error>>()?;
 
@@ -468,42 +455,60 @@ impl Instance {
         // configured VNICs.
         let zname = propolis_zone_name(inner.propolis_id());
 
-        let nics_to_put_in_zone: Vec<String> = guest_nics
-            .iter()
-            .map(|nic| nic.name().to_string())
-            .chain(std::iter::once(control_nic.name().to_string()))
-            .collect();
-
-        Zones::configure_propolis_zone(
+        let installed_zone = InstalledZone::install(
             &inner.log,
-            &zname,
-            nics_to_put_in_zone,
-        )?;
-        info!(inner.log, "Configured propolis zone: {}", zname);
+            &inner.vnic_allocator,
+            "propolis-server",
+            Some(&inner.propolis_id().to_string()),
+            /* dataset= */ &[],
+            &[
+                zone::Device { name: "/dev/vmm/*".to_string() },
+                zone::Device { name: "/dev/vmmctl".to_string() },
+                zone::Device { name: "/dev/viona".to_string() },
+            ],
+            guest_nics,
+        )
+        .await?;
 
-        // Clone the zone from a base zone (faster than installing) and
-        // boot it up.
-        Zones::clone_from_base_propolis(&zname)?;
-        info!(inner.log, "Cloned child zone: {}", zname);
-        Zones::boot(&zname)?;
-        info!(inner.log, "Booted zone: {}", zname);
-
-        // Wait for the network services to come online, then create an address.
-        let fmri = "svc:/milestone/network:default";
-        wait_for_service(Some(&zname), fmri)
-            .await
-            .map_err(|_| Error::Timeout(fmri.to_string()))?;
-        info!(inner.log, "Network milestone ready for {}", zname);
-
-        let network = Zones::create_address(
-            &zname,
-            &interface_name(&control_nic.name()),
-        )?;
+        let running_zone = RunningZone::boot(installed_zone).await?;
+        let network = running_zone.ensure_address(AddressRequest::Dhcp).await?;
         info!(inner.log, "Created address {} for zone: {}", network, zname);
 
         // Run Propolis in the Zone.
         let server_addr = SocketAddr::new(network.ip(), PROPOLIS_PORT);
-        Zones::run_propolis(&zname, inner.propolis_id(), &server_addr)?;
+
+        running_zone.run_cmd(&[
+            crate::illumos::zone::SVCCFG,
+            "import",
+            "/var/svc/manifest/site/propolis-server/manifest.xml",
+        ])?;
+
+        running_zone.run_cmd(&[
+            crate::illumos::zone::SVCCFG,
+            "-s",
+            "system/illumos/propolis-server",
+            "setprop",
+            &format!("config/server_addr={}", server_addr),
+        ])?;
+
+        running_zone.run_cmd(&[
+            crate::illumos::zone::SVCCFG,
+            "-s",
+            "svc:/system/illumos/propolis-server",
+            "add",
+            &format!("vm-{}", inner.propolis_id()),
+        ])?;
+
+        running_zone.run_cmd(&[
+            crate::illumos::zone::SVCADM,
+            "enable",
+            "-t",
+            &format!(
+                "svc:/system/illumos/propolis-server:vm-{}",
+                inner.propolis_id()
+            ),
+        ])?;
+
         info!(inner.log, "Started propolis in zone: {}", zname);
 
         // This isn't strictly necessary - we wait for the HTTP server below -
@@ -526,7 +531,7 @@ impl Instance {
         // don't need to worry about initialization races.
         wait_for_http_server(&inner.log, &client).await?;
 
-        Ok(PropolisSetup { client, control_nic, guest_nics })
+        Ok(PropolisSetup { client, running_zone })
     }
 
     /// Begins the execution of the instance's service (Propolis).
@@ -555,17 +560,6 @@ impl Instance {
         warn!(inner.log, "Halting and removing zone: {}", zname);
         Zones::halt_and_remove(&inner.log, &zname).unwrap();
 
-        // Explicitly remove NICs.
-        //
-        // The NICs would self-delete on drop anyway, but this allows us
-        // to explicitly record errors.
-        let mut nics = vec![];
-        std::mem::swap(&mut inner.allocated_nics, &mut nics);
-        for mut nic in nics {
-            if let Err(e) = nic.delete() {
-                error!(inner.log, "Failed to delete NIC {:?}: {}", nic, e);
-            }
-        }
         inner.running_state.as_mut().unwrap().ticket.terminate();
 
         Ok(())
@@ -640,29 +634,14 @@ impl Instance {
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::illumos::{
-        dladm::{MockDladm, PhysicalLink},
-        zone::MockZones,
-    };
     use crate::mocks::MockNexusClient;
-    use crate::vnic::control_vnic_name;
     use chrono::Utc;
-    use dropshot::{
-        endpoint, ApiDescription, ConfigDropshot, ConfigLogging,
-        ConfigLoggingLevel, HttpError, HttpResponseCreated, HttpResponseOk,
-        HttpResponseUpdatedNoContent, HttpServer, HttpServerStarter, Path,
-        RequestContext, TypedBody,
-    };
-    use futures::future::FutureExt;
     use omicron_common::api::external::{
         ByteCount, Generation, InstanceCpuCount, InstanceState,
     };
     use omicron_common::api::internal::{
         nexus::InstanceRuntimeState, sled_agent::InstanceStateRequested,
     };
-    use propolis_client::api;
-    use tokio::sync::watch;
-
     static INST_UUID_STR: &str = "e398c5d5-5059-4e55-beac-3a1071083aaa";
     static PROPOLIS_UUID_STR: &str = "ed895b13-55d5-4e0b-88e9-3f4e74d0d936";
 
@@ -672,323 +651,6 @@ mod test {
 
     fn test_propolis_uuid() -> Uuid {
         PROPOLIS_UUID_STR.parse().unwrap()
-    }
-
-    // Endpoints for a fake Propolis server.
-    //
-    // We intercept all traffic to Propolis via these endpoints.
-
-    #[endpoint {
-        method = PUT,
-        path = "/instances/{instance_id}",
-    }]
-    async fn instance_ensure(
-        rqctx: Arc<RequestContext<PropolisContext>>,
-        path_params: Path<api::InstancePathParams>,
-        _request: TypedBody<api::InstanceEnsureRequest>,
-    ) -> Result<HttpResponseCreated<api::InstanceEnsureResponse>, HttpError>
-    {
-        let id = path_params.into_inner().instance_id;
-
-        let mut server = rqctx.context().inner.lock().await;
-        if server.is_some() {
-            return Err(HttpError::for_internal_error(
-                "Instance already initialized".to_string(),
-            ));
-        } else {
-            *server = Some(FakeInstance { id });
-            return Ok(HttpResponseCreated(api::InstanceEnsureResponse {
-                migrate: None,
-            }));
-        }
-    }
-
-    #[endpoint {
-        method = GET,
-        path = "/instances/{instance_id}",
-    }]
-    async fn instance_get(
-        rqctx: Arc<RequestContext<PropolisContext>>,
-        path_params: Path<api::InstancePathParams>,
-    ) -> Result<HttpResponseOk<api::InstanceGetResponse>, HttpError> {
-        let id = path_params.into_inner().instance_id;
-        let ctx = rqctx.context();
-        let server = ctx.inner.lock().await;
-
-        if let Some(server) = server.as_ref() {
-            if server.id == id {
-                // TODO: Patch this up with real values
-                let instance_info = api::Instance {
-                    properties: api::InstanceProperties {
-                        id,
-                        name: "Test Name".to_string(),
-                        description: "Test Description".to_string(),
-                        image_id: Uuid::new_v4(),
-                        bootrom_id: Uuid::new_v4(),
-                        memory: 0,
-                        vcpus: 0,
-                    },
-                    state: ctx.state_receiver.borrow().state,
-                    disks: vec![],
-                    nics: vec![],
-                };
-
-                return Ok(HttpResponseOk(api::InstanceGetResponse {
-                    instance: instance_info,
-                }));
-            }
-        }
-        Err(HttpError::for_internal_error("No matching instance".to_string()))
-    }
-
-    #[endpoint {
-        method = GET,
-        path = "/instances/{instance_id}/state-monitor",
-    }]
-    async fn instance_state_monitor(
-        rqctx: Arc<RequestContext<PropolisContext>>,
-        _path_params: Path<api::InstancePathParams>,
-        request: TypedBody<api::InstanceStateMonitorRequest>,
-    ) -> Result<HttpResponseOk<api::InstanceStateMonitorResponse>, HttpError>
-    {
-        let ctx = rqctx.context();
-        let server_guard = ctx.inner.lock().await;
-        let gen = request.into_inner().gen;
-        if server_guard.is_some() {
-            drop(server_guard);
-            let mut receiver = ctx.state_receiver.clone();
-            loop {
-                let last = receiver.borrow().clone();
-                if gen <= last.gen {
-                    return Ok(HttpResponseOk(last));
-                }
-                receiver.changed().await.unwrap();
-            }
-        }
-        Err(HttpError::for_internal_error(
-            "Server not initialized (no instance)".to_string(),
-        ))
-    }
-
-    #[endpoint {
-        method = PUT,
-        path = "/instances/{instance_id}/state",
-    }]
-    async fn instance_state_put(
-        rqctx: Arc<RequestContext<PropolisContext>>,
-        _path_params: Path<api::InstancePathParams>,
-        request: TypedBody<api::InstanceStateRequested>,
-    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
-        let ctx = rqctx.context();
-        let server_guard = ctx.inner.lock().await;
-
-        let state = match request.into_inner() {
-            api::InstanceStateRequested::Run => api::InstanceState::Running,
-            api::InstanceStateRequested::Stop => api::InstanceState::Destroyed,
-            api::InstanceStateRequested::Reboot => {
-                api::InstanceState::Rebooting
-            }
-        };
-
-        if server_guard.is_some() {
-            let last = (*ctx.state_sender.borrow()).clone();
-            let _ = ctx.state_sender.send(api::InstanceStateMonitorResponse {
-                gen: last.gen + 1,
-                state,
-            });
-            Ok(HttpResponseUpdatedNoContent {})
-        } else {
-            Err(HttpError::for_internal_error(
-                "No matching instance".to_string(),
-            ))
-        }
-    }
-
-    // Server context that is only valid once an instance has been ensured.
-    struct FakeInstance {
-        id: Uuid,
-    }
-
-    // Server context for the fake Propolis server.
-    struct PropolisContext {
-        inner: Mutex<Option<FakeInstance>>,
-        state_sender: watch::Sender<api::InstanceStateMonitorResponse>,
-        state_receiver: watch::Receiver<api::InstanceStateMonitorResponse>,
-    }
-
-    // Creates a fake propolis server on port 12400.
-    fn fake_propolis_server() -> HttpServer<PropolisContext> {
-        let config_dropshot = ConfigDropshot {
-            bind_address: "127.0.0.1:12400".parse().unwrap(),
-            ..Default::default()
-        };
-        let config_logging =
-            ConfigLogging::StderrTerminal { level: ConfigLoggingLevel::Info };
-        let log = config_logging
-            .to_logger("fake_propolis_server")
-            .map_err(|error| format!("failed to create logger: {}", error))
-            .unwrap();
-
-        let mut api = ApiDescription::new();
-        api.register(instance_ensure).unwrap();
-        api.register(instance_get).unwrap();
-        api.register(instance_state_monitor).unwrap();
-        api.register(instance_state_put).unwrap();
-        let (tx, rx) = watch::channel(api::InstanceStateMonitorResponse {
-            gen: 0,
-            state: api::InstanceState::Creating,
-        });
-        let api_context = PropolisContext {
-            inner: Mutex::new(None),
-            state_sender: tx,
-            state_receiver: rx,
-        };
-
-        HttpServerStarter::new(&config_dropshot, api, api_context, &log)
-            .map_err(|error| format!("failed to create server: {}", error))
-            .unwrap()
-            .start()
-    }
-
-    // Sets the expectation for the invocations to the underlying system made on
-    // behalf of instance creation.
-    //
-    // Spawns a task which acts as a fake propolis server - this server acts in
-    // lieu of the "real" propolis server which would be launched.
-    async fn execute_instance_start(inst: &Instance, ticket: InstanceTicket) {
-        let mut seq = mockall::Sequence::new();
-        let dladm_find_physical_ctx = MockDladm::find_physical_context();
-        dladm_find_physical_ctx
-            .expect()
-            .times(1)
-            .in_sequence(&mut seq)
-            .returning(|| Ok(PhysicalLink("physical".to_string())));
-
-        let dladm_create_vnic_ctx = MockDladm::create_vnic_context();
-        dladm_create_vnic_ctx
-            .expect()
-            .times(1)
-            .in_sequence(&mut seq)
-            .returning(|phys, vnic, _maybe_mac, _maybe_vlan| {
-                assert_eq!(phys.0, "physical");
-                assert_eq!(vnic, control_vnic_name(0));
-                Ok(())
-            });
-
-        let zone_configure_propolis_ctx =
-            MockZones::configure_propolis_zone_context();
-        zone_configure_propolis_ctx
-            .expect()
-            .times(1)
-            .in_sequence(&mut seq)
-            .returning(|_, zone, vnics| {
-                assert_eq!(zone, propolis_zone_name(&test_propolis_uuid()));
-                assert_eq!(vnics.len(), 1);
-                assert_eq!(vnics[0], control_vnic_name(0));
-                Ok(())
-            });
-
-        let zone_clone_from_base_propolis_ctx =
-            MockZones::clone_from_base_propolis_context();
-        zone_clone_from_base_propolis_ctx
-            .expect()
-            .times(1)
-            .in_sequence(&mut seq)
-            .returning(|zone| {
-                assert_eq!(zone, propolis_zone_name(&test_propolis_uuid()));
-                Ok(())
-            });
-
-        let zone_boot_ctx = MockZones::boot_context();
-        zone_boot_ctx.expect().times(1).in_sequence(&mut seq).returning(
-            |zone| {
-                assert_eq!(zone, propolis_zone_name(&test_propolis_uuid()));
-                Ok(())
-            },
-        );
-
-        let wait_for_service_ctx =
-            crate::illumos::svc::wait_for_service_context();
-        wait_for_service_ctx.expect().times(1).in_sequence(&mut seq).returning(
-            |zone, fmri| {
-                assert_eq!(
-                    zone.unwrap(),
-                    propolis_zone_name(&test_propolis_uuid())
-                );
-                assert_eq!(fmri, "svc:/milestone/network:default");
-                Ok(())
-            },
-        );
-
-        let zone_create_address_ctx = MockZones::create_address_context();
-        zone_create_address_ctx
-            .expect()
-            .times(1)
-            .in_sequence(&mut seq)
-            .returning(|zone, iface| {
-                assert_eq!(zone, propolis_zone_name(&test_propolis_uuid()));
-                assert_eq!(iface, interface_name(&control_vnic_name(0)));
-                Ok("127.0.0.1/24".parse().unwrap())
-            });
-
-        let zone_run_propolis_ctx = MockZones::run_propolis_context();
-        zone_run_propolis_ctx
-            .expect()
-            .times(1)
-            .in_sequence(&mut seq)
-            .returning(|zone, id, addr| {
-                assert_eq!(zone, propolis_zone_name(&test_propolis_uuid()));
-                assert_eq!(id, &test_propolis_uuid());
-                assert_eq!(
-                    addr,
-                    &"127.0.0.1:12400".parse::<SocketAddr>().unwrap()
-                );
-                Ok(())
-            });
-
-        let wait_for_service_ctx =
-            crate::illumos::svc::wait_for_service_context();
-        wait_for_service_ctx.expect().times(1).in_sequence(&mut seq).returning(
-            |zone, fmri| {
-                let id = test_propolis_uuid();
-                assert_eq!(zone.unwrap(), propolis_zone_name(&id));
-                assert_eq!(
-                    fmri,
-                    format!("{}:{}", service_name(), instance_name(&id))
-                );
-                tokio::task::spawn(async {
-                    fake_propolis_server().await.unwrap();
-                });
-                Ok(())
-            },
-        );
-
-        // This invocation triggers all the aforementioned expectations.
-        inst.start(ticket, None).await.unwrap();
-    }
-
-    // Returns a future which resolves when a state transition is reached.
-    fn expect_state_transition(
-        nexus_client: &mut MockNexusClient,
-        seq: &mut mockall::Sequence,
-        expected_state: InstanceState,
-    ) -> impl core::future::Future<Output = ()> {
-        let (tx, rx) = tokio::sync::oneshot::channel();
-
-        nexus_client
-            .expect_cpapi_instances_put()
-            .times(1)
-            .in_sequence(seq)
-            .return_once(move |id, state| {
-                assert_eq!(id, &test_uuid());
-                assert_eq!(
-                    InstanceState::from(&state.run_state),
-                    expected_state
-                );
-                tx.send(()).unwrap();
-                Ok(())
-            });
-        rx.map(|r| r.unwrap())
     }
 
     fn logger() -> Logger {
@@ -1032,95 +694,18 @@ mod test {
 
     #[tokio::test]
     #[serial_test::serial]
-    async fn start_then_stop() {
-        let log = logger();
-        let nic_id_allocator = IdAllocator::new();
-        let mut nexus_client = MockNexusClient::default();
-
-        // Set expectations about what will be seen (and when) by Nexus before
-        // the test begins. We no longer have mutable access to "nexus_client"
-        // when "Instance::new" is invoked, so we have to prepare early.
-        let mut seq = mockall::Sequence::new();
-        let create_fut = expect_state_transition(
-            &mut nexus_client,
-            &mut seq,
-            InstanceState::Creating,
-        );
-        let run_fut = expect_state_transition(
-            &mut nexus_client,
-            &mut seq,
-            InstanceState::Running,
-        );
-        let stop_fut = expect_state_transition(
-            &mut nexus_client,
-            &mut seq,
-            InstanceState::Stopped,
-        );
-
-        let ticket = InstanceTicket::null(test_uuid());
-
-        // Initialize and start the instance.
-        let inst = Instance::new(
-            log.clone(),
-            test_uuid(),
-            nic_id_allocator,
-            new_initial_instance(),
-            None,
-            Arc::new(nexus_client),
-        )
-        .unwrap();
-        execute_instance_start(&inst, ticket).await;
-        create_fut.await;
-
-        // Start running the instance.
-        inst.transition(InstanceRuntimeStateRequested {
-            run_state: InstanceStateRequested::Running,
-            migration_params: None,
-        })
-        .await
-        .unwrap();
-        run_fut.await;
-
-        // Stop the instance.
-        // This terminates the zone to preserve per-sled resources.
-        let zone_halt_and_remove_ctx = MockZones::halt_and_remove_context();
-        zone_halt_and_remove_ctx
-            .expect()
-            .times(1)
-            .in_sequence(&mut seq)
-            .returning(|_, _| Ok(()));
-        let dladm_delete_vnic_ctx = Dladm::delete_vnic_context();
-        dladm_delete_vnic_ctx
-            .expect()
-            .times(1)
-            .in_sequence(&mut seq)
-            .returning(|vnic| {
-                assert_eq!(vnic, control_vnic_name(0));
-                Ok(())
-            });
-        inst.transition(InstanceRuntimeStateRequested {
-            run_state: InstanceStateRequested::Stopped,
-            migration_params: None,
-        })
-        .await
-        .unwrap();
-        stop_fut.await;
-    }
-
-    #[tokio::test]
-    #[serial_test::serial]
     #[should_panic(
         expected = "Propolis client should be initialized before usage"
     )]
     async fn transition_before_start() {
         let log = logger();
-        let nic_id_allocator = IdAllocator::new();
+        let vnic_allocator = VnicAllocator::new("Test".to_string());
         let nexus_client = MockNexusClient::default();
 
         let inst = Instance::new(
             log.clone(),
             test_uuid(),
-            nic_id_allocator,
+            vnic_allocator,
             new_initial_instance(),
             None,
             Arc::new(nexus_client),

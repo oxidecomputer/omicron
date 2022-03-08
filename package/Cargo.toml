@@ -7,8 +7,9 @@ license = "MPL-2.0"
 [dependencies]
 anyhow = "1.0"
 crossbeam = "0.8"
+flate2 = "1.0.22"
 omicron-common = { path = "../common" }
-
+omicron-zone-package = { version = "0.1.2" }
 # We depend on the propolis-server here -- a binary, not a library -- to
 # make it visible to the packaging tool, which can compile it and shove
 # it in a tarball.
@@ -20,6 +21,7 @@ serde_derive = "1.0"
 smf = "0.2"
 structopt = "0.3"
 tar = "0.4"
+tempfile = "3.3"
 thiserror = "1.0"
 tokio = { version = "1.17", features = [ "full" ] }
 toml = "0.5.6"

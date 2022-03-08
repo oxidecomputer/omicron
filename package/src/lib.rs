@@ -33,16 +33,6 @@ pub enum SubCommand {
         /// Defaults to "out".
         #[structopt(long = "out", default_value = "out")]
         artifact_dir: PathBuf,
-
-        /// The binary profile to package.
-        ///
-        /// True: release, False: debug (default).
-        #[structopt(
-            short,
-            long,
-            help = "True if bundling release-mode binaries"
-        )]
-        release: bool,
     },
     /// Checks the packages specified in a manifest, without building.
     Check,

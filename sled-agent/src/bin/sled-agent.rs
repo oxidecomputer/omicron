@@ -4,6 +4,8 @@
 
 //! Executable program to run the sled agent
 
+#![feature(async_closure)]
+
 use dropshot::ConfigDropshot;
 use dropshot::ConfigLogging;
 use dropshot::ConfigLoggingLevel;
@@ -11,14 +13,12 @@ use omicron_common::api::external::Error;
 use omicron_common::cmd::fatal;
 use omicron_common::cmd::CmdError;
 use omicron_sled_agent::bootstrap::{
-    config::Config as BootstrapConfig, server as bootstrap_server,
+    config::Config as BootstrapConfig, config::SetupServiceConfig as RssConfig,
+    server as bootstrap_server,
 };
-use omicron_sled_agent::{
-    common::vlan::VlanID, config::Config as SledConfig, server as sled_server,
-};
-use std::net::SocketAddr;
+use omicron_sled_agent::{config::Config as SledConfig, server as sled_server};
+use std::path::PathBuf;
 use structopt::StructOpt;
-use uuid::Uuid;
 
 #[derive(Debug)]
 enum ApiRequest {
@@ -54,29 +54,8 @@ enum Args {
     },
     /// Runs the Sled Agent server.
     Run {
-        /// UUID of the Sled Agent.
-        #[structopt(name = "SA_UUID", parse(try_from_str))]
-        uuid: Uuid,
-
-        /// Socket address of the bootstrap agent.
-        #[structopt(name = "BA_IP:PORT", parse(try_from_str))]
-        bootstrap_agent_addr: SocketAddr,
-
-        /// Socket address of the sled agent.
-        #[structopt(name = "SA_IP:PORT", parse(try_from_str))]
-        sled_agent_addr: SocketAddr,
-
-        /// Socket address of Nexus.
-        #[structopt(name = "NEXUS_IP:PORT", parse(try_from_str))]
-        nexus_addr: SocketAddr,
-
-        /// Optional VLAN, tagged on all guest NICs.
-        #[structopt(long = "vlan")]
-        vlan: Option<VlanID>,
-
-        /// Optional list of zpools managed by Sled agent.
-        #[structopt(long = "zpools", name = "zpools", parse(try_from_str))]
-        zpools: Option<Vec<String>>,
+        #[structopt(name = "CONFIG_FILE_PATH", parse(from_os_str))]
+        config_path: PathBuf,
     },
 }
 
@@ -101,55 +80,73 @@ async fn do_run() -> Result<(), CmdError> {
                 sled_server::run_openapi().map_err(CmdError::Failure)
             }
         },
-        Args::Run {
-            uuid,
-            bootstrap_agent_addr,
-            sled_agent_addr,
-            nexus_addr,
-            vlan,
-            zpools,
-        } => {
+        Args::Run { config_path } => {
+            let config = SledConfig::from_file(&config_path)
+                .map_err(|e| CmdError::Failure(e.to_string()))?;
+
+            // - Sled agent starts with the normal config file - typically
+            // called "config.toml".
+            // - Thing-flinger likes allowing "sled-specific" configs to arrive
+            // by overlaying files in the package...
+            // - ... so we need a way to *possibly* supply this extra config,
+            // without otherwise changing the package.
+            //
+            // This means we must possibly ingest a config file, without
+            // *explicitly* being told about it.
+            //
+            // Hence, this approach: look around in the same directory as the
+            // expected config file.
+            let rss_config_path = {
+                let mut rss_config_path = config_path.clone();
+                rss_config_path.pop();
+                rss_config_path.push("config-rss.toml");
+                rss_config_path
+            };
+            let rss_config = if rss_config_path.exists() {
+                Some(
+                    RssConfig::from_file(rss_config_path)
+                        .map_err(|e| CmdError::Failure(e.to_string()))?,
+                )
+            } else {
+                None
+            };
+
             // Configure and run the Bootstrap server.
-            let config = BootstrapConfig {
-                id: uuid,
+            let bootstrap_config = BootstrapConfig {
+                id: config.id,
                 dropshot: ConfigDropshot {
-                    bind_address: bootstrap_agent_addr,
+                    bind_address: config.bootstrap_address,
                     ..Default::default()
                 },
                 log: ConfigLogging::StderrTerminal {
                     level: ConfigLoggingLevel::Info,
                 },
+                rss_config,
             };
-            let boot_server = bootstrap_server::Server::start(&config)
-                .await
-                .map_err(CmdError::Failure)?;
-
-            // Configure and run the Sled server now that we've reached a
-            // quorum.
-            let config = SledConfig {
-                id: uuid,
-                nexus_address: nexus_addr,
-                dropshot: ConfigDropshot {
-                    bind_address: sled_agent_addr,
-                    ..Default::default()
-                },
-                log: ConfigLogging::StderrTerminal {
-                    level: ConfigLoggingLevel::Info,
-                },
-                vlan,
-                zpools,
+            let run_bootstrap = async move || -> Result<(), CmdError> {
+                bootstrap_server::Server::start(&bootstrap_config)
+                    .await
+                    .map_err(CmdError::Failure)?
+                    .wait_for_finish()
+                    .await
+                    .map_err(CmdError::Failure)
             };
 
-            let sled_server = sled_server::Server::start(&config)
-                .await
-                .map_err(CmdError::Failure)?;
+            let run_sled_server = async move || -> Result<(), CmdError> {
+                sled_server::Server::start(&config)
+                    .await
+                    .map_err(CmdError::Failure)?
+                    .wait_for_finish()
+                    .await
+                    .map_err(CmdError::Failure)
+            };
 
             tokio::select! {
-                _ = boot_server.wait_for_finish() => {
-                    eprintln!("Boot server exited unexpectedly");
+                Err(e) = run_bootstrap() => {
+                    eprintln!("Boot server exited unexpectedly: {:?}", e);
                 },
-                _ = sled_server.wait_for_finish() => {
-                    eprintln!("Sled server exited unexpectedly");
+                Err(e) = run_sled_server() => {
+                    eprintln!("Sled server exited unexpectedly: {:?}", e);
                 },
             }
             Ok(())
