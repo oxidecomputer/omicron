@@ -511,9 +511,9 @@ dependencies = [
 
 [[package]]
 name = "crc32fast"
-version = "1.3.1"
+version = "1.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a2209c310e29876f7f0b2721e7e26b84aff178aa3da5d091f9bfbf47669e60e3"
+checksum = "b540bd8bc810d3885c6ea91e2018302f68baba2129ab3e88f32389ee9370880d"
 dependencies = [
  "cfg-if",
 ]
@@ -3097,7 +3097,7 @@ dependencies = [
 [[package]]
 name = "progenitor"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/progenitor#579260a943e3c14f2239b1ea9730a20961fbc6bd"
+source = "git+https://github.com/oxidecomputer/progenitor#305635e779f29321878c6ea737c2348c5b521647"
 dependencies = [
  "anyhow",
  "getopts",
@@ -3112,7 +3112,7 @@ dependencies = [
 [[package]]
 name = "progenitor-client"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/progenitor#579260a943e3c14f2239b1ea9730a20961fbc6bd"
+source = "git+https://github.com/oxidecomputer/progenitor#305635e779f29321878c6ea737c2348c5b521647"
 dependencies = [
  "percent-encoding",
  "reqwest",
@@ -3123,7 +3123,7 @@ dependencies = [
 [[package]]
 name = "progenitor-impl"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/progenitor#579260a943e3c14f2239b1ea9730a20961fbc6bd"
+source = "git+https://github.com/oxidecomputer/progenitor#305635e779f29321878c6ea737c2348c5b521647"
 dependencies = [
  "convert_case 0.4.0",
  "getopts",
@@ -3145,7 +3145,7 @@ dependencies = [
 [[package]]
 name = "progenitor-macro"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/progenitor#579260a943e3c14f2239b1ea9730a20961fbc6bd"
+source = "git+https://github.com/oxidecomputer/progenitor#305635e779f29321878c6ea737c2348c5b521647"
 dependencies = [
  "openapiv3",
  "proc-macro2",
@@ -4740,7 +4740,7 @@ checksum = "b63708a265f51345575b27fe43f9500ad611579e764c79edbc2037b1121959ec"
 [[package]]
 name = "typify"
 version = "0.0.6-dev"
-source = "git+https://github.com/oxidecomputer/typify#b712fe6d643a8cf88fc1d5020cb0583a69a76c9b"
+source = "git+https://github.com/oxidecomputer/typify#8316b7d227eeec59d854279e947b1882ae2c635a"
 dependencies = [
  "typify-impl",
  "typify-macro",
@@ -4749,7 +4749,7 @@ dependencies = [
 [[package]]
 name = "typify-impl"
 version = "0.0.6-dev"
-source = "git+https://github.com/oxidecomputer/typify#b712fe6d643a8cf88fc1d5020cb0583a69a76c9b"
+source = "git+https://github.com/oxidecomputer/typify#8316b7d227eeec59d854279e947b1882ae2c635a"
 dependencies = [
  "convert_case 0.4.0",
  "log",
@@ -4766,7 +4766,7 @@ dependencies = [
 [[package]]
 name = "typify-macro"
 version = "0.0.6-dev"
-source = "git+https://github.com/oxidecomputer/typify#b712fe6d643a8cf88fc1d5020cb0583a69a76c9b"
+source = "git+https://github.com/oxidecomputer/typify#8316b7d227eeec59d854279e947b1882ae2c635a"
 dependencies = [
  "proc-macro2",
  "quote",
