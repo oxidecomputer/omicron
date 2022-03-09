@@ -1130,8 +1130,10 @@ async fn project_vpcs_get(
     let organization_name = &path.organization_name;
     let project_name = &path.project_name;
     let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
         let vpcs = nexus
             .project_list_vpcs(
+                &opctx,
                 &organization_name,
                 &project_name,
                 &data_page_params_for(&rqctx, &query)?
@@ -1176,8 +1178,9 @@ async fn project_vpcs_get_vpc(
     let project_name = &path.project_name;
     let vpc_name = &path.vpc_name;
     let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
         let vpc = nexus
-            .project_lookup_vpc(&organization_name, &project_name, &vpc_name)
+            .vpc_fetch(&opctx, &organization_name, &project_name, &vpc_name)
             .await?;
         Ok(HttpResponseOk(vpc.into()))
     };

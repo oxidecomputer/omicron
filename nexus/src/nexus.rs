@@ -1591,17 +1591,19 @@ impl Nexus {
 
     pub async fn project_list_vpcs(
         &self,
+        opctx: &OpContext,
         organization_name: &Name,
         project_name: &Name,
         pagparams: &DataPageParams<'_, Name>,
     ) -> ListResultVec<db::model::Vpc> {
-        let project_id = self
+        let authz_project = self
             .db_datastore
             .project_lookup_by_path(organization_name, project_name)
-            .await?
-            .id();
-        let vpcs =
-            self.db_datastore.project_list_vpcs(&project_id, pagparams).await?;
+            .await?;
+        let vpcs = self
+            .db_datastore
+            .project_list_vpcs(&opctx, &authz_project, pagparams)
+            .await?;
         Ok(vpcs)
     }
 
@@ -1736,6 +1738,25 @@ impl Nexus {
         Ok(())
     }
 
+    pub async fn vpc_fetch(
+        &self,
+        opctx: &OpContext,
+        organization_name: &Name,
+        project_name: &Name,
+        vpc_name: &Name,
+    ) -> LookupResult<db::model::Vpc> {
+        let authz_project = self
+            .db_datastore
+            .project_lookup_by_path(organization_name, project_name)
+            .await?;
+        Ok(self
+            .db_datastore
+            .vpc_fetch(opctx, &authz_project, vpc_name)
+            .await?
+            .1)
+    }
+
+    // XXX revisit this function and its callers
     pub async fn project_lookup_vpc(
         &self,
         organization_name: &Name,

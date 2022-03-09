@@ -2012,18 +2012,74 @@ impl DataStore {
 
     // VPCs
 
+    /// Fetches a Vpc from the database and returns both the database row
+    /// and an [`authz::Vpc`] for doing authz checks
+    ///
+    /// See [`DataStore::organization_lookup_noauthz()`] for intended use cases
+    /// and caveats.
+    // TODO-security See the note on organization_lookup_noauthz().
+    async fn vpc_lookup_noauthz(
+        &self,
+        authz_project: &authz::Project,
+        vpc_name: &Name,
+    ) -> LookupResult<(authz::Vpc, Vpc)> {
+        use db::schema::vpc::dsl;
+        dsl::vpc
+            .filter(dsl::time_deleted.is_null())
+            .filter(dsl::project_id.eq(authz_project.id()))
+            .filter(dsl::name.eq(vpc_name.clone()))
+            .select(Vpc::as_select())
+            .first_async(self.pool())
+            .await
+            .map_err(|e| {
+                public_error_from_diesel_pool(
+                    e,
+                    ErrorHandler::NotFoundByLookup(
+                        ResourceType::Vpc,
+                        LookupType::ByName(vpc_name.as_str().to_owned()),
+                    ),
+                )
+            })
+            .map(|d| {
+                (
+                    authz_project.child_generic(
+                        ResourceType::Vpc,
+                        d.id(),
+                        LookupType::from(&vpc_name.0),
+                    ),
+                    d,
+                )
+            })
+    }
+
+    /// Lookup a Vpc by name and return the full database record, along
+    /// with an [`authz::Vpc`] for subsequent authorization checks
+    pub async fn vpc_fetch(
+        &self,
+        opctx: &OpContext,
+        authz_project: &authz::Project,
+        name: &Name,
+    ) -> LookupResult<(authz::Vpc, Vpc)> {
+        let (authz_vpc, db_vpc) =
+            self.vpc_lookup_noauthz(authz_project, name).await?;
+        opctx.authorize(authz::Action::Read, &authz_vpc).await?;
+        Ok((authz_vpc, db_vpc))
+    }
+
     pub async fn project_list_vpcs(
         &self,
-        project_id: &Uuid,
+        opctx: &OpContext,
+        authz_project: &authz::Project,
         pagparams: &DataPageParams<'_, Name>,
     ) -> ListResultVec<Vpc> {
-        use db::schema::vpc::dsl;
+        opctx.authorize(authz::Action::ListChildren, authz_project).await?;
 
+        use db::schema::vpc::dsl;
         paginated(dsl::vpc, dsl::name, &pagparams)
             .filter(dsl::time_deleted.is_null())
-            .filter(dsl::project_id.eq(*project_id))
+            .filter(dsl::project_id.eq(authz_project.id()))
             .select(Vpc::as_select())
-            .load_async(self.pool())
+            .load_async(self.pool_authorized(opctx).await?)
             .await
             .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
     }
@@ -2073,6 +2129,7 @@ impl DataStore {
         Ok(())
     }
 
+    // XXX remove
     pub async fn vpc_fetch_by_name(
         &self,
         project_id: &Uuid,
