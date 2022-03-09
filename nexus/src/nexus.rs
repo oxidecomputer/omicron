@@ -1763,7 +1763,9 @@ impl Nexus {
             .1)
     }
 
-    // XXX revisit this function and its callers
+    // TODO-security TODO-cleanup Remove this function.  Callers should use
+    // vpc_lookup_by_path() / vpc_fetch() instead, or we should create a more
+    // useful pattern for looking up records by path (e.g., *_fetch_by_path()).
     pub async fn project_lookup_vpc(
         &self,
         organization_name: &Name,

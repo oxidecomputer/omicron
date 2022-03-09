@@ -36,7 +36,6 @@ async fn test_vpcs(cptestctx: &ControlPlaneTestContext) {
     let project_name2 = "pokemon";
     let _ = create_project(&client, &org_name, &project_name2).await;
 
-    // XXX Lots of these need fixing
     /* List vpcs.  We see the default VPC, and nothing else. */
     let mut vpcs = vpcs_list(&client, &vpcs_url).await;
     assert_eq!(vpcs.len(), 1);

@@ -2153,7 +2153,8 @@ impl DataStore {
             })
     }
 
-    // XXX remove
+    // TODO-security TODO-cleanup Remove this function.  Update callers to use
+    // vpc_lookup_by_path() or vpc_fetch() instead.
     pub async fn vpc_fetch_by_name(
         &self,
         project_id: &Uuid,
