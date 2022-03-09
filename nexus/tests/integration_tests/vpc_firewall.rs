@@ -2,8 +2,15 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+use dropshot::test_util::object_get;
 use http::method::Method;
 use http::StatusCode;
+use nexus_test_utils::http_testing::{AuthnMode, NexusRequest};
+use nexus_test_utils::resource_helpers::{
+    create_organization, create_project, create_vpc,
+};
+use nexus_test_utils::ControlPlaneTestContext;
+use nexus_test_utils_macros::nexus_test;
 use omicron_common::api::external::{
     IdentityMetadata, L4Port, L4PortRange, VpcFirewallRule,
     VpcFirewallRuleAction, VpcFirewallRuleDirection, VpcFirewallRuleFilter,
@@ -14,14 +21,6 @@ use omicron_common::api::external::{
 use omicron_nexus::external_api::views::Vpc;
 use std::convert::TryFrom;
 use uuid::Uuid;
-
-use dropshot::test_util::{object_delete, object_get};
-
-use nexus_test_utils::resource_helpers::{
-    create_organization, create_project, create_vpc,
-};
-use nexus_test_utils::ControlPlaneTestContext;
-use nexus_test_utils_macros::nexus_test;
 
 #[nexus_test]
 async fn test_vpc_firewall(cptestctx: &ControlPlaneTestContext) {
@@ -37,7 +36,13 @@ async fn test_vpc_firewall(cptestctx: &ControlPlaneTestContext) {
 
     // Each project has a default VPC. Make sure it has the default rules.
     let default_vpc_url = format!("{}/default", vpcs_url);
-    let default_vpc = object_get::<Vpc>(client, &default_vpc_url).await;
+    let default_vpc: Vpc = NexusRequest::object_get(client, &default_vpc_url)
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .unwrap()
+        .parsed_body()
+        .unwrap();
 
     let default_vpc_firewall = format!("{}/firewall/rules", default_vpc_url);
     let rules = object_get::<VpcFirewallRules>(client, &default_vpc_firewall)
@@ -127,7 +132,14 @@ async fn test_vpc_firewall(cptestctx: &ControlPlaneTestContext) {
         .await;
 
     // Delete a VPC and ensure we can't read its firewall anymore
-    object_delete(client, format!("{}/{}", vpcs_url, other_vpc).as_str()).await;
+    NexusRequest::object_delete(
+        client,
+        format!("{}/{}", vpcs_url, other_vpc).as_str(),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap();
     client
         .make_request_error(
             Method::GET,
