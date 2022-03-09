@@ -2185,6 +2185,8 @@ impl DataStore {
         opctx: &OpContext,
         authz_vpc: &authz::Vpc,
     ) -> DeleteResult {
+        opctx.authorize(authz::Action::Delete, authz_vpc).await?;
+
         use db::schema::vpc::dsl;
 
         // Note that we don't ensure the firewall rules are empty here, because
