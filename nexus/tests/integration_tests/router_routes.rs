@@ -2,7 +2,8 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use std::net::{IpAddr, Ipv4Addr};
+use std::net::IpAddr;
+use std::net::Ipv4Addr;
 
 use dropshot::test_util::{
     object_delete, object_get, objects_list_page, objects_post,
@@ -107,7 +108,7 @@ async fn test_router_routes(cptestctx: &ControlPlaneTestContext) {
                 name: route_name.parse().unwrap(),
                 description: "It's a route, what else can I say?".to_string(),
             },
-            target: RouteTarget::Ip(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1))),
+            target: RouteTarget::Ip(IpAddr::from(Ipv4Addr::new(127, 0, 0, 1))),
             destination: RouteDestination::Subnet("loopback".parse().unwrap()),
         },
     )
@@ -119,7 +120,7 @@ async fn test_router_routes(cptestctx: &ControlPlaneTestContext) {
     assert_eq!(route.kind, RouterRouteKind::Custom);
     assert_eq!(
         route.target,
-        RouteTarget::Ip(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)))
+        RouteTarget::Ip(IpAddr::from(Ipv4Addr::new(127, 0, 0, 1)))
     );
     assert_eq!(
         route.destination,
@@ -136,7 +137,7 @@ async fn test_router_routes(cptestctx: &ControlPlaneTestContext) {
                     name: Some(route_name.parse().unwrap()),
                     description: None,
                 },
-                target: RouteTarget::Ip(IpAddr::V4(Ipv4Addr::new(
+                target: RouteTarget::Ip(IpAddr::from(Ipv4Addr::new(
                     192, 168, 1, 1,
                 ))),
                 destination: RouteDestination::Subnet(
@@ -152,7 +153,7 @@ async fn test_router_routes(cptestctx: &ControlPlaneTestContext) {
     assert_eq!(route.identity.name, route_name);
     assert_eq!(
         route.target,
-        RouteTarget::Ip(IpAddr::V4(Ipv4Addr::new(192, 168, 1, 1,)))
+        RouteTarget::Ip(IpAddr::from(Ipv4Addr::new(192, 168, 1, 1,)))
     );
 
     object_delete(client, route_url.as_str()).await;
