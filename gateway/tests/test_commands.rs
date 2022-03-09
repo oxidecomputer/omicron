@@ -19,7 +19,7 @@ fn path_to_gateway() -> PathBuf {
 }
 
 #[test]
-fn test_sled_agent_openapi_sled() {
+fn test_gateway_openapi_sled() {
     let exec = Exec::cmd(path_to_gateway())
         .arg("--openapi")
         .arg("examples/config.toml");

@@ -13,45 +13,30 @@
     "/ignition": {
       "get": {
         "summary": "List SPs via Ignition",
-        "description": "List the SPs via the Ignition controller. This mechanism retrieves less information than over the management network, however it is lower latency and has fewer moving pieces that could result in delayed responses or unknown states.\nThis interface queries ignition via its associated SP. As this interface may be unreliable, consumers may optionally override the default.",
+        "description": "Retreive information for all SPs via the Ignition controller. This is lower latency and has fewer possible failure modes than querying the SP over the management network.",
         "operationId": "ignition_list",
-        "parameters": [
-          {
-            "in": "query",
-            "name": "limit",
-            "schema": {
-              "nullable": true,
-              "description": "Maximum number of items returned by a single call",
-              "type": "integer",
-              "format": "uint32",
-              "minimum": 1
-            },
-            "style": "form"
-          },
-          {
-            "in": "query",
-            "name": "page_token",
-            "schema": {
-              "nullable": true,
-              "description": "Token returned by previous call to retreive the subsequent page",
-              "type": "string"
-            },
-            "style": "form"
-          }
-        ],
         "responses": {
           "200": {
             "description": "successful operation",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/SpIgnitionInfoResultsPage"
+                  "title": "Array_of_SpIgnitionInfo",
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/SpIgnitionInfo"
+                  }
                 }
               }
             }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
           }
-        },
-        "x-dropshot-pagination": true
+        }
       }
     },
     "/ignition/{type}/{slot}": {
@@ -91,6 +76,12 @@
                 }
               }
             }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
           }
         }
       }
@@ -104,9 +95,9 @@
           {
             "in": "query",
             "name": "limit",
+            "description": "Maximum number of items returned by a single call",
             "schema": {
               "nullable": true,
-              "description": "Maximum number of items returned by a single call",
               "type": "integer",
               "format": "uint32",
               "minimum": 1
@@ -116,16 +107,16 @@
           {
             "in": "query",
             "name": "page_token",
+            "description": "Token returned by previous call to retreive the subsequent page",
             "schema": {
               "nullable": true,
-              "description": "Token returned by previous call to retreive the subsequent page",
               "type": "string"
             },
             "style": "form"
           },
           {
             "in": "query",
-            "name": "timeout",
+            "name": "timeout_millis",
             "schema": {
               "nullable": true,
               "type": "integer",
@@ -145,6 +136,12 @@
                 }
               }
             }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
           }
         },
         "x-dropshot-pagination": true
@@ -178,7 +175,7 @@
           },
           {
             "in": "query",
-            "name": "timeout",
+            "name": "timeout_millis",
             "schema": {
               "nullable": true,
               "type": "integer",
@@ -198,6 +195,12 @@
                 }
               }
             }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
           }
         }
       }
@@ -231,9 +234,9 @@
           {
             "in": "query",
             "name": "limit",
+            "description": "Maximum number of items returned by a single call",
             "schema": {
               "nullable": true,
-              "description": "Maximum number of items returned by a single call",
               "type": "integer",
               "format": "uint32",
               "minimum": 1
@@ -243,16 +246,16 @@
           {
             "in": "query",
             "name": "page_token",
+            "description": "Token returned by previous call to retreive the subsequent page",
             "schema": {
               "nullable": true,
-              "description": "Token returned by previous call to retreive the subsequent page",
               "type": "string"
             },
             "style": "form"
           },
           {
             "in": "query",
-            "name": "timeout",
+            "name": "timeout_millis",
             "schema": {
               "nullable": true,
               "type": "integer",
@@ -272,6 +275,12 @@
                 }
               }
             }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
           }
         },
         "x-dropshot-pagination": true
@@ -286,9 +295,9 @@
           {
             "in": "path",
             "name": "component",
+            "description": "ID for the component of the SP; this is the internal identifier used by the SP itself to identify its components.",
             "required": true,
             "schema": {
-              "description": "ID for the component of the SP; this is the internal identifier used by the SP itself to identify its components.",
               "type": "string"
             },
             "style": "simple"
@@ -315,7 +324,7 @@
           },
           {
             "in": "query",
-            "name": "timeout",
+            "name": "timeout_millis",
             "schema": {
               "nullable": true,
               "type": "integer",
@@ -335,6 +344,12 @@
                 }
               }
             }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
           }
         }
       }
@@ -348,9 +363,9 @@
           {
             "in": "path",
             "name": "component",
+            "description": "ID for the component of the SP; this is the internal identifier used by the SP itself to identify its components.",
             "required": true,
             "schema": {
-              "description": "ID for the component of the SP; this is the internal identifier used by the SP itself to identify its components.",
               "type": "string"
             },
             "style": "simple"
@@ -379,6 +394,12 @@
         "responses": {
           "204": {
             "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
           }
         }
       }
@@ -392,9 +413,9 @@
           {
             "in": "path",
             "name": "component",
+            "description": "ID for the component of the SP; this is the internal identifier used by the SP itself to identify its components.",
             "required": true,
             "schema": {
-              "description": "ID for the component of the SP; this is the internal identifier used by the SP itself to identify its components.",
               "type": "string"
             },
             "style": "simple"
@@ -423,6 +444,12 @@
         "responses": {
           "204": {
             "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
           }
         }
       }
@@ -436,9 +463,9 @@
           {
             "in": "path",
             "name": "component",
+            "description": "ID for the component of the SP; this is the internal identifier used by the SP itself to identify its components.",
             "required": true,
             "schema": {
-              "description": "ID for the component of the SP; this is the internal identifier used by the SP itself to identify its components.",
               "type": "string"
             },
             "style": "simple"
@@ -474,6 +501,12 @@
                 }
               }
             }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
           }
         }
       },
@@ -485,9 +518,9 @@
           {
             "in": "path",
             "name": "component",
+            "description": "ID for the component of the SP; this is the internal identifier used by the SP itself to identify its components.",
             "required": true,
             "schema": {
-              "description": "ID for the component of the SP; this is the internal identifier used by the SP itself to identify its components.",
               "type": "string"
             },
             "style": "simple"
@@ -527,6 +560,12 @@
         "responses": {
           "204": {
             "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
           }
         }
       }
@@ -540,9 +579,9 @@
           {
             "in": "path",
             "name": "component",
+            "description": "ID for the component of the SP; this is the internal identifier used by the SP itself to identify its components.",
             "required": true,
             "schema": {
-              "description": "ID for the component of the SP; this is the internal identifier used by the SP itself to identify its components.",
               "type": "string"
             },
             "style": "simple"
@@ -588,6 +627,12 @@
                 }
               }
             }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
           }
         }
       }
@@ -619,15 +664,14 @@
           }
         ],
         "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/SpIgnitionInfo"
-                }
-              }
-            }
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
           }
         }
       }
@@ -659,22 +703,52 @@
           }
         ],
         "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/SpIgnitionInfo"
-                }
-              }
-            }
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
           }
         }
       }
     }
   },
   "components": {
+    "responses": {
+      "Error": {
+        "description": "Error",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      }
+    },
     "schemas": {
+      "Error": {
+        "description": "Error information from a response.",
+        "type": "object",
+        "properties": {
+          "error_code": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          },
+          "request_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "message",
+          "request_id"
+        ]
+      },
       "SerialConsoleChunk": {
         "description": "A chunk of serial console data: either actual data, or an amount of data we missed (presumably due to dropped packets or something similar).",
         "oneOf": [
@@ -866,27 +940,6 @@
         "required": [
           "details",
           "id"
-        ]
-      },
-      "SpIgnitionInfoResultsPage": {
-        "description": "A single page of results",
-        "type": "object",
-        "properties": {
-          "items": {
-            "description": "list of items on this page of results",
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/SpIgnitionInfo"
-            }
-          },
-          "next_page": {
-            "nullable": true,
-            "description": "token used to fetch the next page of results (if any)",
-            "type": "string"
-          }
-        },
-        "required": [
-          "items"
         ]
       },
       "SpInfo": {
