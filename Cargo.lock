@@ -1942,6 +1942,7 @@ dependencies = [
  "clap 3.1.6",
  "dropshot",
  "expectorate",
+ "futures",
  "gateway-messages",
  "hex",
  "omicron-common",
