@@ -27,3 +27,11 @@ features = [ "max_level_trace", "release_max_level_debug" ]
 [dependencies.tokio]
 version = "1.16"
 features = [ "full" ]
+
+[dev-dependencies]
+expectorate = "1.0.4"
+omicron-test-utils = { path = "../test-utils" }
+openapi-lint = { git = "https://github.com/oxidecomputer/openapi-lint", branch = "main" }
+openapiv3 = "1.0"
+serde_json = "1.0"
+subprocess = "0.2.8"
