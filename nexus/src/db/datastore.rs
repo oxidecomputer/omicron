@@ -2084,14 +2084,21 @@ impl DataStore {
             .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
     }
 
-    pub async fn project_create_vpc(&self, vpc: Vpc) -> Result<Vpc, Error> {
+    pub async fn project_create_vpc(
+        &self,
+        opctx: &OpContext,
+        authz_project: &authz::Project,
+        vpc: Vpc,
+    ) -> Result<Vpc, Error> {
         use db::schema::vpc::dsl;
 
+        assert_eq!(authz_project.id(), vpc.project_id);
+        opctx.authorize(authz::Action::CreateChild, authz_project).await?;
+
+        // TODO-correctness Shouldn't this use "insert_resource"?
         let name = vpc.name().clone();
         let vpc = diesel::insert_into(dsl::vpc)
             .values(vpc)
-            .on_conflict(dsl::id)
-            .do_nothing()
             .returning(Vpc::as_returning())
             .get_result_async(self.pool())
             .await

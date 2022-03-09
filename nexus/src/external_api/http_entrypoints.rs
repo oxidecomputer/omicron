@@ -1207,8 +1207,10 @@ async fn project_vpcs_post(
     let project_name = &path.project_name;
     let new_vpc_params = &new_vpc.into_inner();
     let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
         let vpc = nexus
             .project_create_vpc(
+                &opctx,
                 &organization_name,
                 &project_name,
                 &new_vpc_params,

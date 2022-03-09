@@ -353,7 +353,7 @@ function cmd_vpc_create_demo
 {
 	[[ $# != 4 ]] && usage "expected ORGANIZATION_NAME PROJECT_NAME VPC_NAME DNS_NAME"
 	mkjson name="$3" dns_name="$4" description="a vpc called $3" |
-		do_curl "/organizations/$1/projects/$2/vpcs" -X POST -T -
+		do_curl_authn "/organizations/$1/projects/$2/vpcs" -X POST -T -
 }
 
 function cmd_vpc_get

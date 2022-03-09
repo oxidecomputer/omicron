@@ -578,6 +578,7 @@ impl Nexus {
         // Create a default VPC associated with the project.
         let _ = self
             .project_create_vpc(
+                opctx,
                 &organization_name,
                 &new_project.identity.name.clone().into(),
                 &params::VpcCreate {
@@ -1609,15 +1610,15 @@ impl Nexus {
 
     pub async fn project_create_vpc(
         &self,
+        opctx: &OpContext,
         organization_name: &Name,
         project_name: &Name,
         params: &params::VpcCreate,
     ) -> CreateResult<db::model::Vpc> {
-        let project_id = self
+        let authz_project = self
             .db_datastore
             .project_lookup_by_path(organization_name, project_name)
-            .await?
-            .id();
+            .await?;
         let vpc_id = Uuid::new_v4();
         let system_router_id = Uuid::new_v4();
         let default_route_id = Uuid::new_v4();
@@ -1668,11 +1669,14 @@ impl Nexus {
         self.db_datastore.router_create_route(route).await?;
         let vpc = db::model::Vpc::new(
             vpc_id,
-            project_id,
+            authz_project.id(),
             system_router_id,
             params.clone(),
         )?;
-        let vpc = self.db_datastore.project_create_vpc(vpc).await?;
+        let vpc = self
+            .db_datastore
+            .project_create_vpc(opctx, &authz_project, vpc)
+            .await?;
 
         // Allocate the first /64 sub-range from the requested or created
         // prefix.
@@ -1700,23 +1704,26 @@ impl Nexus {
             ipv6_block,
         );
 
-        // Create the subnet record in the database. Overlapping IP ranges should be translated
-        // into an internal error. That implies that there's already an existing VPC Subnet, but
-        // we're explicitly creating the _first_ VPC in the project. Something is wrong, and likely
-        // a bug in our code.
+        // Create the subnet record in the database. Overlapping IP ranges
+        // should be translated into an internal error. That implies that
+        // there's already an existing VPC Subnet, but we're explicitly creating
+        // the _first_ VPC in the project. Something is wrong, and likely a bug
+        // in our code.
         let _ = self.db_datastore.vpc_create_subnet(subnet).await.map_err(|err| {
             match err {
                 SubnetError::OverlappingIpRange => {
                     warn!(
                         self.log,
-                        "failed to create default VPC Subnet, found overlapping IP address ranges";
+                        "failed to create default VPC Subnet, \
+                        found overlapping IP address ranges";
                         "vpc_id" => ?vpc_id,
                         "subnet_id" => ?default_subnet_id,
                         "ipv4_block" => ?*defaults::DEFAULT_VPC_SUBNET_IPV4_BLOCK,
                         "ipv6_block" => ?ipv6_block,
                     );
                     external::Error::internal_error(
-                        "Failed to create default VPC Subnet, found overlapping IP address ranges"
+                        "Failed to create default VPC Subnet, \
+                        found overlapping IP address ranges"
                     )
                 },
                 SubnetError::External(e) => e,
