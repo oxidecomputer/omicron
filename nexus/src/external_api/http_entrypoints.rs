@@ -1238,8 +1238,10 @@ async fn project_vpcs_put_vpc(
     let nexus = &apictx.nexus;
     let path = path_params.into_inner();
     let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
         nexus
             .project_update_vpc(
+                &opctx,
                 &path.organization_name,
                 &path.project_name,
                 &path.vpc_name,

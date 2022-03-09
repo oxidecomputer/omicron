@@ -1780,21 +1780,19 @@ impl Nexus {
 
     pub async fn project_update_vpc(
         &self,
+        opctx: &OpContext,
         organization_name: &Name,
         project_name: &Name,
         vpc_name: &Name,
         params: &params::VpcUpdate,
     ) -> UpdateResult<()> {
-        let project_id = self
+        let authz_vpc = self
             .db_datastore
-            .project_lookup_by_path(organization_name, project_name)
-            .await?
-            .id();
-        let vpc =
-            self.db_datastore.vpc_fetch_by_name(&project_id, vpc_name).await?;
+            .vpc_lookup_by_path(organization_name, project_name, vpc_name)
+            .await?;
         Ok(self
             .db_datastore
-            .project_update_vpc(&vpc.id(), params.clone().into())
+            .project_update_vpc(opctx, &authz_vpc, params.clone().into())
             .await?)
     }
 

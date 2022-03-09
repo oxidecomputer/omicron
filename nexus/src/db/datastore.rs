@@ -2052,6 +2052,24 @@ impl DataStore {
             })
     }
 
+    /// Look up the id for a Vpc based on its name
+    ///
+    /// Returns an [`authz::Vpc`] (which makes the id available).
+    ///
+    /// Like the other "lookup_by_path()" functions, this function does no authz
+    /// checks.
+    pub async fn vpc_lookup_by_path(
+        &self,
+        organization_name: &Name,
+        project_name: &Name,
+        vpc_name: &Name,
+    ) -> LookupResult<authz::Vpc> {
+        let authz_project = self
+            .project_lookup_by_path(organization_name, project_name)
+            .await?;
+        self.vpc_lookup_noauthz(&authz_project, vpc_name).await.map(|(v, _)| v)
+    }
+
     /// Lookup a Vpc by name and return the full database record, along
     /// with an [`authz::Vpc`] for subsequent authorization checks
     pub async fn vpc_fetch(
@@ -2113,24 +2131,23 @@ impl DataStore {
 
     pub async fn project_update_vpc(
         &self,
-        vpc_id: &Uuid,
+        opctx: &OpContext,
+        authz_vpc: &authz::Vpc,
         updates: VpcUpdate,
     ) -> Result<(), Error> {
-        use db::schema::vpc::dsl;
+        opctx.authorize(authz::Action::Modify, authz_vpc).await?;
 
+        use db::schema::vpc::dsl;
         diesel::update(dsl::vpc)
             .filter(dsl::time_deleted.is_null())
-            .filter(dsl::id.eq(*vpc_id))
+            .filter(dsl::id.eq(authz_vpc.id()))
             .set(updates)
-            .execute_async(self.pool())
+            .execute_async(self.pool_authorized(opctx).await?)
             .await
             .map_err(|e| {
                 public_error_from_diesel_pool(
                     e,
-                    ErrorHandler::NotFoundByLookup(
-                        ResourceType::Vpc,
-                        LookupType::ById(*vpc_id),
-                    ),
+                    ErrorHandler::NotFoundByResource(authz_vpc),
                 )
             })?;
         Ok(())
