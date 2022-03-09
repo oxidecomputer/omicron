@@ -816,8 +816,8 @@ async fn sdc_create_volume_record_undo(
 ) -> Result<(), anyhow::Error> {
     let osagactx = sagactx.user_data();
 
-    let disk_id = sagactx.lookup::<Uuid>("disk_id")?;
-    osagactx.datastore().project_delete_disk_no_auth(&disk_id).await?;
+    let volume_id = sagactx.lookup::<Uuid>("volume_id")?;
+    osagactx.datastore().volume_delete(volume_id).await?;
     Ok(())
 }
 
