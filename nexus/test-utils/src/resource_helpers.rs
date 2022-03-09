@@ -2,6 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+use crate::http_testing::RequestBuilder;
 use crate::ControlPlaneTestContext;
 
 use super::http_testing::dropshot_compat::objects_post;
@@ -151,14 +152,14 @@ pub async fn create_vpc(
     project_name: &str,
     vpc_name: &str,
 ) -> Vpc {
-    objects_post(
+    object_create(
         &client,
         format!(
             "/organizations/{}/projects/{}/vpcs",
             &organization_name, &project_name
         )
         .as_str(),
-        params::VpcCreate {
+        &params::VpcCreate {
             identity: IdentityMetadataCreateParams {
                 name: vpc_name.parse().unwrap(),
                 description: "vpc description".to_string(),
@@ -179,25 +180,32 @@ pub async fn create_vpc_with_error(
     vpc_name: &str,
     status: StatusCode,
 ) -> HttpErrorResponseBody {
-    client
-        .make_request_error_body(
+    NexusRequest::new(
+        RequestBuilder::new(
+            client,
             Method::POST,
             format!(
                 "/organizations/{}/projects/{}/vpcs",
                 &organization_name, &project_name
             )
             .as_str(),
-            params::VpcCreate {
-                identity: IdentityMetadataCreateParams {
-                    name: vpc_name.parse().unwrap(),
-                    description: String::from("vpc description"),
-                },
-                ipv6_prefix: None,
-                dns_name: "abc".parse().unwrap(),
-            },
-            status,
         )
-        .await
+        .body(Some(&params::VpcCreate {
+            identity: IdentityMetadataCreateParams {
+                name: vpc_name.parse().unwrap(),
+                description: String::from("vpc description"),
+            },
+            ipv6_prefix: None,
+            dns_name: "abc".parse().unwrap(),
+        }))
+        .expect_status(Some(status)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap()
+    .parsed_body()
+    .unwrap()
 }
 
 pub async fn create_router(
