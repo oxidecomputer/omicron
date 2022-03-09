@@ -1233,13 +1233,13 @@ async fn project_vpcs_put_vpc(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<VpcPathParam>,
     updated_vpc: TypedBody<params::VpcUpdate>,
-) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+) -> Result<HttpResponseOk<Vpc>, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
     let path = path_params.into_inner();
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
-        nexus
+        let newvpc = nexus
             .project_update_vpc(
                 &opctx,
                 &path.organization_name,
@@ -1248,7 +1248,7 @@ async fn project_vpcs_put_vpc(
                 &updated_vpc.into_inner(),
             )
             .await?;
-        Ok(HttpResponseUpdatedNoContent())
+        Ok(HttpResponseOk(newvpc.into()))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }

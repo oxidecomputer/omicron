@@ -2134,7 +2134,7 @@ impl DataStore {
         opctx: &OpContext,
         authz_vpc: &authz::Vpc,
         updates: VpcUpdate,
-    ) -> Result<(), Error> {
+    ) -> UpdateResult<Vpc> {
         opctx.authorize(authz::Action::Modify, authz_vpc).await?;
 
         use db::schema::vpc::dsl;
@@ -2142,15 +2142,15 @@ impl DataStore {
             .filter(dsl::time_deleted.is_null())
             .filter(dsl::id.eq(authz_vpc.id()))
             .set(updates)
-            .execute_async(self.pool_authorized(opctx).await?)
+            .returning(Vpc::as_returning())
+            .get_result_async(self.pool_authorized(opctx).await?)
             .await
             .map_err(|e| {
                 public_error_from_diesel_pool(
                     e,
                     ErrorHandler::NotFoundByResource(authz_vpc),
                 )
-            })?;
-        Ok(())
+            })
     }
 
     // XXX remove

@@ -1785,15 +1785,14 @@ impl Nexus {
         project_name: &Name,
         vpc_name: &Name,
         params: &params::VpcUpdate,
-    ) -> UpdateResult<()> {
+    ) -> UpdateResult<db::model::Vpc> {
         let authz_vpc = self
             .db_datastore
             .vpc_lookup_by_path(organization_name, project_name, vpc_name)
             .await?;
-        Ok(self
-            .db_datastore
+        self.db_datastore
             .project_update_vpc(opctx, &authz_vpc, params.clone().into())
-            .await?)
+            .await
     }
 
     pub async fn project_delete_vpc(
