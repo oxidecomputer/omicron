@@ -107,6 +107,11 @@ lazy_static! {
             url: &*DEMO_ORG_PROJECTS_URL,
             body: serde_json::to_value(&*DEMO_PROJECT_CREATE).unwrap(),
         },
+        // Create a VPC in the Project
+        SetupReq {
+            url: &*DEMO_PROJECT_URL_VPCS,
+            body: serde_json::to_value(&*DEMO_VPC_CREATE).unwrap(),
+        },
         // Create a Disk in the Project
         SetupReq {
             url: &*DEMO_PROJECT_URL_DISKS,
@@ -141,12 +146,28 @@ lazy_static! {
         format!("{}/disks", *DEMO_PROJECT_URL);
     static ref DEMO_PROJECT_URL_INSTANCES: String =
         format!("{}/instances", *DEMO_PROJECT_URL);
+    static ref DEMO_PROJECT_URL_VPCS: String =
+        format!("{}/vpcs", *DEMO_PROJECT_URL);
     static ref DEMO_PROJECT_CREATE: params::ProjectCreate =
         params::ProjectCreate {
             identity: IdentityMetadataCreateParams {
                 name: DEMO_PROJECT_NAME.clone(),
                 description: "".parse().unwrap(),
             },
+        };
+
+    // VPC used for testing
+    static ref DEMO_VPC_NAME: Name = "demo-vpc".parse().unwrap();
+    static ref DEMO_VPC_URL: String =
+        format!("{}/{}", *DEMO_PROJECT_URL_VPCS, *DEMO_VPC_NAME);
+    static ref DEMO_VPC_CREATE: params::VpcCreate =
+        params::VpcCreate {
+            identity: IdentityMetadataCreateParams {
+                name: DEMO_VPC_NAME.clone(),
+                description: "".parse().unwrap(),
+            },
+            ipv6_prefix: None,
+            dns_name: DEMO_VPC_NAME.clone(),
         };
 
     // Disk used for testing
@@ -350,6 +371,36 @@ lazy_static! {
                         },
                     }).unwrap()
                 ),
+            ],
+        },
+
+        /* VPCs */
+        VerifyEndpoint {
+            url: &*DEMO_PROJECT_URL_VPCS,
+            visibility: Visibility::Protected,
+            allowed_methods: vec![
+                AllowedMethod::Get,
+                AllowedMethod::Post(
+                    serde_json::to_value(&*DEMO_VPC_CREATE).unwrap()
+                ),
+            ],
+        },
+
+        VerifyEndpoint {
+            url: &*DEMO_VPC_URL,
+            visibility: Visibility::Protected,
+            allowed_methods: vec![
+                AllowedMethod::Get,
+                AllowedMethod::Put(
+                    serde_json::to_value(&params::VpcUpdate {
+                        identity: IdentityMetadataUpdateParams {
+                            name: None,
+                            description: Some("different".to_string())
+                        },
+                        dns_name: None,
+                    }).unwrap()
+                ),
+                AllowedMethod::Delete,
             ],
         },
 
