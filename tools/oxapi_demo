@@ -365,7 +365,7 @@ function cmd_vpc_get
 function cmd_vpc_delete
 {
 	[[ $# != 3 ]] && usage "expected ORGANIZATION_NAME PROJECT_NAME VPC_NAME"
-	do_curl "/organizations/$1/projects/$2/vpcs/$3" -X DELETE
+	do_curl_authn "/organizations/$1/projects/$2/vpcs/$3" -X DELETE
 }
 
 function cmd_vpc_subnets_list

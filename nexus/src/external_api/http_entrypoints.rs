@@ -1272,8 +1272,14 @@ async fn project_vpcs_delete_vpc(
     let project_name = &path.project_name;
     let vpc_name = &path.vpc_name;
     let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
         nexus
-            .project_delete_vpc(&organization_name, &project_name, &vpc_name)
+            .project_delete_vpc(
+                &opctx,
+                &organization_name,
+                &project_name,
+                &vpc_name,
+            )
             .await?;
         Ok(HttpResponseDeleted())
     };

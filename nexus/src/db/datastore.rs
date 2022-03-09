@@ -2179,7 +2179,11 @@ impl DataStore {
             })
     }
 
-    pub async fn project_delete_vpc(&self, vpc_id: &Uuid) -> DeleteResult {
+    pub async fn project_delete_vpc(
+        &self,
+        opctx: &OpContext,
+        authz_vpc: &authz::Vpc,
+    ) -> DeleteResult {
         use db::schema::vpc::dsl;
 
         // Note that we don't ensure the firewall rules are empty here, because
@@ -2191,18 +2195,15 @@ impl DataStore {
         let now = Utc::now();
         diesel::update(dsl::vpc)
             .filter(dsl::time_deleted.is_null())
-            .filter(dsl::id.eq(*vpc_id))
+            .filter(dsl::id.eq(authz_vpc.id()))
             .set(dsl::time_deleted.eq(now))
             .returning(Vpc::as_returning())
-            .get_result_async(self.pool())
+            .get_result_async(self.pool_authorized(opctx).await?)
             .await
             .map_err(|e| {
                 public_error_from_diesel_pool(
                     e,
-                    ErrorHandler::NotFoundByLookup(
-                        ResourceType::Vpc,
-                        LookupType::ById(*vpc_id),
-                    ),
+                    ErrorHandler::NotFoundByResource(authz_vpc),
                 )
             })?;
         Ok(())

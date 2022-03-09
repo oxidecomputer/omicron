@@ -1798,21 +1798,27 @@ impl Nexus {
 
     pub async fn project_delete_vpc(
         &self,
+        opctx: &OpContext,
         organization_name: &Name,
         project_name: &Name,
         vpc_name: &Name,
     ) -> DeleteResult {
-        let vpc = self
-            .project_lookup_vpc(organization_name, project_name, vpc_name)
+        let authz_project = self
+            .db_datastore
+            .project_lookup_by_path(organization_name, project_name)
+            .await?;
+        let (authz_vpc, db_vpc) = self
+            .db_datastore
+            .vpc_fetch(opctx, &authz_project, vpc_name)
             .await?;
         // TODO: This should eventually use a saga to call the
         // networking subsystem to have it clean up the networking resources
-        self.db_datastore.vpc_delete_router(&vpc.system_router_id).await?;
-        self.db_datastore.project_delete_vpc(&vpc.id()).await?;
+        self.db_datastore.vpc_delete_router(&db_vpc.system_router_id).await?;
+        self.db_datastore.project_delete_vpc(opctx, &authz_vpc).await?;
 
         // Delete all firewall rules after deleting the VPC, to ensure no
         // firewall rules get added between rules deletion and VPC deletion.
-        self.db_datastore.vpc_delete_all_firewall_rules(&vpc.id()).await
+        self.db_datastore.vpc_delete_all_firewall_rules(&authz_vpc.id()).await
     }
 
     pub async fn vpc_list_firewall_rules(
