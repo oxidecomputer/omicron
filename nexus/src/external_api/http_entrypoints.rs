@@ -15,20 +15,23 @@ use super::{
     views::{Organization, Project, Rack, Role, Sled, User, Vpc, VpcSubnet},
 };
 use crate::context::OpContext;
+use dropshot::endpoint;
 use dropshot::ApiDescription;
+use dropshot::EmptyScanParams;
 use dropshot::HttpError;
 use dropshot::HttpResponseAccepted;
 use dropshot::HttpResponseCreated;
 use dropshot::HttpResponseDeleted;
 use dropshot::HttpResponseOk;
 use dropshot::HttpResponseUpdatedNoContent;
+use dropshot::PaginationOrder;
+use dropshot::PaginationParams;
 use dropshot::Path;
 use dropshot::Query;
 use dropshot::RequestContext;
 use dropshot::ResultsPage;
 use dropshot::TypedBody;
 use dropshot::WhichPage;
-use dropshot::{endpoint, EmptyScanParams, PaginationOrder, PaginationParams};
 use omicron_common::api::external::http_pagination::data_page_params_for;
 use omicron_common::api::external::http_pagination::data_page_params_nameid_id;
 use omicron_common::api::external::http_pagination::data_page_params_nameid_name;
@@ -158,7 +161,9 @@ pub fn external_api() -> NexusApiDescription {
         Ok(())
     }
 
-    let mut api = NexusApiDescription::new();
+    let conf = serde_json::from_str(include_str!("./tag-config.json")).unwrap();
+    let mut api = NexusApiDescription::new().tag_config(conf);
+
     if let Err(err) = register_endpoints(&mut api) {
         panic!("failed to register entrypoints: {}", err);
     }
@@ -2280,4 +2285,16 @@ async fn roles_get_role(
         Ok(HttpResponseOk(role.into()))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+#[cfg(test)]
+mod test {
+    use super::external_api;
+
+    #[test]
+    fn test_nexus_tag_policy() {
+        // This will fail if any of the endpoints don't match the policy in
+        // ./tag-config.json
+        let _ = external_api();
+    }
 }
