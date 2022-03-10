@@ -73,8 +73,8 @@ use crate::db::{
         Name, NetworkInterface, Organization, OrganizationUpdate, OximeterInfo,
         ProducerEndpoint, Project, ProjectUpdate, Region,
         RoleAssignmentBuiltin, RoleBuiltin, RouterRoute, RouterRouteUpdate,
-        Sled, UpdateArtifactKind, UpdateAvailableArtifact, UserBuiltin, Vpc,
-        VpcFirewallRule, VpcRouter, VpcRouterUpdate, VpcSubnet,
+        Sled, UpdateArtifactKind, UpdateAvailableArtifact, UserBuiltin, Volume,
+        Vpc, VpcFirewallRule, VpcRouter, VpcRouterUpdate, VpcSubnet,
         VpcSubnetUpdate, VpcUpdate, Zpool,
     },
     pagination::paginated,
@@ -270,12 +270,12 @@ impl DataStore {
     }
 
     fn get_allocated_regions_query(
-        disk_id: Uuid,
+        volume_id: Uuid,
     ) -> impl RunnableQuery<(Dataset, Region)> {
         use db::schema::dataset::dsl as dataset_dsl;
         use db::schema::region::dsl as region_dsl;
         region_dsl::region
-            .filter(region_dsl::disk_id.eq(disk_id))
+            .filter(region_dsl::volume_id.eq(volume_id))
             .inner_join(
                 dataset_dsl::dataset
                     .on(region_dsl::dataset_id.eq(dataset_dsl::id)),
@@ -290,9 +290,9 @@ impl DataStore {
     /// may be used in a context where the disk is being deleted.
     pub async fn get_allocated_regions(
         &self,
-        disk_id: Uuid,
+        volume_id: Uuid,
     ) -> Result<Vec<(Dataset, Region)>, Error> {
-        Self::get_allocated_regions_query(disk_id)
+        Self::get_allocated_regions_query(volume_id)
             .get_results_async::<(Dataset, Region)>(self.pool())
             .await
             .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
@@ -324,7 +324,7 @@ impl DataStore {
     /// belong.
     pub async fn region_allocate(
         &self,
-        disk_id: Uuid,
+        volume_id: Uuid,
         params: &params::DiskCreate,
     ) -> Result<Vec<(Dataset, Region)>, Error> {
         use db::schema::dataset::dsl as dataset_dsl;
@@ -363,10 +363,9 @@ impl DataStore {
                 //
                 // If they are, return those regions and the associated
                 // datasets.
-                let datasets_and_regions = Self::get_allocated_regions_query(
-                    disk_id,
-                )
-                .get_results::<(Dataset, Region)>(conn)?;
+                let datasets_and_regions =
+                    Self::get_allocated_regions_query(volume_id)
+                        .get_results::<(Dataset, Region)>(conn)?;
                 if !datasets_and_regions.is_empty() {
                     return Ok(datasets_and_regions);
                 }
@@ -389,7 +388,7 @@ impl DataStore {
                     .map(|dataset| {
                         Region::new(
                             dataset.id(),
-                            disk_id,
+                            volume_id,
                             params.block_size().into(),
                             params.blocks_per_extent(),
                             params.extent_count(),
@@ -442,13 +441,13 @@ impl DataStore {
     /// Deletes all regions backing a disk.
     ///
     /// Also updates the storage usage on their corresponding datasets.
-    pub async fn regions_hard_delete(&self, disk_id: Uuid) -> DeleteResult {
+    pub async fn regions_hard_delete(&self, volume_id: Uuid) -> DeleteResult {
         use db::schema::dataset::dsl as dataset_dsl;
         use db::schema::region::dsl as region_dsl;
 
         // Remove the regions, collecting datasets they're from.
         let (dataset_id, size) = diesel::delete(region_dsl::region)
-            .filter(region_dsl::disk_id.eq(disk_id))
+            .filter(region_dsl::volume_id.eq(volume_id))
             .returning((
                 region_dsl::dataset_id,
                 region_dsl::block_size
@@ -478,6 +477,60 @@ impl DataStore {
             })?;
 
         Ok(())
+    }
+
+    pub async fn volume_create(&self, volume: Volume) -> CreateResult<Volume> {
+        use db::schema::volume::dsl;
+
+        diesel::insert_into(dsl::volume)
+            .values(volume.clone())
+            .on_conflict(dsl::id)
+            .do_nothing()
+            .returning(Volume::as_returning())
+            .get_result_async(self.pool())
+            .await
+            .map_err(|e| {
+                public_error_from_diesel_pool(
+                    e,
+                    ErrorHandler::Conflict(
+                        ResourceType::Volume,
+                        volume.id().to_string().as_str(),
+                    ),
+                )
+            })
+    }
+
+    pub async fn volume_delete(&self, volume_id: Uuid) -> DeleteResult {
+        use db::schema::volume::dsl;
+
+        let now = Utc::now();
+        diesel::update(dsl::volume)
+            .filter(dsl::id.eq(volume_id))
+            .set(dsl::time_deleted.eq(now))
+            .check_if_exists::<Volume>(volume_id)
+            .execute_and_check(self.pool())
+            .await
+            .map_err(|e| {
+                public_error_from_diesel_pool(
+                    e,
+                    ErrorHandler::NotFoundByLookup(
+                        ResourceType::Volume,
+                        LookupType::ById(volume_id),
+                    ),
+                )
+            })?;
+        Ok(())
+    }
+
+    pub async fn volume_get(&self, volume_id: Uuid) -> LookupResult<Volume> {
+        use db::schema::volume::dsl;
+
+        dsl::volume
+            .filter(dsl::id.eq(volume_id))
+            .select(Volume::as_select())
+            .get_result_async(self.pool())
+            .await
+            .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
     }
 
     /// Create a organization
@@ -1548,6 +1601,8 @@ impl DataStore {
 
     /// Updates a disk record to indicate it has been deleted.
     ///
+    /// Returns the volume ID of associated with the deleted disk.
+    ///
     /// Does not attempt to modify any resources (e.g. regions) which may
     /// belong to the disk.
     // TODO: Delete me (this function, not the disk!), ensure all datastore
@@ -1570,7 +1625,7 @@ impl DataStore {
     pub async fn project_delete_disk_no_auth(
         &self,
         disk_id: &Uuid,
-    ) -> Result<(), Error> {
+    ) -> Result<Uuid, Error> {
         use db::schema::disk::dsl;
         let pool = self.pool();
         let now = Utc::now();
@@ -1605,7 +1660,7 @@ impl DataStore {
             })?;
 
         match result.status {
-            UpdateStatus::Updated => Ok(()),
+            UpdateStatus::Updated => Ok(result.found.volume_id),
             UpdateStatus::NotUpdatedButExists => {
                 let disk = result.found;
                 let disk_state = disk.state();
@@ -1615,7 +1670,7 @@ impl DataStore {
                 {
                     // To maintain idempotency, if the disk has already been
                     // destroyed, don't throw an error.
-                    return Ok(());
+                    return Ok(disk.volume_id);
                 } else if !ok_to_delete_states.contains(disk_state.state()) {
                     return Err(Error::InvalidRequest {
                         message: format!(
@@ -3289,18 +3344,18 @@ mod test {
             "disk1",
             ByteCount::from_mebibytes_u32(500),
         );
-        let disk1_id = Uuid::new_v4();
-        // Currently, we only allocate one Region Set per disk.
+        let volume1_id = Uuid::new_v4();
+        // Currently, we only allocate one Region Set per volume.
         let expected_region_count = REGION_REDUNDANCY_THRESHOLD;
         let dataset_and_regions =
-            datastore.region_allocate(disk1_id, &params).await.unwrap();
+            datastore.region_allocate(volume1_id, &params).await.unwrap();
 
         // Verify the allocation.
         assert_eq!(expected_region_count, dataset_and_regions.len());
         let mut disk1_datasets = HashSet::new();
         for (dataset, region) in dataset_and_regions {
             assert!(disk1_datasets.insert(dataset.id()));
-            assert_eq!(disk1_id, region.disk_id());
+            assert_eq!(volume1_id, region.volume_id());
             assert_eq!(params.block_size(), region.block_size());
             assert_eq!(params.blocks_per_extent(), region.blocks_per_extent());
             assert_eq!(params.extent_count(), region.extent_count());
@@ -3312,14 +3367,14 @@ mod test {
             "disk2",
             ByteCount::from_mebibytes_u32(500),
         );
-        let disk2_id = Uuid::new_v4();
+        let volume2_id = Uuid::new_v4();
         let dataset_and_regions =
-            datastore.region_allocate(disk2_id, &params).await.unwrap();
+            datastore.region_allocate(volume2_id, &params).await.unwrap();
         assert_eq!(expected_region_count, dataset_and_regions.len());
         let mut disk2_datasets = HashSet::new();
         for (dataset, region) in dataset_and_regions {
             assert!(disk2_datasets.insert(dataset.id()));
-            assert_eq!(disk2_id, region.disk_id());
+            assert_eq!(volume2_id, region.volume_id());
             assert_eq!(params.block_size(), region.block_size());
             assert_eq!(params.blocks_per_extent(), region.blocks_per_extent());
             assert_eq!(params.extent_count(), region.extent_count());
@@ -3360,16 +3415,16 @@ mod test {
             datastore.dataset_upsert(dataset).await.unwrap();
         }
 
-        // Allocate regions from the datasets for this disk.
+        // Allocate regions from the datasets for this volume.
         let params = create_test_disk_create_params(
             "disk",
             ByteCount::from_mebibytes_u32(500),
         );
-        let disk_id = Uuid::new_v4();
+        let volume_id = Uuid::new_v4();
         let mut dataset_and_regions1 =
-            datastore.region_allocate(disk_id, &params).await.unwrap();
+            datastore.region_allocate(volume_id, &params).await.unwrap();
         let mut dataset_and_regions2 =
-            datastore.region_allocate(disk_id, &params).await.unwrap();
+            datastore.region_allocate(volume_id, &params).await.unwrap();
 
         // Give them a consistent order so we can easily compare them.
         let sort_vec = |v: &mut Vec<(Dataset, Region)>| {
@@ -3421,14 +3476,14 @@ mod test {
             datastore.dataset_upsert(dataset).await.unwrap();
         }
 
-        // Allocate regions from the datasets for this disk.
+        // Allocate regions from the datasets for this volume.
         let params = create_test_disk_create_params(
             "disk1",
             ByteCount::from_mebibytes_u32(500),
         );
-        let disk1_id = Uuid::new_v4();
+        let volume1_id = Uuid::new_v4();
         let err =
-            datastore.region_allocate(disk1_id, &params).await.unwrap_err();
+            datastore.region_allocate(volume1_id, &params).await.unwrap_err();
         assert!(err
             .to_string()
             .contains("Not enough datasets to allocate disks"));
@@ -3475,10 +3530,10 @@ mod test {
         // so we shouldn't have space for redundancy.
         let disk_size = test_zpool_size();
         let params = create_test_disk_create_params("disk1", disk_size);
-        let disk1_id = Uuid::new_v4();
+        let volume1_id = Uuid::new_v4();
 
         // NOTE: This *should* be an error, rather than succeeding.
-        datastore.region_allocate(disk1_id, &params).await.unwrap();
+        datastore.region_allocate(volume1_id, &params).await.unwrap();
 
         let _ = db.cleanup().await;
     }

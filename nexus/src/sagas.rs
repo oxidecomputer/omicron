@@ -539,6 +539,12 @@ fn saga_disk_create() -> SagaTemplate<SagaDiskCreate> {
     );
 
     template_builder.append(
+        "volume_id",
+        "GenerateVolumeId",
+        new_action_noop_undo(saga_generate_uuid),
+    );
+
+    template_builder.append(
         "created_disk",
         "CreateDiskRecord",
         ActionFunc::new_action(
@@ -560,6 +566,15 @@ fn saga_disk_create() -> SagaTemplate<SagaDiskCreate> {
     );
 
     template_builder.append(
+        "created_volume",
+        "CreateVolumeRecord",
+        ActionFunc::new_action(
+            sdc_create_volume_record,
+            sdc_create_volume_record_undo,
+        ),
+    );
+
+    template_builder.append(
         "disk_runtime",
         "FinalizeDiskRecord",
         new_action_noop_undo(sdc_finalize_disk_record),
@@ -575,9 +590,14 @@ async fn sdc_create_disk_record(
     let params = sagactx.saga_params();
 
     let disk_id = sagactx.lookup::<Uuid>("disk_id")?;
+    // We admittedly reference the volume before it has been allocated,
+    // but this should be acceptable because the disk remains in a "Creating"
+    // state until the saga has completed.
+    let volume_id = sagactx.lookup::<Uuid>("volume_id")?;
     let disk = db::model::Disk::new(
         disk_id,
         params.project_id,
+        volume_id,
         params.create_params.clone(),
         db::model::DiskRuntimeState::new(),
     );
@@ -604,7 +624,7 @@ async fn sdc_alloc_regions(
 ) -> Result<Vec<(db::model::Dataset, db::model::Region)>, ActionError> {
     let osagactx = sagactx.user_data();
     let params = sagactx.saga_params();
-    let disk_id = sagactx.lookup::<Uuid>("disk_id")?;
+    let volume_id = sagactx.lookup::<Uuid>("volume_id")?;
     // Ensure the disk is backed by appropriate regions.
     //
     // This allocates regions in the database, but the disk state is still
@@ -618,7 +638,7 @@ async fn sdc_alloc_regions(
     // returning all of them at once.
     let datasets_and_regions = osagactx
         .datastore()
-        .region_allocate(disk_id, &params.create_params)
+        .region_allocate(volume_id, &params.create_params)
         .await
         .map_err(ActionError::action_failed)?;
     Ok(datasets_and_regions)
@@ -629,8 +649,8 @@ async fn sdc_alloc_regions_undo(
 ) -> Result<(), anyhow::Error> {
     let osagactx = sagactx.user_data();
 
-    let disk_id = sagactx.lookup::<Uuid>("disk_id")?;
-    osagactx.datastore().regions_hard_delete(disk_id).await?;
+    let volume_id = sagactx.lookup::<Uuid>("volume_id")?;
+    osagactx.datastore().regions_hard_delete(volume_id).await?;
     Ok(())
 }
 
@@ -649,7 +669,7 @@ async fn ensure_region_in_dataset(
         // TODO: Can we avoid casting from UUID to string?
         // NOTE: This'll require updating the crucible agent client.
         id: RegionId(region.id().to_string()),
-        volume_id: region.disk_id().to_string(),
+        volume_id: region.volume_id().to_string(),
         encrypted: region.encrypted(),
         cert_pem: None,
         key_pem: None,
@@ -772,6 +792,35 @@ async fn sdc_regions_ensure_undo(
     Ok(())
 }
 
+async fn sdc_create_volume_record(
+    sagactx: ActionContext<SagaDiskCreate>,
+) -> Result<db::model::Volume, ActionError> {
+    let osagactx = sagactx.user_data();
+
+    let volume_id = sagactx.lookup::<Uuid>("volume_id")?;
+    let volume = db::model::Volume::new(
+        volume_id,
+        // TODO: Patch this up with serialized contents that Crucible can use.
+        "Some Data".to_string(),
+    );
+    let volume_created = osagactx
+        .datastore()
+        .volume_create(volume)
+        .await
+        .map_err(ActionError::action_failed)?;
+    Ok(volume_created)
+}
+
+async fn sdc_create_volume_record_undo(
+    sagactx: ActionContext<SagaDiskCreate>,
+) -> Result<(), anyhow::Error> {
+    let osagactx = sagactx.user_data();
+
+    let volume_id = sagactx.lookup::<Uuid>("volume_id")?;
+    osagactx.datastore().volume_delete(volume_id).await?;
+    Ok(())
+}
+
 async fn sdc_finalize_disk_record(
     sagactx: ActionContext<SagaDiskCreate>,
 ) -> Result<(), ActionError> {
@@ -823,7 +872,7 @@ fn saga_disk_delete() -> SagaTemplate<SagaDiskDelete> {
     let mut template_builder = SagaTemplateBuilder::new();
 
     template_builder.append(
-        "no_result",
+        "volume_id",
         "DeleteDiskRecord",
         // TODO: See the comment on the "DeleteRegions" step,
         // we may want to un-delete the disk if we cannot remove
@@ -852,32 +901,37 @@ fn saga_disk_delete() -> SagaTemplate<SagaDiskDelete> {
         new_action_noop_undo(sdd_delete_region_records),
     );
 
+    template_builder.append(
+        "no_result",
+        "DeleteVolumeRecord",
+        new_action_noop_undo(sdd_delete_volume_record),
+    );
+
     template_builder.build()
 }
 
 async fn sdd_delete_disk_record(
     sagactx: ActionContext<SagaDiskDelete>,
-) -> Result<(), ActionError> {
+) -> Result<Uuid, ActionError> {
     let osagactx = sagactx.user_data();
     let params = sagactx.saga_params();
 
-    osagactx
+    let volume_id = osagactx
         .datastore()
         .project_delete_disk_no_auth(&params.disk_id)
         .await
         .map_err(ActionError::action_failed)?;
-    Ok(())
+    Ok(volume_id)
 }
 
 async fn sdd_delete_regions(
     sagactx: ActionContext<SagaDiskDelete>,
 ) -> Result<(), ActionError> {
     let osagactx = sagactx.user_data();
-    let params = sagactx.saga_params();
-
+    let volume_id = sagactx.lookup::<Uuid>("volume_id")?;
     let datasets_and_regions = osagactx
         .datastore()
-        .get_allocated_regions(params.disk_id)
+        .get_allocated_regions(volume_id)
         .await
         .map_err(ActionError::action_failed)?;
     delete_regions(datasets_and_regions)
@@ -890,10 +944,23 @@ async fn sdd_delete_region_records(
     sagactx: ActionContext<SagaDiskDelete>,
 ) -> Result<(), ActionError> {
     let osagactx = sagactx.user_data();
-    let params = sagactx.saga_params();
+    let volume_id = sagactx.lookup::<Uuid>("volume_id")?;
     osagactx
         .datastore()
-        .regions_hard_delete(params.disk_id)
+        .regions_hard_delete(volume_id)
+        .await
+        .map_err(ActionError::action_failed)?;
+    Ok(())
+}
+
+async fn sdd_delete_volume_record(
+    sagactx: ActionContext<SagaDiskDelete>,
+) -> Result<(), ActionError> {
+    let osagactx = sagactx.user_data();
+    let volume_id = sagactx.lookup::<Uuid>("volume_id")?;
+    osagactx
+        .datastore()
+        .volume_delete(volume_id)
         .await
         .map_err(ActionError::action_failed)?;
     Ok(())

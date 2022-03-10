@@ -10,7 +10,7 @@ use crate::db::schema::{
     console_session, dataset, disk, instance, metric_producer,
     network_interface, organization, oximeter, project, rack, region,
     role_assignment_builtin, role_builtin, router_route, sled,
-    update_available_artifact, user_builtin, vpc, vpc_firewall_rule,
+    update_available_artifact, user_builtin, volume, vpc, vpc_firewall_rule,
     vpc_router, vpc_subnet, zpool,
 };
 use crate::defaults;
@@ -670,12 +670,12 @@ impl DatastoreCollection<Region> for Dataset {
     type CollectionIdColumn = region::dsl::dataset_id;
 }
 
-// Virtual disks contain regions
-impl DatastoreCollection<Region> for Disk {
+// Volumes contain regions
+impl DatastoreCollection<Region> for Volume {
     type CollectionId = Uuid;
-    type GenerationNumberColumn = disk::dsl::rcgen;
-    type CollectionTimeDeletedColumn = disk::dsl::time_deleted;
-    type CollectionIdColumn = region::dsl::disk_id;
+    type GenerationNumberColumn = volume::dsl::rcgen;
+    type CollectionTimeDeletedColumn = volume::dsl::time_deleted;
+    type CollectionIdColumn = region::dsl::volume_id;
 }
 
 /// Database representation of a Region.
@@ -699,7 +699,7 @@ pub struct Region {
     identity: RegionIdentity,
 
     dataset_id: Uuid,
-    disk_id: Uuid,
+    volume_id: Uuid,
 
     block_size: ByteCount,
     blocks_per_extent: i64,
@@ -709,7 +709,7 @@ pub struct Region {
 impl Region {
     pub fn new(
         dataset_id: Uuid,
-        disk_id: Uuid,
+        volume_id: Uuid,
         block_size: ByteCount,
         blocks_per_extent: i64,
         extent_count: i64,
@@ -717,15 +717,15 @@ impl Region {
         Self {
             identity: RegionIdentity::new(Uuid::new_v4()),
             dataset_id,
-            disk_id,
+            volume_id,
             block_size,
             blocks_per_extent,
             extent_count,
         }
     }
 
-    pub fn disk_id(&self) -> Uuid {
-        self.disk_id
+    pub fn volume_id(&self) -> Uuid {
+        self.volume_id
     }
     pub fn dataset_id(&self) -> Uuid {
         self.dataset_id
@@ -743,6 +743,38 @@ impl Region {
         // Per RFD 29, data is always encrypted at rest, and support for
         // external, customer-supplied keys is a non-requirement.
         true
+    }
+}
+
+#[derive(
+    Asset,
+    Queryable,
+    Insertable,
+    Debug,
+    Selectable,
+    Serialize,
+    Deserialize,
+    Clone,
+)]
+#[table_name = "volume"]
+pub struct Volume {
+    #[diesel(embed)]
+    identity: VolumeIdentity,
+    time_deleted: Option<DateTime<Utc>>,
+
+    rcgen: Generation,
+
+    data: String,
+}
+
+impl Volume {
+    pub fn new(id: Uuid, data: String) -> Self {
+        Self {
+            identity: VolumeIdentity::new(id),
+            time_deleted: None,
+            rcgen: Generation::new(),
+            data,
+        }
     }
 }
 
@@ -1021,6 +1053,9 @@ pub struct Disk {
     /// id for the project containing this Disk
     pub project_id: Uuid,
 
+    /// Root volume of the disk
+    pub volume_id: Uuid,
+
     /// runtime state of the Disk
     #[diesel(embed)]
     pub runtime_state: DiskRuntimeState,
@@ -1038,6 +1073,7 @@ impl Disk {
     pub fn new(
         disk_id: Uuid,
         project_id: Uuid,
+        volume_id: Uuid,
         params: params::DiskCreate,
         runtime_initial: DiskRuntimeState,
     ) -> Self {
@@ -1046,6 +1082,7 @@ impl Disk {
             identity,
             rcgen: external::Generation::new().into(),
             project_id,
+            volume_id,
             runtime_state: runtime_initial,
             size: params.size.into(),
             create_snapshot_id: params.snapshot_id,
