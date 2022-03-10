@@ -1130,8 +1130,10 @@ async fn project_vpcs_get(
     let organization_name = &path.organization_name;
     let project_name = &path.project_name;
     let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
         let vpcs = nexus
             .project_list_vpcs(
+                &opctx,
                 &organization_name,
                 &project_name,
                 &data_page_params_for(&rqctx, &query)?
@@ -1176,8 +1178,9 @@ async fn project_vpcs_get_vpc(
     let project_name = &path.project_name;
     let vpc_name = &path.vpc_name;
     let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
         let vpc = nexus
-            .project_lookup_vpc(&organization_name, &project_name, &vpc_name)
+            .vpc_fetch(&opctx, &organization_name, &project_name, &vpc_name)
             .await?;
         Ok(HttpResponseOk(vpc.into()))
     };
@@ -1204,8 +1207,10 @@ async fn project_vpcs_post(
     let project_name = &path.project_name;
     let new_vpc_params = &new_vpc.into_inner();
     let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
         let vpc = nexus
             .project_create_vpc(
+                &opctx,
                 &organization_name,
                 &project_name,
                 &new_vpc_params,
@@ -1228,20 +1233,22 @@ async fn project_vpcs_put_vpc(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<VpcPathParam>,
     updated_vpc: TypedBody<params::VpcUpdate>,
-) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+) -> Result<HttpResponseOk<Vpc>, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
     let path = path_params.into_inner();
     let handler = async {
-        nexus
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let newvpc = nexus
             .project_update_vpc(
+                &opctx,
                 &path.organization_name,
                 &path.project_name,
                 &path.vpc_name,
                 &updated_vpc.into_inner(),
             )
             .await?;
-        Ok(HttpResponseUpdatedNoContent())
+        Ok(HttpResponseOk(newvpc.into()))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
@@ -1265,8 +1272,14 @@ async fn project_vpcs_delete_vpc(
     let project_name = &path.project_name;
     let vpc_name = &path.vpc_name;
     let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
         nexus
-            .project_delete_vpc(&organization_name, &project_name, &vpc_name)
+            .project_delete_vpc(
+                &opctx,
+                &organization_name,
+                &project_name,
+                &vpc_name,
+            )
             .await?;
         Ok(HttpResponseDeleted())
     };

@@ -578,6 +578,7 @@ impl Nexus {
         // Create a default VPC associated with the project.
         let _ = self
             .project_create_vpc(
+                opctx,
                 &organization_name,
                 &new_project.identity.name.clone().into(),
                 &params::VpcCreate {
@@ -1540,82 +1541,35 @@ impl Nexus {
             .map(|_| ())
     }
 
-    /**
-     * Creates a new network interface for this instance
-     */
-    pub async fn instance_create_network_interface(
-        &self,
-        organization_name: &Name,
-        project_name: &Name,
-        instance_name: &Name,
-        vpc_name: &Name,
-        subnet_name: &Name,
-        params: &params::NetworkInterfaceCreate,
-    ) -> CreateResult<db::model::NetworkInterface> {
-        let authz_instance = self
-            .db_datastore
-            .instance_lookup_by_path(
-                organization_name,
-                project_name,
-                instance_name,
-            )
-            .await?;
-        let vpc = self
-            .db_datastore
-            .vpc_fetch_by_name(&authz_instance.project().id(), vpc_name)
-            .await?;
-        let subnet = self
-            .db_datastore
-            .vpc_subnet_fetch_by_name(&vpc.id(), subnet_name)
-            .await?;
-
-        let mac = db::model::MacAddr::new()?;
-
-        let interface_id = Uuid::new_v4();
-        // Request an allocation
-        let ip = None;
-        let interface = db::model::IncompleteNetworkInterface::new(
-            interface_id,
-            authz_instance.id(),
-            // TODO-correctness: vpc_id here is used for name uniqueness. Should
-            // interface names be unique to the subnet's VPC or to the
-            // VPC associated with the instance's default interface?
-            vpc.id(),
-            subnet,
-            mac,
-            ip,
-            params.clone(),
-        );
-        self.db_datastore.instance_create_network_interface(interface).await
-    }
-
     pub async fn project_list_vpcs(
         &self,
+        opctx: &OpContext,
         organization_name: &Name,
         project_name: &Name,
         pagparams: &DataPageParams<'_, Name>,
     ) -> ListResultVec<db::model::Vpc> {
-        let project_id = self
+        let authz_project = self
             .db_datastore
             .project_lookup_by_path(organization_name, project_name)
-            .await?
-            .id();
-        let vpcs =
-            self.db_datastore.project_list_vpcs(&project_id, pagparams).await?;
+            .await?;
+        let vpcs = self
+            .db_datastore
+            .project_list_vpcs(&opctx, &authz_project, pagparams)
+            .await?;
         Ok(vpcs)
     }
 
     pub async fn project_create_vpc(
         &self,
+        opctx: &OpContext,
         organization_name: &Name,
         project_name: &Name,
         params: &params::VpcCreate,
     ) -> CreateResult<db::model::Vpc> {
-        let project_id = self
+        let authz_project = self
             .db_datastore
             .project_lookup_by_path(organization_name, project_name)
-            .await?
-            .id();
+            .await?;
         let vpc_id = Uuid::new_v4();
         let system_router_id = Uuid::new_v4();
         let default_route_id = Uuid::new_v4();
@@ -1666,11 +1620,14 @@ impl Nexus {
         self.db_datastore.router_create_route(route).await?;
         let vpc = db::model::Vpc::new(
             vpc_id,
-            project_id,
+            authz_project.id(),
             system_router_id,
             params.clone(),
         )?;
-        let vpc = self.db_datastore.project_create_vpc(vpc).await?;
+        let vpc = self
+            .db_datastore
+            .project_create_vpc(opctx, &authz_project, vpc)
+            .await?;
 
         // Allocate the first /64 sub-range from the requested or created
         // prefix.
@@ -1698,23 +1655,26 @@ impl Nexus {
             ipv6_block,
         );
 
-        // Create the subnet record in the database. Overlapping IP ranges should be translated
-        // into an internal error. That implies that there's already an existing VPC Subnet, but
-        // we're explicitly creating the _first_ VPC in the project. Something is wrong, and likely
-        // a bug in our code.
+        // Create the subnet record in the database. Overlapping IP ranges
+        // should be translated into an internal error. That implies that
+        // there's already an existing VPC Subnet, but we're explicitly creating
+        // the _first_ VPC in the project. Something is wrong, and likely a bug
+        // in our code.
         let _ = self.db_datastore.vpc_create_subnet(subnet).await.map_err(|err| {
             match err {
                 SubnetError::OverlappingIpRange => {
                     warn!(
                         self.log,
-                        "failed to create default VPC Subnet, found overlapping IP address ranges";
+                        "failed to create default VPC Subnet, \
+                        found overlapping IP address ranges";
                         "vpc_id" => ?vpc_id,
                         "subnet_id" => ?default_subnet_id,
                         "ipv4_block" => ?*defaults::DEFAULT_VPC_SUBNET_IPV4_BLOCK,
                         "ipv6_block" => ?ipv6_block,
                     );
                     external::Error::internal_error(
-                        "Failed to create default VPC Subnet, found overlapping IP address ranges"
+                        "Failed to create default VPC Subnet, \
+                        found overlapping IP address ranges"
                     )
                 },
                 SubnetError::External(e) => e,
@@ -1736,6 +1696,27 @@ impl Nexus {
         Ok(())
     }
 
+    pub async fn vpc_fetch(
+        &self,
+        opctx: &OpContext,
+        organization_name: &Name,
+        project_name: &Name,
+        vpc_name: &Name,
+    ) -> LookupResult<db::model::Vpc> {
+        let authz_project = self
+            .db_datastore
+            .project_lookup_by_path(organization_name, project_name)
+            .await?;
+        Ok(self
+            .db_datastore
+            .vpc_fetch(opctx, &authz_project, vpc_name)
+            .await?
+            .1)
+    }
+
+    // TODO-security TODO-cleanup Remove this function.  Callers should use
+    // vpc_lookup_by_path() / vpc_fetch() instead, or we should create a more
+    // useful pattern for looking up records by path (e.g., *_fetch_by_path()).
     pub async fn project_lookup_vpc(
         &self,
         organization_name: &Name,
@@ -1752,41 +1733,44 @@ impl Nexus {
 
     pub async fn project_update_vpc(
         &self,
+        opctx: &OpContext,
         organization_name: &Name,
         project_name: &Name,
         vpc_name: &Name,
         params: &params::VpcUpdate,
-    ) -> UpdateResult<()> {
-        let project_id = self
+    ) -> UpdateResult<db::model::Vpc> {
+        let authz_vpc = self
             .db_datastore
-            .project_lookup_by_path(organization_name, project_name)
-            .await?
-            .id();
-        let vpc =
-            self.db_datastore.vpc_fetch_by_name(&project_id, vpc_name).await?;
-        Ok(self
-            .db_datastore
-            .project_update_vpc(&vpc.id(), params.clone().into())
-            .await?)
+            .vpc_lookup_by_path(organization_name, project_name, vpc_name)
+            .await?;
+        self.db_datastore
+            .project_update_vpc(opctx, &authz_vpc, params.clone().into())
+            .await
     }
 
     pub async fn project_delete_vpc(
         &self,
+        opctx: &OpContext,
         organization_name: &Name,
         project_name: &Name,
         vpc_name: &Name,
     ) -> DeleteResult {
-        let vpc = self
-            .project_lookup_vpc(organization_name, project_name, vpc_name)
+        let authz_project = self
+            .db_datastore
+            .project_lookup_by_path(organization_name, project_name)
+            .await?;
+        let (authz_vpc, db_vpc) = self
+            .db_datastore
+            .vpc_fetch(opctx, &authz_project, vpc_name)
             .await?;
         // TODO: This should eventually use a saga to call the
         // networking subsystem to have it clean up the networking resources
-        self.db_datastore.vpc_delete_router(&vpc.system_router_id).await?;
-        self.db_datastore.project_delete_vpc(&vpc.id()).await?;
+        self.db_datastore.vpc_delete_router(&db_vpc.system_router_id).await?;
+        self.db_datastore.project_delete_vpc(opctx, &authz_vpc).await?;
 
         // Delete all firewall rules after deleting the VPC, to ensure no
         // firewall rules get added between rules deletion and VPC deletion.
-        self.db_datastore.vpc_delete_all_firewall_rules(&vpc.id()).await
+        self.db_datastore.vpc_delete_all_firewall_rules(&authz_vpc.id()).await
     }
 
     pub async fn vpc_list_firewall_rules(
