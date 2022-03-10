@@ -713,7 +713,7 @@ async fn project_disks_delete_disk(
 #[endpoint {
     method = POST,
     path = "/organizations/{organization_name}/projects/{project_name}/disks/{disk_name}/snapshot",
-    tags = ["disks"],
+    tags = ["snapshots"],
 }]
 async fn project_disks_snapshot_post(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,

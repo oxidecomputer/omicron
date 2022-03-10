@@ -963,7 +963,7 @@
     "/organizations/{organization_name}/projects/{project_name}/disks/{disk_name}/snapshot": {
       "post": {
         "tags": [
-          "disks"
+          "snapshots"
         ],
         "summary": "Create a snapshot of a disk.",
         "operationId": "project_disks_snapshot_post",
