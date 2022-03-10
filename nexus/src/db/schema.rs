@@ -16,6 +16,7 @@ table! {
         time_deleted -> Nullable<Timestamptz>,
         rcgen -> Int8,
         project_id -> Uuid,
+        volume_id -> Uuid,
         disk_state -> Text,
         attach_instance_id -> Nullable<Uuid>,
         state_generation -> Int8,
@@ -207,11 +208,24 @@ table! {
         time_modified -> Timestamptz,
 
         dataset_id -> Uuid,
-        disk_id -> Uuid,
+        volume_id -> Uuid,
 
         block_size -> Int8,
         blocks_per_extent -> Int8,
         extent_count -> Int8,
+    }
+}
+
+table! {
+    volume (id) {
+        id -> Uuid,
+        time_created -> Timestamptz,
+        time_modified -> Timestamptz,
+        time_deleted -> Nullable<Timestamptz>,
+        rcgen -> Int8,
+
+        data -> Text,
+        /* TODO: some sort of refcount? */
     }
 }
 

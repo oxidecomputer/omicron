@@ -135,8 +135,8 @@ CREATE TABLE omicron.public.Region (
     /* FK into the Dataset table */
     dataset_id UUID NOT NULL,
 
-    /* FK into the (Guest-visible, Virtual) Disk table */
-    disk_id UUID NOT NULL,
+    /* FK into the volume table */
+    volume_id UUID NOT NULL,
 
     /* Metadata describing the region */
     block_size INT NOT NULL,
@@ -148,7 +148,28 @@ CREATE TABLE omicron.public.Region (
  * Allow all regions belonging to a disk to be accessed quickly.
  */
 CREATE INDEX on omicron.public.Region (
-    disk_id
+    volume_id
+);
+
+/*
+ * A volume within Crucible
+ */
+CREATE TABLE omicron.public.volume (
+    id UUID PRIMARY KEY,
+    time_created TIMESTAMPTZ NOT NULL,
+    time_modified TIMESTAMPTZ NOT NULL,
+    time_deleted TIMESTAMPTZ,
+
+    /* child resource generation number, per RFD 192 */
+    rcgen INT NOT NULL,
+
+    /*
+     * A JSON document describing the construction of the volume, including all
+     * sub volumes. This is what will be POSTed to propolis, and eventually
+     * consumed by some Upstairs code to perform the volume creation. The Rust
+     * type of this column should be Crucible::VolumeConstructionRequest.
+     */
+    data TEXT NOT NULL
 );
 
 /*
@@ -314,6 +335,9 @@ CREATE TABLE omicron.public.disk (
 
     /* Every Disk is in exactly one Project at a time. */
     project_id UUID NOT NULL,
+
+    /* Every disk consists of a root volume */
+    volume_id UUID NOT NULL,
 
     /*
      * TODO Would it make sense for the runtime state to live in a separate

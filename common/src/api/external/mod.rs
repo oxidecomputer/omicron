@@ -573,6 +573,7 @@ pub enum ResourceType {
     Rack,
     Sled,
     SagaDbg,
+    Volume,
     Vpc,
     VpcFirewallRule,
     VpcSubnet,
