@@ -21,9 +21,9 @@
           {
             "in": "query",
             "name": "limit",
+            "description": "Maximum number of items returned by a single call",
             "schema": {
               "nullable": true,
-              "description": "Maximum number of items returned by a single call",
               "type": "integer",
               "format": "uint32",
               "minimum": 1
@@ -33,9 +33,9 @@
           {
             "in": "query",
             "name": "page_token",
+            "description": "Token returned by previous call to retreive the subsequent page",
             "schema": {
               "nullable": true,
-              "description": "Token returned by previous call to retreive the subsequent page",
               "type": "string"
             },
             "style": "form"
@@ -59,6 +59,12 @@
                 }
               }
             }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
           }
         },
         "x-dropshot-pagination": true
@@ -75,9 +81,9 @@
           {
             "in": "path",
             "name": "rack_id",
+            "description": "The rack's unique ID.",
             "required": true,
             "schema": {
-              "description": "The rack's unique ID.",
               "type": "string",
               "format": "uuid"
             },
@@ -94,6 +100,12 @@
                 }
               }
             }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
           }
         }
       }
@@ -109,9 +121,9 @@
           {
             "in": "query",
             "name": "limit",
+            "description": "Maximum number of items returned by a single call",
             "schema": {
               "nullable": true,
-              "description": "Maximum number of items returned by a single call",
               "type": "integer",
               "format": "uint32",
               "minimum": 1
@@ -121,9 +133,9 @@
           {
             "in": "query",
             "name": "page_token",
+            "description": "Token returned by previous call to retreive the subsequent page",
             "schema": {
               "nullable": true,
-              "description": "Token returned by previous call to retreive the subsequent page",
               "type": "string"
             },
             "style": "form"
@@ -147,6 +159,12 @@
                 }
               }
             }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
           }
         },
         "x-dropshot-pagination": true
@@ -163,9 +181,9 @@
           {
             "in": "path",
             "name": "sled_id",
+            "description": "The sled's unique ID.",
             "required": true,
             "schema": {
-              "description": "The sled's unique ID.",
               "type": "string",
               "format": "uuid"
             },
@@ -182,6 +200,12 @@
                 }
               }
             }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
           }
         }
       }
@@ -233,9 +257,9 @@
           {
             "in": "query",
             "name": "limit",
+            "description": "Maximum number of items returned by a single call",
             "schema": {
               "nullable": true,
-              "description": "Maximum number of items returned by a single call",
               "type": "integer",
               "format": "uint32",
               "minimum": 1
@@ -245,9 +269,9 @@
           {
             "in": "query",
             "name": "page_token",
+            "description": "Token returned by previous call to retreive the subsequent page",
             "schema": {
               "nullable": true,
-              "description": "Token returned by previous call to retreive the subsequent page",
               "type": "string"
             },
             "style": "form"
@@ -271,6 +295,12 @@
                 }
               }
             }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
           }
         },
         "x-dropshot-pagination": true
@@ -301,6 +331,12 @@
                 }
               }
             }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
           }
         }
       }
@@ -316,6 +352,7 @@
           {
             "in": "path",
             "name": "organization_name",
+            "description": "The organization's unique name.",
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/Name"
@@ -333,6 +370,12 @@
                 }
               }
             }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
           }
         }
       },
@@ -346,6 +389,7 @@
           {
             "in": "path",
             "name": "organization_name",
+            "description": "The organization's unique name.",
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/Name"
@@ -373,6 +417,12 @@
                 }
               }
             }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
           }
         }
       },
@@ -386,6 +436,7 @@
           {
             "in": "path",
             "name": "organization_name",
+            "description": "The organization's unique name.",
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/Name"
@@ -396,6 +447,12 @@
         "responses": {
           "204": {
             "description": "successful deletion"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
           }
         }
       }
@@ -411,9 +468,9 @@
           {
             "in": "query",
             "name": "limit",
+            "description": "Maximum number of items returned by a single call",
             "schema": {
               "nullable": true,
-              "description": "Maximum number of items returned by a single call",
               "type": "integer",
               "format": "uint32",
               "minimum": 1
@@ -423,9 +480,9 @@
           {
             "in": "query",
             "name": "page_token",
+            "description": "Token returned by previous call to retreive the subsequent page",
             "schema": {
               "nullable": true,
-              "description": "Token returned by previous call to retreive the subsequent page",
               "type": "string"
             },
             "style": "form"
@@ -441,6 +498,7 @@
           {
             "in": "path",
             "name": "organization_name",
+            "description": "The organization's unique name.",
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/Name"
@@ -458,6 +516,12 @@
                 }
               }
             }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
           }
         },
         "x-dropshot-pagination": true
@@ -472,6 +536,7 @@
           {
             "in": "path",
             "name": "organization_name",
+            "description": "The organization's unique name.",
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/Name"
@@ -499,6 +564,12 @@
                 }
               }
             }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
           }
         }
       }
@@ -514,6 +585,7 @@
           {
             "in": "path",
             "name": "organization_name",
+            "description": "The organization's unique name.",
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/Name"
@@ -523,6 +595,7 @@
           {
             "in": "path",
             "name": "project_name",
+            "description": "The project's unique name within the organization.",
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/Name"
@@ -540,6 +613,12 @@
                 }
               }
             }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
           }
         }
       },
@@ -553,6 +632,7 @@
           {
             "in": "path",
             "name": "organization_name",
+            "description": "The organization's unique name.",
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/Name"
@@ -562,6 +642,7 @@
           {
             "in": "path",
             "name": "project_name",
+            "description": "The project's unique name within the organization.",
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/Name"
@@ -589,6 +670,12 @@
                 }
               }
             }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
           }
         }
       },
@@ -602,6 +689,7 @@
           {
             "in": "path",
             "name": "organization_name",
+            "description": "The organization's unique name.",
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/Name"
@@ -611,6 +699,7 @@
           {
             "in": "path",
             "name": "project_name",
+            "description": "The project's unique name within the organization.",
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/Name"
@@ -621,6 +710,12 @@
         "responses": {
           "204": {
             "description": "successful deletion"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
           }
         }
       }
@@ -636,9 +731,9 @@
           {
             "in": "query",
             "name": "limit",
+            "description": "Maximum number of items returned by a single call",
             "schema": {
               "nullable": true,
-              "description": "Maximum number of items returned by a single call",
               "type": "integer",
               "format": "uint32",
               "minimum": 1
@@ -648,9 +743,9 @@
           {
             "in": "query",
             "name": "page_token",
+            "description": "Token returned by previous call to retreive the subsequent page",
             "schema": {
               "nullable": true,
-              "description": "Token returned by previous call to retreive the subsequent page",
               "type": "string"
             },
             "style": "form"
@@ -666,6 +761,7 @@
           {
             "in": "path",
             "name": "organization_name",
+            "description": "The organization's unique name.",
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/Name"
@@ -675,6 +771,7 @@
           {
             "in": "path",
             "name": "project_name",
+            "description": "The project's unique name within the organization.",
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/Name"
@@ -692,6 +789,12 @@
                 }
               }
             }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
           }
         },
         "x-dropshot-pagination": true
@@ -706,6 +809,7 @@
           {
             "in": "path",
             "name": "organization_name",
+            "description": "The organization's unique name.",
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/Name"
@@ -715,6 +819,7 @@
           {
             "in": "path",
             "name": "project_name",
+            "description": "The project's unique name within the organization.",
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/Name"
@@ -742,6 +847,12 @@
                 }
               }
             }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
           }
         }
       }
@@ -792,6 +903,12 @@
                 }
               }
             }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
           }
         }
       },
@@ -833,6 +950,12 @@
         "responses": {
           "204": {
             "description": "successful deletion"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
           }
         }
       }
@@ -848,9 +971,9 @@
           {
             "in": "query",
             "name": "limit",
+            "description": "Maximum number of items returned by a single call",
             "schema": {
               "nullable": true,
-              "description": "Maximum number of items returned by a single call",
               "type": "integer",
               "format": "uint32",
               "minimum": 1
@@ -860,9 +983,9 @@
           {
             "in": "query",
             "name": "page_token",
+            "description": "Token returned by previous call to retreive the subsequent page",
             "schema": {
               "nullable": true,
-              "description": "Token returned by previous call to retreive the subsequent page",
               "type": "string"
             },
             "style": "form"
@@ -878,6 +1001,7 @@
           {
             "in": "path",
             "name": "organization_name",
+            "description": "The organization's unique name.",
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/Name"
@@ -887,6 +1011,7 @@
           {
             "in": "path",
             "name": "project_name",
+            "description": "The project's unique name within the organization.",
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/Name"
@@ -904,6 +1029,12 @@
                 }
               }
             }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
           }
         },
         "x-dropshot-pagination": true
@@ -918,6 +1049,7 @@
           {
             "in": "path",
             "name": "organization_name",
+            "description": "The organization's unique name.",
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/Name"
@@ -927,6 +1059,7 @@
           {
             "in": "path",
             "name": "project_name",
+            "description": "The project's unique name within the organization.",
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/Name"
@@ -954,6 +1087,12 @@
                 }
               }
             }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
           }
         }
       }
@@ -1004,6 +1143,12 @@
                 }
               }
             }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
           }
         }
       },
@@ -1045,6 +1190,12 @@
         "responses": {
           "204": {
             "description": "successful deletion"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
           }
         }
       }
@@ -1060,9 +1211,9 @@
           {
             "in": "query",
             "name": "limit",
+            "description": "Maximum number of items returned by a single call",
             "schema": {
               "nullable": true,
-              "description": "Maximum number of items returned by a single call",
               "type": "integer",
               "format": "uint32",
               "minimum": 1
@@ -1072,9 +1223,9 @@
           {
             "in": "query",
             "name": "page_token",
+            "description": "Token returned by previous call to retreive the subsequent page",
             "schema": {
               "nullable": true,
-              "description": "Token returned by previous call to retreive the subsequent page",
               "type": "string"
             },
             "style": "form"
@@ -1125,6 +1276,12 @@
                 }
               }
             }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
           }
         },
         "x-dropshot-pagination": true
@@ -1185,6 +1342,12 @@
                 }
               }
             }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
           }
         }
       }
@@ -1244,6 +1407,12 @@
                 }
               }
             }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
           }
         }
       }
@@ -1304,6 +1473,12 @@
                 }
               }
             }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
           }
         }
       }
@@ -1354,6 +1529,12 @@
                 }
               }
             }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
           }
         }
       }
@@ -1404,6 +1585,12 @@
                 }
               }
             }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
           }
         }
       }
@@ -1454,6 +1641,12 @@
                 }
               }
             }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
           }
         }
       }
@@ -1469,9 +1662,9 @@
           {
             "in": "query",
             "name": "limit",
+            "description": "Maximum number of items returned by a single call",
             "schema": {
               "nullable": true,
-              "description": "Maximum number of items returned by a single call",
               "type": "integer",
               "format": "uint32",
               "minimum": 1
@@ -1481,9 +1674,9 @@
           {
             "in": "query",
             "name": "page_token",
+            "description": "Token returned by previous call to retreive the subsequent page",
             "schema": {
               "nullable": true,
-              "description": "Token returned by previous call to retreive the subsequent page",
               "type": "string"
             },
             "style": "form"
@@ -1499,6 +1692,7 @@
           {
             "in": "path",
             "name": "organization_name",
+            "description": "The organization's unique name.",
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/Name"
@@ -1508,6 +1702,7 @@
           {
             "in": "path",
             "name": "project_name",
+            "description": "The project's unique name within the organization.",
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/Name"
@@ -1525,6 +1720,12 @@
                 }
               }
             }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
           }
         },
         "x-dropshot-pagination": true
@@ -1539,6 +1740,7 @@
           {
             "in": "path",
             "name": "organization_name",
+            "description": "The organization's unique name.",
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/Name"
@@ -1548,6 +1750,7 @@
           {
             "in": "path",
             "name": "project_name",
+            "description": "The project's unique name within the organization.",
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/Name"
@@ -1575,6 +1778,12 @@
                 }
               }
             }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
           }
         }
       }
@@ -1625,6 +1834,12 @@
                 }
               }
             }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
           }
         }
       },
@@ -1676,6 +1891,12 @@
         "responses": {
           "204": {
             "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
           }
         }
       },
@@ -1717,6 +1938,12 @@
         "responses": {
           "204": {
             "description": "successful deletion"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
           }
         }
       }
@@ -1767,6 +1994,12 @@
                 }
               }
             }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
           }
         }
       },
@@ -1825,6 +2058,12 @@
                 }
               }
             }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
           }
         }
       }
@@ -1840,9 +2079,9 @@
           {
             "in": "query",
             "name": "limit",
+            "description": "Maximum number of items returned by a single call",
             "schema": {
               "nullable": true,
-              "description": "Maximum number of items returned by a single call",
               "type": "integer",
               "format": "uint32",
               "minimum": 1
@@ -1852,9 +2091,9 @@
           {
             "in": "query",
             "name": "page_token",
+            "description": "Token returned by previous call to retreive the subsequent page",
             "schema": {
               "nullable": true,
-              "description": "Token returned by previous call to retreive the subsequent page",
               "type": "string"
             },
             "style": "form"
@@ -1905,6 +2144,12 @@
                 }
               }
             }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
           }
         },
         "x-dropshot-pagination": true
@@ -1964,6 +2209,12 @@
                 }
               }
             }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
           }
         }
       }
@@ -2023,6 +2274,12 @@
                 }
               }
             }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
           }
         }
       },
@@ -2083,6 +2340,12 @@
         "responses": {
           "204": {
             "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
           }
         }
       },
@@ -2133,6 +2396,12 @@
         "responses": {
           "204": {
             "description": "successful deletion"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
           }
         }
       }
@@ -2148,9 +2417,9 @@
           {
             "in": "query",
             "name": "limit",
+            "description": "Maximum number of items returned by a single call",
             "schema": {
               "nullable": true,
-              "description": "Maximum number of items returned by a single call",
               "type": "integer",
               "format": "uint32",
               "minimum": 1
@@ -2160,9 +2429,9 @@
           {
             "in": "query",
             "name": "page_token",
+            "description": "Token returned by previous call to retreive the subsequent page",
             "schema": {
               "nullable": true,
-              "description": "Token returned by previous call to retreive the subsequent page",
               "type": "string"
             },
             "style": "form"
@@ -2222,6 +2491,12 @@
                 }
               }
             }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
           }
         },
         "x-dropshot-pagination": true
@@ -2290,6 +2565,12 @@
                 }
               }
             }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
           }
         }
       }
@@ -2358,6 +2639,12 @@
                 }
               }
             }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
           }
         }
       },
@@ -2427,6 +2714,12 @@
         "responses": {
           "204": {
             "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
           }
         }
       },
@@ -2486,6 +2779,12 @@
         "responses": {
           "204": {
             "description": "successful deletion"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
           }
         }
       }
@@ -2501,9 +2800,9 @@
           {
             "in": "query",
             "name": "limit",
+            "description": "Maximum number of items returned by a single call",
             "schema": {
               "nullable": true,
-              "description": "Maximum number of items returned by a single call",
               "type": "integer",
               "format": "uint32",
               "minimum": 1
@@ -2513,9 +2812,9 @@
           {
             "in": "query",
             "name": "page_token",
+            "description": "Token returned by previous call to retreive the subsequent page",
             "schema": {
               "nullable": true,
-              "description": "Token returned by previous call to retreive the subsequent page",
               "type": "string"
             },
             "style": "form"
@@ -2566,6 +2865,12 @@
                 }
               }
             }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
           }
         },
         "x-dropshot-pagination": true
@@ -2625,6 +2930,12 @@
                 }
               }
             }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
           }
         }
       }
@@ -2684,6 +2995,12 @@
                 }
               }
             }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
           }
         }
       },
@@ -2744,6 +3061,12 @@
         "responses": {
           "204": {
             "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
           }
         }
       },
@@ -2794,6 +3117,12 @@
         "responses": {
           "204": {
             "description": "successful deletion"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
           }
         }
       }
@@ -2809,9 +3138,9 @@
           {
             "in": "query",
             "name": "limit",
+            "description": "Maximum number of items returned by a single call",
             "schema": {
               "nullable": true,
-              "description": "Maximum number of items returned by a single call",
               "type": "integer",
               "format": "uint32",
               "minimum": 1
@@ -2821,9 +3150,9 @@
           {
             "in": "query",
             "name": "page_token",
+            "description": "Token returned by previous call to retreive the subsequent page",
             "schema": {
               "nullable": true,
-              "description": "Token returned by previous call to retreive the subsequent page",
               "type": "string"
             },
             "style": "form"
@@ -2883,6 +3212,12 @@
                 }
               }
             }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
           }
         },
         "x-dropshot-pagination": true
@@ -2899,9 +3234,9 @@
           {
             "in": "query",
             "name": "limit",
+            "description": "Maximum number of items returned by a single call",
             "schema": {
               "nullable": true,
-              "description": "Maximum number of items returned by a single call",
               "type": "integer",
               "format": "uint32",
               "minimum": 1
@@ -2911,9 +3246,9 @@
           {
             "in": "query",
             "name": "page_token",
+            "description": "Token returned by previous call to retreive the subsequent page",
             "schema": {
               "nullable": true,
-              "description": "Token returned by previous call to retreive the subsequent page",
               "type": "string"
             },
             "style": "form"
@@ -2929,6 +3264,12 @@
                 }
               }
             }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
           }
         },
         "x-dropshot-pagination": true
@@ -2945,9 +3286,9 @@
           {
             "in": "path",
             "name": "role_name",
+            "description": "The built-in role's unique name.",
             "required": true,
             "schema": {
-              "description": "The built-in role's unique name.",
               "type": "string"
             },
             "style": "simple"
@@ -2963,6 +3304,12 @@
                 }
               }
             }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
           }
         }
       }
@@ -2978,9 +3325,9 @@
           {
             "in": "query",
             "name": "limit",
+            "description": "Maximum number of items returned by a single call",
             "schema": {
               "nullable": true,
-              "description": "Maximum number of items returned by a single call",
               "type": "integer",
               "format": "uint32",
               "minimum": 1
@@ -2990,9 +3337,9 @@
           {
             "in": "query",
             "name": "page_token",
+            "description": "Token returned by previous call to retreive the subsequent page",
             "schema": {
               "nullable": true,
-              "description": "Token returned by previous call to retreive the subsequent page",
               "type": "string"
             },
             "style": "form"
@@ -3016,6 +3363,12 @@
                 }
               }
             }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
           }
         },
         "x-dropshot-pagination": true
@@ -3050,6 +3403,12 @@
                 }
               }
             }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
           }
         }
       }
@@ -3071,6 +3430,12 @@
                 }
               }
             }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
           }
         }
       }
@@ -3086,9 +3451,9 @@
           {
             "in": "query",
             "name": "limit",
+            "description": "Maximum number of items returned by a single call",
             "schema": {
               "nullable": true,
-              "description": "Maximum number of items returned by a single call",
               "type": "integer",
               "format": "uint32",
               "minimum": 1
@@ -3098,9 +3463,9 @@
           {
             "in": "query",
             "name": "page_token",
+            "description": "Token returned by previous call to retreive the subsequent page",
             "schema": {
               "nullable": true,
-              "description": "Token returned by previous call to retreive the subsequent page",
               "type": "string"
             },
             "style": "form"
@@ -3116,9 +3481,35 @@
                 }
               }
             }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
           }
         },
         "x-dropshot-pagination": true
+      }
+    },
+    "/updates/refresh": {
+      "post": {
+        "tags": [
+          "updates"
+        ],
+        "summary": "Refresh update metadata",
+        "operationId": "updates_refresh",
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
       }
     },
     "/users": {
@@ -3132,9 +3523,9 @@
           {
             "in": "query",
             "name": "limit",
+            "description": "Maximum number of items returned by a single call",
             "schema": {
               "nullable": true,
-              "description": "Maximum number of items returned by a single call",
               "type": "integer",
               "format": "uint32",
               "minimum": 1
@@ -3144,9 +3535,9 @@
           {
             "in": "query",
             "name": "page_token",
+            "description": "Token returned by previous call to retreive the subsequent page",
             "schema": {
               "nullable": true,
-              "description": "Token returned by previous call to retreive the subsequent page",
               "type": "string"
             },
             "style": "form"
@@ -3170,6 +3561,12 @@
                 }
               }
             }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
           }
         },
         "x-dropshot-pagination": true
@@ -3186,6 +3583,7 @@
           {
             "in": "path",
             "name": "user_name",
+            "description": "The built-in user's unique name.",
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/Name"
@@ -3203,12 +3601,30 @@
                 }
               }
             }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
           }
         }
       }
     }
   },
   "components": {
+    "responses": {
+      "Error": {
+        "description": "Error",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      }
+    },
     "schemas": {
       "ByteCount": {
         "description": "A count of bytes, typically used either for memory or storage capacity\n\nThe maximum supported byte count is [`i64::MAX`].  This makes it somewhat inconvenient to define constructors: a u32 constructor can be infallible, but an i64 constructor can fail (if the value is negative) and a u64 constructor can fail (if the value is larger than i64::MAX).  We provide all of these for consumers' convenience.",
@@ -3480,6 +3896,25 @@
               "state"
             ]
           }
+        ]
+      },
+      "Error": {
+        "description": "Error information from a response.",
+        "type": "object",
+        "properties": {
+          "error_code": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          },
+          "request_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "message",
+          "request_id"
         ]
       },
       "FieldSchema": {

@@ -16,6 +16,7 @@ table! {
         time_deleted -> Nullable<Timestamptz>,
         rcgen -> Int8,
         project_id -> Uuid,
+        volume_id -> Uuid,
         disk_state -> Text,
         attach_instance_id -> Nullable<Uuid>,
         state_generation -> Int8,
@@ -141,6 +142,7 @@ table! {
         id -> Uuid,
         time_created -> Timestamptz,
         time_modified -> Timestamptz,
+        tuf_base_url -> Text,
     }
 }
 
@@ -206,11 +208,24 @@ table! {
         time_modified -> Timestamptz,
 
         dataset_id -> Uuid,
-        disk_id -> Uuid,
+        volume_id -> Uuid,
 
         block_size -> Int8,
         blocks_per_extent -> Int8,
         extent_count -> Int8,
+    }
+}
+
+table! {
+    volume (id) {
+        id -> Uuid,
+        time_created -> Timestamptz,
+        time_modified -> Timestamptz,
+        time_deleted -> Nullable<Timestamptz>,
+        rcgen -> Int8,
+
+        data -> Text,
+        /* TODO: some sort of refcount? */
     }
 }
 
@@ -326,6 +341,19 @@ table! {
         role_name -> Text,
         resource_id -> Uuid,
         user_builtin_id -> Uuid,
+    }
+}
+
+table! {
+    update_available_artifact (name, version, kind) {
+        name -> Text,
+        version -> Int8,
+        kind -> crate::db::model::UpdateArtifactKindEnum,
+        targets_role_version -> Int8,
+        valid_until -> Timestamptz,
+        target_name -> Text,
+        target_sha256 -> Text,
+        target_length -> Int8,
     }
 }
 

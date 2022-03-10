@@ -13,6 +13,12 @@ use omicron_common::generate_logging_api;
 
 generate_logging_api!("../openapi/nexus-internal.json");
 
+impl omicron_common::api::external::ClientError for types::Error {
+    fn message(&self) -> String {
+        self.message.clone()
+    }
+}
+
 impl From<types::Generation> for omicron_common::api::external::Generation {
     fn from(s: types::Generation) -> Self {
         Self::try_from(s.0 as i64).unwrap()
@@ -54,6 +60,19 @@ impl From<types::InstanceState>
             types::InstanceState::Repairing => Self::Repairing,
             types::InstanceState::Failed => Self::Failed,
             types::InstanceState::Destroyed => Self::Destroyed,
+        }
+    }
+}
+
+impl From<omicron_common::api::internal::sled_agent::DatasetKind>
+    for types::DatasetKind
+{
+    fn from(d: omicron_common::api::internal::sled_agent::DatasetKind) -> Self {
+        use omicron_common::api::internal::sled_agent::DatasetKind::*;
+        match d {
+            CockroachDb { .. } => types::DatasetKind::Cockroach,
+            Crucible { .. } => types::DatasetKind::Crucible,
+            Clickhouse { .. } => types::DatasetKind::Clickhouse,
         }
     }
 }
@@ -223,6 +242,20 @@ impl From<&omicron_common::api::internal::nexus::ProducerEndpoint>
             base_route: s.base_route.clone(),
             id: s.id,
             interval: s.interval.into(),
+        }
+    }
+}
+
+impl From<omicron_common::api::internal::nexus::UpdateArtifactKind>
+    for types::UpdateArtifactKind
+{
+    fn from(
+        s: omicron_common::api::internal::nexus::UpdateArtifactKind,
+    ) -> Self {
+        use omicron_common::api::internal::nexus::UpdateArtifactKind;
+
+        match s {
+            UpdateArtifactKind::Zone => types::UpdateArtifactKind::Zone,
         }
     }
 }

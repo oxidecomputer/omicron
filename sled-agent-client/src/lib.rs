@@ -13,6 +13,12 @@ use uuid::Uuid;
 
 generate_logging_api!("../openapi/sled-agent.json");
 
+impl omicron_common::api::external::ClientError for types::Error {
+    fn message(&self) -> String {
+        self.message.clone()
+    }
+}
+
 impl From<omicron_common::api::internal::nexus::InstanceRuntimeState>
     for types::InstanceRuntimeState
 {
@@ -309,6 +315,75 @@ impl From<omicron_common::api::external::MacAddr> for types::MacAddr {
         Self(s.0.to_string())
     }
 }
+
+impl From<omicron_common::api::internal::sled_agent::DatasetKind>
+    for types::DatasetKind
+{
+    fn from(k: omicron_common::api::internal::sled_agent::DatasetKind) -> Self {
+        use omicron_common::api::internal::sled_agent::DatasetKind::*;
+        match k {
+            CockroachDb { all_addresses } => Self::CockroachDb(
+                all_addresses.iter().map(|a| a.to_string()).collect(),
+            ),
+            Crucible => Self::Crucible,
+            Clickhouse => Self::Clickhouse,
+        }
+    }
+}
+
+impl From<omicron_common::api::internal::sled_agent::DatasetEnsureBody>
+    for types::DatasetEnsureBody
+{
+    fn from(
+        p: omicron_common::api::internal::sled_agent::DatasetEnsureBody,
+    ) -> Self {
+        Self {
+            zpool_uuid: p.zpool_uuid,
+            partition_kind: p.partition_kind.into(),
+            address: p.address.to_string(),
+        }
+    }
+}
+
+impl From<omicron_common::api::internal::sled_agent::ServiceRequest>
+    for types::ServiceRequest
+{
+    fn from(
+        s: omicron_common::api::internal::sled_agent::ServiceRequest,
+    ) -> Self {
+        Self {
+            name: s.name,
+            addresses: s.addresses.into_iter().map(|s| s.to_string()).collect(),
+        }
+    }
+}
+
+impl From<omicron_common::api::internal::nexus::UpdateArtifact>
+    for types::UpdateArtifact
+{
+    fn from(s: omicron_common::api::internal::nexus::UpdateArtifact) -> Self {
+        types::UpdateArtifact {
+            name: s.name,
+            version: s.version,
+            kind: s.kind.into(),
+        }
+    }
+}
+
+impl From<omicron_common::api::internal::nexus::UpdateArtifactKind>
+    for types::UpdateArtifactKind
+{
+    fn from(
+        s: omicron_common::api::internal::nexus::UpdateArtifactKind,
+    ) -> Self {
+        use omicron_common::api::internal::nexus::UpdateArtifactKind;
+
+        match s {
+            UpdateArtifactKind::Zone => types::UpdateArtifactKind::Zone,
+        }
+    }
+}
+
 /**
  * Exposes additional [`Client`] interfaces for use by the test suite. These
  * are bonus endpoints, not generated in the real client.

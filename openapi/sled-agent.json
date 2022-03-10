@@ -45,6 +45,38 @@
                 }
               }
             }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/filesystem": {
+      "put": {
+        "operationId": "filesystem_put",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DatasetEnsureBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
           }
         }
       }
@@ -84,18 +116,164 @@
                 }
               }
             }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/services": {
+      "put": {
+        "operationId": "services_put",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ServiceEnsureBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/update": {
+      "post": {
+        "operationId": "update_artifact",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateArtifact"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
           }
         }
       }
     }
   },
   "components": {
+    "responses": {
+      "Error": {
+        "description": "Error",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      }
+    },
     "schemas": {
       "ByteCount": {
         "description": "A count of bytes, typically used either for memory or storage capacity\n\nThe maximum supported byte count is [`i64::MAX`].  This makes it somewhat inconvenient to define constructors: a u32 constructor can be infallible, but an i64 constructor can fail (if the value is negative) and a u64 constructor can fail (if the value is larger than i64::MAX).  We provide all of these for consumers' convenience.",
         "type": "integer",
         "format": "uint64",
         "minimum": 0
+      },
+      "DatasetEnsureBody": {
+        "description": "Used to request a new partition kind exists within a zpool.\n\nMany partition types are associated with services that will be instantiated when the partition is detected.",
+        "type": "object",
+        "properties": {
+          "address": {
+            "type": "string"
+          },
+          "partition_kind": {
+            "$ref": "#/components/schemas/DatasetKind"
+          },
+          "zpool_uuid": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "required": [
+          "address",
+          "partition_kind",
+          "zpool_uuid"
+        ]
+      },
+      "DatasetKind": {
+        "description": "The type of a dataset, and an auxiliary information necessary to successfully launch a zone managing the associated data.",
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "all_addresses": {
+                "description": "The addresses of all nodes within the cluster.",
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "cockroach_db"
+                ]
+              }
+            },
+            "required": [
+              "all_addresses",
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "crucible"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "clickhouse"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          }
+        ]
       },
       "DiskEnsureBody": {
         "description": "Sent from to a sled agent to establish the runtime state of a Disk",
@@ -344,6 +522,25 @@
               "state"
             ]
           }
+        ]
+      },
+      "Error": {
+        "description": "Error information from a response.",
+        "type": "object",
+        "properties": {
+          "error_code": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          },
+          "request_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "message",
+          "request_id"
         ]
       },
       "Generation": {
@@ -663,6 +860,67 @@
           "time_created",
           "time_modified",
           "vpc_id"
+        ]
+      },
+      "ServiceEnsureBody": {
+        "description": "Used to request that the Sled initialize certain services on initialization.\n\nThis may be used to record that certain sleds are responsible for launching services which may not be associated with a partition, such as Nexus.",
+        "type": "object",
+        "properties": {
+          "services": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ServiceRequest"
+            }
+          }
+        },
+        "required": [
+          "services"
+        ]
+      },
+      "ServiceRequest": {
+        "type": "object",
+        "properties": {
+          "addresses": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "name": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "addresses",
+          "name"
+        ]
+      },
+      "UpdateArtifact": {
+        "description": "Description of a single update artifact.",
+        "type": "object",
+        "properties": {
+          "kind": {
+            "$ref": "#/components/schemas/UpdateArtifactKind"
+          },
+          "name": {
+            "type": "string"
+          },
+          "version": {
+            "type": "integer",
+            "format": "int64"
+          }
+        },
+        "required": [
+          "kind",
+          "name",
+          "version"
+        ]
+      },
+      "UpdateArtifactKind": {
+        "description": "Kinds of update artifacts, as used by Nexus to determine what updates are available and by sled-agent to determine how to apply an update when asked.",
+        "type": "string",
+        "enum": [
+          "zone"
         ]
       }
     }

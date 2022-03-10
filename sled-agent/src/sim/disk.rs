@@ -6,10 +6,10 @@
  * Simulated sled agent implementation
  */
 
+use crate::nexus::NexusClient;
 use crate::params::DiskStateRequested;
 use crate::sim::simulatable::Simulatable;
 use async_trait::async_trait;
-use nexus_client::Client as NexusClient;
 use omicron_common::api::external::DiskState;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::Generation;

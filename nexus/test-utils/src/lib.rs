@@ -104,7 +104,7 @@ pub async fn test_setup_with_config(
     config.database.url = database.pg_config().clone();
     config.timeseries_db.address.set_port(clickhouse.port());
 
-    let server = omicron_nexus::Server::start(&config, &rack_id, &logctx.log)
+    let server = omicron_nexus::Server::start(&config, rack_id, &logctx.log)
         .await
         .unwrap();
     server
@@ -238,7 +238,7 @@ impl oximeter::Producer for IntegrationProducer {
         &mut self,
     ) -> Result<
         Box<(dyn Iterator<Item = oximeter::types::Sample> + 'static)>,
-        oximeter::Error,
+        oximeter::MetricsError,
     > {
         use oximeter::Metric;
         let sample = oximeter::types::Sample::new(&self.target, &self.metric);

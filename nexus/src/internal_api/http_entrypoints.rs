@@ -2,10 +2,10 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use crate::context::OpContext;
 /**
  * Handler functions (entrypoints) for HTTP APIs internal to the control plane
  */
+use crate::context::OpContext;
 use crate::ServerContext;
 
 use super::params::{
@@ -20,9 +20,12 @@ use dropshot::HttpResponseUpdatedNoContent;
 use dropshot::Path;
 use dropshot::RequestContext;
 use dropshot::TypedBody;
+use http::{Response, StatusCode};
+use hyper::Body;
 use omicron_common::api::internal::nexus::DiskRuntimeState;
 use omicron_common::api::internal::nexus::InstanceRuntimeState;
 use omicron_common::api::internal::nexus::ProducerEndpoint;
+use omicron_common::api::internal::nexus::UpdateArtifact;
 use oximeter::types::ProducerResults;
 use oximeter_producer::{collect, ProducerIdPathParams};
 use schemars::JsonSchema;
@@ -45,6 +48,7 @@ pub fn internal_api() -> NexusApiDescription {
         api.register(cpapi_producers_post)?;
         api.register(cpapi_collectors_post)?;
         api.register(cpapi_metrics_collect)?;
+        api.register(cpapi_artifact_download)?;
         Ok(())
     }
 
@@ -281,4 +285,21 @@ async fn cpapi_metrics_collect(
         .internal_latencies
         .instrument_dropshot_handler(&request_context, handler)
         .await
+}
+
+/// Endpoint used by Sled Agents to download cached artifacts.
+#[endpoint {
+    method = GET,
+    path = "/artifacts/{kind}/{name}/{version}",
+}]
+async fn cpapi_artifact_download(
+    request_context: Arc<RequestContext<Arc<ServerContext>>>,
+    path_params: Path<UpdateArtifact>,
+) -> Result<Response<Body>, HttpError> {
+    let context = request_context.context();
+    let nexus = &context.nexus;
+    // TODO: return 404 if the error we get here says that the record isn't found
+    let body = nexus.download_artifact(path_params.into_inner()).await?;
+
+    Ok(Response::builder().status(StatusCode::OK).body(body.into())?)
 }

@@ -5,17 +5,17 @@
 //! HTTP entrypoint functions for the sled agent's exposed API
 
 use super::params::DiskEnsureBody;
-use dropshot::endpoint;
-use dropshot::ApiDescription;
-use dropshot::HttpError;
-use dropshot::HttpResponseOk;
-use dropshot::Path;
-use dropshot::RequestContext;
-use dropshot::TypedBody;
+use dropshot::{
+    endpoint, ApiDescription, HttpError, HttpResponseOk,
+    HttpResponseUpdatedNoContent, Path, RequestContext, TypedBody,
+};
 use omicron_common::api::external::Error;
 use omicron_common::api::internal::nexus::DiskRuntimeState;
 use omicron_common::api::internal::nexus::InstanceRuntimeState;
+use omicron_common::api::internal::nexus::UpdateArtifact;
+use omicron_common::api::internal::sled_agent::DatasetEnsureBody;
 use omicron_common::api::internal::sled_agent::InstanceEnsureBody;
+use omicron_common::api::internal::sled_agent::ServiceEnsureBody;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use std::sync::Arc;
@@ -28,8 +28,11 @@ type SledApiDescription = ApiDescription<SledAgent>;
 /// Returns a description of the sled agent API
 pub fn api() -> SledApiDescription {
     fn register_endpoints(api: &mut SledApiDescription) -> Result<(), String> {
+        api.register(services_put)?;
+        api.register(filesystem_put)?;
         api.register(instance_put)?;
         api.register(disk_put)?;
+        api.register(update_artifact)?;
         Ok(())
     }
 
@@ -38,6 +41,40 @@ pub fn api() -> SledApiDescription {
         panic!("failed to register entrypoints: {}", err);
     }
     api
+}
+
+#[endpoint {
+    method = PUT,
+    path = "/services",
+}]
+async fn services_put(
+    rqctx: Arc<RequestContext<SledAgent>>,
+    body: TypedBody<ServiceEnsureBody>,
+) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+    let sa = rqctx.context();
+    let body_args = body.into_inner();
+    sa.services_ensure(body_args).await.map_err(|e| Error::from(e))?;
+    Ok(HttpResponseUpdatedNoContent())
+}
+
+#[endpoint {
+    method = PUT,
+    path = "/filesystem",
+}]
+async fn filesystem_put(
+    rqctx: Arc<RequestContext<SledAgent>>,
+    body: TypedBody<DatasetEnsureBody>,
+) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+    let sa = rqctx.context();
+    let body_args = body.into_inner();
+    sa.filesystem_ensure(
+        body_args.zpool_uuid,
+        body_args.partition_kind,
+        body_args.address,
+    )
+    .await
+    .map_err(|e| Error::from(e))?;
+    Ok(HttpResponseUpdatedNoContent())
 }
 
 /// Path parameters for Instance requests (sled agent API)
@@ -66,7 +103,7 @@ async fn instance_put(
             body_args.migrate,
         )
         .await
-        .map_err(|e| Error::from(e))?,
+        .map_err(Error::from)?,
     ))
 }
 
@@ -97,4 +134,17 @@ async fn disk_put(
         .await
         .map_err(|e| Error::from(e))?,
     ))
+}
+
+#[endpoint {
+    method = POST,
+    path = "/update"
+}]
+async fn update_artifact(
+    rqctx: Arc<RequestContext<SledAgent>>,
+    artifact: TypedBody<UpdateArtifact>,
+) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+    let sa = rqctx.context();
+    sa.update_artifact(artifact.into_inner()).await.map_err(Error::from)?;
+    Ok(HttpResponseUpdatedNoContent())
 }

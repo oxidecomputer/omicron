@@ -7,17 +7,13 @@
 use super::config::Config;
 use super::http_entrypoints::api as http_api;
 use super::sled_agent::SledAgent;
+use crate::nexus::NexusClient;
 use slog::Drain;
 
 use omicron_common::backoff::{
     internal_service_policy, retry_notify, BackoffError,
 };
 use std::sync::Arc;
-
-#[cfg(test)]
-use crate::mocks::MockNexusClient as NexusClient;
-#[cfg(not(test))]
-use nexus_client::Client as NexusClient;
 
 /// Packages up a [`SledAgent`], running the sled agent API under a Dropshot
 /// server wired up to the sled agent
@@ -90,9 +86,11 @@ impl Server {
                 .await
                 .map_err(BackoffError::Transient)
         };
-        let log_notification_failure = |error, delay| {
-            warn!(log, "failed to contact nexus, will retry in {:?}", delay;
-                "error" => ?error);
+        let log_notification_failure = |_, delay| {
+            warn!(
+                log,
+                "failed to contact nexus, will retry in {:?}", delay;
+            );
         };
         retry_notify(
             internal_service_policy(),

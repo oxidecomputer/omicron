@@ -5,21 +5,39 @@
 //! Behavior implemented by both real and simulated SPs.
 
 use crate::{
-    version, IgnitionCommand, Request, RequestKind, ResponseKind,
-    SerialConsole, SpComponent, SpMessage, SpMessageKind,
+    version, BulkIgnitionState, IgnitionCommand, IgnitionState, Request,
+    RequestKind, ResponseError, ResponseKind, SerialConsole, SpComponent,
+    SpMessage, SpMessageKind, SpState,
 };
 use hubpack::SerializedSize;
 
 pub trait SpHandler {
-    fn ping(&mut self) -> ResponseKind;
+    fn ping(&mut self) -> Result<(), ResponseError>;
 
-    fn ignition_state(&mut self, target: u8) -> ResponseKind;
+    fn ignition_state(
+        &mut self,
+        target: u8,
+    ) -> Result<IgnitionState, ResponseError>;
+
+    fn bulk_ignition_state(
+        &mut self,
+    ) -> Result<BulkIgnitionState, ResponseError>;
 
     fn ignition_command(
         &mut self,
         target: u8,
         command: IgnitionCommand,
-    ) -> ResponseKind;
+    ) -> Result<(), ResponseError>;
+
+    fn sp_state(&mut self) -> Result<SpState, ResponseError>;
+
+    // TODO Should we return "number of bytes written" here, or is it sufficient
+    // to say "all or none"? Would be nice for the caller to not have to resend
+    // UDP chunks; can SP ensure it writes all data locally?
+    fn serial_console_write(
+        &mut self,
+        packet: SerialConsole,
+    ) -> Result<(), ResponseError>;
 }
 
 #[derive(Debug)]
@@ -71,15 +89,10 @@ pub struct SerialConsolePackets<'a, 'b> {
     data: &'b [u8],
 }
 
-impl SerialConsolePackets<'_, '_> {
-    /// Get the next packet of serial console data, if one exists.
-    ///
-    /// Returns `Some(data)` with a packet to be sent if any data remains, or
-    /// `None` if all data has been previously returned.
-    pub fn next_packet<'a>(
-        &mut self,
-        out: &'a mut [u8; SpMessage::MAX_SIZE],
-    ) -> Option<&'a [u8]> {
+impl Iterator for SerialConsolePackets<'_, '_> {
+    type Item = SerialConsole;
+
+    fn next(&mut self) -> Option<Self::Item> {
         if self.data.is_empty() {
             return None;
         }
@@ -89,61 +102,44 @@ impl SerialConsolePackets<'_, '_> {
             SerialConsole::MAX_DATA_PER_PACKET,
         ));
 
-        let mut message = SerialConsole {
+        let mut packet = SerialConsole {
             component: self.parent.component,
             offset: self.parent.offset,
-            len: this_packet.len() as u8,
+            len: this_packet.len() as u16,
             data: [0; SerialConsole::MAX_DATA_PER_PACKET],
         };
-        message.data[..this_packet.len()].copy_from_slice(this_packet);
-        let message = SpMessage {
-            version: version::V1,
-            kind: SpMessageKind::SerialConsole(message),
-        };
-
-        // We know `out` is big enough for any `SpMessage`, so no need to bubble
-        // up an error here.
-        let n = match hubpack::serialize(&mut out[..], &message) {
-            Ok(n) => n,
-            Err(_) => panic!(),
-        };
+        packet.data[..this_packet.len()].copy_from_slice(this_packet);
 
         self.data = remaining;
         self.parent.offset += this_packet.len() as u64;
 
-        Some(&out[..n])
+        Some(packet)
     }
 }
 
 #[derive(Debug)]
-pub struct SpServer<Handler> {
+pub struct SpServer {
     buf: [u8; SpMessage::MAX_SIZE],
-    handler: Handler,
 }
 
-impl<Handler> SpServer<Handler>
-where
-    Handler: SpHandler,
-{
-    pub fn new(handler: Handler) -> Self {
-        Self { buf: [0; SpMessage::MAX_SIZE], handler }
+impl Default for SpServer {
+    fn default() -> Self {
+        Self { buf: [0; SpMessage::MAX_SIZE] }
     }
+}
 
-    pub fn handler(&self) -> &Handler {
-        &self.handler
-    }
-
-    pub fn handler_mut(&mut self) -> &mut Handler {
-        &mut self.handler
-    }
-
+impl SpServer {
     /// Handler for incoming UDP requests.
     ///
     /// `data` should be a UDP packet that has arrived for the current SP. It
     /// will be parsed (into a [`Request`]), the appropriate method will be
-    /// called on the underlying message handler, and a serialized response will
+    /// called on `handler`, and a serialized response will
     /// be returned, which the caller should send back to the requester.
-    pub fn dispatch(&mut self, data: &[u8]) -> Result<&[u8], Error> {
+    pub fn dispatch<H: SpHandler>(
+        &mut self,
+        data: &[u8],
+        handler: &mut H,
+    ) -> Result<&[u8], Error> {
         // parse request, with sanity checks on sizes
         if data.len() > Request::MAX_SIZE {
             return Err(Error::DataTooLarge);
@@ -160,14 +156,23 @@ where
         }
 
         // call out to handler to provide response
-        let response_kind = match request.kind {
-            RequestKind::Ping => self.handler.ping(),
+        let result = match request.kind {
+            RequestKind::Ping => handler.ping().map(|()| ResponseKind::Pong),
             RequestKind::IgnitionState { target } => {
-                self.handler.ignition_state(target)
+                handler.ignition_state(target).map(ResponseKind::IgnitionState)
             }
-            RequestKind::IgnitionCommand { target, command } => {
-                self.handler.ignition_command(target, command)
+            RequestKind::BulkIgnitionState => handler
+                .bulk_ignition_state()
+                .map(ResponseKind::BulkIgnitionState),
+            RequestKind::IgnitionCommand { target, command } => handler
+                .ignition_command(target, command)
+                .map(|()| ResponseKind::IgnitionCommandAck),
+            RequestKind::SpState => {
+                handler.sp_state().map(ResponseKind::SpState)
             }
+            RequestKind::SerialConsoleWrite(packet) => handler
+                .serial_console_write(packet)
+                .map(|()| ResponseKind::SerialConsoleWriteAck),
         };
 
         // we control `SpMessage` and know all cases can successfully serialize
@@ -176,7 +181,7 @@ where
             version: version::V1,
             kind: SpMessageKind::Response {
                 request_id: request.request_id,
-                kind: response_kind,
+                result,
             },
         };
         let n = match hubpack::serialize(&mut self.buf, &response) {

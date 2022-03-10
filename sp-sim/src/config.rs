@@ -8,6 +8,7 @@
 //!
 
 use dropshot::ConfigLogging;
+use gateway_messages::SerialNumber;
 use serde::{Deserialize, Serialize};
 use std::{
     net::SocketAddr,
@@ -15,36 +16,62 @@ use std::{
 };
 use thiserror::Error;
 
-#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Serialize)]
-#[serde(rename_all = "lowercase")]
-pub enum SpType {
-    Sidecar,
-    Gimlet,
-}
-
-/// Description of a simulated SP's components.
-// TODO should reorganize this once we have more to do with components than just
-// a serial console - maybe a list of components with flags for which operations
-// they support (serial console, power on/off, etc)
+/// Configuration of a simulated sidecar SP
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
-pub struct SpComponents {
-    /// List of components with a serial console.
-    pub serial_console: Vec<String>,
+pub struct SidecarConfig {
+    /// UDP address
+    pub bind_address: SocketAddr,
+    /// Fake serial number
+    pub serial_number: SerialNumber,
 }
 
-/// Configuration for a simulated SP
+/// Configuration of a simulated gimlet SP
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+pub struct GimletConfig {
+    /// UDP address
+    pub bind_address: SocketAddr,
+    /// Fake serial number
+    pub serial_number: SerialNumber,
+    /// Attached components
+    pub components: Vec<SpComponentConfig>,
+}
+
+/// Configuration of a simulated gimlet SP
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+pub struct SpComponentConfig {
+    /// Name of the component
+    pub name: String,
+    /// Socket address we'll use to expose this component's serial console
+    /// via TCP.
+    pub serial_console: Option<SocketAddr>,
+}
+
+/// Configuration of a set of simulated SPs
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+pub struct SimulatedSps {
+    /// Simulated sidecar(s)
+    pub sidecar: Vec<SidecarConfig>,
+    /// Simulated gimlet(s)
+    pub gimlet: Vec<GimletConfig>,
+}
+
+/// Configuration for a sp-sim
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct Config {
+    /// UDP address of MGS.
+    pub gateway_address: SocketAddr,
+    /// List of SPs to simulate.
+    pub simulated_sps: SimulatedSps,
+    /// Server-wide logging configuration.
+    pub log: ConfigLogging,
+    /*
     /// Type of SP to simulate.
     pub sp_type: SpType,
     /// Components to simulate.
     pub components: SpComponents,
     /// UDP listen address.
     pub bind_address: SocketAddr,
-    /// UDP address of MGS.
-    pub gateway_address: SocketAddr,
-    /// Server-wide logging configuration.
-    pub log: ConfigLogging,
+    */
 }
 
 impl Config {

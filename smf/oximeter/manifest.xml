@@ -7,9 +7,9 @@
   <create_default_instance enabled='false' />
   <single_instance />
 
-  <dependency name='sled-agent' grouping='require_all' restart_on='none'
+  <dependency name='multi_user' grouping='require_all' restart_on='none'
     type='service'>
-  <service_fmri value='svc:/system/illumos/sled-agent' />
+  <service_fmri value='svc:/milestone/multi-user:default' />
   </dependency>
 
   <method_context>
@@ -18,7 +18,7 @@
     </method_environment>
   </method_context>
   <exec_method type='method' name='start'
-	  exec='ctrun -l child -o noorphan,regent /opt/oxide/oximeter/oximeter /opt/oxide/oximeter/pkg/config.toml &amp;'
+    exec='ctrun -l child -o noorphan,regent /opt/oxide/oximeter/bin/oximeter /var/svc/manifest/site/oximeter/config.toml &amp;'
     timeout_seconds='0' />
   <exec_method type='method' name='stop' exec=':kill' timeout_seconds='0' />
 
