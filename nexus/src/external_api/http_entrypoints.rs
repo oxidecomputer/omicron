@@ -58,6 +58,9 @@ use omicron_common::api::external::RouterRouteUpdateParams;
 use omicron_common::api::external::Saga;
 use omicron_common::api::external::VpcFirewallRuleUpdateParams;
 use omicron_common::api::external::VpcFirewallRules;
+use omicron_common::api::internal::nexus::{
+    InstanceSerialConsoleData, InstanceSerialConsoleRequest,
+};
 use omicron_common::{
     api::external::http_pagination::data_page_params_for, bail_unless,
 };
@@ -116,6 +119,7 @@ pub fn external_api() -> NexusApiDescription {
         api.register(project_instances_instance_reboot)?;
         api.register(project_instances_instance_start)?;
         api.register(project_instances_instance_stop)?;
+        api.register(project_instances_instance_serial_get)?;
 
         // Globally-scoped Images API
         api.register(images_get)?;
@@ -1416,6 +1420,39 @@ async fn project_instances_instance_stop(
             )
             .await?;
         Ok(HttpResponseAccepted(instance.into()))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Get contents of an instance's serial console.
+#[endpoint {
+    method = GET,
+    path = "/organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/serial",
+    tags = ["instances"],
+}]
+async fn project_instances_instance_serial_get(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    path_params: Path<InstancePathParam>,
+    query_params: Query<InstanceSerialConsoleRequest>,
+) -> Result<HttpResponseOk<InstanceSerialConsoleData>, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let path = path_params.into_inner();
+    let organization_name = &path.organization_name;
+    let project_name = &path.project_name;
+    let instance_name = &path.instance_name;
+    let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let data = nexus
+            .instance_serial_console_data(
+                &opctx,
+                &organization_name,
+                &project_name,
+                &instance_name,
+                &query_params.into_inner(),
+            )
+            .await?;
+        Ok(HttpResponseOk(data.into()))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }

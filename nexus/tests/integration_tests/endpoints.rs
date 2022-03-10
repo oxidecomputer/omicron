@@ -195,6 +195,8 @@ lazy_static! {
         format!("{}/detach", *DEMO_INSTANCE_DISKS_URL);
     pub static ref DEMO_INSTANCE_NICS_URL: String =
         format!("{}/network-interfaces", *DEMO_INSTANCE_URL);
+    pub static ref DEMO_INSTANCE_SERIAL_URL: String =
+        format!("{}/serial", *DEMO_INSTANCE_URL);
     pub static ref DEMO_INSTANCE_CREATE: params::InstanceCreate =
         params::InstanceCreate {
             identity: IdentityMetadataCreateParams {
@@ -864,6 +866,13 @@ lazy_static! {
                         dst_sled_id: uuid::Uuid::new_v4(),
                     }
                 ).unwrap()),
+            ],
+        },
+        VerifyEndpoint {
+            url: &*DEMO_INSTANCE_SERIAL_URL,
+            visibility: Visibility::Protected,
+            allowed_methods: vec![
+                AllowedMethod::GetNonexistent // has required query parameters
             ],
         },
 

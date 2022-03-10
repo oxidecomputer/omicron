@@ -18,6 +18,7 @@ use crate::params::{
 };
 use crate::services::ServiceManager;
 use crate::storage_manager::StorageManager;
+use omicron_common::api::internal::nexus::InstanceSerialConsoleData;
 use omicron_common::api::{
     internal::nexus::DiskRuntimeState, internal::nexus::InstanceRuntimeState,
     internal::nexus::UpdateArtifact,
@@ -322,5 +323,21 @@ impl SledAgent {
         crate::updates::download_artifact(artifact, self.nexus_client.as_ref())
             .await?;
         Ok(())
+    }
+
+    pub async fn instance_serial_console_data(
+        &self,
+        instance_id: Uuid,
+        byte_offset: Option<isize>,
+        max_bytes: Option<usize>,
+    ) -> Result<InstanceSerialConsoleData, Error> {
+        self.instances
+            .instance_serial_console_buffer_data(
+                instance_id,
+                byte_offset,
+                max_bytes,
+            )
+            .await
+            .map_err(Error::from)
     }
 }

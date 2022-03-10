@@ -103,3 +103,19 @@ pub struct UpdateArtifact {
 pub enum UpdateArtifactKind {
     Zone,
 }
+
+/// Sent to a sled agent to request the contents of an Instance's serial console.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
+pub struct InstanceSerialConsoleRequest {
+    /// Character index in the serial buffer (since instance boot) from which to read.
+    pub byte_offset: Option<isize>,
+    /// Maximum number of bytes of buffered serial console contents (after byte_offset) to return.
+    pub max_bytes: Option<usize>,
+}
+
+/// Contents of an Instance's serial console buffer.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct InstanceSerialConsoleData {
+    pub data: Vec<u8>, // might not be UTF-8.
+    pub last_byte_offset: usize,
+}

@@ -19,10 +19,13 @@ use crate::params::NetworkInterface;
 use crate::params::{
     InstanceHardware, InstanceMigrateParams, InstanceRuntimeStateRequested,
 };
+use crate::serial::SerialConsoleBuffer;
 use anyhow::anyhow;
 use futures::lock::{Mutex, MutexGuard};
 use omicron_common::address::PROPOLIS_PORT;
-use omicron_common::api::internal::nexus::InstanceRuntimeState;
+use omicron_common::api::internal::nexus::{
+    InstanceRuntimeState, InstanceSerialConsoleData,
+};
 use omicron_common::backoff;
 use propolis_client::api::DiskRequest;
 use propolis_client::Client as PropolisClient;
@@ -79,6 +82,9 @@ pub enum Error {
 
     #[error(transparent)]
     Opte(#[from] crate::opte::Error),
+
+    #[error("Serial console buffer: {0}")]
+    Serial(#[from] crate::serial::Error),
 }
 
 // Issues read-only, idempotent HTTP requests at propolis until it responds with
@@ -212,6 +218,9 @@ struct InstanceInner {
     // Internal State management
     state: InstanceStates,
     running_state: Option<RunningState>,
+
+    // Task buffering the instance's serial console
+    serial_tty_task: Option<SerialConsoleBuffer>,
 
     // Connection to Nexus
     nexus_client: Arc<NexusClient>,
@@ -399,6 +408,11 @@ mockall::mock! {
             &self,
             target: InstanceRuntimeStateRequested,
         ) -> Result<InstanceRuntimeState, Error>;
+        pub async fn serial_console_buffer_data(
+            &self,
+            byte_offset: Option<isize>,
+            max_bytes: Option<usize>,
+        ) -> Result<InstanceSerialConsoleData, Error>;
     }
     impl Clone for Instance {
         fn clone(&self) -> Self;
@@ -458,6 +472,7 @@ impl Instance {
             state: InstanceStates::new(initial.runtime),
             running_state: None,
             nexus_client,
+            serial_tty_task: None,
         };
 
         let inner = Arc::new(Mutex::new(instance));
@@ -628,9 +643,16 @@ impl Instance {
         // Create the propolis zone and resources
         let setup = self.setup_propolis_locked(&mut inner).await?;
 
+        let ws_uri = setup.client.ws_uri_instance_serial_console();
+
         // Ensure the instance exists in the Propolis Server before we start
         // using it.
         inner.ensure(self.clone(), ticket, setup, migrate).await?;
+
+        if inner.serial_tty_task.is_none() {
+            inner.serial_tty_task =
+                Some(SerialConsoleBuffer::new(ws_uri, inner.log.clone()));
+        }
 
         Ok(())
     }
@@ -708,6 +730,21 @@ impl Instance {
             inner.take_action(action).await?;
         }
         Ok(inner.state.current().clone())
+    }
+
+    pub async fn serial_console_buffer_data(
+        &self,
+        byte_offset: Option<isize>,
+        max_bytes: Option<usize>,
+    ) -> Result<InstanceSerialConsoleData, Error> {
+        let inner = self.inner.lock().await;
+        if let Some(ttybuf) = &inner.serial_tty_task {
+            let (data, last_byte_offset) =
+                ttybuf.contents(byte_offset, max_bytes).await?;
+            Ok(InstanceSerialConsoleData { data, last_byte_offset })
+        } else {
+            Err(crate::serial::Error::Existential.into())
+        }
     }
 }
 

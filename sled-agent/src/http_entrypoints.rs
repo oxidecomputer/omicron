@@ -9,12 +9,14 @@ use crate::params::{
 };
 use dropshot::{
     endpoint, ApiDescription, HttpError, HttpResponseOk,
-    HttpResponseUpdatedNoContent, Path, RequestContext, TypedBody,
+    HttpResponseUpdatedNoContent, Path, Query, RequestContext, TypedBody,
 };
 use omicron_common::api::external::Error;
-use omicron_common::api::internal::nexus::DiskRuntimeState;
 use omicron_common::api::internal::nexus::InstanceRuntimeState;
 use omicron_common::api::internal::nexus::UpdateArtifact;
+use omicron_common::api::internal::nexus::{
+    DiskRuntimeState, InstanceSerialConsoleData, InstanceSerialConsoleRequest,
+};
 use schemars::JsonSchema;
 use serde::Deserialize;
 use std::sync::Arc;
@@ -32,6 +34,7 @@ pub fn api() -> SledApiDescription {
         api.register(instance_put)?;
         api.register(disk_put)?;
         api.register(update_artifact)?;
+        api.register(instance_serial_get)?;
         Ok(())
     }
 
@@ -146,4 +149,31 @@ async fn update_artifact(
     let sa = rqctx.context();
     sa.update_artifact(artifact.into_inner()).await.map_err(Error::from)?;
     Ok(HttpResponseUpdatedNoContent())
+}
+
+#[endpoint {
+    method = GET,
+    path = "/instances/{instance_id}/serial",
+}]
+async fn instance_serial_get(
+    rqctx: Arc<RequestContext<SledAgent>>,
+    path_params: Path<InstancePathParam>,
+    query: Query<InstanceSerialConsoleRequest>,
+) -> Result<HttpResponseOk<InstanceSerialConsoleData>, HttpError> {
+    let sa = rqctx.context();
+    let instance_id = path_params.into_inner().instance_id;
+    let query_params = query.into_inner();
+
+    // TODO: support websocket in dropshot, detect websocket upgrade header and proxy the data
+
+    let data = sa
+        .instance_serial_console_data(
+            instance_id,
+            query_params.byte_offset,
+            query_params.max_bytes,
+        )
+        .await
+        .map_err(Error::from)?;
+
+    Ok(HttpResponseOk(data))
 }

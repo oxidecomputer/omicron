@@ -39,6 +39,7 @@ use nexus_test_utils::resource_helpers::{
 };
 use nexus_test_utils::ControlPlaneTestContext;
 use nexus_test_utils_macros::nexus_test;
+use omicron_common::api::internal::nexus::InstanceSerialConsoleData;
 
 static ORGANIZATION_NAME: &str = "test-org";
 static PROJECT_NAME: &str = "springfield-squidport";
@@ -2239,6 +2240,94 @@ async fn test_instances_memory_not_divisible_by_min_memory_size(
             ByteCount::from(params::MIN_MEMORY_SIZE_BYTES)
         ),
     );
+}
+
+#[nexus_test]
+async fn test_instance_serial(cptestctx: &ControlPlaneTestContext) {
+    let client = &cptestctx.external_client;
+    let apictx = &cptestctx.server.apictx;
+    let nexus = &apictx.nexus;
+
+    // Create a project that we'll use for testing.
+    create_organization(&client, ORGANIZATION_NAME).await;
+    let url_instances = format!(
+        "/organizations/{}/projects/{}/instances",
+        ORGANIZATION_NAME, PROJECT_NAME
+    );
+    let _ = create_project(&client, ORGANIZATION_NAME, PROJECT_NAME).await;
+
+    // Make sure we get a 404 if we try to access the serial console before creation.
+    let instance_serial_url = format!("{}/kris-picks/serial", url_instances);
+    let error: HttpErrorResponseBody = NexusRequest::expect_failure(
+        client,
+        StatusCode::NOT_FOUND,
+        Method::GET,
+        &instance_serial_url,
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap()
+    .parsed_body()
+    .unwrap();
+    assert_eq!(error.message, "not found: instance with name \"kris-picks\"");
+
+    // Create an instance.
+    let instance_url = format!("{}/kris-picks", url_instances);
+    let instance =
+        create_instance(client, ORGANIZATION_NAME, PROJECT_NAME, "kris-picks")
+            .await;
+
+    // Now, simulate completion of instance boot and check the state reported.
+    instance_simulate(nexus, &instance.identity.id).await;
+    let instance_next = instance_get(&client, &instance_url).await;
+    identity_eq(&instance.identity, &instance_next.identity);
+    assert_eq!(instance_next.runtime.run_state, InstanceState::Running);
+    assert!(
+        instance_next.runtime.time_run_state_updated
+            > instance.runtime.time_run_state_updated
+    );
+
+    let serial_data: InstanceSerialConsoleData =
+        NexusRequest::object_get(client, &instance_serial_url)
+            .authn_as(AuthnMode::PrivilegedUser)
+            .execute()
+            .await
+            .expect("failed to make request")
+            .parsed_body()
+            .unwrap();
+
+    // FIXME: this is not necessarily going to always be the sled-agent-sim!
+    //  when it's reasonable to boot arbitrary images, perhaps we simply use one
+    //  that outputs something predictable like this
+    let expected = "This is simulated serial console output for ".as_bytes();
+    assert_eq!(&serial_data.data[..expected.len()], expected);
+
+    // Request a halt and verify both the immediate state and the finished state.
+    let instance = instance_next;
+    let instance_next =
+        instance_post(&client, &instance_url, InstanceOp::Stop).await;
+    assert_eq!(instance_next.runtime.run_state, InstanceState::Stopping);
+    assert!(
+        instance_next.runtime.time_run_state_updated
+            > instance.runtime.time_run_state_updated
+    );
+
+    let instance = instance_next;
+    instance_simulate(nexus, &instance.identity.id).await;
+    let instance_next = instance_get(&client, &instance_url).await;
+    assert_eq!(instance_next.runtime.run_state, InstanceState::Stopped);
+    assert!(
+        instance_next.runtime.time_run_state_updated
+            > instance.runtime.time_run_state_updated
+    );
+
+    // Delete the instance.
+    NexusRequest::object_delete(client, &instance_url)
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .unwrap();
 }
 
 async fn instance_get(

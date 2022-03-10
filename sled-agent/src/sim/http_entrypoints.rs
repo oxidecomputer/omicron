@@ -5,7 +5,6 @@
 //! HTTP entrypoint functions for the sled agent's exposed API
 
 use crate::params::{DiskEnsureBody, InstanceEnsureBody};
-use dropshot::endpoint;
 use dropshot::ApiDescription;
 use dropshot::HttpError;
 use dropshot::HttpResponseOk;
@@ -13,8 +12,11 @@ use dropshot::HttpResponseUpdatedNoContent;
 use dropshot::Path;
 use dropshot::RequestContext;
 use dropshot::TypedBody;
+use dropshot::{endpoint, Query};
 use omicron_common::api::internal::nexus::DiskRuntimeState;
 use omicron_common::api::internal::nexus::InstanceRuntimeState;
+use omicron_common::api::internal::nexus::InstanceSerialConsoleData;
+use omicron_common::api::internal::nexus::InstanceSerialConsoleRequest;
 use omicron_common::api::internal::nexus::UpdateArtifact;
 use schemars::JsonSchema;
 use serde::Deserialize;
@@ -33,6 +35,7 @@ pub fn api() -> SledApiDescription {
         api.register(disk_put)?;
         api.register(disk_poke_post)?;
         api.register(update_artifact)?;
+        api.register(instance_serial_get)?;
         Ok(())
     }
 
@@ -138,4 +141,29 @@ async fn update_artifact(
     .await
     .map_err(|e| HttpError::for_internal_error(e.to_string()))?;
     Ok(HttpResponseUpdatedNoContent())
+}
+
+#[endpoint {
+    method = GET,
+    path = "/instances/{instance_id}/serial",
+}]
+async fn instance_serial_get(
+    rqctx: Arc<RequestContext<Arc<SledAgent>>>,
+    path_params: Path<InstancePathParam>,
+    query: Query<InstanceSerialConsoleRequest>,
+) -> Result<HttpResponseOk<InstanceSerialConsoleData>, HttpError> {
+    let sa = rqctx.context();
+    let instance_id = path_params.into_inner().instance_id;
+    let query_params = query.into_inner();
+
+    let data = sa
+        .instance_serial_console_data(
+            instance_id,
+            query_params.byte_offset,
+            query_params.max_bytes,
+        )
+        .await
+        .map_err(HttpError::for_internal_error)?;
+
+    Ok(HttpResponseOk(data))
 }

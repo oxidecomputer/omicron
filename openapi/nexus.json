@@ -2469,6 +2469,85 @@
         }
       }
     },
+    "/organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/serial": {
+      "get": {
+        "tags": [
+          "instances"
+        ],
+        "summary": "Get contents of an instance's serial console.",
+        "operationId": "project_instances_instance_serial_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "instance_name",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Name"
+            },
+            "style": "simple"
+          },
+          {
+            "in": "path",
+            "name": "organization_name",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Name"
+            },
+            "style": "simple"
+          },
+          {
+            "in": "path",
+            "name": "project_name",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Name"
+            },
+            "style": "simple"
+          },
+          {
+            "in": "query",
+            "name": "byte_offset",
+            "description": "Character index in the serial buffer (since instance boot) from which to read.",
+            "schema": {
+              "nullable": true,
+              "type": "integer",
+              "format": "int"
+            },
+            "style": "form"
+          },
+          {
+            "in": "query",
+            "name": "max_bytes",
+            "description": "Maximum number of bytes of buffered serial console contents (after byte_offset) to return.",
+            "schema": {
+              "nullable": true,
+              "type": "integer",
+              "format": "uint",
+              "minimum": 0
+            },
+            "style": "form"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InstanceSerialConsoleData"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/start": {
       "post": {
         "tags": [
@@ -6866,6 +6945,29 @@
         },
         "required": [
           "items"
+        ]
+      },
+      "InstanceSerialConsoleData": {
+        "description": "Contents of an Instance's serial console buffer.",
+        "type": "object",
+        "properties": {
+          "data": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "format": "uint8",
+              "minimum": 0
+            }
+          },
+          "last_byte_offset": {
+            "type": "integer",
+            "format": "uint",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "data",
+          "last_byte_offset"
         ]
       },
       "InstanceState": {

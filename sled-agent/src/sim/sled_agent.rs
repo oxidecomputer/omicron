@@ -10,8 +10,10 @@ use crate::params::{
 };
 use futures::lock::Mutex;
 use omicron_common::api::external::Error;
-use omicron_common::api::internal::nexus::DiskRuntimeState;
 use omicron_common::api::internal::nexus::InstanceRuntimeState;
+use omicron_common::api::internal::nexus::{
+    DiskRuntimeState, InstanceSerialConsoleData,
+};
 use slog::Logger;
 use std::sync::Arc;
 use uuid::Uuid;
@@ -131,5 +133,88 @@ impl SledAgent {
         dataset_id: Uuid,
     ) -> Arc<CrucibleData> {
         self.storage.lock().await.get_dataset(zpool_id, dataset_id).await
+    }
+
+    /// Get contents of an instance's serial console.
+    pub async fn instance_serial_console_data(
+        &self,
+        instance_id: Uuid,
+        byte_offset: Option<isize>,
+        max_bytes: Option<usize>,
+    ) -> Result<InstanceSerialConsoleData, String> {
+        if !self.instances.sim_contains(&instance_id).await {
+            return Err(format!("No such instance {}", instance_id));
+        }
+
+        // TODO: if instance state isn't running {
+        //  return Ok(InstanceSerialConsoleData { data: vec![], last_byte_offset: 0 });
+        // }
+
+        let gerunds = [
+            "Loading",
+            "Reloading",
+            "Advancing",
+            "Reticulating",
+            "Defeating",
+            "Spoiling",
+            "Cooking",
+            "Destroying",
+            "Resenting",
+            "Introducing",
+            "Reiterating",
+            "Blasting",
+            "Tolling",
+            "Delivering",
+            "Engendering",
+            "Establishing",
+        ];
+        let nouns = [
+            "canon",
+            "browsers",
+            "meta",
+            "splines",
+            "villains",
+            "plot",
+            "books",
+            "evidence",
+            "decisions",
+            "chaos",
+            "points",
+            "processors",
+            "bells",
+            "value",
+            "gender",
+            "shots",
+        ];
+        let mut entropy = instance_id.as_u128();
+        let mut buf = format!(
+            "This is simulated serial console output for {}.\n",
+            instance_id
+        );
+        while entropy != 0 {
+            let gerund = gerunds[entropy as usize % gerunds.len()];
+            entropy /= gerunds.len() as u128;
+            let noun = nouns[entropy as usize % nouns.len()];
+            entropy /= nouns.len() as u128;
+            buf += &format!(
+                "{} {}... {}[\x1b[92m 0K \x1b[m]\n",
+                gerund,
+                noun,
+                " ".repeat(40 - gerund.len() - noun.len())
+            );
+        }
+        buf += "\x1b[2J\x1b[HOS/478 (localhorse) (ttyl)\n\nlocalhorse login: ";
+
+        let byte_offset = byte_offset
+            .map(|x| if x < 0 { buf.len() as isize + x } else { x } as usize)
+            .unwrap_or(0);
+
+        let start = byte_offset.min(buf.len());
+        let end = (byte_offset + max_bytes.unwrap_or(16 * 1024)).min(buf.len());
+        let data = buf[start..end].as_bytes().to_vec();
+
+        let last_byte_offset = byte_offset + data.len();
+
+        Ok(InstanceSerialConsoleData { data, last_byte_offset })
     }
 }
