@@ -27,6 +27,22 @@ table! {
 }
 
 table! {
+    snapshot (id) {
+        id -> Uuid,
+        name -> Text,
+        description -> Text,
+        time_created -> Timestamptz,
+        time_modified -> Timestamptz,
+        time_deleted -> Nullable<Timestamptz>,
+
+        project_id -> Uuid,
+        disk_id -> Uuid,
+        volume_id -> Uuid,
+        size_bytes -> Int8,
+    }
+}
+
+table! {
     instance (id) {
         id -> Uuid,
         name -> Text,

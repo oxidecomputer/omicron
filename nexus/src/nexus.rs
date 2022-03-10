@@ -791,6 +791,47 @@ impl Nexus {
         Ok(())
     }
 
+    pub async fn disk_create_snapshot(
+        self: &Arc<Self>,
+        _opctx: &OpContext,
+        _organization_name: &Name,
+        _project_name: &Name,
+        _disk_name: &Name,
+        _params: &params::SnapshotCreate,
+    ) -> CreateResult<db::model::Snapshot> {
+        unimplemented!();
+    }
+
+    pub async fn project_list_snapshots(
+        &self,
+        _opctx: &OpContext,
+        _organization_name: &Name,
+        _project_name: &Name,
+        _pagparams: &DataPageParams<'_, Name>,
+    ) -> ListResultVec<db::model::Snapshot> {
+        unimplemented!();
+    }
+
+    pub async fn snapshot_fetch(
+        &self,
+        _opctx: &OpContext,
+        _organization_name: &Name,
+        _project_name: &Name,
+        _snapshot_name: &Name,
+    ) -> LookupResult<db::model::Snapshot> {
+        unimplemented!();
+    }
+
+    pub async fn project_delete_snapshot(
+        self: &Arc<Self>,
+        _opctx: &OpContext,
+        _organization_name: &Name,
+        _project_name: &Name,
+        _snapshot_name: &Name,
+    ) -> DeleteResult {
+        unimplemented!();
+    }
+
     /*
      * Instances
      */

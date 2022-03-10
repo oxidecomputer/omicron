@@ -936,6 +936,21 @@ impl DiskState {
 }
 
 /*
+ * SNAPSHOTS
+ */
+
+/// Client view of a Snapshot
+#[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct Snapshot {
+    #[serde(flatten)]
+    pub identity: IdentityMetadata,
+
+    pub project_id: Uuid,
+    pub disk_id: Uuid,
+    pub size: ByteCount,
+}
+
+/*
  * Sagas
  *
  * These are currently only intended for observability by developers.  We will
