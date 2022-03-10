@@ -4,6 +4,7 @@ project_disks_delete_disk                /organizations/{organization_name}/proj
 project_disks_get                        /organizations/{organization_name}/projects/{project_name}/disks
 project_disks_get_disk                   /organizations/{organization_name}/projects/{project_name}/disks/{disk_name}
 project_disks_post                       /organizations/{organization_name}/projects/{project_name}/disks
+project_disks_snapshot_post              /organizations/{organization_name}/projects/{project_name}/disks/{disk_name}/snapshot
 
 API operations found with tag "firewall"
 OPERATION ID                             URL PATH
@@ -85,6 +86,12 @@ API operations found with tag "sleds"
 OPERATION ID                             URL PATH
 hardware_sleds_get                       /hardware/sleds
 hardware_sleds_get_sled                  /hardware/sleds/{sled_id}
+
+API operations found with tag "snapshots"
+OPERATION ID                             URL PATH
+project_snapshots_delete_snapshot        /organizations/{organization_name}/projects/{project_name}/snapshots/{snapshot_name}
+project_snapshots_get                    /organizations/{organization_name}/projects/{project_name}/snapshots
+project_snapshots_get_snapshot           /organizations/{organization_name}/projects/{project_name}/snapshots/{snapshot_name}
 
 API operations found with tag "subnets"
 OPERATION ID                             URL PATH
