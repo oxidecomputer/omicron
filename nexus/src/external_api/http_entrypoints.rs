@@ -12,7 +12,7 @@ use crate::ServerContext;
 
 use super::{
     console_api, params,
-    views::{Organization, Project, Rack, Role, Sled, User, Vpc, VpcSubnet},
+    views::{Organization, Project, Rack, Role, Sled, Snapshot, User, Vpc, VpcSubnet},
 };
 use crate::context::OpContext;
 use dropshot::ApiDescription;
@@ -52,7 +52,6 @@ use omicron_common::api::external::RouterRouteCreateParams;
 use omicron_common::api::external::RouterRouteKind;
 use omicron_common::api::external::RouterRouteUpdateParams;
 use omicron_common::api::external::Saga;
-use omicron_common::api::external::Snapshot;
 use omicron_common::api::external::VpcFirewallRuleUpdateParams;
 use omicron_common::api::external::VpcFirewallRules;
 use omicron_common::api::external::VpcRouter;

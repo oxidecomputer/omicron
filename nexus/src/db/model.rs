@@ -15,6 +15,7 @@ use crate::db::schema::{
 };
 use crate::defaults;
 use crate::external_api::params;
+use crate::external_api::views;
 use crate::internal_api;
 use chrono::{DateTime, Utc};
 use db_macros::{Asset, Resource};
@@ -1254,7 +1255,7 @@ pub struct Snapshot {
     pub size: ByteCount,
 }
 
-impl From<Snapshot> for external::Snapshot {
+impl From<Snapshot> for views::Snapshot {
     fn from(snapshot: Snapshot) -> Self {
         Self {
             identity: snapshot.identity(),
