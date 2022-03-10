@@ -12,7 +12,9 @@ use crate::ServerContext;
 
 use super::{
     console_api, params,
-    views::{Organization, Project, Rack, Role, Sled, User, Vpc, VpcSubnet},
+    views::{
+        Image, Organization, Project, Rack, Role, Sled, User, Vpc, VpcSubnet,
+    },
 };
 use crate::context::OpContext;
 use dropshot::ApiDescription;
@@ -45,7 +47,6 @@ use omicron_common::api::external::to_list;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Disk;
 use omicron_common::api::external::Error;
-use omicron_common::api::external::Image;
 use omicron_common::api::external::Instance;
 use omicron_common::api::external::NetworkInterface;
 use omicron_common::api::external::RouterRoute;

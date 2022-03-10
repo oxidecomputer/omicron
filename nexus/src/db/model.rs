@@ -15,6 +15,7 @@ use crate::db::schema::{
 };
 use crate::defaults;
 use crate::external_api::params;
+use crate::external_api::views;
 use crate::internal_api;
 use chrono::{DateTime, Utc};
 use db_macros::{Asset, Resource};
@@ -1252,7 +1253,7 @@ pub struct Image {
     size: ByteCount,
 }
 
-impl From<Image> for external::Image {
+impl From<Image> for views::Image {
     fn from(image: Image) -> Self {
         Self {
             identity: image.identity(),
