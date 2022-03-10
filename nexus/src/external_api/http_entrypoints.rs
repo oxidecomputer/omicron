@@ -12,7 +12,9 @@ use crate::ServerContext;
 
 use super::{
     console_api, params,
-    views::{Organization, Project, Rack, Role, Sled, Snapshot, User, Vpc, VpcSubnet},
+    views::{
+        Organization, Project, Rack, Role, Sled, Snapshot, User, Vpc, VpcSubnet,
+    },
 };
 use crate::context::OpContext;
 use dropshot::ApiDescription;
