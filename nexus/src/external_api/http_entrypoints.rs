@@ -903,6 +903,8 @@ async fn project_instances_migrate_instance(
 
 /**
  * Reboot an instance.
+ *
+ * Adding this text to cause a failure in test_nexus_openapi.
  */
 #[endpoint {
     method = POST,
