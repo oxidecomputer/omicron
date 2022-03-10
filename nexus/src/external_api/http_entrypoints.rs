@@ -45,6 +45,7 @@ use omicron_common::api::external::to_list;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Disk;
 use omicron_common::api::external::Error;
+use omicron_common::api::external::Image;
 use omicron_common::api::external::Instance;
 use omicron_common::api::external::NetworkInterface;
 use omicron_common::api::external::RouterRoute;
@@ -95,6 +96,18 @@ pub fn external_api() -> NexusApiDescription {
         api.register(project_instances_instance_reboot)?;
         api.register(project_instances_instance_start)?;
         api.register(project_instances_instance_stop)?;
+
+        // Globally-scoped Images API
+        api.register(images_get)?;
+        api.register(images_post)?;
+        api.register(images_get_image)?;
+        api.register(images_delete_image)?;
+
+        // Project-scoped images API
+        api.register(project_images_get)?;
+        api.register(project_images_post)?;
+        api.register(project_images_get_image)?;
+        api.register(project_images_delete_image)?;
 
         api.register(instance_disks_get)?;
         api.register(instance_disks_attach)?;
@@ -1102,6 +1115,249 @@ async fn instance_disks_detach(
             )
             .await?;
         Ok(HttpResponseAccepted(disk.into()))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/*
+ * Images
+ */
+
+/// List global images.
+#[endpoint {
+    method = GET,
+    path = "/images",
+    tags = ["images"],
+}]
+async fn images_get(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    query_params: Query<PaginatedByName>,
+) -> Result<HttpResponseOk<ResultsPage<Image>>, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let query = query_params.into_inner();
+    let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let images = nexus
+            .list_images(
+                &opctx,
+                &data_page_params_for(&rqctx, &query)?
+                    .map_name(|n| Name::ref_cast(n)),
+            )
+            .await?
+            .into_iter()
+            .map(|d| d.into())
+            .collect();
+        Ok(HttpResponseOk(ScanByName::results_page(&query, images)?))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Create a global image.
+#[endpoint {
+    method = POST,
+    path = "/images",
+    tags = ["images"]
+}]
+async fn images_post(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    new_image: TypedBody<params::ImageCreate>,
+) -> Result<HttpResponseCreated<Image>, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let new_image_params = &new_image.into_inner();
+    let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let image = nexus.create_image(&opctx, &new_image_params).await?;
+        Ok(HttpResponseCreated(image.into()))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Path parameters for Image requests
+#[derive(Deserialize, JsonSchema)]
+struct GlobalImagePathParam {
+    image_name: Name,
+}
+
+/// Get a global image.
+#[endpoint {
+    method = GET,
+    path = "/images/{image_name}",
+    tags = ["images"],
+}]
+async fn images_get_image(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    path_params: Path<GlobalImagePathParam>,
+) -> Result<HttpResponseOk<Image>, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let path = path_params.into_inner();
+    let image_name = &path.image_name;
+    let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let image = nexus.image_fetch(&opctx, &image_name).await?;
+        Ok(HttpResponseOk(image.into()))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Delete a global image.
+#[endpoint {
+    method = DELETE,
+    path = "/images/{image_name}",
+    tags = ["images"],
+}]
+async fn images_delete_image(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    path_params: Path<GlobalImagePathParam>,
+) -> Result<HttpResponseDeleted, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let path = path_params.into_inner();
+    let image_name = &path.image_name;
+    let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        nexus.delete_image(&opctx, &image_name).await?;
+        Ok(HttpResponseDeleted())
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// List images in a project.
+#[endpoint {
+    method = GET,
+    path = "/organizations/{organization_name}/projects/{project_name}/images",
+    tags = ["images"],
+}]
+async fn project_images_get(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    query_params: Query<PaginatedByName>,
+    path_params: Path<ProjectPathParam>,
+) -> Result<HttpResponseOk<ResultsPage<Image>>, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let query = query_params.into_inner();
+    let path = path_params.into_inner();
+    let organization_name = &path.organization_name;
+    let project_name = &path.project_name;
+    let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let images = nexus
+            .project_list_images(
+                &opctx,
+                organization_name,
+                project_name,
+                &data_page_params_for(&rqctx, &query)?
+                    .map_name(|n| Name::ref_cast(n)),
+            )
+            .await?
+            .into_iter()
+            .map(|d| d.into())
+            .collect();
+        Ok(HttpResponseOk(ScanByName::results_page(&query, images)?))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Create an instance in a project
+#[endpoint {
+    method = POST,
+    path = "/organizations/{organization_name}/projects/{project_name}/images",
+    tags = ["images"]
+}]
+async fn project_images_post(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    path_params: Path<ProjectPathParam>,
+    new_image: TypedBody<params::ImageCreate>,
+) -> Result<HttpResponseCreated<Image>, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let path = path_params.into_inner();
+    let organization_name = &path.organization_name;
+    let project_name = &path.project_name;
+    let new_image_params = &new_image.into_inner();
+    let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let image = nexus
+            .project_create_image(
+                &opctx,
+                &organization_name,
+                &project_name,
+                &new_image_params,
+            )
+            .await?;
+        Ok(HttpResponseCreated(image.into()))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Path parameters for Image requests
+#[derive(Deserialize, JsonSchema)]
+struct ImagePathParam {
+    organization_name: Name,
+    project_name: Name,
+    image_name: Name,
+}
+
+/// Get an image in a project.
+#[endpoint {
+    method = GET,
+    path = "/organizations/{organization_name}/projects/{project_name}/images/{image_name}",
+    tags = ["images"],
+}]
+async fn project_images_get_image(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    path_params: Path<ImagePathParam>,
+) -> Result<HttpResponseOk<Image>, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let path = path_params.into_inner();
+    let organization_name = &path.organization_name;
+    let project_name = &path.project_name;
+    let image_name = &path.image_name;
+    let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let image = nexus
+            .project_image_fetch(
+                &opctx,
+                &organization_name,
+                &project_name,
+                &image_name,
+            )
+            .await?;
+        Ok(HttpResponseOk(image.into()))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Delete an image from a project.
+#[endpoint {
+    method = DELETE,
+    path = "/organizations/{organization_name}/projects/{project_name}/images/{image_name}",
+    tags = ["images"],
+}]
+async fn project_images_delete_image(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    path_params: Path<ImagePathParam>,
+) -> Result<HttpResponseDeleted, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let path = path_params.into_inner();
+    let organization_name = &path.organization_name;
+    let project_name = &path.project_name;
+    let image_name = &path.image_name;
+    let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        nexus
+            .project_delete_image(
+                &opctx,
+                &organization_name,
+                &project_name,
+                &image_name,
+            )
+            .await?;
+        Ok(HttpResponseDeleted())
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }

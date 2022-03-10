@@ -936,6 +936,20 @@ impl DiskState {
 }
 
 /*
+ * IMAGES
+ */
+
+/// Client view of Images
+#[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct Image {
+    #[serde(flatten)]
+    pub identity: IdentityMetadata,
+
+    pub project_id: Option<Uuid>,
+    pub size: ByteCount,
+}
+
+/*
  * Sagas
  *
  * These are currently only intended for observability by developers.  We will

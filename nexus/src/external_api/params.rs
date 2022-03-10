@@ -230,6 +230,19 @@ pub struct DiskIdentifier {
 }
 
 /*
+ * IMAGES
+ */
+
+/// Create-time parameters for an
+/// [`Image`](omicron_common::api::external::Image)
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct ImageCreate {
+    /// common identifying metadata
+    #[serde(flatten)]
+    pub identity: IdentityMetadataCreateParams,
+}
+
+/*
  * BUILT-IN USERS
  *
  * These cannot be created via the external API, but we use the same interfaces

@@ -7,7 +7,7 @@
 use crate::db::collection_insert::DatastoreCollection;
 use crate::db::identity::{Asset, Resource};
 use crate::db::schema::{
-    console_session, dataset, disk, instance, metric_producer,
+    console_session, dataset, disk, image, instance, metric_producer,
     network_interface, organization, oximeter, project, rack, region,
     role_assignment_builtin, role_builtin, router_route, sled,
     update_available_artifact, user_builtin, volume, vpc, vpc_firewall_rule,
@@ -1228,6 +1228,37 @@ impl From<external::DiskState> for DiskState {
 impl Into<external::DiskState> for DiskState {
     fn into(self) -> external::DiskState {
         self.0
+    }
+}
+
+#[derive(
+    Queryable,
+    Insertable,
+    Selectable,
+    Clone,
+    Debug,
+    Resource,
+    Serialize,
+    Deserialize,
+)]
+#[table_name = "image"]
+pub struct Image {
+    #[diesel(embed)]
+    identity: ImageIdentity,
+
+    project_id: Option<Uuid>,
+    volume_id: Uuid,
+    #[column_name = "size_bytes"]
+    size: ByteCount,
+}
+
+impl From<Image> for external::Image {
+    fn from(image: Image) -> Self {
+        Self {
+            identity: image.identity(),
+            project_id: image.project_id,
+            size: image.size.into(),
+        }
     }
 }
 
