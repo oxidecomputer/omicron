@@ -169,7 +169,7 @@ CREATE TABLE omicron.public.volume (
      * consumed by some Upstairs code to perform the volume creation. The Rust
      * type of this column should be Crucible::VolumeConstructionRequest.
      */
-    data TEXT NOT NULL /* JSONB */
+    data TEXT NOT NULL
 );
 
 /*

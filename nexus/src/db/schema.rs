@@ -224,7 +224,7 @@ table! {
         time_deleted -> Nullable<Timestamptz>,
         rcgen -> Int8,
 
-        data -> Text, /* TODO Jsonb */
+        data -> Text,
         /* TODO: some sort of refcount? */
     }
 }

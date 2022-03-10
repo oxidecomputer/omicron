@@ -764,7 +764,7 @@ pub struct Volume {
 
     rcgen: Generation,
 
-    pub data: String, // XXX serde_json::Value,
+    data: String,
 }
 
 impl Volume {
