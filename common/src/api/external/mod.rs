@@ -1311,9 +1311,10 @@ pub enum RouteTarget {
 #[serde(tag = "type", content = "value", rename_all = "snake_case")]
 #[display("{}:{0}", style = "lowercase")]
 pub enum RouteDestination {
-    /// Route applies to traffic destined for a specific IP address or IP
-    /// subnet.
-    Ip(IpNet),
+    /// Route applies to traffic destined for a specific IP address
+    Ip(IpAddr),
+    /// Route applies to traffic destined for a specific IP subnet
+    IpNet(IpNet),
     /// Route applies to traffic destined for the given VPC.
     Vpc(Name),
     /// Route applies to traffic
@@ -1533,8 +1534,10 @@ pub enum VpcFirewallRuleTarget {
     Subnet(Name),
     /// The rule applies to this specific instance
     Instance(Name),
-    /// The rule applies to a specific IP address or IP subnet
-    Ip(IpNet),
+    /// The rule applies to a specific IP address
+    Ip(IpAddr),
+    /// The rule applies to a specific IP subnet
+    IpNet(IpNet),
     // Tags not yet implemented
     //Tag(Name),
 }
@@ -1562,8 +1565,10 @@ pub enum VpcFirewallRuleHostFilter {
     Instance(Name),
     // Tags not yet implemented
     // Tag(Name),
-    /// The rule applies to traffic from/to a specific IP address or IP subnet
-    Ip(IpNet),
+    /// The rule applies to traffic from/to a specific IP address
+    Ip(IpAddr),
+    /// The rule applies to traffic from/to a specific IP subnet
+    IpNet(IpNet),
     // TODO: Internet gateways not yet implemented
     // #[display("inetgw:{0}")]
     // InternetGateway(Name),
@@ -2211,8 +2216,8 @@ mod test {
             "ip:192.168.0.10".parse().unwrap()
         );
         assert_eq!(
-            RouteDestination::Ip(network),
-            "ip:fd00::/64".parse().unwrap()
+            RouteDestination::IpNet(network),
+            "ipnet:fd00::/64".parse().unwrap()
         );
         assert!("foo:foo".parse::<RouteDestination>().is_err());
         assert!("foo".parse::<RouteDestination>().is_err());
@@ -2240,8 +2245,8 @@ mod test {
             "ip:192.168.0.10".parse().unwrap()
         );
         assert_eq!(
-            VpcFirewallRuleTarget::Ip(network),
-            "ip:fd00::/64".parse().unwrap()
+            VpcFirewallRuleTarget::IpNet(network),
+            "ipnet:fd00::/64".parse().unwrap()
         );
         assert!("foo:foo".parse::<VpcFirewallRuleTarget>().is_err());
         assert!("foo".parse::<VpcFirewallRuleTarget>().is_err());
@@ -2269,8 +2274,8 @@ mod test {
             "ip:192.168.0.10".parse().unwrap()
         );
         assert_eq!(
-            VpcFirewallRuleHostFilter::Ip(network),
-            "ip:fd00::/64".parse().unwrap()
+            VpcFirewallRuleHostFilter::IpNet(network),
+            "ipnet:fd00::/64".parse().unwrap()
         );
         assert!("foo:foo".parse::<VpcFirewallRuleHostFilter>().is_err());
         assert!("foo".parse::<VpcFirewallRuleHostFilter>().is_err());

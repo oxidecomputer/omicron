@@ -4593,13 +4593,33 @@
         "description": "A `RouteDestination` is used to match traffic with a routing rule, on the destination of that traffic.\n\nWhen traffic is to be sent to a destination that is within a given `RouteDestination`, the corresponding [`RouterRoute`] applies, and traffic will be forward to the [`RouteTarget`] for that rule.",
         "oneOf": [
           {
-            "description": "Route applies to traffic destined for a specific IP address or IP subnet.",
+            "description": "Route applies to traffic destined for a specific IP address",
             "type": "object",
             "properties": {
               "type": {
                 "type": "string",
                 "enum": [
                   "ip"
+                ]
+              },
+              "value": {
+                "type": "string",
+                "format": "ip"
+              }
+            },
+            "required": [
+              "type",
+              "value"
+            ]
+          },
+          {
+            "description": "Route applies to traffic destined for a specific IP subnet",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "ip_net"
                 ]
               },
               "value": {
@@ -5572,13 +5592,33 @@
             ]
           },
           {
-            "description": "The rule applies to traffic from/to a specific IP address or IP subnet",
+            "description": "The rule applies to traffic from/to a specific IP address",
             "type": "object",
             "properties": {
               "type": {
                 "type": "string",
                 "enum": [
                   "ip"
+                ]
+              },
+              "value": {
+                "type": "string",
+                "format": "ip"
+              }
+            },
+            "required": [
+              "type",
+              "value"
+            ]
+          },
+          {
+            "description": "The rule applies to traffic from/to a specific IP subnet",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "ip_net"
                 ]
               },
               "value": {
@@ -5669,13 +5709,33 @@
             ]
           },
           {
-            "description": "The rule applies to a specific IP address or IP subnet",
+            "description": "The rule applies to a specific IP address",
             "type": "object",
             "properties": {
               "type": {
                 "type": "string",
                 "enum": [
                   "ip"
+                ]
+              },
+              "value": {
+                "type": "string",
+                "format": "ip"
+              }
+            },
+            "required": [
+              "type",
+              "value"
+            ]
+          },
+          {
+            "description": "The rule applies to a specific IP subnet",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "ip_net"
                 ]
               },
               "value": {
