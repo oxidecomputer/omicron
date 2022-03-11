@@ -2,8 +2,9 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use crate::config::{Config, GimletConfig};
+use crate::config::GimletConfig;
 use crate::server::UdpServer;
+use crate::SimulatedSp;
 use anyhow::{anyhow, Context, Result};
 use gateway_messages::sp_impl::{SerialConsolePacketizer, SpHandler, SpServer};
 use gateway_messages::{
@@ -13,7 +14,7 @@ use gateway_messages::{
 use slog::{debug, error, info, warn, Logger};
 use std::collections::HashMap;
 use std::net::SocketAddr;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, UdpSocket};
 use tokio::select;
@@ -21,6 +22,8 @@ use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
 use tokio::task::{self, JoinHandle};
 
 pub struct Gimlet {
+    local_addr: SocketAddr,
+    serial_number: SerialNumber,
     inner_tasks: Vec<JoinHandle<()>>,
 }
 
@@ -33,19 +36,37 @@ impl Drop for Gimlet {
     }
 }
 
+impl SimulatedSp for Gimlet {
+    fn serial_number(&self) -> String {
+        hex::encode(self.serial_number)
+    }
+
+    fn local_addr(&self) -> SocketAddr {
+        self.local_addr
+    }
+}
+
 impl Gimlet {
-    pub async fn spawn(
-        config: &Config,
-        gimlet: &GimletConfig,
-        log: Logger,
-    ) -> Result<Self> {
+    pub async fn spawn(gimlet: &GimletConfig, log: Logger) -> Result<Self> {
         info!(log, "setting up simualted gimlet");
 
         let server = UdpServer::new(gimlet.bind_address).await?;
         let sock = Arc::clone(server.socket());
+        let local_addr = sock
+            .local_addr()
+            .with_context(|| "could not get local address of bound socket")?;
 
         let mut incoming_console_tx = HashMap::new();
         let mut inner_tasks = Vec::new();
+
+        // We want to be able to start without knowing the gateway's socket
+        // address, but we're spawning both the primary UDP task (which receives
+        // messages from the gateway) and a helper TCP task (which emulates a
+        // serial console and sends messages to the gateway unprompted). We'll
+        // share a locked `Option<SocketAddr>` between the tasks, and have the
+        // UDP task populate it. If the TCP task receives data but doesn't know
+        // the gateways address, it will just discard it.
+        let gateway_address: Arc<Mutex<Option<SocketAddr>>> = Arc::default();
 
         for component_config in &gimlet.components {
             let name = component_config.name.as_str();
@@ -65,7 +86,7 @@ impl Gimlet {
                     listener,
                     rx,
                     Arc::clone(&sock),
-                    config.gateway_address,
+                    Arc::clone(&gateway_address),
                     log.new(slog::o!("serial-console" => name.to_string())),
                 );
                 inner_tasks.push(task::spawn(async move {
@@ -76,6 +97,7 @@ impl Gimlet {
 
         let inner = UdpTask::new(
             server,
+            gateway_address,
             gimlet.serial_number,
             incoming_console_tx,
             log,
@@ -83,7 +105,11 @@ impl Gimlet {
         inner_tasks
             .push(task::spawn(async move { inner.run().await.unwrap() }));
 
-        Ok(Self { inner_tasks })
+        Ok(Self {
+            local_addr,
+            serial_number: gimlet.serial_number,
+            inner_tasks,
+        })
     }
 }
 
@@ -91,7 +117,7 @@ struct SerialConsoleTcpTask {
     listener: TcpListener,
     incoming_serial_console: UnboundedReceiver<SerialConsole>,
     sock: Arc<UdpSocket>,
-    gateway_address: SocketAddr,
+    gateway_address: Arc<Mutex<Option<SocketAddr>>>,
     console_packetizer: SerialConsolePacketizer,
     log: Logger,
 }
@@ -102,7 +128,7 @@ impl SerialConsoleTcpTask {
         listener: TcpListener,
         incoming_serial_console: UnboundedReceiver<SerialConsole>,
         sock: Arc<UdpSocket>,
-        gateway_address: SocketAddr,
+        gateway_address: Arc<Mutex<Option<SocketAddr>>>,
         log: Logger,
     ) -> Self {
         Self {
@@ -116,6 +142,8 @@ impl SerialConsoleTcpTask {
     }
 
     async fn send_serial_console(&mut self, mut data: &[u8]) -> Result<()> {
+        let gateway_address = self.gateway_address.lock().unwrap().ok_or_else(|| anyhow!("serial console task does not know gateway's UDP address (yet?)"))?;
+
         // if we're told to send something starting with "SKIP ", emulate a
         // dropped packet spanning 10 bytes before sending the rest of the data.
         if let Some(remaining) = data.strip_prefix(b"SKIP ") {
@@ -134,7 +162,7 @@ impl SerialConsoleTcpTask {
             // bubble up an error here.
             let n =
                 gateway_messages::serialize(&mut out[..], &message).unwrap();
-            self.sock.send_to(&out[..n], self.gateway_address).await?;
+            self.sock.send_to(&out[..n], gateway_address).await?;
         }
 
         Ok(())
@@ -213,12 +241,14 @@ impl SerialConsoleTcpTask {
 
 struct UdpTask {
     udp: UdpServer,
+    gateway_address: Arc<Mutex<Option<SocketAddr>>>,
     handler: Handler,
 }
 
 impl UdpTask {
     fn new(
         server: UdpServer,
+        gateway_address: Arc<Mutex<Option<SocketAddr>>>,
         serial_number: SerialNumber,
         incoming_serial_console: HashMap<
             SpComponent,
@@ -228,6 +258,7 @@ impl UdpTask {
     ) -> Self {
         Self {
             udp: server,
+            gateway_address,
             handler: Handler { log, serial_number, incoming_serial_console },
         }
     }
@@ -238,6 +269,7 @@ impl UdpTask {
             select! {
                 recv = self.udp.recv_from() => {
                     let (data, addr) = recv?;
+                    *self.gateway_address.lock().unwrap() = Some(addr);
 
                     let resp = match server.dispatch(data, &mut self.handler) {
                         Ok(resp) => resp,

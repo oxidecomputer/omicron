@@ -4,9 +4,8 @@
 
 use anyhow::Result;
 use omicron_common::cmd::{fatal, CmdError};
-use slog::Logger;
-use sp_sim::config::{Config, GimletConfig, SidecarConfig};
-use sp_sim::{Gimlet, Sidecar};
+use sp_sim::config::Config;
+use sp_sim::SimRack;
 use std::path::PathBuf;
 use std::time::Duration;
 use structopt::StructOpt;
@@ -32,29 +31,12 @@ async fn do_run() -> Result<(), CmdError> {
     let config = Config::from_file(args.config_file_path)
         .map_err(|e| CmdError::Failure(e.to_string()))?;
 
-    let mut sidecar_handles = Vec::new();
-    let mut gimlet_handles = Vec::new();
+    let log = sp_sim::logger(&config)
+        .map_err(|e| CmdError::Failure(e.to_string()))?;
 
-    for (i, sidecar) in config.simulated_sps.sidecar.iter().enumerate() {
-        sidecar_handles.push(
-            spawn_sidecar(
-                &config,
-                sidecar,
-                sp_sim::logger(&config, format!("sidecar {}", i)).unwrap(),
-            )
-            .await?,
-        );
-    }
-    for (i, gimlet) in config.simulated_sps.gimlet.iter().enumerate() {
-        gimlet_handles.push(
-            spawn_gimlet(
-                &config,
-                gimlet,
-                sp_sim::logger(&config, format!("gimlet {}", i)).unwrap(),
-            )
-            .await?,
-        );
-    }
+    let _rack = SimRack::start(&config, &log)
+        .await
+        .map_err(|e| CmdError::Failure(e.to_string()))?;
 
     // for now, do nothing except let the spawned tasks run. in the future
     // (or when used as a library), the expectation is that a caller can
@@ -62,24 +44,4 @@ async fn do_run() -> Result<(), CmdError> {
     loop {
         tokio::time::sleep(Duration::MAX).await;
     }
-}
-
-async fn spawn_sidecar(
-    config: &Config,
-    sidecar_config: &SidecarConfig,
-    log: Logger,
-) -> Result<Sidecar, CmdError> {
-    Sidecar::spawn(config, sidecar_config, log)
-        .await
-        .map_err(|e| CmdError::Failure(e.to_string()))
-}
-
-async fn spawn_gimlet(
-    config: &Config,
-    gimlet_config: &GimletConfig,
-    log: Logger,
-) -> Result<Gimlet, CmdError> {
-    Gimlet::spawn(config, gimlet_config, log)
-        .await
-        .map_err(|e| CmdError::Failure(e.to_string()))
 }

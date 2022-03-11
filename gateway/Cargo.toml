@@ -31,8 +31,10 @@ features = [ "full" ]
 
 [dev-dependencies]
 expectorate = "1.0.4"
+http = "0.2.5"
 omicron-test-utils = { path = "../test-utils" }
 openapi-lint = { git = "https://github.com/oxidecomputer/openapi-lint", branch = "main" }
 openapiv3 = "1.0"
 serde_json = "1.0"
+sp-sim = { path = "../sp-sim" }
 subprocess = "0.2.8"

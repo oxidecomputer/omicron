@@ -35,15 +35,35 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio::time::Instant;
 
-#[derive(Debug, Serialize, JsonSchema)]
-struct SpInfo {
-    info: SpIgnitionInfo,
-    details: SpState,
+#[derive(
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Deserialize,
+    Serialize,
+    JsonSchema,
+)]
+pub struct SpInfo {
+    pub info: SpIgnitionInfo,
+    pub details: SpState,
 }
 
-#[derive(Debug, Clone, Serialize, JsonSchema)]
+#[derive(
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Deserialize,
+    Serialize,
+    JsonSchema,
+)]
 #[serde(tag = "state")]
-pub(crate) enum SpState {
+pub enum SpState {
     Disabled,
     Unresponsive,
     Enabled {
@@ -52,16 +72,36 @@ pub(crate) enum SpState {
     },
 }
 
-#[derive(Debug, Serialize, JsonSchema)]
-struct SpIgnitionInfo {
-    id: SpIdentifier,
-    details: SpIgnition,
+#[derive(
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Deserialize,
+    Serialize,
+    JsonSchema,
+)]
+pub struct SpIgnitionInfo {
+    pub id: SpIdentifier,
+    pub details: SpIgnition,
 }
 
-#[derive(Debug, Serialize, JsonSchema)]
+#[derive(
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Deserialize,
+    Serialize,
+    JsonSchema,
+)]
 #[serde(tag = "present")]
 #[allow(dead_code)] // TODO remove once `Absent` is used
-enum SpIgnition {
+pub enum SpIgnition {
     #[serde(rename = "no")]
     Absent,
     #[serde(rename = "yes")]
@@ -113,20 +153,42 @@ struct TimeoutSelector<T> {
     start_time: u64, // TODO
 }
 
-#[derive(Serialize, Deserialize, JsonSchema, PartialEq, Debug, Clone, Copy)]
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Serialize,
+    Deserialize,
+    JsonSchema,
+)]
 #[serde(rename_all = "lowercase")]
-pub(crate) enum SpType {
+pub enum SpType {
     Sled,
     Power,
     Switch,
 }
 
-#[derive(Serialize, Deserialize, JsonSchema, PartialEq, Debug, Clone, Copy)]
-pub(crate) struct SpIdentifier {
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Serialize,
+    Deserialize,
+    JsonSchema,
+)]
+pub struct SpIdentifier {
     #[serde(rename = "type")]
-    pub(crate) typ: SpType,
+    pub typ: SpType,
     #[serde(deserialize_with = "deserializer_u32_from_string")]
-    pub(crate) slot: u32,
+    pub slot: u32,
 }
 
 // We can't use the default `Deserialize` derivation for `SpIdentifier::slot`
@@ -209,17 +271,18 @@ impl SpIdentifier {
 
 fn placeholder_map_from_target(
     known_sps: &KnownSps,
-    mut target: usize,
+    target: usize,
 ) -> Result<SpIdentifier, Error> {
+    let mut n = target;
     for (typ, count) in [
         (SpType::Switch, known_sps.switches.len()),
         (SpType::Sled, known_sps.sleds.len()),
         (SpType::Power, known_sps.power_controllers.len()),
     ] {
-        if target < count {
-            return Ok(SpIdentifier { typ, slot: target as u32 });
+        if n < count {
+            return Ok(SpIdentifier { typ, slot: n as u32 });
         }
-        target -= count;
+        n -= count;
     }
 
     Err(Error::InternalError {
