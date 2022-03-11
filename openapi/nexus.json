@@ -6092,5 +6092,126 @@
         ]
       }
     }
-  }
+  },
+  "tags": [
+    {
+      "name": "disks",
+      "description": "Virtual disks are used to store instance-local data which includes the operating system.",
+      "externalDocs": {
+        "url": "http://oxide.computer/docs/#xxx"
+      }
+    },
+    {
+      "name": "firewall",
+      "description": "Firewall operation controls the flow of network data into a VPC",
+      "externalDocs": {
+        "url": "http://oxide.computer/docs/#xxx"
+      }
+    },
+    {
+      "name": "hidden",
+      "description": "TODO operations that will not ship to customers",
+      "externalDocs": {
+        "url": "http://oxide.computer/docs/#xxx"
+      }
+    },
+    {
+      "name": "instances",
+      "description": "Virtual machine instances are the basic unit of computation. These operations are used for provisioning, controlling, and destroying instances.",
+      "externalDocs": {
+        "url": "http://oxide.computer/docs/#xxx"
+      }
+    },
+    {
+      "name": "metrics",
+      "description": "Metrics provide insight into the operation of the Oxide deployment. These include telemetry on hardware and software components that can be used to understand the current state as well as to diagnose issues.",
+      "externalDocs": {
+        "url": "http://oxide.computer/docs/#xxx"
+      }
+    },
+    {
+      "name": "organizations",
+      "description": "Organizations represent a subset of users and projects in an Oxide deployment.",
+      "externalDocs": {
+        "url": "http://oxide.computer/docs/#xxx"
+      }
+    },
+    {
+      "name": "projects",
+      "description": "Projects are a grouping of associated resources such as instances and disks within an organization for purposes of billing and access control.",
+      "externalDocs": {
+        "url": "http://oxide.computer/docs/#xxx"
+      }
+    },
+    {
+      "name": "racks",
+      "description": "These operations pertain to hardware inventory and management. Racks are the unit of expansion of an Oxide deployment. Racks are in turn composed of sleds, switches, power supplies, and a cabled backplane.",
+      "externalDocs": {
+        "url": "http://oxide.computer/docs/#xxx"
+      }
+    },
+    {
+      "name": "roles",
+      "description": "Roles are a component of Identity and Access Management (IAM) that allow a user or agent account access to additional permissions.",
+      "externalDocs": {
+        "url": "http://oxide.computer/docs/#xxx"
+      }
+    },
+    {
+      "name": "routers",
+      "description": "Routers direct the flow of network traffic into, out of, and within a VPC via routes.",
+      "externalDocs": {
+        "url": "http://oxide.computer/docs/#xxx"
+      }
+    },
+    {
+      "name": "routes",
+      "description": "Routes define router policy.",
+      "externalDocs": {
+        "url": "http://oxide.computer/docs/#xxx"
+      }
+    },
+    {
+      "name": "sagas",
+      "description": "Sagas are the abstraction used to represent multi-step operations within the Oxide deployment. These operations can be used to query saga status and report errors.",
+      "externalDocs": {
+        "url": "http://oxide.computer/docs/#xxx"
+      }
+    },
+    {
+      "name": "sleds",
+      "description": "This tag should be moved into hardware",
+      "externalDocs": {
+        "url": "http://oxide.computer/docs/#xxx"
+      }
+    },
+    {
+      "name": "subnets",
+      "description": "This tag should be moved into a generic network tag",
+      "externalDocs": {
+        "url": "http://oxide.computer/docs/#xxx"
+      }
+    },
+    {
+      "name": "updates",
+      "description": "This tag should be moved into a operations tag",
+      "externalDocs": {
+        "url": "http://oxide.computer/docs/#xxx"
+      }
+    },
+    {
+      "name": "users",
+      "description": "This tag should be moved into an IAM tag",
+      "externalDocs": {
+        "url": "http://oxide.computer/docs/#xxx"
+      }
+    },
+    {
+      "name": "vpcs",
+      "description": "A Virtual Private Cloud (VPC) is an isolated network environment that should probaby be moved into a more generic networking tag",
+      "externalDocs": {
+        "url": "http://oxide.computer/docs/#xxx"
+      }
+    }
+  ]
 }
