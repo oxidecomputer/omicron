@@ -4675,7 +4675,7 @@
             ]
           },
           {
-            "description": "Forward traffic a VPC",
+            "description": "Forward traffic to a VPC",
             "type": "object",
             "properties": {
               "type": {
@@ -4694,7 +4694,7 @@
             ]
           },
           {
-            "description": "Forward traffic a VPC Subnet",
+            "description": "Forward traffic to a VPC Subnet",
             "type": "object",
             "properties": {
               "type": {
@@ -4713,7 +4713,7 @@
             ]
           },
           {
-            "description": "Forward traffic a specific instance",
+            "description": "Forward traffic to a specific instance",
             "type": "object",
             "properties": {
               "type": {

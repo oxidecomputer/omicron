@@ -1277,19 +1277,15 @@ pub struct VpcRouter {
     JsonSchema,
 )]
 #[serde(tag = "type", content = "value", rename_all = "snake_case")]
-#[display(style = "lowercase")]
+#[display("{}:{0}", style = "lowercase")]
 pub enum RouteTarget {
     /// Forward traffic to a particular IP address.
-    #[display("{}:{0}")]
     Ip(IpAddr),
-    /// Forward traffic a VPC
-    #[display("{}:{0}")]
+    /// Forward traffic to a VPC
     Vpc(Name),
-    /// Forward traffic a VPC Subnet
-    #[display("{}:{0}")]
+    /// Forward traffic to a VPC Subnet
     Subnet(Name),
-    /// Forward traffic a specific instance
-    #[display("{}:{0}")]
+    /// Forward traffic to a specific instance
     Instance(Name),
     #[display("inetgw:{0}")]
     /// Forward traffic to an internet gateway
@@ -1556,21 +1552,17 @@ pub enum VpcFirewallRuleTarget {
     JsonSchema,
 )]
 #[serde(tag = "type", content = "value", rename_all = "snake_case")]
-#[display(style = "lowercase")]
+#[display("{}:{0}", style = "lowercase")]
 pub enum VpcFirewallRuleHostFilter {
     /// The rule applies to traffic from/to all instances in the VPC
-    #[display("{}:{0}")]
     Vpc(Name),
     /// The rule applies to traffic from/to all instances in the VPC Subnet
-    #[display("{}:{0}")]
     Subnet(Name),
     /// The rule applies to traffic from/to this specific instance
-    #[display("{}:{0}")]
     Instance(Name),
     // Tags not yet implemented
     // Tag(Name),
     /// The rule applies to traffic from/to a specific IP address or IP subnet
-    #[display("{}:{0}")]
     Ip(IpNet),
     // TODO: Internet gateways not yet implemented
     // #[display("inetgw:{0}")]
