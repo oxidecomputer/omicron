@@ -35,6 +35,8 @@ use std::fmt::Display;
 use std::fmt::Formatter;
 use std::fmt::Result as FormatResult;
 use std::net::IpAddr;
+use std::net::Ipv4Addr;
+use std::net::Ipv6Addr;
 use std::num::{NonZeroU16, NonZeroU32};
 use std::str::FromStr;
 use uuid::Uuid;
@@ -1040,7 +1042,7 @@ impl From<steno::SagaStateView> for SagaState {
 }
 
 /// An `Ipv4Net` represents a IPv4 subnetwork, including the address and network mask.
-#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Serialize)]
+#[derive(Clone, Copy, Debug, Deserialize, Hash, PartialEq, Serialize)]
 pub struct Ipv4Net(pub ipnetwork::Ipv4Network);
 
 impl Ipv4Net {
@@ -1089,11 +1091,11 @@ impl JsonSchema for Ipv4Net {
                     pattern: Some(
                         concat!(
                             // 10.x.x.x/8
-                            r#"^(10\.(25[0-5]|[1-2][0-4][0-9]|[1-9][0-9]|[0-9]\.){2}(25[0-5]|[1-2][0-4][0-9]|[1-9][0-9]|[0-9])/(1[0-9]|2[0-8]|[8-9]))$"#,
+                            r#"(^(10\.(25[0-5]|[1-2][0-4][0-9]|[1-9][0-9]|[0-9]\.){2}(25[0-5]|[1-2][0-4][0-9]|[1-9][0-9]|[0-9])/(1[0-9]|2[0-8]|[8-9]))$)|"#,
                             // 172.16.x.x/12
-                            r#"^(172\.16\.(25[0-5]|[1-2][0-4][0-9]|[1-9][0-9]|[0-9])\.(25[0-5]|[1-2][0-4][0-9]|[1-9][0-9]|[0-9])/(1[2-9]|2[0-8]))$"#,
+                            r#"(^(172\.16\.(25[0-5]|[1-2][0-4][0-9]|[1-9][0-9]|[0-9])\.(25[0-5]|[1-2][0-4][0-9]|[1-9][0-9]|[0-9])/(1[2-9]|2[0-8]))$)|"#,
                             // 192.168.x.x/16
-                            r#"^(192\.168\.(25[0-5]|[1-2][0-4][0-9]|[1-9][0-9]|[0-9])\.(25[0-5]|[1-2][0-4][0-9]|[1-9][0-9]|[0-9])/(1[6-9]|2[0-8]))$"#,
+                            r#"(^(192\.168\.(25[0-5]|[1-2][0-4][0-9]|[1-9][0-9]|[0-9])\.(25[0-5]|[1-2][0-4][0-9]|[1-9][0-9]|[0-9])/(1[6-9]|2[0-8]))$)"#,
                         ).to_string(),
                     ),
                 })),
@@ -1104,7 +1106,7 @@ impl JsonSchema for Ipv4Net {
 }
 
 /// An `Ipv6Net` represents a IPv6 subnetwork, including the address and network mask.
-#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Serialize)]
+#[derive(Clone, Copy, Debug, Deserialize, Hash, PartialEq, Serialize)]
 pub struct Ipv6Net(pub ipnetwork::Ipv6Network);
 
 impl Ipv6Net {
@@ -1187,6 +1189,61 @@ impl JsonSchema for Ipv6Net {
     }
 }
 
+/// An `IpNet` represents an IP network, either IPv4 or IPv6.
+#[derive(
+    Clone, Copy, Debug, Deserialize, PartialEq, Hash, JsonSchema, Serialize,
+)]
+pub enum IpNet {
+    V4(Ipv4Net),
+    V6(Ipv6Net),
+}
+
+impl From<Ipv4Net> for IpNet {
+    fn from(n: Ipv4Net) -> IpNet {
+        IpNet::V4(n)
+    }
+}
+
+impl From<Ipv4Addr> for IpNet {
+    fn from(n: Ipv4Addr) -> IpNet {
+        IpNet::V4(Ipv4Net(ipnetwork::Ipv4Network::from(n)))
+    }
+}
+
+impl From<Ipv6Net> for IpNet {
+    fn from(n: Ipv6Net) -> IpNet {
+        IpNet::V6(n)
+    }
+}
+
+impl From<Ipv6Addr> for IpNet {
+    fn from(n: Ipv6Addr) -> IpNet {
+        IpNet::V6(Ipv6Net(ipnetwork::Ipv6Network::from(n)))
+    }
+}
+
+impl std::fmt::Display for IpNet {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            IpNet::V4(inner) => write!(f, "{}", inner),
+            IpNet::V6(inner) => write!(f, "{}", inner),
+        }
+    }
+}
+
+impl FromStr for IpNet {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let net =
+            s.parse::<ipnetwork::IpNetwork>().map_err(|e| e.to_string())?;
+        match net {
+            ipnetwork::IpNetwork::V4(net) => Ok(IpNet::from(Ipv4Net(net))),
+            ipnetwork::IpNetwork::V6(net) => Ok(IpNet::from(Ipv6Net(net))),
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum VpcRouterKind {
@@ -1208,160 +1265,61 @@ pub struct VpcRouter {
     pub vpc_id: Uuid,
 }
 
-/// Represents all possible network target strings as defined in RFD-21
-/// This enum itself isn't intended to be used directly but rather as a
-/// delegate for subset enums to not have to re-implement all the base type conversions.
-///
-/// See <https://rfd.shared.oxide.computer/rfd/0021#api-target-strings>
-#[derive(Debug, PartialEq, Display, FromStr)]
-pub enum NetworkTarget {
-    #[display("vpc:{0}")]
-    Vpc(Name),
-    #[display("subnet:{0}")]
-    Subnet(Name),
-    #[display("instance:{0}")]
-    Instance(Name),
-    #[display("tag:{0}")]
-    Tag(Name),
-    #[display("ip:{0}")]
-    Ip(IpAddr),
-    #[display("inetgw:{0}")]
-    InternetGateway(Name),
-    #[display("fip:{0}")]
-    FloatingIp(Name),
-}
-
-/// A subset of [`NetworkTarget`], `RouteTarget` specifies all
-/// possible targets that a route can forward to.
-#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, JsonSchema)]
+/// A `RouteTarget` describes the possible locations that traffic matching a
+/// route destination can be sent.
+#[derive(
+    Clone,
+    Debug,
+    Deserialize,
+    Display,
+    FromStr,
+    Serialize,
+    PartialEq,
+    JsonSchema,
+)]
 #[serde(tag = "type", content = "value", rename_all = "snake_case")]
+#[display("{}:{0}", style = "lowercase")]
 pub enum RouteTarget {
+    /// Forward traffic to a particular IP address.
     Ip(IpAddr),
+    /// Forward traffic to a VPC
     Vpc(Name),
+    /// Forward traffic to a VPC Subnet
     Subnet(Name),
+    /// Forward traffic to a specific instance
     Instance(Name),
+    #[display("inetgw:{0}")]
+    /// Forward traffic to an internet gateway
     InternetGateway(Name),
 }
 
-impl TryFrom<String> for RouteTarget {
-    type Error = String;
-
-    fn try_from(value: String) -> Result<Self, Self::Error> {
-        RouteTarget::try_from(
-            value.parse::<NetworkTarget>().map_err(|e| e.to_string())?,
-        )
-    }
-}
-
-impl FromStr for RouteTarget {
-    type Err = String;
-
-    fn from_str(value: &str) -> Result<Self, Self::Err> {
-        RouteTarget::try_from(String::from(value))
-    }
-}
-
-impl From<RouteTarget> for NetworkTarget {
-    fn from(target: RouteTarget) -> Self {
-        match target {
-            RouteTarget::Ip(ip) => NetworkTarget::Ip(ip),
-            RouteTarget::Vpc(name) => NetworkTarget::Vpc(name),
-            RouteTarget::Subnet(name) => NetworkTarget::Subnet(name),
-            RouteTarget::Instance(name) => NetworkTarget::Instance(name),
-            RouteTarget::InternetGateway(name) => {
-                NetworkTarget::InternetGateway(name)
-            }
-        }
-    }
-}
-
-impl TryFrom<NetworkTarget> for RouteTarget {
-    type Error = String;
-
-    fn try_from(value: NetworkTarget) -> Result<Self, Self::Error> {
-        match value {
-            NetworkTarget::Ip(ip) => Ok(RouteTarget::Ip(ip)),
-            NetworkTarget::Vpc(name) => Ok(RouteTarget::Vpc(name)),
-            NetworkTarget::Subnet(name) => Ok(RouteTarget::Subnet(name)),
-            NetworkTarget::Instance(name) => Ok(RouteTarget::Instance(name)),
-            NetworkTarget::InternetGateway(name) => {
-                Ok(RouteTarget::InternetGateway(name))
-            }
-            _ => Err(format!(
-                "Invalid RouteTarget {}, only ip, vpc, subnet, instance, and inetgw are allowed",
-                value
-            )),
-        }
-    }
-}
-
-impl Display for RouteTarget {
-    fn fmt(&self, f: &mut Formatter<'_>) -> FormatResult {
-        let target = NetworkTarget::from(self.clone());
-        write!(f, "{}", target)
-    }
-}
-
-/// A subset of [`NetworkTarget`], `RouteDestination` specifies
-/// the kind of network traffic that will be matched to be forwarded
-/// to the [`RouteTarget`].
-#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, JsonSchema)]
+/// A `RouteDestination` is used to match traffic with a routing rule, on the
+/// destination of that traffic.
+///
+/// When traffic is to be sent to a destination that is within a given
+/// `RouteDestination`, the corresponding [`RouterRoute`] applies, and traffic
+/// will be forward to the [`RouteTarget`] for that rule.
+#[derive(
+    Clone,
+    Debug,
+    Deserialize,
+    Display,
+    FromStr,
+    Serialize,
+    PartialEq,
+    JsonSchema,
+)]
 #[serde(tag = "type", content = "value", rename_all = "snake_case")]
+#[display("{}:{0}", style = "lowercase")]
 pub enum RouteDestination {
+    /// Route applies to traffic destined for a specific IP address
     Ip(IpAddr),
+    /// Route applies to traffic destined for a specific IP subnet
+    IpNet(IpNet),
+    /// Route applies to traffic destined for the given VPC.
     Vpc(Name),
+    /// Route applies to traffic
     Subnet(Name),
-}
-
-impl TryFrom<NetworkTarget> for RouteDestination {
-    type Error = String;
-
-    fn try_from(value: NetworkTarget) -> Result<Self, Self::Error> {
-        match value {
-            NetworkTarget::Ip(ip) => Ok(RouteDestination::Ip(ip)),
-            NetworkTarget::Vpc(name) => Ok(RouteDestination::Vpc(name)),
-            NetworkTarget::Subnet(name) => Ok(RouteDestination::Subnet(name)),
-            _ => Err(format!(
-                "Invalid RouteTarget {}, only ip, vpc, and subnets are allowed",
-                value
-            )),
-        }
-    }
-}
-
-impl TryFrom<String> for RouteDestination {
-    type Error = String;
-
-    fn try_from(value: String) -> Result<Self, Self::Error> {
-        RouteDestination::try_from(
-            value.parse::<NetworkTarget>().map_err(|e| e.to_string())?,
-        )
-    }
-}
-
-impl FromStr for RouteDestination {
-    type Err = String;
-
-    fn from_str(value: &str) -> Result<Self, Self::Err> {
-        RouteDestination::try_from(String::from(value))
-    }
-}
-
-impl From<RouteDestination> for NetworkTarget {
-    fn from(target: RouteDestination) -> Self {
-        match target {
-            RouteDestination::Ip(ip) => NetworkTarget::Ip(ip),
-            RouteDestination::Vpc(name) => NetworkTarget::Vpc(name),
-            RouteDestination::Subnet(name) => NetworkTarget::Subnet(name),
-        }
-    }
-}
-
-impl Display for RouteDestination {
-    fn fmt(&self, f: &mut Formatter<'_>) -> FormatResult {
-        let target = NetworkTarget::from(self.clone());
-        write!(f, "{}", target)
-    }
 }
 
 /// The classification of a [`RouterRoute`] as defined by the system.
@@ -1556,158 +1514,65 @@ pub enum VpcFirewallRuleAction {
     Deny,
 }
 
-/// A subset of [`NetworkTarget`], `VpcFirewallRuleTarget` specifies all
-/// possible targets that a firewall rule can be attached to.
-#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, JsonSchema)]
+/// A `VpcFirewallRuleTarget` is used to specify the set of [`Instance`]s to
+/// which a firewall rule applies.
+#[derive(
+    Clone,
+    Debug,
+    Deserialize,
+    Display,
+    FromStr,
+    Serialize,
+    PartialEq,
+    JsonSchema,
+)]
 #[serde(tag = "type", content = "value", rename_all = "snake_case")]
+#[display("{}:{0}", style = "lowercase")]
 pub enum VpcFirewallRuleTarget {
+    /// The rule applies to all instances in the VPC
     Vpc(Name),
+    /// The rule applies to all instances in the VPC Subnet
     Subnet(Name),
+    /// The rule applies to this specific instance
     Instance(Name),
+    /// The rule applies to a specific IP address
+    Ip(IpAddr),
+    /// The rule applies to a specific IP subnet
+    IpNet(IpNet),
     // Tags not yet implemented
     //Tag(Name),
 }
 
-impl TryFrom<String> for VpcFirewallRuleTarget {
-    type Error = String;
-
-    fn try_from(value: String) -> Result<Self, Self::Error> {
-        VpcFirewallRuleTarget::try_from(
-            value.parse::<NetworkTarget>().map_err(|e| e.to_string())?,
-        )
-    }
-}
-
-impl FromStr for VpcFirewallRuleTarget {
-    type Err = String;
-
-    fn from_str(value: &str) -> Result<Self, Self::Err> {
-        VpcFirewallRuleTarget::try_from(String::from(value))
-    }
-}
-
-impl From<VpcFirewallRuleTarget> for NetworkTarget {
-    fn from(target: VpcFirewallRuleTarget) -> Self {
-        match target {
-            VpcFirewallRuleTarget::Vpc(name) => NetworkTarget::Vpc(name),
-            VpcFirewallRuleTarget::Subnet(name) => NetworkTarget::Subnet(name),
-            VpcFirewallRuleTarget::Instance(name) => {
-                NetworkTarget::Instance(name)
-            }
-        }
-    }
-}
-
-impl TryFrom<NetworkTarget> for VpcFirewallRuleTarget {
-    type Error = String;
-
-    fn try_from(value: NetworkTarget) -> Result<Self, Self::Error> {
-        match value {
-            NetworkTarget::Vpc(name) => Ok(VpcFirewallRuleTarget::Vpc(name)),
-            NetworkTarget::Subnet(name) => {
-                Ok(VpcFirewallRuleTarget::Subnet(name))
-            }
-            NetworkTarget::Instance(name) => {
-                Ok(VpcFirewallRuleTarget::Instance(name))
-            }
-            _ => Err(format!(
-                "Invalid VpcFirewallRuleTarget {}, only vpc, subnet, and instance, \
-                are allowed",
-                value
-            )),
-        }
-    }
-}
-
-impl Display for VpcFirewallRuleTarget {
-    fn fmt(&self, f: &mut Formatter<'_>) -> FormatResult {
-        let target = NetworkTarget::from(self.clone());
-        write!(f, "{}", target)
-    }
-}
-
-/// A subset of [`NetworkTarget`], `VpcFirewallRuleHostFilter` specifies all
-/// possible targets that a route can forward to.
-#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, JsonSchema)]
+/// The `VpcFirewallRuleHostFilter` is used to filter traffic on the basis of
+/// its source or destination host.
+#[derive(
+    Clone,
+    Debug,
+    Deserialize,
+    Display,
+    FromStr,
+    Serialize,
+    PartialEq,
+    JsonSchema,
+)]
 #[serde(tag = "type", content = "value", rename_all = "snake_case")]
+#[display("{}:{0}", style = "lowercase")]
 pub enum VpcFirewallRuleHostFilter {
+    /// The rule applies to traffic from/to all instances in the VPC
     Vpc(Name),
+    /// The rule applies to traffic from/to all instances in the VPC Subnet
     Subnet(Name),
+    /// The rule applies to traffic from/to this specific instance
     Instance(Name),
     // Tags not yet implemented
     // Tag(Name),
+    /// The rule applies to traffic from/to a specific IP address
     Ip(IpAddr),
-    InternetGateway(Name),
-}
-
-impl TryFrom<String> for VpcFirewallRuleHostFilter {
-    type Error = String;
-
-    fn try_from(value: String) -> Result<Self, Self::Error> {
-        VpcFirewallRuleHostFilter::try_from(
-            value.parse::<NetworkTarget>().map_err(|e| e.to_string())?,
-        )
-    }
-}
-
-impl FromStr for VpcFirewallRuleHostFilter {
-    type Err = String;
-
-    fn from_str(value: &str) -> Result<Self, Self::Err> {
-        VpcFirewallRuleHostFilter::try_from(String::from(value))
-    }
-}
-
-impl From<VpcFirewallRuleHostFilter> for NetworkTarget {
-    fn from(target: VpcFirewallRuleHostFilter) -> Self {
-        match target {
-            VpcFirewallRuleHostFilter::Vpc(name) => NetworkTarget::Vpc(name),
-            VpcFirewallRuleHostFilter::Subnet(name) => {
-                NetworkTarget::Subnet(name)
-            }
-            VpcFirewallRuleHostFilter::Instance(name) => {
-                NetworkTarget::Instance(name)
-            }
-            VpcFirewallRuleHostFilter::Ip(ip) => NetworkTarget::Ip(ip),
-            VpcFirewallRuleHostFilter::InternetGateway(name) => {
-                NetworkTarget::InternetGateway(name)
-            }
-        }
-    }
-}
-
-impl TryFrom<NetworkTarget> for VpcFirewallRuleHostFilter {
-    type Error = String;
-
-    fn try_from(value: NetworkTarget) -> Result<Self, Self::Error> {
-        match value {
-            NetworkTarget::Vpc(name) => {
-                Ok(VpcFirewallRuleHostFilter::Vpc(name))
-            }
-            NetworkTarget::Subnet(name) => {
-                Ok(VpcFirewallRuleHostFilter::Subnet(name))
-            }
-            NetworkTarget::Instance(name) => {
-                Ok(VpcFirewallRuleHostFilter::Instance(name))
-            }
-            NetworkTarget::Ip(ip) => Ok(VpcFirewallRuleHostFilter::Ip(ip)),
-            NetworkTarget::InternetGateway(name) => {
-                Ok(VpcFirewallRuleHostFilter::InternetGateway(name))
-            }
-            _ => Err(format!(
-                "Invalid VpcFirewallRuleHostFilter {}, only vpc, subnet, \
-                instance, ip, and inetgw are allowed",
-                value
-            )),
-        }
-    }
-}
-
-impl Display for VpcFirewallRuleHostFilter {
-    fn fmt(&self, f: &mut Formatter<'_>) -> FormatResult {
-        let target = NetworkTarget::from(self.clone());
-        write!(f, "{}", target)
-    }
+    /// The rule applies to traffic from/to a specific IP subnet
+    IpNet(IpNet),
+    // TODO: Internet gateways not yet implemented
+    // #[display("inetgw:{0}")]
+    // InternetGateway(Name),
 }
 
 /// Port number used in a transport-layer protocol like TCP or UDP
@@ -1927,18 +1792,20 @@ pub struct NetworkInterface {
 
 #[cfg(test)]
 mod test {
+    use super::RouteDestination;
+    use super::RouteTarget;
+    use super::VpcFirewallRuleHostFilter;
+    use super::VpcFirewallRuleTarget;
     use super::{
-        ByteCount, L4Port, L4PortRange, Name, NetworkTarget, RoleName,
-        VpcFirewallRuleAction, VpcFirewallRuleDirection, VpcFirewallRuleFilter,
-        VpcFirewallRuleHostFilter, VpcFirewallRulePriority,
-        VpcFirewallRuleProtocol, VpcFirewallRuleStatus, VpcFirewallRuleTarget,
-        VpcFirewallRuleUpdate, VpcFirewallRuleUpdateParams,
+        ByteCount, L4Port, L4PortRange, Name, RoleName, VpcFirewallRuleAction,
+        VpcFirewallRuleDirection, VpcFirewallRuleFilter,
+        VpcFirewallRulePriority, VpcFirewallRuleProtocol,
+        VpcFirewallRuleStatus, VpcFirewallRuleUpdate,
+        VpcFirewallRuleUpdateParams,
     };
     use crate::api::external::Error;
     use crate::api::external::ResourceType;
     use std::convert::TryFrom;
-    use std::net::IpAddr;
-    use std::net::Ipv4Addr;
 
     #[test]
     fn test_name_parse() {
@@ -2290,48 +2157,6 @@ mod test {
     }
 
     #[test]
-    fn test_networktarget_parsing() {
-        assert_eq!(
-            "vpc:my-vital-vpc".parse(),
-            Ok(NetworkTarget::Vpc("my-vital-vpc".parse().unwrap()))
-        );
-        assert_eq!(
-            "subnet:my-slick-subnet".parse(),
-            Ok(NetworkTarget::Subnet("my-slick-subnet".parse().unwrap()))
-        );
-        assert_eq!(
-            "instance:my-intrepid-instance".parse(),
-            Ok(NetworkTarget::Instance(
-                "my-intrepid-instance".parse().unwrap()
-            ))
-        );
-        assert_eq!(
-            "tag:my-turbid-tag".parse(),
-            Ok(NetworkTarget::Tag("my-turbid-tag".parse().unwrap()))
-        );
-        assert_eq!(
-            "ip:127.0.0.1".parse(),
-            Ok(NetworkTarget::Ip(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1))))
-        );
-        assert_eq!(
-            "inetgw:my-gregarious-internet-gateway".parse(),
-            Ok(NetworkTarget::InternetGateway(
-                "my-gregarious-internet-gateway".parse().unwrap()
-            ))
-        );
-        assert_eq!(
-            "fip:my-fickle-floating-ip".parse(),
-            Ok(NetworkTarget::FloatingIp(
-                "my-fickle-floating-ip".parse().unwrap()
-            ))
-        );
-        assert_eq!(
-            "nope:this-should-error".parse::<NetworkTarget>().unwrap_err(),
-            parse_display::ParseError::new()
-        );
-    }
-
-    #[test]
     fn test_ipv6_net_operations() {
         use super::Ipv6Net;
         assert!(Ipv6Net("fd00::/8".parse().unwrap()).is_unique_local());
@@ -2351,5 +2176,109 @@ mod test {
         assert!(
             !Ipv6Net("fd00::/63".parse().unwrap()).is_vpc_subnet(&vpc_prefix)
         );
+    }
+
+    #[test]
+    fn test_route_target_parse() {
+        let name: Name = "foo".parse().unwrap();
+        let address = "192.168.0.10".parse().unwrap();
+        assert_eq!(RouteTarget::Vpc(name.clone()), "vpc:foo".parse().unwrap());
+        assert_eq!(
+            RouteTarget::Subnet(name.clone()),
+            "subnet:foo".parse().unwrap()
+        );
+        assert_eq!(
+            RouteTarget::Instance(name),
+            "instance:foo".parse().unwrap()
+        );
+        assert_eq!(
+            RouteTarget::Ip(address),
+            "ip:192.168.0.10".parse().unwrap()
+        );
+        assert!("foo:foo".parse::<RouteTarget>().is_err());
+        assert!("foo".parse::<RouteTarget>().is_err());
+    }
+
+    #[test]
+    fn test_route_destination_parse() {
+        let name: Name = "foo".parse().unwrap();
+        let address = "192.168.0.10".parse().unwrap();
+        let network = "fd00::/64".parse().unwrap();
+        assert_eq!(
+            RouteDestination::Vpc(name.clone()),
+            "vpc:foo".parse().unwrap()
+        );
+        assert_eq!(
+            RouteDestination::Subnet(name.clone()),
+            "subnet:foo".parse().unwrap()
+        );
+        assert_eq!(
+            RouteDestination::Ip(address),
+            "ip:192.168.0.10".parse().unwrap()
+        );
+        assert_eq!(
+            RouteDestination::IpNet(network),
+            "ipnet:fd00::/64".parse().unwrap()
+        );
+        assert!("foo:foo".parse::<RouteDestination>().is_err());
+        assert!("foo".parse::<RouteDestination>().is_err());
+    }
+
+    #[test]
+    fn test_firewall_rule_target_parse() {
+        let name: Name = "foo".parse().unwrap();
+        let address = "192.168.0.10".parse().unwrap();
+        let network = "fd00::/64".parse().unwrap();
+        assert_eq!(
+            VpcFirewallRuleTarget::Vpc(name.clone()),
+            "vpc:foo".parse().unwrap()
+        );
+        assert_eq!(
+            VpcFirewallRuleTarget::Subnet(name.clone()),
+            "subnet:foo".parse().unwrap()
+        );
+        assert_eq!(
+            VpcFirewallRuleTarget::Instance(name),
+            "instance:foo".parse().unwrap()
+        );
+        assert_eq!(
+            VpcFirewallRuleTarget::Ip(address),
+            "ip:192.168.0.10".parse().unwrap()
+        );
+        assert_eq!(
+            VpcFirewallRuleTarget::IpNet(network),
+            "ipnet:fd00::/64".parse().unwrap()
+        );
+        assert!("foo:foo".parse::<VpcFirewallRuleTarget>().is_err());
+        assert!("foo".parse::<VpcFirewallRuleTarget>().is_err());
+    }
+
+    #[test]
+    fn test_firewall_rule_host_filter_parse() {
+        let name: Name = "foo".parse().unwrap();
+        let address = "192.168.0.10".parse().unwrap();
+        let network = "fd00::/64".parse().unwrap();
+        assert_eq!(
+            VpcFirewallRuleHostFilter::Vpc(name.clone()),
+            "vpc:foo".parse().unwrap()
+        );
+        assert_eq!(
+            VpcFirewallRuleHostFilter::Subnet(name.clone()),
+            "subnet:foo".parse().unwrap()
+        );
+        assert_eq!(
+            VpcFirewallRuleHostFilter::Instance(name),
+            "instance:foo".parse().unwrap()
+        );
+        assert_eq!(
+            VpcFirewallRuleHostFilter::Ip(address),
+            "ip:192.168.0.10".parse().unwrap()
+        );
+        assert_eq!(
+            VpcFirewallRuleHostFilter::IpNet(network),
+            "ipnet:fd00::/64".parse().unwrap()
+        );
+        assert!("foo:foo".parse::<VpcFirewallRuleHostFilter>().is_err());
+        assert!("foo".parse::<VpcFirewallRuleHostFilter>().is_err());
     }
 }
