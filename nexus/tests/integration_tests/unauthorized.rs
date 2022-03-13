@@ -22,6 +22,7 @@ use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::IdentityMetadataUpdateParams;
 use omicron_common::api::external::InstanceCpuCount;
+use omicron_common::api::external::Ipv4Net;
 use omicron_common::api::external::Name;
 use omicron_nexus::authn;
 use omicron_nexus::authn::external::spoof;
@@ -112,6 +113,11 @@ lazy_static! {
             url: &*DEMO_PROJECT_URL_VPCS,
             body: serde_json::to_value(&*DEMO_VPC_CREATE).unwrap(),
         },
+        // Create a VPC Subnet in the Vpc
+        SetupReq {
+            url: &*DEMO_VPC_URL_SUBNETS,
+            body: serde_json::to_value(&*DEMO_VPC_SUBNET_CREATE).unwrap(),
+        },
         // Create a Disk in the Project
         SetupReq {
             url: &*DEMO_PROJECT_URL_DISKS,
@@ -160,6 +166,8 @@ lazy_static! {
     static ref DEMO_VPC_NAME: Name = "demo-vpc".parse().unwrap();
     static ref DEMO_VPC_URL: String =
         format!("{}/{}", *DEMO_PROJECT_URL_VPCS, *DEMO_VPC_NAME);
+    static ref DEMO_VPC_URL_SUBNETS: String =
+        format!("{}/subnets", *DEMO_VPC_URL);
     static ref DEMO_VPC_CREATE: params::VpcCreate =
         params::VpcCreate {
             identity: IdentityMetadataCreateParams {
@@ -168,6 +176,20 @@ lazy_static! {
             },
             ipv6_prefix: None,
             dns_name: DEMO_VPC_NAME.clone(),
+        };
+
+    // VPC Subnet used for testing
+    static ref DEMO_VPC_SUBNET_NAME: Name = "demo-vpc-subnet".parse().unwrap();
+    static ref DEMO_VPC_SUBNET_URL: String =
+        format!("{}/{}", *DEMO_VPC_URL_SUBNETS, *DEMO_VPC_SUBNET_NAME);
+    static ref DEMO_VPC_SUBNET_CREATE: params::VpcSubnetCreate =
+        params::VpcSubnetCreate {
+            identity: IdentityMetadataCreateParams {
+                name: DEMO_VPC_SUBNET_NAME.clone(),
+                description: "".parse().unwrap(),
+            },
+            ipv4_block: Ipv4Net("10.1.2.3/8".parse().unwrap()),
+            ipv6_block: None,
         };
 
     // Disk used for testing
@@ -403,6 +425,38 @@ lazy_static! {
                 AllowedMethod::Delete,
             ],
         },
+
+        /* VPC Subnets */
+        VerifyEndpoint {
+            url: &*DEMO_VPC_URL_SUBNETS,
+            visibility: Visibility::Protected,
+            allowed_methods: vec![
+                AllowedMethod::Get,
+                AllowedMethod::Post(
+                    serde_json::to_value(&*DEMO_VPC_SUBNET_CREATE).unwrap()
+                ),
+            ],
+        },
+
+        VerifyEndpoint {
+            url: &*DEMO_VPC_SUBNET_URL,
+            visibility: Visibility::Protected,
+            allowed_methods: vec![
+                AllowedMethod::Get,
+                AllowedMethod::Put(
+                    serde_json::to_value(&params::VpcSubnetUpdate {
+                        identity: IdentityMetadataUpdateParams {
+                            name: None,
+                            description: Some("different".to_string())
+                        },
+                        ipv4_block: None,
+                        ipv6_block: None,
+                    }).unwrap()
+                ),
+                AllowedMethod::Delete,
+            ],
+        },
+
 
         /* Disks */
 
