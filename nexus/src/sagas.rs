@@ -114,6 +114,7 @@ async fn saga_generate_uuid<UserType: SagaType>(
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct ParamsInstanceCreate {
+    pub serialized_authn: authn::saga::Serialized,
     pub project_id: Uuid,
     pub create_params: params::InstanceCreate,
 }
@@ -188,19 +189,23 @@ async fn sic_create_network_interface(
     sagactx: ActionContext<SagaInstanceCreate>,
 ) -> Result<NetworkInterface, ActionError> {
     let osagactx = sagactx.user_data();
+    let datastore = osagactx.datastore();
     let params = sagactx.saga_params();
     let instance_id = sagactx.lookup::<Uuid>("instance_id")?;
+    let opctx = OpContext::for_saga_action(&sagactx, &params.serialized_authn);
 
     let default_name =
         db::model::Name(Name::try_from("default".to_string()).unwrap());
-    let vpc = osagactx
-        .datastore()
-        .vpc_fetch_by_name(&params.project_id, &default_name)
+    let authz_project = datastore
+        .project_lookup_by_id(params.project_id)
         .await
         .map_err(ActionError::action_failed)?;
-    let subnet = osagactx
-        .datastore()
-        .vpc_subnet_fetch_by_name(&vpc.id(), &default_name)
+    let (authz_vpc, _) = datastore
+        .vpc_fetch(&opctx, &authz_project, &default_name)
+        .await
+        .map_err(ActionError::action_failed)?;
+    let (_, db_subnet) = datastore
+        .vpc_subnet_fetch(&opctx, &authz_vpc, &default_name)
         .await
         .map_err(ActionError::action_failed)?;
 
@@ -214,8 +219,8 @@ async fn sic_create_network_interface(
         // TODO-correctness: vpc_id here is used for name uniqueness. Should
         // interface names be unique to the subnet's VPC or to the
         // VPC associated with the instance's default interface?
-        vpc.id(),
-        subnet,
+        authz_vpc.id(),
+        db_subnet,
         mac,
         ip,
         params::NetworkInterfaceCreate {
@@ -231,8 +236,7 @@ async fn sic_create_network_interface(
         },
     );
 
-    let interface = osagactx
-        .datastore()
+    let interface = datastore
         .instance_create_network_interface(interface)
         .await
         .map_err(ActionError::action_failed)?;

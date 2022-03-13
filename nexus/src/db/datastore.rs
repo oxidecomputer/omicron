@@ -2471,34 +2471,6 @@ impl DataStore {
         Ok((authz_vpc_subnet, db_vpc_subnet))
     }
 
-    // XXX remove?  this is used by the instance create saga.  that needs to
-    // have serialized creds (like other sagas have), then use those to call the
-    // normal functions
-    pub async fn vpc_subnet_fetch_by_name(
-        &self,
-        vpc_id: &Uuid,
-        subnet_name: &Name,
-    ) -> LookupResult<VpcSubnet> {
-        use db::schema::vpc_subnet::dsl;
-
-        dsl::vpc_subnet
-            .filter(dsl::time_deleted.is_null())
-            .filter(dsl::vpc_id.eq(*vpc_id))
-            .filter(dsl::name.eq(subnet_name.clone()))
-            .select(VpcSubnet::as_select())
-            .get_result_async(self.pool())
-            .await
-            .map_err(|e| {
-                public_error_from_diesel_pool(
-                    e,
-                    ErrorHandler::NotFoundByLookup(
-                        ResourceType::VpcSubnet,
-                        LookupType::ByName(subnet_name.as_str().to_owned()),
-                    ),
-                )
-            })
-    }
-
     /// Insert a VPC Subnet, checking for unique IP address ranges.
     pub async fn vpc_create_subnet(
         &self,

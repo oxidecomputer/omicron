@@ -852,6 +852,7 @@ impl Nexus {
         opctx.authorize(authz::Action::CreateChild, &authz_project).await?;
 
         let saga_params = Arc::new(sagas::ParamsInstanceCreate {
+            serialized_authn: authn::saga::Serialized::for_opctx(opctx),
             project_id: authz_project.id(),
             create_params: params.clone(),
         });

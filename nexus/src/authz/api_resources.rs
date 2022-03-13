@@ -431,7 +431,6 @@ pub struct ProjectChild {
     lookup_type: LookupType,
 }
 
-// XXX Okay, maybe it is worth cleaning this up.
 #[derive(Clone, Debug)]
 enum ProjectChildKind {
     Direct(Project),
