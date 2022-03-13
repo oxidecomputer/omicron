@@ -2373,14 +2373,16 @@ impl DataStore {
 
     pub async fn vpc_list_subnets(
         &self,
-        vpc_id: &Uuid,
+        opctx: &OpContext,
+        authz_vpc: &authz::Vpc,
         pagparams: &DataPageParams<'_, Name>,
     ) -> ListResultVec<VpcSubnet> {
-        use db::schema::vpc_subnet::dsl;
+        opctx.authorize(authz::Action::ListChildren, authz_vpc).await?;
 
+        use db::schema::vpc_subnet::dsl;
         paginated(dsl::vpc_subnet, dsl::name, &pagparams)
             .filter(dsl::time_deleted.is_null())
-            .filter(dsl::vpc_id.eq(*vpc_id))
+            .filter(dsl::vpc_id.eq(authz_vpc.id()))
             .select(VpcSubnet::as_select())
             .load_async(self.pool())
             .await

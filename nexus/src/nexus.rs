@@ -1806,17 +1806,17 @@ impl Nexus {
 
     pub async fn vpc_list_subnets(
         &self,
+        opctx: &OpContext,
         organization_name: &Name,
         project_name: &Name,
         vpc_name: &Name,
         pagparams: &DataPageParams<'_, Name>,
     ) -> ListResultVec<db::model::VpcSubnet> {
-        let vpc = self
-            .project_lookup_vpc(organization_name, project_name, vpc_name)
+        let authz_vpc = self
+            .db_datastore
+            .vpc_lookup_by_path(organization_name, project_name, vpc_name)
             .await?;
-        let subnets =
-            self.db_datastore.vpc_list_subnets(&vpc.id(), pagparams).await?;
-        Ok(subnets)
+        self.db_datastore.vpc_list_subnets(opctx, &authz_vpc, pagparams).await
     }
 
     pub async fn vpc_lookup_subnet(

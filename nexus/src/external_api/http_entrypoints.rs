@@ -1304,8 +1304,10 @@ async fn vpc_subnets_get(
     let query = query_params.into_inner();
     let path = path_params.into_inner();
     let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
         let vpcs = nexus
             .vpc_list_subnets(
+                &opctx,
                 &path.organization_name,
                 &path.project_name,
                 &path.vpc_name,
