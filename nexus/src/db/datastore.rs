@@ -2389,6 +2389,82 @@ impl DataStore {
             .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
     }
 
+    /// Fetches a VpcSubnet from the database and returns both the database row
+    /// and an [`authz::VpcSubnet`] for doing authz checks
+    ///
+    /// See [`DataStore::organization_lookup_noauthz()`] for intended use cases
+    /// and caveats.
+    // TODO-security See the note on organization_lookup_noauthz().
+    async fn vpc_subnet_lookup_noauthz(
+        &self,
+        authz_vpc: &authz::Vpc,
+        subnet_name: &Name,
+    ) -> LookupResult<(authz::VpcSubnet, VpcSubnet)> {
+        use db::schema::vpc_subnet::dsl;
+        dsl::vpc_subnet
+            .filter(dsl::time_deleted.is_null())
+            .filter(dsl::vpc_id.eq(authz_vpc.id()))
+            .filter(dsl::name.eq(subnet_name.clone()))
+            .select(VpcSubnet::as_select())
+            .first_async(self.pool())
+            .await
+            .map_err(|e| {
+                public_error_from_diesel_pool(
+                    e,
+                    ErrorHandler::NotFoundByLookup(
+                        ResourceType::VpcSubnet,
+                        LookupType::ByName(subnet_name.as_str().to_owned()),
+                    ),
+                )
+            })
+            .map(|d| {
+                (
+                    authz_vpc.child_generic(
+                        ResourceType::VpcSubnet,
+                        d.id(),
+                        LookupType::from(&subnet_name.0),
+                    ),
+                    d,
+                )
+            })
+    }
+
+    /// Look up the id for a VpcSubnet based on its name
+    ///
+    /// Returns an [`authz::VpcSubnet`] (which makes the id available).
+    ///
+    /// Like the other "lookup_by_path()" functions, this function does no authz
+    /// checks.
+    pub async fn vpc_subnet_lookup_by_path(
+        &self,
+        organization_name: &Name,
+        project_name: &Name,
+        vpc_name: &Name,
+        subnet_name: &Name,
+    ) -> LookupResult<authz::Vpc> {
+        let authz_vpc = self
+            .vpc_lookup_by_path(organization_name, project_name, vpc_name)
+            .await?;
+        self.vpc_subnet_lookup_noauthz(&authz_vpc, subnet_name)
+            .await
+            .map(|(v, _)| v)
+    }
+
+    /// Lookup a VpcSubnet by name and return the full database record, along
+    /// with an [`authz::VpcSubnet`] for subsequent authorization checks
+    pub async fn vpc_subnet_fetch(
+        &self,
+        opctx: &OpContext,
+        authz_vpc: &authz::Vpc,
+        name: &Name,
+    ) -> LookupResult<(authz::VpcSubnet, VpcSubnet)> {
+        let (authz_vpc_subnet, db_vpc_subnet) =
+            self.vpc_subnet_lookup_noauthz(authz_vpc, name).await?;
+        opctx.authorize(authz::Action::Read, &authz_vpc_subnet).await?;
+        Ok((authz_vpc_subnet, db_vpc_subnet))
+    }
+
+    // XXX remove?
     pub async fn vpc_subnet_fetch_by_name(
         &self,
         vpc_id: &Uuid,
@@ -2445,24 +2521,26 @@ impl DataStore {
             })
     }
 
-    pub async fn vpc_delete_subnet(&self, subnet_id: &Uuid) -> DeleteResult {
-        use db::schema::vpc_subnet::dsl;
+    pub async fn vpc_delete_subnet(
+        &self,
+        opctx: &OpContext,
+        authz_subnet: &authz::VpcSubnet,
+    ) -> DeleteResult {
+        opctx.authorize(authz::Action::Delete, authz_subnet).await?;
 
+        use db::schema::vpc_subnet::dsl;
         let now = Utc::now();
         diesel::update(dsl::vpc_subnet)
             .filter(dsl::time_deleted.is_null())
-            .filter(dsl::id.eq(*subnet_id))
+            .filter(dsl::id.eq(authz_subnet.id()))
             .set(dsl::time_deleted.eq(now))
             .returning(VpcSubnet::as_returning())
-            .get_result_async(self.pool())
+            .get_result_async(self.pool_authorized(opctx).await?)
             .await
             .map_err(|e| {
                 public_error_from_diesel_pool(
                     e,
-                    ErrorHandler::NotFoundByLookup(
-                        ResourceType::VpcSubnet,
-                        LookupType::ById(*subnet_id),
-                    ),
+                    ErrorHandler::NotFoundByResource(authz_subnet),
                 )
             })?;
         Ok(())
@@ -2470,24 +2548,23 @@ impl DataStore {
 
     pub async fn vpc_update_subnet(
         &self,
-        subnet_id: &Uuid,
+        opctx: &OpContext,
+        authz_subnet: &authz::VpcSubnet,
         updates: VpcSubnetUpdate,
     ) -> Result<(), Error> {
-        use db::schema::vpc_subnet::dsl;
+        opctx.authorize(authz::Action::Modify, authz_subnet).await?;
 
+        use db::schema::vpc_subnet::dsl;
         diesel::update(dsl::vpc_subnet)
             .filter(dsl::time_deleted.is_null())
-            .filter(dsl::id.eq(*subnet_id))
+            .filter(dsl::id.eq(authz_subnet.id()))
             .set(updates)
-            .execute_async(self.pool())
+            .execute_async(self.pool_authorized(opctx).await?)
             .await
             .map_err(|e| {
                 public_error_from_diesel_pool(
                     e,
-                    ErrorHandler::NotFoundByLookup(
-                        ResourceType::VpcSubnet,
-                        LookupType::ById(*subnet_id),
-                    ),
+                    ErrorHandler::NotFoundByResource(authz_subnet),
                 )
             })?;
         Ok(())
@@ -2495,16 +2572,20 @@ impl DataStore {
 
     pub async fn subnet_list_network_interfaces(
         &self,
-        subnet_id: &Uuid,
+        opctx: &OpContext,
+        authz_subnet: &authz::VpcSubnet,
         pagparams: &DataPageParams<'_, Name>,
     ) -> ListResultVec<NetworkInterface> {
-        use db::schema::network_interface::dsl;
+        opctx.authorize(authz::Action::ListChildren, authz_subnet).await?;
 
+        use db::schema::network_interface::dsl;
         paginated(dsl::network_interface, dsl::name, pagparams)
             .filter(dsl::time_deleted.is_null())
-            .filter(dsl::subnet_id.eq(*subnet_id))
+            .filter(dsl::subnet_id.eq(authz_subnet.id()))
             .select(NetworkInterface::as_select())
-            .load_async::<db::model::NetworkInterface>(self.pool())
+            .load_async::<db::model::NetworkInterface>(
+                self.pool_authorized(opctx).await?,
+            )
             .await
             .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
     }

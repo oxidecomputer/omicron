@@ -1350,8 +1350,10 @@ async fn vpc_subnets_get_subnet(
     let nexus = &apictx.nexus;
     let path = path_params.into_inner();
     let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
         let subnet = nexus
-            .vpc_lookup_subnet(
+            .vpc_subnet_fetch(
+                &opctx,
                 &path.organization_name,
                 &path.project_name,
                 &path.vpc_name,
@@ -1409,8 +1411,10 @@ async fn vpc_subnets_delete_subnet(
     let nexus = &apictx.nexus;
     let path = path_params.into_inner();
     let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
         nexus
             .vpc_delete_subnet(
+                &opctx,
                 &path.organization_name,
                 &path.project_name,
                 &path.vpc_name,
@@ -1439,8 +1443,10 @@ async fn vpc_subnets_put_subnet(
     let nexus = &apictx.nexus;
     let path = path_params.into_inner();
     let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
         nexus
             .vpc_update_subnet(
+                &opctx,
                 &path.organization_name,
                 &path.project_name,
                 &path.vpc_name,
@@ -1474,8 +1480,10 @@ async fn subnets_ips_get(
     let query = query_params.into_inner();
     let path = path_params.into_inner();
     let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
         let interfaces = nexus
             .subnet_list_network_interfaces(
+                &opctx,
                 &path.organization_name,
                 &path.project_name,
                 &path.vpc_name,
