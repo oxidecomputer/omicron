@@ -1382,8 +1382,10 @@ async fn vpc_subnets_post(
     let nexus = &apictx.nexus;
     let path = path_params.into_inner();
     let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
         let subnet = nexus
             .vpc_create_subnet(
+                &opctx,
                 &path.organization_name,
                 &path.project_name,
                 &path.vpc_name,

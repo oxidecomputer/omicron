@@ -702,7 +702,7 @@ mod test {
 
         // We should be able to insert anything into an empty table.
         assert!(
-            matches!(db_datastore.vpc_create_subnet(row).await, Ok(_)),
+            matches!(db_datastore.vpc_create_subnet_raw(row).await, Ok(_)),
             "Should be able to insert VPC subnet into empty table"
         );
 
@@ -717,7 +717,7 @@ mod test {
         );
         assert!(
             matches!(
-                db_datastore.vpc_create_subnet(new_row).await,
+                db_datastore.vpc_create_subnet_raw(new_row).await,
                 Err(SubnetError::OverlappingIpRange)
             ),
             "Should not be able to insert new VPC subnet with the same IP ranges"
@@ -733,7 +733,7 @@ mod test {
             ipv6_block,
         );
         assert!(
-            matches!(db_datastore.vpc_create_subnet(new_row).await, Ok(_)),
+            matches!(db_datastore.vpc_create_subnet_raw(new_row).await, Ok(_)),
             "Should be able to insert a VPC Subnet with the same ranges in a different VPC",
         );
 
@@ -748,7 +748,7 @@ mod test {
         );
         assert!(
             matches!(
-                db_datastore.vpc_create_subnet(new_row).await,
+                db_datastore.vpc_create_subnet_raw(new_row).await,
                 Err(SubnetError::OverlappingIpRange),
             ),
             "Should not be able to insert VPC Subnet with overlapping IPv4 range"
@@ -762,7 +762,7 @@ mod test {
         );
         assert!(
             matches!(
-                db_datastore.vpc_create_subnet(new_row).await,
+                db_datastore.vpc_create_subnet_raw(new_row).await,
                 Err(SubnetError::OverlappingIpRange),
             ),
             "Should not be able to insert VPC Subnet with overlapping IPv6 range"
@@ -779,7 +779,7 @@ mod test {
         );
         assert!(
             matches!(
-                db_datastore.vpc_create_subnet(new_row).await,
+                db_datastore.vpc_create_subnet_raw(new_row).await,
                 Err(SubnetError::External(_))
             ),
             "Should get an error inserting a VPC Subnet with unique IP ranges, but the same name"
@@ -795,7 +795,7 @@ mod test {
             other_ipv6_block,
         );
         assert!(
-            matches!(db_datastore.vpc_create_subnet(new_row).await, Ok(_)),
+            matches!(db_datastore.vpc_create_subnet_raw(new_row).await, Ok(_)),
             "Should be able to insert new VPC Subnet with non-overlapping IP ranges"
         );
 

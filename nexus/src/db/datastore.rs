@@ -2162,7 +2162,7 @@ impl DataStore {
         opctx: &OpContext,
         authz_project: &authz::Project,
         vpc: Vpc,
-    ) -> Result<Vpc, Error> {
+    ) -> Result<(authz::Vpc, Vpc), Error> {
         use db::schema::vpc::dsl;
 
         assert_eq!(authz_project.id(), vpc.project_id);
@@ -2181,7 +2181,14 @@ impl DataStore {
                     ErrorHandler::Conflict(ResourceType::Vpc, name.as_str()),
                 )
             })?;
-        Ok(vpc)
+        Ok((
+            authz_project.child_generic(
+                ResourceType::Vpc,
+                vpc.id(),
+                LookupType::ByName(vpc.name().to_string()),
+            ),
+            vpc,
+        ))
     }
 
     pub async fn project_update_vpc(
@@ -2384,7 +2391,7 @@ impl DataStore {
             .filter(dsl::time_deleted.is_null())
             .filter(dsl::vpc_id.eq(authz_vpc.id()))
             .select(VpcSubnet::as_select())
-            .load_async(self.pool())
+            .load_async(self.pool_authorized(opctx).await?)
             .await
             .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
     }
@@ -2464,7 +2471,9 @@ impl DataStore {
         Ok((authz_vpc_subnet, db_vpc_subnet))
     }
 
-    // XXX remove?
+    // XXX remove?  this is used by the instance create saga.  that needs to
+    // have serialized creds (like other sagas have), then use those to call the
+    // normal functions
     pub async fn vpc_subnet_fetch_by_name(
         &self,
         vpc_id: &Uuid,
@@ -2492,6 +2501,21 @@ impl DataStore {
 
     /// Insert a VPC Subnet, checking for unique IP address ranges.
     pub async fn vpc_create_subnet(
+        &self,
+        opctx: &OpContext,
+        authz_vpc: &authz::Vpc,
+        subnet: VpcSubnet,
+    ) -> Result<VpcSubnet, SubnetError> {
+        opctx
+            .authorize(authz::Action::CreateChild, authz_vpc)
+            .await
+            .map_err(SubnetError::External)?;
+        assert_eq!(authz_vpc.id(), subnet.vpc_id);
+
+        self.vpc_create_subnet_raw(subnet).await
+    }
+
+    pub(super) async fn vpc_create_subnet_raw(
         &self,
         subnet: VpcSubnet,
     ) -> Result<VpcSubnet, SubnetError> {

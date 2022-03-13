@@ -377,13 +377,13 @@ function cmd_vpc_subnets_list
 function cmd_vpc_subnet_get
 {
 	[[ $# != 4 ]] && usage "expected ORGANIZATION_NAME PROJECT_NAME VPC_NAME SUBNET_NAME"
-	do_curl "/organizations/$1/projects/$2/vpcs/$3/subnets/$4"
+	do_curl_authn "/organizations/$1/projects/$2/vpcs/$3/subnets/$4"
 }
 
 function cmd_subnet_ips_list
 {
 	[[ $# != 4 ]] && usage "expected ORGANIZATION_NAME PROJECT_NAME VPC_NAME SUBNET_NAME"
-	do_curl "/organizations/$1/projects/$2/vpcs/$3/subnets/$4/ips"
+	do_curl_authn "/organizations/$1/projects/$2/vpcs/$3/subnets/$4/ips"
 }
 
 function cmd_vpc_firewall_rules_get
