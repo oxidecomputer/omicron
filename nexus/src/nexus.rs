@@ -1822,12 +1822,15 @@ impl Nexus {
             .vpc_create_subnet(opctx, &authz_vpc, subnet)
             .await
             .map_err(|err| match err {
-                SubnetError::OverlappingIpRange => {
+                SubnetError::OverlappingIpRange(ip) => {
                     let ipv4_block = &defaults::DEFAULT_VPC_SUBNET_IPV4_BLOCK;
-                    warn!(
+                    error!(
                         self.log,
-                        "failed to create default VPC Subnet, \
-                        found overlapping IP address ranges";
+                        concat!(
+                            "failed to create default VPC Subnet, IP address ",
+                            "range '{}' overlaps with existing",
+                        ),
+                        ip;
                         "vpc_id" => ?vpc_id,
                         "subnet_id" => ?default_subnet_id,
                         "ipv4_block" => ?**ipv4_block,
@@ -2080,8 +2083,12 @@ impl Nexus {
                         .await;
                     match result {
                         // Allow NUM_RETRIES retries, after the first attempt.
-                        Err(SubnetError::OverlappingIpRange)
-                            if retry <= NUM_RETRIES =>
+                        //
+                        // Note that we only catch IPv6 overlaps. The client
+                        // always specifies the IPv4 range, so we fail the
+                        // request if that overlaps with an existing range.
+                        Err(SubnetError::OverlappingIpRange(ip))
+                            if retry <= NUM_RETRIES && ip.is_ipv6() =>
                         {
                             debug!(
                                 self.log,
@@ -2096,7 +2103,9 @@ impl Nexus {
                     }
                 };
                 match result {
-                    Err(SubnetError::OverlappingIpRange) => {
+                    Err(SubnetError::OverlappingIpRange(ip))
+                        if ip.is_ipv6() =>
+                    {
                         // TODO-monitoring TODO-debugging
                         //
                         // We should maintain a counter for this occurrence, and
@@ -2105,7 +2114,7 @@ impl Nexus {
                         // goal here is for us to notice that this is happening
                         // before it becomes a major issue for customers.
                         let vpc_id = authz_vpc.id();
-                        warn!(
+                        error!(
                             self.log,
                             "failed to generate unique random IPv6 address \
                             range in {} retries",
@@ -2117,6 +2126,10 @@ impl Nexus {
                             "Unable to allocate unique IPv6 address range \
                             for VPC Subnet",
                         ))
+                    }
+                    Err(SubnetError::OverlappingIpRange(_)) => {
+                        // Overlapping IPv4 ranges, which is always a client error.
+                        Err(result.unwrap_err().into_external())
                     }
                     Err(SubnetError::External(e)) => Err(e),
                     Ok(subnet) => Ok(subnet),
@@ -2142,19 +2155,7 @@ impl Nexus {
                 self.db_datastore
                     .vpc_create_subnet(opctx, &authz_vpc, subnet)
                     .await
-                    .map_err(|err| match err {
-                        SubnetError::OverlappingIpRange => {
-                            external::Error::invalid_request(&format!(
-                                concat!(
-                                    "IPv4 block '{}' and/or IPv6 block '{}' ",
-                                    "overlaps with existing VPC Subnet ",
-                                    "IP address ranges"
-                                ),
-                                params.ipv4_block, ipv6_block,
-                            ))
-                        }
-                        SubnetError::External(e) => e,
-                    })
+                    .map_err(SubnetError::into_external)
             }
         }
     }

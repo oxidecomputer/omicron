@@ -7,6 +7,7 @@
 use crate::db;
 use crate::db::identity::Resource;
 use crate::db::model::IncompleteNetworkInterface;
+use crate::db::model::VpcSubnet;
 use chrono::{DateTime, Utc};
 use diesel::pg::Pg;
 use diesel::prelude::*;
@@ -41,10 +42,164 @@ fn generate_last_address_offset(subnet: &ipnetwork::IpNetwork) -> i64 {
 }
 
 /// Errors related to allocating VPC Subnets.
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub enum SubnetError {
-    OverlappingIpRange,
+    /// An IPv4 or IPv6 subnet overlaps with an existing VPC Subnet
+    OverlappingIpRange(ipnetwork::IpNetwork),
+    /// An other error
     External(external::Error),
+}
+
+impl SubnetError {
+    /// Construct a `SubnetError` from a Diesel error, catching the desired
+    /// cases and building useful errors.
+    pub fn from_pool(
+        e: async_bb8_diesel::PoolError,
+        subnet: &VpcSubnet,
+    ) -> Self {
+        use crate::db::error;
+        use async_bb8_diesel::ConnectionError;
+        use async_bb8_diesel::PoolError;
+        use diesel::result::DatabaseErrorKind;
+        use diesel::result::Error;
+        const IPV4_OVERLAP_ERROR_MESSAGE: &str =
+            r#"null value in column "ipv4_block" violates not-null constraint"#;
+        const IPV6_OVERLAP_ERROR_MESSAGE: &str =
+            r#"null value in column "ipv6_block" violates not-null constraint"#;
+        const NAME_CONFLICT_CONSTRAINT: &str = "vpc_subnet_vpc_id_name_key";
+        match e {
+            // Attempt to insert overlapping IPv4 subnet
+            PoolError::Connection(ConnectionError::Query(
+                Error::DatabaseError(
+                    DatabaseErrorKind::NotNullViolation,
+                    ref info,
+                ),
+            )) if info.message() == IPV4_OVERLAP_ERROR_MESSAGE => {
+                SubnetError::OverlappingIpRange(subnet.ipv4_block.0 .0.into())
+            }
+
+            // Attempt to insert overlapping IPv6 subnet
+            PoolError::Connection(ConnectionError::Query(
+                Error::DatabaseError(
+                    DatabaseErrorKind::NotNullViolation,
+                    ref info,
+                ),
+            )) if info.message() == IPV6_OVERLAP_ERROR_MESSAGE => {
+                SubnetError::OverlappingIpRange(subnet.ipv6_block.0 .0.into())
+            }
+
+            // Conflicting name for the subnet within a VPC
+            PoolError::Connection(ConnectionError::Query(
+                Error::DatabaseError(
+                    DatabaseErrorKind::UniqueViolation,
+                    ref info,
+                ),
+            )) if info.constraint_name() == Some(NAME_CONFLICT_CONSTRAINT) => {
+                SubnetError::External(error::public_error_from_diesel_pool(
+                    e,
+                    error::ErrorHandler::Conflict(
+                        external::ResourceType::VpcSubnet,
+                        subnet.identity().name.as_str(),
+                    ),
+                ))
+            }
+
+            // Any other error at all is a bug
+            _ => SubnetError::External(error::public_error_from_diesel_pool(
+                e,
+                error::ErrorHandler::Server,
+            )),
+        }
+    }
+
+    /// Convert into a public error
+    pub fn into_external(self) -> external::Error {
+        match self {
+            SubnetError::OverlappingIpRange(ip) => {
+                external::Error::invalid_request(
+                    format!("IP address range '{}' conflicts with an existing subnet", ip).as_str()
+                )
+            },
+            SubnetError::External(e) => e,
+        }
+    }
+}
+
+/// Generate a subquery that selects any overlapping address ranges of the same
+/// type as the input IP subnet.
+///
+/// This generates a query that, in full, looks like:
+///
+/// ```sql
+/// SELECT
+///     <ip>
+/// FROM
+///     vpc_subnet
+/// WHERE
+///     vpc_id = <vpc_id> AND
+///     time_deleted IS NULL AND
+///     inet_contains_or_equals(ipv*_block, <ip>)
+/// LIMIT 1
+/// ```
+///
+/// The input may be either an IPv4 or IPv6 subnet, and the corresponding column
+/// is compared against. Note that the exact input IP range is returned on
+/// purpose.
+fn push_select_overlapping_ip_range(
+    mut out: AstPass<Pg>,
+    vpc_id: &Uuid,
+    ip: &ipnetwork::IpNetwork,
+) -> diesel::QueryResult<()> {
+    use crate::db::schema::vpc_subnet::dsl;
+    out.push_sql("SELECT ");
+    out.push_bind_param::<sql_types::Inet, ipnetwork::IpNetwork>(ip)?;
+    out.push_sql(" FROM ");
+    dsl::vpc_subnet.from_clause().walk_ast(out.reborrow())?;
+    out.push_sql(" WHERE ");
+    out.push_identifier(dsl::vpc_id::NAME)?;
+    out.push_sql(" = ");
+    out.push_bind_param::<sql_types::Uuid, Uuid>(vpc_id)?;
+    out.push_sql(" AND ");
+    out.push_identifier(dsl::time_deleted::NAME)?;
+    out.push_sql(" IS NULL AND inet_contains_or_equals(");
+    if ip.is_ipv4() {
+        out.push_identifier(dsl::ipv4_block::NAME)?;
+    } else {
+        out.push_identifier(dsl::ipv6_block::NAME)?;
+    }
+    out.push_sql(", ");
+    out.push_bind_param::<sql_types::Inet, ipnetwork::IpNetwork>(ip)?;
+    out.push_sql(")");
+    Ok(())
+}
+
+/// Generate a subquery that returns NULL if there is an overlapping IP address
+/// range of any type.
+///
+/// This specifically generates a query that looks like:
+///
+/// ```sql
+/// SELECT NULLIF(
+///     <ip>,
+///     push_select_overlapping_ip_range(<vpc_id>, <ip>)
+/// )
+/// ```
+///
+/// The `NULLIF` function returns NULL if those two expressions are equal, and
+/// the first expression otherwise. That is, this returns NULL if there exists
+/// an overlapping IP range already in the VPC Subnet table, and the requested
+/// IP range if not.
+fn push_null_if_overlapping_ip_range(
+    mut out: AstPass<Pg>,
+    vpc_id: &Uuid,
+    ip: &ipnetwork::IpNetwork,
+) -> diesel::QueryResult<()> {
+    out.push_sql("SELECT NULLIF(");
+    out.push_bind_param::<sql_types::Inet, ipnetwork::IpNetwork>(ip)?;
+    out.push_sql(", (");
+    push_select_overlapping_ip_range(out.reborrow(), vpc_id, ip)?;
+    out.push_sql("))");
+    Ok(())
 }
 
 /// Generate a CTE that can be used to insert a VPC Subnet, only if the IP
@@ -61,9 +216,7 @@ pub enum SubnetError {
 ///     time_created,
 ///     time_modified,
 ///     time_deleted,
-///     vpc_id,
-///     ipv4_block,
-///     ipv6_block
+///     vpc_id
 /// ) AS (VALUES (
 ///     <id>,
 ///     <name>,
@@ -72,24 +225,32 @@ pub enum SubnetError {
 ///     <time_modified>,
 ///     NULL::TIMESTAMPTZ,
 ///     <vpc_id>,
-///     <ipv4_block>,
-///     <ipv6_block>
-/// ))
-/// SELECT *
-/// FROM candidate
-/// WHERE NOT EXISTS (
-///     SELECT ipv4_block, ipv6_block
-///     FROM vpc_subnet
-///     WHERE
-///         vpc_id = <vpc_id> AND
-///         time_deleted IS NULL AND
-///         (
-///             inet_contains_or_equals(ipv4_block, candidate.ipv4_block) OR
-///             inet_contains_or_equals(ipv6_block, candidate.ipv6_block)
-///         )
+/// )),
+/// candidate_ipv4(ipv4_block) AS (
+///     SELECT(
+///         NULLIF(
+///             <ipv4_block>,
+///             (
+///                 SELECT
+///                     ipv4_block
+///                 FROM
+///                     vpc_subnet
+///                 WHERE
+///                     vpc_id = <vpc_id> AND
+///                     time_deleted IS NULL AND
+///                     inet_contains_or_equals(<ipv4_block>, ipv4_block)
+///                 LIMIT 1
+///             )
+///        )
+///   )
+/// ),
+/// candidate_ipv6(ipv6_block) AS (
+///     <same as above, for ipv6>
 /// )
+/// SELECT *
+/// FROM candidate, candidate_ipv4, candidate_ipv6
 /// ```
-pub struct FilterConflictingVpcSubnetRangesQuery(pub db::model::VpcSubnet);
+pub struct FilterConflictingVpcSubnetRangesQuery(pub VpcSubnet);
 
 impl QueryId for FilterConflictingVpcSubnetRangesQuery {
     type QueryId = ();
@@ -100,151 +261,68 @@ impl QueryFragment<Pg> for FilterConflictingVpcSubnetRangesQuery {
     fn walk_ast(&self, mut out: AstPass<Pg>) -> diesel::QueryResult<()> {
         use db::schema::vpc_subnet::dsl;
 
-        // "SELECT * FROM (WITH candidate("
+        // Create the base `candidate` from values provided that need no
+        // verificiation.
         out.push_sql("SELECT * FROM (WITH candidate(");
-
-        // "id, "
         out.push_identifier(dsl::id::NAME)?;
         out.push_sql(", ");
-
-        // "name, "
         out.push_identifier(dsl::name::NAME)?;
         out.push_sql(", ");
-
-        // "description, "
         out.push_identifier(dsl::description::NAME)?;
         out.push_sql(", ");
-
-        // "time_created, "
         out.push_identifier(dsl::time_created::NAME)?;
         out.push_sql(", ");
-
-        // "time_modified, "
         out.push_identifier(dsl::time_modified::NAME)?;
         out.push_sql(", ");
-
-        // "time_deleted, "
         out.push_identifier(dsl::time_deleted::NAME)?;
         out.push_sql(", ");
-
-        // "vpc_id, "
         out.push_identifier(dsl::vpc_id::NAME)?;
-        out.push_sql(", ");
-
-        // "ipv4_block, "
-        out.push_identifier(dsl::ipv4_block::NAME)?;
-        out.push_sql(", ");
-
-        // "ipv6_block) AS (VALUES ("
-        out.push_identifier(dsl::ipv6_block::NAME)?;
         out.push_sql(") AS (VALUES (");
-
-        // "<id>, "
         out.push_bind_param::<sql_types::Uuid, Uuid>(&self.0.id())?;
         out.push_sql(", ");
-
-        // "<name>, "
         out.push_bind_param::<sql_types::Text, String>(
             &self.0.name().to_string(),
         )?;
         out.push_sql(", ");
-
-        // "<description>, "
         out.push_bind_param::<sql_types::Text, &str>(&self.0.description())?;
         out.push_sql(", ");
-
-        // "<time_created>, "
         out.push_bind_param::<sql_types::Timestamptz, DateTime<Utc>>(
             &self.0.time_created(),
         )?;
         out.push_sql(", ");
-
-        // "<time_modified>, "
         out.push_bind_param::<sql_types::Timestamptz, DateTime<Utc>>(
             &self.0.time_modified(),
         )?;
         out.push_sql(", ");
-
-        // "NULL::TIMESTAMPTZ, "
         out.push_sql("NULL::TIMESTAMPTZ, ");
-
-        // "<vpc_id>, "
         out.push_bind_param::<sql_types::Uuid, Uuid>(&self.0.vpc_id)?;
-        out.push_sql(", ");
+        out.push_sql(")), ");
 
-        // <ipv4_block>, "
-        out.push_bind_param::<sql_types::Inet, ipnetwork::IpNetwork>(
-            &ipnetwork::IpNetwork::from(self.0.ipv4_block.0 .0),
-        )?;
-        out.push_sql(", ");
-
-        // "<ipv6_block>)"
-        out.push_bind_param::<sql_types::Inet, ipnetwork::IpNetwork>(
-            &ipnetwork::IpNetwork::from(self.0.ipv6_block.0 .0),
-        )?;
-        out.push_sql("))");
-
-        /*
-         * Possibly filter the candidate row.
-         *
-         * This selects everything in the `candidate` CTE, where there is no
-         * "overlapping" row in the `vpc_subnet` table. Specifically, we search
-         * that table for rows with:
-         *
-         * - The same `vpc_id`
-         * - Not soft-deleted
-         * - The IPv4 range overlaps _or_ the IPv6 range overlaps
-         *
-         * Those are removed from `candidate`.
-         */
-
-        // " SELECT * FROM candidate WHERE NOT EXISTS ("
-        out.push_sql(" SELECT * FROM candidate WHERE NOT EXISTS (");
-
-        // " SELECT "
-        out.push_sql("SELECT ");
-
-        // "ipv4_block, "
+        // Push the candidate IPv4 and IPv6 selection subqueries, which return
+        // NULL if the corresponding address range overlaps.
+        out.push_sql("candidate_ipv4(");
         out.push_identifier(dsl::ipv4_block::NAME)?;
-        out.push_sql(", ");
-
-        // "ipv6_block "
-        out.push_identifier(dsl::ipv6_block::NAME)?;
-
-        // "FROM vpc_subnet"
-        out.push_sql(" FROM ");
-        dsl::vpc_subnet.from_clause().walk_ast(out.reborrow())?;
-
-        // " WHERE "
-        out.push_sql(" WHERE ");
-
-        // "vpc_id = <vpc_id>"
-        out.push_identifier(dsl::vpc_id::NAME)?;
-        out.push_sql(" = ");
-        out.push_bind_param::<sql_types::Uuid, Uuid>(&self.0.vpc_id)?;
-
-        // " AND time_deleted IS NULL AND (("
-        out.push_sql(" AND ");
-        out.push_identifier(dsl::time_deleted::NAME)?;
-        out.push_sql(" IS NULL AND (");
-
-        // "inet_contains_or_equals(ipv4_block, <ipv4_block>
-        out.push_sql("inet_contains_or_equals(");
-        out.push_identifier(dsl::ipv4_block::NAME)?;
-        out.push_sql(", ");
-        out.push_bind_param::<sql_types::Inet, ipnetwork::IpNetwork>(
+        out.push_sql(") AS (");
+        push_null_if_overlapping_ip_range(
+            out.reborrow(),
+            &self.0.vpc_id,
             &ipnetwork::IpNetwork::from(self.0.ipv4_block.0 .0),
         )?;
 
-        // ") OR inet_contains_or_equals(ipv6_block, <ipv6_block>))"
-        out.push_sql(") OR inet_contains_or_equals(");
+        out.push_sql("), candidate_ipv6(");
         out.push_identifier(dsl::ipv6_block::NAME)?;
-        out.push_sql(", ");
-        out.push_bind_param::<sql_types::Inet, ipnetwork::IpNetwork>(
+        out.push_sql(") AS (");
+        push_null_if_overlapping_ip_range(
+            out.reborrow(),
+            &self.0.vpc_id,
             &ipnetwork::IpNetwork::from(self.0.ipv6_block.0 .0),
         )?;
-        out.push_sql("))))");
+        out.push_sql(") ");
 
+        // Select the entire set of candidate columns.
+        out.push_sql(
+            "SELECT * FROM candidate, candidate_ipv4, candidate_ipv6)",
+        );
         Ok(())
     }
 }
@@ -1054,13 +1132,12 @@ impl QueryFragment<Pg> for InsertNetworkInterfaceQueryValues {
 
 #[cfg(test)]
 mod test {
-    use super::FilterConflictingVpcSubnetRangesQuery;
     use super::NetworkInterfaceError;
     use super::SubnetError;
     use crate::db::model::{
         self, IncompleteNetworkInterface, NetworkInterface, VpcSubnet,
     };
-    use diesel::pg::Pg;
+    use ipnetwork::IpNetwork;
     use nexus_test_utils::db::test_setup_database;
     use omicron_common::api::external::{
         Error, IdentityMetadataCreateParams, Ipv4Net, Ipv6Net, Name,
@@ -1069,46 +1146,6 @@ mod test {
     use std::convert::TryInto;
     use std::sync::Arc;
     use uuid::Uuid;
-
-    #[test]
-    fn test_filter_conflicting_vpc_subnet_ranges_query_string() {
-        use crate::db::identity::Resource;
-        let ipv4_block = Ipv4Net("172.30.0.0/22".parse().unwrap());
-        let ipv6_block = Ipv6Net("fd12:3456:7890::/64".parse().unwrap());
-        let name = "a-name".to_string().try_into().unwrap();
-        let description = "some description".to_string();
-        let identity = IdentityMetadataCreateParams { name, description };
-        let vpc_id = Uuid::new_v4();
-        let subnet_id = Uuid::new_v4();
-        let row =
-            VpcSubnet::new(subnet_id, vpc_id, identity, ipv4_block, ipv6_block);
-        let query = FilterConflictingVpcSubnetRangesQuery(row.clone());
-        let query_str = diesel::debug_query::<Pg, _>(&query).to_string();
-        let expected_query = format!(
-            concat!(
-                "SELECT * FROM (WITH candidate(",
-                r#""id", "name", "description", "time_created", "time_modified", "#,
-                r#""time_deleted", "vpc_id", "ipv4_block", "ipv6_block") AS "#,
-                "(VALUES ($1, $2, $3, $4, $5, NULL::TIMESTAMPTZ, $6, $7, $8)) ",
-                "SELECT * FROM candidate WHERE NOT EXISTS (",
-                r#"SELECT "ipv4_block", "ipv6_block" FROM "vpc_subnet" WHERE "#,
-                r#""vpc_id" = $9 AND "time_deleted" IS NULL AND ("#,
-                r#"inet_contains_or_equals("ipv4_block", $10) OR inet_contains_or_equals("ipv6_block", $11)))) "#,
-                r#"-- binds: [{subnet_id}, "{name}", "{description}", {time_created:?}, "#,
-                r#"{time_modified:?}, {vpc_id}, V4({ipv4_block:?}), V6({ipv6_block:?}), "#,
-                r#"{vpc_id}, V4({ipv4_block:?}), V6({ipv6_block:?})]"#,
-            ),
-            subnet_id = row.id(),
-            name = row.name(),
-            description = row.description(),
-            vpc_id = row.vpc_id,
-            ipv4_block = row.ipv4_block.0 .0,
-            ipv6_block = row.ipv6_block.0 .0,
-            time_created = row.time_created(),
-            time_modified = row.time_modified(),
-        );
-        assert_eq!(query_str, expected_query);
-    }
 
     #[tokio::test]
     async fn test_filter_conflicting_vpc_subnet_ranges_query() {
@@ -1162,9 +1199,9 @@ mod test {
         assert!(
             matches!(
                 db_datastore.vpc_create_subnet_raw(new_row).await,
-                Err(SubnetError::OverlappingIpRange)
+                Err(SubnetError::OverlappingIpRange(IpNetwork::V4(_)))
             ),
-            "Should not be able to insert new VPC subnet with the same IP ranges"
+            "Should not be able to insert new VPC subnet with the same IPv4 and IPv6 ranges"
         );
 
         // We should be able to insert data with the same ranges, if we change
@@ -1190,12 +1227,14 @@ mod test {
             other_ipv4_block,
             ipv6_block,
         );
-        assert!(
-            matches!(
-                db_datastore.vpc_create_subnet_raw(new_row).await,
-                Err(SubnetError::OverlappingIpRange),
-            ),
-            "Should not be able to insert VPC Subnet with overlapping IPv4 range"
+        let err = db_datastore
+            .vpc_create_subnet_raw(new_row)
+            .await
+            .expect_err("Should not be able to insert VPC Subnet with overlapping IPv6 range");
+        assert_eq!(
+            err,
+            SubnetError::OverlappingIpRange(IpNetwork::from(ipv6_block.0)),
+            "SubnetError variant should include the exact IP range that overlaps"
         );
         let new_row = VpcSubnet::new(
             other_subnet_id,
@@ -1204,12 +1243,14 @@ mod test {
             ipv4_block,
             other_ipv6_block,
         );
-        assert!(
-            matches!(
-                db_datastore.vpc_create_subnet_raw(new_row).await,
-                Err(SubnetError::OverlappingIpRange),
-            ),
-            "Should not be able to insert VPC Subnet with overlapping IPv6 range"
+        let err = db_datastore
+            .vpc_create_subnet_raw(new_row)
+            .await
+            .expect_err("Should not be able to insert VPC Subnet with overlapping IPv4 range");
+        assert_eq!(
+            err,
+            SubnetError::OverlappingIpRange(IpNetwork::from(ipv4_block.0)),
+            "SubnetError variant should include the exact IP range that overlaps"
         );
 
         // We should get an _external error_ if the IP address ranges are OK,
