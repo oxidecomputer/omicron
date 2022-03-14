@@ -1152,6 +1152,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "gateway-sp-comms"
+version = "0.1.0"
+dependencies = [
+ "futures",
+ "gateway-messages",
+ "omicron-test-utils",
+ "ringbuffer",
+ "serde",
+ "slog",
+ "thiserror",
+ "tokio",
+ "uuid",
+]
+
+[[package]]
 name = "generic-array"
 version = "0.12.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
