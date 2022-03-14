@@ -14,6 +14,7 @@ use crate::db;
 use crate::db::identity::{Asset, Resource};
 use crate::db::model::DatasetKind;
 use crate::db::model::Name;
+use crate::db::subnet_allocation::NetworkInterfaceError;
 use crate::db::subnet_allocation::SubnetError;
 use crate::defaults;
 use crate::external_api::params;
@@ -1541,6 +1542,160 @@ impl Nexus {
             .map(|_| ())
     }
 
+    ///  Lists network interfaces attached to the instance.
+    pub async fn instance_list_network_interfaces(
+        &self,
+        opctx: &OpContext,
+        organization_name: &Name,
+        project_name: &Name,
+        instance_name: &Name,
+        pagparams: &DataPageParams<'_, Name>,
+    ) -> ListResultVec<db::model::NetworkInterface> {
+        let authz_instance = self
+            .db_datastore
+            .instance_lookup_by_path(
+                organization_name,
+                project_name,
+                instance_name,
+            )
+            .await?;
+        opctx.authorize(authz::Action::ListChildren, &authz_instance).await?;
+        self.db_datastore
+            .instance_list_network_interfaces(&authz_instance.id(), pagparams)
+            .await
+    }
+
+    /// Create a network interface attached to the provided instance.
+    // TODO-performance: Add a version of this that accepts the instance ID
+    // directly. This will avoid all the internal database lookups in the event
+    // that we create many NICs for the same instance, such as in a saga.
+    pub async fn instance_create_network_interface(
+        &self,
+        opctx: &OpContext,
+        organization_name: &Name,
+        project_name: &Name,
+        instance_name: &Name,
+        params: &params::NetworkInterfaceCreate,
+    ) -> CreateResult<db::model::NetworkInterface> {
+        let authz_project = self
+            .db_datastore
+            .project_lookup_by_path(organization_name, project_name)
+            .await?;
+        let (authz_instance, db_instance) = self
+            .db_datastore
+            .instance_fetch(opctx, &authz_project, instance_name)
+            .await?;
+        opctx.authorize(authz::Action::Modify, &authz_instance).await?;
+
+        // TODO-completeness: We'd like to relax this once hot-plug is supported
+        let stopped =
+            db::model::InstanceState::new(external::InstanceState::Stopped);
+        if db_instance.runtime_state.state != stopped {
+            return Err(external::Error::invalid_request(
+                "Instance must be stopped to attach a new network interface",
+            ));
+        }
+
+        // NOTE: We need to lookup the VPC and VPC Subnet, since we need both
+        // IDs for creating the network interface.
+        let vpc_name = db::model::Name(params.vpc_name.clone());
+        let subnet_name = db::model::Name(params.subnet_name.clone());
+        let vpc = self
+            .project_lookup_vpc(organization_name, project_name, &vpc_name)
+            .await?;
+        let subnet = self
+            .db_datastore
+            .vpc_subnet_fetch_by_name(&vpc.id(), &subnet_name)
+            .await?;
+        let mac = db::model::MacAddr::new()?;
+        let interface_id = Uuid::new_v4();
+        let interface = db::model::IncompleteNetworkInterface::new(
+            interface_id,
+            authz_instance.id(),
+            vpc.id(),
+            subnet,
+            mac,
+            params.identity.clone(),
+            params.ip,
+        )?;
+        let interface = self
+            .db_datastore
+            .instance_create_network_interface(interface)
+            .await
+            .map_err(NetworkInterfaceError::into_external)?;
+        Ok(interface)
+    }
+
+    /// Delete a network interface from the provided instance.
+    pub async fn instance_delete_network_interface(
+        &self,
+        opctx: &OpContext,
+        organization_name: &Name,
+        project_name: &Name,
+        instance_name: &Name,
+        interface_name: &Name,
+    ) -> DeleteResult {
+        let authz_project = self
+            .db_datastore
+            .project_lookup_by_path(organization_name, project_name)
+            .await?;
+        let (authz_instance, db_instance) = self
+            .db_datastore
+            .instance_fetch(opctx, &authz_project, instance_name)
+            .await?;
+        opctx.authorize(authz::Action::Modify, &authz_instance).await?;
+
+        // TODO-completeness: We'd like to relax this once hot-plug is supported
+        let stopped =
+            db::model::InstanceState::new(external::InstanceState::Stopped);
+        if db_instance.runtime_state.state != stopped {
+            return Err(external::Error::invalid_request(
+                "Instance must be stopped to detach a network interface",
+            ));
+        }
+        // TODO-cleanup: It's annoying that we need to look up the interface by
+        // name, which gets a single record, and then soft-delete that one
+        // record. We should be able to do both at once, but the
+        // `update_and_check` tools only operate on the primary key. That means
+        // we need to fetch the whole record first.
+        let interface = self
+            .db_datastore
+            .instance_lookup_network_interface(
+                &authz_instance.id(),
+                interface_name,
+            )
+            .await?;
+        self.db_datastore
+            .instance_delete_network_interface(&interface.id())
+            .await
+    }
+
+    /// Fetch a network interface attached to the given instance.
+    pub async fn instance_lookup_network_interface(
+        &self,
+        opctx: &OpContext,
+        organization_name: &Name,
+        project_name: &Name,
+        instance_name: &Name,
+        interface_name: &Name,
+    ) -> LookupResult<db::model::NetworkInterface> {
+        let authz_instance = self
+            .db_datastore
+            .instance_lookup_by_path(
+                organization_name,
+                project_name,
+                instance_name,
+            )
+            .await?;
+        opctx.authorize(authz::Action::ListChildren, &authz_instance).await?;
+        self.db_datastore
+            .instance_lookup_network_interface(
+                &authz_instance.id(),
+                interface_name,
+            )
+            .await
+    }
+
     pub async fn project_list_vpcs(
         &self,
         opctx: &OpContext,
@@ -1826,7 +1981,6 @@ impl Nexus {
         vpc_name: &Name,
         subnet_name: &Name,
     ) -> LookupResult<db::model::VpcSubnet> {
-        // TODO: join projects, vpcs, and subnets and do this in one query
         let vpc = self
             .project_lookup_vpc(organization_name, project_name, vpc_name)
             .await?;

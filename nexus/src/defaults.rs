@@ -23,6 +23,9 @@ pub const MIN_VPC_IPV4_SUBNET_PREFIX: u8 = 8;
 /// NOTE: This is the maximum _prefix_, which sets the minimum subnet size.
 pub const MAX_VPC_IPV4_SUBNET_PREFIX: u8 = 26;
 
+/// The number of reserved addresses at the beginning of a subnet range.
+pub const NUM_INITIAL_RESERVED_IP_ADDRESSES: usize = 5;
+
 lazy_static! {
     /// The default IPv4 subnet range assigned to the default VPC Subnet, when
     /// the VPC is created, if one is not provided in the request. See
