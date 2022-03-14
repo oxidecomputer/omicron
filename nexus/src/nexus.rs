@@ -1596,8 +1596,8 @@ impl Nexus {
             ));
         }
 
-        // Lookup both the VPC and VPC Subnet, since we need both IDs to create
-        // an interface.
+        // NOTE: We need to lookup the VPC and VPC Subnet, since we need both
+        // IDs for creating the network interface.
         let vpc_name = db::model::Name(params.vpc_name.clone());
         let subnet_name = db::model::Name(params.subnet_name.clone());
         let vpc = self
