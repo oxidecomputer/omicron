@@ -14,6 +14,7 @@ use crate::db;
 use crate::db::identity::{Asset, Resource};
 use crate::db::model::DatasetKind;
 use crate::db::model::Name;
+use crate::db::model::VpcSubnet;
 use crate::db::subnet_allocation::SubnetError;
 use crate::defaults;
 use crate::external_api::params;
@@ -2032,7 +2033,7 @@ impl Nexus {
         vpc_name: &Name,
         subnet_name: &Name,
         params: &params::VpcSubnetUpdate,
-    ) -> UpdateResult<()> {
+    ) -> UpdateResult<VpcSubnet> {
         let authz_subnet = self
             .db_datastore
             .vpc_subnet_lookup_by_path(

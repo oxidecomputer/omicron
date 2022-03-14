@@ -1445,13 +1445,13 @@ async fn vpc_subnets_put_subnet(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<VpcSubnetPathParam>,
     subnet_params: TypedBody<params::VpcSubnetUpdate>,
-) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+) -> Result<HttpResponseOk<VpcSubnet>, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
     let path = path_params.into_inner();
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
-        nexus
+        let subnet = nexus
             .vpc_update_subnet(
                 &opctx,
                 &path.organization_name,
@@ -1461,7 +1461,7 @@ async fn vpc_subnets_put_subnet(
                 &subnet_params.into_inner(),
             )
             .await?;
-        Ok(HttpResponseUpdatedNoContent())
+        Ok(HttpResponseOk(subnet.into()))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }

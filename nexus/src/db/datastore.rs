@@ -2547,7 +2547,7 @@ impl DataStore {
         opctx: &OpContext,
         authz_subnet: &authz::VpcSubnet,
         updates: VpcSubnetUpdate,
-    ) -> Result<(), Error> {
+    ) -> UpdateResult<VpcSubnet> {
         opctx.authorize(authz::Action::Modify, authz_subnet).await?;
 
         use db::schema::vpc_subnet::dsl;
@@ -2555,15 +2555,15 @@ impl DataStore {
             .filter(dsl::time_deleted.is_null())
             .filter(dsl::id.eq(authz_subnet.id()))
             .set(updates)
-            .execute_async(self.pool_authorized(opctx).await?)
+            .returning(VpcSubnet::as_returning())
+            .get_result_async(self.pool_authorized(opctx).await?)
             .await
             .map_err(|e| {
                 public_error_from_diesel_pool(
                     e,
                     ErrorHandler::NotFoundByResource(authz_subnet),
                 )
-            })?;
-        Ok(())
+            })
     }
 
     pub async fn subnet_list_network_interfaces(
