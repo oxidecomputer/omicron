@@ -6,8 +6,9 @@ use std::net::SocketAddr;
 
 use crate::config::{Config, SidecarConfig};
 use crate::server::UdpServer;
-use crate::{ignition_id, SimulatedSp};
+use crate::{ignition_id, Responsiveness, SimulatedSp};
 use anyhow::{Context, Result};
+use async_trait::async_trait;
 use gateway_messages::sp_impl::{SpHandler, SpServer};
 use gateway_messages::{
     BulkIgnitionState, IgnitionCommand, IgnitionFlags, IgnitionState,
@@ -35,6 +36,7 @@ impl Drop for Sidecar {
     }
 }
 
+#[async_trait]
 impl SimulatedSp for Sidecar {
     fn serial_number(&self) -> String {
         hex::encode(self.serial_number)
@@ -42,6 +44,15 @@ impl SimulatedSp for Sidecar {
 
     fn local_addr(&self) -> SocketAddr {
         self.local_addr
+    }
+
+    async fn set_responsiveness(&self, r: Responsiveness) {
+        let (tx, rx) = oneshot::channel();
+        self.commands
+            .send((Command::SetResponsiveness(r), tx))
+            .map_err(|_| "gimlet task died unexpectedly")
+            .unwrap();
+        rx.await.unwrap();
     }
 }
 
@@ -97,16 +108,21 @@ impl Sidecar {
             .unwrap();
         match rx.await.unwrap() {
             CommandResponse::CurrentIgnitionState(state) => state,
+            other => panic!("unexpected response {:?}", other),
         }
     }
 }
 
+#[derive(Debug)]
 enum Command {
     CurrentIgnitionState,
+    SetResponsiveness(Responsiveness),
 }
 
+#[derive(Debug)]
 enum CommandResponse {
     CurrentIgnitionState(Vec<IgnitionState>),
+    SetResponsivenessAck,
 }
 
 struct Inner {
@@ -136,9 +152,14 @@ impl Inner {
 
     async fn run(mut self) -> Result<()> {
         let mut server = SpServer::default();
+        let mut responsiveness = Responsiveness::Responsive;
         loop {
             select! {
                 recv = self.udp.recv_from() => {
+                    if responsiveness != Responsiveness::Responsive {
+                        continue;
+                    }
+
                     let (data, addr) = recv?;
 
                     let resp = match server.dispatch(data, &mut self.handler) {
@@ -167,6 +188,11 @@ impl Inner {
                             tx.send(CommandResponse::CurrentIgnitionState(
                                 self.handler.ignition_targets.clone()
                             )).map_err(|_| "receiving half died").unwrap();
+                        }
+                        Command::SetResponsiveness(r) => {
+                            responsiveness = r;
+                            tx.send(CommandResponse::SetResponsivenessAck)
+                                .map_err(|_| "receiving half died").unwrap();
                         }
                     }
                 }

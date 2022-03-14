@@ -8,6 +8,7 @@ mod server;
 mod sidecar;
 
 pub use anyhow::Result;
+use async_trait::async_trait;
 pub use config::Config;
 pub use gimlet::Gimlet;
 pub use server::logger;
@@ -20,11 +21,21 @@ pub mod ignition_id {
     pub const SIDECAR: u16 = 0b0000_0000_0001_0010;
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Responsiveness {
+    Responsive,
+    Unresponsive,
+}
+
+#[async_trait]
 pub trait SimulatedSp {
     /// Hexlified serial number.
     fn serial_number(&self) -> String;
     /// Listening UDP address of the simulated SP.
     fn local_addr(&self) -> SocketAddr;
+    /// Simulate the SP being unresponsive, in which it ignores all incoming
+    /// messages.
+    async fn set_responsiveness(&self, r: Responsiveness);
 }
 
 pub struct SimRack {

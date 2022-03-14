@@ -17,6 +17,7 @@ use omicron_gateway::http_entrypoints::SpInfo;
 use omicron_gateway::http_entrypoints::SpState;
 use omicron_gateway::http_entrypoints::SpType;
 use sp_sim::ignition_id;
+use sp_sim::Responsiveness;
 use sp_sim::SimRack;
 use sp_sim::SimulatedSp;
 use std::collections::BTreeSet;
@@ -42,9 +43,10 @@ impl SpStateExt for SpState {
 // original "thing"
 macro_rules! assert_eq_unordered {
     ($items0:expr, $items1:expr) => {
-        let items0 = $items0.iter().collect::<BTreeSet<_>>();
-        let items1 = $items1.iter().collect::<BTreeSet<_>>();
-        assert_eq!(items0, items1);
+        assert_eq!(
+            $items0.iter().collect::<BTreeSet<_>>(),
+            $items1.iter().collect::<BTreeSet<_>>(),
+        );
     };
 }
 
@@ -184,6 +186,51 @@ async fn bulk_sp_get_one_sp_powered_off() {
         test_util::objects_list_page(client, &url).await;
 
     assert_eq_unordered!(page.items, expected);
+
+    testctx.teardown().await;
+}
+
+#[tokio::test]
+async fn bulk_sp_get_one_sp_unresponsive() {
+    let testctx = setup::test_setup("bulk_sp_get_all_online").await;
+    let client = &testctx.client;
+
+    // simulator just started; all SPs are online
+    let mut expected = current_simulator_state(&testctx.simrack).await;
+
+    // sanity check: we have at least 1 sidecar and at least 1 gimlet, and all
+    // SPs are enabled
+    assert!(expected.iter().any(|sp| sp.info.id.typ == SpType::Switch));
+    assert!(expected.iter().any(|sp| sp.info.id.typ == SpType::Sled));
+    assert!(expected.iter().all(|sp| sp.details.is_enabled()));
+
+    // instruct simulator to disable sled 0
+    testctx.simrack.gimlets[0]
+        .set_responsiveness(Responsiveness::Unresponsive)
+        .await;
+
+    // With an unresponsive SP, we should get back an initial page containing
+    // the responsive SPs, then the subsequent page will eventually give us the
+    // unresponsive one. Remove it from `expected` and set it to unresponsive.
+    let sled_0_index = expected
+        .iter()
+        .position(|sp| {
+            sp.info.id == SpIdentifier { typ: SpType::Sled, slot: 0 }
+        })
+        .unwrap();
+    let mut expected_sled_0 = expected.remove(sled_0_index);
+    expected_sled_0.details = SpState::Unresponsive;
+
+    let url = format!("{}", client.url("/sp"));
+    let page: ResultsPage<SpInfo> =
+        test_util::objects_list_page(client, &url).await;
+    assert_eq_unordered!(page.items, expected);
+
+    // get the subsequent page, which should tell us about the unresponsive SP
+    let url = format!("{}?page_token={}", url, page.next_page.unwrap());
+    let page: ResultsPage<SpInfo> =
+        test_util::objects_list_page(client, &url).await;
+    assert_eq_unordered!(page.items, [expected_sled_0]);
 
     testctx.teardown().await;
 }

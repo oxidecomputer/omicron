@@ -4,8 +4,9 @@
 
 use crate::config::GimletConfig;
 use crate::server::UdpServer;
-use crate::SimulatedSp;
+use crate::{Responsiveness, SimulatedSp};
 use anyhow::{anyhow, Context, Result};
+use async_trait::async_trait;
 use gateway_messages::sp_impl::{SerialConsolePacketizer, SpHandler, SpServer};
 use gateway_messages::{
     version, ResponseError, SerialConsole, SerialNumber, SerializedSize,
@@ -19,11 +20,14 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, UdpSocket};
 use tokio::select;
 use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
+use tokio::sync::oneshot;
 use tokio::task::{self, JoinHandle};
 
 pub struct Gimlet {
     local_addr: SocketAddr,
     serial_number: SerialNumber,
+    commands:
+        mpsc::UnboundedSender<(Command, oneshot::Sender<CommandResponse>)>,
     inner_tasks: Vec<JoinHandle<()>>,
 }
 
@@ -36,6 +40,7 @@ impl Drop for Gimlet {
     }
 }
 
+#[async_trait]
 impl SimulatedSp for Gimlet {
     fn serial_number(&self) -> String {
         hex::encode(self.serial_number)
@@ -43,6 +48,15 @@ impl SimulatedSp for Gimlet {
 
     fn local_addr(&self) -> SocketAddr {
         self.local_addr
+    }
+
+    async fn set_responsiveness(&self, r: Responsiveness) {
+        let (tx, rx) = oneshot::channel();
+        self.commands
+            .send((Command::SetResponsiveness(r), tx))
+            .map_err(|_| "gimlet task died unexpectedly")
+            .unwrap();
+        rx.await.unwrap();
     }
 }
 
@@ -95,11 +109,13 @@ impl Gimlet {
             }
         }
 
+        let (commands, commands_rx) = mpsc::unbounded_channel();
         let inner = UdpTask::new(
             server,
             gateway_address,
             gimlet.serial_number,
             incoming_console_tx,
+            commands_rx,
             log,
         );
         inner_tasks
@@ -108,6 +124,7 @@ impl Gimlet {
         Ok(Self {
             local_addr,
             serial_number: gimlet.serial_number,
+            commands,
             inner_tasks,
         })
     }
@@ -239,10 +256,20 @@ impl SerialConsoleTcpTask {
     }
 }
 
+enum Command {
+    SetResponsiveness(Responsiveness),
+}
+
+enum CommandResponse {
+    SetResponsivenessAck,
+}
+
 struct UdpTask {
     udp: UdpServer,
     gateway_address: Arc<Mutex<Option<SocketAddr>>>,
     handler: Handler,
+    commands:
+        mpsc::UnboundedReceiver<(Command, oneshot::Sender<CommandResponse>)>,
 }
 
 impl UdpTask {
@@ -254,20 +281,30 @@ impl UdpTask {
             SpComponent,
             UnboundedSender<SerialConsole>,
         >,
+        commands: mpsc::UnboundedReceiver<(
+            Command,
+            oneshot::Sender<CommandResponse>,
+        )>,
         log: Logger,
     ) -> Self {
         Self {
             udp: server,
             gateway_address,
             handler: Handler { log, serial_number, incoming_serial_console },
+            commands,
         }
     }
 
     async fn run(mut self) -> Result<()> {
         let mut server = SpServer::default();
+        let mut responsiveness = Responsiveness::Responsive;
         loop {
             select! {
                 recv = self.udp.recv_from() => {
+                    if responsiveness != Responsiveness::Responsive {
+                        continue;
+                    }
+
                     let (data, addr) = recv?;
                     *self.gateway_address.lock().unwrap() = Some(addr);
 
@@ -283,6 +320,22 @@ impl UdpTask {
                     };
 
                     self.udp.send_to(resp, addr).await?;
+                }
+
+                command = self.commands.recv() => {
+                    // if sending half is gone, we're about to be killed anyway
+                    let (command, tx) = match command {
+                        Some((command, tx)) => (command, tx),
+                        None => return Ok(()),
+                    };
+
+                    match command {
+                        Command::SetResponsiveness(r) => {
+                            responsiveness = r;
+                            tx.send(CommandResponse::SetResponsivenessAck)
+                                .map_err(|_| "receiving half died").unwrap();
+                        }
+                    }
                 }
             }
         }

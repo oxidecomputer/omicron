@@ -16,12 +16,12 @@ sleds = ["127.0.0.1:0", "127.0.0.1:0"]
 power_controllers = []
 
 [timeouts]
-ignition_controller_millis = 1_000
-sp_request_millis = 1_000
-bulk_request_default_millis = 5_000
-bulk_request_max_millis = 60_000
-bulk_request_page_millis = 1_000
-bulk_request_retain_grace_period_millis = 10_000
+ignition_controller_millis = 500
+sp_request_millis = 500
+bulk_request_default_millis = 1_000
+bulk_request_max_millis = 2_000
+bulk_request_page_millis = 500
+bulk_request_retain_grace_period_millis = 2_000
 
 #
 # NOTE: for the test suite, the port MUST be 0 (in order to bind to any
