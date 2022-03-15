@@ -1311,7 +1311,7 @@ async fn project_snapshots_get(
 /// Create a snapshot of a disk.
 #[endpoint {
     method = POST,
-    path = "/organizations/{organization_name}/projects/{project_name}/snapshot",
+    path = "/organizations/{organization_name}/projects/{project_name}/snapshots",
     tags = ["snapshots"],
 }]
 async fn project_snapshots_post(

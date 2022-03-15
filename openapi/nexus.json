@@ -960,72 +960,6 @@
         }
       }
     },
-    "/organizations/{organization_name}/projects/{project_name}/disks/{disk_name}/snapshot": {
-      "post": {
-        "tags": [
-          "snapshots"
-        ],
-        "summary": "Create a snapshot of a disk.",
-        "operationId": "project_disks_snapshot_post",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "disk_name",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/Name"
-            },
-            "style": "simple"
-          },
-          {
-            "in": "path",
-            "name": "organization_name",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/Name"
-            },
-            "style": "simple"
-          },
-          {
-            "in": "path",
-            "name": "project_name",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/Name"
-            },
-            "style": "simple"
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/SnapshotCreate"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "201": {
-            "description": "successful creation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Snapshot"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      }
-    },
     "/organizations/{organization_name}/projects/{project_name}/instances": {
       "get": {
         "tags": [
@@ -2067,6 +2001,63 @@
           }
         },
         "x-dropshot-pagination": true
+      },
+      "post": {
+        "tags": [
+          "snapshots"
+        ],
+        "summary": "Create a snapshot of a disk.",
+        "operationId": "project_snapshots_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "organization_name",
+            "description": "The organization's unique name.",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Name"
+            },
+            "style": "simple"
+          },
+          {
+            "in": "path",
+            "name": "project_name",
+            "description": "The project's unique name within the organization.",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Name"
+            },
+            "style": "simple"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SnapshotCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "successful creation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Snapshot"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
       }
     },
     "/organizations/{organization_name}/projects/{project_name}/snapshots/{snapshot_name}": {
@@ -5887,12 +5878,21 @@
           "description": {
             "type": "string"
           },
+          "disk": {
+            "description": "The name of the disk to be snapshotted",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Name"
+              }
+            ]
+          },
           "name": {
             "$ref": "#/components/schemas/Name"
           }
         },
         "required": [
           "description",
+          "disk",
           "name"
         ]
       },
@@ -7019,6 +7019,13 @@
     {
       "name": "sleds",
       "description": "This tag should be moved into hardware",
+      "externalDocs": {
+        "url": "http://oxide.computer/docs/#xxx"
+      }
+    },
+    {
+      "name": "snapshots",
+      "description": "Snapshots of Virtual Disks at a particular point in time.",
       "externalDocs": {
         "url": "http://oxide.computer/docs/#xxx"
       }

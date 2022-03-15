@@ -92,10 +92,10 @@ hardware_sleds_get_sled                  /hardware/sleds/{sled_id}
 
 API operations found with tag "snapshots"
 OPERATION ID                             URL PATH
-project_disks_snapshot_post              /organizations/{organization_name}/projects/{project_name}/disks/{disk_name}/snapshot
 project_snapshots_delete_snapshot        /organizations/{organization_name}/projects/{project_name}/snapshots/{snapshot_name}
 project_snapshots_get                    /organizations/{organization_name}/projects/{project_name}/snapshots
 project_snapshots_get_snapshot           /organizations/{organization_name}/projects/{project_name}/snapshots/{snapshot_name}
+project_snapshots_post                   /organizations/{organization_name}/projects/{project_name}/snapshots
 
 API operations found with tag "subnets"
 OPERATION ID                             URL PATH
