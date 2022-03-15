@@ -4,7 +4,9 @@
 
 //! HTTP entrypoint functions for the sled agent's exposed API
 
-use super::params::DiskEnsureBody;
+use crate::params::{
+    DatasetEnsureBody, DiskEnsureBody, InstanceEnsureBody, ServiceEnsureBody,
+};
 use dropshot::{
     endpoint, ApiDescription, HttpError, HttpResponseOk,
     HttpResponseUpdatedNoContent, Path, RequestContext, TypedBody,
@@ -13,9 +15,6 @@ use omicron_common::api::external::Error;
 use omicron_common::api::internal::nexus::DiskRuntimeState;
 use omicron_common::api::internal::nexus::InstanceRuntimeState;
 use omicron_common::api::internal::nexus::UpdateArtifact;
-use omicron_common::api::internal::sled_agent::DatasetEnsureBody;
-use omicron_common::api::internal::sled_agent::InstanceEnsureBody;
-use omicron_common::api::internal::sled_agent::ServiceEnsureBody;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use std::sync::Arc;
