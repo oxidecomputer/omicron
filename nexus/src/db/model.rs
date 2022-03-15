@@ -9,12 +9,13 @@ use crate::db::identity::{Asset, Resource};
 use crate::db::schema::{
     console_session, dataset, disk, instance, metric_producer,
     network_interface, organization, oximeter, project, rack, region,
-    role_assignment_builtin, role_builtin, router_route, sled,
+    role_assignment_builtin, role_builtin, router_route, sled, snapshot,
     update_available_artifact, user_builtin, volume, vpc, vpc_firewall_rule,
     vpc_router, vpc_subnet, zpool,
 };
 use crate::defaults;
 use crate::external_api::params;
+use crate::external_api::views;
 use crate::internal_api;
 use chrono::{DateTime, Utc};
 use db_macros::{Asset, Resource};
@@ -1257,6 +1258,40 @@ impl From<external::DiskState> for DiskState {
 impl Into<external::DiskState> for DiskState {
     fn into(self) -> external::DiskState {
         self.0
+    }
+}
+
+#[derive(
+    Queryable,
+    Insertable,
+    Selectable,
+    Clone,
+    Debug,
+    Resource,
+    Serialize,
+    Deserialize,
+)]
+#[table_name = "snapshot"]
+pub struct Snapshot {
+    #[diesel(embed)]
+    identity: SnapshotIdentity,
+
+    project_id: Uuid,
+    disk_id: Uuid,
+    volume_id: Uuid,
+
+    #[column_name = "size_bytes"]
+    pub size: ByteCount,
+}
+
+impl From<Snapshot> for views::Snapshot {
+    fn from(snapshot: Snapshot) -> Self {
+        Self {
+            identity: snapshot.identity(),
+            project_id: snapshot.project_id,
+            disk_id: snapshot.disk_id,
+            size: snapshot.size.into(),
+        }
     }
 }
 

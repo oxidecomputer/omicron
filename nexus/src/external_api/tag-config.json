@@ -80,6 +80,12 @@
         "url": "http://oxide.computer/docs/#xxx"
       }
     },
+    "snapshots": {
+      "description": "Snapshots of Virtual Disks at a particular point in time.",
+      "external_docs": {
+        "url": "http://oxide.computer/docs/#xxx"
+      }
+    },
     "subnets": {
       "description": "This tag should be moved into a generic network tag",
       "external_docs": {

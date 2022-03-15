@@ -1923,6 +1923,246 @@
         }
       }
     },
+    "/organizations/{organization_name}/projects/{project_name}/snapshots": {
+      "get": {
+        "tags": [
+          "snapshots"
+        ],
+        "summary": "List snapshots in a project.",
+        "operationId": "project_snapshots_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "description": "Maximum number of items returned by a single call",
+            "schema": {
+              "nullable": true,
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 1
+            },
+            "style": "form"
+          },
+          {
+            "in": "query",
+            "name": "page_token",
+            "description": "Token returned by previous call to retreive the subsequent page",
+            "schema": {
+              "nullable": true,
+              "type": "string"
+            },
+            "style": "form"
+          },
+          {
+            "in": "query",
+            "name": "sort_by",
+            "schema": {
+              "$ref": "#/components/schemas/NameSortMode"
+            },
+            "style": "form"
+          },
+          {
+            "in": "path",
+            "name": "organization_name",
+            "description": "The organization's unique name.",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Name"
+            },
+            "style": "simple"
+          },
+          {
+            "in": "path",
+            "name": "project_name",
+            "description": "The project's unique name within the organization.",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Name"
+            },
+            "style": "simple"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SnapshotResultsPage"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-dropshot-pagination": true
+      },
+      "post": {
+        "tags": [
+          "snapshots"
+        ],
+        "summary": "Create a snapshot of a disk.",
+        "operationId": "project_snapshots_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "organization_name",
+            "description": "The organization's unique name.",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Name"
+            },
+            "style": "simple"
+          },
+          {
+            "in": "path",
+            "name": "project_name",
+            "description": "The project's unique name within the organization.",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Name"
+            },
+            "style": "simple"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SnapshotCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "successful creation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Snapshot"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/organizations/{organization_name}/projects/{project_name}/snapshots/{snapshot_name}": {
+      "get": {
+        "tags": [
+          "snapshots"
+        ],
+        "summary": "Get a snapshot in a project.",
+        "operationId": "project_snapshots_get_snapshot",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "organization_name",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Name"
+            },
+            "style": "simple"
+          },
+          {
+            "in": "path",
+            "name": "project_name",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Name"
+            },
+            "style": "simple"
+          },
+          {
+            "in": "path",
+            "name": "snapshot_name",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Name"
+            },
+            "style": "simple"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Snapshot"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "snapshots"
+        ],
+        "summary": "Delete a snapshot from a project.",
+        "operationId": "project_snapshots_delete_snapshot",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "organization_name",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Name"
+            },
+            "style": "simple"
+          },
+          {
+            "in": "path",
+            "name": "project_name",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Name"
+            },
+            "style": "simple"
+          },
+          {
+            "in": "path",
+            "name": "snapshot_name",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Name"
+            },
+            "style": "simple"
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "successful deletion"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/organizations/{organization_name}/projects/{project_name}/vpcs": {
       "get": {
         "tags": [
@@ -5577,6 +5817,106 @@
           "items"
         ]
       },
+      "Snapshot": {
+        "description": "Client view of a Snapshot",
+        "type": "object",
+        "properties": {
+          "description": {
+            "description": "human-readable free-form text about a resource",
+            "type": "string"
+          },
+          "disk_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "id": {
+            "description": "unique, immutable, system-controlled identifier for each resource",
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "description": "unique, mutable, user-controlled identifier for each resource",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Name"
+              }
+            ]
+          },
+          "project_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "size": {
+            "$ref": "#/components/schemas/ByteCount"
+          },
+          "time_created": {
+            "description": "timestamp when this resource was created",
+            "type": "string",
+            "format": "date-time"
+          },
+          "time_modified": {
+            "description": "timestamp when this resource was last modified",
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "description",
+          "disk_id",
+          "id",
+          "name",
+          "project_id",
+          "size",
+          "time_created",
+          "time_modified"
+        ]
+      },
+      "SnapshotCreate": {
+        "description": "Create-time parameters for a [`Snapshot`](omicron_common::api::external::Snapshot)",
+        "type": "object",
+        "properties": {
+          "description": {
+            "type": "string"
+          },
+          "disk": {
+            "description": "The name of the disk to be snapshotted",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Name"
+              }
+            ]
+          },
+          "name": {
+            "$ref": "#/components/schemas/Name"
+          }
+        },
+        "required": [
+          "description",
+          "disk",
+          "name"
+        ]
+      },
+      "SnapshotResultsPage": {
+        "description": "A single page of results",
+        "type": "object",
+        "properties": {
+          "items": {
+            "description": "list of items on this page of results",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Snapshot"
+            }
+          },
+          "next_page": {
+            "nullable": true,
+            "description": "token used to fetch the next page of results (if any)",
+            "type": "string"
+          }
+        },
+        "required": [
+          "items"
+        ]
+      },
       "TimeseriesName": {
         "title": "The name of a timeseries",
         "description": "Names are constructed by concatenating the target and metric names with ':'. Target and metric names must be lowercase alphanumeric characters with '_' separating words.",
@@ -6679,6 +7019,13 @@
     {
       "name": "sleds",
       "description": "This tag should be moved into hardware",
+      "externalDocs": {
+        "url": "http://oxide.computer/docs/#xxx"
+      }
+    },
+    {
+      "name": "snapshots",
+      "description": "Snapshots of Virtual Disks at a particular point in time.",
       "externalDocs": {
         "url": "http://oxide.computer/docs/#xxx"
       }

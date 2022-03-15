@@ -371,6 +371,35 @@ CREATE INDEX ON omicron.public.disk (
     time_deleted IS NULL AND attach_instance_id IS NOT NULL;
 
 
+CREATE TABLE omicron.public.snapshot (
+    /* Identity metadata (resource) */
+    id UUID PRIMARY KEY,
+    name STRING(63) NOT NULL,
+    description STRING(512) NOT NULL,
+    time_created TIMESTAMPTZ NOT NULL,
+    time_modified TIMESTAMPTZ NOT NULL,
+    /* Indicates that the object has been deleted */
+    time_deleted TIMESTAMPTZ,
+
+    /* Every Snapshot is in exactly one Project at a time. */
+    project_id UUID NOT NULL,
+
+    /* Every Snapshot originated from a single disk */
+    disk_id UUID NOT NULL,
+
+    /* Every Snapshot consists of a root volume */
+    volume_id UUID NOT NULL,
+
+    /* Disk configuration (from the time the snapshot was taken) */
+    size_bytes INT NOT NULL
+);
+
+CREATE UNIQUE INDEX ON omicron.public.snapshot (
+    project_id,
+    name
+) WHERE
+    time_deleted IS NULL;
+
 /*
  * Oximeter collector servers.
  */

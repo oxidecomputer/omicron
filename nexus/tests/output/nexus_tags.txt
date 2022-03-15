@@ -90,6 +90,13 @@ OPERATION ID                             URL PATH
 hardware_sleds_get                       /hardware/sleds
 hardware_sleds_get_sled                  /hardware/sleds/{sled_id}
 
+API operations found with tag "snapshots"
+OPERATION ID                             URL PATH
+project_snapshots_delete_snapshot        /organizations/{organization_name}/projects/{project_name}/snapshots/{snapshot_name}
+project_snapshots_get                    /organizations/{organization_name}/projects/{project_name}/snapshots
+project_snapshots_get_snapshot           /organizations/{organization_name}/projects/{project_name}/snapshots/{snapshot_name}
+project_snapshots_post                   /organizations/{organization_name}/projects/{project_name}/snapshots
+
 API operations found with tag "subnets"
 OPERATION ID                             URL PATH
 subnet_network_interfaces_get            /organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/subnets/{subnet_name}/network-interfaces

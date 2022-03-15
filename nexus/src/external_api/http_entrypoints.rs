@@ -12,7 +12,9 @@ use crate::ServerContext;
 
 use super::{
     console_api, params,
-    views::{Organization, Project, Rack, Role, Sled, User, Vpc, VpcSubnet},
+    views::{
+        Organization, Project, Rack, Role, Sled, Snapshot, User, Vpc, VpcSubnet,
+    },
 };
 use crate::context::OpContext;
 use dropshot::endpoint;
@@ -102,6 +104,11 @@ pub fn external_api() -> NexusApiDescription {
         api.register(instance_disks_get)?;
         api.register(instance_disks_attach)?;
         api.register(instance_disks_detach)?;
+
+        api.register(project_snapshots_get)?;
+        api.register(project_snapshots_post)?;
+        api.register(project_snapshots_get_snapshot)?;
+        api.register(project_snapshots_delete_snapshot)?;
 
         api.register(project_vpcs_get)?;
         api.register(project_vpcs_post)?;
@@ -1257,6 +1264,148 @@ async fn instance_network_interfaces_get_interface(
             )
             .await?;
         Ok(HttpResponseOk(NetworkInterface::from(interface)))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/*
+ * Snapshots
+ */
+
+/// List snapshots in a project.
+#[endpoint {
+    method = GET,
+    path = "/organizations/{organization_name}/projects/{project_name}/snapshots",
+    tags = ["snapshots"],
+}]
+async fn project_snapshots_get(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    query_params: Query<PaginatedByName>,
+    path_params: Path<ProjectPathParam>,
+) -> Result<HttpResponseOk<ResultsPage<Snapshot>>, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let query = query_params.into_inner();
+    let path = path_params.into_inner();
+    let organization_name = &path.organization_name;
+    let project_name = &path.project_name;
+    let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let snapshots = nexus
+            .project_list_snapshots(
+                &opctx,
+                organization_name,
+                project_name,
+                &data_page_params_for(&rqctx, &query)?
+                    .map_name(|n| Name::ref_cast(n)),
+            )
+            .await?
+            .into_iter()
+            .map(|d| d.into())
+            .collect();
+        Ok(HttpResponseOk(ScanByName::results_page(&query, snapshots)?))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Create a snapshot of a disk.
+#[endpoint {
+    method = POST,
+    path = "/organizations/{organization_name}/projects/{project_name}/snapshots",
+    tags = ["snapshots"],
+}]
+async fn project_snapshots_post(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    path_params: Path<ProjectPathParam>,
+    new_snapshot: TypedBody<params::SnapshotCreate>,
+) -> Result<HttpResponseCreated<Snapshot>, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let path = path_params.into_inner();
+    let organization_name = &path.organization_name;
+    let project_name = &path.project_name;
+    let new_snapshot_params = &new_snapshot.into_inner();
+    let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let snapshot = nexus
+            .project_create_snapshot(
+                &opctx,
+                &organization_name,
+                &project_name,
+                &new_snapshot_params,
+            )
+            .await?;
+        Ok(HttpResponseCreated(snapshot.into()))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Path parameters for Snapshot requests
+#[derive(Deserialize, JsonSchema)]
+struct SnapshotPathParam {
+    organization_name: Name,
+    project_name: Name,
+    snapshot_name: Name,
+}
+
+/// Get a snapshot in a project.
+#[endpoint {
+    method = GET,
+    path = "/organizations/{organization_name}/projects/{project_name}/snapshots/{snapshot_name}",
+    tags = ["snapshots"],
+}]
+async fn project_snapshots_get_snapshot(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    path_params: Path<SnapshotPathParam>,
+) -> Result<HttpResponseOk<Snapshot>, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let path = path_params.into_inner();
+    let organization_name = &path.organization_name;
+    let project_name = &path.project_name;
+    let snapshot_name = &path.snapshot_name;
+    let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let snapshot = nexus
+            .snapshot_fetch(
+                &opctx,
+                &organization_name,
+                &project_name,
+                &snapshot_name,
+            )
+            .await?;
+        Ok(HttpResponseOk(snapshot.into()))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Delete a snapshot from a project.
+#[endpoint {
+    method = DELETE,
+    path = "/organizations/{organization_name}/projects/{project_name}/snapshots/{snapshot_name}",
+    tags = ["snapshots"],
+}]
+async fn project_snapshots_delete_snapshot(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    path_params: Path<SnapshotPathParam>,
+) -> Result<HttpResponseDeleted, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let path = path_params.into_inner();
+    let organization_name = &path.organization_name;
+    let project_name = &path.project_name;
+    let snapshot_name = &path.snapshot_name;
+    let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        nexus
+            .project_delete_snapshot(
+                &opctx,
+                &organization_name,
+                &project_name,
+                &snapshot_name,
+            )
+            .await?;
+        Ok(HttpResponseDeleted())
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
