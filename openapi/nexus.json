@@ -228,7 +228,12 @@
         },
         "responses": {
           "default": {
-            "description": ""
+            "description": "",
+            "content": {
+              "*/*": {
+                "schema": {}
+              }
+            }
           }
         }
       }
@@ -241,7 +246,12 @@
         "operationId": "logout",
         "responses": {
           "default": {
-            "description": ""
+            "description": "",
+            "content": {
+              "*/*": {
+                "schema": {}
+              }
+            }
           }
         }
       }
