@@ -71,8 +71,10 @@ where
     if release {
         cmd.arg("--release");
     }
-    let status =
-        cmd.status().await.context(format!("Failed to run command: ({:?})", cmd))?;
+    let status = cmd
+        .status()
+        .await
+        .context(format!("Failed to run command: ({:?})", cmd))?;
     if !status.success() {
         bail!("Failed to build packages");
     }
@@ -80,22 +82,36 @@ where
     Ok(())
 }
 
-async fn do_for_all_rust_packages(config: &Config, command: &str) -> Result<()> {
+async fn do_for_all_rust_packages(
+    config: &Config,
+    command: &str,
+) -> Result<()> {
     // First, filter out all Rust packages from the configuration that should be
     // built, and partition them into "release" and "debug" categories.
-    let (release_pkgs, debug_pkgs): (Vec<_>, _) =
-        config.packages.iter().filter_map(|(name, pkg)| {
+    let (release_pkgs, debug_pkgs): (Vec<_>, _) = config
+        .packages
+        .iter()
+        .filter_map(|(name, pkg)| {
             pkg.rust.as_ref().map(|rust_pkg| (name, rust_pkg.release))
-        }).partition(|(_, release)| {
-            *release
-        });
+        })
+        .partition(|(_, release)| *release);
 
     // Execute all the release / debug packages at the same time.
     if !release_pkgs.is_empty() {
-        run_cargo_on_packages(command, release_pkgs.iter().map(|(name, _)| name), true).await?;
+        run_cargo_on_packages(
+            command,
+            release_pkgs.iter().map(|(name, _)| name),
+            true,
+        )
+        .await?;
     }
     if !debug_pkgs.is_empty() {
-        run_cargo_on_packages(command, debug_pkgs.iter().map(|(name, _)| name), false).await?;
+        run_cargo_on_packages(
+            command,
+            debug_pkgs.iter().map(|(name, _)| name),
+            false,
+        )
+        .await?;
     }
     Ok(())
 }
@@ -153,13 +169,17 @@ in improving the cross-repository meta-build system, please contact sean@.",
             None,
             |((package_name, package), ui)| async move {
                 let total_work = package.get_total_work();
-                let progress = ui.add_package(package_name.to_string(), total_work);
+                let progress =
+                    ui.add_package(package_name.to_string(), total_work);
                 progress.set_message("bundle package".to_string());
-                package.create_with_progress(&progress, &output_directory).await?;
+                package
+                    .create_with_progress(&progress, &output_directory)
+                    .await?;
                 progress.finish();
                 Ok(())
-            }
-    ).await?;
+            },
+        )
+        .await?;
 
     Ok(())
 }
@@ -274,7 +294,9 @@ fn do_uninstall(
 
 fn in_progress_style() -> ProgressStyle {
     ProgressStyle::default_bar()
-        .template("[{elapsed_precise}] {bar:40.cyan/blue} {pos:>7}/{len:7} {msg}")
+        .template(
+            "[{elapsed_precise}] {bar:40.cyan/blue} {pos:>7}/{len:7} {msg}",
+        )
         .unwrap()
         .progress_chars("#>.")
 }
@@ -307,7 +329,11 @@ impl PackageProgress {
 
 impl Progress for PackageProgress {
     fn set_message(&self, message: impl Into<std::borrow::Cow<'static, str>>) {
-        self.pb.set_message(format!("{}: {}", self.service_name, message.into()));
+        self.pb.set_message(format!(
+            "{}: {}",
+            self.service_name,
+            message.into()
+        ));
     }
 
     fn increment(&self, delta: u64) {
@@ -328,10 +354,7 @@ impl ProgressUI {
         pb.set_style(self.style.clone());
         pb.set_message(service_name.clone());
         pb.tick();
-        PackageProgress {
-            pb,
-            service_name,
-        }
+        PackageProgress { pb, service_name }
     }
 }
 
