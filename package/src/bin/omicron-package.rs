@@ -7,16 +7,19 @@
  */
 
 use anyhow::{anyhow, bail, Context, Result};
+use futures::stream::{self, StreamExt, TryStreamExt};
+use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 use omicron_package::{parse, SubCommand};
-use omicron_zone_package::package::Package;
+use omicron_zone_package::package::{Package, Progress};
 use rayon::prelude::*;
 use serde_derive::Deserialize;
 use std::collections::BTreeMap;
 use std::env;
 use std::fs::create_dir_all;
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::sync::Arc;
 use structopt::StructOpt;
+use tokio::process::Command;
 
 /// Describes the configuration for a set of packages.
 #[derive(Deserialize, Debug)]
@@ -49,50 +52,74 @@ struct Args {
     subcommand: SubCommand,
 }
 
-fn run_cargo_on_package(
+async fn run_cargo_on_packages<I, S>(
     subcmd: &str,
-    package: &str,
+    packages: I,
     release: bool,
-) -> Result<()> {
+) -> Result<()>
+where
+    I: IntoIterator<Item = S>,
+    S: AsRef<std::ffi::OsStr>,
+{
     let mut cmd = Command::new("cargo");
     // We rely on the rust-toolchain.toml file for toolchain information,
     // rather than specifying one within the packaging tool.
-    cmd.arg(subcmd).arg("-p").arg(package);
+    cmd.arg(subcmd);
+    for package in packages {
+        cmd.arg("-p").arg(package);
+    }
     if release {
         cmd.arg("--release");
     }
     let status =
-        cmd.status().context(format!("Failed to run command: ({:?})", cmd))?;
+        cmd.status().await.context(format!("Failed to run command: ({:?})", cmd))?;
     if !status.success() {
-        bail!("Failed to build package: {}", package);
+        bail!("Failed to build packages");
     }
 
     Ok(())
 }
 
-async fn do_check(config: &Config) -> Result<()> {
-    for (package_name, package) in &config.packages {
-        if let Some(rust_pkg) = &package.rust {
-            println!("Checking {}", package_name);
-            run_cargo_on_package("check", &package_name, rust_pkg.release)?;
-        }
+async fn do_for_all_rust_packages(config: &Config, command: &str) -> Result<()> {
+    // First, filter out all Rust packages from the configuration that should be
+    // built, and partition them into "release" and "debug" categories.
+    let (release_pkgs, debug_pkgs): (Vec<_>, _) =
+        config.packages.iter().filter_map(|(name, pkg)| {
+            pkg.rust.as_ref().map(|rust_pkg| (name, rust_pkg.release))
+        }).partition(|(_, release)| {
+            *release
+        });
+
+    // Execute all the release / debug packages at the same time.
+    if !release_pkgs.is_empty() {
+        run_cargo_on_packages(command, release_pkgs.iter().map(|(name, _)| name), true).await?;
+    }
+    if !debug_pkgs.is_empty() {
+        run_cargo_on_packages(command, debug_pkgs.iter().map(|(name, _)| name), false).await?;
     }
     Ok(())
+}
+
+async fn do_check(config: &Config) -> Result<()> {
+    do_for_all_rust_packages(config, "check").await
+}
+
+async fn do_build(config: &Config) -> Result<()> {
+    do_for_all_rust_packages(config, "build").await
 }
 
 async fn do_package(config: &Config, output_directory: &Path) -> Result<()> {
     create_dir_all(&output_directory)
         .map_err(|err| anyhow!("Cannot create output directory: {}", err))?;
 
-    for (package_name, package) in &config.packages {
-        if let Some(rust_pkg) = &package.rust {
-            println!("Building: {}", package_name);
-            run_cargo_on_package("build", package_name, rust_pkg.release)?;
-        }
-        package.create(&output_directory).await?;
-    }
+    let ui = ProgressUI::new();
+    let ui_refs = vec![ui.clone(); config.packages.len()];
+
+    do_build(&config).await?;
 
     for (package_name, package) in &config.external_packages {
+        let progress = ui.add_package(package_name.to_string(), 1);
+        progress.set_message("finding package".to_string());
         let path = package.get_output_path(&output_directory);
         if !path.exists() {
             bail!(
@@ -110,7 +137,29 @@ in improving the cross-repository meta-build system, please contact sean@.",
                     .to_string_lossy(),
             );
         }
+        progress.finish();
     }
+
+    stream::iter(&config.packages)
+        // It's a pain to clone a value into closures - see
+        // https://github.com/rust-lang/rfcs/issues/2407 - so in the meantime,
+        // we explicitly create the references to the UI we need for each
+        // package.
+        .zip(stream::iter(ui_refs))
+        // We convert the stream type to operate on Results, so we may invoke
+        // "try_for_each_concurrent" more easily.
+        .map(Ok::<_, anyhow::Error>)
+        .try_for_each_concurrent(
+            None,
+            |((package_name, package), ui)| async move {
+                let total_work = package.get_total_work();
+                let progress = ui.add_package(package_name.to_string(), total_work);
+                progress.set_message("bundle package".to_string());
+                package.create_with_progress(&progress, &output_directory).await?;
+                progress.finish();
+                Ok(())
+            }
+    ).await?;
 
     Ok(())
 }
@@ -221,6 +270,69 @@ fn do_uninstall(
     println!("Removing: {}", install_dir.to_string_lossy());
     remove_all_unless_already_removed(install_dir)?;
     Ok(())
+}
+
+fn in_progress_style() -> ProgressStyle {
+    ProgressStyle::default_bar()
+        .template("[{elapsed_precise}] {bar:40.cyan/blue} {pos:>7}/{len:7} {msg}")
+        .unwrap()
+        .progress_chars("#>.")
+}
+
+fn completed_progress_style() -> ProgressStyle {
+    ProgressStyle::default_bar()
+        .template("[{elapsed_precise}] {bar:40.cyan/blue} {pos:>7}/{len:7} {msg:.green}")
+        .unwrap()
+        .progress_chars("#>.")
+}
+
+// Struct managing display of progress to UI.
+struct ProgressUI {
+    multi: MultiProgress,
+    style: ProgressStyle,
+}
+
+struct PackageProgress {
+    pb: ProgressBar,
+    service_name: String,
+}
+
+impl PackageProgress {
+    fn finish(&self) {
+        self.pb.set_style(completed_progress_style());
+        self.pb.finish_with_message(format!("{}: done", self.service_name));
+        self.pb.tick();
+    }
+}
+
+impl Progress for PackageProgress {
+    fn set_message(&self, message: impl Into<std::borrow::Cow<'static, str>>) {
+        self.pb.set_message(format!("{}: {}", self.service_name, message.into()));
+    }
+
+    fn increment(&self, delta: u64) {
+        self.pb.inc(delta);
+    }
+}
+
+impl ProgressUI {
+    fn new() -> Arc<Self> {
+        Arc::new(Self {
+            multi: MultiProgress::new(),
+            style: in_progress_style(),
+        })
+    }
+
+    fn add_package(&self, service_name: String, total: u64) -> PackageProgress {
+        let pb = self.multi.add(ProgressBar::new(total));
+        pb.set_style(self.style.clone());
+        pb.set_message(service_name.clone());
+        pb.tick();
+        PackageProgress {
+            pb,
+            service_name,
+        }
+    }
 }
 
 #[tokio::main]
