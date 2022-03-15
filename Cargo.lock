@@ -1006,7 +1006,7 @@ checksum = "1435fa1053d8b2fbbe9be7e97eca7f33d37b28409959813daefc1446a14247f1"
 [[package]]
 name = "dropshot"
 version = "0.6.1-dev"
-source = "git+https://github.com/oxidecomputer/dropshot?branch=main#eadf3bb7169a5744eab633f159093d7f7017b9d6"
+source = "git+https://github.com/oxidecomputer/dropshot?branch=main#6ca8e21a8b9fe1a35e6780afa1f70a5ec6a22513"
 dependencies = [
  "async-stream",
  "async-trait",
@@ -1044,7 +1044,7 @@ dependencies = [
 [[package]]
 name = "dropshot_endpoint"
 version = "0.6.1-dev"
-source = "git+https://github.com/oxidecomputer/dropshot?branch=main#eadf3bb7169a5744eab633f159093d7f7017b9d6"
+source = "git+https://github.com/oxidecomputer/dropshot?branch=main#6ca8e21a8b9fe1a35e6780afa1f70a5ec6a22513"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -3371,9 +3371,9 @@ dependencies = [
 
 [[package]]
 name = "regex"
-version = "1.5.4"
+version = "1.5.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d07a8629359eb56f1e2fb1652bb04212c072a87ba68546a04065d525673ac461"
+checksum = "1a11647b6b25ff05a515cb92c365cec08801e83423a235b51e231e1808747286"
 dependencies = [
  "aho-corasick",
  "memchr",

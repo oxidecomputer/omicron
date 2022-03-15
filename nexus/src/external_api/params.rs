@@ -12,6 +12,7 @@ use omicron_common::api::external::{
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use std::net::IpAddr;
 use uuid::Uuid;
 
 /*
@@ -70,11 +71,59 @@ pub struct ProjectUpdate {
 pub struct NetworkInterfaceCreate {
     #[serde(flatten)]
     pub identity: IdentityMetadataCreateParams,
+    /// The VPC in which to create the interface.
+    pub vpc_name: Name,
+    /// The VPC Subnet in which to create the interface.
+    pub subnet_name: Name,
+    /// The IP address for the interface. One will be auto-assigned if not provided.
+    pub ip: Option<IpAddr>,
 }
 
 /*
  * INSTANCES
  */
+
+/// Describes an attachment of a `NetworkInterface` to an `Instance`, at the
+/// time the instance is created.
+// NOTE: VPC's are an organizing concept for networking resources, not for
+// instances. It's true that all networking resources for an instance must
+// belong to a single VPC, but we don't consider instances to be "scoped" to a
+// VPC in the same way that they are scoped to projects, for example.
+//
+// This is slightly different than some other cloud providers, such as AWS,
+// which use VPCs as both a networking concept, and a container more similar to
+// our concept of a project. One example for why this is useful is that "moving"
+// an instance to a new VPC can be done by detaching any interfaces in the
+// original VPC and attaching interfaces in the new VPC.
+//
+// This type then requires the VPC identifiers, exactly because instances are
+// _not_ scoped to a VPC, and so the VPC and/or VPC Subnet names are not present
+// in the path of endpoints handling instance operations.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(tag = "type", content = "params")]
+pub enum InstanceNetworkInterfaceAttachment {
+    /// Create one or more `NetworkInterface`s for the `Instance`
+    Create(InstanceNetworkInterfaceCreate),
+
+    /// Default networking setup, which creates a single interface with an
+    /// auto-assigned IP address from project's "default" VPC and "default" VPC
+    /// Subnet.
+    Default,
+
+    /// No network interfaces at all will be created for the instance.
+    None,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct InstanceNetworkInterfaceCreate {
+    pub params: Vec<NetworkInterfaceCreate>,
+}
+
+impl Default for InstanceNetworkInterfaceAttachment {
+    fn default() -> Self {
+        Self::Default
+    }
+}
 
 /**
  * Create-time parameters for an [`Instance`](omicron_common::api::external::Instance)
@@ -86,6 +135,10 @@ pub struct InstanceCreate {
     pub ncpus: InstanceCpuCount,
     pub memory: ByteCount,
     pub hostname: String, /* TODO-cleanup different type? */
+
+    /// The network interfaces to be created for this instance.
+    #[serde(default)]
+    pub network_interfaces: InstanceNetworkInterfaceAttachment,
 }
 
 /**
@@ -158,8 +211,9 @@ pub struct VpcSubnetCreate {
 pub struct VpcSubnetUpdate {
     #[serde(flatten)]
     pub identity: IdentityMetadataUpdateParams,
-    // TODO-correctness: It seems fraught to allow changing these, since it can
-    // invalidate arbitrary sub-resources (e.g., network interfaces).
+    // TODO-correctness: These need to be removed. Changing these is effectively
+    // creating a new resource, so we should require explicit
+    // deletion/recreation by the client.
     pub ipv4_block: Option<Ipv4Net>,
     pub ipv6_block: Option<Ipv6Net>,
 }
@@ -227,6 +281,14 @@ impl DiskCreate {
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct DiskIdentifier {
     pub disk: Name,
+}
+
+/// Parameters for the
+/// [`NetworkInterface`](omicron_common::api::external::NetworkInterface) to be
+/// attached or detached to an instance.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct NetworkInterfaceIdentifier {
+    pub interface_name: Name,
 }
 
 /*

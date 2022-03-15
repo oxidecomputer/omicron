@@ -2,25 +2,25 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+use dropshot::test_util::ClientTestContext;
 use http::method::Method;
 use http::StatusCode;
-use omicron_common::api::external::IdentityMetadataCreateParams;
-use omicron_common::api::external::IdentityMetadataUpdateParams;
-use omicron_common::api::external::Ipv4Net;
-use omicron_common::api::external::Ipv6Net;
-use omicron_nexus::external_api::{params, views::VpcSubnet};
-
-use dropshot::test_util::object_get;
-use dropshot::test_util::objects_list_page;
-use dropshot::test_util::objects_post;
-use dropshot::test_util::ClientTestContext;
-
+use nexus_test_utils::http_testing::AuthnMode;
+use nexus_test_utils::http_testing::NexusRequest;
+use nexus_test_utils::http_testing::RequestBuilder;
 use nexus_test_utils::identity_eq;
+use nexus_test_utils::resource_helpers::objects_list_page_authz;
 use nexus_test_utils::resource_helpers::{
     create_organization, create_project, create_vpc,
 };
 use nexus_test_utils::ControlPlaneTestContext;
 use nexus_test_utils_macros::nexus_test;
+use omicron_common::api::external::IdentityMetadataCreateParams;
+use omicron_common::api::external::IdentityMetadataUpdateParams;
+use omicron_common::api::external::Ipv4Net;
+use omicron_common::api::external::Ipv6Net;
+use omicron_nexus::external_api::{params, views::VpcSubnet};
+use serde_json::json;
 
 #[nexus_test]
 async fn test_vpc_subnets(cptestctx: &ControlPlaneTestContext) {
@@ -43,31 +43,40 @@ async fn test_vpc_subnets(cptestctx: &ControlPlaneTestContext) {
 
     // get subnets should return the default subnet
     let subnets =
-        objects_list_page::<VpcSubnet>(client, &subnets_url).await.items;
+        objects_list_page_authz::<VpcSubnet>(client, &subnets_url).await.items;
     assert_eq!(subnets.len(), 1);
 
     // delete default subnet
-    client
-        .make_request_no_body(
-            Method::DELETE,
-            &format!("{}/{}", subnets_url, subnets[0].identity.name),
-            StatusCode::NO_CONTENT,
-        )
-        .await
-        .unwrap();
+    NexusRequest::object_delete(
+        &client,
+        &format!("{}/{}", subnets_url, subnets[0].identity.name),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap();
 
     // get subnets should now be empty
     let subnets =
-        objects_list_page::<VpcSubnet>(client, &subnets_url).await.items;
+        objects_list_page_authz::<VpcSubnet>(client, &subnets_url).await.items;
     assert_eq!(subnets.len(), 0);
 
     let subnet_name = "subnet1";
     let subnet_url = format!("{}/{}", subnets_url, subnet_name);
 
     // fetching a particular subnet should 404
-    let error = client
-        .make_request_error(Method::GET, &subnet_url, StatusCode::NOT_FOUND)
-        .await;
+    let error: dropshot::HttpErrorResponseBody = NexusRequest::expect_failure(
+        client,
+        StatusCode::NOT_FOUND,
+        Method::GET,
+        &subnet_url,
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap()
+    .parsed_body()
+    .unwrap();
     assert_eq!(error.message, "not found: vpc-subnet with name \"subnet1\"");
 
     /* Create a VPC Subnet. */
@@ -91,7 +100,13 @@ async fn test_vpc_subnets(cptestctx: &ControlPlaneTestContext) {
         ipv6_block,
     };
     let subnet: VpcSubnet =
-        objects_post(&client, &subnets_url, new_subnet.clone()).await;
+        NexusRequest::objects_post(client, &subnets_url, &new_subnet)
+            .authn_as(AuthnMode::PrivilegedUser)
+            .execute()
+            .await
+            .unwrap()
+            .parsed_body()
+            .unwrap();
     assert_eq!(subnet.identity.name, subnet_name);
     assert_eq!(subnet.identity.description, "it's below the net");
     assert_eq!(subnet.vpc_id, vpc.identity.id);
@@ -103,7 +118,7 @@ async fn test_vpc_subnets(cptestctx: &ControlPlaneTestContext) {
     assert_put_400(
         client,
         &subnet_url,
-        String::from("{ \"ipv4_block\": \"2001:db8::0/96\" }"),
+        &json!({ "ipv4_block": "2001:db8::0/96" }),
         "unable to parse body: invalid address: 2001:db8::0",
     )
     .await;
@@ -112,18 +127,24 @@ async fn test_vpc_subnets(cptestctx: &ControlPlaneTestContext) {
     assert_put_400(
         client,
         &subnet_url,
-        String::from("{ \"ipv6_block\": \"10.1.9.32/16\" }"),
+        &json!({ "ipv6_block": "10.1.9.32/16" }),
         "unable to parse body: invalid address: 10.1.9.32",
     )
     .await;
 
     // get subnet, should be the same
-    let same_subnet = object_get::<VpcSubnet>(client, &subnet_url).await;
+    let same_subnet = NexusRequest::object_get(client, &subnet_url)
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .unwrap()
+        .parsed_body()
+        .unwrap();
     subnets_eq(&subnet, &same_subnet);
 
     // subnets list should now have the one in it
     let subnets =
-        objects_list_page::<VpcSubnet>(client, &subnets_url).await.items;
+        objects_list_page_authz::<VpcSubnet>(client, &subnets_url).await.items;
     assert_eq!(subnets.len(), 1);
     subnets_eq(&subnets[0], &subnet);
 
@@ -136,14 +157,17 @@ async fn test_vpc_subnets(cptestctx: &ControlPlaneTestContext) {
         ipv4_block,
         ipv6_block,
     };
-    let error = client
-        .make_request_error_body(
-            Method::POST,
-            &subnets_url,
-            new_subnet.clone(),
-            StatusCode::BAD_REQUEST,
-        )
-        .await;
+    let error: dropshot::HttpErrorResponseBody = NexusRequest::new(
+        RequestBuilder::new(client, Method::POST, &subnets_url)
+            .expect_status(Some(StatusCode::BAD_REQUEST))
+            .body(Some(&new_subnet)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap()
+    .parsed_body()
+    .unwrap();
     assert!(error.message.starts_with("IPv4 block '"));
 
     // creating another subnet in the same VPC with the same name, but different
@@ -156,23 +180,35 @@ async fn test_vpc_subnets(cptestctx: &ControlPlaneTestContext) {
         ipv4_block: other_ipv4_block,
         ipv6_block: other_ipv6_block,
     };
-    let error = client
-        .make_request_error_body(
-            Method::POST,
-            &subnets_url,
-            new_subnet.clone(),
-            StatusCode::BAD_REQUEST,
-        )
-        .await;
+    let error: dropshot::HttpErrorResponseBody = NexusRequest::new(
+        RequestBuilder::new(client, Method::POST, &subnets_url)
+            .expect_status(Some(StatusCode::BAD_REQUEST))
+            .body(Some(&new_subnet)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap()
+    .parsed_body()
+    .unwrap();
     assert_eq!(error.message, "already exists: vpc-subnet \"subnet1\"");
 
     let subnet2_name = "subnet2";
     let subnet2_url = format!("{}/{}", subnets_url, subnet2_name);
 
     // second subnet 404s before it's created
-    let error = client
-        .make_request_error(Method::GET, &subnet2_url, StatusCode::NOT_FOUND)
-        .await;
+    let error: dropshot::HttpErrorResponseBody = NexusRequest::expect_failure(
+        client,
+        StatusCode::NOT_FOUND,
+        Method::GET,
+        &subnet2_url,
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap()
+    .parsed_body()
+    .unwrap();
     assert_eq!(error.message, "not found: vpc-subnet with name \"subnet2\"");
 
     // create second subnet, this time with an autogenerated IPv6 range.
@@ -186,7 +222,13 @@ async fn test_vpc_subnets(cptestctx: &ControlPlaneTestContext) {
         ipv6_block: None,
     };
     let subnet2: VpcSubnet =
-        objects_post(&client, &subnets_url, new_subnet.clone()).await;
+        NexusRequest::objects_post(client, &subnets_url, &new_subnet)
+            .authn_as(AuthnMode::PrivilegedUser)
+            .execute()
+            .await
+            .unwrap()
+            .parsed_body()
+            .unwrap();
     assert_eq!(subnet2.identity.name, subnet2_name);
     assert_eq!(subnet2.identity.description, "it's also below the net");
     assert_eq!(subnet2.vpc_id, vpc.identity.id);
@@ -195,7 +237,7 @@ async fn test_vpc_subnets(cptestctx: &ControlPlaneTestContext) {
 
     // subnets list should now have two in it
     let subnets =
-        objects_list_page::<VpcSubnet>(client, &subnets_url).await.items;
+        objects_list_page_authz::<VpcSubnet>(client, &subnets_url).await.items;
     assert_eq!(subnets.len(), 2);
     subnets_eq(&subnets[0], &subnet);
     subnets_eq(&subnets[1], &subnet2);
@@ -209,72 +251,104 @@ async fn test_vpc_subnets(cptestctx: &ControlPlaneTestContext) {
         ipv4_block: None,
         ipv6_block: None,
     };
-    client
-        .make_request(
-            Method::PUT,
-            &subnet_url,
-            Some(update_params),
-            StatusCode::NO_CONTENT,
-        )
+    NexusRequest::object_put(client, &subnet_url, Some(&update_params))
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
         .await
         .unwrap();
 
     // fetching by old name 404s
-    let error = client
-        .make_request_error(Method::GET, &subnet_url, StatusCode::NOT_FOUND)
-        .await;
+    let error: dropshot::HttpErrorResponseBody = NexusRequest::expect_failure(
+        client,
+        StatusCode::NOT_FOUND,
+        Method::GET,
+        &subnet_url,
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap()
+    .parsed_body()
+    .unwrap();
     assert_eq!(error.message, "not found: vpc-subnet with name \"subnet1\"");
 
     let subnet_url = format!("{}/{}", subnets_url, "new-name");
 
     // fetching by new name works
-    let updated_subnet = object_get::<VpcSubnet>(client, &subnet_url).await;
+    let updated_subnet: VpcSubnet =
+        NexusRequest::object_get(client, &subnet_url)
+            .authn_as(AuthnMode::PrivilegedUser)
+            .execute()
+            .await
+            .unwrap()
+            .parsed_body()
+            .unwrap();
     assert_eq!(&updated_subnet.identity.description, "another description");
 
     // fetching list should show updated one
     let subnets =
-        objects_list_page::<VpcSubnet>(client, &subnets_url).await.items;
+        objects_list_page_authz::<VpcSubnet>(client, &subnets_url).await.items;
     assert_eq!(subnets.len(), 2);
     subnets_eq(&subnets[0], &updated_subnet);
 
     // delete first subnet
-    client
-        .make_request_no_body(
-            Method::DELETE,
-            &subnet_url,
-            StatusCode::NO_CONTENT,
-        )
+    NexusRequest::object_delete(client, &subnet_url)
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
         .await
         .unwrap();
 
     // subnets list should now have one again, the second one
     let subnets =
-        objects_list_page::<VpcSubnet>(client, &subnets_url).await.items;
+        objects_list_page_authz::<VpcSubnet>(client, &subnets_url).await.items;
     assert_eq!(subnets.len(), 1);
     subnets_eq(&subnets[0], &subnet2);
 
     // get subnet should 404
-    let error = client
-        .make_request_error(Method::GET, &subnet_url, StatusCode::NOT_FOUND)
-        .await;
+    let error: dropshot::HttpErrorResponseBody = NexusRequest::expect_failure(
+        client,
+        StatusCode::NOT_FOUND,
+        Method::GET,
+        &subnet_url,
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap()
+    .parsed_body()
+    .unwrap();
     assert_eq!(error.message, "not found: vpc-subnet with name \"new-name\"");
 
     // delete subnet should 404
-    let error = client
-        .make_request_error(Method::DELETE, &subnet_url, StatusCode::NOT_FOUND)
-        .await;
+    let error: dropshot::HttpErrorResponseBody = NexusRequest::expect_failure(
+        client,
+        StatusCode::NOT_FOUND,
+        Method::DELETE,
+        &subnet_url,
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap()
+    .parsed_body()
+    .unwrap();
     assert_eq!(error.message, "not found: vpc-subnet with name \"new-name\"");
 
     // Creating a subnet with the same name in a different VPC is allowed
     let vpc2_name = "vpc2";
     let vpc2 = create_vpc(&client, org_name, project_name, vpc2_name).await;
 
-    let subnet_same_name: VpcSubnet = objects_post(
-        &client,
+    let subnet_same_name: VpcSubnet = NexusRequest::objects_post(
+        client,
         format!("{}/{}/subnets", vpcs_url, vpc2_name).as_str(),
-        new_subnet.clone(),
+        &new_subnet,
     )
-    .await;
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap()
+    .parsed_body()
+    .unwrap();
     assert_eq!(subnet_same_name.identity.name, subnet2_name);
     assert_eq!(
         subnet_same_name.identity.description,
@@ -296,17 +370,19 @@ fn subnets_eq(sn1: &VpcSubnet, sn2: &VpcSubnet) {
 async fn assert_put_400(
     client: &ClientTestContext,
     url: &str,
-    body: String,
+    body: &serde_json::Value,
     message: &str,
 ) {
-    let error = client
-        .make_request_with_body(
-            Method::PUT,
-            &url,
-            body.into(),
-            StatusCode::BAD_REQUEST,
-        )
-        .await
-        .unwrap_err();
+    let error: dropshot::HttpErrorResponseBody = NexusRequest::new(
+        RequestBuilder::new(client, Method::PUT, &url)
+            .expect_status(Some(StatusCode::BAD_REQUEST))
+            .body(Some(&body)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap()
+    .parsed_body()
+    .unwrap();
     assert!(error.message.starts_with(message));
 }

@@ -1549,6 +1549,278 @@
         }
       }
     },
+    "/organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/network-interfaces": {
+      "get": {
+        "tags": [
+          "instances"
+        ],
+        "summary": "List network interfaces attached to this instance.",
+        "operationId": "instance_network_interfaces_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "description": "Maximum number of items returned by a single call",
+            "schema": {
+              "nullable": true,
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 1
+            },
+            "style": "form"
+          },
+          {
+            "in": "query",
+            "name": "page_token",
+            "description": "Token returned by previous call to retreive the subsequent page",
+            "schema": {
+              "nullable": true,
+              "type": "string"
+            },
+            "style": "form"
+          },
+          {
+            "in": "query",
+            "name": "sort_by",
+            "schema": {
+              "$ref": "#/components/schemas/NameSortMode"
+            },
+            "style": "form"
+          },
+          {
+            "in": "path",
+            "name": "instance_name",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Name"
+            },
+            "style": "simple"
+          },
+          {
+            "in": "path",
+            "name": "organization_name",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Name"
+            },
+            "style": "simple"
+          },
+          {
+            "in": "path",
+            "name": "project_name",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Name"
+            },
+            "style": "simple"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NetworkInterfaceResultsPage"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-dropshot-pagination": true
+      },
+      "post": {
+        "tags": [
+          "instances"
+        ],
+        "summary": "Create a network interface for an instance.",
+        "operationId": "instance_network_interfaces_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "instance_name",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Name"
+            },
+            "style": "simple"
+          },
+          {
+            "in": "path",
+            "name": "organization_name",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Name"
+            },
+            "style": "simple"
+          },
+          {
+            "in": "path",
+            "name": "project_name",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Name"
+            },
+            "style": "simple"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NetworkInterfaceCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "successful creation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NetworkInterface"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/network-interfaces/{interface_name}": {
+      "get": {
+        "tags": [
+          "instances"
+        ],
+        "summary": "Get an interface attached to an instance.",
+        "operationId": "instance_network_interfaces_get_interface",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "instance_name",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Name"
+            },
+            "style": "simple"
+          },
+          {
+            "in": "path",
+            "name": "interface_name",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Name"
+            },
+            "style": "simple"
+          },
+          {
+            "in": "path",
+            "name": "organization_name",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Name"
+            },
+            "style": "simple"
+          },
+          {
+            "in": "path",
+            "name": "project_name",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Name"
+            },
+            "style": "simple"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NetworkInterface"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "instances"
+        ],
+        "summary": "Detach a network interface from an instance.",
+        "operationId": "instance_network_interfaces_delete_interface",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "instance_name",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Name"
+            },
+            "style": "simple"
+          },
+          {
+            "in": "path",
+            "name": "interface_name",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Name"
+            },
+            "style": "simple"
+          },
+          {
+            "in": "path",
+            "name": "organization_name",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Name"
+            },
+            "style": "simple"
+          },
+          {
+            "in": "path",
+            "name": "project_name",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Name"
+            },
+            "style": "simple"
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "successful deletion"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/reboot": {
       "post": {
         "tags": [
@@ -2138,8 +2410,15 @@
           "required": true
         },
         "responses": {
-          "204": {
-            "description": "resource updated"
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Vpc"
+                }
+              }
+            }
           },
           "4XX": {
             "$ref": "#/components/responses/Error"
@@ -3308,8 +3587,15 @@
           "required": true
         },
         "responses": {
-          "204": {
-            "description": "resource updated"
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VpcSubnet"
+                }
+              }
+            }
           },
           "4XX": {
             "$ref": "#/components/responses/Error"
@@ -3376,13 +3662,13 @@
         }
       }
     },
-    "/organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/subnets/{subnet_name}/ips": {
+    "/organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/subnets/{subnet_name}/network-interfaces": {
       "get": {
         "tags": [
           "subnets"
         ],
-        "summary": "List IP addresses on a VPC subnet.",
-        "operationId": "subnets_ips_get",
+        "summary": "List network interfaces in a VPC subnet.",
+        "operationId": "subnet_network_interfaces_get",
         "parameters": [
           {
             "in": "query",
@@ -4307,6 +4593,14 @@
           },
           "ncpus": {
             "$ref": "#/components/schemas/InstanceCpuCount"
+          },
+          "network_interfaces": {
+            "description": "The network interfaces to be created for this instance.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/InstanceNetworkInterfaceAttachment"
+              }
+            ]
           }
         },
         "required": [
@@ -4328,6 +4622,74 @@
         },
         "required": [
           "dst_sled_uuid"
+        ]
+      },
+      "InstanceNetworkInterfaceAttachment": {
+        "description": "Describes an attachment of a `NetworkInterface` to an `Instance`, at the time the instance is created.",
+        "oneOf": [
+          {
+            "description": "Create one or more `NetworkInterface`s for the `Instance`",
+            "type": "object",
+            "properties": {
+              "params": {
+                "$ref": "#/components/schemas/InstanceNetworkInterfaceCreate"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "Create"
+                ]
+              }
+            },
+            "required": [
+              "params",
+              "type"
+            ]
+          },
+          {
+            "description": "Default networking setup, which creates a single interface with an auto-assigned IP address from project's \"default\" VPC and \"default\" VPC Subnet.",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "Default"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "description": "No network interfaces at all will be created for the instance.",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "None"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          }
+        ]
+      },
+      "InstanceNetworkInterfaceCreate": {
+        "type": "object",
+        "properties": {
+          "params": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/NetworkInterfaceCreate"
+            }
+          }
+        },
+        "required": [
+          "params"
         ]
       },
       "InstanceResultsPage": {
@@ -4367,11 +4729,40 @@
           "destroyed"
         ]
       },
+      "IpNet": {
+        "description": "An `IpNet` represents an IP network, either IPv4 or IPv6.",
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "V4": {
+                "$ref": "#/components/schemas/Ipv4Net"
+              }
+            },
+            "required": [
+              "V4"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "V6": {
+                "$ref": "#/components/schemas/Ipv6Net"
+              }
+            },
+            "required": [
+              "V6"
+            ],
+            "additionalProperties": false
+          }
+        ]
+      },
       "Ipv4Net": {
         "title": "An IPv4 subnet",
         "description": "An IPv4 subnet, including prefix and subnet mask",
         "type": "string",
-        "pattern": "^(10\\.(25[0-5]|[1-2][0-4][0-9]|[1-9][0-9]|[0-9]\\.){2}(25[0-5]|[1-2][0-4][0-9]|[1-9][0-9]|[0-9])/(1[0-9]|2[0-8]|[8-9]))$^(172\\.16\\.(25[0-5]|[1-2][0-4][0-9]|[1-9][0-9]|[0-9])\\.(25[0-5]|[1-2][0-4][0-9]|[1-9][0-9]|[0-9])/(1[2-9]|2[0-8]))$^(192\\.168\\.(25[0-5]|[1-2][0-4][0-9]|[1-9][0-9]|[0-9])\\.(25[0-5]|[1-2][0-4][0-9]|[1-9][0-9]|[0-9])/(1[6-9]|2[0-8]))$",
+        "pattern": "(^(10\\.(25[0-5]|[1-2][0-4][0-9]|[1-9][0-9]|[0-9]\\.){2}(25[0-5]|[1-2][0-4][0-9]|[1-9][0-9]|[0-9])/(1[0-9]|2[0-8]|[8-9]))$)|(^(172\\.16\\.(25[0-5]|[1-2][0-4][0-9]|[1-9][0-9]|[0-9])\\.(25[0-5]|[1-2][0-4][0-9]|[1-9][0-9]|[0-9])/(1[2-9]|2[0-8]))$)|(^(192\\.168\\.(25[0-5]|[1-2][0-4][0-9]|[1-9][0-9]|[0-9])\\.(25[0-5]|[1-2][0-4][0-9]|[1-9][0-9]|[0-9])/(1[6-9]|2[0-8]))$)",
         "maxLength": 18
       },
       "Ipv6Net": {
@@ -4486,6 +4877,46 @@
           "time_created",
           "time_modified",
           "vpc_id"
+        ]
+      },
+      "NetworkInterfaceCreate": {
+        "description": "Create-time parameters for a [`NetworkInterface`](omicron_common::api::external::NetworkInterface)",
+        "type": "object",
+        "properties": {
+          "description": {
+            "type": "string"
+          },
+          "ip": {
+            "nullable": true,
+            "description": "The IP address for the interface. One will be auto-assigned if not provided.",
+            "type": "string",
+            "format": "ip"
+          },
+          "name": {
+            "$ref": "#/components/schemas/Name"
+          },
+          "subnet_name": {
+            "description": "The VPC Subnet in which to create the interface.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Name"
+              }
+            ]
+          },
+          "vpc_name": {
+            "description": "The VPC in which to create the interface.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Name"
+              }
+            ]
+          }
+        },
+        "required": [
+          "description",
+          "name",
+          "subnet_name",
+          "vpc_name"
         ]
       },
       "NetworkInterfaceResultsPage": {
@@ -4810,9 +5241,10 @@
         ]
       },
       "RouteDestination": {
-        "description": "A subset of [`NetworkTarget`], `RouteDestination` specifies the kind of network traffic that will be matched to be forwarded to the [`RouteTarget`].",
+        "description": "A `RouteDestination` is used to match traffic with a routing rule, on the destination of that traffic.\n\nWhen traffic is to be sent to a destination that is within a given `RouteDestination`, the corresponding [`RouterRoute`] applies, and traffic will be forward to the [`RouteTarget`] for that rule.",
         "oneOf": [
           {
+            "description": "Route applies to traffic destined for a specific IP address",
             "type": "object",
             "properties": {
               "type": {
@@ -4832,6 +5264,26 @@
             ]
           },
           {
+            "description": "Route applies to traffic destined for a specific IP subnet",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "ip_net"
+                ]
+              },
+              "value": {
+                "$ref": "#/components/schemas/IpNet"
+              }
+            },
+            "required": [
+              "type",
+              "value"
+            ]
+          },
+          {
+            "description": "Route applies to traffic destined for the given VPC.",
             "type": "object",
             "properties": {
               "type": {
@@ -4850,6 +5302,7 @@
             ]
           },
           {
+            "description": "Route applies to traffic",
             "type": "object",
             "properties": {
               "type": {
@@ -4870,9 +5323,10 @@
         ]
       },
       "RouteTarget": {
-        "description": "A subset of [`NetworkTarget`], `RouteTarget` specifies all possible targets that a route can forward to.",
+        "description": "A `RouteTarget` describes the possible locations that traffic matching a route destination can be sent.",
         "oneOf": [
           {
+            "description": "Forward traffic to a particular IP address.",
             "type": "object",
             "properties": {
               "type": {
@@ -4892,6 +5346,7 @@
             ]
           },
           {
+            "description": "Forward traffic to a VPC",
             "type": "object",
             "properties": {
               "type": {
@@ -4910,6 +5365,7 @@
             ]
           },
           {
+            "description": "Forward traffic to a VPC Subnet",
             "type": "object",
             "properties": {
               "type": {
@@ -4928,6 +5384,7 @@
             ]
           },
           {
+            "description": "Forward traffic to a specific instance",
             "type": "object",
             "properties": {
               "type": {
@@ -4946,6 +5403,7 @@
             ]
           },
           {
+            "description": "Forward traffic to an internet gateway",
             "type": "object",
             "properties": {
               "type": {
@@ -5816,9 +6274,10 @@
         }
       },
       "VpcFirewallRuleHostFilter": {
-        "description": "A subset of [`NetworkTarget`], `VpcFirewallRuleHostFilter` specifies all possible targets that a route can forward to.",
+        "description": "The `VpcFirewallRuleHostFilter` is used to filter traffic on the basis of its source or destination host.",
         "oneOf": [
           {
+            "description": "The rule applies to traffic from/to all instances in the VPC",
             "type": "object",
             "properties": {
               "type": {
@@ -5837,6 +6296,7 @@
             ]
           },
           {
+            "description": "The rule applies to traffic from/to all instances in the VPC Subnet",
             "type": "object",
             "properties": {
               "type": {
@@ -5855,6 +6315,7 @@
             ]
           },
           {
+            "description": "The rule applies to traffic from/to this specific instance",
             "type": "object",
             "properties": {
               "type": {
@@ -5873,6 +6334,7 @@
             ]
           },
           {
+            "description": "The rule applies to traffic from/to a specific IP address",
             "type": "object",
             "properties": {
               "type": {
@@ -5892,16 +6354,17 @@
             ]
           },
           {
+            "description": "The rule applies to traffic from/to a specific IP subnet",
             "type": "object",
             "properties": {
               "type": {
                 "type": "string",
                 "enum": [
-                  "internet_gateway"
+                  "ip_net"
                 ]
               },
               "value": {
-                "$ref": "#/components/schemas/Name"
+                "$ref": "#/components/schemas/IpNet"
               }
             },
             "required": [
@@ -5928,9 +6391,10 @@
         ]
       },
       "VpcFirewallRuleTarget": {
-        "description": "A subset of [`NetworkTarget`], `VpcFirewallRuleTarget` specifies all possible targets that a firewall rule can be attached to.",
+        "description": "A `VpcFirewallRuleTarget` is used to specify the set of [`Instance`]s to which a firewall rule applies.",
         "oneOf": [
           {
+            "description": "The rule applies to all instances in the VPC",
             "type": "object",
             "properties": {
               "type": {
@@ -5949,6 +6413,7 @@
             ]
           },
           {
+            "description": "The rule applies to all instances in the VPC Subnet",
             "type": "object",
             "properties": {
               "type": {
@@ -5967,6 +6432,7 @@
             ]
           },
           {
+            "description": "The rule applies to this specific instance",
             "type": "object",
             "properties": {
               "type": {
@@ -5977,6 +6443,45 @@
               },
               "value": {
                 "$ref": "#/components/schemas/Name"
+              }
+            },
+            "required": [
+              "type",
+              "value"
+            ]
+          },
+          {
+            "description": "The rule applies to a specific IP address",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "ip"
+                ]
+              },
+              "value": {
+                "type": "string",
+                "format": "ip"
+              }
+            },
+            "required": [
+              "type",
+              "value"
+            ]
+          },
+          {
+            "description": "The rule applies to a specific IP subnet",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "ip_net"
+                ]
+              },
+              "value": {
+                "$ref": "#/components/schemas/IpNet"
               }
             },
             "required": [
@@ -6425,5 +6930,126 @@
         ]
       }
     }
-  }
+  },
+  "tags": [
+    {
+      "name": "disks",
+      "description": "Virtual disks are used to store instance-local data which includes the operating system.",
+      "externalDocs": {
+        "url": "http://oxide.computer/docs/#xxx"
+      }
+    },
+    {
+      "name": "firewall",
+      "description": "Firewall operation controls the flow of network data into a VPC",
+      "externalDocs": {
+        "url": "http://oxide.computer/docs/#xxx"
+      }
+    },
+    {
+      "name": "hidden",
+      "description": "TODO operations that will not ship to customers",
+      "externalDocs": {
+        "url": "http://oxide.computer/docs/#xxx"
+      }
+    },
+    {
+      "name": "instances",
+      "description": "Virtual machine instances are the basic unit of computation. These operations are used for provisioning, controlling, and destroying instances.",
+      "externalDocs": {
+        "url": "http://oxide.computer/docs/#xxx"
+      }
+    },
+    {
+      "name": "metrics",
+      "description": "Metrics provide insight into the operation of the Oxide deployment. These include telemetry on hardware and software components that can be used to understand the current state as well as to diagnose issues.",
+      "externalDocs": {
+        "url": "http://oxide.computer/docs/#xxx"
+      }
+    },
+    {
+      "name": "organizations",
+      "description": "Organizations represent a subset of users and projects in an Oxide deployment.",
+      "externalDocs": {
+        "url": "http://oxide.computer/docs/#xxx"
+      }
+    },
+    {
+      "name": "projects",
+      "description": "Projects are a grouping of associated resources such as instances and disks within an organization for purposes of billing and access control.",
+      "externalDocs": {
+        "url": "http://oxide.computer/docs/#xxx"
+      }
+    },
+    {
+      "name": "racks",
+      "description": "These operations pertain to hardware inventory and management. Racks are the unit of expansion of an Oxide deployment. Racks are in turn composed of sleds, switches, power supplies, and a cabled backplane.",
+      "externalDocs": {
+        "url": "http://oxide.computer/docs/#xxx"
+      }
+    },
+    {
+      "name": "roles",
+      "description": "Roles are a component of Identity and Access Management (IAM) that allow a user or agent account access to additional permissions.",
+      "externalDocs": {
+        "url": "http://oxide.computer/docs/#xxx"
+      }
+    },
+    {
+      "name": "routers",
+      "description": "Routers direct the flow of network traffic into, out of, and within a VPC via routes.",
+      "externalDocs": {
+        "url": "http://oxide.computer/docs/#xxx"
+      }
+    },
+    {
+      "name": "routes",
+      "description": "Routes define router policy.",
+      "externalDocs": {
+        "url": "http://oxide.computer/docs/#xxx"
+      }
+    },
+    {
+      "name": "sagas",
+      "description": "Sagas are the abstraction used to represent multi-step operations within the Oxide deployment. These operations can be used to query saga status and report errors.",
+      "externalDocs": {
+        "url": "http://oxide.computer/docs/#xxx"
+      }
+    },
+    {
+      "name": "sleds",
+      "description": "This tag should be moved into hardware",
+      "externalDocs": {
+        "url": "http://oxide.computer/docs/#xxx"
+      }
+    },
+    {
+      "name": "subnets",
+      "description": "This tag should be moved into a generic network tag",
+      "externalDocs": {
+        "url": "http://oxide.computer/docs/#xxx"
+      }
+    },
+    {
+      "name": "updates",
+      "description": "This tag should be moved into a operations tag",
+      "externalDocs": {
+        "url": "http://oxide.computer/docs/#xxx"
+      }
+    },
+    {
+      "name": "users",
+      "description": "This tag should be moved into an IAM tag",
+      "externalDocs": {
+        "url": "http://oxide.computer/docs/#xxx"
+      }
+    },
+    {
+      "name": "vpcs",
+      "description": "A Virtual Private Cloud (VPC) is an isolated network environment that should probaby be moved into a more generic networking tag",
+      "externalDocs": {
+        "url": "http://oxide.computer/docs/#xxx"
+      }
+    }
+  ]
 }

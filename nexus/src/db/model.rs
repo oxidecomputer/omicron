@@ -34,6 +34,8 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::convert::TryFrom;
 use std::net::IpAddr;
+use std::net::Ipv4Addr;
+use std::net::Ipv6Addr;
 use std::net::SocketAddr;
 use uuid::Uuid;
 
@@ -321,6 +323,23 @@ pub struct Ipv4Net(pub external::Ipv4Net);
 NewtypeFrom! { () pub struct Ipv4Net(external::Ipv4Net); }
 NewtypeDeref! { () pub struct Ipv4Net(external::Ipv4Net); }
 
+impl Ipv4Net {
+    /// Check if an address is a valid user-requestable address for this subnet
+    pub fn check_requestable_addr(&self, addr: Ipv4Addr) -> bool {
+        self.contains(addr)
+            && (
+                // First N addresses are reserved
+                self.iter()
+                    .take(defaults::NUM_INITIAL_RESERVED_IP_ADDRESSES)
+                    .all(|this| this != addr)
+            )
+            && (
+                // Last address in the subnet is reserved
+                addr != self.broadcast()
+            )
+    }
+}
+
 impl<DB> ToSql<sql_types::Inet, DB> for Ipv4Net
 where
     DB: Backend,
@@ -404,6 +423,16 @@ impl Ipv6Net {
         let net = ipnetwork::Ipv6Network::new(addr, prefix)
             .expect("Failed to create random subnet");
         Some(Self(external::Ipv6Net(net)))
+    }
+
+    /// Check if an address is a valid user-requestable address for this subnet
+    pub fn check_requestable_addr(&self, addr: Ipv6Addr) -> bool {
+        // Only the first N addresses are reserved
+        self.contains(addr)
+            && self
+                .iter()
+                .take(defaults::NUM_INITIAL_RESERVED_IP_ADDRESSES)
+                .all(|this| this != addr)
     }
 }
 
@@ -1005,7 +1034,7 @@ impl_enum_type!(
     #[postgres(type_name = "instance_state", type_schema = "public")]
     pub struct InstanceStateEnum;
 
-    #[derive(Clone, Debug, AsExpression, FromSqlRow)]
+    #[derive(Clone, Debug, PartialEq, AsExpression, FromSqlRow)]
     #[sql_type = "InstanceStateEnum"]
     pub struct InstanceState(pub external::InstanceState);
 
@@ -1448,29 +1477,29 @@ impl VpcSubnet {
     ///
     /// - The subnet has an allocated block of the same version as the address
     /// - The allocated block contains the address.
-    pub fn contains(&self, addr: IpAddr) -> Result<(), external::Error> {
-        match addr {
+    /// - The address is not reserved.
+    pub fn check_requestable_addr(
+        &self,
+        addr: IpAddr,
+    ) -> Result<(), external::Error> {
+        let subnet = match addr {
             IpAddr::V4(addr) => {
-                if self.ipv4_block.contains(addr) {
-                    Ok(())
-                } else {
-                    Err(external::Error::invalid_request(&format!(
-                        "Address '{}' not in IPv4 subnet '{}'",
-                        addr, self.ipv4_block.0,
-                    )))
+                if self.ipv4_block.check_requestable_addr(addr) {
+                    return Ok(());
                 }
+                ipnetwork::IpNetwork::V4(self.ipv4_block.0 .0)
             }
             IpAddr::V6(addr) => {
-                if self.ipv6_block.contains(addr) {
-                    Ok(())
-                } else {
-                    Err(external::Error::invalid_request(&format!(
-                        "Address '{}' not in IPv6 subnet '{}'",
-                        addr, self.ipv6_block.0,
-                    )))
+                if self.ipv6_block.check_requestable_addr(addr) {
+                    return Ok(());
                 }
+                ipnetwork::IpNetwork::V6(self.ipv6_block.0 .0)
             }
-        }
+        };
+        Err(external::Error::invalid_request(&format!(
+            "Address '{}' not in subnet '{}' or is reserved for rack services",
+            addr, subnet,
+        )))
     }
 }
 
@@ -2040,12 +2069,14 @@ impl IncompleteNetworkInterface {
         vpc_id: Uuid,
         subnet: VpcSubnet,
         mac: MacAddr,
+        identity: external::IdentityMetadataCreateParams,
         ip: Option<std::net::IpAddr>,
-        params: params::NetworkInterfaceCreate,
-    ) -> Self {
-        let identity =
-            NetworkInterfaceIdentity::new(interface_id, params.identity);
-        Self { identity, instance_id, subnet, vpc_id, mac, ip }
+    ) -> Result<Self, external::Error> {
+        if let Some(ip) = ip {
+            subnet.check_requestable_addr(ip)?;
+        };
+        let identity = NetworkInterfaceIdentity::new(interface_id, identity);
+        Ok(Self { identity, instance_id, subnet, vpc_id, mac, ip })
     }
 }
 
@@ -2060,6 +2091,11 @@ pub struct NetworkInterface {
     pub subnet_id: Uuid,
     pub mac: MacAddr,
     pub ip: ipnetwork::IpNetwork,
+    // TODO-correctness: We need to split this into an optional V4 and optional V6 address, at
+    // least one of which will always be specified.
+    //
+    // If user requests an address of either kind, give exactly that and not the other.
+    // If neither is specified, auto-assign one of each?
 }
 
 impl From<NetworkInterface> for external::NetworkInterface {
@@ -2208,7 +2244,7 @@ mod tests {
     use std::net::Ipv6Addr;
 
     #[test]
-    fn test_vpc_subnet_contains() {
+    fn test_vpc_subnet_check_requestable_addr() {
         let ipv4_block =
             Ipv4Net("192.168.0.0/16".parse::<Ipv4Network>().unwrap());
         let ipv6_block = Ipv6Net("fd00::/48".parse::<Ipv6Network>().unwrap());
@@ -2216,27 +2252,54 @@ mod tests {
             name: "net-test-vpc".parse().unwrap(),
             description: "A test VPC".parse().unwrap(),
         };
-        let vpc = VpcSubnet::new(
+        let subnet = VpcSubnet::new(
             Uuid::new_v4(),
             Uuid::new_v4(),
             identity,
             ipv4_block,
             ipv6_block,
         );
-        assert!(vpc
-            .contains(IpAddr::from(Ipv4Addr::new(192, 168, 1, 1)))
-            .is_ok());
-        assert!(vpc
-            .contains(IpAddr::from(Ipv4Addr::new(192, 160, 1, 1)))
-            .is_err());
-        assert!(vpc
-            .contains(IpAddr::from(Ipv6Addr::new(
-                0xfd00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01
+        // Within subnet
+        assert!(subnet
+            .check_requestable_addr(IpAddr::from(Ipv4Addr::new(
+                192, 168, 1, 10
             )))
             .is_ok());
-        assert!(vpc
-            .contains(IpAddr::from(Ipv6Addr::new(
-                0xfc00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01
+        // Network address is reserved
+        assert!(subnet
+            .check_requestable_addr(IpAddr::from(Ipv4Addr::new(192, 168, 0, 0)))
+            .is_err());
+        // Broadcast address is reserved
+        assert!(subnet
+            .check_requestable_addr(IpAddr::from(Ipv4Addr::new(
+                192, 168, 255, 255
+            )))
+            .is_err());
+        // Within subnet, but reserved
+        assert!(subnet
+            .check_requestable_addr(IpAddr::from(Ipv4Addr::new(192, 168, 0, 1)))
+            .is_err());
+        // Not within subnet
+        assert!(subnet
+            .check_requestable_addr(IpAddr::from(Ipv4Addr::new(192, 160, 1, 1)))
+            .is_err());
+
+        // Within subnet
+        assert!(subnet
+            .check_requestable_addr(IpAddr::from(Ipv6Addr::new(
+                0xfd00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x10
+            )))
+            .is_ok());
+        // Within subnet, but reserved
+        assert!(subnet
+            .check_requestable_addr(IpAddr::from(Ipv6Addr::new(
+                0xfd00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01
+            )))
+            .is_err());
+        // Not within subnet
+        assert!(subnet
+            .check_requestable_addr(IpAddr::from(Ipv6Addr::new(
+                0xfc00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x10
             )))
             .is_err());
     }
@@ -2272,5 +2335,22 @@ mod tests {
             "random_subnet should generate an actual subnet"
         );
         assert_eq!(base.random_subnet(base.prefix()), Some(base));
+    }
+
+    #[test]
+    fn test_ip_subnet_check_requestable_address() {
+        let subnet = super::Ipv4Net(Ipv4Net("192.168.0.0/16".parse().unwrap()));
+        assert!(subnet.check_requestable_addr("192.168.0.10".parse().unwrap()));
+        assert!(subnet.check_requestable_addr("192.168.1.0".parse().unwrap()));
+        assert!(!subnet.check_requestable_addr("192.168.0.0".parse().unwrap()));
+        assert!(subnet.check_requestable_addr("192.168.0.255".parse().unwrap()));
+        assert!(
+            !subnet.check_requestable_addr("192.168.255.255".parse().unwrap())
+        );
+
+        let subnet = super::Ipv6Net(Ipv6Net("fd00::/64".parse().unwrap()));
+        assert!(subnet.check_requestable_addr("fd00::a".parse().unwrap()));
+        assert!(!subnet.check_requestable_addr("fd00::1".parse().unwrap()));
+        assert!(subnet.check_requestable_addr("fd00::1:1".parse().unwrap()));
     }
 }

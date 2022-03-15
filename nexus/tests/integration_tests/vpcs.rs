@@ -2,23 +2,24 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+use dropshot::test_util::ClientTestContext;
+use dropshot::HttpErrorResponseBody;
 use http::method::Method;
 use http::StatusCode;
-use omicron_common::api::external::IdentityMetadataCreateParams;
-use omicron_common::api::external::IdentityMetadataUpdateParams;
-use omicron_common::api::external::Ipv6Net;
-use omicron_nexus::external_api::{params, views::Vpc};
-
-use dropshot::test_util::object_get;
-use dropshot::test_util::objects_list_page;
-use dropshot::test_util::ClientTestContext;
-
+use nexus_test_utils::http_testing::AuthnMode;
+use nexus_test_utils::http_testing::NexusRequest;
+use nexus_test_utils::http_testing::RequestBuilder;
 use nexus_test_utils::identity_eq;
+use nexus_test_utils::resource_helpers::objects_list_page_authz;
 use nexus_test_utils::resource_helpers::{
     create_organization, create_project, create_vpc, create_vpc_with_error,
 };
 use nexus_test_utils::ControlPlaneTestContext;
 use nexus_test_utils_macros::nexus_test;
+use omicron_common::api::external::IdentityMetadataCreateParams;
+use omicron_common::api::external::IdentityMetadataUpdateParams;
+use omicron_common::api::external::Ipv6Net;
+use omicron_nexus::external_api::{params, views::Vpc};
 
 #[nexus_test]
 async fn test_vpcs(cptestctx: &ControlPlaneTestContext) {
@@ -42,40 +43,48 @@ async fn test_vpcs(cptestctx: &ControlPlaneTestContext) {
     assert_eq!(vpcs[0].dns_name, "default");
     let default_vpc = vpcs.remove(0);
 
-    /* Make sure we get a 404 if we fetch one. */
+    /* Make sure we get a 404 if we fetch or delete one. */
     let vpc_url = format!("{}/just-rainsticks", vpcs_url);
-
-    let error = client
-        .make_request_error(Method::GET, &vpc_url, StatusCode::NOT_FOUND)
-        .await;
-    assert_eq!(error.message, "not found: vpc with name \"just-rainsticks\"");
-
-    /* Ditto if we try to delete one. */
-    let error = client
-        .make_request_error(Method::DELETE, &vpc_url, StatusCode::NOT_FOUND)
-        .await;
-    assert_eq!(error.message, "not found: vpc with name \"just-rainsticks\"");
+    for method in &[Method::GET, Method::DELETE] {
+        let error: HttpErrorResponseBody = NexusRequest::expect_failure(
+            client,
+            StatusCode::NOT_FOUND,
+            method.clone(),
+            &vpc_url,
+        )
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .unwrap()
+        .parsed_body()
+        .unwrap();
+        assert_eq!(
+            error.message,
+            "not found: vpc with name \"just-rainsticks\""
+        );
+    }
 
     /*
      * Make sure creating a VPC fails if we specify an IPv6 prefix that is
      * not a valid ULA range.
      */
     let bad_prefix = Ipv6Net("2000:1000::/48".parse().unwrap());
-    let _ = client
-        .make_request_error_body(
-            Method::POST,
-            &vpcs_url,
-            params::VpcCreate {
+    NexusRequest::new(
+        RequestBuilder::new(client, Method::POST, &vpcs_url)
+            .expect_status(Some(StatusCode::BAD_REQUEST))
+            .body(Some(&params::VpcCreate {
                 identity: IdentityMetadataCreateParams {
                     name: "just-rainsticks".parse().unwrap(),
                     description: String::from("vpc description"),
                 },
                 ipv6_prefix: Some(bad_prefix),
                 dns_name: "abc".parse().unwrap(),
-            },
-            StatusCode::BAD_REQUEST,
-        )
-        .await;
+            })),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap();
 
     /* Create a VPC. */
     let vpc_name = "just-rainsticks";
@@ -127,12 +136,24 @@ async fn test_vpcs(cptestctx: &ControlPlaneTestContext) {
         },
         dns_name: Some("def".parse().unwrap()),
     };
-    vpc_put(&client, &vpc_url, update_params).await;
+    let updated_vpc = vpc_put(&client, &vpc_url, update_params).await;
+    assert_eq!(updated_vpc.identity.name, "new-name");
+    assert_eq!(updated_vpc.identity.description, "another description");
+    assert_eq!(updated_vpc.dns_name, "def");
 
     // fetching by old name fails
-    let error = client
-        .make_request_error(Method::GET, &vpc_url, StatusCode::NOT_FOUND)
-        .await;
+    let error: HttpErrorResponseBody = NexusRequest::expect_failure(
+        client,
+        StatusCode::NOT_FOUND,
+        Method::GET,
+        &vpc_url,
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap()
+    .parsed_body()
+    .unwrap();
     assert_eq!(error.message, "not found: vpc with name \"just-rainsticks\"");
 
     // new url with new name
@@ -145,15 +166,25 @@ async fn test_vpcs(cptestctx: &ControlPlaneTestContext) {
     assert_eq!(vpc.dns_name, "def");
 
     /* Delete the VPC. */
-    client
-        .make_request_no_body(Method::DELETE, &vpc_url, StatusCode::NO_CONTENT)
+    NexusRequest::object_delete(client, &vpc_url)
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
         .await
         .unwrap();
 
     /* Now we expect a 404 on fetch */
-    let error = client
-        .make_request_error(Method::GET, &vpc_url, StatusCode::NOT_FOUND)
-        .await;
+    let error: HttpErrorResponseBody = NexusRequest::expect_failure(
+        client,
+        StatusCode::NOT_FOUND,
+        Method::GET,
+        &vpc_url,
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap()
+    .parsed_body()
+    .unwrap();
     assert_eq!(error.message, "not found: vpc with name \"new-name\"");
 
     /* And the list should be empty (aside from default VPC) again */
@@ -163,27 +194,31 @@ async fn test_vpcs(cptestctx: &ControlPlaneTestContext) {
 }
 
 async fn vpcs_list(client: &ClientTestContext, vpcs_url: &str) -> Vec<Vpc> {
-    objects_list_page::<Vpc>(client, vpcs_url).await.items
+    objects_list_page_authz::<Vpc>(client, vpcs_url).await.items
 }
 
 async fn vpc_get(client: &ClientTestContext, vpc_url: &str) -> Vpc {
-    object_get::<Vpc>(client, vpc_url).await
+    NexusRequest::object_get(client, vpc_url)
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .unwrap()
+        .parsed_body()
+        .unwrap()
 }
 
 async fn vpc_put(
     client: &ClientTestContext,
     vpc_url: &str,
     params: params::VpcUpdate,
-) {
-    client
-        .make_request(
-            Method::PUT,
-            &vpc_url,
-            Some(params),
-            StatusCode::NO_CONTENT,
-        )
+) -> Vpc {
+    NexusRequest::object_put(client, vpc_url, Some(&params))
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
         .await
-        .unwrap();
+        .unwrap()
+        .parsed_body()
+        .unwrap()
 }
 
 fn vpcs_eq(vpc1: &Vpc, vpc2: &Vpc) {
