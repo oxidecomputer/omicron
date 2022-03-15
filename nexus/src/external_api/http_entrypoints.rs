@@ -115,7 +115,12 @@ pub fn external_api() -> NexusApiDescription {
         api.register(vpc_subnets_delete_subnet)?;
         api.register(vpc_subnets_put_subnet)?;
 
-        api.register(subnets_ips_get)?;
+        api.register(subnet_network_interfaces_get)?;
+
+        api.register(instance_network_interfaces_post)?;
+        api.register(instance_network_interfaces_get)?;
+        api.register(instance_network_interfaces_get_interface)?;
+        api.register(instance_network_interfaces_delete_interface)?;
 
         api.register(vpc_routers_get)?;
         api.register(vpc_routers_get_router)?;
@@ -1111,6 +1116,151 @@ async fn instance_disks_detach(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
+/// List network interfaces attached to this instance.
+#[endpoint {
+    method = GET,
+    path = "/organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/network-interfaces",
+    tags = ["instances"],
+}]
+async fn instance_network_interfaces_get(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    query_params: Query<PaginatedByName>,
+    path_params: Path<InstancePathParam>,
+) -> Result<HttpResponseOk<ResultsPage<NetworkInterface>>, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let query = query_params.into_inner();
+    let path = path_params.into_inner();
+    let organization_name = &path.organization_name;
+    let project_name = &path.project_name;
+    let instance_name = &path.instance_name;
+    let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let interfaces = nexus
+            .instance_list_network_interfaces(
+                &opctx,
+                &organization_name,
+                &project_name,
+                &instance_name,
+                &data_page_params_for(&rqctx, &query)?
+                    .map_name(|n| Name::ref_cast(n)),
+            )
+            .await?
+            .into_iter()
+            .map(|d| d.into())
+            .collect();
+        Ok(HttpResponseOk(ScanByName::results_page(&query, interfaces)?))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Create a network interface for an instance.
+#[endpoint {
+    method = POST,
+    path = "/organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/network-interfaces",
+    tags = ["instances"],
+}]
+async fn instance_network_interfaces_post(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    path_params: Path<InstancePathParam>,
+    interface_params: TypedBody<params::NetworkInterfaceCreate>,
+) -> Result<HttpResponseCreated<NetworkInterface>, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let path = path_params.into_inner();
+    let organization_name = &path.organization_name;
+    let project_name = &path.project_name;
+    let instance_name = &path.instance_name;
+    let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let iface = nexus
+            .instance_create_network_interface(
+                &opctx,
+                &organization_name,
+                &project_name,
+                &instance_name,
+                &interface_params.into_inner(),
+            )
+            .await?;
+        Ok(HttpResponseCreated(iface.into()))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
+pub struct NetworkInterfacePathParam {
+    pub organization_name: Name,
+    pub project_name: Name,
+    pub instance_name: Name,
+    pub interface_name: Name,
+}
+
+/// Detach a network interface from an instance.
+#[endpoint {
+    method = DELETE,
+    path = "/organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/network-interfaces/{interface_name}",
+    tags = ["instances"],
+}]
+async fn instance_network_interfaces_delete_interface(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    path_params: Path<NetworkInterfacePathParam>,
+) -> Result<HttpResponseDeleted, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let path = path_params.into_inner();
+    let organization_name = &path.organization_name;
+    let project_name = &path.project_name;
+    let instance_name = &path.instance_name;
+    let interface_name = &path.interface_name;
+    let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        nexus
+            .instance_delete_network_interface(
+                &opctx,
+                organization_name,
+                project_name,
+                instance_name,
+                interface_name,
+            )
+            .await?;
+        Ok(HttpResponseDeleted())
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Get an interface attached to an instance.
+#[endpoint {
+    method = GET,
+    path = "/organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/network-interfaces/{interface_name}",
+    tags = ["instances"],
+}]
+async fn instance_network_interfaces_get_interface(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    path_params: Path<NetworkInterfacePathParam>,
+) -> Result<HttpResponseOk<NetworkInterface>, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let path = path_params.into_inner();
+    let organization_name = &path.organization_name;
+    let project_name = &path.project_name;
+    let instance_name = &path.instance_name;
+    let interface_name = &path.interface_name;
+    let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let interface = nexus
+            .instance_lookup_network_interface(
+                &opctx,
+                organization_name,
+                project_name,
+                instance_name,
+                interface_name,
+            )
+            .await?;
+        Ok(HttpResponseOk(NetworkInterface::from(interface)))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
 /*
  * VPCs
  */
@@ -1466,18 +1616,13 @@ async fn vpc_subnets_put_subnet(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/**
- * List IP addresses on a VPC subnet.
- */
-// TODO-correctness: This API has not actually been specified in an RFD yet, and
-// may not actually be what we want. It is being implemented here to give our
-// testing introspection into network interfaces.
+/// List network interfaces in a VPC subnet.
 #[endpoint {
     method = GET,
-    path = "/organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/subnets/{subnet_name}/ips",
+    path = "/organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/subnets/{subnet_name}/network-interfaces",
     tags = ["subnets"],
 }]
-async fn subnets_ips_get(
+async fn subnet_network_interfaces_get(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     query_params: Query<PaginatedByName>,
     path_params: Path<VpcSubnetPathParam>,

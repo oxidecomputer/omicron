@@ -41,6 +41,7 @@ async fn create_instance_expect_failure(
         ncpus: InstanceCpuCount(1),
         memory: ByteCount::from_mebibytes_u32(256),
         hostname: name.to_string(),
+        network_interfaces: params::InstanceNetworkInterfaceAttachment::Default,
     };
 
     NexusRequest::new(
@@ -100,10 +101,10 @@ async fn test_subnet_allocation(cptestctx: &ControlPlaneTestContext) {
     // This should fail from address exhaustion
     let error =
         create_instance_expect_failure(client, &url_instances, "i3").await;
-    assert_eq!(error.message, "no available IP addresses");
+    assert_eq!(error.message, "No available IP addresses for interface");
 
     // Verify the subnet lists the two addresses as in use
-    let url_ips = format!("{}/ips", url_subnet);
+    let url_ips = format!("{}/network-interfaces", url_subnet);
     let mut network_interfaces =
         objects_list_page_authz::<NetworkInterface>(client, &url_ips)
             .await
