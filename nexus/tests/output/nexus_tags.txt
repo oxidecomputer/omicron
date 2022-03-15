@@ -13,8 +13,12 @@ vpc_firewall_rules_put                   /organizations/{organization_name}/proj
 API operations found with tag "hidden"
 OPERATION ID                             URL PATH
 logout                                   /logout
+project_instances_migrate_instance       /organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/migrate
+sagas_get                                /sagas
+sagas_get_saga                           /sagas/{saga_id}
 session_me                               /session/me
 spoof_login                              /login
+updates_refresh                          /updates/refresh
 
 API operations found with tag "instances"
 OPERATION ID                             URL PATH
@@ -31,7 +35,6 @@ project_instances_get_instance           /organizations/{organization_name}/proj
 project_instances_instance_reboot        /organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/reboot
 project_instances_instance_start         /organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/start
 project_instances_instance_stop          /organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/stop
-project_instances_migrate_instance       /organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/migrate
 project_instances_post                   /organizations/{organization_name}/projects/{project_name}/instances
 
 API operations found with tag "metrics"
@@ -80,11 +83,6 @@ routers_routes_get_route                 /organizations/{organization_name}/proj
 routers_routes_post                      /organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/routers/{router_name}/routes
 routers_routes_put_route                 /organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/routers/{router_name}/routes/{route_name}
 
-API operations found with tag "sagas"
-OPERATION ID                             URL PATH
-sagas_get                                /sagas
-sagas_get_saga                           /sagas/{saga_id}
-
 API operations found with tag "sleds"
 OPERATION ID                             URL PATH
 hardware_sleds_get                       /hardware/sleds
@@ -105,10 +103,6 @@ vpc_subnets_get                          /organizations/{organization_name}/proj
 vpc_subnets_get_subnet                   /organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/subnets/{subnet_name}
 vpc_subnets_post                         /organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/subnets
 vpc_subnets_put_subnet                   /organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/subnets/{subnet_name}
-
-API operations found with tag "updates"
-OPERATION ID                             URL PATH
-updates_refresh                          /updates/refresh
 
 API operations found with tag "users"
 OPERATION ID                             URL PATH

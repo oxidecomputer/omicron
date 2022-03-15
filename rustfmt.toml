@@ -4,3 +4,8 @@
 max_width = 80
 use_small_heuristics = "max"
 edition = "2021"
+
+
+# Temp unstable features
+unstable_features = true
+normalize_comments = true
