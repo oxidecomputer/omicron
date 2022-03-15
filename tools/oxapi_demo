@@ -52,9 +52,9 @@ INSTANCES
     instance_list_disks  ORGANIZATION_NAME PROJECT_NAME INSTANCE_NAME
 
     instance_create_nic ORGANIZATION_NAME PROJECT_NAME INSTANCE_NAME VPC_NAME
-    SUBNET_NAME INTERFACE_NAME
-    instance_delete_nic ORGANIZATION_NAME PROJECT_NAME INTERFACE_NAME VPC_NAME
-    SUBNET_NAME INTERFACE_NAME
+        SUBNET_NAME INTERFACE_NAME
+    instance_delete_nic ORGANIZATION_NAME PROJECT_NAME INSTANCE_NAME VPC_NAME
+        SUBNET_NAME INTERFACE_NAME
     instance_list_nics ORGANIZATION_NAME PROJECT_NAME INSTANCE_NAME
     instance_get_nic ORGANIZATION_NAME PROJECT_NAME INSTANCE_NAME
 
@@ -74,8 +74,6 @@ VPC SUBNETS
 
     vpc_subnets_list ORGANIZATION_NAME PROJECT_NAME VPC_NAME
     vpc_subnet_get ORGANIZATION_NAME PROJECT_NAME VPC_NAME SUBNET_NAME
-    vpc_subnet_create_demo ORGANIZATION_NAME PROJECT_NAME VPC_NAME SUBNET_NAME
-    IPV4_NET
 
 VPC SUBNET NETWORK INTERFACES
 
@@ -380,13 +378,13 @@ function cmd_vpc_delete
 function cmd_vpc_subnets_list
 {
 	[[ $# != 3 ]] && usage "expected ORGANIZATION_NAME PROJECT_NAME VPC_NAME"
-	do_curl "/organizations/$1/projects/$2/vpcs/$3/subnets"
+	do_curl_authn "/organizations/$1/projects/$2/vpcs/$3/subnets"
 }
 
 function cmd_vpc_subnet_get
 {
 	[[ $# != 4 ]] && usage "expected ORGANIZATION_NAME PROJECT_NAME VPC_NAME SUBNET_NAME"
-	do_curl "/organizations/$1/projects/$2/vpcs/$3/subnets/$4"
+	do_curl_authn "/organizations/$1/projects/$2/vpcs/$3/subnets/$4"
 }
 
 function cmd_instance_create_nic
@@ -415,7 +413,7 @@ function cmd_instance_delete_nic
 function cmd_subnet_list_nics
 {
 	[[ $# != 4 ]] && usage "expected ORGANIZATION_NAME PROJECT_NAME VPC_NAME SUBNET_NAME"
-	do_curl "/organizations/$1/projects/$2/vpcs/$3/subnets/$4/network-interfaces"
+	do_curl_authn "/organizations/$1/projects/$2/vpcs/$3/subnets/$4/network-interfaces"
 }
 
 function cmd_instance_get_nic

@@ -363,7 +363,7 @@ impl Project {
         lookup_type: LookupType,
     ) -> ProjectChild {
         ProjectChild {
-            parent: self.clone(),
+            parent: ProjectChildKind::Direct(self.clone()),
             resource_type,
             resource_id,
             lookup_type,
@@ -425,10 +425,16 @@ impl ApiResourceError for Project {
 /// using [`Project::child_generic()`].
 #[derive(Clone, Debug)]
 pub struct ProjectChild {
-    parent: Project,
+    parent: ProjectChildKind,
     resource_type: ResourceType,
     resource_id: Uuid,
     lookup_type: LookupType,
+}
+
+#[derive(Clone, Debug)]
+enum ProjectChildKind {
+    Direct(Project),
+    Indirect(Box<ProjectChild>),
 }
 
 impl ProjectChild {
@@ -437,7 +443,32 @@ impl ProjectChild {
     }
 
     pub fn project(&self) -> &Project {
-        &self.parent
+        match &self.parent {
+            ProjectChildKind::Direct(p) => p,
+            ProjectChildKind::Indirect(p) => p.project(),
+        }
+    }
+
+    /// Returns an authz resource representing a child of this Project child.
+    ///
+    /// This is currently only used for children of Vpc, which include
+    /// VpcSubnets.
+    // TODO-cleanup It would be more type-safe to have a more explicit resource
+    // hierarchy -- i.e., Project -> Vpc -> VpcSubnet.  However, it would also
+    // mean a bunch more boilerplate and it'd be more confusing: you'd have
+    // Projects with children Vpc _or_ ProjectChild.
+    pub fn child_generic(
+        &self,
+        resource_type: ResourceType,
+        resource_id: Uuid,
+        lookup_type: LookupType,
+    ) -> ProjectChild {
+        ProjectChild {
+            parent: ProjectChildKind::Indirect(Box::new(self.clone())),
+            resource_type,
+            resource_id,
+            lookup_type,
+        }
     }
 }
 
@@ -455,7 +486,7 @@ impl oso::PolarClass for ProjectChild {
                 },
             )
             .add_attribute_getter("project", |pr: &ProjectChild| {
-                pr.parent.clone()
+                pr.project().clone()
             })
     }
 }
@@ -467,7 +498,10 @@ impl ApiResource for ProjectChild {
     }
 
     fn parent(&self) -> Option<&dyn AuthorizedResource> {
-        Some(&self.parent)
+        match &self.parent {
+            ProjectChildKind::Direct(p) => Some(p),
+            ProjectChildKind::Indirect(p) => Some(p.as_ref()),
+        }
     }
 }
 
@@ -480,3 +514,4 @@ impl ApiResourceError for ProjectChild {
 pub type Disk = ProjectChild;
 pub type Instance = ProjectChild;
 pub type Vpc = ProjectChild;
+pub type VpcSubnet = ProjectChild;

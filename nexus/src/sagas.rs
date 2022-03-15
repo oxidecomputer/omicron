@@ -115,6 +115,7 @@ async fn saga_generate_uuid<UserType: SagaType>(
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct ParamsInstanceCreate {
+    pub serialized_authn: authn::saga::Serialized,
     pub project_id: Uuid,
     pub create_params: params::InstanceCreate,
 }
@@ -263,13 +264,20 @@ async fn sic_create_custom_network_interfaces(
     }
 
     let osagactx = sagactx.user_data();
+    let datastore = osagactx.datastore();
     let saga_params = sagactx.saga_params();
+    let opctx =
+        OpContext::for_saga_action(&sagactx, &saga_params.serialized_authn);
     let instance_id = sagactx.lookup::<Uuid>("instance_id")?;
     let ids = sagactx.lookup::<Vec<Uuid>>("network_interface_ids")?;
-    let vpc = osagactx
-        .datastore()
-        .vpc_fetch_by_name(
-            &saga_params.project_id,
+    let authz_project = datastore
+        .project_lookup_by_id(saga_params.project_id)
+        .await
+        .map_err(ActionError::action_failed)?;
+    let (authz_vpc, db_vpc) = datastore
+        .vpc_fetch(
+            &opctx,
+            &authz_project,
             &db::model::Name::from(interface_params[0].vpc_name.clone()),
         )
         .await
@@ -279,7 +287,7 @@ async fn sic_create_custom_network_interfaces(
     //
     // This isn't strictly necessary, as the queries would fail below, but it's
     // easier to handle here.
-    if interface_params.iter().any(|p| p.vpc_name != vpc.name().0) {
+    if interface_params.iter().any(|p| p.vpc_name != db_vpc.name().0) {
         return Err(ActionError::action_failed(Error::invalid_request(
             "All interfaces must be in the same VPC",
         )));
@@ -288,7 +296,8 @@ async fn sic_create_custom_network_interfaces(
     let mut interfaces = Vec::with_capacity(interface_params.len());
     if ids.len() != interface_params.len() {
         return Err(ActionError::action_failed(Error::internal_error(
-            "found differing number of network interface IDs and interface parameters"
+            "found differing number of network interface IDs and interface \
+            parameters",
         )));
     }
     for (interface_id, params) in ids.into_iter().zip(interface_params.iter()) {
@@ -297,10 +306,10 @@ async fn sic_create_custom_network_interfaces(
         // should probably either be in a transaction, or the
         // `subnet_create_network_interface` function/query needs some JOIN
         // on the `vpc_subnet` table.
-        let subnet = osagactx
-            .datastore()
-            .vpc_subnet_fetch_by_name(
-                &vpc.id(),
+        let (_, db_subnet) = datastore
+            .vpc_subnet_fetch(
+                &opctx,
+                &authz_vpc,
                 &db::model::Name::from(params.subnet_name.clone()),
             )
             .await
@@ -310,17 +319,15 @@ async fn sic_create_custom_network_interfaces(
         let interface = db::model::IncompleteNetworkInterface::new(
             interface_id,
             instance_id,
-            vpc.id(),
-            subnet.clone(),
+            authz_vpc.id(),
+            db_subnet,
             mac,
             params.identity.clone(),
             params.ip,
         )
         .map_err(ActionError::action_failed)?;
-        let result = osagactx
-            .datastore()
-            .instance_create_network_interface(interface)
-            .await;
+        let result =
+            datastore.instance_create_network_interface(interface).await;
 
         use crate::db::subnet_allocation::NetworkInterfaceError;
         let interface = match result {
@@ -349,17 +356,19 @@ async fn sic_create_custom_network_interfaces(
                     "Detected duplicate primary key during saga to \
                     create network interfaces for instance '{}'. \
                     This likely occurred because \
-                    the saga action 'sic_create_custom_network_interfaces' crashed \
-                    and has been recovered.",
+                    the saga action 'sic_create_custom_network_interfaces' \
+                    crashed and has been recovered.",
                     instance_id;
                     "primary_key" => interface_id.to_string(),
                 );
 
                 // Refetch the interface itself, to serialize it for the next
                 // saga node.
-                osagactx
-                    .datastore()
-                    .instance_lookup_network_interface(&instance_id, &db::model::Name(params.identity.name.clone()))
+                datastore
+                    .instance_lookup_network_interface(
+                        &instance_id,
+                        &db::model::Name(params.identity.name.clone()),
+                    )
                     .await
             }
             Err(e) => Err(e.into_external()),
@@ -375,7 +384,10 @@ async fn sic_create_default_network_interface(
     sagactx: &ActionContext<SagaInstanceCreate>,
 ) -> Result<Option<Vec<NetworkInterface>>, ActionError> {
     let osagactx = sagactx.user_data();
+    let datastore = osagactx.datastore();
     let saga_params = sagactx.saga_params();
+    let opctx =
+        OpContext::for_saga_action(&sagactx, &saga_params.serialized_authn);
     let instance_id = sagactx.lookup::<Uuid>("instance_id")?;
     let default_name = Name::try_from("default".to_string()).unwrap();
     let internal_default_name = db::model::Name::from(default_name.clone());
@@ -391,17 +403,16 @@ async fn sic_create_default_network_interface(
         subnet_name: default_name.clone(),
         ip: None, // Request an IP address allocation
     };
-    let vpc = osagactx
-        .datastore()
-        .vpc_fetch_by_name(
-            &saga_params.project_id,
-            &internal_default_name.clone(),
-        )
+    let authz_project = datastore
+        .project_lookup_by_id(saga_params.project_id)
         .await
         .map_err(ActionError::action_failed)?;
-    let subnet = osagactx
-        .datastore()
-        .vpc_subnet_fetch_by_name(&vpc.id(), &internal_default_name)
+    let (authz_vpc, _) = datastore
+        .vpc_fetch(&opctx, &authz_project, &internal_default_name.clone())
+        .await
+        .map_err(ActionError::action_failed)?;
+    let (_, db_subnet) = datastore
+        .vpc_subnet_fetch(&opctx, &authz_vpc, &internal_default_name)
         .await
         .map_err(ActionError::action_failed)?;
 
@@ -410,15 +421,14 @@ async fn sic_create_default_network_interface(
     let interface = db::model::IncompleteNetworkInterface::new(
         interface_id,
         instance_id,
-        vpc.id(),
-        subnet.clone(),
+        authz_vpc.id(),
+        db_subnet,
         mac,
         interface_params.identity.clone(),
         interface_params.ip,
     )
     .map_err(ActionError::action_failed)?;
-    let interface = osagactx
-        .datastore()
+    let interface = datastore
         .instance_create_network_interface(interface)
         .await
         .map_err(db::subnet_allocation::NetworkInterfaceError::into_external)

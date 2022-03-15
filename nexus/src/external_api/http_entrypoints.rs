@@ -1459,8 +1459,10 @@ async fn vpc_subnets_get(
     let query = query_params.into_inner();
     let path = path_params.into_inner();
     let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
         let vpcs = nexus
             .vpc_list_subnets(
+                &opctx,
                 &path.organization_name,
                 &path.project_name,
                 &path.vpc_name,
@@ -1503,8 +1505,10 @@ async fn vpc_subnets_get_subnet(
     let nexus = &apictx.nexus;
     let path = path_params.into_inner();
     let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
         let subnet = nexus
-            .vpc_lookup_subnet(
+            .vpc_subnet_fetch(
+                &opctx,
                 &path.organization_name,
                 &path.project_name,
                 &path.vpc_name,
@@ -1533,8 +1537,10 @@ async fn vpc_subnets_post(
     let nexus = &apictx.nexus;
     let path = path_params.into_inner();
     let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
         let subnet = nexus
             .vpc_create_subnet(
+                &opctx,
                 &path.organization_name,
                 &path.project_name,
                 &path.vpc_name,
@@ -1562,8 +1568,10 @@ async fn vpc_subnets_delete_subnet(
     let nexus = &apictx.nexus;
     let path = path_params.into_inner();
     let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
         nexus
             .vpc_delete_subnet(
+                &opctx,
                 &path.organization_name,
                 &path.project_name,
                 &path.vpc_name,
@@ -1587,13 +1595,15 @@ async fn vpc_subnets_put_subnet(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<VpcSubnetPathParam>,
     subnet_params: TypedBody<params::VpcSubnetUpdate>,
-) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+) -> Result<HttpResponseOk<VpcSubnet>, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
     let path = path_params.into_inner();
     let handler = async {
-        nexus
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let subnet = nexus
             .vpc_update_subnet(
+                &opctx,
                 &path.organization_name,
                 &path.project_name,
                 &path.vpc_name,
@@ -1601,7 +1611,7 @@ async fn vpc_subnets_put_subnet(
                 &subnet_params.into_inner(),
             )
             .await?;
-        Ok(HttpResponseUpdatedNoContent())
+        Ok(HttpResponseOk(subnet.into()))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
@@ -1622,8 +1632,10 @@ async fn subnet_network_interfaces_get(
     let query = query_params.into_inner();
     let path = path_params.into_inner();
     let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
         let interfaces = nexus
             .subnet_list_network_interfaces(
+                &opctx,
                 &path.organization_name,
                 &path.project_name,
                 &path.vpc_name,

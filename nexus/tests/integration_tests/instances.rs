@@ -11,6 +11,7 @@ use http::StatusCode;
 use nexus_test_utils::http_testing::AuthnMode;
 use nexus_test_utils::http_testing::NexusRequest;
 use nexus_test_utils::http_testing::RequestBuilder;
+use nexus_test_utils::resource_helpers::objects_list_page_authz;
 use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::Instance;
@@ -26,7 +27,6 @@ use std::convert::TryFrom;
 use std::sync::Arc;
 use uuid::Uuid;
 
-use dropshot::test_util::objects_list_page;
 use dropshot::test_util::ClientTestContext;
 use dropshot::HttpErrorResponseBody;
 
@@ -173,7 +173,9 @@ async fn test_instances_create_reboot_halt(
         ORGANIZATION_NAME, PROJECT_NAME
     );
     let network_interfaces =
-        objects_list_page::<NetworkInterface>(client, &ips_url).await.items;
+        objects_list_page_authz::<NetworkInterface>(client, &ips_url)
+            .await
+            .items;
     assert_eq!(network_interfaces.len(), 1);
     assert_eq!(network_interfaces[0].instance_id, instance.identity.id);
     assert_eq!(network_interfaces[0].identity.name, "default");

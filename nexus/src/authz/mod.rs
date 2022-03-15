@@ -171,6 +171,7 @@ pub use api_resources::Instance;
 pub use api_resources::Organization;
 pub use api_resources::Project;
 pub use api_resources::Vpc;
+pub use api_resources::VpcSubnet;
 pub use api_resources::FLEET;
 
 mod context;
