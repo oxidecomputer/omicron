@@ -794,12 +794,11 @@ impl Nexus {
         Ok(())
     }
 
-    pub async fn disk_create_snapshot(
+    pub async fn project_create_snapshot(
         self: &Arc<Self>,
         _opctx: &OpContext,
         _organization_name: &Name,
         _project_name: &Name,
-        _disk_name: &Name,
         _params: &params::SnapshotCreate,
     ) -> CreateResult<db::model::Snapshot> {
         unimplemented!();

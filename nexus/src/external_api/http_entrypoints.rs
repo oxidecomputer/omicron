@@ -91,7 +91,6 @@ pub fn external_api() -> NexusApiDescription {
         api.register(project_disks_post)?;
         api.register(project_disks_get_disk)?;
         api.register(project_disks_delete_disk)?;
-        api.register(project_disks_snapshot_post)?;
 
         api.register(project_instances_get)?;
         api.register(project_instances_post)?;
@@ -107,6 +106,7 @@ pub fn external_api() -> NexusApiDescription {
         api.register(instance_disks_detach)?;
 
         api.register(project_snapshots_get)?;
+        api.register(project_snapshots_post)?;
         api.register(project_snapshots_get_snapshot)?;
         api.register(project_snapshots_delete_snapshot)?;
 
@@ -721,40 +721,6 @@ async fn project_disks_delete_disk(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Create a snapshot of a disk.
-#[endpoint {
-    method = POST,
-    path = "/organizations/{organization_name}/projects/{project_name}/disks/{disk_name}/snapshot",
-    tags = ["snapshots"],
-}]
-async fn project_disks_snapshot_post(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
-    path_params: Path<DiskPathParam>,
-    new_snapshot: TypedBody<params::SnapshotCreate>,
-) -> Result<HttpResponseCreated<Snapshot>, HttpError> {
-    let apictx = rqctx.context();
-    let nexus = &apictx.nexus;
-    let path = path_params.into_inner();
-    let organization_name = &path.organization_name;
-    let project_name = &path.project_name;
-    let disk_name = &path.disk_name;
-    let new_snapshot_params = &new_snapshot.into_inner();
-    let handler = async {
-        let opctx = OpContext::for_external_api(&rqctx).await?;
-        let snapshot = nexus
-            .disk_create_snapshot(
-                &opctx,
-                &organization_name,
-                &project_name,
-                &disk_name,
-                &new_snapshot_params,
-            )
-            .await?;
-        Ok(HttpResponseCreated(snapshot.into()))
-    };
-    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
-}
-
 /*
  * Instances
  */
@@ -1338,6 +1304,38 @@ async fn project_snapshots_get(
             .map(|d| d.into())
             .collect();
         Ok(HttpResponseOk(ScanByName::results_page(&query, snapshots)?))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Create a snapshot of a disk.
+#[endpoint {
+    method = POST,
+    path = "/organizations/{organization_name}/projects/{project_name}/snapshot",
+    tags = ["snapshots"],
+}]
+async fn project_snapshots_post(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    path_params: Path<ProjectPathParam>,
+    new_snapshot: TypedBody<params::SnapshotCreate>,
+) -> Result<HttpResponseCreated<Snapshot>, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let path = path_params.into_inner();
+    let organization_name = &path.organization_name;
+    let project_name = &path.project_name;
+    let new_snapshot_params = &new_snapshot.into_inner();
+    let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let snapshot = nexus
+            .project_create_snapshot(
+                &opctx,
+                &organization_name,
+                &project_name,
+                &new_snapshot_params,
+            )
+            .await?;
+        Ok(HttpResponseCreated(snapshot.into()))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
