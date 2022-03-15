@@ -10,10 +10,6 @@ crossbeam = "0.8"
 flate2 = "1.0.22"
 omicron-common = { path = "../common" }
 omicron-zone-package = { version = "0.1.2" }
-# We depend on the propolis-server here -- a binary, not a library -- to
-# make it visible to the packaging tool, which can compile it and shove
-# it in a tarball.
-propolis-server = { git = "https://github.com/oxidecomputer/propolis", rev = "0e3798510ae190131f63b9df767ec01b2beacf91" }
 rayon = "1.5"
 reqwest = { version = "0.11", default-features = false, features = ["rustls-tls"] }
 serde = { version = "1.0", features = [ "derive" ] }
