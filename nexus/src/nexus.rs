@@ -13,6 +13,7 @@ use crate::db::identity::{Asset, Resource};
 use crate::db::model::DatasetKind;
 use crate::db::model::Name;
 use crate::db::model::VpcRouter;
+use crate::db::model::VpcRouterKind;
 use crate::db::model::VpcSubnet;
 use crate::db::subnet_allocation::NetworkInterfaceError;
 use crate::db::subnet_allocation::SubnetError;
@@ -1712,7 +1713,7 @@ impl Nexus {
         let router = db::model::VpcRouter::new(
             system_router_id,
             vpc_id,
-            db::model::VpcRouterKind::System,
+            VpcRouterKind::System,
             params::VpcRouterCreate {
                 identity: IdentityMetadataCreateParams {
                     name: "system".parse().unwrap(),
@@ -2237,7 +2238,7 @@ impl Nexus {
         organization_name: &Name,
         project_name: &Name,
         vpc_name: &Name,
-        kind: &db::model::VpcRouterKind,
+        kind: &VpcRouterKind,
         params: &params::VpcRouterCreate,
     ) -> CreateResult<db::model::VpcRouter> {
         let authz_vpc = self
@@ -2281,7 +2282,7 @@ impl Nexus {
         // database query?  This shouldn't affect correctness, assuming that a
         // router kind cannot be changed, but it might be able to save us a
         // database round-trip.
-        if db_router.kind == db::model::VpcRouterKind::System {
+        if db_router.kind == VpcRouterKind::System {
             return Err(Error::MethodNotAllowed {
                 internal_message: "Cannot delete system router".to_string(),
             });
