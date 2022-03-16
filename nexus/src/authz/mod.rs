@@ -167,6 +167,7 @@ pub use api_resources::Disk;
 pub use api_resources::Fleet;
 pub use api_resources::FleetChild;
 pub use api_resources::Instance;
+pub use api_resources::NetworkInterface;
 pub use api_resources::Organization;
 pub use api_resources::Project;
 pub use api_resources::Vpc;

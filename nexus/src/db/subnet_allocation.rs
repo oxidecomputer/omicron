@@ -1134,6 +1134,7 @@ impl QueryFragment<Pg> for InsertNetworkInterfaceQueryValues {
 mod test {
     use super::NetworkInterfaceError;
     use super::SubnetError;
+    use crate::context::OpContext;
     use crate::db::model::{
         self, IncompleteNetworkInterface, NetworkInterface, VpcSubnet,
     };
@@ -1298,6 +1299,7 @@ mod test {
         let pool = Arc::new(crate::db::Pool::new(&cfg));
         let db_datastore =
             Arc::new(crate::db::DataStore::new(Arc::clone(&pool)));
+        let opctx = OpContext::for_tests(log.new(o!()), db_datastore.clone());
 
         // Two test VpcSubnets, in different VPCs. The IPv4 range has space for
         // 16 addresses, less the 6 that are reserved.
@@ -1352,7 +1354,7 @@ mod test {
         )
         .unwrap();
         let inserted_interface = db_datastore
-            .instance_create_network_interface(interface.clone())
+            .instance_create_network_interface_raw(&opctx, interface.clone())
             .await
             .expect("Failed to insert interface with known-good IP address");
         assert_interfaces_eq(&interface, &inserted_interface);
@@ -1380,7 +1382,7 @@ mod test {
         )
         .unwrap();
         let inserted_interface = db_datastore
-            .instance_create_network_interface(interface.clone())
+            .instance_create_network_interface_raw(&opctx, interface.clone())
             .await
             .expect("Failed to insert interface with known-good IP address");
         assert_interfaces_eq(&interface, &inserted_interface);
@@ -1404,8 +1406,9 @@ mod test {
             Some(requested_ip),
         )
         .unwrap();
-        let result =
-            db_datastore.instance_create_network_interface(interface).await;
+        let result = db_datastore
+            .instance_create_network_interface_raw(&opctx, interface)
+            .await;
         assert!(
             matches!(
                 result,
@@ -1429,8 +1432,9 @@ mod test {
             None,
         )
         .unwrap();
-        let result =
-            db_datastore.instance_create_network_interface(interface).await;
+        let result = db_datastore
+            .instance_create_network_interface_raw(&opctx, interface)
+            .await;
         assert!(
             matches!(
                 result,
@@ -1455,8 +1459,9 @@ mod test {
                 addr,
             )
             .unwrap();
-            let result =
-                db_datastore.instance_create_network_interface(interface).await;
+            let result = db_datastore
+                .instance_create_network_interface_raw(&opctx, interface)
+                .await;
             assert!(
                 matches!(result, Err(NetworkInterfaceError::InstanceSpansMultipleVpcs(_))),
                 "Attaching an interface to an instance which already has one in a different VPC should fail"
@@ -1481,8 +1486,9 @@ mod test {
                 None,
             )
             .unwrap();
-            let result =
-                db_datastore.instance_create_network_interface(interface).await;
+            let result = db_datastore
+                .instance_create_network_interface_raw(&opctx, interface)
+                .await;
             assert!(
                 result.is_ok(),
                 "We should be able to allocate 8 more interfaces successfully",
@@ -1501,8 +1507,9 @@ mod test {
             None,
         )
         .unwrap();
-        let result =
-            db_datastore.instance_create_network_interface(interface).await;
+        let result = db_datastore
+            .instance_create_network_interface_raw(&opctx, interface)
+            .await;
         assert!(
             matches!(
                 result,
@@ -1528,8 +1535,9 @@ mod test {
                 None,
             )
             .unwrap();
-            let result =
-                db_datastore.instance_create_network_interface(interface).await;
+            let result = db_datastore
+                .instance_create_network_interface_raw(&opctx, interface)
+                .await;
             assert!(
                 result.is_ok(),
                 concat!(
@@ -1577,6 +1585,7 @@ mod test {
         let pool = Arc::new(crate::db::Pool::new(&cfg));
         let db_datastore =
             Arc::new(crate::db::DataStore::new(Arc::clone(&pool)));
+        let opctx = OpContext::for_tests(log.new(o!()), db_datastore.clone());
         let ipv4_block = Ipv4Net("172.30.0.0/28".parse().unwrap());
         let ipv6_block = Ipv6Net("fd12:3456:7890::/64".parse().unwrap());
         let subnet_name = "subnet-a".to_string().try_into().unwrap();
@@ -1610,13 +1619,13 @@ mod test {
         )
         .unwrap();
         let inserted_interface = db_datastore
-            .instance_create_network_interface(interface.clone())
+            .instance_create_network_interface_raw(&opctx, interface.clone())
             .await
             .expect("Failed to insert interface with known-good IP address");
 
         // Attempt to insert the exact same record again.
         let result = db_datastore
-            .instance_create_network_interface(interface.clone())
+            .instance_create_network_interface_raw(&opctx, interface.clone())
             .await;
         if let Err(NetworkInterfaceError::DuplicatePrimaryKey(key)) = result {
             assert_eq!(key, inserted_interface.identity.id);

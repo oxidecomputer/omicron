@@ -1514,9 +1514,8 @@ impl Nexus {
                 instance_name,
             )
             .await?;
-        opctx.authorize(authz::Action::ListChildren, &authz_instance).await?;
         self.db_datastore
-            .instance_list_network_interfaces(&authz_instance.id(), pagparams)
+            .instance_list_network_interfaces(opctx, &authz_instance, pagparams)
             .await
     }
 
@@ -1540,9 +1539,15 @@ impl Nexus {
             .db_datastore
             .instance_fetch(opctx, &authz_project, instance_name)
             .await?;
-        opctx.authorize(authz::Action::Modify, &authz_instance).await?;
 
-        // TODO-completeness: We'd like to relax this once hot-plug is supported
+        // TODO-completeness: We'd like to relax this once hot-plug is
+        // supported.
+        //
+        // TODO-correctness: There's a TOCTOU race here. Someone might start the
+        // instance between this check and when we actually create the NIC
+        // record. One solution is to place the state verification in the query
+        // to create the NIC. Unfortunately, that query is already very
+        // complicated.
         let stopped =
             db::model::InstanceState::new(external::InstanceState::Stopped);
         if db_instance.runtime_state.state != stopped {
@@ -1559,7 +1564,7 @@ impl Nexus {
             .db_datastore
             .vpc_fetch(opctx, &authz_project, &vpc_name)
             .await?;
-        let (_, db_subnet) = self
+        let (authz_subnet, db_subnet) = self
             .db_datastore
             .vpc_subnet_fetch(opctx, &authz_vpc, &subnet_name)
             .await?;
@@ -1576,7 +1581,12 @@ impl Nexus {
         )?;
         let interface = self
             .db_datastore
-            .instance_create_network_interface(interface)
+            .instance_create_network_interface(
+                opctx,
+                &authz_subnet,
+                &authz_instance,
+                interface,
+            )
             .await
             .map_err(NetworkInterfaceError::into_external)?;
         Ok(interface)
@@ -1609,20 +1619,12 @@ impl Nexus {
                 "Instance must be stopped to detach a network interface",
             ));
         }
-        // TODO-cleanup: It's annoying that we need to look up the interface by
-        // name, which gets a single record, and then soft-delete that one
-        // record. We should be able to do both at once, but the
-        // `update_and_check` tools only operate on the primary key. That means
-        // we need to fetch the whole record first.
-        let interface = self
-            .db_datastore
-            .instance_lookup_network_interface(
-                &authz_instance.id(),
+        self.db_datastore
+            .instance_delete_network_interface(
+                opctx,
+                &authz_instance,
                 interface_name,
             )
-            .await?;
-        self.db_datastore
-            .instance_delete_network_interface(&interface.id())
             .await
     }
 
@@ -1643,10 +1645,10 @@ impl Nexus {
                 instance_name,
             )
             .await?;
-        opctx.authorize(authz::Action::ListChildren, &authz_instance).await?;
         self.db_datastore
             .instance_lookup_network_interface(
-                &authz_instance.id(),
+                opctx,
+                &authz_instance,
                 interface_name,
             )
             .await

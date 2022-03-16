@@ -515,3 +515,4 @@ pub type Disk = ProjectChild;
 pub type Instance = ProjectChild;
 pub type Vpc = ProjectChild;
 pub type VpcSubnet = ProjectChild;
+pub type NetworkInterface = ProjectChild;

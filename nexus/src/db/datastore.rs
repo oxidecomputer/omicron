@@ -1676,8 +1676,29 @@ impl DataStore {
     }
 
     // Network interfaces
+
+    /// Create a network interface attached to the provided instance.
     pub async fn instance_create_network_interface(
         &self,
+        opctx: &OpContext,
+        authz_subnet: &authz::VpcSubnet,
+        authz_instance: &authz::Instance,
+        interface: IncompleteNetworkInterface,
+    ) -> Result<NetworkInterface, NetworkInterfaceError> {
+        opctx
+            .authorize(authz::Action::Modify, authz_instance)
+            .await
+            .map_err(NetworkInterfaceError::External)?;
+        opctx
+            .authorize(authz::Action::CreateChild, authz_subnet)
+            .await
+            .map_err(NetworkInterfaceError::External)?;
+        self.instance_create_network_interface_raw(&opctx, interface).await
+    }
+
+    pub(super) async fn instance_create_network_interface_raw(
+        &self,
+        opctx: &OpContext,
         interface: IncompleteNetworkInterface,
     ) -> Result<NetworkInterface, NetworkInterfaceError> {
         use db::schema::network_interface::dsl;
@@ -1688,7 +1709,11 @@ impl DataStore {
         diesel::insert_into(dsl::network_interface)
             .values(query)
             .returning(NetworkInterface::as_returning())
-            .get_result_async(self.pool())
+            .get_result_async(
+                self.pool_authorized(opctx)
+                    .await
+                    .map_err(NetworkInterfaceError::External)?,
+            )
             .await
             .map_err(|e| NetworkInterfaceError::from_pool(e, &interface))
     }
@@ -1720,82 +1745,111 @@ impl DataStore {
         Ok(())
     }
 
-    pub async fn instance_delete_network_interface(
+    /// Fetches a `NetworkInterface` from the database and returns both the
+    /// database row and an [`authz::NetworkInterface`] for doing authz checks.
+    ///
+    /// See [`DataStore::organization_lookup_noauthz()`] for intended use cases
+    /// and caveats.
+    // TODO-security See the note on organization_lookup_noauthz().
+    async fn network_interface_lookup_noauthz(
         &self,
-        interface_id: &Uuid,
-    ) -> DeleteResult {
-        use db::schema::network_interface::dsl;
-        let now = Utc::now();
-        let result = diesel::update(dsl::network_interface)
-            .filter(dsl::id.eq(*interface_id))
-            .filter(dsl::time_deleted.is_null())
-            .set((dsl::time_deleted.eq(now),))
-            .check_if_exists::<db::model::NetworkInterface>(*interface_id)
-            .execute_and_check(self.pool())
-            .await
-            .map_err(|e| {
-                public_error_from_diesel_pool(
-                    e,
-                    ErrorHandler::NotFoundByLookup(
-                        ResourceType::NetworkInterface,
-                        LookupType::ById(*interface_id),
-                    ),
-                )
-            })?;
-        match result.status {
-            UpdateStatus::Updated => Ok(()),
-            UpdateStatus::NotUpdatedButExists => {
-                let interface = &result.found;
-                if interface.time_deleted().is_some() {
-                    // Already deleted
-                    Ok(())
-                } else {
-                    Err(Error::internal_error(&format!(
-                        "failed to delete network interface: {}",
-                        interface_id
-                    )))
-                }
-            }
-        }
-    }
-
-    pub async fn subnet_lookup_network_interface(
-        &self,
-        subnet_id: &Uuid,
+        authz_instance: &authz::Instance,
         interface_name: &Name,
-    ) -> LookupResult<db::model::NetworkInterface> {
+    ) -> LookupResult<(authz::NetworkInterface, NetworkInterface)> {
         use db::schema::network_interface::dsl;
-
         dsl::network_interface
-            .filter(dsl::subnet_id.eq(*subnet_id))
             .filter(dsl::time_deleted.is_null())
+            .filter(dsl::instance_id.eq(authz_instance.id()))
             .filter(dsl::name.eq(interface_name.clone()))
-            .select(db::model::NetworkInterface::as_select())
-            .get_result_async(self.pool())
+            .select(NetworkInterface::as_select())
+            .first_async(self.pool())
             .await
             .map_err(|e| {
                 public_error_from_diesel_pool(
                     e,
                     ErrorHandler::NotFoundByLookup(
                         ResourceType::NetworkInterface,
-                        LookupType::ByName(interface_name.to_string()),
+                        LookupType::ByName(interface_name.as_str().to_owned()),
                     ),
                 )
             })
+            .map(|d| {
+                (
+                    authz_instance.child_generic(
+                        ResourceType::NetworkInterface,
+                        d.id(),
+                        LookupType::from(&interface_name.0),
+                    ),
+                    d,
+                )
+            })
+    }
+
+    /// Lookup a `NetworkInterface` by name and return the full database record,
+    /// along with an [`authz::NetworkInterface`] for subsequent authorization
+    /// checks.
+    pub async fn network_interface_fetch(
+        &self,
+        opctx: &OpContext,
+        authz_instance: &authz::Instance,
+        name: &Name,
+    ) -> LookupResult<(authz::NetworkInterface, NetworkInterface)> {
+        let (authz_interface, db_interface) =
+            self.network_interface_lookup_noauthz(authz_instance, name).await?;
+        opctx.authorize(authz::Action::Read, &authz_interface).await?;
+        Ok((authz_interface, db_interface))
+    }
+
+    /// Delete a `NetworkInterface` attached to a provided instance.
+    pub async fn instance_delete_network_interface(
+        &self,
+        opctx: &OpContext,
+        authz_instance: &authz::Instance,
+        interface_name: &Name,
+    ) -> DeleteResult {
+        opctx.authorize(authz::Action::Modify, authz_instance).await?;
+
+        let (authz_interface, _) = self
+            .network_interface_fetch(opctx, &authz_instance, interface_name)
+            .await?;
+        opctx.authorize(authz::Action::Delete, &authz_interface).await?;
+
+        use db::schema::network_interface::dsl;
+        let now = Utc::now();
+        let interface_id = authz_interface.id();
+        diesel::update(dsl::network_interface)
+            .filter(dsl::id.eq(interface_id))
+            .filter(dsl::time_deleted.is_null())
+            .set((dsl::time_deleted.eq(now),))
+            .execute_async(self.pool_authorized(opctx).await?)
+            .await
+            .map_err(|e| {
+                public_error_from_diesel_pool(
+                    e,
+                    ErrorHandler::NotFoundByLookup(
+                        ResourceType::NetworkInterface,
+                        LookupType::ById(interface_id),
+                    ),
+                )
+            })?;
+        Ok(())
     }
 
     /// List network interfaces associated with a given instance.
     pub async fn instance_list_network_interfaces(
         &self,
-        instance_id: &Uuid,
+        opctx: &OpContext,
+        authz_instance: &authz::Instance,
         pagparams: &DataPageParams<'_, Name>,
     ) -> ListResultVec<NetworkInterface> {
+        opctx.authorize(authz::Action::ListChildren, authz_instance).await?;
+
         use db::schema::network_interface::dsl;
         paginated(dsl::network_interface, dsl::name, &pagparams)
             .filter(dsl::time_deleted.is_null())
-            .filter(dsl::instance_id.eq(*instance_id))
+            .filter(dsl::instance_id.eq(authz_instance.id()))
             .select(NetworkInterface::as_select())
-            .load_async::<NetworkInterface>(self.pool())
+            .load_async::<NetworkInterface>(self.pool_authorized(opctx).await?)
             .await
             .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
     }
@@ -1803,26 +1857,14 @@ impl DataStore {
     /// Get a network interface by name attached to an instance
     pub async fn instance_lookup_network_interface(
         &self,
-        instance_id: &Uuid,
+        opctx: &OpContext,
+        authz_instance: &authz::Instance,
         interface_name: &Name,
     ) -> LookupResult<NetworkInterface> {
-        use db::schema::network_interface::dsl;
-        dsl::network_interface
-            .filter(dsl::instance_id.eq(*instance_id))
-            .filter(dsl::name.eq(interface_name.clone()))
-            .filter(dsl::time_deleted.is_null())
-            .select(NetworkInterface::as_select())
-            .get_result_async(self.pool())
-            .await
-            .map_err(|e| {
-                public_error_from_diesel_pool(
-                    e,
-                    ErrorHandler::NotFoundByLookup(
-                        ResourceType::NetworkInterface,
-                        LookupType::ByName(interface_name.to_string()),
-                    ),
-                )
-            })
+        Ok(self
+            .network_interface_fetch(opctx, &authz_instance, interface_name)
+            .await?
+            .1)
     }
 
     // Create a record for a new Oximeter instance
