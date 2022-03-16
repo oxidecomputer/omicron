@@ -1686,7 +1686,7 @@ impl DataStore {
         interface: IncompleteNetworkInterface,
     ) -> Result<NetworkInterface, NetworkInterfaceError> {
         opctx
-            .authorize(authz::Action::Modify, authz_instance)
+            .authorize(authz::Action::CreateChild, authz_instance)
             .await
             .map_err(NetworkInterfaceError::External)?;
         opctx
@@ -1807,8 +1807,6 @@ impl DataStore {
         authz_instance: &authz::Instance,
         interface_name: &Name,
     ) -> DeleteResult {
-        opctx.authorize(authz::Action::Modify, authz_instance).await?;
-
         let (authz_interface, _) = self
             .network_interface_fetch(opctx, &authz_instance, interface_name)
             .await?;
