@@ -6666,7 +6666,7 @@
         ]
       },
       "VpcRouterCreate": {
-        "description": "Create-time parameters for a [`VpcRouter`](omicron_common::api::external::VpcRouter)",
+        "description": "Create-time parameters for a [`VpcRouter`](crate::external_api::views::VpcRouter)",
         "type": "object",
         "properties": {
           "description": {
@@ -6710,7 +6710,7 @@
         ]
       },
       "VpcRouterUpdate": {
-        "description": "Updateable properties of a [`VpcRouter`](omicron_common::api::external::VpcRouter)",
+        "description": "Updateable properties of a [`VpcRouter`](crate::external_api::views::VpcRouter)",
         "type": "object",
         "properties": {
           "description": {

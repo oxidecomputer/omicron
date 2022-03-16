@@ -6,9 +6,8 @@ use http::method::Method;
 use http::StatusCode;
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::IdentityMetadataUpdateParams;
-use omicron_common::api::external::VpcRouter;
-use omicron_common::api::external::VpcRouterKind;
 use omicron_nexus::external_api::params;
+use omicron_nexus::external_api::views::{VpcRouter, VpcRouterKind};
 
 use dropshot::test_util::object_get;
 use dropshot::test_util::objects_list_page;

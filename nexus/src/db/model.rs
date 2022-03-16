@@ -1689,25 +1689,6 @@ impl DatastoreCollection<RouterRoute> for VpcRouter {
     type CollectionIdColumn = router_route::dsl::router_id;
 }
 
-impl Into<external::VpcRouterKind> for VpcRouterKind {
-    fn into(self) -> external::VpcRouterKind {
-        match self {
-            VpcRouterKind::Custom => external::VpcRouterKind::Custom,
-            VpcRouterKind::System => external::VpcRouterKind::System,
-        }
-    }
-}
-
-impl Into<external::VpcRouter> for VpcRouter {
-    fn into(self) -> external::VpcRouter {
-        external::VpcRouter {
-            identity: self.identity(),
-            vpc_id: self.vpc_id,
-            kind: self.kind.into(),
-        }
-    }
-}
-
 #[derive(AsChangeset)]
 #[table_name = "vpc_router"]
 pub struct VpcRouterUpdate {
