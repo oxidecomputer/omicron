@@ -136,11 +136,11 @@ pub enum VpcRouterKind {
     Custom,
 }
 
-impl Into<VpcRouterKind> for model::VpcRouterKind {
-    fn into(self) -> VpcRouterKind {
-        match self {
-            model::VpcRouterKind::Custom => VpcRouterKind::Custom,
-            model::VpcRouterKind::System => VpcRouterKind::System,
+impl From<model::VpcRouterKind> for VpcRouterKind {
+    fn from(k: model::VpcRouterKind) -> Self {
+        match k {
+            model::VpcRouterKind::Custom => Self::Custom,
+            model::VpcRouterKind::System => Self::System,
         }
     }
 }
@@ -159,13 +159,9 @@ pub struct VpcRouter {
     pub vpc_id: Uuid,
 }
 
-impl Into<VpcRouter> for model::VpcRouter {
-    fn into(self) -> VpcRouter {
-        VpcRouter {
-            identity: self.identity(),
-            vpc_id: self.vpc_id,
-            kind: self.kind.into(),
-        }
+impl From<model::VpcRouter> for VpcRouter {
+    fn from(r: model::VpcRouter) -> Self {
+        Self { identity: r.identity(), vpc_id: r.vpc_id, kind: r.kind.into() }
     }
 }
 
