@@ -4,6 +4,7 @@
 
 use super::{Generation, Ipv6Net, Name, VpcFirewallRule};
 use crate::db::collection_insert::DatastoreCollection;
+use crate::db::model::Vni;
 use crate::db::schema::{vpc, vpc_firewall_rule};
 use crate::defaults;
 use crate::external_api::params;
@@ -20,6 +21,7 @@ pub struct Vpc {
 
     pub project_id: Uuid,
     pub system_router_id: Uuid,
+    pub vni: Vni,
     pub ipv6_prefix: Ipv6Net,
     pub dns_name: Name,
 
@@ -54,6 +56,7 @@ impl Vpc {
             identity,
             project_id,
             system_router_id,
+            vni: Vni(external::Vni::random()),
             ipv6_prefix,
             dns_name: params.dns_name.into(),
             firewall_gen: Generation::new(),

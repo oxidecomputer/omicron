@@ -592,6 +592,13 @@ CREATE TABLE omicron.public.vpc (
     system_router_id UUID NOT NULL,
     dns_name STRING(63) NOT NULL,
 
+    /*
+     * The Geneve Virtual Network Identifier for this VPC. Note that this is a
+     * 24-bit unsigned value, properties which are checked in the application,
+     * not the database.
+     */
+    vni INT4 NOT NULL,
+
     /* The IPv6 prefix allocated to subnets. */
     ipv6_prefix INET NOT NULL,
 
@@ -603,6 +610,11 @@ CREATE TABLE omicron.public.vpc (
 CREATE UNIQUE INDEX ON omicron.public.vpc (
     project_id,
     name
+) WHERE
+    time_deleted IS NULL;
+
+CREATE UNIQUE INDEX ON omicron.public.vpc (
+    vni
 ) WHERE
     time_deleted IS NULL;
 

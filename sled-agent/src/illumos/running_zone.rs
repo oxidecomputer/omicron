@@ -8,6 +8,7 @@ use crate::illumos::addrobj::AddrObject;
 use crate::illumos::svc::wait_for_service;
 use crate::illumos::vnic::{Vnic, VnicAllocator};
 use crate::illumos::zone::{AddressRequest, ZONE_PREFIX};
+use crate::opte::OptePort;
 use ipnetwork::IpNetwork;
 use slog::Logger;
 use std::path::PathBuf;
@@ -228,13 +229,13 @@ impl RunningZone {
                 // TODO(https://github.com/oxidecomputer/omicron/issues/725)
                 //
                 // Re-initialize guest_vnic state by inspecting the zone.
-                guest_vnics: vec![],
+                opte_ports: vec![],
             },
         })
     }
 
-    pub fn get_guest_vnics(&self) -> &Vec<Vnic> {
-        &self.inner.guest_vnics
+    pub fn get_opte_ports(&self) -> &Vec<OptePort> {
+        &self.inner.opte_ports
     }
 }
 
@@ -279,8 +280,8 @@ pub struct InstalledZone {
     // NIC used for control plane communication.
     control_vnic: Vnic,
 
-    // Other NICs being used by the zone.
-    guest_vnics: Vec<Vnic>,
+    // OPTE devices for the guest network interfaces
+    opte_ports: Vec<OptePort>,
 }
 
 impl InstalledZone {
@@ -312,7 +313,7 @@ impl InstalledZone {
         unique_name: Option<&str>,
         datasets: &[zone::Dataset],
         devices: &[zone::Device],
-        vnics: Vec<Vnic>,
+        opte_ports: Vec<OptePort>,
     ) -> Result<InstalledZone, InstallZoneError> {
         let control_vnic = vnic_allocator.new_control(None).map_err(|err| {
             InstallZoneError::CreateVnic {
@@ -325,9 +326,9 @@ impl InstalledZone {
         let zone_image_path =
             PathBuf::from(&format!("/opt/oxide/{}.tar.gz", service_name));
 
-        let vnic_names: Vec<String> = vnics
+        let net_device_names: Vec<String> = opte_ports
             .iter()
-            .map(|vnic| vnic.name().to_string())
+            .map(|port| port.vnic().name().to_string())
             .chain(std::iter::once(control_vnic.name().to_string()))
             .collect();
 
@@ -337,7 +338,7 @@ impl InstalledZone {
             &zone_image_path,
             &datasets,
             &devices,
-            vnic_names,
+            net_device_names,
         )
         .map_err(|err| InstallZoneError::InstallZone {
             zone: zone_name.to_string(),
@@ -349,7 +350,7 @@ impl InstalledZone {
             log: log.new(o!("zone" => zone_name.clone())),
             name: zone_name,
             control_vnic,
-            guest_vnics: vnics,
+            opte_ports,
         })
     }
 }

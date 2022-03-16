@@ -4,7 +4,6 @@
 
 //! API for controlling a single instance.
 
-use crate::common::vlan::VlanID;
 use crate::illumos::dladm::{
     CreateVnicError, DeleteVnicError, PhysicalLink, VNIC_PREFIX,
     VNIC_PREFIX_CONTROL,
@@ -48,19 +47,6 @@ impl VnicAllocator {
             scope: scope.as_ref().to_string(),
             data_link: physical_link,
         }
-    }
-
-    /// Creates a new NIC, intended for usage by the guest.
-    pub fn new_guest(
-        &self,
-        mac: Option<MacAddr>,
-        vlan: Option<VlanID>,
-    ) -> Result<Vnic, CreateVnicError> {
-        let allocator = self.new_superscope("Guest");
-        let name = allocator.next();
-        debug_assert!(name.starts_with(VNIC_PREFIX));
-        Dladm::create_vnic(&self.data_link, &name, mac, vlan)?;
-        Ok(Vnic { name, deleted: false })
     }
 
     /// Creates a new NIC, intended for allowing Propolis to communicate
@@ -110,8 +96,8 @@ pub struct Vnic {
 
 impl Vnic {
     /// Takes ownership of an existing VNIC.
-    pub fn wrap_existing(name: String) -> Self {
-        Vnic { name, deleted: false }
+    pub fn wrap_existing<S: AsRef<str>>(name: S) -> Self {
+        Vnic { name: name.as_ref().to_owned(), deleted: false }
     }
 
     /// Deletes a NIC (if it has not already been deleted).
