@@ -514,4 +514,5 @@ impl ApiResourceError for ProjectChild {
 pub type Disk = ProjectChild;
 pub type Instance = ProjectChild;
 pub type Vpc = ProjectChild;
+pub type VpcRouter = ProjectChild;
 pub type VpcSubnet = ProjectChild;
