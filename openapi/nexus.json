@@ -2466,7 +2466,7 @@
           "vpcs"
         ],
         "summary": "Delete a VPC",
-        "description": "Permanently delete a VPC from a project. This operation cannot be undone. Any subnets or other resources in the VPC will be deleted as well.",
+        "description": "Permanently delete a VPC from a project. This operation cannot be undone. If the parameter `force` is set to true, any subnets or other resources in the VPC will be deleted as well. If the parameter `force` is set to false, the operation will fail if there are any subnets or other resources in the VPC.",
         "operationId": "project_vpcs_delete_vpc",
         "parameters": [
           {
@@ -2724,7 +2724,7 @@
           "routers"
         ],
         "summary": "Create a router",
-        "description": "Creates a new router in a VPC.",
+        "description": "Creates a new custom router in a VPC. There can only be one custom router in a subnet.",
         "operationId": "vpc_routers_post",
         "parameters": [
           {
@@ -2922,7 +2922,7 @@
           "routers"
         ],
         "summary": "Delete a router",
-        "description": "Deletes the router with the specified name. This operation cannot be undone.",
+        "description": "Deletes the custom router with the specified name. This operation cannot be undone. If the parameter `force` is set to `true`, any routes held by the router will be deleted. If the parameter `force` is set to `false`, the router must be empty before it can be deleted.",
         "operationId": "vpc_routers_delete_router",
         "parameters": [
           {
@@ -3076,7 +3076,7 @@
           "routes"
         ],
         "summary": "Create a route",
-        "description": "Creates a new route in the specified router.",
+        "description": "Creates a new route in the specified custom router.",
         "operationId": "routers_routes_post",
         "parameters": [
           {
@@ -3225,7 +3225,7 @@
           "routes"
         ],
         "summary": "Update a route",
-        "description": "Updates the specified route in the specified router by setting the values of the parameters passed. Any parameters not provided are left unchanged.",
+        "description": "Updates the specified route in the specified custom router by setting the values of the parameters passed. Any parameters not provided are left unchanged.",
         "operationId": "routers_routes_put_route",
         "parameters": [
           {
@@ -3301,7 +3301,7 @@
           "routes"
         ],
         "summary": "Delete a route",
-        "description": "Permanently deletes the specified route from the specified router. TODO: We might want some more detail here on the behavior of this endpoint.",
+        "description": "Permanently deletes the specified route from the specified custom router.",
         "operationId": "routers_routes_delete_route",
         "parameters": [
           {
