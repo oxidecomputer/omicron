@@ -129,6 +129,42 @@ impl Into<VpcSubnet> for model::VpcSubnet {
     }
 }
 
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum VpcRouterKind {
+    System,
+    Custom,
+}
+
+impl From<model::VpcRouterKind> for VpcRouterKind {
+    fn from(k: model::VpcRouterKind) -> Self {
+        match k {
+            model::VpcRouterKind::Custom => Self::Custom,
+            model::VpcRouterKind::System => Self::System,
+        }
+    }
+}
+
+/// A VPC router defines a series of rules that indicate where traffic
+/// should be sent depending on its destination.
+#[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct VpcRouter {
+    /// common identifying metadata
+    #[serde(flatten)]
+    pub identity: IdentityMetadata,
+
+    pub kind: VpcRouterKind,
+
+    /// The VPC to which the router belongs.
+    pub vpc_id: Uuid,
+}
+
+impl From<model::VpcRouter> for VpcRouter {
+    fn from(r: model::VpcRouter) -> Self {
+        Self { identity: r.identity(), vpc_id: r.vpc_id, kind: r.kind.into() }
+    }
+}
+
 // RACKS
 
 /// Client view of an [`Rack`]

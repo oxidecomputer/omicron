@@ -13,6 +13,7 @@ use crate::db::identity::{Asset, Resource};
 use crate::db::model::DatasetKind;
 use crate::db::model::Name;
 use crate::db::model::VpcRouter;
+use crate::db::model::VpcRouterKind;
 use crate::db::model::VpcSubnet;
 use crate::db::subnet_allocation::NetworkInterfaceError;
 use crate::db::subnet_allocation::SubnetError;
@@ -50,7 +51,6 @@ use omicron_common::api::external::RouterRouteKind;
 use omicron_common::api::external::RouterRouteUpdateParams;
 use omicron_common::api::external::UpdateResult;
 use omicron_common::api::external::VpcFirewallRuleUpdateParams;
-use omicron_common::api::external::VpcRouterKind;
 use omicron_common::api::internal::nexus;
 use omicron_common::api::internal::nexus::DiskRuntimeState;
 use omicron_common::api::internal::nexus::UpdateArtifact;
@@ -2282,7 +2282,7 @@ impl Nexus {
         // database query?  This shouldn't affect correctness, assuming that a
         // router kind cannot be changed, but it might be able to save us a
         // database round-trip.
-        if db_router.kind.0 == VpcRouterKind::System {
+        if db_router.kind == VpcRouterKind::System {
             return Err(Error::MethodNotAllowed {
                 internal_message: "Cannot delete system router".to_string(),
             });

@@ -1154,27 +1154,6 @@ impl FromStr for IpNet {
     }
 }
 
-#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, JsonSchema)]
-#[serde(rename_all = "snake_case")]
-pub enum VpcRouterKind {
-    System,
-    Custom,
-}
-
-/// A VPC router defines a series of rules that indicate where traffic
-/// should be sent depending on its destination.
-#[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
-pub struct VpcRouter {
-    /// common identifying metadata
-    #[serde(flatten)]
-    pub identity: IdentityMetadata,
-
-    pub kind: VpcRouterKind,
-
-    /// The VPC to which the router belongs.
-    pub vpc_id: Uuid,
-}
-
 /// A `RouteTarget` describes the possible locations that traffic matching a
 /// route destination can be sent.
 #[derive(
