@@ -11,7 +11,8 @@ use crate::ServerContext;
 use super::{
     console_api, params,
     views::{
-        Organization, Project, Rack, Role, Sled, Snapshot, User, Vpc, VpcSubnet,
+        Organization, Project, Rack, Role, Sled, Snapshot, User, Vpc,
+        VpcRouter, VpcSubnet,
     },
 };
 use crate::context::OpContext;
@@ -57,8 +58,6 @@ use omicron_common::api::external::RouterRouteUpdateParams;
 use omicron_common::api::external::Saga;
 use omicron_common::api::external::VpcFirewallRuleUpdateParams;
 use omicron_common::api::external::VpcFirewallRules;
-use omicron_common::api::external::VpcRouter;
-use omicron_common::api::external::VpcRouterKind;
 use ref_cast::RefCast;
 use schemars::JsonSchema;
 use serde::Deserialize;
@@ -1863,7 +1862,7 @@ async fn vpc_routers_post(
                 &path.organization_name,
                 &path.project_name,
                 &path.vpc_name,
-                &VpcRouterKind::Custom,
+                &db::model::VpcRouterKind::Custom,
                 &create_params.into_inner(),
             )
             .await?;

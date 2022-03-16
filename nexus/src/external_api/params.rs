@@ -186,14 +186,14 @@ pub struct VpcSubnetUpdate {
 
 // VPC ROUTERS
 
-/// Create-time parameters for a [`VpcRouter`](omicron_common::api::external::VpcRouter)
+/// Create-time parameters for a [`VpcRouter`](crate::external_api::views::VpcRouter)
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct VpcRouterCreate {
     #[serde(flatten)]
     pub identity: IdentityMetadataCreateParams,
 }
 
-/// Updateable properties of a [`VpcRouter`](omicron_common::api::external::VpcRouter)
+/// Updateable properties of a [`VpcRouter`](crate::external_api::views::VpcRouter)
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct VpcRouterUpdate {
     #[serde(flatten)]

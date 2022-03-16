@@ -17,9 +17,9 @@ use nexus_test_utils::ControlPlaneTestContext;
 use nexus_test_utils_macros::nexus_test;
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::IdentityMetadataUpdateParams;
-use omicron_common::api::external::VpcRouter;
-use omicron_common::api::external::VpcRouterKind;
 use omicron_nexus::external_api::params;
+use omicron_nexus::external_api::views::VpcRouter;
+use omicron_nexus::external_api::views::VpcRouterKind;
 
 #[nexus_test]
 async fn test_vpc_routers(cptestctx: &ControlPlaneTestContext) {
