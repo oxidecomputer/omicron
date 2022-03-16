@@ -5,6 +5,9 @@
 //! Verify the behavior of API endpoints when hit by unauthenticated and
 //! unauthorized users
 
+use std::net::IpAddr;
+use std::net::Ipv4Addr;
+
 use dropshot::test_util::ClientTestContext;
 use dropshot::HttpErrorResponseBody;
 use headers::authorization::Credentials;
@@ -24,6 +27,10 @@ use omicron_common::api::external::IdentityMetadataUpdateParams;
 use omicron_common::api::external::InstanceCpuCount;
 use omicron_common::api::external::Ipv4Net;
 use omicron_common::api::external::Name;
+use omicron_common::api::external::RouteDestination;
+use omicron_common::api::external::RouteTarget;
+use omicron_common::api::external::RouterRouteCreateParams;
+use omicron_common::api::external::RouterRouteUpdateParams;
 use omicron_nexus::authn;
 use omicron_nexus::authn::external::spoof;
 use omicron_nexus::external_api::params;
@@ -122,6 +129,11 @@ lazy_static! {
             url: &*DEMO_VPC_URL_ROUTERS,
             body: serde_json::to_value(&*DEMO_VPC_ROUTER_CREATE).unwrap(),
         },
+        // Create a VPC Router in the Vpc
+        SetupReq {
+            url: &*DEMO_VPC_ROUTER_URL_ROUTES,
+            body: serde_json::to_value(&*DEMO_ROUTER_ROUTE_CREATE).unwrap(),
+        },
         // Create a Disk in the Project
         SetupReq {
             url: &*DEMO_PROJECT_URL_DISKS,
@@ -202,12 +214,29 @@ lazy_static! {
     static ref DEMO_VPC_ROUTER_NAME: Name = "demo-vpc-router".parse().unwrap();
     static ref DEMO_VPC_ROUTER_URL: String =
         format!("{}/{}", *DEMO_VPC_URL_ROUTERS, *DEMO_VPC_ROUTER_NAME);
+    static ref DEMO_VPC_ROUTER_URL_ROUTES: String =
+        format!("{}/routes", *DEMO_VPC_ROUTER_URL);
     static ref DEMO_VPC_ROUTER_CREATE: params::VpcRouterCreate =
         params::VpcRouterCreate {
             identity: IdentityMetadataCreateParams {
                 name: DEMO_VPC_ROUTER_NAME.clone(),
                 description: String::from(""),
             },
+        };
+
+    // Router Route used for testing
+    static ref DEMO_ROUTER_ROUTE_NAME: Name =
+        "demo-router-route".parse().unwrap();
+    static ref DEMO_ROUTER_ROUTE_URL: String =
+        format!("{}/{}", *DEMO_VPC_ROUTER_URL_ROUTES, *DEMO_ROUTER_ROUTE_NAME);
+    static ref DEMO_ROUTER_ROUTE_CREATE: RouterRouteCreateParams =
+        RouterRouteCreateParams {
+            identity: IdentityMetadataCreateParams {
+                name: DEMO_ROUTER_ROUTE_NAME.clone(),
+                description: String::from(""),
+            },
+            target: RouteTarget::Ip(IpAddr::from(Ipv4Addr::new(127, 0, 0, 1))),
+            destination: RouteDestination::Subnet("loopback".parse().unwrap()),
         };
 
     // Disk used for testing
@@ -504,6 +533,41 @@ lazy_static! {
                 AllowedMethod::Delete,
             ],
         },
+
+        /* Router Routes */
+
+        VerifyEndpoint {
+            url: &*DEMO_VPC_ROUTER_URL_ROUTES,
+            visibility: Visibility::Protected,
+            allowed_methods: vec![
+                AllowedMethod::Get,
+                AllowedMethod::Post(
+                    serde_json::to_value(&*DEMO_ROUTER_ROUTE_CREATE).unwrap()
+                ),
+            ],
+        },
+
+        VerifyEndpoint {
+            url: &*DEMO_ROUTER_ROUTE_URL,
+            visibility: Visibility::Protected,
+            allowed_methods: vec![
+                AllowedMethod::Get,
+                AllowedMethod::Put(
+                    serde_json::to_value(&RouterRouteUpdateParams {
+                        identity: IdentityMetadataUpdateParams {
+                            name: None,
+                            description: Some("different".to_string())
+                        },
+                        target: RouteTarget::Ip(
+                            IpAddr::from(Ipv4Addr::new(127, 0, 0, 1))),
+                        destination: RouteDestination::Subnet(
+                            "loopback".parse().unwrap()),
+                    }).unwrap()
+                ),
+                AllowedMethod::Delete,
+            ],
+        },
+
 
         /* Disks */
 

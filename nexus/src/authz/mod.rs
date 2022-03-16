@@ -170,6 +170,7 @@ pub use api_resources::Instance;
 pub use api_resources::NetworkInterface;
 pub use api_resources::Organization;
 pub use api_resources::Project;
+pub use api_resources::RouterRoute;
 pub use api_resources::Vpc;
 pub use api_resources::VpcRouter;
 pub use api_resources::VpcSubnet;
