@@ -101,6 +101,67 @@ macro_rules! impl_enum_type {
     }
 }
 
+macro_rules! impl_enum_type2 {
+    (
+        $(#[$enum_meta:meta])*
+        pub struct $diesel_type:ident;
+
+        $(#[$model_meta:meta])*
+        pub enum $model_type:ident;
+        $($enum_item:ident => $sql_value:literal)+
+    ) => {
+
+        $(#[$enum_meta])*
+        pub struct $diesel_type;
+
+        $(#[$model_meta])*
+        pub enum $model_type {
+            $(
+                $enum_item,
+            )*
+        }
+
+        impl<DB> ToSql<$diesel_type, DB> for $model_type
+        where
+            DB: Backend,
+        {
+            fn to_sql<W: std::io::Write>(
+                &self,
+                out: &mut serialize::Output<W, DB>,
+            ) -> serialize::Result {
+                match self {
+                    $(
+                    $model_type::$enum_item => {
+                        out.write_all($sql_value)?
+                    }
+                    )*
+                }
+                Ok(IsNull::No)
+            }
+        }
+
+        impl<DB> FromSql<$diesel_type, DB> for $model_type
+        where
+            DB: Backend + for<'a> BinaryRawValue<'a>,
+        {
+            fn from_sql(bytes: RawValue<DB>) -> deserialize::Result<Self> {
+                match DB::as_bytes(bytes) {
+                    $(
+                    $sql_value => {
+                        Ok($model_type::$enum_item)
+                    }
+                    )*
+                    _ => {
+                        Err(concat!("Unrecognized enum variant for ",
+                                stringify!{$model_type})
+                            .into())
+                    }
+                }
+            }
+        }
+    }
+}
+
 /// Newtype wrapper around [external::Name].
 #[derive(
     Clone,
@@ -1584,14 +1645,14 @@ impl From<params::VpcSubnetUpdate> for VpcSubnetUpdate {
     }
 }
 
-impl_enum_type!(
+impl_enum_type2!(
     #[derive(SqlType, Debug)]
     #[postgres(type_name = "vpc_router_kind", type_schema = "public")]
     pub struct VpcRouterKindEnum;
 
-    #[derive(Clone, Debug, AsExpression, FromSqlRow)]
+    #[derive(Clone, Copy, Debug, AsExpression, FromSqlRow, PartialEq)]
     #[sql_type = "VpcRouterKindEnum"]
-    pub struct VpcRouterKind(pub external::VpcRouterKind);
+    pub enum VpcRouterKind;
 
     // Enum values
     System => b"system"
@@ -1613,16 +1674,11 @@ impl VpcRouter {
     pub fn new(
         router_id: Uuid,
         vpc_id: Uuid,
-        kind: external::VpcRouterKind,
+        kind: VpcRouterKind,
         params: params::VpcRouterCreate,
     ) -> Self {
         let identity = VpcRouterIdentity::new(router_id, params.identity);
-        Self {
-            identity,
-            vpc_id,
-            kind: VpcRouterKind(kind),
-            rcgen: Generation::new(),
-        }
+        Self { identity, vpc_id, kind, rcgen: Generation::new() }
     }
 }
 
@@ -1633,12 +1689,21 @@ impl DatastoreCollection<RouterRoute> for VpcRouter {
     type CollectionIdColumn = router_route::dsl::router_id;
 }
 
+impl Into<external::VpcRouterKind> for VpcRouterKind {
+    fn into(self) -> external::VpcRouterKind {
+        match self {
+            VpcRouterKind::Custom => external::VpcRouterKind::Custom,
+            VpcRouterKind::System => external::VpcRouterKind::System,
+        }
+    }
+}
+
 impl Into<external::VpcRouter> for VpcRouter {
     fn into(self) -> external::VpcRouter {
         external::VpcRouter {
             identity: self.identity(),
             vpc_id: self.vpc_id,
-            kind: self.kind.0,
+            kind: self.kind.into(),
         }
     }
 }

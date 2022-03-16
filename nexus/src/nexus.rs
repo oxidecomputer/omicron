@@ -50,7 +50,6 @@ use omicron_common::api::external::RouterRouteKind;
 use omicron_common::api::external::RouterRouteUpdateParams;
 use omicron_common::api::external::UpdateResult;
 use omicron_common::api::external::VpcFirewallRuleUpdateParams;
-use omicron_common::api::external::VpcRouterKind;
 use omicron_common::api::internal::nexus;
 use omicron_common::api::internal::nexus::DiskRuntimeState;
 use omicron_common::api::internal::nexus::UpdateArtifact;
@@ -1778,7 +1777,7 @@ impl Nexus {
         let router = db::model::VpcRouter::new(
             system_router_id,
             vpc_id,
-            VpcRouterKind::System,
+            db::model::VpcRouterKind::System,
             params::VpcRouterCreate {
                 identity: IdentityMetadataCreateParams {
                     name: "system".parse().unwrap(),
@@ -2301,7 +2300,7 @@ impl Nexus {
         organization_name: &Name,
         project_name: &Name,
         vpc_name: &Name,
-        kind: &VpcRouterKind,
+        kind: &db::model::VpcRouterKind,
         params: &params::VpcRouterCreate,
     ) -> CreateResult<db::model::VpcRouter> {
         let vpc = self
@@ -2332,7 +2331,7 @@ impl Nexus {
                 router_name,
             )
             .await?;
-        if router.kind.0 == VpcRouterKind::System {
+        if router.kind == db::model::VpcRouterKind::System {
             return Err(Error::MethodNotAllowed {
                 internal_message: "Cannot delete system router".to_string(),
             });
