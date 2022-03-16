@@ -117,6 +117,11 @@ lazy_static! {
             url: &*DEMO_VPC_URL_SUBNETS,
             body: serde_json::to_value(&*DEMO_VPC_SUBNET_CREATE).unwrap(),
         },
+        // Create a VPC Router in the Vpc
+        SetupReq {
+            url: &*DEMO_VPC_URL_ROUTERS,
+            body: serde_json::to_value(&*DEMO_VPC_ROUTER_CREATE).unwrap(),
+        },
         // Create a Disk in the Project
         SetupReq {
             url: &*DEMO_PROJECT_URL_DISKS,
@@ -139,7 +144,7 @@ lazy_static! {
         params::OrganizationCreate {
             identity: IdentityMetadataCreateParams {
                 name: DEMO_ORG_NAME.clone(),
-                description: "".parse().unwrap(),
+                description: String::from(""),
             },
         };
 
@@ -157,7 +162,7 @@ lazy_static! {
         params::ProjectCreate {
             identity: IdentityMetadataCreateParams {
                 name: DEMO_PROJECT_NAME.clone(),
-                description: "".parse().unwrap(),
+                description: String::from(""),
             },
         };
 
@@ -167,11 +172,13 @@ lazy_static! {
         format!("{}/{}", *DEMO_PROJECT_URL_VPCS, *DEMO_VPC_NAME);
     static ref DEMO_VPC_URL_SUBNETS: String =
         format!("{}/subnets", *DEMO_VPC_URL);
+    static ref DEMO_VPC_URL_ROUTERS: String =
+        format!("{}/routers", *DEMO_VPC_URL);
     static ref DEMO_VPC_CREATE: params::VpcCreate =
         params::VpcCreate {
             identity: IdentityMetadataCreateParams {
                 name: DEMO_VPC_NAME.clone(),
-                description: "".parse().unwrap(),
+                description: String::from(""),
             },
             ipv6_prefix: None,
             dns_name: DEMO_VPC_NAME.clone(),
@@ -185,10 +192,22 @@ lazy_static! {
         params::VpcSubnetCreate {
             identity: IdentityMetadataCreateParams {
                 name: DEMO_VPC_SUBNET_NAME.clone(),
-                description: "".parse().unwrap(),
+                description: String::from(""),
             },
             ipv4_block: Ipv4Net("10.1.2.3/8".parse().unwrap()),
             ipv6_block: None,
+        };
+
+    // VPC Router used for testing
+    static ref DEMO_VPC_ROUTER_NAME: Name = "demo-vpc-router".parse().unwrap();
+    static ref DEMO_VPC_ROUTER_URL: String =
+        format!("{}/{}", *DEMO_VPC_URL_ROUTERS, *DEMO_VPC_ROUTER_NAME);
+    static ref DEMO_VPC_ROUTER_CREATE: params::VpcRouterCreate =
+        params::VpcRouterCreate {
+            identity: IdentityMetadataCreateParams {
+                name: DEMO_VPC_ROUTER_NAME.clone(),
+                description: String::from(""),
+            },
         };
 
     // Disk used for testing
@@ -456,6 +475,35 @@ lazy_static! {
             ],
         },
 
+        /* VPC Routers */
+
+        VerifyEndpoint {
+            url: &*DEMO_VPC_URL_ROUTERS,
+            visibility: Visibility::Protected,
+            allowed_methods: vec![
+                AllowedMethod::Get,
+                AllowedMethod::Post(
+                    serde_json::to_value(&*DEMO_VPC_ROUTER_CREATE).unwrap()
+                ),
+            ],
+        },
+
+        VerifyEndpoint {
+            url: &*DEMO_VPC_ROUTER_URL,
+            visibility: Visibility::Protected,
+            allowed_methods: vec![
+                AllowedMethod::Get,
+                AllowedMethod::Put(
+                    serde_json::to_value(&params::VpcRouterUpdate {
+                        identity: IdentityMetadataUpdateParams {
+                            name: None,
+                            description: Some("different".to_string())
+                        },
+                    }).unwrap()
+                ),
+                AllowedMethod::Delete,
+            ],
+        },
 
         /* Disks */
 

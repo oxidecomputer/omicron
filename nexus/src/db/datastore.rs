@@ -2594,30 +2594,39 @@ impl DataStore {
 
     pub async fn vpc_list_routers(
         &self,
-        vpc_id: &Uuid,
+        opctx: &OpContext,
+        authz_vpc: &authz::Vpc,
         pagparams: &DataPageParams<'_, Name>,
     ) -> ListResultVec<VpcRouter> {
-        use db::schema::vpc_router::dsl;
+        opctx.authorize(authz::Action::ListChildren, authz_vpc).await?;
 
+        use db::schema::vpc_router::dsl;
         paginated(dsl::vpc_router, dsl::name, pagparams)
             .filter(dsl::time_deleted.is_null())
-            .filter(dsl::vpc_id.eq(*vpc_id))
+            .filter(dsl::vpc_id.eq(authz_vpc.id()))
             .select(VpcRouter::as_select())
-            .load_async::<db::model::VpcRouter>(self.pool())
+            .load_async::<db::model::VpcRouter>(
+                self.pool_authorized(opctx).await?,
+            )
             .await
             .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
     }
 
-    pub async fn vpc_router_fetch_by_name(
+    /// Fetches a VpcRouter from the database and returns both the database row
+    /// and an [`authz::VpcRouter`] for doing authz checks
+    ///
+    /// See [`DataStore::organization_lookup_noauthz()`] for intended use cases
+    /// and caveats.
+    // TODO-security See the note on organization_lookup_noauthz().
+    async fn vpc_router_lookup_noauthz(
         &self,
-        vpc_id: &Uuid,
+        authz_vpc: &authz::Vpc,
         router_name: &Name,
-    ) -> LookupResult<VpcRouter> {
+    ) -> LookupResult<(authz::VpcRouter, VpcRouter)> {
         use db::schema::vpc_router::dsl;
-
         dsl::vpc_router
             .filter(dsl::time_deleted.is_null())
-            .filter(dsl::vpc_id.eq(*vpc_id))
+            .filter(dsl::vpc_id.eq(authz_vpc.id()))
             .filter(dsl::name.eq(router_name.clone()))
             .select(VpcRouter::as_select())
             .get_result_async(self.pool())
@@ -2631,21 +2640,69 @@ impl DataStore {
                     ),
                 )
             })
+            .map(|r| {
+                (
+                    authz_vpc.child_generic(
+                        ResourceType::VpcRouter,
+                        r.id(),
+                        LookupType::ByName(router_name.to_string()),
+                    ),
+                    r,
+                )
+            })
+    }
+
+    /// Lookup a VpcRouter by name and return the full database record, along
+    /// with an [`authz::Vpc`] for subsequent authorization checks
+    pub async fn vpc_router_fetch(
+        &self,
+        opctx: &OpContext,
+        authz_vpc: &authz::Vpc,
+        name: &Name,
+    ) -> LookupResult<(authz::VpcRouter, VpcRouter)> {
+        let (authz_vpc_router, db_vpc_router) =
+            self.vpc_router_lookup_noauthz(authz_vpc, name).await?;
+        opctx.authorize(authz::Action::Read, &authz_vpc_router).await?;
+        Ok((authz_vpc_router, db_vpc_router))
+    }
+
+    /// Look up the id for a VpcRouter based on its name
+    ///
+    /// Returns an [`authz::VpcRouter`] (which makes the id available).
+    ///
+    /// Like the other "lookup_by_path()" functions, this function does no authz
+    /// checks.
+    pub async fn vpc_router_lookup_by_path(
+        &self,
+        organization_name: &Name,
+        project_name: &Name,
+        vpc_name: &Name,
+        router_name: &Name,
+    ) -> LookupResult<authz::VpcRouter> {
+        let authz_vpc = self
+            .vpc_lookup_by_path(organization_name, project_name, vpc_name)
+            .await?;
+        self.vpc_router_lookup_noauthz(&authz_vpc, router_name)
+            .await
+            .map(|(v, _)| v)
     }
 
     pub async fn vpc_create_router(
         &self,
+        opctx: &OpContext,
+        authz_vpc: &authz::Vpc,
         router: VpcRouter,
     ) -> CreateResult<VpcRouter> {
-        use db::schema::vpc_router::dsl;
+        opctx.authorize(authz::Action::CreateChild, authz_vpc).await?;
 
+        use db::schema::vpc_router::dsl;
         let name = router.name().clone();
         let router = diesel::insert_into(dsl::vpc_router)
             .values(router)
             .on_conflict(dsl::id)
             .do_nothing()
             .returning(VpcRouter::as_returning())
-            .get_result_async(self.pool())
+            .get_result_async(self.pool_authorized(opctx).await?)
             .await
             .map_err(|e| {
                 public_error_from_diesel_pool(
@@ -2659,13 +2716,18 @@ impl DataStore {
         Ok(router)
     }
 
-    pub async fn vpc_delete_router(&self, router_id: &Uuid) -> DeleteResult {
-        use db::schema::vpc_router::dsl;
+    pub async fn vpc_delete_router(
+        &self,
+        opctx: &OpContext,
+        authz_router: &authz::VpcRouter,
+    ) -> DeleteResult {
+        opctx.authorize(authz::Action::Delete, authz_router).await?;
 
+        use db::schema::vpc_router::dsl;
         let now = Utc::now();
         diesel::update(dsl::vpc_router)
             .filter(dsl::time_deleted.is_null())
-            .filter(dsl::id.eq(*router_id))
+            .filter(dsl::id.eq(authz_router.id()))
             .set(dsl::time_deleted.eq(now))
             .returning(VpcRouter::as_returning())
             .get_result_async(self.pool())
@@ -2673,10 +2735,7 @@ impl DataStore {
             .map_err(|e| {
                 public_error_from_diesel_pool(
                     e,
-                    ErrorHandler::NotFoundByLookup(
-                        ResourceType::VpcRouter,
-                        LookupType::ById(*router_id),
-                    ),
+                    ErrorHandler::NotFoundByResource(authz_router),
                 )
             })?;
         Ok(())
@@ -2684,27 +2743,26 @@ impl DataStore {
 
     pub async fn vpc_update_router(
         &self,
-        router_id: &Uuid,
+        opctx: &OpContext,
+        authz_router: &authz::VpcRouter,
         updates: VpcRouterUpdate,
-    ) -> Result<(), Error> {
-        use db::schema::vpc_router::dsl;
+    ) -> UpdateResult<VpcRouter> {
+        opctx.authorize(authz::Action::Modify, authz_router).await?;
 
+        use db::schema::vpc_router::dsl;
         diesel::update(dsl::vpc_router)
             .filter(dsl::time_deleted.is_null())
-            .filter(dsl::id.eq(*router_id))
+            .filter(dsl::id.eq(authz_router.id()))
             .set(updates)
-            .execute_async(self.pool())
+            .returning(VpcRouter::as_returning())
+            .get_result_async(self.pool_authorized(opctx).await?)
             .await
             .map_err(|e| {
                 public_error_from_diesel_pool(
                     e,
-                    ErrorHandler::NotFoundByLookup(
-                        ResourceType::VpcRouter,
-                        LookupType::ById(*router_id),
-                    ),
+                    ErrorHandler::NotFoundByResource(authz_router),
                 )
-            })?;
-        Ok(())
+            })
     }
 
     pub async fn router_list_routes(

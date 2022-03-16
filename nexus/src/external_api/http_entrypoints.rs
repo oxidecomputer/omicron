@@ -1784,8 +1784,10 @@ async fn vpc_routers_get(
     let query = query_params.into_inner();
     let path = path_params.into_inner();
     let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
         let routers = nexus
             .vpc_list_routers(
+                &opctx,
                 &path.organization_name,
                 &path.project_name,
                 &path.vpc_name,
@@ -1824,8 +1826,10 @@ async fn vpc_routers_get_router(
     let nexus = &apictx.nexus;
     let path = path_params.into_inner();
     let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
         let vpc_router = nexus
-            .vpc_lookup_router(
+            .vpc_router_fetch(
+                &opctx,
                 &path.organization_name,
                 &path.project_name,
                 &path.vpc_name,
@@ -1852,8 +1856,10 @@ async fn vpc_routers_post(
     let nexus = &apictx.nexus;
     let path = path_params.into_inner();
     let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
         let router = nexus
             .vpc_create_router(
+                &opctx,
                 &path.organization_name,
                 &path.project_name,
                 &path.vpc_name,
@@ -1880,8 +1886,10 @@ async fn vpc_routers_delete_router(
     let nexus = &apictx.nexus;
     let path = path_params.into_inner();
     let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
         nexus
             .vpc_delete_router(
+                &opctx,
                 &path.organization_name,
                 &path.project_name,
                 &path.vpc_name,
@@ -1903,13 +1911,15 @@ async fn vpc_routers_put_router(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<VpcRouterPathParam>,
     router_params: TypedBody<params::VpcRouterUpdate>,
-) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+) -> Result<HttpResponseOk<VpcRouter>, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
     let path = path_params.into_inner();
     let handler = async {
-        nexus
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let router = nexus
             .vpc_update_router(
+                &opctx,
                 &path.organization_name,
                 &path.project_name,
                 &path.vpc_name,
@@ -1917,7 +1927,7 @@ async fn vpc_routers_put_router(
                 &router_params.into_inner(),
             )
             .await?;
-        Ok(HttpResponseUpdatedNoContent())
+        Ok(HttpResponseOk(router.into()))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
