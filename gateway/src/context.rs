@@ -51,13 +51,8 @@ impl ServerContext {
         config: &Config,
         log: &Logger,
     ) -> Result<Arc<Self>, StartupError> {
-        let sp_comms = Arc::new(
-            SpCommunicator::new(
-                config.known_sps.clone(),
-                log,
-            )
-            .await?,
-        );
+        let sp_comms =
+            Arc::new(SpCommunicator::new(config.known_sps.clone(), log).await?);
         Ok(Arc::new(ServerContext {
             sp_comms,
             timeouts: Timeouts::from(&config.timeouts),

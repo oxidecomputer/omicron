@@ -184,10 +184,7 @@ impl ManagementSwitch {
         }
     }
 
-    pub fn switch_port(
-        &self,
-        id: SpIdentifier,
-    ) -> Option<SwitchPort> {
+    pub fn switch_port(&self, id: SpIdentifier) -> Option<SwitchPort> {
         self.inner.switch_port(id.typ, id.slot)
     }
 

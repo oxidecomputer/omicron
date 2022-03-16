@@ -20,5 +20,5 @@ pub use management_switch::SwitchPort;
 // TODO these will remain public for a while, but eventually will be removed
 // altogther; currently these provide a way to hard-code the rack topology,
 // which is not what we want.
-pub use management_switch::KnownSps;
 pub use management_switch::KnownSp;
+pub use management_switch::KnownSps;
