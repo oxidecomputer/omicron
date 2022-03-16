@@ -2354,8 +2354,7 @@ impl Nexus {
                 router_name,
             )
             .await?;
-        self
-            .db_datastore
+        self.db_datastore
             .vpc_update_router(opctx, &authz_router, params.clone().into())
             .await
     }
