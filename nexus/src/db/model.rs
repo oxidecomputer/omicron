@@ -690,14 +690,14 @@ impl DatastoreCollection<Dataset> for Zpool {
     type CollectionIdColumn = dataset::dsl::pool_id;
 }
 
-impl_enum_type!(
+impl_enum_type2!(
     #[derive(SqlType, Debug, QueryId)]
     #[postgres(type_name = "dataset_kind", type_schema = "public")]
     pub struct DatasetKindEnum;
 
     #[derive(Clone, Debug, AsExpression, FromSqlRow, Serialize, Deserialize, PartialEq)]
     #[sql_type = "DatasetKindEnum"]
-    pub struct DatasetKind(pub internal_api::params::DatasetKind);
+    pub enum DatasetKind;
 
     // Enum values
     Crucible => b"crucible"
@@ -707,7 +707,17 @@ impl_enum_type!(
 
 impl From<internal_api::params::DatasetKind> for DatasetKind {
     fn from(k: internal_api::params::DatasetKind) -> Self {
-        Self(k)
+        match k {
+            internal_api::params::DatasetKind::Crucible => {
+                DatasetKind::Crucible
+            }
+            internal_api::params::DatasetKind::Cockroach => {
+                DatasetKind::Cockroach
+            }
+            internal_api::params::DatasetKind::Clickhouse => {
+                DatasetKind::Clickhouse
+            }
+        }
     }
 }
 
@@ -750,7 +760,7 @@ impl Dataset {
         kind: DatasetKind,
     ) -> Self {
         let size_used = match kind {
-            DatasetKind(internal_api::params::DatasetKind::Crucible) => Some(0),
+            DatasetKind::Crucible => Some(0),
             _ => None,
         };
         Self {
