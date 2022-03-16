@@ -26,9 +26,9 @@ pub struct Organization {
     pub identity: IdentityMetadata,
 }
 
-impl Into<Organization> for model::Organization {
-    fn into(self) -> Organization {
-        Organization { identity: self.identity() }
+impl From<model::Organization> for Organization {
+    fn from(org: model::Organization) -> Self {
+        Self { identity: org.identity() }
     }
 }
 
@@ -44,11 +44,11 @@ pub struct Project {
     pub organization_id: Uuid,
 }
 
-impl Into<Project> for model::Project {
-    fn into(self) -> Project {
-        Project {
-            identity: self.identity(),
-            organization_id: self.organization_id,
+impl From<model::Project> for Project {
+    fn from(project: model::Project) -> Self {
+        Self {
+            identity: project.identity(),
+            organization_id: project.organization_id,
         }
     }
 }
@@ -88,14 +88,14 @@ pub struct Vpc {
     pub dns_name: Name,
 }
 
-impl Into<Vpc> for model::Vpc {
-    fn into(self) -> Vpc {
-        Vpc {
-            identity: self.identity(),
-            project_id: self.project_id,
-            system_router_id: self.system_router_id,
-            ipv6_prefix: *self.ipv6_prefix,
-            dns_name: self.dns_name.0,
+impl From<model::Vpc> for Vpc {
+    fn from(vpc: model::Vpc) -> Self {
+        Self {
+            identity: vpc.identity(),
+            project_id: vpc.project_id,
+            system_router_id: vpc.system_router_id,
+            ipv6_prefix: *vpc.ipv6_prefix,
+            dns_name: vpc.dns_name.0,
         }
     }
 }
@@ -118,13 +118,13 @@ pub struct VpcSubnet {
     pub ipv6_block: Ipv6Net,
 }
 
-impl Into<VpcSubnet> for model::VpcSubnet {
-    fn into(self) -> VpcSubnet {
-        VpcSubnet {
-            identity: self.identity(),
-            vpc_id: self.vpc_id,
-            ipv4_block: self.ipv4_block.0,
-            ipv6_block: self.ipv6_block.0,
+impl From<model::VpcSubnet> for VpcSubnet {
+    fn from(subnet: model::VpcSubnet) -> Self {
+        Self {
+            identity: subnet.identity(),
+            vpc_id: subnet.vpc_id,
+            ipv4_block: subnet.ipv4_block.0,
+            ipv6_block: subnet.ipv6_block.0,
         }
     }
 }
@@ -137,8 +137,8 @@ pub enum VpcRouterKind {
 }
 
 impl From<model::VpcRouterKind> for VpcRouterKind {
-    fn from(k: model::VpcRouterKind) -> Self {
-        match k {
+    fn from(kind: model::VpcRouterKind) -> Self {
+        match kind {
             model::VpcRouterKind::Custom => Self::Custom,
             model::VpcRouterKind::System => Self::System,
         }
@@ -160,8 +160,12 @@ pub struct VpcRouter {
 }
 
 impl From<model::VpcRouter> for VpcRouter {
-    fn from(r: model::VpcRouter) -> Self {
-        Self { identity: r.identity(), vpc_id: r.vpc_id, kind: r.kind.into() }
+    fn from(router: model::VpcRouter) -> Self {
+        Self {
+            identity: router.identity(),
+            vpc_id: router.vpc_id,
+            kind: router.kind.into(),
+        }
     }
 }
 
@@ -174,9 +178,9 @@ pub struct Rack {
     pub identity: IdentityMetadata,
 }
 
-impl Into<Rack> for model::Rack {
-    fn into(self) -> Rack {
-        Rack { identity: self.identity() }
+impl From<model::Rack> for Rack {
+    fn from(rack: model::Rack) -> Self {
+        Self { identity: rack.identity() }
     }
 }
 
@@ -190,9 +194,9 @@ pub struct Sled {
     pub service_address: SocketAddr,
 }
 
-impl Into<Sled> for model::Sled {
-    fn into(self) -> Sled {
-        Sled { identity: self.identity(), service_address: self.address() }
+impl From<model::Sled> for Sled {
+    fn from(sled: model::Sled) -> Self {
+        Self { identity: sled.identity(), service_address: sled.address() }
     }
 }
 
@@ -207,9 +211,9 @@ pub struct User {
     pub identity: IdentityMetadata,
 }
 
-impl Into<User> for model::UserBuiltin {
-    fn into(self) -> User {
-        User { identity: self.identity() }
+impl From<model::UserBuiltin> for User {
+    fn from(user: model::UserBuiltin) -> Self {
+        Self { identity: user.identity() }
     }
 }
 
@@ -221,9 +225,9 @@ pub struct SessionUser {
     pub id: Uuid,
 }
 
-impl Into<SessionUser> for authn::Actor {
-    fn into(self) -> SessionUser {
-        SessionUser { id: self.0 }
+impl From<authn::Actor> for SessionUser {
+    fn from(actor: authn::Actor) -> Self {
+        Self { id: actor.0 }
     }
 }
 
@@ -236,11 +240,11 @@ pub struct Role {
     pub description: String,
 }
 
-impl Into<Role> for model::RoleBuiltin {
-    fn into(self) -> Role {
-        Role {
-            name: RoleName::new(&self.resource_type, &self.role_name),
-            description: self.description,
+impl From<model::RoleBuiltin> for Role {
+    fn from(role: model::RoleBuiltin) -> Self {
+        Self {
+            name: RoleName::new(&role.resource_type, &role.role_name),
+            description: role.description,
         }
     }
 }
