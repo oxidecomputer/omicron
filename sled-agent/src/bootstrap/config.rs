@@ -7,11 +7,9 @@
  */
 
 use crate::config::ConfigError;
+use crate::params::{DatasetEnsureBody, ServiceRequest};
 use dropshot::ConfigDropshot;
 use dropshot::ConfigLogging;
-use omicron_common::api::internal::sled_agent::{
-    DatasetEnsureBody, ServiceRequest,
-};
 use serde::Deserialize;
 use serde::Serialize;
 use std::net::SocketAddr;

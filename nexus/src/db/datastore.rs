@@ -35,10 +35,7 @@ use crate::context::OpContext;
 use crate::db::fixed_data::role_assignment_builtin::BUILTIN_ROLE_ASSIGNMENTS;
 use crate::db::fixed_data::role_builtin::BUILTIN_ROLES;
 use crate::external_api::params;
-use async_bb8_diesel::{
-    AsyncConnection, AsyncRunQueryDsl, ConnectionError, ConnectionManager,
-    PoolError,
-};
+use async_bb8_diesel::{AsyncConnection, AsyncRunQueryDsl, ConnectionManager};
 use chrono::Utc;
 use diesel::pg::Pg;
 use diesel::prelude::*;
@@ -2537,29 +2534,13 @@ impl DataStore {
         subnet: VpcSubnet,
     ) -> Result<VpcSubnet, SubnetError> {
         use db::schema::vpc_subnet::dsl;
-        let name = subnet.name().clone();
-        let values = FilterConflictingVpcSubnetRangesQuery(subnet);
+        let values = FilterConflictingVpcSubnetRangesQuery(subnet.clone());
         diesel::insert_into(dsl::vpc_subnet)
             .values(values)
             .returning(VpcSubnet::as_returning())
             .get_result_async(self.pool())
             .await
-            .map_err(|err| {
-                if let PoolError::Connection(ConnectionError::Query(
-                    diesel::result::Error::NotFound,
-                )) = err
-                {
-                    SubnetError::OverlappingIpRange
-                } else {
-                    SubnetError::External(public_error_from_diesel_pool(
-                        err,
-                        ErrorHandler::Conflict(
-                            ResourceType::VpcSubnet,
-                            name.to_string().as_str(),
-                        ),
-                    ))
-                }
-            })
+            .map_err(|e| SubnetError::from_pool(e, &subnet))
     }
 
     pub async fn vpc_delete_subnet(

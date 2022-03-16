@@ -11,7 +11,8 @@ use crate::db::identity::{Asset, Resource};
 use crate::db::model;
 use api_identity::ObjectIdentity;
 use omicron_common::api::external::{
-    IdentityMetadata, Ipv4Net, Ipv6Net, Name, ObjectIdentity, RoleName,
+    ByteCount, IdentityMetadata, Ipv4Net, Ipv6Net, Name, ObjectIdentity,
+    RoleName,
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -62,6 +63,21 @@ impl Into<Project> for model::Project {
             organization_id: self.organization_id,
         }
     }
+}
+
+/*
+ * SNAPSHOTS
+ */
+
+/// Client view of a Snapshot
+#[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct Snapshot {
+    #[serde(flatten)]
+    pub identity: IdentityMetadata,
+
+    pub project_id: Uuid,
+    pub disk_id: Uuid,
+    pub size: ByteCount,
 }
 
 /*

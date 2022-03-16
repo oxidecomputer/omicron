@@ -56,9 +56,6 @@ use omicron_common::api::external::VpcRouterKind;
 use omicron_common::api::internal::nexus;
 use omicron_common::api::internal::nexus::DiskRuntimeState;
 use omicron_common::api::internal::nexus::UpdateArtifact;
-use omicron_common::api::internal::sled_agent::InstanceRuntimeStateMigrateParams;
-use omicron_common::api::internal::sled_agent::InstanceRuntimeStateRequested;
-use omicron_common::api::internal::sled_agent::InstanceStateRequested;
 use omicron_common::backoff;
 use omicron_common::bail_unless;
 use oximeter_client::Client as OximeterClient;
@@ -67,6 +64,9 @@ use oximeter_db::TimeseriesSchemaPaginationParams;
 use oximeter_producer::register;
 use rand::{rngs::StdRng, Rng, RngCore, SeedableRng};
 use ring::digest;
+use sled_agent_client::types::InstanceRuntimeStateMigrateParams;
+use sled_agent_client::types::InstanceRuntimeStateRequested;
+use sled_agent_client::types::InstanceStateRequested;
 use sled_agent_client::Client as SledAgentClient;
 use slog::Logger;
 use std::convert::{TryFrom, TryInto};
@@ -796,6 +796,46 @@ impl Nexus {
         Ok(())
     }
 
+    pub async fn project_create_snapshot(
+        self: &Arc<Self>,
+        _opctx: &OpContext,
+        _organization_name: &Name,
+        _project_name: &Name,
+        _params: &params::SnapshotCreate,
+    ) -> CreateResult<db::model::Snapshot> {
+        unimplemented!();
+    }
+
+    pub async fn project_list_snapshots(
+        &self,
+        _opctx: &OpContext,
+        _organization_name: &Name,
+        _project_name: &Name,
+        _pagparams: &DataPageParams<'_, Name>,
+    ) -> ListResultVec<db::model::Snapshot> {
+        unimplemented!();
+    }
+
+    pub async fn snapshot_fetch(
+        &self,
+        _opctx: &OpContext,
+        _organization_name: &Name,
+        _project_name: &Name,
+        _snapshot_name: &Name,
+    ) -> LookupResult<db::model::Snapshot> {
+        unimplemented!();
+    }
+
+    pub async fn project_delete_snapshot(
+        self: &Arc<Self>,
+        _opctx: &OpContext,
+        _organization_name: &Name,
+        _project_name: &Name,
+        _snapshot_name: &Name,
+    ) -> DeleteResult {
+        unimplemented!();
+    }
+
     /*
      * Instances
      */
@@ -1253,15 +1293,12 @@ impl Nexus {
          * beat us to it.
          */
 
-        let runtime: nexus::InstanceRuntimeState =
-            db_instance.runtime().clone().into();
-
         // TODO: Populate this with an appropriate NIC.
         // See also: sic_create_instance_record in sagas.rs for a similar
         // construction.
         let instance_hardware = sled_agent_client::types::InstanceHardware {
             runtime: sled_agent_client::types::InstanceRuntimeState::from(
-                runtime,
+                db_instance.runtime().clone(),
             ),
             nics: vec![],
         };
@@ -1271,7 +1308,7 @@ impl Nexus {
                 &db_instance.id(),
                 &sled_agent_client::types::InstanceEnsureBody {
                     initial: instance_hardware,
-                    target: requested.into(),
+                    target: requested,
                     migrate: None,
                 },
             )
@@ -1829,12 +1866,15 @@ impl Nexus {
             .vpc_create_subnet(opctx, &authz_vpc, subnet)
             .await
             .map_err(|err| match err {
-                SubnetError::OverlappingIpRange => {
+                SubnetError::OverlappingIpRange(ip) => {
                     let ipv4_block = &defaults::DEFAULT_VPC_SUBNET_IPV4_BLOCK;
-                    warn!(
+                    error!(
                         self.log,
-                        "failed to create default VPC Subnet, \
-                        found overlapping IP address ranges";
+                        concat!(
+                            "failed to create default VPC Subnet, IP address ",
+                            "range '{}' overlaps with existing",
+                        ),
+                        ip;
                         "vpc_id" => ?vpc_id,
                         "subnet_id" => ?default_subnet_id,
                         "ipv4_block" => ?**ipv4_block,
@@ -2093,8 +2133,12 @@ impl Nexus {
                         .await;
                     match result {
                         // Allow NUM_RETRIES retries, after the first attempt.
-                        Err(SubnetError::OverlappingIpRange)
-                            if retry <= NUM_RETRIES =>
+                        //
+                        // Note that we only catch IPv6 overlaps. The client
+                        // always specifies the IPv4 range, so we fail the
+                        // request if that overlaps with an existing range.
+                        Err(SubnetError::OverlappingIpRange(ip))
+                            if retry <= NUM_RETRIES && ip.is_ipv6() =>
                         {
                             debug!(
                                 self.log,
@@ -2109,7 +2153,9 @@ impl Nexus {
                     }
                 };
                 match result {
-                    Err(SubnetError::OverlappingIpRange) => {
+                    Err(SubnetError::OverlappingIpRange(ip))
+                        if ip.is_ipv6() =>
+                    {
                         // TODO-monitoring TODO-debugging
                         //
                         // We should maintain a counter for this occurrence, and
@@ -2118,7 +2164,7 @@ impl Nexus {
                         // goal here is for us to notice that this is happening
                         // before it becomes a major issue for customers.
                         let vpc_id = authz_vpc.id();
-                        warn!(
+                        error!(
                             self.log,
                             "failed to generate unique random IPv6 address \
                             range in {} retries",
@@ -2130,6 +2176,10 @@ impl Nexus {
                             "Unable to allocate unique IPv6 address range \
                             for VPC Subnet",
                         ))
+                    }
+                    Err(SubnetError::OverlappingIpRange(_)) => {
+                        // Overlapping IPv4 ranges, which is always a client error.
+                        Err(result.unwrap_err().into_external())
                     }
                     Err(SubnetError::External(e)) => Err(e),
                     Ok(subnet) => Ok(subnet),
@@ -2155,19 +2205,7 @@ impl Nexus {
                 self.db_datastore
                     .vpc_create_subnet(opctx, &authz_vpc, subnet)
                     .await
-                    .map_err(|err| match err {
-                        SubnetError::OverlappingIpRange => {
-                            external::Error::invalid_request(&format!(
-                                concat!(
-                                    "IPv4 block '{}' and/or IPv6 block '{}' ",
-                                    "overlaps with existing VPC Subnet ",
-                                    "IP address ranges"
-                                ),
-                                params.ipv4_block, ipv6_block,
-                            ))
-                        }
-                        SubnetError::External(e) => e,
-                    })
+                    .map_err(SubnetError::into_external)
             }
         }
     }

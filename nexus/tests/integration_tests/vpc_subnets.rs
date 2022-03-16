@@ -157,6 +157,10 @@ async fn test_vpc_subnets(cptestctx: &ControlPlaneTestContext) {
         ipv4_block,
         ipv6_block,
     };
+    let expected_error = format!(
+        "IP address range '{}' conflicts with an existing subnet",
+        ipv4_block,
+    );
     let error: dropshot::HttpErrorResponseBody = NexusRequest::new(
         RequestBuilder::new(client, Method::POST, &subnets_url)
             .expect_status(Some(StatusCode::BAD_REQUEST))
@@ -168,7 +172,7 @@ async fn test_vpc_subnets(cptestctx: &ControlPlaneTestContext) {
     .unwrap()
     .parsed_body()
     .unwrap();
-    assert!(error.message.starts_with("IPv4 block '"));
+    assert_eq!(error.message, expected_error);
 
     // creating another subnet in the same VPC with the same name, but different
     // IP address ranges also fails.

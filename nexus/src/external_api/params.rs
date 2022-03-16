@@ -292,6 +292,21 @@ pub struct NetworkInterfaceIdentifier {
 }
 
 /*
+ * SNAPSHOTS
+ */
+
+/// Create-time parameters for a [`Snapshot`](omicron_common::api::external::Snapshot)
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct SnapshotCreate {
+    /// common identifying metadata
+    #[serde(flatten)]
+    pub identity: IdentityMetadataCreateParams,
+
+    /// The name of the disk to be snapshotted
+    pub disk: Name,
+}
+
+/*
  * BUILT-IN USERS
  *
  * These cannot be created via the external API, but we use the same interfaces

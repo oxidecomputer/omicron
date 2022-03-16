@@ -7,9 +7,7 @@
 use crate::illumos::running_zone::{InstalledZone, RunningZone};
 use crate::illumos::vnic::VnicAllocator;
 use crate::illumos::zone::AddressRequest;
-use omicron_common::api::internal::sled_agent::{
-    ServiceEnsureBody, ServiceRequest,
-};
+use crate::params::{ServiceEnsureBody, ServiceRequest};
 use slog::Logger;
 use std::collections::HashSet;
 use std::iter::FromIterator;
