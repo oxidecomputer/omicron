@@ -148,6 +148,12 @@ pub fn saga_instance_create() -> SagaTemplate<SagaInstanceCreate> {
         new_action_noop_undo(sic_alloc_server),
     );
 
+    template_builder.append(
+        "initial_runtime",
+        "CreateInstanceRecord",
+        new_action_noop_undo(sic_create_instance_record),
+    );
+
     // NOTE: The separation of the ID-allocation and NIC creation nodes is
     // intentional.
     //
@@ -182,12 +188,6 @@ pub fn saga_instance_create() -> SagaTemplate<SagaInstanceCreate> {
         "network_interfaces",
         "CreateNetworkInterfaces",
         new_action_noop_undo(sic_create_network_interfaces),
-    );
-
-    template_builder.append(
-        "initial_runtime",
-        "CreateInstanceRecord",
-        new_action_noop_undo(sic_create_instance_record),
     );
 
     template_builder.append(
@@ -267,6 +267,12 @@ async fn sic_create_custom_network_interfaces(
         OpContext::for_saga_action(&sagactx, &saga_params.serialized_authn);
     let instance_id = sagactx.lookup::<Uuid>("instance_id")?;
     let ids = sagactx.lookup::<Vec<Uuid>>("network_interface_ids")?;
+
+    // Lookup authz objects, used in the call to create the NIC itself.
+    let authz_instance = datastore
+        .instance_lookup_by_id(instance_id)
+        .await
+        .map_err(ActionError::action_failed)?;
     let authz_project = datastore
         .project_lookup_by_id(saga_params.project_id)
         .await
@@ -303,7 +309,7 @@ async fn sic_create_custom_network_interfaces(
         // should probably either be in a transaction, or the
         // `subnet_create_network_interface` function/query needs some JOIN
         // on the `vpc_subnet` table.
-        let (_, db_subnet) = datastore
+        let (authz_subnet, db_subnet) = datastore
             .vpc_subnet_fetch(
                 &opctx,
                 &authz_vpc,
@@ -323,8 +329,14 @@ async fn sic_create_custom_network_interfaces(
             params.ip,
         )
         .map_err(ActionError::action_failed)?;
-        let result =
-            datastore.instance_create_network_interface(interface).await;
+        let result = datastore
+            .instance_create_network_interface(
+                &opctx,
+                &authz_subnet,
+                &authz_instance,
+                interface,
+            )
+            .await;
 
         use crate::db::subnet_allocation::NetworkInterfaceError;
         let interface = match result {
@@ -363,7 +375,8 @@ async fn sic_create_custom_network_interfaces(
                 // saga node.
                 datastore
                     .instance_lookup_network_interface(
-                        &instance_id,
+                        &opctx,
+                        &authz_instance,
                         &db::model::Name(params.identity.name.clone()),
                     )
                     .await
@@ -400,6 +413,12 @@ async fn sic_create_default_network_interface(
         subnet_name: default_name.clone(),
         ip: None, // Request an IP address allocation
     };
+
+    // Lookup authz objects, used in the call to actually create the NIC.
+    let authz_instance = datastore
+        .instance_lookup_by_id(instance_id)
+        .await
+        .map_err(ActionError::action_failed)?;
     let authz_project = datastore
         .project_lookup_by_id(saga_params.project_id)
         .await
@@ -408,7 +427,7 @@ async fn sic_create_default_network_interface(
         .vpc_fetch(&opctx, &authz_project, &internal_default_name.clone())
         .await
         .map_err(ActionError::action_failed)?;
-    let (_, db_subnet) = datastore
+    let (authz_subnet, db_subnet) = datastore
         .vpc_subnet_fetch(&opctx, &authz_vpc, &internal_default_name)
         .await
         .map_err(ActionError::action_failed)?;
@@ -426,7 +445,12 @@ async fn sic_create_default_network_interface(
     )
     .map_err(ActionError::action_failed)?;
     let interface = datastore
-        .instance_create_network_interface(interface)
+        .instance_create_network_interface(
+            &opctx,
+            &authz_subnet,
+            &authz_instance,
+            interface,
+        )
         .await
         .map_err(db::subnet_allocation::NetworkInterfaceError::into_external)
         .map_err(ActionError::action_failed)?;
@@ -453,15 +477,12 @@ async fn sic_create_network_interfaces_undo(
 
 async fn sic_create_instance_record(
     sagactx: ActionContext<SagaInstanceCreate>,
-) -> Result<InstanceHardware, ActionError> {
+) -> Result<InstanceRuntimeState, ActionError> {
     let osagactx = sagactx.user_data();
     let params = sagactx.saga_params();
     let sled_uuid = sagactx.lookup::<Uuid>("server_id");
     let instance_id = sagactx.lookup::<Uuid>("instance_id");
     let propolis_uuid = sagactx.lookup::<Uuid>("propolis_id");
-    let nics = sagactx
-        .lookup::<Option<Vec<NetworkInterface>>>("network_interfaces")?
-        .unwrap_or_default();
 
     let runtime = InstanceRuntimeState {
         run_state: InstanceState::Creating,
@@ -490,11 +511,7 @@ async fn sic_create_instance_record(
         .await
         .map_err(ActionError::action_failed)?;
 
-    // See also: instance_set_runtime in nexus.rs for a similar construction.
-    Ok(InstanceHardware {
-        runtime: instance.runtime().clone().into(),
-        nics: nics.into_iter().map(|nic| nic.into()).collect(),
-    })
+    Ok(instance.runtime().clone().into())
 }
 
 async fn sic_instance_ensure(
@@ -508,8 +525,14 @@ async fn sic_instance_ensure(
     };
     let instance_id = sagactx.lookup::<Uuid>("instance_id")?;
     let sled_uuid = sagactx.lookup::<Uuid>("server_id")?;
-    let initial_runtime =
-        sagactx.lookup::<InstanceHardware>("initial_runtime")?;
+    let nics = sagactx
+        .lookup::<Option<Vec<NetworkInterface>>>("network_interfaces")?
+        .unwrap_or_default();
+    let runtime = sagactx.lookup::<InstanceRuntimeState>("initial_runtime")?;
+    let initial_hardware = InstanceHardware {
+        runtime: runtime.into(),
+        nics: nics.into_iter().map(|nic| nic.into()).collect(),
+    };
     let sa = osagactx
         .sled_client(&sled_uuid)
         .await
@@ -522,7 +545,7 @@ async fn sic_instance_ensure(
         .instance_put(
             &instance_id,
             &InstanceEnsureBody {
-                initial: initial_runtime,
+                initial: initial_hardware,
                 target: runtime_params,
                 migrate: None,
             },
