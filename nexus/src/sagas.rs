@@ -33,10 +33,15 @@ use omicron_common::api::external::InstanceState;
 use omicron_common::api::external::Name;
 use omicron_common::api::external::NetworkInterface;
 use omicron_common::api::internal::nexus::InstanceRuntimeState;
-use omicron_common::api::internal::sled_agent::InstanceHardware;
 use omicron_common::backoff::{self, BackoffError};
 use serde::Deserialize;
 use serde::Serialize;
+use sled_agent_client::types::InstanceEnsureBody;
+use sled_agent_client::types::InstanceHardware;
+use sled_agent_client::types::InstanceMigrateParams;
+use sled_agent_client::types::InstanceRuntimeStateMigrateParams;
+use sled_agent_client::types::InstanceRuntimeStateRequested;
+use sled_agent_client::types::InstanceStateRequested;
 use slog::warn;
 use slog::Logger;
 use std::collections::BTreeMap;
@@ -494,7 +499,10 @@ async fn sic_create_instance_record(
         .map_err(ActionError::action_failed)?;
 
     // See also: instance_set_runtime in nexus.rs for a similar construction.
-    Ok(InstanceHardware { runtime: instance.runtime().clone().into(), nics })
+    Ok(InstanceHardware {
+        runtime: instance.runtime().clone().into(),
+        nics: nics.into_iter().map(|nic| nic.into()).collect(),
+    })
 }
 
 async fn sic_instance_ensure(
@@ -504,12 +512,10 @@ async fn sic_instance_ensure(
      * TODO-correctness is this idempotent?
      */
     let osagactx = sagactx.user_data();
-    let runtime_params =
-        sled_agent_client::types::InstanceRuntimeStateRequested {
-            run_state:
-                sled_agent_client::types::InstanceStateRequested::Running,
-            migration_params: None,
-        };
+    let runtime_params = InstanceRuntimeStateRequested {
+        run_state: InstanceStateRequested::Running,
+        migration_params: None,
+    };
     let instance_id = sagactx.lookup::<Uuid>("instance_id")?;
     let sled_uuid = sagactx.lookup::<Uuid>("server_id")?;
     let initial_runtime =
@@ -527,10 +533,8 @@ async fn sic_instance_ensure(
     let new_runtime_state = sa
         .instance_put(
             &instance_id,
-            &sled_agent_client::types::InstanceEnsureBody {
-                initial: sled_agent_client::types::InstanceHardware::from(
-                    initial_runtime,
-                ),
+            &InstanceEnsureBody {
+                initial: initial_runtime,
                 target: runtime_params,
                 migrate: None,
             },
@@ -653,19 +657,17 @@ async fn sim_instance_migrate(
         propolis_addr: None,
         ..old_runtime
     };
-    let instance_hardware = sled_agent_client::types::InstanceHardware {
+    let instance_hardware = InstanceHardware {
         runtime: runtime.into(),
         // TODO: populate NICs
         nics: vec![],
     };
-    let target = sled_agent_client::types::InstanceRuntimeStateRequested {
-        run_state: sled_agent_client::types::InstanceStateRequested::Migrating,
-        migration_params: Some(
-            sled_agent_client::types::InstanceRuntimeStateMigrateParams {
-                migration_id,
-                dst_propolis_id: dst_propolis_uuid,
-            },
-        ),
+    let target = InstanceRuntimeStateRequested {
+        run_state: InstanceStateRequested::Migrating,
+        migration_params: Some(InstanceRuntimeStateMigrateParams {
+            migration_id,
+            dst_propolis_id: dst_propolis_uuid,
+        }),
     };
 
     let src_propolis_uuid = old_runtime.propolis_uuid;
@@ -683,13 +685,13 @@ async fn sim_instance_migrate(
     let new_runtime_state: InstanceRuntimeState = dst_sa
         .instance_put(
             &instance_id,
-            &sled_agent_client::types::InstanceEnsureBody {
+            &InstanceEnsureBody {
                 initial: instance_hardware,
                 target,
-                migrate: Some(omicron_common::api::internal::sled_agent::InstanceMigrateParams {
-                    src_propolis_addr,
+                migrate: Some(InstanceMigrateParams {
+                    src_propolis_addr: src_propolis_addr.to_string(),
                     src_propolis_uuid,
-                }.into()),
+                }),
             },
         )
         .await

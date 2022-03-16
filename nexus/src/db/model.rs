@@ -191,6 +191,12 @@ where
     }
 }
 
+impl From<ByteCount> for sled_agent_client::types::ByteCount {
+    fn from(b: ByteCount) -> Self {
+        Self(b.to_bytes())
+    }
+}
+
 #[derive(
     Copy,
     Clone,
@@ -239,6 +245,12 @@ where
         external::Generation::try_from(i64::from_sql(bytes)?)
             .map(Generation)
             .map_err(|e| e.into())
+    }
+}
+
+impl From<Generation> for sled_agent_client::types::Generation {
+    fn from(g: Generation) -> Self {
+        Self(i64::from(&g.0) as u64)
     }
 }
 
@@ -313,6 +325,12 @@ where
         external::InstanceCpuCount::try_from(i64::from_sql(bytes)?)
             .map(InstanceCpuCount)
             .map_err(|e| e.into())
+    }
+}
+
+impl From<InstanceCpuCount> for sled_agent_client::types::InstanceCpuCount {
+    fn from(i: InstanceCpuCount) -> Self {
+        Self(i.0 .0)
     }
 }
 
@@ -979,6 +997,28 @@ pub struct InstanceRuntimeState {
     pub hostname: String,
 }
 
+impl From<InstanceRuntimeState>
+    for sled_agent_client::types::InstanceRuntimeState
+{
+    fn from(s: InstanceRuntimeState) -> Self {
+        Self {
+            run_state: s.state.into(),
+            sled_uuid: s.sled_uuid,
+            propolis_uuid: s.propolis_uuid,
+            dst_propolis_uuid: s.dst_propolis_uuid,
+            propolis_addr: s
+                .propolis_ip
+                .map(|ip| SocketAddr::new(ip.ip(), PROPOLIS_PORT).to_string()),
+            migration_uuid: s.migration_uuid,
+            ncpus: s.ncpus.into(),
+            memory: s.memory.into(),
+            hostname: s.hostname,
+            gen: s.gen.into(),
+            time_updated: s.time_updated,
+        }
+    }
+}
+
 /// Conversion to the external API type.
 impl Into<external::InstanceRuntimeState> for InstanceRuntimeState {
     fn into(self) -> external::InstanceRuntimeState {
@@ -1058,6 +1098,25 @@ impl InstanceState {
 
     pub fn state(&self) -> &external::InstanceState {
         &self.0
+    }
+}
+
+impl From<InstanceState> for sled_agent_client::types::InstanceState {
+    fn from(s: InstanceState) -> Self {
+        use external::InstanceState::*;
+        use sled_agent_client::types::InstanceState as Output;
+        match s.0 {
+            Creating => Output::Creating,
+            Starting => Output::Starting,
+            Running => Output::Running,
+            Stopping => Output::Stopping,
+            Stopped => Output::Stopped,
+            Rebooting => Output::Rebooting,
+            Migrating => Output::Migrating,
+            Repairing => Output::Repairing,
+            Failed => Output::Failed,
+            Destroyed => Output::Destroyed,
+        }
     }
 }
 

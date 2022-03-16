@@ -333,7 +333,10 @@ impl<S: Simulatable + 'static> SimCollection<S> {
 
 #[cfg(test)]
 mod test {
-    use crate::params::DiskStateRequested;
+    use crate::params::{
+        DiskStateRequested, InstanceRuntimeStateRequested,
+        InstanceStateRequested,
+    };
     use crate::sim::collection::SimObject;
     use crate::sim::disk::SimDisk;
     use crate::sim::instance::SimInstance;
@@ -349,8 +352,6 @@ mod test {
     use omicron_common::api::external::InstanceState;
     use omicron_common::api::internal::nexus::DiskRuntimeState;
     use omicron_common::api::internal::nexus::InstanceRuntimeState;
-    use omicron_common::api::internal::sled_agent::InstanceRuntimeStateRequested;
-    use omicron_common::api::internal::sled_agent::InstanceStateRequested;
     use omicron_test_utils::dev::test_setup_log;
 
     fn make_instance(

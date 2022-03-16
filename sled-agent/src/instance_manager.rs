@@ -7,10 +7,10 @@
 use crate::common::vlan::VlanID;
 use crate::illumos::vnic::VnicAllocator;
 use crate::nexus::NexusClient;
+use crate::params::{
+    InstanceHardware, InstanceMigrateParams, InstanceRuntimeStateRequested,
+};
 use omicron_common::api::internal::nexus::InstanceRuntimeState;
-use omicron_common::api::internal::sled_agent::InstanceHardware;
-use omicron_common::api::internal::sled_agent::InstanceMigrateParams;
-use omicron_common::api::internal::sled_agent::InstanceRuntimeStateRequested;
 use slog::Logger;
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
@@ -199,13 +199,12 @@ mod test {
     use crate::illumos::{dladm::MockDladm, zone::MockZones};
     use crate::instance::MockInstance;
     use crate::mocks::MockNexusClient;
+    use crate::params::InstanceStateRequested;
     use chrono::Utc;
     use omicron_common::api::external::{
         ByteCount, Generation, InstanceCpuCount, InstanceState,
     };
-    use omicron_common::api::internal::{
-        nexus::InstanceRuntimeState, sled_agent::InstanceStateRequested,
-    };
+    use omicron_common::api::internal::nexus::InstanceRuntimeState;
 
     static INST_UUID_STR: &str = "e398c5d5-5059-4e55-beac-3a1071083aaa";
 

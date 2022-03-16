@@ -14,13 +14,13 @@ use crate::illumos::vnic::VnicAllocator;
 use crate::illumos::zone::{AddressRequest, PROPOLIS_ZONE_PREFIX};
 use crate::instance_manager::InstanceTicket;
 use crate::nexus::NexusClient;
+use crate::params::{
+    InstanceHardware, InstanceMigrateParams, InstanceRuntimeStateRequested,
+};
 use anyhow::anyhow;
 use futures::lock::{Mutex, MutexGuard};
 use omicron_common::api::external::NetworkInterface;
 use omicron_common::api::internal::nexus::InstanceRuntimeState;
-use omicron_common::api::internal::sled_agent::InstanceHardware;
-use omicron_common::api::internal::sled_agent::InstanceMigrateParams;
-use omicron_common::api::internal::sled_agent::InstanceRuntimeStateRequested;
 use omicron_common::backoff;
 use propolis_client::Client as PropolisClient;
 use slog::Logger;
@@ -219,7 +219,7 @@ impl InstanceInner {
             .cpapi_instances_put(
                 self.id(),
                 &nexus_client::types::InstanceRuntimeState::from(
-                    self.state.current(),
+                    self.state.current().clone(),
                 ),
             )
             .await
@@ -635,13 +635,13 @@ impl Instance {
 mod test {
     use super::*;
     use crate::mocks::MockNexusClient;
+    use crate::params::InstanceStateRequested;
     use chrono::Utc;
     use omicron_common::api::external::{
         ByteCount, Generation, InstanceCpuCount, InstanceState,
     };
-    use omicron_common::api::internal::{
-        nexus::InstanceRuntimeState, sled_agent::InstanceStateRequested,
-    };
+    use omicron_common::api::internal::nexus::InstanceRuntimeState;
+
     static INST_UUID_STR: &str = "e398c5d5-5059-4e55-beac-3a1071083aaa";
     static PROPOLIS_UUID_STR: &str = "ed895b13-55d5-4e0b-88e9-3f4e74d0d936";
 

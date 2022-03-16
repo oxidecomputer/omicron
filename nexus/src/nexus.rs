@@ -54,9 +54,6 @@ use omicron_common::api::external::VpcRouterKind;
 use omicron_common::api::internal::nexus;
 use omicron_common::api::internal::nexus::DiskRuntimeState;
 use omicron_common::api::internal::nexus::UpdateArtifact;
-use omicron_common::api::internal::sled_agent::InstanceRuntimeStateMigrateParams;
-use omicron_common::api::internal::sled_agent::InstanceRuntimeStateRequested;
-use omicron_common::api::internal::sled_agent::InstanceStateRequested;
 use omicron_common::backoff;
 use omicron_common::bail_unless;
 use oximeter_client::Client as OximeterClient;
@@ -65,6 +62,9 @@ use oximeter_db::TimeseriesSchemaPaginationParams;
 use oximeter_producer::register;
 use rand::{rngs::StdRng, Rng, RngCore, SeedableRng};
 use ring::digest;
+use sled_agent_client::types::InstanceRuntimeStateMigrateParams;
+use sled_agent_client::types::InstanceRuntimeStateRequested;
+use sled_agent_client::types::InstanceStateRequested;
 use sled_agent_client::Client as SledAgentClient;
 use slog::Logger;
 use std::convert::{TryFrom, TryInto};
@@ -1291,15 +1291,12 @@ impl Nexus {
          * beat us to it.
          */
 
-        let runtime: nexus::InstanceRuntimeState =
-            db_instance.runtime().clone().into();
-
         // TODO: Populate this with an appropriate NIC.
         // See also: sic_create_instance_record in sagas.rs for a similar
         // construction.
         let instance_hardware = sled_agent_client::types::InstanceHardware {
             runtime: sled_agent_client::types::InstanceRuntimeState::from(
-                runtime,
+                db_instance.runtime().clone(),
             ),
             nics: vec![],
         };
@@ -1309,7 +1306,7 @@ impl Nexus {
                 &db_instance.id(),
                 &sled_agent_client::types::InstanceEnsureBody {
                     initial: instance_hardware,
-                    target: requested.into(),
+                    target: requested,
                     migrate: None,
                 },
             )
