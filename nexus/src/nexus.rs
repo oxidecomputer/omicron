@@ -2368,6 +2368,7 @@ impl Nexus {
             .1)
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub async fn router_create_route(
         &self,
         opctx: &OpContext,
@@ -2434,6 +2435,7 @@ impl Nexus {
         self.db_datastore.router_delete_route(opctx, &authz_route).await
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub async fn router_update_route(
         &self,
         opctx: &OpContext,
