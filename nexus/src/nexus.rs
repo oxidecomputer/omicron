@@ -12,6 +12,7 @@ use crate::db;
 use crate::db::identity::{Asset, Resource};
 use crate::db::model::DatasetKind;
 use crate::db::model::Name;
+use crate::db::model::VpcRouter;
 use crate::db::model::VpcSubnet;
 use crate::db::subnet_allocation::NetworkInterfaceError;
 use crate::db::subnet_allocation::SubnetError;
@@ -39,6 +40,7 @@ use omicron_common::api::external::InstanceState;
 use omicron_common::api::external::ListResult;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
+use omicron_common::api::external::LookupType;
 use omicron_common::api::external::PaginationOrder;
 use omicron_common::api::external::ResourceType;
 use omicron_common::api::external::RouteDestination;
@@ -1684,6 +1686,23 @@ impl Nexus {
         let system_router_id = Uuid::new_v4();
         let default_route_id = Uuid::new_v4();
         let default_subnet_id = Uuid::new_v4();
+
+        // TODO: This is both fake and utter nonsense. It should be eventually
+        // replaced with the proper behavior for creating the default route
+        // which may not even happen here. Creating the vpc, its system router,
+        // and that routers default route should all be a part of the same
+        // transaction.
+        let vpc = db::model::Vpc::new(
+            vpc_id,
+            authz_project.id(),
+            system_router_id,
+            params.clone(),
+        )?;
+        let (authz_vpc, db_vpc) = self
+            .db_datastore
+            .project_create_vpc(opctx, &authz_project, vpc)
+            .await?;
+
         // TODO: Ultimately when the VPC is created a system router w/ an
         // appropriate setup should also be created.  Given that the underlying
         // systems aren't wired up yet this is a naive implementation to
@@ -1703,7 +1722,10 @@ impl Nexus {
                 },
             },
         );
-        let _ = self.db_datastore.vpc_create_router(router).await?;
+        let _ = self
+            .db_datastore
+            .vpc_create_router(&opctx, &authz_vpc, router)
+            .await?;
         let route = db::model::RouterRoute::new(
             default_route_id,
             system_router_id,
@@ -1722,22 +1744,7 @@ impl Nexus {
             },
         );
 
-        // TODO: This is both fake and utter nonsense. It should be eventually
-        // replaced with the proper behavior for creating the default route
-        // which may not even happen here. Creating the vpc, its system router,
-        // and that routers default route should all be apart of the same
-        // transaction.
         self.db_datastore.router_create_route(route).await?;
-        let vpc = db::model::Vpc::new(
-            vpc_id,
-            authz_project.id(),
-            system_router_id,
-            params.clone(),
-        )?;
-        let (authz_vpc, db_vpc) = self
-            .db_datastore
-            .project_create_vpc(opctx, &authz_project, vpc)
-            .await?;
 
         // Allocate the first /64 sub-range from the requested or created
         // prefix.
@@ -1878,9 +1885,15 @@ impl Nexus {
             .db_datastore
             .vpc_fetch(opctx, &authz_project, vpc_name)
             .await?;
+        let authz_vpc_router = authz_vpc.child_generic(
+            ResourceType::VpcRouter,
+            db_vpc.system_router_id,
+            LookupType::ById(db_vpc.system_router_id),
+        );
+
         // TODO: This should eventually use a saga to call the
         // networking subsystem to have it clean up the networking resources
-        self.db_datastore.vpc_delete_router(&db_vpc.system_router_id).await?;
+        self.db_datastore.vpc_delete_router(&opctx, &authz_vpc_router).await?;
         self.db_datastore.project_delete_vpc(opctx, &authz_vpc).await?;
 
         // Delete all firewall rules after deleting the VPC, to ensure no
@@ -2182,50 +2195,66 @@ impl Nexus {
 
     pub async fn vpc_list_routers(
         &self,
+        opctx: &OpContext,
         organization_name: &Name,
         project_name: &Name,
         vpc_name: &Name,
         pagparams: &DataPageParams<'_, Name>,
     ) -> ListResultVec<db::model::VpcRouter> {
-        let vpc = self
-            .project_lookup_vpc(organization_name, project_name, vpc_name)
+        let authz_vpc = self
+            .db_datastore
+            .vpc_lookup_by_path(organization_name, project_name, vpc_name)
             .await?;
-        let routers =
-            self.db_datastore.vpc_list_routers(&vpc.id(), pagparams).await?;
+        let routers = self
+            .db_datastore
+            .vpc_list_routers(opctx, &authz_vpc, pagparams)
+            .await?;
         Ok(routers)
     }
 
-    pub async fn vpc_lookup_router(
+    pub async fn vpc_router_fetch(
         &self,
+        opctx: &OpContext,
         organization_name: &Name,
         project_name: &Name,
         vpc_name: &Name,
         router_name: &Name,
     ) -> LookupResult<db::model::VpcRouter> {
-        let vpc = self
-            .project_lookup_vpc(organization_name, project_name, vpc_name)
+        let authz_vpc = self
+            .db_datastore
+            .vpc_lookup_by_path(organization_name, project_name, vpc_name)
             .await?;
         Ok(self
             .db_datastore
-            .vpc_router_fetch_by_name(&vpc.id(), router_name)
-            .await?)
+            .vpc_router_fetch(&opctx, &authz_vpc, router_name)
+            .await?
+            .1)
     }
 
     pub async fn vpc_create_router(
         &self,
+        opctx: &OpContext,
         organization_name: &Name,
         project_name: &Name,
         vpc_name: &Name,
         kind: &db::model::VpcRouterKind,
         params: &params::VpcRouterCreate,
     ) -> CreateResult<db::model::VpcRouter> {
-        let vpc = self
-            .project_lookup_vpc(organization_name, project_name, vpc_name)
+        let authz_vpc = self
+            .db_datastore
+            .vpc_lookup_by_path(organization_name, project_name, vpc_name)
             .await?;
         let id = Uuid::new_v4();
-        let router =
-            db::model::VpcRouter::new(id, vpc.id(), *kind, params.clone());
-        let router = self.db_datastore.vpc_create_router(router).await?;
+        let router = db::model::VpcRouter::new(
+            id,
+            authz_vpc.id(),
+            *kind,
+            params.clone(),
+        );
+        let router = self
+            .db_datastore
+            .vpc_create_router(&opctx, &authz_vpc, router)
+            .await?;
         Ok(router)
     }
 
@@ -2234,47 +2263,53 @@ impl Nexus {
     //       or trigger an error
     pub async fn vpc_delete_router(
         &self,
+        opctx: &OpContext,
         organization_name: &Name,
         project_name: &Name,
         vpc_name: &Name,
         router_name: &Name,
     ) -> DeleteResult {
-        let router = self
-            .vpc_lookup_router(
-                organization_name,
-                project_name,
-                vpc_name,
-                router_name,
-            )
+        let authz_vpc = self
+            .db_datastore
+            .vpc_lookup_by_path(organization_name, project_name, vpc_name)
             .await?;
-        if router.kind == db::model::VpcRouterKind::System {
+        let (authz_router, db_router) = self
+            .db_datastore
+            .vpc_router_fetch(opctx, &authz_vpc, router_name)
+            .await?;
+        // TODO-performance shouldn't this check be part of the "update"
+        // database query?  This shouldn't affect correctness, assuming that a
+        // router kind cannot be changed, but it might be able to save us a
+        // database round-trip.
+        if db_router.kind == db::model::VpcRouterKind::System {
             return Err(Error::MethodNotAllowed {
                 internal_message: "Cannot delete system router".to_string(),
             });
         }
-        self.db_datastore.vpc_delete_router(&router.id()).await
+        self.db_datastore.vpc_delete_router(opctx, &authz_router).await
     }
 
     pub async fn vpc_update_router(
         &self,
+        opctx: &OpContext,
         organization_name: &Name,
         project_name: &Name,
         vpc_name: &Name,
         router_name: &Name,
         params: &params::VpcRouterUpdate,
-    ) -> UpdateResult<()> {
-        let router = self
-            .vpc_lookup_router(
+    ) -> UpdateResult<VpcRouter> {
+        let authz_router = self
+            .db_datastore
+            .vpc_router_lookup_by_path(
                 organization_name,
                 project_name,
                 vpc_name,
                 router_name,
             )
             .await?;
-        Ok(self
-            .db_datastore
-            .vpc_update_router(&router.id(), params.clone().into())
-            .await?)
+        self.db_datastore
+            .vpc_update_router(opctx, &authz_router, params.clone().into())
+            .await
     }
 
     /// VPC Router routes
@@ -2287,8 +2322,9 @@ impl Nexus {
         router_name: &Name,
         pagparams: &DataPageParams<'_, Name>,
     ) -> ListResultVec<db::model::RouterRoute> {
-        let router = self
-            .vpc_lookup_router(
+        let authz_router = self
+            .db_datastore
+            .vpc_router_lookup_by_path(
                 organization_name,
                 project_name,
                 vpc_name,
@@ -2297,7 +2333,7 @@ impl Nexus {
             .await?;
         let routes = self
             .db_datastore
-            .router_list_routes(&router.id(), pagparams)
+            .router_list_routes(&authz_router.id(), pagparams)
             .await?;
         Ok(routes)
     }
@@ -2310,8 +2346,9 @@ impl Nexus {
         router_name: &Name,
         route_name: &Name,
     ) -> LookupResult<db::model::RouterRoute> {
-        let router = self
-            .vpc_lookup_router(
+        let authz_router = self
+            .db_datastore
+            .vpc_router_lookup_by_path(
                 organization_name,
                 project_name,
                 vpc_name,
@@ -2320,7 +2357,7 @@ impl Nexus {
             .await?;
         Ok(self
             .db_datastore
-            .router_route_fetch_by_name(&router.id(), route_name)
+            .router_route_fetch_by_name(&authz_router.id(), route_name)
             .await?)
     }
 
@@ -2333,8 +2370,9 @@ impl Nexus {
         kind: &RouterRouteKind,
         params: &RouterRouteCreateParams,
     ) -> CreateResult<db::model::RouterRoute> {
-        let router = self
-            .vpc_lookup_router(
+        let authz_router = self
+            .db_datastore
+            .vpc_router_lookup_by_path(
                 organization_name,
                 project_name,
                 vpc_name,
@@ -2342,8 +2380,12 @@ impl Nexus {
             )
             .await?;
         let id = Uuid::new_v4();
-        let route =
-            db::model::RouterRoute::new(id, router.id(), *kind, params.clone());
+        let route = db::model::RouterRoute::new(
+            id,
+            authz_router.id(),
+            *kind,
+            params.clone(),
+        );
         let route = self.db_datastore.router_create_route(route).await?;
         Ok(route)
     }

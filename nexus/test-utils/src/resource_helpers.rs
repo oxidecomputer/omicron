@@ -5,7 +5,6 @@
 use crate::http_testing::RequestBuilder;
 use crate::ControlPlaneTestContext;
 
-use super::http_testing::dropshot_compat::objects_post;
 use super::http_testing::AuthnMode;
 use super::http_testing::NexusRequest;
 use dropshot::test_util::ClientTestContext;
@@ -218,21 +217,26 @@ pub async fn create_router(
     vpc_name: &str,
     router_name: &str,
 ) -> VpcRouter {
-    objects_post(
+    NexusRequest::objects_post(
         &client,
         format!(
             "/organizations/{}/projects/{}/vpcs/{}/routers",
             &organization_name, &project_name, &vpc_name
         )
         .as_str(),
-        params::VpcRouterCreate {
+        &params::VpcRouterCreate {
             identity: IdentityMetadataCreateParams {
                 name: router_name.parse().unwrap(),
                 description: String::from("router description"),
             },
         },
     )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
     .await
+    .unwrap()
+    .parsed_body()
+    .unwrap()
 }
 
 pub async fn project_get(
