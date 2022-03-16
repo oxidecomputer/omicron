@@ -2,9 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-/*!
- * Views are response bodies, most of which are public lenses onto DB models.
- */
+//! Views are response bodies, most of which are public lenses onto DB models.
 
 use crate::authn;
 use crate::db::identity::{Asset, Resource};
@@ -19,13 +17,9 @@ use serde::{Deserialize, Serialize};
 use std::net::SocketAddr;
 use uuid::Uuid;
 
-/*
- * ORGANIZATIONS
- */
+// ORGANIZATIONS
 
-/**
- * Client view of an [`Organization`]
- */
+/// Client view of an [`Organization`]
 #[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct Organization {
     #[serde(flatten)]
@@ -38,19 +32,13 @@ impl Into<Organization> for model::Organization {
     }
 }
 
-/*
- * PROJECTS
- */
+// PROJECTS
 
-/**
- * Client view of a [`Project`]
- */
+/// Client view of a [`Project`]
 #[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct Project {
-    /*
-     * TODO-correctness is flattening here (and in all the other types) the
-     * intent in RFD 4?
-     */
+    // TODO-correctness is flattening here (and in all the other types) the
+    // intent in RFD 4?
     #[serde(flatten)]
     pub identity: IdentityMetadata,
     pub organization_id: Uuid,
@@ -65,9 +53,7 @@ impl Into<Project> for model::Project {
     }
 }
 
-/*
- * SNAPSHOTS
- */
+// SNAPSHOTS
 
 /// Client view of a Snapshot
 #[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
@@ -80,19 +66,15 @@ pub struct Snapshot {
     pub size: ByteCount,
 }
 
-/*
- * VPCs
- */
+// VPCs
 
-/**
- * Client view of a [`Vpc`]
- */
+/// Client view of a [`Vpc`]
 #[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct Vpc {
     #[serde(flatten)]
     pub identity: IdentityMetadata,
 
-    /** id for the project containing this VPC */
+    /// id for the project containing this VPC
     pub project_id: Uuid,
 
     /// id for the system router where subnet default routes are registered
@@ -102,7 +84,7 @@ pub struct Vpc {
     pub ipv6_prefix: Ipv6Net,
 
     // TODO-design should this be optional?
-    /** The name used for the VPC in DNS. */
+    /// The name used for the VPC in DNS.
     pub dns_name: Name,
 }
 
@@ -122,17 +104,17 @@ impl Into<Vpc> for model::Vpc {
 /// them, within a IPv4 subnetwork or optionall an IPv6 subnetwork.
 #[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct VpcSubnet {
-    /** common identifying metadata */
+    /// common identifying metadata
     #[serde(flatten)]
     pub identity: IdentityMetadata,
 
-    /** The VPC to which the subnet belongs. */
+    /// The VPC to which the subnet belongs.
     pub vpc_id: Uuid,
 
-    /** The IPv4 subnet CIDR block. */
+    /// The IPv4 subnet CIDR block.
     pub ipv4_block: Ipv4Net,
 
-    /** The IPv6 subnet CIDR block. */
+    /// The IPv6 subnet CIDR block.
     pub ipv6_block: Ipv6Net,
 }
 
@@ -147,13 +129,9 @@ impl Into<VpcSubnet> for model::VpcSubnet {
     }
 }
 
-/*
- * RACKS
- */
+// RACKS
 
-/**
- * Client view of an [`Rack`]
- */
+/// Client view of an [`Rack`]
 #[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct Rack {
     #[serde(flatten)]
@@ -166,13 +144,9 @@ impl Into<Rack> for model::Rack {
     }
 }
 
-/*
- * SLEDS
- */
+// SLEDS
 
-/**
- * Client view of an [`Sled`]
- */
+/// Client view of an [`Sled`]
 #[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct Sled {
     #[serde(flatten)]
@@ -186,19 +160,13 @@ impl Into<Sled> for model::Sled {
     }
 }
 
-/*
- * BUILT-IN USERS
- */
+// BUILT-IN USERS
 
-/**
- * Client view of a [`User`]
- */
+/// Client view of a [`User`]
 #[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct User {
-    /*
-     * TODO-correctness is flattening here (and in all the other types) the
-     * intent in RFD 4?
-     */
+    // TODO-correctness is flattening here (and in all the other types) the
+    // intent in RFD 4?
     #[serde(flatten)]
     pub identity: IdentityMetadata,
 }
@@ -209,9 +177,7 @@ impl Into<User> for model::UserBuiltin {
     }
 }
 
-/**
- * Client view of currently authed user.
- */
+/// Client view of currently authed user.
 // TODO: this may end up merged with User once more details about the user are
 // stored in the auth context. Right now there is only the ID.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
@@ -225,13 +191,9 @@ impl Into<SessionUser> for authn::Actor {
     }
 }
 
-/*
- * ROLES
- */
+// ROLES
 
-/**
- * Client view of a [`Role`]
- */
+/// Client view of a [`Role`]
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
 pub struct Role {
     pub name: RoleName,

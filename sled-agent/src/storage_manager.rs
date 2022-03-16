@@ -672,7 +672,8 @@ impl StorageWorker {
             .initialize_dataset_and_zone(
                 pool,
                 &dataset_info,
-                /* do_format= */ true,
+                // do_format=
+                true,
             )
             .await?;
 
@@ -714,7 +715,8 @@ impl StorageWorker {
         self.initialize_dataset_and_zone(
             pool,
             &dataset_info,
-            /* do_format= */ false,
+            // do_format=
+            false,
         )
         .await?;
 

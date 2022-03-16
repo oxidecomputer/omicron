@@ -158,7 +158,6 @@
 //! in [`roles`] about how this is set up.)  If Oso finds a role granting this
 //! permission that's associated with this actor and resource, the action is
 //! allowed.  Otherwise, it's not.
-//!
 
 mod actor;
 

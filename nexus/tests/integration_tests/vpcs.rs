@@ -25,7 +25,7 @@ use omicron_nexus::external_api::{params, views::Vpc};
 async fn test_vpcs(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
 
-    /* Create a project that we'll use for testing. */
+    // Create a project that we'll use for testing.
     let org_name = "test-org";
     create_organization(&client, &org_name).await;
     let project_name = "springfield-squidport";
@@ -36,14 +36,14 @@ async fn test_vpcs(cptestctx: &ControlPlaneTestContext) {
     let project_name2 = "pokemon";
     let _ = create_project(&client, &org_name, &project_name2).await;
 
-    /* List vpcs.  We see the default VPC, and nothing else. */
+    // List vpcs.  We see the default VPC, and nothing else.
     let mut vpcs = vpcs_list(&client, &vpcs_url).await;
     assert_eq!(vpcs.len(), 1);
     assert_eq!(vpcs[0].identity.name, "default");
     assert_eq!(vpcs[0].dns_name, "default");
     let default_vpc = vpcs.remove(0);
 
-    /* Make sure we get a 404 if we fetch or delete one. */
+    // Make sure we get a 404 if we fetch or delete one.
     let vpc_url = format!("{}/just-rainsticks", vpcs_url);
     for method in &[Method::GET, Method::DELETE] {
         let error: HttpErrorResponseBody = NexusRequest::expect_failure(
@@ -64,10 +64,8 @@ async fn test_vpcs(cptestctx: &ControlPlaneTestContext) {
         );
     }
 
-    /*
-     * Make sure creating a VPC fails if we specify an IPv6 prefix that is
-     * not a valid ULA range.
-     */
+    // Make sure creating a VPC fails if we specify an IPv6 prefix that is
+    // not a valid ULA range.
     let bad_prefix = Ipv6Net("2000:1000::/48".parse().unwrap());
     NexusRequest::new(
         RequestBuilder::new(client, Method::POST, &vpcs_url)
@@ -86,7 +84,7 @@ async fn test_vpcs(cptestctx: &ControlPlaneTestContext) {
     .await
     .unwrap();
 
-    /* Create a VPC. */
+    // Create a VPC.
     let vpc_name = "just-rainsticks";
     let vpc = create_vpc(&client, org_name, project_name, vpc_name).await;
     assert_eq!(vpc.identity.name, "just-rainsticks");
@@ -102,7 +100,7 @@ async fn test_vpcs(cptestctx: &ControlPlaneTestContext) {
         "Expected a ULA IPv6 address prefix"
     );
 
-    /* Attempt to create a second VPC with a conflicting name. */
+    // Attempt to create a second VPC with a conflicting name.
     let error = create_vpc_with_error(
         &client,
         org_name,
@@ -113,22 +111,22 @@ async fn test_vpcs(cptestctx: &ControlPlaneTestContext) {
     .await;
     assert_eq!(error.message, "already exists: vpc \"just-rainsticks\"");
 
-    /* creating a VPC with the same name in another project works, though */
+    // creating a VPC with the same name in another project works, though
     let vpc2: Vpc =
         create_vpc(&client, org_name, project_name2, vpc_name).await;
     assert_eq!(vpc2.identity.name, "just-rainsticks");
 
-    /* List VPCs again and expect to find the one we just created. */
+    // List VPCs again and expect to find the one we just created.
     let vpcs = vpcs_list(&client, &vpcs_url).await;
     assert_eq!(vpcs.len(), 2);
     vpcs_eq(&vpcs[0], &default_vpc);
     vpcs_eq(&vpcs[1], &vpc);
 
-    /* Fetch the VPC and expect it to match. */
+    // Fetch the VPC and expect it to match.
     let vpc = vpc_get(&client, &vpc_url).await;
     vpcs_eq(&vpcs[1], &vpc);
 
-    /* Update the VPC */
+    // Update the VPC
     let update_params = params::VpcUpdate {
         identity: IdentityMetadataUpdateParams {
             name: Some("new-name".parse().unwrap()),
@@ -159,20 +157,20 @@ async fn test_vpcs(cptestctx: &ControlPlaneTestContext) {
     // new url with new name
     let vpc_url = format!("{}/new-name", vpcs_url);
 
-    /* Fetch the VPC again. It should have the updated properties. */
+    // Fetch the VPC again. It should have the updated properties.
     let vpc = vpc_get(&client, &vpc_url).await;
     assert_eq!(vpc.identity.name, "new-name");
     assert_eq!(vpc.identity.description, "another description");
     assert_eq!(vpc.dns_name, "def");
 
-    /* Delete the VPC. */
+    // Delete the VPC.
     NexusRequest::object_delete(client, &vpc_url)
         .authn_as(AuthnMode::PrivilegedUser)
         .execute()
         .await
         .unwrap();
 
-    /* Now we expect a 404 on fetch */
+    // Now we expect a 404 on fetch
     let error: HttpErrorResponseBody = NexusRequest::expect_failure(
         client,
         StatusCode::NOT_FOUND,
@@ -187,7 +185,7 @@ async fn test_vpcs(cptestctx: &ControlPlaneTestContext) {
     .unwrap();
     assert_eq!(error.message, "not found: vpc with name \"new-name\"");
 
-    /* And the list should be empty (aside from default VPC) again */
+    // And the list should be empty (aside from default VPC) again
     let vpcs = vpcs_list(&client, &vpcs_url).await;
     assert_eq!(vpcs.len(), 1);
     vpcs_eq(&vpcs[0], &default_vpc);

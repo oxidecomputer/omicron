@@ -12,7 +12,7 @@ use std::fmt::{Debug, Display, Formatter, Result as FormatResult};
 use std::net::SocketAddr;
 use uuid::Uuid;
 
-///Used to request a Disk state change
+/// Used to request a Disk state change
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
 #[serde(rename_all = "lowercase", tag = "state", content = "instance")]
 pub enum DiskStateRequested {

@@ -2,10 +2,8 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-/*!
- * Tests that subnet allocation will successfully allocate the entire space of a
- * subnet and error appropriately when the space is exhausted.
- */
+//! Tests that subnet allocation will successfully allocate the entire space of a
+//! subnet and error appropriately when the space is exhausted.
 
 use http::method::Method;
 use http::StatusCode;

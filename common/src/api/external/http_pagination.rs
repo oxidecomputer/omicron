@@ -2,45 +2,43 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-/*!
- * Pagination support
- *
- * All list operations in the API are paginated, meaning that there's a limit on
- * the number of objects returned in a single request and clients are expected
- * to make additional requests to fetch the next page of results until the end
- * of the list is reached or the client has found what it needs.  For any list
- * operation, objects are sorted by a particular field that is unique among
- * objects in the list (usually a UTF-8 name or a UUID).  With each response,
- * the server will return a page of objects, plus a token that can be used to
- * fetch the next page.
- *
- * See Dropshot's pagination documentation for more background on this.
- *
- * For our API, we expect that most resources will support pagination in the
- * same way, which will include:
- *
- * * definitely: sorting in ascending order of the resource's "name"
- * * maybe in the future: sorting in descending order of the resource's "name"
- * * maybe in the future: sorting in ascending order of the resource's "id"
- * * maybe in the future: sorting in descending order of the resource's "id"
- * * maybe in the future: sorting in descending order of the resource's "mtime"
- *   and then "name" or "id"
- *
- * Dropshot's pagination support requires that we define the query parameters we
- * support with the first request ("scan params"), the information we need on
- * subsequent requests to resume a scan ("page selector"), and a way to generate
- * the page selector from a given object in the collection.  We can share these
- * definitions across as many resources as we want.  Below, we provide
- * definitions for resources that implement the `ObjectIdentity` trait.  With
- * these definitions, any type that has identity metadata can be paginated by
- * "name" in ascending order, "id" in ascending order, or either of those (plus
- * name in descending order) without any new boilerplate for that type.
- *
- * There may be resources that can't be paginated using one of the above three
- * ways, and we can define new ways to paginate them.  As you will notice below,
- * there's a fair bit of boilerplate for each way of paginating (rather than for
- * each resource paginated that way).  Where possible, we should share code.
- */
+//! Pagination support
+//!
+//! All list operations in the API are paginated, meaning that there's a limit on
+//! the number of objects returned in a single request and clients are expected
+//! to make additional requests to fetch the next page of results until the end
+//! of the list is reached or the client has found what it needs.  For any list
+//! operation, objects are sorted by a particular field that is unique among
+//! objects in the list (usually a UTF-8 name or a UUID).  With each response,
+//! the server will return a page of objects, plus a token that can be used to
+//! fetch the next page.
+//!
+//! See Dropshot's pagination documentation for more background on this.
+//!
+//! For our API, we expect that most resources will support pagination in the
+//! same way, which will include:
+//!
+//! * definitely: sorting in ascending order of the resource's "name"
+//! * maybe in the future: sorting in descending order of the resource's "name"
+//! * maybe in the future: sorting in ascending order of the resource's "id"
+//! * maybe in the future: sorting in descending order of the resource's "id"
+//! * maybe in the future: sorting in descending order of the resource's "mtime"
+//!   and then "name" or "id"
+//!
+//! Dropshot's pagination support requires that we define the query parameters we
+//! support with the first request ("scan params"), the information we need on
+//! subsequent requests to resume a scan ("page selector"), and a way to generate
+//! the page selector from a given object in the collection.  We can share these
+//! definitions across as many resources as we want.  Below, we provide
+//! definitions for resources that implement the `ObjectIdentity` trait.  With
+//! these definitions, any type that has identity metadata can be paginated by
+//! "name" in ascending order, "id" in ascending order, or either of those (plus
+//! name in descending order) without any new boilerplate for that type.
+//!
+//! There may be resources that can't be paginated using one of the above three
+//! ways, and we can define new ways to paginate them.  As you will notice below,
+//! there's a fair bit of boilerplate for each way of paginating (rather than for
+//! each resource paginated that way).  Where possible, we should share code.
 
 use crate::api::external::DataPageParams;
 use crate::api::external::Name;
@@ -60,76 +58,60 @@ use std::num::NonZeroU32;
 use std::sync::Arc;
 use uuid::Uuid;
 
-/*
- * General pagination infrastructure
- */
+// General pagination infrastructure
 
-/**
- * Specifies which page of results we're on
- *
- * This type is generic over the different scan modes that we support.
- */
+/// Specifies which page of results we're on
+///
+/// This type is generic over the different scan modes that we support.
 #[derive(Debug, Deserialize, JsonSchema, Serialize)]
 pub struct PageSelector<ScanParams, MarkerType> {
-    /** parameters describing the scan */
+    /// parameters describing the scan
     #[serde(flatten)]
     scan: ScanParams,
-    /** value of the marker field last seen by the client */
+    /// value of the marker field last seen by the client
     last_seen: MarkerType,
 }
 
-/**
- * Describes one of our supported scan modes
- *
- * To minimize boilerplate, we provide common functions needed by our consumers
- * (e.g., `ScanParams::results_page`) as well as the Dropshot interface (e.g.,
- * `page_selector_for`).  This trait encapsulates the functionality that differs
- * among the different scan modes that we support.  Much of the functionality
- * here isn't so much a property of the Dropshot "scan parameters" as much as it
- * is specific to a scan using those parameters.  As a result, several of these
- * are associated functions rather than methods.
- */
+/// Describes one of our supported scan modes
+///
+/// To minimize boilerplate, we provide common functions needed by our consumers
+/// (e.g., `ScanParams::results_page`) as well as the Dropshot interface (e.g.,
+/// `page_selector_for`).  This trait encapsulates the functionality that differs
+/// among the different scan modes that we support.  Much of the functionality
+/// here isn't so much a property of the Dropshot "scan parameters" as much as it
+/// is specific to a scan using those parameters.  As a result, several of these
+/// are associated functions rather than methods.
 pub trait ScanParams:
     Clone + Debug + DeserializeOwned + JsonSchema + PartialEq + Serialize
 {
-    /**
-     * Type of the "marker" field for this scan mode
-     *
-     * For example, when scanning by name, this would be `Name`.
-     */
+    /// Type of the "marker" field for this scan mode
+    ///
+    /// For example, when scanning by name, this would be `Name`.
     type MarkerValue: Clone + Debug + DeserializeOwned + PartialEq + Serialize;
 
-    /**
-     * Return the direction of the scan
-     */
+    /// Return the direction of the scan
     fn direction(&self) -> PaginationOrder;
 
-    /**
-     * Given an item, return the appropriate marker value
-     *
-     * For example, when scanning by name, this returns the "name" field of the
-     * item.
-     */
+    /// Given an item, return the appropriate marker value
+    ///
+    /// For example, when scanning by name, this returns the "name" field of the
+    /// item.
     fn marker_for_item<T: ObjectIdentity>(&self, t: &T) -> Self::MarkerValue;
 
-    /**
-     * Given pagination parameters, return the current scan parameters
-     *
-     * This can fail if the pagination parameters are not self-consistent (e.g.,
-     * if the scan parameters indicate we're going in ascending order by name,
-     * but the marker is an id rather than a name).
-     */
+    /// Given pagination parameters, return the current scan parameters
+    ///
+    /// This can fail if the pagination parameters are not self-consistent (e.g.,
+    /// if the scan parameters indicate we're going in ascending order by name,
+    /// but the marker is an id rather than a name).
     fn from_query(
         q: &PaginationParams<Self, PageSelector<Self, Self::MarkerValue>>,
     ) -> Result<&Self, HttpError>;
 
-    /**
-     * Generate a page of results for a paginated endpoint that lists items of
-     * type `T`
-     *
-     * `list` contains the items that should appear on the page.  It's not
-     * expected that consumers would override this implementation.
-     */
+    /// Generate a page of results for a paginated endpoint that lists items of
+    /// type `T`
+    ///
+    /// `list` contains the items that should appear on the page.  It's not
+    /// expected that consumers would override this implementation.
     fn results_page<T>(
         query: &PaginationParams<Self, PageSelector<Self, Self::MarkerValue>>,
         list: Vec<T>,
@@ -142,9 +124,7 @@ pub trait ScanParams:
     }
 }
 
-/**
- * See `dropshot::ResultsPage::new`
- */
+/// See `dropshot::ResultsPage::new`
 fn page_selector_for<T, S, M>(item: &T, scan_params: &S) -> PageSelector<S, M>
 where
     T: ObjectIdentity,
@@ -157,14 +137,12 @@ where
     }
 }
 
-/**
- * Given a request and pagination parameters, return a [`DataPageParams`]
- * describing the current page of results to return
- *
- * This implementation is used for `ScanByName` and `ScanById`.  See
- * [`data_page_params_nameid_name`] and [`data_page_params_nameid_id`] for
- * variants that can be used for `ScanByNameOrId`.
- */
+/// Given a request and pagination parameters, return a [`DataPageParams`]
+/// describing the current page of results to return
+///
+/// This implementation is used for `ScanByName` and `ScanById`.  See
+/// [`data_page_params_nameid_name`] and [`data_page_params_nameid_id`] for
+/// variants that can be used for `ScanByNameOrId`.
 pub fn data_page_params_for<'a, S, C>(
     rqctx: &'a Arc<RequestContext<C>>,
     pag_params: &'a PaginationParams<S, PageSelector<S, S::MarkerValue>>,
@@ -177,11 +155,9 @@ where
     data_page_params_with_limit(limit, &pag_params)
 }
 
-/**
- * Provided separately from data_page_params_for() so that the test suite can
- * test the bulk of the logic without needing to cons up a Dropshot
- * `RequestContext` just to get the limit.
- */
+/// Provided separately from data_page_params_for() so that the test suite can
+/// test the bulk of the logic without needing to cons up a Dropshot
+/// `RequestContext` just to get the limit.
 fn data_page_params_with_limit<S>(
     limit: NonZeroU32,
     pag_params: &PaginationParams<S, PageSelector<S, S::MarkerValue>>,
@@ -199,29 +175,25 @@ where
     Ok(DataPageParams { marker, direction, limit })
 }
 
-/*
- * Pagination by name in ascending order only (most resources today)
- */
+// Pagination by name in ascending order only (most resources today)
 
-/** Query parameters for pagination by name only */
+/// Query parameters for pagination by name only
 pub type PaginatedByName = PaginationParams<ScanByName, PageSelectorByName>;
-/** Page selector for pagination by name only */
+/// Page selector for pagination by name only
 pub type PageSelectorByName = PageSelector<ScanByName, Name>;
-/** Scan parameters for resources that support scanning by name only */
+/// Scan parameters for resources that support scanning by name only
 #[derive(Clone, Debug, Deserialize, JsonSchema, PartialEq, Serialize)]
 pub struct ScanByName {
     #[serde(default = "default_name_sort_mode")]
     sort_by: NameSortMode,
 }
-/**
- * Supported set of sort modes for scanning by name only
- *
- * Currently, we only support scanning in ascending order.
- */
+/// Supported set of sort modes for scanning by name only
+///
+/// Currently, we only support scanning in ascending order.
 #[derive(Copy, Clone, Debug, Deserialize, JsonSchema, PartialEq, Serialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum NameSortMode {
-    /** sort in increasing order of "name" */
+    /// sort in increasing order of "name"
     NameAscending,
 }
 
@@ -247,30 +219,26 @@ impl ScanParams for ScanByName {
     }
 }
 
-/*
- * Pagination by id in ascending order only (for some anonymous resources today)
- */
+// Pagination by id in ascending order only (for some anonymous resources today)
 
-/** Query parameters for pagination by id only */
+/// Query parameters for pagination by id only
 pub type PaginatedById = PaginationParams<ScanById, PageSelectorById>;
-/** Page selector for pagination by name only */
+/// Page selector for pagination by name only
 pub type PageSelectorById = PageSelector<ScanById, Uuid>;
-/** Scan parameters for resources that support scanning by id only */
+/// Scan parameters for resources that support scanning by id only
 #[derive(Clone, Debug, Deserialize, JsonSchema, PartialEq, Serialize)]
 pub struct ScanById {
     #[serde(default = "default_id_sort_mode")]
     sort_by: IdSortMode,
 }
 
-/**
- * Supported set of sort modes for scanning by id only.
- *
- * Currently, we only support scanning in ascending order.
- */
+/// Supported set of sort modes for scanning by id only.
+///
+/// Currently, we only support scanning in ascending order.
 #[derive(Copy, Clone, Debug, Deserialize, JsonSchema, PartialEq, Serialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum IdSortMode {
-    /** sort in increasing order of "id" */
+    /// sort in increasing order of "id"
     IdAscending,
 }
 
@@ -294,31 +262,29 @@ impl ScanParams for ScanById {
     }
 }
 
-/*
- * Pagination by any of: name ascending, name descending, or id ascending.
- * We include this now primarily to exercise the interface for doing so.
- */
+// Pagination by any of: name ascending, name descending, or id ascending.
+// We include this now primarily to exercise the interface for doing so.
 
-/** Query parameters for pagination by name or id */
+/// Query parameters for pagination by name or id
 pub type PaginatedByNameOrId =
     PaginationParams<ScanByNameOrId, PageSelectorByNameOrId>;
-/** Page selector for pagination by name or id */
+/// Page selector for pagination by name or id
 pub type PageSelectorByNameOrId = PageSelector<ScanByNameOrId, NameOrIdMarker>;
-/** Scan parameters for resources that support scanning by name or id */
+/// Scan parameters for resources that support scanning by name or id
 #[derive(Clone, Debug, Deserialize, JsonSchema, PartialEq, Serialize)]
 pub struct ScanByNameOrId {
     #[serde(default = "default_nameid_sort_mode")]
     sort_by: NameOrIdSortMode,
 }
-/** Supported set of sort modes for scanning by name or id */
+/// Supported set of sort modes for scanning by name or id
 #[derive(Copy, Clone, Debug, Deserialize, JsonSchema, PartialEq, Serialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum NameOrIdSortMode {
-    /** sort in increasing order of "name" */
+    /// sort in increasing order of "name"
     NameAscending,
-    /** sort in decreasing order of "name" */
+    /// sort in decreasing order of "name"
     NameDescending,
-    /** sort in increasing order of "id" */
+    /// sort in increasing order of "id"
     IdAscending,
 }
 
@@ -326,17 +292,15 @@ fn default_nameid_sort_mode() -> NameOrIdSortMode {
     NameOrIdSortMode::NameAscending
 }
 
-/*
- * TODO-correctness It's tempting to make this a serde(untagged) enum, which
- * would clean up the format of the page selector parameter.  However, it would
- * have the side effect that if the name happened to be a valid uuid, then we'd
- * parse it as a uuid here, even if the corresponding scan parameters indicated
- * that we were doing a scan by name.  Then we'd fail later on an invalid
- * combination.  We could infer the correct variant here from the "sort_by"
- * field of the adjacent scan params, but we'd have to write our own
- * `Deserialize` to do this.  This might be worth revisiting before we commit to
- * any particular version of the API.
- */
+// TODO-correctness It's tempting to make this a serde(untagged) enum, which
+// would clean up the format of the page selector parameter.  However, it would
+// have the side effect that if the name happened to be a valid uuid, then we'd
+// parse it as a uuid here, even if the corresponding scan parameters indicated
+// that we were doing a scan by name.  Then we'd fail later on an invalid
+// combination.  We could infer the correct variant here from the "sort_by"
+// field of the adjacent scan params, but we'd have to write our own
+// `Deserialize` to do this.  This might be worth revisiting before we commit to
+// any particular version of the API.
 #[derive(Clone, Debug, Deserialize, JsonSchema, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub enum NameOrIdMarker {
@@ -409,19 +373,17 @@ impl ScanParams for ScanByNameOrId {
     }
 }
 
-/**
- * Serves the same purpose as [`data_page_params_for`] for the specific case of
- * `ScanByNameOrId` when scanning by `name`
- *
- * Why do we need a separate function here?  Because `data_page_params_for` only
- * knows how to return the (statically-defined) marker value from the page
- * selector.  For `ScanByNameOrId`, this would return the enum
- * `NameOrIdMarker`.  But at some point our caller needs the specific type
- * (e.g., `Name` for a scan by name or `Uuid` for a scan by Uuid).  They get
- * that from this function and its partner, [`data_page_params_nameid_id`].
- * These functions are where we look at the enum variant and extract the
- * specific marker value out.
- */
+/// Serves the same purpose as [`data_page_params_for`] for the specific case of
+/// `ScanByNameOrId` when scanning by `name`
+///
+/// Why do we need a separate function here?  Because `data_page_params_for` only
+/// knows how to return the (statically-defined) marker value from the page
+/// selector.  For `ScanByNameOrId`, this would return the enum
+/// `NameOrIdMarker`.  But at some point our caller needs the specific type
+/// (e.g., `Name` for a scan by name or `Uuid` for a scan by Uuid).  They get
+/// that from this function and its partner, [`data_page_params_nameid_id`].
+/// These functions are where we look at the enum variant and extract the
+/// specific marker value out.
 pub fn data_page_params_nameid_name<'a, C>(
     rqctx: &'a Arc<RequestContext<C>>,
     pag_params: &'a PaginatedByNameOrId,
@@ -442,19 +404,15 @@ fn data_page_params_nameid_name_limit(
     let marker = match data_page.marker {
         None => None,
         Some(NameOrIdMarker::Name(name)) => Some(name),
-        /*
-         * This should arguably be a panic or a 500 error, since the caller
-         * should not have invoked this version of the function if they didn't
-         * know they were looking at a name-based marker.
-         */
+        // This should arguably be a panic or a 500 error, since the caller
+        // should not have invoked this version of the function if they didn't
+        // know they were looking at a name-based marker.
         Some(NameOrIdMarker::Id(_)) => return Err(bad_token_error()),
     };
     Ok(DataPageParams { limit, direction, marker })
 }
 
-/**
- * See [`data_page_params_nameid_name`].
- */
+/// See [`data_page_params_nameid_name`].
 pub fn data_page_params_nameid_id<'a, C>(
     rqctx: &'a Arc<RequestContext<C>>,
     pag_params: &'a PaginatedByNameOrId,
@@ -475,11 +433,9 @@ fn data_page_params_nameid_id_limit(
     let marker = match data_page.marker {
         None => None,
         Some(NameOrIdMarker::Id(id)) => Some(id),
-        /*
-         * This should arguably be a panic or a 500 error, since the caller
-         * should not have invoked this version of the function if they didn't
-         * know they were looking at an id-based marker.
-         */
+        // This should arguably be a panic or a 500 error, since the caller
+        // should not have invoked this version of the function if they didn't
+        // know they were looking at an id-based marker.
         Some(NameOrIdMarker::Name(_)) => return Err(bad_token_error()),
     };
     Ok(DataPageParams { limit, direction, marker })
@@ -523,17 +479,15 @@ mod test {
     use std::num::NonZeroU32;
     use uuid::Uuid;
 
-    /*
-     * It's important to verify the schema for the page selectors because this
-     * is a part of our interface that does not appear in the OpenAPI spec
-     * because it's obscured by Dropshot's automatic encoding of the page
-     * selector.
-     *
-     * Below, we also check the schema for the scan parameters because it's easy
-     * to do and useful to have the examples there.  We may want to remove this
-     * if/when we add a test case that checks the entire OpenAPI schema for our
-     * various APIs, since this will then be redundant.
-     */
+    // It's important to verify the schema for the page selectors because this
+    // is a part of our interface that does not appear in the OpenAPI spec
+    // because it's obscured by Dropshot's automatic encoding of the page
+    // selector.
+    //
+    // Below, we also check the schema for the scan parameters because it's easy
+    // to do and useful to have the examples there.  We may want to remove this
+    // if/when we add a test case that checks the entire OpenAPI schema for our
+    // various APIs, since this will then be redundant.
     #[test]
     fn test_pagination_schemas() {
         let schemas = vec![
@@ -566,10 +520,8 @@ mod test {
         assert_contents("tests/output/pagination-schema.txt", &found_output);
     }
 
-    /*
-     * As much for illustration as anything, we check examples of the scan
-     * parameters and page selectors here.
-     */
+    // As much for illustration as anything, we check examples of the scan
+    // parameters and page selectors here.
     #[test]
     fn test_pagination_examples() {
         let scan_by_id = ScanById { sort_by: IdSortMode::IdAscending };
@@ -581,7 +533,7 @@ mod test {
         let id: Uuid = "61a78113-d3c6-4b35-a410-23e9eae64328".parse().unwrap();
         let name: Name = "bort".parse().unwrap();
         let examples = vec![
-            /* scan parameters only */
+            // scan parameters only
             ("scan by id ascending", to_string_pretty(&scan_by_id).unwrap()),
             (
                 "scan by name ascending",
@@ -595,7 +547,7 @@ mod test {
                 "scan by name or id, using name ascending",
                 to_string_pretty(&scan_by_nameid_name).unwrap(),
             ),
-            /* page selectors */
+            // page selectors
             (
                 "page selector: by id ascending",
                 to_string_pretty(&PageSelectorById {
@@ -664,9 +616,7 @@ mod test {
             .collect()
     }
 
-    /**
-     * Function for running a bunch of tests on a ScanParams type.
-     */
+    /// Function for running a bunch of tests on a ScanParams type.
     fn test_scan_param_common<S>(
         list: &Vec<MyThing>,
         scan: &S,
@@ -683,11 +633,11 @@ mod test {
     {
         let li = list.len() - 1;
 
-        /* Test basic parts of ScanParams interface. */
+        // Test basic parts of ScanParams interface.
         assert_eq!(&scan.marker_for_item(&list[0]), item0_marker);
         assert_eq!(&scan.marker_for_item(&list[li]), itemlast_marker);
 
-        /* Test page_selector_for(). */
+        // Test page_selector_for().
         let page_selector = page_selector_for(&list[0], scan);
         assert_eq!(&page_selector.scan, scan);
         assert_eq!(&page_selector.last_seen, item0_marker);
@@ -696,23 +646,19 @@ mod test {
         assert_eq!(&page_selector.scan, scan);
         assert_eq!(&page_selector.last_seen, itemlast_marker);
 
-        /* Test from_query() with the default scan parameters. */
+        // Test from_query() with the default scan parameters.
         let p: PaginationParams<S, PageSelector<S, S::MarkerValue>> =
             serde_urlencoded::from_str("").unwrap();
         assert_eq!(S::from_query(&p).unwrap(), scan_default);
 
-        /*
-         * Test from_query() based on an explicit querystring corresponding to
-         * the first page in a scan with "scan" as the scan parameters.
-         */
+        // Test from_query() based on an explicit querystring corresponding to
+        // the first page in a scan with "scan" as the scan parameters.
         let p0: PaginationParams<S, PageSelector<S, S::MarkerValue>> =
             serde_urlencoded::from_str(querystring).unwrap();
         assert_eq!(S::from_query(&p0).unwrap(), scan);
 
-        /*
-         * Generate a results page from that, verify it, pull the token out, and
-         * use it to generate pagination parameters for a NextPage request.
-         */
+        // Generate a results page from that, verify it, pull the token out, and
+        // use it to generate pagination parameters for a NextPage request.
         let page = S::results_page(&p0, list.clone()).unwrap();
         assert_eq!(&page.items, list);
         assert!(page.next_page.is_some());
@@ -720,11 +666,9 @@ mod test {
         let p1: PaginationParams<S, PageSelector<S, S::MarkerValue>> =
             serde_urlencoded::from_str(&q).unwrap();
 
-        /*
-         * Now pull the information out of that, including the "last_seen"
-         * marker.  This should match `itemlast_marker`.  That will tell us that
-         * the results page was properly generated.
-         */
+        // Now pull the information out of that, including the "last_seen"
+        // marker.  This should match `itemlast_marker`.  That will tell us that
+        // the results page was properly generated.
         assert_eq!(S::from_query(&p1).unwrap(), scan);
         if let WhichPage::Next(PageSelector { ref last_seen, .. }) = p1.page {
             assert_eq!(last_seen, itemlast_marker);
@@ -732,16 +676,14 @@ mod test {
             panic!("expected WhichPage::Next");
         }
 
-        /*
-         * Return these two sets of pagination parameters to the caller for more
-         * testing.
-         */
+        // Return these two sets of pagination parameters to the caller for more
+        // testing.
         (p0, p1)
     }
 
     #[test]
     fn test_scan_by_name() {
-        /* Start with the common battery of tests. */
+        // Start with the common battery of tests.
         let scan = ScanByName { sort_by: NameSortMode::NameAscending };
 
         let list = list_of_things();
@@ -755,7 +697,7 @@ mod test {
         );
         assert_eq!(scan.direction(), PaginationOrder::Ascending);
 
-        /* Verify data pages based on the query params. */
+        // Verify data pages based on the query params.
         let limit = NonZeroU32::new(123).unwrap();
         let data_page = data_page_params_with_limit(limit, &p0).unwrap();
         assert_eq!(data_page.marker, None);
@@ -767,7 +709,7 @@ mod test {
         assert_eq!(data_page.direction, PaginationOrder::Ascending);
         assert_eq!(data_page.limit, limit);
 
-        /* Test from_query(): error case. */
+        // Test from_query(): error case.
         let error = serde_urlencoded::from_str::<PaginatedByName>(
             "sort_by=name-descending",
         )
@@ -780,7 +722,7 @@ mod test {
 
     #[test]
     fn test_scan_by_id() {
-        /* Start with the common battery of tests. */
+        // Start with the common battery of tests.
         let scan = ScanById { sort_by: IdSortMode::IdAscending };
 
         let list = list_of_things();
@@ -794,7 +736,7 @@ mod test {
         );
         assert_eq!(scan.direction(), PaginationOrder::Ascending);
 
-        /* Verify data pages based on the query params. */
+        // Verify data pages based on the query params.
         let limit = NonZeroU32::new(123).unwrap();
         let data_page = data_page_params_with_limit(limit, &p0).unwrap();
         assert_eq!(data_page.marker, None);
@@ -806,7 +748,7 @@ mod test {
         assert_eq!(data_page.direction, PaginationOrder::Ascending);
         assert_eq!(data_page.limit, limit);
 
-        /* Test from_query(): error case. */
+        // Test from_query(): error case.
         let error = serde_urlencoded::from_str::<PaginatedById>(
             "sort_by=id-descending",
         )
@@ -819,7 +761,7 @@ mod test {
 
     #[test]
     fn test_scan_by_nameid_generic() {
-        /* Test from_query(): error case. */
+        // Test from_query(): error case.
         let error = serde_urlencoded::from_str::<PaginatedByNameOrId>(
             "sort_by=id-descending",
         )
@@ -830,19 +772,17 @@ mod test {
              `name-ascending`, `name-descending`, `id-ascending`"
         );
 
-        /*
-         * TODO-coverage It'd be nice to exercise the from_query() error cases
-         * where the scan params doesn't match the last_seen value kind.
-         * However, we can't easily generate these, either directly or by
-         * causing Dropshot to parse a querystring.  In the latter case, it
-         * would have to be a page token that Dropshot generated, but by
-         * design we can't get Dropshot to construct such a token.
-         */
+        // TODO-coverage It'd be nice to exercise the from_query() error cases
+        // where the scan params doesn't match the last_seen value kind.
+        // However, we can't easily generate these, either directly or by
+        // causing Dropshot to parse a querystring.  In the latter case, it
+        // would have to be a page token that Dropshot generated, but by
+        // design we can't get Dropshot to construct such a token.
     }
 
     #[test]
     fn test_scan_by_nameid_name() {
-        /* Start with the common battery of tests. */
+        // Start with the common battery of tests.
         let scan = ScanByNameOrId { sort_by: NameOrIdSortMode::NameDescending };
         assert_eq!(pagination_field_for_scan_params(&scan), PagField::Name);
         assert_eq!(scan.direction(), PaginationOrder::Descending);
@@ -860,7 +800,7 @@ mod test {
             &ScanByNameOrId { sort_by: NameOrIdSortMode::NameAscending },
         );
 
-        /* Verify data pages based on the query params. */
+        // Verify data pages based on the query params.
         let limit = NonZeroU32::new(123).unwrap();
         let data_page = data_page_params_nameid_name_limit(limit, &p0).unwrap();
         assert_eq!(data_page.marker, None);
@@ -879,7 +819,7 @@ mod test {
 
     #[test]
     fn test_scan_by_nameid_id() {
-        /* Start with the common battery of tests. */
+        // Start with the common battery of tests.
         let scan = ScanByNameOrId { sort_by: NameOrIdSortMode::IdAscending };
         assert_eq!(pagination_field_for_scan_params(&scan), PagField::Id);
         assert_eq!(scan.direction(), PaginationOrder::Ascending);
@@ -898,7 +838,7 @@ mod test {
             &ScanByNameOrId { sort_by: NameOrIdSortMode::NameAscending },
         );
 
-        /* Verify data pages based on the query params. */
+        // Verify data pages based on the query params.
         let limit = NonZeroU32::new(123).unwrap();
         let data_page = data_page_params_nameid_id_limit(limit, &p0).unwrap();
         assert_eq!(data_page.marker, None);

@@ -2,9 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-/*!
- * Simulated sled agent implementation
- */
+//! Simulated sled agent implementation
 
 use crate::nexus::NexusClient;
 use crate::params::DiskStateRequested;
@@ -20,11 +18,9 @@ use uuid::Uuid;
 
 use crate::common::disk::{Action as DiskAction, DiskStates};
 
-/**
- * Simulated Disk (network block device), as created by the external Oxide API
- *
- * See `Simulatable` for how this works.
- */
+/// Simulated Disk (network block device), as created by the external Oxide API
+///
+/// See `Simulatable` for how this works.
 #[derive(Debug)]
 pub struct SimDisk {
     state: DiskStates,

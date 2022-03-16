@@ -460,7 +460,8 @@ impl Instance {
             &inner.vnic_allocator,
             "propolis-server",
             Some(&inner.propolis_id().to_string()),
-            /* dataset= */ &[],
+            // dataset=
+            &[],
             &[
                 zone::Device { name: "/dev/vmm/*".to_string() },
                 zone::Device { name: "/dev/vmmctl".to_string() },

@@ -2,9 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-/*!
- * Interface for making API requests to a Sled Agent
- */
+//! Interface for making API requests to a Sled Agent
 
 use async_trait::async_trait;
 use omicron_common::generate_logging_api;
@@ -252,10 +250,8 @@ impl From<omicron_common::api::internal::nexus::UpdateArtifactKind>
     }
 }
 
-/**
- * Exposes additional [`Client`] interfaces for use by the test suite. These
- * are bonus endpoints, not generated in the real client.
- */
+/// Exposes additional [`Client`] interfaces for use by the test suite. These
+/// are bonus endpoints, not generated in the real client.
 #[async_trait]
 pub trait TestInterfaces {
     async fn instance_finish_transition(&self, id: Uuid);

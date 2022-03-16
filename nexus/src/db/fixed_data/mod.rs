@@ -4,7 +4,6 @@
 //! Fixed (hardcoded) data that gets inserted into the database programmatically
 //! either when the rack is set up or when Nexus starts up.
 
-//
 // Here's a proposed convention for choosing uuids that we hardcode into
 // Omicron.
 //

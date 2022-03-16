@@ -2,15 +2,11 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-/*!
- * Tests for the executable commands in this repo.  Most functionality is tested
- * elsewhere, so this really just sanity checks argument parsing, bad args, and
- * the --openapi mode.
- */
+//! Tests for the executable commands in this repo.  Most functionality is tested
+//! elsewhere, so this really just sanity checks argument parsing, bad args, and
+//! the --openapi mode.
 
-/*
- * TODO-coverage: test success cases of sled-agent
- */
+// TODO-coverage: test success cases of sled-agent
 
 use expectorate::assert_contents;
 use omicron_test_utils::dev::test_cmds::assert_exit_code;
@@ -22,7 +18,7 @@ use openapiv3::OpenAPI;
 use std::path::PathBuf;
 use subprocess::Exec;
 
-/** name of the "sled-agent-sim" executable */
+/// name of the "sled-agent-sim" executable
 const CMD_SLED_AGENT_SIM: &str = env!("CARGO_BIN_EXE_sled-agent-sim");
 
 fn path_to_sled_agent_sim() -> PathBuf {
@@ -43,7 +39,7 @@ fn test_sled_agent_sim_no_args() {
         &stderr_text,
     );
 }
-/** name of the "sled-agent" executable */
+/// name of the "sled-agent" executable
 const CMD_SLED_AGENT: &str = env!("CARGO_BIN_EXE_sled-agent");
 
 fn path_to_sled_agent() -> PathBuf {
@@ -72,17 +68,13 @@ fn test_sled_agent_openapi_bootagent() {
     let spec: OpenAPI = serde_json::from_str(&stdout_text)
         .expect("stdout was not valid OpenAPI");
 
-    /*
-     * Check for lint errors.
-     */
+    // Check for lint errors.
     let errors = openapi_lint::validate(&spec);
     assert!(errors.is_empty(), "{}", errors.join("\n\n"));
 
-    /*
-     * Confirm that the output hasn't changed. It's expected that we'll change
-     * this file as the API evolves, but pay attention to the diffs to ensure
-     * that the changes match your expectations.
-     */
+    // Confirm that the output hasn't changed. It's expected that we'll change
+    // this file as the API evolves, but pay attention to the diffs to ensure
+    // that the changes match your expectations.
     assert_contents("../openapi/bootstrap-agent.json", &stdout_text);
 }
 
@@ -99,16 +91,12 @@ fn test_sled_agent_openapi_sled() {
     let spec: OpenAPI = serde_json::from_str(&stdout_text)
         .expect("stdout was not valid OpenAPI");
 
-    /*
-     * Check for lint errors.
-     */
+    // Check for lint errors.
     let errors = openapi_lint::validate(&spec);
     assert!(errors.is_empty(), "{}", errors.join("\n\n"));
 
-    /*
-     * Confirm that the output hasn't changed. It's expected that we'll change
-     * this file as the API evolves, but pay attention to the diffs to ensure
-     * that the changes match your expectations.
-     */
+    // Confirm that the output hasn't changed. It's expected that we'll change
+    // this file as the API evolves, but pay attention to the diffs to ensure
+    // that the changes match your expectations.
     assert_contents("../openapi/sled-agent.json", &stdout_text);
 }
