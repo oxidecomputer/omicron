@@ -10,46 +10,44 @@ use std::fmt;
 use std::sync::Arc;
 use uuid::Uuid;
 
-/**
- * Describes Oxide API objects that can be simulated here in the sled agent
- *
- * We only simulate these objects from the perspective of an API consumer, which
- * means for example accepting a request to boot it, reporting the current state
- * as "starting", and then some time later reporting that the state is
- * "running".
- *
- * The basic idea is that for any type that we want to simulate (e.g.,
- * Instances), there's a `CurrentState` (which you could think of as "stopped",
- * "starting", "running", "stopping") and a `RequestedState` (which would only
- * be "stopped" and "running" -- you can't ask an Instance to transition to
- * "starting" or "stopping")
- *
- * (The term "state" here is a bit overloaded.  `CurrentState` refers to the
- * state of the object itself that's being simulated.  This might be an Instance
- * that is currently in state "running".  `RequestedState` refers to a requested
- * _change_ to the state of the object.  The state of the _simulated_ object
- * includes both of these: e.g., a "starting" Instance that is requested to be
- * "running".  So in most cases in the interface below, the state is represented
- * by a tuple of `(CurrentState, Option<RequestedState>)`.)
- *
- * Transitioning between states is always either synchronous (which means that
- * we make the transition immediately) or asynchronous (which means that we
- * first transition to some intermediate state and some time later finish the
- * transition to the requested state).  An Instance transition from "Stopped" to
- * "Destroyed" is synchronous.  An Instance transition from "Stopped" to
- * "Running" is asynchronous; it first goes to "Starting" and some time later
- * becomes "Running".
- *
- * It's expected that an object can begin another user-requested state
- * transition no matter what state it's in, although some particular transitions
- * may be disallowed (e.g., "reboot" from a stopped state).
- *
- * The implementor determines the set of possible states (via `CurrentState` and
- * `RequestedState`) as well as what transitions are allowed.
- *
- * When an asynchronous state change completes, we notify the control plane via
- * the `notify()` function.
- */
+/// Describes Oxide API objects that can be simulated here in the sled agent
+///
+/// We only simulate these objects from the perspective of an API consumer, which
+/// means for example accepting a request to boot it, reporting the current state
+/// as "starting", and then some time later reporting that the state is
+/// "running".
+///
+/// The basic idea is that for any type that we want to simulate (e.g.,
+/// Instances), there's a `CurrentState` (which you could think of as "stopped",
+/// "starting", "running", "stopping") and a `RequestedState` (which would only
+/// be "stopped" and "running" -- you can't ask an Instance to transition to
+/// "starting" or "stopping")
+///
+/// (The term "state" here is a bit overloaded.  `CurrentState` refers to the
+/// state of the object itself that's being simulated.  This might be an Instance
+/// that is currently in state "running".  `RequestedState` refers to a requested
+/// _change_ to the state of the object.  The state of the _simulated_ object
+/// includes both of these: e.g., a "starting" Instance that is requested to be
+/// "running".  So in most cases in the interface below, the state is represented
+/// by a tuple of `(CurrentState, Option<RequestedState>)`.)
+///
+/// Transitioning between states is always either synchronous (which means that
+/// we make the transition immediately) or asynchronous (which means that we
+/// first transition to some intermediate state and some time later finish the
+/// transition to the requested state).  An Instance transition from "Stopped" to
+/// "Destroyed" is synchronous.  An Instance transition from "Stopped" to
+/// "Running" is asynchronous; it first goes to "Starting" and some time later
+/// becomes "Running".
+///
+/// It's expected that an object can begin another user-requested state
+/// transition no matter what state it's in, although some particular transitions
+/// may be disallowed (e.g., "reboot" from a stopped state).
+///
+/// The implementor determines the set of possible states (via `CurrentState` and
+/// `RequestedState`) as well as what transitions are allowed.
+///
+/// When an asynchronous state change completes, we notify the control plane via
+/// the `notify()` function.
 #[async_trait]
 pub trait Simulatable: fmt::Debug + Send + Sync {
     /// Represents a possible current runtime state of the simulated object.

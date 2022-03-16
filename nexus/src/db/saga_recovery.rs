@@ -2,9 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-/*!
- * Handles recovery of sagas
- */
+//! Handles recovery of sagas
 
 use crate::context::OpContext;
 use crate::db;
@@ -85,23 +83,21 @@ where
     let join_handle = tokio::spawn(async move {
         info!(&opctx.log, "start saga recovery");
 
-        /*
-         * We perform the initial list of sagas using a standard retry policy.
-         * We treat all errors as transient because there's nothing we can do
-         * about any of them except try forever.  As a result, we never expect
-         * an error from the overall operation.
-         * TODO-monitoring we definitely want a way to raise a big red flag if
-         * saga recovery is not completing.
-         * TODO-robustness It would be better to retry the individual database
-         * operations within this operation than retrying the overall operation.
-         * As this is written today, if the listing requires a bunch of pages
-         * and the operation fails partway through, we'll re-fetch all the pages
-         * we successfully fetched before.  If the database is overloaded and
-         * only N% of requests are completing, the probability of this operation
-         * succeeding decreases considerably as the number of separate queries
-         * (pages) goes up.  We'd be much more likely to finish the overall
-         * operation if we didn't throw away the results we did get each time.
-         */
+        // We perform the initial list of sagas using a standard retry policy.
+        // We treat all errors as transient because there's nothing we can do
+        // about any of them except try forever.  As a result, we never expect
+        // an error from the overall operation.
+        // TODO-monitoring we definitely want a way to raise a big red flag if
+        // saga recovery is not completing.
+        // TODO-robustness It would be better to retry the individual database
+        // operations within this operation than retrying the overall operation.
+        // As this is written today, if the listing requires a bunch of pages
+        // and the operation fails partway through, we'll re-fetch all the pages
+        // we successfully fetched before.  If the database is overloaded and
+        // only N% of requests are completing, the probability of this operation
+        // succeeding decreases considerably as the number of separate queries
+        // (pages) goes up.  We'd be much more likely to finish the overall
+        // operation if we didn't throw away the results we did get each time.
         let found_sagas = retry_notify(
             internal_service_policy(),
             || async {
@@ -124,19 +120,17 @@ where
         info!(&opctx.log, "listed sagas ({} total)", found_sagas.len());
 
         let recovery_futures = found_sagas.into_iter().map(|saga| async {
-            /*
-             * TODO-robustness We should put this into a retry loop.  We may
-             * also want to take any failed sagas and put them at the end of the
-             * queue.  It shouldn't really matter, in that the transient
-             * failures here are likely to affect recovery of all sagas.
-             * However, it's conceivable we misclassify a permanent failure as a
-             * transient failure, or that a transient failure is more likely to
-             * affect some sagas than others (e.g, data on a different node, or
-             * it has a larger log that requires more queries).  To avoid one
-             * bad saga ruining the rest, we should try to recover the rest
-             * before we go back to one that's failed.
-             */
-            /* TODO-debug want visibility into "abandoned" sagas */
+            // TODO-robustness We should put this into a retry loop.  We may
+            // also want to take any failed sagas and put them at the end of the
+            // queue.  It shouldn't really matter, in that the transient
+            // failures here are likely to affect recovery of all sagas.
+            // However, it's conceivable we misclassify a permanent failure as a
+            // transient failure, or that a transient failure is more likely to
+            // affect some sagas than others (e.g, data on a different node, or
+            // it has a larger log that requires more queries).  To avoid one
+            // bad saga ruining the rest, we should try to recover the rest
+            // before we go back to one that's failed.
+            // TODO-debug want visibility into "abandoned" sagas
             let saga_id: steno::SagaId = saga.id.into();
             recover_saga(
                 &opctx,
@@ -187,20 +181,16 @@ fn new_page_params(
     }
 }
 
-/**
- * Queries the database to return a list of uncompleted sagas assigned to SEC
- * `sec_id`
- */
-/*
-* For now, we do the simplest thing: we fetch all the sagas that the
-* caller's going to need before returning any of them.  This is easier to
-* implement than, say, using a channel or some other stream.  In principle
-* we're giving up some opportunity for parallelism.  The caller could be
-* going off and fetching the saga log for the first sagas that we find
-* while we're still listing later sagas.  Doing that properly would require
-* concurrency limits to prevent overload or starvation of other database
-* consumers.
-*/
+/// Queries the database to return a list of uncompleted sagas assigned to SEC
+/// `sec_id`
+// For now, we do the simplest thing: we fetch all the sagas that the
+// caller's going to need before returning any of them.  This is easier to
+// implement than, say, using a channel or some other stream.  In principle
+// we're giving up some opportunity for parallelism.  The caller could be
+// going off and fetching the saga log for the first sagas that we find
+// while we're still listing later sagas.  Doing that properly would require
+// concurrency limits to prevent overload or starvation of other database
+// consumers.
 async fn list_unfinished_sagas(
     opctx: &OpContext,
     datastore: &db::DataStore,
@@ -279,10 +269,8 @@ where
         )
         .await
         .map_err(|error| {
-            /*
-             * TODO-robustness We want to differentiate between retryable and
-             * not here
-             */
+            // TODO-robustness We want to differentiate between retryable and
+            // not here
             Error::internal_error(&format!(
                 "failed to resume saga: {:#}",
                 error
@@ -300,9 +288,7 @@ where
     })
 }
 
-/**
- * Queries the database to load the full log for the specified saga
- */
+/// Queries the database to load the full log for the specified saga
 async fn load_saga_log(
     datastore: &db::DataStore,
     saga: &db::saga_types::Saga,

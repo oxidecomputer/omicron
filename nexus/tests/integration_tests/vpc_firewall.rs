@@ -26,7 +26,7 @@ use uuid::Uuid;
 async fn test_vpc_firewall(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
 
-    /* Create a project that we'll use for testing. */
+    // Create a project that we'll use for testing.
     let org_name = "test-org";
     create_organization(&client, &org_name).await;
     let project_name = "springfield-squidport";

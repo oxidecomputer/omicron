@@ -2,25 +2,21 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-/*!
- * Primary control plane interface for database read and write operations
- */
+//! Primary control plane interface for database read and write operations
 
-/*
- * TODO-scalability review all queries for use of indexes (may need
- * "time_deleted IS NOT NULL" conditions) Figure out how to automate this.
- *
- * TODO-design Better support for joins?
- * The interfaces here often require that to do anything with an object, a
- * caller must first look up the id and then do operations with the id.  For
- * example, the caller of project_list_disks() always looks up the project to
- * get the project_id, then lists disks having that project_id.  It's possible
- * to implement this instead with a JOIN in the database so that we do it with
- * one database round-trip.  We could use CTEs similar to what we do with
- * conditional updates to distinguish the case where the project didn't exist
- * vs. there were no disks in it.  This seems likely to be a fair bit more
- * complicated to do safely and generally compared to what we have now.
- */
+// TODO-scalability review all queries for use of indexes (may need
+// "time_deleted IS NOT NULL" conditions) Figure out how to automate this.
+//
+// TODO-design Better support for joins?
+// The interfaces here often require that to do anything with an object, a
+// caller must first look up the id and then do operations with the id.  For
+// example, the caller of project_list_disks() always looks up the project to
+// get the project_id, then lists disks having that project_id.  It's possible
+// to implement this instead with a JOIN in the database so that we do it with
+// one database round-trip.  We could use CTEs similar to what we do with
+// conditional updates to distinguish the case where the project didn't exist
+// vs. there were no disks in it.  This seems likely to be a fair bit more
+// complicated to do safely and generally compared to what we have now.
 
 use super::collection_insert::{
     AsyncInsertError, DatastoreCollection, SyncInsertError,
@@ -929,11 +925,9 @@ impl DataStore {
     }
 
     /// Delete a project
-    /*
-     * TODO-correctness This needs to check whether there are any resources that
-     * depend on the Project (Disks, Instances).  We can do this with a
-     * generation counter that gets bumped when these resources are created.
-     */
+    // TODO-correctness This needs to check whether there are any resources that
+    // depend on the Project (Disks, Instances).  We can do this with a
+    // generation counter that gets bumped when these resources are created.
     pub async fn project_delete(
         &self,
         opctx: &OpContext,
@@ -1023,9 +1017,7 @@ impl DataStore {
             })
     }
 
-    /*
-     * Instances
-     */
+    // Instances
 
     /// Fetches an Instance from the database and returns both the database row
     /// and an [`authz::Instance`] for doing authz checks
@@ -1148,12 +1140,10 @@ impl DataStore {
     /// In addition to the usual database errors (e.g., no connections
     /// available), this function can fail if there is already a different
     /// instance (having a different id) with the same name in the same project.
-    /*
-     * TODO-design Given that this is really oriented towards the saga
-     * interface, one wonders if it's even worth having an abstraction here, or
-     * if sagas shouldn't directly work with the database here (i.e., just do
-     * what this function does under the hood).
-     */
+    // TODO-design Given that this is really oriented towards the saga
+    // interface, one wonders if it's even worth having an abstraction here, or
+    // if sagas shouldn't directly work with the database here (i.e., just do
+    // what this function does under the hood).
     pub async fn project_create_instance(
         &self,
         instance: Instance,
@@ -1238,15 +1228,13 @@ impl DataStore {
             })
     }
 
-    /*
-     * TODO-design It's tempting to return the updated state of the Instance
-     * here because it's convenient for consumers and by using a RETURNING
-     * clause, we could ensure that the "update" and "fetch" are atomic.
-     * But in the unusual case that we _don't_ update the row because our
-     * update is older than the one in the database, we would have to fetch
-     * the current state explicitly.  For now, we'll just require consumers
-     * to explicitly fetch the state if they want that.
-     */
+    // TODO-design It's tempting to return the updated state of the Instance
+    // here because it's convenient for consumers and by using a RETURNING
+    // clause, we could ensure that the "update" and "fetch" are atomic.
+    // But in the unusual case that we _don't_ update the row because our
+    // update is older than the one in the database, we would have to fetch
+    // the current state explicitly.  For now, we'll just require consumers
+    // to explicitly fetch the state if they want that.
     pub async fn instance_update_runtime(
         &self,
         instance_id: &Uuid,
@@ -1291,15 +1279,13 @@ impl DataStore {
     ) -> DeleteResult {
         opctx.authorize(authz::Action::Delete, authz_instance).await?;
 
-        /*
-         * This is subject to change, but for now we're going to say that an
-         * instance must be "stopped" or "failed" in order to delete it.  The
-         * delete operation sets "time_deleted" (just like with other objects)
-         * and also sets the state to "destroyed".  By virtue of being
-         * "stopped", we assume there are no dependencies on this instance
-         * (e.g., disk attachments).  If that changes, we'll want to check for
-         * such dependencies here.
-         */
+        // This is subject to change, but for now we're going to say that an
+        // instance must be "stopped" or "failed" in order to delete it.  The
+        // delete operation sets "time_deleted" (just like with other objects)
+        // and also sets the state to "destroyed".  By virtue of being
+        // "stopped", we assume there are no dependencies on this instance
+        // (e.g., disk attachments).  If that changes, we'll want to check for
+        // such dependencies here.
         use api::external::InstanceState as ApiInstanceState;
         use db::model::InstanceState as DbInstanceState;
         use db::schema::instance::dsl;
@@ -1338,9 +1324,7 @@ impl DataStore {
         }
     }
 
-    /*
-     * Disks
-     */
+    // Disks
 
     /// Fetches a Disk from the database and returns both the database row
     /// and an [`authz::Disk`] for doing authz checks
@@ -1450,9 +1434,7 @@ impl DataStore {
         Ok((authz_disk, db_disk))
     }
 
-    /**
-     * List disks associated with a given instance.
-     */
+    /// List disks associated with a given instance.
     pub async fn instance_list_disks(
         &self,
         opctx: &OpContext,
@@ -1693,9 +1675,7 @@ impl DataStore {
         }
     }
 
-    /*
-     * Network interfaces
-     */
+    // Network interfaces
     pub async fn instance_create_network_interface(
         &self,
         interface: IncompleteNetworkInterface,

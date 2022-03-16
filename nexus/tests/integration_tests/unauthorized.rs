@@ -79,7 +79,6 @@ async fn test_unauthorized(cptestctx: &ControlPlaneTestContext) {
     }
 }
 
-//
 // SETUP PHASE
 //
 
@@ -237,7 +236,6 @@ lazy_static! {
         };
 }
 
-//
 // VERIFY PHASE
 //
 

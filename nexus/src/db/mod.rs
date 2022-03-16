@@ -2,9 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-/*!
- * Facilities for working with the Omicron database
- */
+//! Facilities for working with the Omicron database
 
 // This is not intended to be public, but this is necessary to use it from
 // doctests

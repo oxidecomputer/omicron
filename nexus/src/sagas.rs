@@ -2,16 +2,12 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-/*!
- * Saga actions, undo actions, and saga constructors used in Nexus.
- */
+//! Saga actions, undo actions, and saga constructors used in Nexus.
 
-/*
- * NOTE: We want to be careful about what interfaces we expose to saga actions.
- * In the future, we expect to mock these out for comprehensive testing of
- * correctness, idempotence, etc.  The more constrained this interface is, the
- * easier it will be to test, version, and update in deployed systems.
- */
+// NOTE: We want to be careful about what interfaces we expose to saga actions.
+// In the future, we expect to mock these out for comprehensive testing of
+// correctness, idempotence, etc.  The more constrained this interface is, the
+// easier it will be to test, version, and update in deployed systems.
 
 use crate::context::OpContext;
 use crate::db::identity::{Asset, Resource};
@@ -57,9 +53,7 @@ use steno::SagaTemplateGeneric;
 use steno::SagaType;
 use uuid::Uuid;
 
-/*
- * We'll need a richer mechanism for registering sagas, but this works for now.
- */
+// We'll need a richer mechanism for registering sagas, but this works for now.
 pub const SAGA_INSTANCE_CREATE_NAME: &'static str = "instance-create";
 pub const SAGA_INSTANCE_MIGRATE_NAME: &'static str = "instance-migrate";
 pub const SAGA_DISK_CREATE_NAME: &'static str = "disk-create";
@@ -114,9 +108,7 @@ async fn saga_generate_uuid<UserType: SagaType>(
     Ok(Uuid::new_v4())
 }
 
-/*
- * "Create Instance" saga template
- */
+// "Create Instance" saga template
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct ParamsInstanceCreate {
@@ -508,9 +500,7 @@ async fn sic_create_instance_record(
 async fn sic_instance_ensure(
     sagactx: ActionContext<SagaInstanceCreate>,
 ) -> Result<(), ActionError> {
-    /*
-     * TODO-correctness is this idempotent?
-     */
+    // TODO-correctness is this idempotent?
     let osagactx = sagactx.user_data();
     let runtime_params = InstanceRuntimeStateRequested {
         run_state: InstanceStateRequested::Running,
@@ -525,11 +515,9 @@ async fn sic_instance_ensure(
         .await
         .map_err(ActionError::action_failed)?;
 
-    /*
-     * Ask the sled agent to begin the state change.  Then update the database
-     * to reflect the new intermediate state.  If this update is not the newest
-     * one, that's fine.  That might just mean the sled agent beat us to it.
-     */
+    // Ask the sled agent to begin the state change.  Then update the database
+    // to reflect the new intermediate state.  If this update is not the newest
+    // one, that's fine.  That might just mean the sled agent beat us to it.
     let new_runtime_state = sa
         .instance_put(
             &instance_id,
@@ -554,9 +542,7 @@ async fn sic_instance_ensure(
         .map_err(ActionError::action_failed)
 }
 
-/*
- * "Migrate Instance" saga template
- */
+// "Migrate Instance" saga template
 #[derive(Debug, Deserialize, Serialize)]
 pub struct ParamsInstanceMigrate {
     pub serialized_authn: authn::saga::Serialized,

@@ -2,15 +2,11 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-/*!
- * Tests for the executable commands in this repo.  Most functionality is tested
- * elsewhere, so this really just sanity checks argument parsing, bad args, and
- * the --openapi mode.
- */
+//! Tests for the executable commands in this repo.  Most functionality is tested
+//! elsewhere, so this really just sanity checks argument parsing, bad args, and
+//! the --openapi mode.
 
-/*
- * TODO-coverage: test success cases of nexus
- */
+// TODO-coverage: test success cases of nexus
 
 use expectorate::assert_contents;
 use omicron_test_utils::dev::test_cmds::assert_exit_code;
@@ -27,17 +23,15 @@ use std::fs;
 use std::path::PathBuf;
 use subprocess::Exec;
 
-/** name of the "nexus" executable */
+/// name of the "nexus" executable
 const CMD_NEXUS: &str = env!("CARGO_BIN_EXE_nexus");
 
 fn path_to_nexus() -> PathBuf {
     path_to_executable(CMD_NEXUS)
 }
 
-/**
- * Write the requested string to a temporary file and return the path to that
- * file.
- */
+/// Write the requested string to a temporary file and return the path to that
+/// file.
 fn write_config(config: &str) -> PathBuf {
     let file_path = temp_file_path("test_commands_config");
     eprintln!("writing temp config: {}", file_path.display());
@@ -45,9 +39,7 @@ fn write_config(config: &str) -> PathBuf {
     file_path
 }
 
-/*
- * Tests
- */
+// Tests
 
 #[test]
 fn test_nexus_no_args() {
@@ -93,15 +85,13 @@ fn test_nexus_invalid_config() {
 
 #[track_caller]
 fn run_command_with_arg(arg: &str) -> (String, String) {
-    /*
-     * This is a little goofy: we need a config file for the program.
-     * (Arguably, --openapi shouldn't require a config file, but it's
-     * conceivable that the API metadata or the exposed endpoints would depend
-     * on the configuration.)  We ship a config file in "examples", and we may
-     * as well use it here -- it would be a bug if that one didn't work for this
-     * purpose.  However, it's not clear how to reliably locate it at runtime.
-     * But we do know where it is at compile time, so we load it then.
-     */
+    // This is a little goofy: we need a config file for the program.
+    // (Arguably, --openapi shouldn't require a config file, but it's
+    // conceivable that the API metadata or the exposed endpoints would depend
+    // on the configuration.)  We ship a config file in "examples", and we may
+    // as well use it here -- it would be a bug if that one didn't work for this
+    // purpose.  However, it's not clear how to reliably locate it at runtime.
+    // But we do know where it is at compile time, so we load it then.
     let config = include_str!("../../examples/config.toml");
     let config_path = write_config(config);
     let exec = Exec::cmd(path_to_nexus()).arg(&config_path).arg(arg);
@@ -117,39 +107,29 @@ fn test_nexus_openapi() {
     let (stdout_text, stderr_text) = run_command_with_arg("--openapi");
     assert_contents("tests/output/cmd-nexus-openapi-stderr", &stderr_text);
 
-    /*
-     * Make sure the result parses as a valid OpenAPI spec and sanity-check a
-     * few fields.
-     */
+    // Make sure the result parses as a valid OpenAPI spec and sanity-check a
+    // few fields.
     let spec: OpenAPI = serde_json::from_str(&stdout_text)
         .expect("stdout was not valid OpenAPI");
     assert_eq!(spec.openapi, "3.0.3");
     assert_eq!(spec.info.title, "Oxide Region API");
     assert_eq!(spec.info.version, "0.0.1");
 
-    /*
-     * Spot check a couple of items.
-     */
+    // Spot check a couple of items.
     assert!(!spec.paths.paths.is_empty());
     assert!(spec.paths.paths.get("/organizations").is_some());
 
-    /*
-     * Check for lint errors.
-     */
+    // Check for lint errors.
     let errors = openapi_lint::validate(&spec);
     assert!(errors.is_empty(), "{}", errors.join("\n\n"));
 
-    /*
-     * Construct a string that helps us identify the organization of tags and
-     * operations.
-     */
+    // Construct a string that helps us identify the organization of tags and
+    // operations.
     let mut ops_by_tag = BTreeMap::<String, Vec<(String, String)>>::new();
     for (path, _, op) in spec.operations() {
-        /*
-         * Make sure each operation has exactly one tag. Note, we intentionally
-         * do this before validating the OpenAPI output as fixing an error here
-         * would necessitate refreshing the spec file again.
-         */
+        // Make sure each operation has exactly one tag. Note, we intentionally
+        // do this before validating the OpenAPI output as fixing an error here
+        // would necessitate refreshing the spec file again.
         assert_eq!(
             op.tags.len(),
             1,
@@ -178,17 +158,13 @@ fn test_nexus_openapi() {
         tags.push('\n');
     }
 
-    /*
-     * Confirm that the output hasn't changed. It's expected that we'll change
-     * this file as the API evolves, but pay attention to the diffs to ensure
-     * that the changes match your expectations.
-     */
+    // Confirm that the output hasn't changed. It's expected that we'll change
+    // this file as the API evolves, but pay attention to the diffs to ensure
+    // that the changes match your expectations.
     assert_contents("../openapi/nexus.json", &stdout_text);
 
-    /*
-     * When this fails, verify that operations on which you're adding,
-     * renaming, or changing the tags are what you intend.
-     */
+    // When this fails, verify that operations on which you're adding,
+    // renaming, or changing the tags are what you intend.
     assert_contents("tests/output/nexus_tags.txt", &tags);
 }
 
@@ -198,16 +174,12 @@ fn test_nexus_openapi_internal() {
     let spec: OpenAPI = serde_json::from_str(&stdout_text)
         .expect("stdout was not valid OpenAPI");
 
-    /*
-     * Check for lint errors.
-     */
+    // Check for lint errors.
     let errors = openapi_lint::validate(&spec);
     assert!(errors.is_empty(), "{}", errors.join("\n\n"));
 
-    /*
-     * Confirm that the output hasn't changed. It's expected that we'll change
-     * this file as the API evolves, but pay attention to the diffs to ensure
-     * that the changes match your expectations.
-     */
+    // Confirm that the output hasn't changed. It's expected that we'll change
+    // this file as the API evolves, but pay attention to the diffs to ensure
+    // that the changes match your expectations.
     assert_contents("../openapi/nexus-internal.json", &stdout_text);
 }

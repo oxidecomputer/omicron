@@ -2,9 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-/*!
- * HTTP entrypoint functions for the sled agent's exposed API
- */
+//! HTTP entrypoint functions for the sled agent's exposed API
 
 use crate::params::{DiskEnsureBody, InstanceEnsureBody};
 use dropshot::endpoint;
@@ -27,9 +25,7 @@ use super::sled_agent::SledAgent;
 
 type SledApiDescription = ApiDescription<Arc<SledAgent>>;
 
-/**
- * Returns a description of the sled agent API
- */
+/// Returns a description of the sled agent API
 pub fn api() -> SledApiDescription {
     fn register_endpoints(api: &mut SledApiDescription) -> Result<(), String> {
         api.register(instance_put)?;
@@ -47,9 +43,7 @@ pub fn api() -> SledApiDescription {
     api
 }
 
-/**
- * Path parameters for Instance requests (sled agent API)
- */
+/// Path parameters for Instance requests (sled agent API)
 #[derive(Deserialize, JsonSchema)]
 struct InstancePathParam {
     instance_id: Uuid,
@@ -87,9 +81,7 @@ async fn instance_poke_post(
     Ok(HttpResponseUpdatedNoContent())
 }
 
-/**
- * Path parameters for Disk requests (sled agent API)
- */
+/// Path parameters for Disk requests (sled agent API)
 #[derive(Deserialize, JsonSchema)]
 struct DiskPathParam {
     disk_id: Uuid,

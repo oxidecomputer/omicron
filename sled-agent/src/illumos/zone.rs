@@ -161,7 +161,8 @@ impl Zones {
         info!(log, "Configuring new Omicron zone: {}", zone_name);
         let mut cfg = zone::Config::create(
             zone_name,
-            /* overwrite= */ true,
+            // overwrite=
+            true,
             zone::CreationOptions::Blank,
         );
         let path = format!("{}/{}", ZONE_ZFS_DATASET_MOUNTPOINT, zone_name);

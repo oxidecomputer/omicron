@@ -2,20 +2,16 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-/*!
- * Executable program to run Nexus, the heart of the control plane
- */
+//! Executable program to run Nexus, the heart of the control plane
 
-/*
- * TODO
- * - TCP and HTTP KeepAlive parameters
- * - Server hostname
- * - Disable signals?
- * - Analogs for actix client_timeout (request timeout), client_shutdown (client
- *   shutdown timeout), server backlog, number of workers, max connections per
- *   worker, max connect-in-progress sockets, shutdown_timeout (server shutdown
- *   timeout)
- */
+// TODO
+// - TCP and HTTP KeepAlive parameters
+// - Server hostname
+// - Disable signals?
+// - Analogs for actix client_timeout (request timeout), client_shutdown (client
+//   shutdown timeout), server backlog, number of workers, max connections per
+//   worker, max connect-in-progress sockets, shutdown_timeout (server shutdown
+//   timeout)
 
 use omicron_common::cmd::fatal;
 use omicron_common::cmd::CmdError;

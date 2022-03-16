@@ -2,9 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-/*!
- * Developer tool for setting up a local database for use by Omicron
- */
+//! Developer tool for setting up a local database for use by Omicron
 
 use anyhow::bail;
 use anyhow::Context;
@@ -70,45 +68,35 @@ struct DbRunArgs {
     store_dir: Option<PathBuf>,
 
     /// Database (SQL) listen port.  Use `0` to request any available port.
-    /*
-     * We choose an arbitrary default port that's different from the default
-     * CockroachDB port to avoid conflicting.  We don't use 0 because this port
-     * is specified in a few other places, like the default Nexus config file.
-     * TODO We could load that file at compile time and use the value there.
-     */
+    // We choose an arbitrary default port that's different from the default
+    // CockroachDB port to avoid conflicting.  We don't use 0 because this port
+    // is specified in a few other places, like the default Nexus config file.
+    // TODO We could load that file at compile time and use the value there.
     #[structopt(long, default_value = "32221")]
     listen_port: u16,
 
-    /*
-     * This unusual structopt configuration makes "populate" default to true,
-     * allowing a --no-populate override on the CLI.
-     */
+    // This unusual structopt configuration makes "populate" default to true,
+    // allowing a --no-populate override on the CLI.
     /// Do not populate the database with any schema
     #[structopt(long = "--no-populate", parse(from_flag = std::ops::Not::not))]
     populate: bool,
 }
 
 async fn cmd_db_run(args: &DbRunArgs) -> Result<(), anyhow::Error> {
-    /*
-     * Set ourselves up to wait for SIGINT.  It's important to do this early,
-     * before we've created resources that we want to have cleaned up on SIGINT
-     * (e.g., the temporary directory created by the database starter).
-     */
+    // Set ourselves up to wait for SIGINT.  It's important to do this early,
+    // before we've created resources that we want to have cleaned up on SIGINT
+    // (e.g., the temporary directory created by the database starter).
     let signals = Signals::new(&[SIGINT]).expect("failed to wait for SIGINT");
     let mut signal_stream = signals.fuse();
 
-    /*
-     * Now start CockroachDB.  This process looks bureaucratic (create arg
-     * builder, then create starter, then start it) because we want to be able
-     * to print what's happening before we do it.
-     */
+    // Now start CockroachDB.  This process looks bureaucratic (create arg
+    // builder, then create starter, then start it) because we want to be able
+    // to print what's happening before we do it.
     let mut db_arg_builder =
         dev::db::CockroachStarterBuilder::new().listen_port(args.listen_port);
 
-    /*
-     * NOTE: The stdout strings here are not intended to be stable, but they are
-     * used by the test suite.
-     */
+    // NOTE: The stdout strings here are not intended to be stable, but they are
+    // used by the test suite.
 
     if let Some(store_dir) = &args.store_dir {
         println!(
@@ -141,18 +129,14 @@ async fn cmd_db_run(args: &DbRunArgs) -> Result<(), anyhow::Error> {
     );
 
     if args.populate {
-        /*
-         * Populate the database with our schema.
-         */
+        // Populate the database with our schema.
         println!("omicron-dev: populating database");
         db_instance.populate().await.context("populating database")?;
         println!("omicron-dev: populated database");
     }
 
-    /*
-     * Wait for either the child process to shut down on its own or for us to
-     * receive SIGINT.
-     */
+    // Wait for either the child process to shut down on its own or for us to
+    // receive SIGINT.
     tokio::select! {
         _ = db_instance.wait_for_shutdown() => {
             db_instance.cleanup().await.context("clean up after shutdown")?;

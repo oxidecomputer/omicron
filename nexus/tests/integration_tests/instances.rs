@@ -2,9 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-/*!
- * Tests basic instance support in the API
- */
+//! Tests basic instance support in the API
 
 use http::method::Method;
 use http::StatusCode;
@@ -46,7 +44,7 @@ async fn test_instances_access_before_create_returns_not_found(
 ) {
     let client = &cptestctx.external_client;
 
-    /* Create a project that we'll use for testing. */
+    // Create a project that we'll use for testing.
     create_organization(&client, ORGANIZATION_NAME).await;
     let url_instances = format!(
         "/organizations/{}/projects/{}/instances",
@@ -54,11 +52,11 @@ async fn test_instances_access_before_create_returns_not_found(
     );
     let _ = create_project(&client, ORGANIZATION_NAME, PROJECT_NAME).await;
 
-    /* List instances.  There aren't any yet. */
+    // List instances.  There aren't any yet.
     let instances = instances_list(&client, &url_instances).await;
     assert_eq!(instances.len(), 0);
 
-    /* Make sure we get a 404 if we fetch one. */
+    // Make sure we get a 404 if we fetch one.
     let instance_url = format!("{}/just-rainsticks", url_instances);
     let error: HttpErrorResponseBody = NexusRequest::expect_failure(
         client,
@@ -77,7 +75,7 @@ async fn test_instances_access_before_create_returns_not_found(
         "not found: instance with name \"just-rainsticks\""
     );
 
-    /* Ditto if we try to delete one. */
+    // Ditto if we try to delete one.
     let error: HttpErrorResponseBody = NexusRequest::expect_failure(
         client,
         StatusCode::NOT_FOUND,
@@ -104,7 +102,7 @@ async fn test_instances_create_reboot_halt(
     let apictx = &cptestctx.server.apictx;
     let nexus = &apictx.nexus;
 
-    /* Create a project that we'll use for testing. */
+    // Create a project that we'll use for testing.
     create_organization(&client, ORGANIZATION_NAME).await;
     let url_instances = format!(
         "/organizations/{}/projects/{}/instances",
@@ -112,7 +110,7 @@ async fn test_instances_create_reboot_halt(
     );
     let _ = create_project(&client, ORGANIZATION_NAME, PROJECT_NAME).await;
 
-    /* Create an instance. */
+    // Create an instance.
     let instance_url = format!("{}/just-rainsticks", url_instances);
     let instance = create_instance(
         client,
@@ -124,13 +122,13 @@ async fn test_instances_create_reboot_halt(
     assert_eq!(instance.identity.name, "just-rainsticks");
     assert_eq!(instance.identity.description, "instance \"just-rainsticks\"");
     let InstanceCpuCount(nfoundcpus) = instance.ncpus;
-    /* These particulars are hardcoded in create_instance(). */
+    // These particulars are hardcoded in create_instance().
     assert_eq!(nfoundcpus, 4);
     assert_eq!(instance.memory.to_whole_mebibytes(), 256);
     assert_eq!(instance.hostname, "the_host");
     assert_eq!(instance.runtime.run_state, InstanceState::Starting);
 
-    /* Attempt to create a second instance with a conflicting name. */
+    // Attempt to create a second instance with a conflicting name.
     let error: HttpErrorResponseBody = NexusRequest::new(
         RequestBuilder::new(client, Method::POST, &url_instances)
             .body(Some(&params::InstanceCreate {
@@ -157,17 +155,17 @@ async fn test_instances_create_reboot_halt(
     .unwrap();
     assert_eq!(error.message, "already exists: instance \"just-rainsticks\"");
 
-    /* List instances again and expect to find the one we just created. */
+    // List instances again and expect to find the one we just created.
     let instances = instances_list(&client, &url_instances).await;
     assert_eq!(instances.len(), 1);
     instances_eq(&instances[0], &instance);
 
-    /* Fetch the instance and expect it to match. */
+    // Fetch the instance and expect it to match.
     let instance = instance_get(&client, &instance_url).await;
     instances_eq(&instances[0], &instance);
     assert_eq!(instance.runtime.run_state, InstanceState::Starting);
 
-    /* Check that the instance got a network interface */
+    // Check that the instance got a network interface
     let ips_url = format!(
         "/organizations/{}/projects/{}/vpcs/default/subnets/default/network-interfaces",
         ORGANIZATION_NAME, PROJECT_NAME
@@ -180,9 +178,7 @@ async fn test_instances_create_reboot_halt(
     assert_eq!(network_interfaces[0].instance_id, instance.identity.id);
     assert_eq!(network_interfaces[0].identity.name, "default");
 
-    /*
-     * Now, simulate completion of instance boot and check the state reported.
-     */
+    // Now, simulate completion of instance boot and check the state reported.
     instance_simulate(nexus, &instance.identity.id).await;
     let instance_next = instance_get(&client, &instance_url).await;
     identity_eq(&instance.identity, &instance_next.identity);
@@ -192,10 +188,8 @@ async fn test_instances_create_reboot_halt(
             > instance.runtime.time_run_state_updated
     );
 
-    /*
-     * Request another boot.  This should succeed without changing the state,
-     * not even the state timestamp.
-     */
+    // Request another boot.  This should succeed without changing the state,
+    // not even the state timestamp.
     let instance = instance_next;
     let instance_next =
         instance_post(&client, &instance_url, InstanceOp::Start).await;
@@ -203,9 +197,7 @@ async fn test_instances_create_reboot_halt(
     let instance_next = instance_get(&client, &instance_url).await;
     instances_eq(&instance, &instance_next);
 
-    /*
-     * Reboot the instance.
-     */
+    // Reboot the instance.
     let instance = instance_next;
     let instance_next =
         instance_post(&client, &instance_url, InstanceOp::Reboot).await;
@@ -233,9 +225,7 @@ async fn test_instances_create_reboot_halt(
             > instance.runtime.time_run_state_updated
     );
 
-    /*
-     * Request a halt and verify both the immediate state and the finished state.
-     */
+    // Request a halt and verify both the immediate state and the finished state.
     let instance = instance_next;
     let instance_next =
         instance_post(&client, &instance_url, InstanceOp::Stop).await;
@@ -254,10 +244,8 @@ async fn test_instances_create_reboot_halt(
             > instance.runtime.time_run_state_updated
     );
 
-    /*
-     * Request another halt.  This should succeed without changing the state,
-     * not even the state timestamp.
-     */
+    // Request another halt.  This should succeed without changing the state,
+    // not even the state timestamp.
     let instance = instance_next;
     let instance_next =
         instance_post(&client, &instance_url, InstanceOp::Stop).await;
@@ -265,9 +253,7 @@ async fn test_instances_create_reboot_halt(
     let instance_next = instance_get(&client, &instance_url).await;
     instances_eq(&instance, &instance_next);
 
-    /*
-     * Attempt to reboot the halted instance.  This should fail.
-     */
+    // Attempt to reboot the halted instance.  This should fail.
     let _error: HttpErrorResponseBody = NexusRequest::expect_failure(
         client,
         StatusCode::BAD_REQUEST,
@@ -285,10 +271,8 @@ async fn test_instances_create_reboot_halt(
     // client, and expressing that as a rich error type.
     // assert_eq!(error.message, "cannot reboot instance in state \"stopped\"");
 
-    /*
-     * Start the instance.  While it's starting, issue a reboot.  This should
-     * succeed, having stopped in between.
-     */
+    // Start the instance.  While it's starting, issue a reboot.  This should
+    // succeed, having stopped in between.
     let instance = instance_next;
     let instance_next =
         instance_post(&client, &instance_url, InstanceOp::Start).await;
@@ -325,11 +309,9 @@ async fn test_instances_create_reboot_halt(
             > instance.runtime.time_run_state_updated
     );
 
-    /*
-     * Stop the instance.  While it's stopping, issue a reboot.  This should
-     * fail because you cannot stop an instance that's en route to a stopped
-     * state.
-     */
+    // Stop the instance.  While it's stopping, issue a reboot.  This should
+    // fail because you cannot stop an instance that's en route to a stopped
+    // state.
     let instance = instance_next;
     let instance_next =
         instance_post(&client, &instance_url, InstanceOp::Stop).await;
@@ -351,7 +333,7 @@ async fn test_instances_create_reboot_halt(
     .unwrap()
     .parsed_body()
     .unwrap();
-    //assert_eq!(error.message, "cannot reboot instance in state \"stopping\"");
+    // assert_eq!(error.message, "cannot reboot instance in state \"stopping\"");
     let instance = instance_next;
     instance_simulate(nexus, &instance.identity.id).await;
     let instance_next = instance_get(&client, &instance_url).await;
@@ -361,25 +343,21 @@ async fn test_instances_create_reboot_halt(
             > instance.runtime.time_run_state_updated
     );
 
-    /* TODO-coverage add a test to try to delete the project at this point. */
+    // TODO-coverage add a test to try to delete the project at this point.
 
-    /* Delete the instance. */
+    // Delete the instance.
     NexusRequest::object_delete(client, &instance_url)
         .authn_as(AuthnMode::PrivilegedUser)
         .execute()
         .await
         .unwrap();
 
-    /*
-     * TODO-coverage re-add tests that check the server-side state after
-     * deleting.  We need to figure out how these actually get cleaned up from
-     * the API namespace when this happens.
-     */
+    // TODO-coverage re-add tests that check the server-side state after
+    // deleting.  We need to figure out how these actually get cleaned up from
+    // the API namespace when this happens.
 
-    /*
-     * Once more, try to reboot it.  This should not work on a destroyed
-     * instance.
-     */
+    // Once more, try to reboot it.  This should not work on a destroyed
+    // instance.
     NexusRequest::expect_failure(
         client,
         StatusCode::NOT_FOUND,
@@ -391,9 +369,7 @@ async fn test_instances_create_reboot_halt(
     .await
     .unwrap();
 
-    /*
-     * Similarly, we should not be able to start or stop the instance.
-     */
+    // Similarly, we should not be able to start or stop the instance.
     NexusRequest::expect_failure(
         client,
         StatusCode::NOT_FOUND,
@@ -485,12 +461,10 @@ async fn test_instances_delete_fails_when_running_succeeds_when_stopped(
 async fn test_instances_invalid_creation_returns_bad_request(
     cptestctx: &ControlPlaneTestContext,
 ) {
-    /*
-     * The rest of these examples attempt to create invalid instances.  We don't
-     * do exhaustive tests of the model here -- those are part of unit tests --
-     * but we exercise a few different types of errors to make sure those get
-     * passed through properly.
-     */
+    // The rest of these examples attempt to create invalid instances.  We don't
+    // do exhaustive tests of the model here -- those are part of unit tests --
+    // but we exercise a few different types of errors to make sure those get
+    // passed through properly.
 
     let client = &cptestctx.external_client;
     let url_instances = format!(
@@ -922,7 +896,7 @@ async fn test_instance_with_multiple_nics_unwinds_completely(
 ) {
     let client = &cptestctx.external_client;
 
-    /* Create a project that we'll use for testing. */
+    // Create a project that we'll use for testing.
     create_organization(&client, ORGANIZATION_NAME).await;
     let url_instances = format!(
         "/organizations/{}/projects/{}/instances",
@@ -1018,9 +992,7 @@ async fn instances_list(
         .all_items
 }
 
-/**
- * Convenience function for starting, stopping, or rebooting an instance.
- */
+/// Convenience function for starting, stopping, or rebooting an instance.
 enum InstanceOp {
     Start,
     Stop,
@@ -1070,12 +1042,10 @@ fn instances_eq(instance1: &Instance, instance2: &Instance) {
     );
 }
 
-/**
- * Simulate completion of an ongoing instance state transition.  To do this, we
- * have to look up the instance, then get the sled agent associated with that
- * instance, and then tell it to finish simulating whatever async transition is
- * going on.
- */
+/// Simulate completion of an ongoing instance state transition.  To do this, we
+/// have to look up the instance, then get the sled agent associated with that
+/// instance, and then tell it to finish simulating whatever async transition is
+/// going on.
 async fn instance_simulate(nexus: &Arc<Nexus>, id: &Uuid) {
     let sa = nexus.instance_sled_by_id(id).await.unwrap();
     sa.instance_finish_transition(id.clone()).await;

@@ -71,9 +71,7 @@ pub struct ProducerEndpoint {
 }
 
 impl ProducerEndpoint {
-    /**
-     * Return the route that can be used to request metric data.
-     */
+    /// Return the route that can be used to request metric data.
     pub fn collection_route(&self) -> String {
         format!("{}/{}", &self.base_route, &self.id)
     }

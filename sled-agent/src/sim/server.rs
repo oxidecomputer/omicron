@@ -2,9 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-/*!
-* Library interface to the sled agent
- */
+//! Library interface to the sled agent
 
 use super::config::Config;
 use super::http_entrypoints::api as http_api;
@@ -18,21 +16,17 @@ use omicron_common::backoff::{
 use slog::{Drain, Logger};
 use std::sync::Arc;
 
-/**
- * Packages up a [`SledAgent`], running the sled agent API under a Dropshot
- * server wired up to the sled agent
- */
+/// Packages up a [`SledAgent`], running the sled agent API under a Dropshot
+/// server wired up to the sled agent
 pub struct Server {
-    /** underlying sled agent */
+    /// underlying sled agent
     pub sled_agent: Arc<SledAgent>,
-    /** dropshot server for the API */
+    /// dropshot server for the API
     pub http_server: dropshot::HttpServer<Arc<SledAgent>>,
 }
 
 impl Server {
-    /**
-     * Start a SledAgent server
-     */
+    /// Start a SledAgent server
     pub async fn start(
         config: &Config,
         log: &Logger,
@@ -66,14 +60,12 @@ impl Server {
         .map_err(|error| format!("initializing server: {}", error))?
         .start();
 
-        /*
-         * Notify the control plane that we're up, and continue trying this
-         * until it succeeds. We retry with an randomized, capped exponential
-         * backoff.
-         *
-         * TODO-robustness if this returns a 400 error, we probably want to
-         * return a permanent error from the `notify_nexus` closure.
-         */
+        // Notify the control plane that we're up, and continue trying this
+        // until it succeeds. We retry with an randomized, capped exponential
+        // backoff.
+        //
+        // TODO-robustness if this returns a 400 error, we probably want to
+        // return a permanent error from the `notify_nexus` closure.
         let sa_address = http_server.local_addr();
         let notify_nexus = || async {
             debug!(log, "contacting server nexus");
@@ -120,21 +112,17 @@ impl Server {
         Ok(Server { sled_agent, http_server })
     }
 
-    /**
-     * Wait for the given server to shut down
-     *
-     * Note that this doesn't initiate a graceful shutdown, so if you call this
-     * immediately after calling `start()`, the program will block indefinitely
-     * or until something else initiates a graceful shutdown.
-     */
+    /// Wait for the given server to shut down
+    ///
+    /// Note that this doesn't initiate a graceful shutdown, so if you call this
+    /// immediately after calling `start()`, the program will block indefinitely
+    /// or until something else initiates a graceful shutdown.
     pub async fn wait_for_finish(self) -> Result<(), String> {
         self.http_server.await
     }
 }
 
-/**
- * Run an instance of the `Server`
- */
+/// Run an instance of the `Server`
 pub async fn run_server(config: &Config) -> Result<(), String> {
     let (drain, registration) = slog_dtrace::with_drain(
         config

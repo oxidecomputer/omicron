@@ -53,7 +53,6 @@ async fn test_roles_builtin(cptestctx: &ControlPlaneTestContext) {
     // There's an empty page at the end of each dropshot scan.
     assert_eq!(roles.len() + 1, roles_paginated.npages);
 
-    //
     // Test GET /roles/$role_name
     //
 
