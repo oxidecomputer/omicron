@@ -26,7 +26,7 @@ use serde_json::json;
 async fn test_vpc_subnets(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
 
-    /* Create a project that we'll use for testing. */
+    // Create a project that we'll use for testing.
     let org_name = "test-org";
     create_organization(&client, &org_name).await;
     let project_name = "springfield-squidport";
@@ -34,7 +34,7 @@ async fn test_vpc_subnets(cptestctx: &ControlPlaneTestContext) {
         format!("/organizations/{}/projects/{}/vpcs", org_name, project_name);
     let _ = create_project(&client, org_name, project_name).await;
 
-    /* Create a VPC. */
+    // Create a VPC.
     let vpc_name = "vpc1";
     let vpc = create_vpc(&client, org_name, project_name, vpc_name).await;
 
@@ -79,7 +79,7 @@ async fn test_vpc_subnets(cptestctx: &ControlPlaneTestContext) {
     .unwrap();
     assert_eq!(error.message, "not found: vpc-subnet with name \"subnet1\"");
 
-    /* Create a VPC Subnet. */
+    // Create a VPC Subnet.
     let ipv4_block = Ipv4Net("10.0.0.0/24".parse().unwrap());
     let other_ipv4_block = Ipv4Net("172.31.0.0/16".parse().unwrap());
     // Create the first two available IPv6 address ranges. */

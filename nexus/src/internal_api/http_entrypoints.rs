@@ -2,9 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-/**
- * Handler functions (entrypoints) for HTTP APIs internal to the control plane
- */
+/// Handler functions (entrypoints) for HTTP APIs internal to the control plane
 use crate::context::OpContext;
 use crate::ServerContext;
 
@@ -35,9 +33,7 @@ use uuid::Uuid;
 
 type NexusApiDescription = ApiDescription<Arc<ServerContext>>;
 
-/**
- * Returns a description of the internal nexus API
- */
+/// Returns a description of the internal nexus API
 pub fn internal_api() -> NexusApiDescription {
     fn register_endpoints(api: &mut NexusApiDescription) -> Result<(), String> {
         api.register(cpapi_sled_agents_post)?;
@@ -59,9 +55,7 @@ pub fn internal_api() -> NexusApiDescription {
     api
 }
 
-/**
- * Path parameters for Sled Agent requests (internal API)
- */
+/// Path parameters for Sled Agent requests (internal API)
 #[derive(Deserialize, JsonSchema)]
 struct SledAgentPathParam {
     sled_id: Uuid,
@@ -93,18 +87,14 @@ async fn cpapi_sled_agents_post(
     apictx.internal_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/**
- * Path parameters for Sled Agent requests (internal API)
- */
+/// Path parameters for Sled Agent requests (internal API)
 #[derive(Deserialize, JsonSchema)]
 struct ZpoolPathParam {
     sled_id: Uuid,
     zpool_id: Uuid,
 }
 
-/**
- * Report that a pool for a specified sled has come online.
- */
+/// Report that a pool for a specified sled has come online.
 #[endpoint {
      method = PUT,
      path = "/sled_agents/{sled_id}/zpools/{zpool_id}",
@@ -128,9 +118,7 @@ struct DatasetPathParam {
     dataset_id: Uuid,
 }
 
-/**
- * Report that a dataset within a pool has come online.
- */
+/// Report that a dataset within a pool has come online.
 #[endpoint {
      method = PUT,
      path = "/zpools/{zpool_id}/dataset/{dataset_id}",
@@ -155,17 +143,13 @@ async fn dataset_put(
     Ok(HttpResponseOk(DatasetPutResponse { reservation: None, quota: None }))
 }
 
-/**
- * Path parameters for Instance requests (internal API)
- */
+/// Path parameters for Instance requests (internal API)
 #[derive(Deserialize, JsonSchema)]
 struct InstancePathParam {
     instance_id: Uuid,
 }
 
-/**
- * Report updated state for an instance.
- */
+/// Report updated state for an instance.
 #[endpoint {
      method = PUT,
      path = "/instances/{instance_id}",
@@ -186,17 +170,13 @@ async fn cpapi_instances_put(
     apictx.internal_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/**
- * Path parameters for Disk requests (internal API)
- */
+/// Path parameters for Disk requests (internal API)
 #[derive(Deserialize, JsonSchema)]
 struct DiskPathParam {
     disk_id: Uuid,
 }
 
-/**
- * Report updated state for a disk.
- */
+/// Report updated state for a disk.
 #[endpoint {
      method = PUT,
      path = "/disks/{disk_id}",
@@ -218,9 +198,7 @@ async fn cpapi_disks_put(
     apictx.internal_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/**
- * Accept a registration from a new metric producer
- */
+/// Accept a registration from a new metric producer
 #[endpoint {
      method = POST,
      path = "/metrics/producers",
@@ -242,9 +220,7 @@ async fn cpapi_producers_post(
         .await
 }
 
-/**
- * Accept a notification of a new oximeter collection server.
- */
+/// Accept a notification of a new oximeter collection server.
 #[endpoint {
      method = POST,
      path = "/metrics/collectors",
@@ -266,9 +242,7 @@ async fn cpapi_collectors_post(
         .await
 }
 
-/**
- * Endpoint for oximeter to collect nexus server metrics.
- */
+/// Endpoint for oximeter to collect nexus server metrics.
 #[endpoint {
     method = GET,
     path = "/metrics/collect/{producer_id}",

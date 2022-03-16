@@ -24,7 +24,7 @@ use nexus_test_utils_macros::nexus_test;
 async fn test_vpc_routers(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
 
-    /* Create a project that we'll use for testing. */
+    // Create a project that we'll use for testing.
     let organization_name = "test-org";
     let project_name = "springfield-squidport";
     let vpcs_url = format!(
@@ -34,7 +34,7 @@ async fn test_vpc_routers(cptestctx: &ControlPlaneTestContext) {
     create_organization(&client, organization_name).await;
     let _ = create_project(&client, organization_name, project_name).await;
 
-    /* Create a VPC. */
+    // Create a VPC.
     let vpc_name = "vpc1";
     let vpc =
         create_vpc(&client, organization_name, project_name, vpc_name).await;
@@ -57,7 +57,7 @@ async fn test_vpc_routers(cptestctx: &ControlPlaneTestContext) {
         .await;
     assert_eq!(error.message, "not found: vpc-router with name \"router1\"");
 
-    /* Create a VPC Router. */
+    // Create a VPC Router.
     let new_router = params::VpcRouterCreate {
         identity: IdentityMetadataCreateParams {
             name: router_name.parse().unwrap(),

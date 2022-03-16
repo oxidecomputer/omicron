@@ -547,9 +547,7 @@ where
 pub struct MacAddr(pub external::MacAddr);
 
 impl MacAddr {
-    /**
-     * Generate a unique MAC address for an interface
-     */
+    /// Generate a unique MAC address for an interface
     pub fn new() -> Result<Self, external::Error> {
         use rand::Fill;
         // Use the Oxide OUI A8 40 25

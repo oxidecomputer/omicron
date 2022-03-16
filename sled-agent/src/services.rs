@@ -109,10 +109,14 @@ impl ServiceManager {
                 &self.log,
                 &self.vnic_allocator,
                 &service.name,
-                /* unique_name= */ None,
-                /* dataset= */ &[],
-                /* devices= */ &[],
-                /* vnics= */ vec![],
+                // unique_name=
+                None,
+                // dataset=
+                &[],
+                // devices=
+                &[],
+                // vnics=
+                vec![],
             )
             .await?;
 

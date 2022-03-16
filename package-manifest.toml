@@ -32,16 +32,6 @@ zone = true
 from = "smf/oximeter"
 to = "/var/svc/manifest/site/oximeter"
 
-[package.propolis-server]
-rust.binary_names = ["propolis-server"]
-rust.release = true
-service_name = "propolis-server"
-zone = true
-blobs = [ "alpine.iso", "OVMF_CODE.fd" ]
-[[package.propolis-server.paths]]
-from = "smf/propolis-server"
-to = "/var/svc/manifest/site/propolis-server"
-
 [package.clickhouse]
 service_name = "clickhouse"
 zone = true
@@ -69,4 +59,8 @@ to = "/var/svc/manifest/site/cockroachdb"
 
 [external_package.crucible]
 service_name = "crucible"
+zone = true
+
+[external_package.propolis-server]
+service_name = "propolis-server"
 zone = true

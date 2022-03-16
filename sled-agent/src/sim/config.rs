@@ -2,9 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-/*!
- * Interfaces for working with sled agent configuration
- */
+//! Interfaces for working with sled agent configuration
 
 use dropshot::ConfigDropshot;
 use dropshot::ConfigLogging;
@@ -13,23 +11,17 @@ use serde::Serialize;
 use std::net::{IpAddr, SocketAddr};
 use uuid::Uuid;
 
-/**
- * How a [`SledAgent`](`super::sled_agent::SledAgent`) simulates object states and
- * transitions
- */
+/// How a [`SledAgent`](`super::sled_agent::SledAgent`) simulates object states and
+/// transitions
 #[derive(Copy, Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub enum SimMode {
-    /**
-     * Indicates that asynchronous state transitions should be simulated
-     * automatically using a timer to complete the transition a few seconds in
-     * the future.
-     */
+    /// Indicates that asynchronous state transitions should be simulated
+    /// automatically using a timer to complete the transition a few seconds in
+    /// the future.
     Auto,
 
-    /**
-     * Indicates that asynchronous state transitions should be simulated
-     * explicitly, relying on calls through `sled_agent::TestInterfaces`.
-     */
+    /// Indicates that asynchronous state transitions should be simulated
+    /// explicitly, relying on calls through `sled_agent::TestInterfaces`.
     Explicit,
 }
 
@@ -49,21 +41,19 @@ pub struct ConfigStorage {
     pub ip: IpAddr,
 }
 
-/**
- * Configuration for a sled agent
- */
+/// Configuration for a sled agent
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct Config {
-    /** unique id for the sled */
+    /// unique id for the sled
     pub id: Uuid,
-    /** how to simulate asynchronous Instance and Disk transitions */
+    /// how to simulate asynchronous Instance and Disk transitions
     pub sim_mode: SimMode,
-    /** IP address and TCP port for Nexus instance to register with */
+    /// IP address and TCP port for Nexus instance to register with
     pub nexus_address: SocketAddr,
-    /** configuration for the sled agent dropshot server */
+    /// configuration for the sled agent dropshot server
     pub dropshot: ConfigDropshot,
-    /** configuration for the sled agent debug log */
+    /// configuration for the sled agent debug log
     pub log: ConfigLogging,
-    /** configuration for the sled agent's storage */
+    /// configuration for the sled agent's storage
     pub storage: ConfigStorage,
 }
