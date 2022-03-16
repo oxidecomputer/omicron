@@ -712,9 +712,7 @@ fn disks_eq(disk1: &Disk, disk2: &Disk) {
     assert_eq!(disk1.device_path, disk2.device_path);
 }
 
-/**
- * Simulate completion of an ongoing disk state transition.
- */
+/// Simulate completion of an ongoing disk state transition.
 async fn disk_simulate(nexus: &Arc<Nexus>, id: &Uuid) {
     let sa = nexus.disk_sled_by_id(id).await.unwrap();
     sa.disk_finish_transition(id.clone()).await;

@@ -16,7 +16,6 @@ use std::fmt::Debug;
 
 /// Convenient way to make an outgoing HTTP request and verify various
 /// properties of the response for testing
-//
 // When testing an HTTP server, we make varying requests to the server and
 // verify a bunch of properties about its behavior.  A lot of things can go
 // wrong along the way:

@@ -2,9 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-/*!
- * Simulated sled agent implementation
- */
+//! Simulated sled agent implementation
 
 use super::simulatable::Simulatable;
 
@@ -22,9 +20,7 @@ use uuid::Uuid;
 
 use crate::common::instance::{Action as InstanceAction, InstanceStates};
 
-/**
- * Simulated Instance (virtual machine), as created by the external Oxide API
- */
+/// Simulated Instance (virtual machine), as created by the external Oxide API
 #[derive(Debug)]
 pub struct SimInstance {
     state: InstanceStates,

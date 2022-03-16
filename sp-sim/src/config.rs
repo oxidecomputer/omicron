@@ -2,10 +2,8 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//!
 //! Interfaces for parsing configuration files and working with a simulated SP
 //! configuration
-//!
 
 use dropshot::ConfigLogging;
 use gateway_messages::SerialNumber;
@@ -64,14 +62,12 @@ pub struct Config {
     pub simulated_sps: SimulatedSps,
     /// Server-wide logging configuration.
     pub log: ConfigLogging,
-    /*
-    /// Type of SP to simulate.
-    pub sp_type: SpType,
-    /// Components to simulate.
-    pub components: SpComponents,
-    /// UDP listen address.
-    pub bind_address: SocketAddr,
-    */
+    // Type of SP to simulate.
+    // pub sp_type: SpType,
+    // Components to simulate.
+    // pub components: SpComponents,
+    // UDP listen address.
+    // pub bind_address: SocketAddr,
 }
 
 impl Config {

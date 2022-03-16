@@ -232,7 +232,7 @@ impl oso::PolarClass for FleetChild {
         oso::Class::builder()
             .add_method(
                 "has_role",
-                /* Roles are not supported on FleetChilds today. */
+                // Roles are not supported on FleetChilds today.
                 |_: &FleetChild, _: AuthenticatedActor, _: String| false,
             )
             .add_attribute_getter("fleet", |_: &FleetChild| FLEET)

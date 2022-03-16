@@ -108,9 +108,9 @@ async fn static_content(
     rqctx: Arc<RequestContext<FileServerContext>>,
     path: Path<AllPath>,
 ) -> Result<Response<Body>, HttpError> {
-    /* NOTE: this is a particularly brief and bad implementation of this to keep the test shorter.
-     * see https://github.com/oxidecomputer/dropshot/blob/main/dropshot/examples/file_server.rs for
-     * something more robust! */
+    // NOTE: this is a particularly brief and bad implementation of this to keep the test shorter.
+    // see https://github.com/oxidecomputer/dropshot/blob/main/dropshot/examples/file_server.rs for
+    // something more robust!
     let mut fs_path = rqctx.context().base.clone();
     for component in path.into_inner().path {
         fs_path.push(component);

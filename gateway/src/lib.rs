@@ -71,15 +71,13 @@ impl Server {
     }
 
     // TODO does MGS register itself with oximeter?
-    /*
-    /// Register the Nexus server as a metric producer with `oximeter.
-    pub async fn register_as_producer(&self) {
-        self.apictx
-            .nexus
-            .register_as_producer(self.http_server_internal.local_addr())
-            .await;
-    }
-    */
+    // Register the Nexus server as a metric producer with `oximeter.
+    // pub async fn register_as_producer(&self) {
+    // self.apictx
+    // .nexus
+    // .register_as_producer(self.http_server_internal.local_addr())
+    // .await;
+    // }
 }
 
 /// Run an instance of the [Server].
@@ -101,6 +99,6 @@ pub async fn run_server(config: &Config) -> Result<(), String> {
     }
     let rack_id = Uuid::new_v4();
     let server = Server::start(config, &rack_id, &log).await?;
-    //server.register_as_producer().await;
+    // server.register_as_producer().await;
     server.wait_for_finish().await
 }

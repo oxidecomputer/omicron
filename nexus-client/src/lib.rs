@@ -2,10 +2,8 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-/*!
- * Interface for making API requests to the Oxide control plane at large
- * from within the control plane
- */
+//! Interface for making API requests to the Oxide control plane at large
+//! from within the control plane
 
 use omicron_common::generate_logging_api;
 

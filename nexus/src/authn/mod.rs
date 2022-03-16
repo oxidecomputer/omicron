@@ -201,7 +201,6 @@ NewtypeDisplay! { () pub struct SchemeName(&'static str); }
 ///    type.  This will generally have a lot less information to avoid leaking
 ///    information to attackers, but it's still useful to distinguish between
 ///    400 and 401/403, for example.
-///
 #[derive(Debug, thiserror::Error)]
 #[error("authentication failed (tried schemes: {schemes_tried:?})")]
 pub struct Error {
