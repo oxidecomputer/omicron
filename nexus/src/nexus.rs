@@ -12,6 +12,7 @@ use crate::db;
 use crate::db::identity::{Asset, Resource};
 use crate::db::model::DatasetKind;
 use crate::db::model::Name;
+use crate::db::model::RouterRoute;
 use crate::db::model::VpcRouter;
 use crate::db::model::VpcSubnet;
 use crate::db::subnet_allocation::NetworkInterfaceError;
@@ -1723,7 +1724,7 @@ impl Nexus {
                 },
             },
         );
-        let _ = self
+        let (authz_router, _) = self
             .db_datastore
             .vpc_create_router(&opctx, &authz_vpc, router)
             .await?;
@@ -1745,7 +1746,9 @@ impl Nexus {
             },
         );
 
-        self.db_datastore.router_create_route(route).await?;
+        self.db_datastore
+            .router_create_route(opctx, &authz_router, route)
+            .await?;
 
         // Allocate the first /64 sub-range from the requested or created
         // prefix.
@@ -2252,7 +2255,7 @@ impl Nexus {
             *kind,
             params.clone(),
         );
-        let router = self
+        let (_, router) = self
             .db_datastore
             .vpc_create_router(&opctx, &authz_vpc, router)
             .await?;
@@ -2317,6 +2320,7 @@ impl Nexus {
 
     pub async fn router_list_routes(
         &self,
+        opctx: &OpContext,
         organization_name: &Name,
         project_name: &Name,
         vpc_name: &Name,
@@ -2334,13 +2338,14 @@ impl Nexus {
             .await?;
         let routes = self
             .db_datastore
-            .router_list_routes(&authz_router.id(), pagparams)
+            .router_list_routes(opctx, &authz_router, pagparams)
             .await?;
         Ok(routes)
     }
 
-    pub async fn router_lookup_route(
+    pub async fn route_fetch(
         &self,
+        opctx: &OpContext,
         organization_name: &Name,
         project_name: &Name,
         vpc_name: &Name,
@@ -2358,12 +2363,14 @@ impl Nexus {
             .await?;
         Ok(self
             .db_datastore
-            .router_route_fetch_by_name(&authz_router.id(), route_name)
-            .await?)
+            .route_fetch(&opctx, &authz_router, route_name)
+            .await?
+            .1)
     }
 
     pub async fn router_create_route(
         &self,
+        opctx: &OpContext,
         organization_name: &Name,
         project_name: &Name,
         vpc_name: &Name,
@@ -2387,71 +2394,86 @@ impl Nexus {
             *kind,
             params.clone(),
         );
-        let route = self.db_datastore.router_create_route(route).await?;
+        let route = self
+            .db_datastore
+            .router_create_route(&opctx, &authz_router, route)
+            .await?;
         Ok(route)
     }
 
     pub async fn router_delete_route(
         &self,
+        opctx: &OpContext,
         organization_name: &Name,
         project_name: &Name,
         vpc_name: &Name,
         router_name: &Name,
         route_name: &Name,
     ) -> DeleteResult {
-        let route = self
-            .router_lookup_route(
+        let authz_router = self
+            .db_datastore
+            .vpc_router_lookup_by_path(
                 organization_name,
                 project_name,
                 vpc_name,
                 router_name,
-                route_name,
             )
             .await?;
+        let (authz_route, db_route) = self
+            .db_datastore
+            .route_fetch(opctx, &authz_router, route_name)
+            .await?;
         // Only custom routes can be deleted
-        if route.kind.0 != RouterRouteKind::Custom {
+        // TODO Shouldn't this constraint be checked by the database query?
+        if db_route.kind.0 != RouterRouteKind::Custom {
             return Err(Error::MethodNotAllowed {
                 internal_message: "DELETE not allowed on system routes"
                     .to_string(),
             });
         }
-        self.db_datastore.router_delete_route(&route.id()).await
+        self.db_datastore.router_delete_route(opctx, &authz_route).await
     }
 
     pub async fn router_update_route(
         &self,
+        opctx: &OpContext,
         organization_name: &Name,
         project_name: &Name,
         vpc_name: &Name,
         router_name: &Name,
         route_name: &Name,
         params: &RouterRouteUpdateParams,
-    ) -> UpdateResult<()> {
-        let route = self
-            .router_lookup_route(
+    ) -> UpdateResult<RouterRoute> {
+        let authz_router = self
+            .db_datastore
+            .vpc_router_lookup_by_path(
                 organization_name,
                 project_name,
                 vpc_name,
                 router_name,
-                route_name,
             )
             .await?;
-        // TODO: Write a test for this once there's a way to test it (i.e. subnets automatically register to the system router table)
-        match route.kind.0 {
+        let (authz_route, db_route) = self
+            .db_datastore
+            .route_fetch(opctx, &authz_router, route_name)
+            .await?;
+        // TODO: Write a test for this once there's a way to test it (i.e.
+        // subnets automatically register to the system router table)
+        match db_route.kind.0 {
             RouterRouteKind::Custom | RouterRouteKind::Default => (),
             _ => {
                 return Err(Error::MethodNotAllowed {
                     internal_message: format!(
-                        "routes of type {} from the system table of VPC {} are not modifiable",
-                        route.kind.0,
-                        vpc_name
+                        "routes of type {} from the system table of VPC {:?} \
+                        are not modifiable",
+                        db_route.kind.0, vpc_name
                     ),
                 })
             }
         }
         Ok(self
             .db_datastore
-            .router_update_route(&route.id(), params.clone().into())
+            .router_update_route(&opctx, &authz_route, params.clone().into())
             .await?)
     }
 

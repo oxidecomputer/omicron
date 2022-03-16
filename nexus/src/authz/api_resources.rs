@@ -513,6 +513,7 @@ impl ApiResourceError for ProjectChild {
 
 pub type Disk = ProjectChild;
 pub type Instance = ProjectChild;
+pub type RouterRoute = ProjectChild;
 pub type Vpc = ProjectChild;
 pub type VpcRouter = ProjectChild;
 pub type VpcSubnet = ProjectChild;
