@@ -2884,6 +2884,7 @@ impl DataStore {
 
         use db::schema::router_route::dsl;
         let router_id = route.router_id;
+        let name = route.name().clone();
 
         VpcRouter::insert_resource(
             router_id,
@@ -2899,7 +2900,10 @@ impl DataStore {
             AsyncInsertError::DatabaseError(e) => {
                 public_error_from_diesel_pool(
                     e,
-                    ErrorHandler::NotFoundByResource(authz_router),
+                    ErrorHandler::Conflict(
+                        ResourceType::RouterRoute,
+                        name.as_str(),
+                    ),
                 )
             }
         })
