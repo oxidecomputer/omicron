@@ -1959,6 +1959,7 @@ dependencies = [
  "expectorate",
  "futures",
  "gateway-messages",
+ "gateway-sp-comms",
  "hex",
  "http",
  "omicron-common",
