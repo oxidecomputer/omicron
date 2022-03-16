@@ -41,10 +41,19 @@ use uuid::Uuid;
 
 // TODO: Break up types into multiple files
 
-/// This macro implements serialization and deserialization of an enum type
-/// from our database into our model types.
-/// See [`VpcRouterKindEnum`] and [`VpcRouterKind`] for a sample usage
-macro_rules! impl_enum_type {
+// TODO: The existence of both impl_enum_type and impl_enum_wrapper is a
+// temporary state of affairs while we do the work of converting uses of
+// impl_enum_wrapper to impl_enum_type. This is part of a broader initiative to
+// move types out of the common crate into Nexus where possible. See
+// https://github.com/oxidecomputer/omicron/issues/388
+
+/// This macro implements serialization and deserialization of an enum type from
+/// our database into our model types. This version wraps an enum imported from
+/// the common crate in a struct so we can implement DB traits on it. We are
+/// moving those enum definitions into this file and using impl_enum_type
+/// instead, so eventually this macro will go away. See [`InstanceState`] for a
+/// sample usage.
+macro_rules! impl_enum_wrapper {
     (
         $(#[$enum_meta:meta])*
         pub struct $diesel_type:ident;
@@ -101,7 +110,10 @@ macro_rules! impl_enum_type {
     }
 }
 
-macro_rules! impl_enum_type2 {
+/// This macro implements serialization and deserialization of an enum type from
+/// our database into our model types. See [`VpcRouterKindEnum`] and
+/// [`VpcRouterKind`] for a sample usage
+macro_rules! impl_enum_type {
     (
         $(#[$enum_meta:meta])*
         pub struct $diesel_type:ident;
@@ -688,7 +700,7 @@ impl DatastoreCollection<Dataset> for Zpool {
     type CollectionIdColumn = dataset::dsl::pool_id;
 }
 
-impl_enum_type2!(
+impl_enum_type!(
     #[derive(SqlType, Debug, QueryId)]
     #[postgres(type_name = "dataset_kind", type_schema = "public")]
     pub struct DatasetKindEnum;
@@ -1138,7 +1150,7 @@ impl Into<internal::nexus::InstanceRuntimeState> for InstanceRuntimeState {
     }
 }
 
-impl_enum_type!(
+impl_enum_wrapper!(
     #[derive(SqlType, Debug)]
     #[postgres(type_name = "instance_state", type_schema = "public")]
     pub struct InstanceStateEnum;
@@ -1653,7 +1665,7 @@ impl From<params::VpcSubnetUpdate> for VpcSubnetUpdate {
     }
 }
 
-impl_enum_type2!(
+impl_enum_type!(
     #[derive(SqlType, Debug)]
     #[postgres(type_name = "vpc_router_kind", type_schema = "public")]
     pub struct VpcRouterKindEnum;
@@ -1715,7 +1727,7 @@ impl From<params::VpcRouterUpdate> for VpcRouterUpdate {
     }
 }
 
-impl_enum_type!(
+impl_enum_wrapper!(
     #[derive(SqlType, Debug)]
     #[postgres(type_name = "router_route_kind", type_schema = "public")]
     pub struct RouterRouteKindEnum;
@@ -1863,7 +1875,7 @@ impl From<external::RouterRouteUpdateParams> for RouterRouteUpdate {
     }
 }
 
-impl_enum_type!(
+impl_enum_wrapper!(
     #[derive(SqlType, Debug)]
     #[postgres(type_name = "vpc_firewall_rule_status", type_schema = "public")]
     pub struct VpcFirewallRuleStatusEnum;
@@ -1878,7 +1890,7 @@ impl_enum_type!(
 NewtypeFrom! { () pub struct VpcFirewallRuleStatus(external::VpcFirewallRuleStatus); }
 NewtypeDeref! { () pub struct VpcFirewallRuleStatus(external::VpcFirewallRuleStatus); }
 
-impl_enum_type!(
+impl_enum_wrapper!(
     #[derive(SqlType, Debug)]
     #[postgres(type_name = "vpc_firewall_rule_direction", type_schema = "public")]
     pub struct VpcFirewallRuleDirectionEnum;
@@ -1893,7 +1905,7 @@ impl_enum_type!(
 NewtypeFrom! { () pub struct VpcFirewallRuleDirection(external::VpcFirewallRuleDirection); }
 NewtypeDeref! { () pub struct VpcFirewallRuleDirection(external::VpcFirewallRuleDirection); }
 
-impl_enum_type!(
+impl_enum_wrapper!(
     #[derive(SqlType, Debug)]
     #[postgres(type_name = "vpc_firewall_rule_action", type_schema = "public")]
     pub struct VpcFirewallRuleActionEnum;
@@ -1908,7 +1920,7 @@ impl_enum_type!(
 NewtypeFrom! { () pub struct VpcFirewallRuleAction(external::VpcFirewallRuleAction); }
 NewtypeDeref! { () pub struct VpcFirewallRuleAction(external::VpcFirewallRuleAction); }
 
-impl_enum_type!(
+impl_enum_wrapper!(
     #[derive(SqlType, Debug)]
     #[postgres(type_name = "vpc_firewall_rule_protocol", type_schema = "public")]
     pub struct VpcFirewallRuleProtocolEnum;
@@ -2308,7 +2320,7 @@ impl RoleAssignmentBuiltin {
     }
 }
 
-impl_enum_type!(
+impl_enum_wrapper!(
     #[derive(SqlType, Debug, QueryId)]
     #[postgres(type_name = "update_artifact_kind", type_schema = "public")]
     pub struct UpdateArtifactKindEnum;
