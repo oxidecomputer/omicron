@@ -55,6 +55,8 @@ pub const SESSION_COOKIE_SCHEME_NAME: authn::SchemeName =
 
 /// Generate session cookie header
 pub fn session_cookie_header_value(token: &str, max_age: Duration) -> String {
+    // TODO(https://github.com/oxidecomputer/omicron/issues/249): We should
+    // insert "Secure;" back into this string.
     format!(
         "{}={}; Path=/; HttpOnly; SameSite=Lax; Max-Age={}",
         SESSION_COOKIE_COOKIE_NAME,
