@@ -44,12 +44,14 @@ impl UdpServer {
     }
 }
 
-pub fn logger(config: &Config, name: String) -> Result<Logger> {
+pub fn logger(config: &Config) -> Result<Logger> {
+    const NAME: &str = "sp-sim";
     use slog::Drain;
+
     let (drain, registration) = slog_dtrace::with_drain(
-        config.log.to_logger(&name).with_context(|| "initializing logger")?,
+        config.log.to_logger(NAME).with_context(|| "initializing logger")?,
     );
-    let log = slog::Logger::root(drain.fuse(), slog::o!("component" => name));
+    let log = slog::Logger::root(drain.fuse(), slog::o!("component" => NAME));
     if let slog_dtrace::ProbeRegistration::Failed(e) = registration {
         let msg = format!("failed to register DTrace probes: {}", e);
         error!(log, "{}", msg);

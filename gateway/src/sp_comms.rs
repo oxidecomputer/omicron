@@ -7,32 +7,53 @@
 
 //! Inteface for communicating with SPs over UDP on the management network.
 
+mod bulk_state_get;
 mod serial_console_history;
 
-pub(crate) use serial_console_history::SerialConsoleContents;
-use serial_console_history::SerialConsoleHistory;
+pub(crate) use self::bulk_state_get::BulkSpStateSingleResult;
+pub(crate) use self::bulk_state_get::BulkStateProgress;
+pub(crate) use self::bulk_state_get::SpStateRequestId;
+pub(crate) use self::serial_console_history::SerialConsoleContents;
 
-use crate::{config::KnownSps, http_entrypoints::SpState};
+use self::bulk_state_get::OutstandingSpStateRequests;
+use self::serial_console_history::SerialConsoleHistory;
+
+use crate::config::KnownSps;
+use crate::http_entrypoints::SpState;
 use dropshot::HttpError;
-use gateway_messages::{
-    sp_impl::SerialConsolePacketizer, version, IgnitionCommand, IgnitionState,
-    Request, RequestKind, ResponseError, ResponseKind, SerialConsole,
-    SerializedSize, SpComponent, SpMessage, SpMessageKind,
-};
-use slog::{debug, error, info, o, Logger};
-use std::{
-    collections::HashMap,
-    io,
-    net::SocketAddr,
-    sync::{atomic::AtomicU32, Arc, Mutex},
-    time::Duration,
-};
+use gateway_messages::sp_impl::SerialConsolePacketizer;
+use gateway_messages::version;
+use gateway_messages::IgnitionCommand;
+use gateway_messages::IgnitionState;
+use gateway_messages::Request;
+use gateway_messages::RequestKind;
+use gateway_messages::ResponseError;
+use gateway_messages::ResponseKind;
+use gateway_messages::SerialConsole;
+use gateway_messages::SerializedSize;
+use gateway_messages::SpComponent;
+use gateway_messages::SpMessage;
+use gateway_messages::SpMessageKind;
+use slog::debug;
+use slog::error;
+use slog::info;
+use slog::o;
+use slog::Logger;
+use std::collections::HashMap;
+use std::io;
+use std::net::SocketAddr;
+use std::sync::atomic::AtomicU32;
+use std::sync::Arc;
+use std::sync::Mutex;
+use std::time::Duration;
 use thiserror::Error;
-use tokio::{
-    net::UdpSocket,
-    sync::oneshot::{self, error::RecvError, Receiver, Sender},
-    task::JoinHandle,
-};
+use tokio::net::UdpSocket;
+use tokio::sync::oneshot;
+use tokio::sync::oneshot::error::RecvError;
+use tokio::sync::oneshot::Receiver;
+use tokio::sync::oneshot::Sender;
+use tokio::task::JoinHandle;
+use tokio::time::Instant;
 
 #[derive(Debug, Error)]
 pub enum StartupError {
@@ -44,10 +65,17 @@ pub enum StartupError {
 // right if these comms are going to move to their own crate, but at the moment
 // it's confusing. For now we'll keep them separate, but maybe we should split
 // this module out into its own crate sooner rather than later.
-#[derive(Debug, Error)]
+#[derive(Debug, Clone, Error)]
 pub enum Error {
+    // ----
+    // internal errors
+    // ----
+    // `Error` needs to be `Clone` because we hold onto `Result<SpState, Error>`
+    // in memory during bulk "get all SP state" requests, and then we clone
+    // those results to give to any clients that want info for that request.
+    // `io::Error` isn't `Clone`, so we wrap it in an `Arc`.
     #[error("error sending to UDP address {addr}: {err}")]
-    UdpSend { addr: SocketAddr, err: io::Error },
+    UdpSend { addr: SocketAddr, err: Arc<io::Error> },
     #[error(
         "SP sent a bogus response type (got `{got}`; expected `{expected}`)"
     )]
@@ -55,16 +83,44 @@ pub enum Error {
     #[error("error from SP: {0}")]
     SpError(#[from] ResponseError),
     #[error("timeout")]
-    Timeout(#[from] tokio::time::error::Elapsed),
+    Timeout,
     #[error("no known SP at {0}")]
     SpDoesNotExist(SocketAddr),
+
+    // ----
+    // client errors
+    // ----
+    #[error("invalid page token (no such request)")]
+    NoSuchRequest,
+    #[error("invalid page token (invalid last SP seen)")]
+    InvalidLastSpSeen,
+}
+
+impl From<tokio::time::error::Elapsed> for Error {
+    fn from(_: tokio::time::error::Elapsed) -> Self {
+        Self::Timeout
+    }
 }
 
 impl From<Error> for HttpError {
     fn from(err: Error) -> Self {
-        // none of `Error`'s cases are caused by the client; they're all
-        // internal to gateway <-> SP failures
-        HttpError::for_internal_error(err.to_string())
+        match err {
+            Error::NoSuchRequest => HttpError::for_bad_request(
+                Some(String::from("NoSuchRequest")),
+                err.to_string(),
+            ),
+            Error::InvalidLastSpSeen => HttpError::for_bad_request(
+                Some(String::from("InvalidLastSpSeen")),
+                err.to_string(),
+            ),
+            Error::UdpSend { .. }
+            | Error::BogusResponseType { .. }
+            | Error::SpError(_)
+            | Error::Timeout
+            | Error::SpDoesNotExist(_) => {
+                HttpError::for_internal_error(err.to_string())
+            }
+        }
     }
 }
 
@@ -111,6 +167,7 @@ pub struct SpCommunicator {
     socket: Arc<UdpSocket>,
     known_sps: KnownSps,
     sp_state: Arc<AllSpState>,
+    bulk_state_requests: OutstandingSpStateRequests,
     request_id: AtomicU32,
     recv_task: JoinHandle<()>,
 }
@@ -153,6 +210,7 @@ impl SpCommunicator {
             socket,
             known_sps,
             sp_state,
+            bulk_state_requests: OutstandingSpStateRequests::default(),
             request_id: AtomicU32::new(0),
             recv_task,
         })
@@ -165,15 +223,33 @@ impl SpCommunicator {
     pub(crate) async fn state_get(
         &self,
         sp: SocketAddr,
-        timeout: Duration,
+        timeout: Instant,
     ) -> Result<SpState, Error> {
-        tokio::time::timeout(timeout, self.state_get_impl(sp)).await?
+        tokio::time::timeout_at(timeout, self.state_get_impl(sp)).await?
     }
 
-    pub(crate) async fn state_get_impl(
+    pub(crate) fn bulk_state_start(
+        self: &Arc<Self>,
+        timeout: Instant,
+        retain_grace_period: Duration,
+        sps: impl Iterator<Item = (usize, IgnitionState, Option<SocketAddr>)>,
+    ) -> SpStateRequestId {
+        self.bulk_state_requests.start(timeout, retain_grace_period, sps, self)
+    }
+
+    pub(crate) async fn bulk_state_get_progress(
         &self,
-        sp: SocketAddr,
-    ) -> Result<SpState, Error> {
+        id: &SpStateRequestId,
+        last_seen_target: Option<u8>,
+        timeout: Duration,
+        limit: usize,
+    ) -> Result<BulkStateProgress, Error> {
+        self.bulk_state_requests
+            .get(id, last_seen_target, timeout, limit, &self.log)
+            .await
+    }
+
+    async fn state_get_impl(&self, sp: SocketAddr) -> Result<SpState, Error> {
         match self.request_response(sp, RequestKind::SpState).await? {
             ResponseKind::SpState(state) => Ok(SpState::Enabled {
                 serial_number: hex::encode(&state.serial_number[..]),
@@ -209,7 +285,7 @@ impl SpCommunicator {
         .await?
     }
 
-    pub(crate) async fn serial_console_post_impl(
+    async fn serial_console_post_impl(
         &self,
         sp: SocketAddr,
         component: SpComponent,
@@ -374,7 +450,7 @@ impl SpCommunicator {
         self.socket
             .send_to(serialized_request, sp)
             .await
-            .map_err(|err| Error::UdpSend { addr: sp, err })?;
+            .map_err(|err| Error::UdpSend { addr: sp, err: Arc::new(err) })?;
 
         // recv() can only fail if the sender is dropped, but we're holding it
         // in `self.outstanding_requests`; unwrap() is fine.
