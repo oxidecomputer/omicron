@@ -70,9 +70,9 @@ dependencies = [
 
 [[package]]
 name = "async-stream"
-version = "0.3.2"
+version = "0.3.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "171374e7e3b2504e0e5236e3b59260560f9fe94bfe9ac39ba5e4e929c5590625"
+checksum = "dad5c83079eae9969be7fadefe640a1c566901f05ff91ab221de4b6f68d9507e"
 dependencies = [
  "async-stream-impl",
  "futures-core",
@@ -80,9 +80,9 @@ dependencies = [
 
 [[package]]
 name = "async-stream-impl"
-version = "0.3.2"
+version = "0.3.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "648ed8c8d2ce5409ccd57453d9d1b214b342a0d69376a6feda1fd6cae3299308"
+checksum = "10f203db73a71dfa2fb6dd22763990fa26f3d2625a6da2da900d23b87d26be27"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -791,7 +791,7 @@ checksum = "1435fa1053d8b2fbbe9be7e97eca7f33d37b28409959813daefc1446a14247f1"
 [[package]]
 name = "dropshot"
 version = "0.6.1-dev"
-source = "git+https://github.com/oxidecomputer/dropshot?branch=main#6ca8e21a8b9fe1a35e6780afa1f70a5ec6a22513"
+source = "git+https://github.com/oxidecomputer/dropshot?branch=main#1e07d6cdc7c752d43541e546b6a6a366433fd443"
 dependencies = [
  "async-stream",
  "async-trait",
@@ -829,7 +829,7 @@ dependencies = [
 [[package]]
 name = "dropshot_endpoint"
 version = "0.6.1-dev"
-source = "git+https://github.com/oxidecomputer/dropshot?branch=main#6ca8e21a8b9fe1a35e6780afa1f70a5ec6a22513"
+source = "git+https://github.com/oxidecomputer/dropshot?branch=main#1e07d6cdc7c752d43541e546b6a6a366433fd443"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -2179,7 +2179,7 @@ checksum = "624a8340c38c1b80fd549087862da4ba43e08858af025b236e509b6649fc13d5"
 [[package]]
 name = "openapi-lint"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/openapi-lint?branch=main#025fc867b7da62b33474d0a765823653a437f362"
+source = "git+https://github.com/oxidecomputer/openapi-lint?branch=main#9e3ada82808ef882fdefe2d01a39eeeb219c8778"
 dependencies = [
  "convert_case 0.5.0",
  "indexmap",
@@ -2812,7 +2812,7 @@ dependencies = [
 [[package]]
 name = "progenitor"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/progenitor#ae7c178e21b321b0f88a9fa886a59fb98defa21a"
+source = "git+https://github.com/oxidecomputer/progenitor#b7bbb5cdffdfc4ddf5bc7c1a45d34760130e48a0"
 dependencies = [
  "anyhow",
  "getopts",
@@ -2827,8 +2827,10 @@ dependencies = [
 [[package]]
 name = "progenitor-client"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/progenitor#ae7c178e21b321b0f88a9fa886a59fb98defa21a"
+source = "git+https://github.com/oxidecomputer/progenitor#b7bbb5cdffdfc4ddf5bc7c1a45d34760130e48a0"
 dependencies = [
+ "bytes",
+ "futures-core",
  "percent-encoding",
  "reqwest",
  "serde",
@@ -2838,7 +2840,7 @@ dependencies = [
 [[package]]
 name = "progenitor-impl"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/progenitor#ae7c178e21b321b0f88a9fa886a59fb98defa21a"
+source = "git+https://github.com/oxidecomputer/progenitor#b7bbb5cdffdfc4ddf5bc7c1a45d34760130e48a0"
 dependencies = [
  "convert_case 0.4.0",
  "getopts",
@@ -2860,7 +2862,7 @@ dependencies = [
 [[package]]
 name = "progenitor-macro"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/progenitor#ae7c178e21b321b0f88a9fa886a59fb98defa21a"
+source = "git+https://github.com/oxidecomputer/progenitor#b7bbb5cdffdfc4ddf5bc7c1a45d34760130e48a0"
 dependencies = [
  "openapiv3",
  "proc-macro2",
@@ -3073,6 +3075,7 @@ dependencies = [
  "tokio",
  "tokio-native-tls",
  "tokio-rustls",
+ "tokio-util 0.6.9",
  "url",
  "wasm-bindgen",
  "wasm-bindgen-futures",
@@ -4299,7 +4302,7 @@ checksum = "b63708a265f51345575b27fe43f9500ad611579e764c79edbc2037b1121959ec"
 [[package]]
 name = "typify"
 version = "0.0.6-dev"
-source = "git+https://github.com/oxidecomputer/typify#8316b7d227eeec59d854279e947b1882ae2c635a"
+source = "git+https://github.com/oxidecomputer/typify#6617df9800c81954ef2aa630f117f66e824f104d"
 dependencies = [
  "typify-impl",
  "typify-macro",
@@ -4308,7 +4311,7 @@ dependencies = [
 [[package]]
 name = "typify-impl"
 version = "0.0.6-dev"
-source = "git+https://github.com/oxidecomputer/typify#8316b7d227eeec59d854279e947b1882ae2c635a"
+source = "git+https://github.com/oxidecomputer/typify#6617df9800c81954ef2aa630f117f66e824f104d"
 dependencies = [
  "convert_case 0.4.0",
  "log",
@@ -4325,7 +4328,7 @@ dependencies = [
 [[package]]
 name = "typify-macro"
 version = "0.0.6-dev"
-source = "git+https://github.com/oxidecomputer/typify#8316b7d227eeec59d854279e947b1882ae2c635a"
+source = "git+https://github.com/oxidecomputer/typify#6617df9800c81954ef2aa630f117f66e824f104d"
 dependencies = [
  "proc-macro2",
  "quote",
