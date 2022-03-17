@@ -2,14 +2,16 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+mod bulk_state_get;
 mod config;
 mod context;
 mod error;
+
 pub mod http_entrypoints; // TODO pub only for testing - is this right?
-mod sp_comms;
 
 pub use config::Config;
 pub use context::ServerContext;
+
 use slog::{debug, error, info, o, Logger};
 use std::sync::Arc;
 use uuid::Uuid;

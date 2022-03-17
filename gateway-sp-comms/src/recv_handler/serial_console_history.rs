@@ -2,27 +2,31 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use gateway_messages::{SerialConsole, SpComponent};
-use ringbuffer::{AllocRingBuffer, RingBufferExt, RingBufferWrite};
-use schemars::JsonSchema;
-use serde::Serialize;
-use slog::{warn, Logger};
-use std::{cmp::Ordering, collections::HashMap, mem};
+// Copyright 2022 Oxide Computer Company
+
+use gateway_messages::SerialConsole;
+use gateway_messages::SpComponent;
+use ringbuffer::AllocRingBuffer;
+use ringbuffer::RingBufferExt;
+use ringbuffer::RingBufferWrite;
+use slog::warn;
+use slog::Logger;
+use std::cmp::Ordering;
+use std::collections::HashMap;
+use std::mem;
 
 /// Current in-memory contents of an SP component's serial console.
 ///
 /// If we have not received any serial console data from this SP component,
 /// `start` will be `0` and `chunks` will be empty.
-// TODO is it a code smell that this type impls Serialize and JsonSchema but
-// isn't defined in `http_entrypoints.rs`?
-#[derive(Debug, Default, Serialize, JsonSchema)]
-pub(crate) struct SerialConsoleContents {
+#[derive(Debug, PartialEq)]
+pub struct SerialConsoleContents {
     /// Position since SP component start of the first byte of the first element
     /// of `chunks`.
     ///
     /// This is equal to the number of bytes that we've discarded since the SP
     /// started.
-    pub(crate) start: u64,
+    pub start: u64,
 
     /// Chunks of serial console data.
     ///
@@ -31,14 +35,13 @@ pub(crate) struct SerialConsoleContents {
     /// be different (i.e., one will be [`SerialConsoleChunk::Missing`] and the
     /// other will be [`SerialConsoleChunk::Data`]). If `chunks` is not empty,
     /// its final element is guaranteed to be a [`SerialConsoleChunk::Data`].
-    pub(crate) chunks: Vec<SerialConsoleChunk>,
+    pub chunks: Vec<SerialConsoleChunk>,
 }
 
 /// A chunk of serial console data: either actual data, or an amount of data
 /// we missed (presumably due to dropped packets or something similar).
-#[derive(Debug, Serialize, JsonSchema)]
-#[serde(tag = "kind", rename_all = "lowercase")]
-pub(crate) enum SerialConsoleChunk {
+#[derive(Debug, PartialEq)]
+pub enum SerialConsoleChunk {
     Data { bytes: Vec<u8> },
     Missing { len: u64 },
 }
@@ -168,5 +171,93 @@ impl Slot {
             Slot::MissingData { offset, len } => offset + len,
             Slot::Valid { offset, len, .. } => offset + u64::from(*len),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use once_cell::sync::Lazy;
+    use std::convert::TryFrom;
+
+    static COMPONENT: Lazy<SpComponent> =
+        Lazy::new(|| SpComponent::try_from("test").unwrap());
+
+    fn make_packet(offset: usize, data: &str) -> SerialConsole {
+        let mut packet = SerialConsole {
+            component: *COMPONENT,
+            offset: u64::try_from(offset).unwrap(),
+            len: u16::try_from(data.len()).unwrap(),
+            data: [0; SerialConsole::MAX_DATA_PER_PACKET],
+        };
+        packet.data[..data.len()].copy_from_slice(data.as_bytes());
+        packet
+    }
+
+    #[test]
+    fn consecutive_packets_are_coalesced() {
+        let mut hist = SerialConsoleHistory::default();
+        let log = Logger::root(slog::Discard, slog::o!());
+
+        // push first packet
+        hist.push(make_packet(0, "hello "), &log);
+        let contents = hist.contents(&COMPONENT).unwrap();
+        assert_eq!(
+            contents,
+            SerialConsoleContents {
+                start: 0,
+                chunks: vec![SerialConsoleChunk::Data {
+                    bytes: b"hello ".to_vec()
+                }]
+            }
+        );
+
+        // push second packet with an offset that ends at first
+        hist.push(make_packet(6, "world"), &log);
+        let contents = hist.contents(&COMPONENT).unwrap();
+        assert_eq!(
+            contents,
+            SerialConsoleContents {
+                start: 0,
+                chunks: vec![SerialConsoleChunk::Data {
+                    bytes: b"hello world".to_vec()
+                }]
+            }
+        );
+    }
+
+    #[test]
+    fn skipped_data_leaves_gaps() {
+        let mut hist = SerialConsoleHistory::default();
+        let log = Logger::root(slog::Discard, slog::o!());
+
+        // push first packet
+        hist.push(make_packet(0, "hello "), &log);
+        let contents = hist.contents(&COMPONENT).unwrap();
+        assert_eq!(
+            contents,
+            SerialConsoleContents {
+                start: 0,
+                chunks: vec![SerialConsoleChunk::Data {
+                    bytes: b"hello ".to_vec()
+                }]
+            }
+        );
+
+        // push second packet with an offset that is 5 bytes past the end of the
+        // first packet (i.e., 5 bytes were lost)
+        hist.push(make_packet(6 + 5, "world"), &log);
+        let contents = hist.contents(&COMPONENT).unwrap();
+        assert_eq!(
+            contents,
+            SerialConsoleContents {
+                start: 0,
+                chunks: vec![
+                    SerialConsoleChunk::Data { bytes: b"hello ".to_vec() },
+                    SerialConsoleChunk::Missing { len: 5 },
+                    SerialConsoleChunk::Data { bytes: b"world".to_vec() },
+                ]
+            }
+        );
     }
 }

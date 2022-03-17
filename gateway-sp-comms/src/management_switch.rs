@@ -48,13 +48,13 @@ pub struct KnownSps {
     pub power_controllers: Vec<KnownSp>,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SpIdentifier {
     pub typ: SpType,
     pub slot: usize,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SpType {
     Switch,
     Sled,
@@ -62,10 +62,10 @@ pub enum SpType {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct SwitchPort(usize);
+pub(crate) struct SwitchPort(usize);
 
 impl SwitchPort {
-    pub fn as_ignition_target(self) -> u8 {
+    pub(crate) fn as_ignition_target(self) -> u8 {
         // TODO should we use a u16 to describe ignition targets instead? rack
         // v1 is limited to 36, unclear what ignition will look like in future
         // products
@@ -78,7 +78,7 @@ impl SwitchPort {
 }
 
 #[derive(Debug)]
-pub struct ManagementSwitchDiscovery {
+pub(crate) struct ManagementSwitchDiscovery {
     inner: Arc<Inner>,
 }
 
@@ -94,7 +94,7 @@ impl ManagementSwitchDiscovery {
     // ```
     //
     // and any leftover bind addresses are ignored.
-    pub async fn placeholder_start(
+    pub(crate) async fn placeholder_start(
         known_sps: KnownSps,
         log: Logger,
     ) -> Result<Self, StartupError> {
@@ -126,7 +126,7 @@ impl ManagementSwitchDiscovery {
     //
     // TODO 2 should we attach the SP type to each port? For now just return a
     // flat list.
-    pub fn all_ports(
+    pub(crate) fn all_ports(
         &self,
     ) -> impl ExactSizeIterator<Item = SwitchPort> + 'static {
         (0..self.inner.ports.len()).map(SwitchPort)
@@ -134,7 +134,7 @@ impl ManagementSwitchDiscovery {
 
     /// Consume `self` and start a long-running task to receive packets on all
     /// ports, calling `recv_callback` for each.
-    pub fn start_recv_task<F>(self, recv_callback: F) -> ManagementSwitch
+    pub(crate) fn start_recv_task<F>(self, recv_callback: F) -> ManagementSwitch
     where
         F: Fn(SwitchPort, &'_ [u8]) + Send + 'static,
     {
@@ -147,7 +147,7 @@ impl ManagementSwitchDiscovery {
 }
 
 #[derive(Debug)]
-pub struct ManagementSwitch {
+pub(crate) struct ManagementSwitch {
     inner: Arc<Inner>,
 
     // handle to the running task that calls recv on all `switch_ports` sockets;
@@ -163,7 +163,7 @@ impl Drop for ManagementSwitch {
 
 impl ManagementSwitch {
     /// Get the socket connected to the local ignition controller.
-    pub fn ignition_controller(&self) -> SpSocket {
+    pub(crate) fn ignition_controller(&self) -> SpSocket {
         // TODO for now this is guaranteed to exist based on the assertions in
         // `placeholder_start`; once that's replaced by a non-placeholder
         // implementation, revisit this.
@@ -171,7 +171,7 @@ impl ManagementSwitch {
         self.inner.sp_socket(port).unwrap()
     }
 
-    pub fn switch_port_from_ignition_target(
+    pub(crate) fn switch_port_from_ignition_target(
         &self,
         target: usize,
     ) -> Option<SwitchPort> {
@@ -184,15 +184,15 @@ impl ManagementSwitch {
         }
     }
 
-    pub fn switch_port(&self, id: SpIdentifier) -> Option<SwitchPort> {
+    pub(crate) fn switch_port(&self, id: SpIdentifier) -> Option<SwitchPort> {
         self.inner.switch_port(id.typ, id.slot)
     }
 
-    pub fn switch_port_to_id(&self, port: SwitchPort) -> SpIdentifier {
+    pub(crate) fn switch_port_to_id(&self, port: SwitchPort) -> SpIdentifier {
         self.inner.port_to_id(port)
     }
 
-    pub fn sp_socket(&self, port: SwitchPort) -> Option<SpSocket<'_>> {
+    pub(crate) fn sp_socket(&self, port: SwitchPort) -> Option<SpSocket<'_>> {
         self.inner.sp_socket(port)
     }
 }
@@ -200,24 +200,24 @@ impl ManagementSwitch {
 /// Wrapper for a UDP socket on one of our switch ports that knows the address
 /// of the SP connected to this port.
 #[derive(Debug)]
-pub struct SpSocket<'a> {
+pub(crate) struct SpSocket<'a> {
     socket: &'a UdpSocket,
     addr: SocketAddr,
     port: SwitchPort,
 }
 
 impl SpSocket<'_> {
-    pub fn addr(&self) -> SocketAddr {
+    pub(crate) fn addr(&self) -> SocketAddr {
         self.addr
     }
 
-    pub fn port(&self) -> SwitchPort {
+    pub(crate) fn port(&self) -> SwitchPort {
         self.port
     }
 
     /// Wrapper around `send_to` that uses the SP address stored in `self` as
     /// the destination address.
-    pub async fn send(&self, buf: &[u8]) -> io::Result<usize> {
+    pub(crate) async fn send(&self, buf: &[u8]) -> io::Result<usize> {
         self.socket.send_to(buf, self.addr).await
     }
 }
