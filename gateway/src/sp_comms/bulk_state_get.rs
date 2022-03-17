@@ -11,9 +11,9 @@
 //! The flow of this process, starting from the client(s), is below. This
 //! modules comes into play at step 3.
 //!
-//! 1. A client requests the state of all SPs. They provide a timeout for the
-//!    overall request (or we provide a default timeout on their behalf), which
-//!    specifies the point at which any SPs we believe are on but which we
+//! 1. A client requests the state of all SPs. The client provides a timeout for
+//!    the overall request (or we provide a default timeout on their behalf),
+//!    which specifies the point at which any SPs we believe are on but which we
 //!    haven't heard from are classified as "unresponsive".
 //!
 //! 2. We ask our ignition controller for the ignition state of all SPs.
@@ -69,6 +69,7 @@ use futures::StreamExt;
 use gateway_messages::{IgnitionFlags, IgnitionState};
 use serde::{Deserialize, Serialize};
 use slog::debug;
+use slog::error;
 use slog::trace;
 use slog::Logger;
 use std::collections::HashMap;
@@ -239,6 +240,11 @@ impl OutstandingSpStateRequests {
                 if skip_results == 0 {
                     // caller claimed to have seen a target, but we don't have
                     // it (if we did, `skip_results` is >= 1).
+                    error!(
+                        log,
+                        "client reported last seeing {:?}, but it isn't in our list of collected responses",
+                        last_seen_target
+                    );
                     return Err(Error::InvalidLastSpSeen);
                 }
 
@@ -461,11 +467,10 @@ async fn wait_for_sp_responses<Fut>(
     // period where we keep this request in memory so clients can continue to
     // ask for additional pages.
     //
-    // TODO In the event that we get here _earlier_ than the client-requested
+    // In the event that we get here _earlier_ than the client-requested
     // timeout (i.e., because we heard back from all the SPs and none timed
-    // out), should we wait for "end of client timeout + grace period" or just
-    // "end of last result collected + grace period"? Currently we choose the
-    // latter, but maybe that's wrong.
+    // out), we ignore the client timeout and jump immediately to staying alive
+    // for our internal post-completion grace period.
 
     debug!(log, "all responses collected; starting grace period");
     tokio::time::sleep(retain_grace_period).await;
