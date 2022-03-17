@@ -1719,8 +1719,10 @@ async fn vpc_firewall_rules_get(
     let nexus = &apictx.nexus;
     let path = path_params.into_inner();
     let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
         let rules = nexus
             .vpc_list_firewall_rules(
+                &opctx,
                 &path.organization_name,
                 &path.project_name,
                 &path.vpc_name,
@@ -1750,8 +1752,10 @@ async fn vpc_firewall_rules_put(
     let nexus = &apictx.nexus;
     let path = path_params.into_inner();
     let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
         let rules = nexus
             .vpc_update_firewall_rules(
+                &opctx,
                 &path.organization_name,
                 &path.project_name,
                 &path.vpc_name,

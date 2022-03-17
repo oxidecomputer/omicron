@@ -31,6 +31,7 @@ use omicron_common::api::external::RouteDestination;
 use omicron_common::api::external::RouteTarget;
 use omicron_common::api::external::RouterRouteCreateParams;
 use omicron_common::api::external::RouterRouteUpdateParams;
+use omicron_common::api::external::VpcFirewallRuleUpdateParams;
 use omicron_nexus::authn;
 use omicron_nexus::authn::external::spoof;
 use omicron_nexus::external_api::params;
@@ -182,10 +183,12 @@ lazy_static! {
     static ref DEMO_VPC_NAME: Name = "demo-vpc".parse().unwrap();
     static ref DEMO_VPC_URL: String =
         format!("{}/{}", *DEMO_PROJECT_URL_VPCS, *DEMO_VPC_NAME);
-    static ref DEMO_VPC_URL_SUBNETS: String =
-        format!("{}/subnets", *DEMO_VPC_URL);
+    static ref DEMO_VPC_URL_FIREWALL_RULES: String =
+        format!("{}/firewall/rules", *DEMO_VPC_URL);
     static ref DEMO_VPC_URL_ROUTERS: String =
         format!("{}/routers", *DEMO_VPC_URL);
+    static ref DEMO_VPC_URL_SUBNETS: String =
+        format!("{}/subnets", *DEMO_VPC_URL);
     static ref DEMO_VPC_CREATE: params::VpcCreate =
         params::VpcCreate {
             identity: IdentityMetadataCreateParams {
@@ -470,6 +473,20 @@ lazy_static! {
                     }).unwrap()
                 ),
                 AllowedMethod::Delete,
+            ],
+        },
+
+        /* Firewall rules */
+        VerifyEndpoint {
+            url: &*DEMO_VPC_URL_FIREWALL_RULES,
+            visibility: Visibility::Protected,
+            allowed_methods: vec![
+                AllowedMethod::Get,
+                AllowedMethod::Put(
+                    serde_json::to_value(VpcFirewallRuleUpdateParams {
+                        rules: vec![],
+                    }).unwrap()
+                ),
             ],
         },
 

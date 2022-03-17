@@ -1808,20 +1808,14 @@ impl Nexus {
                 }
                 SubnetError::External(e) => e,
             })?;
-        self.create_default_vpc_firewall(&vpc_id).await?;
-        Ok(db_vpc)
-    }
-
-    async fn create_default_vpc_firewall(
-        &self,
-        vpc_id: &Uuid,
-    ) -> CreateResult<()> {
         let rules = db::model::VpcFirewallRule::vec_from_params(
-            *vpc_id,
+            authz_vpc.id(),
             defaults::DEFAULT_FIREWALL_RULES.clone(),
         );
-        self.db_datastore.vpc_update_firewall_rules(&vpc_id, rules).await?;
-        Ok(())
+        self.db_datastore
+            .vpc_update_firewall_rules(opctx, &authz_vpc, rules)
+            .await?;
+        Ok(db_vpc)
     }
 
     pub async fn vpc_fetch(
@@ -1840,23 +1834,6 @@ impl Nexus {
             .vpc_fetch(opctx, &authz_project, vpc_name)
             .await?
             .1)
-    }
-
-    // TODO-security TODO-cleanup Remove this function.  Callers should use
-    // vpc_lookup_by_path() / vpc_fetch() instead, or we should create a more
-    // useful pattern for looking up records by path (e.g., *_fetch_by_path()).
-    pub async fn project_lookup_vpc(
-        &self,
-        organization_name: &Name,
-        project_name: &Name,
-        vpc_name: &Name,
-    ) -> LookupResult<db::model::Vpc> {
-        let project_id = self
-            .db_datastore
-            .project_lookup_by_path(organization_name, project_name)
-            .await?
-            .id();
-        Ok(self.db_datastore.vpc_fetch_by_name(&project_id, vpc_name).await?)
     }
 
     pub async fn project_update_vpc(
@@ -1904,38 +1881,48 @@ impl Nexus {
 
         // Delete all firewall rules after deleting the VPC, to ensure no
         // firewall rules get added between rules deletion and VPC deletion.
-        self.db_datastore.vpc_delete_all_firewall_rules(&authz_vpc.id()).await
+        self.db_datastore
+            .vpc_delete_all_firewall_rules(&opctx, &authz_vpc)
+            .await
     }
 
     pub async fn vpc_list_firewall_rules(
         &self,
+        opctx: &OpContext,
         organization_name: &Name,
         project_name: &Name,
         vpc_name: &Name,
     ) -> ListResultVec<db::model::VpcFirewallRule> {
-        let vpc = self
-            .project_lookup_vpc(organization_name, project_name, vpc_name)
+        let authz_vpc = self
+            .db_datastore
+            .vpc_lookup_by_path(organization_name, project_name, vpc_name)
             .await?;
-        let rules =
-            self.db_datastore.vpc_list_firewall_rules(&vpc.id()).await?;
+        let rules = self
+            .db_datastore
+            .vpc_list_firewall_rules(&opctx, &authz_vpc)
+            .await?;
         Ok(rules)
     }
 
     pub async fn vpc_update_firewall_rules(
         &self,
+        opctx: &OpContext,
         organization_name: &Name,
         project_name: &Name,
         vpc_name: &Name,
         params: &VpcFirewallRuleUpdateParams,
     ) -> UpdateResult<Vec<db::model::VpcFirewallRule>> {
-        let vpc = self
-            .project_lookup_vpc(organization_name, project_name, vpc_name)
+        let authz_vpc = self
+            .db_datastore
+            .vpc_lookup_by_path(organization_name, project_name, vpc_name)
             .await?;
         let rules = db::model::VpcFirewallRule::vec_from_params(
-            vpc.id(),
+            authz_vpc.id(),
             params.clone(),
         );
-        self.db_datastore.vpc_update_firewall_rules(&vpc.id(), rules).await
+        self.db_datastore
+            .vpc_update_firewall_rules(opctx, &authz_vpc, rules)
+            .await
     }
 
     pub async fn vpc_list_subnets(
