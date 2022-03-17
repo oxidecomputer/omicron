@@ -35,7 +35,6 @@ use omicron_common::api::external::VpcFirewallRuleUpdateParams;
 use omicron_nexus::authn;
 use omicron_nexus::authn::external::spoof;
 use omicron_nexus::external_api::params;
-use serde_json::json;
 
 // This test hits a list Nexus API endpoints using both unauthenticated and
 // unauthorized requests to make sure we get the expected behavior (generally:
