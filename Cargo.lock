@@ -2012,6 +2012,7 @@ dependencies = [
  "pq-sys",
  "rand",
  "ref-cast",
+ "regex",
  "reqwest",
  "ring",
  "schemars",
