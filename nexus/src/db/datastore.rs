@@ -165,7 +165,7 @@ impl DataStore {
         use db::schema::sled::dsl;
         paginated(dsl::sled, dsl::id, pagparams)
             .select(Sled::as_select())
-            .load_async(self.pool())
+            .load_async(self.pool_authorized(opctx).await?)
             .await
             .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
     }
@@ -173,22 +173,19 @@ impl DataStore {
     pub async fn sled_fetch(
         &self,
         opctx: &OpContext,
-        id: Uuid,
+        authz_sled: &authz::Sled,
     ) -> LookupResult<Sled> {
-        opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
+        opctx.authorize(authz::Action::Read, authz_sled).await?;
         use db::schema::sled::dsl;
         dsl::sled
-            .filter(dsl::id.eq(id))
+            .filter(dsl::id.eq(authz_sled.id()))
             .select(Sled::as_select())
-            .first_async(self.pool())
+            .first_async(self.pool_authorized(opctx).await?)
             .await
             .map_err(|e| {
                 public_error_from_diesel_pool(
                     e,
-                    ErrorHandler::NotFoundByLookup(
-                        ResourceType::Sled,
-                        LookupType::ById(id),
-                    ),
+                    ErrorHandler::NotFoundByResource(authz_sled),
                 )
             })
     }

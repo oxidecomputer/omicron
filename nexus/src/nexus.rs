@@ -2514,7 +2514,9 @@ impl Nexus {
         opctx: &OpContext,
         rack_id: &Uuid,
     ) -> LookupResult<db::model::Rack> {
-        opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
+        let authz_rack = authz::FLEET
+            .child_generic(ResourceType::Rack, LookupType::ById(*rack_id));
+        opctx.authorize(authz::Action::Read, &authz_rack).await?;
 
         if *rack_id == self.rack_id {
             Ok(self.as_rack())
@@ -2538,7 +2540,9 @@ impl Nexus {
         opctx: &OpContext,
         sled_id: &Uuid,
     ) -> LookupResult<db::model::Sled> {
-        self.db_datastore.sled_fetch(&opctx, *sled_id).await
+        let authz_sled =
+            authz::FLEET.sled(*sled_id, LookupType::ById(*sled_id));
+        self.db_datastore.sled_fetch(&opctx, &authz_sled).await
     }
 
     // Sagas

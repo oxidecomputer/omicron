@@ -213,7 +213,7 @@ async fn verify_endpoint(
     let get_allowed = endpoint
         .allowed_methods
         .iter()
-        .any(|allowed| allowed.http_method() == Method::GET);
+        .any(|allowed| matches!(allowed, AllowedMethod::Get));
     let resource_before: Option<serde_json::Value> = if get_allowed {
         info!(log, "test: privileged GET");
         Some(
