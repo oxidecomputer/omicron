@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use super::endpoints::*;
+use super::endpoints::VERIFY_ENDPOINTS;
 use expectorate::assert_contents;
 use openapiv3::OpenAPI;
 use std::collections::BTreeMap;
@@ -61,7 +61,7 @@ fn test_unauthorized_coverage() {
                 "unexpected character in URL: {:?}",
                 path
             );
-            let re = regex::Regex::new("/\\{[^.}][^}]+\\}").unwrap();
+            let re = regex::Regex::new("/\\{[^}]+\\}").unwrap();
             let regex_path = re.replace_all(path, "/[^/]+");
             let regex = regex::Regex::new(&format!("^{}$", regex_path))
                 .expect("modified URL string was not a valid regex");
