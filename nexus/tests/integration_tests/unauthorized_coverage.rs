@@ -106,8 +106,9 @@ fn test_unauthorized_coverage() {
 
     // If you're here because this assertion failed, we found an endpoint tested
     // by "unauthorized.rs" that's not in the OpenAPI spec.  This could happen
-    // if you're adding an endpoint that's marked "hidden".  In that case, you
-    // might just allow expectorate to add it to the allowlist here.
+    // if you're adding a test for an endpoint that's marked "unpublished".  In
+    // that case, you might just allow expectorate to add this endpoint to the
+    // allowlist here.
     assert_contents(
         "tests/output/unexpected-authz-endpoints.txt",
         &unexpected_endpoints,
