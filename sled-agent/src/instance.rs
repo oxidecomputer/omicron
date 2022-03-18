@@ -176,6 +176,9 @@ struct InstanceInner {
     // Properties visible to Propolis
     properties: propolis_client::api::InstanceProperties,
 
+    // The ID of the Propolis server (and zone) running this instance
+    propolis_id: Uuid,
+
     // NIC-related properties
     vnic_allocator: VnicAllocator,
     requested_nics: Vec<NetworkInterface>,
@@ -196,7 +199,7 @@ impl InstanceInner {
 
     /// UUID of the underlying propolis-server process
     fn propolis_id(&self) -> &Uuid {
-        &self.properties.id
+        &self.propolis_id
     }
 
     async fn observe_state(
@@ -403,7 +406,7 @@ impl Instance {
             id,
             // NOTE: Mostly lies.
             properties: propolis_client::api::InstanceProperties {
-                id: initial.runtime.propolis_uuid,
+                id,
                 name: initial.runtime.hostname.clone(),
                 description: "Test description".to_string(),
                 image_id: Uuid::nil(),
@@ -414,6 +417,7 @@ impl Instance {
                 // InstanceCpuCount here, to avoid any casting...
                 vcpus: initial.runtime.ncpus.0 as u8,
             },
+            propolis_id: initial.runtime.propolis_uuid,
             vnic_allocator,
             requested_nics: initial.nics,
             vlan,
