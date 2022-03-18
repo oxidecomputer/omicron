@@ -366,7 +366,10 @@ fn verify_response(response: &TestResponse) {
         StatusCode::NOT_FOUND => {
             assert_eq!(error.error_code.unwrap(), "ObjectNotFound");
             assert!(error.message.starts_with("not found: "));
-            assert!(error.message.contains(" with name \""));
+            assert!(
+                error.message.contains(" with name \"")
+                    || error.message.contains(" with id \"")
+            );
             assert!(error.message.ends_with("\""));
         }
         StatusCode::METHOD_NOT_ALLOWED => {
