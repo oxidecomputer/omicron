@@ -124,6 +124,8 @@ jobs:
     - name: Download CockroachDB binary
       if: steps.cache-cockroachdb.outputs.cache-hit != 'true'
       run: bash ./tools/ci_download_cockroachdb
+    - name: Install cargo-nextest
+      run: cargo install cargo-nextest
     - name: Create temporary directory for test outputs
       run: mkdir -p $OMICRON_TMP
     - name: Build
@@ -146,7 +148,7 @@ jobs:
       # rebuild here.
       # Put "./cockroachdb/bin" and "./clickhouse" on the PATH for the test
       # suite.
-      run: TMPDIR=$OMICRON_TMP PATH="$PATH:$PWD/cockroachdb/bin:$PWD/clickhouse" RUSTFLAGS="-D warnings" RUSTDOCFLAGS="-D warnings" cargo test --no-fail-fast --workspace --locked --verbose
+      run: TMPDIR=$OMICRON_TMP PATH="$PATH:$PWD/cockroachdb/bin:$PWD/clickhouse" RUSTFLAGS="-D warnings" RUSTDOCFLAGS="-D warnings" cargo nextest run --no-fail-fast --workspace --locked
     - name: Archive any failed test results
       if: ${{ failure() }}
       # actions/upload-artifact@v2.3.1

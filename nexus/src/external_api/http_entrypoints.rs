@@ -2138,7 +2138,8 @@ struct RackPathParam {
     rack_id: Uuid,
 }
 
-/// Fetch information about a particular rack.
+// deliberate failure to test output
+/// Fetch information about a specific rack.
 #[endpoint {
     method = GET,
     path = "/hardware/racks/{rack_id}",
