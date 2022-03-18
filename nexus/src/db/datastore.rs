@@ -158,8 +158,10 @@ impl DataStore {
 
     pub async fn sled_list(
         &self,
+        opctx: &OpContext,
         pagparams: &DataPageParams<'_, Uuid>,
     ) -> ListResultVec<Sled> {
+        opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
         use db::schema::sled::dsl;
         paginated(dsl::sled, dsl::id, pagparams)
             .select(Sled::as_select())
@@ -168,7 +170,12 @@ impl DataStore {
             .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
     }
 
-    pub async fn sled_fetch(&self, id: Uuid) -> LookupResult<Sled> {
+    pub async fn sled_fetch(
+        &self,
+        opctx: &OpContext,
+        id: Uuid,
+    ) -> LookupResult<Sled> {
+        opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
         use db::schema::sled::dsl;
         dsl::sled
             .filter(dsl::id.eq(id))
@@ -3153,6 +3160,7 @@ impl DataStore {
             // Note: "db_init" is also a builtin user, but that one by necessity
             // is created with the database.
             &*authn::USER_INTERNAL_API,
+            &*authn::USER_INTERNAL_READ,
             &*authn::USER_SAGA_RECOVERY,
             &*authn::USER_TEST_PRIVILEGED,
             &*authn::USER_TEST_UNPRIVILEGED,
@@ -3338,8 +3346,11 @@ impl DataStore {
 
     pub async fn update_available_artifact_upsert(
         &self,
+        opctx: &OpContext,
         artifact: UpdateAvailableArtifact,
     ) -> CreateResult<UpdateAvailableArtifact> {
+        opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
+
         use db::schema::update_available_artifact::dsl;
         diesel::insert_into(dsl::update_available_artifact)
             .values(artifact.clone())
@@ -3347,21 +3358,25 @@ impl DataStore {
             .do_update()
             .set(artifact.clone())
             .returning(UpdateAvailableArtifact::as_returning())
-            .get_result_async(self.pool())
+            .get_result_async(self.pool_authorized(opctx).await?)
             .await
             .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
     }
 
     pub async fn update_available_artifact_hard_delete_outdated(
         &self,
+        opctx: &OpContext,
         current_targets_role_version: i64,
     ) -> DeleteResult {
-        // We use the `targets_role_version` column in the table to delete any old rows, keeping
-        // the table in sync with the current copy of artifacts.json.
+        opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
+
+        // We use the `targets_role_version` column in the table to delete any
+        // old rows, keeping the table in sync with the current copy of
+        // artifacts.json.
         use db::schema::update_available_artifact::dsl;
         diesel::delete(dsl::update_available_artifact)
             .filter(dsl::targets_role_version.lt(current_targets_role_version))
-            .execute_async(self.pool())
+            .execute_async(self.pool_authorized(opctx).await?)
             .await
             .map(|_rows_deleted| ())
             .map_err(|e| {
@@ -3374,8 +3389,11 @@ impl DataStore {
 
     pub async fn update_available_artifact_fetch(
         &self,
+        opctx: &OpContext,
         artifact: &UpdateArtifact,
     ) -> LookupResult<UpdateAvailableArtifact> {
+        opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
+
         use db::schema::update_available_artifact::dsl;
         dsl::update_available_artifact
             .filter(
@@ -3385,7 +3403,7 @@ impl DataStore {
                     .and(dsl::kind.eq(UpdateArtifactKind(artifact.kind))),
             )
             .select(UpdateAvailableArtifact::as_select())
-            .first_async(self.pool())
+            .first_async(self.pool_authorized(opctx).await?)
             .await
             .map_err(|e| {
                 Error::internal_error(&format!(
