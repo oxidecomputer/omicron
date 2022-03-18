@@ -39,6 +39,7 @@ PROJECTS
 INSTANCES
 
     instance_create_demo ORGANIZATION_NAME PROJECT_NAME INSTANCE_NAME
+    instance_create_attach_disk_demo ORGANIZATION_NAME PROJECT_NAME INSTANCE_NAME DISK_NAME
     instance_get         ORGANIZATION_NAME PROJECT_NAME INSTANCE_NAME
     instance_delete      ORGANIZATION_NAME PROJECT_NAME INSTANCE_NAME
     instance_migrate     ORGANIZATION_NAME PROJECT_NAME INSTANCE_NAME SLED_ID
@@ -280,6 +281,22 @@ function cmd_instance_create_demo
 		    -X POST -T -
 }
 
+function cmd_instance_create_attach_disk_demo
+{
+	[[ $# != 4 ]] && usage "expected ORGANIZATION_NAME PROJECT_NAME INSTANCE_NAME DISK_NAME"
+	do_curl_authn "/organizations/$1/projects/$2/instances" \
+		-X POST -T - <<EOF
+{
+	"name": "${3}",
+	"description": "an instance called $3",
+	"ncpus": 1,
+	"memory": $((1024 * 1024 * 256)),
+	"hostname": "$3",
+	"disks": [{"type": "attach", "disk": "$4"}]
+}
+EOF
+}
+
 function cmd_instance_get
 {
 	[[ $# != 3 ]] && usage "expected ORGANIZATION_NAME PROJECT_NAME INSTANCE_NAME"
@@ -339,8 +356,9 @@ function cmd_instance_list_disks
 
 function cmd_disk_create_demo
 {
+	# note: requests a 1 GB disk
 	[[ $# != 3 ]] && usage "expected ORGANIZATION_NAME PROJECT_NAME DISK_NAME"
-	mkjson name="$3" description="a disk called $3" size=1024 |
+	mkjson name="$3" description="a disk called $3" size=$((1024 * 1024 * 1024)) |
 		do_curl_authn "/organizations/$1/projects/$2/disks" -X POST -T -
 }
 

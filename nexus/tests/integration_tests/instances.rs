@@ -9,8 +9,12 @@ use http::StatusCode;
 use nexus_test_utils::http_testing::AuthnMode;
 use nexus_test_utils::http_testing::NexusRequest;
 use nexus_test_utils::http_testing::RequestBuilder;
+use nexus_test_utils::resource_helpers::create_disk;
 use nexus_test_utils::resource_helpers::objects_list_page_authz;
+use nexus_test_utils::resource_helpers::DiskTest;
 use omicron_common::api::external::ByteCount;
+use omicron_common::api::external::Disk;
+use omicron_common::api::external::DiskState;
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::Instance;
 use omicron_common::api::external::InstanceCpuCount;
@@ -144,6 +148,7 @@ async fn test_instances_create_reboot_halt(
                 hostname: instance.hostname.clone(),
                 network_interfaces:
                     params::InstanceNetworkInterfaceAttachment::Default,
+                disks: vec![],
             }))
             .expect_status(Some(StatusCode::BAD_REQUEST)),
     )
@@ -551,6 +556,7 @@ async fn test_instance_with_single_explicit_ip_address(
         memory: ByteCount::from_mebibytes_u32(4),
         hostname: String::from("nic-test"),
         network_interfaces: interface_params,
+        disks: vec![],
     };
     let response =
         NexusRequest::objects_post(client, &url_instances, &instance_params)
@@ -666,6 +672,7 @@ async fn test_instance_with_new_custom_network_interfaces(
         memory: ByteCount::from_mebibytes_u32(4),
         hostname: String::from("nic-test"),
         network_interfaces: interface_params,
+        disks: vec![],
     };
     let response =
         NexusRequest::objects_post(client, &url_instances, &instance_params)
@@ -758,6 +765,7 @@ async fn test_instance_create_delete_network_interface(
         memory: ByteCount::from_mebibytes_u32(4),
         hostname: String::from("nic-test"),
         network_interfaces: params::InstanceNetworkInterfaceAttachment::None,
+        disks: vec![],
     };
     let response =
         NexusRequest::objects_post(client, &url_instances, &instance_params)
@@ -940,6 +948,7 @@ async fn test_instance_with_multiple_nics_unwinds_completely(
         memory: ByteCount::from_mebibytes_u32(4),
         hostname: String::from("nic-test"),
         network_interfaces: interface_params,
+        disks: vec![],
     };
     let builder =
         RequestBuilder::new(client, http::Method::POST, &url_instances)
@@ -967,6 +976,92 @@ async fn test_instance_with_multiple_nics_unwinds_completely(
         interfaces.is_empty(),
         "There should be no network interfaces in the subnet"
     );
+}
+
+/// Create a disk and attach during instance creation
+#[nexus_test]
+async fn test_attach_one_disk_to_instance(cptestctx: &ControlPlaneTestContext) {
+    let client = &cptestctx.external_client;
+
+    const ORGANIZATION_NAME: &str = "bobs-barrel-of-bytes";
+    const PROJECT_NAME: &str = "bit-barrel";
+
+    // Test pre-reqs
+    DiskTest::new(&cptestctx).await;
+    create_organization(&client, ORGANIZATION_NAME).await;
+    create_project(client, ORGANIZATION_NAME, PROJECT_NAME).await;
+
+    // Create the "probablydata" disk
+    create_disk(&client, ORGANIZATION_NAME, PROJECT_NAME, "probablydata").await;
+
+    // Verify disk is there and currently detached
+    let url_project_disks = format!(
+        "/organizations/{}/projects/{}/disks",
+        ORGANIZATION_NAME, PROJECT_NAME,
+    );
+    let disks: Vec<Disk> = NexusRequest::iter_collection_authn(
+        client,
+        &url_project_disks,
+        "",
+        None,
+    )
+    .await
+    .expect("failed to list disks")
+    .all_items;
+    assert_eq!(disks.len(), 1);
+    assert_eq!(disks[0].state, DiskState::Detached);
+
+    // Create the instance
+    let instance_params = params::InstanceCreate {
+        identity: IdentityMetadataCreateParams {
+            name: Name::try_from(String::from("nfs")).unwrap(),
+            description: String::from("probably serving data"),
+        },
+        ncpus: InstanceCpuCount::try_from(2).unwrap(),
+        memory: ByteCount::from_mebibytes_u32(4),
+        hostname: String::from("nfs"),
+        network_interfaces: params::InstanceNetworkInterfaceAttachment::Default,
+        disks: vec![params::InstanceDiskAttachment::Attach(
+            params::InstanceDiskAttach {
+                disk: Name::try_from(String::from("probablydata")).unwrap(),
+            },
+        )],
+    };
+
+    let url_instances = format!(
+        "/organizations/{}/projects/{}/instances",
+        ORGANIZATION_NAME, PROJECT_NAME
+    );
+    let builder =
+        RequestBuilder::new(client, http::Method::POST, &url_instances)
+            .body(Some(&instance_params))
+            .expect_status(Some(http::StatusCode::CREATED));
+    let response = NexusRequest::new(builder)
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .expect("Expected instance creation to work!");
+
+    let instance = response.parsed_body::<Instance>().unwrap();
+
+    // Verify disk is attached to the instance
+    let url_instance_disks = format!(
+        "/organizations/{}/projects/{}/instances/{}/disks",
+        ORGANIZATION_NAME,
+        PROJECT_NAME,
+        instance.identity.name.as_str(),
+    );
+    let disks: Vec<Disk> = NexusRequest::iter_collection_authn(
+        client,
+        &url_instance_disks,
+        "",
+        None,
+    )
+    .await
+    .expect("failed to list disks")
+    .all_items;
+    assert_eq!(disks.len(), 1);
+    assert_eq!(disks[0].state, DiskState::Attached(instance.identity.id));
 }
 
 async fn instance_get(

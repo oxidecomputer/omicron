@@ -858,6 +858,8 @@ impl Nexus {
 
         let saga_params = Arc::new(sagas::ParamsInstanceCreate {
             serialized_authn: authn::saga::Serialized::for_opctx(opctx),
+            organization_name: organization_name.clone().into(),
+            project_name: project_name.clone().into(),
             project_id: authz_project.id(),
             create_params: params.clone(),
         });
@@ -1209,7 +1211,7 @@ impl Nexus {
 
     /// Modifies the runtime state of the Instance as requested.  This generally
     /// means booting or halting the Instance.
-    async fn instance_set_runtime(
+    pub(crate) async fn instance_set_runtime(
         &self,
         opctx: &OpContext,
         authz_instance: &authz::Instance,
@@ -1223,22 +1225,70 @@ impl Nexus {
             &requested,
         )?;
 
-        let sa = self.instance_sled(&db_instance).await?;
+        // Gather disk information and turn that into DiskRequests
+        let disks = self
+            .db_datastore
+            .instance_list_disks(
+                &opctx,
+                &authz_instance,
+                &DataPageParams {
+                    marker: None,
+                    direction: dropshot::PaginationOrder::Ascending,
+                    // TODO: is there a limit to the number of disks an instance
+                    // can have attached?
+                    limit: std::num::NonZeroU32::new(8).unwrap(),
+                },
+            )
+            .await?;
+
+        let mut disk_reqs = vec![];
+        for (i, disk) in disks.iter().enumerate() {
+            let volume = self.db_datastore.volume_get(disk.volume_id).await?;
+            disk_reqs.push(sled_agent_client::types::DiskRequest {
+                name: disk.name().to_string(),
+                slot: sled_agent_client::types::Slot(i as u8),
+                // TODO offer ability to attach read-only?
+                read_only: false,
+                device: "nvme".to_string(),
+                gen: disk.runtime_state.gen.0.get(),
+                volume_construction_request: serde_json::from_str(
+                    &volume.data(),
+                )?,
+            });
+        }
+
+        let nics: Vec<external::NetworkInterface> = self
+            .db_datastore
+            .instance_list_network_interfaces(
+                &opctx,
+                &authz_instance,
+                &DataPageParams {
+                    marker: None,
+                    direction: dropshot::PaginationOrder::Ascending,
+                    // TODO: is there a limit to the number of NICs an instance
+                    // can have attached?
+                    limit: std::num::NonZeroU32::new(8).unwrap(),
+                },
+            )
+            .await?
+            .iter()
+            .map(|x| x.clone().into())
+            .collect();
 
         // Ask the sled agent to begin the state change.  Then update the
         // database to reflect the new intermediate state.  If this update is
         // not the newest one, that's fine.  That might just mean the sled agent
         // beat us to it.
 
-        // TODO: Populate this with an appropriate NIC.
-        // See also: sic_create_instance_record in sagas.rs for a similar
-        // construction.
         let instance_hardware = sled_agent_client::types::InstanceHardware {
             runtime: sled_agent_client::types::InstanceRuntimeState::from(
                 db_instance.runtime().clone(),
             ),
-            nics: vec![],
+            nics: nics.iter().map(|nic| nic.clone().into()).collect(),
+            disks: disk_reqs,
         };
+
+        let sa = self.instance_sled(&db_instance).await?;
 
         let new_runtime = sa
             .instance_put(
@@ -1381,6 +1431,7 @@ impl Nexus {
             opctx,
             &authz_disk,
             &db_disk,
+            &db_instance,
             self.instance_sled(&db_instance).await?,
             sled_agent_client::types::DiskStateRequested::Attached(
                 *instance_id,
@@ -1455,6 +1506,7 @@ impl Nexus {
             opctx,
             &authz_disk,
             &db_disk,
+            &db_instance,
             self.instance_sled(&db_instance).await?,
             sled_agent_client::types::DiskStateRequested::Detached,
         )
@@ -1469,30 +1521,74 @@ impl Nexus {
         opctx: &OpContext,
         authz_disk: &authz::Disk,
         db_disk: &db::model::Disk,
+        db_instance: &db::model::Instance,
         sa: Arc<SledAgentClient>,
         requested: sled_agent_client::types::DiskStateRequested,
     ) -> Result<(), Error> {
+        use sled_agent_client::types::DiskStateRequested;
+
         let runtime: DiskRuntimeState = db_disk.runtime().into();
 
         opctx.authorize(authz::Action::Modify, authz_disk).await?;
 
-        // Ask the Sled Agent to begin the state change.  Then update the
-        // database to reflect the new intermediate state.
-        let new_runtime = sa
-            .disk_put(
-                &authz_disk.id(),
-                &sled_agent_client::types::DiskEnsureBody {
-                    initial_runtime:
-                        sled_agent_client::types::DiskRuntimeState::from(
-                            runtime,
-                        ),
-                    target: requested,
-                },
-            )
-            .await
-            .map_err(Error::from)?;
+        let new_runtime: DiskRuntimeState = match &db_instance
+            .runtime_state
+            .state
+            .state()
+        {
+            InstanceState::Running | InstanceState::Starting => {
+                /*
+                 * If there's a propolis zone for this instnace, ask the Sled
+                 * Agent to hot-plug or hot-remove disk. Then update the
+                 * database to reflect the new intermediate state.
+                 *
+                 * TODO this will probably involve volume construction requests
+                 * as well!
+                 */
+                let new_runtime = sa
+                    .disk_put(
+                        &authz_disk.id(),
+                        &sled_agent_client::types::DiskEnsureBody {
+                            initial_runtime:
+                                sled_agent_client::types::DiskRuntimeState::from(
+                                    runtime,
+                                ),
+                            target: requested,
+                        },
+                    )
+                    .await
+                    .map_err(Error::from)?;
 
-        let new_runtime: DiskRuntimeState = new_runtime.into_inner().into();
+                new_runtime.into_inner().into()
+            }
+
+            InstanceState::Creating => {
+                // If we're still creating this instance, then the disks will be
+                // attached as part of the instance ensure by specifying volume
+                // construction requests.
+                match requested {
+                    DiskStateRequested::Detached => {
+                        db_disk.runtime().detach().into()
+                    }
+                    DiskStateRequested::Attached(id) => {
+                        db_disk.runtime().attach(id).into()
+                    }
+                    DiskStateRequested::Destroyed => {
+                        todo!()
+                    }
+                    DiskStateRequested::Faulted => {
+                        todo!()
+                    }
+                }
+            }
+
+            _ => {
+                todo!(
+                    "implement state {:?}",
+                    db_instance.runtime_state.state.state()
+                );
+            }
+        };
 
         self.db_datastore
             .disk_update_runtime(opctx, authz_disk, &new_runtime.into())

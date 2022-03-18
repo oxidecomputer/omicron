@@ -9,6 +9,53 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f26201604c87b1e01bd3d98f8d5d9a8fcbb815e8cedb41ffccbeb4bf593a35fe"
 
 [[package]]
+name = "aead"
+version = "0.4.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0b613b8e1e3cf911a086f53f03bf286f52fd7a7258e4fa606f0ef220d39d8877"
+dependencies = [
+ "generic-array 0.14.4",
+]
+
+[[package]]
+name = "aes"
+version = "0.7.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9e8b47f52ea9bae42228d07ec09eb676433d7c4ed1ebdf0f1d1c29ed446f1ab8"
+dependencies = [
+ "cfg-if",
+ "cipher",
+ "cpufeatures",
+ "opaque-debug 0.3.0",
+]
+
+[[package]]
+name = "aes-gcm-siv"
+version = "0.10.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "589c637f0e68c877bbd59a4599bbe849cac8e5f3e4b5a3ebae8f528cd218dcdc"
+dependencies = [
+ "aead",
+ "aes",
+ "cipher",
+ "ctr",
+ "polyval",
+ "subtle",
+ "zeroize",
+]
+
+[[package]]
+name = "ahash"
+version = "0.7.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fcb51a0695d8f838b1ee009b3fbf66bda078cd64590202a864a8f3e8c4315c47"
+dependencies = [
+ "getrandom",
+ "once_cell",
+ "version_check",
+]
+
+[[package]]
 name = "aho-corasick"
 version = "0.7.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -306,6 +353,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "cipher"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7ee52072ec15386f770805afd189a01c8841be8696bed250fa2f13c4c0d6dfb7"
+dependencies = [
+ "generic-array 0.14.4",
+]
+
+[[package]]
 name = "clap"
 version = "2.34.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -519,9 +575,41 @@ dependencies = [
 ]
 
 [[package]]
+name = "crucible"
+version = "0.0.1"
+source = "git+https://github.com/oxidecomputer/crucible?rev=4090a023b77dcab7a5000057cf2c96cdbb0469b6#4090a023b77dcab7a5000057cf2c96cdbb0469b6"
+dependencies = [
+ "aes-gcm-siv",
+ "anyhow",
+ "base64",
+ "bytes",
+ "crucible-common",
+ "crucible-protocol",
+ "crucible-scope",
+ "dropshot",
+ "futures",
+ "futures-core",
+ "rand",
+ "rand_chacha",
+ "reqwest",
+ "ringbuffer",
+ "schemars",
+ "serde",
+ "serde_json",
+ "structopt",
+ "tokio",
+ "tokio-rustls",
+ "tokio-util 0.7.0",
+ "toml",
+ "tracing",
+ "usdt 0.3.1",
+ "uuid",
+]
+
+[[package]]
 name = "crucible-agent-client"
 version = "0.0.1"
-source = "git+https://github.com/oxidecomputer/crucible?rev=3e7e49eeb88fa8ad74375b0642aabd4224b1f2cb#3e7e49eeb88fa8ad74375b0642aabd4224b1f2cb"
+source = "git+https://github.com/oxidecomputer/crucible?rev=32e603bdc3b6e5eb6b880a2ddde7e05f043b5357#32e603bdc3b6e5eb6b880a2ddde7e05f043b5357"
 dependencies = [
  "anyhow",
  "chrono",
@@ -531,6 +619,53 @@ dependencies = [
  "schemars",
  "serde",
  "serde_json",
+]
+
+[[package]]
+name = "crucible-common"
+version = "0.0.0"
+source = "git+https://github.com/oxidecomputer/crucible?rev=4090a023b77dcab7a5000057cf2c96cdbb0469b6#4090a023b77dcab7a5000057cf2c96cdbb0469b6"
+dependencies = [
+ "anyhow",
+ "rusqlite",
+ "rustls-pemfile 0.3.0",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror",
+ "tokio-rustls",
+ "toml",
+ "twox-hash",
+ "uuid",
+]
+
+[[package]]
+name = "crucible-protocol"
+version = "0.0.0"
+source = "git+https://github.com/oxidecomputer/crucible?rev=4090a023b77dcab7a5000057cf2c96cdbb0469b6#4090a023b77dcab7a5000057cf2c96cdbb0469b6"
+dependencies = [
+ "anyhow",
+ "bincode",
+ "bytes",
+ "crucible-common",
+ "serde",
+ "tokio-util 0.7.0",
+ "uuid",
+]
+
+[[package]]
+name = "crucible-scope"
+version = "0.0.0"
+source = "git+https://github.com/oxidecomputer/crucible?rev=4090a023b77dcab7a5000057cf2c96cdbb0469b6#4090a023b77dcab7a5000057cf2c96cdbb0469b6"
+dependencies = [
+ "anyhow",
+ "futures",
+ "futures-core",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tokio-util 0.7.0",
+ "toml",
 ]
 
 [[package]]
@@ -590,6 +725,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2b2466559f260f48ad25fe6317b3c8dac77b5bdb5763ac7d9d6103530663bc90"
 dependencies = [
  "memchr",
+]
+
+[[package]]
+name = "ctr"
+version = "0.8.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "049bb91fb4aaf0e3c7efa6cd5ef877dbbbd15b39dad06d9948de4ec8a75761ea"
+dependencies = [
+ "cipher",
 ]
 
 [[package]]
@@ -930,6 +1074,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4443176a9f2c162692bd3d352d745ef9413eec5782a80d8fd6f8a1ac692a07f7"
 
 [[package]]
+name = "fallible-streaming-iterator"
+version = "0.1.9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7360491ce676a36bf9bb3c56c1aa791658183a54d2744120f27285738d90465a"
+
+[[package]]
 name = "fastrand"
 version = "1.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1251,6 +1401,18 @@ name = "hashbrown"
 version = "0.11.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ab5ef0d4909ef3724cc8cce6ccc8572c5c817592e9285f5464f8e86f8bd3726e"
+dependencies = [
+ "ahash",
+]
+
+[[package]]
+name = "hashlink"
+version = "0.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7249a3129cbc1ffccd74857f81464a323a152173cdb134e0fd81bc803b29facf"
+dependencies = [
+ "hashbrown",
+]
 
 [[package]]
 name = "headers"
@@ -1602,6 +1764,16 @@ name = "libc"
 version = "0.2.119"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1bf2e165bb3457c8e098ea76f3e3bc9db55f87aa90d52d0e6be741470916aaa4"
+
+[[package]]
+name = "libsqlite3-sys"
+version = "0.24.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cb644c388dfaefa18035c12614156d285364769e818893da0dda9030c80ad2ba"
+dependencies = [
+ "pkg-config",
+ "vcpkg",
+]
 
 [[package]]
 name = "lock_api"
@@ -1973,6 +2145,7 @@ dependencies = [
  "api_identity",
  "async-bb8-diesel",
  "async-trait",
+ "base64",
  "bb8",
  "chrono",
  "cookie",
@@ -2698,6 +2871,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "polyval"
+version = "0.5.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8419d2b623c7c0896ff2d5d96e2cb4ede590fed28fcc34934f4c33c036e620a1"
+dependencies = [
+ "cfg-if",
+ "cpufeatures",
+ "opaque-debug 0.3.0",
+ "universal-hash",
+]
+
+[[package]]
 name = "postgres-protocol"
 version = "0.6.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2881,8 +3066,9 @@ dependencies = [
 [[package]]
 name = "propolis-client"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=0e3798510ae190131f63b9df767ec01b2beacf91#0e3798510ae190131f63b9df767ec01b2beacf91"
+source = "git+https://github.com/oxidecomputer/propolis?rev=832a86afce308d3210685af987ace1ba74c2ecd6#832a86afce308d3210685af987ace1ba74c2ecd6"
 dependencies = [
+ "crucible",
  "reqwest",
  "ring",
  "schemars",
@@ -3110,6 +3296,21 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "72dfeba9c94fdc308dcfe165efa6855c698f317484b736605ff859c5fa81d992"
 dependencies = [
  "array-init",
+]
+
+[[package]]
+name = "rusqlite"
+version = "0.27.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "85127183a999f7db96d1a976a309eebbfb6ea3b0b400ddd8340190129de6eb7a"
+dependencies = [
+ "bitflags",
+ "fallible-iterator",
+ "fallible-streaming-iterator",
+ "hashlink",
+ "libsqlite3-sys",
+ "memchr",
+ "smallvec",
 ]
 
 [[package]]
@@ -3743,6 +3944,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "static_assertions"
+version = "1.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a2eb9349b6444b326872e140eb1cf5e7c522154d69e7a0ffb0fb81c06b37543f"
+
+[[package]]
 name = "steno"
 version = "0.1.0"
 source = "git+https://github.com/oxidecomputer/steno?branch=main#578498bbb43f9061c636b938dff98e7ece0b0efc"
@@ -4300,6 +4507,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "twox-hash"
+version = "1.6.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4ee73e6e4924fe940354b8d4d98cad5231175d615cd855b758adc658c0aac6a0"
+dependencies = [
+ "cfg-if",
+ "rand",
+ "static_assertions",
+]
+
+[[package]]
 name = "typenum"
 version = "1.14.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4399,6 +4617,16 @@ name = "unindent"
 version = "0.1.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f14ee04d9415b52b3aeab06258a3f07093182b88ba0f9b8d203f211a7a7d41c7"
+
+[[package]]
+name = "universal-hash"
+version = "0.4.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9f214e8f697e925001e66ec2c6e37a4ef93f0f78c2eed7814394e10c62025b05"
+dependencies = [
+ "generic-array 0.14.4",
+ "subtle",
+]
 
 [[package]]
 name = "untrusted"

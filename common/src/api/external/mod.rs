@@ -467,6 +467,10 @@ impl Generation {
         assert!(next_gen <= u64::try_from(i64::MAX).unwrap());
         Generation(next_gen)
     }
+
+    pub fn get(&self) -> u64 {
+        self.0
+    }
 }
 
 impl Display for Generation {

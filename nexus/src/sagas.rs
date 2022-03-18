@@ -30,6 +30,7 @@ use omicron_common::api::external::Name;
 use omicron_common::api::external::NetworkInterface;
 use omicron_common::api::internal::nexus::InstanceRuntimeState;
 use omicron_common::backoff::{self, BackoffError};
+use rand::{rngs::StdRng, RngCore, SeedableRng};
 use serde::Deserialize;
 use serde::Serialize;
 use sled_agent_client::types::InstanceEnsureBody;
@@ -113,6 +114,8 @@ async fn saga_generate_uuid<UserType: SagaType>(
 #[derive(Debug, Deserialize, Serialize)]
 pub struct ParamsInstanceCreate {
     pub serialized_authn: authn::saga::Serialized,
+    pub organization_name: Name,
+    pub project_name: Name,
     pub project_id: Uuid,
     pub create_params: params::InstanceCreate,
 }
@@ -149,7 +152,7 @@ pub fn saga_instance_create() -> SagaTemplate<SagaInstanceCreate> {
     );
 
     template_builder.append(
-        "initial_runtime",
+        "instance_name",
         "CreateInstanceRecord",
         new_action_noop_undo(sic_create_instance_record),
     );
@@ -184,10 +187,20 @@ pub fn saga_instance_create() -> SagaTemplate<SagaInstanceCreate> {
             sic_create_network_interfaces_undo,
         ),
     );
+
     template_builder.append(
         "network_interfaces",
         "CreateNetworkInterfaces",
         new_action_noop_undo(sic_create_network_interfaces),
+    );
+
+    template_builder.append(
+        "attach_disks",
+        "AttachDisksToInstance",
+        ActionFunc::new_action(
+            sic_attach_disks_to_instance,
+            sic_attach_disks_to_instance_undo,
+        ),
     );
 
     template_builder.append(
@@ -475,9 +488,77 @@ async fn sic_create_network_interfaces_undo(
     Ok(())
 }
 
+async fn sic_attach_disks_to_instance(
+    sagactx: ActionContext<SagaInstanceCreate>,
+) -> Result<(), ActionError> {
+    ensure_instance_disk_attach_state(sagactx, true).await
+}
+
+async fn sic_attach_disks_to_instance_undo(
+    sagactx: ActionContext<SagaInstanceCreate>,
+) -> Result<(), anyhow::Error> {
+    Ok(ensure_instance_disk_attach_state(sagactx, false).await?)
+}
+
+async fn ensure_instance_disk_attach_state(
+    sagactx: ActionContext<SagaInstanceCreate>,
+    attached: bool,
+) -> Result<(), ActionError> {
+    let osagactx = sagactx.user_data();
+    let saga_params = sagactx.saga_params();
+    let opctx =
+        OpContext::for_saga_action(&sagactx, &saga_params.serialized_authn);
+
+    let saga_disks = &saga_params.create_params.disks;
+    let instance_name = sagactx.lookup::<db::model::Name>("instance_name")?;
+
+    let organization_name: db::model::Name =
+        saga_params.organization_name.clone().into();
+    let project_name: db::model::Name = saga_params.project_name.clone().into();
+
+    for disk in saga_disks {
+        match disk {
+            params::InstanceDiskAttachment::Create(_) => {
+                todo!();
+            }
+            params::InstanceDiskAttachment::Attach(instance_disk_attach) => {
+                let disk_name: db::model::Name =
+                    instance_disk_attach.disk.clone().into();
+
+                if attached {
+                    osagactx
+                        .nexus()
+                        .instance_attach_disk(
+                            &opctx,
+                            &organization_name,
+                            &project_name,
+                            &instance_name,
+                            &disk_name,
+                        )
+                        .await
+                } else {
+                    osagactx
+                        .nexus()
+                        .instance_detach_disk(
+                            &opctx,
+                            &organization_name,
+                            &project_name,
+                            &instance_name,
+                            &disk_name,
+                        )
+                        .await
+                }
+                .map_err(ActionError::action_failed)?;
+            }
+        }
+    }
+
+    Ok(())
+}
+
 async fn sic_create_instance_record(
     sagactx: ActionContext<SagaInstanceCreate>,
-) -> Result<InstanceRuntimeState, ActionError> {
+) -> Result<db::model::Name, ActionError> {
     let osagactx = sagactx.user_data();
     let params = sagactx.saga_params();
     let sled_uuid = sagactx.lookup::<Uuid>("server_id");
@@ -511,7 +592,7 @@ async fn sic_create_instance_record(
         .await
         .map_err(ActionError::action_failed)?;
 
-    Ok(instance.runtime().clone().into())
+    Ok(instance.name().clone())
 }
 
 async fn sic_instance_ensure(
@@ -519,50 +600,39 @@ async fn sic_instance_ensure(
 ) -> Result<(), ActionError> {
     // TODO-correctness is this idempotent?
     let osagactx = sagactx.user_data();
+    let params = sagactx.saga_params();
     let runtime_params = InstanceRuntimeStateRequested {
         run_state: InstanceStateRequested::Running,
         migration_params: None,
     };
-    let instance_id = sagactx.lookup::<Uuid>("instance_id")?;
-    let sled_uuid = sagactx.lookup::<Uuid>("server_id")?;
-    let nics = sagactx
-        .lookup::<Option<Vec<NetworkInterface>>>("network_interfaces")?
-        .unwrap_or_default();
-    let runtime = sagactx.lookup::<InstanceRuntimeState>("initial_runtime")?;
-    let initial_hardware = InstanceHardware {
-        runtime: runtime.into(),
-        nics: nics.into_iter().map(|nic| nic.into()).collect(),
-    };
-    let sa = osagactx
-        .sled_client(&sled_uuid)
+
+    let instance_name = sagactx.lookup::<db::model::Name>("instance_name")?;
+    let opctx = OpContext::for_saga_action(&sagactx, &params.serialized_authn);
+
+    let authz_project = osagactx
+        .datastore()
+        .project_lookup_by_id(params.project_id)
         .await
         .map_err(ActionError::action_failed)?;
 
-    // Ask the sled agent to begin the state change.  Then update the database
-    // to reflect the new intermediate state.  If this update is not the newest
-    // one, that's fine.  That might just mean the sled agent beat us to it.
-    let new_runtime_state = sa
-        .instance_put(
-            &instance_id,
-            &InstanceEnsureBody {
-                initial: initial_hardware,
-                target: runtime_params,
-                migrate: None,
-            },
-        )
+    let (authz_instance, instance) = osagactx
+        .datastore()
+        .instance_fetch(&opctx, &authz_project, &instance_name)
         .await
-        .map_err(omicron_common::api::external::Error::from)
         .map_err(ActionError::action_failed)?;
-
-    let new_runtime_state: InstanceRuntimeState =
-        new_runtime_state.into_inner().into();
 
     osagactx
-        .datastore()
-        .instance_update_runtime(&instance_id, &new_runtime_state.into())
+        .nexus()
+        .instance_set_runtime(
+            &opctx,
+            &authz_instance,
+            &instance,
+            runtime_params,
+        )
         .await
-        .map(|_| ())
-        .map_err(ActionError::action_failed)
+        .map_err(ActionError::action_failed)?;
+
+    Ok(())
 }
 
 // "Migrate Instance" saga template
@@ -670,6 +740,8 @@ async fn sim_instance_migrate(
         runtime: runtime.into(),
         // TODO: populate NICs
         nics: vec![],
+        // TODO: populate disks
+        disks: vec![],
     };
     let target = InstanceRuntimeStateRequested {
         run_state: InstanceStateRequested::Migrating,
@@ -879,7 +951,6 @@ async fn ensure_region_in_dataset(
         // TODO: Can we avoid casting from UUID to string?
         // NOTE: This'll require updating the crucible agent client.
         id: RegionId(region.id().to_string()),
-        volume_id: region.volume_id().to_string(),
         encrypted: region.encrypted(),
         cert_pem: None,
         key_pem: None,
@@ -927,30 +998,120 @@ const MAX_CONCURRENT_REGION_REQUESTS: usize = 3;
 
 async fn sdc_regions_ensure(
     sagactx: ActionContext<SagaDiskCreate>,
-) -> Result<(), ActionError> {
+) -> Result<String, ActionError> {
     let log = sagactx.user_data().log();
     let datasets_and_regions = sagactx
         .lookup::<Vec<(db::model::Dataset, db::model::Region)>>(
             "datasets_and_regions",
         )?;
+
     let request_count = datasets_and_regions.len();
-    futures::stream::iter(datasets_and_regions)
+
+    // Allocate regions, and additionally return the dataset that the region was
+    // allocated in.
+    let datasets_and_regions: Vec<(
+        db::model::Dataset,
+        crucible_agent_client::types::Region,
+    )> = futures::stream::iter(datasets_and_regions)
         .map(|(dataset, region)| async move {
-            ensure_region_in_dataset(log, &dataset, &region).await
+            match ensure_region_in_dataset(log, &dataset, &region).await {
+                Ok(result) => Ok((dataset, result)),
+                Err(e) => Err(e),
+            }
         })
         // Execute the allocation requests concurrently.
         .buffer_unordered(std::cmp::min(
             request_count,
             MAX_CONCURRENT_REGION_REQUESTS,
         ))
-        .collect::<Vec<Result<_, _>>>()
+        .collect::<Vec<
+            Result<
+                (db::model::Dataset, crucible_agent_client::types::Region),
+                Error,
+            >,
+        >>()
         .await
         .into_iter()
-        .collect::<Result<Vec<_>, _>>()
+        .collect::<Result<
+            Vec<(db::model::Dataset, crucible_agent_client::types::Region)>,
+            Error,
+        >>()
         .map_err(ActionError::action_failed)?;
 
-    // TODO: Region has a port value, we could store this in the DB?
-    Ok(())
+    // Assert each region has the same block size, otherwise Volume creation
+    // will fail.
+    let all_region_have_same_block_size = datasets_and_regions
+        .windows(2)
+        .all(|w| w[0].1.block_size == w[1].1.block_size);
+
+    if !all_region_have_same_block_size {
+        return Err(ActionError::new_subsaga(
+            // XXX wrong error type?
+            anyhow::anyhow!(
+                "volume creation will fail due to block size mismatch"
+            ),
+        ));
+    }
+
+    let block_size = datasets_and_regions[0].1.block_size;
+
+    // Store volume details in db
+    let mut rng = StdRng::from_entropy();
+    let volume_construction_request =
+        sled_agent_client::types::VolumeConstructionRequest::Volume {
+            block_size,
+            sub_volumes: vec![
+                // XXX allocation algorithm only supports one sub vol?
+                sled_agent_client::types::VolumeConstructionRequest::Region {
+                    block_size,
+                    // gen of 0 is here, these regions were just allocated.
+                    gen: 0,
+                    opts: sled_agent_client::types::CrucibleOpts {
+                        target: datasets_and_regions
+                            .iter()
+                            .map(|(dataset, region)| {
+                                dataset
+                                    .address_with_port(region.port_number)
+                                    .to_string()
+                            })
+                            .collect(),
+
+                        lossy: false,
+
+                        // all downstairs will expect encrypted blocks
+                        key: Some(base64::encode({
+                            // XXX the current encryption key
+                            // requirement is 32 bytes, what if that
+                            // changes?
+                            let mut random_bytes: [u8; 32] = [0; 32];
+                            rng.fill_bytes(&mut random_bytes);
+                            random_bytes
+                        })),
+
+                        // TODO TLS, which requires sending X509 stuff during
+                        // downstairs region allocation too.
+                        cert_pem: None,
+                        key_pem: None,
+                        root_cert_pem: None,
+
+                        // TODO open a control socket for the whole volume, not
+                        // in the sub volumes
+                        control: None,
+                    },
+                },
+            ],
+            read_only_parent: None,
+        };
+
+    let volume_data = serde_json::to_string(&volume_construction_request)
+        .map_err(|_| {
+            ActionError::new_subsaga(
+                // XXX wrong error type?
+                anyhow::anyhow!("serde_json::to_string"),
+            )
+        })?;
+
+    Ok(volume_data)
 }
 
 async fn delete_regions(
@@ -1008,16 +1169,16 @@ async fn sdc_create_volume_record(
     let osagactx = sagactx.user_data();
 
     let volume_id = sagactx.lookup::<Uuid>("volume_id")?;
-    let volume = db::model::Volume::new(
-        volume_id,
-        // TODO: Patch this up with serialized contents that Crucible can use.
-        "Some Data".to_string(),
-    );
+    let volume_data = sagactx.lookup::<String>("regions_ensure")?;
+
+    let volume = db::model::Volume::new(volume_id, volume_data);
+
     let volume_created = osagactx
         .datastore()
         .volume_create(volume)
         .await
         .map_err(ActionError::action_failed)?;
+
     Ok(volume_created)
 }
 

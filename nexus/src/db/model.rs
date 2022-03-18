@@ -646,7 +646,11 @@ impl Sled {
 
     pub fn address(&self) -> SocketAddr {
         // TODO: avoid this unwrap
-        SocketAddr::new(self.ip.ip(), u16::try_from(self.port).unwrap())
+        self.address_with_port(u16::try_from(self.port).unwrap())
+    }
+
+    pub fn address_with_port(&self, port: u16) -> SocketAddr {
+        SocketAddr::new(self.ip.ip(), port)
     }
 }
 
@@ -787,7 +791,11 @@ impl Dataset {
 
     pub fn address(&self) -> SocketAddr {
         // TODO: avoid this unwrap
-        SocketAddr::new(self.ip.ip(), u16::try_from(self.port).unwrap())
+        self.address_with_port(u16::try_from(self.port).unwrap())
+    }
+
+    pub fn address_with_port(&self, port: u16) -> SocketAddr {
+        SocketAddr::new(self.ip.ip(), port)
     }
 }
 
@@ -904,6 +912,10 @@ impl Volume {
             rcgen: Generation::new(),
             data,
         }
+    }
+
+    pub fn data(&self) -> &String {
+        &self.data
     }
 }
 
@@ -1266,6 +1278,10 @@ impl Disk {
     pub fn runtime(&self) -> DiskRuntimeState {
         self.runtime_state.clone()
     }
+
+    pub fn id(&self) -> Uuid {
+        self.identity.id
+    }
 }
 
 /// Conversion to the external API type.
@@ -1315,6 +1331,17 @@ impl DiskRuntimeState {
             disk_state: external::DiskState::Creating.label().to_string(),
             attach_instance_id: None,
             gen: external::Generation::new().into(),
+            time_updated: Utc::now(),
+        }
+    }
+
+    pub fn attach(self, instance_id: Uuid) -> Self {
+        Self {
+            disk_state: external::DiskState::Attached(instance_id)
+                .label()
+                .to_string(),
+            attach_instance_id: Some(instance_id),
+            gen: self.gen.next().into(),
             time_updated: Utc::now(),
         }
     }

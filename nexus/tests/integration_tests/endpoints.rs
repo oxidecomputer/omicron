@@ -166,6 +166,7 @@ lazy_static! {
             hostname: String::from("demo-instance"),
             network_interfaces:
                 params::InstanceNetworkInterfaceAttachment::Default,
+            disks: vec![],
         };
 }
 

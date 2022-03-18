@@ -105,6 +105,23 @@ impl Default for InstanceNetworkInterfaceAttachment {
     }
 }
 
+/// Describe the instance's disks at creation time
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum InstanceDiskAttachment {
+    /// During instance creation, create and attach disks
+    Create(DiskCreate),
+
+    /// During instance creation, attach this disk
+    Attach(InstanceDiskAttach),
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct InstanceDiskAttach {
+    /// A disk name to attach
+    pub disk: Name,
+}
+
 /// Create-time parameters for an [`Instance`](omicron_common::api::external::Instance)
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct InstanceCreate {
@@ -117,6 +134,10 @@ pub struct InstanceCreate {
     /// The network interfaces to be created for this instance.
     #[serde(default)]
     pub network_interfaces: InstanceNetworkInterfaceAttachment,
+
+    /// The disks to be created or attached for this instance.
+    #[serde(default)]
+    pub disks: Vec<InstanceDiskAttachment>,
 }
 
 /// Migration parameters for an [`Instance`](omicron_common::api::external::Instance)
