@@ -846,7 +846,7 @@ async fn project_instances_get_instance(
 /// Permanently deletes the instance with the specified name in the specified project and
 /// organization. This operation cannot be undone. If the instance is using a disk,
 /// and the disk settings are to delete upon instance deletion, the disk will be deleted.
-/// Any ephermal IP addresses associated with the instance will be released.
+/// Any ephemeral IP addresses associated with the instance will be released.
 #[endpoint {
     method = DELETE,
     path = "/organizations/{organization_name}/projects/{project_name}/instances/{instance_name}",
