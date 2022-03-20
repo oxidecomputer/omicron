@@ -30,14 +30,43 @@
 //     problem: then we can't have different methods (like "instance_name") at
 //     each node along the way.
 //
-// Most promising right now looks like putting a reference to the LookupPath in
-// every node.
+// Conclusions:
+// - the only thing that can possibly own the LookupPath is the leaf node
+//   because that's the only thing the caller actually has.
+// - the internal nodes also need to be able to get the LookupPath so that they
+//   can impl their own Fetch()
+// => The LookupPath should appear at the root, owned (indirectly) by each item
+//    in the chain, ending at the leaf.
+// => Each item has to traverse the chain above it to get to the LookupPath
+//
+// NOTE: as I impl the first Fetch, I realize that I want Fetch to do an access
+// check.  But I can't do an access check when I'm only doing a fetch as a
+// non-leaf node, for the same reason that foo_lookup_noauthz() cannot do the
+// access check.  I think this implies there need to be two different traits:
+// - Fetch: the public trait that lets you fetch a complete record and the authz
+//   objects for the items in the hierarchy
+// - Lookup: a trait private to this file that lets callers fetch the record and
+//   _does not_ do an access check
+// If so, that may simplify things because:
+// - I can have the leaf node store the LookupPath directly
+// - it can pass the LookupPath (or whatever context is needed) to the lookup()
+//   function of the lookup() trait.
 
 use super::datastore::DataStore;
+use super::identity::Resource;
 use super::model;
-use crate::{authz, context::OpContext};
+use crate::{
+    authz,
+    context::OpContext,
+    db,
+    db::error::{public_error_from_diesel_pool, ErrorHandler},
+    db::model::Name,
+};
+use async_bb8_diesel::AsyncRunQueryDsl;
+use diesel::{ExpressionMethods, QueryDsl, SelectableHelper};
 use futures::future::BoxFuture;
-use omicron_common::api::external::{LookupResult, Name};
+use futures::FutureExt;
+use omicron_common::api::external::{LookupResult, LookupType, ResourceType};
 use uuid::Uuid;
 
 pub trait Fetch {
@@ -110,7 +139,77 @@ impl Fetch for Organization<'_> {
     type FetchType = (authz::Organization, model::Organization);
 
     fn fetch(&self) -> BoxFuture<'_, LookupResult<Self::FetchType>> {
-        todo!()
+        // XXX-dap TODO This is a proof of concept.  Each type in this path is
+        // going to need to get to the LookupPath through a sort of convoluted
+        // way.  I wanted to implement a recursive function to get to the
+        // LookupPath, but then I'd need to create a trait for it that each type
+        // would have to impl, etc.  (That might still be the way to go.)
+        //
+        // But see the note above -- maybe a different approach is better here!
+        let lookup = match &self.key {
+            Key::Name(Root { lookup }, _) => lookup,
+            Key::Id(lookup, _) => lookup,
+        };
+
+        let opctx = &lookup.opctx;
+        let datastore = lookup.datastore;
+        async {
+            let lookup_type = || match &self.key {
+                Key::Name(_, name) => {
+                    LookupType::ByName(name.as_str().to_owned())
+                }
+                Key::Id(_, id) => LookupType::ById(*id),
+            };
+
+            use db::schema::organization::dsl;
+            let conn = datastore.pool_authorized(opctx).await?;
+            // XXX-dap TODO This construction sucks.  What I kind of want is a
+            // generic function that takes:
+            // - a table (e.g., dsl::organization)
+            // - a db model type to return
+            // - some information about the LookupType we're trying to do
+            // - a closure that can be used to apply filters
+            //   (which would be either "name" or "id")
+            // and does the whole thing.
+            let db_org = match self.key {
+                Key::Name(_, name) => dsl::organization
+                    .filter(dsl::time_deleted.is_null())
+                    .filter(dsl::name.eq(name.clone()))
+                    .select(model::Organization::as_select())
+                    .get_result_async(conn)
+                    .await
+                    .map_err(|e| {
+                        public_error_from_diesel_pool(
+                            e,
+                            ErrorHandler::NotFoundByLookup(
+                                ResourceType::Organization,
+                                lookup_type(),
+                            ),
+                        )
+                    }),
+                Key::Id(_, id) => dsl::organization
+                    .filter(dsl::time_deleted.is_null())
+                    .filter(dsl::id.eq(id))
+                    .select(model::Organization::as_select())
+                    .get_result_async(conn)
+                    .await
+                    .map_err(|e| {
+                        public_error_from_diesel_pool(
+                            e,
+                            ErrorHandler::NotFoundByLookup(
+                                ResourceType::Organization,
+                                lookup_type(),
+                            ),
+                        )
+                    }),
+            }?;
+
+            let authz_org =
+                authz::FLEET.organization(db_org.id(), lookup_type());
+            opctx.authorize(authz::Action::Read, &authz_org).await?;
+            Ok((authz_org, db_org))
+        }
+        .boxed()
     }
 }
 
@@ -158,8 +257,8 @@ mod test {
     use super::Project;
     use super::Root;
     use crate::context::OpContext;
+    use crate::db::model::Name;
     use nexus_test_utils::db::test_setup_database;
-    use omicron_common::api::external::Name;
     use omicron_test_utils::dev;
     use std::sync::Arc;
 
@@ -171,9 +270,9 @@ mod test {
             crate::db::datastore::datastore_test(&logctx, &db).await;
         let opctx =
             OpContext::for_tests(logctx.log.new(o!()), Arc::clone(&datastore));
-        let org_name: Name = "my-org".parse().unwrap();
-        let project_name: Name = "my-project".parse().unwrap();
-        let instance_name: Name = "my-instance".parse().unwrap();
+        let org_name: Name = Name("my-org".parse().unwrap());
+        let project_name: Name = Name("my-project".parse().unwrap());
+        let instance_name: Name = Name("my-instance".parse().unwrap());
 
         let leaf = LookupPath::new(&opctx, &datastore)
             .organization_name(&org_name)
