@@ -47,7 +47,7 @@ pub trait Fetch {
 
 enum Key<'a, P> {
     Name(P, &'a Name),
-    Id(Root, Uuid),
+    Id(LookupPath<'a>, Uuid),
 }
 
 pub struct LookupPath<'a> {
@@ -55,7 +55,9 @@ pub struct LookupPath<'a> {
     datastore: &'a DataStore,
 }
 
-struct Root<'a> {}
+struct Root<'a> {
+    lookup: LookupPath<'a>,
+}
 
 impl<'a> LookupPath<'a> {
     pub fn new<'b, 'c>(
