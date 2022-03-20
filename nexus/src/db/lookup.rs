@@ -20,8 +20,8 @@
 //         way to get the datastore out.
 //   - idea: use Arc on the LookupPath -- this would probably work but feels
 //     cheesy
-//   - idea: put a reference to the LookupPath at each node problem: _somebody_
-//     has to own it.  Who will that be?  Root?
+//   - idea: put a reference to the LookupPath at each node
+//     problem: _somebody_ has to own it.  Who will that be?  Root?
 //   - idea: have every resource impl a trait that gets its own key out.  Then
 //     we can impl `key.lookup()` in terms of the parent key.
 //     problem: lots of boilerplate
