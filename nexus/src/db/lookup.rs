@@ -7,19 +7,19 @@
 // XXX-dap TODO status:
 // - I've got the skeleton of an API here that looks pretty promising
 // - Next step is probably to implement some of the `Fetch` interfaces.  The
-//   challenge I'm facing here is that I need access to the `Lookup` at the top
-//   of the tree in order to use the datastore's methods.
-//   - idea: pass the Lookup down so it's only present at the leaf
+//   challenge I'm facing here is that I need access to the `LookupPath` at the
+//   top of the tree in order to use the datastore's methods.
+//   - idea: pass the LookupPath down so it's only present at the leaf
 //     problem: doesn't that mean every node needs two versions: one as a leaf,
 //         and one as a node in the tree?  (maybe every internal node can be the
 //         same class?  but probably not because we're going to wind up using
 //         their `Fetch` impls recursively).  Maybe instead of two versions,
 //         each internal node could be an enum with two variants, one as a leaf
-//         (which has the Lookup) and one as an internal node (which has the
+//         (which has the LookupPath) and one as an internal node (which has the
 //         rest)?  But then how will its impl of Fetch work -- it will have _no_
 //         way to get the datastore out.
-//   - idea: use Arc on the Lookup -- this would probably work but feels cheesy
-//   - idea: put a reference to the Lookup at each node
+//   - idea: use Arc on the LookupPath -- this would probably work but feels
+//     cheesy - idea: put a reference to the LookupPath at each node
 //     problem: _somebody_ has to own it.  Who will that be?  Root?
 //   - idea: have every resource impl a trait that gets its own key out.  Then
 //     we can impl `key.lookup()` in terms of the parent key.
@@ -29,7 +29,7 @@
 //     problem: then we can't have different methods (like "instance_name") at
 //     each node along the way.
 //
-// Most promising right now looks like putting a reference to the Lookup in
+// Most promising right now looks like putting a reference to the LookupPath in
 // every node.
 
 use super::datastore::DataStore;
@@ -46,28 +46,26 @@ pub trait Fetch {
 
 enum Key<'a, P> {
     Name(P, &'a Name),
-    Id(Lookup<'a>, Uuid),
+    Id(Root, Uuid),
 }
 
-pub struct Lookup<'a> {
+pub struct LookupPath<'a> {
     opctx: &'a OpContext,
     datastore: &'a DataStore,
 }
 
-struct Root<'a> {
-    lookup: Lookup<'a>,
-}
+struct Root<'a> {}
 
-impl<'a> Lookup<'a> {
+impl<'a> LookupPath<'a> {
     pub fn new<'b, 'c>(
         opctx: &'b OpContext,
         datastore: &'c DataStore,
-    ) -> Lookup<'a>
+    ) -> LookupPath<'a>
     where
         'b: 'a,
         'c: 'a,
     {
-        Lookup { opctx, datastore }
+        LookupPath { opctx, datastore }
     }
 
     pub fn organization_name<'b, 'c>(self, name: &'b Name) -> Organization<'c>
@@ -152,7 +150,7 @@ pub struct Instance<'a> {
 mod test {
     use super::Instance;
     use super::Key;
-    use super::Lookup;
+    use super::LookupPath;
     use super::Organization;
     use super::Project;
     use super::Root;
@@ -174,7 +172,7 @@ mod test {
         let project_name: Name = "my-project".parse().unwrap();
         let instance_name: Name = "my-instance".parse().unwrap();
 
-        let leaf = Lookup::new(&opctx, &datastore)
+        let leaf = LookupPath::new(&opctx, &datastore)
             .organization_name(&org_name)
             .project_name(&project_name)
             .instance_name(&instance_name);
@@ -189,12 +187,12 @@ mod test {
             if **o == org_name && **p == project_name && **i == instance_name));
 
         let org_id = "006f29d9-0ff0-e2d2-a022-87e152440122".parse().unwrap();
-        let leaf = Lookup::new(&opctx, &datastore)
+        let leaf = LookupPath::new(&opctx, &datastore)
             .organization_id(org_id)
             .project_name(&project_name);
         assert!(matches!(&leaf, Project {
             key: Key::Name(Organization {
-                key: Key::Id(Lookup { .. }, o)
+                key: Key::Id(LookupPath { .. }, o)
             }, p)
         } if *o == org_id && **p == project_name));
 
