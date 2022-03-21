@@ -228,16 +228,18 @@ impl<'a> GetLookupRoot for Instance<'a> {
 }
 
 macro_rules! define_lookup {
-    ($lc:ident, $pc:ident) => {
+    ($pc:ident) => {
         paste::paste! {
-            async fn [<$lc _lookup_by_id>](
+            // Do NOT make these functions public.  They should instead be
+            // wrapped by functions that perform authz checks.
+            async fn [<$pc:lower _lookup_by_id_no_authz>](
                 opctx: &OpContext,
                 datastore: &DataStore,
                 id: Uuid,
             ) -> LookupResult<(authz::$pc, model::$pc)> {
-                use db::schema::$lc::dsl;
+                use db::schema::[<$pc:lower>]::dsl;
                 let conn = datastore.pool_authorized(opctx).await?;
-                dsl::$lc
+                dsl::[<$pc:lower>]
                     .filter(dsl::time_deleted.is_null())
                     .filter(dsl::id.eq(id))
                     .select(model::$pc::as_select())
@@ -253,20 +255,22 @@ macro_rules! define_lookup {
                         )
                     })
                     .map(|o| {(
-                        authz::FLEET.$lc(o.id(), LookupType::ById(id)),
+                        authz::FLEET.[<$pc:lower>](o.id(), LookupType::ById(id)),
                         o
                         )}
                     )
             }
 
-            async fn [<$lc _lookup_by_name>](
+            // Do NOT make these functions public.  They should instead be
+            // wrapped by functions that perform authz checks.
+            async fn [<$pc:lower _lookup_by_name_no_authz>](
                 opctx: &OpContext,
                 datastore: &DataStore,
                 name: &Name,
             ) -> LookupResult<(authz::$pc, model::$pc)> {
-                use db::schema::$lc::dsl;
+                use db::schema::[<$pc:lower>]::dsl;
                 let conn = datastore.pool_authorized(opctx).await?;
-                dsl::$lc
+                dsl::[<$pc:lower>]
                     .filter(dsl::time_deleted.is_null())
                     .filter(dsl::name.eq(name.clone()))
                     .select(model::$pc::as_select())
@@ -282,7 +286,7 @@ macro_rules! define_lookup {
                         )
                     })
                     .map(|o| {(
-                        authz::FLEET.$lc(
+                        authz::FLEET.[<$pc:lower>](
                             o.id(),
                             LookupType::ByName(name.as_str().to_string())
                         ),
@@ -291,32 +295,42 @@ macro_rules! define_lookup {
                     )
             }
 
+            async fn [<$pc:lower _fetch_by_name>](
+                opctx: &OpContext,
+                datastore: &DataStore,
+                name: &Name,
+            ) -> LookupResult<(authz::$pc, model::$pc)> {
+                let (authz_child, db_child) =
+                    [<$pc:lower _lookup_by_name_no_authz>](
+                        opctx,
+                        datastore,
+                        name
+                    ).await?;
+                opctx.authorize(authz::Action::Read, &authz_child).await?;
+                Ok((authz_child, db_child))
+            }
         }
     };
 }
 
 macro_rules! define_lookup_with_parent {
     (
-        $lc:ident,          // Lowercase version of resource name
         $pc:ident,          // Pascal-case version of resource name
-        $parent_lc:ident,   // Lowercase version of parent resource name
         $parent_pc:ident,   // Pascal-case version of parent resource name
         $mkauthz:expr       // Closure to generate resource's authz object
                             //   from parent's
     ) => {
         paste::paste! {
-            // XXX TODO-dap the lookup_by_id is not within the context of a
-            // particular parent.  Thus, we can't return an authz struct for the
-            // new thing -- we have to look up the parent we find again in order
-            // to do that.
-            async fn [<$lc _lookup_by_id>](
+            // Do NOT make these functions public.  They should instead be
+            // wrapped by functions that perform authz checks.
+            async fn [<$pc:lower _lookup_by_id_no_authz>](
                 opctx: &OpContext,
                 datastore: &DataStore,
                 id: Uuid,
             ) -> LookupResult<(authz::$pc, model::$pc)> {
-                use db::schema::$lc::dsl;
+                use db::schema::[<$pc:lower>]::dsl;
                 let conn = datastore.pool_authorized(opctx).await?;
-                let db_row = dsl::$lc
+                let db_row = dsl::[<$pc:lower>]
                     .filter(dsl::time_deleted.is_null())
                     .filter(dsl::id.eq(id))
                     .select(model::$pc::as_select())
@@ -332,10 +346,10 @@ macro_rules! define_lookup_with_parent {
                         )
                     })?;
                 let (authz_parent, _) =
-                    [< $parent_lc _lookup_by_id >](
+                    [< $parent_pc:lower _lookup_by_id_no_authz >](
                         opctx,
                         datastore,
-                        db_row.[<$parent_lc _id>]
+                        db_row.[<$parent_pc:lower _id>]
                     ).await?;
                 let authz_child = ($mkauthz)(
                     &authz_parent, &db_row, LookupType::ById(id)
@@ -343,18 +357,20 @@ macro_rules! define_lookup_with_parent {
                 Ok((authz_child, db_row))
             }
 
-            async fn [<$lc _lookup_by_name>](
+            // Do NOT make these functions public.  They should instead be
+            // wrapped by functions that perform authz checks.
+            async fn [<$pc:lower _lookup_by_name_no_authz>](
                 opctx: &OpContext,
                 datastore: &DataStore,
                 authz_parent: &authz::$parent_pc,
                 name: &Name,
             ) -> LookupResult<(authz::$pc, model::$pc)> {
-                use db::schema::$lc::dsl;
+                use db::schema::[<$pc:lower>]::dsl;
                 let conn = datastore.pool_authorized(opctx).await?;
-                dsl::$lc
+                dsl::[<$pc:lower>]
                     .filter(dsl::time_deleted.is_null())
                     .filter(dsl::name.eq(name.clone()))
-                    .filter(dsl::[<$parent_lc _id>].eq(authz_parent.id()))
+                    .filter(dsl::[<$parent_pc:lower _id>].eq(authz_parent.id()))
                     .select(model::$pc::as_select())
                     .get_result_async(conn)
                     .await
@@ -376,24 +392,37 @@ macro_rules! define_lookup_with_parent {
                         dbmodel
                     )})
             }
+
+            async fn [<$pc:lower _fetch_by_name>](
+                opctx: &OpContext,
+                datastore: &DataStore,
+                authz_parent: &authz::$parent_pc,
+                name: &Name,
+            ) -> LookupResult<(authz::$pc, model::$pc)> {
+                let (authz_child, db_child) =
+                    [<$pc:lower _lookup_by_name_no_authz>](
+                        opctx,
+                        datastore,
+                        authz_parent,
+                        name
+                    ).await?;
+                opctx.authorize(authz::Action::Read, &authz_child).await?;
+                Ok((authz_child, db_child))
+            }
         }
     };
 }
 
-define_lookup!(organization, Organization);
+define_lookup!(Organization);
 define_lookup_with_parent!(
-    project,
     Project,
-    organization,
     Organization,
     |authz_org: &authz::Organization,
      project: &model::Project,
      lookup: LookupType| { authz_org.project(project.id(), lookup) }
 );
 define_lookup_with_parent!(
-    instance,
     Instance,
-    project,
     Project,
     |authz_project: &authz::Project,
      instance: &model::Instance,
