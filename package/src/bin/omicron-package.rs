@@ -28,11 +28,7 @@ pub enum ExternalPackageSource {
     /// Downloads the package from the following URL:
     ///
     /// <https://buildomat.eng.oxide.computer/public/file/oxidecomputer/REPO/image/COMMIT/PACKAGE>
-    Prebuilt {
-        repo: String,
-        commit: String,
-        sha256: String,
-    },
+    Prebuilt { repo: String, commit: String, sha256: String },
     /// Expects that a package will be manually built and placed into the output
     /// directory.
     Manual,
@@ -154,16 +150,14 @@ async fn do_build(config: &Config) -> Result<()> {
 }
 
 async fn get_sha256_digest(path: &PathBuf) -> Result<Digest> {
-    let mut reader = BufReader::new(
-        tokio::fs::File::open(&path).await?
-    );
+    let mut reader = BufReader::new(tokio::fs::File::open(&path).await?);
     let mut context = DigestContext::new(&SHA256);
     let mut buffer = [0; 1024];
 
     loop {
         let count = reader.read(&mut buffer).await?;
         if count == 0 {
-            break
+            break;
         } else {
             context.update(&buffer[..count]);
         }
@@ -182,7 +176,8 @@ async fn do_package_external(
     match &external_package.source {
         ExternalPackageSource::Prebuilt { repo, commit, sha256 } => {
             let expected_digest = hex::decode(&sha256)?;
-            let path = external_package.package.get_output_path(&output_directory);
+            let path =
+                external_package.package.get_output_path(&output_directory);
 
             let should_download = if path.exists() {
                 // Re-download the package if the SHA doesn't match.
@@ -203,7 +198,9 @@ async fn do_package_external(
                 );
                 let response = reqwest::Client::new().get(url).send().await?;
                 progress.set_length(
-                    response.content_length().ok_or_else(|| anyhow!("Missing Content Length"))?
+                    response
+                        .content_length()
+                        .ok_or_else(|| anyhow!("Missing Content Length"))?,
                 );
                 let mut file = tokio::fs::File::create(path).await?;
                 let mut stream = response.bytes_stream();
@@ -223,9 +220,10 @@ async fn do_package_external(
                     bail!("Digest mismatch");
                 }
             }
-        },
+        }
         ExternalPackageSource::Manual => {
-            let path = external_package.package.get_output_path(&output_directory);
+            let path =
+                external_package.package.get_output_path(&output_directory);
             if !path.exists() {
                 bail!(
                     "The package for {} (expected at {}) does not exist.",
@@ -233,7 +231,7 @@ async fn do_package_external(
                     path.to_string_lossy(),
                 );
             }
-        },
+        }
     }
     progress.finish();
     Ok(())
@@ -260,7 +258,13 @@ async fn do_package(config: &Config, output_directory: &Path) -> Result<()> {
         .try_for_each_concurrent(
             None,
             |((package_name, package), ui)| async move {
-                do_package_external(&ui, package_name, package, output_directory).await
+                do_package_external(
+                    &ui,
+                    package_name,
+                    package,
+                    output_directory,
+                )
+                .await
             },
         );
 
@@ -283,11 +287,7 @@ async fn do_package(config: &Config, output_directory: &Path) -> Result<()> {
             },
         );
 
-    tokio::try_join!(
-        external_pkg_stream,
-        internal_pkg_stream,
-    )?;
-
+    tokio::try_join!(external_pkg_stream, internal_pkg_stream,)?;
     Ok(())
 }
 
@@ -301,10 +301,16 @@ fn do_install(
     })?;
 
     // Copy all packages to the install location in parallel.
-    let packages: Vec<(&String, &Package)> =
-        config.packages.iter().chain(
-            config.external_packages.iter().map(|(name, epkg)| (name, &epkg.package))
-        ).collect();
+    let packages: Vec<(&String, &Package)> = config
+        .packages
+        .iter()
+        .chain(
+            config
+                .external_packages
+                .iter()
+                .map(|(name, epkg)| (name, &epkg.package)),
+        )
+        .collect();
     packages.into_par_iter().try_for_each(|(_, package)| -> Result<()> {
         let tarfile = if package.zone {
             artifact_dir.join(format!("{}.tar.gz", package.service_name))
@@ -360,10 +366,10 @@ fn do_install(
 
 // Attempts to both disable and delete all requested packages.
 fn uninstall_all_packages(config: &Config) {
-    for package in
-        config.packages.values().chain(
-            config.external_packages.values().map(|epkg| &epkg.package)
-        )
+    for package in config
+        .packages
+        .values()
+        .chain(config.external_packages.values().map(|epkg| &epkg.package))
     {
         if package.zone {
             // TODO(https://github.com/oxidecomputer/omicron/issues/723):
