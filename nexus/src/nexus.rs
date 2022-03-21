@@ -1538,14 +1538,12 @@ impl Nexus {
             .state()
         {
             InstanceState::Running | InstanceState::Starting => {
-                /*
-                 * If there's a propolis zone for this instnace, ask the Sled
-                 * Agent to hot-plug or hot-remove disk. Then update the
-                 * database to reflect the new intermediate state.
-                 *
-                 * TODO this will probably involve volume construction requests
-                 * as well!
-                 */
+                // If there's a propolis zone for this instnace, ask the Sled
+                // Agent to hot-plug or hot-remove disk. Then update the
+                // database to reflect the new intermediate state.
+                //
+                // TODO this will probably involve volume construction requests
+                // as well!
                 let new_runtime = sa
                     .disk_put(
                         &authz_disk.id(),
