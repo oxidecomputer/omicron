@@ -244,7 +244,7 @@ impl InstanceInner {
             .as_ref()
             .expect("Propolis client should be initialized before usage")
             .client
-            .instance_state_put(*self.propolis_id(), request)
+            .instance_state_put(*self.id(), request)
             .await?;
         Ok(())
     }
@@ -579,9 +579,9 @@ impl Instance {
         //
         // They aren't modified after being initialized, so it's fine to grab
         // a copy.
-        let (propolis_id, client) = {
+        let (instance_id, client) = {
             let inner = self.inner.lock().await;
-            let id = *inner.propolis_id();
+            let id = *inner.id();
             let client = inner.running_state.as_ref().unwrap().client.clone();
             (id, client)
         };
@@ -591,7 +591,7 @@ impl Instance {
             // State monitoring always returns the most recent state/gen pair
             // known to Propolis.
             let response =
-                client.instance_state_monitor(propolis_id, gen).await?;
+                client.instance_state_monitor(instance_id, gen).await?;
             let reaction =
                 self.inner.lock().await.observe_state(response.state).await?;
 
