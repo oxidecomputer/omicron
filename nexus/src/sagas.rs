@@ -195,6 +195,15 @@ pub fn saga_instance_create() -> SagaTemplate<SagaInstanceCreate> {
     );
 
     template_builder.append(
+        "create_disks",
+        "CreateDisksForInstance",
+        ActionFunc::new_action(
+            sic_create_disks_for_instance,
+            sic_create_disks_for_instance_undo,
+        ),
+    );
+
+    template_builder.append(
         "attach_disks",
         "AttachDisksToInstance",
         ActionFunc::new_action(
@@ -488,6 +497,38 @@ async fn sic_create_network_interfaces_undo(
     Ok(())
 }
 
+/// Create disks during instance creation, and return a list of disk names
+// TODO implement
+async fn sic_create_disks_for_instance(
+    sagactx: ActionContext<SagaInstanceCreate>,
+) -> Result<Vec<String>, ActionError> {
+    let saga_params = sagactx.saga_params();
+    let saga_disks = &saga_params.create_params.disks;
+
+    for disk in saga_disks {
+        match disk {
+            params::InstanceDiskAttachment::Create(_create_params) => {
+                return Err(ActionError::action_failed(
+                    "Creating disk during instance create unsupported!"
+                        .to_string(),
+                ));
+            }
+
+            _ => {}
+        }
+    }
+
+    Ok(vec![])
+}
+
+/// Undo disks created during instance creation
+// TODO implement
+async fn sic_create_disks_for_instance_undo(
+    _sagactx: ActionContext<SagaInstanceCreate>,
+) -> Result<(), anyhow::Error> {
+    Ok(())
+}
+
 async fn sic_attach_disks_to_instance(
     sagactx: ActionContext<SagaInstanceCreate>,
 ) -> Result<(), ActionError> {
@@ -519,7 +560,7 @@ async fn ensure_instance_disk_attach_state(
     for disk in saga_disks {
         match disk {
             params::InstanceDiskAttachment::Create(_) => {
-                todo!();
+                // TODO grab disks created in sic_create_disks_for_instance
             }
             params::InstanceDiskAttachment::Attach(instance_disk_attach) => {
                 let disk_name: db::model::Name =
