@@ -11,7 +11,6 @@ use dropshot::test_util::ClientTestContext;
 use dropshot::ResultsPage;
 use headers::authorization::Credentials;
 use omicron_nexus::authn::external::spoof;
-use omicron_nexus::db::model::ConsoleSession;
 use std::convert::TryInto;
 use std::fmt::Debug;
 

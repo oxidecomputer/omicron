@@ -69,15 +69,14 @@ use crate::db::{
     self,
     error::{public_error_from_diesel_pool, ErrorHandler, TransactionError},
     model::{
-        ConsoleSession, ConsoleSessionWithSiloId, Dataset, DatasetKind, Disk,
-        DiskRuntimeState, Generation, IncompleteNetworkInterface, Instance,
-        InstanceRuntimeState, Name, NetworkInterface, Organization,
-        OrganizationUpdate, OximeterInfo, ProducerEndpoint, Project,
-        ProjectUpdate, Region, RoleAssignmentBuiltin, RoleBuiltin, RouterRoute,
-        RouterRouteUpdate, Silo, SiloUser, Sled, UpdateArtifactKind,
-        UpdateAvailableArtifact, UserBuiltin, Volume, Vpc, VpcFirewallRule,
-        VpcRouter, VpcRouterUpdate, VpcSubnet, VpcSubnetUpdate, VpcUpdate,
-        Zpool,
+        ConsoleSession, Dataset, DatasetKind, Disk, DiskRuntimeState,
+        Generation, IncompleteNetworkInterface, Instance, InstanceRuntimeState,
+        Name, NetworkInterface, Organization, OrganizationUpdate, OximeterInfo,
+        ProducerEndpoint, Project, ProjectUpdate, Region,
+        RoleAssignmentBuiltin, RoleBuiltin, RouterRoute, RouterRouteUpdate,
+        Silo, SiloUser, Sled, UpdateArtifactKind, UpdateAvailableArtifact,
+        UserBuiltin, Volume, Vpc, VpcFirewallRule, VpcRouter, VpcRouterUpdate,
+        VpcSubnet, VpcSubnetUpdate, VpcUpdate, Zpool,
     },
     pagination::paginated,
     pagination::paginated_multicolumn,
@@ -2687,7 +2686,7 @@ impl DataStore {
     pub async fn session_fetch(
         &self,
         token: String,
-    ) -> LookupResult<ConsoleSessionWithSiloId> {
+    ) -> LookupResult<authn::ConsoleSessionWithSiloId> {
         use db::schema::console_session::dsl;
         let console_session = dsl::console_session
             .filter(dsl::token.eq(token.clone()))
@@ -2711,7 +2710,7 @@ impl DataStore {
                 ))
             })?;
 
-        Ok(ConsoleSessionWithSiloId { console_session, silo_id })
+        Ok(authn::ConsoleSessionWithSiloId { console_session, silo_id })
     }
 
     pub async fn session_create(
@@ -2736,7 +2735,7 @@ impl DataStore {
     pub async fn session_update_last_used(
         &self,
         token: String,
-    ) -> UpdateResult<ConsoleSessionWithSiloId> {
+    ) -> UpdateResult<authn::ConsoleSessionWithSiloId> {
         use db::schema::console_session::dsl;
 
         let console_session = diesel::update(dsl::console_session)
@@ -2762,7 +2761,7 @@ impl DataStore {
                 ))
             })?;
 
-        Ok(ConsoleSessionWithSiloId { console_session, silo_id })
+        Ok(authn::ConsoleSessionWithSiloId { console_session, silo_id })
     }
 
     // putting "hard" in the name because we don't do this with any other model

@@ -2673,7 +2673,7 @@ impl Nexus {
     pub async fn session_fetch(
         &self,
         token: String,
-    ) -> LookupResult<db::model::ConsoleSessionWithSiloId> {
+    ) -> LookupResult<authn::ConsoleSessionWithSiloId> {
         self.db_datastore.session_fetch(token).await
     }
 
@@ -2690,7 +2690,7 @@ impl Nexus {
     pub async fn session_update_last_used(
         &self,
         token: String,
-    ) -> UpdateResult<db::model::ConsoleSessionWithSiloId> {
+    ) -> UpdateResult<authn::ConsoleSessionWithSiloId> {
         Ok(self.db_datastore.session_update_last_used(token).await?)
     }
 

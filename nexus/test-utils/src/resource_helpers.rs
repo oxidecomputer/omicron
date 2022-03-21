@@ -18,7 +18,6 @@ use omicron_common::api::external::Instance;
 use omicron_common::api::external::InstanceCpuCount;
 use omicron_common::api::external::VpcRouter;
 use omicron_nexus::crucible_agent_client::types::State as RegionState;
-use omicron_nexus::db::model::ConsoleSession;
 use omicron_nexus::external_api::params;
 use omicron_nexus::external_api::views::{Organization, Project, Silo, Vpc};
 use omicron_sled_agent::sim::SledAgent;

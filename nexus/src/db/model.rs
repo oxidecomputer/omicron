@@ -2126,13 +2126,6 @@ impl ConsoleSession {
     }
 }
 
-// Return this instead, by performing an additional SELECT to get silo id
-#[derive(Clone, Debug)]
-pub struct ConsoleSessionWithSiloId {
-    pub console_session: ConsoleSession,
-    pub silo_id: Uuid,
-}
-
 /// Describes a built-in user, as stored in the database
 #[derive(Queryable, Insertable, Debug, Resource, Selectable)]
 #[table_name = "user_builtin"]

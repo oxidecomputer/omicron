@@ -32,6 +32,7 @@ pub use crate::db::fixed_data::user_builtin::USER_INTERNAL_API;
 pub use crate::db::fixed_data::user_builtin::USER_SAGA_RECOVERY;
 pub use crate::db::fixed_data::user_builtin::USER_TEST_PRIVILEGED;
 pub use crate::db::fixed_data::user_builtin::USER_TEST_UNPRIVILEGED;
+use crate::db::model::ConsoleSession;
 
 use serde::Deserialize;
 use serde::Serialize;
@@ -206,6 +207,13 @@ pub struct Details {
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct Actor {
     pub id: Uuid, // silo user id
+    pub silo_id: Uuid,
+}
+
+/// A console session with the silo id of the authenticated user
+#[derive(Clone, Debug)]
+pub struct ConsoleSessionWithSiloId {
+    pub console_session: ConsoleSession,
     pub silo_id: Uuid,
 }
 
