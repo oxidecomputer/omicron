@@ -598,13 +598,11 @@ impl DataStore {
     // doing an authz check.
     async fn organization_lookup_noauthz(
         &self,
-        // XXX enable when all endpoints are protected by authn
-        // opctx: &OpContext,
         name: &Name,
     ) -> LookupResult<(authz::Organization, Organization)> {
         use db::schema::organization::dsl;
 
-        // XXX uncomment when all endpoints are protected by authn
+        // TODO-security uncomment when all endpoints are protected by authn
         //let silo_id = opctx.authn.silo_required()?;
         let silo_id = *SILO_ID;
 
