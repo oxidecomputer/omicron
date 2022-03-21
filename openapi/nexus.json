@@ -5227,6 +5227,7 @@
             "type": "string"
           },
           "discoverable": {
+            "description": "A silo where discoverable is false can be retrieved only by its id - it will not be part of the \"list all silos\" output.",
             "type": "boolean"
           },
           "id": {

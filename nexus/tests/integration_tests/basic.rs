@@ -53,25 +53,6 @@ async fn test_basic_failures(cptestctx: &ControlPlaneTestContext) {
         .expect_err("expected error");
     assert_eq!("Not Found", error.message);
 
-    /*
-     * Error case: GET /organizations/test-org/projects/nonexistent (a possible
-     * value that does not exist inside a collection that does exist) from an
-     * unauthorized user results in a 401.
-
-     // TODO-security uncomment when this endpoint is protected by authn!
-
-    let error = client
-        .make_request(
-            Method::GET,
-            "/organizations/test-org/projects/nonexistent",
-            None as Option<()>,
-            StatusCode::UNAUTHORIZED,
-        )
-        .await
-        .expect_err("expected error");
-    assert_eq!("credentials missing or invalid", error.message);
-     */
-
     struct TestCase<'a> {
         method: http::Method,
         uri: &'a str,
