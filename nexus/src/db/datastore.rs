@@ -54,6 +54,7 @@ use omicron_common::api::external::{
 use omicron_common::api::internal::nexus::UpdateArtifact;
 use omicron_common::bail_unless;
 use std::convert::{TryFrom, TryInto};
+use std::net::IpAddr;
 use std::sync::Arc;
 use uuid::Uuid;
 
@@ -66,9 +67,9 @@ use crate::db::{
         Name, NetworkInterface, Organization, OrganizationUpdate, OximeterInfo,
         ProducerEndpoint, Project, ProjectUpdate, Region,
         RoleAssignmentBuiltin, RoleBuiltin, RouterRoute, RouterRouteUpdate,
-        Sled, UpdateArtifactKind, UpdateAvailableArtifact, UserBuiltin, Volume,
-        Vpc, VpcFirewallRule, VpcRouter, VpcRouterUpdate, VpcSubnet,
-        VpcSubnetUpdate, VpcUpdate, Zpool,
+        Sled, StaticV6Address, UpdateArtifactKind, UpdateAvailableArtifact,
+        UserBuiltin, Volume, Vpc, VpcFirewallRule, VpcRouter, VpcRouterUpdate,
+        VpcSubnet, VpcSubnetUpdate, VpcUpdate, Zpool,
     },
     pagination::paginated,
     pagination::paginated_multicolumn,
@@ -3409,6 +3410,61 @@ impl DataStore {
                 ))
             })
     }
+
+    pub async fn allocate_static_v6_address(
+        &self,
+    ) -> Result<IpAddr, Error> {
+        use db::schema::static_v6_address::dsl;
+
+        self.pool()
+            .transaction(move |conn| {
+                // Grab the next sequential address
+                // XXX should this use push_next_available_ip_subquery?
+                // refactor?
+                let new_address: Vec<StaticV6Address> = diesel::sql_query("select static_v6_address.address + 1 as address from static_v6_address where not exists (select 1 from static_v6_address tmp where tmp.address = static_v6_address.address + 1) limit 1").load(conn)?;
+
+                let new_address = if new_address.len() != 1 {
+                    // This means there are no addresses in the table!
+                    // XXX normally this should come from something else, hard
+                    // code here.
+                    StaticV6Address {
+                        address: "fd00:1234::101".parse().unwrap(),
+                    }
+                } else {
+                    new_address[0].clone()
+                };
+
+                let new_address = diesel::insert_into(dsl::static_v6_address)
+                    .values(new_address)
+                    .returning(StaticV6Address::as_returning())
+                    .get_result(conn)?;
+
+                return Ok(new_address.address.ip());
+            })
+            .await
+            .map_err(|e: async_bb8_diesel::PoolError| {
+                Error::internal_error(&format!("Transaction error: {}", e))
+            })
+    }
+
+    pub async fn free_static_v6_address(
+        &self,
+        address: IpAddr,
+    ) -> UpdateResult<()> {
+        use db::schema::static_v6_address::dsl;
+
+        diesel::delete(dsl::static_v6_address)
+            .filter(dsl::address.eq(ipnetwork::IpNetwork::from(address)))
+            .execute_async(self.pool())
+            .await
+            .map(|_| ())
+            .map_err(|e| {
+                Error::internal_error(&format!(
+                    "error freeing static v6 address: {:?}",
+                    e
+                ))
+            })
+    }
 }
 
 /// Constructs a DataStore for use in test suites that has preloaded the
@@ -3460,7 +3516,7 @@ mod test {
     };
     use omicron_test_utils::dev;
     use std::collections::HashSet;
-    use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+    use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
     use std::sync::Arc;
     use uuid::Uuid;
 
@@ -3876,5 +3932,73 @@ mod test {
         );
 
         let _ = db.cleanup().await;
+    }
+
+    // Test static v6 address allocation
+    #[tokio::test]
+    async fn test_static_v6_address_allocation() -> Result<(), Error> {
+        let logctx = dev::test_setup_log("test_static_v6_address_allocation");
+        let mut db = test_setup_database(&logctx.log).await;
+        let cfg = db::Config { url: db.pg_config().clone() };
+        let pool = db::Pool::new(&cfg);
+        let datastore = DataStore::new(Arc::new(pool));
+
+        // db contents: []
+        let address1 =
+            datastore.allocate_static_v6_address().await?;
+        // db contents: [101]
+        assert_eq!(address1, "fd00:1234::101".parse::<Ipv6Addr>().unwrap());
+
+        // db contents: [101]
+        let address2 =
+            datastore.allocate_static_v6_address().await?;
+        // db contents: [101, 102]
+        assert_eq!(address2, "fd00:1234::102".parse::<Ipv6Addr>().unwrap());
+
+        // db contents: [101, 102]
+        let address3 =
+            datastore.allocate_static_v6_address().await?;
+        // db contents: [101, 102, 103]
+        assert_eq!(address3, "fd00:1234::103".parse::<Ipv6Addr>().unwrap());
+
+        // db contents: [101, 102, 103]
+        datastore.free_static_v6_address(address1).await?;
+        // db contents: [102, 103]
+
+        // db contents: [102, 103]
+        let address4 =
+            datastore.allocate_static_v6_address().await?;
+        // db contents: [102, 103, 104]
+        assert_eq!(address4, "fd00:1234::104".parse::<Ipv6Addr>().unwrap());
+
+        // db contents: [102, 103, 104]
+        datastore.free_static_v6_address(address4).await?;
+        // db contents: [102, 103]
+
+        // db contents: [102, 103]
+        datastore.free_static_v6_address(address2).await?;
+        // db contents: [103]
+
+        // db contents: [103]
+        let address5 =
+            datastore.allocate_static_v6_address().await?;
+        // db contents: [103, 104]
+        assert_eq!(address5, "fd00:1234::104".parse::<Ipv6Addr>().unwrap());
+
+        // db contents: [103, 104]
+        let address6 =
+            datastore.allocate_static_v6_address().await?;
+        // db contents: [103, 104, 105]
+        assert_eq!(address6, "fd00:1234::105".parse::<Ipv6Addr>().unwrap());
+
+        // db contents: [103, 104, 105]
+        let address7 =
+            datastore.allocate_static_v6_address().await?;
+        // db contents: [103, 104, 105, 106]
+        assert_eq!(address7, "fd00:1234::106".parse::<Ipv6Addr>().unwrap());
+
+        let _ = db.cleanup().await;
+
+        Ok(())
     }
 }

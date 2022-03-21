@@ -181,9 +181,10 @@ impl SledAgent {
         initial: InstanceHardware,
         target: InstanceRuntimeStateRequested,
         migrate: Option<InstanceMigrateParams>,
+        allocated_control_ip: std::net::IpAddr,
     ) -> Result<InstanceRuntimeState, Error> {
         self.instances
-            .ensure(instance_id, initial, target, migrate)
+            .ensure(instance_id, initial, target, migrate, allocated_control_ip)
             .await
             .map_err(|e| Error::Instance(e))
     }

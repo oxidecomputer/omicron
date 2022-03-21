@@ -559,6 +559,11 @@
         "description": "Sent to a sled agent to establish the runtime state of an Instance",
         "type": "object",
         "properties": {
+          "allocated_control_ip": {
+            "description": "Allocated address for propolis's control vnic",
+            "type": "string",
+            "format": "ip"
+          },
           "initial": {
             "description": "Last runtime state of the Instance known to Nexus (used if the agent has never seen this Instance before).",
             "allOf": [
@@ -586,6 +591,7 @@
           }
         },
         "required": [
+          "allocated_control_ip",
           "initial",
           "target"
         ]

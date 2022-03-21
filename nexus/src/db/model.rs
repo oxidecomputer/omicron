@@ -10,8 +10,8 @@ use crate::db::schema::{
     console_session, dataset, disk, instance, metric_producer,
     network_interface, organization, oximeter, project, rack, region,
     role_assignment_builtin, role_builtin, router_route, sled, snapshot,
-    update_available_artifact, user_builtin, volume, vpc, vpc_firewall_rule,
-    vpc_router, vpc_subnet, zpool,
+    static_v6_address, update_available_artifact, user_builtin, volume, vpc,
+    vpc_firewall_rule, vpc_router, vpc_subnet, zpool,
 };
 use crate::defaults;
 use crate::external_api::params;
@@ -2353,6 +2353,12 @@ pub struct UpdateAvailableArtifact {
     pub target_sha256: String,
     // FIXME this *should* be a u64
     pub target_length: i64,
+}
+
+#[derive(Queryable, QueryableByName, Insertable, Clone, Debug, Selectable, AsChangeset)]
+#[table_name = "static_v6_address"]
+pub struct StaticV6Address {
+    pub address: IpNetwork,
 }
 
 #[cfg(test)]

@@ -76,6 +76,7 @@ impl InstanceManager {
         initial_hardware: InstanceHardware,
         target: InstanceRuntimeStateRequested,
         migrate: Option<InstanceMigrateParams>,
+        allocated_control_ip: std::net::IpAddr,
     ) -> Result<InstanceRuntimeState, Error> {
         info!(
             &self.inner.log,
@@ -120,6 +121,7 @@ impl InstanceManager {
                         initial_hardware,
                         self.inner.vlan,
                         self.inner.nexus_client.clone(),
+                        allocated_control_ip,
                     )?;
                     let instance_clone = instance.clone();
                     let old_instance = instances
@@ -271,7 +273,7 @@ mod test {
         let ticket = Arc::new(std::sync::Mutex::new(None));
         let ticket_clone = ticket.clone();
         let instance_new_ctx = MockInstance::new_context();
-        instance_new_ctx.expect().return_once(move |_, _, _, _, _, _| {
+        instance_new_ctx.expect().return_once(move |_, _, _, _, _, _, _| {
             let mut inst = MockInstance::default();
             inst.expect_clone().return_once(move || {
                 let mut inst = MockInstance::default();
@@ -300,6 +302,7 @@ mod test {
                     migration_params: None,
                 },
                 None,
+                "127.0.0.1".parse().unwrap(),
             )
             .await
             .unwrap();
@@ -335,7 +338,7 @@ mod test {
         let ticket_clone = ticket.clone();
         let instance_new_ctx = MockInstance::new_context();
         let mut seq = mockall::Sequence::new();
-        instance_new_ctx.expect().return_once(move |_, _, _, _, _, _| {
+        instance_new_ctx.expect().return_once(move |_, _, _, _, _, _, _| {
             let mut inst = MockInstance::default();
             // First call to ensure (start + transition).
             inst.expect_clone().times(1).in_sequence(&mut seq).return_once(
@@ -377,11 +380,11 @@ mod test {
         };
 
         // Creates instance, start + transition.
-        im.ensure(id, rt.clone(), target.clone(), None).await.unwrap();
+        im.ensure(id, rt.clone(), target.clone(), None, "127.0.0.1".parse().unwrap()).await.unwrap();
         // Transition only.
-        im.ensure(id, rt.clone(), target.clone(), None).await.unwrap();
+        im.ensure(id, rt.clone(), target.clone(), None, "127.0.0.1".parse().unwrap()).await.unwrap();
         // Transition only.
-        im.ensure(id, rt, target, None).await.unwrap();
+        im.ensure(id, rt, target, None, "127.0.0.1".parse().unwrap()).await.unwrap();
 
         assert_eq!(im.inner.instances.lock().unwrap().len(), 1);
         ticket.lock().unwrap().take();

@@ -52,6 +52,7 @@ use steno::SagaTemplateBuilder;
 use steno::SagaTemplateGeneric;
 use steno::SagaType;
 use uuid::Uuid;
+use std::net::IpAddr;
 
 // We'll need a richer mechanism for registering sagas, but this works for now.
 pub const SAGA_INSTANCE_CREATE_NAME: &'static str = "instance-create";
@@ -188,6 +189,15 @@ pub fn saga_instance_create() -> SagaTemplate<SagaInstanceCreate> {
         "network_interfaces",
         "CreateNetworkInterfaces",
         new_action_noop_undo(sic_create_network_interfaces),
+    );
+
+    template_builder.append(
+        "allocated_control_ip",
+        "AllocateIpv6ForPropolisControl",
+        ActionFunc::new_action(
+            sic_allocate_v6_address,
+            sic_allocate_v6_address_undo,
+        )
     );
 
     template_builder.append(
@@ -514,6 +524,42 @@ async fn sic_create_instance_record(
     Ok(instance.runtime().clone().into())
 }
 
+// XXX can't reuse this function?
+
+async fn sic_allocate_v6_address(
+    sagactx: ActionContext<SagaInstanceCreate>,
+) -> Result<IpAddr, ActionError> {
+    let osagactx = sagactx.user_data();
+    let nexus = osagactx.nexus();
+    Ok(nexus.allocate_static_v6_address().await.map_err(ActionError::action_failed)?)
+}
+
+async fn sic_allocate_v6_address_undo(
+    sagactx: ActionContext<SagaInstanceCreate>,
+) -> Result<(), anyhow::Error> {
+    let osagactx = sagactx.user_data();
+    let nexus = osagactx.nexus();
+    let ipv6 = sagactx.lookup::<IpAddr>("allocated_ipv6")?;
+    Ok(nexus.free_static_v6_address(ipv6).await?)
+}
+
+async fn sim_allocate_v6_address(
+    sagactx: ActionContext<SagaInstanceMigrate>,
+) -> Result<IpAddr, ActionError> {
+    let osagactx = sagactx.user_data();
+    let nexus = osagactx.nexus();
+    Ok(nexus.allocate_static_v6_address().await.map_err(ActionError::action_failed)?)
+}
+
+async fn sim_allocate_v6_address_undo(
+    sagactx: ActionContext<SagaInstanceMigrate>,
+) -> Result<(), anyhow::Error> {
+    let osagactx = sagactx.user_data();
+    let nexus = osagactx.nexus();
+    let ipv6 = sagactx.lookup::<IpAddr>("allocated_ipv6")?;
+    Ok(nexus.free_static_v6_address(ipv6).await?)
+}
+
 async fn sic_instance_ensure(
     sagactx: ActionContext<SagaInstanceCreate>,
 ) -> Result<(), ActionError> {
@@ -538,6 +584,8 @@ async fn sic_instance_ensure(
         .await
         .map_err(ActionError::action_failed)?;
 
+    let allocated_control_ip = sagactx.lookup::<IpAddr>("allocated_control_ip")?;
+
     // Ask the sled agent to begin the state change.  Then update the database
     // to reflect the new intermediate state.  If this update is not the newest
     // one, that's fine.  That might just mean the sled agent beat us to it.
@@ -548,6 +596,7 @@ async fn sic_instance_ensure(
                 initial: initial_hardware,
                 target: runtime_params,
                 migrate: None,
+                allocated_control_ip: allocated_control_ip.to_string(),
             },
         )
         .await
@@ -599,6 +648,15 @@ pub fn saga_instance_migrate() -> SagaTemplate<SagaInstanceMigrate> {
         "migrate_instance",
         "MigratePrep",
         new_action_noop_undo(sim_migrate_prep),
+    );
+
+    template_builder.append(
+        "allocated_control_ip",
+        "AllocateIpv6ForPropolisControl",
+        ActionFunc::new_action(
+            sim_allocate_v6_address,
+            sim_allocate_v6_address_undo,
+        )
     );
 
     template_builder.append(
@@ -691,6 +749,8 @@ async fn sim_instance_migrate(
         .await
         .map_err(ActionError::action_failed)?;
 
+    let allocated_control_ip = sagactx.lookup::<IpAddr>("allocated_control_ip")?;
+
     let new_runtime_state: InstanceRuntimeState = dst_sa
         .instance_put(
             &instance_id,
@@ -701,6 +761,7 @@ async fn sim_instance_migrate(
                     src_propolis_addr: src_propolis_addr.to_string(),
                     src_propolis_uuid,
                 }),
+                allocated_control_ip: allocated_control_ip.to_string(),
             },
         )
         .await

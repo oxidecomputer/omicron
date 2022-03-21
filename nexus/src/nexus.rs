@@ -69,7 +69,7 @@ use sled_agent_client::types::InstanceStateRequested;
 use sled_agent_client::Client as SledAgentClient;
 use slog::Logger;
 use std::convert::{TryFrom, TryInto};
-use std::net::SocketAddr;
+use std::net::{IpAddr, SocketAddr};
 use std::num::NonZeroU32;
 use std::path::Path;
 use std::sync::Arc;
@@ -1263,6 +1263,10 @@ impl Nexus {
                     initial: instance_hardware,
                     target: requested,
                     migrate: None,
+                    // XXX where does this come from? we need to associate the
+                    // control ip with the instance, but the static_v6_address
+                    // table only has one column (the address)
+                    allocated_control_ip: "TODO".parse().unwrap(),
                 },
             )
             .await
@@ -3068,6 +3072,19 @@ impl Nexus {
             ))
         })?;
         Ok(body)
+    }
+
+    pub async fn allocate_static_v6_address(&self) -> Result<IpAddr, Error> {
+        self.db_datastore
+            .allocate_static_v6_address()
+            .await
+    }
+
+    pub async fn free_static_v6_address(
+        &self,
+        address: IpAddr,
+    ) -> Result<(), Error> {
+        self.db_datastore.free_static_v6_address(address).await
     }
 }
 

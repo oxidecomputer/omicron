@@ -188,6 +188,9 @@ struct InstanceInner {
 
     // Connection to Nexus
     nexus_client: Arc<NexusClient>,
+
+    // Allocated IP for control traffic
+    allocated_control_ip: std::net::IpAddr,
 }
 
 impl InstanceInner {
@@ -360,6 +363,7 @@ mockall::mock! {
             initial: InstanceHardware,
             vlan: Option<VlanID>,
             nexus_client: Arc<NexusClient>,
+            allocated_control_ip: std::net::IpAddr,
         ) -> Result<Self, Error>;
         pub async fn start(
             &self,
@@ -397,6 +401,7 @@ impl Instance {
         initial: InstanceHardware,
         vlan: Option<VlanID>,
         nexus_client: Arc<NexusClient>,
+        allocated_control_ip: std::net::IpAddr,
     ) -> Result<Self, Error> {
         info!(log, "Instance::new w/initial HW: {:?}", initial);
         let instance = InstanceInner {
@@ -421,6 +426,7 @@ impl Instance {
             state: InstanceStates::new(initial.runtime),
             running_state: None,
             nexus_client,
+            allocated_control_ip,
         };
 
         let inner = Arc::new(Mutex::new(instance));
@@ -475,6 +481,14 @@ impl Instance {
         let running_zone = RunningZone::boot(installed_zone).await?;
         let network = running_zone.ensure_address(AddressRequest::Dhcp).await?;
         info!(inner.log, "Created address {} for zone: {}", network, zname);
+
+        let v6 = running_zone
+            .ensure_address(AddressRequest::new_static(
+                inner.allocated_control_ip,
+                None, // XXX what should this be?
+            ))
+            .await?;
+        info!(inner.log, "Created v6 address {} for zone: {}", v6, zname);
 
         // Run Propolis in the Zone.
         let server_addr = SocketAddr::new(network.ip(), PROPOLIS_PORT);
@@ -557,6 +571,8 @@ impl Instance {
     // Terminate the Propolis service.
     async fn stop(&self) -> Result<(), Error> {
         let mut inner = self.inner.lock().await;
+
+        // XXX how to free the static V6 address? where do I store it?
 
         let zname = propolis_zone_name(inner.propolis_id());
         warn!(inner.log, "Halting and removing zone: {}", zname);
@@ -711,6 +727,7 @@ mod test {
             new_initial_instance(),
             None,
             Arc::new(nexus_client),
+            "127.0.0.1".parse().unwrap(),
         )
         .unwrap();
 

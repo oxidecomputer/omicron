@@ -6,9 +6,9 @@
 
 use mockall::mock;
 use nexus_client::types::{
-    DatasetPutRequest, DatasetPutResponse, DiskRuntimeState,
-    InstanceRuntimeState, SledAgentStartupInfo, UpdateArtifactKind,
-    ZpoolPutRequest, ZpoolPutResponse,
+    AllocateStaticV6AddressResponse, DatasetPutRequest, DatasetPutResponse,
+    DiskRuntimeState, InstanceRuntimeState, SledAgentStartupInfo,
+    UpdateArtifactKind, ZpoolPutRequest, ZpoolPutResponse,
 };
 use reqwest::Response;
 use slog::Logger;
@@ -57,5 +57,8 @@ mock! {
             dataset_id: &Uuid,
             info: &DatasetPutRequest,
         ) -> Result<DatasetPutResponse>;
+        pub async fn allocate_static_v_6_address(
+            &self,
+        ) -> Result<AllocateStaticV6AddressResponse>;
     }
 }

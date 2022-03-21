@@ -323,6 +323,70 @@
         }
       }
     },
+    "/static_address/v6": {
+      "post": {
+        "summary": "Endpoint used by Sled Agents to allocate static V6 addresses",
+        "operationId": "allocate_static_v6_address",
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AllocateStaticV6AddressResponse"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/static_address/v6/{address}": {
+      "delete": {
+        "summary": "Endpoint used by Sled Agents to free static V6 addresses",
+        "operationId": "free_static_v6_address",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "address",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "ip"
+            },
+            "style": "simple"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Null",
+                  "type": "string",
+                  "enum": [
+                    null
+                  ]
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/zpools/{zpool_id}/dataset/{dataset_id}": {
       "put": {
         "summary": "Report that a dataset within a pool has come online.",
@@ -394,6 +458,19 @@
       }
     },
     "schemas": {
+      "AllocateStaticV6AddressResponse": {
+        "description": "Response when allocating a static v6 address",
+        "type": "object",
+        "properties": {
+          "address": {
+            "type": "string",
+            "format": "ip"
+          }
+        },
+        "required": [
+          "address"
+        ]
+      },
       "BinRangedouble": {
         "description": "A type storing a range over `T`.\n\nThis type supports ranges similar to the `RangeTo`, `Range` and `RangeFrom` types in the standard library. Those cover `(..end)`, `(start..end)`, and `(start..)` respectively.",
         "oneOf": [

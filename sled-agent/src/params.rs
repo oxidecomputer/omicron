@@ -62,6 +62,8 @@ pub struct InstanceEnsureBody {
     pub target: InstanceRuntimeStateRequested,
     /// If we're migrating this instance, the details needed to drive the migration
     pub migrate: Option<InstanceMigrateParams>,
+    /// Allocated address for propolis's control vnic
+    pub allocated_control_ip: std::net::IpAddr,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]

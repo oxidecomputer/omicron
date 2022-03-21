@@ -7,7 +7,8 @@ use crate::context::OpContext;
 use crate::ServerContext;
 
 use super::params::{
-    DatasetPutRequest, DatasetPutResponse, OximeterInfo, SledAgentStartupInfo,
+    AllocateStaticV6AddressResponse, DatasetPutRequest, DatasetPutResponse,
+    FreeStaticV6AddressParams, OximeterInfo, SledAgentStartupInfo,
     ZpoolPutRequest, ZpoolPutResponse,
 };
 use dropshot::endpoint;
@@ -45,6 +46,8 @@ pub fn internal_api() -> NexusApiDescription {
         api.register(cpapi_collectors_post)?;
         api.register(cpapi_metrics_collect)?;
         api.register(cpapi_artifact_download)?;
+        api.register(allocate_static_v6_address)?;
+        api.register(free_static_v6_address)?;
         Ok(())
     }
 
@@ -278,4 +281,39 @@ async fn cpapi_artifact_download(
         nexus.download_artifact(&opctx, path_params.into_inner()).await?;
 
     Ok(Response::builder().status(StatusCode::OK).body(body.into())?)
+}
+
+/// Endpoint used by Sled Agents to allocate static V6 addresses
+#[endpoint {
+    method = POST,
+    path = "/static_address/v6",
+}]
+async fn allocate_static_v6_address(
+    request_context: Arc<RequestContext<Arc<ServerContext>>>,
+) -> Result<HttpResponseOk<AllocateStaticV6AddressResponse>, HttpError> {
+    let context = request_context.context();
+    let nexus = &context.nexus;
+
+    Ok(HttpResponseOk(AllocateStaticV6AddressResponse {
+        address: nexus.allocate_static_v6_address().await?,
+    }))
+}
+
+/// Endpoint used by Sled Agents to free static V6 addresses
+#[endpoint {
+    method = DELETE,
+    path = "/static_address/v6/{address}",
+}]
+async fn free_static_v6_address(
+    request_context: Arc<RequestContext<Arc<ServerContext>>>,
+    path_params: Path<FreeStaticV6AddressParams>,
+) -> Result<HttpResponseOk<()>, HttpError> {
+    let context = request_context.context();
+    let nexus = &context.nexus;
+
+    nexus
+        .free_static_v6_address(path_params.into_inner().address)
+        .await?;
+
+    Ok(HttpResponseOk(()))
 }

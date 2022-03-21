@@ -912,6 +912,13 @@ CREATE TABLE omicron.public.role_assignment_builtin (
     PRIMARY KEY(user_builtin_id, resource_type, resource_id, role_name)
 );
 
+/*
+ * Store addresses allocated for internal services (like propolis zones)
+ */
+CREATE TABLE omicron.public.static_v6_address (
+    address INET PRIMARY KEY NOT NULL
+);
+
 /*******************************************************************/
 
 /*

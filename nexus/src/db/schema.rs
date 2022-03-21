@@ -373,6 +373,12 @@ table! {
     }
 }
 
+table! {
+    static_v6_address (address) {
+        address -> Inet,
+    }
+}
+
 allow_tables_to_appear_in_same_query!(
     dataset,
     disk,

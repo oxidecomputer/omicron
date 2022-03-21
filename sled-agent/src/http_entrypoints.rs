@@ -100,6 +100,7 @@ async fn instance_put(
             body_args.initial,
             body_args.target,
             body_args.migrate,
+            body_args.allocated_control_ip,
         )
         .await
         .map_err(Error::from)?,

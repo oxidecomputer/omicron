@@ -7,7 +7,7 @@ use omicron_common::api::external::ByteCount;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::fmt;
-use std::net::SocketAddr;
+use std::net::{IpAddr, SocketAddr};
 use std::str::FromStr;
 use uuid::Uuid;
 
@@ -104,4 +104,16 @@ pub struct OximeterInfo {
 
     /// The address on which this oximeter instance listens for requests
     pub address: SocketAddr,
+}
+
+/// Response when allocating a static v6 address
+#[derive(Debug, Clone, Copy, JsonSchema, Serialize, Deserialize)]
+pub struct AllocateStaticV6AddressResponse {
+    pub address: IpAddr,
+}
+
+/// Static Ipv6 address to free
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct FreeStaticV6AddressParams {
+    pub address: IpAddr,
 }
