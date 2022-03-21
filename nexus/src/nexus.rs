@@ -1538,7 +1538,7 @@ impl Nexus {
             .state()
         {
             InstanceState::Running | InstanceState::Starting => {
-                // If there's a propolis zone for this instnace, ask the Sled
+                // If there's a propolis zone for this instance, ask the Sled
                 // Agent to hot-plug or hot-remove disk. Then update the
                 // database to reflect the new intermediate state.
                 //
