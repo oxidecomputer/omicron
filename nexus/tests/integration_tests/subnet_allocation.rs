@@ -2,10 +2,8 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-/*!
- * Tests that subnet allocation will successfully allocate the entire space of a
- * subnet and error appropriately when the space is exhausted.
- */
+//! Tests that subnet allocation will successfully allocate the entire space of a
+//! subnet and error appropriately when the space is exhausted.
 
 use http::method::Method;
 use http::StatusCode;
@@ -13,6 +11,7 @@ use nexus_test_utils::http_testing::AuthnMode;
 use nexus_test_utils::http_testing::NexusRequest;
 use nexus_test_utils::http_testing::RequestBuilder;
 use nexus_test_utils::resource_helpers::create_instance;
+use nexus_test_utils::resource_helpers::objects_list_page_authz;
 use omicron_common::api::external::{
     ByteCount, IdentityMetadataCreateParams, IdentityMetadataUpdateParams,
     InstanceCpuCount, Ipv4Net, NetworkInterface,
@@ -20,7 +19,6 @@ use omicron_common::api::external::{
 use omicron_nexus::external_api::params;
 use std::net::IpAddr;
 
-use dropshot::test_util::objects_list_page;
 use dropshot::test_util::ClientTestContext;
 use dropshot::HttpErrorResponseBody;
 
@@ -41,6 +39,7 @@ async fn create_instance_expect_failure(
         ncpus: InstanceCpuCount(1),
         memory: ByteCount::from_mebibytes_u32(256),
         hostname: name.to_string(),
+        network_interfaces: params::InstanceNetworkInterfaceAttachment::Default,
     };
 
     NexusRequest::new(
@@ -86,13 +85,9 @@ async fn test_subnet_allocation(cptestctx: &ControlPlaneTestContext) {
         ipv4_block: Some(Ipv4Net(subnet)),
         ipv6_block: None,
     };
-    client
-        .make_request(
-            Method::PUT,
-            &url_subnet,
-            Some(subnet_update),
-            StatusCode::NO_CONTENT,
-        )
+    NexusRequest::object_put(client, &url_subnet, Some(&subnet_update))
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
         .await
         .unwrap();
 
@@ -104,12 +99,14 @@ async fn test_subnet_allocation(cptestctx: &ControlPlaneTestContext) {
     // This should fail from address exhaustion
     let error =
         create_instance_expect_failure(client, &url_instances, "i3").await;
-    assert_eq!(error.message, "no available IP addresses");
+    assert_eq!(error.message, "No available IP addresses for interface");
 
     // Verify the subnet lists the two addresses as in use
-    let url_ips = format!("{}/ips", url_subnet);
+    let url_ips = format!("{}/network-interfaces", url_subnet);
     let mut network_interfaces =
-        objects_list_page::<NetworkInterface>(client, &url_ips).await.items;
+        objects_list_page_authz::<NetworkInterface>(client, &url_ips)
+            .await
+            .items;
     assert_eq!(network_interfaces.len(), 2);
 
     // Sort by IP address to simplify the checks

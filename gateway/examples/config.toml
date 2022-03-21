@@ -16,8 +16,12 @@ sleds = ["127.0.0.1:23457", "127.0.0.1:23458"]
 power_controllers = []
 
 [timeouts]
-ignition_controller_milliseconds = 1_000
-sp_request_milliseconds = 1_000
+ignition_controller_millis = 1_000
+sp_request_millis = 1_000
+bulk_request_default_millis = 5_000
+bulk_request_max_millis = 60_000
+bulk_request_page_millis = 1_000
+bulk_request_retain_grace_period_millis = 10_000
 
 [dropshot]
 # IP address and TCP port on which to listen for the external API

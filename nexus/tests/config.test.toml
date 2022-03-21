@@ -31,10 +31,12 @@ url = "postgresql://root@127.0.0.1:0/omicron?sslmode=disable"
 #
 [dropshot_external]
 bind_address = "127.0.0.1:0"
+request_body_max_bytes = 2048
 
 # port must be 0. see above
 [dropshot_internal]
 bind_address = "127.0.0.1:0"
+request_body_max_bytes = 2048
 
 #
 # NOTE: for the test suite, if mode = "file", the file path MUST be the sentinel

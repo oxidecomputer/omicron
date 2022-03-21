@@ -83,11 +83,9 @@ async fn populate(
         .await;
 
         if let Err(error) = &db_result {
-            /*
-             * TODO-autonomy this should raise an alert, bump a counter, or raise
-             * some other red flag that something is wrong.  (This should be
-             * unlikely in practice.)
-             */
+            // TODO-autonomy this should raise an alert, bump a counter, or raise
+            // some other red flag that something is wrong.  (This should be
+            // unlikely in practice.)
             error!(opctx.log,
                 "gave up trying to populate built-in {}", p.name;
                 "error_message" => ?error

@@ -1,7 +1,7 @@
 [package]
 name = "omicron-sled-agent"
 version = "0.1.0"
-edition = "2018"
+edition = "2021"
 license = "MPL-2.0"
 
 [dependencies]
@@ -23,7 +23,7 @@ percent-encoding = "2.1.0"
 progenitor = { git = "https://github.com/oxidecomputer/progenitor" }
 propolis-client = { git = "https://github.com/oxidecomputer/propolis", rev = "0e3798510ae190131f63b9df767ec01b2beacf91" }
 rand = { version = "0.8.5", features = ["getrandom"] }
-reqwest = "0.11.8"
+reqwest = { version = "0.11.8", default-features = false, features = ["rustls-tls", "stream"] }
 schemars = { version = "0.8", features = [ "chrono", "uuid" ] }
 serde = { version = "1.0", features = [ "derive" ] }
 serde_json = "1.0"

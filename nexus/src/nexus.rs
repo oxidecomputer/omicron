@@ -2,9 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-/*!
- * Nexus, the service that operates much of the control plane in an Oxide fleet
- */
+//! Nexus, the service that operates much of the control plane in an Oxide fleet
 
 use crate::authn;
 use crate::authz;
@@ -14,6 +12,11 @@ use crate::db;
 use crate::db::identity::{Asset, Resource};
 use crate::db::model::DatasetKind;
 use crate::db::model::Name;
+use crate::db::model::RouterRoute;
+use crate::db::model::VpcRouter;
+use crate::db::model::VpcRouterKind;
+use crate::db::model::VpcSubnet;
+use crate::db::subnet_allocation::NetworkInterfaceError;
 use crate::db::subnet_allocation::SubnetError;
 use crate::defaults;
 use crate::external_api::params;
@@ -39,6 +42,7 @@ use omicron_common::api::external::InstanceState;
 use omicron_common::api::external::ListResult;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
+use omicron_common::api::external::LookupType;
 use omicron_common::api::external::PaginationOrder;
 use omicron_common::api::external::ResourceType;
 use omicron_common::api::external::RouteDestination;
@@ -48,13 +52,9 @@ use omicron_common::api::external::RouterRouteKind;
 use omicron_common::api::external::RouterRouteUpdateParams;
 use omicron_common::api::external::UpdateResult;
 use omicron_common::api::external::VpcFirewallRuleUpdateParams;
-use omicron_common::api::external::VpcRouterKind;
 use omicron_common::api::internal::nexus;
 use omicron_common::api::internal::nexus::DiskRuntimeState;
 use omicron_common::api::internal::nexus::UpdateArtifact;
-use omicron_common::api::internal::sled_agent::InstanceRuntimeStateMigrateParams;
-use omicron_common::api::internal::sled_agent::InstanceRuntimeStateRequested;
-use omicron_common::api::internal::sled_agent::InstanceStateRequested;
 use omicron_common::backoff;
 use omicron_common::bail_unless;
 use oximeter_client::Client as OximeterClient;
@@ -63,6 +63,9 @@ use oximeter_db::TimeseriesSchemaPaginationParams;
 use oximeter_producer::register;
 use rand::{rngs::StdRng, Rng, RngCore, SeedableRng};
 use ring::digest;
+use sled_agent_client::types::InstanceRuntimeStateMigrateParams;
+use sled_agent_client::types::InstanceRuntimeStateRequested;
+use sled_agent_client::types::InstanceStateRequested;
 use sled_agent_client::Client as SledAgentClient;
 use slog::Logger;
 use std::convert::{TryFrom, TryInto};
@@ -81,24 +84,18 @@ use uuid::Uuid;
 // TODO: When referring to API types, we should try to include
 // the prefix unless it is unambiguous.
 
-/**
- * Exposes additional [`Nexus`] interfaces for use by the test suite
- */
+/// Exposes additional [`Nexus`] interfaces for use by the test suite
 #[async_trait]
 pub trait TestInterfaces {
-    /**
-     * Returns the SledAgentClient for an Instance from its id.  We may also
-     * want to split this up into instance_lookup_by_id() and instance_sled(),
-     * but after all it's a test suite special to begin with.
-     */
+    /// Returns the SledAgentClient for an Instance from its id.  We may also
+    /// want to split this up into instance_lookup_by_id() and instance_sled(),
+    /// but after all it's a test suite special to begin with.
     async fn instance_sled_by_id(
         &self,
         id: &Uuid,
     ) -> Result<Arc<SledAgentClient>, Error>;
 
-    /**
-     * Returns the SledAgentClient for a Disk from its id.
-     */
+    /// Returns the SledAgentClient for a Disk from its id.
     async fn disk_sled_by_id(
         &self,
         id: &Uuid,
@@ -112,57 +109,51 @@ pub trait TestInterfaces {
 
 pub static BASE_ARTIFACT_DIR: &str = "/var/tmp/oxide_artifacts";
 
-/**
- * Manages an Oxide fleet -- the heart of the control plane
- */
+/// Manages an Oxide fleet -- the heart of the control plane
 pub struct Nexus {
-    /** uuid for this nexus instance. */
+    /// uuid for this nexus instance.
     id: Uuid,
 
-    /** uuid for this rack (TODO should also be in persistent storage) */
+    /// uuid for this rack (TODO should also be in persistent storage)
     rack_id: Uuid,
 
-    /** general server log */
+    /// general server log
     log: Logger,
 
-    /** cached rack identity metadata */
+    /// cached rack identity metadata
     api_rack_identity: db::model::RackIdentity,
 
-    /** persistent storage for resources in the control plane */
+    /// persistent storage for resources in the control plane
     db_datastore: Arc<db::DataStore>,
 
-    /** handle to global authz information */
+    /// handle to global authz information
     authz: Arc<authz::Authz>,
 
-    /** saga execution coordinator */
+    /// saga execution coordinator
     sec_client: Arc<steno::SecClient>,
 
-    /** Task representing completion of recovered Sagas */
+    /// Task representing completion of recovered Sagas
     recovery_task: std::sync::Mutex<Option<db::RecoveryTask>>,
 
-    /** Status of background task to populate database */
+    /// Status of background task to populate database
     populate_status: tokio::sync::watch::Receiver<PopulateStatus>,
 
-    /** Client to the timeseries database. */
+    /// Client to the timeseries database.
     timeseries_client: oximeter_db::Client,
 
-    /** Contents of the trusted root role for the TUF repository. */
+    /// Contents of the trusted root role for the TUF repository.
     updates_config: Option<config::UpdatesConfig>,
 }
 
-/*
- * TODO Is it possible to make some of these operations more generic?  A
- * particularly good example is probably list() (or even lookup()), where
- * with the right type parameters, generic code can be written to work on all
- * types.
- * TODO update and delete need to accommodate both with-etag and don't-care
- * TODO audit logging ought to be part of this structure and its functions
- */
+// TODO Is it possible to make some of these operations more generic?  A
+// particularly good example is probably list() (or even lookup()), where
+// with the right type parameters, generic code can be written to work on all
+// types.
+// TODO update and delete need to accommodate both with-etag and don't-care
+// TODO audit logging ought to be part of this structure and its functions
 impl Nexus {
-    /**
-     * Create a new Nexus instance for the given rack id `rack_id`
-     */
-    /* TODO-polish revisit rack metadata */
+    /// Create a new Nexus instance for the given rack id `rack_id`
+    // TODO-polish revisit rack metadata
     pub fn new_with_id(
         rack_id: Uuid,
         log: Logger,
@@ -188,12 +179,10 @@ impl Nexus {
         let timeseries_client =
             oximeter_db::Client::new(config.timeseries_db.address, &log);
 
-        /*
-         * TODO-cleanup We may want a first-class subsystem for managing startup
-         * background tasks.  It could use a Future for each one, a status enum
-         * for each one, status communication via channels, and a single task to
-         * run them all.
-         */
+        // TODO-cleanup We may want a first-class subsystem for managing startup
+        // background tasks.  It could use a Future for each one, a status enum
+        // for each one, status communication via channels, and a single task to
+        // run them all.
         let populate_ctx = OpContext::for_background(
             log.new(o!("component" => "DataLoader")),
             Arc::clone(&authz),
@@ -217,7 +206,7 @@ impl Nexus {
             updates_config: config.updates.clone(),
         };
 
-        /* TODO-cleanup all the extra Arcs here seems wrong */
+        // TODO-cleanup all the extra Arcs here seems wrong
         let nexus = Arc::new(nexus);
         let opctx = OpContext::for_background(
             log.new(o!("component" => "SagaRecoverer")),
@@ -260,10 +249,8 @@ impl Nexus {
         }
     }
 
-    /*
-     * TODO-robustness we should have a limit on how many sled agents there can
-     * be (for graceful degradation at large scale).
-     */
+    // TODO-robustness we should have a limit on how many sled agents there can
+    // be (for graceful degradation at large scale).
     pub async fn upsert_sled(
         &self,
         id: Uuid,
@@ -302,9 +289,7 @@ impl Nexus {
         Ok(())
     }
 
-    /**
-     * Insert a new record of an Oximeter collector server.
-     */
+    /// Insert a new record of an Oximeter collector server.
     pub async fn upsert_oximeter_collector(
         &self,
         oximeter_info: &OximeterInfo,
@@ -417,9 +402,7 @@ impl Nexus {
         client
     }
 
-    /**
-     * List all registered Oximeter collector instances.
-     */
+    /// List all registered Oximeter collector instances.
     pub async fn oximeter_list(
         &self,
         page_params: &DataPageParams<'_, Uuid>,
@@ -431,9 +414,7 @@ impl Nexus {
         &self.db_datastore
     }
 
-    /**
-     * Given a saga template and parameters, create a new saga and execute it.
-     */
+    /// Given a saga template and parameters, create a new saga and execute it.
     async fn execute_saga<P, S>(
         self: &Arc<Self>,
         saga_template: Arc<SagaTemplate<S>>,
@@ -445,10 +426,8 @@ impl Nexus {
             ExecContextType = Arc<SagaContext>,
             SagaParamsType = Arc<P>,
         >,
-        /*
-         * TODO-cleanup The bound `P: Serialize` should not be necessary because
-         * SagaParamsType must already impl Serialize.
-         */
+        // TODO-cleanup The bound `P: Serialize` should not be necessary because
+        // SagaParamsType must already impl Serialize.
         P: serde::Serialize,
     {
         let saga_id = SagaId(Uuid::new_v4());
@@ -471,11 +450,9 @@ impl Nexus {
             .await
             .context("creating saga")
             .map_err(|error| {
-                /*
-                 * TODO-error This could be a service unavailable error,
-                 * depending on the failure mode.  We need more information from
-                 * Steno.
-                 */
+                // TODO-error This could be a service unavailable error,
+                // depending on the failure mode.  We need more information from
+                // Steno.
                 Error::internal_error(&format!("{:#}", error))
             })?;
 
@@ -488,15 +465,13 @@ impl Nexus {
         let result = future.await;
         result.kind.map_err(|saga_error| {
             saga_error.error_source.convert::<Error>().unwrap_or_else(|e| {
-                /* TODO-error more context would be useful */
+                // TODO-error more context would be useful
                 Error::InternalError { internal_message: e.to_string() }
             })
         })
     }
 
-    /*
-     * Organizations
-     */
+    // Organizations
 
     pub async fn organization_create(
         &self,
@@ -550,9 +525,7 @@ impl Nexus {
             .await
     }
 
-    /*
-     * Projects
-     */
+    // Projects
 
     pub async fn project_create(
         &self,
@@ -674,9 +647,7 @@ impl Nexus {
             .await
     }
 
-    /*
-     * Disks
-     */
+    // Disks
 
     pub async fn project_list_disks(
         &self,
@@ -711,10 +682,8 @@ impl Nexus {
         // (if possibly redundant) to check this here.
         opctx.authorize(authz::Action::CreateChild, &authz_project).await?;
 
-        /*
-         * Until we implement snapshots, do not allow disks to be created with a
-         * snapshot id.
-         */
+        // Until we implement snapshots, do not allow disks to be created with a
+        // snapshot id.
         if params.snapshot_id.is_some() {
             return Err(Error::InvalidValue {
                 label: String::from("snapshot_id"),
@@ -792,14 +761,50 @@ impl Nexus {
         Ok(())
     }
 
-    /*
-     * Instances
-     */
+    pub async fn project_create_snapshot(
+        self: &Arc<Self>,
+        _opctx: &OpContext,
+        _organization_name: &Name,
+        _project_name: &Name,
+        _params: &params::SnapshotCreate,
+    ) -> CreateResult<db::model::Snapshot> {
+        unimplemented!();
+    }
 
-    /*
-     * TODO-design This interface should not exist.  See
-     * SagaContext::alloc_server().
-     */
+    pub async fn project_list_snapshots(
+        &self,
+        _opctx: &OpContext,
+        _organization_name: &Name,
+        _project_name: &Name,
+        _pagparams: &DataPageParams<'_, Name>,
+    ) -> ListResultVec<db::model::Snapshot> {
+        unimplemented!();
+    }
+
+    pub async fn snapshot_fetch(
+        &self,
+        _opctx: &OpContext,
+        _organization_name: &Name,
+        _project_name: &Name,
+        _snapshot_name: &Name,
+    ) -> LookupResult<db::model::Snapshot> {
+        unimplemented!();
+    }
+
+    pub async fn project_delete_snapshot(
+        self: &Arc<Self>,
+        _opctx: &OpContext,
+        _organization_name: &Name,
+        _project_name: &Name,
+        _snapshot_name: &Name,
+    ) -> DeleteResult {
+        unimplemented!();
+    }
+
+    // Instances
+
+    // TODO-design This interface should not exist.  See
+    // SagaContext::alloc_server().
     pub async fn sled_allocate(&self) -> Result<Uuid, Error> {
         // TODO: replace this with a real allocation policy.
         //
@@ -852,6 +857,7 @@ impl Nexus {
         opctx.authorize(authz::Action::CreateChild, &authz_project).await?;
 
         let saga_params = Arc::new(sagas::ParamsInstanceCreate {
+            serialized_authn: authn::saga::Serialized::for_opctx(opctx),
             project_id: authz_project.id(),
             create_params: params.clone(),
         });
@@ -863,66 +869,62 @@ impl Nexus {
                 saga_params,
             )
             .await?;
-        /* TODO-error more context would be useful  */
+        // TODO-error more context would be useful
         let instance_id =
             saga_outputs.lookup_output::<Uuid>("instance_id").map_err(|e| {
                 Error::InternalError { internal_message: e.to_string() }
             })?;
-        /*
-         * TODO-correctness TODO-robustness TODO-design It's not quite correct
-         * to take this instance id and look it up again.  It's possible that
-         * it's been modified or even deleted since the saga executed.  In that
-         * case, we might return a different state of the Instance than the one
-         * that the user created or even fail with a 404!  Both of those are
-         * wrong behavior -- we should be returning the very instance that the
-         * user created.
-         *
-         * How can we fix this?  Right now we have internal representations like
-         * Instance and analaogous end-user-facing representations like
-         * Instance.  The former is not even serializable.  The saga
-         * _could_ emit the View version, but that's not great for two (related)
-         * reasons: (1) other sagas might want to provision instances and get
-         * back the internal representation to do other things with the
-         * newly-created instance, and (2) even within a saga, it would be
-         * useful to pass a single Instance representation along the saga,
-         * but they probably would want the internal representation, not the
-         * view.
-         *
-         * The saga could emit an Instance directly.  Today, Instance
-         * etc. aren't supposed to even be serializable -- we wanted to be able
-         * to have other datastore state there if needed.  We could have a third
-         * InstanceInternalView...but that's starting to feel pedantic.  We
-         * could just make Instance serializable, store that, and call it a
-         * day.  Does it matter that we might have many copies of the same
-         * objects in memory?
-         *
-         * If we make these serializable, it would be nice if we could leverage
-         * the type system to ensure that we never accidentally send them out a
-         * dropshot endpoint.  (On the other hand, maybe we _do_ want to do
-         * that, for internal interfaces!  Can we do this on a
-         * per-dropshot-server-basis?)
-         *
-         * TODO Even worse, post-authz, we do two lookups here instead of one.
-         * Maybe sagas should be able to emit `authz::Instance`-type objects.
-         */
+        // TODO-correctness TODO-robustness TODO-design It's not quite correct
+        // to take this instance id and look it up again.  It's possible that
+        // it's been modified or even deleted since the saga executed.  In that
+        // case, we might return a different state of the Instance than the one
+        // that the user created or even fail with a 404!  Both of those are
+        // wrong behavior -- we should be returning the very instance that the
+        // user created.
+        //
+        // How can we fix this?  Right now we have internal representations like
+        // Instance and analaogous end-user-facing representations like
+        // Instance.  The former is not even serializable.  The saga
+        // _could_ emit the View version, but that's not great for two (related)
+        // reasons: (1) other sagas might want to provision instances and get
+        // back the internal representation to do other things with the
+        // newly-created instance, and (2) even within a saga, it would be
+        // useful to pass a single Instance representation along the saga,
+        // but they probably would want the internal representation, not the
+        // view.
+        //
+        // The saga could emit an Instance directly.  Today, Instance
+        // etc. aren't supposed to even be serializable -- we wanted to be able
+        // to have other datastore state there if needed.  We could have a third
+        // InstanceInternalView...but that's starting to feel pedantic.  We
+        // could just make Instance serializable, store that, and call it a
+        // day.  Does it matter that we might have many copies of the same
+        // objects in memory?
+        //
+        // If we make these serializable, it would be nice if we could leverage
+        // the type system to ensure that we never accidentally send them out a
+        // dropshot endpoint.  (On the other hand, maybe we _do_ want to do
+        // that, for internal interfaces!  Can we do this on a
+        // per-dropshot-server-basis?)
+        //
+        // TODO Even worse, post-authz, we do two lookups here instead of one.
+        // Maybe sagas should be able to emit `authz::Instance`-type objects.
         let authz_instance =
             self.db_datastore.instance_lookup_by_id(instance_id).await?;
         self.db_datastore.instance_refetch(opctx, &authz_instance).await
     }
 
-    /*
-     * TODO-correctness It's not totally clear what the semantics and behavior
-     * should be here.  It might be nice to say that you can only do this
-     * operation if the Instance is already stopped, in which case we can
-     * execute this immediately by just removing it from the database, with the
-     * same race we have with disk delete (i.e., if someone else is requesting
-     * an instance boot, we may wind up in an inconsistent state).  On the other
-     * hand, we could always allow this operation, issue the request to the SA
-     * to destroy the instance (not just stop it), and proceed with deletion
-     * when that finishes.  But in that case, although the HTTP DELETE request
-     * completed, the object will still appear for a little while, which kind of
-     * sucks.
-     */
+    // TODO-correctness It's not totally clear what the semantics and behavior
+    // should be here.  It might be nice to say that you can only do this
+    // operation if the Instance is already stopped, in which case we can
+    // execute this immediately by just removing it from the database, with the
+    // same race we have with disk delete (i.e., if someone else is requesting
+    // an instance boot, we may wind up in an inconsistent state).  On the other
+    // hand, we could always allow this operation, issue the request to the SA
+    // to destroy the instance (not just stop it), and proceed with deletion
+    // when that finishes.  But in that case, although the HTTP DELETE request
+    // completed, the object will still appear for a little while, which kind of
+    // sucks.
     pub async fn project_destroy_instance(
         &self,
         opctx: &OpContext,
@@ -930,11 +932,9 @@ impl Nexus {
         project_name: &Name,
         instance_name: &Name,
     ) -> DeleteResult {
-        /*
-         * TODO-robustness We need to figure out what to do with Destroyed
-         * instances?  Presumably we need to clean them up at some point, but
-         * not right away so that callers can see that they've been destroyed.
-         */
+        // TODO-robustness We need to figure out what to do with Destroyed
+        // instances?  Presumably we need to clean them up at some point, but
+        // not right away so that callers can see that they've been destroyed.
         let authz_instance = self
             .db_datastore
             .instance_lookup_by_path(
@@ -1006,15 +1006,13 @@ impl Nexus {
         runtime: &nexus::InstanceRuntimeState,
         requested: &InstanceRuntimeStateRequested,
     ) -> Result<(), Error> {
-        /*
-         * Users are allowed to request a start or stop even if the instance is
-         * already in the desired state (or moving to it), and we will issue a
-         * request to the SA to make the state change in these cases in case the
-         * runtime state we saw here was stale.  However, users are not allowed
-         * to change the state of an instance that's migrating, failed or
-         * destroyed.  But if we're already migrating, requesting a migration is
-         * allowed to allow for idempotency.
-         */
+        // Users are allowed to request a start or stop even if the instance is
+        // already in the desired state (or moving to it), and we will issue a
+        // request to the SA to make the state change in these cases in case the
+        // runtime state we saw here was stale.  However, users are not allowed
+        // to change the state of an instance that's migrating, failed or
+        // destroyed.  But if we're already migrating, requesting a migration is
+        // allowed to allow for idempotency.
         let allowed = match runtime.run_state {
             InstanceState::Creating => true,
             InstanceState::Starting => true,
@@ -1070,9 +1068,7 @@ impl Nexus {
         )))
     }
 
-    /**
-     * Returns the SledAgentClient for the host where this Instance is running.
-     */
+    /// Returns the SledAgentClient for the host where this Instance is running.
     async fn instance_sled(
         &self,
         instance: &db::model::Instance,
@@ -1081,9 +1077,7 @@ impl Nexus {
         self.sled_client(&sa_id).await
     }
 
-    /**
-     * Reboot the specified instance.
-     */
+    /// Reboot the specified instance.
     pub async fn instance_reboot(
         &self,
         opctx: &OpContext,
@@ -1091,19 +1085,17 @@ impl Nexus {
         project_name: &Name,
         instance_name: &Name,
     ) -> UpdateResult<db::model::Instance> {
-        /*
-         * To implement reboot, we issue a call to the sled agent to set a
-         * runtime state of "reboot". We cannot simply stop the Instance and
-         * start it again here because if we crash in the meantime, we might
-         * leave it stopped.
-         *
-         * When an instance is rebooted, the "rebooting" flag remains set on
-         * the runtime state as it transitions to "Stopping" and "Stopped".
-         * This flag is cleared when the state goes to "Starting".  This way,
-         * even if the whole rack powered off while this was going on, we would
-         * never lose track of the fact that this Instance was supposed to be
-         * running.
-         */
+        // To implement reboot, we issue a call to the sled agent to set a
+        // runtime state of "reboot". We cannot simply stop the Instance and
+        // start it again here because if we crash in the meantime, we might
+        // leave it stopped.
+        //
+        // When an instance is rebooted, the "rebooting" flag remains set on
+        // the runtime state as it transitions to "Stopping" and "Stopped".
+        // This flag is cleared when the state goes to "Starting".  This way,
+        // even if the whole rack powered off while this was going on, we would
+        // never lose track of the fact that this Instance was supposed to be
+        // running.
         let authz_project = self
             .db_datastore
             .project_lookup_by_path(organization_name, project_name)
@@ -1126,9 +1118,7 @@ impl Nexus {
         self.db_datastore.instance_refetch(opctx, &authz_instance).await
     }
 
-    /**
-     * Make sure the given Instance is running.
-     */
+    /// Make sure the given Instance is running.
     pub async fn instance_start(
         &self,
         opctx: &OpContext,
@@ -1158,9 +1148,7 @@ impl Nexus {
         self.db_datastore.instance_refetch(opctx, &authz_instance).await
     }
 
-    /**
-     * Make sure the given Instance is stopped.
-     */
+    /// Make sure the given Instance is stopped.
     pub async fn instance_stop(
         &self,
         opctx: &OpContext,
@@ -1190,9 +1178,7 @@ impl Nexus {
         self.db_datastore.instance_refetch(opctx, &authz_instance).await
     }
 
-    /**
-     * Idempotently place the instance in a 'Migrating' state.
-     */
+    /// Idempotently place the instance in a 'Migrating' state.
     pub async fn instance_start_migrate(
         &self,
         opctx: &OpContext,
@@ -1221,10 +1207,8 @@ impl Nexus {
         self.db_datastore.instance_refetch(opctx, &authz_instance).await
     }
 
-    /**
-     * Modifies the runtime state of the Instance as requested.  This generally
-     * means booting or halting the Instance.
-     */
+    /// Modifies the runtime state of the Instance as requested.  This generally
+    /// means booting or halting the Instance.
     async fn instance_set_runtime(
         &self,
         opctx: &OpContext,
@@ -1241,22 +1225,17 @@ impl Nexus {
 
         let sa = self.instance_sled(&db_instance).await?;
 
-        /*
-         * Ask the sled agent to begin the state change.  Then update the
-         * database to reflect the new intermediate state.  If this update is
-         * not the newest one, that's fine.  That might just mean the sled agent
-         * beat us to it.
-         */
-
-        let runtime: nexus::InstanceRuntimeState =
-            db_instance.runtime().clone().into();
+        // Ask the sled agent to begin the state change.  Then update the
+        // database to reflect the new intermediate state.  If this update is
+        // not the newest one, that's fine.  That might just mean the sled agent
+        // beat us to it.
 
         // TODO: Populate this with an appropriate NIC.
         // See also: sic_create_instance_record in sagas.rs for a similar
         // construction.
         let instance_hardware = sled_agent_client::types::InstanceHardware {
             runtime: sled_agent_client::types::InstanceRuntimeState::from(
-                runtime,
+                db_instance.runtime().clone(),
             ),
             nics: vec![],
         };
@@ -1266,7 +1245,7 @@ impl Nexus {
                 &db_instance.id(),
                 &sled_agent_client::types::InstanceEnsureBody {
                     initial: instance_hardware,
-                    target: requested.into(),
+                    target: requested,
                     migrate: None,
                 },
             )
@@ -1282,9 +1261,7 @@ impl Nexus {
             .map(|_| ())
     }
 
-    /**
-     * Lists disks attached to the instance.
-     */
+    /// Lists disks attached to the instance.
     pub async fn instance_list_disks(
         &self,
         opctx: &OpContext,
@@ -1306,9 +1283,7 @@ impl Nexus {
             .await
     }
 
-    /**
-     * Attach a disk to an instance.
-     */
+    /// Attach a disk to an instance.
     pub async fn instance_attach_disk(
         &self,
         opctx: &OpContext,
@@ -1342,12 +1317,10 @@ impl Nexus {
                 DiskState::Creating => "disk is detached",
                 DiskState::Detached => "disk is detached",
 
-                /*
-                 * It would be nice to provide a more specific message here, but
-                 * the appropriate identifier to provide the user would be the
-                 * other instance's name.  Getting that would require another
-                 * database hit, which doesn't seem worth it for this.
-                 */
+                // It would be nice to provide a more specific message here, but
+                // the appropriate identifier to provide the user would be the
+                // other instance's name.  Getting that would require another
+                // database hit, which doesn't seem worth it for this.
                 DiskState::Attaching(_) => {
                     "disk is attached to another instance"
                 }
@@ -1367,23 +1340,19 @@ impl Nexus {
         }
 
         match &db_disk.state().into() {
-            /*
-             * If we're already attaching or attached to the requested instance,
-             * there's nothing else to do.
-             * TODO-security should it be an error if you're not authorized to
-             * do this and we did not actually have to do anything?
-             */
+            // If we're already attaching or attached to the requested instance,
+            // there's nothing else to do.
+            // TODO-security should it be an error if you're not authorized to
+            // do this and we did not actually have to do anything?
             DiskState::Attached(id) if id == instance_id => return Ok(db_disk),
 
-            /*
-             * If the disk is currently attaching or attached to another
-             * instance, fail this request.  Users must explicitly detach first
-             * if that's what they want.  If it's detaching, they have to wait
-             * for it to become detached.
-             * TODO-debug: the error message here could be better.  We'd have to
-             * look up the other instance by id (and gracefully handle it not
-             * existing).
-             */
+            // If the disk is currently attaching or attached to another
+            // instance, fail this request.  Users must explicitly detach first
+            // if that's what they want.  If it's detaching, they have to wait
+            // for it to become detached.
+            // TODO-debug: the error message here could be better.  We'd have to
+            // look up the other instance by id (and gracefully handle it not
+            // existing).
             DiskState::Attached(id) => {
                 assert_ne!(id, instance_id);
                 return disk_attachment_error(&db_disk);
@@ -1421,9 +1390,7 @@ impl Nexus {
         self.db_datastore.disk_refetch(opctx, &authz_disk).await
     }
 
-    /**
-     * Detach a disk from an instance.
-     */
+    /// Detach a disk from an instance.
     pub async fn instance_detach_disk(
         &self,
         opctx: &OpContext,
@@ -1449,12 +1416,10 @@ impl Nexus {
         let instance_id = &authz_instance.id();
 
         match &db_disk.state().into() {
-            /*
-             * This operation is a noop if the disk is not attached or already
-             * detaching from the same instance.
-             * TODO-security should it be an error if you're not authorized to
-             * do this and we did not actually have to do anything?
-             */
+            // This operation is a noop if the disk is not attached or already
+            // detaching from the same instance.
+            // TODO-security should it be an error if you're not authorized to
+            // do this and we did not actually have to do anything?
             DiskState::Creating => return Ok(db_disk),
             DiskState::Detached => return Ok(db_disk),
             DiskState::Destroyed => return Ok(db_disk),
@@ -1463,10 +1428,8 @@ impl Nexus {
                 return Ok(db_disk)
             }
 
-            /*
-             * This operation is not allowed if the disk is attached to some
-             * other instance.
-             */
+            // This operation is not allowed if the disk is attached to some
+            // other instance.
             DiskState::Attaching(id) if id != instance_id => {
                 return Err(Error::InvalidRequest {
                     message: String::from("disk is attached elsewhere"),
@@ -1483,7 +1446,7 @@ impl Nexus {
                 });
             }
 
-            /* These are the cases where we have to do something. */
+            // These are the cases where we have to do something.
             DiskState::Attaching(_) => (),
             DiskState::Attached(_) => (),
         }
@@ -1499,10 +1462,8 @@ impl Nexus {
         self.db_datastore.disk_refetch(opctx, &authz_disk).await
     }
 
-    /**
-     * Modifies the runtime state of the Disk as requested.  This generally
-     * means attaching or detaching the disk.
-     */
+    /// Modifies the runtime state of the Disk as requested.  This generally
+    /// means attaching or detaching the disk.
     async fn disk_set_runtime(
         &self,
         opctx: &OpContext,
@@ -1515,10 +1476,8 @@ impl Nexus {
 
         opctx.authorize(authz::Action::Modify, authz_disk).await?;
 
-        /*
-         * Ask the Sled Agent to begin the state change.  Then update the
-         * database to reflect the new intermediate state.
-         */
+        // Ask the Sled Agent to begin the state change.  Then update the
+        // database to reflect the new intermediate state.
         let new_runtime = sa
             .disk_put(
                 &authz_disk.id(),
@@ -1539,6 +1498,163 @@ impl Nexus {
             .disk_update_runtime(opctx, authz_disk, &new_runtime.into())
             .await
             .map(|_| ())
+    }
+
+    ///  Lists network interfaces attached to the instance.
+    pub async fn instance_list_network_interfaces(
+        &self,
+        opctx: &OpContext,
+        organization_name: &Name,
+        project_name: &Name,
+        instance_name: &Name,
+        pagparams: &DataPageParams<'_, Name>,
+    ) -> ListResultVec<db::model::NetworkInterface> {
+        let authz_instance = self
+            .db_datastore
+            .instance_lookup_by_path(
+                organization_name,
+                project_name,
+                instance_name,
+            )
+            .await?;
+        self.db_datastore
+            .instance_list_network_interfaces(opctx, &authz_instance, pagparams)
+            .await
+    }
+
+    /// Create a network interface attached to the provided instance.
+    // TODO-performance: Add a version of this that accepts the instance ID
+    // directly. This will avoid all the internal database lookups in the event
+    // that we create many NICs for the same instance, such as in a saga.
+    pub async fn instance_create_network_interface(
+        &self,
+        opctx: &OpContext,
+        organization_name: &Name,
+        project_name: &Name,
+        instance_name: &Name,
+        params: &params::NetworkInterfaceCreate,
+    ) -> CreateResult<db::model::NetworkInterface> {
+        let authz_project = self
+            .db_datastore
+            .project_lookup_by_path(organization_name, project_name)
+            .await?;
+        let (authz_instance, db_instance) = self
+            .db_datastore
+            .instance_fetch(opctx, &authz_project, instance_name)
+            .await?;
+
+        // TODO-completeness: We'd like to relax this once hot-plug is
+        // supported.
+        //
+        // TODO-correctness: There's a TOCTOU race here. Someone might start the
+        // instance between this check and when we actually create the NIC
+        // record. One solution is to place the state verification in the query
+        // to create the NIC. Unfortunately, that query is already very
+        // complicated.
+        let stopped =
+            db::model::InstanceState::new(external::InstanceState::Stopped);
+        if db_instance.runtime_state.state != stopped {
+            return Err(external::Error::invalid_request(
+                "Instance must be stopped to attach a new network interface",
+            ));
+        }
+
+        // NOTE: We need to lookup the VPC and VPC Subnet, since we need both
+        // IDs for creating the network interface.
+        let vpc_name = db::model::Name(params.vpc_name.clone());
+        let subnet_name = db::model::Name(params.subnet_name.clone());
+        let (authz_vpc, _) = self
+            .db_datastore
+            .vpc_fetch(opctx, &authz_project, &vpc_name)
+            .await?;
+        let (authz_subnet, db_subnet) = self
+            .db_datastore
+            .vpc_subnet_fetch(opctx, &authz_vpc, &subnet_name)
+            .await?;
+        let mac = db::model::MacAddr::new()?;
+        let interface_id = Uuid::new_v4();
+        let interface = db::model::IncompleteNetworkInterface::new(
+            interface_id,
+            authz_instance.id(),
+            authz_vpc.id(),
+            db_subnet,
+            mac,
+            params.identity.clone(),
+            params.ip,
+        )?;
+        let interface = self
+            .db_datastore
+            .instance_create_network_interface(
+                opctx,
+                &authz_subnet,
+                &authz_instance,
+                interface,
+            )
+            .await
+            .map_err(NetworkInterfaceError::into_external)?;
+        Ok(interface)
+    }
+
+    /// Delete a network interface from the provided instance.
+    pub async fn instance_delete_network_interface(
+        &self,
+        opctx: &OpContext,
+        organization_name: &Name,
+        project_name: &Name,
+        instance_name: &Name,
+        interface_name: &Name,
+    ) -> DeleteResult {
+        let authz_project = self
+            .db_datastore
+            .project_lookup_by_path(organization_name, project_name)
+            .await?;
+        let (authz_instance, db_instance) = self
+            .db_datastore
+            .instance_fetch(opctx, &authz_project, instance_name)
+            .await?;
+        opctx.authorize(authz::Action::Modify, &authz_instance).await?;
+
+        // TODO-completeness: We'd like to relax this once hot-plug is supported
+        let stopped =
+            db::model::InstanceState::new(external::InstanceState::Stopped);
+        if db_instance.runtime_state.state != stopped {
+            return Err(external::Error::invalid_request(
+                "Instance must be stopped to detach a network interface",
+            ));
+        }
+        self.db_datastore
+            .instance_delete_network_interface(
+                opctx,
+                &authz_instance,
+                interface_name,
+            )
+            .await
+    }
+
+    /// Fetch a network interface attached to the given instance.
+    pub async fn instance_lookup_network_interface(
+        &self,
+        opctx: &OpContext,
+        organization_name: &Name,
+        project_name: &Name,
+        instance_name: &Name,
+        interface_name: &Name,
+    ) -> LookupResult<db::model::NetworkInterface> {
+        let authz_instance = self
+            .db_datastore
+            .instance_lookup_by_path(
+                organization_name,
+                project_name,
+                instance_name,
+            )
+            .await?;
+        self.db_datastore
+            .instance_lookup_network_interface(
+                opctx,
+                &authz_instance,
+                interface_name,
+            )
+            .await
     }
 
     pub async fn project_list_vpcs(
@@ -1574,6 +1690,23 @@ impl Nexus {
         let system_router_id = Uuid::new_v4();
         let default_route_id = Uuid::new_v4();
         let default_subnet_id = Uuid::new_v4();
+
+        // TODO: This is both fake and utter nonsense. It should be eventually
+        // replaced with the proper behavior for creating the default route
+        // which may not even happen here. Creating the vpc, its system router,
+        // and that routers default route should all be a part of the same
+        // transaction.
+        let vpc = db::model::Vpc::new(
+            vpc_id,
+            authz_project.id(),
+            system_router_id,
+            params.clone(),
+        )?;
+        let (authz_vpc, db_vpc) = self
+            .db_datastore
+            .project_create_vpc(opctx, &authz_project, vpc)
+            .await?;
+
         // TODO: Ultimately when the VPC is created a system router w/ an
         // appropriate setup should also be created.  Given that the underlying
         // systems aren't wired up yet this is a naive implementation to
@@ -1593,7 +1726,10 @@ impl Nexus {
                 },
             },
         );
-        let _ = self.db_datastore.vpc_create_router(router).await?;
+        let (authz_router, _) = self
+            .db_datastore
+            .vpc_create_router(&opctx, &authz_vpc, router)
+            .await?;
         let route = db::model::RouterRoute::new(
             default_route_id,
             system_router_id,
@@ -1612,27 +1748,14 @@ impl Nexus {
             },
         );
 
-        // TODO: This is both fake and utter nonsense. It should be eventually
-        // replaced with the proper behavior for creating the default route
-        // which may not even happen here. Creating the vpc, its system router,
-        // and that routers default route should all be apart of the same
-        // transaction.
-        self.db_datastore.router_create_route(route).await?;
-        let vpc = db::model::Vpc::new(
-            vpc_id,
-            authz_project.id(),
-            system_router_id,
-            params.clone(),
-        )?;
-        let vpc = self
-            .db_datastore
-            .project_create_vpc(opctx, &authz_project, vpc)
+        self.db_datastore
+            .router_create_route(opctx, &authz_router, route)
             .await?;
 
         // Allocate the first /64 sub-range from the requested or created
         // prefix.
         let ipv6_block = external::Ipv6Net(
-            ipnetwork::Ipv6Network::new(vpc.ipv6_prefix.network(), 64)
+            ipnetwork::Ipv6Network::new(db_vpc.ipv6_prefix.network(), 64)
                 .map_err(|_| {
                     external::Error::internal_error(
                         "Failed to allocate default IPv6 subnet",
@@ -1660,40 +1783,39 @@ impl Nexus {
         // there's already an existing VPC Subnet, but we're explicitly creating
         // the _first_ VPC in the project. Something is wrong, and likely a bug
         // in our code.
-        let _ = self.db_datastore.vpc_create_subnet(subnet).await.map_err(|err| {
-            match err {
-                SubnetError::OverlappingIpRange => {
-                    warn!(
+        self.db_datastore
+            .vpc_create_subnet(opctx, &authz_vpc, subnet)
+            .await
+            .map_err(|err| match err {
+                SubnetError::OverlappingIpRange(ip) => {
+                    let ipv4_block = &defaults::DEFAULT_VPC_SUBNET_IPV4_BLOCK;
+                    error!(
                         self.log,
-                        "failed to create default VPC Subnet, \
-                        found overlapping IP address ranges";
+                        concat!(
+                            "failed to create default VPC Subnet, IP address ",
+                            "range '{}' overlaps with existing",
+                        ),
+                        ip;
                         "vpc_id" => ?vpc_id,
                         "subnet_id" => ?default_subnet_id,
-                        "ipv4_block" => ?*defaults::DEFAULT_VPC_SUBNET_IPV4_BLOCK,
+                        "ipv4_block" => ?**ipv4_block,
                         "ipv6_block" => ?ipv6_block,
                     );
                     external::Error::internal_error(
                         "Failed to create default VPC Subnet, \
-                        found overlapping IP address ranges"
+                            found overlapping IP address ranges",
                     )
-                },
+                }
                 SubnetError::External(e) => e,
-            }
-        })?;
-        self.create_default_vpc_firewall(&vpc_id).await?;
-        Ok(vpc)
-    }
-
-    async fn create_default_vpc_firewall(
-        &self,
-        vpc_id: &Uuid,
-    ) -> CreateResult<()> {
+            })?;
         let rules = db::model::VpcFirewallRule::vec_from_params(
-            *vpc_id,
+            authz_vpc.id(),
             defaults::DEFAULT_FIREWALL_RULES.clone(),
         );
-        self.db_datastore.vpc_update_firewall_rules(&vpc_id, rules).await?;
-        Ok(())
+        self.db_datastore
+            .vpc_update_firewall_rules(opctx, &authz_vpc, rules)
+            .await?;
+        Ok(db_vpc)
     }
 
     pub async fn vpc_fetch(
@@ -1712,23 +1834,6 @@ impl Nexus {
             .vpc_fetch(opctx, &authz_project, vpc_name)
             .await?
             .1)
-    }
-
-    // TODO-security TODO-cleanup Remove this function.  Callers should use
-    // vpc_lookup_by_path() / vpc_fetch() instead, or we should create a more
-    // useful pattern for looking up records by path (e.g., *_fetch_by_path()).
-    pub async fn project_lookup_vpc(
-        &self,
-        organization_name: &Name,
-        project_name: &Name,
-        vpc_name: &Name,
-    ) -> LookupResult<db::model::Vpc> {
-        let project_id = self
-            .db_datastore
-            .project_lookup_by_path(organization_name, project_name)
-            .await?
-            .id();
-        Ok(self.db_datastore.vpc_fetch_by_name(&project_id, vpc_name).await?)
     }
 
     pub async fn project_update_vpc(
@@ -1763,89 +1868,114 @@ impl Nexus {
             .db_datastore
             .vpc_fetch(opctx, &authz_project, vpc_name)
             .await?;
+        let authz_vpc_router = authz_vpc.child_generic(
+            ResourceType::VpcRouter,
+            db_vpc.system_router_id,
+            LookupType::ById(db_vpc.system_router_id),
+        );
+
         // TODO: This should eventually use a saga to call the
         // networking subsystem to have it clean up the networking resources
-        self.db_datastore.vpc_delete_router(&db_vpc.system_router_id).await?;
+        self.db_datastore.vpc_delete_router(&opctx, &authz_vpc_router).await?;
         self.db_datastore.project_delete_vpc(opctx, &authz_vpc).await?;
 
         // Delete all firewall rules after deleting the VPC, to ensure no
         // firewall rules get added between rules deletion and VPC deletion.
-        self.db_datastore.vpc_delete_all_firewall_rules(&authz_vpc.id()).await
+        self.db_datastore
+            .vpc_delete_all_firewall_rules(&opctx, &authz_vpc)
+            .await
     }
 
     pub async fn vpc_list_firewall_rules(
         &self,
+        opctx: &OpContext,
         organization_name: &Name,
         project_name: &Name,
         vpc_name: &Name,
     ) -> ListResultVec<db::model::VpcFirewallRule> {
-        let vpc = self
-            .project_lookup_vpc(organization_name, project_name, vpc_name)
+        let authz_vpc = self
+            .db_datastore
+            .vpc_lookup_by_path(organization_name, project_name, vpc_name)
             .await?;
-        let rules =
-            self.db_datastore.vpc_list_firewall_rules(&vpc.id()).await?;
+        let rules = self
+            .db_datastore
+            .vpc_list_firewall_rules(&opctx, &authz_vpc)
+            .await?;
         Ok(rules)
     }
 
     pub async fn vpc_update_firewall_rules(
         &self,
+        opctx: &OpContext,
         organization_name: &Name,
         project_name: &Name,
         vpc_name: &Name,
         params: &VpcFirewallRuleUpdateParams,
     ) -> UpdateResult<Vec<db::model::VpcFirewallRule>> {
-        let vpc = self
-            .project_lookup_vpc(organization_name, project_name, vpc_name)
+        let authz_vpc = self
+            .db_datastore
+            .vpc_lookup_by_path(organization_name, project_name, vpc_name)
             .await?;
         let rules = db::model::VpcFirewallRule::vec_from_params(
-            vpc.id(),
+            authz_vpc.id(),
             params.clone(),
         );
-        self.db_datastore.vpc_update_firewall_rules(&vpc.id(), rules).await
+        self.db_datastore
+            .vpc_update_firewall_rules(opctx, &authz_vpc, rules)
+            .await
     }
 
     pub async fn vpc_list_subnets(
         &self,
+        opctx: &OpContext,
         organization_name: &Name,
         project_name: &Name,
         vpc_name: &Name,
         pagparams: &DataPageParams<'_, Name>,
     ) -> ListResultVec<db::model::VpcSubnet> {
-        let vpc = self
-            .project_lookup_vpc(organization_name, project_name, vpc_name)
+        let authz_vpc = self
+            .db_datastore
+            .vpc_lookup_by_path(organization_name, project_name, vpc_name)
             .await?;
-        let subnets =
-            self.db_datastore.vpc_list_subnets(&vpc.id(), pagparams).await?;
-        Ok(subnets)
+        self.db_datastore.vpc_list_subnets(opctx, &authz_vpc, pagparams).await
     }
 
-    pub async fn vpc_lookup_subnet(
+    pub async fn vpc_subnet_fetch(
         &self,
+        opctx: &OpContext,
         organization_name: &Name,
         project_name: &Name,
         vpc_name: &Name,
         subnet_name: &Name,
     ) -> LookupResult<db::model::VpcSubnet> {
-        // TODO: join projects, vpcs, and subnets and do this in one query
-        let vpc = self
-            .project_lookup_vpc(organization_name, project_name, vpc_name)
+        let authz_vpc = self
+            .db_datastore
+            .vpc_lookup_by_path(organization_name, project_name, vpc_name)
             .await?;
         Ok(self
             .db_datastore
-            .vpc_subnet_fetch_by_name(&vpc.id(), subnet_name)
-            .await?)
+            .vpc_subnet_fetch(opctx, &authz_vpc, subnet_name)
+            .await?
+            .1)
     }
 
-    // TODO: When a subnet is created it should add a route entry into the VPC's system router
+    // TODO: When a subnet is created it should add a route entry into the VPC's
+    // system router
     pub async fn vpc_create_subnet(
         &self,
+        opctx: &OpContext,
         organization_name: &Name,
         project_name: &Name,
         vpc_name: &Name,
         params: &params::VpcSubnetCreate,
     ) -> CreateResult<db::model::VpcSubnet> {
-        let vpc = self
-            .project_lookup_vpc(organization_name, project_name, vpc_name)
+        let authz_project = self
+            .db_datastore
+            .project_lookup_by_path(organization_name, project_name)
+            .await?;
+        let (authz_vpc, db_vpc) = self
+            .db_datastore
+            .vpc_fetch(opctx, &authz_project, vpc_name)
             .await?;
 
         // Validate IPv4 range
@@ -1887,7 +2017,7 @@ impl Nexus {
                 const NUM_RETRIES: usize = 2;
                 let mut retry = 0;
                 let result = loop {
-                    let ipv6_block = vpc
+                    let ipv6_block = db_vpc
                         .ipv6_prefix
                         .random_subnet(
                             external::Ipv6Net::VPC_SUBNET_IPV6_PREFIX_LENGTH,
@@ -1900,21 +2030,29 @@ impl Nexus {
                         })?;
                     let subnet = db::model::VpcSubnet::new(
                         subnet_id,
-                        vpc.id(),
+                        authz_vpc.id(),
                         params.identity.clone(),
                         params.ipv4_block,
                         ipv6_block,
                     );
-                    let result =
-                        self.db_datastore.vpc_create_subnet(subnet).await;
+                    let result = self
+                        .db_datastore
+                        .vpc_create_subnet(opctx, &authz_vpc, subnet)
+                        .await;
                     match result {
                         // Allow NUM_RETRIES retries, after the first attempt.
-                        Err(SubnetError::OverlappingIpRange)
-                            if retry <= NUM_RETRIES =>
+                        //
+                        // Note that we only catch IPv6 overlaps. The client
+                        // always specifies the IPv4 range, so we fail the
+                        // request if that overlaps with an existing range.
+                        Err(SubnetError::OverlappingIpRange(ip))
+                            if retry <= NUM_RETRIES && ip.is_ipv6() =>
                         {
                             debug!(
-                             self.log, "autogenerated random IPv6 range overlap";
-                            "subnet_id" => ?subnet_id, "ipv6_block" => %ipv6_block.0
+                                self.log,
+                                "autogenerated random IPv6 range overlap";
+                                "subnet_id" => ?subnet_id,
+                                "ipv6_block" => %ipv6_block.0
                             );
                             retry += 1;
                             continue;
@@ -1923,7 +2061,9 @@ impl Nexus {
                     }
                 };
                 match result {
-                    Err(SubnetError::OverlappingIpRange) => {
+                    Err(SubnetError::OverlappingIpRange(ip))
+                        if ip.is_ipv6() =>
+                    {
                         // TODO-monitoring TODO-debugging
                         //
                         // We should maintain a counter for this occurrence, and
@@ -1931,109 +2071,87 @@ impl Nexus {
                         // failures through the timeseries database. The main
                         // goal here is for us to notice that this is happening
                         // before it becomes a major issue for customers.
-                        let vpc_id = vpc.id();
-                        warn!(
+                        let vpc_id = authz_vpc.id();
+                        error!(
                             self.log,
-                            "failed to generate unique random IPv6 address range in {} retries",
+                            "failed to generate unique random IPv6 address \
+                            range in {} retries",
                             NUM_RETRIES;
                             "vpc_id" => ?vpc_id,
                             "subnet_id" => ?subnet_id,
                         );
                         Err(external::Error::internal_error(
-                            "Unable to allocate unique IPv6 address range for VPC Subnet"
+                            "Unable to allocate unique IPv6 address range \
+                            for VPC Subnet",
                         ))
+                    }
+                    Err(SubnetError::OverlappingIpRange(_)) => {
+                        // Overlapping IPv4 ranges, which is always a client error.
+                        Err(result.unwrap_err().into_external())
                     }
                     Err(SubnetError::External(e)) => Err(e),
                     Ok(subnet) => Ok(subnet),
                 }
             }
             Some(ipv6_block) => {
-                if !ipv6_block.is_vpc_subnet(&vpc.ipv6_prefix) {
+                if !ipv6_block.is_vpc_subnet(&db_vpc.ipv6_prefix) {
                     return Err(external::Error::invalid_request(&format!(
                         concat!(
                         "VPC Subnet IPv6 address range '{}' is not valid for ",
                         "VPC with IPv6 prefix '{}'",
                     ),
-                        ipv6_block, vpc.ipv6_prefix.0 .0,
+                        ipv6_block, db_vpc.ipv6_prefix.0 .0,
                     )));
                 }
                 let subnet = db::model::VpcSubnet::new(
                     subnet_id,
-                    vpc.id(),
+                    db_vpc.id(),
                     params.identity.clone(),
                     params.ipv4_block,
                     ipv6_block,
                 );
-                self.db_datastore.vpc_create_subnet(subnet).await.map_err(
-                    |err| match err {
-                        SubnetError::OverlappingIpRange => {
-                            external::Error::invalid_request(&format!(
-                                concat!(
-                                    "IPv4 block '{}' and/or IPv6 block '{}' ",
-                                    "overlaps with existing VPC Subnet ",
-                                    "IP address ranges"
-                                ),
-                                params.ipv4_block, ipv6_block,
-                            ))
-                        }
-                        SubnetError::External(e) => e,
-                    },
-                )
+                self.db_datastore
+                    .vpc_create_subnet(opctx, &authz_vpc, subnet)
+                    .await
+                    .map_err(SubnetError::into_external)
             }
         }
     }
 
-    // TODO: When a subnet is deleted it should remove its entry from the VPC's system router.
+    // TODO: When a subnet is deleted it should remove its entry from the VPC's
+    // system router.
     pub async fn vpc_delete_subnet(
         &self,
+        opctx: &OpContext,
         organization_name: &Name,
         project_name: &Name,
         vpc_name: &Name,
         subnet_name: &Name,
     ) -> DeleteResult {
-        let subnet = self
-            .vpc_lookup_subnet(
+        let authz_subnet = self
+            .db_datastore
+            .vpc_subnet_lookup_by_path(
                 organization_name,
                 project_name,
                 vpc_name,
                 subnet_name,
             )
             .await?;
-        self.db_datastore.vpc_delete_subnet(&subnet.id()).await
+        self.db_datastore.vpc_delete_subnet(opctx, &authz_subnet).await
     }
 
     pub async fn vpc_update_subnet(
         &self,
+        opctx: &OpContext,
         organization_name: &Name,
         project_name: &Name,
         vpc_name: &Name,
         subnet_name: &Name,
         params: &params::VpcSubnetUpdate,
-    ) -> UpdateResult<()> {
-        let subnet = self
-            .vpc_lookup_subnet(
-                organization_name,
-                project_name,
-                vpc_name,
-                subnet_name,
-            )
-            .await?;
-        Ok(self
+    ) -> UpdateResult<VpcSubnet> {
+        let authz_subnet = self
             .db_datastore
-            .vpc_update_subnet(&subnet.id(), params.clone().into())
-            .await?)
-    }
-
-    pub async fn subnet_list_network_interfaces(
-        &self,
-        organization_name: &Name,
-        project_name: &Name,
-        vpc_name: &Name,
-        subnet_name: &Name,
-        pagparams: &DataPageParams<'_, Name>,
-    ) -> ListResultVec<db::model::NetworkInterface> {
-        let subnet = self
-            .vpc_lookup_subnet(
+            .vpc_subnet_lookup_by_path(
                 organization_name,
                 project_name,
                 vpc_name,
@@ -2041,56 +2159,95 @@ impl Nexus {
             )
             .await?;
         self.db_datastore
-            .subnet_list_network_interfaces(&subnet.id(), pagparams)
+            .vpc_update_subnet(&opctx, &authz_subnet, params.clone().into())
+            .await
+    }
+
+    pub async fn subnet_list_network_interfaces(
+        &self,
+        opctx: &OpContext,
+        organization_name: &Name,
+        project_name: &Name,
+        vpc_name: &Name,
+        subnet_name: &Name,
+        pagparams: &DataPageParams<'_, Name>,
+    ) -> ListResultVec<db::model::NetworkInterface> {
+        let authz_subnet = self
+            .db_datastore
+            .vpc_subnet_lookup_by_path(
+                organization_name,
+                project_name,
+                vpc_name,
+                subnet_name,
+            )
+            .await?;
+        self.db_datastore
+            .subnet_list_network_interfaces(opctx, &authz_subnet, pagparams)
             .await
     }
 
     pub async fn vpc_list_routers(
         &self,
+        opctx: &OpContext,
         organization_name: &Name,
         project_name: &Name,
         vpc_name: &Name,
         pagparams: &DataPageParams<'_, Name>,
     ) -> ListResultVec<db::model::VpcRouter> {
-        let vpc = self
-            .project_lookup_vpc(organization_name, project_name, vpc_name)
+        let authz_vpc = self
+            .db_datastore
+            .vpc_lookup_by_path(organization_name, project_name, vpc_name)
             .await?;
-        let routers =
-            self.db_datastore.vpc_list_routers(&vpc.id(), pagparams).await?;
+        let routers = self
+            .db_datastore
+            .vpc_list_routers(opctx, &authz_vpc, pagparams)
+            .await?;
         Ok(routers)
     }
 
-    pub async fn vpc_lookup_router(
+    pub async fn vpc_router_fetch(
         &self,
+        opctx: &OpContext,
         organization_name: &Name,
         project_name: &Name,
         vpc_name: &Name,
         router_name: &Name,
     ) -> LookupResult<db::model::VpcRouter> {
-        let vpc = self
-            .project_lookup_vpc(organization_name, project_name, vpc_name)
+        let authz_vpc = self
+            .db_datastore
+            .vpc_lookup_by_path(organization_name, project_name, vpc_name)
             .await?;
         Ok(self
             .db_datastore
-            .vpc_router_fetch_by_name(&vpc.id(), router_name)
-            .await?)
+            .vpc_router_fetch(&opctx, &authz_vpc, router_name)
+            .await?
+            .1)
     }
 
     pub async fn vpc_create_router(
         &self,
+        opctx: &OpContext,
         organization_name: &Name,
         project_name: &Name,
         vpc_name: &Name,
         kind: &VpcRouterKind,
         params: &params::VpcRouterCreate,
     ) -> CreateResult<db::model::VpcRouter> {
-        let vpc = self
-            .project_lookup_vpc(organization_name, project_name, vpc_name)
+        let authz_vpc = self
+            .db_datastore
+            .vpc_lookup_by_path(organization_name, project_name, vpc_name)
             .await?;
         let id = Uuid::new_v4();
-        let router =
-            db::model::VpcRouter::new(id, vpc.id(), *kind, params.clone());
-        let router = self.db_datastore.vpc_create_router(router).await?;
+        let router = db::model::VpcRouter::new(
+            id,
+            authz_vpc.id(),
+            *kind,
+            params.clone(),
+        );
+        let (_, router) = self
+            .db_datastore
+            .vpc_create_router(&opctx, &authz_vpc, router)
+            .await?;
         Ok(router)
     }
 
@@ -2099,63 +2256,69 @@ impl Nexus {
     //       or trigger an error
     pub async fn vpc_delete_router(
         &self,
+        opctx: &OpContext,
         organization_name: &Name,
         project_name: &Name,
         vpc_name: &Name,
         router_name: &Name,
     ) -> DeleteResult {
-        let router = self
-            .vpc_lookup_router(
-                organization_name,
-                project_name,
-                vpc_name,
-                router_name,
-            )
+        let authz_vpc = self
+            .db_datastore
+            .vpc_lookup_by_path(organization_name, project_name, vpc_name)
             .await?;
-        if router.kind.0 == VpcRouterKind::System {
+        let (authz_router, db_router) = self
+            .db_datastore
+            .vpc_router_fetch(opctx, &authz_vpc, router_name)
+            .await?;
+        // TODO-performance shouldn't this check be part of the "update"
+        // database query?  This shouldn't affect correctness, assuming that a
+        // router kind cannot be changed, but it might be able to save us a
+        // database round-trip.
+        if db_router.kind == VpcRouterKind::System {
             return Err(Error::MethodNotAllowed {
                 internal_message: "Cannot delete system router".to_string(),
             });
         }
-        self.db_datastore.vpc_delete_router(&router.id()).await
+        self.db_datastore.vpc_delete_router(opctx, &authz_router).await
     }
 
     pub async fn vpc_update_router(
         &self,
+        opctx: &OpContext,
         organization_name: &Name,
         project_name: &Name,
         vpc_name: &Name,
         router_name: &Name,
         params: &params::VpcRouterUpdate,
-    ) -> UpdateResult<()> {
-        let router = self
-            .vpc_lookup_router(
+    ) -> UpdateResult<VpcRouter> {
+        let authz_router = self
+            .db_datastore
+            .vpc_router_lookup_by_path(
                 organization_name,
                 project_name,
                 vpc_name,
                 router_name,
             )
             .await?;
-        Ok(self
-            .db_datastore
-            .vpc_update_router(&router.id(), params.clone().into())
-            .await?)
+        self.db_datastore
+            .vpc_update_router(opctx, &authz_router, params.clone().into())
+            .await
     }
 
-    /**
-     * VPC Router routes
-     */
+    /// VPC Router routes
 
     pub async fn router_list_routes(
         &self,
+        opctx: &OpContext,
         organization_name: &Name,
         project_name: &Name,
         vpc_name: &Name,
         router_name: &Name,
         pagparams: &DataPageParams<'_, Name>,
     ) -> ListResultVec<db::model::RouterRoute> {
-        let router = self
-            .vpc_lookup_router(
+        let authz_router = self
+            .db_datastore
+            .vpc_router_lookup_by_path(
                 organization_name,
                 project_name,
                 vpc_name,
@@ -2164,21 +2327,23 @@ impl Nexus {
             .await?;
         let routes = self
             .db_datastore
-            .router_list_routes(&router.id(), pagparams)
+            .router_list_routes(opctx, &authz_router, pagparams)
             .await?;
         Ok(routes)
     }
 
-    pub async fn router_lookup_route(
+    pub async fn route_fetch(
         &self,
+        opctx: &OpContext,
         organization_name: &Name,
         project_name: &Name,
         vpc_name: &Name,
         router_name: &Name,
         route_name: &Name,
     ) -> LookupResult<db::model::RouterRoute> {
-        let router = self
-            .vpc_lookup_router(
+        let authz_router = self
+            .db_datastore
+            .vpc_router_lookup_by_path(
                 organization_name,
                 project_name,
                 vpc_name,
@@ -2187,12 +2352,15 @@ impl Nexus {
             .await?;
         Ok(self
             .db_datastore
-            .router_route_fetch_by_name(&router.id(), route_name)
-            .await?)
+            .route_fetch(&opctx, &authz_router, route_name)
+            .await?
+            .1)
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub async fn router_create_route(
         &self,
+        opctx: &OpContext,
         organization_name: &Name,
         project_name: &Name,
         vpc_name: &Name,
@@ -2200,8 +2368,9 @@ impl Nexus {
         kind: &RouterRouteKind,
         params: &RouterRouteCreateParams,
     ) -> CreateResult<db::model::RouterRoute> {
-        let router = self
-            .vpc_lookup_router(
+        let authz_router = self
+            .db_datastore
+            .vpc_router_lookup_by_path(
                 organization_name,
                 project_name,
                 vpc_name,
@@ -2209,79 +2378,97 @@ impl Nexus {
             )
             .await?;
         let id = Uuid::new_v4();
-        let route =
-            db::model::RouterRoute::new(id, router.id(), *kind, params.clone());
-        let route = self.db_datastore.router_create_route(route).await?;
+        let route = db::model::RouterRoute::new(
+            id,
+            authz_router.id(),
+            *kind,
+            params.clone(),
+        );
+        let route = self
+            .db_datastore
+            .router_create_route(&opctx, &authz_router, route)
+            .await?;
         Ok(route)
     }
 
     pub async fn router_delete_route(
         &self,
+        opctx: &OpContext,
         organization_name: &Name,
         project_name: &Name,
         vpc_name: &Name,
         router_name: &Name,
         route_name: &Name,
     ) -> DeleteResult {
-        let route = self
-            .router_lookup_route(
+        let authz_router = self
+            .db_datastore
+            .vpc_router_lookup_by_path(
                 organization_name,
                 project_name,
                 vpc_name,
                 router_name,
-                route_name,
             )
             .await?;
+        let (authz_route, db_route) = self
+            .db_datastore
+            .route_fetch(opctx, &authz_router, route_name)
+            .await?;
         // Only custom routes can be deleted
-        if route.kind.0 != RouterRouteKind::Custom {
+        // TODO Shouldn't this constraint be checked by the database query?
+        if db_route.kind.0 != RouterRouteKind::Custom {
             return Err(Error::MethodNotAllowed {
                 internal_message: "DELETE not allowed on system routes"
                     .to_string(),
             });
         }
-        self.db_datastore.router_delete_route(&route.id()).await
+        self.db_datastore.router_delete_route(opctx, &authz_route).await
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub async fn router_update_route(
         &self,
+        opctx: &OpContext,
         organization_name: &Name,
         project_name: &Name,
         vpc_name: &Name,
         router_name: &Name,
         route_name: &Name,
         params: &RouterRouteUpdateParams,
-    ) -> UpdateResult<()> {
-        let route = self
-            .router_lookup_route(
+    ) -> UpdateResult<RouterRoute> {
+        let authz_router = self
+            .db_datastore
+            .vpc_router_lookup_by_path(
                 organization_name,
                 project_name,
                 vpc_name,
                 router_name,
-                route_name,
             )
             .await?;
-        // TODO: Write a test for this once there's a way to test it (i.e. subnets automatically register to the system router table)
-        match route.kind.0 {
+        let (authz_route, db_route) = self
+            .db_datastore
+            .route_fetch(opctx, &authz_router, route_name)
+            .await?;
+        // TODO: Write a test for this once there's a way to test it (i.e.
+        // subnets automatically register to the system router table)
+        match db_route.kind.0 {
             RouterRouteKind::Custom | RouterRouteKind::Default => (),
             _ => {
                 return Err(Error::MethodNotAllowed {
                     internal_message: format!(
-                        "routes of type {} from the system table of VPC {} are not modifiable",
-                        route.kind.0,
-                        vpc_name
+                        "routes of type {} from the system table of VPC {:?} \
+                        are not modifiable",
+                        db_route.kind.0, vpc_name
                     ),
                 })
             }
         }
         Ok(self
             .db_datastore
-            .router_update_route(&route.id(), params.clone().into())
+            .router_update_route(&opctx, &authz_route, params.clone().into())
             .await?)
     }
 
-    /*
-     * Racks.  We simulate just one for now.
-     */
+    // Racks.  We simulate just one for now.
 
     fn as_rack(&self) -> db::model::Rack {
         db::model::Rack {
@@ -2314,9 +2501,7 @@ impl Nexus {
         }
     }
 
-    /*
-     * Sleds
-     */
+    // Sleds
 
     pub async fn sleds_list(
         &self,
@@ -2332,18 +2517,14 @@ impl Nexus {
         self.db_datastore.sled_fetch(*sled_id).await
     }
 
-    /*
-     * Sagas
-     */
+    // Sagas
 
     pub async fn sagas_list(
         &self,
         pagparams: &DataPageParams<'_, Uuid>,
     ) -> ListResult<external::Saga> {
-        /*
-         * The endpoint we're serving only supports `ScanById`, which only
-         * supports an ascending scan.
-         */
+        // The endpoint we're serving only supports `ScanById`, which only
+        // supports an ascending scan.
         bail_unless!(
             pagparams.direction == dropshot::PaginationOrder::Ascending
         );
@@ -2369,9 +2550,7 @@ impl Nexus {
             })?
     }
 
-    /*
-     * Built-in users
-     */
+    // Built-in users
 
     pub async fn users_builtin_list(
         &self,
@@ -2389,9 +2568,7 @@ impl Nexus {
         self.db_datastore.user_builtin_fetch(opctx, name).await
     }
 
-    /*
-     * Built-in roles
-     */
+    // Built-in roles
 
     pub async fn roles_builtin_list(
         &self,
@@ -2409,14 +2586,10 @@ impl Nexus {
         self.db_datastore.role_builtin_fetch(opctx, name).await
     }
 
-    /*
-     * Internal control plane interfaces.
-     */
+    // Internal control plane interfaces.
 
-    /**
-     * Invoked by a sled agent to publish an updated runtime state for an
-     * Instance.
-     */
+    /// Invoked by a sled agent to publish an updated runtime state for an
+    /// Instance.
     pub async fn notify_instance_updated(
         &self,
         id: &Uuid,
@@ -2446,15 +2619,13 @@ impl Nexus {
                 Ok(())
             }
 
-            /*
-             * If the instance doesn't exist, swallow the error -- there's
-             * nothing to do here.
-             * TODO-robustness This could only be possible if we've removed an
-             * Instance from the datastore altogether.  When would we do that?
-             * We don't want to do it as soon as something's destroyed, I think,
-             * and in that case, we'd need some async task for cleaning these
-             * up.
-             */
+            // If the instance doesn't exist, swallow the error -- there's
+            // nothing to do here.
+            // TODO-robustness This could only be possible if we've removed an
+            // Instance from the datastore altogether.  When would we do that?
+            // We don't want to do it as soon as something's destroyed, I think,
+            // and in that case, we'd need some async task for cleaning these
+            // up.
             Err(Error::ObjectNotFound { .. }) => {
                 warn!(log, "non-existent instance updated by sled agent";
                     "instance_id" => %id,
@@ -2462,12 +2633,10 @@ impl Nexus {
                 Ok(())
             }
 
-            /*
-             * If the datastore is unavailable, propagate that to the caller.
-             * TODO-robustness Really this should be any _transient_ error.  How
-             * can we distinguish?  Maybe datastore should emit something
-             * different from Error with an Into<Error>.
-             */
+            // If the datastore is unavailable, propagate that to the caller.
+            // TODO-robustness Really this should be any _transient_ error.  How
+            // can we distinguish?  Maybe datastore should emit something
+            // different from Error with an Into<Error>.
             Err(error) => {
                 warn!(log, "failed to update instance from sled agent";
                     "instance_id" => %id,
@@ -2492,7 +2661,7 @@ impl Nexus {
             .disk_update_runtime(opctx, &authz_disk, &new_state.clone().into())
             .await;
 
-        /* TODO-cleanup commonize with notify_instance_updated() */
+        // TODO-cleanup commonize with notify_instance_updated()
         match result {
             Ok(true) => {
                 info!(log, "disk updated by sled agent";
@@ -2507,15 +2676,13 @@ impl Nexus {
                 Ok(())
             }
 
-            /*
-             * If the disk doesn't exist, swallow the error -- there's
-             * nothing to do here.
-             * TODO-robustness This could only be possible if we've removed a
-             * disk from the datastore altogether.  When would we do that?
-             * We don't want to do it as soon as something's destroyed, I think,
-             * and in that case, we'd need some async task for cleaning these
-             * up.
-             */
+            // If the disk doesn't exist, swallow the error -- there's
+            // nothing to do here.
+            // TODO-robustness This could only be possible if we've removed a
+            // disk from the datastore altogether.  When would we do that?
+            // We don't want to do it as soon as something's destroyed, I think,
+            // and in that case, we'd need some async task for cleaning these
+            // up.
             Err(Error::ObjectNotFound { .. }) => {
                 warn!(log, "non-existent disk updated by sled agent";
                     "instance_id" => %id,
@@ -2523,9 +2690,7 @@ impl Nexus {
                 Ok(())
             }
 
-            /*
-             * If the datastore is unavailable, propagate that to the caller.
-             */
+            // If the datastore is unavailable, propagate that to the caller.
             Err(error) => {
                 warn!(log, "failed to update disk from sled agent";
                     "disk_id" => %id,
@@ -2536,13 +2701,9 @@ impl Nexus {
         }
     }
 
-    /*
-     * Timeseries
-     */
+    // Timeseries
 
-    /**
-     * List existing timeseries schema.
-     */
+    /// List existing timeseries schema.
     pub async fn timeseries_schema_list(
         &self,
         pag_params: &TimeseriesSchemaPaginationParams,
@@ -2561,9 +2722,7 @@ impl Nexus {
             })
     }
 
-    /**
-     * Assign a newly-registered metric producer to an oximeter collector server.
-     */
+    /// Assign a newly-registered metric producer to an oximeter collector server.
     pub async fn assign_producer(
         &self,
         producer_info: nexus::ProducerEndpoint,
@@ -2586,9 +2745,7 @@ impl Nexus {
         Ok(())
     }
 
-    /**
-     * Return an oximeter collector to assign a newly-registered producer
-     */
+    /// Return an oximeter collector to assign a newly-registered producer
     async fn next_collector(&self) -> Result<(OximeterClient, Uuid), Error> {
         // TODO-robustness Replace with a real load-balancing strategy.
         let page_params = DataPageParams {

@@ -10,16 +10,15 @@ use crate::illumos::zfs::{
 };
 use crate::instance_manager::InstanceManager;
 use crate::nexus::NexusClient;
-use crate::params::DiskStateRequested;
+use crate::params::{
+    DatasetKind, DiskStateRequested, InstanceHardware, InstanceMigrateParams,
+    InstanceRuntimeStateRequested, ServiceEnsureBody,
+};
 use crate::services::ServiceManager;
 use crate::storage_manager::StorageManager;
 use omicron_common::api::{
     internal::nexus::DiskRuntimeState, internal::nexus::InstanceRuntimeState,
-    internal::nexus::UpdateArtifact, internal::sled_agent::DatasetKind,
-    internal::sled_agent::InstanceHardware,
-    internal::sled_agent::InstanceMigrateParams,
-    internal::sled_agent::InstanceRuntimeStateRequested,
-    internal::sled_agent::ServiceEnsureBody,
+    internal::nexus::UpdateArtifact,
 };
 use slog::Logger;
 use std::net::SocketAddr;
@@ -99,7 +98,8 @@ impl SledAgent {
             Mountpoint::Path(std::path::PathBuf::from(
                 ZONE_ZFS_DATASET_MOUNTPOINT,
             )),
-            /* do_format= */ true,
+            // do_format=
+            true,
         )?;
 
         // Identify all existing zones which should be managed by the Sled

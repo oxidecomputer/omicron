@@ -5,7 +5,6 @@
 use crate::http_testing::RequestBuilder;
 use crate::ControlPlaneTestContext;
 
-use super::http_testing::dropshot_compat::objects_post;
 use super::http_testing::AuthnMode;
 use super::http_testing::NexusRequest;
 use dropshot::test_util::ClientTestContext;
@@ -17,10 +16,11 @@ use omicron_common::api::external::Disk;
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::Instance;
 use omicron_common::api::external::InstanceCpuCount;
-use omicron_common::api::external::VpcRouter;
 use omicron_nexus::crucible_agent_client::types::State as RegionState;
 use omicron_nexus::external_api::params;
-use omicron_nexus::external_api::views::{Organization, Project, Vpc};
+use omicron_nexus::external_api::views::{
+    Organization, Project, Vpc, VpcRouter,
+};
 use omicron_sled_agent::sim::SledAgent;
 use std::sync::Arc;
 use uuid::Uuid;
@@ -141,6 +141,8 @@ pub async fn create_instance(
             ncpus: InstanceCpuCount(4),
             memory: ByteCount::from_mebibytes_u32(256),
             hostname: String::from("the_host"),
+            network_interfaces:
+                params::InstanceNetworkInterfaceAttachment::Default,
         },
     )
     .await
@@ -215,21 +217,26 @@ pub async fn create_router(
     vpc_name: &str,
     router_name: &str,
 ) -> VpcRouter {
-    objects_post(
+    NexusRequest::objects_post(
         &client,
         format!(
             "/organizations/{}/projects/{}/vpcs/{}/routers",
             &organization_name, &project_name, &vpc_name
         )
         .as_str(),
-        params::VpcRouterCreate {
+        &params::VpcRouterCreate {
             identity: IdentityMetadataCreateParams {
                 name: router_name.parse().unwrap(),
                 description: String::from("router description"),
             },
         },
     )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
     .await
+    .unwrap()
+    .parsed_body()
+    .unwrap()
 }
 
 pub async fn project_get(

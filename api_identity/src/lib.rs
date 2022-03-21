@@ -3,10 +3,8 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 // Copyright 2020 Oxide Computer Company
-/*!
- * This macro is a helper to generate an accessor for the identity of any
- * `api::Object`.
- */
+//! This macro is a helper to generate an accessor for the identity of any
+//! `api::Object`.
 
 extern crate proc_macro;
 
@@ -15,10 +13,8 @@ use quote::quote;
 use syn::Fields;
 use syn::ItemStruct;
 
-/**
- * Generates an "identity()" accessor for any `api::Object` having an `identity`
- * field.
- */
+/// Generates an "identity()" accessor for any `api::Object` having an `identity`
+/// field.
 #[proc_macro_derive(ObjectIdentity)]
 pub fn object_identity(
     item: proc_macro::TokenStream,

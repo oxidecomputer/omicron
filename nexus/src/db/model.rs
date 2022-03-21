@@ -9,12 +9,13 @@ use crate::db::identity::{Asset, Resource};
 use crate::db::schema::{
     console_session, dataset, disk, instance, metric_producer,
     network_interface, organization, oximeter, project, rack, region,
-    role_assignment_builtin, role_builtin, router_route, sled,
+    role_assignment_builtin, role_builtin, router_route, sled, snapshot,
     update_available_artifact, user_builtin, volume, vpc, vpc_firewall_rule,
     vpc_router, vpc_subnet, zpool,
 };
 use crate::defaults;
 use crate::external_api::params;
+use crate::external_api::views;
 use crate::internal_api;
 use chrono::{DateTime, Utc};
 use db_macros::{Asset, Resource};
@@ -33,15 +34,26 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::convert::TryFrom;
 use std::net::IpAddr;
+use std::net::Ipv4Addr;
+use std::net::Ipv6Addr;
 use std::net::SocketAddr;
 use uuid::Uuid;
 
 // TODO: Break up types into multiple files
 
-/// This macro implements serialization and deserialization of an enum type
-/// from our database into our model types.
-/// See [`VpcRouterKindEnum`] and [`VpcRouterKind`] for a sample usage
-macro_rules! impl_enum_type {
+// TODO: The existence of both impl_enum_type and impl_enum_wrapper is a
+// temporary state of affairs while we do the work of converting uses of
+// impl_enum_wrapper to impl_enum_type. This is part of a broader initiative to
+// move types out of the common crate into Nexus where possible. See
+// https://github.com/oxidecomputer/omicron/issues/388
+
+/// This macro implements serialization and deserialization of an enum type from
+/// our database into our model types. This version wraps an enum imported from
+/// the common crate in a struct so we can implement DB traits on it. We are
+/// moving those enum definitions into this file and using impl_enum_type
+/// instead, so eventually this macro will go away. See [`InstanceState`] for a
+/// sample usage.
+macro_rules! impl_enum_wrapper {
     (
         $(#[$enum_meta:meta])*
         pub struct $diesel_type:ident;
@@ -85,6 +97,70 @@ macro_rules! impl_enum_type {
                     $(
                     $sql_value => {
                         Ok($model_type(<$ext_type>::$enum_item))
+                    }
+                    )*
+                    _ => {
+                        Err(concat!("Unrecognized enum variant for ",
+                                stringify!{$model_type})
+                            .into())
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// This macro implements serialization and deserialization of an enum type from
+/// our database into our model types. See [`VpcRouterKindEnum`] and
+/// [`VpcRouterKind`] for a sample usage
+macro_rules! impl_enum_type {
+    (
+        $(#[$enum_meta:meta])*
+        pub struct $diesel_type:ident;
+
+        $(#[$model_meta:meta])*
+        pub enum $model_type:ident;
+        $($enum_item:ident => $sql_value:literal)+
+    ) => {
+
+        $(#[$enum_meta])*
+        pub struct $diesel_type;
+
+        $(#[$model_meta])*
+        pub enum $model_type {
+            $(
+                $enum_item,
+            )*
+        }
+
+        impl<DB> ToSql<$diesel_type, DB> for $model_type
+        where
+            DB: Backend,
+        {
+            fn to_sql<W: std::io::Write>(
+                &self,
+                out: &mut serialize::Output<W, DB>,
+            ) -> serialize::Result {
+                match self {
+                    $(
+                    $model_type::$enum_item => {
+                        out.write_all($sql_value)?
+                    }
+                    )*
+                }
+                Ok(IsNull::No)
+            }
+        }
+
+        impl<DB> FromSql<$diesel_type, DB> for $model_type
+        where
+            DB: Backend + for<'a> BinaryRawValue<'a>,
+        {
+            fn from_sql(bytes: RawValue<DB>) -> deserialize::Result<Self> {
+                match DB::as_bytes(bytes) {
+                    $(
+                    $sql_value => {
+                        Ok($model_type::$enum_item)
                     }
                     )*
                     _ => {
@@ -188,6 +264,12 @@ where
     }
 }
 
+impl From<ByteCount> for sled_agent_client::types::ByteCount {
+    fn from(b: ByteCount) -> Self {
+        Self(b.to_bytes())
+    }
+}
+
 #[derive(
     Copy,
     Clone,
@@ -236,6 +318,12 @@ where
         external::Generation::try_from(i64::from_sql(bytes)?)
             .map(Generation)
             .map_err(|e| e.into())
+    }
+}
+
+impl From<Generation> for sled_agent_client::types::Generation {
+    fn from(g: Generation) -> Self {
+        Self(i64::from(&g.0) as u64)
     }
 }
 
@@ -313,12 +401,35 @@ where
     }
 }
 
+impl From<InstanceCpuCount> for sled_agent_client::types::InstanceCpuCount {
+    fn from(i: InstanceCpuCount) -> Self {
+        Self(i.0 .0)
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, AsExpression, FromSqlRow)]
 #[sql_type = "sql_types::Inet"]
 pub struct Ipv4Net(pub external::Ipv4Net);
 
 NewtypeFrom! { () pub struct Ipv4Net(external::Ipv4Net); }
 NewtypeDeref! { () pub struct Ipv4Net(external::Ipv4Net); }
+
+impl Ipv4Net {
+    /// Check if an address is a valid user-requestable address for this subnet
+    pub fn check_requestable_addr(&self, addr: Ipv4Addr) -> bool {
+        self.contains(addr)
+            && (
+                // First N addresses are reserved
+                self.iter()
+                    .take(defaults::NUM_INITIAL_RESERVED_IP_ADDRESSES)
+                    .all(|this| this != addr)
+            )
+            && (
+                // Last address in the subnet is reserved
+                addr != self.broadcast()
+            )
+    }
+}
 
 impl<DB> ToSql<sql_types::Inet, DB> for Ipv4Net
 where
@@ -404,6 +515,16 @@ impl Ipv6Net {
             .expect("Failed to create random subnet");
         Some(Self(external::Ipv6Net(net)))
     }
+
+    /// Check if an address is a valid user-requestable address for this subnet
+    pub fn check_requestable_addr(&self, addr: Ipv6Addr) -> bool {
+        // Only the first N addresses are reserved
+        self.contains(addr)
+            && self
+                .iter()
+                .take(defaults::NUM_INITIAL_RESERVED_IP_ADDRESSES)
+                .all(|this| this != addr)
+    }
 }
 
 impl<DB> ToSql<sql_types::Inet, DB> for Ipv6Net
@@ -438,9 +559,7 @@ where
 pub struct MacAddr(pub external::MacAddr);
 
 impl MacAddr {
-    /**
-     * Generate a unique MAC address for an interface
-     */
+    /// Generate a unique MAC address for an interface
     pub fn new() -> Result<Self, external::Error> {
         use rand::Fill;
         // Use the Oxide OUI A8 40 25
@@ -588,7 +707,7 @@ impl_enum_type!(
 
     #[derive(Clone, Debug, AsExpression, FromSqlRow, Serialize, Deserialize, PartialEq)]
     #[sql_type = "DatasetKindEnum"]
-    pub struct DatasetKind(pub internal_api::params::DatasetKind);
+    pub enum DatasetKind;
 
     // Enum values
     Crucible => b"crucible"
@@ -598,7 +717,17 @@ impl_enum_type!(
 
 impl From<internal_api::params::DatasetKind> for DatasetKind {
     fn from(k: internal_api::params::DatasetKind) -> Self {
-        Self(k)
+        match k {
+            internal_api::params::DatasetKind::Crucible => {
+                DatasetKind::Crucible
+            }
+            internal_api::params::DatasetKind::Cockroach => {
+                DatasetKind::Cockroach
+            }
+            internal_api::params::DatasetKind::Clickhouse => {
+                DatasetKind::Clickhouse
+            }
+        }
     }
 }
 
@@ -641,7 +770,7 @@ impl Dataset {
         kind: DatasetKind,
     ) -> Self {
         let size_used = match kind {
-            DatasetKind(internal_api::params::DatasetKind::Crucible) => Some(0),
+            DatasetKind::Crucible => Some(0),
             _ => None,
         };
         Self {
@@ -949,6 +1078,28 @@ pub struct InstanceRuntimeState {
     pub hostname: String,
 }
 
+impl From<InstanceRuntimeState>
+    for sled_agent_client::types::InstanceRuntimeState
+{
+    fn from(s: InstanceRuntimeState) -> Self {
+        Self {
+            run_state: s.state.into(),
+            sled_uuid: s.sled_uuid,
+            propolis_uuid: s.propolis_uuid,
+            dst_propolis_uuid: s.dst_propolis_uuid,
+            propolis_addr: s
+                .propolis_ip
+                .map(|ip| SocketAddr::new(ip.ip(), PROPOLIS_PORT).to_string()),
+            migration_uuid: s.migration_uuid,
+            ncpus: s.ncpus.into(),
+            memory: s.memory.into(),
+            hostname: s.hostname,
+            gen: s.gen.into(),
+            time_updated: s.time_updated,
+        }
+    }
+}
+
 /// Conversion to the external API type.
 impl Into<external::InstanceRuntimeState> for InstanceRuntimeState {
     fn into(self) -> external::InstanceRuntimeState {
@@ -999,12 +1150,12 @@ impl Into<internal::nexus::InstanceRuntimeState> for InstanceRuntimeState {
     }
 }
 
-impl_enum_type!(
+impl_enum_wrapper!(
     #[derive(SqlType, Debug)]
     #[postgres(type_name = "instance_state", type_schema = "public")]
     pub struct InstanceStateEnum;
 
-    #[derive(Clone, Debug, AsExpression, FromSqlRow)]
+    #[derive(Clone, Debug, PartialEq, AsExpression, FromSqlRow)]
     #[sql_type = "InstanceStateEnum"]
     pub struct InstanceState(pub external::InstanceState);
 
@@ -1028,6 +1179,25 @@ impl InstanceState {
 
     pub fn state(&self) -> &external::InstanceState {
         &self.0
+    }
+}
+
+impl From<InstanceState> for sled_agent_client::types::InstanceState {
+    fn from(s: InstanceState) -> Self {
+        use external::InstanceState::*;
+        use sled_agent_client::types::InstanceState as Output;
+        match s.0 {
+            Creating => Output::Creating,
+            Starting => Output::Starting,
+            Running => Output::Running,
+            Stopping => Output::Stopping,
+            Stopped => Output::Stopped,
+            Rebooting => Output::Rebooting,
+            Migrating => Output::Migrating,
+            Repairing => Output::Repairing,
+            Failed => Output::Failed,
+            Destroyed => Output::Destroyed,
+        }
     }
 }
 
@@ -1231,6 +1401,40 @@ impl Into<external::DiskState> for DiskState {
     }
 }
 
+#[derive(
+    Queryable,
+    Insertable,
+    Selectable,
+    Clone,
+    Debug,
+    Resource,
+    Serialize,
+    Deserialize,
+)]
+#[table_name = "snapshot"]
+pub struct Snapshot {
+    #[diesel(embed)]
+    identity: SnapshotIdentity,
+
+    project_id: Uuid,
+    disk_id: Uuid,
+    volume_id: Uuid,
+
+    #[column_name = "size_bytes"]
+    pub size: ByteCount,
+}
+
+impl From<Snapshot> for views::Snapshot {
+    fn from(snapshot: Snapshot) -> Self {
+        Self {
+            identity: snapshot.identity(),
+            project_id: snapshot.project_id,
+            disk_id: snapshot.disk_id,
+            size: snapshot.size.into(),
+        }
+    }
+}
+
 /// Information announced by a metric server, used so that clients can contact it and collect
 /// available metric data from it.
 #[derive(Queryable, Insertable, Debug, Clone, Selectable, Asset)]
@@ -1413,29 +1617,29 @@ impl VpcSubnet {
     ///
     /// - The subnet has an allocated block of the same version as the address
     /// - The allocated block contains the address.
-    pub fn contains(&self, addr: IpAddr) -> Result<(), external::Error> {
-        match addr {
+    /// - The address is not reserved.
+    pub fn check_requestable_addr(
+        &self,
+        addr: IpAddr,
+    ) -> Result<(), external::Error> {
+        let subnet = match addr {
             IpAddr::V4(addr) => {
-                if self.ipv4_block.contains(addr) {
-                    Ok(())
-                } else {
-                    Err(external::Error::invalid_request(&format!(
-                        "Address '{}' not in IPv4 subnet '{}'",
-                        addr, self.ipv4_block.0,
-                    )))
+                if self.ipv4_block.check_requestable_addr(addr) {
+                    return Ok(());
                 }
+                ipnetwork::IpNetwork::V4(self.ipv4_block.0 .0)
             }
             IpAddr::V6(addr) => {
-                if self.ipv6_block.contains(addr) {
-                    Ok(())
-                } else {
-                    Err(external::Error::invalid_request(&format!(
-                        "Address '{}' not in IPv6 subnet '{}'",
-                        addr, self.ipv6_block.0,
-                    )))
+                if self.ipv6_block.check_requestable_addr(addr) {
+                    return Ok(());
                 }
+                ipnetwork::IpNetwork::V6(self.ipv6_block.0 .0)
             }
-        }
+        };
+        Err(external::Error::invalid_request(&format!(
+            "Address '{}' not in subnet '{}' or is reserved for rack services",
+            addr, subnet,
+        )))
     }
 }
 
@@ -1466,9 +1670,9 @@ impl_enum_type!(
     #[postgres(type_name = "vpc_router_kind", type_schema = "public")]
     pub struct VpcRouterKindEnum;
 
-    #[derive(Clone, Debug, AsExpression, FromSqlRow)]
+    #[derive(Clone, Copy, Debug, AsExpression, FromSqlRow, PartialEq)]
     #[sql_type = "VpcRouterKindEnum"]
-    pub struct VpcRouterKind(pub external::VpcRouterKind);
+    pub enum VpcRouterKind;
 
     // Enum values
     System => b"system"
@@ -1490,16 +1694,11 @@ impl VpcRouter {
     pub fn new(
         router_id: Uuid,
         vpc_id: Uuid,
-        kind: external::VpcRouterKind,
+        kind: VpcRouterKind,
         params: params::VpcRouterCreate,
     ) -> Self {
         let identity = VpcRouterIdentity::new(router_id, params.identity);
-        Self {
-            identity,
-            vpc_id,
-            kind: VpcRouterKind(kind),
-            rcgen: Generation::new(),
-        }
+        Self { identity, vpc_id, kind, rcgen: Generation::new() }
     }
 }
 
@@ -1508,16 +1707,6 @@ impl DatastoreCollection<RouterRoute> for VpcRouter {
     type GenerationNumberColumn = vpc_router::dsl::rcgen;
     type CollectionTimeDeletedColumn = vpc_router::dsl::time_deleted;
     type CollectionIdColumn = router_route::dsl::router_id;
-}
-
-impl Into<external::VpcRouter> for VpcRouter {
-    fn into(self) -> external::VpcRouter {
-        external::VpcRouter {
-            identity: self.identity(),
-            vpc_id: self.vpc_id,
-            kind: self.kind.0,
-        }
-    }
 }
 
 #[derive(AsChangeset)]
@@ -1538,7 +1727,7 @@ impl From<params::VpcRouterUpdate> for VpcRouterUpdate {
     }
 }
 
-impl_enum_type!(
+impl_enum_wrapper!(
     #[derive(SqlType, Debug)]
     #[postgres(type_name = "router_route_kind", type_schema = "public")]
     pub struct RouterRouteKindEnum;
@@ -1686,7 +1875,7 @@ impl From<external::RouterRouteUpdateParams> for RouterRouteUpdate {
     }
 }
 
-impl_enum_type!(
+impl_enum_wrapper!(
     #[derive(SqlType, Debug)]
     #[postgres(type_name = "vpc_firewall_rule_status", type_schema = "public")]
     pub struct VpcFirewallRuleStatusEnum;
@@ -1701,7 +1890,7 @@ impl_enum_type!(
 NewtypeFrom! { () pub struct VpcFirewallRuleStatus(external::VpcFirewallRuleStatus); }
 NewtypeDeref! { () pub struct VpcFirewallRuleStatus(external::VpcFirewallRuleStatus); }
 
-impl_enum_type!(
+impl_enum_wrapper!(
     #[derive(SqlType, Debug)]
     #[postgres(type_name = "vpc_firewall_rule_direction", type_schema = "public")]
     pub struct VpcFirewallRuleDirectionEnum;
@@ -1716,7 +1905,7 @@ impl_enum_type!(
 NewtypeFrom! { () pub struct VpcFirewallRuleDirection(external::VpcFirewallRuleDirection); }
 NewtypeDeref! { () pub struct VpcFirewallRuleDirection(external::VpcFirewallRuleDirection); }
 
-impl_enum_type!(
+impl_enum_wrapper!(
     #[derive(SqlType, Debug)]
     #[postgres(type_name = "vpc_firewall_rule_action", type_schema = "public")]
     pub struct VpcFirewallRuleActionEnum;
@@ -1731,7 +1920,7 @@ impl_enum_type!(
 NewtypeFrom! { () pub struct VpcFirewallRuleAction(external::VpcFirewallRuleAction); }
 NewtypeDeref! { () pub struct VpcFirewallRuleAction(external::VpcFirewallRuleAction); }
 
-impl_enum_type!(
+impl_enum_wrapper!(
     #[derive(SqlType, Debug)]
     #[postgres(type_name = "vpc_firewall_rule_protocol", type_schema = "public")]
     pub struct VpcFirewallRuleProtocolEnum;
@@ -2005,12 +2194,14 @@ impl IncompleteNetworkInterface {
         vpc_id: Uuid,
         subnet: VpcSubnet,
         mac: MacAddr,
+        identity: external::IdentityMetadataCreateParams,
         ip: Option<std::net::IpAddr>,
-        params: params::NetworkInterfaceCreate,
-    ) -> Self {
-        let identity =
-            NetworkInterfaceIdentity::new(interface_id, params.identity);
-        Self { identity, instance_id, subnet, vpc_id, mac, ip }
+    ) -> Result<Self, external::Error> {
+        if let Some(ip) = ip {
+            subnet.check_requestable_addr(ip)?;
+        };
+        let identity = NetworkInterfaceIdentity::new(interface_id, identity);
+        Ok(Self { identity, instance_id, subnet, vpc_id, mac, ip })
     }
 }
 
@@ -2025,6 +2216,11 @@ pub struct NetworkInterface {
     pub subnet_id: Uuid,
     pub mac: MacAddr,
     pub ip: ipnetwork::IpNetwork,
+    // TODO-correctness: We need to split this into an optional V4 and optional V6 address, at
+    // least one of which will always be specified.
+    //
+    // If user requests an address of either kind, give exactly that and not the other.
+    // If neither is specified, auto-assign one of each?
 }
 
 impl From<NetworkInterface> for external::NetworkInterface {
@@ -2124,7 +2320,7 @@ impl RoleAssignmentBuiltin {
     }
 }
 
-impl_enum_type!(
+impl_enum_wrapper!(
     #[derive(SqlType, Debug, QueryId)]
     #[postgres(type_name = "update_artifact_kind", type_schema = "public")]
     pub struct UpdateArtifactKindEnum;
@@ -2173,7 +2369,7 @@ mod tests {
     use std::net::Ipv6Addr;
 
     #[test]
-    fn test_vpc_subnet_contains() {
+    fn test_vpc_subnet_check_requestable_addr() {
         let ipv4_block =
             Ipv4Net("192.168.0.0/16".parse::<Ipv4Network>().unwrap());
         let ipv6_block = Ipv6Net("fd00::/48".parse::<Ipv6Network>().unwrap());
@@ -2181,27 +2377,54 @@ mod tests {
             name: "net-test-vpc".parse().unwrap(),
             description: "A test VPC".parse().unwrap(),
         };
-        let vpc = VpcSubnet::new(
+        let subnet = VpcSubnet::new(
             Uuid::new_v4(),
             Uuid::new_v4(),
             identity,
             ipv4_block,
             ipv6_block,
         );
-        assert!(vpc
-            .contains(IpAddr::from(Ipv4Addr::new(192, 168, 1, 1)))
-            .is_ok());
-        assert!(vpc
-            .contains(IpAddr::from(Ipv4Addr::new(192, 160, 1, 1)))
-            .is_err());
-        assert!(vpc
-            .contains(IpAddr::from(Ipv6Addr::new(
-                0xfd00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01
+        // Within subnet
+        assert!(subnet
+            .check_requestable_addr(IpAddr::from(Ipv4Addr::new(
+                192, 168, 1, 10
             )))
             .is_ok());
-        assert!(vpc
-            .contains(IpAddr::from(Ipv6Addr::new(
-                0xfc00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01
+        // Network address is reserved
+        assert!(subnet
+            .check_requestable_addr(IpAddr::from(Ipv4Addr::new(192, 168, 0, 0)))
+            .is_err());
+        // Broadcast address is reserved
+        assert!(subnet
+            .check_requestable_addr(IpAddr::from(Ipv4Addr::new(
+                192, 168, 255, 255
+            )))
+            .is_err());
+        // Within subnet, but reserved
+        assert!(subnet
+            .check_requestable_addr(IpAddr::from(Ipv4Addr::new(192, 168, 0, 1)))
+            .is_err());
+        // Not within subnet
+        assert!(subnet
+            .check_requestable_addr(IpAddr::from(Ipv4Addr::new(192, 160, 1, 1)))
+            .is_err());
+
+        // Within subnet
+        assert!(subnet
+            .check_requestable_addr(IpAddr::from(Ipv6Addr::new(
+                0xfd00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x10
+            )))
+            .is_ok());
+        // Within subnet, but reserved
+        assert!(subnet
+            .check_requestable_addr(IpAddr::from(Ipv6Addr::new(
+                0xfd00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01
+            )))
+            .is_err());
+        // Not within subnet
+        assert!(subnet
+            .check_requestable_addr(IpAddr::from(Ipv6Addr::new(
+                0xfc00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x10
             )))
             .is_err());
     }
@@ -2237,5 +2460,22 @@ mod tests {
             "random_subnet should generate an actual subnet"
         );
         assert_eq!(base.random_subnet(base.prefix()), Some(base));
+    }
+
+    #[test]
+    fn test_ip_subnet_check_requestable_address() {
+        let subnet = super::Ipv4Net(Ipv4Net("192.168.0.0/16".parse().unwrap()));
+        assert!(subnet.check_requestable_addr("192.168.0.10".parse().unwrap()));
+        assert!(subnet.check_requestable_addr("192.168.1.0".parse().unwrap()));
+        assert!(!subnet.check_requestable_addr("192.168.0.0".parse().unwrap()));
+        assert!(subnet.check_requestable_addr("192.168.0.255".parse().unwrap()));
+        assert!(
+            !subnet.check_requestable_addr("192.168.255.255".parse().unwrap())
+        );
+
+        let subnet = super::Ipv6Net(Ipv6Net("fd00::/64".parse().unwrap()));
+        assert!(subnet.check_requestable_addr("fd00::a".parse().unwrap()));
+        assert!(!subnet.check_requestable_addr("fd00::1".parse().unwrap()));
+        assert!(subnet.check_requestable_addr("fd00::1:1".parse().unwrap()));
     }
 }

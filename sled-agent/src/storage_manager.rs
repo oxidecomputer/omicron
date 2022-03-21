@@ -12,12 +12,12 @@ use crate::illumos::zone::AddressRequest;
 use crate::illumos::zpool::ZpoolName;
 use crate::illumos::{zfs::Mountpoint, zone::ZONE_PREFIX, zpool::ZpoolInfo};
 use crate::nexus::NexusClient;
+use crate::params::DatasetKind;
 use futures::stream::FuturesOrdered;
 use futures::FutureExt;
 use futures::StreamExt;
 use nexus_client::types::{DatasetPutRequest, ZpoolPutRequest};
 use omicron_common::api::external::{ByteCount, ByteCountRangeError};
-use omicron_common::api::internal::sled_agent::DatasetKind;
 use omicron_common::backoff;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -672,7 +672,8 @@ impl StorageWorker {
             .initialize_dataset_and_zone(
                 pool,
                 &dataset_info,
-                /* do_format= */ true,
+                // do_format=
+                true,
             )
             .await?;
 
@@ -714,7 +715,8 @@ impl StorageWorker {
         self.initialize_dataset_and_zone(
             pool,
             &dataset_info,
-            /* do_format= */ false,
+            // do_format=
+            false,
         )
         .await?;
 

@@ -2,16 +2,12 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-/*!
- * Interfaces for working with bootstrap agent configuration
- */
+//! Interfaces for working with bootstrap agent configuration
 
 use crate::config::ConfigError;
+use crate::params::{DatasetEnsureBody, ServiceRequest};
 use dropshot::ConfigDropshot;
 use dropshot::ConfigLogging;
-use omicron_common::api::internal::sled_agent::{
-    DatasetEnsureBody, ServiceRequest,
-};
 use serde::Deserialize;
 use serde::Serialize;
 use std::net::SocketAddr;

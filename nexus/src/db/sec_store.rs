@@ -2,9 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-/*!
- * Implementation of [`steno::SecStore`] backed by Omicron's database
- */
+//! Implementation of [`steno::SecStore`] backed by Omicron's database
 
 use crate::db::{self, model::Generation};
 use anyhow::Context;
@@ -14,10 +12,8 @@ use std::fmt;
 use std::sync::Arc;
 use steno::SagaId;
 
-/**
- * Implementation of [`steno::SecStore`] backed by the Omicron CockroachDB
- * database.
- */
+/// Implementation of [`steno::SecStore`] backed by the Omicron CockroachDB
+/// database.
 pub struct CockroachDbSecStore {
     sec_id: db::SecId,
     datastore: Arc<db::DataStore>,
@@ -64,28 +60,22 @@ impl steno::SecStore for CockroachDbSecStore {
         );
         let our_event = db::saga_types::SagaNodeEvent::new(event, self.sec_id);
 
-        /*
-         * TODO-robustness This should be wrapped with a retry loop rather than
-         * unwrapping the result.
-         */
+        // TODO-robustness This should be wrapped with a retry loop rather than
+        // unwrapping the result.
         self.datastore.saga_create_event(&our_event).await.unwrap();
     }
 
     async fn saga_update(&self, id: SagaId, update: steno::SagaCachedState) {
-        /*
-         * TODO-robustness We should track the current generation of the saga
-         * and use it.  We'll know this either from when it was created or when
-         * it was recovered.
-         */
+        // TODO-robustness We should track the current generation of the saga
+        // and use it.  We'll know this either from when it was created or when
+        // it was recovered.
         info!(&self.log, "updating state";
             "saga_id" => id.to_string(),
             "new_state" => update.to_string()
         );
 
-        /*
-         * TODO-robustness This should be wrapped with a retry loop rather than
-         * unwrapping the result.
-         */
+        // TODO-robustness This should be wrapped with a retry loop rather than
+        // unwrapping the result.
         self.datastore
             .saga_update_state(id, update, self.sec_id, Generation::new())
             .await

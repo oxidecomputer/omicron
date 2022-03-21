@@ -2,30 +2,25 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-/*!
- * Simulated sled agent implementation
- */
+//! Simulated sled agent implementation
 
 use super::simulatable::Simulatable;
 
 use crate::nexus::NexusClient;
+use crate::params::{InstanceRuntimeStateRequested, InstanceStateRequested};
 use async_trait::async_trait;
 use nexus_client;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::Generation;
 use omicron_common::api::external::InstanceState;
 use omicron_common::api::internal::nexus::InstanceRuntimeState;
-use omicron_common::api::internal::sled_agent::InstanceRuntimeStateRequested;
-use omicron_common::api::internal::sled_agent::InstanceStateRequested;
 use propolis_client::api::InstanceState as PropolisInstanceState;
 use std::sync::Arc;
 use uuid::Uuid;
 
 use crate::common::instance::{Action as InstanceAction, InstanceStates};
 
-/**
- * Simulated Instance (virtual machine), as created by the external Oxide API
- */
+/// Simulated Instance (virtual machine), as created by the external Oxide API
 #[derive(Debug)]
 pub struct SimInstance {
     state: InstanceStates,

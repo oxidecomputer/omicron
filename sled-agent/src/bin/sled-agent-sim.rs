@@ -2,13 +2,9 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-/*!
- * Executable program to run a simulated sled agent
- */
+//! Executable program to run a simulated sled agent
 
-/*
- * TODO see the TODO for nexus.
- */
+// TODO see the TODO for nexus.
 
 use dropshot::ConfigDropshot;
 use dropshot::ConfigLogging;
@@ -72,6 +68,7 @@ async fn do_run() -> Result<(), CmdError> {
         nexus_address: args.nexus_addr,
         dropshot: ConfigDropshot {
             bind_address: args.sled_agent_addr,
+            request_body_max_bytes: 2048,
             ..Default::default()
         },
         log: ConfigLogging::StderrTerminal { level: ConfigLoggingLevel::Info },

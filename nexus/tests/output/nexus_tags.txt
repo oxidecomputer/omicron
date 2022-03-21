@@ -21,6 +21,10 @@ OPERATION ID                             URL PATH
 instance_disks_attach                    /organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/disks/attach
 instance_disks_detach                    /organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/disks/detach
 instance_disks_get                       /organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/disks
+instance_network_interfaces_delete_interface /organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/network-interfaces/{interface_name}
+instance_network_interfaces_get          /organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/network-interfaces
+instance_network_interfaces_get_interface /organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/network-interfaces/{interface_name}
+instance_network_interfaces_post         /organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/network-interfaces
 project_instances_delete_instance        /organizations/{organization_name}/projects/{project_name}/instances/{instance_name}
 project_instances_get                    /organizations/{organization_name}/projects/{project_name}/instances
 project_instances_get_instance           /organizations/{organization_name}/projects/{project_name}/instances/{instance_name}
@@ -86,9 +90,16 @@ OPERATION ID                             URL PATH
 hardware_sleds_get                       /hardware/sleds
 hardware_sleds_get_sled                  /hardware/sleds/{sled_id}
 
+API operations found with tag "snapshots"
+OPERATION ID                             URL PATH
+project_snapshots_delete_snapshot        /organizations/{organization_name}/projects/{project_name}/snapshots/{snapshot_name}
+project_snapshots_get                    /organizations/{organization_name}/projects/{project_name}/snapshots
+project_snapshots_get_snapshot           /organizations/{organization_name}/projects/{project_name}/snapshots/{snapshot_name}
+project_snapshots_post                   /organizations/{organization_name}/projects/{project_name}/snapshots
+
 API operations found with tag "subnets"
 OPERATION ID                             URL PATH
-subnets_ips_get                          /organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/subnets/{subnet_name}/ips
+subnet_network_interfaces_get            /organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/subnets/{subnet_name}/network-interfaces
 vpc_subnets_delete_subnet                /organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/subnets/{subnet_name}
 vpc_subnets_get                          /organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/subnets
 vpc_subnets_get_subnet                   /organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/subnets/{subnet_name}

@@ -2,12 +2,8 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-/*!
- * Interface for making API requests to the Oxide control plane at large
- * from within the control plane
- */
-
-use std::convert::TryFrom;
+//! Interface for making API requests to the Oxide control plane at large
+//! from within the control plane
 
 use omicron_common::generate_logging_api;
 
@@ -16,12 +12,6 @@ generate_logging_api!("../openapi/nexus-internal.json");
 impl omicron_common::api::external::ClientError for types::Error {
     fn message(&self) -> String {
         self.message.clone()
-    }
-}
-
-impl From<types::Generation> for omicron_common::api::external::Generation {
-    fn from(s: types::Generation) -> Self {
-        Self::try_from(s.0 as i64).unwrap()
     }
 }
 
@@ -64,19 +54,6 @@ impl From<types::InstanceState>
     }
 }
 
-impl From<omicron_common::api::internal::sled_agent::DatasetKind>
-    for types::DatasetKind
-{
-    fn from(d: omicron_common::api::internal::sled_agent::DatasetKind) -> Self {
-        use omicron_common::api::internal::sled_agent::DatasetKind::*;
-        match d {
-            CockroachDb { .. } => types::DatasetKind::Cockroach,
-            Crucible { .. } => types::DatasetKind::Crucible,
-            Clickhouse { .. } => types::DatasetKind::Clickhouse,
-        }
-    }
-}
-
 impl From<omicron_common::api::internal::nexus::InstanceRuntimeState>
     for types::InstanceRuntimeState
 {
@@ -99,63 +76,22 @@ impl From<omicron_common::api::internal::nexus::InstanceRuntimeState>
     }
 }
 
-impl From<&omicron_common::api::internal::nexus::InstanceRuntimeState>
-    for types::InstanceRuntimeState
-{
-    fn from(
-        s: &omicron_common::api::internal::nexus::InstanceRuntimeState,
-    ) -> Self {
-        Self {
-            run_state: s.run_state.into(),
-            sled_uuid: s.sled_uuid,
-            propolis_uuid: s.propolis_uuid,
-            dst_propolis_uuid: s.dst_propolis_uuid,
-            propolis_addr: s.propolis_addr.map(|addr| addr.to_string()),
-            migration_uuid: s.migration_uuid,
-            ncpus: s.ncpus.into(),
-            memory: s.memory.into(),
-            hostname: s.hostname.clone(),
-            gen: s.gen.into(),
-            time_updated: s.time_updated,
-        }
-    }
-}
-
 impl From<omicron_common::api::external::InstanceState>
     for types::InstanceState
 {
     fn from(s: omicron_common::api::external::InstanceState) -> Self {
+        use omicron_common::api::external::InstanceState;
         match s {
-            omicron_common::api::external::InstanceState::Creating => {
-                Self::Creating
-            }
-            omicron_common::api::external::InstanceState::Starting => {
-                Self::Starting
-            }
-            omicron_common::api::external::InstanceState::Running => {
-                Self::Running
-            }
-            omicron_common::api::external::InstanceState::Stopping => {
-                Self::Stopping
-            }
-            omicron_common::api::external::InstanceState::Stopped => {
-                Self::Stopped
-            }
-            omicron_common::api::external::InstanceState::Rebooting => {
-                Self::Rebooting
-            }
-            omicron_common::api::external::InstanceState::Migrating => {
-                Self::Migrating
-            }
-            omicron_common::api::external::InstanceState::Repairing => {
-                Self::Repairing
-            }
-            omicron_common::api::external::InstanceState::Failed => {
-                Self::Failed
-            }
-            omicron_common::api::external::InstanceState::Destroyed => {
-                Self::Destroyed
-            }
+            InstanceState::Creating => Self::Creating,
+            InstanceState::Starting => Self::Starting,
+            InstanceState::Running => Self::Running,
+            InstanceState::Stopping => Self::Stopping,
+            InstanceState::Stopped => Self::Stopped,
+            InstanceState::Rebooting => Self::Rebooting,
+            InstanceState::Migrating => Self::Migrating,
+            InstanceState::Repairing => Self::Repairing,
+            InstanceState::Failed => Self::Failed,
+            InstanceState::Destroyed => Self::Destroyed,
         }
     }
 }
@@ -188,26 +124,15 @@ impl From<omicron_common::api::internal::nexus::DiskRuntimeState>
 
 impl From<omicron_common::api::external::DiskState> for types::DiskState {
     fn from(s: omicron_common::api::external::DiskState) -> Self {
+        use omicron_common::api::external::DiskState;
         match s {
-            omicron_common::api::external::DiskState::Creating => {
-                Self::Creating
-            }
-            omicron_common::api::external::DiskState::Detached => {
-                Self::Detached
-            }
-            omicron_common::api::external::DiskState::Attaching(u) => {
-                Self::Attaching(u)
-            }
-            omicron_common::api::external::DiskState::Attached(u) => {
-                Self::Attached(u)
-            }
-            omicron_common::api::external::DiskState::Detaching(u) => {
-                Self::Detaching(u)
-            }
-            omicron_common::api::external::DiskState::Destroyed => {
-                Self::Destroyed
-            }
-            omicron_common::api::external::DiskState::Faulted => Self::Faulted,
+            DiskState::Creating => Self::Creating,
+            DiskState::Detached => Self::Detached,
+            DiskState::Attaching(u) => Self::Attaching(u),
+            DiskState::Attached(u) => Self::Attached(u),
+            DiskState::Detaching(u) => Self::Detaching(u),
+            DiskState::Destroyed => Self::Destroyed,
+            DiskState::Faulted => Self::Faulted,
         }
     }
 }

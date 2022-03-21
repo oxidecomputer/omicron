@@ -2,10 +2,8 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-/*!
- * Facilities intended for development tools and the test suite.  These should
- * not be used in production code.
- */
+//! Facilities intended for development tools and the test suite.  These should
+//! not be used in production code.
 
 pub mod clickhouse;
 pub mod db;
@@ -58,13 +56,11 @@ fn copy_dir(
     Ok(())
 }
 
-/**
- * Set up a [`dropshot::test_util::LogContext`] appropriate for a test named
- * `test_name`
- *
- * This function is currently only used by unit tests.  (We want the dead code
- * warning if it's removed from unit tests, but not during a normal build.)
- */
+/// Set up a [`dropshot::test_util::LogContext`] appropriate for a test named
+/// `test_name`
+///
+/// This function is currently only used by unit tests.  (We want the dead code
+/// warning if it's removed from unit tests, but not during a normal build.)
 pub fn test_setup_log(test_name: &str) -> LogContext {
     let log_config = ConfigLogging::File {
         level: ConfigLoggingLevel::Debug,
@@ -157,13 +153,9 @@ async fn setup_database(
     database
 }
 
-/**
- * Returns whether the given process is currently running
- */
+/// Returns whether the given process is currently running
 pub fn process_running(pid: u32) -> bool {
-    /*
-     * It should be okay to invoke this syscall with these arguments.  This
-     * only checks whether the process is running.
-     */
+    // It should be okay to invoke this syscall with these arguments.  This
+    // only checks whether the process is running.
     0 == (unsafe { libc::kill(pid as libc::pid_t, 0) })
 }

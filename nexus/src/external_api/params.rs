@@ -2,9 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-/*!
- * Params define the request bodies of API endpoints for creating or updating resources.
- */
+//! Params define the request bodies of API endpoints for creating or updating resources.
 
 use omicron_common::api::external::{
     ByteCount, IdentityMetadataCreateParams, IdentityMetadataUpdateParams,
@@ -12,97 +10,124 @@ use omicron_common::api::external::{
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use std::net::IpAddr;
 use uuid::Uuid;
 
-/*
- * ORGANIZATIONS
- */
+// ORGANIZATIONS
 
-/**
- * Create-time parameters for an [`Organization`](crate::external_api::views::Organization)
- */
+/// Create-time parameters for an [`Organization`](crate::external_api::views::Organization)
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct OrganizationCreate {
     #[serde(flatten)]
     pub identity: IdentityMetadataCreateParams,
 }
 
-/**
- * Updateable properties of an [`Organization`](crate::external_api::views::Organization)
- */
+/// Updateable properties of an [`Organization`](crate::external_api::views::Organization)
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct OrganizationUpdate {
     #[serde(flatten)]
     pub identity: IdentityMetadataUpdateParams,
 }
 
-/*
- * PROJECTS
- */
+// PROJECTS
 
-/**
- * Create-time parameters for a [`Project`](crate::external_api::views::Project)
- */
+/// Create-time parameters for a [`Project`](crate::external_api::views::Project)
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct ProjectCreate {
     #[serde(flatten)]
     pub identity: IdentityMetadataCreateParams,
 }
 
-/**
- * Updateable properties of a [`Project`](crate::external_api::views::Project)
- */
+/// Updateable properties of a [`Project`](crate::external_api::views::Project)
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct ProjectUpdate {
     #[serde(flatten)]
     pub identity: IdentityMetadataUpdateParams,
 }
 
-/*
- * NETWORK INTERFACES
- */
+// NETWORK INTERFACES
 
-/**
- * Create-time parameters for a
- * [`NetworkInterface`](omicron_common::api::external::NetworkInterface)
- */
+/// Create-time parameters for a
+/// [`NetworkInterface`](omicron_common::api::external::NetworkInterface)
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct NetworkInterfaceCreate {
     #[serde(flatten)]
     pub identity: IdentityMetadataCreateParams,
+    /// The VPC in which to create the interface.
+    pub vpc_name: Name,
+    /// The VPC Subnet in which to create the interface.
+    pub subnet_name: Name,
+    /// The IP address for the interface. One will be auto-assigned if not provided.
+    pub ip: Option<IpAddr>,
 }
 
-/*
- * INSTANCES
- */
+// INSTANCES
 
-/**
- * Create-time parameters for an [`Instance`](omicron_common::api::external::Instance)
- */
+/// Describes an attachment of a `NetworkInterface` to an `Instance`, at the
+/// time the instance is created.
+// NOTE: VPC's are an organizing concept for networking resources, not for
+// instances. It's true that all networking resources for an instance must
+// belong to a single VPC, but we don't consider instances to be "scoped" to a
+// VPC in the same way that they are scoped to projects, for example.
+//
+// This is slightly different than some other cloud providers, such as AWS,
+// which use VPCs as both a networking concept, and a container more similar to
+// our concept of a project. One example for why this is useful is that "moving"
+// an instance to a new VPC can be done by detaching any interfaces in the
+// original VPC and attaching interfaces in the new VPC.
+//
+// This type then requires the VPC identifiers, exactly because instances are
+// _not_ scoped to a VPC, and so the VPC and/or VPC Subnet names are not present
+// in the path of endpoints handling instance operations.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(tag = "type", content = "params")]
+pub enum InstanceNetworkInterfaceAttachment {
+    /// Create one or more `NetworkInterface`s for the `Instance`
+    Create(InstanceNetworkInterfaceCreate),
+
+    /// Default networking setup, which creates a single interface with an
+    /// auto-assigned IP address from project's "default" VPC and "default" VPC
+    /// Subnet.
+    Default,
+
+    /// No network interfaces at all will be created for the instance.
+    None,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct InstanceNetworkInterfaceCreate {
+    pub params: Vec<NetworkInterfaceCreate>,
+}
+
+impl Default for InstanceNetworkInterfaceAttachment {
+    fn default() -> Self {
+        Self::Default
+    }
+}
+
+/// Create-time parameters for an [`Instance`](omicron_common::api::external::Instance)
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct InstanceCreate {
     #[serde(flatten)]
     pub identity: IdentityMetadataCreateParams,
     pub ncpus: InstanceCpuCount,
     pub memory: ByteCount,
-    pub hostname: String, /* TODO-cleanup different type? */
+    pub hostname: String, // TODO-cleanup different type?
+
+    /// The network interfaces to be created for this instance.
+    #[serde(default)]
+    pub network_interfaces: InstanceNetworkInterfaceAttachment,
 }
 
-/**
- * Migration parameters for an [`Instance`](omicron_common::api::external::Instance)
- */
+/// Migration parameters for an [`Instance`](omicron_common::api::external::Instance)
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct InstanceMigrate {
     pub dst_sled_uuid: Uuid,
 }
 
-/*
- * VPCS
- */
+// VPCS
 
-/**
- * Create-time parameters for a [`Vpc`](crate::external_api::views::Vpc)
- */
+/// Create-time parameters for a [`Vpc`](crate::external_api::views::Vpc)
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct VpcCreate {
     #[serde(flatten)]
@@ -118,9 +143,7 @@ pub struct VpcCreate {
     pub dns_name: Name,
 }
 
-/**
- * Updateable properties of a [`Vpc`](crate::external_api::views::Vpc)
- */
+/// Updateable properties of a [`Vpc`](crate::external_api::views::Vpc)
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct VpcUpdate {
     #[serde(flatten)]
@@ -128,9 +151,7 @@ pub struct VpcUpdate {
     pub dns_name: Option<Name>,
 }
 
-/**
- * Create-time parameters for a [`VpcSubnet`](crate::external_api::views::VpcSubnet)
- */
+/// Create-time parameters for a [`VpcSubnet`](crate::external_api::views::VpcSubnet)
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct VpcSubnetCreate {
     #[serde(flatten)]
@@ -151,52 +172,45 @@ pub struct VpcSubnetCreate {
     pub ipv6_block: Option<Ipv6Net>,
 }
 
-/**
- * Updateable properties of a [`VpcSubnet`](crate::external_api::views::VpcSubnet)
- */
+/// Updateable properties of a [`VpcSubnet`](crate::external_api::views::VpcSubnet)
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct VpcSubnetUpdate {
     #[serde(flatten)]
     pub identity: IdentityMetadataUpdateParams,
-    // TODO-correctness: It seems fraught to allow changing these, since it can
-    // invalidate arbitrary sub-resources (e.g., network interfaces).
+    // TODO-correctness: These need to be removed. Changing these is effectively
+    // creating a new resource, so we should require explicit
+    // deletion/recreation by the client.
     pub ipv4_block: Option<Ipv4Net>,
     pub ipv6_block: Option<Ipv6Net>,
 }
 
-/*
- * VPC ROUTERS
- */
+// VPC ROUTERS
 
-/// Create-time parameters for a [`VpcRouter`](omicron_common::api::external::VpcRouter)
+/// Create-time parameters for a [`VpcRouter`](crate::external_api::views::VpcRouter)
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct VpcRouterCreate {
     #[serde(flatten)]
     pub identity: IdentityMetadataCreateParams,
 }
 
-/// Updateable properties of a [`VpcRouter`](omicron_common::api::external::VpcRouter)
+/// Updateable properties of a [`VpcRouter`](crate::external_api::views::VpcRouter)
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct VpcRouterUpdate {
     #[serde(flatten)]
     pub identity: IdentityMetadataUpdateParams,
 }
 
-/*
- * DISKS
- */
+// DISKS
 
-/**
- * Create-time parameters for a [`Disk`](omicron_common::api::external::Disk)
- */
+/// Create-time parameters for a [`Disk`](omicron_common::api::external::Disk)
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct DiskCreate {
-    /** common identifying metadata */
+    /// common identifying metadata
     #[serde(flatten)]
     pub identity: IdentityMetadataCreateParams,
-    /** id for snapshot from which the Disk should be created, if any */
-    pub snapshot_id: Option<Uuid>, /* TODO should be a name? */
-    /** size of the Disk */
+    /// id for snapshot from which the Disk should be created, if any
+    pub snapshot_id: Option<Uuid>, // TODO should be a name?
+    /// size of the Disk
     pub size: ByteCount,
 }
 
@@ -220,26 +234,41 @@ impl DiskCreate {
     }
 }
 
-/**
- * Parameters for the [`Disk`](omicron_common::api::external::Disk) to be
- * attached or detached to an instance
- */
+/// Parameters for the [`Disk`](omicron_common::api::external::Disk) to be
+/// attached or detached to an instance
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct DiskIdentifier {
     pub disk: Name,
 }
 
-/*
- * BUILT-IN USERS
- *
- * These cannot be created via the external API, but we use the same interfaces
- * for creating them internally as we use for types that can be created in the
- * external API.
- */
+/// Parameters for the
+/// [`NetworkInterface`](omicron_common::api::external::NetworkInterface) to be
+/// attached or detached to an instance.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct NetworkInterfaceIdentifier {
+    pub interface_name: Name,
+}
 
-/**
- * Create-time parameters for a [`UserBuiltin`](crate::db::model::UserBuiltin)
- */
+// SNAPSHOTS
+
+/// Create-time parameters for a [`Snapshot`](omicron_common::api::external::Snapshot)
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct SnapshotCreate {
+    /// common identifying metadata
+    #[serde(flatten)]
+    pub identity: IdentityMetadataCreateParams,
+
+    /// The name of the disk to be snapshotted
+    pub disk: Name,
+}
+
+// BUILT-IN USERS
+//
+// These cannot be created via the external API, but we use the same interfaces
+// for creating them internally as we use for types that can be created in the
+// external API.
+
+/// Create-time parameters for a [`UserBuiltin`](crate::db::model::UserBuiltin)
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct UserBuiltinCreate {
     #[serde(flatten)]

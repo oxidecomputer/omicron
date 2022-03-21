@@ -5,10 +5,11 @@
 mod config;
 mod context;
 mod error;
-mod http_entrypoints;
+pub mod http_entrypoints; // TODO pub only for testing - is this right?
 mod sp_comms;
 
 pub use config::Config;
+pub use config::KnownSps;
 pub use context::ServerContext;
 use slog::{debug, error, info, o, Logger};
 use std::sync::Arc;
@@ -37,7 +38,7 @@ impl Server {
     /// Start a gateway server.
     pub async fn start(
         config: &Config,
-        _rack_id: &Uuid,
+        _rack_id: Uuid,
         log: &Logger,
     ) -> Result<Server, String> {
         let log = log.new(o!("name" => config.id.to_string()));
@@ -71,15 +72,13 @@ impl Server {
     }
 
     // TODO does MGS register itself with oximeter?
-    /*
-    /// Register the Nexus server as a metric producer with `oximeter.
-    pub async fn register_as_producer(&self) {
-        self.apictx
-            .nexus
-            .register_as_producer(self.http_server_internal.local_addr())
-            .await;
-    }
-    */
+    // Register the Nexus server as a metric producer with `oximeter.
+    // pub async fn register_as_producer(&self) {
+    // self.apictx
+    // .nexus
+    // .register_as_producer(self.http_server_internal.local_addr())
+    // .await;
+    // }
 }
 
 /// Run an instance of the [Server].
@@ -100,7 +99,7 @@ pub async fn run_server(config: &Config) -> Result<(), String> {
         debug!(log, "registered DTrace probes");
     }
     let rack_id = Uuid::new_v4();
-    let server = Server::start(config, &rack_id, &log).await?;
-    //server.register_as_producer().await;
+    let server = Server::start(config, rack_id, &log).await?;
+    // server.register_as_producer().await;
     server.wait_for_finish().await
 }
