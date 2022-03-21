@@ -2688,6 +2688,7 @@ impl DataStore {
         token: String,
     ) -> LookupResult<authn::ConsoleSessionWithSiloId> {
         use db::schema::console_session::dsl;
+
         let console_session = dsl::console_session
             .filter(dsl::token.eq(token.clone()))
             .select(ConsoleSession::as_select())
@@ -2700,8 +2701,8 @@ impl DataStore {
                 ))
             })?;
 
-        let silo_id = self
-            .get_silo_id_from_silo_user_id(console_session.silo_user_id)
+        let silo_user = self
+            .silo_user_fetch(console_session.silo_user_id)
             .await
             .map_err(|e| {
                 Error::internal_error(&format!(
@@ -2710,7 +2711,10 @@ impl DataStore {
                 ))
             })?;
 
-        Ok(authn::ConsoleSessionWithSiloId { console_session, silo_id })
+        Ok(authn::ConsoleSessionWithSiloId {
+            console_session,
+            silo_id: silo_user.silo_id,
+        })
     }
 
     pub async fn session_create(
@@ -2751,8 +2755,8 @@ impl DataStore {
                 ))
             })?;
 
-        let silo_id = self
-            .get_silo_id_from_silo_user_id(console_session.silo_user_id)
+        let silo_user = self
+            .silo_user_fetch(console_session.silo_user_id)
             .await
             .map_err(|e| {
                 Error::internal_error(&format!(
@@ -2761,7 +2765,10 @@ impl DataStore {
                 ))
             })?;
 
-        Ok(authn::ConsoleSessionWithSiloId { console_session, silo_id })
+        Ok(authn::ConsoleSessionWithSiloId {
+            console_session,
+            silo_id: silo_user.silo_id,
+        })
     }
 
     // putting "hard" in the name because we don't do this with any other model
@@ -3094,14 +3101,24 @@ impl DataStore {
             })
     }
 
-    pub async fn get_silo_id_from_silo_user_id(
+    pub async fn silo_user_fetch(
         &self,
         silo_user_id: Uuid,
-    ) -> LookupResult<Uuid> {
-        let silo_user: SiloUser =
-            self.silo_user_fetch_by_id(silo_user_id).await?;
+    ) -> LookupResult<SiloUser> {
+        use db::schema::silo_user::dsl;
 
-        Ok(silo_user.silo_id)
+        dsl::silo_user
+            .filter(dsl::id.eq(silo_user_id))
+            .filter(dsl::time_deleted.is_null())
+            .select(SiloUser::as_select())
+            .first_async(self.pool())
+            .await
+            .map_err(|e| {
+                Error::internal_error(&format!(
+                    "error fetching silo user: {:?}",
+                    e
+                ))
+            })
     }
 
     pub async fn silo_user_create(
@@ -3118,26 +3135,6 @@ impl DataStore {
             .map_err(|e| {
                 Error::internal_error(&format!(
                     "error creating silo user: {:?}",
-                    e
-                ))
-            })
-    }
-
-    pub async fn silo_user_fetch_by_id(
-        &self,
-        id: Uuid,
-    ) -> CreateResult<SiloUser> {
-        use db::schema::silo_user::dsl;
-
-        dsl::silo_user
-            .filter(dsl::id.eq(id))
-            .filter(dsl::time_deleted.is_null())
-            .select(SiloUser::as_select())
-            .first_async(self.pool())
-            .await
-            .map_err(|e| {
-                Error::internal_error(&format!(
-                    "error fetching silo user: {:?}",
                     e
                 ))
             })
@@ -3482,9 +3479,10 @@ mod test {
         assert_eq!(
             silo_user.silo_id,
             datastore
-                .get_silo_id_from_silo_user_id(session.silo_user_id)
+                .silo_user_fetch(session.silo_user_id)
                 .await
-                .unwrap(),
+                .unwrap()
+                .silo_id,
         );
 
         // fetch the one we just created

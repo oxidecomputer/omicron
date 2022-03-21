@@ -2927,11 +2927,42 @@ impl Nexus {
         Ok(body)
     }
 
-    pub async fn get_silo_id_from_silo_user_id(
+    pub async fn login_allowed(
         &self,
         silo_user_id: Uuid,
-    ) -> LookupResult<Uuid> {
-        self.db_datastore.get_silo_id_from_silo_user_id(silo_user_id).await
+    ) -> Result<bool, Error> {
+        // Was this silo user deleted?
+        let fetch_result =
+            self.db_datastore.silo_user_fetch(silo_user_id).await;
+
+        match fetch_result {
+            Err(e) => {
+                match e {
+                    Error::ObjectNotFound { type_name: _, lookup_type: _ } => {
+                        // if the silo user was deleted, they're not allowed to
+                        // log in :)
+                        return Ok(false);
+                    }
+
+                    _ => {
+                        return Err(e);
+                    }
+                }
+            }
+
+            Ok(_) => {
+                // they're allowed
+            }
+        }
+
+        Ok(true)
+    }
+
+    pub async fn silo_user_fetch(
+        &self,
+        silo_user_id: Uuid,
+    ) -> LookupResult<SiloUser> {
+        self.db_datastore.silo_user_fetch(silo_user_id).await
     }
 
     pub async fn silo_user_create(

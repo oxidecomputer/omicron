@@ -129,7 +129,7 @@ async fn test_silos(cptestctx: &ControlPlaneTestContext) {
 
     // Verify silo user was also deleted
     nexus
-        .get_silo_id_from_silo_user_id(new_silo_user.id)
+        .silo_user_fetch(new_silo_user.id)
         .await
         .expect_err("unexpected success");
 
