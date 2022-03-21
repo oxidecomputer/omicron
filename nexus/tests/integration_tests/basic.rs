@@ -40,42 +40,36 @@ async fn test_basic_failures(cptestctx: &ControlPlaneTestContext) {
     create_organization(&client, &org_name).await;
 
     // Error case: GET /nonexistent (a path with no route at all)
-    let error = client
-        .make_request(
-            Method::GET,
-            "/nonexistent",
-            None as Option<()>,
-            StatusCode::NOT_FOUND,
-        )
-        .await
-        .expect_err("expected error");
+    let error = error_response(
+        client,
+        StatusCode::NOT_FOUND,
+        Method::GET,
+        "/nonexistent",
+    )
+    .await;
     assert_eq!("Not Found", error.message);
 
     // Error case: GET /organizations/test-org/projects/nonexistent (a possible
     // value that does not exist inside a collection that does exist)
-    let error = client
-        .make_request(
-            Method::GET,
-            "/organizations/test-org/projects/nonexistent",
-            None as Option<()>,
-            StatusCode::NOT_FOUND,
-        )
-        .await
-        .expect_err("expected error");
+    let error = error_response(
+        client,
+        StatusCode::NOT_FOUND,
+        Method::GET,
+        "/organizations/test-org/projects/nonexistent",
+    )
+    .await;
     assert_eq!("not found: project with name \"nonexistent\"", error.message);
 
     // Error case: GET /organizations/test-org/projects/-invalid-name
     // TODO-correctness is 400 the right error code here or is 404 more
     // appropriate?
-    let error = client
-        .make_request(
-            Method::GET,
-            "/organizations/test-org/projects/-invalid-name",
-            None as Option<()>,
-            StatusCode::BAD_REQUEST,
-        )
-        .await
-        .expect_err("expected error");
+    let error = error_response(
+        client,
+        StatusCode::BAD_REQUEST,
+        Method::GET,
+        "/organizations/test-org/projects/-invalid-name",
+    )
+    .await;
     assert_eq!(
         "bad parameter in URL path: name must begin with an ASCII lowercase \
          character",
@@ -83,63 +77,53 @@ async fn test_basic_failures(cptestctx: &ControlPlaneTestContext) {
     );
 
     // Error case: PUT /organizations/test-org/projects
-    let error = client
-        .make_request(
-            Method::PUT,
-            "/organizations/test-org/projects",
-            None as Option<()>,
-            StatusCode::METHOD_NOT_ALLOWED,
-        )
-        .await
-        .expect_err("expected error");
+    let error = error_response(
+        client,
+        StatusCode::METHOD_NOT_ALLOWED,
+        Method::PUT,
+        "/organizations/test-org/projects",
+    )
+    .await;
     assert_eq!("Method Not Allowed", error.message);
 
     // Error case: DELETE /organizations/test-org/projects
-    let error = client
-        .make_request(
-            Method::DELETE,
-            "/organizations/test-org/projects",
-            None as Option<()>,
-            StatusCode::METHOD_NOT_ALLOWED,
-        )
-        .await
-        .expect_err("expected error");
+    let error = error_response(
+        client,
+        StatusCode::METHOD_NOT_ALLOWED,
+        Method::DELETE,
+        "/organizations/test-org/projects",
+    )
+    .await;
     assert_eq!("Method Not Allowed", error.message);
 
     // Error case: list instances in a nonexistent project.
-    let error = client
-        .make_request_with_body(
-            Method::GET,
-            "/organizations/test-org/projects/nonexistent/instances",
-            "".into(),
-            StatusCode::NOT_FOUND,
-        )
-        .await
-        .expect_err("expected error");
+    let error = error_response(
+        client,
+        StatusCode::NOT_FOUND,
+        Method::GET,
+        "/organizations/test-org/projects/nonexistent/instances",
+    )
+    .await;
     assert_eq!("not found: project with name \"nonexistent\"", error.message);
 
     // Error case: fetch an instance in a nonexistent project.
-    let error = client
-        .make_request_with_body(
-            Method::GET,
-            "/organizations/test-org/projects/nonexistent/instances/my-instance",
-            "".into(),
-            StatusCode::NOT_FOUND,
-        )
-        .await
-        .expect_err("expected error");
+    let error = error_response(
+        client,
+        StatusCode::NOT_FOUND,
+        Method::GET,
+        "/organizations/test-org/projects/nonexistent/instances/my-instance",
+    )
+    .await;
     assert_eq!("not found: project with name \"nonexistent\"", error.message);
 
     // Error case: fetch an instance with an invalid name.
-    let error = client
-        .make_request_with_body(
-            Method::GET,
-            "/organizations/test-org/projects/nonexistent/instances/my_instance",
-            "".into(),
-            StatusCode::BAD_REQUEST,
-        )
-        .await
-        .expect_err("expected error");
+    let error = error_response(
+        client,
+        StatusCode::BAD_REQUEST,
+        Method::GET,
+        "/organizations/test-org/projects/nonexistent/instances/my_instance",
+    )
+    .await;
     assert_eq!(
         "bad parameter in URL path: name contains invalid character: \"_\" \
          (allowed characters are lowercase ASCII, digits, and \"-\")",
@@ -147,20 +131,30 @@ async fn test_basic_failures(cptestctx: &ControlPlaneTestContext) {
     );
 
     // Error case: delete an instance with an invalid name.
-    let error = client
-        .make_request_with_body(
-            Method::DELETE,
-            "/organizations/test-org/projects/nonexistent/instances/my_instance",
-            "".into(),
-            StatusCode::BAD_REQUEST,
-        )
-        .await
-        .expect_err("expected error");
+    let error = error_response(
+        client,
+        StatusCode::BAD_REQUEST,
+        Method::DELETE,
+        "/organizations/test-org/projects/nonexistent/instances/my_instance",
+    )
+    .await;
     assert_eq!(
         "bad parameter in URL path: name contains invalid character: \"_\" \
          (allowed characters are lowercase ASCII, digits, and \"-\")",
         error.message
     );
+}
+
+async fn error_response(
+    client: &ClientTestContext,
+    status_code: http::StatusCode,
+    method: http::Method,
+    url: &str,
+) -> dropshot::HttpErrorResponseBody {
+    NexusRequest::expect_failure(client, status_code, method, url)
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute_and_parse_unwrap()
+        .await
 }
 
 #[nexus_test]

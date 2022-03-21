@@ -42,13 +42,12 @@ use omicron_nexus::authn::external::spoof;
 // TODO-coverage:
 // * It would be good to add a built-in test user that can read everything in
 //   the world and use that to exercise 404 vs. 401/403 behavior.
-// * It'd be nice to verify that all the endpoints listed here are within the
-//   OpenAPI spec.
-// * It'd be nice to produce a list of endpoints from the OpenAPI spec that are
-//   not checked here.  We could put this into an expectorate file and make sure
-//   that we don't add new unchecked endpoints.
 // * When we finish authz, maybe the hardcoded information here can come instead
 //   from the OpenAPI spec?
+// * For each endpoint that hits a real resource, we should hit the same
+//   endpoint with a non-existent resource to ensure that we get the same result
+//   (so that we don't leak information about existence based on, say, 401 vs.
+//   403).
 #[nexus_test]
 async fn test_unauthorized(cptestctx: &ControlPlaneTestContext) {
     DiskTest::new(cptestctx).await;
