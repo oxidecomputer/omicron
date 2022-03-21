@@ -228,37 +228,82 @@ impl<'a> GetLookupRoot for Instance<'a> {
 }
 
 macro_rules! define_lookup {
-    ($lc:ident, $tc:ident) => {
+    ($lc:ident, $pc:ident) => {
         paste::paste! {
-            async fn [<$lc lookup_by_name>](
+            async fn [<$lc _lookup_by_id>](
                 opctx: &OpContext,
                 datastore: &DataStore,
-                name: &Name,
-            ) -> LookupResult<model::$tc> {
+                id: Uuid,
+            ) -> LookupResult<(authz::$pc, model::$pc)> {
                 use db::schema::$lc::dsl;
                 let conn = datastore.pool_authorized(opctx).await?;
                 dsl::$lc
                     .filter(dsl::time_deleted.is_null())
-                    .filter(dsl::name.eq(name.clone()))
-                    .select(model::$tc::as_select())
+                    .filter(dsl::id.eq(id))
+                    .select(model::$pc::as_select())
                     .get_result_async(conn)
                     .await
                     .map_err(|e| {
                         public_error_from_diesel_pool(
                             e,
                             ErrorHandler::NotFoundByLookup(
-                                ResourceType::$tc,
+                                ResourceType::$pc,
+                                LookupType::ById(id)
+                            )
+                        )
+                    })
+                    .map(|o| {(
+                        authz::FLEET.$lc(o.id(), LookupType::ById(id)),
+                        o
+                        )}
+                    )
+            }
+
+            async fn [<$lc _lookup_by_name>](
+                opctx: &OpContext,
+                datastore: &DataStore,
+                name: &Name,
+            ) -> LookupResult<(authz::$pc, model::$pc)> {
+                use db::schema::$lc::dsl;
+                let conn = datastore.pool_authorized(opctx).await?;
+                dsl::$lc
+                    .filter(dsl::time_deleted.is_null())
+                    .filter(dsl::name.eq(name.clone()))
+                    .select(model::$pc::as_select())
+                    .get_result_async(conn)
+                    .await
+                    .map_err(|e| {
+                        public_error_from_diesel_pool(
+                            e,
+                            ErrorHandler::NotFoundByLookup(
+                                ResourceType::$pc,
                                 LookupType::ByName(name.as_str().to_string())
                             )
                         )
                     })
+                    .map(|o| {(
+                        authz::FLEET.$lc(
+                            o.id(),
+                            LookupType::ByName(name.as_str().to_string())
+                        ),
+                        o
+                        )}
+                    )
             }
+
         }
     };
 }
 
 macro_rules! define_lookup_with_parent {
-    ($lc:ident, $tc:ident, $authz_parent:ident, $parent_id:ident, $mkauthz:expr) => {
+    (
+        $lc:ident,          // Lowercase version of resource name
+        $pc:ident,          // Pascal-case version of resource name
+        $parent_lc:ident,   // Lowercase version of parent resource name
+        $parent_pc:ident,   // Pascal-case version of parent resource name
+        $mkauthz:expr       // Closure to generate resource's authz object
+                            //   from parent's
+    ) => {
         paste::paste! {
             // XXX TODO-dap the lookup_by_id is not within the context of a
             // particular parent.  Thus, we can't return an authz struct for the
@@ -267,63 +312,63 @@ macro_rules! define_lookup_with_parent {
             async fn [<$lc _lookup_by_id>](
                 opctx: &OpContext,
                 datastore: &DataStore,
-                authz_parent: &authz::$authz_parent,
                 id: Uuid,
-            ) -> LookupResult<(authz::$tc, model::$tc)> {
+            ) -> LookupResult<(authz::$pc, model::$pc)> {
                 use db::schema::$lc::dsl;
                 let conn = datastore.pool_authorized(opctx).await?;
-                dsl::$lc
+                let db_row = dsl::$lc
                     .filter(dsl::time_deleted.is_null())
                     .filter(dsl::id.eq(id))
-                    .filter(dsl::$parent_id.eq(authz_parent.id()))
-                    .select(model::$tc::as_select())
+                    .select(model::$pc::as_select())
                     .get_result_async(conn)
                     .await
                     .map_err(|e| {
                         public_error_from_diesel_pool(
                             e,
                             ErrorHandler::NotFoundByLookup(
-                                ResourceType::$tc,
+                                ResourceType::$pc,
                                 LookupType::ById(id)
                             )
                         )
-                    })
-                    .map(|dbmodel| {(
-                        $mkauthz(
-                            authz_parent,
-                            &dbmodel,
-                            LookupType::ById(id)
-                        ),
-                        dbmodel
-                    )})
+                    })?;
+                let (authz_parent, _) =
+                    [< $parent_lc _lookup_by_id >](
+                        opctx,
+                        datastore,
+                        db_row.[<$parent_lc _id>]
+                    ).await?;
+                let authz_child = ($mkauthz)(
+                    &authz_parent, &db_row, LookupType::ById(id)
+                );
+                Ok((authz_child, db_row))
             }
 
             async fn [<$lc _lookup_by_name>](
                 opctx: &OpContext,
                 datastore: &DataStore,
-                authz_parent: &authz::$authz_parent,
+                authz_parent: &authz::$parent_pc,
                 name: &Name,
-            ) -> LookupResult<(authz::$tc, model::$tc)> {
+            ) -> LookupResult<(authz::$pc, model::$pc)> {
                 use db::schema::$lc::dsl;
                 let conn = datastore.pool_authorized(opctx).await?;
                 dsl::$lc
                     .filter(dsl::time_deleted.is_null())
                     .filter(dsl::name.eq(name.clone()))
-                    .filter(dsl::$parent_id.eq(authz_parent.id()))
-                    .select(model::$tc::as_select())
+                    .filter(dsl::[<$parent_lc _id>].eq(authz_parent.id()))
+                    .select(model::$pc::as_select())
                     .get_result_async(conn)
                     .await
                     .map_err(|e| {
                         public_error_from_diesel_pool(
                             e,
                             ErrorHandler::NotFoundByLookup(
-                                ResourceType::$tc,
+                                ResourceType::$pc,
                                 LookupType::ByName(name.as_str().to_string())
                             )
                         )
                     })
                     .map(|dbmodel| {(
-                        $mkauthz(
+                        ($mkauthz)(
                             authz_parent,
                             &dbmodel,
                             LookupType::ByName(name.as_str().to_string())
@@ -339,8 +384,8 @@ define_lookup!(organization, Organization);
 define_lookup_with_parent!(
     project,
     Project,
+    organization,
     Organization,
-    organization_id,
     |authz_org: &authz::Organization,
      project: &model::Project,
      lookup: LookupType| { authz_org.project(project.id(), lookup) }
@@ -348,8 +393,8 @@ define_lookup_with_parent!(
 define_lookup_with_parent!(
     instance,
     Instance,
+    project,
     Project,
-    project_id,
     |authz_project: &authz::Project,
      instance: &model::Instance,
      lookup: LookupType| {
