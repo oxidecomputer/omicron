@@ -68,10 +68,9 @@ async fn test_silos(cptestctx: &ControlPlaneTestContext) {
     // Create a new user in the discoverable silo, then create a console session
     let new_silo_user = nexus
         .silo_user_create(
-            silos[0].identity.id,        /* silo id */
-            Uuid::new_v4(),              /* silo user id */
-            "new silo user".to_string(), /* name */
-            Uuid::new_v4(),              /* internal user id */
+            silos[0].identity.id, /* silo id */
+            Uuid::new_v4(),       /* silo user id */
+            Uuid::new_v4(),       /* internal user id */
         )
         .await
         .unwrap();

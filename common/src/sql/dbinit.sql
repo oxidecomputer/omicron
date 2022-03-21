@@ -207,9 +207,6 @@ CREATE TABLE omicron.public.silo_user (
 
     silo_id UUID NOT NULL,
 
-    /* XXX SCIM parameters? */
-    name TEXT NOT NULL,
-
     time_created TIMESTAMPTZ NOT NULL,
     time_modified TIMESTAMPTZ NOT NULL,
     time_deleted TIMESTAMPTZ,

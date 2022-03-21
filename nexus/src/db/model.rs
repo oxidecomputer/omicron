@@ -820,8 +820,6 @@ pub struct SiloUser {
     pub id: Uuid,
     pub silo_id: Uuid,
 
-    pub name: String,
-
     pub time_created: DateTime<Utc>,
     pub time_modified: DateTime<Utc>,
     pub time_deleted: Option<DateTime<Utc>>,
@@ -830,18 +828,11 @@ pub struct SiloUser {
 }
 
 impl SiloUser {
-    pub fn new(
-        silo_id: Uuid,
-        user_id: Uuid,
-        name: String,
-        internal_user_id: Uuid,
-    ) -> Self {
+    pub fn new(silo_id: Uuid, user_id: Uuid, internal_user_id: Uuid) -> Self {
         let now = Utc::now();
         Self {
             id: user_id,
             silo_id,
-
-            name,
 
             time_created: now,
             time_modified: now,

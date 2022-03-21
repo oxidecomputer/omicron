@@ -2945,11 +2945,9 @@ impl Nexus {
         &self,
         silo_id: Uuid,
         silo_user_id: Uuid,
-        name: String,
         internal_user_id: Uuid,
     ) -> CreateResult<SiloUser> {
-        let silo_user =
-            SiloUser::new(silo_id, silo_user_id, name, internal_user_id);
+        let silo_user = SiloUser::new(silo_id, silo_user_id, internal_user_id);
         Ok(self.db_datastore.silo_user_create(silo_user).await?)
     }
 }

@@ -2863,8 +2863,7 @@ impl DataStore {
         for builtin_user in &builtin_users {
             self.silo_user_create(SiloUser::new(
                 *SILO_ID,
-                Uuid::new_v4(), /* silo user id */
-                builtin_user.identity.name.to_string(), /* name */
+                Uuid::new_v4(),           /* silo user id */
                 builtin_user.identity.id, /* internal user id */
             ))
             .await?;
@@ -3503,9 +3502,8 @@ mod test {
         // Associate silo with user
         let silo_user = datastore
             .silo_user_create(SiloUser::new(
-                Uuid::new_v4(), /* silo id */
-                Uuid::new_v4(), /* silo user id */
-                "fakeuser".to_string(),
+                Uuid::new_v4(),  /* silo id */
+                Uuid::new_v4(),  /* silo user id */
                 session.user_id, /* internal user id */
             ))
             .await
