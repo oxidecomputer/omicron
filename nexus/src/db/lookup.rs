@@ -30,22 +30,19 @@ pub trait Fetch {
 }
 
 mod private {
+    use super::LookupPath;
     use futures::future::BoxFuture;
     use omicron_common::api::external::LookupResult;
 
-    use crate::authz::AuthorizedResource;
-
-    use super::LookupPath;
-
-    // TODO-dap XXX we could probably get rid of this trait and its impls because
-    // we're now calling `lookup_root()` from a macro that can essentially inline
-    // the impl of GetLookupRoot for Key.
+    // TODO-dap XXX-dap we could probably get rid of this trait and its impls
+    // because we're now calling `lookup_root()` from a macro that can
+    // essentially inline the impl of GetLookupRoot for Key.
     pub trait GetLookupRoot {
         fn lookup_root(&self) -> &LookupPath<'_>;
     }
 
     pub trait LookupNoauthz {
-        type LookupType: AuthorizedResource + Clone + std::fmt::Debug + Send;
+        type LookupType;
         fn lookup(&self) -> BoxFuture<'_, LookupResult<Self::LookupType>>;
     }
 }
@@ -64,10 +61,9 @@ pub trait LookupFor {
 
 impl<T> LookupFor for T
 where
-    T: LookupNoauthz + GetLookupRoot + Send + Sync, // XXX-dap try removing Sync?
-                                                    // XXX-dap
-                                                    // <T as LookupNoauthz>::LookupType:
-                                                    //     AuthorizedResource + Clone + std::fmt::Debug + Send,
+    T: LookupNoauthz + GetLookupRoot + Send + Sync,
+    <T as LookupNoauthz>::LookupType:
+        AuthorizedResource + Clone + std::fmt::Debug + Send,
 {
     type LookupType = <T as LookupNoauthz>::LookupType;
     fn lookup_for(
@@ -518,7 +514,7 @@ macro_rules! define_lookup_with_parent {
                         let datastore = lookup.datastore;
                         match &self.key {
                             Key::Name(parent, name) => {
-                                let (parent_authz, _) = parent.fetch().await?;
+                                let parent_authz = parent.lookup().await?;
                                 [< $pc:lower _fetch_by_name >](
                                     opctx,
                                     datastore,
