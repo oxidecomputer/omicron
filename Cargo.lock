@@ -2009,6 +2009,7 @@ dependencies = [
  "oximeter-instruments",
  "oximeter-producer",
  "parse-display",
+ "paste",
  "pq-sys",
  "rand",
  "ref-cast",

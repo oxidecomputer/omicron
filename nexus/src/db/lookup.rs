@@ -138,14 +138,6 @@ impl Fetch for Organization<'_> {
         async {
             use db::schema::organization::dsl;
             let conn = datastore.pool_authorized(opctx).await?;
-            // XXX-dap TODO This construction sucks.  What I kind of want is a
-            // generic function that takes:
-            // - a table (e.g., dsl::organization)
-            // - a db model type to return
-            // - some information about the LookupType we're trying to do
-            // - a closure that can be used to apply filters
-            //   (which would be either "name" or "id")
-            // and does the whole thing.
             let db_org = match self.key {
                 Key::Name(_, name) => dsl::organization
                     .filter(dsl::time_deleted.is_null())
@@ -234,6 +226,140 @@ impl<'a> GetLookupRoot for Instance<'a> {
         self.key.lookup_root()
     }
 }
+
+macro_rules! define_lookup {
+    ($lc:ident, $tc:ident) => {
+        paste::paste! {
+            async fn [<$lc lookup_by_name>](
+                opctx: &OpContext,
+                datastore: &DataStore,
+                name: &Name,
+            ) -> LookupResult<model::$tc> {
+                use db::schema::$lc::dsl;
+                let conn = datastore.pool_authorized(opctx).await?;
+                dsl::$lc
+                    .filter(dsl::time_deleted.is_null())
+                    .filter(dsl::name.eq(name.clone()))
+                    .select(model::$tc::as_select())
+                    .get_result_async(conn)
+                    .await
+                    .map_err(|e| {
+                        public_error_from_diesel_pool(
+                            e,
+                            ErrorHandler::NotFoundByLookup(
+                                ResourceType::$tc,
+                                LookupType::ByName(name.as_str().to_string())
+                            )
+                        )
+                    })
+            }
+        }
+    };
+}
+
+macro_rules! define_lookup_with_parent {
+    ($lc:ident, $tc:ident, $authz_parent:ident, $parent_id:ident, $mkauthz:expr) => {
+        paste::paste! {
+            // XXX TODO-dap the lookup_by_id is not within the context of a
+            // particular parent.  Thus, we can't return an authz struct for the
+            // new thing -- we have to look up the parent we find again in order
+            // to do that.
+            async fn [<$lc _lookup_by_id>](
+                opctx: &OpContext,
+                datastore: &DataStore,
+                authz_parent: &authz::$authz_parent,
+                id: Uuid,
+            ) -> LookupResult<(authz::$tc, model::$tc)> {
+                use db::schema::$lc::dsl;
+                let conn = datastore.pool_authorized(opctx).await?;
+                dsl::$lc
+                    .filter(dsl::time_deleted.is_null())
+                    .filter(dsl::id.eq(id))
+                    .filter(dsl::$parent_id.eq(authz_parent.id()))
+                    .select(model::$tc::as_select())
+                    .get_result_async(conn)
+                    .await
+                    .map_err(|e| {
+                        public_error_from_diesel_pool(
+                            e,
+                            ErrorHandler::NotFoundByLookup(
+                                ResourceType::$tc,
+                                LookupType::ById(id)
+                            )
+                        )
+                    })
+                    .map(|dbmodel| {(
+                        $mkauthz(
+                            authz_parent,
+                            &dbmodel,
+                            LookupType::ById(id)
+                        ),
+                        dbmodel
+                    )})
+            }
+
+            async fn [<$lc _lookup_by_name>](
+                opctx: &OpContext,
+                datastore: &DataStore,
+                authz_parent: &authz::$authz_parent,
+                name: &Name,
+            ) -> LookupResult<(authz::$tc, model::$tc)> {
+                use db::schema::$lc::dsl;
+                let conn = datastore.pool_authorized(opctx).await?;
+                dsl::$lc
+                    .filter(dsl::time_deleted.is_null())
+                    .filter(dsl::name.eq(name.clone()))
+                    .filter(dsl::$parent_id.eq(authz_parent.id()))
+                    .select(model::$tc::as_select())
+                    .get_result_async(conn)
+                    .await
+                    .map_err(|e| {
+                        public_error_from_diesel_pool(
+                            e,
+                            ErrorHandler::NotFoundByLookup(
+                                ResourceType::$tc,
+                                LookupType::ByName(name.as_str().to_string())
+                            )
+                        )
+                    })
+                    .map(|dbmodel| {(
+                        $mkauthz(
+                            authz_parent,
+                            &dbmodel,
+                            LookupType::ByName(name.as_str().to_string())
+                        ),
+                        dbmodel
+                    )})
+            }
+        }
+    };
+}
+
+define_lookup!(organization, Organization);
+define_lookup_with_parent!(
+    project,
+    Project,
+    Organization,
+    organization_id,
+    |authz_org: &authz::Organization,
+     project: &model::Project,
+     lookup: LookupType| { authz_org.project(project.id(), lookup) }
+);
+define_lookup_with_parent!(
+    instance,
+    Instance,
+    Project,
+    project_id,
+    |authz_project: &authz::Project,
+     instance: &model::Instance,
+     lookup: LookupType| {
+        authz_project.child_generic(
+            ResourceType::Instance,
+            instance.id(),
+            lookup,
+        )
+    }
+);
 
 #[cfg(test)]
 mod test {
