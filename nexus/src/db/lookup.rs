@@ -108,10 +108,6 @@ impl<'a> GetLookupRoot for LookupPath<'a> {
     }
 }
 
-pub struct Organization<'a> {
-    key: Key<'a, LookupPath<'a>>,
-}
-
 impl<'a> Organization<'a> {
     fn project_name<'b, 'c>(self, name: &'b Name) -> Project<'c>
     where
@@ -120,10 +116,6 @@ impl<'a> Organization<'a> {
     {
         Project { key: Key::Name(self, name) }
     }
-}
-
-pub struct Project<'a> {
-    key: Key<'a, Organization<'a>>,
 }
 
 impl<'a> Project<'a> {
@@ -136,13 +128,19 @@ impl<'a> Project<'a> {
     }
 }
 
-pub struct Instance<'a> {
-    key: Key<'a, Project<'a>>,
-}
-
 macro_rules! define_lookup {
     ($pc:ident) => {
         paste::paste! {
+            pub struct $pc<'a> {
+                key: Key<'a, LookupPath<'a>>,
+            }
+
+            impl<'a> GetLookupRoot for $pc<'a> {
+                fn lookup_root(&self) -> &LookupPath<'_> {
+                    self.key.lookup_root()
+                }
+            }
+
             // Do NOT make these functions public.  They should instead be
             // wrapped by functions that perform authz checks.
             async fn [<$pc:lower _lookup_by_id_no_authz>](
@@ -238,12 +236,6 @@ macro_rules! define_lookup {
                 Ok((authz_child, db_child))
             }
 
-            impl<'a> GetLookupRoot for $pc<'a> {
-                fn lookup_root(&self) -> &LookupPath<'_> {
-                    self.key.lookup_root()
-                }
-            }
-
             impl Fetch for $pc<'_> {
                 type FetchType = (authz::$pc, model::$pc);
 
@@ -272,9 +264,6 @@ macro_rules! define_lookup {
                     .boxed()
                 }
             }
-
-
-
         }
     };
 }
@@ -287,6 +276,16 @@ macro_rules! define_lookup_with_parent {
                             //   from parent's
     ) => {
         paste::paste! {
+            pub struct $pc<'a> {
+                key: Key<'a, $parent_pc<'a>>,
+            }
+
+            impl<'a> GetLookupRoot for $pc<'a> {
+                fn lookup_root(&self) -> &LookupPath<'_> {
+                    self.key.lookup_root()
+                }
+            }
+
             // Do NOT make these functions public.  They should instead be
             // wrapped by functions that perform authz checks.
             async fn [<$pc:lower _lookup_by_id_no_authz>](
@@ -389,12 +388,6 @@ macro_rules! define_lookup_with_parent {
                     ).await?;
                 opctx.authorize(authz::Action::Read, &authz_child).await?;
                 Ok((authz_child, db_child))
-            }
-
-            impl<'a> GetLookupRoot for $pc<'a> {
-                fn lookup_root(&self) -> &LookupPath<'_> {
-                    self.key.lookup_root()
-                }
             }
 
             impl Fetch for $pc<'_> {
