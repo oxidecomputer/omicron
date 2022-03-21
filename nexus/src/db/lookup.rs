@@ -29,6 +29,9 @@ pub trait Fetch {
     fn fetch(&self) -> BoxFuture<'_, LookupResult<Self::FetchType>>;
 }
 
+// This private module exist solely to implement the "Sealed trait" pattern.
+// This isn't about future-proofing ourselves.  Rather, we don't want to expose
+// an interface that accesses database objects without an authz check.
 mod private {
     use super::LookupPath;
     use futures::future::BoxFuture;
@@ -47,7 +50,6 @@ mod private {
     }
 }
 
-// XXX-dap workaround compiler error with private mod
 use private::GetLookupRoot;
 use private::LookupNoauthz;
 
