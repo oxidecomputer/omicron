@@ -1428,17 +1428,36 @@ impl Nexus {
             }
         }
 
-        self.disk_set_runtime(
-            opctx,
-            &authz_disk,
-            &db_disk,
-            &db_instance,
-            self.instance_sled(&db_instance).await?,
-            sled_agent_client::types::DiskStateRequested::Attached(
-                *instance_id,
-            ),
-        )
-        .await?;
+        match &db_instance.runtime_state.state.state() {
+            // If there's a propolis zone for this instance, ask the Sled Agent
+            // to hot-plug the disk.
+            //
+            // TODO this will probably involve volume construction requests as
+            // well!
+            InstanceState::Running | InstanceState::Starting => {
+                self.disk_set_runtime(
+                    opctx,
+                    &authz_disk,
+                    &db_disk,
+                    self.instance_sled(&db_instance).await?,
+                    sled_agent_client::types::DiskStateRequested::Attached(
+                        *instance_id,
+                    ),
+                )
+                .await?;
+            }
+
+            _ => {
+                // If there is not a propolis zone, then disk attach only occurs
+                // in the DB.
+                let new_runtime = db_disk.runtime().attach(*instance_id);
+
+                self.db_datastore
+                    .disk_update_runtime(opctx, &authz_disk, &new_runtime)
+                    .await?;
+            }
+        }
+
         self.db_datastore.disk_refetch(opctx, &authz_disk).await
     }
 
@@ -1503,15 +1522,31 @@ impl Nexus {
             DiskState::Attached(_) => (),
         }
 
-        self.disk_set_runtime(
-            opctx,
-            &authz_disk,
-            &db_disk,
-            &db_instance,
-            self.instance_sled(&db_instance).await?,
-            sled_agent_client::types::DiskStateRequested::Detached,
-        )
-        .await?;
+        // If there's a propolis zone for this instance, ask the Sled
+        // Agent to hot-remove the disk.
+        match &db_instance.runtime_state.state.state() {
+            InstanceState::Running | InstanceState::Starting => {
+                self.disk_set_runtime(
+                    opctx,
+                    &authz_disk,
+                    &db_disk,
+                    self.instance_sled(&db_instance).await?,
+                    sled_agent_client::types::DiskStateRequested::Detached,
+                )
+                .await?;
+            }
+
+            _ => {
+                // If there is not a propolis zone, then disk detach only occurs
+                // in the DB.
+                let new_runtime = db_disk.runtime().detach();
+
+                self.db_datastore
+                    .disk_update_runtime(opctx, &authz_disk, &new_runtime)
+                    .await?;
+            }
+        }
+
         self.db_datastore.disk_refetch(opctx, &authz_disk).await
     }
 
@@ -1522,72 +1557,30 @@ impl Nexus {
         opctx: &OpContext,
         authz_disk: &authz::Disk,
         db_disk: &db::model::Disk,
-        db_instance: &db::model::Instance,
         sa: Arc<SledAgentClient>,
         requested: sled_agent_client::types::DiskStateRequested,
     ) -> Result<(), Error> {
-        use sled_agent_client::types::DiskStateRequested;
-
         let runtime: DiskRuntimeState = db_disk.runtime().into();
 
         opctx.authorize(authz::Action::Modify, authz_disk).await?;
 
-        let new_runtime: DiskRuntimeState = match &db_instance
-            .runtime_state
-            .state
-            .state()
-        {
-            InstanceState::Running | InstanceState::Starting => {
-                // If there's a propolis zone for this instance, ask the Sled
-                // Agent to hot-plug or hot-remove disk. Then update the
-                // database to reflect the new intermediate state.
-                //
-                // TODO this will probably involve volume construction requests
-                // as well!
-                let new_runtime = sa
-                    .disk_put(
-                        &authz_disk.id(),
-                        &sled_agent_client::types::DiskEnsureBody {
-                            initial_runtime:
-                                sled_agent_client::types::DiskRuntimeState::from(
-                                    runtime,
-                                ),
-                            target: requested,
-                        },
-                    )
-                    .await
-                    .map_err(Error::from)?;
+        // Ask the Sled Agent to begin the state change.  Then update the
+        // database to reflect the new intermediate state.
+        let new_runtime = sa
+            .disk_put(
+                &authz_disk.id(),
+                &sled_agent_client::types::DiskEnsureBody {
+                    initial_runtime:
+                        sled_agent_client::types::DiskRuntimeState::from(
+                            runtime,
+                        ),
+                    target: requested,
+                },
+            )
+            .await
+            .map_err(Error::from)?;
 
-                new_runtime.into_inner().into()
-            }
-
-            InstanceState::Creating => {
-                // If we're still creating this instance, then the disks will be
-                // attached as part of the instance ensure by specifying volume
-                // construction requests.
-                match requested {
-                    DiskStateRequested::Detached => {
-                        db_disk.runtime().detach().into()
-                    }
-                    DiskStateRequested::Attached(id) => {
-                        db_disk.runtime().attach(id).into()
-                    }
-                    DiskStateRequested::Destroyed => {
-                        todo!()
-                    }
-                    DiskStateRequested::Faulted => {
-                        todo!()
-                    }
-                }
-            }
-
-            _ => {
-                todo!(
-                    "implement state {:?}",
-                    db_instance.runtime_state.state.state()
-                );
-            }
-        };
+        let new_runtime: DiskRuntimeState = new_runtime.into_inner().into();
 
         self.db_datastore
             .disk_update_runtime(opctx, authz_disk, &new_runtime.into())
