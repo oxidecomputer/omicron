@@ -74,6 +74,8 @@ pub enum LookupType {
     ByName(String),
     /** a specific id was requested */
     ById(Uuid),
+    /** a token was requested */
+    ByToken(String),
 }
 
 impl LookupType {
@@ -180,6 +182,7 @@ impl From<Error> for HttpError {
                 let (lookup_field, lookup_value) = match lt {
                     LookupType::ByName(name) => ("name", name),
                     LookupType::ById(id) => ("id", id.to_string()),
+                    LookupType::ByToken(token) => ("token", token),
                 };
                 let message = format!(
                     "not found: {} with {} \"{}\"",

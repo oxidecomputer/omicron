@@ -2693,21 +2693,17 @@ impl DataStore {
             .first_async(self.pool())
             .await
             .map_err(|e| {
-                Error::internal_error(&format!(
-                    "error fetching session: {:?}",
-                    e
-                ))
+                public_error_from_diesel_pool(
+                    e,
+                    ErrorHandler::NotFoundByLookup(
+                        ResourceType::ConsoleSession,
+                        LookupType::ByToken(token),
+                    ),
+                )
             })?;
 
-        let silo_user = self
-            .silo_user_fetch(console_session.silo_user_id)
-            .await
-            .map_err(|e| {
-                Error::internal_error(&format!(
-                    "error fetching silo id: {:?}",
-                    e
-                ))
-            })?;
+        let silo_user =
+            self.silo_user_fetch(console_session.silo_user_id).await?;
 
         Ok(authn::ConsoleSessionWithSiloId {
             console_session,
@@ -3515,7 +3511,7 @@ mod test {
         let fetched = datastore.session_fetch(token.clone()).await;
         assert!(matches!(
             fetched,
-            Err(Error::InternalError { internal_message: _ })
+            Err(Error::ObjectNotFound { type_name: _, lookup_type: _ })
         ));
 
         // deleting an already nonexistent is considered a success

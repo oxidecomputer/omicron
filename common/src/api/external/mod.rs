@@ -566,6 +566,7 @@ pub enum ResourceType {
     Fleet,
     Silo,
     SiloUser,
+    ConsoleSession,
     Organization,
     Project,
     Dataset,
