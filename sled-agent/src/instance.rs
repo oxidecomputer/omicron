@@ -169,8 +169,6 @@ struct PropolisSetup {
 }
 
 struct InstanceInner {
-    id: Uuid,
-
     log: Logger,
 
     // Properties visible to Propolis
@@ -194,7 +192,7 @@ struct InstanceInner {
 
 impl InstanceInner {
     fn id(&self) -> &Uuid {
-        &self.id
+        &self.properties.id
     }
 
     /// UUID of the underlying propolis-server process
@@ -403,7 +401,6 @@ impl Instance {
         info!(log, "Instance::new w/initial HW: {:?}", initial);
         let instance = InstanceInner {
             log: log.new(o!("instance id" => id.to_string())),
-            id,
             // NOTE: Mostly lies.
             properties: propolis_client::api::InstanceProperties {
                 id,
