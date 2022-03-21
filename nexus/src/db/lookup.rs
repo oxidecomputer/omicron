@@ -34,6 +34,9 @@ trait Lookup {
     ) -> BoxFuture<'_, LookupResult<Self::LookupType>>;
 }
 
+// TODO-dap XXX we could probably get rid of this trait and its impls because
+// we're now calling `lookup_root()` from a macro that can essentially inline
+// the impl of GetLookupRoot for Key.
 trait GetLookupRoot {
     fn lookup_root(&self) -> &LookupPath<'_>;
 }
