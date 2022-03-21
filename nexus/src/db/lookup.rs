@@ -136,7 +136,6 @@ impl Fetch for Organization<'_> {
         let opctx = &lookup.opctx;
         let datastore = lookup.datastore;
         async {
-            let conn = datastore.pool_authorized(opctx).await?;
             match self.key {
                 Key::Name(_, name) => {
                     organization_fetch_by_name(opctx, datastore, name).await
@@ -154,20 +153,6 @@ pub struct Project<'a> {
     key: Key<'a, Organization<'a>>,
 }
 
-impl<'a> GetLookupRoot for Project<'a> {
-    fn lookup_root(&self) -> &LookupPath<'_> {
-        self.key.lookup_root()
-    }
-}
-
-impl Fetch for Project<'_> {
-    type FetchType = (authz::Organization, authz::Project, model::Project);
-
-    fn fetch(&self) -> BoxFuture<'_, LookupResult<Self::FetchType>> {
-        todo!()
-    }
-}
-
 impl<'a> Project<'a> {
     fn instance_name<'b, 'c>(self, name: &'b Name) -> Instance<'c>
     where
@@ -178,23 +163,8 @@ impl<'a> Project<'a> {
     }
 }
 
-impl Fetch for Instance<'_> {
-    type FetchType =
-        (authz::Organization, authz::Project, authz::Instance, model::Instance);
-
-    fn fetch(&self) -> BoxFuture<'_, LookupResult<Self::FetchType>> {
-        todo!()
-    }
-}
-
 pub struct Instance<'a> {
     key: Key<'a, Project<'a>>,
-}
-
-impl<'a> GetLookupRoot for Instance<'a> {
-    fn lookup_root(&self) -> &LookupPath<'_> {
-        self.key.lookup_root()
-    }
 }
 
 macro_rules! define_lookup {
@@ -265,21 +235,6 @@ macro_rules! define_lookup {
                     )
             }
 
-            async fn [<$pc:lower _fetch_by_name>](
-                opctx: &OpContext,
-                datastore: &DataStore,
-                name: &Name,
-            ) -> LookupResult<(authz::$pc, model::$pc)> {
-                let (authz_child, db_child) =
-                    [<$pc:lower _lookup_by_name_no_authz>](
-                        opctx,
-                        datastore,
-                        name
-                    ).await?;
-                opctx.authorize(authz::Action::Read, &authz_child).await?;
-                Ok((authz_child, db_child))
-            }
-
             async fn [<$pc:lower _fetch_by_id>](
                 opctx: &OpContext,
                 datastore: &DataStore,
@@ -290,6 +245,21 @@ macro_rules! define_lookup {
                         opctx,
                         datastore,
                         id,
+                    ).await?;
+                opctx.authorize(authz::Action::Read, &authz_child).await?;
+                Ok((authz_child, db_child))
+            }
+
+            async fn [<$pc:lower _fetch_by_name>](
+                opctx: &OpContext,
+                datastore: &DataStore,
+                name: &Name,
+            ) -> LookupResult<(authz::$pc, model::$pc)> {
+                let (authz_child, db_child) =
+                    [<$pc:lower _lookup_by_name_no_authz>](
+                        opctx,
+                        datastore,
+                        name
                     ).await?;
                 opctx.authorize(authz::Action::Read, &authz_child).await?;
                 Ok((authz_child, db_child))
@@ -378,6 +348,21 @@ macro_rules! define_lookup_with_parent {
                     )})
             }
 
+            async fn [<$pc:lower _fetch_by_id>](
+                opctx: &OpContext,
+                datastore: &DataStore,
+                id: Uuid,
+            ) -> LookupResult<(authz::$pc, model::$pc)> {
+                let (authz_child, db_child) =
+                    [<$pc:lower _lookup_by_id_no_authz>](
+                        opctx,
+                        datastore,
+                        id,
+                    ).await?;
+                opctx.authorize(authz::Action::Read, &authz_child).await?;
+                Ok((authz_child, db_child))
+            }
+
             async fn [<$pc:lower _fetch_by_name>](
                 opctx: &OpContext,
                 datastore: &DataStore,
@@ -393,6 +378,43 @@ macro_rules! define_lookup_with_parent {
                     ).await?;
                 opctx.authorize(authz::Action::Read, &authz_child).await?;
                 Ok((authz_child, db_child))
+            }
+
+            impl<'a> GetLookupRoot for $pc<'a> {
+                fn lookup_root(&self) -> &LookupPath<'_> {
+                    self.key.lookup_root()
+                }
+            }
+
+            impl Fetch for $pc<'_> {
+                type FetchType = (authz::$pc, model::$pc);
+
+                fn fetch(&self) -> BoxFuture<'_, LookupResult<Self::FetchType>> {
+                    let lookup = self.lookup_root();
+                    let opctx = &lookup.opctx;
+                    let datastore = lookup.datastore;
+                    async {
+                        match &self.key {
+                            Key::Name(parent, name) => {
+                                let (parent_authz, _) = parent.fetch().await?;
+                                [< $pc:lower _fetch_by_name >](
+                                    opctx,
+                                    datastore,
+                                    &parent_authz,
+                                    *name
+                                ).await
+                            }
+                            Key::Id(_, id) => {
+                                [< $pc:lower _fetch_by_id >](
+                                    opctx,
+                                    datastore,
+                                    *id
+                                ).await
+                            }
+                        }
+                    }
+                    .boxed()
+                }
             }
         }
     };
