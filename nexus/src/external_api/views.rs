@@ -30,6 +30,8 @@ pub struct Silo {
     #[serde(flatten)]
     pub identity: IdentityMetadata,
 
+    /// A silo where discoverable is false can be retrieved only by its id - it
+    /// will not be part of the "list all silos" output.
     pub discoverable: bool,
 }
 
