@@ -74,6 +74,14 @@ pub trait Fetch {
     fn fetch(&self) -> BoxFuture<'_, LookupResult<Self::FetchType>>;
 }
 
+trait Lookup {
+    type LookupType;
+    fn lookup(
+        &self,
+        lookup: &LookupPath,
+    ) -> BoxFuture<'_, LookupResult<Self::LookupType>>;
+}
+
 enum Key<'a, P> {
     Name(P, &'a Name),
     Id(LookupPath<'a>, Uuid),
@@ -82,10 +90,6 @@ enum Key<'a, P> {
 pub struct LookupPath<'a> {
     opctx: &'a OpContext,
     datastore: &'a DataStore,
-}
-
-struct Root<'a> {
-    lookup: LookupPath<'a>,
 }
 
 impl<'a> LookupPath<'a> {
@@ -105,7 +109,7 @@ impl<'a> LookupPath<'a> {
         'a: 'c,
         'b: 'c,
     {
-        Organization { key: Key::Name(Root { lookup: self }, name) }
+        Organization { key: Key::Name(self, name) }
     }
 
     pub fn organization_id(self, id: Uuid) -> Organization<'a> {
@@ -122,7 +126,7 @@ impl<'a> LookupPath<'a> {
 }
 
 pub struct Organization<'a> {
-    key: Key<'a, Root<'a>>,
+    key: Key<'a, LookupPath<'a>>,
 }
 
 impl<'a> Organization<'a> {
@@ -147,7 +151,7 @@ impl Fetch for Organization<'_> {
         //
         // But see the note above -- maybe a different approach is better here!
         let lookup = match &self.key {
-            Key::Name(Root { lookup }, _) => lookup,
+            Key::Name(lookup, _) => lookup,
             Key::Id(lookup, _) => lookup,
         };
 
@@ -255,7 +259,6 @@ mod test {
     use super::LookupPath;
     use super::Organization;
     use super::Project;
-    use super::Root;
     use crate::context::OpContext;
     use crate::db::model::Name;
     use nexus_test_utils::db::test_setup_database;
@@ -282,7 +285,7 @@ mod test {
             Instance {
                 key: Key::Name(Project {
                     key: Key::Name(Organization {
-                        key: Key::Name(Root { .. }, o)
+                        key: Key::Name(_, o)
                     }, p)
                 }, i)
             }
