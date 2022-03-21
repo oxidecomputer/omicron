@@ -2681,8 +2681,15 @@ impl Nexus {
         &self,
         user_id: Uuid,
     ) -> CreateResult<db::model::ConsoleSession> {
+        if !self.login_allowed(user_id).await? {
+            return Err(Error::Unauthenticated {
+                internal_message: "User not allowed to login".to_string(),
+            });
+        }
+
         let session =
             db::model::ConsoleSession::new(generate_session_token(), user_id);
+
         Ok(self.db_datastore.session_create(session).await?)
     }
 
@@ -2927,10 +2934,7 @@ impl Nexus {
         Ok(body)
     }
 
-    pub async fn login_allowed(
-        &self,
-        silo_user_id: Uuid,
-    ) -> Result<bool, Error> {
+    async fn login_allowed(&self, silo_user_id: Uuid) -> Result<bool, Error> {
         // Was this silo user deleted?
         let fetch_result =
             self.db_datastore.silo_user_fetch(silo_user_id).await;

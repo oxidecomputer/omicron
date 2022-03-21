@@ -69,13 +69,6 @@ pub async fn spoof_login(
 
     let user_id = user_id.unwrap();
 
-    if !nexus.login_allowed(user_id).await? {
-        return Ok(Response::builder()
-            .status(StatusCode::UNAUTHORIZED)
-            .header(header::SET_COOKIE, clear_session_cookie_header_value())
-            .body("".into())?); // TODO: failed login response body?
-    }
-
     let session = nexus.session_create(user_id).await?;
 
     Ok(Response::builder()
