@@ -19,6 +19,13 @@ GENERAL OPTIONS
               (default behavior: use "spoof" authentication for endpoints
                that require it)
 
+SILOS
+
+    silos_list
+    silo_create_demo SILO NAME
+    silo_get         SILO_NAME
+    silo_delete      SILO_NAME
+
 ORGANIZATIONS
 
     organizations_list
@@ -194,6 +201,31 @@ function mkjson
 #
 # API commands
 #
+
+function cmd_silos_list
+{
+	[[ $# != 0 ]] && usage "expected no arguments"
+	do_curl_authn /silos
+}
+
+function cmd_silo_create_demo
+{
+	[[ $# != 1 ]] && usage "expected SILO_NAME"
+	mkjson name="${1}" description="a silo called ${1}" discoverable="true" |
+		do_curl_authn /silos -X POST -T -
+}
+
+function cmd_silo_get
+{
+	[[ $# != 1 ]] && usage "expected SILO_NAME"
+	do_curl_authn "/silos/${1}"
+}
+
+function cmd_silo_delete
+{
+	[[ $# != 1 ]] && usage "expected SILO_NAME"
+	do_curl_authn "/silos/${1}" -X DELETE
+}
 
 function cmd_organizations_list
 {
