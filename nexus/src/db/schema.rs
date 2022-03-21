@@ -96,13 +96,9 @@ table! {
         id -> Uuid,
         silo_id -> Uuid,
 
-        name -> Text,
-
         time_created -> Timestamptz,
         time_modified -> Timestamptz,
         time_deleted -> Nullable<Timestamptz>,
-
-        internal_user_id -> Uuid,
     }
 }
 
@@ -180,7 +176,7 @@ table! {
         token -> Text,
         time_created -> Timestamptz,
         time_last_used -> Timestamptz,
-        user_id -> Uuid,
+        silo_user_id -> Uuid,
     }
 }
 

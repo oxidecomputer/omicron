@@ -528,8 +528,8 @@ impl SessionStore for Arc<ServerContext> {
 }
 
 impl Session for ConsoleSessionWithSiloId {
-    fn user_id(&self) -> Uuid {
-        self.console_session.user_id
+    fn silo_user_id(&self) -> Uuid {
+        self.console_session.silo_user_id
     }
     fn silo_id(&self) -> Uuid {
         self.silo_id

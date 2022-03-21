@@ -2702,7 +2702,7 @@ impl DataStore {
             })?;
 
         let silo_id = self
-            .get_silo_id_from_internal_user_id(console_session.user_id)
+            .get_silo_id_from_silo_user_id(console_session.silo_user_id)
             .await
             .map_err(|e| {
                 Error::internal_error(&format!(
@@ -2753,7 +2753,7 @@ impl DataStore {
             })?;
 
         let silo_id = self
-            .get_silo_id_from_internal_user_id(console_session.user_id)
+            .get_silo_id_from_silo_user_id(console_session.silo_user_id)
             .await
             .map_err(|e| {
                 Error::internal_error(&format!(
@@ -2863,8 +2863,7 @@ impl DataStore {
         for builtin_user in &builtin_users {
             self.silo_user_create(SiloUser::new(
                 *SILO_ID,
-                Uuid::new_v4(),           /* silo user id */
-                builtin_user.identity.id, /* internal user id */
+                builtin_user.identity.id, /* silo user id */
             ))
             .await?;
         }
@@ -3106,16 +3105,6 @@ impl DataStore {
         Ok(silo_user.silo_id)
     }
 
-    pub async fn get_silo_id_from_internal_user_id(
-        &self,
-        internal_user_id: Uuid,
-    ) -> LookupResult<Uuid> {
-        let silo_user: SiloUser =
-            self.silo_user_fetch_by_internal_id(internal_user_id).await?;
-
-        Ok(silo_user.silo_id)
-    }
-
     pub async fn silo_user_create(
         &self,
         silo_user: SiloUser,
@@ -3143,26 +3132,6 @@ impl DataStore {
 
         dsl::silo_user
             .filter(dsl::id.eq(id))
-            .filter(dsl::time_deleted.is_null())
-            .select(SiloUser::as_select())
-            .first_async(self.pool())
-            .await
-            .map_err(|e| {
-                Error::internal_error(&format!(
-                    "error fetching silo user: {:?}",
-                    e
-                ))
-            })
-    }
-
-    pub async fn silo_user_fetch_by_internal_id(
-        &self,
-        internal_user_id: Uuid,
-    ) -> CreateResult<SiloUser> {
-        use db::schema::silo_user::dsl;
-
-        dsl::silo_user
-            .filter(dsl::internal_user_id.eq(internal_user_id))
             .filter(dsl::time_deleted.is_null())
             .select(SiloUser::as_select())
             .first_async(self.pool())
@@ -3489,12 +3458,15 @@ mod test {
         let logctx = dev::test_setup_log("test_session_methods");
         let mut db = test_setup_database(&logctx.log).await;
         let (_, datastore) = datastore_test(&logctx, &db).await;
+
         let token = "a_token".to_string();
+        let silo_user_id = Uuid::new_v4();
+
         let session = ConsoleSession {
             token: token.clone(),
             time_created: Utc::now() - Duration::minutes(5),
             time_last_used: Utc::now() - Duration::minutes(5),
-            user_id: Uuid::new_v4(),
+            silo_user_id,
         };
 
         let _ = datastore.session_create(session.clone()).await;
@@ -3502,9 +3474,8 @@ mod test {
         // Associate silo with user
         let silo_user = datastore
             .silo_user_create(SiloUser::new(
-                Uuid::new_v4(),  /* silo id */
-                Uuid::new_v4(),  /* silo user id */
-                session.user_id, /* internal user id */
+                Uuid::new_v4(), /* silo id */
+                silo_user_id,
             ))
             .await
             .unwrap();
@@ -3512,14 +3483,14 @@ mod test {
         assert_eq!(
             silo_user.silo_id,
             datastore
-                .get_silo_id_from_internal_user_id(session.user_id)
+                .get_silo_id_from_silo_user_id(session.silo_user_id)
                 .await
                 .unwrap(),
         );
 
         // fetch the one we just created
         let fetched = datastore.session_fetch(token.clone()).await.unwrap();
-        assert_eq!(session.user_id, fetched.console_session.user_id);
+        assert_eq!(session.silo_user_id, fetched.console_session.silo_user_id);
 
         // trying to insert the same one again fails
         let duplicate = datastore.session_create(session.clone()).await;

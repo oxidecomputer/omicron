@@ -2934,20 +2934,12 @@ impl Nexus {
         self.db_datastore.get_silo_id_from_silo_user_id(silo_user_id).await
     }
 
-    pub async fn get_silo_id_from_internal_user_id(
-        &self,
-        user_id: Uuid,
-    ) -> LookupResult<Uuid> {
-        self.db_datastore.get_silo_id_from_internal_user_id(user_id).await
-    }
-
     pub async fn silo_user_create(
         &self,
         silo_id: Uuid,
         silo_user_id: Uuid,
-        internal_user_id: Uuid,
     ) -> CreateResult<SiloUser> {
-        let silo_user = SiloUser::new(silo_id, silo_user_id, internal_user_id);
+        let silo_user = SiloUser::new(silo_id, silo_user_id);
         Ok(self.db_datastore.silo_user_create(silo_user).await?)
     }
 }

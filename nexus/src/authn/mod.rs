@@ -205,7 +205,7 @@ pub struct Details {
 /// Who is performing an operation
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct Actor {
-    pub id: Uuid,
+    pub id: Uuid, // silo user id
     pub silo_id: Uuid,
 }
 

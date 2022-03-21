@@ -823,12 +823,10 @@ pub struct SiloUser {
     pub time_created: DateTime<Utc>,
     pub time_modified: DateTime<Utc>,
     pub time_deleted: Option<DateTime<Utc>>,
-
-    pub internal_user_id: Uuid,
 }
 
 impl SiloUser {
-    pub fn new(silo_id: Uuid, user_id: Uuid, internal_user_id: Uuid) -> Self {
+    pub fn new(silo_id: Uuid, user_id: Uuid) -> Self {
         let now = Utc::now();
         Self {
             id: user_id,
@@ -837,8 +835,6 @@ impl SiloUser {
             time_created: now,
             time_modified: now,
             time_deleted: None,
-
-            internal_user_id,
         }
     }
 }
@@ -2120,13 +2116,13 @@ pub struct ConsoleSession {
     pub token: String,
     pub time_created: DateTime<Utc>,
     pub time_last_used: DateTime<Utc>,
-    pub user_id: Uuid,
+    pub silo_user_id: Uuid,
 }
 
 impl ConsoleSession {
-    pub fn new(token: String, user_id: Uuid) -> Self {
+    pub fn new(token: String, silo_user_id: Uuid) -> Self {
         let now = Utc::now();
-        Self { token, user_id, time_last_used: now, time_created: now }
+        Self { token, silo_user_id, time_last_used: now, time_created: now }
     }
 }
 

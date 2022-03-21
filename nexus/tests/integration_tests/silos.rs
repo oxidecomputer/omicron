@@ -11,7 +11,6 @@ use http::method::Method;
 use http::StatusCode;
 use nexus_test_utils::resource_helpers::{
     create_organization, create_silo, objects_list_page_authz,
-    objects_list_page_authz_with_session,
 };
 
 use nexus_test_utils::ControlPlaneTestContext;
@@ -70,13 +69,11 @@ async fn test_silos(cptestctx: &ControlPlaneTestContext) {
         .silo_user_create(
             silos[0].identity.id, /* silo id */
             Uuid::new_v4(),       /* silo user id */
-            Uuid::new_v4(),       /* internal user id */
         )
         .await
         .unwrap();
 
-    let session =
-        nexus.session_create(new_silo_user.internal_user_id).await.unwrap();
+    let session = nexus.session_create(new_silo_user.id).await.unwrap();
 
     // Create organization with built-in user auth
     // Note: this currently goes to the built-in silo!
@@ -131,10 +128,6 @@ async fn test_silos(cptestctx: &ControlPlaneTestContext) {
         .expect("failed to make request");
 
     // Verify silo user was also deleted
-    nexus
-        .get_silo_id_from_internal_user_id(new_silo_user.internal_user_id)
-        .await
-        .expect_err("unexpected success");
     nexus
         .get_silo_id_from_silo_user_id(new_silo_user.id)
         .await

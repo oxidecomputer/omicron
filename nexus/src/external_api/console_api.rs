@@ -70,7 +70,7 @@ pub async fn spoof_login(
     let user_id = user_id.unwrap();
 
     // look up silo id, make sure user is legal
-    if let Err(e) = nexus.get_silo_id_from_internal_user_id(user_id).await {
+    if let Err(e) = nexus.get_silo_id_from_silo_user_id(user_id).await {
         return Err(HttpError::for_internal_error(format!(
             "no silo id found! {}",
             e

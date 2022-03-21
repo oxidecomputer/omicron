@@ -209,10 +209,7 @@ CREATE TABLE omicron.public.silo_user (
 
     time_created TIMESTAMPTZ NOT NULL,
     time_modified TIMESTAMPTZ NOT NULL,
-    time_deleted TIMESTAMPTZ,
-
-    /* internal user id used by authz */
-    internal_user_id UUID NOT NULL
+    time_deleted TIMESTAMPTZ
 );
 
 /*
@@ -754,8 +751,8 @@ CREATE TABLE omicron.public.console_session (
     token STRING(40) PRIMARY KEY,
     time_created TIMESTAMPTZ NOT NULL,
     time_last_used TIMESTAMPTZ NOT NULL,
-    -- this maps to internal_user_id in the silo_user table
-    user_id UUID NOT NULL
+    -- this maps to id in the silo_user table
+    silo_user_id UUID NOT NULL
 );
 
 -- to be used for cleaning up old tokens
