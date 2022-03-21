@@ -57,10 +57,34 @@ to = "/var/svc/manifest/site/cockroachdb"
 
 # Packages not built within Omicron, but which must be imported.
 
+# Refer to
+#   https://github.com/oxidecomputer/crucible/blob/main/package/README.md
+# for instructions on building this manually.
 [external_package.crucible]
 service_name = "crucible"
 zone = true
+[external_package.crucible.source]
+# To manually override the package source (for example, to test a change in
+# both Crucible and Omicron simultaneously):
+#
+# 1. Build the zone image manually
+# 2. Copy the output zone image from crucible/out to omicron/out
+# 3. Use type = "manual" instead of the "prebuilt"
+type = "prebuilt"
+repo = "crucible"
+commit = "195a5544f4cde7dad47304061a954aa9a7e753ed"
+# The SHA256 digest is automatically posted to:
+# https://buildomat.eng.oxide.computer/public/file/oxidecomputer/crucible/image/<commit>/crucible.sha256.txt
+sha256 = "fc7ee178a3320b53e2975fa38cbde4bbb9b68c71ddcc5aeff61bdce519b2f4d7"
 
+# Refer to
+#   https://github.com/oxidecomputer/propolis/blob/master/package/README.md
+# for instructions on building this manually.
 [external_package.propolis-server]
 service_name = "propolis-server"
 zone = true
+[external_package.propolis-server.source]
+type = "prebuilt"
+repo = "propolis"
+commit = "e131374d400a14674dab5eccbafcf994657c55fe"
+sha256 = "0c7bd314614f9413493558d7592d67156089887ab9736149934518c12ebd125f"

@@ -10,6 +10,7 @@ use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 use omicron_package::{parse, SubCommand};
 use omicron_zone_package::package::{Package, Progress};
 use rayon::prelude::*;
+use ring::digest::{Context as DigestContext, Digest, SHA256};
 use serde_derive::Deserialize;
 use std::collections::BTreeMap;
 use std::env;
@@ -17,7 +18,37 @@ use std::fs::create_dir_all;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use structopt::StructOpt;
+use tokio::io::{AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::process::Command;
+
+/// Describes the origin of an externally-built package.
+#[derive(Deserialize, Debug)]
+#[serde(tag = "type", rename_all = "lowercase")]
+pub enum ExternalPackageSource {
+    /// Downloads the package from the following URL:
+    ///
+    /// <https://buildomat.eng.oxide.computer/public/file/oxidecomputer/REPO/image/COMMIT/PACKAGE>
+    Prebuilt {
+        repo: String,
+        commit: String,
+        sha256: String,
+    },
+    /// Expects that a package will be manually built and placed into the output
+    /// directory.
+    Manual,
+}
+
+/// Describes a package which originates from outside this repo.
+///
+/// These packages are usually downloaded via a prebuilt, but also may be
+/// supplied manually.
+#[derive(Deserialize, Debug)]
+pub struct ExternalPackage {
+    #[serde(flatten)]
+    pub package: Package,
+
+    pub source: ExternalPackageSource,
+}
 
 /// Describes the configuration for a set of packages.
 #[derive(Deserialize, Debug)]
@@ -29,7 +60,7 @@ pub struct Config {
     /// Packages to be installed, but which have been created outside this
     /// repository.
     #[serde(default, rename = "external_package")]
-    pub external_packages: BTreeMap<String, Package>,
+    pub external_packages: BTreeMap<String, ExternalPackage>,
 }
 
 #[derive(Debug, StructOpt)]
@@ -122,39 +153,102 @@ async fn do_build(config: &Config) -> Result<()> {
     do_for_all_rust_packages(config, "build").await
 }
 
+async fn get_sha256_digest(path: &PathBuf) -> Result<Digest> {
+    let mut reader = BufReader::new(
+        tokio::fs::File::open(&path).await?
+    );
+    let mut context = DigestContext::new(&SHA256);
+    let mut buffer = [0; 1024];
+
+    loop {
+        let count = reader.read(&mut buffer).await?;
+        if count == 0 {
+            break
+        } else {
+            context.update(&buffer[..count]);
+        }
+    }
+    Ok(context.finish())
+}
+
+// Performs the packaging step for an external package.
+async fn do_package_external(
+    ui: &Arc<ProgressUI>,
+    package_name: &String,
+    external_package: &ExternalPackage,
+    output_directory: &Path,
+) -> Result<()> {
+    let progress = ui.add_package(package_name.to_string(), 1);
+    match &external_package.source {
+        ExternalPackageSource::Prebuilt { repo, commit, sha256 } => {
+            let expected_digest = hex::decode(&sha256)?;
+            let path = external_package.package.get_output_path(&output_directory);
+
+            let should_download = if path.exists() {
+                // Re-download the package if the SHA doesn't match.
+                progress.set_message("verifying hash".to_string());
+                let digest = get_sha256_digest(&path).await?;
+                digest.as_ref() != expected_digest
+            } else {
+                true
+            };
+
+            if should_download {
+                progress.set_message("downloading prebuilt".to_string());
+                let url = format!(
+                    "https://buildomat.eng.oxide.computer/public/file/oxidecomputer/{}/image/{}/{}",
+                    repo,
+                    commit,
+                    path.as_path().file_name().unwrap().to_string_lossy(),
+                );
+                let response = reqwest::Client::new().get(url).send().await?;
+                progress.set_length(
+                    response.content_length().ok_or_else(|| anyhow!("Missing Content Length"))?
+                );
+                let mut file = tokio::fs::File::create(path).await?;
+                let mut stream = response.bytes_stream();
+                let mut context = DigestContext::new(&SHA256);
+                while let Some(chunk) = stream.next().await {
+                    let chunk = chunk?;
+                    // Update the running SHA digest
+                    context.update(&chunk);
+                    // Update the downloaded file
+                    file.write_all(&chunk).await?;
+                    // Record progress in the UI
+                    progress.increment(chunk.len().try_into().unwrap());
+                }
+
+                let digest = context.finish();
+                if digest.as_ref() != expected_digest {
+                    bail!("Digest mismatch");
+                }
+            }
+        },
+        ExternalPackageSource::Manual => {
+            let path = external_package.package.get_output_path(&output_directory);
+            if !path.exists() {
+                bail!(
+                    "The package for {} (expected at {}) does not exist.",
+                    package_name,
+                    path.to_string_lossy(),
+                );
+            }
+        },
+    }
+    progress.finish();
+    Ok(())
+}
+
 async fn do_package(config: &Config, output_directory: &Path) -> Result<()> {
     create_dir_all(&output_directory)
         .map_err(|err| anyhow!("Cannot create output directory: {}", err))?;
 
     let ui = ProgressUI::new();
-    let ui_refs = vec![ui.clone(); config.packages.len()];
 
     do_build(&config).await?;
 
-    for (package_name, package) in &config.external_packages {
-        let progress = ui.add_package(package_name.to_string(), 1);
-        progress.set_message("finding package".to_string());
-        let path = package.get_output_path(&output_directory);
-        if !path.exists() {
-            bail!(
-                "The package for {} (expected at {}) does not exist.
-Omicron can build all packages that exist within the repository, but packages
-from outside the repository must be created manually, and copied to the output
-directory (which is currently: {}).
-
-This is currently a shortcoming with the build system - if you have an interest
-in improving the cross-repository meta-build system, please contact sean@.",
-                package_name,
-                path.to_string_lossy(),
-                std::fs::canonicalize(output_directory)
-                    .unwrap()
-                    .to_string_lossy(),
-            );
-        }
-        progress.finish();
-    }
-
-    stream::iter(&config.packages)
+    let ui_refs = vec![ui.clone(); config.external_packages.len()];
+    let external_pkg_stream = stream::iter(&config.external_packages)
         // It's a pain to clone a value into closures - see
         // https://github.com/rust-lang/rfcs/issues/2407 - so in the meantime,
         // we explicitly create the references to the UI we need for each
@@ -162,6 +256,17 @@ in improving the cross-repository meta-build system, please contact sean@.",
         .zip(stream::iter(ui_refs))
         // We convert the stream type to operate on Results, so we may invoke
         // "try_for_each_concurrent" more easily.
+        .map(Ok::<_, anyhow::Error>)
+        .try_for_each_concurrent(
+            None,
+            |((package_name, package), ui)| async move {
+                do_package_external(&ui, package_name, package, output_directory).await
+            },
+        );
+
+    let ui_refs = vec![ui.clone(); config.packages.len()];
+    let internal_pkg_stream = stream::iter(&config.packages)
+        .zip(stream::iter(ui_refs))
         .map(Ok::<_, anyhow::Error>)
         .try_for_each_concurrent(
             None,
@@ -176,8 +281,12 @@ in improving the cross-repository meta-build system, please contact sean@.",
                 progress.finish();
                 Ok(())
             },
-        )
-        .await?;
+        );
+
+    tokio::try_join!(
+        external_pkg_stream,
+        internal_pkg_stream,
+    )?;
 
     Ok(())
 }
@@ -193,7 +302,9 @@ fn do_install(
 
     // Copy all packages to the install location in parallel.
     let packages: Vec<(&String, &Package)> =
-        config.packages.iter().chain(config.external_packages.iter()).collect();
+        config.packages.iter().chain(
+            config.external_packages.iter().map(|(name, epkg)| (name, &epkg.package))
+        ).collect();
     packages.into_par_iter().try_for_each(|(_, package)| -> Result<()> {
         let tarfile = if package.zone {
             artifact_dir.join(format!("{}.tar.gz", package.service_name))
@@ -250,7 +361,9 @@ fn do_install(
 // Attempts to both disable and delete all requested packages.
 fn uninstall_all_packages(config: &Config) {
     for package in
-        config.packages.values().chain(config.external_packages.values())
+        config.packages.values().chain(
+            config.external_packages.values().map(|epkg| &epkg.package)
+        )
     {
         if package.zone {
             // TODO(https://github.com/oxidecomputer/omicron/issues/723):
@@ -323,6 +436,10 @@ impl PackageProgress {
         self.pb.finish_with_message(format!("{}: done", self.service_name));
         self.pb.tick();
     }
+
+    fn set_length(&self, total: u64) {
+        self.pb.set_length(total);
+    }
 }
 
 impl Progress for PackageProgress {
@@ -332,6 +449,7 @@ impl Progress for PackageProgress {
             self.service_name,
             message.into()
         ));
+        self.pb.tick();
     }
 
     fn increment(&self, delta: u64) {

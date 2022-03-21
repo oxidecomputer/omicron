@@ -72,11 +72,11 @@ See <<_configuring_clickhouse>> for details on ClickHouse's setup and configurat
 +
 . Additional software requirements:
 +
-On an illumos-based machine (Helios, OmniOS), if you want to run the real (non-simulated) Sled Agent to run actual VMs with Propolis, make sure your packages are up to date, and you have the `brand/sparse` package:
+On an illumos-based machine (Helios, OmniOS), if you want to run the real (non-simulated) Sled Agent to run actual VMs with Propolis, make sure your packages are up to date, and you have the `brand/omicron1/tools` package:
 +
 [source,text]
 ----
-pkg install brand/sparse
+pkg install brand/omicron1/tools
 pkg install pkg:/package/pkg
 pkg update
 ----
