@@ -215,7 +215,7 @@ async fn get_external_package(
 
                 let digest = context.finish();
                 if digest.as_ref() != expected_digest {
-                    bail!("Digest mismatch");
+                    bail!("Digest mismatch downloading {}", package_name);
                 }
             }
         }
