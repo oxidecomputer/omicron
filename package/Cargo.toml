@@ -8,8 +8,10 @@ license = "MPL-2.0"
 anyhow = "1.0"
 crossbeam = "0.8"
 flate2 = "1.0.22"
+futures = "0.3.21"
+indicatif = { version = "0.17.0-rc.9", features = ["rayon"] }
 omicron-common = { path = "../common" }
-omicron-zone-package = { version = "0.1.2" }
+omicron-zone-package = { version = "0.2.0" }
 rayon = "1.5"
 reqwest = { version = "0.11", default-features = false, features = ["rustls-tls"] }
 serde = { version = "1.0", features = [ "derive" ] }
