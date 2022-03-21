@@ -22,8 +22,8 @@ async fn test_silos(cptestctx: &ControlPlaneTestContext) {
     let nexus = &cptestctx.server.apictx.nexus;
 
     // Create two silos: one discoverable, one not
-    create_silo(&client, &"discoverable", true).await;
-    create_silo(&client, &"hidden", false).await;
+    create_silo(&client, "discoverable", true).await;
+    create_silo(&client, "hidden", false).await;
 
     // Verify GET /silos/{silo} works for both discoverable and not
     let discoverable_url = "/silos/discoverable";
