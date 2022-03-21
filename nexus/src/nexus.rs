@@ -1244,13 +1244,14 @@ impl Nexus {
         let mut disk_reqs = vec![];
         for (i, disk) in disks.iter().enumerate() {
             let volume = self.db_datastore.volume_get(disk.volume_id).await?;
+            let gen: i64 = (&disk.runtime_state.gen.0).into();
             disk_reqs.push(sled_agent_client::types::DiskRequest {
                 name: disk.name().to_string(),
                 slot: sled_agent_client::types::Slot(i as u8),
                 // TODO offer ability to attach read-only?
                 read_only: false,
                 device: "nvme".to_string(),
-                gen: disk.runtime_state.gen.0.get(),
+                gen: gen as u64,
                 volume_construction_request: serde_json::from_str(
                     &volume.data(),
                 )?,
