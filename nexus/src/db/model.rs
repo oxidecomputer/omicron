@@ -914,7 +914,7 @@ impl Volume {
         }
     }
 
-    pub fn data(&self) -> &String {
+    pub fn data(&self) -> &str {
         &self.data
     }
 }
