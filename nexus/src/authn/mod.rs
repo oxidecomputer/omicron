@@ -64,15 +64,16 @@ impl Context {
     }
 
     /// Returns the authenticated actor if present, Unauthenticated error otherwise
-    // TODO this should maybe return omicron_common::api::external::Error
-    pub fn actor_required(&self) -> Result<&Actor, dropshot::HttpError> {
+    pub fn actor_required(
+        &self,
+    ) -> Result<&Actor, omicron_common::api::external::Error> {
         match &self.kind {
             Kind::Authenticated(Details { actor }) => Ok(actor),
-            Kind::Unauthenticated => Err(dropshot::HttpError::from(
-                omicron_common::api::external::Error::Unauthenticated {
+            Kind::Unauthenticated => {
+                Err(omicron_common::api::external::Error::Unauthenticated {
                     internal_message: "Actor required".to_string(),
-                },
-            )),
+                })
+            }
         }
     }
 
