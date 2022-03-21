@@ -122,33 +122,6 @@ impl<'a> Organization<'a> {
     }
 }
 
-impl<'a> GetLookupRoot for Organization<'a> {
-    fn lookup_root(&self) -> &LookupPath<'_> {
-        self.key.lookup_root()
-    }
-}
-
-impl Fetch for Organization<'_> {
-    type FetchType = (authz::Organization, model::Organization);
-
-    fn fetch(&self) -> BoxFuture<'_, LookupResult<Self::FetchType>> {
-        let lookup = self.lookup_root();
-        let opctx = &lookup.opctx;
-        let datastore = lookup.datastore;
-        async {
-            match self.key {
-                Key::Name(_, name) => {
-                    organization_fetch_by_name(opctx, datastore, name).await
-                }
-                Key::Id(_, id) => {
-                    organization_fetch_by_id(opctx, datastore, id).await
-                }
-            }
-        }
-        .boxed()
-    }
-}
-
 pub struct Project<'a> {
     key: Key<'a, Organization<'a>>,
 }
@@ -264,6 +237,44 @@ macro_rules! define_lookup {
                 opctx.authorize(authz::Action::Read, &authz_child).await?;
                 Ok((authz_child, db_child))
             }
+
+            impl<'a> GetLookupRoot for $pc<'a> {
+                fn lookup_root(&self) -> &LookupPath<'_> {
+                    self.key.lookup_root()
+                }
+            }
+
+            impl Fetch for $pc<'_> {
+                type FetchType = (authz::$pc, model::$pc);
+
+                fn fetch(&self) -> BoxFuture<'_, LookupResult<Self::FetchType>> {
+                    let lookup = self.lookup_root();
+                    let opctx = &lookup.opctx;
+                    let datastore = lookup.datastore;
+                    async {
+                        match self.key {
+                            Key::Name(_, name) => {
+                                [<$pc:lower _fetch_by_name>](
+                                    opctx,
+                                    datastore,
+                                    name
+                                ).await
+                            }
+                            Key::Id(_, id) => {
+                                [<$pc:lower _fetch_by_id>](
+                                    opctx,
+                                    datastore,
+                                    id
+                                ).await
+                            }
+                        }
+                    }
+                    .boxed()
+                }
+            }
+
+
+
         }
     };
 }
