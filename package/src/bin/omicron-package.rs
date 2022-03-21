@@ -35,9 +35,6 @@ pub enum ExternalPackageSource {
 }
 
 /// Describes a package which originates from outside this repo.
-///
-/// These packages are usually downloaded via a prebuilt, but also may be
-/// supplied manually.
 #[derive(Deserialize, Debug)]
 pub struct ExternalPackage {
     #[serde(flatten)]
@@ -149,6 +146,7 @@ async fn do_build(config: &Config) -> Result<()> {
     do_for_all_rust_packages(config, "build").await
 }
 
+// Calculates the SHA256 digest for a file.
 async fn get_sha256_digest(path: &PathBuf) -> Result<Digest> {
     let mut reader = BufReader::new(tokio::fs::File::open(&path).await?);
     let mut context = DigestContext::new(&SHA256);
@@ -165,8 +163,8 @@ async fn get_sha256_digest(path: &PathBuf) -> Result<Digest> {
     Ok(context.finish())
 }
 
-// Performs the packaging step for an external package.
-async fn do_package_external(
+// Accesses a package which is contructed outside of Omicron.
+async fn get_external_package(
     ui: &Arc<ProgressUI>,
     package_name: &String,
     external_package: &ExternalPackage,
@@ -258,7 +256,7 @@ async fn do_package(config: &Config, output_directory: &Path) -> Result<()> {
         .try_for_each_concurrent(
             None,
             |((package_name, package), ui)| async move {
-                do_package_external(
+                get_external_package(
                     &ui,
                     package_name,
                     package,
