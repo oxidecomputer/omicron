@@ -136,45 +136,15 @@ impl Fetch for Organization<'_> {
         let opctx = &lookup.opctx;
         let datastore = lookup.datastore;
         async {
-            use db::schema::organization::dsl;
             let conn = datastore.pool_authorized(opctx).await?;
-            let db_org = match self.key {
-                Key::Name(_, name) => dsl::organization
-                    .filter(dsl::time_deleted.is_null())
-                    .filter(dsl::name.eq(name.clone()))
-                    .select(model::Organization::as_select())
-                    .get_result_async(conn)
-                    .await
-                    .map_err(|e| {
-                        public_error_from_diesel_pool(
-                            e,
-                            ErrorHandler::NotFoundByLookup(
-                                ResourceType::Organization,
-                                self.key.lookup_type(),
-                            ),
-                        )
-                    }),
-                Key::Id(_, id) => dsl::organization
-                    .filter(dsl::time_deleted.is_null())
-                    .filter(dsl::id.eq(id))
-                    .select(model::Organization::as_select())
-                    .get_result_async(conn)
-                    .await
-                    .map_err(|e| {
-                        public_error_from_diesel_pool(
-                            e,
-                            ErrorHandler::NotFoundByLookup(
-                                ResourceType::Organization,
-                                self.key.lookup_type(),
-                            ),
-                        )
-                    }),
-            }?;
-
-            let authz_org =
-                authz::FLEET.organization(db_org.id(), self.key.lookup_type());
-            opctx.authorize(authz::Action::Read, &authz_org).await?;
-            Ok((authz_org, db_org))
+            match self.key {
+                Key::Name(_, name) => {
+                    organization_fetch_by_name(opctx, datastore, name).await
+                }
+                Key::Id(_, id) => {
+                    organization_fetch_by_id(opctx, datastore, id).await
+                }
+            }
         }
         .boxed()
     }
@@ -305,6 +275,21 @@ macro_rules! define_lookup {
                         opctx,
                         datastore,
                         name
+                    ).await?;
+                opctx.authorize(authz::Action::Read, &authz_child).await?;
+                Ok((authz_child, db_child))
+            }
+
+            async fn [<$pc:lower _fetch_by_id>](
+                opctx: &OpContext,
+                datastore: &DataStore,
+                id: Uuid,
+            ) -> LookupResult<(authz::$pc, model::$pc)> {
+                let (authz_child, db_child) =
+                    [<$pc:lower _lookup_by_id_no_authz>](
+                        opctx,
+                        datastore,
+                        id,
                     ).await?;
                 opctx.authorize(authz::Action::Read, &authz_child).await?;
                 Ok((authz_child, db_child))
