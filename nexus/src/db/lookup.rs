@@ -8,7 +8,7 @@ use super::datastore::DataStore;
 use super::identity::Resource;
 use super::model;
 use crate::{
-    authz,
+    authz::{self, AuthorizedResource},
     context::OpContext,
     db,
     db::error::{public_error_from_diesel_pool, ErrorHandler},
@@ -21,24 +21,68 @@ use futures::FutureExt;
 use omicron_common::api::external::{LookupResult, LookupType, ResourceType};
 use uuid::Uuid;
 
+// TODO-dap XXX Neither "fetcH" nor "lookup" needs to be a trait now that the
+// macro is defining the impls and the structs
+
 pub trait Fetch {
     type FetchType;
     fn fetch(&self) -> BoxFuture<'_, LookupResult<Self::FetchType>>;
 }
 
-trait Lookup {
+mod private {
+    use futures::future::BoxFuture;
+    use omicron_common::api::external::LookupResult;
+
+    use crate::authz::AuthorizedResource;
+
+    use super::LookupPath;
+
+    // TODO-dap XXX we could probably get rid of this trait and its impls because
+    // we're now calling `lookup_root()` from a macro that can essentially inline
+    // the impl of GetLookupRoot for Key.
+    pub trait GetLookupRoot {
+        fn lookup_root(&self) -> &LookupPath<'_>;
+    }
+
+    pub trait LookupNoauthz {
+        type LookupType: AuthorizedResource + Clone + std::fmt::Debug + Send;
+        fn lookup(&self) -> BoxFuture<'_, LookupResult<Self::LookupType>>;
+    }
+}
+
+// XXX-dap workaround compiler error with private mod
+use private::GetLookupRoot;
+use private::LookupNoauthz;
+
+pub trait LookupFor {
     type LookupType;
-    fn lookup(
+    fn lookup_for(
         &self,
-        lookup: &LookupPath,
+        action: authz::Action,
     ) -> BoxFuture<'_, LookupResult<Self::LookupType>>;
 }
 
-// TODO-dap XXX we could probably get rid of this trait and its impls because
-// we're now calling `lookup_root()` from a macro that can essentially inline
-// the impl of GetLookupRoot for Key.
-trait GetLookupRoot {
-    fn lookup_root(&self) -> &LookupPath<'_>;
+impl<T> LookupFor for T
+where
+    T: LookupNoauthz + GetLookupRoot + Send + Sync, // XXX-dap try removing Sync?
+                                                    // XXX-dap
+                                                    // <T as LookupNoauthz>::LookupType:
+                                                    //     AuthorizedResource + Clone + std::fmt::Debug + Send,
+{
+    type LookupType = <T as LookupNoauthz>::LookupType;
+    fn lookup_for(
+        &self,
+        action: authz::Action,
+    ) -> BoxFuture<'_, LookupResult<Self::LookupType>> {
+        async move {
+            let lookup = self.lookup_root();
+            let opctx = &lookup.opctx;
+            let rv = self.lookup().await?;
+            opctx.authorize(action, &rv).await?;
+            Ok(rv)
+        }
+        .boxed()
+    }
 }
 
 enum Key<'a, P> {
@@ -112,7 +156,7 @@ impl<'a> GetLookupRoot for LookupPath<'a> {
 }
 
 impl<'a> Organization<'a> {
-    fn project_name<'b, 'c>(self, name: &'b Name) -> Project<'c>
+    pub fn project_name<'b, 'c>(self, name: &'b Name) -> Project<'c>
     where
         'a: 'c,
         'b: 'c,
@@ -122,7 +166,7 @@ impl<'a> Organization<'a> {
 }
 
 impl<'a> Project<'a> {
-    fn instance_name<'b, 'c>(self, name: &'b Name) -> Instance<'c>
+    pub fn instance_name<'b, 'c>(self, name: &'b Name) -> Instance<'c>
     where
         'a: 'c,
         'b: 'c,
@@ -239,14 +283,48 @@ macro_rules! define_lookup {
                 Ok((authz_child, db_child))
             }
 
+            impl LookupNoauthz for $pc<'_> {
+                type LookupType = authz::$pc;
+
+                fn lookup(
+                    &self,
+                ) -> BoxFuture<'_, LookupResult<Self::LookupType>> {
+                    async {
+                        let lookup = self.lookup_root();
+                        let opctx = &lookup.opctx;
+                        let datastore = lookup.datastore;
+                        match self.key {
+                            Key::Name(_, name) => {
+                                let (rv, _) =
+                                    [<$pc:lower _lookup_by_name_no_authz>](
+                                        opctx,
+                                        datastore,
+                                        name
+                                    ).await?;
+                                Ok(rv)
+                            }
+                            Key::Id(_, id) => {
+                                let (rv, _) =
+                                    [<$pc:lower _lookup_by_id_no_authz>](
+                                        opctx,
+                                        datastore,
+                                        id
+                                    ).await?;
+                                Ok(rv)
+                            }
+                        }
+                    }.boxed()
+                }
+            }
+
             impl Fetch for $pc<'_> {
                 type FetchType = (authz::$pc, model::$pc);
 
                 fn fetch(&self) -> BoxFuture<'_, LookupResult<Self::FetchType>> {
-                    let lookup = self.lookup_root();
-                    let opctx = &lookup.opctx;
-                    let datastore = lookup.datastore;
                     async {
+                        let lookup = self.lookup_root();
+                        let opctx = &lookup.opctx;
+                        let datastore = lookup.datastore;
                         match self.key {
                             Key::Name(_, name) => {
                                 [<$pc:lower _fetch_by_name>](
@@ -393,14 +471,51 @@ macro_rules! define_lookup_with_parent {
                 Ok((authz_child, db_child))
             }
 
+            impl LookupNoauthz for $pc<'_> {
+                type LookupType = authz::$pc;
+
+                fn lookup(
+                    &self,
+                ) -> BoxFuture<'_, LookupResult<Self::LookupType>> {
+                    async {
+                        let lookup = self.lookup_root();
+                        let opctx = &lookup.opctx;
+                        let datastore = lookup.datastore;
+                        match &self.key {
+                            Key::Name(parent, name) => {
+                                let parent_authz = parent.lookup().await?;
+                                let (rv, _) =
+                                    [< $pc:lower _lookup_by_name_no_authz >](
+                                        opctx,
+                                        datastore,
+                                        &parent_authz,
+                                        *name
+                                    ).await?;
+                                Ok(rv)
+                            }
+                            Key::Id(_, id) => {
+                                let (rv, _) =
+                                    [< $pc:lower _lookup_by_id_no_authz >](
+                                        opctx,
+                                        datastore,
+                                        *id
+                                    ).await?;
+                                Ok(rv)
+                            }
+                        }
+                    }
+                    .boxed()
+                }
+            }
+
             impl Fetch for $pc<'_> {
                 type FetchType = (authz::$pc, model::$pc);
 
                 fn fetch(&self) -> BoxFuture<'_, LookupResult<Self::FetchType>> {
-                    let lookup = self.lookup_root();
-                    let opctx = &lookup.opctx;
-                    let datastore = lookup.datastore;
                     async {
+                        let lookup = self.lookup_root();
+                        let opctx = &lookup.opctx;
+                        let datastore = lookup.datastore;
                         match &self.key {
                             Key::Name(parent, name) => {
                                 let (parent_authz, _) = parent.fetch().await?;

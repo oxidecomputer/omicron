@@ -10,6 +10,9 @@ use crate::config;
 use crate::context::OpContext;
 use crate::db;
 use crate::db::identity::{Asset, Resource};
+use crate::db::lookup::Fetch;
+use crate::db::lookup::LookupFor;
+use crate::db::lookup::LookupPath;
 use crate::db::model::DatasetKind;
 use crate::db::model::Name;
 use crate::db::model::RouterRoute;
@@ -533,15 +536,18 @@ impl Nexus {
         organization_name: &Name,
         new_project: &params::ProjectCreate,
     ) -> CreateResult<db::model::Project> {
-        let org = self
-            .db_datastore
-            .organization_lookup_by_path(organization_name)
+        let authz_org = LookupPath::new(opctx, &self.db_datastore)
+            .organization_name(organization_name)
+            .lookup_for(authz::Action::CreateChild)
             .await?;
 
         // Create a project.
-        let db_project = db::model::Project::new(org.id(), new_project.clone());
         let db_project =
-            self.db_datastore.project_create(opctx, &org, db_project).await?;
+            db::model::Project::new(authz_org.id(), new_project.clone());
+        let db_project = self
+            .db_datastore
+            .project_create(opctx, &authz_org, db_project)
+            .await?;
 
         // TODO: We probably want to have "project creation" and "default VPC
         // creation" co-located within a saga for atomicity.
@@ -549,6 +555,9 @@ impl Nexus {
         // Until then, we just perform the operations sequentially.
 
         // Create a default VPC associated with the project.
+        // XXX-dap We need to be using the project_id we just created.
+        // project_create() should return authz::Project and we should use that
+        // here.
         let _ = self
             .project_create_vpc(
                 opctx,
@@ -577,13 +586,10 @@ impl Nexus {
         organization_name: &Name,
         project_name: &Name,
     ) -> LookupResult<db::model::Project> {
-        let authz_org = self
-            .db_datastore
-            .organization_lookup_by_path(organization_name)
-            .await?;
-        Ok(self
-            .db_datastore
-            .project_fetch(opctx, &authz_org, project_name)
+        Ok(LookupPath::new(opctx, &self.db_datastore)
+            .organization_name(organization_name)
+            .project_name(project_name)
+            .fetch()
             .await?
             .1)
     }
@@ -594,9 +600,9 @@ impl Nexus {
         organization_name: &Name,
         pagparams: &DataPageParams<'_, Name>,
     ) -> ListResultVec<db::model::Project> {
-        let authz_org = self
-            .db_datastore
-            .organization_lookup_by_path(organization_name)
+        let authz_org = LookupPath::new(opctx, &self.db_datastore)
+            .organization_name(organization_name)
+            .lookup_for(authz::Action::CreateChild)
             .await?;
         self.db_datastore
             .projects_list_by_name(opctx, &authz_org, pagparams)
@@ -609,9 +615,9 @@ impl Nexus {
         organization_name: &Name,
         pagparams: &DataPageParams<'_, Uuid>,
     ) -> ListResultVec<db::model::Project> {
-        let authz_org = self
-            .db_datastore
-            .organization_lookup_by_path(organization_name)
+        let authz_org = LookupPath::new(opctx, &self.db_datastore)
+            .organization_name(organization_name)
+            .lookup_for(authz::Action::CreateChild)
             .await?;
         self.db_datastore
             .projects_list_by_id(opctx, &authz_org, pagparams)

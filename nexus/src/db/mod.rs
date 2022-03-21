@@ -14,7 +14,7 @@ pub mod datastore;
 mod error;
 mod explain;
 pub mod fixed_data;
-mod lookup;
+pub mod lookup;
 mod pagination;
 mod pool;
 mod saga_recovery;
