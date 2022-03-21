@@ -1298,20 +1298,20 @@ impl Nexus {
         instance_name: &Name,
         disk_name: &Name,
     ) -> UpdateResult<db::model::Disk> {
-        // TODO: This shouldn't be looking up multiple database entries by name,
-        // it should resolve names to IDs first.
-        let authz_project = self
-            .db_datastore
-            .project_lookup_by_path(organization_name, project_name)
+        let (authz_disk, db_disk) = LookupPath::new(opctx, &self.db_datastore)
+            .organization_name(organization_name)
+            .project_name(project_name)
+            .disk_name(disk_name)
+            .fetch()
             .await?;
-        let (authz_disk, db_disk) = self
-            .db_datastore
-            .disk_fetch(opctx, &authz_project, disk_name)
-            .await?;
-        let (authz_instance, db_instance) = self
-            .db_datastore
-            .instance_fetch(opctx, &authz_project, instance_name)
-            .await?;
+        // TODO-dap XXX-dap can we have fetch() return this instead?
+        let authz_project = authz_disk.project();
+        let (authz_instance, db_instance) =
+            LookupPath::new(opctx, &self.db_datastore)
+                .project_id(authz_project.id())
+                .instance_name(instance_name)
+                .fetch()
+                .await?;
         let instance_id = &authz_instance.id();
 
         fn disk_attachment_error(
@@ -1405,20 +1405,19 @@ impl Nexus {
         instance_name: &Name,
         disk_name: &Name,
     ) -> UpdateResult<db::model::Disk> {
-        // TODO: This shouldn't be looking up multiple database entries by name,
-        // it should resolve names to IDs first.
-        let authz_project = self
-            .db_datastore
-            .project_lookup_by_path(organization_name, project_name)
+        let (authz_disk, db_disk) = LookupPath::new(opctx, &self.db_datastore)
+            .organization_name(organization_name)
+            .project_name(project_name)
+            .disk_name(disk_name)
+            .fetch()
             .await?;
-        let (authz_disk, db_disk) = self
-            .db_datastore
-            .disk_fetch(opctx, &authz_project, disk_name)
-            .await?;
-        let (authz_instance, db_instance) = self
-            .db_datastore
-            .instance_fetch(opctx, &authz_project, instance_name)
-            .await?;
+        let authz_project = authz_disk.project();
+        let (authz_instance, db_instance) =
+            LookupPath::new(opctx, &self.db_datastore)
+                .project_id(authz_project.id())
+                .instance_name(instance_name)
+                .fetch()
+                .await?;
         let instance_id = &authz_instance.id();
 
         match &db_disk.state().into() {

@@ -143,6 +143,10 @@ impl<'a> LookupPath<'a> {
     pub fn instance_id(self, id: Uuid) -> Instance<'a> {
         Instance { key: Key::Id(self, id) }
     }
+
+    pub fn disk_id(self, id: Uuid) -> Disk<'a> {
+        Disk { key: Key::Id(self, id) }
+    }
 }
 
 impl<'a> GetLookupRoot for LookupPath<'a> {
@@ -162,6 +166,14 @@ impl<'a> Organization<'a> {
 }
 
 impl<'a> Project<'a> {
+    pub fn disk_name<'b, 'c>(self, name: &'b Name) -> Disk<'c>
+    where
+        'a: 'c,
+        'b: 'c,
+    {
+        Disk { key: Key::Name(self, name) }
+    }
+
     pub fn instance_name<'b, 'c>(self, name: &'b Name) -> Instance<'c>
     where
         'a: 'c,
@@ -187,12 +199,18 @@ macro_rules! define_lookup {
             // Do NOT make these functions public.  They should instead be
             // wrapped by functions that perform authz checks.
             async fn [<$pc:lower _lookup_by_id_no_authz>](
-                opctx: &OpContext,
+                _opctx: &OpContext,
                 datastore: &DataStore,
                 id: Uuid,
             ) -> LookupResult<(authz::$pc, model::$pc)> {
                 use db::schema::[<$pc:lower>]::dsl;
-                let conn = datastore.pool_authorized(opctx).await?;
+                // TODO-security This could use pool_authorized() instead.
+                // However, it will change the response code for this case:
+                // unauthenticated users will get a 401 rather than a 404
+                // because we'll kick them out sooner than we used to -- they
+                // won't even be able to make this database query.  That's a
+                // good thing but this change can be deferred to a follow-up PR.
+                let conn = datastore.pool();
                 dsl::[<$pc:lower>]
                     .filter(dsl::time_deleted.is_null())
                     .filter(dsl::id.eq(id))
@@ -218,12 +236,13 @@ macro_rules! define_lookup {
             // Do NOT make these functions public.  They should instead be
             // wrapped by functions that perform authz checks.
             async fn [<$pc:lower _lookup_by_name_no_authz>](
-                opctx: &OpContext,
+                _opctx: &OpContext,
                 datastore: &DataStore,
                 name: &Name,
             ) -> LookupResult<(authz::$pc, model::$pc)> {
                 use db::schema::[<$pc:lower>]::dsl;
-                let conn = datastore.pool_authorized(opctx).await?;
+                // TODO-security See the note about pool_authorized() above.
+                let conn = datastore.pool();
                 dsl::[<$pc:lower>]
                     .filter(dsl::time_deleted.is_null())
                     .filter(dsl::name.eq(name.clone()))
@@ -371,7 +390,8 @@ macro_rules! define_lookup_with_parent {
                 id: Uuid,
             ) -> LookupResult<(authz::$pc, model::$pc)> {
                 use db::schema::[<$pc:lower>]::dsl;
-                let conn = datastore.pool_authorized(opctx).await?;
+                // TODO-security See the note about pool_authorized() above.
+                let conn = datastore.pool();
                 let db_row = dsl::[<$pc:lower>]
                     .filter(dsl::time_deleted.is_null())
                     .filter(dsl::id.eq(id))
@@ -402,13 +422,14 @@ macro_rules! define_lookup_with_parent {
             // Do NOT make these functions public.  They should instead be
             // wrapped by functions that perform authz checks.
             async fn [<$pc:lower _lookup_by_name_no_authz>](
-                opctx: &OpContext,
+                _opctx: &OpContext,
                 datastore: &DataStore,
                 authz_parent: &authz::$parent_pc,
                 name: &Name,
             ) -> LookupResult<(authz::$pc, model::$pc)> {
                 use db::schema::[<$pc:lower>]::dsl;
-                let conn = datastore.pool_authorized(opctx).await?;
+                // TODO-security See the note about pool_authorized() above.
+                let conn = datastore.pool();
                 dsl::[<$pc:lower>]
                     .filter(dsl::time_deleted.is_null())
                     .filter(dsl::name.eq(name.clone()))
@@ -557,6 +578,13 @@ define_lookup_with_parent!(
             instance.id(),
             lookup,
         )
+    }
+);
+define_lookup_with_parent!(
+    Disk,
+    Project,
+    |authz_project: &authz::Project, disk: &model::Disk, lookup: LookupType| {
+        authz_project.child_generic(ResourceType::Disk, disk.id(), lookup)
     }
 );
 
