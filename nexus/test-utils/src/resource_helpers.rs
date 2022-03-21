@@ -44,13 +44,13 @@ where
 pub async fn objects_list_page_authz_with_session<ItemType>(
     client: &ClientTestContext,
     path: &str,
-    session: &ConsoleSession,
+    session_token: &str,
 ) -> dropshot::ResultsPage<ItemType>
 where
     ItemType: serde::de::DeserializeOwned,
 {
     NexusRequest::object_get(client, path)
-        .authn_with_session(session)
+        .authn_with_session(session_token)
         .execute()
         .await
         .expect("failed to make request")

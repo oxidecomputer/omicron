@@ -445,10 +445,10 @@ impl<'a> NexusRequest<'a> {
         self
     }
 
-    pub fn authn_with_session(mut self, session: &ConsoleSession) -> Self {
+    pub fn authn_with_session(mut self, session_token: &str) -> Self {
         self.request_builder = self.request_builder.header(
             &http::header::COOKIE,
-            format!("session={}", session.token),
+            format!("session={}", session_token),
         );
         self
     }
