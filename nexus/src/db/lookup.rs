@@ -4,54 +4,6 @@
 
 //! Facilities for looking up API resources from the database
 
-// XXX-dap TODO status:
-// - I've got the skeleton of an API here that looks pretty promising
-// - Next step is probably to implement some of the `Fetch` interfaces.  The
-//   challenge I'm facing here is that I need access to the `LookupPath` at the
-//   top of the tree in order to use the datastore's methods.
-//   - idea: pass the LookupPath down so it's only present at the leaf
-//     problem: doesn't that mean every node needs two versions: one as a leaf,
-//         and one as a node in the tree?  (maybe every internal node can be the
-//         same class?  but probably not because we're going to wind up using
-//         their `Fetch` impls recursively).  Maybe instead of two versions,
-//         each internal node could be an enum with two variants, one as a leaf
-//         (which has the LookupPath) and one as an internal node (which has the
-//         rest)?  But then how will its impl of Fetch work -- it will have _no_
-//         way to get the datastore out.
-//   - idea: use Arc on the LookupPath -- this would probably work but feels
-//     cheesy
-//   - idea: put a reference to the LookupPath at each node
-//     problem: _somebody_ has to own it.  Who will that be?  Root?
-//   - idea: have every resource impl a trait that gets its own key out.  Then
-//     we can impl `key.lookup()` in terms of the parent key.
-//     problem: lots of boilerplate
-//   - idea: just use Key instead of structs like Project, etc.  Then we can
-//     impl `key.lookup()` more easily?
-//     problem: then we can't have different methods (like "instance_name") at
-//     each node along the way.
-//
-// Conclusions:
-// - the only thing that can possibly own the LookupPath is the leaf node
-//   because that's the only thing the caller actually has.
-// - the internal nodes also need to be able to get the LookupPath so that they
-//   can impl their own Fetch()
-// => The LookupPath should appear at the root, owned (indirectly) by each item
-//    in the chain, ending at the leaf.
-// => Each item has to traverse the chain above it to get to the LookupPath
-//
-// NOTE: as I impl the first Fetch, I realize that I want Fetch to do an access
-// check.  But I can't do an access check when I'm only doing a fetch as a
-// non-leaf node, for the same reason that foo_lookup_noauthz() cannot do the
-// access check.  I think this implies there need to be two different traits:
-// - Fetch: the public trait that lets you fetch a complete record and the authz
-//   objects for the items in the hierarchy
-// - Lookup: a trait private to this file that lets callers fetch the record and
-//   _does not_ do an access check
-// If so, that may simplify things because:
-// - I can have the leaf node store the LookupPath directly
-// - it can pass the LookupPath (or whatever context is needed) to the lookup()
-//   function of the lookup() trait.
-
 use super::datastore::DataStore;
 use super::identity::Resource;
 use super::model;
@@ -82,9 +34,34 @@ trait Lookup {
     ) -> BoxFuture<'_, LookupResult<Self::LookupType>>;
 }
 
+trait GetLookupRoot {
+    fn lookup_root(&self) -> &LookupPath<'_>;
+}
+
 enum Key<'a, P> {
     Name(P, &'a Name),
     Id(LookupPath<'a>, Uuid),
+}
+
+impl<'a, T> GetLookupRoot for Key<'a, T>
+where
+    T: GetLookupRoot,
+{
+    fn lookup_root(&self) -> &LookupPath<'_> {
+        match self {
+            Key::Name(parent, _) => parent.lookup_root(),
+            Key::Id(lookup, _) => lookup,
+        }
+    }
+}
+
+impl<'a, P> Key<'a, P> {
+    fn lookup_type(&self) -> LookupType {
+        match self {
+            Key::Name(_, name) => LookupType::ByName(name.as_str().to_string()),
+            Key::Id(_, id) => LookupType::ById(*id),
+        }
+    }
 }
 
 pub struct LookupPath<'a> {
@@ -125,6 +102,12 @@ impl<'a> LookupPath<'a> {
     }
 }
 
+impl<'a> GetLookupRoot for LookupPath<'a> {
+    fn lookup_root(&self) -> &LookupPath<'_> {
+        self
+    }
+}
+
 pub struct Organization<'a> {
     key: Key<'a, LookupPath<'a>>,
 }
@@ -139,32 +122,20 @@ impl<'a> Organization<'a> {
     }
 }
 
+impl<'a> GetLookupRoot for Organization<'a> {
+    fn lookup_root(&self) -> &LookupPath<'_> {
+        self.key.lookup_root()
+    }
+}
+
 impl Fetch for Organization<'_> {
     type FetchType = (authz::Organization, model::Organization);
 
     fn fetch(&self) -> BoxFuture<'_, LookupResult<Self::FetchType>> {
-        // XXX-dap TODO This is a proof of concept.  Each type in this path is
-        // going to need to get to the LookupPath through a sort of convoluted
-        // way.  I wanted to implement a recursive function to get to the
-        // LookupPath, but then I'd need to create a trait for it that each type
-        // would have to impl, etc.  (That might still be the way to go.)
-        //
-        // But see the note above -- maybe a different approach is better here!
-        let lookup = match &self.key {
-            Key::Name(lookup, _) => lookup,
-            Key::Id(lookup, _) => lookup,
-        };
-
+        let lookup = self.lookup_root();
         let opctx = &lookup.opctx;
         let datastore = lookup.datastore;
         async {
-            let lookup_type = || match &self.key {
-                Key::Name(_, name) => {
-                    LookupType::ByName(name.as_str().to_owned())
-                }
-                Key::Id(_, id) => LookupType::ById(*id),
-            };
-
             use db::schema::organization::dsl;
             let conn = datastore.pool_authorized(opctx).await?;
             // XXX-dap TODO This construction sucks.  What I kind of want is a
@@ -187,7 +158,7 @@ impl Fetch for Organization<'_> {
                             e,
                             ErrorHandler::NotFoundByLookup(
                                 ResourceType::Organization,
-                                lookup_type(),
+                                self.key.lookup_type(),
                             ),
                         )
                     }),
@@ -202,14 +173,14 @@ impl Fetch for Organization<'_> {
                             e,
                             ErrorHandler::NotFoundByLookup(
                                 ResourceType::Organization,
-                                lookup_type(),
+                                self.key.lookup_type(),
                             ),
                         )
                     }),
             }?;
 
             let authz_org =
-                authz::FLEET.organization(db_org.id(), lookup_type());
+                authz::FLEET.organization(db_org.id(), self.key.lookup_type());
             opctx.authorize(authz::Action::Read, &authz_org).await?;
             Ok((authz_org, db_org))
         }
@@ -219,6 +190,12 @@ impl Fetch for Organization<'_> {
 
 pub struct Project<'a> {
     key: Key<'a, Organization<'a>>,
+}
+
+impl<'a> GetLookupRoot for Project<'a> {
+    fn lookup_root(&self) -> &LookupPath<'_> {
+        self.key.lookup_root()
+    }
 }
 
 impl Fetch for Project<'_> {
@@ -250,6 +227,12 @@ impl Fetch for Instance<'_> {
 
 pub struct Instance<'a> {
     key: Key<'a, Project<'a>>,
+}
+
+impl<'a> GetLookupRoot for Instance<'a> {
+    fn lookup_root(&self) -> &LookupPath<'_> {
+        self.key.lookup_root()
+    }
 }
 
 #[cfg(test)]
