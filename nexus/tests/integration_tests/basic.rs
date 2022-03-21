@@ -58,7 +58,7 @@ async fn test_basic_failures(cptestctx: &ControlPlaneTestContext) {
      * value that does not exist inside a collection that does exist) from an
      * unauthorized user results in a 401.
 
-     // XXX uncomment when this endpoint is protected by authn!
+     // TODO-security uncomment when this endpoint is protected by authn!
 
     let error = client
         .make_request(
