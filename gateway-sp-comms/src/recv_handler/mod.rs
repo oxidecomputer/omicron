@@ -184,6 +184,7 @@ impl RecvHandler {
         request_id: u32,
         result: Result<ResponseKind, ResponseError>,
     ) {
+        probes::recv_response!(|| (&port, request_id, &result));
         match self.sp_state(port).requests.ingest_response(&request_id, result)
         {
             ResponseIngestResult::Ok => (),
@@ -199,6 +200,13 @@ impl RecvHandler {
     }
 
     fn handle_serial_console(&self, port: SwitchPort, packet: SerialConsole) {
+        probes::recv_serial_console!(|| (
+            &port,
+            &packet.component,
+            packet.offset,
+            packet.data.as_ptr() as usize as u64,
+            u64::from(packet.len)
+        ));
         debug!(
             &self.log,
             "received serial console data from {:?}: {:?}", port, packet
@@ -215,4 +223,23 @@ impl RecvHandler {
 struct SingleSpState {
     requests: RequestResponseMap<u32, Result<ResponseKind, ResponseError>>,
     serial_console: Mutex<SerialConsoleHistory>,
+}
+
+#[usdt::provider(provider = "gateway_sp_comms")]
+mod probes {
+    fn recv_response(
+        _port: &SwitchPort,
+        _request_id: u32,
+        _result: &Result<ResponseKind, ResponseError>,
+    ) {
+    }
+
+    fn recv_serial_console(
+        _port: &SwitchPort,
+        _component: &SpComponent,
+        _offset: u64,
+        _data: u64, // TODO actually a `*const u8`, but that isn't allowed by usdt
+        _len: u64,
+    ) {
+    }
 }
