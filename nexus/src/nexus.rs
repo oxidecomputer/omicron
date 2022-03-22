@@ -536,7 +536,7 @@ impl Nexus {
         organization_name: &Name,
         new_project: &params::ProjectCreate,
     ) -> CreateResult<db::model::Project> {
-        let authz_org = LookupPath::new(opctx, &self.db_datastore)
+        let (authz_org,) = LookupPath::new(opctx, &self.db_datastore)
             .organization_name(organization_name)
             .lookup_for(authz::Action::CreateChild)
             .await?;
@@ -600,7 +600,7 @@ impl Nexus {
         organization_name: &Name,
         pagparams: &DataPageParams<'_, Name>,
     ) -> ListResultVec<db::model::Project> {
-        let authz_org = LookupPath::new(opctx, &self.db_datastore)
+        let (authz_org,) = LookupPath::new(opctx, &self.db_datastore)
             .organization_name(organization_name)
             .lookup_for(authz::Action::CreateChild)
             .await?;
@@ -615,7 +615,7 @@ impl Nexus {
         organization_name: &Name,
         pagparams: &DataPageParams<'_, Uuid>,
     ) -> ListResultVec<db::model::Project> {
-        let authz_org = LookupPath::new(opctx, &self.db_datastore)
+        let (authz_org,) = LookupPath::new(opctx, &self.db_datastore)
             .organization_name(organization_name)
             .lookup_for(authz::Action::CreateChild)
             .await?;

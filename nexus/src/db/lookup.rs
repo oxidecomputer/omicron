@@ -61,28 +61,6 @@ pub trait LookupFor {
     ) -> BoxFuture<'_, LookupResult<Self::LookupType>>;
 }
 
-impl<T> LookupFor for T
-where
-    T: LookupNoauthz + GetLookupRoot + Send + Sync,
-    <T as LookupNoauthz>::LookupType:
-        AuthorizedResource + Clone + std::fmt::Debug + Send,
-{
-    type LookupType = <T as LookupNoauthz>::LookupType;
-    fn lookup_for(
-        &self,
-        action: authz::Action,
-    ) -> BoxFuture<'_, LookupResult<Self::LookupType>> {
-        async move {
-            let lookup = self.lookup_root();
-            let opctx = &lookup.opctx;
-            let rv = self.lookup().await?;
-            opctx.authorize(action, &rv).await?;
-            Ok(rv)
-        }
-        .boxed()
-    }
-}
-
 enum Key<'a, P> {
     Name(P, &'a Name),
     Id(LookupPath<'a>, Uuid),
@@ -301,7 +279,7 @@ macro_rules! define_lookup {
             }
 
             impl LookupNoauthz for $pc<'_> {
-                type LookupType = authz::$pc;
+                type LookupType = (authz::$pc,);
 
                 fn lookup(
                     &self,
@@ -318,7 +296,7 @@ macro_rules! define_lookup {
                                         datastore,
                                         name
                                     ).await?;
-                                Ok(rv)
+                                Ok((rv,))
                             }
                             Key::Id(_, id) => {
                                 let (rv, _) =
@@ -327,7 +305,7 @@ macro_rules! define_lookup {
                                         datastore,
                                         id
                                     ).await?;
-                                Ok(rv)
+                                Ok((rv,))
                             }
                         }
                     }.boxed()
@@ -362,6 +340,24 @@ macro_rules! define_lookup {
                     .boxed()
                 }
             }
+
+            impl LookupFor for $pc<'_> {
+                type LookupType = <Self as LookupNoauthz>::LookupType;
+
+                fn lookup_for(
+                    &self,
+                    action: authz::Action,
+                ) -> BoxFuture<'_, LookupResult<Self::LookupType>> {
+                    async move {
+                        let lookup = self.lookup_root();
+                        let opctx = &lookup.opctx;
+                        let (authz_child,) = self.lookup().await?;
+                        opctx.authorize(action, &authz_child).await?;
+                        Ok((authz_child,))
+                    }
+                    .boxed()
+                }
+            }
         }
     };
 }
@@ -371,6 +367,7 @@ macro_rules! define_lookup_with_parent {
         $pc:ident,              // Pascal-case version of resource name
         $parent_pc:ident,       // Pascal-case version of parent resource name
         ($($ancestor:ident),*), // List of ancestors above parent
+        // XXX-dap update comment
         $mkauthz:expr           // Closure to generate resource's authz object
                                 //   from parent's
     ) => {
@@ -415,21 +412,16 @@ macro_rules! define_lookup_with_parent {
                             )
                         )
                     })?;
-                let ($([<authz_ $ancestor:lower>],)* authz_parent, _) =
+                let ($([<_authz_ $ancestor:lower>],)* authz_parent, _) =
                     [< $parent_pc:lower _lookup_by_id_no_authz >](
                         opctx,
                         datastore,
                         db_row.[<$parent_pc:lower _id>]
                     ).await?;
-                let authz_child = ($mkauthz)(
-                    &authz_parent, &db_row, LookupType::ById(id)
+                let authz_list = ($mkauthz)(
+                    authz_parent, db_row, LookupType::ById(id)
                 );
-                Ok((
-                    $([<authz_ $ancestor:lower>],)*
-                    authz_parent,
-                    authz_child,
-                    db_row
-                ))
+                Ok(authz_list)
             }
 
             // Do NOT make these functions public.  They should instead be
@@ -464,15 +456,13 @@ macro_rules! define_lookup_with_parent {
                             )
                         )
                     })
-                    .map(|dbmodel| {(
-                        // XXX-dap XXX-dap
+                    .map(|dbmodel| {
                         ($mkauthz)(
-                            authz_parent,
-                            &dbmodel,
+                            authz_parent.clone(),
+                            dbmodel,
                             LookupType::ByName(name.as_str().to_string())
-                        ),
-                        dbmodel
-                    )})
+                        )
+                    })
             }
 
             async fn [<$pc:lower _fetch_by_id>](
@@ -553,15 +543,18 @@ macro_rules! define_lookup_with_parent {
                         let datastore = lookup.datastore;
                         match &self.key {
                             Key::Name(parent, name) => {
-                                let parent_authz = parent.lookup().await?;
                                 let (
                                     $([<authz_ $ancestor:lower>],)*
                                     authz_parent,
+                                ) = parent.lookup().await?;
+                                let (
+                                    $([<_authz_ $ancestor:lower>],)*
+                                    _authz_parent,
                                     authz_child, _) =
                                     [< $pc:lower _lookup_by_name_no_authz >](
                                         opctx,
                                         datastore,
-                                        &parent_authz,
+                                        &authz_parent,
                                         *name
                                     ).await?;
                                 Ok((
@@ -630,6 +623,32 @@ macro_rules! define_lookup_with_parent {
                     .boxed()
                 }
             }
+
+            impl LookupFor for $pc<'_> {
+                type LookupType = <Self as LookupNoauthz>::LookupType;
+
+                fn lookup_for(
+                    &self,
+                    action: authz::Action,
+                ) -> BoxFuture<'_, LookupResult<Self::LookupType>> {
+                    async move {
+                        let lookup = self.lookup_root();
+                        let opctx = &lookup.opctx;
+                        let (
+                                $([<authz_ $ancestor:lower>],)*
+                                authz_parent,
+                                authz_child
+                        ) = self.lookup().await?;
+                        opctx.authorize(action, &authz_child).await?;
+                        Ok((
+                            $([<authz_ $ancestor:lower>],)*
+                            authz_parent,
+                            authz_child
+                        ))
+                    }
+                    .boxed()
+                }
+            }
         }
     };
 }
@@ -640,22 +659,29 @@ define_lookup_with_parent!(
     Project,
     Organization,
     (),
-    |authz_org: &authz::Organization,
-     project: &model::Project,
-     lookup: LookupType| { authz_org.project(project.id(), lookup) }
+    |authz_org: authz::Organization,
+     project: model::Project,
+     lookup: LookupType| {
+        (authz_org.clone(), authz_org.project(project.id(), lookup), project)
+    }
 );
 
 define_lookup_with_parent!(
     Instance,
     Project,
     (Organization),
-    |authz_project: &authz::Project,
-     instance: &model::Instance,
+    |authz_project: authz::Project,
+     instance: model::Instance,
      lookup: LookupType| {
-        authz_project.child_generic(
-            ResourceType::Instance,
-            instance.id(),
-            lookup,
+        (
+            authz_project.organization().clone(),
+            authz_project.clone(),
+            authz_project.child_generic(
+                ResourceType::Instance,
+                instance.id(),
+                lookup,
+            ),
+            instance,
         )
     }
 );
@@ -664,8 +690,13 @@ define_lookup_with_parent!(
     Disk,
     Project,
     (Organization),
-    |authz_project: &authz::Project, disk: &model::Disk, lookup: LookupType| {
-        authz_project.child_generic(ResourceType::Disk, disk.id(), lookup)
+    |authz_project: authz::Project, disk: model::Disk, lookup: LookupType| {
+        (
+            authz_project.organization().clone(),
+            authz_project.clone(),
+            authz_project.child_generic(ResourceType::Disk, disk.id(), lookup),
+            disk,
+        )
     }
 );
 
