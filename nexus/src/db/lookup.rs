@@ -700,6 +700,154 @@ define_lookup_with_parent!(
     }
 );
 
+// XXX-dap
+mod play {
+    use super::{Organization, Project};
+    use crate::db::identity::Resource as _;
+    use crate::{
+        authz::{self, AuthorizedResource},
+        context::OpContext,
+        db::{
+            self,
+            error::{public_error_from_diesel_pool, ErrorHandler},
+            model::{self, Name},
+            DataStore,
+        },
+    };
+    use diesel::QueryDsl;
+    use omicron_common::api::external::{LookupType, ResourceType};
+    use uuid::Uuid;
+
+    trait Resource {
+        type Authz: AuthorizedResource;
+        type LookupPath;
+        // XXX-dap working here
+
+        type Model;
+        const RESOURCE_TYPE: ResourceType;
+
+        type Table: diesel::Table;
+        const TABLE: Self::Table;
+
+        type TimeDeletedColumn: 'static
+            + diesel::Column
+            + Copy
+            + diesel::ExpressionMethods
+            + diesel::AppearsOnTable<Self::Table>;
+        const TIME_DELETED_COLUMN: Self::TimeDeletedColumn;
+
+        type IdColumn;
+        const ID_COLUMN: Self::IdColumn;
+
+        type NameColumn;
+        const NAME_COLUMN: Self::NameColumn;
+    }
+
+    trait ResourceWithParent: Resource {
+        type Parent: Resource;
+        type ParentIdColumn;
+        const PARENT_ID_COLUMN: Self::ParentIdColumn;
+        type ParentIdColumnValue;
+
+        fn authz_path(
+            authz_parent: &<Self::Parent as Resource>::Authz,
+            db_row: &Self::Model,
+            lookup: LookupType,
+        ) -> Self::LookupPath;
+
+        fn parent_key(
+            authz_parent: &<Self::Parent as Resource>::Authz,
+        ) -> Self::ParentIdColumnValue;
+    }
+
+    impl<'a> Resource for Organization<'a> {
+        type Authz = authz::Organization;
+        type LookupPath = (authz::Organization,);
+        type Model = model::Organization;
+        const RESOURCE_TYPE: ResourceType = ResourceType::Organization;
+        type Table = db::schema::organization::table;
+        const TABLE: Self::Table = db::schema::organization::dsl::organization;
+        type TimeDeletedColumn =
+            db::schema::organization::columns::time_deleted;
+        const TIME_DELETED_COLUMN: Self::TimeDeletedColumn =
+            db::schema::organization::dsl::time_deleted;
+        type IdColumn = db::schema::organization::columns::id;
+        const ID_COLUMN: Self::IdColumn = db::schema::organization::dsl::id;
+        type NameColumn = db::schema::organization::columns::name;
+        const NAME_COLUMN: Self::NameColumn =
+            db::schema::organization::dsl::name;
+    }
+
+    impl<'a> Resource for Project<'a> {
+        type Authz = authz::Project;
+        type LookupPath = (authz::Organization, authz::Project);
+        type Model = model::Project;
+        const RESOURCE_TYPE: ResourceType = ResourceType::Project;
+        type Table = db::schema::project::table;
+        const TABLE: Self::Table = db::schema::project::dsl::project;
+        type TimeDeletedColumn = db::schema::project::columns::time_deleted;
+        const TIME_DELETED_COLUMN: Self::TimeDeletedColumn =
+            db::schema::project::dsl::time_deleted;
+        type IdColumn = db::schema::project::columns::id;
+        const ID_COLUMN: Self::IdColumn = db::schema::project::dsl::id;
+        type NameColumn = db::schema::project::columns::name;
+        const NAME_COLUMN: Self::NameColumn = db::schema::project::dsl::name;
+    }
+
+    impl<'a> ResourceWithParent for Project<'a> {
+        type Parent = Organization<'a>;
+        type ParentIdColumn = db::schema::project::columns::organization_id;
+        const PARENT_ID_COLUMN: Self::ParentIdColumn =
+            db::schema::project::dsl::organization_id;
+        type ParentIdColumnValue = Uuid;
+
+        fn parent_key(
+            authz_parent: &<Self::Parent as Resource>::Authz,
+        ) -> Self::ParentIdColumnValue {
+            authz_parent.id()
+        }
+
+        fn authz_path(
+            authz_parent: &<Self::Parent as Resource>::Authz,
+            db_row: &Self::Model,
+            lookup: LookupType,
+        ) -> Self::LookupPath {
+            (authz_parent.clone(), authz_parent.project(db_row.id(), lookup))
+        }
+    }
+
+    async fn resource_lookup_by_name_no_authz<T: ResourceWithParent>(
+        opctx: &OpContext,
+        datastore: &DataStore,
+        authz_parent: &<T::Parent as Resource>::Authz,
+        name: &Name,
+    ) -> Result<T::LookupPath, T::Model> {
+        // TODO-security XXX-dap copy comment from above.
+        let conn = datastore.pool();
+        let lookup = LookupType::ByName(name.as_str().to_string());
+        T::TABLE
+            .filter(T::TIME_DELETED_COLUMN.is_null())
+            .filter(T::NAME_COLUMN.eq(name.clone()))
+            .filter(T::PARENT_ID_COLUMN.eq(T::parent_key(authz_parent)))
+            .select(T::Model::as_select())
+            .get_result_async(conn)
+            .await
+            .map_err(|e| {
+                public_error_from_diesel_pool(
+                    e,
+                    ErrorHandler::NotFoundByLookup(T::RESOURCE_TYPE, lookup),
+                )
+            })
+            .map(|db_row| T::authz_path(authz_parent, &db_row, lookup))
+    }
+}
+// XXX-dap
+// fn dummy1(foo: ()) {}
+// fn dummy2() {
+//     dummy1(db::schema::organization::dsl::organization);
+//     dummy1(db::schema::organization::dsl::name);
+// }
+
 #[cfg(test)]
 mod test {
     use super::Instance;
