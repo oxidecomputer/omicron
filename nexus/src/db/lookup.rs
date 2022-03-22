@@ -714,40 +714,60 @@ mod play {
             DataStore,
         },
     };
-    use diesel::QueryDsl;
+    use diesel::dsl::Eq;
+    use diesel::dsl::IsNull;
+    use diesel::query_dsl::methods;
+    use diesel::{sql_types, ExpressionMethods, QueryDsl};
     use omicron_common::api::external::{LookupType, ResourceType};
     use uuid::Uuid;
 
     trait Resource {
         type Authz: AuthorizedResource;
         type LookupPath;
-        // XXX-dap working here
 
         type Model;
         const RESOURCE_TYPE: ResourceType;
 
-        type Table: diesel::Table;
+        type Table: diesel::Table
+            + diesel::QueryDsl
+            + methods::FilterDsl<IsNull<Self::TimeDeletedColumn>>
+            + methods::FilterDsl<Eq<Self::NameColumn, Name>>
+            + methods::FilterDsl<Eq<Self::IdColumn, Uuid>>;
         const TABLE: Self::Table;
 
         type TimeDeletedColumn: 'static
             + diesel::Column
             + Copy
-            + diesel::ExpressionMethods
+            + ExpressionMethods
             + diesel::AppearsOnTable<Self::Table>;
         const TIME_DELETED_COLUMN: Self::TimeDeletedColumn;
 
-        type IdColumn;
+        type IdColumn: 'static
+            // XXX-dap should be related to Uuid instead?
+            + diesel::Column<SqlType = sql_types::Uuid>
+            + Copy
+            + ExpressionMethods
+            + diesel::AppearsOnTable<Self::Table>;
         const ID_COLUMN: Self::IdColumn;
 
-        type NameColumn;
+        type NameColumn: 'static
+            // XXX-dap should be related to Name instead?
+            + diesel::Column<SqlType = sql_types::Text>
+            + Copy
+            + ExpressionMethods
+            + diesel::AppearsOnTable<Self::Table>;
         const NAME_COLUMN: Self::NameColumn;
     }
 
     trait ResourceWithParent: Resource {
         type Parent: Resource;
-        type ParentIdColumn;
+        type ParentIdColumn: 'static
+            // XXX-dap shoudl be related to Uuid instead?
+            + diesel::Column<SqlType = sql_types::Uuid>
+            + Copy
+            + ExpressionMethods
+            + diesel::AppearsOnTable<<Self as Resource>::Table>;
         const PARENT_ID_COLUMN: Self::ParentIdColumn;
-        type ParentIdColumnValue;
 
         fn authz_path(
             authz_parent: &<Self::Parent as Resource>::Authz,
@@ -755,9 +775,8 @@ mod play {
             lookup: LookupType,
         ) -> Self::LookupPath;
 
-        fn parent_key(
-            authz_parent: &<Self::Parent as Resource>::Authz,
-        ) -> Self::ParentIdColumnValue;
+        fn parent_key(authz_parent: &<Self::Parent as Resource>::Authz)
+            -> Uuid;
     }
 
     impl<'a> Resource for Organization<'a> {
@@ -799,11 +818,10 @@ mod play {
         type ParentIdColumn = db::schema::project::columns::organization_id;
         const PARENT_ID_COLUMN: Self::ParentIdColumn =
             db::schema::project::dsl::organization_id;
-        type ParentIdColumnValue = Uuid;
 
         fn parent_key(
             authz_parent: &<Self::Parent as Resource>::Authz,
-        ) -> Self::ParentIdColumnValue {
+        ) -> Uuid {
             authz_parent.id()
         }
 
@@ -821,7 +839,24 @@ mod play {
         datastore: &DataStore,
         authz_parent: &<T::Parent as Resource>::Authz,
         name: &Name,
-    ) -> Result<T::LookupPath, T::Model> {
+    ) -> Result<T::LookupPath, T::Model>
+    where
+        // The table itself needs to be filterable by "time_deleted IS NOT NULL"
+        T::Table: diesel::Table
+            + methods::FilterDsl<IsNull<T::TimeDeletedColumn>>,
+
+        // The result of that needs to be filterable again by "name"
+        <T::Table as methods::FilterDsl<
+            IsNull<T::TimeDeletedColumn>,
+        >>::Output:
+            methods::FilterDsl<Eq<T::NameColumn, Name>>,
+
+        // The result of that needs to be filterable again by "parent_id"
+        <<T::Table as methods::FilterDsl<
+            IsNull<T::TimeDeletedColumn>,
+        >>::Output as methods::FilterDsl<Eq<T::NameColumn, Name>>>::Output:
+            methods::FilterDsl<Eq<T::ParentIdColumn, Uuid>>,
+    {
         // TODO-security XXX-dap copy comment from above.
         let conn = datastore.pool();
         let lookup = LookupType::ByName(name.as_str().to_string());
@@ -841,12 +876,6 @@ mod play {
             .map(|db_row| T::authz_path(authz_parent, &db_row, lookup))
     }
 }
-// XXX-dap
-// fn dummy1(foo: ()) {}
-// fn dummy2() {
-//     dummy1(db::schema::organization::dsl::organization);
-//     dummy1(db::schema::organization::dsl::name);
-// }
 
 #[cfg(test)]
 mod test {
