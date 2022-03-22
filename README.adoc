@@ -444,6 +444,7 @@ date: Wed, 17 Nov 2021 01:49:10 GMT
 
 Prerequisite: Have a machine already running Helios. An easy way to
 do this is by using a https://github.com/oxidecomputer/helios-engvm[Helios VM].
+ISOs are also available for download https://pkg.oxide.computer/install[here].
 
 The control plane repository contains a packaging tool which bundles binaries
 and SMF manifests. After building the expected binaries, they can be packaged
