@@ -1,0 +1,12 @@
+[package]
+name = "internal-dns-client"
+version = "0.1.0"
+edition = "2021"
+license = "MPL-2.0"
+
+[dependencies]
+progenitor = { git = "https://github.com/oxidecomputer/progenitor" }
+serde = { version = "1.0", features = [ "derive" ] }
+serde_json = "1.0"
+slog = { version = "2.5.0", features = [ "max_level_trace", "release_max_level_debug" ] }
+reqwest = { version = "0.11", features = ["json", "rustls-tls", "stream"] }
