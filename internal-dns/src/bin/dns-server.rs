@@ -32,8 +32,10 @@ async fn main() -> Result<(), anyhow::Error> {
         .with_context(|| format!("parse config file {:?}", config_file))?;
     eprintln!("{:?}", config);
 
-    let log =
-        config.log.to_logger("internal-dns").context("failed to create logger")?;
+    let log = config
+        .log
+        .to_logger("internal-dns")
+        .context("failed to create logger")?;
 
     let db = Arc::new(sled::open(&config.data.storage_path)?);
 
@@ -42,9 +44,9 @@ async fn main() -> Result<(), anyhow::Error> {
         let log = log.clone();
         let config = config.dns.clone();
 
-        tokio::spawn(
-            async move { internal_dns::dns_server::run(log, db, config).await },
-        );
+        tokio::spawn(async move {
+            internal_dns::dns_server::run(log, db, config).await
+        });
     }
 
     let server = internal_dns::start_server(config, log, db).await?;

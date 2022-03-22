@@ -6,11 +6,11 @@ use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
 use std::sync::Arc;
 
 use anyhow::{anyhow, Context, Result};
-use std::net::Ipv6Addr;
 use internal_dns_client::{
     types::{DnsKv, DnsRecord, DnsRecordKey, Srv},
     Client,
 };
+use std::net::Ipv6Addr;
 use trust_dns_resolver::config::{
     NameServerConfig, Protocol, ResolverConfig, ResolverOpts,
 };
@@ -107,8 +107,10 @@ async fn init_client_server(
 ) -> Result<(Client, TokioAsyncResolver), anyhow::Error> {
     // initialize dns server config
     let (config, dropshot_port, dns_port) = test_config()?;
-    let log =
-        config.log.to_logger("internal-dns").context("failed to create logger")?;
+    let log = config
+        .log
+        .to_logger("internal-dns")
+        .context("failed to create logger")?;
 
     // initialize dns server db
     let db = Arc::new(sled::open(&config.data.storage_path)?);
@@ -140,9 +142,9 @@ async fn init_client_server(
         let log = log.clone();
         let config = config.dns.clone();
 
-        tokio::spawn(
-            async move { internal_dns::dns_server::run(log, db, config).await },
-        );
+        tokio::spawn(async move {
+            internal_dns::dns_server::run(log, db, config).await
+        });
     }
 
     // launch a dropshot server
@@ -178,7 +180,10 @@ fn test_config() -> Result<(internal_dns::Config, u16, u16), anyhow::Error> {
             request_body_max_bytes: 1024,
             ..Default::default()
         },
-        data: internal_dns::dns_data::Config { nmax_messages: 16, storage_path },
+        data: internal_dns::dns_data::Config {
+            nmax_messages: 16,
+            storage_path,
+        },
         dns: internal_dns::dns_server::Config {
             bind_address: format!("127.0.0.1:{}", dns_port).parse().unwrap(),
         },

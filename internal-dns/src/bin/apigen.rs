@@ -3,9 +3,9 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use anyhow::{bail, Result};
+use internal_dns::dropshot_server::api;
 use std::fs::File;
 use std::io;
-use internal_dns::dropshot_server::api;
 
 fn usage(args: &Vec<String>) -> String {
     format!("{} [output path]", args[0])

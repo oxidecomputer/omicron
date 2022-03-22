@@ -3,12 +3,12 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use expectorate::assert_contents;
-use subprocess::Exec;
 use omicron_test_utils::dev::test_cmds::assert_exit_code;
 use omicron_test_utils::dev::test_cmds::path_to_executable;
 use omicron_test_utils::dev::test_cmds::run_command;
 use omicron_test_utils::dev::test_cmds::EXIT_SUCCESS;
 use openapiv3::OpenAPI;
+use subprocess::Exec;
 
 const CMD_API_GEN: &str = env!("CARGO_BIN_EXE_apigen");
 
@@ -18,8 +18,8 @@ fn test_internal_dns_openapi() {
     let (exit_status, stdout, _) = run_command(exec);
     assert_exit_code(exit_status, EXIT_SUCCESS);
 
-    let spec: OpenAPI = serde_json::from_str(&stdout)
-        .expect("stdout was not valid OpenAPI");
+    let spec: OpenAPI =
+        serde_json::from_str(&stdout).expect("stdout was not valid OpenAPI");
     let errors = openapi_lint::validate(&spec);
     assert!(errors.is_empty(), "{}", errors.join("\n\n"));
 
