@@ -591,7 +591,7 @@ impl Nexus {
             .project_name(project_name)
             .fetch()
             .await?
-            .1)
+            .2)
     }
 
     pub async fn projects_list_by_name(
@@ -1298,15 +1298,14 @@ impl Nexus {
         instance_name: &Name,
         disk_name: &Name,
     ) -> UpdateResult<db::model::Disk> {
-        let (authz_disk, db_disk) = LookupPath::new(opctx, &self.db_datastore)
-            .organization_name(organization_name)
-            .project_name(project_name)
-            .disk_name(disk_name)
-            .fetch()
-            .await?;
-        // TODO-dap XXX-dap can we have fetch() return this instead?
-        let authz_project = authz_disk.project();
-        let (authz_instance, db_instance) =
+        let (_, authz_project, authz_disk, db_disk) =
+            LookupPath::new(opctx, &self.db_datastore)
+                .organization_name(organization_name)
+                .project_name(project_name)
+                .disk_name(disk_name)
+                .fetch()
+                .await?;
+        let (_, _, authz_instance, db_instance) =
             LookupPath::new(opctx, &self.db_datastore)
                 .project_id(authz_project.id())
                 .instance_name(instance_name)
@@ -1405,14 +1404,14 @@ impl Nexus {
         instance_name: &Name,
         disk_name: &Name,
     ) -> UpdateResult<db::model::Disk> {
-        let (authz_disk, db_disk) = LookupPath::new(opctx, &self.db_datastore)
-            .organization_name(organization_name)
-            .project_name(project_name)
-            .disk_name(disk_name)
-            .fetch()
-            .await?;
-        let authz_project = authz_disk.project();
-        let (authz_instance, db_instance) =
+        let (_, authz_project, authz_disk, db_disk) =
+            LookupPath::new(opctx, &self.db_datastore)
+                .organization_name(organization_name)
+                .project_name(project_name)
+                .disk_name(disk_name)
+                .fetch()
+                .await?;
+        let (_, _, authz_instance, db_instance) =
             LookupPath::new(opctx, &self.db_datastore)
                 .project_id(authz_project.id())
                 .instance_name(instance_name)

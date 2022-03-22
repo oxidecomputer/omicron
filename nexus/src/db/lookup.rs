@@ -368,10 +368,11 @@ macro_rules! define_lookup {
 
 macro_rules! define_lookup_with_parent {
     (
-        $pc:ident,          // Pascal-case version of resource name
-        $parent_pc:ident,   // Pascal-case version of parent resource name
-        $mkauthz:expr       // Closure to generate resource's authz object
-                            //   from parent's
+        $pc:ident,              // Pascal-case version of resource name
+        $parent_pc:ident,       // Pascal-case version of parent resource name
+        ($($ancestor:ident),*), // List of ancestors above parent
+        $mkauthz:expr           // Closure to generate resource's authz object
+                                //   from parent's
     ) => {
         paste::paste! {
             pub struct $pc<'a> {
@@ -390,7 +391,12 @@ macro_rules! define_lookup_with_parent {
                 opctx: &OpContext,
                 datastore: &DataStore,
                 id: Uuid,
-            ) -> LookupResult<(authz::$pc, model::$pc)> {
+            ) -> LookupResult<(
+                    $(authz::[<$ancestor>],)*
+                    authz::$parent_pc,
+                    authz::$pc,
+                    model::$pc
+            )> {
                 use db::schema::[<$pc:lower>]::dsl;
                 // TODO-security See the note about pool_authorized() above.
                 let conn = datastore.pool();
@@ -409,7 +415,7 @@ macro_rules! define_lookup_with_parent {
                             )
                         )
                     })?;
-                let (authz_parent, _) =
+                let ($([<authz_ $ancestor:lower>],)* authz_parent, _) =
                     [< $parent_pc:lower _lookup_by_id_no_authz >](
                         opctx,
                         datastore,
@@ -418,7 +424,12 @@ macro_rules! define_lookup_with_parent {
                 let authz_child = ($mkauthz)(
                     &authz_parent, &db_row, LookupType::ById(id)
                 );
-                Ok((authz_child, db_row))
+                Ok((
+                    $([<authz_ $ancestor:lower>],)*
+                    authz_parent,
+                    authz_child,
+                    db_row
+                ))
             }
 
             // Do NOT make these functions public.  They should instead be
@@ -428,7 +439,12 @@ macro_rules! define_lookup_with_parent {
                 datastore: &DataStore,
                 authz_parent: &authz::$parent_pc,
                 name: &Name,
-            ) -> LookupResult<(authz::$pc, model::$pc)> {
+            ) -> LookupResult<(
+                    $(authz::[<$ancestor>],)*
+                    authz::$parent_pc,
+                    authz::$pc,
+                    model::$pc
+            )> {
                 use db::schema::[<$pc:lower>]::dsl;
                 // TODO-security See the note about pool_authorized() above.
                 let conn = datastore.pool();
@@ -449,6 +465,7 @@ macro_rules! define_lookup_with_parent {
                         )
                     })
                     .map(|dbmodel| {(
+                        // XXX-dap XXX-dap
                         ($mkauthz)(
                             authz_parent,
                             &dbmodel,
@@ -462,15 +479,30 @@ macro_rules! define_lookup_with_parent {
                 opctx: &OpContext,
                 datastore: &DataStore,
                 id: Uuid,
-            ) -> LookupResult<(authz::$pc, model::$pc)> {
-                let (authz_child, db_child) =
+            ) -> LookupResult<(
+                    $(authz::[<$ancestor>],)*
+                    authz::$parent_pc,
+                    authz::$pc,
+                    model::$pc
+            )> {
+                let (
+                    $([<authz_ $ancestor:lower>],)*
+                    authz_parent,
+                    authz_child,
+                    db_child
+                ) =
                     [<$pc:lower _lookup_by_id_no_authz>](
                         opctx,
                         datastore,
                         id,
                     ).await?;
                 opctx.authorize(authz::Action::Read, &authz_child).await?;
-                Ok((authz_child, db_child))
+                Ok((
+                    $([<authz_ $ancestor:lower>],)*
+                    authz_parent,
+                    authz_child,
+                    db_child
+                ))
             }
 
             async fn [<$pc:lower _fetch_by_name>](
@@ -478,8 +510,18 @@ macro_rules! define_lookup_with_parent {
                 datastore: &DataStore,
                 authz_parent: &authz::$parent_pc,
                 name: &Name,
-            ) -> LookupResult<(authz::$pc, model::$pc)> {
-                let (authz_child, db_child) =
+            ) -> LookupResult<(
+                    $(authz::[<$ancestor>],)*
+                    authz::$parent_pc,
+                    authz::$pc,
+                    model::$pc
+            )> {
+                let (
+                    $([<authz_ $ancestor:lower>],)*
+                    authz_parent,
+                    authz_child,
+                    db_child
+                ) =
                     [<$pc:lower _lookup_by_name_no_authz>](
                         opctx,
                         datastore,
@@ -487,11 +529,20 @@ macro_rules! define_lookup_with_parent {
                         name
                     ).await?;
                 opctx.authorize(authz::Action::Read, &authz_child).await?;
-                Ok((authz_child, db_child))
+                Ok((
+                    $([<authz_ $ancestor:lower>],)*
+                    authz_parent,
+                    authz_child,
+                    db_child
+                ))
             }
 
             impl LookupNoauthz for $pc<'_> {
-                type LookupType = authz::$pc;
+                type LookupType = (
+                    $(authz::[<$ancestor>],)*
+                    authz::[<$parent_pc>],
+                    authz::$pc,
+                );
 
                 fn lookup(
                     &self,
@@ -503,23 +554,37 @@ macro_rules! define_lookup_with_parent {
                         match &self.key {
                             Key::Name(parent, name) => {
                                 let parent_authz = parent.lookup().await?;
-                                let (rv, _) =
+                                let (
+                                    $([<authz_ $ancestor:lower>],)*
+                                    authz_parent,
+                                    authz_child, _) =
                                     [< $pc:lower _lookup_by_name_no_authz >](
                                         opctx,
                                         datastore,
                                         &parent_authz,
                                         *name
                                     ).await?;
-                                Ok(rv)
+                                Ok((
+                                    $([<authz_ $ancestor:lower>],)*
+                                    authz_parent,
+                                    authz_child
+                                ))
                             }
                             Key::Id(_, id) => {
-                                let (rv, _) =
+                                let (
+                                    $([<authz_ $ancestor:lower>],)*
+                                    authz_parent,
+                                    authz_child, _) =
                                     [< $pc:lower _lookup_by_id_no_authz >](
                                         opctx,
                                         datastore,
                                         *id
                                     ).await?;
-                                Ok(rv)
+                                Ok((
+                                    $([<authz_ $ancestor:lower>],)*
+                                    authz_parent,
+                                    authz_child
+                                ))
                             }
                         }
                     }
@@ -528,7 +593,12 @@ macro_rules! define_lookup_with_parent {
             }
 
             impl Fetch for $pc<'_> {
-                type FetchType = (authz::$pc, model::$pc);
+                type FetchType = (
+                    $(authz::[<$ancestor>],)*
+                    authz::[<$parent_pc>],
+                    authz::$pc,
+                    model::$pc
+                );
 
                 fn fetch(&self) -> BoxFuture<'_, LookupResult<Self::FetchType>> {
                     async {
@@ -537,11 +607,14 @@ macro_rules! define_lookup_with_parent {
                         let datastore = lookup.datastore;
                         match &self.key {
                             Key::Name(parent, name) => {
-                                let parent_authz = parent.lookup().await?;
+                                let (
+                                    $([<_authz_ $ancestor:lower>],)*
+                                    authz_parent,
+                                ) = parent.lookup().await?;
                                 [< $pc:lower _fetch_by_name >](
                                     opctx,
                                     datastore,
-                                    &parent_authz,
+                                    &authz_parent,
                                     *name
                                 ).await
                             }
@@ -562,16 +635,20 @@ macro_rules! define_lookup_with_parent {
 }
 
 define_lookup!(Organization);
+
 define_lookup_with_parent!(
     Project,
     Organization,
+    (),
     |authz_org: &authz::Organization,
      project: &model::Project,
      lookup: LookupType| { authz_org.project(project.id(), lookup) }
 );
+
 define_lookup_with_parent!(
     Instance,
     Project,
+    (Organization),
     |authz_project: &authz::Project,
      instance: &model::Instance,
      lookup: LookupType| {
@@ -582,9 +659,11 @@ define_lookup_with_parent!(
         )
     }
 );
+
 define_lookup_with_parent!(
     Disk,
     Project,
+    (Organization),
     |authz_project: &authz::Project, disk: &model::Disk, lookup: LookupType| {
         authz_project.child_generic(ResourceType::Disk, disk.id(), lookup)
     }
