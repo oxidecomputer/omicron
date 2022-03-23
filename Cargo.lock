@@ -1161,6 +1161,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "gateway-sp-comms"
+version = "0.1.0"
+dependencies = [
+ "futures",
+ "gateway-messages",
+ "omicron-test-utils",
+ "ringbuffer",
+ "serde",
+ "slog",
+ "thiserror",
+ "tokio",
+ "uuid",
+]
+
+[[package]]
 name = "generic-array"
 version = "0.12.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1960,6 +1975,7 @@ dependencies = [
  "expectorate",
  "futures",
  "gateway-messages",
+ "gateway-sp-comms",
  "hex",
  "http",
  "omicron-common",
@@ -2060,11 +2076,13 @@ dependencies = [
  "crossbeam",
  "flate2",
  "futures",
+ "hex",
  "indicatif",
  "omicron-common",
  "omicron-zone-package",
  "rayon",
  "reqwest",
+ "ring",
  "serde",
  "serde_derive",
  "smf",
