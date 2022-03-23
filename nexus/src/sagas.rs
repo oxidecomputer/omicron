@@ -1141,11 +1141,8 @@ async fn sdc_regions_ensure(
         };
 
     let volume_data = serde_json::to_string(&volume_construction_request)
-        .map_err(|_| {
-            ActionError::new_subsaga(
-                // XXX wrong error type?
-                anyhow::anyhow!("serde_json::to_string"),
-            )
+        .map_err(|e| {
+            ActionError::action_failed(Error::internal_error(&e.to_string()))
         })?;
 
     Ok(volume_data)
