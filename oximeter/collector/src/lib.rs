@@ -433,9 +433,9 @@ impl Oximeter {
                 })
                 .send()
                 .await
-                .map_err(backoff::BackoffError::Transient)?
+                .map_err(backoff::BackoffError::transient)?
                 .error_for_status()
-                .map_err(backoff::BackoffError::Transient)
+                .map_err(backoff::BackoffError::transient)
         };
         let log_notification_failure = |error, delay| {
             warn!(

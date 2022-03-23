@@ -95,7 +95,7 @@ async fn wait_for_http_server(
                         // request, instead of a connection error.
                         return Ok(());
                     }
-                    return Err(backoff::BackoffError::Transient(value));
+                    return Err(backoff::BackoffError::transient(value));
                 }
             }
         },

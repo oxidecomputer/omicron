@@ -375,7 +375,7 @@ impl Nexus {
             debug!(self.log, "registering nexus as metric producer");
             register(address, &self.log, &producer_endpoint)
                 .await
-                .map_err(backoff::BackoffError::Transient)
+                .map_err(backoff::BackoffError::transient)
         };
         let log_registration_failure = |error, delay| {
             warn!(
