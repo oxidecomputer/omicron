@@ -1086,12 +1086,9 @@ async fn sdc_regions_ensure(
         .all(|w| w[0].1.block_size == w[1].1.block_size);
 
     if !all_region_have_same_block_size {
-        return Err(ActionError::new_subsaga(
-            // XXX wrong error type?
-            anyhow::anyhow!(
-                "volume creation will fail due to block size mismatch"
-            ),
-        ));
+        return Err(ActionError::action_failed(Error::internal_error(
+            "volume creation will fail due to block size mismatch",
+        )));
     }
 
     let block_size = datasets_and_regions[0].1.block_size;
