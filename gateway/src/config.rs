@@ -6,47 +6,11 @@
 //! configuration
 
 use dropshot::{ConfigDropshot, ConfigLogging};
+use gateway_sp_comms::KnownSps;
 use serde::{Deserialize, Serialize};
-use std::{
-    net::SocketAddr,
-    path::{Path, PathBuf},
-};
+use std::path::Path;
+use std::path::PathBuf;
 use thiserror::Error;
-
-use crate::http_entrypoints::{SpIdentifier, SpType};
-
-// TODO: This is a placeholder; how do we determine what SPs should exist and
-// how to talk to them? Just store a list of socket addrs we'll hit with UDP for
-// now.
-#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
-pub struct KnownSps {
-    pub ignition_controller: SocketAddr,
-    pub switches: Vec<SocketAddr>,
-    pub sleds: Vec<SocketAddr>,
-    pub power_controllers: Vec<SocketAddr>,
-}
-
-impl KnownSps {
-    pub(crate) fn addr_for_id(&self, sp: &SpIdentifier) -> Option<SocketAddr> {
-        let slot = sp.slot as usize;
-        match sp.typ {
-            SpType::Sled => self.sleds.get(slot).copied(),
-            SpType::Power => self.power_controllers.get(slot).copied(),
-            SpType::Switch => self.switches.get(slot).copied(),
-        }
-    }
-
-    pub(crate) fn addr_for_target(&self, target: u8) -> Option<SocketAddr> {
-        let mut target = usize::from(target);
-        for targets in [&self.switches, &self.sleds, &self.power_controllers] {
-            if let Some(&addr) = targets.get(target) {
-                return Some(addr);
-            }
-            target -= targets.len();
-        }
-        None
-    }
-}
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct Timeouts {
@@ -80,9 +44,6 @@ pub struct Config {
     pub id: uuid::Uuid,
     /// Various timeouts
     pub timeouts: Timeouts,
-    /// Bind address for UDP socket for SP communication on the management
-    /// network.
-    pub udp_bind_address: SocketAddr,
     /// Dropshot configuration for API server
     pub dropshot: ConfigDropshot,
     /// Placeholder description of all known SPs in the system.

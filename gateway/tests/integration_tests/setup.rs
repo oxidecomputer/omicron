@@ -6,10 +6,9 @@
 
 use dropshot::test_util::ClientTestContext;
 use dropshot::test_util::LogContext;
-use omicron_gateway::KnownSps;
+use gateway_sp_comms::KnownSp;
+use gateway_sp_comms::KnownSps;
 use slog::o;
-use sp_sim::Gimlet;
-use sp_sim::Sidecar;
 use sp_sim::SimRack;
 use sp_sim::SimulatedSp;
 use std::path::Path;
@@ -66,12 +65,23 @@ pub async fn test_setup_with_config(
     let simrack = SimRack::start(sp_sim_config, log).await.unwrap();
 
     // Update gateway config to match the simulated rack.
-    let sidecars =
-        simrack.sidecars.iter().map(Sidecar::local_addr).collect::<Vec<_>>();
-    let gimlets =
-        simrack.gimlets.iter().map(Gimlet::local_addr).collect::<Vec<_>>();
+    let sidecars = simrack
+        .sidecars
+        .iter()
+        .map(|simsp| KnownSp {
+            sp: simsp.local_addr(),
+            switch_port: "127.0.0.1:0".parse().unwrap(),
+        })
+        .collect::<Vec<_>>();
+    let gimlets = simrack
+        .gimlets
+        .iter()
+        .map(|simsp| KnownSp {
+            sp: simsp.local_addr(),
+            switch_port: "127.0.0.1:0".parse().unwrap(),
+        })
+        .collect::<Vec<_>>();
     server_config.known_sps = KnownSps {
-        ignition_controller: simrack.ignition_controller().local_addr(),
         switches: sidecars,
         sleds: gimlets,
         power_controllers: vec![], // TODO
