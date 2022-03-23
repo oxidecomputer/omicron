@@ -200,6 +200,9 @@ This repo includes a Dockerfile that builds an image containing the Nexus and sl
 The `oxide` CLI can be installed from the [latest
 release](https://github.com/oxidecomputer/cli/releases).
 
+Run `oxide auth login` to authenticate with your Oxide account. Alternatively,
+oxide will respect the `OXIDE_TOKEN` and `OXIDE_HOST` environment variables.
+
 Here's a small demo that creates a project, creates an instance, and attaches a disk to it:
 
 [source,text]
