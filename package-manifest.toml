@@ -55,6 +55,15 @@ to = "/opt/oxide/cockroachdb/sql"
 from = "smf/cockroachdb"
 to = "/var/svc/manifest/site/cockroachdb"
 
+[package.internal-dns]
+rust.binary_names = ["dns-server"]
+rust.release = true
+service_name = "internal-dns"
+zone = true
+[[package.internal-dns.paths]]
+from = "smf/internal-dns"
+to = "/var/svc/manifest/site/internal-dns"
+
 # Packages not built within Omicron, but which must be imported.
 
 # Refer to
