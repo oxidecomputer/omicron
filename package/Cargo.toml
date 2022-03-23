@@ -10,7 +10,7 @@ crossbeam = "0.8"
 flate2 = "1.0.22"
 futures = "0.3.21"
 hex = "0.4.3"
-indicatif = { version = "0.17.0-rc.9", features = ["rayon"] }
+indicatif = { version = "0.16.2", features = ["rayon"] }
 omicron-common = { path = "../common" }
 omicron-zone-package = { version = "0.2.0" }
 rayon = "1.5"
