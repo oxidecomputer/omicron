@@ -714,10 +714,18 @@ mod play {
             DataStore,
         },
     };
+    use async_bb8_diesel::{
+        AsyncConnection, AsyncRunQueryDsl, AsyncSimpleConnection,
+        ConnectionManager,
+    };
     use diesel::dsl::Eq;
     use diesel::dsl::IsNull;
+    use diesel::expression::select_by::SelectBy;
+    use diesel::prelude::Selectable;
     use diesel::query_dsl::methods;
-    use diesel::{sql_types, ExpressionMethods, QueryDsl};
+    use diesel::sql_types::SingleValue;
+    use diesel::sql_types::SqlType;
+    use diesel::{sql_types, ExpressionMethods, QueryDsl, SelectableHelper};
     use omicron_common::api::external::{LookupType, ResourceType};
     use uuid::Uuid;
 
@@ -834,6 +842,13 @@ mod play {
         }
     }
 
+    // XXX-dap copied from pagination.rs
+    use diesel::pg::Pg;
+    use diesel::query_builder::AsQuery;
+    use diesel::query_builder::BoxedSelectStatement;
+    type TableSqlType<T> = <T as AsQuery>::SqlType;
+    type BoxedQuery<T> = BoxedSelectStatement<'static, TableSqlType<T>, T, Pg>;
+
     async fn resource_lookup_by_name_no_authz<T: ResourceWithParent>(
         opctx: &OpContext,
         datastore: &DataStore,
@@ -841,26 +856,73 @@ mod play {
         name: &Name,
     ) -> Result<T::LookupPath, T::Model>
     where
-        // The table itself needs to be filterable by "time_deleted IS NOT NULL"
-        T::Table: diesel::Table
-            + methods::FilterDsl<IsNull<T::TimeDeletedColumn>>,
+        // T's table is a table which can create a BoxedQuery.
+        T::Table: diesel::Table,
+        T::Table: methods::BoxedDsl<'static, Pg, Output = BoxedQuery<T::Table>>,
 
-        // The result of that needs to be filterable again by "name"
-        <T::Table as methods::FilterDsl<
-            IsNull<T::TimeDeletedColumn>,
-        >>::Output:
-            methods::FilterDsl<Eq<T::NameColumn, Name>>,
+        // "Name" is a column on the table
+        <T as Resource>::NameColumn: 'static
+            + diesel::Column
+            + Copy
+            + ExpressionMethods
+            + diesel::AppearsOnTable<T::Table>,
+        // <<T as Resource>::NameColumn>::SqlType: SqlType,
+        // Name: diesel::expression::AsExpression<<T::NameColumn>::SqlType>,
+        // "ParentId" is a column on the table
+        T::ParentIdColumn: 'static
+            + diesel::Column
+            + Copy
+            + ExpressionMethods
+            + diesel::AppearsOnTable<T::Table>,
+        // <T::ParentIdColumn>::SqlType: SqlType,
+        // Uuid: diesel::expression::AsExpression<<T::ParentIdColumn>::SqlType>,
+        // "TimeDeleted" is a column on the table
+        <T as Resource>::TimeDeletedColumn: 'static
+            + diesel::Column
+            + Copy
+            + ExpressionMethods
+            + diesel::AppearsOnTable<T::Table>,
+        // <<T as Resource>::TimeDeletedColumn>::SqlType: SqlType,
 
-        // The result of that needs to be filterable again by "parent_id"
-        <<T::Table as methods::FilterDsl<
+        // For any boxed query on T's table, we can filter by "time_deleted IS
+        // NOT NULL"
+        BoxedQuery<T::Table>: methods::FilterDsl<
             IsNull<T::TimeDeletedColumn>,
-        >>::Output as methods::FilterDsl<Eq<T::NameColumn, Name>>>::Output:
-            methods::FilterDsl<Eq<T::ParentIdColumn, Uuid>>,
+            Output = BoxedQuery<T::Table>,
+        >,
+
+        // For any boxed query on T's table, we can filter by "name == some
+        // name"
+        BoxedQuery<T::Table>: methods::FilterDsl<
+            Eq<T::NameColumn, Name>,
+            Output = BoxedQuery<T::Table>,
+        >,
+
+        // For any boxed query on T's table, we can filter by "parent_id == some
+        // id"
+        BoxedQuery<T::Table>: methods::FilterDsl<
+            Eq<T::ParentIdColumn, Uuid>,
+            Output = BoxedQuery<T::Table>,
+        >,
+
+        // The query can be selected-from
+        //BoxedQuery<T::Table>:
+        //    methods::SelectDsl<<T::Model as Selectable<Pg>>::SelectExpression>,
+        BoxedQuery<T::Table>:
+            methods::SelectDsl<SelectBy<<T as Resource>::Model, Pg>>,
+        SelectBy<<T as Resource>::Model, Pg>: diesel::Expression,
+
+        // The model type is itself selectable
+        T::Model: SelectableHelper<Pg> + Send,
+
+        // The final query must satisfy the bounds for `get_result_async`:
+        BoxedQuery<T::Table>: Send,
     {
         // TODO-security XXX-dap copy comment from above.
         let conn = datastore.pool();
         let lookup = LookupType::ByName(name.as_str().to_string());
         T::TABLE
+            .into_boxed()
             .filter(T::TIME_DELETED_COLUMN.is_null())
             .filter(T::NAME_COLUMN.eq(name.clone()))
             .filter(T::PARENT_ID_COLUMN.eq(T::parent_key(authz_parent)))
