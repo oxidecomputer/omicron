@@ -189,7 +189,7 @@ Dec 02 18:00:01.093 DEBG registered endpoint, path: /producers, method: POST, lo
 ----
 
 Once everything is up and running, you can use `curl` directly to hit either of
-the servers.  But it's easier to use the [`oxide` cli](https://docs.oxide.computer/cli/manual) (see below).
+the servers.  But it's easier to use the [`oxide` CLI](https://docs.oxide.computer/cli/manual) (see below).
 
 == Docker image
 
