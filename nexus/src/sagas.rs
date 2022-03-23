@@ -892,7 +892,7 @@ async fn ensure_region_in_dataset(
             .await
             .map_err(|e| BackoffError::Permanent(e.into()))?;
         match region.state {
-            RegionState::Requested => Err(BackoffError::Transient(anyhow!(
+            RegionState::Requested => Err(BackoffError::transient(anyhow!(
                 "Region creation in progress"
             ))),
             RegionState::Created => Ok(region),
