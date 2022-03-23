@@ -201,7 +201,7 @@ The `oxide` CLI can be installed from the [latest
 release](https://github.com/oxidecomputer/cli/releases).
 
 Run `oxide auth login` to authenticate with your Oxide account. Alternatively,
-oxide will respect the `OXIDE_TOKEN` and `OXIDE_HOST` environment variables.
+`oxide` will respect the `OXIDE_TOKEN` and `OXIDE_HOST` environment variables.
 
 If you find bugs or have feedback, leave it on the [cli
 repo](https://github.com/oxidecomputer/cli/issues).
