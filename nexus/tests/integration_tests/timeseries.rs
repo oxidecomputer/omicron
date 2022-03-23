@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use dropshot::test_util::objects_list_page;
+use nexus_test_utils::resource_helpers::objects_list_page_authz;
 use nexus_test_utils::ControlPlaneTestContext;
 use nexus_test_utils_macros::nexus_test;
 use omicron_test_utils::dev::poll::{wait_for_condition, CondCheckError};
@@ -18,7 +18,7 @@ async fn test_timeseries_schema(context: &ControlPlaneTestContext) {
     const POLL_DURATION: Duration = Duration::from_secs(10);
     let page = wait_for_condition(
         || async {
-            let page = objects_list_page::<TimeseriesSchema>(
+            let page = objects_list_page_authz::<TimeseriesSchema>(
                 client,
                 "/timeseries/schema",
             )
@@ -44,7 +44,7 @@ async fn test_timeseries_schema(context: &ControlPlaneTestContext) {
         "/timeseries/schema?page_token={}",
         page.next_page.as_ref().unwrap()
     );
-    let page = objects_list_page::<TimeseriesSchema>(client, &url).await;
+    let page = objects_list_page_authz::<TimeseriesSchema>(client, &url).await;
     assert!(
         page.next_page.is_none(),
         "Expected exactly one page of timeseries schema"

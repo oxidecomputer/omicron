@@ -272,8 +272,10 @@ async fn cpapi_artifact_download(
 ) -> Result<Response<Body>, HttpError> {
     let context = request_context.context();
     let nexus = &context.nexus;
+    let opctx = OpContext::for_internal_api(&request_context).await;
     // TODO: return 404 if the error we get here says that the record isn't found
-    let body = nexus.download_artifact(path_params.into_inner()).await?;
+    let body =
+        nexus.download_artifact(&opctx, path_params.into_inner()).await?;
 
     Ok(Response::builder().status(StatusCode::OK).body(body.into())?)
 }
