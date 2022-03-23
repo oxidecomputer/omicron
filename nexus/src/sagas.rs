@@ -1099,7 +1099,6 @@ async fn sdc_regions_ensure(
         sled_agent_client::types::VolumeConstructionRequest::Volume {
             block_size,
             sub_volumes: vec![
-                // XXX allocation algorithm only supports one sub vol?
                 sled_agent_client::types::VolumeConstructionRequest::Region {
                     block_size,
                     // gen of 0 is here, these regions were just allocated.
@@ -1118,7 +1117,7 @@ async fn sdc_regions_ensure(
 
                         // all downstairs will expect encrypted blocks
                         key: Some(base64::encode({
-                            // XXX the current encryption key
+                            // TODO the current encryption key
                             // requirement is 32 bytes, what if that
                             // changes?
                             let mut random_bytes: [u8; 32] = [0; 32];
