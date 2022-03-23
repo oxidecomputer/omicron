@@ -794,7 +794,7 @@ checksum = "1435fa1053d8b2fbbe9be7e97eca7f33d37b28409959813daefc1446a14247f1"
 [[package]]
 name = "dropshot"
 version = "0.6.1-dev"
-source = "git+https://github.com/oxidecomputer/dropshot?branch=main#1e07d6cdc7c752d43541e546b6a6a366433fd443"
+source = "git+https://github.com/oxidecomputer/dropshot?branch=main#cc7ac240249b7b7f793261962e5461adbf438d82"
 dependencies = [
  "async-stream",
  "async-trait",
@@ -832,7 +832,7 @@ dependencies = [
 [[package]]
 name = "dropshot_endpoint"
 version = "0.6.1-dev"
-source = "git+https://github.com/oxidecomputer/dropshot?branch=main#1e07d6cdc7c752d43541e546b6a6a366433fd443"
+source = "git+https://github.com/oxidecomputer/dropshot?branch=main#cc7ac240249b7b7f793261962e5461adbf438d82"
 dependencies = [
  "proc-macro2",
  "quote",
