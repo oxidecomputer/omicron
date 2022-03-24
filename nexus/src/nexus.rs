@@ -105,6 +105,8 @@ pub trait TestInterfaces {
         &self,
         session: db::model::ConsoleSession,
     ) -> CreateResult<db::model::ConsoleSession>;
+
+    async fn set_disk_as_faulted(&self, disk_id: &Uuid) -> Result<bool, Error>;
 }
 
 pub static BASE_ARTIFACT_DIR: &str = "/var/tmp/oxide_artifacts";
@@ -856,6 +858,13 @@ impl Nexus {
 
         opctx.authorize(authz::Action::CreateChild, &authz_project).await?;
 
+        // Validate parameters
+        if params.disks.len() > 8 {
+            return Err(Error::invalid_request(
+                "cannot attach more than 8 disks to instance!",
+            ));
+        }
+
         let saga_params = Arc::new(sagas::ParamsInstanceCreate {
             serialized_authn: authn::saga::Serialized::for_opctx(opctx),
             organization_name: organization_name.clone().into(),
@@ -1358,6 +1367,27 @@ impl Nexus {
             .instance_fetch(opctx, &authz_project, instance_name)
             .await?;
         let instance_id = &authz_instance.id();
+
+        // Enforce attached disks limit
+        let attached_disks = self
+            .instance_list_disks(
+                opctx,
+                organization_name,
+                project_name,
+                instance_name,
+                &DataPageParams {
+                    marker: None,
+                    direction: dropshot::PaginationOrder::Ascending,
+                    limit: std::num::NonZeroU32::new(8).unwrap(),
+                },
+            )
+            .await?;
+
+        if attached_disks.len() == 8 {
+            return Err(Error::invalid_request(
+                "cannot attach more than 8 disks to instance!",
+            ));
+        }
 
         fn disk_attachment_error(
             disk: &db::model::Disk,
@@ -3163,5 +3193,22 @@ impl TestInterfaces for Nexus {
         session: db::model::ConsoleSession,
     ) -> CreateResult<db::model::ConsoleSession> {
         Ok(self.db_datastore.session_create(session).await?)
+    }
+
+    async fn set_disk_as_faulted(&self, disk_id: &Uuid) -> Result<bool, Error> {
+        let opctx = OpContext::for_tests(
+            self.log.new(o!()),
+            Arc::clone(&self.db_datastore),
+        );
+
+        let authz_disk = self.db_datastore.disk_lookup_by_id(*disk_id).await?;
+        let db_disk =
+            self.db_datastore.disk_refetch(&opctx, &authz_disk).await?;
+
+        let new_runtime = db_disk.runtime_state.faulted();
+
+        self.db_datastore
+            .disk_update_runtime(&opctx, &authz_disk, &new_runtime)
+            .await
     }
 }

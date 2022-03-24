@@ -1366,6 +1366,15 @@ impl DiskRuntimeState {
             .unwrap(),
         )
     }
+
+    pub fn faulted(self) -> Self {
+        Self {
+            disk_state: external::DiskState::Faulted.label().to_string(),
+            attach_instance_id: None,
+            gen: self.gen.next().into(),
+            time_updated: Utc::now(),
+        }
+    }
 }
 
 /// Conversion from the internal API type.

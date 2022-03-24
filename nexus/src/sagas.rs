@@ -194,23 +194,48 @@ pub fn saga_instance_create() -> SagaTemplate<SagaInstanceCreate> {
         new_action_noop_undo(sic_create_network_interfaces),
     );
 
-    template_builder.append(
-        "create_disks",
-        "CreateDisksForInstance",
-        ActionFunc::new_action(
-            sic_create_disks_for_instance,
-            sic_create_disks_for_instance_undo,
-        ),
-    );
+    // Saga actions must be atomic - they have to fully complete or fully abort.
+    // This is because Steno assumes that the saga actions are atomic and
+    // therefore undo actions are *not* run for the failing node.
+    //
+    // For this reason, each disk is created and attached with a separate saga
+    // node. If a saga node had a loop to attach or detach all disks, and one
+    // failed, any disks that were attached would not be detached because the
+    // corresponding undo action would not be run. Separate each disk create and
+    // attach to their own saga node and ensure that each function behaves
+    // atomically.
+    //
+    // Currently, instances can have a maximum of 8 disks attached. Create two
+    // saga nodes for each disk that will unconditionally run but contain
+    // conditional logic depending on if that disk index is going to be used.
+    // Steno does not currently support the saga node graph changing shape.
+    for i in 0..8 {
+        template_builder.append(
+            &format!("create_disks{}", i),
+            "CreateDisksForInstance",
+            ActionFunc::new_action(
+                async move |sagactx| {
+                    sic_create_disks_for_instance(sagactx, i).await
+                },
+                async move |sagactx| {
+                    sic_create_disks_for_instance_undo(sagactx, i).await
+                },
+            ),
+        );
 
-    template_builder.append(
-        "attach_disks",
-        "AttachDisksToInstance",
-        ActionFunc::new_action(
-            sic_attach_disks_to_instance,
-            sic_attach_disks_to_instance_undo,
-        ),
-    );
+        template_builder.append(
+            &format!("attach_disks{}", i),
+            "AttachDisksToInstance",
+            ActionFunc::new_action(
+                async move |sagactx| {
+                    sic_attach_disks_to_instance(sagactx, i).await
+                },
+                async move |sagactx| {
+                    sic_attach_disks_to_instance_undo(sagactx, i).await
+                },
+            ),
+        );
+    }
 
     template_builder.append(
         "instance_ensure",
@@ -501,48 +526,56 @@ async fn sic_create_network_interfaces_undo(
 // TODO implement
 async fn sic_create_disks_for_instance(
     sagactx: ActionContext<SagaInstanceCreate>,
-) -> Result<Vec<String>, ActionError> {
+    disk_index: usize,
+) -> Result<Option<String>, ActionError> {
     let saga_params = sagactx.saga_params();
     let saga_disks = &saga_params.create_params.disks;
 
-    for disk in saga_disks {
-        match disk {
-            params::InstanceDiskAttachment::Create(_create_params) => {
-                return Err(ActionError::action_failed(
-                    "Creating disk during instance create unsupported!"
-                        .to_string(),
-                ));
-            }
-
-            _ => {}
-        }
+    if disk_index >= saga_disks.len() {
+        return Ok(None);
     }
 
-    Ok(vec![])
+    let disk = &saga_disks[disk_index];
+
+    match disk {
+        params::InstanceDiskAttachment::Create(_create_params) => {
+            return Err(ActionError::action_failed(
+                "Creating disk during instance create unsupported!".to_string(),
+            ));
+        }
+
+        _ => {}
+    }
+
+    Ok(None)
 }
 
 /// Undo disks created during instance creation
 // TODO implement
 async fn sic_create_disks_for_instance_undo(
     _sagactx: ActionContext<SagaInstanceCreate>,
+    _disk_index: usize,
 ) -> Result<(), anyhow::Error> {
     Ok(())
 }
 
 async fn sic_attach_disks_to_instance(
     sagactx: ActionContext<SagaInstanceCreate>,
+    disk_index: usize,
 ) -> Result<(), ActionError> {
-    ensure_instance_disk_attach_state(sagactx, true).await
+    ensure_instance_disk_attach_state(sagactx, disk_index, true).await
 }
 
 async fn sic_attach_disks_to_instance_undo(
     sagactx: ActionContext<SagaInstanceCreate>,
+    disk_index: usize,
 ) -> Result<(), anyhow::Error> {
-    Ok(ensure_instance_disk_attach_state(sagactx, false).await?)
+    Ok(ensure_instance_disk_attach_state(sagactx, disk_index, false).await?)
 }
 
 async fn ensure_instance_disk_attach_state(
     sagactx: ActionContext<SagaInstanceCreate>,
+    disk_index: usize,
     attached: bool,
 ) -> Result<(), ActionError> {
     let osagactx = sagactx.user_data();
@@ -553,44 +586,48 @@ async fn ensure_instance_disk_attach_state(
     let saga_disks = &saga_params.create_params.disks;
     let instance_name = sagactx.lookup::<db::model::Name>("instance_name")?;
 
+    if disk_index >= saga_disks.len() {
+        return Ok(());
+    }
+
+    let disk = &saga_disks[disk_index];
+
     let organization_name: db::model::Name =
         saga_params.organization_name.clone().into();
     let project_name: db::model::Name = saga_params.project_name.clone().into();
 
-    for disk in saga_disks {
-        match disk {
-            params::InstanceDiskAttachment::Create(_) => {
-                // TODO grab disks created in sic_create_disks_for_instance
-            }
-            params::InstanceDiskAttachment::Attach(instance_disk_attach) => {
-                let disk_name: db::model::Name =
-                    instance_disk_attach.disk.clone().into();
+    match disk {
+        params::InstanceDiskAttachment::Create(_) => {
+            // TODO grab disks created in sic_create_disks_for_instance
+        }
+        params::InstanceDiskAttachment::Attach(instance_disk_attach) => {
+            let disk_name: db::model::Name =
+                instance_disk_attach.disk.clone().into();
 
-                if attached {
-                    osagactx
-                        .nexus()
-                        .instance_attach_disk(
-                            &opctx,
-                            &organization_name,
-                            &project_name,
-                            &instance_name,
-                            &disk_name,
-                        )
-                        .await
-                } else {
-                    osagactx
-                        .nexus()
-                        .instance_detach_disk(
-                            &opctx,
-                            &organization_name,
-                            &project_name,
-                            &instance_name,
-                            &disk_name,
-                        )
-                        .await
-                }
-                .map_err(ActionError::action_failed)?;
+            if attached {
+                osagactx
+                    .nexus()
+                    .instance_attach_disk(
+                        &opctx,
+                        &organization_name,
+                        &project_name,
+                        &instance_name,
+                        &disk_name,
+                    )
+                    .await
+            } else {
+                osagactx
+                    .nexus()
+                    .instance_detach_disk(
+                        &opctx,
+                        &organization_name,
+                        &project_name,
+                        &instance_name,
+                        &disk_name,
+                    )
+                    .await
             }
+            .map_err(ActionError::action_failed)?;
         }
     }
 
