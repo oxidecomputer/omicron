@@ -214,9 +214,9 @@ pub fn external_api() -> NexusApiDescription {
 // clients. Client generators use operationId to name API methods, so changing
 // a function name is a breaking change from a client perspective.
 
-/// List organizations
+/// List Organizations
 ///
-/// Returns a list of all organizations in the system. The organizations are returned
+/// Returns a list of all Organizations in the system. The Organizations are returned
 /// in sorted order by name alphabetically by default.
 #[endpoint {
     method = GET,
@@ -256,9 +256,9 @@ async fn organizations_get(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Create an organization
+/// Create an Organization
 ///
-/// Creates a new organization.
+/// Creates a new Organization.
 #[endpoint {
     method = POST,
     path = "/organizations",
@@ -287,10 +287,10 @@ struct OrganizationPathParam {
     organization_name: Name,
 }
 
-/// Get an organization
+/// Get an Organization
 ///
-/// Retrieves the details of an organization with the given name. The same information
-/// is returned when creating or updating an organization.
+/// Retrieves the details of an Organization with the given name. The same information
+/// is returned when creating or updating an Organization.
 #[endpoint {
     method = GET,
     path = "/organizations/{organization_name}",
@@ -313,14 +313,14 @@ async fn organizations_get_organization(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Delete an organization
+/// Delete an Organization
 ///
-/// Permanently deletes an organization. It cannot be undone. This will not remove any
-/// users or groups since those are being synced from your identity provider via SCIM
-/// or SAML authentication.
+/// Permanently deletes an Organization. It cannot be undone. This will not remove any
+/// Users or Groups since those are being synced from your identity provider via SCIM
+/// or via just-in-time SAML authentication.
 ///
-/// A request to delete an organization will fail if there are any active projects
-/// in the organization.
+/// A request to delete an Organization will fail if there are any active Projects
+/// in the Organization.
 #[endpoint {
     method = DELETE,
     path = "/organizations/{organization_name}",
@@ -342,9 +342,9 @@ async fn organizations_delete_organization(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Update an organization
+/// Update an Organization
 ///
-/// Updates the specified organization by setting the values of the parameters passed.
+/// Updates the specified Organization by setting the values of the parameters passed.
 /// Any parameters not provided will be left unchanged.
 // TODO-correctness: Is it valid for PUT to accept application/json that's a
 // subset of what the resource actually represents?  If not, is that a problem?
@@ -381,9 +381,9 @@ async fn organizations_put_organization(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// List projects
+/// List Projects
 ///
-/// Returns a list of all projects in the organization. The projects are sorted
+/// Returns a list of all Projects in the Organization. The Projects are sorted
 /// by name alphabetically by default.
 #[endpoint {
     method = GET,
@@ -438,9 +438,9 @@ async fn organization_projects_get(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Create a project
+/// Create a Project
 ///
-/// Creates a new project in the specified organization.
+/// Creates a new Project in the specified Organization.
 #[endpoint {
     method = POST,
     path = "/organizations/{organization_name}/projects",
@@ -478,9 +478,9 @@ struct ProjectPathParam {
     project_name: Name,
 }
 
-/// Get a project
+/// Get a Project
 ///
-/// Returns the project with the specified name in the specified organization.
+/// Returns the Project with the specified name in the specified Organization.
 #[endpoint {
     method = GET,
     path = "/organizations/{organization_name}/projects/{project_name}",
@@ -505,9 +505,9 @@ async fn organization_projects_get_project(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Delete a project
+/// Delete a Project
 ///
-/// Permanently deletes the project with the specified name in the specified organization.
+/// Permanently deletes the Project with the specified name in the specified Organization.
 /// It cannot be undone.
 // In the future we will want to also delete the project's data recursively, perhaps if the user
 // gives a flag or not, but see RFD4.
@@ -533,9 +533,9 @@ async fn organization_projects_delete_project(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Update a project
+/// Update a Project
 ///
-/// Updates the specified project in the specified organization by setting the values
+/// Updates the specified Project in the specified Organization by setting the values
 /// of the parameters passed. Any parameters not provided are left unchanged.
 #[endpoint {
     method = PUT,
@@ -569,9 +569,9 @@ async fn organization_projects_put_project(
 
 // Disks
 
-/// List disks
+/// List Disks
 ///
-/// Returns a list of disks in the specified project. The disks are returned sorted
+/// Returns a list of disks in the specified Project. The Disks are returned sorted
 /// by name alphabetically by default.
 #[endpoint {
     method = GET,
@@ -608,9 +608,9 @@ async fn project_disks_get(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Create a disk
+/// Create a Disk
 ///
-/// Creates a new disk in the specified project.
+/// Creates a new Disk in the specified Project.
 // TODO-correctness See note about instance create.  This should be async.
 #[endpoint {
     method = POST,
@@ -651,9 +651,9 @@ struct DiskPathParam {
     disk_name: Name,
 }
 
-/// Get a disk
+/// Get a Disk
 ///
-/// Retrieves the details of the disk with the specified name in the specified project.
+/// Retrieves the details of the Disk with the specified name in the specified Project.
 #[endpoint {
     method = GET,
     path = "/organizations/{organization_name}/projects/{project_name}/disks/{disk_name}",
@@ -679,9 +679,9 @@ async fn project_disks_get_disk(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Delete a disk
+/// Delete a Disk
 ///
-/// Permanently deletes the disk with the specified name in the specified project.
+/// Permanently deletes the Disk with the specified name in the specified Project.
 /// This cannot be undone.
 #[endpoint {
     method = DELETE,
@@ -715,9 +715,9 @@ async fn project_disks_delete_disk(
 
 // Instances
 
-/// List instances
+/// List Instances
 ///
-/// Retrieves a list of instances in the specified project. The instances are returned sorted
+/// Retrieves a list of Instances in the specified Project. The Instances are returned sorted
 /// by name alphabetically by default.
 #[endpoint {
     method = GET,
@@ -754,9 +754,9 @@ async fn project_instances_get(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Create an instance
+/// Create an Instance
 ///
-/// Creates a new instance in the specified project.
+/// Creates a new Instance in the specified Project.
 // TODO-correctness This is supposed to be async.  Is that right?  We can create
 // the instance immediately -- it's just not booted yet.  Maybe the boot
 // operation is what's a separate operation_id.  What about the response code
@@ -803,9 +803,9 @@ struct InstancePathParam {
     instance_name: Name,
 }
 
-/// Get an instance
+/// Get an Instance
 ///
-/// Retrieves the instance with the specified name in the specified project and organization.
+/// Retrieves the Instance with the specified name in the specified Project and Organization.
 #[endpoint {
     method = GET,
     path = "/organizations/{organization_name}/projects/{project_name}/instances/{instance_name}",
@@ -836,17 +836,17 @@ async fn project_instances_get_instance(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Delete an instance
+/// Delete an Instance
 ///
-/// Permanently deletes the instance with the specified name in the specified project and
-/// organization. This operation cannot be undone.
+/// Permanently deletes the Instance with the specified name in the specified Project and
+/// Organization. This operation cannot be undone.
 ///
-/// If the instance is using a disk, and the disk settings are to delete upon
-/// instance deletion, the disk will be deleted.
+/// If the Instance is using a Disk, and the Disk settings are to delete upon
+/// Instance deletion, the Disk will be deleted.
 ///
-/// Any ephemeral IP addresses associated with the instance will be released.
+/// Any ephemeral IP addresses associated with the Instance will be released.
 ///
-/// Deleting an instance required that the instance is stopped.
+/// Deleting an Instance requires that the Instance is stopped.
 #[endpoint {
     method = DELETE,
     path = "/organizations/{organization_name}/projects/{project_name}/instances/{instance_name}",
@@ -877,9 +877,9 @@ async fn project_instances_delete_instance(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Migrate an instance
+/// Migrate an Instance
 ///
-/// Migrates an instance to a different propolis server, possibly on a different sled.
+/// Migrates an Instance to a different propolis server, possibly on a different Sled.
 #[endpoint {
     method = POST,
     path = "/organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/migrate",
@@ -913,12 +913,12 @@ async fn project_instances_migrate_instance(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Reboot an instance
+/// Reboot an Instance
 ///
-/// Reboots the instance with the specified name in the specified project and organization.
+/// Reboots the Instance with the specified name in the specified Project and Organization.
 ///
-/// Any ephermal IP addresses associated with the instance will be released and a new
-/// ephermal IP address will be assigned when the instance starts back up. If you want the
+/// Any ephermal IP addresses associated with the Instance will be released and a new
+/// ephermal IP address will be assigned when the Instance starts back up. If you want the
 /// IP address to remain consistent, change it to a floating IP address before rebooting.
 // TODO: link to that API call above.
 #[endpoint {
@@ -951,9 +951,9 @@ async fn project_instances_instance_reboot(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Start an instance
+/// Start an Instance
 ///
-/// Starts the instance with the specified name in the specified project and organization.
+/// Starts the Instance with the specified name in the specified Project and Organization.
 #[endpoint {
     method = POST,
     path = "/organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/start",
@@ -984,13 +984,13 @@ async fn project_instances_instance_start(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Stop an instance
+/// Stop an Instance
 ///
-/// Stop the instance with the specified name in the specified project and organization.
-/// Any ephermal IP addresses associated with the instance will be released and a new
-/// ephermal IP address will be assigned when the instance starts back up. If you want the
+/// Stop the Instance with the specified name in the specified Project and Organization.
+/// Any ephermal IP addresses associated with the Instance will be released and a new
+/// ephermal IP address will be assigned when the Instance starts back up. If you want the
 /// IP address to remain consistent, change it to a floating IP address before stopping.
-/// TODO: link to that API call.
+// TODO: link to that API call.
 #[endpoint {
     method = POST,
     path = "/organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/stop",
@@ -1022,9 +1022,9 @@ async fn project_instances_instance_stop(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// List disks attached
+/// List Disks attached
 ///
-/// List the disks attached to a specified instance. The disks are listed in alphabetical
+/// List the Disks attached to a specified instance. The Disks are listed in alphabetical
 /// order by name.
 // TODO-scalability needs to be paginated
 #[endpoint {
@@ -1064,11 +1064,11 @@ async fn instance_disks_get(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Attach a disk
+/// Attach a Disk
 ///
-/// Attaches a disk to a specified instance. You must first create the disk before
-/// you can attach it to an instance. TODO: link to that API call. It is not
-/// possible to create and attach a disk from one API call.
+/// Attaches a Disk to a specified Instance. You must first create the Disk before
+/// you can attach it to an Instance. It is not possible to create and attach a
+/// Disk from one API call.
 #[endpoint {
     method = POST,
     path = "/organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/disks/attach",
@@ -1101,10 +1101,10 @@ async fn instance_disks_attach(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Detach a disk
+/// Detach a Disk
 ///
-/// Detaches a disk from a specified instance. The disk is not deleted, but it is
-/// no longer attached to the instance.
+/// Detaches a Disk from a specified Instance. The Disk is not deleted, but it is
+/// no longer attached to the Instance.
 #[endpoint {
     method = POST,
     path = "/organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/disks/detach",
@@ -1137,9 +1137,9 @@ async fn instance_disks_detach(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// List network interfaces
+/// List Network Interfaces
 ///
-/// List the network interfaces attached to a specified instance. The network interfaces
+/// List the Network Interfaces attached to a specified Instance. The Network Interfaces
 /// are listed in alphabetical order by name.
 #[endpoint {
     method = GET,
@@ -1178,9 +1178,9 @@ async fn instance_network_interfaces_get(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Create a network interface
+/// Create a Network Interface
 ///
-/// Create a network interface for a specified instance.
+/// Create a Network Interface for a specified Instance.
 #[endpoint {
     method = POST,
     path = "/organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/network-interfaces",
@@ -1221,10 +1221,10 @@ pub struct NetworkInterfacePathParam {
     pub interface_name: Name,
 }
 
-/// Detach a network interface
+/// Detach a Network Interface
 ///
-/// Detaches a network interface from a specified instance. The network interface is not deleted,
-/// but it is no longer attached to the instance.
+/// Detaches a Network Interface from a specified Instance. The Network Interface is not deleted,
+/// but it is no longer attached to the Instance.
 #[endpoint {
     method = DELETE,
     path = "/organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/network-interfaces/{interface_name}",
@@ -1257,9 +1257,9 @@ async fn instance_network_interfaces_delete_interface(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Get a network interface
+/// Get a Network Interface
 ///
-/// Retrieve a specific network interface attached to a specified instance.
+/// Retrieve a specific Network Interface attached to a specified Instance.
 #[endpoint {
     method = GET,
     path = "/organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/network-interfaces/{interface_name}",
@@ -1294,9 +1294,9 @@ async fn instance_network_interfaces_get_interface(
 
 // Snapshots
 
-/// List snapshots
+/// List Snapshots
 ///
-/// List snapshots in a project. Snapshots are sorted by alphabetically by name by default.
+/// List Snapshots in a project. Snapshots are sorted by alphabetically by name by default.
 #[endpoint {
     method = GET,
     path = "/organizations/{organization_name}/projects/{project_name}/snapshots",
@@ -1332,9 +1332,9 @@ async fn project_snapshots_get(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Create a snapshot
+/// Create a Snapshot
 ///
-/// Create a snapshot of a disk.
+/// Create a Snapshot of a Disk.
 #[endpoint {
     method = POST,
     path = "/organizations/{organization_name}/projects/{project_name}/snapshots",
@@ -1374,9 +1374,9 @@ struct SnapshotPathParam {
     snapshot_name: Name,
 }
 
-/// Get a snapshot
+/// Get a Snapshot
 ///
-/// Retrieve details of a specific snapshot in a project.
+/// Retrieve details of a specific Snapshot in a Project.
 #[endpoint {
     method = GET,
     path = "/organizations/{organization_name}/projects/{project_name}/snapshots/{snapshot_name}",
@@ -1407,9 +1407,9 @@ async fn project_snapshots_get_snapshot(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Delete a snapshot
+/// Delete a Snapshot
 ///
-/// Permanently delete a snapshot from a project. This operation cannot be undone.
+/// Permanently delete a Snapshot from a Project. This operation cannot be undone.
 #[endpoint {
     method = DELETE,
     path = "/organizations/{organization_name}/projects/{project_name}/snapshots/{snapshot_name}",
@@ -1444,7 +1444,7 @@ async fn project_snapshots_delete_snapshot(
 
 /// List VPCs
 ///
-/// Returns a list of VPCs in the specified project. The VPCs are returned sorted
+/// Returns a list of VPCs in the specified Project. The VPCs are returned sorted
 /// by name alphabetically by default.
 #[endpoint {
     method = GET,
@@ -1492,7 +1492,7 @@ struct VpcPathParam {
 
 /// Get a VPC
 ///
-/// Retrieve details about a specific VPC in a project.
+/// Retrieve details about a specific VPC in a Project.
 #[endpoint {
     method = GET,
     path = "/organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}",
@@ -1520,7 +1520,7 @@ async fn project_vpcs_get_vpc(
 
 /// Create a VPC
 ///
-/// Create a new VPC in a project.
+/// Create a new VPC in a Project.
 #[endpoint {
     method = POST,
     path = "/organizations/{organization_name}/projects/{project_name}/vpcs",
@@ -1554,7 +1554,7 @@ async fn project_vpcs_post(
 
 /// Update a VPC
 ///
-/// Updates the specified VPC in a project by setting the values of the parameters
+/// Updates the specified VPC in a Project by setting the values of the parameters
 /// passed. Any parameters not provided will be left unchanged.
 #[endpoint {
     method = PUT,
@@ -1587,10 +1587,7 @@ async fn project_vpcs_put_vpc(
 
 /// Delete a VPC
 ///
-/// Permanently delete a VPC from a project. This operation cannot be undone.
-/// If the parameter `force` is set to true, any subnets
-/// or other resources in the VPC will be deleted as well. If the parameter `force` is set to false,
-/// the operation will fail if there are any subnets or other resources in the VPC.
+/// Permanently delete a VPC from a Project. This operation cannot be undone.
 #[endpoint {
     method = DELETE,
     path = "/organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}",
@@ -1621,9 +1618,9 @@ async fn project_vpcs_delete_vpc(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// List subnets
+/// List Subnets
 ///
-/// Returns a list of all subnets in a VPC. The subnets are returned sorted by
+/// Returns a list of all Subnets in a VPC. The Subnets are returned sorted by
 /// name alphabetically by default.
 #[endpoint {
     method = GET,
@@ -1668,9 +1665,9 @@ struct VpcSubnetPathParam {
     subnet_name: Name,
 }
 
-/// Get a subnet
+/// Get a Subnet
 ///
-/// Returns the specified subnet in a VPC.
+/// Returns the specified Subnet in a VPC.
 #[endpoint {
     method = GET,
     path = "/organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/subnets/{subnet_name}",
@@ -1699,9 +1696,9 @@ async fn vpc_subnets_get_subnet(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Create a subnet
+/// Create a Subnet
 ///
-/// Creates a new subnet in a VPC.
+/// Creates a new Subnet in a VPC.
 #[endpoint {
     method = POST,
     path = "/organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/subnets",
@@ -1731,9 +1728,9 @@ async fn vpc_subnets_post(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Delete a subnet
+/// Delete a Subnet
 ///
-/// Permanently deletes a subnet from a VPC. This operation cannot be undone.
+/// Permanently deletes a Subnet from a VPC. This operation cannot be undone.
 #[endpoint {
     method = DELETE,
     path = "/organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/subnets/{subnet_name}",
@@ -1762,9 +1759,9 @@ async fn vpc_subnets_delete_subnet(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Update a subnet
+/// Update a Subnet
 ///
-/// Updates the specified subnet in a VPC by setting the values of the parameters passed. Any
+/// Updates the specified Subnet in a VPC by setting the values of the parameters passed. Any
 /// parameters not provided are left unchanged.
 #[endpoint {
     method = PUT,
@@ -1796,9 +1793,9 @@ async fn vpc_subnets_put_subnet(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// List network interfaces in a subnet
+/// List Network Interfaces in a Subnet
 ///
-/// Returns a list of network interfaces in a subnet. The network interfaces are
+/// Returns a list of Network Interfaces in a Subnet. The Network Interfaces are
 /// returned sorted alphabetically by name.
 #[endpoint {
     method = GET,
@@ -1837,9 +1834,9 @@ async fn subnet_network_interfaces_get(
 
 // VPC Firewalls
 
-/// List firewall rules
+/// List Firewall Rules
 ///
-/// Returns a list of firewall rules in a VPC. The firewall rules are returned sorted
+/// Returns a list of Firewall Rules in a VPC. The Firewall Rules are returned sorted
 /// by priority and then alphabetically by name.
 #[endpoint {
     method = GET,
@@ -1871,11 +1868,11 @@ async fn vpc_firewall_rules_get(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Replace the firewall rules
+/// Replace the Firewall Rules
 ///
-/// Replaces the firewall rules in a VPC with the specified rules. Any existing
-/// firewall rules are overwritten by the new rules.
-/// TODO: write a bit about the semantics of this operation since it is finiky.
+/// Replaces the Firewall Rules in a VPC with the specified rules. Any existing
+/// Firewall Rules are overwritten by the new rules.
+// TODO: write a bit about the semantics of this operation since it is finiky.
 #[endpoint {
     method = PUT,
     path = "/organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/firewall/rules",
@@ -1909,9 +1906,9 @@ async fn vpc_firewall_rules_put(
 
 // VPC Routers
 
-/// List routers
+/// List Routers
 ///
-/// Returns a list of routers in a VPC. The routers are returned sorted alphabetically by name.
+/// Returns a list of Routers in a VPC. The Routers are returned sorted alphabetically by name.
 #[endpoint {
     method = GET,
     path = "/organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/routers",
@@ -1953,9 +1950,9 @@ struct VpcRouterPathParam {
     router_name: Name,
 }
 
-/// Get a router
+/// Get a Router
 ///
-/// Returns details of the router with the specified name.
+/// Returns details of the Router with the specified name.
 #[endpoint {
     method = GET,
     path = "/organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/routers/{router_name}",
@@ -1982,10 +1979,10 @@ async fn vpc_routers_get_router(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Create a router
+/// Create a Router
 ///
-/// Creates a new custom router in a VPC. There can only be one custom router in a
-/// subnet.
+/// Creates a new custom Router in a VPC. There can only be one custom Router in a
+/// Subnet.
 #[endpoint {
     method = POST,
     path = "/organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/routers",
@@ -2014,11 +2011,9 @@ async fn vpc_routers_post(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Delete a router
+/// Delete a Router
 ///
-/// Deletes the custom router with the specified name. This operation cannot be undone.
-/// If the parameter `force` is set to `true`, any routes held by the router will be deleted.
-/// If the parameter `force` is set to `false`, the router must be empty before it can be deleted.
+/// Deletes the custom Router with the specified name.
 #[endpoint {
     method = DELETE,
     path = "/organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/routers/{router_name}",
@@ -2045,9 +2040,9 @@ async fn vpc_routers_delete_router(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Update a router
+/// Update a Router
 ///
-/// Updates the specified router by setting the values of the parameters passed.
+/// Updates the specified Router by setting the values of the parameters passed.
 /// Any parameters not specified are left unchanged.
 #[endpoint {
     method = PUT,
@@ -2079,10 +2074,10 @@ async fn vpc_routers_put_router(
 
 // Vpc Router Routes
 
-/// List routes
+/// List Routes
 ///
-/// Returns a list of routes for the specified router. The routes are returned
-/// in alphabetical order by route name.
+/// Returns a list of Routes for the specified router. The Routes are returned
+/// in alphabetical order by Route name.
 #[endpoint {
     method = GET,
     path = "/organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/routers/{router_name}/routes",
@@ -2126,9 +2121,9 @@ struct RouterRoutePathParam {
     route_name: Name,
 }
 
-/// Get a route
+/// Get a Route
 ///
-/// Returns details of the route with the specified name in the specified router.
+/// Returns details of the Route with the specified name in the specified Router.
 #[endpoint {
     method = GET,
     path = "/organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/routers/{router_name}/routes/{route_name}",
@@ -2156,9 +2151,9 @@ async fn routers_routes_get_route(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Create a route
+/// Create a Route
 ///
-/// Creates a new route in the specified custom router.
+/// Creates a new Route in the specified custom Router.
 #[endpoint {
     method = POST,
     path = "/organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/routers/{router_name}/routes",
@@ -2188,9 +2183,9 @@ async fn routers_routes_post(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Delete a route
+/// Delete a Route
 ///
-/// Permanently deletes the specified route from the specified custom router.
+/// Permanently deletes the specified Route from the specified custom Router.
 #[endpoint {
     method = DELETE,
     path = "/organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/routers/{router_name}/routes/{route_name}",
@@ -2218,9 +2213,9 @@ async fn routers_routes_delete_route(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Update a route
+/// Update a Route
 ///
-/// Updates the specified route in the specified custom router by setting the values of the parameters
+/// Updates the specified Route in the specified custom Router by setting the values of the parameters
 /// passed. Any parameters not provided are left unchanged.
 #[endpoint {
     method = PUT,
@@ -2253,9 +2248,9 @@ async fn routers_routes_put_route(
 
 // Racks
 
-/// List racks
+/// List Racks
 ///
-/// Returns a list of racks. The racks are returned sorted by name alphabetically.
+/// Returns a list of Racks. The Racks are returned sorted by name alphabetically.
 #[endpoint {
     method = GET,
     path = "/hardware/racks",
@@ -2284,9 +2279,9 @@ struct RackPathParam {
     rack_id: Uuid,
 }
 
-/// Get a rack
+/// Get a Rack
 ///
-/// Returns details of the specified rack.
+/// Returns details of the specified Rack.
 #[endpoint {
     method = GET,
     path = "/hardware/racks/{rack_id}",
@@ -2308,9 +2303,9 @@ async fn hardware_racks_get_rack(
 
 // Sleds
 
-/// List sleds
+/// List Sleds
 ///
-/// Returns a list of sleds. The sleds are returned sorted by name alphabetically.
+/// Returns a list of Sleds. The Sleds are returned sorted by name alphabetically.
 #[endpoint {
     method = GET,
     path = "/hardware/sleds",
@@ -2342,9 +2337,9 @@ struct SledPathParam {
     sled_id: Uuid,
 }
 
-/// Get a sled
+/// Get a Sled
 ///
-/// Returns details of the specified sled.
+/// Returns details of the specified Sled.
 #[endpoint {
     method = GET,
     path = "/hardware/sleds/{sled_id}",
@@ -2444,9 +2439,9 @@ async fn sagas_get_saga(
 
 // Built-in (system) users
 
-/// List users
+/// List Users
 ///
-/// Returns a list of users. The users are returned sorted by name alphabetically.
+/// Returns a list of Users. The Users are returned sorted by name alphabetically.
 #[endpoint {
     method = GET,
     path = "/users",
@@ -2481,11 +2476,11 @@ struct UserPathParam {
     user_name: Name,
 }
 
-/// Get a user
+/// Get a User
 ///
-/// Returns details of the specified user.
+/// Returns details of the specified User.
 ///
-/// To get details of the current user, use the `/session/me` endpoint.
+/// To get details of the current authenticated User, use the `/session/me` endpoint.
 #[endpoint {
     method = GET,
     path = "/users/{user_name}",
@@ -2540,10 +2535,10 @@ struct RolePage {
     last_seen: String,
 }
 
-/// List roles
+/// List Roles
 ///
-/// Returns a list of roles. The roles are returned sorted by name alphabetically.
-/// For now, these are only the built-in roles.
+/// Returns a list of Roles. The Roles are returned sorted by name alphabetically.
+/// For now, these are only the built-in Roles.
 #[endpoint {
     method = GET,
     path = "/roles",
@@ -2597,9 +2592,9 @@ struct RolePathParam {
     role_name: String,
 }
 
-/// Get a role
+/// Get a Role
 ///
-/// Returns details of the specified role.
+/// Returns details of the specified Role.
 #[endpoint {
     method = GET,
     path = "/roles/{role_name}",
