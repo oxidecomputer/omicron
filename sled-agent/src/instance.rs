@@ -572,7 +572,7 @@ impl Instance {
     async fn stop(&self) -> Result<(), Error> {
         let mut inner = self.inner.lock().await;
 
-        // XXX how to free the static V6 address? where do I store it?
+        // XXX free address through nexus internal client?
 
         let zname = propolis_zone_name(inner.propolis_id());
         warn!(inner.log, "Halting and removing zone: {}", zname);

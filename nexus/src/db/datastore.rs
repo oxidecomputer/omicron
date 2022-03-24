@@ -3453,6 +3453,7 @@ impl DataStore {
     ) -> UpdateResult<()> {
         use db::schema::static_v6_address::dsl;
 
+        // XXX what if the address isn't in the table?
         diesel::delete(dsl::static_v6_address)
             .filter(dsl::address.eq(ipnetwork::IpNetwork::from(address)))
             .execute_async(self.pool())
