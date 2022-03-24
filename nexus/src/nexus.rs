@@ -111,6 +111,8 @@ pub trait TestInterfaces {
 
 pub static BASE_ARTIFACT_DIR: &str = "/var/tmp/oxide_artifacts";
 
+const MAX_DISKS_PER_INSTANCE: u32 = 8;
+
 /// Manages an Oxide fleet -- the heart of the control plane
 pub struct Nexus {
     /// uuid for this nexus instance.
@@ -859,10 +861,11 @@ impl Nexus {
         opctx.authorize(authz::Action::CreateChild, &authz_project).await?;
 
         // Validate parameters
-        if params.disks.len() > 8 {
-            return Err(Error::invalid_request(
-                "cannot attach more than 8 disks to instance!",
-            ));
+        if params.disks.len() > MAX_DISKS_PER_INSTANCE as usize {
+            return Err(Error::invalid_request(&format!(
+                "cannot attach more than {} disks to instance!",
+                MAX_DISKS_PER_INSTANCE
+            )));
         }
 
         let saga_params = Arc::new(sagas::ParamsInstanceCreate {
@@ -1243,9 +1246,8 @@ impl Nexus {
                 &DataPageParams {
                     marker: None,
                     direction: dropshot::PaginationOrder::Ascending,
-                    // TODO: is there a limit to the number of disks an instance
-                    // can have attached?
-                    limit: std::num::NonZeroU32::new(8).unwrap(),
+                    limit: std::num::NonZeroU32::new(MAX_DISKS_PER_INSTANCE)
+                        .unwrap(),
                 },
             )
             .await?;
@@ -1257,7 +1259,6 @@ impl Nexus {
             disk_reqs.push(sled_agent_client::types::DiskRequest {
                 name: disk.name().to_string(),
                 slot: sled_agent_client::types::Slot(i as u8),
-                // TODO offer ability to attach read-only?
                 read_only: false,
                 device: "nvme".to_string(),
                 gen: gen as u64,
@@ -1378,15 +1379,17 @@ impl Nexus {
                 &DataPageParams {
                     marker: None,
                     direction: dropshot::PaginationOrder::Ascending,
-                    limit: std::num::NonZeroU32::new(8).unwrap(),
+                    limit: std::num::NonZeroU32::new(MAX_DISKS_PER_INSTANCE)
+                        .unwrap(),
                 },
             )
             .await?;
 
-        if attached_disks.len() == 8 {
-            return Err(Error::invalid_request(
-                "cannot attach more than 8 disks to instance!",
-            ));
+        if attached_disks.len() == MAX_DISKS_PER_INSTANCE as usize {
+            return Err(Error::invalid_request(&format!(
+                "cannot attach more than {} disks to instance!",
+                MAX_DISKS_PER_INSTANCE
+            )));
         }
 
         fn disk_attachment_error(
