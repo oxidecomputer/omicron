@@ -15,8 +15,8 @@
         "tags": [
           "racks"
         ],
-        "summary": "List racks",
-        "description": "Returns a list of racks. The racks are returned sorted by name alphabetically.",
+        "summary": "List Racks",
+        "description": "Returns a list of Racks. The Racks are returned sorted by name alphabetically.",
         "operationId": "hardware_racks_get",
         "parameters": [
           {
@@ -76,8 +76,8 @@
         "tags": [
           "racks"
         ],
-        "summary": "Get a rack",
-        "description": "Returns details of the specified rack.",
+        "summary": "Get a Rack",
+        "description": "Returns details of the specified Rack.",
         "operationId": "hardware_racks_get_rack",
         "parameters": [
           {
@@ -117,8 +117,8 @@
         "tags": [
           "sleds"
         ],
-        "summary": "List sleds",
-        "description": "Returns a list of sleds. The sleds are returned sorted by name alphabetically.",
+        "summary": "List Sleds",
+        "description": "Returns a list of Sleds. The Sleds are returned sorted by name alphabetically.",
         "operationId": "hardware_sleds_get",
         "parameters": [
           {
@@ -178,8 +178,8 @@
         "tags": [
           "sleds"
         ],
-        "summary": "Get a sled",
-        "description": "Returns details of the specified sled.",
+        "summary": "Get a Sled",
+        "description": "Returns details of the specified Sled.",
         "operationId": "hardware_sleds_get_sled",
         "parameters": [
           {
@@ -255,8 +255,8 @@
         "tags": [
           "organizations"
         ],
-        "summary": "List organizations",
-        "description": "Returns a list of all organizations in the system. The organizations are returned in sorted order by name alphabetically by default.",
+        "summary": "List Organizations",
+        "description": "Returns a list of all Organizations in the system. The Organizations are returned in sorted order by name alphabetically by default.",
         "operationId": "organizations_get",
         "parameters": [
           {
@@ -314,8 +314,8 @@
         "tags": [
           "organizations"
         ],
-        "summary": "Create an organization",
-        "description": "Creates a new organization.",
+        "summary": "Create an Organization",
+        "description": "Creates a new Organization.",
         "operationId": "organizations_post",
         "requestBody": {
           "content": {
@@ -352,8 +352,8 @@
         "tags": [
           "organizations"
         ],
-        "summary": "Get an organization",
-        "description": "Retrieves the details of an organization with the given name. The same information is returned when creating or updating an organization.",
+        "summary": "Get an Organization",
+        "description": "Retrieves the details of an Organization with the given name. The same information is returned when creating or updating an Organization.",
         "operationId": "organizations_get_organization",
         "parameters": [
           {
@@ -390,8 +390,8 @@
         "tags": [
           "organizations"
         ],
-        "summary": "Update an organization",
-        "description": "Updates the specified organization by setting the values of the parameters passed. Any parameters not provided will be left unchanged.",
+        "summary": "Update an Organization",
+        "description": "Updates the specified Organization by setting the values of the parameters passed. Any parameters not provided will be left unchanged.",
         "operationId": "organizations_put_organization",
         "parameters": [
           {
@@ -438,8 +438,8 @@
         "tags": [
           "organizations"
         ],
-        "summary": "Delete an organization",
-        "description": "Permanently deletes an organization. It cannot be undone. This will not remove any users or groups since those are being synced from your identity provider via SCIM or SAML authentication.\nA request to delete an organization will fail if there are any active projects in the organization.",
+        "summary": "Delete an Organization",
+        "description": "Permanently deletes an Organization. It cannot be undone. This will not remove any Users or Groups since those are being synced from your identity provider via SCIM or via just-in-time SAML authentication.\nA request to delete an Organization will fail if there are any active Projects in the Organization.",
         "operationId": "organizations_delete_organization",
         "parameters": [
           {
@@ -471,8 +471,8 @@
         "tags": [
           "projects"
         ],
-        "summary": "List projects",
-        "description": "Returns a list of all projects in the organization. The projects are sorted by name alphabetically by default.",
+        "summary": "List Projects",
+        "description": "Returns a list of all Projects in the Organization. The Projects are sorted by name alphabetically by default.",
         "operationId": "organization_projects_get",
         "parameters": [
           {
@@ -540,8 +540,8 @@
         "tags": [
           "projects"
         ],
-        "summary": "Create a project",
-        "description": "Creates a new project in the specified organization.",
+        "summary": "Create a Project",
+        "description": "Creates a new Project in the specified Organization.",
         "operationId": "organization_projects_post",
         "parameters": [
           {
@@ -590,8 +590,8 @@
         "tags": [
           "projects"
         ],
-        "summary": "Get a project",
-        "description": "Returns the project with the specified name in the specified organization.",
+        "summary": "Get a Project",
+        "description": "Returns the Project with the specified name in the specified Organization.",
         "operationId": "organization_projects_get_project",
         "parameters": [
           {
@@ -638,8 +638,8 @@
         "tags": [
           "projects"
         ],
-        "summary": "Update a project",
-        "description": "Updates the specified project in the specified organization by setting the values of the parameters passed. Any parameters not provided are left unchanged.",
+        "summary": "Update a Project",
+        "description": "Updates the specified Project in the specified Organization by setting the values of the parameters passed. Any parameters not provided are left unchanged.",
         "operationId": "organization_projects_put_project",
         "parameters": [
           {
@@ -696,8 +696,8 @@
         "tags": [
           "projects"
         ],
-        "summary": "Delete a project",
-        "description": "Permanently deletes the project with the specified name in the specified organization. It cannot be undone.",
+        "summary": "Delete a Project",
+        "description": "Permanently deletes the Project with the specified name in the specified Organization. It cannot be undone.",
         "operationId": "organization_projects_delete_project",
         "parameters": [
           {
@@ -739,8 +739,8 @@
         "tags": [
           "disks"
         ],
-        "summary": "List disks",
-        "description": "Returns a list of disks in the specified project. The disks are returned sorted by name alphabetically by default.",
+        "summary": "List Disks",
+        "description": "Returns a list of disks in the specified Project. The Disks are returned sorted by name alphabetically by default.",
         "operationId": "project_disks_get",
         "parameters": [
           {
@@ -818,8 +818,8 @@
         "tags": [
           "disks"
         ],
-        "summary": "Create a disk",
-        "description": "Creates a new disk in the specified project.",
+        "summary": "Create a Disk",
+        "description": "Creates a new Disk in the specified Project.",
         "operationId": "project_disks_post",
         "parameters": [
           {
@@ -878,8 +878,8 @@
         "tags": [
           "disks"
         ],
-        "summary": "Get a disk",
-        "description": "Retrieves the details of the disk with the specified name in the specified project.",
+        "summary": "Get a Disk",
+        "description": "Retrieves the details of the Disk with the specified name in the specified Project.",
         "operationId": "project_disks_get_disk",
         "parameters": [
           {
@@ -933,8 +933,8 @@
         "tags": [
           "disks"
         ],
-        "summary": "Delete a disk",
-        "description": "Permanently deletes the disk with the specified name in the specified project. This cannot be undone.",
+        "summary": "Delete a Disk",
+        "description": "Permanently deletes the Disk with the specified name in the specified Project. This cannot be undone.",
         "operationId": "project_disks_delete_disk",
         "parameters": [
           {
@@ -983,8 +983,8 @@
         "tags": [
           "instances"
         ],
-        "summary": "List instances",
-        "description": "Retrieves a list of instances in the specified project. The instances are returned sorted by name alphabetically by default.",
+        "summary": "List Instances",
+        "description": "Retrieves a list of Instances in the specified Project. The Instances are returned sorted by name alphabetically by default.",
         "operationId": "project_instances_get",
         "parameters": [
           {
@@ -1062,8 +1062,8 @@
         "tags": [
           "instances"
         ],
-        "summary": "Create an instance",
-        "description": "Creates a new instance in the specified project.",
+        "summary": "Create an Instance",
+        "description": "Creates a new Instance in the specified Project.",
         "operationId": "project_instances_post",
         "parameters": [
           {
@@ -1122,8 +1122,8 @@
         "tags": [
           "instances"
         ],
-        "summary": "Get an instance",
-        "description": "Retrieves the instance with the specified name in the specified project and organization.",
+        "summary": "Get an Instance",
+        "description": "Retrieves the Instance with the specified name in the specified Project and Organization.",
         "operationId": "project_instances_get_instance",
         "parameters": [
           {
@@ -1177,8 +1177,8 @@
         "tags": [
           "instances"
         ],
-        "summary": "Delete an instance",
-        "description": "Permanently deletes the instance with the specified name in the specified project and organization. This operation cannot be undone.\nIf the instance is using a disk, and the disk settings are to delete upon instance deletion, the disk will be deleted.\nAny ephemeral IP addresses associated with the instance will be released.\nDeleting an instance required that the instance is stopped.",
+        "summary": "Delete an Instance",
+        "description": "Permanently deletes the Instance with the specified name in the specified Project and Organization. This operation cannot be undone.\nIf the Instance is using a Disk, and the Disk settings are to delete upon Instance deletion, the Disk will be deleted.\nAny ephemeral IP addresses associated with the Instance will be released.\nDeleting an Instance requires that the Instance is stopped.",
         "operationId": "project_instances_delete_instance",
         "parameters": [
           {
@@ -1227,8 +1227,8 @@
         "tags": [
           "instances"
         ],
-        "summary": "List disks attached",
-        "description": "List the disks attached to a specified instance. The disks are listed in alphabetical order by name.",
+        "summary": "List Disks attached",
+        "description": "List the Disks attached to a specified instance. The Disks are listed in alphabetical order by name.",
         "operationId": "instance_disks_get",
         "parameters": [
           {
@@ -1315,8 +1315,8 @@
         "tags": [
           "instances"
         ],
-        "summary": "Attach a disk",
-        "description": "Attaches a disk to a specified instance. You must first create the disk before you can attach it to an instance. TODO: link to that API call. It is not possible to create and attach a disk from one API call.",
+        "summary": "Attach a Disk",
+        "description": "Attaches a Disk to a specified Instance. You must first create the Disk before you can attach it to an Instance. It is not possible to create and attach a Disk from one API call.",
         "operationId": "instance_disks_attach",
         "parameters": [
           {
@@ -1382,8 +1382,8 @@
         "tags": [
           "instances"
         ],
-        "summary": "Detach a disk",
-        "description": "Detaches a disk from a specified instance. The disk is not deleted, but it is no longer attached to the instance.",
+        "summary": "Detach a Disk",
+        "description": "Detaches a Disk from a specified Instance. The Disk is not deleted, but it is no longer attached to the Instance.",
         "operationId": "instance_disks_detach",
         "parameters": [
           {
@@ -1449,8 +1449,8 @@
         "tags": [
           "hidden"
         ],
-        "summary": "Migrate an instance",
-        "description": "Migrates an instance to a different propolis server, possibly on a different sled.",
+        "summary": "Migrate an Instance",
+        "description": "Migrates an Instance to a different propolis server, possibly on a different Sled.",
         "operationId": "project_instances_migrate_instance",
         "parameters": [
           {
@@ -1516,8 +1516,8 @@
         "tags": [
           "instances"
         ],
-        "summary": "List network interfaces",
-        "description": "List the network interfaces attached to a specified instance. The network interfaces are listed in alphabetical order by name.",
+        "summary": "List Network Interfaces",
+        "description": "List the Network Interfaces attached to a specified Instance. The Network Interfaces are listed in alphabetical order by name.",
         "operationId": "instance_network_interfaces_get",
         "parameters": [
           {
@@ -1602,8 +1602,8 @@
         "tags": [
           "instances"
         ],
-        "summary": "Create a network interface",
-        "description": "Create a network interface for a specified instance.",
+        "summary": "Create a Network Interface",
+        "description": "Create a Network Interface for a specified Instance.",
         "operationId": "instance_network_interfaces_post",
         "parameters": [
           {
@@ -1669,8 +1669,8 @@
         "tags": [
           "instances"
         ],
-        "summary": "Get a network interface",
-        "description": "Retrieve a specific network interface attached to a specified instance.",
+        "summary": "Get a Network Interface",
+        "description": "Retrieve a specific Network Interface attached to a specified Instance.",
         "operationId": "instance_network_interfaces_get_interface",
         "parameters": [
           {
@@ -1733,8 +1733,8 @@
         "tags": [
           "instances"
         ],
-        "summary": "Detach a network interface",
-        "description": "Detaches a network interface from a specified instance. The network interface is not deleted, but it is no longer attached to the instance.",
+        "summary": "Detach a Network Interface",
+        "description": "Detaches a Network Interface from a specified Instance. The Network Interface is not deleted, but it is no longer attached to the Instance.",
         "operationId": "instance_network_interfaces_delete_interface",
         "parameters": [
           {
@@ -1792,8 +1792,8 @@
         "tags": [
           "instances"
         ],
-        "summary": "Reboot an instance",
-        "description": "Reboots the instance with the specified name in the specified project and organization.\nAny ephermal IP addresses associated with the instance will be released and a new ephermal IP address will be assigned when the instance starts back up. If you want the IP address to remain consistent, change it to a floating IP address before rebooting.",
+        "summary": "Reboot an Instance",
+        "description": "Reboots the Instance with the specified name in the specified Project and Organization.\nAny ephermal IP addresses associated with the Instance will be released and a new ephermal IP address will be assigned when the Instance starts back up. If you want the IP address to remain consistent, change it to a floating IP address before rebooting.",
         "operationId": "project_instances_instance_reboot",
         "parameters": [
           {
@@ -1849,8 +1849,8 @@
         "tags": [
           "instances"
         ],
-        "summary": "Start an instance",
-        "description": "Starts the instance with the specified name in the specified project and organization.",
+        "summary": "Start an Instance",
+        "description": "Starts the Instance with the specified name in the specified Project and Organization.",
         "operationId": "project_instances_instance_start",
         "parameters": [
           {
@@ -1906,8 +1906,8 @@
         "tags": [
           "instances"
         ],
-        "summary": "Stop an instance",
-        "description": "Stop the instance with the specified name in the specified project and organization. Any ephermal IP addresses associated with the instance will be released and a new ephermal IP address will be assigned when the instance starts back up. If you want the IP address to remain consistent, change it to a floating IP address before stopping. TODO: link to that API call.",
+        "summary": "Stop an Instance",
+        "description": "Stop the Instance with the specified name in the specified Project and Organization. Any ephermal IP addresses associated with the Instance will be released and a new ephermal IP address will be assigned when the Instance starts back up. If you want the IP address to remain consistent, change it to a floating IP address before stopping.",
         "operationId": "project_instances_instance_stop",
         "parameters": [
           {
@@ -1963,8 +1963,8 @@
         "tags": [
           "snapshots"
         ],
-        "summary": "List snapshots",
-        "description": "List snapshots in a project. Snapshots are sorted by alphabetically by name by default.",
+        "summary": "List Snapshots",
+        "description": "List Snapshots in a project. Snapshots are sorted by alphabetically by name by default.",
         "operationId": "project_snapshots_get",
         "parameters": [
           {
@@ -2042,8 +2042,8 @@
         "tags": [
           "snapshots"
         ],
-        "summary": "Create a snapshot",
-        "description": "Create a snapshot of a disk.",
+        "summary": "Create a Snapshot",
+        "description": "Create a Snapshot of a Disk.",
         "operationId": "project_snapshots_post",
         "parameters": [
           {
@@ -2102,8 +2102,8 @@
         "tags": [
           "snapshots"
         ],
-        "summary": "Get a snapshot",
-        "description": "Retrieve details of a specific snapshot in a project.",
+        "summary": "Get a Snapshot",
+        "description": "Retrieve details of a specific Snapshot in a Project.",
         "operationId": "project_snapshots_get_snapshot",
         "parameters": [
           {
@@ -2157,8 +2157,8 @@
         "tags": [
           "snapshots"
         ],
-        "summary": "Delete a snapshot",
-        "description": "Permanently delete a snapshot from a project. This operation cannot be undone.",
+        "summary": "Delete a Snapshot",
+        "description": "Permanently delete a Snapshot from a Project. This operation cannot be undone.",
         "operationId": "project_snapshots_delete_snapshot",
         "parameters": [
           {
@@ -2208,7 +2208,7 @@
           "vpcs"
         ],
         "summary": "List VPCs",
-        "description": "Returns a list of VPCs in the specified project. The VPCs are returned sorted by name alphabetically by default.",
+        "description": "Returns a list of VPCs in the specified Project. The VPCs are returned sorted by name alphabetically by default.",
         "operationId": "project_vpcs_get",
         "parameters": [
           {
@@ -2287,7 +2287,7 @@
           "vpcs"
         ],
         "summary": "Create a VPC",
-        "description": "Create a new VPC in a project.",
+        "description": "Create a new VPC in a Project.",
         "operationId": "project_vpcs_post",
         "parameters": [
           {
@@ -2347,7 +2347,7 @@
           "vpcs"
         ],
         "summary": "Get a VPC",
-        "description": "Retrieve details about a specific VPC in a project.",
+        "description": "Retrieve details about a specific VPC in a Project.",
         "operationId": "project_vpcs_get_vpc",
         "parameters": [
           {
@@ -2402,7 +2402,7 @@
           "vpcs"
         ],
         "summary": "Update a VPC",
-        "description": "Updates the specified VPC in a project by setting the values of the parameters passed. Any parameters not provided will be left unchanged.",
+        "description": "Updates the specified VPC in a Project by setting the values of the parameters passed. Any parameters not provided will be left unchanged.",
         "operationId": "project_vpcs_put_vpc",
         "parameters": [
           {
@@ -2467,7 +2467,7 @@
           "vpcs"
         ],
         "summary": "Delete a VPC",
-        "description": "Permanently delete a VPC from a project. This operation cannot be undone. If the parameter `force` is set to true, any subnets or other resources in the VPC will be deleted as well. If the parameter `force` is set to false, the operation will fail if there are any subnets or other resources in the VPC.",
+        "description": "Permanently delete a VPC from a Project. This operation cannot be undone.",
         "operationId": "project_vpcs_delete_vpc",
         "parameters": [
           {
@@ -2516,8 +2516,8 @@
         "tags": [
           "firewall"
         ],
-        "summary": "List firewall rules",
-        "description": "Returns a list of firewall rules in a VPC. The firewall rules are returned sorted by priority and then alphabetically by name.",
+        "summary": "List Firewall Rules",
+        "description": "Returns a list of Firewall Rules in a VPC. The Firewall Rules are returned sorted by priority and then alphabetically by name.",
         "operationId": "vpc_firewall_rules_get",
         "parameters": [
           {
@@ -2571,8 +2571,8 @@
         "tags": [
           "firewall"
         ],
-        "summary": "Replace the firewall rules",
-        "description": "Replaces the firewall rules in a VPC with the specified rules. Any existing firewall rules are overwritten by the new rules. TODO: write a bit about the semantics of this operation since it is finiky.",
+        "summary": "Replace the Firewall Rules",
+        "description": "Replaces the Firewall Rules in a VPC with the specified rules. Any existing Firewall Rules are overwritten by the new rules.",
         "operationId": "vpc_firewall_rules_put",
         "parameters": [
           {
@@ -2638,8 +2638,8 @@
         "tags": [
           "routers"
         ],
-        "summary": "List routers",
-        "description": "Returns a list of routers in a VPC. The routers are returned sorted alphabetically by name.",
+        "summary": "List Routers",
+        "description": "Returns a list of Routers in a VPC. The Routers are returned sorted alphabetically by name.",
         "operationId": "vpc_routers_get",
         "parameters": [
           {
@@ -2724,8 +2724,8 @@
         "tags": [
           "routers"
         ],
-        "summary": "Create a router",
-        "description": "Creates a new custom router in a VPC. There can only be one custom router in a subnet.",
+        "summary": "Create a Router",
+        "description": "Creates a new custom Router in a VPC. There can only be one custom Router in a Subnet.",
         "operationId": "vpc_routers_post",
         "parameters": [
           {
@@ -2791,8 +2791,8 @@
         "tags": [
           "routers"
         ],
-        "summary": "Get a router",
-        "description": "Returns details of the router with the specified name.",
+        "summary": "Get a Router",
+        "description": "Returns details of the Router with the specified name.",
         "operationId": "vpc_routers_get_router",
         "parameters": [
           {
@@ -2855,8 +2855,8 @@
         "tags": [
           "routers"
         ],
-        "summary": "Update a router",
-        "description": "Updates the specified router by setting the values of the parameters passed. Any parameters not specified are left unchanged.",
+        "summary": "Update a Router",
+        "description": "Updates the specified Router by setting the values of the parameters passed. Any parameters not specified are left unchanged.",
         "operationId": "vpc_routers_put_router",
         "parameters": [
           {
@@ -2922,8 +2922,8 @@
         "tags": [
           "routers"
         ],
-        "summary": "Delete a router",
-        "description": "Deletes the custom router with the specified name. This operation cannot be undone. If the parameter `force` is set to `true`, any routes held by the router will be deleted. If the parameter `force` is set to `false`, the router must be empty before it can be deleted.",
+        "summary": "Delete a Router",
+        "description": "Deletes the custom Router with the specified name.",
         "operationId": "vpc_routers_delete_router",
         "parameters": [
           {
@@ -2981,8 +2981,8 @@
         "tags": [
           "routes"
         ],
-        "summary": "List routes",
-        "description": "Returns a list of routes for the specified router. The routes are returned in alphabetical order by route name.",
+        "summary": "List Routes",
+        "description": "Returns a list of Routes for the specified router. The Routes are returned in alphabetical order by Route name.",
         "operationId": "routers_routes_get",
         "parameters": [
           {
@@ -3076,8 +3076,8 @@
         "tags": [
           "routes"
         ],
-        "summary": "Create a route",
-        "description": "Creates a new route in the specified custom router.",
+        "summary": "Create a Route",
+        "description": "Creates a new Route in the specified custom Router.",
         "operationId": "routers_routes_post",
         "parameters": [
           {
@@ -3152,8 +3152,8 @@
         "tags": [
           "routes"
         ],
-        "summary": "Get a route",
-        "description": "Returns details of the route with the specified name in the specified router.",
+        "summary": "Get a Route",
+        "description": "Returns details of the Route with the specified name in the specified Router.",
         "operationId": "routers_routes_get_route",
         "parameters": [
           {
@@ -3225,8 +3225,8 @@
         "tags": [
           "routes"
         ],
-        "summary": "Update a route",
-        "description": "Updates the specified route in the specified custom router by setting the values of the parameters passed. Any parameters not provided are left unchanged.",
+        "summary": "Update a Route",
+        "description": "Updates the specified Route in the specified custom Router by setting the values of the parameters passed. Any parameters not provided are left unchanged.",
         "operationId": "routers_routes_put_route",
         "parameters": [
           {
@@ -3301,8 +3301,8 @@
         "tags": [
           "routes"
         ],
-        "summary": "Delete a route",
-        "description": "Permanently deletes the specified route from the specified custom router.",
+        "summary": "Delete a Route",
+        "description": "Permanently deletes the specified Route from the specified custom Router.",
         "operationId": "routers_routes_delete_route",
         "parameters": [
           {
@@ -3369,8 +3369,8 @@
         "tags": [
           "subnets"
         ],
-        "summary": "List subnets",
-        "description": "Returns a list of all subnets in a VPC. The subnets are returned sorted by name alphabetically by default.",
+        "summary": "List Subnets",
+        "description": "Returns a list of all Subnets in a VPC. The Subnets are returned sorted by name alphabetically by default.",
         "operationId": "vpc_subnets_get",
         "parameters": [
           {
@@ -3455,8 +3455,8 @@
         "tags": [
           "subnets"
         ],
-        "summary": "Create a subnet",
-        "description": "Creates a new subnet in a VPC.",
+        "summary": "Create a Subnet",
+        "description": "Creates a new Subnet in a VPC.",
         "operationId": "vpc_subnets_post",
         "parameters": [
           {
@@ -3522,8 +3522,8 @@
         "tags": [
           "subnets"
         ],
-        "summary": "Get a subnet",
-        "description": "Returns the specified subnet in a VPC.",
+        "summary": "Get a Subnet",
+        "description": "Returns the specified Subnet in a VPC.",
         "operationId": "vpc_subnets_get_subnet",
         "parameters": [
           {
@@ -3586,8 +3586,8 @@
         "tags": [
           "subnets"
         ],
-        "summary": "Update a subnet",
-        "description": "Updates the specified subnet in a VPC by setting the values of the parameters passed. Any parameters not provided are left unchanged.",
+        "summary": "Update a Subnet",
+        "description": "Updates the specified Subnet in a VPC by setting the values of the parameters passed. Any parameters not provided are left unchanged.",
         "operationId": "vpc_subnets_put_subnet",
         "parameters": [
           {
@@ -3660,8 +3660,8 @@
         "tags": [
           "subnets"
         ],
-        "summary": "Delete a subnet",
-        "description": "Permanently deletes a subnet from a VPC. This operation cannot be undone.",
+        "summary": "Delete a Subnet",
+        "description": "Permanently deletes a Subnet from a VPC. This operation cannot be undone.",
         "operationId": "vpc_subnets_delete_subnet",
         "parameters": [
           {
@@ -3719,8 +3719,8 @@
         "tags": [
           "subnets"
         ],
-        "summary": "List network interfaces in a subnet",
-        "description": "Returns a list of network interfaces in a subnet. The network interfaces are returned sorted alphabetically by name.",
+        "summary": "List Network Interfaces in a Subnet",
+        "description": "Returns a list of Network Interfaces in a Subnet. The Network Interfaces are returned sorted alphabetically by name.",
         "operationId": "subnet_network_interfaces_get",
         "parameters": [
           {
@@ -3816,8 +3816,8 @@
         "tags": [
           "roles"
         ],
-        "summary": "List roles",
-        "description": "Returns a list of roles. The roles are returned sorted by name alphabetically. For now, these are only the built-in roles.",
+        "summary": "List Roles",
+        "description": "Returns a list of Roles. The Roles are returned sorted by name alphabetically. For now, these are only the built-in Roles.",
         "operationId": "roles_get",
         "parameters": [
           {
@@ -3869,8 +3869,8 @@
         "tags": [
           "roles"
         ],
-        "summary": "Get a role",
-        "description": "Returns details of the specified role.",
+        "summary": "Get a Role",
+        "description": "Returns details of the specified Role.",
         "operationId": "roles_get_role",
         "parameters": [
           {
@@ -4111,8 +4111,8 @@
         "tags": [
           "users"
         ],
-        "summary": "List users",
-        "description": "Returns a list of users. The users are returned sorted by name alphabetically.",
+        "summary": "List Users",
+        "description": "Returns a list of Users. The Users are returned sorted by name alphabetically.",
         "operationId": "users_get",
         "parameters": [
           {
@@ -4172,8 +4172,8 @@
         "tags": [
           "users"
         ],
-        "summary": "Get a user",
-        "description": "Returns details of the specified user.\nTo get details of the current user, use the `/session/me` endpoint.",
+        "summary": "Get a User",
+        "description": "Returns details of the specified User.\nTo get details of the current authenticated User, use the `/session/me` endpoint.",
         "operationId": "users_get_user",
         "parameters": [
           {
