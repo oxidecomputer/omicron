@@ -80,14 +80,7 @@ impl Context {
     pub fn silo_required(
         &self,
     ) -> Result<Uuid, omicron_common::api::external::Error> {
-        match self.actor_required() {
-            Ok(actor) => Ok(actor.silo_id),
-            Err(_) => {
-                Err(omicron_common::api::external::Error::Unauthenticated {
-                    internal_message: "Actor required".to_string(),
-                })
-            }
-        }
+        self.actor_required().map(|actor| actor.silo_id)
     }
 
     /// Returns the list of schemes tried, in order
