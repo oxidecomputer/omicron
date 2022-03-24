@@ -5,7 +5,7 @@
 mod config;
 mod context;
 mod error;
-mod http_entrypoints;
+pub mod http_entrypoints; // TODO pub only for testing - is this right?
 mod sp_comms;
 
 pub use config::Config;
@@ -37,7 +37,7 @@ impl Server {
     /// Start a gateway server.
     pub async fn start(
         config: &Config,
-        _rack_id: &Uuid,
+        _rack_id: Uuid,
         log: &Logger,
     ) -> Result<Server, String> {
         let log = log.new(o!("name" => config.id.to_string()));
@@ -98,7 +98,7 @@ pub async fn run_server(config: &Config) -> Result<(), String> {
         debug!(log, "registered DTrace probes");
     }
     let rack_id = Uuid::new_v4();
-    let server = Server::start(config, &rack_id, &log).await?;
+    let server = Server::start(config, rack_id, &log).await?;
     // server.register_as_producer().await;
     server.wait_for_finish().await
 }

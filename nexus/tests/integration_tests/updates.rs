@@ -15,6 +15,7 @@ use dropshot::{
 };
 use http::{Method, Response, StatusCode};
 use hyper::Body;
+use nexus_test_utils::http_testing::{AuthnMode, NexusRequest, RequestBuilder};
 use nexus_test_utils::{load_test_config, test_setup, test_setup_with_config};
 use omicron_common::api::internal::nexus::UpdateArtifactKind;
 use omicron_nexus::config::UpdatesConfig;
@@ -76,20 +77,22 @@ async fn test_update_end_to_end() {
     // - download and verify the repo
     // - return 204 Non Content
     // - tells sled agent to do the thing
-    client
-        .make_request_no_body(
-            Method::POST,
-            "/updates/refresh",
-            StatusCode::NO_CONTENT,
-        )
-        .await
-        .unwrap();
+    NexusRequest::new(
+        RequestBuilder::new(client, Method::POST, "/updates/refresh")
+            .expect_status(Some(StatusCode::NO_CONTENT)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap();
 
     // check sled agent did the thing
     assert_eq!(
         std::fs::read("/var/tmp/zones/cockroachdb").unwrap(),
         TARGET_CONTENTS
     );
+
+    cptestctx.teardown().await;
 }
 
 // =^..^=   =^..^=   =^..^=   =^..^=   =^..^=   =^..^=   =^..^=   =^..^=
@@ -275,13 +278,16 @@ async fn test_download_with_dots_fails() {
     let filename = "hey/can/you/look/../../../../up/the/directory/tree";
     let artifact_get_url = format!("/artifacts/{}", filename);
 
-    client
-        .make_request_error(
-            Method::GET,
-            &artifact_get_url,
-            StatusCode::BAD_REQUEST,
-        )
-        .await;
+    NexusRequest::expect_failure(
+        client,
+        StatusCode::BAD_REQUEST,
+        Method::GET,
+        &artifact_get_url,
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap();
 
     cptestctx.teardown().await;
 }

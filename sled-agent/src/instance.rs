@@ -95,7 +95,7 @@ async fn wait_for_http_server(
                         // request, instead of a connection error.
                         return Ok(());
                     }
-                    return Err(backoff::BackoffError::Transient(value));
+                    return Err(backoff::BackoffError::transient(value));
                 }
             }
         },
@@ -169,12 +169,13 @@ struct PropolisSetup {
 }
 
 struct InstanceInner {
-    id: Uuid,
-
     log: Logger,
 
     // Properties visible to Propolis
     properties: propolis_client::api::InstanceProperties,
+
+    // The ID of the Propolis server (and zone) running this instance
+    propolis_id: Uuid,
 
     // NIC-related properties
     vnic_allocator: VnicAllocator,
@@ -191,12 +192,12 @@ struct InstanceInner {
 
 impl InstanceInner {
     fn id(&self) -> &Uuid {
-        &self.id
+        &self.properties.id
     }
 
     /// UUID of the underlying propolis-server process
     fn propolis_id(&self) -> &Uuid {
-        &self.properties.id
+        &self.propolis_id
     }
 
     async fn observe_state(
@@ -241,7 +242,7 @@ impl InstanceInner {
             .as_ref()
             .expect("Propolis client should be initialized before usage")
             .client
-            .instance_state_put(*self.propolis_id(), request)
+            .instance_state_put(*self.id(), request)
             .await?;
         Ok(())
     }
@@ -400,10 +401,9 @@ impl Instance {
         info!(log, "Instance::new w/initial HW: {:?}", initial);
         let instance = InstanceInner {
             log: log.new(o!("instance id" => id.to_string())),
-            id,
             // NOTE: Mostly lies.
             properties: propolis_client::api::InstanceProperties {
-                id: initial.runtime.propolis_uuid,
+                id,
                 name: initial.runtime.hostname.clone(),
                 description: "Test description".to_string(),
                 image_id: Uuid::nil(),
@@ -414,6 +414,7 @@ impl Instance {
                 // InstanceCpuCount here, to avoid any casting...
                 vcpus: initial.runtime.ncpus.0 as u8,
             },
+            propolis_id: initial.runtime.propolis_uuid,
             vnic_allocator,
             requested_nics: initial.nics,
             vlan,
@@ -575,9 +576,9 @@ impl Instance {
         //
         // They aren't modified after being initialized, so it's fine to grab
         // a copy.
-        let (propolis_id, client) = {
+        let (instance_id, client) = {
             let inner = self.inner.lock().await;
-            let id = *inner.propolis_id();
+            let id = *inner.id();
             let client = inner.running_state.as_ref().unwrap().client.clone();
             (id, client)
         };
@@ -587,7 +588,7 @@ impl Instance {
             // State monitoring always returns the most recent state/gen pair
             // known to Propolis.
             let response =
-                client.instance_state_monitor(propolis_id, gen).await?;
+                client.instance_state_monitor(instance_id, gen).await?;
             let reaction =
                 self.inner.lock().await.observe_state(response.state).await?;
 

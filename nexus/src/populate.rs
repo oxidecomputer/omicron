@@ -65,7 +65,7 @@ async fn populate(
             || async {
                 (p.func)().await.map_err(|error| match &error {
                     Error::ServiceUnavailable { .. } => {
-                        backoff::BackoffError::Transient(error)
+                        backoff::BackoffError::transient(error)
                     }
                     _ => backoff::BackoffError::Permanent(error),
                 })

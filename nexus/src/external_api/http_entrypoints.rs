@@ -1719,8 +1719,10 @@ async fn vpc_firewall_rules_get(
     let nexus = &apictx.nexus;
     let path = path_params.into_inner();
     let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
         let rules = nexus
             .vpc_list_firewall_rules(
+                &opctx,
                 &path.organization_name,
                 &path.project_name,
                 &path.vpc_name,
@@ -1750,8 +1752,10 @@ async fn vpc_firewall_rules_put(
     let nexus = &apictx.nexus;
     let path = path_params.into_inner();
     let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
         let rules = nexus
             .vpc_update_firewall_rules(
+                &opctx,
                 &path.organization_name,
                 &path.project_name,
                 &path.vpc_name,
@@ -2119,8 +2123,10 @@ async fn hardware_racks_get(
     let nexus = &apictx.nexus;
     let query = query_params.into_inner();
     let handler = async {
-        let rack_stream =
-            nexus.racks_list(&data_page_params_for(&rqctx, &query)?).await?;
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let rack_stream = nexus
+            .racks_list(&opctx, &data_page_params_for(&rqctx, &query)?)
+            .await?;
         let view_list = to_list::<db::model::Rack, Rack>(rack_stream).await;
         Ok(HttpResponseOk(ScanById::results_page(&query, view_list)?))
     };
@@ -2148,7 +2154,8 @@ async fn hardware_racks_get_rack(
     let nexus = &apictx.nexus;
     let path = path_params.into_inner();
     let handler = async {
-        let rack_info = nexus.rack_lookup(&path.rack_id).await?;
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let rack_info = nexus.rack_lookup(&opctx, &path.rack_id).await?;
         Ok(HttpResponseOk(rack_info.into()))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
@@ -2170,8 +2177,9 @@ async fn hardware_sleds_get(
     let nexus = &apictx.nexus;
     let query = query_params.into_inner();
     let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
         let sleds = nexus
-            .sleds_list(&data_page_params_for(&rqctx, &query)?)
+            .sleds_list(&opctx, &data_page_params_for(&rqctx, &query)?)
             .await?
             .into_iter()
             .map(|s| s.into())
@@ -2202,7 +2210,8 @@ async fn hardware_sleds_get_sled(
     let nexus = &apictx.nexus;
     let path = path_params.into_inner();
     let handler = async {
-        let sled_info = nexus.sled_lookup(&path.sled_id).await?;
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let sled_info = nexus.sled_lookup(&opctx, &path.sled_id).await?;
         Ok(HttpResponseOk(sled_info.into()))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
@@ -2222,7 +2231,8 @@ async fn updates_refresh(
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
     let handler = async {
-        nexus.updates_refresh_metadata().await?;
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        nexus.updates_refresh_metadata(&opctx).await?;
         Ok(HttpResponseUpdatedNoContent())
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
@@ -2245,7 +2255,8 @@ async fn sagas_get(
     let query = query_params.into_inner();
     let pagparams = data_page_params_for(&rqctx, &query)?;
     let handler = async {
-        let saga_stream = nexus.sagas_list(&pagparams).await?;
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let saga_stream = nexus.sagas_list(&opctx, &pagparams).await?;
         let view_list = to_list(saga_stream).await;
         Ok(HttpResponseOk(ScanById::results_page(&query, view_list)?))
     };
@@ -2272,7 +2283,8 @@ async fn sagas_get_saga(
     let nexus = &apictx.nexus;
     let path = path_params.into_inner();
     let handler = async {
-        let saga = nexus.saga_get(path.saga_id).await?;
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let saga = nexus.saga_get(&opctx, path.saga_id).await?;
         Ok(HttpResponseOk(saga))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
@@ -2353,7 +2365,9 @@ async fn timeseries_schema_get(
     let query = query_params.into_inner();
     let limit = rqctx.page_limit(&query)?;
     let handler = async {
-        Ok(HttpResponseOk(nexus.timeseries_schema_list(&query, limit).await?))
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let list = nexus.timeseries_schema_list(&opctx, &query, limit).await?;
+        Ok(HttpResponseOk(list))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }

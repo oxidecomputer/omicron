@@ -158,30 +158,34 @@ impl DataStore {
 
     pub async fn sled_list(
         &self,
+        opctx: &OpContext,
         pagparams: &DataPageParams<'_, Uuid>,
     ) -> ListResultVec<Sled> {
+        opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
         use db::schema::sled::dsl;
         paginated(dsl::sled, dsl::id, pagparams)
             .select(Sled::as_select())
-            .load_async(self.pool())
+            .load_async(self.pool_authorized(opctx).await?)
             .await
             .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
     }
 
-    pub async fn sled_fetch(&self, id: Uuid) -> LookupResult<Sled> {
+    pub async fn sled_fetch(
+        &self,
+        opctx: &OpContext,
+        authz_sled: &authz::Sled,
+    ) -> LookupResult<Sled> {
+        opctx.authorize(authz::Action::Read, authz_sled).await?;
         use db::schema::sled::dsl;
         dsl::sled
-            .filter(dsl::id.eq(id))
+            .filter(dsl::id.eq(authz_sled.id()))
             .select(Sled::as_select())
-            .first_async(self.pool())
+            .first_async(self.pool_authorized(opctx).await?)
             .await
             .map_err(|e| {
                 public_error_from_diesel_pool(
                     e,
-                    ErrorHandler::NotFoundByLookup(
-                        ResourceType::Sled,
-                        LookupType::ById(id),
-                    ),
+                    ErrorHandler::NotFoundByResource(authz_sled),
                 )
             })
     }
@@ -2336,41 +2340,47 @@ impl DataStore {
 
     pub async fn vpc_list_firewall_rules(
         &self,
-        vpc_id: &Uuid,
+        opctx: &OpContext,
+        authz_vpc: &authz::Vpc,
     ) -> ListResultVec<VpcFirewallRule> {
+        // Firewall rules are modeled in the API as a single resource under the
+        // Vpc (rather than individual child resources with their own CRUD
+        // endpoints).  You cannot look them up individually, create them,
+        // remove them, or update them.  You can only modify the whole set.  So
+        // for authz, we treat them as part of the Vpc itself.
+        opctx.authorize(authz::Action::Read, authz_vpc).await?;
         use db::schema::vpc_firewall_rule::dsl;
 
         dsl::vpc_firewall_rule
             .filter(dsl::time_deleted.is_null())
-            .filter(dsl::vpc_id.eq(*vpc_id))
+            .filter(dsl::vpc_id.eq(authz_vpc.id()))
             .order(dsl::name.asc())
             .select(VpcFirewallRule::as_select())
-            .load_async(self.pool())
+            .load_async(self.pool_authorized(opctx).await?)
             .await
             .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
     }
 
     pub async fn vpc_delete_all_firewall_rules(
         &self,
-        vpc_id: &Uuid,
+        opctx: &OpContext,
+        authz_vpc: &authz::Vpc,
     ) -> DeleteResult {
+        opctx.authorize(authz::Action::Modify, authz_vpc).await?;
         use db::schema::vpc_firewall_rule::dsl;
 
         let now = Utc::now();
         // TODO-performance: Paginate this update to avoid long queries
         diesel::update(dsl::vpc_firewall_rule)
             .filter(dsl::time_deleted.is_null())
-            .filter(dsl::vpc_id.eq(*vpc_id))
+            .filter(dsl::vpc_id.eq(authz_vpc.id()))
             .set(dsl::time_deleted.eq(now))
-            .execute_async(self.pool())
+            .execute_async(self.pool_authorized(opctx).await?)
             .await
             .map_err(|e| {
                 public_error_from_diesel_pool(
                     e,
-                    ErrorHandler::NotFoundByLookup(
-                        ResourceType::Vpc,
-                        LookupType::ById(*vpc_id),
-                    ),
+                    ErrorHandler::NotFoundByResource(authz_vpc),
                 )
             })?;
         Ok(())
@@ -2379,19 +2389,31 @@ impl DataStore {
     /// Replace all firewall rules with the given rules
     pub async fn vpc_update_firewall_rules(
         &self,
-        vpc_id: &Uuid,
-        rules: Vec<VpcFirewallRule>,
+        opctx: &OpContext,
+        authz_vpc: &authz::Vpc,
+        mut rules: Vec<VpcFirewallRule>,
     ) -> UpdateResult<Vec<VpcFirewallRule>> {
+        opctx.authorize(authz::Action::Modify, authz_vpc).await?;
+        for r in &rules {
+            assert_eq!(r.vpc_id, authz_vpc.id());
+        }
+
+        // Sort the rules in the same order that we would return them when
+        // listing them.  This is because we're going to use RETURNING to return
+        // the inserted rows from the database and we want them to come back in
+        // the same order that we would normally list them.
+        rules.sort_by_key(|r| r.name().to_string());
+
         use db::schema::vpc_firewall_rule::dsl;
 
         let now = Utc::now();
         let delete_old_query = diesel::update(dsl::vpc_firewall_rule)
             .filter(dsl::time_deleted.is_null())
-            .filter(dsl::vpc_id.eq(*vpc_id))
+            .filter(dsl::vpc_id.eq(authz_vpc.id()))
             .set(dsl::time_deleted.eq(now));
 
         let insert_new_query = Vpc::insert_resource(
-            *vpc_id,
+            authz_vpc.id(),
             diesel::insert_into(dsl::vpc_firewall_rule).values(rules),
         );
 
@@ -2405,7 +2427,8 @@ impl DataStore {
         // hold a transaction open across multiple roundtrips from the database,
         // but for now we're using a transaction due to the severely decreased
         // legibility of CTEs via diesel right now.
-        self.pool()
+        self.pool_authorized(opctx)
+            .await?
             .transaction(move |conn| {
                 delete_old_query.execute(conn)?;
 
@@ -2427,13 +2450,10 @@ impl DataStore {
             .map_err(|e| match e {
                 TxnError::CustomError(
                     FirewallUpdateError::CollectionNotFound,
-                ) => Error::not_found_by_id(ResourceType::Vpc, vpc_id),
+                ) => Error::not_found_by_id(ResourceType::Vpc, &authz_vpc.id()),
                 TxnError::Pool(e) => public_error_from_diesel_pool(
                     e,
-                    ErrorHandler::NotFoundByLookup(
-                        ResourceType::VpcFirewallRule,
-                        LookupType::ById(*vpc_id),
-                    ),
+                    ErrorHandler::NotFoundByResource(authz_vpc),
                 ),
             })
     }
@@ -3137,6 +3157,7 @@ impl DataStore {
             // Note: "db_init" is also a builtin user, but that one by necessity
             // is created with the database.
             &*authn::USER_INTERNAL_API,
+            &*authn::USER_INTERNAL_READ,
             &*authn::USER_SAGA_RECOVERY,
             &*authn::USER_TEST_PRIVILEGED,
             &*authn::USER_TEST_UNPRIVILEGED,
@@ -3322,8 +3343,11 @@ impl DataStore {
 
     pub async fn update_available_artifact_upsert(
         &self,
+        opctx: &OpContext,
         artifact: UpdateAvailableArtifact,
     ) -> CreateResult<UpdateAvailableArtifact> {
+        opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
+
         use db::schema::update_available_artifact::dsl;
         diesel::insert_into(dsl::update_available_artifact)
             .values(artifact.clone())
@@ -3331,21 +3355,25 @@ impl DataStore {
             .do_update()
             .set(artifact.clone())
             .returning(UpdateAvailableArtifact::as_returning())
-            .get_result_async(self.pool())
+            .get_result_async(self.pool_authorized(opctx).await?)
             .await
             .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
     }
 
     pub async fn update_available_artifact_hard_delete_outdated(
         &self,
+        opctx: &OpContext,
         current_targets_role_version: i64,
     ) -> DeleteResult {
-        // We use the `targets_role_version` column in the table to delete any old rows, keeping
-        // the table in sync with the current copy of artifacts.json.
+        opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
+
+        // We use the `targets_role_version` column in the table to delete any
+        // old rows, keeping the table in sync with the current copy of
+        // artifacts.json.
         use db::schema::update_available_artifact::dsl;
         diesel::delete(dsl::update_available_artifact)
             .filter(dsl::targets_role_version.lt(current_targets_role_version))
-            .execute_async(self.pool())
+            .execute_async(self.pool_authorized(opctx).await?)
             .await
             .map(|_rows_deleted| ())
             .map_err(|e| {
@@ -3358,8 +3386,11 @@ impl DataStore {
 
     pub async fn update_available_artifact_fetch(
         &self,
+        opctx: &OpContext,
         artifact: &UpdateArtifact,
     ) -> LookupResult<UpdateAvailableArtifact> {
+        opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
+
         use db::schema::update_available_artifact::dsl;
         dsl::update_available_artifact
             .filter(
@@ -3369,7 +3400,7 @@ impl DataStore {
                     .and(dsl::kind.eq(UpdateArtifactKind(artifact.kind))),
             )
             .select(UpdateAvailableArtifact::as_select())
-            .first_async(self.pool())
+            .first_async(self.pool_authorized(opctx).await?)
             .await
             .map_err(|e| {
                 Error::internal_error(&format!(

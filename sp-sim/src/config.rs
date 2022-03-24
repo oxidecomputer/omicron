@@ -56,8 +56,6 @@ pub struct SimulatedSps {
 /// Configuration for a sp-sim
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct Config {
-    /// UDP address of MGS.
-    pub gateway_address: SocketAddr,
     /// List of SPs to simulate.
     pub simulated_sps: SimulatedSps,
     /// Server-wide logging configuration.

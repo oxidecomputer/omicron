@@ -2,21 +2,30 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+use std::net::SocketAddr;
+
 use crate::config::{Config, SidecarConfig};
 use crate::server::UdpServer;
-use anyhow::Result;
+use crate::{ignition_id, Responsiveness, SimulatedSp};
+use anyhow::{Context, Result};
+use async_trait::async_trait;
 use gateway_messages::sp_impl::{SpHandler, SpServer};
 use gateway_messages::{
     BulkIgnitionState, IgnitionCommand, IgnitionFlags, IgnitionState,
     ResponseError, SerialNumber, SpState,
 };
 use slog::{debug, error, info, warn, Logger};
+use tokio::sync::{mpsc, oneshot};
 use tokio::{
     select,
     task::{self, JoinHandle},
 };
 
 pub struct Sidecar {
+    local_addr: SocketAddr,
+    serial_number: SerialNumber,
+    commands:
+        mpsc::UnboundedSender<(Command, oneshot::Sender<CommandResponse>)>,
     inner_task: JoinHandle<()>,
 }
 
@@ -27,46 +36,100 @@ impl Drop for Sidecar {
     }
 }
 
+#[async_trait]
+impl SimulatedSp for Sidecar {
+    fn serial_number(&self) -> String {
+        hex::encode(self.serial_number)
+    }
+
+    fn local_addr(&self) -> SocketAddr {
+        self.local_addr
+    }
+
+    async fn set_responsiveness(&self, r: Responsiveness) {
+        let (tx, rx) = oneshot::channel();
+        self.commands
+            .send((Command::SetResponsiveness(r), tx))
+            .map_err(|_| "gimlet task died unexpectedly")
+            .unwrap();
+        rx.await.unwrap();
+    }
+}
+
 impl Sidecar {
     pub async fn spawn(
         config: &Config,
         sidecar_config: &SidecarConfig,
         log: Logger,
     ) -> Result<Self> {
-        const ID_GIMLET: u16 = 0b0000_0000_0001_0001;
-        const ID_SIDECAR: u16 = 0b0000_0000_0001_0010;
-
         info!(log, "setting up simualted sidecar");
         let server = UdpServer::new(sidecar_config.bind_address).await?;
+        let local_addr = server
+            .socket()
+            .local_addr()
+            .with_context(|| "could not get local address of bound socket")?;
 
         let mut ignition_targets = Vec::new();
         for _ in &config.simulated_sps.sidecar {
             ignition_targets.push(IgnitionState {
-                id: ID_SIDECAR,
+                id: ignition_id::SIDECAR,
                 flags: IgnitionFlags::POWER | IgnitionFlags::CTRL_DETECT_0,
             });
         }
         for _ in &config.simulated_sps.gimlet {
             ignition_targets.push(IgnitionState {
-                id: ID_GIMLET,
+                id: ignition_id::GIMLET,
                 flags: IgnitionFlags::POWER | IgnitionFlags::CTRL_DETECT_0,
             });
         }
 
+        let (commands, commands_rx) = mpsc::unbounded_channel();
         let inner = Inner::new(
             server,
             sidecar_config.serial_number,
             ignition_targets,
+            commands_rx,
             log,
         );
         let inner_task = task::spawn(async move { inner.run().await.unwrap() });
-        Ok(Self { inner_task })
+        Ok(Self {
+            local_addr,
+            serial_number: sidecar_config.serial_number,
+            commands,
+            inner_task,
+        })
     }
+
+    pub async fn current_ignition_state(&self) -> Vec<IgnitionState> {
+        let (tx, rx) = oneshot::channel();
+        self.commands
+            .send((Command::CurrentIgnitionState, tx))
+            .map_err(|_| "sidecar task died unexpectedly")
+            .unwrap();
+        match rx.await.unwrap() {
+            CommandResponse::CurrentIgnitionState(state) => state,
+            other => panic!("unexpected response {:?}", other),
+        }
+    }
+}
+
+#[derive(Debug)]
+enum Command {
+    CurrentIgnitionState,
+    SetResponsiveness(Responsiveness),
+}
+
+#[derive(Debug)]
+enum CommandResponse {
+    CurrentIgnitionState(Vec<IgnitionState>),
+    SetResponsivenessAck,
 }
 
 struct Inner {
     handler: Handler,
     udp: UdpServer,
+    commands:
+        mpsc::UnboundedReceiver<(Command, oneshot::Sender<CommandResponse>)>,
 }
 
 impl Inner {
@@ -74,19 +137,29 @@ impl Inner {
         server: UdpServer,
         serial_number: SerialNumber,
         ignition_targets: Vec<IgnitionState>,
+        commands: mpsc::UnboundedReceiver<(
+            Command,
+            oneshot::Sender<CommandResponse>,
+        )>,
         log: Logger,
     ) -> Self {
         Self {
             handler: Handler { log, serial_number, ignition_targets },
             udp: server,
+            commands,
         }
     }
 
     async fn run(mut self) -> Result<()> {
         let mut server = SpServer::default();
+        let mut responsiveness = Responsiveness::Responsive;
         loop {
             select! {
                 recv = self.udp.recv_from() => {
+                    if responsiveness != Responsiveness::Responsive {
+                        continue;
+                    }
+
                     let (data, addr) = recv?;
 
                     let resp = match server.dispatch(data, &mut self.handler) {
@@ -101,6 +174,27 @@ impl Inner {
                     };
 
                     self.udp.send_to(resp, addr).await?;
+                }
+
+                command = self.commands.recv() => {
+                    // if sending half is gone, we're about to be killed anyway
+                    let (command, tx) = match command {
+                        Some((command, tx)) => (command, tx),
+                        None => return Ok(()),
+                    };
+
+                    match command {
+                        Command::CurrentIgnitionState => {
+                            tx.send(CommandResponse::CurrentIgnitionState(
+                                self.handler.ignition_targets.clone()
+                            )).map_err(|_| "receiving half died").unwrap();
+                        }
+                        Command::SetResponsiveness(r) => {
+                            responsiveness = r;
+                            tx.send(CommandResponse::SetResponsivenessAck)
+                                .map_err(|_| "receiving half died").unwrap();
+                        }
+                    }
                 }
             }
         }

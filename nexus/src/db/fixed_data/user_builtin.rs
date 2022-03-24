@@ -47,6 +47,15 @@ lazy_static! {
             "used by Nexus when handling internal API requests",
         );
 
+    /// Internal user used by Nexus to read privileged control plane data
+    pub static ref USER_INTERNAL_READ: UserBuiltinConfig =
+        UserBuiltinConfig::new_static(
+            // "4ead" looks like "read"
+            "001de000-05e4-4000-8000-000000004ead",
+            "internal-read",
+            "used by Nexus to read privileged control plane data",
+        );
+
     /// Internal user used by Nexus when recovering sagas
     pub static ref USER_SAGA_RECOVERY: UserBuiltinConfig =
         UserBuiltinConfig::new_static(
@@ -83,6 +92,7 @@ mod test {
     use super::super::assert_valid_uuid;
     use super::USER_DB_INIT;
     use super::USER_INTERNAL_API;
+    use super::USER_INTERNAL_READ;
     use super::USER_SAGA_RECOVERY;
     use super::USER_TEST_PRIVILEGED;
     use super::USER_TEST_UNPRIVILEGED;
@@ -91,6 +101,7 @@ mod test {
     fn test_builtin_user_ids_are_valid() {
         assert_valid_uuid(&USER_DB_INIT.id);
         assert_valid_uuid(&USER_INTERNAL_API.id);
+        assert_valid_uuid(&USER_INTERNAL_READ.id);
         assert_valid_uuid(&USER_SAGA_RECOVERY.id);
         assert_valid_uuid(&USER_TEST_PRIVILEGED.id);
         assert_valid_uuid(&USER_TEST_UNPRIVILEGED.id);
