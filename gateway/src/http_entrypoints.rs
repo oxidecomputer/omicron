@@ -6,7 +6,6 @@
 
 //! HTTP entrypoint functions for the gateway service
 
-use crate::config::KnownSps;
 use crate::error::Error;
 use crate::sp_comms::BulkSpStateSingleResult;
 use crate::sp_comms::BulkStateProgress;
@@ -172,6 +171,26 @@ pub enum SpType {
     Switch,
 }
 
+impl From<SpType> for gateway_sp_comms::SpType {
+    fn from(typ: SpType) -> Self {
+        match typ {
+            SpType::Sled => Self::Sled,
+            SpType::Power => Self::Power,
+            SpType::Switch => Self::Switch,
+        }
+    }
+}
+
+impl From<gateway_sp_comms::SpType> for SpType {
+    fn from(typ: gateway_sp_comms::SpType) -> Self {
+        match typ {
+            gateway_sp_comms::SpType::Sled => Self::Sled,
+            gateway_sp_comms::SpType::Power => Self::Power,
+            gateway_sp_comms::SpType::Switch => Self::Switch,
+        }
+    }
+}
+
 #[derive(
     Debug,
     Clone,
@@ -189,6 +208,27 @@ pub struct SpIdentifier {
     pub typ: SpType,
     #[serde(deserialize_with = "deserializer_u32_from_string")]
     pub slot: u32,
+}
+
+impl From<SpIdentifier> for gateway_sp_comms::SpIdentifier {
+    fn from(id: SpIdentifier) -> Self {
+        Self {
+            typ: id.typ.into(),
+            // id.slot may come from an untrusted source, but usize >= 32 bits
+            // on any platform that will run this code, so unwrap is fine
+            slot: usize::try_from(id.slot).unwrap(),
+        }
+    }
+}
+
+impl From<gateway_sp_comms::SpIdentifier> for SpIdentifier {
+    fn from(id: gateway_sp_comms::SpIdentifier) -> Self {
+        Self {
+            typ: id.typ.into(),
+            // id.slot comes from a trusted source and will not exceed u32::MAX
+            slot: u32::try_from(id.slot).unwrap(),
+        }
+    }
 }
 
 // We can't use the default `Deserialize` derivation for `SpIdentifier::slot`
@@ -221,73 +261,6 @@ where
             .map_err(|_| de::Error::invalid_type(Unexpected::Str(&s), &"u32")),
         StringOrU32::U32(n) => Ok(n),
     }
-}
-
-impl SpIdentifier {
-    fn placeholder_map_to_target(
-        &self,
-        known_sps: &KnownSps,
-    ) -> Result<u8, Error> {
-        // TODO This is wrong in all kinds of ways, but is just a placeholder
-        // for now until we have a better story for bootstrapping how MGS knows
-        // which SP is which.
-        //
-        // Maps `self` to a target number by assuming target numbers are indexed
-        // from 0 starting with switches followed by sleds followed by power
-        // controllers.
-
-        let slot: usize = usize::try_from(self.slot)
-            .map_err(|_| Error::SpDoesNotExist(*self))?;
-
-        let mut base = 0;
-        for (typ, count) in [
-            (SpType::Switch, known_sps.switches.len()),
-            (SpType::Sled, known_sps.sleds.len()),
-            (SpType::Power, known_sps.power_controllers.len()),
-        ] {
-            if self.typ != typ {
-                base += count;
-                continue;
-            }
-
-            if slot < count {
-                let slot = u8::try_from(slot + base).map_err(|_| {
-                    Error::InternalError {
-                        internal_message:
-                            "too many total configured SP slots (must be < 256)"
-                                .to_string(),
-                    }
-                })?;
-                return Ok(slot);
-            } else {
-                return Err(Error::SpDoesNotExist(*self));
-            }
-        }
-
-        // above loop returns once we match on `typ`
-        unreachable!()
-    }
-}
-
-fn placeholder_map_from_target(
-    known_sps: &KnownSps,
-    target: usize,
-) -> Result<SpIdentifier, Error> {
-    let mut n = target;
-    for (typ, count) in [
-        (SpType::Switch, known_sps.switches.len()),
-        (SpType::Sled, known_sps.sleds.len()),
-        (SpType::Power, known_sps.power_controllers.len()),
-    ] {
-        if n < count {
-            return Ok(SpIdentifier { typ, slot: n as u32 });
-        }
-        n -= count;
-    }
-
-    Err(Error::InternalError {
-        internal_message: format!("invalid ignition target index {}", target),
-    })
 }
 
 type TimeoutPaginationParams<T> = PaginationParams<Timeout, TimeoutSelector<T>>;
@@ -341,7 +314,6 @@ async fn sp_list(
 ) -> Result<HttpResponseOk<ResultsPage<SpInfo>>, HttpError> {
     let apictx = rqctx.context();
     let sp_comms = &apictx.sp_comms;
-    let known_sps = sp_comms.placeholder_known_sps();
     let page_params = query.into_inner();
     let page_limit = rqctx.page_limit(&page_params)?.get() as usize;
 
@@ -361,34 +333,24 @@ async fn sp_list(
             let ignition_state = sp_comms
                 .bulk_ignition_get(apictx.timeouts.ignition_controller)
                 .await?;
-            let sps_with_ignition_state =
-                ignition_state.into_iter().enumerate().map(|(i, state)| {
-                    (
-                        i,     // target number
-                        state, // ignition state
-                        known_sps.addr_for_target(u8::try_from(i).unwrap()),
-                    )
-                });
 
             // actually kick off the state collection process
             let request_id = sp_comms.bulk_state_start(
                 timeout,
                 apictx.timeouts.bulk_request_retain_grace_period,
-                sps_with_ignition_state,
+                ignition_state.into_iter(),
             );
             (request_id, None)
         }
         WhichPage::Next(page_selector) => {
-            let last_seen =
-                page_selector.last.placeholder_map_to_target(known_sps)?;
-            (page_selector.request_id, Some(last_seen))
+            (page_selector.request_id, Some(page_selector.last))
         }
     };
 
     let progress = sp_comms
         .bulk_state_get_progress(
             &request_id,
-            last_seen_target,
+            last_seen_target.map(Into::into),
             apictx.timeouts.bulk_request_page,
             page_limit,
         )
@@ -408,8 +370,7 @@ async fn sp_list(
 
     let items = items
         .into_iter()
-        .map(|BulkSpStateSingleResult { target, state, result }| {
-            let id = placeholder_map_from_target(known_sps, target)?;
+        .map(|BulkSpStateSingleResult { port, state, result }| {
             let details = match result {
                 Ok(details) => details,
                 Err(SpCommsError::Timeout) => SpState::Unresponsive,
@@ -423,7 +384,10 @@ async fn sp_list(
                 Err(_) => SpState::Unresponsive,
             };
             Ok(SpInfo {
-                info: SpIgnitionInfo { id, details: state.into() },
+                info: SpIgnitionInfo {
+                    id: sp_comms.port_to_id(port).into(),
+                    details: state.into(),
+                },
                 details,
             })
         })
@@ -467,20 +431,15 @@ async fn sp_get(
             .map(|n| Duration::from_millis(u64::from(n)))
             .unwrap_or(apictx.timeouts.sp_request);
 
-    let target = sp.placeholder_map_to_target(comms.placeholder_known_sps())?;
-    let sp_addr = comms
-        .placeholder_known_sps()
-        .addr_for_id(&sp)
-        .ok_or(Error::SpDoesNotExist(sp))?;
-
     // ping the ignition controller first; if it says the SP is off or otherwise
     // unavailable, we're done.
-    let state =
-        comms.ignition_get(target, apictx.timeouts.ignition_controller).await?;
+    let state = comms
+        .ignition_get(sp.into(), apictx.timeouts.ignition_controller)
+        .await?;
 
     let details = if state.flags.intersects(IgnitionFlags::POWER) {
         // ignition indicates the SP is on; ask it for its state
-        match comms.state_get(sp_addr, timeout).await {
+        match comms.state_get(sp.into(), timeout).await {
             Ok(state) => state,
             Err(SpCommsError::Timeout) => SpState::Unresponsive,
             Err(other) => return Err(other.into()),
@@ -556,13 +515,9 @@ async fn sp_component_serial_console_get(
     let comms = &rqctx.context().sp_comms;
     let PathSpComponent { sp, component } = path.into_inner();
 
-    let sp = comms
-        .placeholder_known_sps()
-        .addr_for_id(&sp)
-        .ok_or(Error::SpDoesNotExist(sp))?;
     let component = SpComponent::try_from(component.as_str())
         .map_err(|_| Error::InvalidSpComponentId(component))?;
-    let contents = comms.serial_console_get(sp, &component)?;
+    let contents = comms.serial_console_get(sp.into(), &component)?;
 
     // TODO With `unwrap_or_default()`, our caller can't tell the difference
     // between "this component hasn't sent us any console information yet" and
@@ -591,10 +546,6 @@ async fn sp_component_serial_console_post(
     let comms = &apictx.sp_comms;
     let PathSpComponent { sp, component } = path.into_inner();
 
-    let sp = comms
-        .placeholder_known_sps()
-        .addr_for_id(&sp)
-        .ok_or(Error::SpDoesNotExist(sp))?;
     let component = SpComponent::try_from(component.as_str())
         .map_err(|_| Error::InvalidSpComponentId(component))?;
 
@@ -608,7 +559,7 @@ async fn sp_component_serial_console_post(
     // sent that hasn't been ack'd yet?
     comms
         .serial_console_post(
-            sp,
+            sp.into(),
             component,
             data.as_bytes(),
             apictx.timeouts.sp_request,
@@ -688,19 +639,15 @@ async fn ignition_list(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
 ) -> Result<HttpResponseOk<Vec<SpIgnitionInfo>>, HttpError> {
     let apictx = rqctx.context();
+    let sp_comms = &apictx.sp_comms;
 
-    let all_state = apictx
-        .sp_comms
-        .bulk_ignition_get(apictx.timeouts.ignition_controller)
-        .await?;
+    let all_state =
+        sp_comms.bulk_ignition_get(apictx.timeouts.ignition_controller).await?;
 
     let mut out = Vec::with_capacity(all_state.len());
-    for (i, state) in all_state.into_iter().enumerate() {
+    for (port, state) in all_state {
         out.push(SpIgnitionInfo {
-            id: placeholder_map_from_target(
-                apictx.sp_comms.placeholder_known_sps(),
-                i,
-            )?,
+            id: sp_comms.port_to_id(port).into(),
             details: state.into(),
         });
     }
@@ -723,12 +670,9 @@ async fn ignition_get(
     let apictx = rqctx.context();
     let sp = path.into_inner().sp;
 
-    let target =
-        sp.placeholder_map_to_target(apictx.sp_comms.placeholder_known_sps())?;
-
     let state = apictx
         .sp_comms
-        .ignition_get(target, apictx.timeouts.ignition_controller)
+        .ignition_get(sp.into(), apictx.timeouts.ignition_controller)
         .await?;
 
     let info = SpIgnitionInfo { id: sp, details: state.into() };
@@ -747,12 +691,9 @@ async fn ignition_power_on(
     let apictx = rqctx.context();
     let sp = path.into_inner().sp;
 
-    let target =
-        sp.placeholder_map_to_target(apictx.sp_comms.placeholder_known_sps())?;
-
     apictx
         .sp_comms
-        .ignition_power_on(target, apictx.timeouts.ignition_controller)
+        .ignition_power_on(sp.into(), apictx.timeouts.ignition_controller)
         .await?;
 
     Ok(HttpResponseUpdatedNoContent {})
@@ -770,12 +711,9 @@ async fn ignition_power_off(
     let apictx = rqctx.context();
     let sp = path.into_inner().sp;
 
-    let target =
-        sp.placeholder_map_to_target(apictx.sp_comms.placeholder_known_sps())?;
-
     apictx
         .sp_comms
-        .ignition_power_off(target, apictx.timeouts.ignition_controller)
+        .ignition_power_off(sp.into(), apictx.timeouts.ignition_controller)
         .await?;
 
     Ok(HttpResponseUpdatedNoContent {})

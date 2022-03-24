@@ -262,7 +262,7 @@ impl DatasetInfo {
                     let http_addr = SocketAddr::new(address.ip(), 8080);
                     reqwest::get(format!("http://{}/health?ready=1", http_addr))
                         .await
-                        .map_err(backoff::BackoffError::Transient)
+                        .map_err(backoff::BackoffError::transient)
                 };
                 let log_failure = |_, _| {
                     warn!(log, "cockroachdb not yet alive");
@@ -573,7 +573,7 @@ impl StorageWorker {
                 nexus
                     .zpool_put(&sled_id, &pool_id, &zpool_request)
                     .await
-                    .map_err(backoff::BackoffError::Transient)?;
+                    .map_err(backoff::BackoffError::transient)?;
                 Ok::<
                     (),
                     backoff::BackoffError<
@@ -620,7 +620,7 @@ impl StorageWorker {
                     nexus
                         .dataset_put(&pool_id, &id, &request)
                         .await
-                        .map_err(backoff::BackoffError::Transient)?;
+                        .map_err(backoff::BackoffError::transient)?;
                 }
 
                 Ok::<

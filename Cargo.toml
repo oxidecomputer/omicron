@@ -4,6 +4,7 @@ members = [
     "gateway",
     "gateway-client",
     "gateway-messages",
+    "gateway-sp-comms",
     "internal-dns",
     "internal-dns-client",
     "nexus",
