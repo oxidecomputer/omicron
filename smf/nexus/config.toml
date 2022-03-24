@@ -14,7 +14,7 @@ session_absolute_timeout_minutes = 480
 
 [authn]
 # TODO(https://github.com/oxidecomputer/omicron/issues/372): Remove "spoof".
-schemes_external = ["spoof"]
+schemes_external = ["spoof", "session_cookie"]
 
 [database]
 # URL for connecting to the database
