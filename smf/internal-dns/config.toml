@@ -1,0 +1,22 @@
+[dropshot]
+bind_address = "[fd00:1234::4]:5353"
+request_body_max_bytes = 1048576
+
+[dns]
+bind_address = "[fd00:1234::4]:4753"
+
+[log]
+# Show log messages of this level and more severe
+level = "debug"
+
+# Example output to a terminal (with colors)
+mode = "stderr-terminal"
+
+# Example output to a file, appending if it already exists.
+#mode = "file"
+#path = "logs/server.log"
+#if_exists = "append"
+
+[data]
+nmax_messages = 16
+storage_path = "/var/tmp/oxide/dns"
