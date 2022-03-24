@@ -109,6 +109,12 @@ pub trait TestInterfaces {
         &self,
         session: db::model::ConsoleSession,
     ) -> CreateResult<db::model::ConsoleSession>;
+
+    async fn silo_user_create(
+        &self,
+        silo_id: Uuid,
+        silo_user_id: Uuid,
+    ) -> CreateResult<SiloUser>;
 }
 
 pub static BASE_ARTIFACT_DIR: &str = "/var/tmp/oxide_artifacts";
@@ -2968,15 +2974,6 @@ impl Nexus {
     ) -> LookupResult<SiloUser> {
         self.db_datastore.silo_user_fetch(silo_user_id).await
     }
-
-    pub async fn silo_user_create(
-        &self,
-        silo_id: Uuid,
-        silo_user_id: Uuid,
-    ) -> CreateResult<SiloUser> {
-        let silo_user = SiloUser::new(silo_id, silo_user_id);
-        Ok(self.db_datastore.silo_user_create(silo_user).await?)
-    }
 }
 
 fn generate_session_token() -> String {
@@ -3033,5 +3030,14 @@ impl TestInterfaces for Nexus {
         session: db::model::ConsoleSession,
     ) -> CreateResult<db::model::ConsoleSession> {
         Ok(self.db_datastore.session_create(session).await?)
+    }
+
+    async fn silo_user_create(
+        &self,
+        silo_id: Uuid,
+        silo_user_id: Uuid,
+    ) -> CreateResult<SiloUser> {
+        let silo_user = SiloUser::new(silo_id, silo_user_id);
+        Ok(self.db_datastore.silo_user_create(silo_user).await?)
     }
 }

@@ -6,6 +6,7 @@ use uuid::Uuid;
 
 use nexus_test_utils::http_testing::{AuthnMode, NexusRequest};
 use omicron_nexus::external_api::views::{Organization, Silo};
+use omicron_nexus::TestInterfaces as _;
 
 use http::method::Method;
 use http::StatusCode;
