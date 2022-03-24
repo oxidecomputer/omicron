@@ -31,5 +31,16 @@ lazy_static! {
                 *FLEET_ID,
                 role_builtin::FLEET_ADMIN.role_name,
             ),
+
+            // The "internal-read" user gets the "viewer" role on the sole Fleet.
+            // This will grant them the ability to read various control plane
+            // data (like the list of sleds), which is in turn used to talk to
+            // sleds or allocate resources.
+            RoleAssignmentBuiltin::new(
+                user_builtin::USER_INTERNAL_READ.id,
+                role_builtin::FLEET_VIEWER.resource_type,
+                *FLEET_ID,
+                role_builtin::FLEET_VIEWER.role_name,
+            ),
         ];
 }

@@ -135,7 +135,8 @@ impl Fleet {
     }
 
     /// Returns an authz resource representing some other kind of child (e.g.,
-    /// a built-in user, built-in role, etc. -- but _not_ an Organization)
+    /// a built-in user, built-in role, etc. -- but _not_ an Organization or
+    /// Sled)
     ///
     /// Aside from Organizations (which you create with
     /// [`Fleet::organization()`] instead), all instances of all types of Fleet
@@ -148,6 +149,11 @@ impl Fleet {
         lookup_type: LookupType,
     ) -> FleetChild {
         FleetChild { resource_type, lookup_type }
+    }
+
+    /// Returns an authz resource representing a Sled
+    pub fn sled(&self, sled_id: Uuid, lookup_type: LookupType) -> Sled {
+        Sled { sled_id, lookup_type }
     }
 }
 
@@ -252,6 +258,52 @@ impl ApiResource for FleetChild {
 impl ApiResourceError for FleetChild {
     fn not_found(&self) -> Error {
         self.lookup_type.clone().into_not_found(self.resource_type)
+    }
+}
+
+/// Represents a Sled for authz purposes
+///
+/// This object is used for authorization checks on such resources by passing
+/// this as the `resource` argument to
+/// [`crate::context::OpContext::authorize()`].  You construct one of these
+/// using [`Fleet::sled()`].
+#[derive(Clone, Debug)]
+pub struct Sled {
+    sled_id: Uuid,
+    lookup_type: LookupType,
+}
+
+impl Sled {
+    pub fn id(&self) -> Uuid {
+        self.sled_id
+    }
+}
+
+impl oso::PolarClass for Sled {
+    fn get_polar_class_builder() -> oso::ClassBuilder<Self> {
+        oso::Class::builder()
+            .add_method(
+                "has_role",
+                // Roles are not supported on Sleds today.
+                |_: &Sled, _: AuthenticatedActor, _: String| false,
+            )
+            .add_attribute_getter("fleet", |_: &Sled| FLEET)
+    }
+}
+
+impl ApiResource for Sled {
+    fn db_resource(&self) -> Option<(ResourceType, Uuid)> {
+        None
+    }
+
+    fn parent(&self) -> Option<&dyn AuthorizedResource> {
+        Some(&FLEET)
+    }
+}
+
+impl ApiResourceError for Sled {
+    fn not_found(&self) -> Error {
+        self.lookup_type.clone().into_not_found(ResourceType::Sled)
     }
 }
 

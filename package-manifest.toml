@@ -84,7 +84,7 @@ repo = "crucible"
 commit = "aec731421ddbb6f5ec733185b82493bcf62c8011"
 # The SHA256 digest is automatically posted to:
 # https://buildomat.eng.oxide.computer/public/file/oxidecomputer/crucible/image/<commit>/crucible.sha256.txt
-sha256 = "fc7ee178a3320b53e2975fa38cbde4bbb9b68c71ddcc5aeff61bdce519b2f4d7"
+sha256 = "c024e5ea6715f43e416e83bbc0327ec166e22886a81dcd9fe5adff36cc327dcc"
 
 # Refer to
 #   https://github.com/oxidecomputer/propolis/blob/master/package/README.md
@@ -96,4 +96,4 @@ zone = true
 type = "prebuilt"
 repo = "propolis"
 commit = "e984409a425df97338efa2c53ba3e40c73668638"
-sha256 = "0c7bd314614f9413493558d7592d67156089887ab9736149934518c12ebd125f"
+sha256 = "206ef42e90d157e3314f4745ddb4422b3c93a16881749824037853e6f39f3762"

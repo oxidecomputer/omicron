@@ -19,8 +19,14 @@ lazy_static! {
         role_name: "admin",
         description: "Fleet Administrator",
     };
+    pub static ref FLEET_VIEWER: RoleBuiltinConfig = RoleBuiltinConfig {
+        resource_type: api::external::ResourceType::Fleet,
+        role_name: "viewer",
+        description: "Fleet Viewer",
+    };
     pub static ref BUILTIN_ROLES: Vec<RoleBuiltinConfig> = vec![
         FLEET_ADMIN.clone(),
+        FLEET_VIEWER.clone(),
         RoleBuiltinConfig {
             resource_type: api::external::ResourceType::Fleet,
             role_name: "collaborator",

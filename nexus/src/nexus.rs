@@ -143,6 +143,9 @@ pub struct Nexus {
 
     /// Contents of the trusted root role for the TUF repository.
     updates_config: Option<config::UpdatesConfig>,
+
+    /// Operational context used for Instance allocation
+    opctx_alloc: OpContext,
 }
 
 // TODO Is it possible to make some of these operations more generic?  A
@@ -204,6 +207,12 @@ impl Nexus {
             populate_status,
             timeseries_client,
             updates_config: config.updates.clone(),
+            opctx_alloc: OpContext::for_background(
+                log.new(o!("component" => "InstanceAllocator")),
+                Arc::clone(&authz),
+                authn::Context::internal_read(),
+                Arc::clone(&db_datastore),
+            ),
         };
 
         // TODO-cleanup all the extra Arcs here seems wrong
@@ -366,7 +375,7 @@ impl Nexus {
             debug!(self.log, "registering nexus as metric producer");
             register(address, &self.log, &producer_endpoint)
                 .await
-                .map_err(backoff::BackoffError::Transient)
+                .map_err(backoff::BackoffError::transient)
         };
         let log_registration_failure = |error, delay| {
             warn!(
@@ -806,6 +815,13 @@ impl Nexus {
     // TODO-design This interface should not exist.  See
     // SagaContext::alloc_server().
     pub async fn sled_allocate(&self) -> Result<Uuid, Error> {
+        // We need an OpContext to query the database.  Normally we'd use
+        // one from the current operation, usually a saga action or API call.
+        // In this case, though, the caller may not have permissions to access
+        // the sleds in the system.  We're really doing this as Nexus itself,
+        // operating on behalf of the caller.
+        let opctx = &self.opctx_alloc;
+
         // TODO: replace this with a real allocation policy.
         //
         // This implementation always assigns the first sled (by ID order).
@@ -814,7 +830,7 @@ impl Nexus {
             direction: dropshot::PaginationOrder::Ascending,
             limit: std::num::NonZeroU32::new(1).unwrap(),
         };
-        let sleds = self.db_datastore.sled_list(&pagparams).await?;
+        let sleds = self.db_datastore.sled_list(&opctx, &pagparams).await?;
 
         sleds
             .first()
@@ -1052,7 +1068,7 @@ impl Nexus {
         // Franky, returning an "Arc" here without a connection pool is a little
         // silly; it's not actually used if each client connection exists as a
         // one-shot.
-        let sled = self.sled_lookup(id).await?;
+        let sled = self.sled_lookup(&self.opctx_alloc, id).await?;
 
         let log = self.log.new(o!("SledAgent" => id.clone().to_string()));
         let dur = std::time::Duration::from_secs(60);
@@ -2479,8 +2495,11 @@ impl Nexus {
 
     pub async fn racks_list(
         &self,
+        opctx: &OpContext,
         pagparams: &DataPageParams<'_, Uuid>,
     ) -> ListResult<db::model::Rack> {
+        opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
+
         if let Some(marker) = pagparams.marker {
             if *marker >= self.rack_id {
                 return Ok(futures::stream::empty().boxed());
@@ -2492,8 +2511,13 @@ impl Nexus {
 
     pub async fn rack_lookup(
         &self,
+        opctx: &OpContext,
         rack_id: &Uuid,
     ) -> LookupResult<db::model::Rack> {
+        let authz_rack = authz::FLEET
+            .child_generic(ResourceType::Rack, LookupType::ById(*rack_id));
+        opctx.authorize(authz::Action::Read, &authz_rack).await?;
+
         if *rack_id == self.rack_id {
             Ok(self.as_rack())
         } else {
@@ -2505,22 +2529,27 @@ impl Nexus {
 
     pub async fn sleds_list(
         &self,
+        opctx: &OpContext,
         pagparams: &DataPageParams<'_, Uuid>,
     ) -> ListResultVec<db::model::Sled> {
-        self.db_datastore.sled_list(pagparams).await
+        self.db_datastore.sled_list(&opctx, pagparams).await
     }
 
     pub async fn sled_lookup(
         &self,
+        opctx: &OpContext,
         sled_id: &Uuid,
     ) -> LookupResult<db::model::Sled> {
-        self.db_datastore.sled_fetch(*sled_id).await
+        let authz_sled =
+            authz::FLEET.sled(*sled_id, LookupType::ById(*sled_id));
+        self.db_datastore.sled_fetch(&opctx, &authz_sled).await
     }
 
     // Sagas
 
     pub async fn sagas_list(
         &self,
+        opctx: &OpContext,
         pagparams: &DataPageParams<'_, Uuid>,
     ) -> ListResult<external::Saga> {
         // The endpoint we're serving only supports `ScanById`, which only
@@ -2528,6 +2557,7 @@ impl Nexus {
         bail_unless!(
             pagparams.direction == dropshot::PaginationOrder::Ascending
         );
+        opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
         let marker = pagparams.marker.map(|s| SagaId::from(*s));
         let saga_list = self
             .sec_client
@@ -2539,7 +2569,12 @@ impl Nexus {
         Ok(futures::stream::iter(saga_list).boxed())
     }
 
-    pub async fn saga_get(&self, id: Uuid) -> LookupResult<external::Saga> {
+    pub async fn saga_get(
+        &self,
+        opctx: &OpContext,
+        id: Uuid,
+    ) -> LookupResult<external::Saga> {
+        opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
         self.sec_client
             .saga_get(steno::SagaId::from(id))
             .await
@@ -2706,9 +2741,11 @@ impl Nexus {
     /// List existing timeseries schema.
     pub async fn timeseries_schema_list(
         &self,
+        opctx: &OpContext,
         pag_params: &TimeseriesSchemaPaginationParams,
         limit: NonZeroU32,
     ) -> Result<dropshot::ResultsPage<TimeseriesSchema>, Error> {
+        opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
         self.timeseries_client
             .timeseries_schema_list(&pag_params.page, limit)
             .await
@@ -2798,7 +2835,12 @@ impl Nexus {
         })
     }
 
-    pub async fn updates_refresh_metadata(&self) -> Result<(), Error> {
+    pub async fn updates_refresh_metadata(
+        &self,
+        opctx: &OpContext,
+    ) -> Result<(), Error> {
+        opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
+
         let updates_config = self.updates_config.as_ref().ok_or_else(|| {
             Error::InvalidRequest {
                 message: "updates system not configured".into(),
@@ -2826,33 +2868,39 @@ impl Nexus {
             internal_message: format!("error trying to refresh updates: {}", e),
         })?;
 
-        // FIXME: if we hit an error in any of these database calls, the available artifact table
-        // will be out of sync with the current artifacts.json. can we do a transaction or
-        // something?
+        // FIXME: if we hit an error in any of these database calls, the
+        // available artifact table will be out of sync with the current
+        // artifacts.json. can we do a transaction or something?
 
         let mut current_version = None;
         for artifact in &artifacts {
             current_version = Some(artifact.targets_role_version);
             self.db_datastore
-                .update_available_artifact_upsert(artifact.clone())
+                .update_available_artifact_upsert(&opctx, artifact.clone())
                 .await?;
         }
 
         // ensure table is in sync with current copy of artifacts.json
         if let Some(current_version) = current_version {
             self.db_datastore
-                .update_available_artifact_hard_delete_outdated(current_version)
+                .update_available_artifact_hard_delete_outdated(
+                    &opctx,
+                    current_version,
+                )
                 .await?;
         }
 
         // demo-grade update logic: tell all sleds to apply all artifacts
         for sled in self
             .db_datastore
-            .sled_list(&DataPageParams {
-                marker: None,
-                direction: PaginationOrder::Ascending,
-                limit: NonZeroU32::new(100).unwrap(),
-            })
+            .sled_list(
+                &opctx,
+                &DataPageParams {
+                    marker: None,
+                    direction: PaginationOrder::Ascending,
+                    limit: NonZeroU32::new(100).unwrap(),
+                },
+            )
             .await?
         {
             let client = self.sled_client(&sled.id()).await?;
@@ -2881,6 +2929,7 @@ impl Nexus {
     /// Downloads a file from within [`BASE_ARTIFACT_DIR`].
     pub async fn download_artifact(
         &self,
+        opctx: &OpContext,
         artifact: UpdateArtifact,
     ) -> Result<Vec<u8>, Error> {
         let mut base_url =
@@ -2891,10 +2940,11 @@ impl Nexus {
             base_url.push('/');
         }
 
-        // We cache the artifact based on its checksum, so fetch that from the database.
+        // We cache the artifact based on its checksum, so fetch that from the
+        // database.
         let artifact_entry = self
             .db_datastore
-            .update_available_artifact_fetch(&artifact)
+            .update_available_artifact_fetch(opctx, &artifact)
             .await?;
         let filename = format!(
             "{}.{}.{}-{}",

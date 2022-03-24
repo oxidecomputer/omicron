@@ -285,7 +285,9 @@ async fn do_package(config: &Config, output_directory: &Path) -> Result<()> {
             },
         );
 
-    tokio::try_join!(external_pkg_stream, internal_pkg_stream,)?;
+    tokio::task::spawn_blocking(move || ui.multi.join());
+    tokio::try_join!(external_pkg_stream, internal_pkg_stream)?;
+
     Ok(())
 }
 
@@ -412,14 +414,12 @@ fn in_progress_style() -> ProgressStyle {
         .template(
             "[{elapsed_precise}] {bar:40.cyan/blue} {pos:>7}/{len:7} {msg}",
         )
-        .unwrap()
         .progress_chars("#>.")
 }
 
 fn completed_progress_style() -> ProgressStyle {
     ProgressStyle::default_bar()
         .template("[{elapsed_precise}] {bar:40.cyan/blue} {pos:>7}/{len:7} {msg:.green}")
-        .unwrap()
         .progress_chars("#>.")
 }
 

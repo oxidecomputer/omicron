@@ -2,10 +2,9 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use crate::{
-    sp_comms::{SpCommunicator, StartupError},
-    Config,
-};
+use crate::sp_comms::SpCommunicator;
+use crate::Config;
+use gateway_sp_comms::error::StartupError;
 use slog::Logger;
 use std::{sync::Arc, time::Duration};
 
@@ -52,14 +51,8 @@ impl ServerContext {
         config: &Config,
         log: &Logger,
     ) -> Result<Arc<Self>, StartupError> {
-        let sp_comms = Arc::new(
-            SpCommunicator::new(
-                config.udp_bind_address,
-                config.known_sps.clone(),
-                log,
-            )
-            .await?,
-        );
+        let sp_comms =
+            Arc::new(SpCommunicator::new(config.known_sps.clone(), log).await?);
         Ok(Arc::new(ServerContext {
             sp_comms,
             timeouts: Timeouts::from(&config.timeouts),
