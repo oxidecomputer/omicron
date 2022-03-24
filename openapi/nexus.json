@@ -256,7 +256,7 @@
           "organizations"
         ],
         "summary": "List organizations",
-        "description": "Returns a list of all organizations in the system. The organizations are returned in sorted order, with the most recent organizations appearing first.\nTODO: figure out if the above is correct or what the order actually is.",
+        "description": "Returns a list of all organizations in the system. The organizations are returned in sorted order by name alphabetically by default.",
         "operationId": "organizations_get",
         "parameters": [
           {
@@ -315,6 +315,7 @@
           "organizations"
         ],
         "summary": "Create an organization",
+        "description": "Creates a new organization.",
         "operationId": "organizations_post",
         "requestBody": {
           "content": {
@@ -438,7 +439,7 @@
           "organizations"
         ],
         "summary": "Delete an organization",
-        "description": "Permanently deletes an organization. It cannot be undone. This will not remove any users or groups since those are being synced from your identity provider via SCIM or SAML authentication.",
+        "description": "Permanently deletes an organization. It cannot be undone. This will not remove any users or groups since those are being synced from your identity provider via SCIM or SAML authentication.\nA request to delete an organization will fail if there are any active projects in the organization.",
         "operationId": "organizations_delete_organization",
         "parameters": [
           {
@@ -471,7 +472,7 @@
           "projects"
         ],
         "summary": "List projects",
-        "description": "Returns a list of all projects in the organization. This includes only the subset of projects that the caller has access to. The projects are sorted by creation date, with the most recently created projects appearing first.",
+        "description": "Returns a list of all projects in the organization. The projects are sorted by name alphabetically by default.",
         "operationId": "organization_projects_get",
         "parameters": [
           {
@@ -696,7 +697,7 @@
           "projects"
         ],
         "summary": "Delete a project",
-        "description": "Permanently deletes the project with the specified name in the specified organization. It cannot be undone. This also deletes all the project's resources.",
+        "description": "Permanently deletes the project with the specified name in the specified organization. It cannot be undone.",
         "operationId": "organization_projects_delete_project",
         "parameters": [
           {
@@ -739,7 +740,7 @@
           "disks"
         ],
         "summary": "List disks",
-        "description": "Returns a list of disks in the specified project. The disks are returned sorted by creation date, with the most recently created disks appearing first.",
+        "description": "Returns a list of disks in the specified project. The disks are returned sorted by name alphabetically by default.",
         "operationId": "project_disks_get",
         "parameters": [
           {
@@ -983,7 +984,7 @@
           "instances"
         ],
         "summary": "List instances",
-        "description": "Retrieves a list of instances in the specified project. The instances are returned sorted by creation date, with the most recently created instances appearing first.",
+        "description": "Retrieves a list of instances in the specified project. The instances are returned sorted by name alphabetically by default.",
         "operationId": "project_instances_get",
         "parameters": [
           {
@@ -1177,7 +1178,7 @@
           "instances"
         ],
         "summary": "Delete an instance",
-        "description": "Permanently deletes the instance with the specified name in the specified project and organization. This operation cannot be undone. If the instance is using a disk, and the disk settings are to delete upon instance deletion, the disk will be deleted. Any ephermal IP addresses associated with the instance will be released.",
+        "description": "Permanently deletes the instance with the specified name in the specified project and organization. This operation cannot be undone.\nIf the instance is using a disk, and the disk settings are to delete upon instance deletion, the disk will be deleted.\nAny ephemeral IP addresses associated with the instance will be released.\nDeleting an instance required that the instance is stopped.",
         "operationId": "project_instances_delete_instance",
         "parameters": [
           {
@@ -1792,7 +1793,7 @@
           "instances"
         ],
         "summary": "Reboot an instance",
-        "description": "Reboots the instance with the specified name in the specified project and organization. Any ephermal IP addresses associated with the instance will be released and a new ephermal IP address will be assigned when the instance starts back up. If you want the IP address to remain consistent, change it to a floating IP address before rebooting. TODO: link to that API call.",
+        "description": "Reboots the instance with the specified name in the specified project and organization.\nAny ephermal IP addresses associated with the instance will be released and a new ephermal IP address will be assigned when the instance starts back up. If you want the IP address to remain consistent, change it to a floating IP address before rebooting.",
         "operationId": "project_instances_instance_reboot",
         "parameters": [
           {
@@ -1963,7 +1964,7 @@
           "snapshots"
         ],
         "summary": "List snapshots",
-        "description": "List snapshots in a project. Snapshots are sorted by creation time, with the most recently created snapshots appearing first.",
+        "description": "List snapshots in a project. Snapshots are sorted by alphabetically by name by default.",
         "operationId": "project_snapshots_get",
         "parameters": [
           {
@@ -2207,7 +2208,7 @@
           "vpcs"
         ],
         "summary": "List VPCs",
-        "description": "Returns a list of VPCs in the specified project. The VPCs are returned sorted by creation date, with the most recently created VPCs appearing first.",
+        "description": "Returns a list of VPCs in the specified project. The VPCs are returned sorted by name alphabetically by default.",
         "operationId": "project_vpcs_get",
         "parameters": [
           {
@@ -2516,7 +2517,7 @@
           "firewall"
         ],
         "summary": "List firewall rules",
-        "description": "Returns a list of firewall rules in a VPC. The firewall rules are returned sorted alphabetically by name.",
+        "description": "Returns a list of firewall rules in a VPC. The firewall rules are returned sorted by priority and then alphabetically by name.",
         "operationId": "vpc_firewall_rules_get",
         "parameters": [
           {
@@ -3369,7 +3370,7 @@
           "subnets"
         ],
         "summary": "List subnets",
-        "description": "Returns a list of all subnets in a VPC. The subnets are returned sorted by creation date, with the most recently created subnet appearing first.",
+        "description": "Returns a list of all subnets in a VPC. The subnets are returned sorted by name alphabetically by default.",
         "operationId": "vpc_subnets_get",
         "parameters": [
           {
@@ -4172,7 +4173,7 @@
           "users"
         ],
         "summary": "Get a user",
-        "description": "Returns details of the specified user. If you pass `me` as the `user_name`, this function returns details of the authenticated user. TODO: Can we make the above true.",
+        "description": "Returns details of the specified user.\nTo get details of the current user, use the `/session/me` endpoint.",
         "operationId": "users_get_user",
         "parameters": [
           {
