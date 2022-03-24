@@ -751,7 +751,6 @@ CREATE TABLE omicron.public.console_session (
     token STRING(40) PRIMARY KEY,
     time_created TIMESTAMPTZ NOT NULL,
     time_last_used TIMESTAMPTZ NOT NULL,
-    -- this maps to id in the silo_user table
     silo_user_id UUID NOT NULL
 );
 
