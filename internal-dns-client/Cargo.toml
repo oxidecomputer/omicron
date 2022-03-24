@@ -5,8 +5,15 @@ edition = "2021"
 license = "MPL-2.0"
 
 [dependencies]
+anyhow = "1.0"
+clap = { version = "3.1", features = [ "derive" ] }
 progenitor = { git = "https://github.com/oxidecomputer/progenitor" }
 serde = { version = "1.0", features = [ "derive" ] }
 serde_json = "1.0"
 slog = { version = "2.5.0", features = [ "max_level_trace", "release_max_level_debug" ] }
+slog-term = "2.7"
+slog-async = "2.7"
+slog-envlogger = "2.2"
+structopt = "0.3"
+tokio = { version = "1.17", features = [ "full" ] }
 reqwest = { version = "0.11", features = ["json", "rustls-tls", "stream"] }

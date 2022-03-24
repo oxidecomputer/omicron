@@ -1701,11 +1701,18 @@ dependencies = [
 name = "internal-dns-client"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
+ "clap 3.1.6",
  "progenitor",
  "reqwest",
  "serde",
  "serde_json",
  "slog",
+ "slog-async",
+ "slog-envlogger",
+ "slog-term",
+ "structopt",
+ "tokio",
 ]
 
 [[package]]
