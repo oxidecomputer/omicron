@@ -404,6 +404,7 @@ impl TestResponse {
 pub enum AuthnMode {
     UnprivilegedUser,
     PrivilegedUser,
+    Session(String),
 }
 
 /// Helper for constructing requests to Nexus's external API
@@ -432,23 +433,32 @@ impl<'a> NexusRequest<'a> {
     /// `mode`
     pub fn authn_as(mut self, mode: AuthnMode) -> Self {
         use omicron_nexus::authn;
-        let header_value = match mode {
-            AuthnMode::UnprivilegedUser => authn::USER_TEST_UNPRIVILEGED.id,
-            AuthnMode::PrivilegedUser => authn::USER_TEST_PRIVILEGED.id,
-        };
 
-        self.request_builder = self.request_builder.header(
-            &http::header::AUTHORIZATION,
-            spoof::make_header_value(header_value).0.encode(),
-        );
-        self
-    }
+        match mode {
+            AuthnMode::UnprivilegedUser | AuthnMode::PrivilegedUser => {
+                let header_value = match mode {
+                    AuthnMode::UnprivilegedUser => {
+                        authn::USER_TEST_UNPRIVILEGED.id
+                    }
+                    AuthnMode::PrivilegedUser => authn::USER_TEST_PRIVILEGED.id,
+                    _ => {
+                        panic!("unreachable!")
+                    }
+                };
 
-    pub fn authn_with_session(mut self, session_token: &str) -> Self {
-        self.request_builder = self.request_builder.header(
-            &http::header::COOKIE,
-            format!("session={}", session_token),
-        );
+                self.request_builder = self.request_builder.header(
+                    &http::header::AUTHORIZATION,
+                    spoof::make_header_value(header_value).0.encode(),
+                );
+            }
+            AuthnMode::Session(session_token) => {
+                self.request_builder = self.request_builder.header(
+                    &http::header::COOKIE,
+                    format!("session={}", session_token),
+                );
+            }
+        }
+
         self
     }
 
