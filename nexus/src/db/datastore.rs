@@ -554,9 +554,8 @@ impl DataStore {
         .insert_and_get_result_async(self.pool_authorized(opctx).await?)
         .await
         .map_err(|e| match e {
-            AsyncInsertError::CollectionNotFound => Error::ObjectNotFound {
-                type_name: ResourceType::Silo,
-                lookup_type: LookupType::ById(silo_id),
+            AsyncInsertError::CollectionNotFound => Error::InternalError {
+                internal_message: format!("attempting to create an organization under non-existent silo {}", silo_id),
             },
             AsyncInsertError::DatabaseError(e) => {
                 public_error_from_diesel_pool(
