@@ -217,9 +217,7 @@ pub fn external_api() -> NexusApiDescription {
 /// List organizations
 ///
 /// Returns a list of all organizations in the system. The organizations are returned
-/// in sorted order, with the most recent organizations appearing first.
-///
-/// TODO: figure out if the above is correct or what the order actually is.
+/// in sorted order by name alphabetically by default.
 #[endpoint {
     method = GET,
     path = "/organizations",
@@ -259,6 +257,8 @@ async fn organizations_get(
 }
 
 /// Create an organization
+///
+/// Creates a new organization.
 #[endpoint {
     method = POST,
     path = "/organizations",
@@ -318,6 +318,9 @@ async fn organizations_get_organization(
 /// Permanently deletes an organization. It cannot be undone. This will not remove any
 /// users or groups since those are being synced from your identity provider via SCIM
 /// or SAML authentication.
+///
+/// A request to delete an organization will fail if there are any active projects
+/// in the organization.
 #[endpoint {
     method = DELETE,
     path = "/organizations/{organization_name}",
@@ -350,9 +353,6 @@ async fn organizations_delete_organization(
 // "application/json-patch")?  We should see what other APIs do.
 // Other APIS work like the docs above, so it's fine. As any any parameters not passed are left
 // unchanged.
-// Leaving this comment here just to ping dave or whoever wrote it to let them know.
-// Then I will delete.
-// - Jess
 #[endpoint {
     method = PUT,
     path = "/organizations/{organization_name}",
@@ -383,9 +383,8 @@ async fn organizations_put_organization(
 
 /// List projects
 ///
-/// Returns a list of all projects in the organization. This includes only the subset
-/// of projects that the caller has access to. The projects are sorted by creation date,
-/// with the most recently created projects appearing first.
+/// Returns a list of all projects in the organization. The projects are sorted
+/// by name alphabetically by default.
 #[endpoint {
     method = GET,
     path = "/organizations/{organization_name}/projects",
@@ -509,7 +508,9 @@ async fn organization_projects_get_project(
 /// Delete a project
 ///
 /// Permanently deletes the project with the specified name in the specified organization.
-/// It cannot be undone. This also deletes all the project's resources.
+/// It cannot be undone.
+// In the future we will want to also delete the project's data recursively, perhaps if the user
+// gives a flag or not, but see RFD4.
 #[endpoint {
     method = DELETE,
     path = "/organizations/{organization_name}/projects/{project_name}",
@@ -571,7 +572,7 @@ async fn organization_projects_put_project(
 /// List disks
 ///
 /// Returns a list of disks in the specified project. The disks are returned sorted
-/// by creation date, with the most recently created disks appearing first.
+/// by name alphabetically by default.
 #[endpoint {
     method = GET,
     path = "/organizations/{organization_name}/projects/{project_name}/disks",
@@ -717,7 +718,7 @@ async fn project_disks_delete_disk(
 /// List instances
 ///
 /// Retrieves a list of instances in the specified project. The instances are returned sorted
-/// by creation date, with the most recently created instances appearing first.
+/// by name alphabetically by default.
 #[endpoint {
     method = GET,
     path = "/organizations/{organization_name}/projects/{project_name}/instances",
@@ -763,12 +764,6 @@ async fn project_instances_get(
 // useful response, including an operation id, with either response code.  Maybe
 // a "reboot" operation would return a 202 Accepted because there's no actual
 // resource created?
-//
-//
-// 201 means its actually been created aka. synchronous
-// 202 means its being created aka. asynchronous
-// At least from the APIs I've used.
-// - Jess
 #[endpoint {
     method = POST,
      path = "/organizations/{organization_name}/projects/{project_name}/instances",
@@ -844,9 +839,14 @@ async fn project_instances_get_instance(
 /// Delete an instance
 ///
 /// Permanently deletes the instance with the specified name in the specified project and
-/// organization. This operation cannot be undone. If the instance is using a disk,
-/// and the disk settings are to delete upon instance deletion, the disk will be deleted.
+/// organization. This operation cannot be undone.
+///
+/// If the instance is using a disk, and the disk settings are to delete upon
+/// instance deletion, the disk will be deleted.
+///
 /// Any ephemeral IP addresses associated with the instance will be released.
+///
+/// Deleting an instance required that the instance is stopped.
 #[endpoint {
     method = DELETE,
     path = "/organizations/{organization_name}/projects/{project_name}/instances/{instance_name}",
@@ -916,10 +916,11 @@ async fn project_instances_migrate_instance(
 /// Reboot an instance
 ///
 /// Reboots the instance with the specified name in the specified project and organization.
+///
 /// Any ephermal IP addresses associated with the instance will be released and a new
 /// ephermal IP address will be assigned when the instance starts back up. If you want the
 /// IP address to remain consistent, change it to a floating IP address before rebooting.
-/// TODO: link to that API call.
+// TODO: link to that API call above.
 #[endpoint {
     method = POST,
     path = "/organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/reboot",
@@ -1295,8 +1296,7 @@ async fn instance_network_interfaces_get_interface(
 
 /// List snapshots
 ///
-/// List snapshots in a project. Snapshots are sorted by creation time, with the most recently created
-/// snapshots appearing first.
+/// List snapshots in a project. Snapshots are sorted by alphabetically by name by default.
 #[endpoint {
     method = GET,
     path = "/organizations/{organization_name}/projects/{project_name}/snapshots",
@@ -1445,7 +1445,7 @@ async fn project_snapshots_delete_snapshot(
 /// List VPCs
 ///
 /// Returns a list of VPCs in the specified project. The VPCs are returned sorted
-/// by creation date, with the most recently created VPCs appearing first.
+/// by name alphabetically by default.
 #[endpoint {
     method = GET,
     path = "/organizations/{organization_name}/projects/{project_name}/vpcs",
@@ -1624,7 +1624,7 @@ async fn project_vpcs_delete_vpc(
 /// List subnets
 ///
 /// Returns a list of all subnets in a VPC. The subnets are returned sorted by
-/// creation date, with the most recently created subnet appearing first.
+/// name alphabetically by default.
 #[endpoint {
     method = GET,
     path = "/organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/subnets",
@@ -1840,7 +1840,7 @@ async fn subnet_network_interfaces_get(
 /// List firewall rules
 ///
 /// Returns a list of firewall rules in a VPC. The firewall rules are returned sorted
-/// alphabetically by name.
+/// by priority and then alphabetically by name.
 #[endpoint {
     method = GET,
     path = "/organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/firewall/rules",
@@ -2483,9 +2483,9 @@ struct UserPathParam {
 
 /// Get a user
 ///
-/// Returns details of the specified user. If you pass `me` as the `user_name`,
-/// this function returns details of the authenticated user.
-/// TODO: Can we make the above true.
+/// Returns details of the specified user.
+///
+/// To get details of the current user, use the `/session/me` endpoint.
 #[endpoint {
     method = GET,
     path = "/users/{user_name}",
