@@ -2696,7 +2696,7 @@ impl DataStore {
                     e,
                     ErrorHandler::NotFoundByLookup(
                         ResourceType::ConsoleSession,
-                        LookupType::ByToken(token),
+                        LookupType::BySessionToken(token),
                     ),
                 )
             })?;
