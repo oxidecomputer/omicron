@@ -51,7 +51,6 @@ pub enum Error {
     /// The system encountered an unhandled operational error.
     #[error("Internal Error: {internal_message}")]
     InternalError { internal_message: String },
-
     /// The system (or part of it) is unavailable.
     #[error("Service Unavailable: {internal_message}")]
     ServiceUnavailable { internal_message: String },
