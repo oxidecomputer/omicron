@@ -376,6 +376,7 @@ table! {
 table! {
     static_v6_address (address) {
         address -> Inet,
+        associated_id -> Uuid,
     }
 }
 

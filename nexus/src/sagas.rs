@@ -42,6 +42,7 @@ use slog::warn;
 use slog::Logger;
 use std::collections::BTreeMap;
 use std::convert::{TryFrom, TryInto};
+use std::net::IpAddr;
 use std::sync::Arc;
 use steno::new_action_noop_undo;
 use steno::ActionContext;
@@ -52,7 +53,6 @@ use steno::SagaTemplateBuilder;
 use steno::SagaTemplateGeneric;
 use steno::SagaType;
 use uuid::Uuid;
-use std::net::IpAddr;
 
 // We'll need a richer mechanism for registering sagas, but this works for now.
 pub const SAGA_INSTANCE_CREATE_NAME: &'static str = "instance-create";
@@ -197,7 +197,7 @@ pub fn saga_instance_create() -> SagaTemplate<SagaInstanceCreate> {
         ActionFunc::new_action(
             sic_allocate_v6_address,
             sic_allocate_v6_address_undo,
-        )
+        ),
     );
 
     template_builder.append(
@@ -531,7 +531,11 @@ async fn sic_allocate_v6_address(
 ) -> Result<IpAddr, ActionError> {
     let osagactx = sagactx.user_data();
     let nexus = osagactx.nexus();
-    Ok(nexus.allocate_static_v6_address().await.map_err(ActionError::action_failed)?)
+    let instance_id = sagactx.lookup::<Uuid>("instance_id")?;
+    Ok(nexus
+        .allocate_static_v6_address(instance_id)
+        .await
+        .map_err(ActionError::action_failed)?)
 }
 
 async fn sic_allocate_v6_address_undo(
@@ -548,7 +552,11 @@ async fn sim_allocate_v6_address(
 ) -> Result<IpAddr, ActionError> {
     let osagactx = sagactx.user_data();
     let nexus = osagactx.nexus();
-    Ok(nexus.allocate_static_v6_address().await.map_err(ActionError::action_failed)?)
+    let instance_id = sagactx.lookup::<Uuid>("instance_id")?;
+    Ok(nexus
+        .allocate_static_v6_address(instance_id)
+        .await
+        .map_err(ActionError::action_failed)?)
 }
 
 async fn sim_allocate_v6_address_undo(
@@ -584,7 +592,8 @@ async fn sic_instance_ensure(
         .await
         .map_err(ActionError::action_failed)?;
 
-    let allocated_control_ip = sagactx.lookup::<IpAddr>("allocated_control_ip")?;
+    let allocated_control_ip =
+        sagactx.lookup::<IpAddr>("allocated_control_ip")?;
 
     // Ask the sled agent to begin the state change.  Then update the database
     // to reflect the new intermediate state.  If this update is not the newest
@@ -656,7 +665,7 @@ pub fn saga_instance_migrate() -> SagaTemplate<SagaInstanceMigrate> {
         ActionFunc::new_action(
             sim_allocate_v6_address,
             sim_allocate_v6_address_undo,
-        )
+        ),
     );
 
     template_builder.append(
@@ -749,7 +758,8 @@ async fn sim_instance_migrate(
         .await
         .map_err(ActionError::action_failed)?;
 
-    let allocated_control_ip = sagactx.lookup::<IpAddr>("allocated_control_ip")?;
+    let allocated_control_ip =
+        sagactx.lookup::<IpAddr>("allocated_control_ip")?;
 
     let new_runtime_state: InstanceRuntimeState = dst_sa
         .instance_put(

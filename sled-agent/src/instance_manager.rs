@@ -380,11 +380,29 @@ mod test {
         };
 
         // Creates instance, start + transition.
-        im.ensure(id, rt.clone(), target.clone(), None, "127.0.0.1".parse().unwrap()).await.unwrap();
+        im.ensure(
+            id,
+            rt.clone(),
+            target.clone(),
+            None,
+            "127.0.0.1".parse().unwrap(),
+        )
+        .await
+        .unwrap();
         // Transition only.
-        im.ensure(id, rt.clone(), target.clone(), None, "127.0.0.1".parse().unwrap()).await.unwrap();
+        im.ensure(
+            id,
+            rt.clone(),
+            target.clone(),
+            None,
+            "127.0.0.1".parse().unwrap(),
+        )
+        .await
+        .unwrap();
         // Transition only.
-        im.ensure(id, rt, target, None, "127.0.0.1".parse().unwrap()).await.unwrap();
+        im.ensure(id, rt, target, None, "127.0.0.1".parse().unwrap())
+            .await
+            .unwrap();
 
         assert_eq!(im.inner.instances.lock().unwrap().len(), 1);
         ticket.lock().unwrap().take();

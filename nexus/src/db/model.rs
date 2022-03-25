@@ -2355,10 +2355,19 @@ pub struct UpdateAvailableArtifact {
     pub target_length: i64,
 }
 
-#[derive(Queryable, QueryableByName, Insertable, Clone, Debug, Selectable, AsChangeset)]
+#[derive(
+    Queryable,
+    QueryableByName,
+    Insertable,
+    Clone,
+    Debug,
+    Selectable,
+    AsChangeset,
+)]
 #[table_name = "static_v6_address"]
 pub struct StaticV6Address {
     pub address: IpNetwork,
+    pub associated_id: Uuid,
 }
 
 #[cfg(test)]

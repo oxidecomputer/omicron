@@ -3413,6 +3413,7 @@ impl DataStore {
 
     pub async fn allocate_static_v6_address(
         &self,
+        associated_id: Uuid,
     ) -> Result<IpAddr, Error> {
         use db::schema::static_v6_address::dsl;
 
@@ -3420,14 +3421,24 @@ impl DataStore {
             .transaction(move |conn| {
                 // Grab the next sequential address
                 // XXX should this use push_next_available_ip_subquery?
-                // refactor?
-                let new_address: Vec<StaticV6Address> = diesel::sql_query("select static_v6_address.address + 1 as address from static_v6_address where not exists (select 1 from static_v6_address tmp where tmp.address = static_v6_address.address + 1) limit 1").load(conn)?;
+                // XXX refactor push_next_available_ip_subquery?
+                // XXX this is a full table scan
+                let query = vec![
+                    "select".to_string(),
+                    format!("'{}'::UUID", associated_id),
+                    "as associated_id, static_v6_address.address + 1 as address".to_string(),
+                    "from static_v6_address where not exists".to_string(),
+                    "(select 1 from static_v6_address tmp where tmp.address = static_v6_address.address + 1)".to_string(),
+                    "limit 1".to_string(),
+                ];
+                let new_address: Vec<StaticV6Address> = diesel::sql_query(query.join(" ")).load(conn)?;
 
                 let new_address = if new_address.len() != 1 {
                     // This means there are no addresses in the table!
-                    // XXX normally this should come from something else, hard
-                    // code here.
+                    // XXX normally this base address should come from something
+                    // else, hard code here.
                     StaticV6Address {
+                        associated_id,
                         address: "fd00:1234::101".parse().unwrap(),
                     }
                 } else {
@@ -3444,6 +3455,26 @@ impl DataStore {
             .await
             .map_err(|e: async_bb8_diesel::PoolError| {
                 Error::internal_error(&format!("Transaction error: {}", e))
+            })
+    }
+
+    pub async fn static_v6_address_fetch(
+        &self,
+        associated_id: Uuid,
+    ) -> LookupResult<IpAddr> {
+        use db::schema::static_v6_address::dsl;
+
+        dsl::static_v6_address
+            .filter(dsl::associated_id.eq(associated_id))
+            .select(StaticV6Address::as_select())
+            .first_async(self.pool())
+            .await
+            .map(|x| x.address.ip())
+            .map_err(|e| {
+                Error::internal_error(&format!(
+                    "error fetching static v6 address for {:?}: {:?}",
+                    associated_id, e
+                ))
             })
     }
 
@@ -3946,19 +3977,19 @@ mod test {
 
         // db contents: []
         let address1 =
-            datastore.allocate_static_v6_address().await?;
+            datastore.allocate_static_v6_address(Uuid::new_v4()).await?;
         // db contents: [101]
         assert_eq!(address1, "fd00:1234::101".parse::<Ipv6Addr>().unwrap());
 
         // db contents: [101]
         let address2 =
-            datastore.allocate_static_v6_address().await?;
+            datastore.allocate_static_v6_address(Uuid::new_v4()).await?;
         // db contents: [101, 102]
         assert_eq!(address2, "fd00:1234::102".parse::<Ipv6Addr>().unwrap());
 
         // db contents: [101, 102]
         let address3 =
-            datastore.allocate_static_v6_address().await?;
+            datastore.allocate_static_v6_address(Uuid::new_v4()).await?;
         // db contents: [101, 102, 103]
         assert_eq!(address3, "fd00:1234::103".parse::<Ipv6Addr>().unwrap());
 
@@ -3968,7 +3999,7 @@ mod test {
 
         // db contents: [102, 103]
         let address4 =
-            datastore.allocate_static_v6_address().await?;
+            datastore.allocate_static_v6_address(Uuid::new_v4()).await?;
         // db contents: [102, 103, 104]
         assert_eq!(address4, "fd00:1234::104".parse::<Ipv6Addr>().unwrap());
 
@@ -3982,21 +4013,32 @@ mod test {
 
         // db contents: [103]
         let address5 =
-            datastore.allocate_static_v6_address().await?;
+            datastore.allocate_static_v6_address(Uuid::new_v4()).await?;
         // db contents: [103, 104]
         assert_eq!(address5, "fd00:1234::104".parse::<Ipv6Addr>().unwrap());
 
         // db contents: [103, 104]
         let address6 =
-            datastore.allocate_static_v6_address().await?;
+            datastore.allocate_static_v6_address(Uuid::new_v4()).await?;
         // db contents: [103, 104, 105]
         assert_eq!(address6, "fd00:1234::105".parse::<Ipv6Addr>().unwrap());
 
         // db contents: [103, 104, 105]
         let address7 =
-            datastore.allocate_static_v6_address().await?;
+            datastore.allocate_static_v6_address(Uuid::new_v4()).await?;
         // db contents: [103, 104, 105, 106]
         assert_eq!(address7, "fd00:1234::106".parse::<Ipv6Addr>().unwrap());
+
+        // get associated address
+        let id = Uuid::new_v4();
+        let address = datastore.allocate_static_v6_address(id.clone()).await?;
+        assert_eq!(address, datastore.static_v6_address_fetch(id).await?);
+
+        // assert that getting the address of an unknown ID returns an error
+        assert!(datastore
+            .static_v6_address_fetch(Uuid::new_v4())
+            .await
+            .is_err());
 
         let _ = db.cleanup().await;
 

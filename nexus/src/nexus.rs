@@ -1256,6 +1256,9 @@ impl Nexus {
             nics: vec![],
         };
 
+        let allocated_control_ip =
+            self.db_datastore.static_v6_address_fetch(db_instance.id()).await?;
+
         let new_runtime = sa
             .instance_put(
                 &db_instance.id(),
@@ -1263,10 +1266,7 @@ impl Nexus {
                     initial: instance_hardware,
                     target: requested,
                     migrate: None,
-                    // XXX where does this come from? we need to associate the
-                    // control ip with the instance, but the static_v6_address
-                    // table only has one column (the address)
-                    allocated_control_ip: "TODO".parse().unwrap(),
+                    allocated_control_ip: allocated_control_ip.to_string(),
                 },
             )
             .await
@@ -3074,10 +3074,11 @@ impl Nexus {
         Ok(body)
     }
 
-    pub async fn allocate_static_v6_address(&self) -> Result<IpAddr, Error> {
-        self.db_datastore
-            .allocate_static_v6_address()
-            .await
+    pub async fn allocate_static_v6_address(
+        &self,
+        associated_id: Uuid,
+    ) -> Result<IpAddr, Error> {
+        self.db_datastore.allocate_static_v6_address(associated_id).await
     }
 
     pub async fn free_static_v6_address(
