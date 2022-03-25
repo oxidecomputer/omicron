@@ -301,6 +301,12 @@ impl<T: ClientError> From<progenitor::progenitor_client::Error<T>> for Error {
     }
 }
 
+impl From<serde_json::Error> for Error {
+    fn from(e: serde_json::Error) -> Self {
+        Error::internal_error(&e.to_string())
+    }
+}
+
 /// Like [`assert!`], except that instead of panicking, this function returns an
 /// `Err(Error::InternalError)` with an appropriate message if the given
 /// condition is not true.

@@ -4760,6 +4760,13 @@
           "description": {
             "type": "string"
           },
+          "disks": {
+            "description": "The disks to be created or attached for this instance.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/InstanceDiskAttachment"
+            }
+          },
           "hostname": {
             "type": "string"
           },
@@ -4787,6 +4794,73 @@
           "memory",
           "name",
           "ncpus"
+        ]
+      },
+      "InstanceDiskAttachment": {
+        "description": "Describe the instance's disks at creation time",
+        "oneOf": [
+          {
+            "description": "During instance creation, create and attach disks",
+            "type": "object",
+            "properties": {
+              "description": {
+                "type": "string"
+              },
+              "name": {
+                "$ref": "#/components/schemas/Name"
+              },
+              "size": {
+                "description": "size of the Disk",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/ByteCount"
+                  }
+                ]
+              },
+              "snapshot_id": {
+                "nullable": true,
+                "description": "id for snapshot from which the Disk should be created, if any",
+                "type": "string",
+                "format": "uuid"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "create"
+                ]
+              }
+            },
+            "required": [
+              "description",
+              "name",
+              "size",
+              "type"
+            ]
+          },
+          {
+            "description": "During instance creation, attach this disk",
+            "type": "object",
+            "properties": {
+              "disk": {
+                "description": "A disk name to attach",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/Name"
+                  }
+                ]
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "attach"
+                ]
+              }
+            },
+            "required": [
+              "disk",
+              "type"
+            ]
+          }
         ]
       },
       "InstanceMigrate": {

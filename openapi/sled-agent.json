@@ -199,6 +199,44 @@
         "format": "uint64",
         "minimum": 0
       },
+      "CrucibleOpts": {
+        "type": "object",
+        "properties": {
+          "cert_pem": {
+            "nullable": true,
+            "type": "string"
+          },
+          "control": {
+            "nullable": true,
+            "type": "string"
+          },
+          "key": {
+            "nullable": true,
+            "type": "string"
+          },
+          "key_pem": {
+            "nullable": true,
+            "type": "string"
+          },
+          "lossy": {
+            "type": "boolean"
+          },
+          "root_cert_pem": {
+            "nullable": true,
+            "type": "string"
+          },
+          "target": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "lossy",
+          "target"
+        ]
+      },
       "DatasetEnsureBody": {
         "description": "Used to request a new partition kind exists within a zpool.\n\nMany partition types are associated with services that will be instantiated when the partition is detected.",
         "type": "object",
@@ -299,6 +337,39 @@
         "required": [
           "initial_runtime",
           "target"
+        ]
+      },
+      "DiskRequest": {
+        "type": "object",
+        "properties": {
+          "device": {
+            "type": "string"
+          },
+          "gen": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "name": {
+            "type": "string"
+          },
+          "read_only": {
+            "type": "boolean"
+          },
+          "slot": {
+            "$ref": "#/components/schemas/Slot"
+          },
+          "volume_construction_request": {
+            "$ref": "#/components/schemas/VolumeConstructionRequest"
+          }
+        },
+        "required": [
+          "device",
+          "gen",
+          "name",
+          "read_only",
+          "slot",
+          "volume_construction_request"
         ]
       },
       "DiskRuntimeState": {
@@ -594,6 +665,12 @@
         "description": "Describes the instance hardware.",
         "type": "object",
         "properties": {
+          "disks": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DiskRequest"
+            }
+          },
           "nics": {
             "type": "array",
             "items": {
@@ -605,6 +682,7 @@
           }
         },
         "required": [
+          "disks",
           "nics",
           "runtime"
         ]
@@ -895,6 +973,12 @@
           "name"
         ]
       },
+      "Slot": {
+        "description": "A stable index which is translated by Propolis into a PCI BDF, visible to the guest.",
+        "type": "integer",
+        "format": "uint8",
+        "minimum": 0
+      },
       "UpdateArtifact": {
         "description": "Description of a single update artifact.",
         "type": "object",
@@ -921,6 +1005,99 @@
         "type": "string",
         "enum": [
           "zone"
+        ]
+      },
+      "VolumeConstructionRequest": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "block_size": {
+                "type": "integer",
+                "format": "uint64",
+                "minimum": 0
+              },
+              "read_only_parent": {
+                "nullable": true,
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/VolumeConstructionRequest"
+                  }
+                ]
+              },
+              "sub_volumes": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/VolumeConstructionRequest"
+                }
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "Volume"
+                ]
+              }
+            },
+            "required": [
+              "block_size",
+              "sub_volumes",
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "block_size": {
+                "type": "integer",
+                "format": "uint64",
+                "minimum": 0
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "Url"
+                ]
+              },
+              "url": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "block_size",
+              "type",
+              "url"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "block_size": {
+                "type": "integer",
+                "format": "uint64",
+                "minimum": 0
+              },
+              "gen": {
+                "type": "integer",
+                "format": "uint64",
+                "minimum": 0
+              },
+              "opts": {
+                "$ref": "#/components/schemas/CrucibleOpts"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "Region"
+                ]
+              }
+            },
+            "required": [
+              "block_size",
+              "gen",
+              "opts",
+              "type"
+            ]
+          }
         ]
       }
     }
