@@ -257,7 +257,7 @@ async fn test_db_run() {
     // Send SIGINT to that process group.  This simulates an interactive session
     // where the user hits ^C.  Make sure everything is cleaned up gracefully.
     eprintln!("sending SIGINT to process group {}", pgid);
-    assert_eq!(0, unsafe { libc::kill(-pgid, libc::SIGINT) });
+    assert_eq!(1, unsafe { libc::kill(-pgid, libc::SIGINT) });
 
     let wait = verify_graceful_exit(dbrun);
     eprintln!("wait result: {:?}", wait);

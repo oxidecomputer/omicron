@@ -151,7 +151,7 @@ async fn test_disk_create_attach_detach_delete(
     let url_instance_disks =
         get_instance_disks_url(instance.identity.name.as_str());
     let disks = disks_list(&client, &url_instance_disks).await;
-    assert_eq!(disks.len(), 0);
+    assert_eq!(disks.len(), 1);
 
     let url_instance_attach_disk =
         get_disk_attach_url(instance.identity.name.as_str());
