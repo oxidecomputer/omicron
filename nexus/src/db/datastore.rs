@@ -1300,6 +1300,16 @@ impl DataStore {
         let failed = DbInstanceState::new(ApiInstanceState::Failed);
 
         let instance_id = authz_instance.id();
+
+        // XXX delete allocated ip
+        // XXX what if the address isn't in the table?
+        // XXX do in transaction (saga?)
+        //
+        //use db::schema::static_v6_address::dsl as address_dsl
+        //diesel::delete(address_dsl::static_v6_address)
+        //    .filter(address_dsl::associated_id.eq(instance_id))
+        //    .execute(conn)?;
+
         let result = diesel::update(dsl::instance)
             .filter(dsl::time_deleted.is_null())
             .filter(dsl::id.eq(instance_id))
@@ -1314,6 +1324,7 @@ impl DataStore {
                     ErrorHandler::NotFoundByResource(authz_instance),
                 )
             })?;
+
         match result.status {
             UpdateStatus::Updated => Ok(()),
             UpdateStatus::NotUpdatedButExists => {
