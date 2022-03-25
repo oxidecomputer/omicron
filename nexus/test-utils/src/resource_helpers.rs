@@ -143,6 +143,7 @@ pub async fn create_instance(
             hostname: String::from("the_host"),
             network_interfaces:
                 params::InstanceNetworkInterfaceAttachment::Default,
+            disks: vec![],
         },
     )
     .await
