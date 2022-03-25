@@ -65,10 +65,10 @@ pub async fn spoof_login(
             .body("".into())?); // TODO: failed login response body?
     }
 
-    let session = nexus
-        // TODO: obviously
-        .session_create(user_id.unwrap())
-        .await?;
+    let user_id = user_id.unwrap();
+
+    let session = nexus.session_create(user_id).await?;
+
     Ok(Response::builder()
         .status(StatusCode::OK)
         .header(

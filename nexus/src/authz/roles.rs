@@ -136,7 +136,7 @@ pub async fn load_roles_for_resource(
         // ... then fetch all the roles for this user that are associated with
         // this resource.
         trace!(opctx.log, "loading roles";
-            "actor_id" => actor_id.0.to_string(),
+            "actor_id" => actor_id.id.to_string(),
             "resource_type" => ?resource_type,
             "resource_id" => resource_id.to_string(),
         );
@@ -144,7 +144,7 @@ pub async fn load_roles_for_resource(
         let roles = datastore
             .role_asgn_builtin_list_for(
                 opctx,
-                actor_id.0,
+                actor_id.id,
                 resource_type,
                 resource_id,
             )

@@ -9,9 +9,9 @@ use crate::db::identity::{Asset, Resource};
 use crate::db::schema::{
     console_session, dataset, disk, instance, metric_producer,
     network_interface, organization, oximeter, project, rack, region,
-    role_assignment_builtin, role_builtin, router_route, sled, snapshot,
-    update_available_artifact, user_builtin, volume, vpc, vpc_firewall_rule,
-    vpc_router, vpc_subnet, zpool,
+    role_assignment_builtin, role_builtin, router_route, silo, silo_user, sled,
+    snapshot, update_available_artifact, user_builtin, volume, vpc,
+    vpc_firewall_rule, vpc_router, vpc_subnet, zpool,
 };
 use crate::defaults;
 use crate::external_api::params;
@@ -919,6 +919,67 @@ impl Volume {
     }
 }
 
+/// Describes a silo within the database.
+#[derive(Queryable, Insertable, Debug, Resource, Selectable)]
+#[table_name = "silo"]
+pub struct Silo {
+    #[diesel(embed)]
+    identity: SiloIdentity,
+
+    pub discoverable: bool,
+
+    /// child resource generation number, per RFD 192
+    pub rcgen: Generation,
+}
+
+impl Silo {
+    /// Creates a new database Silo object.
+    pub fn new(params: params::SiloCreate) -> Self {
+        Self::new_with_id(Uuid::new_v4(), params)
+    }
+
+    pub fn new_with_id(id: Uuid, params: params::SiloCreate) -> Self {
+        Self {
+            identity: SiloIdentity::new(id, params.identity),
+            discoverable: params.discoverable,
+            rcgen: Generation::new(),
+        }
+    }
+}
+
+impl DatastoreCollection<Organization> for Silo {
+    type CollectionId = Uuid;
+    type GenerationNumberColumn = silo::dsl::rcgen;
+    type CollectionTimeDeletedColumn = silo::dsl::time_deleted;
+    type CollectionIdColumn = organization::dsl::silo_id;
+}
+
+/// Describes a silo user within the database.
+#[derive(Queryable, Insertable, Debug, Selectable)]
+#[table_name = "silo_user"]
+pub struct SiloUser {
+    pub id: Uuid,
+    pub silo_id: Uuid,
+
+    pub time_created: DateTime<Utc>,
+    pub time_modified: DateTime<Utc>,
+    pub time_deleted: Option<DateTime<Utc>>,
+}
+
+impl SiloUser {
+    pub fn new(silo_id: Uuid, user_id: Uuid) -> Self {
+        let now = Utc::now();
+        Self {
+            id: user_id,
+            silo_id,
+
+            time_created: now,
+            time_modified: now,
+            time_deleted: None,
+        }
+    }
+}
+
 /// Describes an organization within the database.
 #[derive(Queryable, Insertable, Debug, Resource, Selectable)]
 #[table_name = "organization"]
@@ -926,18 +987,25 @@ pub struct Organization {
     #[diesel(embed)]
     identity: OrganizationIdentity,
 
+    silo_id: Uuid,
+
     /// child resource generation number, per RFD 192
     pub rcgen: Generation,
 }
 
 impl Organization {
     /// Creates a new database Organization object.
-    pub fn new(params: params::OrganizationCreate) -> Self {
+    pub fn new(params: params::OrganizationCreate, silo_id: Uuid) -> Self {
         let id = Uuid::new_v4();
         Self {
             identity: OrganizationIdentity::new(id, params.identity),
+            silo_id,
             rcgen: Generation::new(),
         }
+    }
+
+    pub fn silo_id(&self) -> Uuid {
+        self.silo_id
     }
 }
 
@@ -2280,13 +2348,13 @@ pub struct ConsoleSession {
     pub token: String,
     pub time_created: DateTime<Utc>,
     pub time_last_used: DateTime<Utc>,
-    pub user_id: Uuid,
+    pub silo_user_id: Uuid,
 }
 
 impl ConsoleSession {
-    pub fn new(token: String, user_id: Uuid) -> Self {
+    pub fn new(token: String, silo_user_id: Uuid) -> Self {
         let now = Utc::now();
-        Self { token, user_id, time_last_used: now, time_created: now }
+        Self { token, silo_user_id, time_last_used: now, time_created: now }
     }
 }
 

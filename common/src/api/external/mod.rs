@@ -514,6 +514,9 @@ impl TryFrom<i64> for Generation {
 #[display(style = "kebab-case")]
 pub enum ResourceType {
     Fleet,
+    Silo,
+    SiloUser,
+    ConsoleSession,
     Organization,
     Project,
     Dataset,

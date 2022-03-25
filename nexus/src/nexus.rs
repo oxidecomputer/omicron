@@ -13,6 +13,7 @@ use crate::db::identity::{Asset, Resource};
 use crate::db::model::DatasetKind;
 use crate::db::model::Name;
 use crate::db::model::RouterRoute;
+use crate::db::model::SiloUser;
 use crate::db::model::VpcRouter;
 use crate::db::model::VpcRouterKind;
 use crate::db::model::VpcSubnet;
@@ -107,6 +108,12 @@ pub trait TestInterfaces {
     ) -> CreateResult<db::model::ConsoleSession>;
 
     async fn set_disk_as_faulted(&self, disk_id: &Uuid) -> Result<bool, Error>;
+
+    async fn silo_user_create(
+        &self,
+        silo_id: Uuid,
+        silo_user_id: Uuid,
+    ) -> CreateResult<SiloUser>;
 }
 
 pub static BASE_ARTIFACT_DIR: &str = "/var/tmp/oxide_artifacts";
@@ -484,6 +491,51 @@ impl Nexus {
         })
     }
 
+    /*
+     * Silos
+     */
+
+    pub async fn silo_create(
+        &self,
+        opctx: &OpContext,
+        new_silo_params: params::SiloCreate,
+    ) -> CreateResult<db::model::Silo> {
+        let silo = db::model::Silo::new(new_silo_params);
+        self.db_datastore.silo_create(opctx, silo).await
+    }
+
+    pub async fn silo_fetch(
+        &self,
+        opctx: &OpContext,
+        name: &Name,
+    ) -> LookupResult<db::model::Silo> {
+        self.db_datastore.silo_fetch(opctx, name).await
+    }
+
+    pub async fn silos_list_by_name(
+        &self,
+        opctx: &OpContext,
+        pagparams: &DataPageParams<'_, Name>,
+    ) -> ListResultVec<db::model::Silo> {
+        self.db_datastore.silos_list_by_name(opctx, pagparams).await
+    }
+
+    pub async fn silos_list_by_id(
+        &self,
+        opctx: &OpContext,
+        pagparams: &DataPageParams<'_, Uuid>,
+    ) -> ListResultVec<db::model::Silo> {
+        self.db_datastore.silos_list_by_id(opctx, pagparams).await
+    }
+
+    pub async fn silo_delete(
+        &self,
+        opctx: &OpContext,
+        name: &Name,
+    ) -> DeleteResult {
+        self.db_datastore.silo_delete(opctx, name).await
+    }
+
     // Organizations
 
     pub async fn organization_create(
@@ -491,7 +543,9 @@ impl Nexus {
         opctx: &OpContext,
         new_organization: &params::OrganizationCreate,
     ) -> CreateResult<db::model::Organization> {
-        let db_org = db::model::Organization::new(new_organization.clone());
+        let silo_id = opctx.authn.silo_required()?;
+        let db_org =
+            db::model::Organization::new(new_organization.clone(), silo_id);
         self.db_datastore.organization_create(opctx, db_org).await
     }
 
@@ -2924,7 +2978,7 @@ impl Nexus {
     pub async fn session_fetch(
         &self,
         token: String,
-    ) -> LookupResult<db::model::ConsoleSession> {
+    ) -> LookupResult<authn::ConsoleSessionWithSiloId> {
         self.db_datastore.session_fetch(token).await
     }
 
@@ -2932,8 +2986,15 @@ impl Nexus {
         &self,
         user_id: Uuid,
     ) -> CreateResult<db::model::ConsoleSession> {
+        if !self.login_allowed(user_id).await? {
+            return Err(Error::Unauthenticated {
+                internal_message: "User not allowed to login".to_string(),
+            });
+        }
+
         let session =
             db::model::ConsoleSession::new(generate_session_token(), user_id);
+
         Ok(self.db_datastore.session_create(session).await?)
     }
 
@@ -2941,7 +3002,7 @@ impl Nexus {
     pub async fn session_update_last_used(
         &self,
         token: String,
-    ) -> UpdateResult<db::model::ConsoleSession> {
+    ) -> UpdateResult<authn::ConsoleSessionWithSiloId> {
         Ok(self.db_datastore.session_update_last_used(token).await?)
     }
 
@@ -3190,6 +3251,41 @@ impl Nexus {
         })?;
         Ok(body)
     }
+
+    async fn login_allowed(&self, silo_user_id: Uuid) -> Result<bool, Error> {
+        // Was this silo user deleted?
+        let fetch_result =
+            self.db_datastore.silo_user_fetch(silo_user_id).await;
+
+        match fetch_result {
+            Err(e) => {
+                match e {
+                    Error::ObjectNotFound { type_name: _, lookup_type: _ } => {
+                        // if the silo user was deleted, they're not allowed to
+                        // log in :)
+                        return Ok(false);
+                    }
+
+                    _ => {
+                        return Err(e);
+                    }
+                }
+            }
+
+            Ok(_) => {
+                // they're allowed
+            }
+        }
+
+        Ok(true)
+    }
+
+    pub async fn silo_user_fetch(
+        &self,
+        silo_user_id: Uuid,
+    ) -> LookupResult<SiloUser> {
+        self.db_datastore.silo_user_fetch(silo_user_id).await
+    }
 }
 
 fn generate_session_token() -> String {
@@ -3263,5 +3359,14 @@ impl TestInterfaces for Nexus {
         self.db_datastore
             .disk_update_runtime(&opctx, &authz_disk, &new_runtime)
             .await
+    }
+
+    async fn silo_user_create(
+        &self,
+        silo_id: Uuid,
+        silo_user_id: Uuid,
+    ) -> CreateResult<SiloUser> {
+        let silo_user = SiloUser::new(silo_id, silo_user_id);
+        Ok(self.db_datastore.silo_user_create(silo_user).await?)
     }
 }

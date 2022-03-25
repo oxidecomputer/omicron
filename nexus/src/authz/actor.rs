@@ -23,7 +23,7 @@ impl AnyActor {
         let actor = authn.actor();
         AnyActor {
             authenticated: actor.is_some(),
-            actor_id: actor.map(|a| a.0),
+            actor_id: actor.map(|a| a.id),
             roles,
         }
     }

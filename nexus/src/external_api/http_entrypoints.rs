@@ -11,7 +11,7 @@ use crate::ServerContext;
 use super::{
     console_api, params,
     views::{
-        Organization, Project, Rack, Role, Sled, Snapshot, User, Vpc,
+        Organization, Project, Rack, Role, Silo, Sled, Snapshot, User, Vpc,
         VpcRouter, VpcSubnet,
     },
 };
@@ -70,6 +70,11 @@ type NexusApiDescription = ApiDescription<Arc<ServerContext>>;
 /// Returns a description of the external nexus API
 pub fn external_api() -> NexusApiDescription {
     fn register_endpoints(api: &mut NexusApiDescription) -> Result<(), String> {
+        api.register(silos_get)?;
+        api.register(silos_post)?;
+        api.register(silos_get_silo)?;
+        api.register(silos_delete_silo)?;
+
         api.register(organizations_get)?;
         api.register(organizations_post)?;
         api.register(organizations_get_organization)?;
@@ -213,12 +218,125 @@ pub fn external_api() -> NexusApiDescription {
 // clients. Client generators use operationId to name API methods, so changing
 // a function name is a breaking change from a client perspective.
 
+// TODO authz for silo endpoints
+
+// List all silos (that are discoverable).
+#[endpoint {
+    method = GET,
+    path = "/silos",
+    tags = ["silos"],
+}]
+async fn silos_get(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    query_params: Query<PaginatedByNameOrId>,
+) -> Result<HttpResponseOk<ResultsPage<Silo>>, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let query = query_params.into_inner();
+        let params = ScanByNameOrId::from_query(&query)?;
+        let field = pagination_field_for_scan_params(params);
+
+        let silos = match field {
+            PagField::Id => {
+                let page_selector = data_page_params_nameid_id(&rqctx, &query)?;
+                nexus.silos_list_by_id(&opctx, &page_selector).await?
+            }
+
+            PagField::Name => {
+                let page_selector =
+                    data_page_params_nameid_name(&rqctx, &query)?
+                        .map_name(|n| Name::ref_cast(n));
+                nexus.silos_list_by_name(&opctx, &page_selector).await?
+            }
+        }
+        .into_iter()
+        .map(|p| p.into())
+        .collect();
+        Ok(HttpResponseOk(ScanByNameOrId::results_page(&query, silos)?))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Create a new silo.
+#[endpoint {
+    method = POST,
+    path = "/silos",
+    tags = ["silos"],
+}]
+async fn silos_post(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    new_silo_params: TypedBody<params::SiloCreate>,
+) -> Result<HttpResponseCreated<Silo>, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let silo =
+            nexus.silo_create(&opctx, new_silo_params.into_inner()).await?;
+        Ok(HttpResponseCreated(silo.into()))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Path parameters for Silo requests
+#[derive(Deserialize, JsonSchema)]
+struct SiloPathParam {
+    /// The silo's unique name.
+    silo_name: Name,
+}
+
+/// Fetch a specific silo
+#[endpoint {
+    method = GET,
+    path = "/silos/{silo_name}",
+    tags = ["silos"],
+}]
+async fn silos_get_silo(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    path_params: Path<SiloPathParam>,
+) -> Result<HttpResponseOk<Silo>, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let path = path_params.into_inner();
+    let silo_name = &path.silo_name;
+    let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let silo = nexus.silo_fetch(&opctx, &silo_name).await?;
+        Ok(HttpResponseOk(silo.into()))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Delete a specific silo.
+#[endpoint {
+    method = DELETE,
+    path = "/silos/{silo_name}",
+    tags = ["silos"],
+}]
+async fn silos_delete_silo(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    path_params: Path<SiloPathParam>,
+) -> Result<HttpResponseDeleted, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let params = path_params.into_inner();
+    let silo_name = &params.silo_name;
+    let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        nexus.silo_delete(&opctx, &silo_name).await?;
+        Ok(HttpResponseDeleted())
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
 /// List all organizations.
 #[endpoint {
     method = GET,
     path = "/organizations",
     tags = ["organizations"],
- }]
+}]
 async fn organizations_get(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     query_params: Query<PaginatedByNameOrId>,
