@@ -508,6 +508,121 @@ async fn test_instances_invalid_creation_returns_bad_request(
         .starts_with("unable to parse body: invalid value: integer `-3`"));
 }
 
+#[nexus_test]
+async fn test_instance_create_saga_removes_instance_database_record(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    // This test verifies that we remove the database record for an instance
+    // when the instance-create saga fails and unwinds.
+    //
+    // The test works as follows:
+    //
+    // - Create one instance, with a known IP. This should succeed.
+    // - Create another instance, with the same IP. This should fail.
+    // - Create that same instance again, with a different IP. This should
+    // succeed, even though most of the data (such as the name) would have
+    // conflicted, should the second provision have succeeded.
+    let client = &cptestctx.external_client;
+
+    // Create test organization and project
+    create_organization(&client, ORGANIZATION_NAME).await;
+    let url_instances = format!(
+        "/organizations/{}/projects/{}/instances",
+        ORGANIZATION_NAME, PROJECT_NAME
+    );
+    let _ = create_project(&client, ORGANIZATION_NAME, PROJECT_NAME).await;
+
+    // The network interface parameters.
+    let default_name = "default".parse::<Name>().unwrap();
+    let requested_address = "172.30.0.10".parse::<std::net::IpAddr>().unwrap();
+    let if0_params = params::NetworkInterfaceCreate {
+        identity: IdentityMetadataCreateParams {
+            name: Name::try_from(String::from("if0")).unwrap(),
+            description: String::from("first custom interface"),
+        },
+        vpc_name: default_name.clone(),
+        subnet_name: default_name.clone(),
+        ip: Some(requested_address),
+    };
+    let interface_params = params::InstanceNetworkInterfaceAttachment::Create(
+        params::InstanceNetworkInterfaceCreate {
+            params: vec![if0_params.clone()],
+        },
+    );
+
+    // Create the parameters for the instance itself, and create it.
+    let instance_params = params::InstanceCreate {
+        identity: IdentityMetadataCreateParams {
+            name: Name::try_from(String::from("unwind-test-inst")).unwrap(),
+            description: String::from("instance to test saga unwind"),
+        },
+        ncpus: InstanceCpuCount::try_from(2).unwrap(),
+        memory: ByteCount::from_mebibytes_u32(4),
+        hostname: String::from("inst"),
+        network_interfaces: interface_params.clone(),
+    };
+    let response =
+        NexusRequest::objects_post(client, &url_instances, &instance_params)
+            .authn_as(AuthnMode::PrivilegedUser)
+            .execute()
+            .await
+            .expect("Failed to create first instance");
+    let _ = response.parsed_body::<Instance>().unwrap();
+
+    // Try to create a _new_ instance, with the same IP address. Note that the
+    // other data does not conflict yet.
+    let instance_params = params::InstanceCreate {
+        identity: IdentityMetadataCreateParams {
+            name: Name::try_from(String::from("unwind-test-inst2")).unwrap(),
+            description: String::from("instance to test saga unwind 2"),
+        },
+        ncpus: InstanceCpuCount::try_from(2).unwrap(),
+        memory: ByteCount::from_mebibytes_u32(4),
+        hostname: String::from("inst2"),
+        network_interfaces: interface_params,
+    };
+    let _ =
+        NexusRequest::objects_post(client, &url_instances, &instance_params)
+            .authn_as(AuthnMode::PrivilegedUser)
+            .execute()
+            .await
+            .expect_err(
+                "Should have failed to create second instance with \
+                the same IP address as the first",
+            );
+
+    // Update the IP address to one that will succeed, but leave the other data
+    // as-is. This would fail with a conflict on the instance name, if we don't
+    // fully unwind the saga and delete the instance database record.
+    let requested_address = "172.30.0.11".parse::<std::net::IpAddr>().unwrap();
+    let if0_params = params::NetworkInterfaceCreate {
+        identity: IdentityMetadataCreateParams {
+            name: Name::try_from(String::from("if0")).unwrap(),
+            description: String::from("first custom interface"),
+        },
+        vpc_name: default_name.clone(),
+        subnet_name: default_name.clone(),
+        ip: Some(requested_address),
+    };
+    let interface_params = params::InstanceNetworkInterfaceAttachment::Create(
+        params::InstanceNetworkInterfaceCreate {
+            params: vec![if0_params.clone()],
+        },
+    );
+    let instance_params = params::InstanceCreate {
+        network_interfaces: interface_params,
+        ..instance_params.clone()
+    };
+    let response =
+        NexusRequest::objects_post(client, &url_instances, &instance_params)
+            .authn_as(AuthnMode::PrivilegedUser)
+            .execute()
+            .await
+            .expect("Creating a new instance should succeed");
+    let instance = response.parsed_body::<Instance>().unwrap();
+    assert_eq!(instance.identity.name, instance_params.identity.name);
+}
+
 // Basic test requesting an interface with a specific IP address.
 #[nexus_test]
 async fn test_instance_with_single_explicit_ip_address(
