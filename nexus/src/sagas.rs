@@ -524,7 +524,7 @@ async fn sic_create_instance_record(
     Ok(instance.runtime().clone().into())
 }
 
-// XXX can't reuse this function?
+// XXX can't reuse this function because ActionContext impl changes?
 
 async fn sic_allocate_v6_address(
     sagactx: ActionContext<SagaInstanceCreate>,

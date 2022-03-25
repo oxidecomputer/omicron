@@ -485,7 +485,7 @@ impl Instance {
         let v6 = running_zone
             .ensure_address(AddressRequest::new_static(
                 inner.allocated_control_ip,
-                None, // XXX what should this be?
+                None,
             ))
             .await?;
         info!(inner.log, "Created v6 address {} for zone: {}", v6, zname);
@@ -571,8 +571,6 @@ impl Instance {
     // Terminate the Propolis service.
     async fn stop(&self) -> Result<(), Error> {
         let mut inner = self.inner.lock().await;
-
-        // XXX free address through nexus internal client?
 
         let zname = propolis_zone_name(inner.propolis_id());
         warn!(inner.log, "Halting and removing zone: {}", zname);
