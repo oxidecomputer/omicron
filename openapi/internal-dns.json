@@ -1,0 +1,237 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "Internal DNS",
+    "version": "v0.1.0"
+  },
+  "paths": {
+    "/delete-records": {
+      "put": {
+        "operationId": "dns_records_delete",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "title": "Array_of_DnsRecordKey",
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/DnsRecordKey"
+                }
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Null",
+                  "type": "string",
+                  "enum": [
+                    null
+                  ]
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/get-records": {
+      "get": {
+        "operationId": "dns_records_get",
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Array_of_DnsKv",
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/DnsKv"
+                  }
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/set-records": {
+      "put": {
+        "operationId": "dns_records_set",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "title": "Array_of_DnsKv",
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/DnsKv"
+                }
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Null",
+                  "type": "string",
+                  "enum": [
+                    null
+                  ]
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "responses": {
+      "Error": {
+        "description": "Error",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      }
+    },
+    "schemas": {
+      "DnsKv": {
+        "type": "object",
+        "properties": {
+          "key": {
+            "$ref": "#/components/schemas/DnsRecordKey"
+          },
+          "record": {
+            "$ref": "#/components/schemas/DnsRecord"
+          }
+        },
+        "required": [
+          "key",
+          "record"
+        ]
+      },
+      "DnsRecord": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "AAAA": {
+                "type": "string",
+                "format": "ipv6"
+              }
+            },
+            "required": [
+              "AAAA"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "SRV": {
+                "$ref": "#/components/schemas/Srv"
+              }
+            },
+            "required": [
+              "SRV"
+            ],
+            "additionalProperties": false
+          }
+        ]
+      },
+      "DnsRecordKey": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
+        ]
+      },
+      "Error": {
+        "description": "Error information from a response.",
+        "type": "object",
+        "properties": {
+          "error_code": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          },
+          "request_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "message",
+          "request_id"
+        ]
+      },
+      "Srv": {
+        "type": "object",
+        "properties": {
+          "port": {
+            "type": "integer",
+            "format": "uint16",
+            "minimum": 0
+          },
+          "prio": {
+            "type": "integer",
+            "format": "uint16",
+            "minimum": 0
+          },
+          "target": {
+            "type": "string"
+          },
+          "weight": {
+            "type": "integer",
+            "format": "uint16",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "port",
+          "prio",
+          "target",
+          "weight"
+        ]
+      }
+    }
+  }
+}
