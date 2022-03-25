@@ -56,7 +56,7 @@ from = "smf/cockroachdb"
 to = "/var/svc/manifest/site/cockroachdb"
 
 [package.internal-dns]
-rust.binary_names = ["dns-server"]
+rust.binary_names = ["dnsadm", "dns-server"]
 rust.release = true
 service_name = "internal-dns"
 zone = true

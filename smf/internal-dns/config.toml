@@ -3,11 +3,11 @@ bind_address = "[fd00:1234::4]:5353"
 request_body_max_bytes = 1048576
 
 [dns]
-bind_address = "[fd00:1234::4]:4753"
+bind_address = "[fd00:1234::4]:53"
 
 [log]
 # Show log messages of this level and more severe
-level = "debug"
+level = "info"
 
 # Example output to a terminal (with colors)
 mode = "stderr-terminal"
