@@ -102,6 +102,7 @@ jobs:
     - uses: actions/checkout@28c7f3d2b5162b5ddd3dfd9a45aa55eaf396478b
     - uses: Swatinem/rust-cache@v1
       if: ${{ github.ref != 'refs/heads/main' }}
+    - uses: taiki-e/install-action@nextest
     - name: Report cargo version
       run: cargo --version
     - name: Configure GitHub cache for CockroachDB binaries
@@ -124,8 +125,6 @@ jobs:
     - name: Download CockroachDB binary
       if: steps.cache-cockroachdb.outputs.cache-hit != 'true'
       run: bash ./tools/ci_download_cockroachdb
-    - name: Install cargo-nextest
-      run: cargo install cargo-nextest
     - name: Create temporary directory for test outputs
       run: mkdir -p $OMICRON_TMP
     - name: Build
