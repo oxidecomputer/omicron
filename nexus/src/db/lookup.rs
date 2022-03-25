@@ -15,11 +15,17 @@ use crate::{
     db::model::Name,
 };
 use async_bb8_diesel::AsyncRunQueryDsl;
+use db_macros::lookup_resource;
 use diesel::{ExpressionMethods, QueryDsl, SelectableHelper};
 use futures::future::BoxFuture;
 use futures::FutureExt;
 use omicron_common::api::external::{LookupResult, LookupType, ResourceType};
 use uuid::Uuid;
+
+#[lookup_resource {
+    ancestors = [ "Project", "Organization" ]
+}]
+struct Foo {}
 
 // TODO-dap XXX Neither "fetcH" nor "lookup" needs to be a trait now that the
 // macro is defining the impls and the structs

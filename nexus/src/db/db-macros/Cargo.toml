@@ -11,4 +11,6 @@ proc-macro = true
 [dependencies]
 proc-macro2 = { version = "1.0" }
 quote = { version = "1.0" }
+serde = { version = "1.0", features = [ "derive" ] }
+serde_tokenstream = "0.1"
 syn = { version = "1.0", features = [ "full", "derive", "extra-traits" ] }

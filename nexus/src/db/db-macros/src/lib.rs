@@ -18,6 +18,8 @@ use quote::{format_ident, quote};
 use syn::spanned::Spanned;
 use syn::{Data, DataStruct, DeriveInput, Error, Fields, Ident, Lit, Meta};
 
+mod lookup;
+
 /// Looks for a Meta-style attribute with a particular identifier.
 ///
 /// As an example, for an attribute like `#[foo = "bar"]`, we can find this
@@ -328,6 +330,20 @@ fn build_asset_impl(
             }
         }
     }
+}
+
+/// Identical to [`macro@Resource`], but generates fewer fields.
+///
+/// Contains:
+/// - ID
+/// - Time Created
+/// - Time Modified
+#[proc_macro_attribute]
+pub fn lookup_resource(
+    attr: proc_macro::TokenStream,
+    input: proc_macro::TokenStream,
+) -> proc_macro::TokenStream {
+    lookup::lookup_resource(attr, input)
 }
 
 #[cfg(test)]
