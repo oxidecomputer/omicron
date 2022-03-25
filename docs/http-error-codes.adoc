@@ -1,0 +1,166 @@
+:showtitle:
+:numbered:
+:toc: left
+
+= HTTP Status Codes used in Omicron
+
+This doc is aimed at the public API.  For consistency, we should use the same error codes for internal APIs as well.
+
+== Summary
+
+* "200 OK" is used for most successful GET and PUT requests.
+* "201 Created" is used for successful POST requests that create resources.
+* "202 Accepted" is used for successful POST requests that do not create resources (e.g., attaching a disk).
+* "204 No Content" is used for most successful DELETE requests.
+* "400 Bad Request" is used for most sorts of input validation error.
+* Regarding access control:
+** "401 Unauthorized" is used when the user provided no credentials or bad credentials for an operation that obviously requires authentication (which is most of them).  It's _not_ used when valid credentials are provided.  That is, this reflects an _authentication_ problem.
+** "403 Forbidden" is used when the user provided valid credentials (they were authenticated), but they're not authorized to access the resource, _and_ we don't mind telling them that the resource exists (e.g., accessing "/sleds").
+** "404 Not Found" is used when the user provided valid credentials (they were authenticated), but they're not authorized to access the resource, and they're not even allowed to know whether it exists (e.g., accessing a particular Project).
+* "500 Internal Server Error" is used for any kind of _bug_ or unhandled server-side condition.
+* "503 Service unavailable" is used when the service or a dependency is overloaded or actually unavailable.
+
+There's more discussion about the 400-level and 500-level codes below.
+
+There are many others with reasonably well-understood semantics, like "404 Not Found", "405 Method Not Allowed", "406 Not Acceptable", "408 Request Timeout", "417 Expectation Failed", and "429 Too Many Requests".
+
+WARNING: Recall that HTTP status codes are three digits and they're categorized by the first digit.  The first code in many categories (at least 200, 400, and 500) often server as catch-alls for the category.  But if you want to talk about the whole category of errors starting with "5", please use the term "500-level" or "5xx", _not_ "500".
+
+== How people respond to status codes
+
+In thinking about error codes, it's helpful to think about what different people will do when they're asked to look at them.
+
+[%header,cols="1,3,5,5,5,5"]
+|===
+
+|Code
+|Name
+|Summary
+|User response
+|Operator response
+|Oxide support response
+
+|400
+|Bad Request
+|Server determined the request was not valid.
+|Check the detailed error information in the response and either report the error to a user (if it's an input problem) or fix the client (if it's a client bug).
+|If escalated, help user debug (based on error message) or contact support.
+|If escalated, help user debug (based on error message and maybe server log entries).
+
+|401
+|Unauthorized
+|Credentials were required but missing _or_ provided but invalid
+|Check (manually verify the provided credentials) and fix the credentials.
+|If escalated, help user debug (manually verify the provided credentials) or contact support.
+|If escalated, help user debug.  Information in the server log may help say exactly what the problem was, but may also leak information to a potential attacker.
+
+|403
+|Forbidden
+|Credentials were valid but not authorized for the operation
+|Request access from an owner
+|If escalated, help user find the owner and get access
+|If escalated, help user understand what privileges are required and how to get them granted
+
+|404
+|Not Found
+|The resource doesn't exist or the user is not authorized to see it
+|Request access from an owner (if it exists)
+|If escalated, see if the resource exists.  If so, same as 403
+|If escalated, see if the resource exists.  If so, same as 403
+
+|500
+|Internal Server Error
+|The server hit a condition that it could not handle and that we never expect to happen in a production system (e.g., invalid response from an internal service)
+|Escalate to operator
+|Escalate to support.  (**NOTE**: this could be an automatic phone-home event.)
+|Check server log for details and debug.
+
+|503
+|Service unavailable
+|The service or one of its dependencies are overloaded, offline, or otherwise not able to function (e.g., out of disk space, getting EIO, etc.)
+|Client software should retry with bounded exponential backoff, potentially informed by the `"Retry-after"` header.  The user checks an operator-provided status page or escalates to an operator.
+|Check for alerts or other known failures (e.g., sleds offline, disks that need replacement).  **NOTE:** it would be a bug if the operator resolved all the issues reported by the system and they're still getting 503 errors.
+|Check server logs, metrics, etc. for details and debug
+
+|===
+
+== Rationale
+
+People often observe that HTTP is woefully underspecified.  One manifestation is that people choose different status codes for the same conditions.  Choosing a status code for a particular condition is hard because many of the defined status codes overlap or aren't super clear:
+
+* A successful response that needs no response content could reasonably return a "200 OK" or a "204 No Content".
+* A request that successfully creates a resource could reasonably return "200 OK" or "201 Created".
+* If a request is unauthorized, both "403 Forbidden" or "404 Not Found" could apply, depending on whether the server's willing to tell the client that the resource exists and they just don't have access to it vs. act like it doesn't exist because the client doesn't have permissions to know that it exists.
+* If a request has no credentials, a "401 Unauthorized" or "403 Forbidden" might both seem to apply.  The spec is not super clear on this.
+
+To make things more confusing: some codes are badly named (e.g., "401 Unauthorized" reflects a problem with the _authentication credentials_).  And there's not even a complete list of codes to begin with: many commonly-used status codes come not from one of the main HTTP specs but some other related spec (like WebDAV).
+
+Clients are expected to treat any unrecognized code as the corresponding "x00" code, which makes those a catch-all that's often a reasonable choice.
+
+**While the choice of HTTP status code for a particular condition can be arbitrary, that's not the same as saying it doesn't matter!**  A consistent and thoughtful set of choices can make an HTTP-based service significantly easier for both users and the people operating the service.
+
+When we choose what status code to use for a condition, we should consider:
+
+* what the spec says (which is often insufficient for the reasons mentioned above)
+* what users are likely to expect (for better or worse, other popular APIs and StackOverflow threads are useful data points here)
+* whether a particular status code (or distinction between codes) conveys useful information to anybody.  See <<_how_people_respond_to_status_codes>> above.
+
+The rest of this section describes the non-obvious choices we've made about status codes.
+
+=== Success status codes
+
+==== "200 OK" vs. "204 No Content"
+
+If an endpoint may ever return content, we use "200 OK" always (even if the response body is zero bytes sometimes).  This is simpler on both the server and client sides.
+
+Some sources suggest using "204 No Content" for PUT endpoints, which is a reasonable choice.  We usually return "200 OK" with the new representation of the resource, which seems more useful.
+
+==== "202 Accepted"
+
+"202 Accepted" is a useful status to indicate that an operation is asynchronous, and it would provide a convenient way for us to provide a saga id.  See https://github.com/oxidecomputer/rfd/tree/master/rfd/0004#asynchronous-operations[RFD 4's note about asynchronous operations].
+
+Applying that is not always that clear.  When we create an Instance, we could model this in two ways:
+
+* the Instance is created immediately ("201 Created") in a transient state (`"state": "creating"`) that will change asynchronously to something else (`"state": "running"`)
+* the request to create the instance has been received and we're working on it ("202 Accepted"), but the resource won't show up until the Instance is running
+
+We opt for the first approach in most cases because then you can then fetch the Instance again and see its state, etc.
+
+In cases where the request does not create a new resource (e.g., "detach a disk"), we use "202 Accepted".
+
+=== Client errors vs. server errors
+
+When it comes to errors, **the most important distinction is between 400-level and 500-level status codes**.  https://httpwg.org/specs/rfc7231.html#status.codes[RFC 7231] summarizes the distinction:
+
+* 400-level codes (often called "client errors") mean "the request contains bad syntax or cannot be fulfilled".
+* 500-level codes (often called "server errors") mean "the server failed to fulfill an apparently valid request".
+
+Critically, a 500-level response means the problem is _completely outside the client's control_.  Common reasons include that an internal dependency is offline or overloaded or the server just hit a bug.  There's nothing the client can do except maybe retry, and even that isn't always appropriate.
+
+400-level codes don't necessarily represent a problem, mistake, or bug.  A client might attempt a conditional GET and get back a 400-level error saying the preconditions weren't true.  That might be totally expected on the client side under normal conditions.
+
+=== Client errors
+
+We use "400 Bad Request" for most types of invalid input.  This is pretty arbitrary.  Other popular choices include "409 Conflict" and "422 Unprocessible entity".  The spec for "409" really only seems to apply when the requested change conflicts with the underlying state, which is some kinds of invalid input (e.g., booting an Instance that's currently running) but not all.  422 comes from WebDAV and is not even mentioned in RFC 7231.
+
+=== Server errors
+
+Some clients erroneously treat all 500-level errors the same and retry them.  But it's useful to distinguish them:
+
+"500 Internal Server Error" basically means that the server hit a _bug_.  Retrying is not likely to be useful.  If an operator sees this, they should probably call support.  We might automatically open a support case when we see this.
+
+"503 Service Unavailable" means the server is _currently_ unable to handle the request -- usually this means something is overloaded or a dependency is not working.  Retrying _is_ likely a good idea.  On the operator side: the system should be providing the operator with information about known problems that might cause this, like sleds that are offline or disks that need to be replaced.  If the operator has resolved all the issues being reported them and they still see 503s, that's a bug!
+
+=== Other status codes
+
+There are also https://httpwg.org/specs/rfc7231.html#rfc.section.6.2[100-level status codes], whose use is generally more standardized and well-understood.
+
+There are also https://httpwg.org/specs/rfc7231.html#status.3xx[300-level status codes], which are pretty well-understood and we don't expect to make heavy use of.
+
+== References
+
+https://httpwg.org/specs/rfc7231.html#status.codes[RFC 7231] is the most current, relevant standard on HTTP/1.1 status codes.  It links to several others to cover some codes (like RFC 7235 to cover "401 Unauthorized").
+
+https://developer.mozilla.org/en-US/docs/Web/HTTP/Status[MDN provides a good summary of HTTP Status Codes].
+
+https://www.loggly.com/blog/http-status-code-diagram/[Loggy has a gigantic flowchart], but it's less useful than it seems because the various conditions are often handled at different layers of the stack, and sometimes in a different order.  Concretely, Nexus, Dropshot, and Hyper share responsibilities for the various conditions here, but we usually only ever need to think about the Nexus-level ones and occasionally the Dropshot-level ones.
