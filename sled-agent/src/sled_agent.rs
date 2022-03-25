@@ -62,7 +62,9 @@ pub enum Error {
 impl From<Error> for ExternalError {
     fn from(err: Error) -> Self {
         match err {
-            Error::NotImplemented => ExternalError::NotImplemented,
+            Error::NotImplemented => ExternalError::MethodNotAllowed {
+                internal_message: "Method not implemented".to_string(),
+            },
             _ => ExternalError::InternalError {
                 internal_message: err.to_string(),
             },

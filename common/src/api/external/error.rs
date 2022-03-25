@@ -52,10 +52,6 @@ pub enum Error {
     #[error("Internal Error: {internal_message}")]
     InternalError { internal_message: String },
 
-    /// The system encountered an error due to incomplete implementation.
-    #[error("Not Implemented")]
-    NotImplemented,
-
     /// The system (or part of it) is unavailable.
     #[error("Service Unavailable: {internal_message}")]
     ServiceUnavailable { internal_message: String },
@@ -107,7 +103,6 @@ impl Error {
             | Error::InvalidValue { .. }
             | Error::Forbidden
             | Error::MethodNotAllowed { .. }
-            | Error::NotImplemented
             | Error::InternalError { .. } => false,
         }
     }
@@ -223,11 +218,6 @@ impl From<Error> for HttpError {
                 Some(String::from("Forbidden")),
                 http::StatusCode::FORBIDDEN,
                 String::from("Forbidden"),
-            ),
-
-            Error::NotImplemented => HttpError::for_status(
-                Some(String::from("Not Implemented")),
-                http::StatusCode::NOT_IMPLEMENTED,
             ),
 
             Error::InternalError { internal_message } => {
