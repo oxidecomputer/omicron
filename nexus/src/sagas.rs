@@ -209,16 +209,17 @@ pub fn saga_instance_create() -> SagaTemplate<SagaInstanceCreate> {
     // saga nodes for each disk that will unconditionally run but contain
     // conditional logic depending on if that disk index is going to be used.
     // Steno does not currently support the saga node graph changing shape.
-    for i in 0..8 {
+    for i in 0..crate::nexus::MAX_DISKS_PER_INSTANCE {
         template_builder.append(
             &format!("create_disks{}", i),
             "CreateDisksForInstance",
             ActionFunc::new_action(
                 async move |sagactx| {
-                    sic_create_disks_for_instance(sagactx, i).await
+                    sic_create_disks_for_instance(sagactx, i as usize).await
                 },
                 async move |sagactx| {
-                    sic_create_disks_for_instance_undo(sagactx, i).await
+                    sic_create_disks_for_instance_undo(sagactx, i as usize)
+                        .await
                 },
             ),
         );
@@ -228,10 +229,10 @@ pub fn saga_instance_create() -> SagaTemplate<SagaInstanceCreate> {
             "AttachDisksToInstance",
             ActionFunc::new_action(
                 async move |sagactx| {
-                    sic_attach_disks_to_instance(sagactx, i).await
+                    sic_attach_disks_to_instance(sagactx, i as usize).await
                 },
                 async move |sagactx| {
-                    sic_attach_disks_to_instance_undo(sagactx, i).await
+                    sic_attach_disks_to_instance_undo(sagactx, i as usize).await
                 },
             ),
         );

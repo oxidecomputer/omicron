@@ -111,7 +111,7 @@ pub trait TestInterfaces {
 
 pub static BASE_ARTIFACT_DIR: &str = "/var/tmp/oxide_artifacts";
 
-const MAX_DISKS_PER_INSTANCE: u32 = 8;
+pub(crate) const MAX_DISKS_PER_INSTANCE: u32 = 8;
 
 /// Manages an Oxide fleet -- the heart of the control plane
 pub struct Nexus {
