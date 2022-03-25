@@ -565,6 +565,7 @@ async fn test_instance_create_saga_removes_instance_database_record(
         memory: ByteCount::from_mebibytes_u32(4),
         hostname: String::from("inst"),
         network_interfaces: interface_params.clone(),
+        disks: vec![],
     };
     let response =
         NexusRequest::objects_post(client, &url_instances, &instance_params)
@@ -585,6 +586,7 @@ async fn test_instance_create_saga_removes_instance_database_record(
         memory: ByteCount::from_mebibytes_u32(4),
         hostname: String::from("inst2"),
         network_interfaces: interface_params,
+        disks: vec![],
     };
     let _ =
         NexusRequest::objects_post(client, &url_instances, &instance_params)

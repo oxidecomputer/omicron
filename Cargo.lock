@@ -14,7 +14,7 @@ version = "0.4.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0b613b8e1e3cf911a086f53f03bf286f52fd7a7258e4fa606f0ef220d39d8877"
 dependencies = [
- "generic-array 0.14.4",
+ "generic-array 0.14.5",
 ]
 
 [[package]]
@@ -358,7 +358,7 @@ version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7ee52072ec15386f770805afd189a01c8841be8696bed250fa2f13c4c0d6dfb7"
 dependencies = [
- "generic-array 0.14.4",
+ "generic-array 0.14.5",
 ]
 
 [[package]]
@@ -443,7 +443,7 @@ version = "0.16.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "94d4706de1b0fa5b132270cddffa8585166037822e260a944fe161acd137ca05"
 dependencies = [
- "time 0.3.7",
+ "time 0.3.9",
  "version_check",
 ]
 
@@ -616,7 +616,7 @@ dependencies = [
  "tokio-util 0.7.0",
  "toml",
  "tracing",
- "usdt 0.3.1",
+ "usdt 0.3.2",
  "uuid",
 ]
 
@@ -642,7 +642,7 @@ source = "git+https://github.com/oxidecomputer/crucible?rev=4090a023b77dcab7a500
 dependencies = [
  "anyhow",
  "rusqlite",
- "rustls-pemfile 0.3.0",
+ "rustls-pemfile",
  "serde",
  "serde_json",
  "tempfile",
@@ -749,19 +749,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "049bb91fb4aaf0e3c7efa6cd5ef877dbbbd15b39dad06d9948de4ec8a75761ea"
 dependencies = [
  "cipher",
-]
-
-[[package]]
-name = "curve25519-dalek"
-version = "4.0.0-pre.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4033478fbf70d6acf2655ac70da91ee65852d69daf7a67bf7a2f518fb47aafcf"
-dependencies = [
- "byteorder",
- "digest 0.9.0",
- "rand_core",
- "subtle",
- "zeroize",
 ]
 
 [[package]]
@@ -949,7 +936,7 @@ checksum = "1435fa1053d8b2fbbe9be7e97eca7f33d37b28409959813daefc1446a14247f1"
 [[package]]
 name = "dropshot"
 version = "0.6.1-dev"
-source = "git+https://github.com/oxidecomputer/dropshot?branch=main#cc7ac240249b7b7f793261962e5461adbf438d82"
+source = "git+https://github.com/oxidecomputer/dropshot?branch=main#0590171143964e32d913113df85174771d4699d9"
 dependencies = [
  "async-stream",
  "async-trait",
@@ -987,7 +974,7 @@ dependencies = [
 [[package]]
 name = "dropshot_endpoint"
 version = "0.6.1-dev"
-source = "git+https://github.com/oxidecomputer/dropshot?branch=main#cc7ac240249b7b7f793261962e5461adbf438d82"
+source = "git+https://github.com/oxidecomputer/dropshot?branch=main#0590171143964e32d913113df85174771d4699d9"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -1598,9 +1585,9 @@ dependencies = [
 
 [[package]]
 name = "hyper"
-version = "0.14.17"
+version = "0.14.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "043f0e083e9901b6cc658a77d1eb86f4fc650bbb977a4337dd63192826aa85dd"
+checksum = "b26ae0a80afebe130861d90abf98e3814a4f28a4c6ffeb5ab8ebb2be311e0ef2"
 dependencies = [
  "bytes",
  "futures-channel",
@@ -1822,9 +1809,9 @@ dependencies = [
 
 [[package]]
 name = "log"
-version = "0.4.14"
+version = "0.4.16"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "51b9bbe6c47d51fc3e1a9b945965946b4c44142ab8792c50835a980d362c2710"
+checksum = "6389c490849ff5bc16be905ae24bc913a9c8892e19b2341dbc175e14c341c2b8"
 dependencies = [
  "cfg-if",
 ]
@@ -3086,7 +3073,7 @@ dependencies = [
 [[package]]
 name = "propolis-client"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=832a86afce308d3210685af987ace1ba74c2ecd6#832a86afce308d3210685af987ace1ba74c2ecd6"
+source = "git+https://github.com/oxidecomputer/propolis?rev=3a4fd8fa54ce8e1117bfa259bea39bca87f8ea14#3a4fd8fa54ce8e1117bfa259bea39bca87f8ea14"
 dependencies = [
  "crucible",
  "reqwest",
@@ -3183,9 +3170,9 @@ dependencies = [
 
 [[package]]
 name = "redox_syscall"
-version = "0.2.11"
+version = "0.2.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8380fe0152551244f0747b1bf41737e0f8a74f97a14ccefd1148187271634f3c"
+checksum = "8ae183fc1b06c149f0c1793e1eb447c8b04bfe46d48e9e48bfb8d2d7ed64ecf0"
 dependencies = [
  "bitflags",
 ]
@@ -3531,12 +3518,11 @@ dependencies = [
 
 [[package]]
 name = "serde-big-array"
-version = "0.3.2"
+version = "0.3.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "18b20e7752957bbe9661cff4e0bb04d183d0948cdab2ea58cdb9df36a61dfe62"
+checksum = "cd31f59f6fe2b0c055371bb2f16d7f0aa7d8881676c04a55b1596d1a17cd10a4"
 dependencies = [
  "serde",
- "serde_derive",
 ]
 
 [[package]]
@@ -3822,7 +3808,7 @@ dependencies = [
  "hostname",
  "slog",
  "slog-json",
- "time 0.3.7",
+ "time 0.3.9",
 ]
 
 [[package]]
@@ -3840,14 +3826,14 @@ dependencies = [
 
 [[package]]
 name = "slog-json"
-version = "2.6.0"
+version = "2.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "70f825ce7346f40aa318111df5d3a94945a7fdca9081584cb9b05692fb3dfcb4"
+checksum = "3e1e53f61af1e3c8b852eef0a9dee29008f55d6dd63794f3f12cef786cf0f219"
 dependencies = [
  "serde",
  "serde_json",
  "slog",
- "time 0.3.7",
+ "time 0.3.9",
 ]
 
 [[package]]
@@ -3860,7 +3846,7 @@ dependencies = [
  "slog",
  "term",
  "thread_local",
- "time 0.3.7",
+ "time 0.3.9",
 ]
 
 [[package]]
@@ -4256,9 +4242,9 @@ dependencies = [
 
 [[package]]
 name = "time"
-version = "0.3.7"
+version = "0.3.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "004cbc98f30fa233c61a38bc77e96a9106e65c88f2d3bef182ae952027e5753d"
+checksum = "c2702e08a7a860f005826c6815dcac101b19b5eb330c27fe4a5928fec1d20ddd"
 dependencies = [
  "itoa 1.0.1",
  "libc",
@@ -4268,9 +4254,9 @@ dependencies = [
 
 [[package]]
 name = "time-macros"
-version = "0.2.3"
+version = "0.2.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "25eb0ca3468fc0acc11828786797f6ef9aa1555e4a211a60d64cc8e4d1be47d6"
+checksum = "42657b1a6f4d817cda8e7a0ace261fe0cc946cf3a80314390b22cc61ae080792"
 
 [[package]]
 name = "tiny-keccak"
@@ -4647,7 +4633,7 @@ version = "0.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9f214e8f697e925001e66ec2c6e37a4ef93f0f78c2eed7814394e10c62025b05"
 dependencies = [
- "generic-array 0.14.4",
+ "generic-array 0.14.5",
  "subtle",
 ]
 
@@ -5095,9 +5081,9 @@ dependencies = [
 
 [[package]]
 name = "zeroize"
-version = "1.4.3"
+version = "1.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d68d9dcec5f9b43a30d38c49f91dfedfaac384cb8f085faca366c26207dd1619"
+checksum = "4756f7db3f7b5574938c3eb1c117038b8e07f95ee6718c0efad4ac21508f1efd"
 dependencies = [
  "zeroize_derive",
 ]

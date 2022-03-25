@@ -687,11 +687,22 @@ async fn sic_delete_instance_record(
     let params = sagactx.saga_params();
     let opctx = OpContext::for_saga_action(&sagactx, &params.serialized_authn);
     let instance_id = sagactx.lookup::<Uuid>("instance_id")?;
+    let instance_name = sagactx.lookup::<db::model::Name>("instance_name")?;
 
     // We currently only support deleting an instance if it is stopped or
     // failed, so update the state accordingly to allow deletion.
-    let runtime_state =
-        sagactx.lookup::<InstanceRuntimeState>("initial_runtime")?;
+    let authz_project = osagactx
+        .datastore()
+        .project_lookup_by_id(params.project_id)
+        .await
+        .map_err(ActionError::action_failed)?;
+
+    let (authz_instance, db_instance) = osagactx
+        .datastore()
+        .instance_fetch(&opctx, &authz_project, &instance_name)
+        .await
+        .map_err(ActionError::action_failed)?;
+
     let runtime_state = db::model::InstanceRuntimeState {
         state: db::model::InstanceState::new(InstanceState::Failed),
         // Must update the generation, or the database query will fail.
@@ -700,14 +711,10 @@ async fn sic_delete_instance_record(
         // of the successful completion of the saga, or in this action during
         // saga unwinding. So we're guaranteed that the cached generation in the
         // saga log is the most recent in the database.
-        gen: db::model::Generation::from(runtime_state.gen.next()),
-        ..db::model::InstanceRuntimeState::from(runtime_state)
+        gen: db::model::Generation::from(db_instance.runtime_state.gen.next()),
+        ..db_instance.runtime_state
     };
-    let authz_instance = osagactx
-        .datastore()
-        .instance_lookup_by_id(instance_id)
-        .await
-        .map_err(ActionError::action_failed)?;
+
     let updated = osagactx
         .datastore()
         .instance_update_runtime(&instance_id, &runtime_state)
@@ -727,6 +734,7 @@ async fn sic_delete_instance_record(
         .project_delete_instance(&opctx, &authz_instance)
         .await
         .map_err(ActionError::action_failed)?;
+
     Ok(())
 }
 
