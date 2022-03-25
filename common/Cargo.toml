@@ -7,7 +7,7 @@ license = "MPL-2.0"
 [dependencies]
 anyhow = "1.0"
 api_identity = { path = "../api_identity" }
-backoff = { version = "0.3.0", features = [ "tokio" ] }
+backoff = { version = "0.4.0", features = [ "tokio" ] }
 chrono = { version = "0.4", features = [ "serde" ] }
 dropshot = {  git = "https://github.com/oxidecomputer/dropshot", branch = "main", features = [ "usdt-probes" ] }
 futures = "0.3.21"

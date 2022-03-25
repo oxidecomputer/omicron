@@ -84,7 +84,7 @@ impl Server {
                     },
                 )
                 .await
-                .map_err(BackoffError::Transient)
+                .map_err(BackoffError::transient)
         };
         let log_notification_failure = |_, delay| {
             warn!(

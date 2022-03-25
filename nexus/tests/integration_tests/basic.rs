@@ -7,11 +7,11 @@
 //! This file defines a very basic set of tests against the API.
 //! TODO-coverage add test for racks, sleds
 
-use dropshot::test_util::objects_list_page;
 use dropshot::test_util::ClientTestContext;
 use dropshot::HttpErrorResponseBody;
 use http::method::Method;
 use http::StatusCode;
+use nexus_test_utils::resource_helpers::objects_list_page_authz;
 use nexus_test_utils::resource_helpers::project_get;
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::IdentityMetadataUpdateParams;
@@ -634,5 +634,5 @@ async fn projects_list(
 }
 
 async fn sleds_list(client: &ClientTestContext, sleds_url: &str) -> Vec<Sled> {
-    objects_list_page::<Sled>(client, sleds_url).await.items
+    objects_list_page_authz::<Sled>(client, sleds_url).await.items
 }

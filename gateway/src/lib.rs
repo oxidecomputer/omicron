@@ -9,7 +9,6 @@ pub mod http_entrypoints; // TODO pub only for testing - is this right?
 mod sp_comms;
 
 pub use config::Config;
-pub use config::KnownSps;
 pub use context::ServerContext;
 use slog::{debug, error, info, o, Logger};
 use std::sync::Arc;

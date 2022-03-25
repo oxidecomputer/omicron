@@ -11,6 +11,7 @@ use super::api_resources::FleetChild;
 use super::api_resources::Organization;
 use super::api_resources::Project;
 use super::api_resources::ProjectChild;
+use super::api_resources::Sled;
 use super::context::AuthorizedResource;
 use super::roles::RoleSet;
 use super::Authz;
@@ -48,6 +49,7 @@ pub fn make_omicron_oso() -> Result<Oso, anyhow::Error> {
         Project::get_polar_class(),
         ProjectChild::get_polar_class(),
         FleetChild::get_polar_class(),
+        Sled::get_polar_class(),
     ];
     for c in classes {
         oso.register_class(c).context("registering class")?;

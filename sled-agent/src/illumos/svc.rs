@@ -49,7 +49,7 @@ mod inner {
                         return Ok(());
                     }
                 }
-                return Err(backoff::BackoffError::Transient(
+                return Err(backoff::BackoffError::transient(
                     "Property not found",
                 ));
             },

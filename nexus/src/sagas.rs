@@ -154,7 +154,10 @@ pub fn saga_instance_create() -> SagaTemplate<SagaInstanceCreate> {
     template_builder.append(
         "instance_name",
         "CreateInstanceRecord",
-        new_action_noop_undo(sic_create_instance_record),
+        ActionFunc::new_action(
+            sic_create_instance_record,
+            sic_delete_instance_record,
+        ),
     );
 
     // NOTE: The separation of the ID-allocation and NIC creation nodes is
@@ -677,6 +680,56 @@ async fn sic_create_instance_record(
     Ok(instance.name().clone())
 }
 
+async fn sic_delete_instance_record(
+    sagactx: ActionContext<SagaInstanceCreate>,
+) -> Result<(), anyhow::Error> {
+    let osagactx = sagactx.user_data();
+    let params = sagactx.saga_params();
+    let opctx = OpContext::for_saga_action(&sagactx, &params.serialized_authn);
+    let instance_id = sagactx.lookup::<Uuid>("instance_id")?;
+
+    // We currently only support deleting an instance if it is stopped or
+    // failed, so update the state accordingly to allow deletion.
+    let runtime_state =
+        sagactx.lookup::<InstanceRuntimeState>("initial_runtime")?;
+    let runtime_state = db::model::InstanceRuntimeState {
+        state: db::model::InstanceState::new(InstanceState::Failed),
+        // Must update the generation, or the database query will fail.
+        //
+        // The runtime state of the instance record is only changed as a result
+        // of the successful completion of the saga, or in this action during
+        // saga unwinding. So we're guaranteed that the cached generation in the
+        // saga log is the most recent in the database.
+        gen: db::model::Generation::from(runtime_state.gen.next()),
+        ..db::model::InstanceRuntimeState::from(runtime_state)
+    };
+    let authz_instance = osagactx
+        .datastore()
+        .instance_lookup_by_id(instance_id)
+        .await
+        .map_err(ActionError::action_failed)?;
+    let updated = osagactx
+        .datastore()
+        .instance_update_runtime(&instance_id, &runtime_state)
+        .await
+        .map_err(ActionError::action_failed)?;
+
+    if !updated {
+        warn!(
+            osagactx.log(),
+            "failed to update instance runtime state from creating to failed",
+        );
+    }
+
+    // Actually delete the record.
+    osagactx
+        .datastore()
+        .project_delete_instance(&opctx, &authz_instance)
+        .await
+        .map_err(ActionError::action_failed)?;
+    Ok(())
+}
+
 async fn sic_instance_ensure(
     sagactx: ActionContext<SagaInstanceCreate>,
 ) -> Result<(), ActionError> {
@@ -1045,7 +1098,7 @@ async fn ensure_region_in_dataset(
             .await
             .map_err(|e| BackoffError::Permanent(e.into()))?;
         match region.state {
-            RegionState::Requested => Err(BackoffError::Transient(anyhow!(
+            RegionState::Requested => Err(BackoffError::transient(anyhow!(
                 "Region creation in progress"
             ))),
             RegionState::Created => Ok(region),
