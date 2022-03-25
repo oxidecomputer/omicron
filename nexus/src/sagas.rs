@@ -600,6 +600,9 @@ async fn ensure_instance_disk_attach_state(
     match disk {
         params::InstanceDiskAttachment::Create(_) => {
             // TODO grab disks created in sic_create_disks_for_instance
+            return Err(ActionError::action_failed(Error::invalid_request(
+                "creating disks while creating an instance not supported",
+            )));
         }
         params::InstanceDiskAttachment::Attach(instance_disk_attach) => {
             let disk_name: db::model::Name =
