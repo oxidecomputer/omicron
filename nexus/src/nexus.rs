@@ -3368,4 +3368,5 @@ impl TestInterfaces for Nexus {
     ) -> CreateResult<SiloUser> {
         let silo_user = SiloUser::new(silo_id, silo_user_id);
         Ok(self.db_datastore.silo_user_create(silo_user).await?)
+    }
 }
