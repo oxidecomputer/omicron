@@ -3520,7 +3520,7 @@ mod test {
 
         // time_last_used change persists in DB
         let fetched = datastore.session_fetch(token.clone()).await.unwrap();
-        assert!(fetched.time_last_used < session.time_last_used);
+        assert!(fetched.time_last_used > session.time_last_used);
 
         // delete it and fetch should come back with nothing
         let delete = datastore.session_hard_delete(token.clone()).await;

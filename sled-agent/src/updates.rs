@@ -96,7 +96,7 @@ mod test {
         nexus_client.expect_cpapi_artifact_download().times(1).return_once(
             move |kind, name, version| {
                 assert_eq!(name, "test_artifact");
-                assert_eq!(version, 4);
+                assert_eq!(version, 3);
                 assert_eq!(kind.to_string(), "zone");
                 let response = Response::builder()
                     .status(StatusCode::OK)
