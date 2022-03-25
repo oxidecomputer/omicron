@@ -13,6 +13,17 @@ use serde::{Deserialize, Serialize};
 use std::net::IpAddr;
 use uuid::Uuid;
 
+// Silos
+
+/// Create-time parameters for a [`Silo`](crate::external_api::views::Silo)
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct SiloCreate {
+    #[serde(flatten)]
+    pub identity: IdentityMetadataCreateParams,
+
+    pub discoverable: bool,
+}
+
 // ORGANIZATIONS
 
 /// Create-time parameters for an [`Organization`](crate::external_api::views::Organization)

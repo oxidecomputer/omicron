@@ -19,7 +19,7 @@ use omicron_common::api::external::InstanceCpuCount;
 use omicron_nexus::crucible_agent_client::types::State as RegionState;
 use omicron_nexus::external_api::params;
 use omicron_nexus::external_api::views::{
-    Organization, Project, Vpc, VpcRouter,
+    Organization, Project, Silo, Vpc, VpcRouter,
 };
 use omicron_sled_agent::sim::SledAgent;
 use std::sync::Arc;
@@ -57,6 +57,25 @@ where
         .expect("failed to make \"create\" request")
         .parsed_body()
         .unwrap()
+}
+
+pub async fn create_silo(
+    client: &ClientTestContext,
+    silo_name: &str,
+    discoverable: bool,
+) -> Silo {
+    object_create(
+        client,
+        "/silos",
+        &params::SiloCreate {
+            identity: IdentityMetadataCreateParams {
+                name: silo_name.parse().unwrap(),
+                description: "a silo".to_string(),
+            },
+            discoverable,
+        },
+    )
+    .await
 }
 
 pub async fn create_organization(
