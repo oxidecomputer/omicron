@@ -148,7 +148,7 @@ jobs:
       # rebuild here.
       # Put "./cockroachdb/bin" and "./clickhouse" on the PATH for the test
       # suite.
-      run: TMPDIR=$OMICRON_TMP PATH="$PATH:$PWD/cockroachdb/bin:$PWD/clickhouse" RUSTFLAGS="-D warnings" RUSTDOCFLAGS="-D warnings" cargo nextest run --no-fail-fast --workspace --locked
+      run: TMPDIR=$OMICRON_TMP PATH="$PATH:$PWD/cockroachdb/bin:$PWD/clickhouse" RUSTFLAGS="-D warnings" RUSTDOCFLAGS="-D warnings" cargo nextest run --no-fail-fast --workspace --locked --failure-output immediate-final
     - name: Archive any failed test results
       if: ${{ failure() }}
       # actions/upload-artifact@v2.3.1
