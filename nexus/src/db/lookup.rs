@@ -27,6 +27,10 @@ enum Key<'a, P> {
     Id(LookupPath<'a>, Uuid),
 }
 
+struct Root<'a> {
+    lookup_root: LookupPath<'a>,
+}
+
 #[lookup_resource {
     ancestors = []
 }]
