@@ -96,11 +96,12 @@ fn do_lookup_resource(
             let parent_resource_name =
                 format_ident!("{}", parent_resource_name);
             let parent_authz_type = quote! { &authz::#parent_resource_name };
+            let authz_parent = format_ident!("authz_{}", parent_snake_str);
             let parent_lookup_arg =
-                quote! { authz_parent: #parent_authz_type, };
-            let parent_lookup_arg_value = quote! { authz_parent, };
+                quote! { #authz_parent: #parent_authz_type, };
+            let parent_lookup_arg_value = quote! { #authz_parent , };
             let parent_filter =
-                quote! { .filter(dsl::#parent_id.eq(authz_parent.id())) };
+                quote! { .filter(dsl::#parent_id.eq( #authz_parent.id())) };
             let authz_ancestors_values_assign = quote! {
                 let (#authz_ancestors_values _) =
                     #parent_resource_name::lookup_by_id_no_authz(
@@ -138,8 +139,8 @@ fn do_lookup_resource(
             key: Key<'a, #parent_resource_name>
         }
 
-        impl #resource_name<'a> {
-            fn lookup_root(&self) -> LookupPath<'a> {
+        impl<'a> #resource_name<'a> {
+            fn lookup_root(&self) -> &LookupPath<'a> {
                 match self {
                     Key::Name(parent, _) => parent.lookup_root(),
                     Key::Id(root, _) => root.lookup_root(),
@@ -156,13 +157,17 @@ fn do_lookup_resource(
                 &self,
                 action: authz::Action,
             ) -> LookupResult<(#authz_path_types, #model_resource)> {
+                let lookup = self.lookup_root();
+                let opctx = &lookup.opctx;
+                let datastore = &lookup.datastore;
+
                 match &self.key {
                     Key::Name(parent, name) => {
                         #authz_ancestors_values_assign_lookup
                         let (authz_self, db_row) = Self::fetch_by_name_for(
                             opctx,
                             datastore,
-                            &authz_parent,
+                            #parent_lookup_arg_value
                             *name,
                             action,
                         ).await;
@@ -184,7 +189,9 @@ fn do_lookup_resource(
                 &self,
                 action: authz::Action,
             ) -> LookupResult<(#authz_path_types)> {
-                let (#authz_path_types) = self.lookup();
+                let lookup = self.lookup_root();
+                let opctx = &lookup.opctx;
+                let (#authz_path_values) = self.lookup();
                 opctx.authorize(action, &authz_self).await?;
                 Ok((#authz_path_values))
             }
@@ -194,7 +201,7 @@ fn do_lookup_resource(
             async fn lookup(
                 &self,
             ) -> LookupResult<(#authz_path_types)> {
-                let lookup = parent.lookup_root();
+                let lookup = self.lookup_root();
                 let opctx = &lookup.opctx;
                 let datastore = &lookup.datastore;
 
@@ -288,7 +295,7 @@ fn do_lookup_resource(
                         )
                     })
                     .map(|db_row| {(
-                        self.make_authz(
+                        Self::make_authz(
                             &#parent_authz
                             &db_row,
                             LookupType::ByName(name.as_str().to_string())
@@ -345,7 +352,7 @@ fn do_lookup_resource(
                         )
                     })?;
                 #authz_ancestors_values_assign
-                let authz_self = self.make_authz(
+                let authz_self = Self::make_authz(
                     &#parent_authz
                     &db_row,
                     LookupType::ById(id)
@@ -365,7 +372,7 @@ mod test {
 
     #[test]
     fn test_lookup_resource() {
-        // XXX-dap this should actually do something
+        // XXX-dap this should actually test something
         eprintln!(
             "{}",
             do_lookup_resource(
