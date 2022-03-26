@@ -18,7 +18,7 @@ This doc is aimed at the public API.  For consistency, we should use the same er
 ** "403 Forbidden" is used when the user provided valid credentials (they were authenticated), but they're not authorized to access the resource, _and_ we don't mind telling them that the resource exists (e.g., accessing "/sleds").
 ** "404 Not Found" is used when the user provided valid credentials (they were authenticated), but they're not authorized to access the resource, and they're not even allowed to know whether it exists (e.g., accessing a particular Project).
 * "500 Internal Server Error" is used for any kind of _bug_ or unhandled server-side condition.
-* "503 Service unavailable" is used when the service or a dependency is overloaded or actually unavailable.
+* "503 Service unavailable" is used when the service (or an internal service on which the service depends) is overloaded or actually unavailable.
 
 There's more discussion about the 400-level and 500-level codes below.
 
@@ -113,7 +113,7 @@ The rest of this section describes the non-obvious choices we've made about stat
 
 If an endpoint may ever return content, we use "200 OK" always (even if the response body is zero bytes sometimes).  This is simpler on both the server and client sides.
 
-Some sources suggest using "204 No Content" for PUT endpoints, which is a reasonable choice.  We usually return "200 OK" with the new representation of the resource, which seems more useful.
+Some sources suggest using "204 No Content" for PUT endpoints, which is a reasonable choice.  We strongly prefer that endpoints return "200 OK" with the new representation because it's more useful.
 
 ==== "202 Accepted"
 
@@ -153,9 +153,7 @@ Some clients erroneously treat all 500-level errors the same and retry them.  Bu
 
 === Other status codes
 
-There are also https://httpwg.org/specs/rfc7231.html#rfc.section.6.2[100-level status codes], whose use is generally more standardized and well-understood.
-
-There are also https://httpwg.org/specs/rfc7231.html#status.3xx[300-level status codes], which are pretty well-understood and we don't expect to make heavy use of.
+There are also https://httpwg.org/specs/rfc7231.html#rfc.section.6.2[100-level] and https://httpwg.org/specs/rfc7231.html#rfc.section.6.2[300-level] status codes, whose uses are more standardized and well-understood. If we use these status codes, we should stick to the standard patterns.
 
 == References
 
