@@ -17,7 +17,6 @@ use crate::{
 use async_bb8_diesel::AsyncRunQueryDsl;
 use db_macros::lookup_resource;
 use diesel::{ExpressionMethods, QueryDsl, SelectableHelper};
-use futures::FutureExt;
 use omicron_common::api::external::{LookupResult, LookupType, ResourceType};
 use uuid::Uuid;
 
@@ -46,10 +45,15 @@ struct Organization;
 }]
 struct Project;
 
-// #[lookup_resource {
-//     ancestors = [ "Organization", "Project" ]
-// }]
-// struct Instance;
+#[lookup_resource {
+    ancestors = [ "Organization", "Project" ]
+}]
+struct Instance;
+
+#[lookup_resource {
+    ancestors = [ "Organization", "Project" ]
+}]
+struct Disk;
 
 pub struct LookupPath<'a> {
     opctx: &'a OpContext,
@@ -73,7 +77,7 @@ impl<'a> LookupPath<'a> {
         'a: 'c,
         'b: 'c,
     {
-        Organization { key: Key::Name(self, name) }
+        Organization { key: Key::Name(Root { lookup_path: self }, name) }
     }
 
     pub fn organization_id(self, id: Uuid) -> Organization<'a> {
@@ -83,14 +87,14 @@ impl<'a> LookupPath<'a> {
     pub fn project_id(self, id: Uuid) -> Project<'a> {
         Project { key: Key::Id(self, id) }
     }
-    //
-    //    pub fn instance_id(self, id: Uuid) -> Instance<'a> {
-    //        Instance { key: Key::Id(self, id) }
-    //    }
-    //
-    //    pub fn disk_id(self, id: Uuid) -> Disk<'a> {
-    //        Disk { key: Key::Id(self, id) }
-    //    }
+
+    pub fn instance_id(self, id: Uuid) -> Instance<'a> {
+        Instance { key: Key::Id(self, id) }
+    }
+
+    pub fn disk_id(self, id: Uuid) -> Disk<'a> {
+        Disk { key: Key::Id(self, id) }
+    }
 }
 
 impl<'a> Organization<'a> {
@@ -103,23 +107,23 @@ impl<'a> Organization<'a> {
     }
 }
 
-// impl<'a> Project<'a> {
-//     pub fn disk_name<'b, 'c>(self, name: &'b Name) -> Disk<'c>
-//     where
-//         'a: 'c,
-//         'b: 'c,
-//     {
-//         Disk { key: Key::Name(self, name) }
-//     }
-// 
-//     pub fn instance_name<'b, 'c>(self, name: &'b Name) -> Instance<'c>
-//     where
-//         'a: 'c,
-//         'b: 'c,
-//     {
-//         Instance { key: Key::Name(self, name) }
-//     }
-// }
+impl<'a> Project<'a> {
+    pub fn disk_name<'b, 'c>(self, name: &'b Name) -> Disk<'c>
+    where
+        'a: 'c,
+        'b: 'c,
+    {
+        Disk { key: Key::Name(self, name) }
+    }
+
+    pub fn instance_name<'b, 'c>(self, name: &'b Name) -> Instance<'c>
+    where
+        'a: 'c,
+        'b: 'c,
+    {
+        Instance { key: Key::Name(self, name) }
+    }
+}
 
 //macro_rules! define_lookup {
 //    ($pc:ident) => {
@@ -657,7 +661,7 @@ impl<'a> Organization<'a> {
 //        )
 //    }
 //);
-//
+
 
 #[cfg(test)]
 mod test {

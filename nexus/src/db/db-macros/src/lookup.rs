@@ -136,7 +136,7 @@ fn do_lookup_resource(
 
     Ok(quote! {
         pub struct #resource_name<'a> {
-            key: Key<'a, #parent_resource_name>
+            key: Key<'a, #parent_resource_name<'a>>
         }
 
         impl<'a> #resource_name<'a> {
