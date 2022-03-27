@@ -272,6 +272,20 @@ async fn sic_allocate_network_interface_ids(
         params::InstanceNetworkInterfaceAttachment::Create(
             ref create_params,
         ) => {
+            if create_params.params.len()
+                > crate::nexus::MAX_NICS_PER_INSTANCE.try_into().unwrap()
+            {
+                return Err(ActionError::action_failed(
+                    Error::invalid_request(
+                        format!(
+                            "Instances may not have more than {}
+                            network interfaces",
+                            crate::nexus::MAX_NICS_PER_INSTANCE
+                        )
+                        .as_str(),
+                    ),
+                ));
+            }
             let mut ids = Vec::with_capacity(create_params.params.len());
             for _ in 0..create_params.params.len() {
                 ids.push(Uuid::new_v4());

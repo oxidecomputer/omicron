@@ -120,6 +120,8 @@ pub static BASE_ARTIFACT_DIR: &str = "/var/tmp/oxide_artifacts";
 
 pub(crate) const MAX_DISKS_PER_INSTANCE: u32 = 8;
 
+pub(crate) const MAX_NICS_PER_INSTANCE: u32 = 8;
+
 /// Manages an Oxide fleet -- the heart of the control plane
 pub struct Nexus {
     /// uuid for this nexus instance.
@@ -1346,9 +1348,8 @@ impl Nexus {
                 &DataPageParams {
                     marker: None,
                     direction: dropshot::PaginationOrder::Ascending,
-                    // TODO: is there a limit to the number of NICs an instance
-                    // can have attached?
-                    limit: std::num::NonZeroU32::new(8).unwrap(),
+                    limit: std::num::NonZeroU32::new(MAX_NICS_PER_INSTANCE)
+                        .unwrap(),
                 },
             )
             .await?

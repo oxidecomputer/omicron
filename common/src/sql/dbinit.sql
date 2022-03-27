@@ -550,7 +550,12 @@ CREATE TABLE omicron.public.network_interface (
     /* FK into VPCSubnet table. */
     subnet_id UUID NOT NULL,
     mac STRING(17) NOT NULL, -- e.g., "ff:ff:ff:ff:ff:ff"
-    ip INET NOT NULL
+    ip INET NOT NULL,
+    /*
+     * Limited to 8 NICs per instance. This value must be kept in sync with
+     * `crate::nexus::MAX_NICS_PER_INSTANCE`.
+     */
+    slot INT2 NOT NULL CHECK (slot >= 0 AND slot < 8)
 );
 
 /* TODO-completeness
