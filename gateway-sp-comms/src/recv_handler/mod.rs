@@ -19,6 +19,7 @@ use slog::error;
 use slog::trace;
 use slog::Logger;
 use std::collections::HashMap;
+use std::convert::TryInto;
 use std::sync::Arc;
 use std::sync::Mutex;
 
@@ -122,6 +123,34 @@ impl RecvHandler {
     fn handle_incoming_packet(&self, port: SwitchPort, buf: &[u8]) {
         trace!(&self.log, "received {} bytes from {:?}", buf.len(), port);
 
+        // the first four bytes of packets we expect is always a version number;
+        // check for that first
+        //
+        // TODO? We're (ab)using our knowledge of our packet wire format here -
+        // knowledge contained in another crate - both in expecting that the
+        // first four bytes are the version (perfectly reasonable) and that
+        // they're stored in little endian (a bit less reasonable, but still
+        // probably okay). We could consider moving this check into
+        // `gateway_messages` itself?
+        let version_raw = match buf.get(0..4) {
+            Some(bytes) => u32::from_le_bytes(bytes.try_into().unwrap()),
+            None => {
+                error!(&self.log, "discarding too-short packet");
+                return;
+            }
+        };
+        match version_raw {
+            version::V1 => (),
+            _ => {
+                error!(
+                    &self.log,
+                    "discarding message with unsupported version {}",
+                    version_raw
+                );
+                return;
+            }
+        }
+
         // parse into an `SpMessage`
         let sp_msg = match gateway_messages::deserialize::<SpMessage>(buf) {
             Ok((msg, _extra)) => {
@@ -136,17 +165,6 @@ impl RecvHandler {
             }
         };
         debug!(&self.log, "received {:?} from {:?}", sp_msg, port);
-
-        // `version` is intentionally the first 4 bytes of the packet; we
-        // could check it before trying to deserialize?
-        if sp_msg.version != version::V1 {
-            error!(
-                &self.log,
-                "discarding message with unsupported version {}",
-                sp_msg.version
-            );
-            return;
-        }
 
         // decide whether this is a response to an outstanding request or an
         // unprompted message
