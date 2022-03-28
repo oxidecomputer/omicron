@@ -7,6 +7,7 @@
 use crate::common::vlan::VlanID;
 use crate::illumos::{execute, ExecutionError, PFEXEC};
 use omicron_common::api::external::MacAddr;
+use serde::{Deserialize, Serialize};
 
 pub const VNIC_PREFIX: &str = "ox";
 pub const VNIC_PREFIX_CONTROL: &str = "oxControl";
@@ -26,7 +27,7 @@ pub enum Error {
 }
 
 /// The name of a physical datalink.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct PhysicalLink(pub String);
 
 /// Wraps commands for interacting with data links.

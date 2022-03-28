@@ -29,10 +29,10 @@ use std::sync::Arc;
 use tokio::task::JoinHandle;
 use uuid::Uuid;
 
-#[cfg(not(test))]
-use crate::illumos::{dladm::Dladm, zone::Zones};
 #[cfg(test)]
-use crate::illumos::{dladm::MockDladm as Dladm, zone::MockZones as Zones};
+use crate::illumos::zone::MockZones as Zones;
+#[cfg(not(test))]
+use crate::illumos::zone::Zones;
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
@@ -439,7 +439,6 @@ impl Instance {
         // doesn't exist in illumos.
         //
         // https://github.com/illumos/ipd/blob/master/ipd/0003/README.md
-        let physical_dl = Dladm::find_physical()?;
         let guest_nics = inner
             .requested_nics
             .clone()
@@ -447,7 +446,7 @@ impl Instance {
             .map(|nic| {
                 inner
                     .vnic_allocator
-                    .new_guest(&physical_dl, Some(nic.mac), inner.vlan)
+                    .new_guest(Some(nic.mac), inner.vlan)
                     .map_err(|e| e.into())
             })
             .collect::<Result<Vec<_>, Error>>()?;
@@ -636,6 +635,7 @@ impl Instance {
 #[cfg(test)]
 mod test {
     use super::*;
+    use crate::illumos::dladm::PhysicalLink;
     use crate::mocks::MockNexusClient;
     use crate::params::InstanceStateRequested;
     use chrono::Utc;
@@ -701,7 +701,11 @@ mod test {
     )]
     async fn transition_before_start() {
         let log = logger();
-        let vnic_allocator = VnicAllocator::new("Test".to_string());
+        let vnic_allocator = VnicAllocator::new(
+            "Test".to_string(),
+            Some(PhysicalLink("mylink".to_string())),
+        )
+        .unwrap();
         let nexus_client = MockNexusClient::default();
 
         let inst = Instance::new(

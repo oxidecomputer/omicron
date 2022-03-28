@@ -5,6 +5,7 @@
 //! API for controlling multiple instances on a sled.
 
 use crate::common::vlan::VlanID;
+use crate::illumos::dladm::PhysicalLink;
 use crate::illumos::vnic::VnicAllocator;
 use crate::nexus::NexusClient;
 use crate::params::{
@@ -25,6 +26,9 @@ use crate::instance::MockInstance as Instance;
 pub enum Error {
     #[error("Instance error: {0}")]
     Instance(#[from] crate::instance::Error),
+
+    #[error(transparent)]
+    Dladm(#[from] crate::illumos::dladm::Error),
 
     #[error(transparent)]
     Zone(#[from] crate::illumos::zone::Error),
@@ -55,6 +59,7 @@ impl InstanceManager {
         log: Logger,
         vlan: Option<VlanID>,
         nexus_client: Arc<NexusClient>,
+        physical_link: Option<PhysicalLink>,
     ) -> Result<InstanceManager, Error> {
         Ok(InstanceManager {
             inner: Arc::new(InstanceManagerInternal {
@@ -62,7 +67,7 @@ impl InstanceManager {
                 nexus_client,
                 instances: Mutex::new(BTreeMap::new()),
                 vlan,
-                vnic_allocator: VnicAllocator::new("Instance"),
+                vnic_allocator: VnicAllocator::new("Instance", physical_link)?,
             }),
         })
     }
@@ -196,6 +201,7 @@ impl Drop for InstanceTicket {
 #[cfg(test)]
 mod test {
     use super::*;
+    use crate::illumos::dladm::PhysicalLink;
     use crate::illumos::{dladm::MockDladm, zone::MockZones};
     use crate::instance::MockInstance;
     use crate::mocks::MockNexusClient;
@@ -254,7 +260,13 @@ mod test {
         let dladm_get_vnics_ctx = MockDladm::get_vnics_context();
         dladm_get_vnics_ctx.expect().return_once(|| Ok(vec![]));
 
-        let im = InstanceManager::new(log, None, nexus_client).unwrap();
+        let im = InstanceManager::new(
+            log,
+            None,
+            nexus_client,
+            Some(PhysicalLink("mylink".to_string())),
+        )
+        .unwrap();
 
         // Verify that no instances exist.
         assert!(im.inner.instances.lock().unwrap().is_empty());
@@ -329,7 +341,13 @@ mod test {
         let dladm_get_vnics_ctx = MockDladm::get_vnics_context();
         dladm_get_vnics_ctx.expect().return_once(|| Ok(vec![]));
 
-        let im = InstanceManager::new(log, None, nexus_client).unwrap();
+        let im = InstanceManager::new(
+            log,
+            None,
+            nexus_client,
+            Some(PhysicalLink("mylink".to_string())),
+        )
+        .unwrap();
 
         let ticket = Arc::new(std::sync::Mutex::new(None));
         let ticket_clone = ticket.clone();

@@ -130,8 +130,13 @@ impl SledAgent {
             Dladm::delete_vnic(&vnic)?;
         }
 
-        let storage =
-            StorageManager::new(&log, *id, nexus_client.clone()).await?;
+        let storage = StorageManager::new(
+            &log,
+            *id,
+            nexus_client.clone(),
+            config.data_link.clone(),
+        )
+        .await?;
         if let Some(pools) = &config.zpools {
             for pool in pools {
                 info!(
@@ -142,9 +147,14 @@ impl SledAgent {
                 storage.upsert_zpool(pool).await?;
             }
         }
-        let instances =
-            InstanceManager::new(log.clone(), vlan, nexus_client.clone())?;
-        let services = ServiceManager::new(log.clone()).await?;
+        let instances = InstanceManager::new(
+            log.clone(),
+            vlan,
+            nexus_client.clone(),
+            config.data_link.clone(),
+        )?;
+        let services =
+            ServiceManager::new(log.clone(), config.data_link.clone()).await?;
 
         Ok(SledAgent { storage, instances, nexus_client, services })
     }
