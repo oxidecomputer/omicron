@@ -39,7 +39,7 @@ fn do_lookup_resource(
         "{}",
         heck::AsSnakeCase(resource_name.to_string()).to_string()
     );
-    let authz_resource = quote! { authz::#resource_name };
+    let authz_resource = quote! { authz::#resource_name, };
     let model_resource = quote! { model::#resource_name };
 
     // It's important that even if there's only one item in this list, it should
@@ -84,6 +84,7 @@ fn do_lookup_resource(
         parent_resource_name,
         parent_lookup_arg,
         parent_lookup_arg_value,
+        parent_lookup_arg_value_deref,
         parent_filter,
         authz_ancestors_values_assign,
         parent_authz,
@@ -99,7 +100,8 @@ fn do_lookup_resource(
             let authz_parent = format_ident!("authz_{}", parent_snake_str);
             let parent_lookup_arg =
                 quote! { #authz_parent: #parent_authz_type, };
-            let parent_lookup_arg_value = quote! { #authz_parent , };
+            let parent_lookup_arg_value = quote! { &#authz_parent , };
+            let parent_lookup_arg_value_deref = quote! { #authz_parent , };
             let parent_filter =
                 quote! { .filter(dsl::#parent_id.eq( #authz_parent.id())) };
             let authz_ancestors_values_assign = quote! {
@@ -117,6 +119,7 @@ fn do_lookup_resource(
                 parent_resource_name,
                 parent_lookup_arg,
                 parent_lookup_arg_value,
+                parent_lookup_arg_value_deref,
                 parent_filter,
                 authz_ancestors_values_assign,
                 quote! { #parent_authz },
@@ -125,6 +128,7 @@ fn do_lookup_resource(
         }
         None => (
             format_ident!("Root"),
+            quote! {},
             quote! {},
             quote! {},
             quote! {},
@@ -141,7 +145,7 @@ fn do_lookup_resource(
 
         impl<'a> #resource_name<'a> {
             fn lookup_root(&self) -> &LookupPath<'a> {
-                match self {
+                match &self.key {
                     Key::Name(parent, _) => parent.lookup_root(),
                     Key::Id(root, _) => root.lookup_root(),
                 }
@@ -149,14 +153,14 @@ fn do_lookup_resource(
 
             pub async fn fetch(
                 &self,
-            ) -> LookupResult<(#authz_path_types, #model_resource)> {
-                self.fetch_for(authz::Action::Read)
+            ) -> LookupResult<(#authz_path_types #model_resource)> {
+                self.fetch_for(authz::Action::Read).await
             }
 
             pub async fn fetch_for(
                 &self,
                 action: authz::Action,
-            ) -> LookupResult<(#authz_path_types, #model_resource)> {
+            ) -> LookupResult<(#authz_path_types #model_resource)> {
                 let lookup = self.lookup_root();
                 let opctx = &lookup.opctx;
                 let datastore = &lookup.datastore;
@@ -170,7 +174,7 @@ fn do_lookup_resource(
                             #parent_lookup_arg_value
                             *name,
                             action,
-                        ).await;
+                        ).await?;
                         Ok((#authz_path_values db_row))
                     }
                     Key::Id(_, id) => {
@@ -191,7 +195,7 @@ fn do_lookup_resource(
             ) -> LookupResult<(#authz_path_types)> {
                 let lookup = self.lookup_root();
                 let opctx = &lookup.opctx;
-                let (#authz_path_values) = self.lookup();
+                let (#authz_path_values) = self.lookup().await?;
                 opctx.authorize(action, &authz_self).await?;
                 Ok((#authz_path_values))
             }
@@ -241,7 +245,7 @@ fn do_lookup_resource(
                             Self::lookup_by_id_no_authz(
                                 opctx,
                                 datastore,
-                                id
+                                *id
                             ).await?;
                         Ok((#authz_path_values))
                     }
@@ -255,11 +259,11 @@ fn do_lookup_resource(
                 #parent_lookup_arg
                 name: &Name,
                 action: authz::Action,
-            ) -> LookupResult<(#authz_resource, #model_resource)> {
+            ) -> LookupResult<(#authz_resource #model_resource)> {
                 let (authz_self, db_row) = Self::lookup_by_name_no_authz(
                     opctx,
                     datastore,
-                    #parent_lookup_arg_value
+                    #parent_lookup_arg_value_deref
                     name
                 ).await?;
                 opctx.authorize(action, &authz_self).await?;
@@ -270,10 +274,10 @@ fn do_lookup_resource(
             // wrapped by functions that perform authz checks.
             async fn lookup_by_name_no_authz(
                 _opctx: &OpContext,
-                #parent_lookup_arg
                 datastore: &DataStore,
+                #parent_lookup_arg
                 name: &Name,
-            ) -> LookupResult<(#authz_resource, #model_resource)> {
+            ) -> LookupResult<(#authz_resource #model_resource)> {
                 use db::schema::#resource_as_snake::dsl;
 
                 // TODO-security See the note about pool_authorized() above.
@@ -310,7 +314,7 @@ fn do_lookup_resource(
                 datastore: &DataStore,
                 id: Uuid,
                 action: authz::Action,
-            ) -> LookupResult<(#authz_path_types, #model_resource)> {
+            ) -> LookupResult<(#authz_path_types #model_resource)> {
                 let (#authz_path_values db_row) = Self::lookup_by_id_no_authz(
                     opctx,
                     datastore,
@@ -326,7 +330,7 @@ fn do_lookup_resource(
                 _opctx: &OpContext,
                 datastore: &DataStore,
                 id: Uuid,
-            ) -> LookupResult<(#authz_path_types, #model_resource)> {
+            ) -> LookupResult<(#authz_path_types #model_resource)> {
                 use db::schema::#resource_as_snake::dsl;
 
                 // TODO-security This could use pool_authorized() instead.

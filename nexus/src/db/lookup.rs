@@ -22,7 +22,7 @@ use uuid::Uuid;
 
 enum Key<'a, P> {
     Name(P, &'a Name),
-    Id(LookupPath<'a>, Uuid),
+    Id(Root<'a>, Uuid),
 }
 
 struct Root<'a> {
@@ -35,25 +35,32 @@ impl<'a> Root<'a> {
     }
 }
 
-#[lookup_resource {
-    ancestors = []
-}]
-struct Organization;
+// #[lookup_resource {
+//     ancestors = [],
+//     authz_kind = "named"
+// }]
+// struct Organization;
+//
+// #[lookup_resource {
+//     ancestors = [ "Organization" ],
+//     authz_kind = "named"
+// }]
+// struct Project;
+//
+// #[lookup_resource {
+//     ancestors = [ "Organization", "Project" ]
+//     authz_kind = "generic"
+// }]
+// struct Instance;
+//
+// #[lookup_resource {
+//     ancestors = [ "Organization", "Project" ]
+//     authz_kind = "generic"
+// }]
+// struct Disk;
 
-#[lookup_resource {
-    ancestors = [ "Organization" ]
-}]
-struct Project;
-
-#[lookup_resource {
-    ancestors = [ "Organization", "Project" ]
-}]
-struct Instance;
-
-#[lookup_resource {
-    ancestors = [ "Organization", "Project" ]
-}]
-struct Disk;
+// TODO XXX-dap remove me -- expanded
+// TODO XXX-dap end remove-me -- expanded
 
 pub struct LookupPath<'a> {
     opctx: &'a OpContext,
@@ -77,24 +84,24 @@ impl<'a> LookupPath<'a> {
         'a: 'c,
         'b: 'c,
     {
-        Organization { key: Key::Name(Root { lookup_path: self }, name) }
+        Organization { key: Key::Name(Root { lookup_root: self }, name) }
     }
 
     pub fn organization_id(self, id: Uuid) -> Organization<'a> {
-        Organization { key: Key::Id(self, id) }
+        Organization { key: Key::Id(Root { lookup_root: self }, id) }
     }
 
     pub fn project_id(self, id: Uuid) -> Project<'a> {
-        Project { key: Key::Id(self, id) }
+        Project { key: Key::Id(Root { lookup_root: self }, id) }
     }
 
     pub fn instance_id(self, id: Uuid) -> Instance<'a> {
-        Instance { key: Key::Id(self, id) }
+        Instance { key: Key::Id(Root { lookup_root: self }, id) }
     }
 
-    pub fn disk_id(self, id: Uuid) -> Disk<'a> {
-        Disk { key: Key::Id(self, id) }
-    }
+    // pub fn disk_id(self, id: Uuid) -> Disk<'a> {
+    //     Disk { key: Key::Id(Root { lookup_root: self }, id) }
+    // }
 }
 
 impl<'a> Organization<'a> {
@@ -108,13 +115,13 @@ impl<'a> Organization<'a> {
 }
 
 impl<'a> Project<'a> {
-    pub fn disk_name<'b, 'c>(self, name: &'b Name) -> Disk<'c>
-    where
-        'a: 'c,
-        'b: 'c,
-    {
-        Disk { key: Key::Name(self, name) }
-    }
+    // pub fn disk_name<'b, 'c>(self, name: &'b Name) -> Disk<'c>
+    // where
+    //     'a: 'c,
+    //     'b: 'c,
+    // {
+    //     Disk { key: Key::Name(self, name) }
+    // }
 
     pub fn instance_name<'b, 'c>(self, name: &'b Name) -> Instance<'c>
     where
@@ -661,7 +668,6 @@ impl<'a> Project<'a> {
 //        )
 //    }
 //);
-
 
 #[cfg(test)]
 mod test {
