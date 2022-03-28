@@ -767,7 +767,7 @@ async fn sic_allocate_v6_address_undo(
 ) -> Result<(), anyhow::Error> {
     let osagactx = sagactx.user_data();
     let nexus = osagactx.nexus();
-    let ipv6 = sagactx.lookup::<IpAddr>("allocated_ipv6")?;
+    let ipv6 = sagactx.lookup::<IpAddr>("allocated_control_ip")?;
     Ok(nexus.free_static_v6_address(ipv6).await?)
 }
 
@@ -788,7 +788,7 @@ async fn sim_allocate_v6_address_undo(
 ) -> Result<(), anyhow::Error> {
     let osagactx = sagactx.user_data();
     let nexus = osagactx.nexus();
-    let ipv6 = sagactx.lookup::<IpAddr>("allocated_ipv6")?;
+    let ipv6 = sagactx.lookup::<IpAddr>("allocated_control_ip")?;
     Ok(nexus.free_static_v6_address(ipv6).await?)
 }
 
