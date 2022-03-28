@@ -282,7 +282,7 @@ impl Inner {
         self.ports[port.0].local_addr()
     }
 
-    /// Get the socket to use to communicate with an AP and the socket address
+    /// Get the socket to use to communicate with an SP and the socket address
     /// of that SP.
     fn sp_socket(&self, port: SwitchPort) -> Option<SpSocket<'_>> {
         // NOTE: For now, it's not possible for this method to return `None`. We
@@ -345,30 +345,24 @@ where
         // (to reregister readable interest in the corresponding socket)
         let (port, result) = recv_all_sockets.next().await.unwrap();
 
+        // checking readability of the socket can't fail without violating some
+        // internal state in tokio in a presumably-strage way; at that point we
+        // don't know how to recover, so just panic and let something restart us
+        if let Err(err) = result {
+            panic!("error in socket readability: {} (port={:?})", err, port);
+        }
+
         // immediately push a new future requesting readability interest, as
         // noted above
         let sock = &inner.ports[port.0];
         recv_all_sockets.push(readable_with_port(port, sock));
 
-        // TODO how do we handle errors here (or from `recv()` below)?
-        // currently just log them and retry, assuming any socket errors are
-        // ephemeral
-        if let Err(err) = result {
-            warn!(
-                inner.log,
-                "error checking socket readability";
-                "port" => ?port,
-                "err" => err,
-            );
-            continue;
-        }
-
         match sock.try_recv_from(&mut buf) {
             Ok((n, addr)) => {
                 if Some(addr) != inner.sp_socket(port).map(|s| s.addr) {
-                    // TODO what do we do here? we received a packet from an
-                    // address that doesn't match what we believe is the SP's
-                    // address. for now, log and discard
+                    // TODO-security: we received a packet from an address that
+                    // doesn't match what we believe is the SP's address. for
+                    // now, log and discard; what should we really do?
                     warn!(
                         inner.log,
                         "discarding packet from unknown source";
@@ -382,13 +376,11 @@ where
             }
             // spurious wakeup; no need to log, just continue
             Err(ref e) if e.kind() == io::ErrorKind::WouldBlock => (),
+            // other kinds of errors should be rare/impossible given our use of
+            // UDP and the way tokio is structured; we don't know how to recover
+            // from them, so just panic and let something restart us
             Err(err) => {
-                warn!(
-                    inner.log,
-                    "error in recv_from";
-                    "port" => ?port,
-                    "err" => err,
-                );
+                panic!("error in recv_from: {} (port={:?})", err, port);
             }
         }
     }
