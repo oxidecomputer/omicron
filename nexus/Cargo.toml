@@ -10,7 +10,7 @@ path = "../rpaths"
 [dependencies]
 anyhow = "1.0"
 async-bb8-diesel = { git = "https://github.com/oxidecomputer/async-bb8-diesel", rev = "c849b717be" }
-async-trait = "0.1.51"
+async-trait = "0.1.53"
 base64 = "0.13.0"
 bb8 = "0.7.1"
 cookie = "0.16"
