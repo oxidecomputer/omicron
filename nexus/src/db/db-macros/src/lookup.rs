@@ -13,6 +13,13 @@ use syn::ItemStruct;
 #[derive(serde::Deserialize)]
 struct Config {
     ancestors: Vec<String>,
+    authz_kind: AuthzKind,
+}
+
+#[derive(serde::Deserialize)]
+enum AuthzKind {
+    Generic,
+    Typed,
 }
 
 pub fn lookup_resource(
@@ -88,6 +95,7 @@ fn do_lookup_resource(
         parent_filter,
         authz_ancestors_values_assign,
         parent_authz,
+        parent_authz_type,
         authz_ancestors_values_assign_lookup,
     ) = match config.ancestors.last() {
         Some(parent_resource_name) => {
@@ -123,6 +131,7 @@ fn do_lookup_resource(
                 parent_filter,
                 authz_ancestors_values_assign,
                 quote! { #parent_authz },
+                parent_authz_type,
                 authz_ancestors_values_assign_lookup,
             )
         }
@@ -134,8 +143,17 @@ fn do_lookup_resource(
             quote! {},
             quote! {},
             quote! { authz::FLEET, },
+            quote! { &authz::Fleet },
             quote! {},
         ),
+    };
+
+    let (mkauthz_func, mkauthz_arg) = match &config.authz_kind {
+        AuthzKind::Generic => (
+            format_ident!("child_generic"),
+            quote! { ResourceType::#resource_name, },
+        ),
+        AuthzKind::Typed => (resource_as_snake.clone(), quote! {}),
     };
 
     Ok(quote! {
@@ -149,6 +167,18 @@ fn do_lookup_resource(
                     Key::Name(parent, _) => parent.lookup_root(),
                     Key::Id(root, _) => root.lookup_root(),
                 }
+            }
+
+            fn make_authz(
+                authz_parent: #parent_authz_type,
+                db_row: &#model_resource,
+                lookup_type: LookupType,
+            ) -> authz::#resource_name {
+                authz_parent.#mkauthz_func(
+                    #mkauthz_arg
+                    db_row.id(),
+                    lookup_type
+                )
             }
 
             pub async fn fetch(
@@ -380,7 +410,7 @@ mod test {
         eprintln!(
             "{}",
             do_lookup_resource(
-                quote! { ancestors = [] },
+                quote! { ancestors = [], authz_kind = Typed },
                 quote! { struct Organization; },
             )
             .unwrap(),
@@ -389,7 +419,7 @@ mod test {
         eprintln!(
             "{}",
             do_lookup_resource(
-                quote! { ancestors = [ "Organization" ] },
+                quote! { ancestors = [ "Organization" ], authz_kind = Typed },
                 quote! { struct Project; },
             )
             .unwrap(),
@@ -398,7 +428,7 @@ mod test {
         eprintln!(
             "{}",
             do_lookup_resource(
-                quote! { ancestors = [ "Organization", "Project" ] },
+                quote! { ancestors = [ "Organization", "Project", authz_kind = Generic ] },
                 quote! { struct Instance; },
             )
             .unwrap(),
