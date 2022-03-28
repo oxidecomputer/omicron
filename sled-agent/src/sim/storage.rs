@@ -52,7 +52,6 @@ impl CrucibleDataInner {
 
         let region = Region {
             id: params.id,
-            volume_id: params.volume_id,
             block_size: params.block_size,
             extent_size: params.extent_size,
             extent_count: params.extent_count,

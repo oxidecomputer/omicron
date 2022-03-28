@@ -14,7 +14,9 @@ Omicron is open-source.  But we're pretty focused on our own goals for the fores
 
 https://docs.oxide.computer/api[Docs are automatically generated for the public (externally-facing) API] based on the OpenAPI spec that itself is automatically generated from the server implementation.  You can generate your own docs for either the public API or any of the internal APIs by feeding the corresponding OpenAPI specs (in "./openapi") into an OpenAPI doc generator.
 
-For design and internal Rust API docs, see the https://rust.docs.corp.oxide.computer/omicron/[generated documentation].  You can generate this yourself with:
+There are some internal design docs in the "./docs" directory.
+
+For more design documentation and internal Rust API docs, see the https://rust.docs.corp.oxide.computer/omicron/[generated Rust documentation].  You can generate this yourself with:
 
 [source,text]
 ----
@@ -188,7 +190,8 @@ Dec 02 18:00:01.093 DEBG registered endpoint, path: /producers, method: POST, lo
 ...
 ----
 
-Once everything is up and running, you can use `curl` directly to hit either of the servers.  But it's easier to use the `oxapi_demo` wrapper (see below).
+Once everything is up and running, you can use `curl` directly to hit either of
+the servers.  But it's easier to use the [`oxide` CLI](https://docs.oxide.computer/cli/manual) (see below).
 
 == Docker image
 
@@ -196,200 +199,71 @@ This repo includes a Dockerfile that builds an image containing the Nexus and sl
 
 == Quick demo
 
-There's a small demo tool called `./tools/oxapi_demo` that provides a slightly friendlier interface than `curl`, with the same output format.  To use the demo, the `node` and `json` programs should be installed and available in the users PATH:
+The `oxide` CLI can be installed from the [latest
+release](https://github.com/oxidecomputer/cli/releases).
 
-[source,text]
-----
-pkg install node-12
-npm i -g json
-----
+Run `oxide auth login` to authenticate with your Oxide account. Alternatively,
+`oxide` will respect the `OXIDE_TOKEN` and `OXIDE_HOST` environment variables.
+
+If you find bugs or have feedback, leave it on the [cli
+repo](https://github.com/oxidecomputer/cli/issues).
 
 Here's a small demo that creates a project, creates an instance, and attaches a disk to it:
 
 [source,text]
 ----
-$ ./tools/oxapi_demo
-oxapi_demo: command not specified
-usage: oxapi_demo [-A] [cmd] [args]
+$ oxide org create myorg \
+    --description "My organization"
+✔ Created organization myorg
 
-GENERAL OPTIONS
+$ oxide project create myproject \
+    --description "My project" \
+    --organization myorg
+✔ Created project myorg/myproject
 
-    -A        do not attempt to authenticate
-              (default behavior: use "spoof" authentication for endpoints
-              that require it)
+$ oxide instance create myinstance \
+    --description "My instance" \
+    --project myproject \
+    --org myorg \
+    --hostname "myinstance.maze-war.com" \
+	  --ncpus 1 \
+	  --memory 8
+✔ Created instance myinstance in myorg/myproject
 
-ORGANIZATIONS
-
-    organizations_list
-    organization_create_demo ORGANIZATION_NAME
-    organization_delete      ORGANIZATION_NAME
-    organization_get         ORGANIZATION_NAME
-
-PROJECTS
-
-    projects_list          ORGANIZATION_NAME
-    project_create_demo    ORGANIZATION_NAME PROJECT_NAME
-    project_delete         ORGANIZATION_NAME PROJECT_NAME
-    project_get            ORGANIZATION_NAME PROJECT_NAME
-    project_list_instances ORGANIZATION_NAME PROJECT_NAME
-    project_list_disks     ORGANIZATION_NAME PROJECT_NAME
-    project_list_vpcs      ORGANIZATION_NAME PROJECT_NAME
-
-INSTANCES
-
-    instance_create_demo ORGANIZATION_NAME PROJECT_NAME INSTANCE_NAME
-    instance_get         ORGANIZATION_NAME PROJECT_NAME INSTANCE_NAME
-    instance_delete      ORGANIZATION_NAME PROJECT_NAME INSTANCE_NAME
-
-    instance_stop        ORGANIZATION_NAME PROJECT_NAME INSTANCE_NAME
-    instance_start       ORGANIZATION_NAME PROJECT_NAME INSTANCE_NAME
-    instance_reboot      ORGANIZATION_NAME PROJECT_NAME INSTANCE_NAME
-
-    instance_attach_disk ORGANIZATION_NAME PROJECT_NAME INSTANCE_NAME DISK_NAME
-    instance_detach_disk ORGANIZATION_NAME PROJECT_NAME INSTANCE_NAME DISK_NAME
-    instance_list_disks  ORGANIZATION_NAME PROJECT_NAME INSTANCE_NAME
-    instance_get_disk    ORGANIZATION_NAME PROJECT_NAME INSTANCE_NAME DISK_NAME
-
-DISKS
-
-    disk_create_demo ORGANIZATION_NAME PROJECT_NAME DISK_NAME
-    disk_get         ORGANIZATION_NAME PROJECT_NAME DISK_NAME
-    disk_delete      ORGANIZATION_NAME PROJECT_NAME DISK_NAME
-
-VPCS
-
-    vpc_create_demo ORGANIZATION_NAME PROJECT_NAME VPC_NAME DNS_NAME
-    vpc_get         ORGANIZATION_NAME PROJECT_NAME VPC_NAME
-    vpc_delete      ORGANIZATION_NAME PROJECT_NAME VPC_NAME
-
-HARDWARE
-
-    racks_list
-    rack_get     RACK_ID
-
-    sleds_list
-    sled_get     SLED_ID
-$ ./tools/oxapi_demo organization_create_demo myorg
-++ curl -sSi http://127.0.0.1:12220/organizations -X POST -T - -H 'oxide-authn-spoof: 001de000-05e4-0000-0000-000000004007'
-++ json -ga
-HTTP/1.1 100 Continue
-
-HTTP/1.1 201 Created
-content-type: application/json
-x-request-id: 60ffbc0b-212a-4ffd-84f0-39aeb4b3b772
-content-length: 194
-date: Wed, 17 Nov 2021 01:43:52 GMT
-
-{
-  "id": "dbaf046f-1c05-4b6a-a749-5111a8cd9aa1",
-  "name": "myorg",
-  "description": "an organization called myorg",
-  "timeCreated": "2021-11-17T01:43:52.322629Z",
-  "timeModified": "2021-11-17T01:43:52.322629Z"
-}
-$ ./tools/oxapi_demo project_create_demo myorg myproject
-++ curl -sSi http://127.0.0.1:12220/organizations/myorg/projects -X POST -T -
-++ json -ga
-HTTP/1.1 100 Continue
-
-HTTP/1.1 201 Created
-content-type: application/json
-x-request-id: bea0ba10-2916-473c-b3e4-461984b85c6b
-content-length: 252
-date: Wed, 17 Nov 2021 01:44:01 GMT
-
-{
-  "id": "c197b9d2-285c-4e9f-9461-1815ef093c8d",
-  "name": "myproject",
-  "description": "a project called myproject",
-  "timeCreated": "2021-11-17T01:44:01.933615Z",
-  "timeModified": "2021-11-17T01:44:01.933615Z",
-  "organizationId": "dbaf046f-1c05-4b6a-a749-5111a8cd9aa1"
-}
-$ ./tools/oxapi_demo instance_create_demo myorg myproject myinstance
-++ curl -sSi http://127.0.0.1:12220/organizations/myorg/projects/myproject/instances -X POST -T -
-++ json -ga
-HTTP/1.1 100 Continue
-
-HTTP/1.1 201 Created
-content-type: application/json
-x-request-id: 3d07dfa2-efda-4085-ac9f-9e6bd3040997
-content-length: 377
-date: Wed, 17 Nov 2021 01:45:07 GMT
-
+$ oxide instance view myinstance \
+    --org myorg \
+    --project myproject \
+    --format json
 {
   "id": "99ad2514-050c-4493-9cb9-d9ceba980a98",
   "name": "myinstance",
-  "description": "an instance called myinstance",
+  "description": "My instance",
   "timeCreated": "2021-11-17T01:45:07.606749Z",
   "timeModified": "2021-11-17T01:45:07.606749Z",
   "projectId": "c197b9d2-285c-4e9f-9461-1815ef093c8d",
   "ncpus": 1,
-  "memory": 268435456,
-  "hostname": "myproject",
-  "runState": "starting",
-  "timeRunStateUpdated": "2021-11-17T01:45:07.618960Z"
-}
-$ ./tools/oxapi_demo instance_get myorg myproject myinstance
-++ curl -sSi http://127.0.0.1:12220/organizations/myorg/projects/myproject/instances/myinstance
-++ json -ga
-HTTP/1.1 200 OK
-content-type: application/json
-x-request-id: 5870f965-06a8-41fc-967f-9021ec640ad4
-content-length: 376
-date: Wed, 17 Nov 2021 01:46:41 GMT
-
-{
-  "id": "99ad2514-050c-4493-9cb9-d9ceba980a98",
-  "name": "myinstance",
-  "description": "an instance called myinstance",
-  "timeCreated": "2021-11-17T01:45:07.606749Z",
-  "timeModified": "2021-11-17T01:45:07.606749Z",
-  "projectId": "c197b9d2-285c-4e9f-9461-1815ef093c8d",
-  "ncpus": 1,
-  "memory": 268435456,
-  "hostname": "myproject",
+  "memory": 8,
+  "hostname": "myinstance.maze-war.com",
   "runState": "running",
   "timeRunStateUpdated": "2021-11-17T01:45:09.120652Z"
 }
-$ ./tools/oxapi_demo disk_create_demo myorg myproject mydisk
-++ curl -sSi http://127.0.0.1:12220/organizations/myorg/projects/myproject/disks -X POST -T -
-++ json -ga
-HTTP/1.1 100 Continue
 
-HTTP/1.1 201 Created
-content-type: application/json
-x-request-id: f6073b9d-4b07-4eba-b8cf-55d8158785eb
-content-length: 324
-date: Wed, 17 Nov 2021 01:47:36 GMT
+$ oxide disk create nginx \
+	-D "The nginx disk." \
+	-o myorg \
+	-p myproject \
+	--size 10
+✔ Created disk nginx in myorg/myproject
 
+
+$ oxide disk view nginx \
+    --org myorg \
+    --project myproject \
+    --format json
 {
   "id": "551bbe67-3640-41c9-b968-249a136e5e31",
-  "name": "mydisk",
-  "description": "a disk called mydisk",
-  "timeCreated": "2021-11-17T01:47:36.524136Z",
-  "timeModified": "2021-11-17T01:47:36.524136Z",
-  "projectId": "c197b9d2-285c-4e9f-9461-1815ef093c8d",
-  "snapshotId": null,
-  "size": 1024,
-  "state": {
-    "state": "creating"
-  },
-  "devicePath": "/mnt/mydisk"
-}
-$ ./tools/oxapi_demo disk_get myorg myproject mydisk
-++ curl -sSi http://127.0.0.1:12220/organizations/myorg/projects/myproject/disks/mydisk
-++ json -ga
-HTTP/1.1 200 OK
-content-type: application/json
-x-request-id: bd1083a8-67f2-407a-8d33-068906e9f2f1
-content-length: 324
-date: Wed, 17 Nov 2021 01:48:17 GMT
-
-{
-  "id": "551bbe67-3640-41c9-b968-249a136e5e31",
-  "name": "mydisk",
-  "description": "a disk called mydisk",
+  "name": "nginx",
+  "description": "The nginx disk.",
   "timeCreated": "2021-11-17T01:47:36.524136Z",
   "timeModified": "2021-11-17T01:47:36.524136Z",
   "projectId": "c197b9d2-285c-4e9f-9461-1815ef093c8d",
@@ -398,46 +272,105 @@ date: Wed, 17 Nov 2021 01:48:17 GMT
   "state": {
     "state": "detached"
   },
-  "devicePath": "/mnt/mydisk"
+  "devicePath": "/mnt/nginx"
 }
-$ ./tools/oxapi_demo instance_attach_disk myorg myproject myinstance mydisk
-++ curl -sSi http://127.0.0.1:12220/organizations/myorg/projects/myproject/instances/myinstance/disks
-/mydisk -X PUT -T /dev/null
-++ json -ga
-HTTP/1.1 201 Created
-content-type: application/json
-x-request-id: da298038-28fc-4eb2-a283-4182859d6f33
-content-length: 205
-date: Wed, 17 Nov 2021 01:48:41 GMT
 
+$ oxide disk attach nginx myinstance \
+	-o maze-war \
+	-p prod-online
+✔ Attached disk nginx to instance myinstance in myorg/myproject
+
+$ oxide instance disks myinstance \
+	-o maze-war \
+	-p prod-online \
+  --format json
 {
   "instanceId": "99ad2514-050c-4493-9cb9-d9ceba980a98",
   "diskId": "551bbe67-3640-41c9-b968-249a136e5e31",
-  "diskName": "mydisk",
-  "diskState": {
-    "state": "attaching",
-    "instance": "99ad2514-050c-4493-9cb9-d9ceba980a98"
-  }
-}
-$ ./tools/oxapi_demo instance_list_disks myorg myproject myinstance
-++ curl -sSi http://127.0.0.1:12220/organizations/myorg/projects/myproject/instances/myinstance/disks
-++ json -ga
-HTTP/1.1 200 OK
-content-type: application/json
-x-request-id: 9f0490d5-e09e-4831-900c-d39f5f07d2c8
-content-length: 206
-date: Wed, 17 Nov 2021 01:49:10 GMT
-
-{
-  "instanceId": "99ad2514-050c-4493-9cb9-d9ceba980a98",
-  "diskId": "551bbe67-3640-41c9-b968-249a136e5e31",
-  "diskName": "mydisk",
+  "diskName": "nginx",
   "diskState": {
     "state": "attached",
     "instance": "99ad2514-050c-4493-9cb9-d9ceba980a98"
   }
 }
-----
+
+# Alternatively, you can use the API command to run any endpoint.
+# This operates like a fancy, authenticated curl.
+
+$ oxide api --help
+Makes an authenticated HTTP request to the Oxide API and prints the response.
+
+The endpoint argument should be a path of a Oxide API endpoint.
+
+The default HTTP request method is "GET" normally and "POST" if any parameters
+were added. Override the method with `--method`.
+
+Pass one or more `-f/--raw-field` values in "key=value" format to add static string
+parameters to the request payload. To add non-string or otherwise dynamic values, see
+`--field` below. Note that adding request parameters will automatically switch the
+request method to POST. To send the parameters as a GET query string instead, use
+`--method GET`.
+
+The `-F/--field` flag has magic type conversion based on the format of the value:
+
+- literal values "true", "false", "null", and integer/float numbers get converted to
+  appropriate JSON types;
+- if the value starts with "@", the rest of the value is interpreted as a
+  filename to read the value from. Pass "-" to read from standard input.
+
+Raw request body may be passed from the outside via a file specified by `--input`.
+Pass "-" to read from standard input. In this mode, parameters specified via
+`--field` flags are serialized into URL query parameters.
+
+In `--paginate` mode, all pages of results will sequentially be requested until
+there are no more pages of results.
+
+USAGE:
+    oxide api [OPTIONS] <endpoint>
+
+ARGS:
+    <endpoint>
+            The endpoint to request
+
+OPTIONS:
+    -d, --debug
+            Print debug info
+
+            [env: DEBUG=]
+
+    -f, --raw-field <RAW_FIELD>
+            Add a string parameter in key=value format
+
+    -F, --field <FIELD>
+            Add a typed parameter in key=value format
+
+    -h, --help
+            Print help information
+
+    -H, --header <HEADER>
+            Add a HTTP request header in `key:value` format
+
+    -i, --include
+            Include HTTP response headers in the output
+
+        --input <INPUT>
+            The file to use as body for the HTTP request (use "-" to read from standard input)
+
+            [default: ]
+
+        --paginate
+            Make additional HTTP requests to fetch all pages of results
+
+    -X, --method <METHOD>
+            The HTTP method for the request
+
+$ oxide api /session/me
+{
+  "id": "99ad2514-050c-4493-9cb9-d9ceba980a98"
+}
+
+
+-----
 
 == Deploying Omicron
 

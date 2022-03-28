@@ -22,6 +22,7 @@ use futures::lock::{Mutex, MutexGuard};
 use omicron_common::api::external::NetworkInterface;
 use omicron_common::api::internal::nexus::InstanceRuntimeState;
 use omicron_common::backoff;
+use propolis_client::api::DiskRequest;
 use propolis_client::Client as PropolisClient;
 use slog::Logger;
 use std::net::SocketAddr;
@@ -62,6 +63,9 @@ pub enum Error {
 
     #[error(transparent)]
     RunningZone(#[from] crate::illumos::running_zone::Error),
+
+    #[error("serde_json failure: {0}")]
+    SerdeJsonError(#[from] serde_json::Error),
 }
 
 // Issues read-only, idempotent HTTP requests at propolis until it responds with
@@ -182,6 +186,9 @@ struct InstanceInner {
     requested_nics: Vec<NetworkInterface>,
     vlan: Option<VlanID>,
 
+    // Disk related properties
+    requested_disks: Vec<DiskRequest>,
+
     // Internal State management
     state: InstanceStates,
     running_state: Option<RunningState>,
@@ -288,9 +295,9 @@ impl InstanceInner {
         let request = propolis_client::api::InstanceEnsureRequest {
             properties: self.properties.clone(),
             nics,
-            // TODO: Actual disks need to be wired up here.
-            disks: vec![],
+            disks: self.requested_disks.clone(),
             migrate,
+            cloud_init_bytes: None,
         };
 
         info!(self.log, "Sending ensure request to propolis: {:?}", request);
@@ -422,6 +429,7 @@ impl Instance {
             propolis_id: initial.runtime.propolis_uuid,
             vnic_allocator,
             requested_nics: initial.nics,
+            requested_disks: initial.disks,
             vlan,
             state: InstanceStates::new(initial.runtime),
             running_state: None,
@@ -693,6 +701,7 @@ mod test {
                 time_updated: Utc::now(),
             },
             nics: vec![],
+            disks: vec![],
         }
     }
 

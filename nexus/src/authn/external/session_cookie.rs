@@ -17,7 +17,8 @@ use uuid::Uuid;
 // https://cheatsheetseries.owasp.org/cheatsheets/Session_Management_Cheat_Sheet.html
 
 pub trait Session {
-    fn user_id(&self) -> Uuid;
+    fn silo_user_id(&self) -> Uuid;
+    fn silo_id(&self) -> Uuid;
     fn time_last_used(&self) -> DateTime<Utc>;
     fn time_created(&self) -> DateTime<Utc>;
 }
@@ -106,7 +107,8 @@ where
             }
         };
 
-        let actor = Actor(session.user_id());
+        let actor =
+            Actor { id: session.silo_user_id(), silo_id: session.silo_id() };
 
         // if the session has gone unused for longer than idle_timeout, it is expired
         let now = Utc::now();
@@ -190,13 +192,18 @@ mod test {
 
     #[derive(Clone, Copy)]
     struct FakeSession {
+        silo_user_id: Uuid,
+        silo_id: Uuid,
         time_created: DateTime<Utc>,
         time_last_used: DateTime<Utc>,
     }
 
     impl Session for FakeSession {
-        fn user_id(&self) -> Uuid {
-            Uuid::new_v4()
+        fn silo_user_id(&self) -> Uuid {
+            self.silo_user_id
+        }
+        fn silo_id(&self) -> Uuid {
+            self.silo_id
         }
         fn time_created(&self) -> DateTime<Utc> {
             self.time_created
@@ -279,6 +286,8 @@ mod test {
             sessions: Mutex::new(HashMap::from([(
                 "abc".to_string(),
                 FakeSession {
+                    silo_user_id: Uuid::new_v4(),
+                    silo_id: Uuid::new_v4(),
                     time_last_used: Utc::now() - Duration::hours(2),
                     time_created: Utc::now() - Duration::hours(2),
                 },
@@ -303,6 +312,8 @@ mod test {
             sessions: Mutex::new(HashMap::from([(
                 "abc".to_string(),
                 FakeSession {
+                    silo_user_id: Uuid::new_v4(),
+                    silo_id: Uuid::new_v4(),
                     time_last_used: Utc::now(),
                     time_created: Utc::now() - Duration::hours(20),
                 },
@@ -328,7 +339,12 @@ mod test {
         let context = TestServerContext {
             sessions: Mutex::new(HashMap::from([(
                 "abc".to_string(),
-                FakeSession { time_last_used, time_created: Utc::now() },
+                FakeSession {
+                    silo_user_id: Uuid::new_v4(),
+                    silo_id: Uuid::new_v4(),
+                    time_last_used,
+                    time_created: Utc::now(),
+                },
             )])),
         };
         let result = authn_with_cookie(&context, Some("session=abc")).await;

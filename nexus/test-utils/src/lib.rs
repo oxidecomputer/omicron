@@ -177,7 +177,7 @@ pub async fn start_sled_agent(
         nexus_address,
         dropshot: ConfigDropshot {
             bind_address: SocketAddr::new("127.0.0.1".parse().unwrap(), 0),
-            request_body_max_bytes: 2048,
+            request_body_max_bytes: 1024 * 1024,
             ..Default::default()
         },
         // TODO-cleanup this is unused

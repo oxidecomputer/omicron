@@ -173,12 +173,56 @@ CREATE TABLE omicron.public.volume (
 );
 
 /*
+ * Silos
+ */
+
+CREATE TABLE omicron.public.silo (
+    /* Identity metadata */
+    id UUID PRIMARY KEY,
+
+    name STRING(128) NOT NULL,
+    description STRING(512) NOT NULL,
+
+    discoverable BOOL NOT NULL,
+
+    time_created TIMESTAMPTZ NOT NULL,
+    time_modified TIMESTAMPTZ NOT NULL,
+    time_deleted TIMESTAMPTZ,
+
+    /* child resource generation number, per RFD 192 */
+    rcgen INT NOT NULL
+);
+
+CREATE UNIQUE INDEX ON omicron.public.silo (
+    name
+) WHERE
+    time_deleted IS NULL;
+
+/*
+ * Silo users
+ */
+CREATE TABLE omicron.public.silo_user (
+    /* silo user id */
+    id UUID PRIMARY KEY,
+
+    silo_id UUID NOT NULL,
+
+    time_created TIMESTAMPTZ NOT NULL,
+    time_modified TIMESTAMPTZ NOT NULL,
+    time_deleted TIMESTAMPTZ
+);
+
+/*
  * Organizations
  */
 
 CREATE TABLE omicron.public.organization (
     /* Identity metadata */
     id UUID PRIMARY KEY,
+
+    /* FK into Silo table */
+    silo_id UUID NOT NULL,
+
     name STRING(63) NOT NULL,
     description STRING(512) NOT NULL,
     time_created TIMESTAMPTZ NOT NULL,
@@ -747,9 +791,7 @@ CREATE TABLE omicron.public.console_session (
     token STRING(40) PRIMARY KEY,
     time_created TIMESTAMPTZ NOT NULL,
     time_last_used TIMESTAMPTZ NOT NULL,
-    -- we're agnostic about what this means until work starts on users, but the
-    -- naive interpretation is that it points to a row in the User table
-    user_id UUID NOT NULL
+    silo_user_id UUID NOT NULL
 );
 
 -- to be used for cleaning up old tokens
