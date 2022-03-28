@@ -37,24 +37,28 @@ impl<'a> Root<'a> {
 
 #[lookup_resource {
     ancestors = [],
+    children = [ "Project" ],
     authz_kind = Typed
 }]
 struct Organization;
 
 #[lookup_resource {
     ancestors = [ "Organization" ],
+    children = [ "Disk", "Instance" ],
     authz_kind = Typed
 }]
 struct Project;
 
 #[lookup_resource {
     ancestors = [ "Organization", "Project" ],
+    children = [],
     authz_kind = Generic
 }]
 struct Instance;
 
 #[lookup_resource {
     ancestors = [ "Organization", "Project" ],
+    children = [],
     authz_kind = Generic
 }]
 struct Disk;
@@ -99,38 +103,38 @@ impl<'a> LookupPath<'a> {
         Instance { key: Key::Id(Root { lookup_root: self }, id) }
     }
 
-    // pub fn disk_id(self, id: Uuid) -> Disk<'a> {
-    //     Disk { key: Key::Id(Root { lookup_root: self }, id) }
-    // }
-}
-
-impl<'a> Organization<'a> {
-    pub fn project_name<'b, 'c>(self, name: &'b Name) -> Project<'c>
-    where
-        'a: 'c,
-        'b: 'c,
-    {
-        Project { key: Key::Name(self, name) }
+    pub fn disk_id(self, id: Uuid) -> Disk<'a> {
+        Disk { key: Key::Id(Root { lookup_root: self }, id) }
     }
 }
 
-impl<'a> Project<'a> {
-    // pub fn disk_name<'b, 'c>(self, name: &'b Name) -> Disk<'c>
-    // where
-    //     'a: 'c,
-    //     'b: 'c,
-    // {
-    //     Disk { key: Key::Name(self, name) }
-    // }
-
-    pub fn instance_name<'b, 'c>(self, name: &'b Name) -> Instance<'c>
-    where
-        'a: 'c,
-        'b: 'c,
-    {
-        Instance { key: Key::Name(self, name) }
-    }
-}
+// impl<'a> Organization<'a> {
+//     pub fn project_name<'b, 'c>(self, name: &'b Name) -> Project<'c>
+//     where
+//         'a: 'c,
+//         'b: 'c,
+//     {
+//         Project { key: Key::Name(self, name) }
+//     }
+// }
+// 
+// impl<'a> Project<'a> {
+//     pub fn disk_name<'b, 'c>(self, name: &'b Name) -> Disk<'c>
+//     where
+//         'a: 'c,
+//         'b: 'c,
+//     {
+//         Disk { key: Key::Name(self, name) }
+//     }
+// 
+//     pub fn instance_name<'b, 'c>(self, name: &'b Name) -> Instance<'c>
+//     where
+//         'a: 'c,
+//         'b: 'c,
+//     {
+//         Instance { key: Key::Name(self, name) }
+//     }
+// }
 
 //macro_rules! define_lookup {
 //    ($pc:ident) => {

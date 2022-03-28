@@ -13,6 +13,7 @@ use syn::ItemStruct;
 #[derive(serde::Deserialize)]
 struct Config {
     ancestors: Vec<String>,
+    children: Vec<String>,
     authz_kind: AuthzKind,
 }
 
@@ -155,6 +156,14 @@ fn do_lookup_resource(
         ),
         AuthzKind::Typed => (resource_as_snake.clone(), quote! {}),
     };
+
+    let child_names: Vec<_> =
+        config.children.iter().map(|c| format_ident!("{}", c)).collect();
+    let child_by_names: Vec<_> = config
+        .children
+        .iter()
+        .map(|c| format_ident!("{}_name", heck::AsSnakeCase(c).to_string()))
+        .collect();
 
     Ok(quote! {
         pub struct #resource_name<'a> {
@@ -393,6 +402,19 @@ fn do_lookup_resource(
                 );
                 Ok((#authz_path_values db_row))
             }
+
+            #(
+                pub fn #child_by_names<'b, 'c>(self, name: &'b Name)
+                -> #child_names<'c>
+                where
+                    'a: 'c,
+                    'b: 'c,
+                {
+                    #child_names {
+                        key: Key::Name(self, name)
+                    }
+                }
+            )*
 
             // XXX-dap doc these functions
         }
