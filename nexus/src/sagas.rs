@@ -806,9 +806,6 @@ async fn sic_instance_ensure(
     let instance_name = sagactx.lookup::<db::model::Name>("instance_name")?;
     let opctx = OpContext::for_saga_action(&sagactx, &params.serialized_authn);
 
-    let allocated_control_ip =
-        sagactx.lookup::<IpAddr>("allocated_control_ip")?;
-
     let authz_project = osagactx
         .datastore()
         .project_lookup_by_id(params.project_id)
@@ -828,7 +825,6 @@ async fn sic_instance_ensure(
             &authz_instance,
             &instance,
             runtime_params,
-            allocated_control_ip: allocated_control_ip.to_string(),
         )
         .await
         .map_err(ActionError::action_failed)?;

@@ -10,7 +10,7 @@ use crate::db::schema::{
     console_session, dataset, disk, instance, metric_producer,
     network_interface, organization, oximeter, project, rack, region,
     role_assignment_builtin, role_builtin, router_route, silo, silo_user, sled,
-    static_v6_address, snapshot, update_available_artifact, user_builtin,
+    snapshot, static_v6_address, update_available_artifact, user_builtin,
     volume, vpc, vpc_firewall_rule, vpc_router, vpc_subnet, zpool,
 };
 use crate::defaults;
