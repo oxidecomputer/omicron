@@ -10,8 +10,9 @@ use proc_macro2::TokenStream;
 use quote::{format_ident, quote};
 
 /// Arguments for [`lookup_resource!`]
+// NOTE: this is only "pub" for the `cargo doc` link on [`lookup_resource!`].
 #[derive(serde::Deserialize)]
-struct Config {
+pub struct Config {
     /// Name of the resource (PascalCase)
     name: String,
     /// ordered list of resources that are ancestors of this resource, starting
@@ -29,7 +30,7 @@ struct Config {
 /// Describes how the authz object for a resource is constructed from its
 /// parent's authz object
 ///
-/// By "authz object", we mean the objects in [`nexus::authz::api_resources`].
+/// By "authz object", we mean the objects in nexus/src/authz/api_resources.rs.
 ///
 /// This ought to be made more uniform with more typed authz objects, but that's
 /// not the way they work today.
@@ -167,13 +168,35 @@ pub fn lookup_resource(input: TokenStream) -> Result<TokenStream, syn::Error> {
         .iter()
         .map(|c| format_ident!("{}_name", heck::AsSnakeCase(c).to_string()))
         .collect();
+    let doc_struct = format!(
+        "Selects a resource of type {} (or any of its children, using the \
+        functions on this struct) for lookup or fetch",
+        &config.name,
+    );
+    let child_docs: Vec<_> = config
+        .children
+        .iter()
+        .map(|child| {
+            format!(
+                "Select a resource of type {} within this {}, \
+                identified by its name",
+                child, &config.name
+            )
+        })
+        .collect();
 
     Ok(quote! {
+        #[doc = #doc_struct]
         pub struct #resource_name<'a> {
             key: Key<'a, #parent_resource_name<'a>>
         }
 
         impl<'a> #resource_name<'a> {
+            /// Getting the LookupPath for this lookup
+            ///
+            /// This is used when we actually query the database.  At that
+            /// point, we need the `OpContext` and `DataStore` that are being
+            /// used for this lookup.
             fn lookup_root(&self) -> &LookupPath<'a> {
                 match &self.key {
                     Key::Name(parent, _) => parent.lookup_root(),
@@ -181,6 +204,7 @@ pub fn lookup_resource(input: TokenStream) -> Result<TokenStream, syn::Error> {
                 }
             }
 
+            /// Build the `authz` object for this resource
             fn make_authz(
                 authz_parent: #parent_authz_type,
                 db_row: &#model_resource,
@@ -193,12 +217,24 @@ pub fn lookup_resource(input: TokenStream) -> Result<TokenStream, syn::Error> {
                 )
             }
 
+            /// Fetch the record corresponding to the selected resource
+            ///
+            /// This is equivalent to `fetch_for(authz::Action::Read)`.
             pub async fn fetch(
                 &self,
             ) -> LookupResult<(#authz_path_types #model_resource)> {
                 self.fetch_for(authz::Action::Read).await
             }
 
+            /// Fetch the record corresponding to the selected resource and
+            /// check whether the caller is allowed to do the specified `action`
+            ///
+            /// The return value is a tuple that also includes the `authz`
+            /// objects for all resources along the path to this one (i.e., all
+            /// parent resources) and the authz object for this resource itself.
+            /// These objects are useful for identifying those resources by
+            /// id, for doing other authz checks, or for looking up related
+            /// objects.
             pub async fn fetch_for(
                 &self,
                 action: authz::Action,
@@ -231,6 +267,15 @@ pub fn lookup_resource(input: TokenStream) -> Result<TokenStream, syn::Error> {
                 }
             }
 
+            /// Fetch an `authz` object for the selected resource and check
+            /// whether the caller is allowed to do the specified `action`
+            ///
+            /// The return value is a tuple that also includes the `authz`
+            /// objects for all resources along the path to this one (i.e., all
+            /// parent resources) and the authz object for this resource itself.
+            /// These objects are useful for identifying those resources by
+            /// id, for doing other authz checks, or for looking up related
+            /// objects.
             pub async fn lookup_for(
                 &self,
                 action: authz::Action,
@@ -242,6 +287,12 @@ pub fn lookup_resource(input: TokenStream) -> Result<TokenStream, syn::Error> {
                 Ok((#authz_path_values))
             }
 
+            /// Fetch the "authz" objects for the selected resource and all its
+            /// parents
+            ///
+            /// This function does not check whether the caller has permission
+            /// to read this information.  That's why it's not `pub`.  Outside
+            /// this module, you want `lookup_for(authz::Action)`.
             // Do NOT make this function public.  It's a helper for fetch() and
             // lookup_for().  It's exposed in a safer way via lookup_for().
             async fn lookup(
@@ -294,7 +345,13 @@ pub fn lookup_resource(input: TokenStream) -> Result<TokenStream, syn::Error> {
                 }
             }
 
-            // Do NOT make this function public.  It's exposed via fetch_for().
+            /// Fetch the database row for a resource by doing a lookup by name,
+            /// possibly within a collection
+            ///
+            /// This function checks whether the caller has permissions to read
+            /// the requested data.  However, it's not intended to be used
+            /// outside this module.  See `fetch_for(authz::Action)`.
+            // Do NOT make this function public.
             async fn fetch_by_name_for(
                 opctx: &OpContext,
                 datastore: &DataStore,
@@ -312,8 +369,13 @@ pub fn lookup_resource(input: TokenStream) -> Result<TokenStream, syn::Error> {
                 Ok((authz_self, db_row))
             }
 
-            // Do NOT make these functions public.  They should instead be
-            // wrapped by functions that perform authz checks.
+            /// Lowest-level function for looking up a resource in the database
+            /// by name, possibly within a collection
+            ///
+            /// This function does not check whether the caller has permission
+            /// to read this information.  That's why it's not `pub`.  Outside
+            /// this module, you want `fetch()` or `lookup_for(authz::Action)`.
+            // Do NOT make this function public.
             async fn lookup_by_name_no_authz(
                 _opctx: &OpContext,
                 datastore: &DataStore,
@@ -322,7 +384,7 @@ pub fn lookup_resource(input: TokenStream) -> Result<TokenStream, syn::Error> {
             ) -> LookupResult<(#authz_resource #model_resource)> {
                 use db::schema::#resource_as_snake::dsl;
 
-                // TODO-security See the note about pool_authorized() above.
+                // TODO-security See the note about pool_authorized() below.
                 let conn = datastore.pool();
                 dsl::#resource_as_snake
                     .filter(dsl::time_deleted.is_null())
@@ -350,7 +412,12 @@ pub fn lookup_resource(input: TokenStream) -> Result<TokenStream, syn::Error> {
                     )})
             }
 
-            // Do NOT make this function public.  It's exposed via fetch_for().
+            /// Fetch the database row for a resource by doing a lookup by id
+            ///
+            /// This function checks whether the caller has permissions to read
+            /// the requested data.  However, it's not intended to be used
+            /// outside this module.  See `fetch_for(authz::Action)`.
+            // Do NOT make this function public.
             async fn fetch_by_id_for(
                 opctx: &OpContext,
                 datastore: &DataStore,
@@ -366,8 +433,13 @@ pub fn lookup_resource(input: TokenStream) -> Result<TokenStream, syn::Error> {
                 Ok((#authz_path_values db_row))
             }
 
-            // Do NOT make this function public.  It should instead be wrapped
-            // by functions that perform authz checks.
+            /// Lowest-level function for looking up a resource in the database
+            /// by id
+            ///
+            /// This function does not check whether the caller has permission
+            /// to read this information.  That's why it's not `pub`.  Outside
+            /// this module, you want `fetch()` or `lookup_for(authz::Action)`.
+            // Do NOT make this function public.
             async fn lookup_by_id_no_authz(
                 _opctx: &OpContext,
                 datastore: &DataStore,
@@ -407,6 +479,7 @@ pub fn lookup_resource(input: TokenStream) -> Result<TokenStream, syn::Error> {
             }
 
             #(
+                #[doc = #child_docs]
                 pub fn #child_by_names<'b, 'c>(self, name: &'b Name)
                 -> #child_names<'c>
                 where
@@ -418,8 +491,6 @@ pub fn lookup_resource(input: TokenStream) -> Result<TokenStream, syn::Error> {
                     }
                 }
             )*
-
-            // XXX-dap doc these functions
         }
     })
 }

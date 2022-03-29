@@ -63,9 +63,6 @@ lookup_resource! {
     authz_kind = Generic
 }
 
-// TODO XXX-dap remove me -- expanded
-// TODO XXX-dap end remove-me -- expanded
-
 pub struct LookupPath<'a> {
     opctx: &'a OpContext,
     datastore: &'a DataStore,
