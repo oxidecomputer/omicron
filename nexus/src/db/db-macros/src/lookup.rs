@@ -52,7 +52,7 @@ fn do_lookup_resource(
 
     // It's important that even if there's only one item in this list, it should
     // still have a trailing comma.
-    let authz_ancestors_types_vec: Vec<_> = config
+    let mut authz_path_types_vec: Vec<_> = config
         .ancestors
         .iter()
         .map(|a| {
@@ -60,6 +60,8 @@ fn do_lookup_resource(
             quote! { authz::#name, }
         })
         .collect();
+    authz_path_types_vec.push(authz_resource.clone());
+
     let authz_ancestors_values_vec: Vec<_> = config
         .ancestors
         .iter()
@@ -71,10 +73,6 @@ fn do_lookup_resource(
             quote! { #v , }
         })
         .collect();
-
-    let mut authz_path_types_vec = authz_ancestors_types_vec.clone();
-    authz_path_types_vec.push(authz_resource.clone());
-
     let mut authz_path_values_vec = authz_ancestors_values_vec.clone();
     authz_path_values_vec.push(quote! { authz_self, });
 
