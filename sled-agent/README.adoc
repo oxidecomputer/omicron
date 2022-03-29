@@ -25,14 +25,26 @@ between the two implementations.
 
 Additionally, there are some noteworthy top-level files used by the sled agent:
 
+=== Launching Instances
+
 * `src/instance_manager.rs`: Manages multiple instances on a sled.
 * `src/instance.rs`: Manages a single instance.
+
+=== Managing Sled-local Resources
+
 * `src/storage_manager.rs`: Manages storage within a sled.
+* `src/services.rs`: Manages services that are running within the sled.
+* `src/updates.rs`: Manages packages installed on the sled.
+
+=== HTTP Services
+
+* `src/http_entrypoints.rs`: The HTTP API exposed by the Sled Agent.
+* `src/params.rs`: Parameters to the HTTP endpoints.
 
 As well as some utilities:
 
-* `src/running_zone.rs`: RAII wrapper around a running Zone owned by the Sled Agent.
-* `src/vnic.rs`: RAII wrapper around VNICs owned by the Sled Agent.
+* `src/illumos/running_zone.rs`: RAII wrapper around a running Zone owned by the Sled Agent.
+* `src/illumos/vnic.rs`: RAII wrapper around VNICs owned by the Sled Agent.
 
 == Life of an Instance
 
@@ -44,11 +56,8 @@ following steps on initialization to manage OS-local resources.
 
 .When booting, the Sled Agent...
 . ... creates a ZFS filesystem for zones, called `rpool/zone`, mounted at `/zone`.
-. ... creates a new "base zone", which contains the necessary pieces to execute
-a Propolis server, and as little else as possible. This base zone is derived
-from the "sparse" zone template.
 . ... identifies all Oxide-controlled zones (with the prefix `oxz_`)
-and all Oxide-controlled VNICs (with the prefix `ox_vnic_`), which are
+and all Oxide-controlled VNICs (with the prefix `ox`), which are
 removed from the machine.
 
 .To allocate an instance on the Sled, the following steps occur:
@@ -57,15 +66,14 @@ an operation like `instance_put`.
 . This request is routed to the `InstanceManager` through the `ensure` method.
 If the instance already exists, it is identified by UUID and updated. Otherwise,
 a new instance is created.
-. A dedicated VNIC is created by the Sled Agent, for use by the instance's zone.
-** Currently, this means identifying the first physical data-link device, and
-creating a new VNIC atop.
-. A zone is created for the instance. Within this zone...
-** ... A LOFS pointing to Propolis' executable files is added.
-** ... The previously created VNIC is attached as a network interface.
+. A dedicated "control" VNIC is created by the Sled Agent, for use by the
+instance's zone.
+** This requires identifying a physical data-link device, and creating a new
+VNIC on top of it.
+. An omicron-branded zone is created for the instance. Within this zone...
+** ... Propolis' executable files exist.
+** ... The previously created "control" VNIC is attached as a network interface.
 ** ... Necessary devices for virtualization (`/dev/{vmm,vmmctl,viona}`) are added.
-. Rather than installing this zone from scratch, it is cloned from the base image
-created when the Sled Agent initialized.
 . The zone is then booted. Once the SMF network milestone has been reached...
 ** ... An IP address is allocated on the aforementioned VNIC.
 ** ... Propolis' HTTP server is initialized, using this IP address.
@@ -76,6 +84,12 @@ such that Nexus may be notified if the VM changes state.
 
 = TODOs
 
+We track issues on Github using the following labels:
+* https://github.com/oxidecomputer/omicron/issues?q=is%3Aissue+is%3Aopen+label%3A%22%F0%9F%9B%B7+Sled+Agent%22[Sled Agent]
+* https://github.com/oxidecomputer/omicron/issues?q=is%3Aissue+is%3Aopen+label%3A%22%F0%9F%A5%BE+bootstrap+services%22[Bootstrap Services]
+
+
+However, the following are general areas of improvement for the Sled Agent:
 * (Correctness) Plumbing of Nexus-customizable InstanceProperties, such as
 image, bootrom, memory, vcpus.
 * (Correctness) Integration of OPTE to manage the network and apply policy
@@ -91,5 +105,3 @@ these, the agent uses polling with timeouts to monitor progress between
 "starting" and "actually running and responding to requests". If possible, it
 would be preferable to replace these timeouts with event-triggered behavior,
 which would avoid unnecessary stalls.
-
-
