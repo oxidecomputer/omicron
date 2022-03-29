@@ -102,6 +102,13 @@ impl SledAgent {
             true,
         )?;
 
+        // Ensure the global zone has a functioning IPv6 address.
+        //
+        // TODO(https://github.com/oxidecomputer/omicron/issues/821): This
+        // should be removed once the Sled Agent is initialized with a
+        // RSS-provided IP address. In the meantime, we just pick one.
+        Zones::ensure_has_global_zone_v6_address(config.data_link.clone())?;
+
         // Identify all existing zones which should be managed by the Sled
         // Agent.
         //
@@ -130,8 +137,13 @@ impl SledAgent {
             Dladm::delete_vnic(&vnic)?;
         }
 
-        let storage =
-            StorageManager::new(&log, *id, nexus_client.clone()).await?;
+        let storage = StorageManager::new(
+            &log,
+            *id,
+            nexus_client.clone(),
+            config.data_link.clone(),
+        )
+        .await?;
         if let Some(pools) = &config.zpools {
             for pool in pools {
                 info!(
@@ -142,9 +154,14 @@ impl SledAgent {
                 storage.upsert_zpool(pool).await?;
             }
         }
-        let instances =
-            InstanceManager::new(log.clone(), vlan, nexus_client.clone())?;
-        let services = ServiceManager::new(log.clone()).await?;
+        let instances = InstanceManager::new(
+            log.clone(),
+            vlan,
+            nexus_client.clone(),
+            config.data_link.clone(),
+        )?;
+        let services =
+            ServiceManager::new(log.clone(), config.data_link.clone()).await?;
 
         Ok(SledAgent { storage, instances, nexus_client, services })
     }

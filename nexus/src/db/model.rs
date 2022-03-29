@@ -2319,12 +2319,13 @@ pub struct NetworkInterface {
     pub vpc_id: Uuid,
     pub subnet_id: Uuid,
     pub mac: MacAddr,
-    pub ip: ipnetwork::IpNetwork,
     // TODO-correctness: We need to split this into an optional V4 and optional V6 address, at
     // least one of which will always be specified.
     //
     // If user requests an address of either kind, give exactly that and not the other.
     // If neither is specified, auto-assign one of each?
+    pub ip: ipnetwork::IpNetwork,
+    pub slot: i16,
 }
 
 impl From<NetworkInterface> for external::NetworkInterface {

@@ -26,6 +26,7 @@ type Error = crate::illumos::dladm::Error;
 pub struct VnicAllocator {
     value: Arc<AtomicU64>,
     scope: String,
+    data_link: PhysicalLink,
 }
 
 impl VnicAllocator {
@@ -40,39 +41,43 @@ impl VnicAllocator {
     ///
     /// VnicAllocator::new("Storage") produces
     /// - oxControlStorage[NNN]
-    pub fn new<S: AsRef<str>>(scope: S) -> Self {
-        Self {
+    pub fn new<S: AsRef<str>>(
+        scope: S,
+        physical_link: Option<PhysicalLink>,
+    ) -> Result<Self, crate::illumos::dladm::Error> {
+        let data_link = if let Some(link) = physical_link {
+            link
+        } else {
+            Dladm::find_physical()?
+        };
+        Ok(Self {
             value: Arc::new(AtomicU64::new(0)),
             scope: scope.as_ref().to_string(),
-        }
+            data_link,
+        })
     }
 
     /// Creates a new NIC, intended for usage by the guest.
     pub fn new_guest(
         &self,
-        physical_dl: &PhysicalLink,
         mac: Option<MacAddr>,
         vlan: Option<VlanID>,
     ) -> Result<Vnic, Error> {
         let allocator = self.new_superscope("Guest");
         let name = allocator.next();
         debug_assert!(name.starts_with(VNIC_PREFIX));
-        Dladm::create_vnic(physical_dl, &name, mac, vlan)?;
+        Dladm::create_vnic(&self.data_link, &name, mac, vlan)?;
         Ok(Vnic { name, deleted: false })
     }
 
     /// Creates a new NIC, intended for allowing Propolis to communicate
     /// with the control plane.
-    pub fn new_control(
-        &self,
-        physical_dl: &PhysicalLink,
-        mac: Option<MacAddr>,
-    ) -> Result<Vnic, Error> {
+    pub fn new_control(&self, mac: Option<MacAddr>) -> Result<Vnic, Error> {
         let allocator = self.new_superscope("Control");
         let name = allocator.next();
         debug_assert!(name.starts_with(VNIC_PREFIX));
         debug_assert!(name.starts_with(VNIC_PREFIX_CONTROL));
-        Dladm::create_vnic(physical_dl, &name, mac, None)?;
+        Dladm::create_vnic(&self.data_link, &name, mac, None)?;
         Ok(Vnic { name, deleted: false })
     }
 
@@ -80,6 +85,7 @@ impl VnicAllocator {
         Self {
             value: self.value.clone(),
             scope: format!("{}{}", scope.as_ref(), self.scope),
+            data_link: self.data_link.clone(),
         }
     }
 
@@ -142,7 +148,9 @@ mod test {
 
     #[test]
     fn test_allocate() {
-        let allocator = VnicAllocator::new("Foo");
+        let allocator =
+            VnicAllocator::new("Foo", Some(PhysicalLink("mylink".to_string())))
+                .unwrap();
         assert_eq!("oxFoo0", allocator.next());
         assert_eq!("oxFoo1", allocator.next());
         assert_eq!("oxFoo2", allocator.next());
@@ -150,7 +158,9 @@ mod test {
 
     #[test]
     fn test_allocate_within_scopes() {
-        let allocator = VnicAllocator::new("Foo");
+        let allocator =
+            VnicAllocator::new("Foo", Some(PhysicalLink("mylink".to_string())))
+                .unwrap();
         assert_eq!("oxFoo0", allocator.next());
         let allocator = allocator.new_superscope("Baz");
         assert_eq!("oxBazFoo1", allocator.next());

@@ -91,6 +91,7 @@ table! {
         subnet_id -> Uuid,
         mac -> Text,
         ip -> Inet,
+        slot -> Int2,
     }
 }
 
