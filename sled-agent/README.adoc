@@ -85,11 +85,13 @@ such that Nexus may be notified if the VM changes state.
 = TODOs
 
 We track issues on Github using the following labels:
+
 * https://github.com/oxidecomputer/omicron/issues?q=is%3Aissue+is%3Aopen+label%3A%22%F0%9F%9B%B7+Sled+Agent%22[Sled Agent]
 * https://github.com/oxidecomputer/omicron/issues?q=is%3Aissue+is%3Aopen+label%3A%22%F0%9F%A5%BE+bootstrap+services%22[Bootstrap Services]
 
 
 However, the following are general areas of improvement for the Sled Agent:
+
 * (Correctness) Plumbing of Nexus-customizable InstanceProperties, such as
 image, bootrom, memory, vcpus.
 * (Correctness) Integration of OPTE to manage the network and apply policy
