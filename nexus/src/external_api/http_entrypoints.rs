@@ -1183,6 +1183,9 @@ async fn instance_disks_detach(
 // Images
 
 /// List global images.
+///
+/// Returns a list of all the global images. Global images are returned sorted
+/// by creation date, with the most recent images appearing first.
 #[endpoint {
     method = GET,
     path = "/images",
@@ -1213,6 +1216,9 @@ async fn images_get(
 }
 
 /// Create a global image.
+///
+/// Create a new global image. This image can then be used by any user as a base
+/// for instances.
 #[endpoint {
     method = POST,
     path = "/images",
@@ -1240,6 +1246,8 @@ struct GlobalImagePathParam {
 }
 
 /// Get a global image.
+///
+/// Returns the details of a specific global image.
 #[endpoint {
     method = GET,
     path = "/images/{image_name}",
@@ -1262,6 +1270,10 @@ async fn images_get_image(
 }
 
 /// Delete a global image.
+///
+/// Permanently delete a global image. This operation cannot be undone. Any
+/// instances using the global image will continue to run, however new instances
+/// can not be created with this image.
 #[endpoint {
     method = DELETE,
     path = "/images/{image_name}",
@@ -1283,7 +1295,10 @@ async fn images_delete_image(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// List images in a project.
+/// List images
+///
+/// List images in a project. The images are returned sorted by creation date,
+/// with the most recent images appearing first.
 #[endpoint {
     method = GET,
     path = "/organizations/{organization_name}/projects/{project_name}/images",
@@ -1319,7 +1334,9 @@ async fn project_images_get(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Create an instance in a project
+/// Create an image
+///
+/// Create a new image in a project.
 #[endpoint {
     method = POST,
     path = "/organizations/{organization_name}/projects/{project_name}/images",
@@ -1359,7 +1376,9 @@ struct ImagePathParam {
     image_name: Name,
 }
 
-/// Get an image in a project.
+/// Get an image
+///
+/// Get the details of a specific image in a project.
 #[endpoint {
     method = GET,
     path = "/organizations/{organization_name}/projects/{project_name}/images/{image_name}",
@@ -1390,7 +1409,11 @@ async fn project_images_get_image(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Delete an image from a project.
+/// Delete an image
+///
+/// Permanently delete an image from a project. This operation cannot be undone.
+/// Any instances in the project using the image will continue to run, however
+/// new instances can not be created with this image.
 #[endpoint {
     method = DELETE,
     path = "/organizations/{organization_name}/projects/{project_name}/images/{image_name}",
