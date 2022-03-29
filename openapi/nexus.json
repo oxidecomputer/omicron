@@ -216,6 +216,7 @@
           "images"
         ],
         "summary": "List global images.",
+        "description": "Returns a list of all the global images. Global images are returned sorted by creation date, with the most recent images appearing first.",
         "operationId": "images_get",
         "parameters": [
           {
@@ -274,6 +275,7 @@
           "images"
         ],
         "summary": "Create a global image.",
+        "description": "Create a new global image. This image can then be used by any user as a base for instances.",
         "operationId": "images_post",
         "requestBody": {
           "content": {
@@ -311,6 +313,7 @@
           "images"
         ],
         "summary": "Get a global image.",
+        "description": "Returns the details of a specific global image.",
         "operationId": "images_get_image",
         "parameters": [
           {
@@ -347,6 +350,7 @@
           "images"
         ],
         "summary": "Delete a global image.",
+        "description": "Permanently delete a global image. This operation cannot be undone. Any instances using the global image will continue to run, however new instances can not be created with this image.",
         "operationId": "images_delete_image",
         "parameters": [
           {
@@ -1137,7 +1141,8 @@
         "tags": [
           "images"
         ],
-        "summary": "List images in a project.",
+        "summary": "List images",
+        "description": "List images in a project. The images are returned sorted by creation date, with the most recent images appearing first.",
         "operationId": "project_images_get",
         "parameters": [
           {
@@ -1215,7 +1220,8 @@
         "tags": [
           "images"
         ],
-        "summary": "Create an instance in a project",
+        "summary": "Create an image",
+        "description": "Create a new image in a project.",
         "operationId": "project_images_post",
         "parameters": [
           {
@@ -1274,7 +1280,8 @@
         "tags": [
           "images"
         ],
-        "summary": "Get an image in a project.",
+        "summary": "Get an image",
+        "description": "Get the details of a specific image in a project.",
         "operationId": "project_images_get_image",
         "parameters": [
           {
@@ -1328,7 +1335,8 @@
         "tags": [
           "images"
         ],
-        "summary": "Delete an image from a project.",
+        "summary": "Delete an image",
+        "description": "Permanently delete an image from a project. This operation cannot be undone. Any instances in the project using the image will continue to run, however new instances can not be created with this image.",
         "operationId": "project_images_delete_image",
         "parameters": [
           {
@@ -7784,6 +7792,13 @@
     {
       "name": "hidden",
       "description": "TODO operations that will not ship to customers",
+      "externalDocs": {
+        "url": "http://oxide.computer/docs/#xxx"
+      }
+    },
+    {
+      "name": "images",
+      "description": "Images are read-only Virtual Disks that may be used to boot Virtual Machines",
       "externalDocs": {
         "url": "http://oxide.computer/docs/#xxx"
       }
