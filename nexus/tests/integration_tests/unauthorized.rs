@@ -76,24 +76,29 @@ async fn test_unauthorized(cptestctx: &ControlPlaneTestContext) {
 const VERIFY_HEADER: &str = r#"
 SUMMARY OF REQUESTS MADE
 
-          +----------------------------- privileged GET (expects 200)
-          |                              (digit = last digit of 200-level response)
+KEY:
+
+          +----------------------------> privileged GET (expects 200)
+          |                              (digit = last digit of 200-level
+          |                              response)
           |
-          |   +----+----+----+----+----- HTTP methods tested (see below)
-          |   |    |    |    |    |      (digit = last digit of 400-level response)
+          |   +----+----+----+----+----> HTTP methods tested (see below)
+          |   |    |    |    |    |      (digit = last digit of 400-level
+          |   |    |    |    |    |       response)
           |   |    |    |    |    |
-          |   |    |    |    |    |  +-- privileged GET (expects same as above)
-          |   |    |    |    |    |  |   (digit = last digit of 200-level response)
+          |   |    |    |    |    |  +-> privileged GET (expects same as above)
+          |   |    |    |    |    |  |   (digit = last digit of 200-level
+          |   |    |    |    |    |  |    response)
           |  _|   _|   _|   _|   _|  |   ('-' => skipped (N/A))
-          v /  \ /  \ /  \ /  \ /  \ v
+          ^ /  \ /  \ /  \ /  \ /  \ ^
 HEADER:   G GET  PUT  POST DEL  TRCE G  URL
 EXAMPLE:  0 3111 5555 3111 5555 5555 0  /organizations
-    ROW     ||||
-            ||||                        TEST CASES FOR EACH HTTP METHOD:
-            +|||-----------------------     authenticated, unauthorized request
-             +||-----------------------     unauthenticated request
-              +|-----------------------     bad authentication: no such user
-               +-----------------------     bad authentication: invalid syntax
+    ROW     ^^^^
+            ||||                      TEST CASES FOR EACH HTTP METHOD:
+            +|||----------------------< authenticated, unauthorized request
+             +||----------------------< unauthenticated request
+              +|----------------------< bad authentication: no such user
+               +----------------------< bad authentication: invalid syntax
 
     In this case, an unauthenthicated request to "GET /organizations" returned
     401.  All requests to "PUT /organizations" returned 405.
