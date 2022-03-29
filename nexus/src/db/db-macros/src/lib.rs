@@ -332,18 +332,15 @@ fn build_asset_impl(
     }
 }
 
-/// Identical to [`macro@Resource`], but generates fewer fields.
-///
-/// Contains:
-/// - ID
-/// - Time Created
-/// - Time Modified
-#[proc_macro_attribute]
+// XXX-dap doc
+#[proc_macro]
 pub fn lookup_resource(
-    attr: proc_macro::TokenStream,
     input: proc_macro::TokenStream,
 ) -> proc_macro::TokenStream {
-    lookup::lookup_resource(attr, input)
+    match lookup::lookup_resource(input.into()) {
+        Ok(output) => output.into(),
+        Err(error) => error.to_compile_error().into(),
+    }
 }
 
 #[cfg(test)]

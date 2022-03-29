@@ -8,41 +8,46 @@
 
 use proc_macro2::TokenStream;
 use quote::{format_ident, quote};
-use syn::ItemStruct;
 
+/// Arguments for [`lookup_resource!`]
 #[derive(serde::Deserialize)]
 struct Config {
+    /// Name of the resource (PascalCase)
+    name: String,
+    /// ordered list of resources that are ancestors of this resource, starting
+    /// with the top of the hierarchy
+    /// (e.g., for an Instance, this would be `[ "Organization", "Project" ]`
     ancestors: Vec<String>,
+    /// unordered list of resources that are direct children of this resource
+    /// (e.g., for a Project, these would include "Instance" and "Disk")
     children: Vec<String>,
+    /// describes how the authz object for a resource is constructed from its
+    /// parent's authz object
     authz_kind: AuthzKind,
 }
 
+/// Describes how the authz object for a resource is constructed from its
+/// parent's authz object
+///
+/// By "authz object", we mean the objects in [`nexus::authz::api_resources`].
+///
+/// This ought to be made more uniform with more typed authz objects, but that's
+/// not the way they work today.
 #[derive(serde::Deserialize)]
 enum AuthzKind {
+    /// The authz object is constructed using
+    /// `authz_parent.child_generic(ResourceType, Uuid, LookupType)`
     Generic,
+
+    /// The authz object is constructed using
+    /// `authz_parent.$resource_type(Uuid, LookupType)`.
     Typed,
 }
 
-pub fn lookup_resource(
-    attr: proc_macro::TokenStream,
-    input: proc_macro::TokenStream,
-) -> proc_macro::TokenStream {
-    match do_lookup_resource(attr.into(), input.into()) {
-        Ok(output) => output.into(),
-        Err(error) => error.to_compile_error().into(),
-    }
-}
-
-fn do_lookup_resource(
-    attr: TokenStream,
-    input: TokenStream,
-) -> Result<TokenStream, syn::Error> {
-    let config = serde_tokenstream::from_tokenstream::<Config>(&attr)?;
-
-    // TODO
-    // - validate no generics and no fields?
-    let item: ItemStruct = syn::parse2(input)?;
-    let resource_name = &item.ident;
+/// Implementation of [`lookup_resource!]'.
+pub fn lookup_resource(input: TokenStream) -> Result<TokenStream, syn::Error> {
+    let config = serde_tokenstream::from_tokenstream::<Config>(&input)?;
+    let resource_name = format_ident!("{}", config.name);
     let resource_as_snake = format_ident!(
         "{}",
         heck::AsSnakeCase(resource_name.to_string()).to_string()
@@ -419,39 +424,39 @@ fn do_lookup_resource(
     })
 }
 
-#[cfg(test)]
-mod test {
-    use super::do_lookup_resource;
-    use quote::quote;
-
-    #[test]
-    fn test_lookup_resource() {
-        // XXX-dap this should actually test something
-        eprintln!(
-            "{}",
-            do_lookup_resource(
-                quote! { ancestors = [], authz_kind = Typed },
-                quote! { struct Organization; },
-            )
-            .unwrap(),
-        );
-
-        eprintln!(
-            "{}",
-            do_lookup_resource(
-                quote! { ancestors = [ "Organization" ], authz_kind = Typed },
-                quote! { struct Project; },
-            )
-            .unwrap(),
-        );
-
-        eprintln!(
-            "{}",
-            do_lookup_resource(
-                quote! { ancestors = [ "Organization", "Project", authz_kind = Generic ] },
-                quote! { struct Instance; },
-            )
-            .unwrap(),
-        );
-    }
-}
+// #[cfg(test)]
+// mod test {
+//     use super::do_lookup_resource;
+//     use quote::quote;
+// 
+//     #[test]
+//     fn test_lookup_resource() {
+//         // XXX-dap this should actually test something
+//         eprintln!(
+//             "{}",
+//             do_lookup_resource(
+//                 quote! { ancestors = [], authz_kind = Typed },
+//                 quote! { struct Organization; },
+//             )
+//             .unwrap(),
+//         );
+// 
+//         eprintln!(
+//             "{}",
+//             do_lookup_resource(
+//                 quote! { ancestors = [ "Organization" ], authz_kind = Typed },
+//                 quote! { struct Project; },
+//             )
+//             .unwrap(),
+//         );
+// 
+//         eprintln!(
+//             "{}",
+//             do_lookup_resource(
+//                 quote! { ancestors = [ "Organization", "Project", authz_kind = Generic ] },
+//                 quote! { struct Instance; },
+//             )
+//             .unwrap(),
+//         );
+//     }
+// }

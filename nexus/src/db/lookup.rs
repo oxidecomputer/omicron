@@ -35,33 +35,33 @@ impl<'a> Root<'a> {
     }
 }
 
-#[lookup_resource {
+lookup_resource! {
+    name = "Organization",
     ancestors = [],
     children = [ "Project" ],
     authz_kind = Typed
-}]
-struct Organization;
+}
 
-#[lookup_resource {
+lookup_resource! {
+    name = "Project",
     ancestors = [ "Organization" ],
     children = [ "Disk", "Instance" ],
     authz_kind = Typed
-}]
-struct Project;
+}
 
-#[lookup_resource {
+lookup_resource! {
+    name = "Instance",
     ancestors = [ "Organization", "Project" ],
     children = [],
     authz_kind = Generic
-}]
-struct Instance;
+}
 
-#[lookup_resource {
+lookup_resource! {
+    name = "Disk",
     ancestors = [ "Organization", "Project" ],
     children = [],
     authz_kind = Generic
-}]
-struct Disk;
+}
 
 // TODO XXX-dap remove me -- expanded
 // TODO XXX-dap end remove-me -- expanded
