@@ -2,18 +2,16 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-/*!
- * Smoke tests against the API server
- *
- * This file defines a very basic set of tests against the API.
- * TODO-coverage add test for racks, sleds
- */
+//! Smoke tests against the API server
+//!
+//! This file defines a very basic set of tests against the API.
+//! TODO-coverage add test for racks, sleds
 
-use dropshot::test_util::objects_list_page;
 use dropshot::test_util::ClientTestContext;
 use dropshot::HttpErrorResponseBody;
 use http::method::Method;
 use http::StatusCode;
+use nexus_test_utils::resource_helpers::objects_list_page_authz;
 use nexus_test_utils::resource_helpers::project_get;
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::IdentityMetadataUpdateParams;
@@ -41,7 +39,7 @@ async fn test_basic_failures(cptestctx: &ControlPlaneTestContext) {
     let org_name = "test-org";
     create_organization(&client, &org_name).await;
 
-    /* Error case: GET /nonexistent (a path with no route at all) */
+    // Error case: GET /nonexistent (a path with no route at all)
     let error = client
         .make_request(
             Method::GET,
@@ -53,120 +51,116 @@ async fn test_basic_failures(cptestctx: &ControlPlaneTestContext) {
         .expect_err("expected error");
     assert_eq!("Not Found", error.message);
 
-    /*
-     * Error case: GET /organizations/test-org/projects/nonexistent (a possible
-     * value that does not exist inside a collection that does exist)
-     */
-    let error = client
-        .make_request(
-            Method::GET,
-            "/organizations/test-org/projects/nonexistent",
-            None as Option<()>,
-            StatusCode::NOT_FOUND,
-        )
-        .await
-        .expect_err("expected error");
-    assert_eq!("not found: project with name \"nonexistent\"", error.message);
+    struct TestCase<'a> {
+        method: http::Method,
+        uri: &'a str,
+        expected_code: http::StatusCode,
+        expected_error: &'a str,
+        body: Option<String>,
+    }
 
-    /*
-     * Error case: GET /organizations/test-org/projects/-invalid-name
-     * TODO-correctness is 400 the right error code here or is 404 more
-     * appropriate?
-     */
-    let error = client
-        .make_request(
-            Method::GET,
-            "/organizations/test-org/projects/-invalid-name",
-            None as Option<()>,
-            StatusCode::BAD_REQUEST,
-        )
-        .await
-        .expect_err("expected error");
-    assert_eq!(
-        "bad parameter in URL path: name must begin with an ASCII lowercase \
-         character",
-        error.message
-    );
+    let test_cases = vec![
+        // Error case: GET /organizations/test-org/projects/nonexistent (a
+        // possible value that does not exist inside a collection that does
+        // exist) from an authorized user results in a 404.
+        TestCase {
+            method: Method::GET,
+            uri: "/organizations/test-org/projects/nonexistent",
+            expected_code: StatusCode::NOT_FOUND,
+            expected_error: "not found: project with name \"nonexistent\"",
+            body: None,
+        },
+        // Error case: GET /organizations/test-org/projects/-invalid-name
+        // TODO-correctness is 400 the right error code here or is 404 more
+        // appropriate?
+        TestCase {
+            method: Method::GET,
+            uri: "/organizations/test-org/projects/-invalid-name",
+            expected_code: StatusCode::BAD_REQUEST,
+            expected_error: "bad parameter in URL path: name must begin with \
+            an ASCII lowercase character",
+            body: None,
+        },
+        // Error case: PUT /organizations/test-org/projects
+        TestCase {
+            method: Method::PUT,
+            uri: "/organizations/test-org/projects",
+            expected_code: StatusCode::METHOD_NOT_ALLOWED,
+            expected_error: "Method Not Allowed",
+            body: None,
+        },
+        // Error case: DELETE /organizations/test-org/projects
+        TestCase {
+            method: Method::DELETE,
+            uri: "/organizations/test-org/projects",
+            expected_code: StatusCode::METHOD_NOT_ALLOWED,
+            expected_error: "Method Not Allowed",
+            body: None,
+        },
+        // Error case: list instances in a nonexistent project
+        TestCase {
+            method: Method::GET,
+            uri: "/organizations/test-org/projects/nonexistent/instances",
+            expected_code: StatusCode::NOT_FOUND,
+            expected_error: "not found: project with name \"nonexistent\"",
+            body: Some("".into()),
+        },
+        // Error case: fetch an instance in a nonexistent project
+        TestCase {
+            method: Method::GET,
+            uri: "/organizations/test-org/projects/nonexistent/instances/my-instance",
+            expected_code: StatusCode::NOT_FOUND,
+            expected_error: "not found: project with name \"nonexistent\"",
+            body: Some("".into()),
+        },
+        // Error case: fetch an instance with an invalid name
+        TestCase {
+            method: Method::GET,
+            uri: "/organizations/test-org/projects/nonexistent/instances/my_instance",
+            expected_code: StatusCode::BAD_REQUEST,
+            expected_error: "bad parameter in URL path: name contains \
+                invalid character: \"_\" (allowed characters are lowercase \
+                ASCII, digits, and \"-\")",
+            body: Some("".into()),
+        },
+        // Error case: delete an instance with an invalid name
+        TestCase {
+            method: Method::DELETE,
+            uri: "/organizations/test-org/projects/nonexistent/instances/my_instance",
+            expected_code: StatusCode::BAD_REQUEST,
+            expected_error: "bad parameter in URL path: name contains \
+                invalid character: \"_\" (allowed characters are lowercase \
+                ASCII, digits, and \"-\")",
+            body: Some("".into()),
+        },
+    ];
 
-    /* Error case: PUT /organizations/test-org/projects */
-    let error = client
-        .make_request(
-            Method::PUT,
-            "/organizations/test-org/projects",
-            None as Option<()>,
-            StatusCode::METHOD_NOT_ALLOWED,
-        )
+    for test_case in test_cases {
+        let error = if let Some(body) = test_case.body {
+            NexusRequest::expect_failure_with_body(
+                client,
+                test_case.expected_code,
+                test_case.method,
+                test_case.uri,
+                &body,
+            )
+        } else {
+            NexusRequest::expect_failure(
+                client,
+                test_case.expected_code,
+                test_case.method,
+                test_case.uri,
+            )
+        }
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
         .await
-        .expect_err("expected error");
-    assert_eq!("Method Not Allowed", error.message);
+        .unwrap()
+        .parsed_body::<dropshot::HttpErrorResponseBody>()
+        .unwrap();
 
-    /* Error case: DELETE /organizations/test-org/projects */
-    let error = client
-        .make_request(
-            Method::DELETE,
-            "/organizations/test-org/projects",
-            None as Option<()>,
-            StatusCode::METHOD_NOT_ALLOWED,
-        )
-        .await
-        .expect_err("expected error");
-    assert_eq!("Method Not Allowed", error.message);
-
-    /* Error case: list instances in a nonexistent project. */
-    let error = client
-        .make_request_with_body(
-            Method::GET,
-            "/organizations/test-org/projects/nonexistent/instances",
-            "".into(),
-            StatusCode::NOT_FOUND,
-        )
-        .await
-        .expect_err("expected error");
-    assert_eq!("not found: project with name \"nonexistent\"", error.message);
-
-    /* Error case: fetch an instance in a nonexistent project. */
-    let error = client
-        .make_request_with_body(
-            Method::GET,
-            "/organizations/test-org/projects/nonexistent/instances/my-instance",
-            "".into(),
-            StatusCode::NOT_FOUND,
-        )
-        .await
-        .expect_err("expected error");
-    assert_eq!("not found: project with name \"nonexistent\"", error.message);
-
-    /* Error case: fetch an instance with an invalid name. */
-    let error = client
-        .make_request_with_body(
-            Method::GET,
-            "/organizations/test-org/projects/nonexistent/instances/my_instance",
-            "".into(),
-            StatusCode::BAD_REQUEST,
-        )
-        .await
-        .expect_err("expected error");
-    assert_eq!(
-        "bad parameter in URL path: name contains invalid character: \"_\" \
-         (allowed characters are lowercase ASCII, digits, and \"-\")",
-        error.message
-    );
-
-    /* Error case: delete an instance with an invalid name. */
-    let error = client
-        .make_request_with_body(
-            Method::DELETE,
-            "/organizations/test-org/projects/nonexistent/instances/my_instance",
-            "".into(),
-            StatusCode::BAD_REQUEST,
-        )
-        .await
-        .expect_err("expected error");
-    assert_eq!(
-        "bad parameter in URL path: name contains invalid character: \"_\" \
-         (allowed characters are lowercase ASCII, digits, and \"-\")",
-        error.message
-    );
+        assert_eq!(test_case.expected_error, error.message);
+    }
 }
 
 #[nexus_test]
@@ -177,15 +171,11 @@ async fn test_projects_basic(cptestctx: &ControlPlaneTestContext) {
     create_organization(&client, &org_name).await;
     let projects_url = "/organizations/test-org/projects";
 
-    /*
-     * Verify that there are no projects to begin with.
-     */
+    // Verify that there are no projects to begin with.
     let projects = projects_list(&client, &projects_url).await;
     assert_eq!(0, projects.len());
 
-    /*
-     * Create three projects used by the rest of this test.
-     */
+    // Create three projects used by the rest of this test.
     let projects_to_create = vec!["simproject1", "simproject2", "simproject3"];
     let new_project_ids = {
         let mut project_ids: Vec<Uuid> = Vec::new();
@@ -219,10 +209,8 @@ async fn test_projects_basic(cptestctx: &ControlPlaneTestContext) {
         project_ids
     };
 
-    /*
-     * Error case: GET /organizations/test-org/projects/simproject1/nonexistent
-     * (a path that does not exist beneath a resource that does exist)
-     */
+    // Error case: GET /organizations/test-org/projects/simproject1/nonexistent
+    // (a path that does not exist beneath a resource that does exist)
     let error = client
         .make_request_error(
             Method::GET,
@@ -232,11 +220,9 @@ async fn test_projects_basic(cptestctx: &ControlPlaneTestContext) {
         .await;
     assert_eq!("Not Found", error.message);
 
-    /*
-     * Basic GET /organizations/test-org/projects now that we've created a few.
-     * TODO-coverage: pagination
-     * TODO-coverage: marker even without pagination
-     */
+    // Basic GET /organizations/test-org/projects now that we've created a few.
+    // TODO-coverage: pagination
+    // TODO-coverage: marker even without pagination
     let initial_projects = projects_list(&client, &projects_url).await;
     assert_eq!(initial_projects.len(), 3);
     assert_eq!(initial_projects[0].identity.id, new_project_ids[0]);
@@ -249,10 +235,8 @@ async fn test_projects_basic(cptestctx: &ControlPlaneTestContext) {
     assert_eq!(initial_projects[2].identity.name, "simproject3");
     assert!(initial_projects[2].identity.description.len() > 0);
 
-    /*
-     * Basic test of out-of-the-box GET
-     * /organizations/test-org/projects/simproject2
-     */
+    // Basic test of out-of-the-box GET
+    // /organizations/test-org/projects/simproject2
     let project =
         project_get(&client, "/organizations/test-org/projects/simproject2")
             .await;
@@ -262,10 +246,8 @@ async fn test_projects_basic(cptestctx: &ControlPlaneTestContext) {
     assert_eq!(project.identity.description, expected.identity.description);
     assert!(project.identity.description.len() > 0);
 
-    /*
-     * Delete "simproject2".  We'll make sure that's reflected in the other
-     * requests.
-     */
+    // Delete "simproject2".  We'll make sure that's reflected in the other
+    // requests.
     NexusRequest::object_delete(
         client,
         "/organizations/test-org/projects/simproject2",
@@ -275,10 +257,8 @@ async fn test_projects_basic(cptestctx: &ControlPlaneTestContext) {
     .await
     .expect("expected request to fail");
 
-    /*
-     * Having deleted "simproject2", verify "GET", "PUT", and "DELETE" on
-     * "/organizations/test-org/projects/simproject2".
-     */
+    // Having deleted "simproject2", verify "GET", "PUT", and "DELETE" on
+    // "/organizations/test-org/projects/simproject2".
     for method in [Method::GET, Method::DELETE] {
         NexusRequest::expect_failure(
             client,
@@ -310,9 +290,7 @@ async fn test_projects_basic(cptestctx: &ControlPlaneTestContext) {
     .await
     .expect("failed to make request");
 
-    /*
-     * Similarly, verify "GET /organizations/test-org/projects"
-     */
+    // Similarly, verify "GET /organizations/test-org/projects"
     let expected_projects: Vec<&Project> = initial_projects
         .iter()
         .filter(|p| p.identity.name != "simproject2")
@@ -339,10 +317,8 @@ async fn test_projects_basic(cptestctx: &ControlPlaneTestContext) {
         expected_projects[1].identity.description
     );
 
-    /*
-     * Update "simproject3".  We'll make sure that's reflected in the other
-     * requests.
-     */
+    // Update "simproject3".  We'll make sure that's reflected in the other
+    // requests.
     let project_update = params::ProjectUpdate {
         identity: IdentityMetadataUpdateParams {
             name: None,
@@ -372,11 +348,9 @@ async fn test_projects_basic(cptestctx: &ControlPlaneTestContext) {
     assert_eq!(project.identity.description, expected.identity.description);
     assert_eq!(project.identity.description, "Li'l lightnin'");
 
-    /*
-     * Update "simproject3" in a way that changes its name.  This is a deeper
-     * operation under the hood.  This case also exercises changes to multiple
-     * fields in one request.
-     */
+    // Update "simproject3" in a way that changes its name.  This is a deeper
+    // operation under the hood.  This case also exercises changes to multiple
+    // fields in one request.
     let project_update = params::ProjectUpdate {
         identity: IdentityMetadataUpdateParams {
             name: Some("lil-lightnin".parse().unwrap()),
@@ -409,9 +383,7 @@ async fn test_projects_basic(cptestctx: &ControlPlaneTestContext) {
     .await
     .expect("expected success");
 
-    /*
-     * Try to create a project with a name that conflicts with an existing one.
-     */
+    // Try to create a project with a name that conflicts with an existing one.
     let project_create = params::ProjectCreate {
         identity: IdentityMetadataCreateParams {
             name: "simproject1".parse().unwrap(),
@@ -433,10 +405,8 @@ async fn test_projects_basic(cptestctx: &ControlPlaneTestContext) {
 
     // TODO-coverage try to rename it to a name that conflicts
 
-    /*
-     * Try to create a project with an unsupported name.
-     * TODO-polish why doesn't serde include the field name in this error?
-     */
+    // Try to create a project with an unsupported name.
+    // TODO-polish why doesn't serde include the field name in this error?
     #[derive(Serialize)]
     struct BadProject {
         name: &'static str,
@@ -461,9 +431,7 @@ async fn test_projects_basic(cptestctx: &ControlPlaneTestContext) {
          (allowed characters are lowercase ASCII, digits, and \"-\""
     ));
 
-    /*
-     * Now, really do create another project.
-     */
+    // Now, really do create another project.
     let project_create = params::ProjectCreate {
         identity: IdentityMetadataCreateParams {
             name: "honor-roller".parse().unwrap(),
@@ -481,13 +449,11 @@ async fn test_projects_basic(cptestctx: &ControlPlaneTestContext) {
     assert_eq!(project.identity.name, "honor-roller");
     assert_eq!(project.identity.description, "a soapbox racer");
 
-    /*
-     * List projects again and verify all of our changes.  We should have:
-     *
-     * - "honor-roller" with description "a soapbox racer"
-     * - "lil-lightnin" with description "little lightning"
-     * - "simproject1", same as when it was created.
-     */
+    // List projects again and verify all of our changes.  We should have:
+    //
+    // - "honor-roller" with description "a soapbox racer"
+    // - "lil-lightnin" with description "little lightning"
+    // - "simproject1", same as when it was created.
     let projects = projects_list(&client, &projects_url).await;
     assert_eq!(projects.len(), 3);
     assert_eq!(projects[0].identity.name, "honor-roller");
@@ -505,21 +471,19 @@ async fn test_projects_list(cptestctx: &ControlPlaneTestContext) {
     let org_name = "test-org";
     create_organization(&client, &org_name).await;
 
-    /* Verify that there are no projects to begin with. */
+    // Verify that there are no projects to begin with.
     let projects_url = "/organizations/test-org/projects";
     assert_eq!(projects_list(&client, &projects_url).await.len(), 0);
 
-    /* Create a large number of projects that we can page through. */
+    // Create a large number of projects that we can page through.
     let projects_total = 10;
     let projects_subset = 3;
     let mut projects_created = Vec::with_capacity(projects_total);
     for _ in 0..projects_total {
-        /*
-         * We'll use uuids for the names to make sure that works, and that we
-         * can paginate through by _name_ even though the names happen to be
-         * uuids.  Names have to start with a letter, though, so we've got to
-         * make sure our uuid has one.
-         */
+        // We'll use uuids for the names to make sure that works, and that we
+        // can paginate through by _name_ even though the names happen to be
+        // uuids.  Names have to start with a letter, though, so we've got to
+        // make sure our uuid has one.
         let mut name = Uuid::new_v4().to_string();
         name.replace_range(0..1, "a");
         let project = create_project(&client, org_name, &name).await;
@@ -540,10 +504,8 @@ async fn test_projects_list(cptestctx: &ControlPlaneTestContext) {
         clone.iter().map(|v| v.id).collect::<Vec<Uuid>>()
     };
 
-    /*
-     * Page through all the projects in the default order, which should be in
-     * increasing order of name.
-     */
+    // Page through all the projects in the default order, which should be in
+    // increasing order of name.
     let found_projects_by_name =
         NexusRequest::iter_collection_authn::<Project>(
             &client,
@@ -563,10 +525,8 @@ async fn test_projects_list(cptestctx: &ControlPlaneTestContext) {
             .collect::<Vec<Name>>()
     );
 
-    /*
-     * Page through all the projects in ascending order by name, which should be
-     * the same as above.
-     */
+    // Page through all the projects in ascending order by name, which should be
+    // the same as above.
     let found_projects_by_name =
         NexusRequest::iter_collection_authn::<Project>(
             &client,
@@ -586,10 +546,8 @@ async fn test_projects_list(cptestctx: &ControlPlaneTestContext) {
             .collect::<Vec<Name>>()
     );
 
-    /*
-     * Page through all the projects in descending order by name, which should be
-     * the reverse of the above.
-     */
+    // Page through all the projects in descending order by name, which should be
+    // the reverse of the above.
     let mut found_projects_by_name =
         NexusRequest::iter_collection_authn::<Project>(
             &client,
@@ -610,9 +568,7 @@ async fn test_projects_list(cptestctx: &ControlPlaneTestContext) {
             .collect::<Vec<Name>>()
     );
 
-    /*
-     * Page through the projects in ascending order by id.
-     */
+    // Page through the projects in ascending order by id.
     let found_projects_by_id = NexusRequest::iter_collection_authn::<Project>(
         &client,
         projects_url,
@@ -636,11 +592,11 @@ async fn test_projects_list(cptestctx: &ControlPlaneTestContext) {
 async fn test_sleds_list(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
 
-    /* Verify that there is one sled to begin with. */
+    // Verify that there is one sled to begin with.
     let sleds_url = "/hardware/sleds";
     assert_eq!(sleds_list(&client, &sleds_url).await.len(), 1);
 
-    /* Now start a few more sled agents. */
+    // Now start a few more sled agents.
     let nsleds = 3;
     let mut sas = Vec::with_capacity(nsleds);
     for _ in 0..nsleds {
@@ -651,7 +607,7 @@ async fn test_sleds_list(cptestctx: &ControlPlaneTestContext) {
         sas.push(start_sled_agent(log, addr, sa_id).await.unwrap());
     }
 
-    /* List sleds again. */
+    // List sleds again.
     let sleds_found = sleds_list(&client, &sleds_url).await;
     assert_eq!(sleds_found.len(), nsleds + 1);
 
@@ -661,7 +617,7 @@ async fn test_sleds_list(cptestctx: &ControlPlaneTestContext) {
     sledids_found_sorted.sort();
     assert_eq!(sledids_found, sledids_found_sorted);
 
-    /* Tear down the agents. */
+    // Tear down the agents.
     for sa in sas {
         sa.http_server.close().await.unwrap();
     }
@@ -678,5 +634,5 @@ async fn projects_list(
 }
 
 async fn sleds_list(client: &ClientTestContext, sleds_url: &str) -> Vec<Sled> {
-    objects_list_page::<Sled>(client, sleds_url).await.items
+    objects_list_page_authz::<Sled>(client, sleds_url).await.items
 }

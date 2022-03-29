@@ -2,12 +2,10 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-/*!
- * Data structures and related facilities for representing resources in the API
- *
- * This includes all representations over the wire for both the external and
- * internal APIs.  The contents here are all HTTP-agnostic.
- */
+//! Data structures and related facilities for representing resources in the API
+//!
+//! This includes all representations over the wire for both the external and
+//! internal APIs.  The contents here are all HTTP-agnostic.
 
 mod error;
 pub mod http_pagination;
@@ -35,78 +33,64 @@ use std::fmt::Display;
 use std::fmt::Formatter;
 use std::fmt::Result as FormatResult;
 use std::net::IpAddr;
+use std::net::Ipv4Addr;
+use std::net::Ipv6Addr;
 use std::num::{NonZeroU16, NonZeroU32};
 use std::str::FromStr;
 use uuid::Uuid;
 
-/*
- * The type aliases below exist primarily to ensure consistency among return
- * types for functions in the `nexus::Nexus` and `nexus::DataStore`.  The
- * type argument `T` generally implements `Object`.
- */
+// The type aliases below exist primarily to ensure consistency among return
+// types for functions in the `nexus::Nexus` and `nexus::DataStore`.  The
+// type argument `T` generally implements `Object`.
 
-/** Result of a create operation for the specified type */
+/// Result of a create operation for the specified type
 pub type CreateResult<T> = Result<T, Error>;
-/** Result of a delete operation for the specified type */
+/// Result of a delete operation for the specified type
 pub type DeleteResult = Result<(), Error>;
-/** Result of a list operation that returns an ObjectStream */
+/// Result of a list operation that returns an ObjectStream
 pub type ListResult<T> = Result<ObjectStream<T>, Error>;
-/** Result of a list operation that returns a vector */
+/// Result of a list operation that returns a vector
 pub type ListResultVec<T> = Result<Vec<T>, Error>;
-/** Result of a lookup operation for the specified type */
+/// Result of a lookup operation for the specified type
 pub type LookupResult<T> = Result<T, Error>;
-/** Result of an update operation for the specified type */
+/// Result of an update operation for the specified type
 pub type UpdateResult<T> = Result<T, Error>;
 
-/**
- * A stream of Results, each potentially representing an object in the API
- */
+/// A stream of Results, each potentially representing an object in the API
 pub type ObjectStream<T> = BoxStream<'static, Result<T, Error>>;
 
-/*
- * General-purpose types used for client request parameters and return values.
- */
+// General-purpose types used for client request parameters and return values.
 
-/**
- * Describes an `Object` that has its own identity metadata.  This is
- * currently used only for pagination.
- */
+/// Describes an `Object` that has its own identity metadata.  This is
+/// currently used only for pagination.
 pub trait ObjectIdentity {
     fn identity(&self) -> &IdentityMetadata;
 }
 
-/**
- * Parameters used to request a specific page of results when listing a
- * collection of objects
- *
- * This is logically analogous to Dropshot's `PageSelector` (plus the limit from
- * Dropshot's `PaginationParams).  However, this type is HTTP-agnostic.  More
- * importantly, by the time this struct is generated, we know the type of the
- * sort field and we can specialize `DataPageParams` to that type.  This makes
- * it considerably simpler to implement the backend for most of our paginated
- * APIs.
- *
- * `NameType` is the type of the field used to sort the returned values and it's
- * usually `Name`.
- */
+/// Parameters used to request a specific page of results when listing a
+/// collection of objects
+///
+/// This is logically analogous to Dropshot's `PageSelector` (plus the limit from
+/// Dropshot's `PaginationParams).  However, this type is HTTP-agnostic.  More
+/// importantly, by the time this struct is generated, we know the type of the
+/// sort field and we can specialize `DataPageParams` to that type.  This makes
+/// it considerably simpler to implement the backend for most of our paginated
+/// APIs.
+///
+/// `NameType` is the type of the field used to sort the returned values and it's
+/// usually `Name`.
 #[derive(Debug)]
 pub struct DataPageParams<'a, NameType> {
-    /**
-     * If present, this is the value of the sort field for the last object seen
-     */
+    /// If present, this is the value of the sort field for the last object seen
     pub marker: Option<&'a NameType>,
 
-    /**
-     * Whether the sort is in ascending order
-     */
+    /// Whether the sort is in ascending order
     pub direction: PaginationOrder,
 
-    /**
-     * This identifies how many results should be returned on this page.
-     * Backend implementations must provide this many results unless we're at
-     * the end of the scan.  Dropshot assumes that if we provide fewer results
-     * than this number, then we're done with the scan.
-     */
+    /// This identifies how many results should be returned on this page.
+    /// Backend implementations must provide this many results unless we're at
+    /// the end of the scan.  Dropshot assumes that if we provide fewer results
+    /// than this number, then we're done with the scan.
     pub limit: NonZeroU32,
 }
 
@@ -126,13 +110,11 @@ impl<'a, NameType> DataPageParams<'a, NameType> {
     }
 }
 
-/**
- * A name used in the API
- *
- * Names are generally user-provided unique identifiers, highly constrained as
- * described in RFD 4.  An `Name` can only be constructed with a string
- * that's valid as a name.
- */
+/// A name used in the API
+///
+/// Names are generally user-provided unique identifiers, highly constrained as
+/// described in RFD 4.  An `Name` can only be constructed with a string
+/// that's valid as a name.
 #[derive(
     Clone,
     Debug,
@@ -149,12 +131,10 @@ impl<'a, NameType> DataPageParams<'a, NameType> {
 #[serde(try_from = "String")]
 pub struct Name(String);
 
-/**
- * `Name::try_from(String)` is the primary method for constructing an Name
- * from an input string.  This validates the string according to our
- * requirements for a name.
- * TODO-cleanup why shouldn't callers use TryFrom<&str>?
- */
+/// `Name::try_from(String)` is the primary method for constructing an Name
+/// from an input string.  This validates the string according to our
+/// requirements for a name.
+/// TODO-cleanup why shouldn't callers use TryFrom<&str>?
 impl TryFrom<String> for Name {
     type Error = String;
     fn try_from(value: String) -> Result<Self, Self::Error> {
@@ -210,10 +190,8 @@ impl<'a> From<&'a Name> for &'a str {
     }
 }
 
-/**
- * `Name` instances are comparable like Strings, primarily so that they can
- * be used as keys in trees.
- */
+/// `Name` instances are comparable like Strings, primarily so that they can
+/// be used as keys in trees.
 impl<S> PartialEq<S> for Name
 where
     S: AsRef<str>,
@@ -223,13 +201,9 @@ where
     }
 }
 
-/**
- * Custom JsonSchema implementation to encode the constraints on Name
- */
-/*
- * TODO: 1. make this part of schemars w/ rename and maxlen annotations
- * TODO: 2. integrate the regex with `try_from`
- */
+/// Custom JsonSchema implementation to encode the constraints on Name
+// TODO: 1. make this part of schemars w/ rename and maxlen annotations
+// TODO: 2. integrate the regex with `try_from`
 impl JsonSchema for Name {
     fn schema_name() -> String {
         "Name".to_string()
@@ -275,11 +249,9 @@ impl JsonSchema for Name {
 }
 
 impl Name {
-    /**
-     * Parse an `Name`.  This is a convenience wrapper around
-     * `Name::try_from(String)` that marshals any error into an appropriate
-     * `Error`.
-     */
+    /// Parse an `Name`.  This is a convenience wrapper around
+    /// `Name::try_from(String)` that marshals any error into an appropriate
+    /// `Error`.
     pub fn from_param(value: String, label: &str) -> Result<Name, Error> {
         value.parse().map_err(|e| Error::InvalidValue {
             label: String::from(label),
@@ -287,17 +259,13 @@ impl Name {
         })
     }
 
-    /**
-     * Return the `&str` representing the actual name.
-     */
+    /// Return the `&str` representing the actual name.
     pub fn as_str(&self) -> &str {
         self.0.as_str()
     }
 }
 
-/**
- * Name for a built-in role
- */
+/// Name for a built-in role
 #[derive(
     Clone,
     Debug,
@@ -332,10 +300,8 @@ impl RoleName {
     }
 }
 
-/**
- * Custom JsonSchema implementation to encode the constraints on Name
- */
-/* TODO see TODOs on Name above */
+/// Custom JsonSchema implementation to encode the constraints on Name
+// TODO see TODOs on Name above
 impl JsonSchema for RoleName {
     fn schema_name() -> String {
         "RoleName".to_string()
@@ -379,25 +345,21 @@ impl JsonSchema for RoleName {
     }
 }
 
-/**
- * A count of bytes, typically used either for memory or storage capacity
- *
- * The maximum supported byte count is [`i64::MAX`].  This makes it somewhat
- * inconvenient to define constructors: a u32 constructor can be infallible, but
- * an i64 constructor can fail (if the value is negative) and a u64 constructor
- * can fail (if the value is larger than i64::MAX).  We provide all of these for
- * consumers' convenience.
- */
-/*
- * TODO-cleanup This could benefit from a more complete implementation.
- * TODO-correctness RFD 4 requires that this be a multiple of 256 MiB.  We'll
- * need to write a validator for that.
- */
-/*
- * The maximum byte count of i64::MAX comes from the fact that this is stored in
- * the database as an i64.  Constraining it here ensures that we can't fail to
- * serialize the value.
- */
+/// A count of bytes, typically used either for memory or storage capacity
+///
+/// The maximum supported byte count is [`i64::MAX`].  This makes it somewhat
+/// inconvenient to define constructors: a u32 constructor can be infallible, but
+/// an i64 constructor can fail (if the value is negative) and a u64 constructor
+/// can fail (if the value is larger than i64::MAX).  We provide all of these for
+/// consumers' convenience.
+// TODO-cleanup This could benefit from a more complete implementation.
+// TODO-correctness RFD 4 requires that this be a multiple of 256 MiB.  We'll
+// need to write a validator for that.
+// /
+//
+// The maximum byte count of i64::MAX comes from the fact that this is stored in
+// the database as an i64.  Constraining it here ensures that we can't fail to
+// serialize the value.
 #[derive(Copy, Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
 pub struct ByteCount(u64);
 
@@ -431,7 +393,7 @@ impl ByteCount {
     }
 }
 
-/* TODO-cleanup This could use the experimental std::num::IntErrorKind. */
+// TODO-cleanup This could use the experimental std::num::IntErrorKind.
 #[derive(Debug, Eq, thiserror::Error, Ord, PartialEq, PartialOrd)]
 pub enum ByteCountRangeError {
     #[error("value is too small for a byte count")]
@@ -469,19 +431,15 @@ impl From<u32> for ByteCount {
 
 impl From<ByteCount> for i64 {
     fn from(b: ByteCount) -> Self {
-        /* We have already validated that this value is in range. */
+        // We have already validated that this value is in range.
         i64::try_from(b.0).unwrap()
     }
 }
 
-/**
- * Generation numbers stored in the database, used for optimistic concurrency
- * control
- */
-/*
- * Because generation numbers are stored in the database, we represent them as
- * i64.
- */
+/// Generation numbers stored in the database, used for optimistic concurrency
+/// control
+// Because generation numbers are stored in the database, we represent them as
+// i64.
 #[derive(
     Copy,
     Clone,
@@ -502,11 +460,9 @@ impl Generation {
     }
 
     pub fn next(&self) -> Generation {
-        /*
-         * It should technically be an operational error if this wraps or even
-         * exceeds the value allowed by an i64.  But it seems unlikely enough to
-         * happen in practice that we can probably feel safe with this.
-         */
+        // It should technically be an operational error if this wraps or even
+        // exceeds the value allowed by an i64.  But it seems unlikely enough to
+        // happen in practice that we can probably feel safe with this.
         let next_gen = self.0 + 1;
         assert!(next_gen <= u64::try_from(i64::MAX).unwrap());
         Generation(next_gen)
@@ -521,11 +477,9 @@ impl Display for Generation {
 
 impl From<&Generation> for i64 {
     fn from(g: &Generation) -> Self {
-        /* We have already validated that the value is within range. */
-        /*
-         * TODO-robustness We need to ensure that we don't deserialize a value
-         * out of range here.
-         */
+        // We have already validated that the value is within range.
+        // TODO-robustness We need to ensure that we don't deserialize a value
+        // out of range here.
         i64::try_from(g.0).unwrap()
     }
 }
@@ -541,13 +495,9 @@ impl TryFrom<i64> for Generation {
     }
 }
 
-/*
- * General types used to implement API resources
- */
+// General types used to implement API resources
 
-/**
- * Identifies a type of API resource
- */
+/// Identifies a type of API resource
 #[derive(
     Clone,
     Copy,
@@ -564,6 +514,9 @@ impl TryFrom<i64> for Generation {
 #[display(style = "kebab-case")]
 pub enum ResourceType {
     Fleet,
+    Silo,
+    SiloUser,
+    ConsoleSession,
     Organization,
     Project,
     Dataset,
@@ -597,59 +550,45 @@ where
         .await
 }
 
-/*
- * IDENTITY METADATA
- */
+// IDENTITY METADATA
 
-/**
- * Identity-related metadata that's included in nearly all public API objects
- */
+/// Identity-related metadata that's included in nearly all public API objects
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize, JsonSchema)]
 pub struct IdentityMetadata {
-    /** unique, immutable, system-controlled identifier for each resource */
+    /// unique, immutable, system-controlled identifier for each resource
     pub id: Uuid,
-    /** unique, mutable, user-controlled identifier for each resource */
+    /// unique, mutable, user-controlled identifier for each resource
     pub name: Name,
-    /** human-readable free-form text about a resource */
+    /// human-readable free-form text about a resource
     pub description: String,
-    /** timestamp when this resource was created */
+    /// timestamp when this resource was created
     pub time_created: DateTime<Utc>,
-    /** timestamp when this resource was last modified */
+    /// timestamp when this resource was last modified
     pub time_modified: DateTime<Utc>,
 }
 
-/**
- * Create-time identity-related parameters
- */
+/// Create-time identity-related parameters
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct IdentityMetadataCreateParams {
     pub name: Name,
     pub description: String,
 }
 
-/**
- * Updateable identity-related parameters
- */
+/// Updateable identity-related parameters
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct IdentityMetadataUpdateParams {
     pub name: Option<Name>,
     pub description: Option<String>,
 }
 
-/*
- * Specific API resources
- */
+// Specific API resources
 
-/*
- * INSTANCES
- */
+// INSTANCES
 
-/**
- * Running state of an Instance (primarily: booted or stopped)
- *
- * This typically reflects whether it's starting, running, stopping, or stopped,
- * but also includes states related to the Instance's lifecycle
- */
+/// Running state of an Instance (primarily: booted or stopped)
+///
+/// This typically reflects whether it's starting, running, stopping, or stopped,
+/// but also includes states related to the Instance's lifecycle
 #[derive(
     Copy,
     Clone,
@@ -664,7 +603,7 @@ pub struct IdentityMetadataUpdateParams {
 )]
 #[serde(rename_all = "snake_case")]
 pub enum InstanceState {
-    Creating, /* TODO-polish: paper over Creating in the API with Starting? */
+    Creating, // TODO-polish: paper over Creating in the API with Starting?
     Starting,
     Running,
     /// Implied that a transition to "Stopped" is imminent.
@@ -689,12 +628,10 @@ impl Display for InstanceState {
     }
 }
 
-/*
- * TODO-cleanup why is this error type different from the one for Name?  The
- * reason is probably that Name can be provided by the user, so we want a
- * good validation error.  InstanceState cannot.  Still, is there a way to
- * unify these?
- */
+// TODO-cleanup why is this error type different from the one for Name?  The
+// reason is probably that Name can be provided by the user, so we want a
+// good validation error.  InstanceState cannot.  Still, is there a way to
+// unify these?
 impl TryFrom<&str> for InstanceState {
     type Error = String;
 
@@ -732,11 +669,9 @@ impl InstanceState {
         }
     }
 
-    /**
-     * Returns true if the given state represents a fully stopped Instance.
-     * This means that a transition from an !is_stopped() state must go
-     * through Stopping.
-     */
+    /// Returns true if the given state represents a fully stopped Instance.
+    /// This means that a transition from an !is_stopped() state must go
+    /// through Stopping.
     pub fn is_stopped(&self) -> bool {
         match self {
             InstanceState::Starting => false,
@@ -754,7 +689,7 @@ impl InstanceState {
     }
 }
 
-/** The number of CPUs in an Instance */
+/// The number of CPUs in an Instance
 #[derive(Copy, Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct InstanceCpuCount(pub u16);
 
@@ -772,9 +707,7 @@ impl From<&InstanceCpuCount> for i64 {
     }
 }
 
-/**
- * Client view of an [`InstanceRuntimeState`]
- */
+/// Client view of an [`InstanceRuntimeState`]
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct InstanceRuntimeState {
     pub run_state: InstanceState,
@@ -792,36 +725,30 @@ impl From<crate::api::internal::nexus::InstanceRuntimeState>
     }
 }
 
-/**
- * Client view of an [`Instance`]
- */
+/// Client view of an [`Instance`]
 #[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct Instance {
-    /* TODO is flattening here the intent in RFD 4? */
+    // TODO is flattening here the intent in RFD 4?
     #[serde(flatten)]
     pub identity: IdentityMetadata,
 
-    /** id for the project containing this Instance */
+    /// id for the project containing this Instance
     pub project_id: Uuid,
 
-    /** number of CPUs allocated for this Instance */
+    /// number of CPUs allocated for this Instance
     pub ncpus: InstanceCpuCount,
-    /** memory allocated for this Instance */
+    /// memory allocated for this Instance
     pub memory: ByteCount,
-    /** RFC1035-compliant hostname for the Instance. */
-    pub hostname: String, /* TODO-cleanup different type? */
+    /// RFC1035-compliant hostname for the Instance.
+    pub hostname: String, // TODO-cleanup different type?
 
     #[serde(flatten)]
     pub runtime: InstanceRuntimeState,
 }
 
-/*
- * DISKS
- */
+// DISKS
 
-/**
- * Client view of an [`Disk`]
- */
+/// Client view of an [`Disk`]
 #[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct Disk {
     #[serde(flatten)]
@@ -833,9 +760,7 @@ pub struct Disk {
     pub device_path: String,
 }
 
-/**
- * State of a Disk (primarily: attached or not)
- */
+/// State of a Disk (primarily: attached or not)
 #[derive(
     Clone,
     Debug,
@@ -849,19 +774,19 @@ pub struct Disk {
 )]
 #[serde(tag = "state", content = "instance", rename_all = "snake_case")]
 pub enum DiskState {
-    /** Disk is being initialized */
+    /// Disk is being initialized
     Creating,
-    /** Disk is ready but detached from any Instance */
+    /// Disk is ready but detached from any Instance
     Detached,
-    /** Disk is being attached to the given Instance */
-    Attaching(Uuid), /* attached Instance id */
-    /** Disk is attached to the given Instance */
-    Attached(Uuid), /* attached Instance id */
-    /** Disk is being detached from the given Instance */
-    Detaching(Uuid), /* attached Instance id */
-    /** Disk has been destroyed */
+    /// Disk is being attached to the given Instance
+    Attaching(Uuid), // attached Instance id
+    /// Disk is attached to the given Instance
+    Attached(Uuid), // attached Instance id
+    /// Disk is being detached from the given Instance
+    Detaching(Uuid), // attached Instance id
+    /// Disk has been destroyed
     Destroyed,
-    /** Disk is unavailable */
+    /// Disk is unavailable
     Faulted,
 }
 
@@ -894,9 +819,7 @@ impl TryFrom<(&str, Option<Uuid>)> for DiskState {
 }
 
 impl DiskState {
-    /**
-     * Returns the string label for this disk state
-     */
+    /// Returns the string label for this disk state
     pub fn label(&self) -> &'static str {
         match self {
             DiskState::Creating => "creating",
@@ -909,18 +832,14 @@ impl DiskState {
         }
     }
 
-    /**
-     * Returns whether the Disk is currently attached to, being attached to, or
-     * being detached from any Instance.
-     */
+    /// Returns whether the Disk is currently attached to, being attached to, or
+    /// being detached from any Instance.
     pub fn is_attached(&self) -> bool {
         self.attached_instance_id().is_some()
     }
 
-    /**
-     * If the Disk is attached to, being attached to, or being detached from an
-     * Instance, returns the id for that Instance.  Otherwise returns `None`.
-     */
+    /// If the Disk is attached to, being attached to, or being detached from an
+    /// Instance, returns the id for that Instance.  Otherwise returns `None`.
     pub fn attached_instance_id(&self) -> Option<&Uuid> {
         match self {
             DiskState::Attaching(id) => Some(id),
@@ -935,35 +854,31 @@ impl DiskState {
     }
 }
 
-/*
- * Sagas
- *
- * These are currently only intended for observability by developers.  We will
- * eventually want to flesh this out into something more observable for end
- * users.
- */
+// Sagas
+//
+// These are currently only intended for observability by developers.  We will
+// eventually want to flesh this out into something more observable for end
+// users.
 #[derive(ObjectIdentity, Clone, Debug, Serialize, JsonSchema)]
 pub struct Saga {
     pub id: Uuid,
     pub state: SagaState,
-    /*
-     * TODO-cleanup This object contains a fake `IdentityMetadata`.  Why?  We
-     * want to paginate these objects.  http_pagination.rs provides a bunch of
-     * useful facilities -- notably `PaginatedById`.  `PaginatedById`
-     * requires being able to take an arbitrary object in the result set and get
-     * its id.  To do that, it uses the `ObjectIdentity` trait, which expects
-     * to be able to return an `IdentityMetadata` reference from an object.
-     * Finally, the pagination facilities just pull the `id` out of that.
-     *
-     * In this case (as well as others, like sleds and racks), we have ids, and
-     * we want to be able to paginate by id, but we don't have full identity
-     * metadata.  (Or we do, but it's similarly faked up.)  What we should
-     * probably do is create a new trait, say `ObjectId`, that returns _just_
-     * an id.  We can provide a blanket impl for anything that impls
-     * IdentityMetadata.  We can define one-off impls for structs like this
-     * one.  Then the id-only pagination interfaces can require just
-     * `ObjectId`.
-     */
+    // TODO-cleanup This object contains a fake `IdentityMetadata`.  Why?  We
+    // want to paginate these objects.  http_pagination.rs provides a bunch of
+    // useful facilities -- notably `PaginatedById`.  `PaginatedById`
+    // requires being able to take an arbitrary object in the result set and get
+    // its id.  To do that, it uses the `ObjectIdentity` trait, which expects
+    // to be able to return an `IdentityMetadata` reference from an object.
+    // Finally, the pagination facilities just pull the `id` out of that.
+    //
+    // In this case (as well as others, like sleds and racks), we have ids, and
+    // we want to be able to paginate by id, but we don't have full identity
+    // metadata.  (Or we do, but it's similarly faked up.)  What we should
+    // probably do is create a new trait, say `ObjectId`, that returns _just_
+    // an id.  We can provide a blanket impl for anything that impls
+    // IdentityMetadata.  We can define one-off impls for structs like this
+    // one.  Then the id-only pagination interfaces can require just
+    // `ObjectId`.
     #[serde(skip)]
     pub identity: IdentityMetadata,
 }
@@ -974,7 +889,7 @@ impl From<steno::SagaView> for Saga {
             id: Uuid::from(s.id),
             state: SagaState::from(s.state),
             identity: IdentityMetadata {
-                /* TODO-cleanup See the note in Saga above. */
+                // TODO-cleanup See the note in Saga above.
                 id: Uuid::from(s.id),
                 name: format!("saga-{}", s.id).parse().unwrap(),
                 description: format!("saga {}", s.id),
@@ -1040,7 +955,7 @@ impl From<steno::SagaStateView> for SagaState {
 }
 
 /// An `Ipv4Net` represents a IPv4 subnetwork, including the address and network mask.
-#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Serialize)]
+#[derive(Clone, Copy, Debug, Deserialize, Hash, PartialEq, Serialize)]
 pub struct Ipv4Net(pub ipnetwork::Ipv4Network);
 
 impl Ipv4Net {
@@ -1089,11 +1004,11 @@ impl JsonSchema for Ipv4Net {
                     pattern: Some(
                         concat!(
                             // 10.x.x.x/8
-                            r#"^(10\.(25[0-5]|[1-2][0-4][0-9]|[1-9][0-9]|[0-9]\.){2}(25[0-5]|[1-2][0-4][0-9]|[1-9][0-9]|[0-9])/(1[0-9]|2[0-8]|[8-9]))$"#,
+                            r#"(^(10\.(25[0-5]|[1-2][0-4][0-9]|[1-9][0-9]|[0-9]\.){2}(25[0-5]|[1-2][0-4][0-9]|[1-9][0-9]|[0-9])/(1[0-9]|2[0-8]|[8-9]))$)|"#,
                             // 172.16.x.x/12
-                            r#"^(172\.16\.(25[0-5]|[1-2][0-4][0-9]|[1-9][0-9]|[0-9])\.(25[0-5]|[1-2][0-4][0-9]|[1-9][0-9]|[0-9])/(1[2-9]|2[0-8]))$"#,
+                            r#"(^(172\.16\.(25[0-5]|[1-2][0-4][0-9]|[1-9][0-9]|[0-9])\.(25[0-5]|[1-2][0-4][0-9]|[1-9][0-9]|[0-9])/(1[2-9]|2[0-8]))$)|"#,
                             // 192.168.x.x/16
-                            r#"^(192\.168\.(25[0-5]|[1-2][0-4][0-9]|[1-9][0-9]|[0-9])\.(25[0-5]|[1-2][0-4][0-9]|[1-9][0-9]|[0-9])/(1[6-9]|2[0-8]))$"#,
+                            r#"(^(192\.168\.(25[0-5]|[1-2][0-4][0-9]|[1-9][0-9]|[0-9])\.(25[0-5]|[1-2][0-4][0-9]|[1-9][0-9]|[0-9])/(1[6-9]|2[0-8]))$)"#,
                         ).to_string(),
                     ),
                 })),
@@ -1104,7 +1019,7 @@ impl JsonSchema for Ipv4Net {
 }
 
 /// An `Ipv6Net` represents a IPv6 subnetwork, including the address and network mask.
-#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Serialize)]
+#[derive(Clone, Copy, Debug, Deserialize, Hash, PartialEq, Serialize)]
 pub struct Ipv6Net(pub ipnetwork::Ipv6Network);
 
 impl Ipv6Net {
@@ -1187,181 +1102,116 @@ impl JsonSchema for Ipv6Net {
     }
 }
 
-#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, JsonSchema)]
-#[serde(rename_all = "snake_case")]
-pub enum VpcRouterKind {
-    System,
-    Custom,
+/// An `IpNet` represents an IP network, either IPv4 or IPv6.
+#[derive(
+    Clone, Copy, Debug, Deserialize, PartialEq, Hash, JsonSchema, Serialize,
+)]
+pub enum IpNet {
+    V4(Ipv4Net),
+    V6(Ipv6Net),
 }
 
-/// A VPC router defines a series of rules that indicate where traffic
-/// should be sent depending on its destination.
-#[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
-pub struct VpcRouter {
-    /// common identifying metadata
-    #[serde(flatten)]
-    pub identity: IdentityMetadata,
-
-    pub kind: VpcRouterKind,
-
-    /// The VPC to which the router belongs.
-    pub vpc_id: Uuid,
+impl From<Ipv4Net> for IpNet {
+    fn from(n: Ipv4Net) -> IpNet {
+        IpNet::V4(n)
+    }
 }
 
-/// Represents all possible network target strings as defined in RFD-21
-/// This enum itself isn't intended to be used directly but rather as a
-/// delegate for subset enums to not have to re-implement all the base type conversions.
-///
-/// See <https://rfd.shared.oxide.computer/rfd/0021#api-target-strings>
-#[derive(Debug, PartialEq, Display, FromStr)]
-pub enum NetworkTarget {
-    #[display("vpc:{0}")]
-    Vpc(Name),
-    #[display("subnet:{0}")]
-    Subnet(Name),
-    #[display("instance:{0}")]
-    Instance(Name),
-    #[display("tag:{0}")]
-    Tag(Name),
-    #[display("ip:{0}")]
-    Ip(IpAddr),
-    #[display("inetgw:{0}")]
-    InternetGateway(Name),
-    #[display("fip:{0}")]
-    FloatingIp(Name),
+impl From<Ipv4Addr> for IpNet {
+    fn from(n: Ipv4Addr) -> IpNet {
+        IpNet::V4(Ipv4Net(ipnetwork::Ipv4Network::from(n)))
+    }
 }
 
-/// A subset of [`NetworkTarget`], `RouteTarget` specifies all
-/// possible targets that a route can forward to.
-#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, JsonSchema)]
+impl From<Ipv6Net> for IpNet {
+    fn from(n: Ipv6Net) -> IpNet {
+        IpNet::V6(n)
+    }
+}
+
+impl From<Ipv6Addr> for IpNet {
+    fn from(n: Ipv6Addr) -> IpNet {
+        IpNet::V6(Ipv6Net(ipnetwork::Ipv6Network::from(n)))
+    }
+}
+
+impl std::fmt::Display for IpNet {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            IpNet::V4(inner) => write!(f, "{}", inner),
+            IpNet::V6(inner) => write!(f, "{}", inner),
+        }
+    }
+}
+
+impl FromStr for IpNet {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let net =
+            s.parse::<ipnetwork::IpNetwork>().map_err(|e| e.to_string())?;
+        match net {
+            ipnetwork::IpNetwork::V4(net) => Ok(IpNet::from(Ipv4Net(net))),
+            ipnetwork::IpNetwork::V6(net) => Ok(IpNet::from(Ipv6Net(net))),
+        }
+    }
+}
+
+/// A `RouteTarget` describes the possible locations that traffic matching a
+/// route destination can be sent.
+#[derive(
+    Clone,
+    Debug,
+    Deserialize,
+    Display,
+    FromStr,
+    Serialize,
+    PartialEq,
+    JsonSchema,
+)]
 #[serde(tag = "type", content = "value", rename_all = "snake_case")]
+#[display("{}:{0}", style = "lowercase")]
 pub enum RouteTarget {
+    /// Forward traffic to a particular IP address.
     Ip(IpAddr),
+    /// Forward traffic to a VPC
     Vpc(Name),
+    /// Forward traffic to a VPC Subnet
     Subnet(Name),
+    /// Forward traffic to a specific instance
     Instance(Name),
+    #[display("inetgw:{0}")]
+    /// Forward traffic to an internet gateway
     InternetGateway(Name),
 }
 
-impl TryFrom<String> for RouteTarget {
-    type Error = String;
-
-    fn try_from(value: String) -> Result<Self, Self::Error> {
-        RouteTarget::try_from(
-            value.parse::<NetworkTarget>().map_err(|e| e.to_string())?,
-        )
-    }
-}
-
-impl FromStr for RouteTarget {
-    type Err = String;
-
-    fn from_str(value: &str) -> Result<Self, Self::Err> {
-        RouteTarget::try_from(String::from(value))
-    }
-}
-
-impl From<RouteTarget> for NetworkTarget {
-    fn from(target: RouteTarget) -> Self {
-        match target {
-            RouteTarget::Ip(ip) => NetworkTarget::Ip(ip),
-            RouteTarget::Vpc(name) => NetworkTarget::Vpc(name),
-            RouteTarget::Subnet(name) => NetworkTarget::Subnet(name),
-            RouteTarget::Instance(name) => NetworkTarget::Instance(name),
-            RouteTarget::InternetGateway(name) => {
-                NetworkTarget::InternetGateway(name)
-            }
-        }
-    }
-}
-
-impl TryFrom<NetworkTarget> for RouteTarget {
-    type Error = String;
-
-    fn try_from(value: NetworkTarget) -> Result<Self, Self::Error> {
-        match value {
-            NetworkTarget::Ip(ip) => Ok(RouteTarget::Ip(ip)),
-            NetworkTarget::Vpc(name) => Ok(RouteTarget::Vpc(name)),
-            NetworkTarget::Subnet(name) => Ok(RouteTarget::Subnet(name)),
-            NetworkTarget::Instance(name) => Ok(RouteTarget::Instance(name)),
-            NetworkTarget::InternetGateway(name) => {
-                Ok(RouteTarget::InternetGateway(name))
-            }
-            _ => Err(format!(
-                "Invalid RouteTarget {}, only ip, vpc, subnet, instance, and inetgw are allowed",
-                value
-            )),
-        }
-    }
-}
-
-impl Display for RouteTarget {
-    fn fmt(&self, f: &mut Formatter<'_>) -> FormatResult {
-        let target = NetworkTarget::from(self.clone());
-        write!(f, "{}", target)
-    }
-}
-
-/// A subset of [`NetworkTarget`], `RouteDestination` specifies
-/// the kind of network traffic that will be matched to be forwarded
-/// to the [`RouteTarget`].
-#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, JsonSchema)]
+/// A `RouteDestination` is used to match traffic with a routing rule, on the
+/// destination of that traffic.
+///
+/// When traffic is to be sent to a destination that is within a given
+/// `RouteDestination`, the corresponding [`RouterRoute`] applies, and traffic
+/// will be forward to the [`RouteTarget`] for that rule.
+#[derive(
+    Clone,
+    Debug,
+    Deserialize,
+    Display,
+    FromStr,
+    Serialize,
+    PartialEq,
+    JsonSchema,
+)]
 #[serde(tag = "type", content = "value", rename_all = "snake_case")]
+#[display("{}:{0}", style = "lowercase")]
 pub enum RouteDestination {
+    /// Route applies to traffic destined for a specific IP address
     Ip(IpAddr),
+    /// Route applies to traffic destined for a specific IP subnet
+    IpNet(IpNet),
+    /// Route applies to traffic destined for the given VPC.
     Vpc(Name),
+    /// Route applies to traffic
     Subnet(Name),
-}
-
-impl TryFrom<NetworkTarget> for RouteDestination {
-    type Error = String;
-
-    fn try_from(value: NetworkTarget) -> Result<Self, Self::Error> {
-        match value {
-            NetworkTarget::Ip(ip) => Ok(RouteDestination::Ip(ip)),
-            NetworkTarget::Vpc(name) => Ok(RouteDestination::Vpc(name)),
-            NetworkTarget::Subnet(name) => Ok(RouteDestination::Subnet(name)),
-            _ => Err(format!(
-                "Invalid RouteTarget {}, only ip, vpc, and subnets are allowed",
-                value
-            )),
-        }
-    }
-}
-
-impl TryFrom<String> for RouteDestination {
-    type Error = String;
-
-    fn try_from(value: String) -> Result<Self, Self::Error> {
-        RouteDestination::try_from(
-            value.parse::<NetworkTarget>().map_err(|e| e.to_string())?,
-        )
-    }
-}
-
-impl FromStr for RouteDestination {
-    type Err = String;
-
-    fn from_str(value: &str) -> Result<Self, Self::Err> {
-        RouteDestination::try_from(String::from(value))
-    }
-}
-
-impl From<RouteDestination> for NetworkTarget {
-    fn from(target: RouteDestination) -> Self {
-        match target {
-            RouteDestination::Ip(ip) => NetworkTarget::Ip(ip),
-            RouteDestination::Vpc(name) => NetworkTarget::Vpc(name),
-            RouteDestination::Subnet(name) => NetworkTarget::Subnet(name),
-        }
-    }
-}
-
-impl Display for RouteDestination {
-    fn fmt(&self, f: &mut Formatter<'_>) -> FormatResult {
-        let target = NetworkTarget::from(self.clone());
-        write!(f, "{}", target)
-    }
 }
 
 /// The classification of a [`RouterRoute`] as defined by the system.
@@ -1455,9 +1305,7 @@ pub struct VpcFirewallRule {
     pub vpc_id: Uuid,
 }
 
-/**
- * Collection of a [`Vpc`]'s firewall rules
- */
+/// Collection of a [`Vpc`]'s firewall rules
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct VpcFirewallRules {
     pub rules: Vec<VpcFirewallRule>,
@@ -1484,11 +1332,9 @@ pub struct VpcFirewallRuleUpdate {
     pub priority: VpcFirewallRulePriority,
 }
 
-/**
- * Updateable properties of a `Vpc`'s firewall
- * Note that VpcFirewallRules are implicitly created along with a Vpc,
- * so there is no explicit creation.
- */
+/// Updateable properties of a `Vpc`'s firewall
+/// Note that VpcFirewallRules are implicitly created along with a Vpc,
+/// so there is no explicit creation.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct VpcFirewallRuleUpdateParams {
     pub rules: Vec<VpcFirewallRuleUpdate>,
@@ -1556,158 +1402,65 @@ pub enum VpcFirewallRuleAction {
     Deny,
 }
 
-/// A subset of [`NetworkTarget`], `VpcFirewallRuleTarget` specifies all
-/// possible targets that a firewall rule can be attached to.
-#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, JsonSchema)]
+/// A `VpcFirewallRuleTarget` is used to specify the set of [`Instance`]s to
+/// which a firewall rule applies.
+#[derive(
+    Clone,
+    Debug,
+    Deserialize,
+    Display,
+    FromStr,
+    Serialize,
+    PartialEq,
+    JsonSchema,
+)]
 #[serde(tag = "type", content = "value", rename_all = "snake_case")]
+#[display("{}:{0}", style = "lowercase")]
 pub enum VpcFirewallRuleTarget {
+    /// The rule applies to all instances in the VPC
     Vpc(Name),
+    /// The rule applies to all instances in the VPC Subnet
     Subnet(Name),
+    /// The rule applies to this specific instance
     Instance(Name),
+    /// The rule applies to a specific IP address
+    Ip(IpAddr),
+    /// The rule applies to a specific IP subnet
+    IpNet(IpNet),
     // Tags not yet implemented
-    //Tag(Name),
+    // Tag(Name),
 }
 
-impl TryFrom<String> for VpcFirewallRuleTarget {
-    type Error = String;
-
-    fn try_from(value: String) -> Result<Self, Self::Error> {
-        VpcFirewallRuleTarget::try_from(
-            value.parse::<NetworkTarget>().map_err(|e| e.to_string())?,
-        )
-    }
-}
-
-impl FromStr for VpcFirewallRuleTarget {
-    type Err = String;
-
-    fn from_str(value: &str) -> Result<Self, Self::Err> {
-        VpcFirewallRuleTarget::try_from(String::from(value))
-    }
-}
-
-impl From<VpcFirewallRuleTarget> for NetworkTarget {
-    fn from(target: VpcFirewallRuleTarget) -> Self {
-        match target {
-            VpcFirewallRuleTarget::Vpc(name) => NetworkTarget::Vpc(name),
-            VpcFirewallRuleTarget::Subnet(name) => NetworkTarget::Subnet(name),
-            VpcFirewallRuleTarget::Instance(name) => {
-                NetworkTarget::Instance(name)
-            }
-        }
-    }
-}
-
-impl TryFrom<NetworkTarget> for VpcFirewallRuleTarget {
-    type Error = String;
-
-    fn try_from(value: NetworkTarget) -> Result<Self, Self::Error> {
-        match value {
-            NetworkTarget::Vpc(name) => Ok(VpcFirewallRuleTarget::Vpc(name)),
-            NetworkTarget::Subnet(name) => {
-                Ok(VpcFirewallRuleTarget::Subnet(name))
-            }
-            NetworkTarget::Instance(name) => {
-                Ok(VpcFirewallRuleTarget::Instance(name))
-            }
-            _ => Err(format!(
-                "Invalid VpcFirewallRuleTarget {}, only vpc, subnet, and instance, \
-                are allowed",
-                value
-            )),
-        }
-    }
-}
-
-impl Display for VpcFirewallRuleTarget {
-    fn fmt(&self, f: &mut Formatter<'_>) -> FormatResult {
-        let target = NetworkTarget::from(self.clone());
-        write!(f, "{}", target)
-    }
-}
-
-/// A subset of [`NetworkTarget`], `VpcFirewallRuleHostFilter` specifies all
-/// possible targets that a route can forward to.
-#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, JsonSchema)]
+/// The `VpcFirewallRuleHostFilter` is used to filter traffic on the basis of
+/// its source or destination host.
+#[derive(
+    Clone,
+    Debug,
+    Deserialize,
+    Display,
+    FromStr,
+    Serialize,
+    PartialEq,
+    JsonSchema,
+)]
 #[serde(tag = "type", content = "value", rename_all = "snake_case")]
+#[display("{}:{0}", style = "lowercase")]
 pub enum VpcFirewallRuleHostFilter {
+    /// The rule applies to traffic from/to all instances in the VPC
     Vpc(Name),
+    /// The rule applies to traffic from/to all instances in the VPC Subnet
     Subnet(Name),
+    /// The rule applies to traffic from/to this specific instance
     Instance(Name),
     // Tags not yet implemented
     // Tag(Name),
+    /// The rule applies to traffic from/to a specific IP address
     Ip(IpAddr),
-    InternetGateway(Name),
-}
-
-impl TryFrom<String> for VpcFirewallRuleHostFilter {
-    type Error = String;
-
-    fn try_from(value: String) -> Result<Self, Self::Error> {
-        VpcFirewallRuleHostFilter::try_from(
-            value.parse::<NetworkTarget>().map_err(|e| e.to_string())?,
-        )
-    }
-}
-
-impl FromStr for VpcFirewallRuleHostFilter {
-    type Err = String;
-
-    fn from_str(value: &str) -> Result<Self, Self::Err> {
-        VpcFirewallRuleHostFilter::try_from(String::from(value))
-    }
-}
-
-impl From<VpcFirewallRuleHostFilter> for NetworkTarget {
-    fn from(target: VpcFirewallRuleHostFilter) -> Self {
-        match target {
-            VpcFirewallRuleHostFilter::Vpc(name) => NetworkTarget::Vpc(name),
-            VpcFirewallRuleHostFilter::Subnet(name) => {
-                NetworkTarget::Subnet(name)
-            }
-            VpcFirewallRuleHostFilter::Instance(name) => {
-                NetworkTarget::Instance(name)
-            }
-            VpcFirewallRuleHostFilter::Ip(ip) => NetworkTarget::Ip(ip),
-            VpcFirewallRuleHostFilter::InternetGateway(name) => {
-                NetworkTarget::InternetGateway(name)
-            }
-        }
-    }
-}
-
-impl TryFrom<NetworkTarget> for VpcFirewallRuleHostFilter {
-    type Error = String;
-
-    fn try_from(value: NetworkTarget) -> Result<Self, Self::Error> {
-        match value {
-            NetworkTarget::Vpc(name) => {
-                Ok(VpcFirewallRuleHostFilter::Vpc(name))
-            }
-            NetworkTarget::Subnet(name) => {
-                Ok(VpcFirewallRuleHostFilter::Subnet(name))
-            }
-            NetworkTarget::Instance(name) => {
-                Ok(VpcFirewallRuleHostFilter::Instance(name))
-            }
-            NetworkTarget::Ip(ip) => Ok(VpcFirewallRuleHostFilter::Ip(ip)),
-            NetworkTarget::InternetGateway(name) => {
-                Ok(VpcFirewallRuleHostFilter::InternetGateway(name))
-            }
-            _ => Err(format!(
-                "Invalid VpcFirewallRuleHostFilter {}, only vpc, subnet, \
-                instance, ip, and inetgw are allowed",
-                value
-            )),
-        }
-    }
-}
-
-impl Display for VpcFirewallRuleHostFilter {
-    fn fmt(&self, f: &mut Formatter<'_>) -> FormatResult {
-        let target = NetworkTarget::from(self.clone());
-        write!(f, "{}", target)
-    }
+    /// The rule applies to traffic from/to a specific IP subnet
+    IpNet(IpNet),
+    // TODO: Internet gateways not yet implemented
+    // #[display("inetgw:{0}")]
+    // InternetGateway(Name),
 }
 
 /// Port number used in a transport-layer protocol like TCP or UDP
@@ -1909,42 +1662,44 @@ pub struct NetworkInterface {
     #[serde(flatten)]
     pub identity: IdentityMetadata,
 
-    /** The Instance to which the interface belongs. */
+    /// The Instance to which the interface belongs.
     pub instance_id: Uuid,
 
-    /** The VPC to which the interface belongs. */
+    /// The VPC to which the interface belongs.
     pub vpc_id: Uuid,
 
-    /** The subnet to which the interface belongs. */
+    /// The subnet to which the interface belongs.
     pub subnet_id: Uuid,
 
-    /** The MAC address assigned to this interface. */
+    /// The MAC address assigned to this interface.
     pub mac: MacAddr,
 
-    /** The IP address assigned to this interface. */
+    /// The IP address assigned to this interface.
     pub ip: IpAddr,
+    // TODO-correctness: We need to split this into an optional V4 and optional
+    // V6 address, at least one of which must be specified.
 }
 
 #[cfg(test)]
 mod test {
+    use super::RouteDestination;
+    use super::RouteTarget;
+    use super::VpcFirewallRuleHostFilter;
+    use super::VpcFirewallRuleTarget;
     use super::{
-        ByteCount, L4Port, L4PortRange, Name, NetworkTarget, RoleName,
-        VpcFirewallRuleAction, VpcFirewallRuleDirection, VpcFirewallRuleFilter,
-        VpcFirewallRuleHostFilter, VpcFirewallRulePriority,
-        VpcFirewallRuleProtocol, VpcFirewallRuleStatus, VpcFirewallRuleTarget,
-        VpcFirewallRuleUpdate, VpcFirewallRuleUpdateParams,
+        ByteCount, L4Port, L4PortRange, Name, RoleName, VpcFirewallRuleAction,
+        VpcFirewallRuleDirection, VpcFirewallRuleFilter,
+        VpcFirewallRulePriority, VpcFirewallRuleProtocol,
+        VpcFirewallRuleStatus, VpcFirewallRuleUpdate,
+        VpcFirewallRuleUpdateParams,
     };
     use crate::api::external::Error;
     use crate::api::external::ResourceType;
     use std::convert::TryFrom;
-    use std::net::IpAddr;
-    use std::net::Ipv4Addr;
 
     #[test]
     fn test_name_parse() {
-        /*
-         * Error cases
-         */
+        // Error cases
         let long_name =
             "a234567890123456789012345678901234567890123456789012345678901234";
         assert_eq!(long_name.len(), 64);
@@ -1976,9 +1731,7 @@ mod test {
             assert_eq!(input.parse::<Name>().unwrap_err(), expected_message);
         }
 
-        /*
-         * Success cases
-         */
+        // Success cases
         let valid_names: Vec<&str> =
             vec!["abc", "abc-123", "a123", &long_name[0..63]];
 
@@ -2084,7 +1837,7 @@ mod test {
 
     #[test]
     fn test_bytecount() {
-        /* Smallest supported value: all constructors */
+        // Smallest supported value: all constructors
         let zero = ByteCount::from(0u32);
         assert_eq!(0, zero.to_bytes());
         assert_eq!(0, zero.to_whole_kibibytes());
@@ -2096,7 +1849,7 @@ mod test {
         let zero = ByteCount::try_from(0u64).unwrap();
         assert_eq!(0, zero.to_bytes());
 
-        /* Largest supported value: both constructors that support it. */
+        // Largest supported value: both constructors that support it.
         let max = ByteCount::try_from(i64::MAX).unwrap();
         assert_eq!(i64::MAX, max.to_bytes() as i64);
         assert_eq!(i64::MAX, i64::from(max));
@@ -2110,22 +1863,20 @@ mod test {
             max.to_whole_tebibytes()
         );
 
-        /* Value too large (only one constructor can hit this) */
+        // Value too large (only one constructor can hit this)
         let bogus = ByteCount::try_from(maxu64 + 1).unwrap_err();
         assert_eq!(bogus.to_string(), "value is too large for a byte count");
-        /* Value too small (only one constructor can hit this) */
+        // Value too small (only one constructor can hit this)
         let bogus = ByteCount::try_from(-1i64).unwrap_err();
         assert_eq!(bogus.to_string(), "value is too small for a byte count");
-        /* For good measure, let's check i64::MIN */
+        // For good measure, let's check i64::MIN
         let bogus = ByteCount::try_from(i64::MIN).unwrap_err();
         assert_eq!(bogus.to_string(), "value is too small for a byte count");
 
-        /*
-         * We've now exhaustively tested both sides of all boundary conditions
-         * for all three constructors (to the extent that that's possible).
-         * Check non-trivial cases for the various accessor functions.  This
-         * means picking values in the middle of the range.
-         */
+        // We've now exhaustively tested both sides of all boundary conditions
+        // for all three constructors (to the extent that that's possible).
+        // Check non-trivial cases for the various accessor functions.  This
+        // means picking values in the middle of the range.
         let three_terabytes = 3_000_000_000_000u64;
         let tb3 = ByteCount::try_from(three_terabytes).unwrap();
         assert_eq!(three_terabytes, tb3.to_bytes());
@@ -2290,48 +2041,6 @@ mod test {
     }
 
     #[test]
-    fn test_networktarget_parsing() {
-        assert_eq!(
-            "vpc:my-vital-vpc".parse(),
-            Ok(NetworkTarget::Vpc("my-vital-vpc".parse().unwrap()))
-        );
-        assert_eq!(
-            "subnet:my-slick-subnet".parse(),
-            Ok(NetworkTarget::Subnet("my-slick-subnet".parse().unwrap()))
-        );
-        assert_eq!(
-            "instance:my-intrepid-instance".parse(),
-            Ok(NetworkTarget::Instance(
-                "my-intrepid-instance".parse().unwrap()
-            ))
-        );
-        assert_eq!(
-            "tag:my-turbid-tag".parse(),
-            Ok(NetworkTarget::Tag("my-turbid-tag".parse().unwrap()))
-        );
-        assert_eq!(
-            "ip:127.0.0.1".parse(),
-            Ok(NetworkTarget::Ip(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1))))
-        );
-        assert_eq!(
-            "inetgw:my-gregarious-internet-gateway".parse(),
-            Ok(NetworkTarget::InternetGateway(
-                "my-gregarious-internet-gateway".parse().unwrap()
-            ))
-        );
-        assert_eq!(
-            "fip:my-fickle-floating-ip".parse(),
-            Ok(NetworkTarget::FloatingIp(
-                "my-fickle-floating-ip".parse().unwrap()
-            ))
-        );
-        assert_eq!(
-            "nope:this-should-error".parse::<NetworkTarget>().unwrap_err(),
-            parse_display::ParseError::new()
-        );
-    }
-
-    #[test]
     fn test_ipv6_net_operations() {
         use super::Ipv6Net;
         assert!(Ipv6Net("fd00::/8".parse().unwrap()).is_unique_local());
@@ -2351,5 +2060,109 @@ mod test {
         assert!(
             !Ipv6Net("fd00::/63".parse().unwrap()).is_vpc_subnet(&vpc_prefix)
         );
+    }
+
+    #[test]
+    fn test_route_target_parse() {
+        let name: Name = "foo".parse().unwrap();
+        let address = "192.168.0.10".parse().unwrap();
+        assert_eq!(RouteTarget::Vpc(name.clone()), "vpc:foo".parse().unwrap());
+        assert_eq!(
+            RouteTarget::Subnet(name.clone()),
+            "subnet:foo".parse().unwrap()
+        );
+        assert_eq!(
+            RouteTarget::Instance(name),
+            "instance:foo".parse().unwrap()
+        );
+        assert_eq!(
+            RouteTarget::Ip(address),
+            "ip:192.168.0.10".parse().unwrap()
+        );
+        assert!("foo:foo".parse::<RouteTarget>().is_err());
+        assert!("foo".parse::<RouteTarget>().is_err());
+    }
+
+    #[test]
+    fn test_route_destination_parse() {
+        let name: Name = "foo".parse().unwrap();
+        let address = "192.168.0.10".parse().unwrap();
+        let network = "fd00::/64".parse().unwrap();
+        assert_eq!(
+            RouteDestination::Vpc(name.clone()),
+            "vpc:foo".parse().unwrap()
+        );
+        assert_eq!(
+            RouteDestination::Subnet(name.clone()),
+            "subnet:foo".parse().unwrap()
+        );
+        assert_eq!(
+            RouteDestination::Ip(address),
+            "ip:192.168.0.10".parse().unwrap()
+        );
+        assert_eq!(
+            RouteDestination::IpNet(network),
+            "ipnet:fd00::/64".parse().unwrap()
+        );
+        assert!("foo:foo".parse::<RouteDestination>().is_err());
+        assert!("foo".parse::<RouteDestination>().is_err());
+    }
+
+    #[test]
+    fn test_firewall_rule_target_parse() {
+        let name: Name = "foo".parse().unwrap();
+        let address = "192.168.0.10".parse().unwrap();
+        let network = "fd00::/64".parse().unwrap();
+        assert_eq!(
+            VpcFirewallRuleTarget::Vpc(name.clone()),
+            "vpc:foo".parse().unwrap()
+        );
+        assert_eq!(
+            VpcFirewallRuleTarget::Subnet(name.clone()),
+            "subnet:foo".parse().unwrap()
+        );
+        assert_eq!(
+            VpcFirewallRuleTarget::Instance(name),
+            "instance:foo".parse().unwrap()
+        );
+        assert_eq!(
+            VpcFirewallRuleTarget::Ip(address),
+            "ip:192.168.0.10".parse().unwrap()
+        );
+        assert_eq!(
+            VpcFirewallRuleTarget::IpNet(network),
+            "ipnet:fd00::/64".parse().unwrap()
+        );
+        assert!("foo:foo".parse::<VpcFirewallRuleTarget>().is_err());
+        assert!("foo".parse::<VpcFirewallRuleTarget>().is_err());
+    }
+
+    #[test]
+    fn test_firewall_rule_host_filter_parse() {
+        let name: Name = "foo".parse().unwrap();
+        let address = "192.168.0.10".parse().unwrap();
+        let network = "fd00::/64".parse().unwrap();
+        assert_eq!(
+            VpcFirewallRuleHostFilter::Vpc(name.clone()),
+            "vpc:foo".parse().unwrap()
+        );
+        assert_eq!(
+            VpcFirewallRuleHostFilter::Subnet(name.clone()),
+            "subnet:foo".parse().unwrap()
+        );
+        assert_eq!(
+            VpcFirewallRuleHostFilter::Instance(name),
+            "instance:foo".parse().unwrap()
+        );
+        assert_eq!(
+            VpcFirewallRuleHostFilter::Ip(address),
+            "ip:192.168.0.10".parse().unwrap()
+        );
+        assert_eq!(
+            VpcFirewallRuleHostFilter::IpNet(network),
+            "ipnet:fd00::/64".parse().unwrap()
+        );
+        assert!("foo:foo".parse::<VpcFirewallRuleHostFilter>().is_err());
+        assert!("foo".parse::<VpcFirewallRuleHostFilter>().is_err());
     }
 }

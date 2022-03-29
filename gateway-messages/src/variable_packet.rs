@@ -10,8 +10,7 @@
 //! static world with a fixed max size without sending padding for
 //! underpopulated messages.
 
-use std::marker::PhantomData;
-
+use core::marker::PhantomData;
 use serde::de::{DeserializeOwned, Error, Visitor};
 use serde::ser::SerializeTuple;
 use serde::Serialize;
@@ -80,8 +79,8 @@ pub(crate) trait VariablePacket {
 
             fn expecting(
                 &self,
-                formatter: &mut std::fmt::Formatter,
-            ) -> std::fmt::Result {
+                formatter: &mut core::fmt::Formatter,
+            ) -> core::fmt::Result {
                 write!(formatter, "{}", T::DESERIALIZE_NAME)
             }
 

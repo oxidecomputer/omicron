@@ -4,13 +4,14 @@
 
 //! Describes the states of VM instances.
 
+use crate::params::{
+    InstanceRuntimeStateMigrateParams, InstanceRuntimeStateRequested,
+    InstanceStateRequested,
+};
 use chrono::Utc;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::InstanceState;
 use omicron_common::api::internal::nexus::InstanceRuntimeState;
-use omicron_common::api::internal::sled_agent::InstanceRuntimeStateMigrateParams;
-use omicron_common::api::internal::sled_agent::InstanceRuntimeStateRequested;
-use omicron_common::api::internal::sled_agent::InstanceStateRequested;
 use propolis_client::api::InstanceState as PropolisInstanceState;
 
 /// The port propolis-server listens on inside the propolis zone.
@@ -353,19 +354,17 @@ impl InstanceStates {
 mod test {
     use super::{Action, InstanceStates};
 
-    use std::assert_matches::assert_matches;
-
+    use crate::params::{
+        InstanceRuntimeStateMigrateParams, InstanceRuntimeStateRequested,
+        InstanceStateRequested as Requested,
+    };
     use chrono::Utc;
     use omicron_common::api::external::{
         ByteCount, Error, Generation, InstanceCpuCount, InstanceState as State,
     };
-    use omicron_common::api::internal::{
-        nexus::InstanceRuntimeState,
-        sled_agent::InstanceRuntimeStateMigrateParams,
-        sled_agent::InstanceRuntimeStateRequested,
-        sled_agent::InstanceStateRequested as Requested,
-    };
+    use omicron_common::api::internal::nexus::InstanceRuntimeState;
     use propolis_client::api::InstanceState as Observed;
+    use std::assert_matches::assert_matches;
     use uuid::Uuid;
 
     fn make_instance() -> InstanceStates {

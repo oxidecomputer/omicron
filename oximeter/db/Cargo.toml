@@ -1,18 +1,18 @@
 [package]
 name = "oximeter-db"
 version = "0.1.0"
-edition = "2018"
+edition = "2021"
 description = "Tools for interacting with the Oxide control plane telemetry database"
 license = "MPL-2.0"
 
 [dependencies]
 anyhow = "1.0"
-async-trait = "0.1.51"
+async-trait = "0.1.53"
 bytes = { version = "1.0.1", features = [ "serde" ] }
 chrono = { version = "0.4.19", features = [ "serde" ] }
 dropshot = { git = "https://github.com/oxidecomputer/dropshot", branch = "main" }
 oximeter = { path = "../oximeter" }
-regex = "1.5.4"
+regex = "1.5.5"
 reqwest = { version = "0.11.8", features = [ "json" ] }
 schemars = { version = "0.8.8", features = [ "uuid", "bytes", "chrono" ] }
 serde = { version = "1", features = [ "derive" ] }

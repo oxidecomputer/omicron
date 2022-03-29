@@ -30,6 +30,7 @@ async fn test_roles_builtin(cptestctx: &ControlPlaneTestContext) {
     let expected = [
         ("fleet.admin", "Fleet Administrator"),
         ("fleet.collaborator", "Fleet Collaborator"),
+        ("fleet.viewer", "Fleet Viewer"),
         ("organization.admin", "Organization Administrator"),
         ("organization.collaborator", "Organization Collaborator"),
         ("project.admin", "Project Administrator"),
@@ -53,7 +54,6 @@ async fn test_roles_builtin(cptestctx: &ControlPlaneTestContext) {
     // There's an empty page at the end of each dropshot scan.
     assert_eq!(roles.len() + 1, roles_paginated.npages);
 
-    //
     // Test GET /roles/$role_name
     //
 

@@ -2,9 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-/*!
- * Interface for making API requests to a Sled Agent
- */
+//! Interface for making API requests to a Sled Agent
 
 use async_trait::async_trait;
 use omicron_common::generate_logging_api;
@@ -45,37 +43,18 @@ impl From<omicron_common::api::external::InstanceState>
     for types::InstanceState
 {
     fn from(s: omicron_common::api::external::InstanceState) -> Self {
+        use omicron_common::api::external::InstanceState::*;
         match s {
-            omicron_common::api::external::InstanceState::Creating => {
-                Self::Creating
-            }
-            omicron_common::api::external::InstanceState::Starting => {
-                Self::Starting
-            }
-            omicron_common::api::external::InstanceState::Running => {
-                Self::Running
-            }
-            omicron_common::api::external::InstanceState::Stopping => {
-                Self::Stopping
-            }
-            omicron_common::api::external::InstanceState::Stopped => {
-                Self::Stopped
-            }
-            omicron_common::api::external::InstanceState::Rebooting => {
-                Self::Rebooting
-            }
-            omicron_common::api::external::InstanceState::Migrating => {
-                Self::Migrating
-            }
-            omicron_common::api::external::InstanceState::Repairing => {
-                Self::Repairing
-            }
-            omicron_common::api::external::InstanceState::Failed => {
-                Self::Failed
-            }
-            omicron_common::api::external::InstanceState::Destroyed => {
-                Self::Destroyed
-            }
+            Creating => Self::Creating,
+            Starting => Self::Starting,
+            Running => Self::Running,
+            Stopping => Self::Stopping,
+            Stopped => Self::Stopped,
+            Rebooting => Self::Rebooting,
+            Migrating => Self::Migrating,
+            Repairing => Self::Repairing,
+            Failed => Self::Failed,
+            Destroyed => Self::Destroyed,
         }
     }
 }
@@ -97,42 +76,6 @@ impl From<omicron_common::api::external::ByteCount> for types::ByteCount {
 impl From<omicron_common::api::external::Generation> for types::Generation {
     fn from(s: omicron_common::api::external::Generation) -> Self {
         Self(i64::from(&s) as u64)
-    }
-}
-
-impl From<omicron_common::api::internal::sled_agent::InstanceRuntimeStateMigrateParams>
-    for types::InstanceRuntimeStateMigrateParams
-{
-    fn from(
-        s: omicron_common::api::internal::sled_agent::InstanceRuntimeStateMigrateParams,
-    ) -> Self {
-        Self { migration_id: s.migration_id, dst_propolis_id: s.dst_propolis_id }
-    }
-}
-
-impl From<omicron_common::api::internal::sled_agent::InstanceRuntimeStateRequested>
-    for types::InstanceRuntimeStateRequested
-{
-    fn from(
-        s: omicron_common::api::internal::sled_agent::InstanceRuntimeStateRequested,
-    ) -> Self {
-        Self { run_state: s.run_state.into(), migration_params: s.migration_params.map(|p| p.into()) }
-    }
-}
-
-impl From<omicron_common::api::internal::sled_agent::InstanceStateRequested>
-    for types::InstanceStateRequested
-{
-    fn from(
-        s: omicron_common::api::internal::sled_agent::InstanceStateRequested,
-    ) -> Self {
-        match s {
-            omicron_common::api::internal::sled_agent::InstanceStateRequested::Running => Self::Running,
-            omicron_common::api::internal::sled_agent::InstanceStateRequested::Stopped => Self::Stopped,
-            omicron_common::api::internal::sled_agent::InstanceStateRequested::Reboot => Self::Reboot,
-            omicron_common::api::internal::sled_agent::InstanceStateRequested::Migrating => Self::Migrating,
-            omicron_common::api::internal::sled_agent::InstanceStateRequested::Destroyed => Self::Destroyed,
-        }
     }
 }
 
@@ -160,17 +103,18 @@ impl From<types::InstanceState>
     for omicron_common::api::external::InstanceState
 {
     fn from(s: types::InstanceState) -> Self {
+        use types::InstanceState::*;
         match s {
-            types::InstanceState::Creating => Self::Creating,
-            types::InstanceState::Starting => Self::Starting,
-            types::InstanceState::Running => Self::Running,
-            types::InstanceState::Stopping => Self::Stopping,
-            types::InstanceState::Stopped => Self::Stopped,
-            types::InstanceState::Rebooting => Self::Rebooting,
-            types::InstanceState::Migrating => Self::Migrating,
-            types::InstanceState::Repairing => Self::Repairing,
-            types::InstanceState::Failed => Self::Failed,
-            types::InstanceState::Destroyed => Self::Destroyed,
+            Creating => Self::Creating,
+            Starting => Self::Starting,
+            Running => Self::Running,
+            Stopping => Self::Stopping,
+            Stopped => Self::Stopped,
+            Rebooting => Self::Rebooting,
+            Migrating => Self::Migrating,
+            Repairing => Self::Repairing,
+            Failed => Self::Failed,
+            Destroyed => Self::Destroyed,
         }
     }
 }
@@ -209,26 +153,15 @@ impl From<omicron_common::api::internal::nexus::DiskRuntimeState>
 
 impl From<omicron_common::api::external::DiskState> for types::DiskState {
     fn from(s: omicron_common::api::external::DiskState) -> Self {
+        use omicron_common::api::external::DiskState::*;
         match s {
-            omicron_common::api::external::DiskState::Creating => {
-                Self::Creating
-            }
-            omicron_common::api::external::DiskState::Detached => {
-                Self::Detached
-            }
-            omicron_common::api::external::DiskState::Attaching(u) => {
-                Self::Attaching(u)
-            }
-            omicron_common::api::external::DiskState::Attached(u) => {
-                Self::Attached(u)
-            }
-            omicron_common::api::external::DiskState::Detaching(u) => {
-                Self::Detaching(u)
-            }
-            omicron_common::api::external::DiskState::Destroyed => {
-                Self::Destroyed
-            }
-            omicron_common::api::external::DiskState::Faulted => Self::Faulted,
+            Creating => Self::Creating,
+            Detached => Self::Detached,
+            Attaching(u) => Self::Attaching(u),
+            Attached(u) => Self::Attached(u),
+            Detaching(u) => Self::Detaching(u),
+            Destroyed => Self::Destroyed,
+            Faulted => Self::Faulted,
         }
     }
 }
@@ -247,48 +180,23 @@ impl From<types::DiskRuntimeState>
 
 impl From<types::DiskState> for omicron_common::api::external::DiskState {
     fn from(s: types::DiskState) -> Self {
+        use types::DiskState::*;
         match s {
-            types::DiskState::Creating => Self::Creating,
-            types::DiskState::Detached => Self::Detached,
-            types::DiskState::Attaching(u) => Self::Attaching(u),
-            types::DiskState::Attached(u) => Self::Attached(u),
-            types::DiskState::Detaching(u) => Self::Detaching(u),
-            types::DiskState::Destroyed => Self::Destroyed,
-            types::DiskState::Faulted => Self::Faulted,
+            Creating => Self::Creating,
+            Detached => Self::Detached,
+            Attaching(u) => Self::Attaching(u),
+            Attached(u) => Self::Attached(u),
+            Detaching(u) => Self::Detaching(u),
+            Destroyed => Self::Destroyed,
+            Faulted => Self::Faulted,
         }
     }
 }
 
-impl From<omicron_common::api::internal::sled_agent::InstanceHardware>
-    for types::InstanceHardware
-{
-    fn from(
-        s: omicron_common::api::internal::sled_agent::InstanceHardware,
-    ) -> Self {
-        Self {
-            nics: s.nics.iter().map(Into::into).collect(),
-            runtime: s.runtime.into(),
-        }
-    }
-}
-
-impl From<omicron_common::api::internal::sled_agent::InstanceMigrateParams>
-    for types::InstanceMigrateParams
-{
-    fn from(
-        s: omicron_common::api::internal::sled_agent::InstanceMigrateParams,
-    ) -> Self {
-        Self {
-            src_propolis_addr: s.src_propolis_addr.to_string(),
-            src_propolis_uuid: s.src_propolis_uuid,
-        }
-    }
-}
-
-impl From<&omicron_common::api::external::NetworkInterface>
+impl From<omicron_common::api::external::NetworkInterface>
     for types::NetworkInterface
 {
-    fn from(s: &omicron_common::api::external::NetworkInterface) -> Self {
+    fn from(s: omicron_common::api::external::NetworkInterface) -> Self {
         Self {
             description: s.identity.description.clone(),
             id: s.identity.id,
@@ -313,48 +221,6 @@ impl From<&omicron_common::api::external::Name> for types::Name {
 impl From<omicron_common::api::external::MacAddr> for types::MacAddr {
     fn from(s: omicron_common::api::external::MacAddr) -> Self {
         Self(s.0.to_string())
-    }
-}
-
-impl From<omicron_common::api::internal::sled_agent::DatasetKind>
-    for types::DatasetKind
-{
-    fn from(k: omicron_common::api::internal::sled_agent::DatasetKind) -> Self {
-        use omicron_common::api::internal::sled_agent::DatasetKind::*;
-        match k {
-            CockroachDb { all_addresses } => Self::CockroachDb(
-                all_addresses.iter().map(|a| a.to_string()).collect(),
-            ),
-            Crucible => Self::Crucible,
-            Clickhouse => Self::Clickhouse,
-        }
-    }
-}
-
-impl From<omicron_common::api::internal::sled_agent::DatasetEnsureBody>
-    for types::DatasetEnsureBody
-{
-    fn from(
-        p: omicron_common::api::internal::sled_agent::DatasetEnsureBody,
-    ) -> Self {
-        Self {
-            zpool_uuid: p.zpool_uuid,
-            partition_kind: p.partition_kind.into(),
-            address: p.address.to_string(),
-        }
-    }
-}
-
-impl From<omicron_common::api::internal::sled_agent::ServiceRequest>
-    for types::ServiceRequest
-{
-    fn from(
-        s: omicron_common::api::internal::sled_agent::ServiceRequest,
-    ) -> Self {
-        Self {
-            name: s.name,
-            addresses: s.addresses.into_iter().map(|s| s.to_string()).collect(),
-        }
     }
 }
 
@@ -384,10 +250,8 @@ impl From<omicron_common::api::internal::nexus::UpdateArtifactKind>
     }
 }
 
-/**
- * Exposes additional [`Client`] interfaces for use by the test suite. These
- * are bonus endpoints, not generated in the real client.
- */
+/// Exposes additional [`Client`] interfaces for use by the test suite. These
+/// are bonus endpoints, not generated in the real client.
 #[async_trait]
 pub trait TestInterfaces {
     async fn instance_finish_transition(&self, id: Uuid);

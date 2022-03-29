@@ -1,7 +1,7 @@
 [package]
 name = "omicron-nexus"
 version = "0.1.0"
-edition = "2018"
+edition = "2021"
 license = "MPL-2.0"
 
 [build-dependencies.omicron-rpaths]
@@ -10,10 +10,11 @@ path = "../rpaths"
 [dependencies]
 anyhow = "1.0"
 async-bb8-diesel = { git = "https://github.com/oxidecomputer/async-bb8-diesel", rev = "c849b717be" }
-async-trait = "0.1.51"
+async-trait = "0.1.53"
+base64 = "0.13.0"
 bb8 = "0.7.1"
 cookie = "0.16"
-crucible-agent-client = { git = "https://github.com/oxidecomputer/crucible", rev = "3e7e49eeb88fa8ad74375b0642aabd4224b1f2cb" }
+crucible-agent-client = { git = "https://github.com/oxidecomputer/crucible", rev = "945daedb88cefa790f1d994b3a038b8fa9ac514a" }
 # Tracking pending 2.0 version.
 diesel = { git = "https://github.com/diesel-rs/diesel", rev = "ce77c382", features = ["postgres", "r2d2", "chrono", "serde_json", "network-address", "uuid"] }
 futures = "0.3.21"
@@ -120,6 +121,7 @@ nexus-test-utils-macros = { path = "test-utils-macros" }
 nexus-test-utils = { path = "test-utils" }
 omicron-test-utils = { path = "../test-utils" }
 openapiv3 = "1.0"
+regex = "1.5.5"
 subprocess = "0.2.8"
 
 [dev-dependencies.openapi-lint]

@@ -2,8 +2,6 @@
 # SP simulator: example config file
 #
 
-gateway_address = "127.0.0.1:22222"
-
 [[simulated_sps.sidecar]]
 bind_address = "127.0.0.1:23456"
 serial_number = [0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1]

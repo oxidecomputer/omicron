@@ -6,31 +6,63 @@
 
 //! HTTP entrypoint functions for the gateway service
 
-use crate::config::KnownSps;
 use crate::error::Error;
-use crate::sp_comms::{self, SerialConsoleContents};
+use crate::sp_comms::BulkSpStateSingleResult;
+use crate::sp_comms::BulkStateProgress;
+use crate::sp_comms::Error as SpCommsError;
+use crate::sp_comms::SerialConsoleContents;
+use crate::sp_comms::SpStateRequestId;
 use crate::ServerContext;
-use dropshot::{
-    endpoint, ApiDescription, HttpError, HttpResponseOk,
-    HttpResponseUpdatedNoContent, PaginationParams, Path, Query,
-    RequestContext, ResultsPage, TypedBody, UntypedBody,
-};
+use dropshot::endpoint;
+use dropshot::ApiDescription;
+use dropshot::HttpError;
+use dropshot::HttpResponseOk;
+use dropshot::HttpResponseUpdatedNoContent;
+use dropshot::PaginationParams;
+use dropshot::Path;
+use dropshot::Query;
+use dropshot::RequestContext;
+use dropshot::ResultsPage;
+use dropshot::TypedBody;
+use dropshot::UntypedBody;
+use dropshot::WhichPage;
 use gateway_messages::{IgnitionFlags, SpComponent};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::convert::TryFrom;
 use std::sync::Arc;
 use std::time::Duration;
+use tokio::time::Instant;
 
-#[derive(Serialize, JsonSchema)]
-struct SpInfo {
-    info: SpIgnitionInfo,
-    details: SpState,
+#[derive(
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Deserialize,
+    Serialize,
+    JsonSchema,
+)]
+pub struct SpInfo {
+    pub info: SpIgnitionInfo,
+    pub details: SpState,
 }
 
-#[derive(Serialize, JsonSchema)]
+#[derive(
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Deserialize,
+    Serialize,
+    JsonSchema,
+)]
 #[serde(tag = "state")]
-pub(crate) enum SpState {
+pub enum SpState {
     Disabled,
     Unresponsive,
     Enabled {
@@ -39,16 +71,36 @@ pub(crate) enum SpState {
     },
 }
 
-#[derive(Serialize, JsonSchema)]
-struct SpIgnitionInfo {
-    id: SpIdentifier,
-    details: SpIgnition,
+#[derive(
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Deserialize,
+    Serialize,
+    JsonSchema,
+)]
+pub struct SpIgnitionInfo {
+    pub id: SpIdentifier,
+    pub details: SpIgnition,
 }
 
-#[derive(Serialize, JsonSchema)]
+#[derive(
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Deserialize,
+    Serialize,
+    JsonSchema,
+)]
 #[serde(tag = "present")]
 #[allow(dead_code)] // TODO remove once `Absent` is used
-enum SpIgnition {
+pub enum SpIgnition {
     #[serde(rename = "no")]
     Absent,
     #[serde(rename = "yes")]
@@ -89,25 +141,94 @@ struct Timeout {
 }
 
 #[derive(Serialize, Deserialize)]
+struct SpStatePageSelector {
+    last: SpIdentifier,
+    request_id: SpStateRequestId,
+}
+
+#[derive(Serialize, Deserialize)]
 struct TimeoutSelector<T> {
     last: T,
     start_time: u64, // TODO
 }
 
-#[derive(Serialize, Deserialize, JsonSchema, PartialEq, Debug, Clone, Copy)]
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Serialize,
+    Deserialize,
+    JsonSchema,
+)]
 #[serde(rename_all = "lowercase")]
-pub(crate) enum SpType {
+pub enum SpType {
     Sled,
     Power,
     Switch,
 }
 
-#[derive(Serialize, Deserialize, JsonSchema, PartialEq, Debug, Clone, Copy)]
-pub(crate) struct SpIdentifier {
+impl From<SpType> for gateway_sp_comms::SpType {
+    fn from(typ: SpType) -> Self {
+        match typ {
+            SpType::Sled => Self::Sled,
+            SpType::Power => Self::Power,
+            SpType::Switch => Self::Switch,
+        }
+    }
+}
+
+impl From<gateway_sp_comms::SpType> for SpType {
+    fn from(typ: gateway_sp_comms::SpType) -> Self {
+        match typ {
+            gateway_sp_comms::SpType::Sled => Self::Sled,
+            gateway_sp_comms::SpType::Power => Self::Power,
+            gateway_sp_comms::SpType::Switch => Self::Switch,
+        }
+    }
+}
+
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Serialize,
+    Deserialize,
+    JsonSchema,
+)]
+pub struct SpIdentifier {
     #[serde(rename = "type")]
-    pub(crate) typ: SpType,
+    pub typ: SpType,
     #[serde(deserialize_with = "deserializer_u32_from_string")]
-    pub(crate) slot: u32,
+    pub slot: u32,
+}
+
+impl From<SpIdentifier> for gateway_sp_comms::SpIdentifier {
+    fn from(id: SpIdentifier) -> Self {
+        Self {
+            typ: id.typ.into(),
+            // id.slot may come from an untrusted source, but usize >= 32 bits
+            // on any platform that will run this code, so unwrap is fine
+            slot: usize::try_from(id.slot).unwrap(),
+        }
+    }
+}
+
+impl From<gateway_sp_comms::SpIdentifier> for SpIdentifier {
+    fn from(id: gateway_sp_comms::SpIdentifier) -> Self {
+        Self {
+            typ: id.typ.into(),
+            // id.slot comes from a trusted source and will not exceed u32::MAX
+            slot: u32::try_from(id.slot).unwrap(),
+        }
+    }
 }
 
 // We can't use the default `Deserialize` derivation for `SpIdentifier::slot`
@@ -140,72 +261,6 @@ where
             .map_err(|_| de::Error::invalid_type(Unexpected::Str(&s), &"u32")),
         StringOrU32::U32(n) => Ok(n),
     }
-}
-
-impl SpIdentifier {
-    fn placeholder_map_to_target(
-        &self,
-        known_sps: &KnownSps,
-    ) -> Result<u8, Error> {
-        // TODO This is wrong in all kinds of ways, but is just a placeholder
-        // for now until we have a better story for bootstrapping how MGS knows
-        // which SP is which.
-        //
-        // Maps `self` to a target number by assuming target numbers are indexed
-        // from 0 starting with switches followed by sleds followed by power
-        // controllers.
-
-        let slot: usize = usize::try_from(self.slot)
-            .map_err(|_| Error::SpDoesNotExist(*self))?;
-
-        let mut base = 0;
-        for (typ, count) in [
-            (SpType::Switch, known_sps.switches.len()),
-            (SpType::Sled, known_sps.sleds.len()),
-            (SpType::Power, known_sps.power_controllers.len()),
-        ] {
-            if self.typ != typ {
-                base += count;
-                continue;
-            }
-
-            if slot < count {
-                let slot = u8::try_from(slot + base).map_err(|_| {
-                    Error::InternalError {
-                        internal_message:
-                            "too many total configured SP slots (must be < 256)"
-                                .to_string(),
-                    }
-                })?;
-                return Ok(slot);
-            } else {
-                return Err(Error::SpDoesNotExist(*self));
-            }
-        }
-
-        // above loop returns once we match on `typ`
-        unreachable!()
-    }
-}
-
-fn placeholder_map_from_target(
-    known_sps: &KnownSps,
-    mut target: usize,
-) -> Result<SpIdentifier, Error> {
-    for (typ, count) in [
-        (SpType::Switch, known_sps.switches.len()),
-        (SpType::Sled, known_sps.sleds.len()),
-        (SpType::Power, known_sps.power_controllers.len()),
-    ] {
-        if target < count {
-            return Ok(SpIdentifier { typ, slot: target as u32 });
-        }
-        target -= count;
-    }
-
-    Err(Error::InternalError {
-        internal_message: format!("invalid ignition target index {}", target),
-    })
 }
 
 type TimeoutPaginationParams<T> = PaginationParams<Timeout, TimeoutSelector<T>>;
@@ -254,10 +309,98 @@ pub(crate) struct PathSpComponent {
     path = "/sp",
 }]
 async fn sp_list(
-    _rqctx: Arc<RequestContext<Arc<ServerContext>>>,
-    _query: Query<TimeoutPaginationParams<SpIdentifier>>,
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    query: Query<PaginationParams<Timeout, SpStatePageSelector>>,
 ) -> Result<HttpResponseOk<ResultsPage<SpInfo>>, HttpError> {
-    todo!()
+    let apictx = rqctx.context();
+    let sp_comms = &apictx.sp_comms;
+    let page_params = query.into_inner();
+    let page_limit = rqctx.page_limit(&page_params)?.get() as usize;
+
+    let (request_id, last_seen_target) = match page_params.page {
+        WhichPage::First(timeout) => {
+            // build overall timeout for the entire request
+            let timeout = timeout
+                .timeout_millis
+                .map(|t| Duration::from_millis(u64::from(t)))
+                .unwrap_or(apictx.timeouts.bulk_request_default)
+                // TODO do we also want a floor for the timeout?
+                .min(apictx.timeouts.bulk_request_max);
+            let timeout = Instant::now() + timeout;
+
+            // query ignition to find out which SPs are on (and should therefore
+            // be queried for their state)
+            let ignition_state = sp_comms
+                .bulk_ignition_get(apictx.timeouts.ignition_controller)
+                .await?;
+
+            // actually kick off the state collection process
+            let request_id = sp_comms.bulk_state_start(
+                timeout,
+                apictx.timeouts.bulk_request_retain_grace_period,
+                ignition_state.into_iter(),
+            );
+            (request_id, None)
+        }
+        WhichPage::Next(page_selector) => {
+            (page_selector.request_id, Some(page_selector.last))
+        }
+    };
+
+    let progress = sp_comms
+        .bulk_state_get_progress(
+            &request_id,
+            last_seen_target.map(Into::into),
+            apictx.timeouts.bulk_request_page,
+            page_limit,
+        )
+        .await?;
+
+    // TODO it's weird that we're dropping information here. maybe "page timeout
+    // reached" and "page limit reached" really are equivalent from the client's
+    // point of view (as long as it doesn't interpret "fewer than limit" items
+    // as the end), but ideally we'd omit sending a page token back if we're in
+    // "complete". this is dependent on dropshot changes; see
+    // <https://github.com/oxidecomputer/dropshot/issues/20>.
+    let items = match progress {
+        BulkStateProgress::PageTimeoutReached(items) => items,
+        BulkStateProgress::PageLimitReached(items) => items,
+        BulkStateProgress::Complete(items) => items,
+    };
+
+    let items = items
+        .into_iter()
+        .map(|BulkSpStateSingleResult { port, state, result }| {
+            let details = match result {
+                Ok(details) => details,
+                Err(SpCommsError::Timeout) => SpState::Unresponsive,
+                // TODO we're dropping the error on the floor here - how should
+                // we handle it? This is an SP that we actively failed to
+                // communicate with somehow, which isn't the same as
+                // "unresponsive". Should we fail the entire request? That's how
+                // we handle this kind of an error in the "get the state of a
+                // specific SP" endpoint. We could alternatively add an error
+                // variant to `SpState`?
+                Err(_) => SpState::Unresponsive,
+            };
+            Ok(SpInfo {
+                info: SpIgnitionInfo {
+                    id: sp_comms.port_to_id(port).into(),
+                    details: state.into(),
+                },
+                details,
+            })
+        })
+        .collect::<Result<Vec<_>, Error>>()?;
+
+    Ok(HttpResponseOk(ResultsPage::new(
+        items,
+        &request_id,
+        |sp_info, &request_id| SpStatePageSelector {
+            last: sp_info.info.id,
+            request_id,
+        },
+    )?))
 }
 
 /// Get info on an SP
@@ -277,27 +420,28 @@ async fn sp_get(
     let comms = &apictx.sp_comms;
     let sp = path.into_inner().sp;
 
-    let target = sp.placeholder_map_to_target(comms.placeholder_known_sps())?;
-    let sp_addr = comms
-        .placeholder_known_sps()
-        .addr_for(&sp)
-        .ok_or(Error::SpDoesNotExist(sp))?;
-
-    // ping the ignition controller first; if it says the SP is off or otherwise
-    // unavailable, we're done.
-    let state =
-        comms.ignition_get(target, apictx.ignition_controller_timeout).await?;
-
-    let details = if state.flags.intersects(IgnitionFlags::POWER) {
-        // ignition indicates the SP is on; ask it for its state
-        let timeout = query
+    // TODO should we construct this here or after our `ignition_get`? By
+    // putting it here, the time it takes us to query ignition counts against
+    // the client's timeout; that seems right but puts us in a bind if their
+    // timeout expires while we're still waiting for ignition.
+    let timeout = Instant::now()
+        + query
             .into_inner()
             .timeout_millis
             .map(|n| Duration::from_millis(u64::from(n)))
-            .unwrap_or(apictx.sp_request_timeout);
-        match comms.state_get(sp_addr, timeout).await {
+            .unwrap_or(apictx.timeouts.sp_request);
+
+    // ping the ignition controller first; if it says the SP is off or otherwise
+    // unavailable, we're done.
+    let state = comms
+        .ignition_get(sp.into(), apictx.timeouts.ignition_controller)
+        .await?;
+
+    let details = if state.flags.intersects(IgnitionFlags::POWER) {
+        // ignition indicates the SP is on; ask it for its state
+        match comms.state_get(sp.into(), timeout).await {
             Ok(state) => state,
-            Err(sp_comms::Error::Timeout(_)) => SpState::Unresponsive,
+            Err(SpCommsError::Timeout) => SpState::Unresponsive,
             Err(other) => return Err(other.into()),
         }
     } else {
@@ -371,13 +515,9 @@ async fn sp_component_serial_console_get(
     let comms = &rqctx.context().sp_comms;
     let PathSpComponent { sp, component } = path.into_inner();
 
-    let sp = comms
-        .placeholder_known_sps()
-        .addr_for(&sp)
-        .ok_or(Error::SpDoesNotExist(sp))?;
     let component = SpComponent::try_from(component.as_str())
         .map_err(|_| Error::InvalidSpComponentId(component))?;
-    let contents = comms.serial_console_get(sp, &component)?;
+    let contents = comms.serial_console_get(sp.into(), &component)?;
 
     // TODO With `unwrap_or_default()`, our caller can't tell the difference
     // between "this component hasn't sent us any console information yet" and
@@ -406,10 +546,6 @@ async fn sp_component_serial_console_post(
     let comms = &apictx.sp_comms;
     let PathSpComponent { sp, component } = path.into_inner();
 
-    let sp = comms
-        .placeholder_known_sps()
-        .addr_for(&sp)
-        .ok_or(Error::SpDoesNotExist(sp))?;
     let component = SpComponent::try_from(component.as_str())
         .map_err(|_| Error::InvalidSpComponentId(component))?;
 
@@ -423,10 +559,10 @@ async fn sp_component_serial_console_post(
     // sent that hasn't been ack'd yet?
     comms
         .serial_console_post(
-            sp,
+            sp.into(),
             component,
             data.as_bytes(),
-            apictx.sp_request_timeout,
+            apictx.timeouts.sp_request,
         )
         .await?;
 
@@ -503,19 +639,15 @@ async fn ignition_list(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
 ) -> Result<HttpResponseOk<Vec<SpIgnitionInfo>>, HttpError> {
     let apictx = rqctx.context();
+    let sp_comms = &apictx.sp_comms;
 
-    let all_state = apictx
-        .sp_comms
-        .bulk_ignition_get(apictx.ignition_controller_timeout)
-        .await?;
+    let all_state =
+        sp_comms.bulk_ignition_get(apictx.timeouts.ignition_controller).await?;
 
     let mut out = Vec::with_capacity(all_state.len());
-    for (i, state) in all_state.into_iter().enumerate() {
+    for (port, state) in all_state {
         out.push(SpIgnitionInfo {
-            id: placeholder_map_from_target(
-                apictx.sp_comms.placeholder_known_sps(),
-                i,
-            )?,
+            id: sp_comms.port_to_id(port).into(),
             details: state.into(),
         });
     }
@@ -538,12 +670,9 @@ async fn ignition_get(
     let apictx = rqctx.context();
     let sp = path.into_inner().sp;
 
-    let target =
-        sp.placeholder_map_to_target(apictx.sp_comms.placeholder_known_sps())?;
-
     let state = apictx
         .sp_comms
-        .ignition_get(target, apictx.ignition_controller_timeout)
+        .ignition_get(sp.into(), apictx.timeouts.ignition_controller)
         .await?;
 
     let info = SpIgnitionInfo { id: sp, details: state.into() };
@@ -562,12 +691,9 @@ async fn ignition_power_on(
     let apictx = rqctx.context();
     let sp = path.into_inner().sp;
 
-    let target =
-        sp.placeholder_map_to_target(apictx.sp_comms.placeholder_known_sps())?;
-
     apictx
         .sp_comms
-        .ignition_power_on(target, apictx.ignition_controller_timeout)
+        .ignition_power_on(sp.into(), apictx.timeouts.ignition_controller)
         .await?;
 
     Ok(HttpResponseUpdatedNoContent {})
@@ -585,12 +711,9 @@ async fn ignition_power_off(
     let apictx = rqctx.context();
     let sp = path.into_inner().sp;
 
-    let target =
-        sp.placeholder_map_to_target(apictx.sp_comms.placeholder_known_sps())?;
-
     apictx
         .sp_comms
-        .ignition_power_off(target, apictx.ignition_controller_timeout)
+        .ignition_power_off(sp.into(), apictx.timeouts.ignition_controller)
         .await?;
 
     Ok(HttpResponseUpdatedNoContent {})

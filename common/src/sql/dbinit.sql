@@ -173,12 +173,56 @@ CREATE TABLE omicron.public.volume (
 );
 
 /*
+ * Silos
+ */
+
+CREATE TABLE omicron.public.silo (
+    /* Identity metadata */
+    id UUID PRIMARY KEY,
+
+    name STRING(128) NOT NULL,
+    description STRING(512) NOT NULL,
+
+    discoverable BOOL NOT NULL,
+
+    time_created TIMESTAMPTZ NOT NULL,
+    time_modified TIMESTAMPTZ NOT NULL,
+    time_deleted TIMESTAMPTZ,
+
+    /* child resource generation number, per RFD 192 */
+    rcgen INT NOT NULL
+);
+
+CREATE UNIQUE INDEX ON omicron.public.silo (
+    name
+) WHERE
+    time_deleted IS NULL;
+
+/*
+ * Silo users
+ */
+CREATE TABLE omicron.public.silo_user (
+    /* silo user id */
+    id UUID PRIMARY KEY,
+
+    silo_id UUID NOT NULL,
+
+    time_created TIMESTAMPTZ NOT NULL,
+    time_modified TIMESTAMPTZ NOT NULL,
+    time_deleted TIMESTAMPTZ
+);
+
+/*
  * Organizations
  */
 
 CREATE TABLE omicron.public.organization (
     /* Identity metadata */
     id UUID PRIMARY KEY,
+
+    /* FK into Silo table */
+    silo_id UUID NOT NULL,
+
     name STRING(63) NOT NULL,
     description STRING(512) NOT NULL,
     time_created TIMESTAMPTZ NOT NULL,
@@ -391,6 +435,35 @@ CREATE UNIQUE INDEX on omicron.public.image (
 ) WHERE
     time_deleted is NULL;
 
+CREATE TABLE omicron.public.snapshot (
+    /* Identity metadata (resource) */
+    id UUID PRIMARY KEY,
+    name STRING(63) NOT NULL,
+    description STRING(512) NOT NULL,
+    time_created TIMESTAMPTZ NOT NULL,
+    time_modified TIMESTAMPTZ NOT NULL,
+    /* Indicates that the object has been deleted */
+    time_deleted TIMESTAMPTZ,
+
+    /* Every Snapshot is in exactly one Project at a time. */
+    project_id UUID NOT NULL,
+
+    /* Every Snapshot originated from a single disk */
+    disk_id UUID NOT NULL,
+
+    /* Every Snapshot consists of a root volume */
+    volume_id UUID NOT NULL,
+
+    /* Disk configuration (from the time the snapshot was taken) */
+    size_bytes INT NOT NULL
+);
+
+CREATE UNIQUE INDEX ON omicron.public.snapshot (
+    project_id,
+    name
+) WHERE
+    time_deleted IS NULL;
+
 /*
  * Oximeter collector servers.
  */
@@ -485,14 +558,24 @@ CREATE TABLE omicron.public.network_interface (
     time_modified TIMESTAMPTZ NOT NULL,
     /* Indicates that the object has been deleted */
     time_deleted TIMESTAMPTZ,
-    /* FK into Instance table. */
+
+    /* FK into Instance table.
+     * Note that interfaces are always attached to a particular instance.
+     * IP addresses may be reserved, but this is a different resource.
+     */
     instance_id UUID NOT NULL,
+
     /* FK into VPC table */
     vpc_id UUID NOT NULL,
     /* FK into VPCSubnet table. */
     subnet_id UUID NOT NULL,
     mac STRING(17) NOT NULL, -- e.g., "ff:ff:ff:ff:ff:ff"
-    ip INET NOT NULL
+    ip INET NOT NULL,
+    /*
+     * Limited to 8 NICs per instance. This value must be kept in sync with
+     * `crate::nexus::MAX_NICS_PER_INSTANCE`.
+     */
+    slot INT2 NOT NULL CHECK (slot >= 0 AND slot < 8)
 );
 
 /* TODO-completeness
@@ -502,12 +585,6 @@ CREATE TABLE omicron.public.network_interface (
  * refer to them here, most notably to support multiple IPs per NIC, as well
  * as moving IPs between NICs on different instances, etc.
  */
-
-CREATE UNIQUE INDEX ON omicron.public.network_interface (
-    vpc_id,
-    name
-) WHERE
-    time_deleted IS NULL;
 
 /* Ensure we do not assign the same address twice within a subnet */
 CREATE UNIQUE INDEX ON omicron.public.network_interface (
@@ -523,6 +600,18 @@ CREATE UNIQUE INDEX ON omicron.public.network_interface (
     vpc_id,
     mac
 ) WHERE
+    time_deleted IS NULL;
+
+/*
+ * Index used to verify that an Instance's networking is contained
+ * within a single VPC.
+ */
+CREATE UNIQUE INDEX ON omicron.public.network_interface (
+    instance_id,
+    name
+)
+STORING (vpc_id)
+WHERE
     time_deleted IS NULL;
 
 CREATE TYPE omicron.public.vpc_router_kind AS ENUM (
@@ -727,9 +816,7 @@ CREATE TABLE omicron.public.console_session (
     token STRING(40) PRIMARY KEY,
     time_created TIMESTAMPTZ NOT NULL,
     time_last_used TIMESTAMPTZ NOT NULL,
-    -- we're agnostic about what this means until work starts on users, but the
-    -- naive interpretation is that it points to a row in the User table
-    user_id UUID NOT NULL
+    silo_user_id UUID NOT NULL
 );
 
 -- to be used for cleaning up old tokens

@@ -7,47 +7,73 @@
 
 //! Inteface for communicating with SPs over UDP on the management network.
 
+mod bulk_state_get;
 mod serial_console_history;
 
-pub(crate) use serial_console_history::SerialConsoleContents;
-use serial_console_history::SerialConsoleHistory;
+pub(crate) use self::bulk_state_get::BulkSpStateSingleResult;
+pub(crate) use self::bulk_state_get::BulkStateProgress;
+pub(crate) use self::bulk_state_get::SpStateRequestId;
+pub(crate) use self::serial_console_history::SerialConsoleContents;
 
-use crate::{config::KnownSps, http_entrypoints::SpState};
+use self::bulk_state_get::OutstandingSpStateRequests;
+use self::serial_console_history::SerialConsoleHistory;
+
+use crate::http_entrypoints::SpState;
 use dropshot::HttpError;
-use gateway_messages::{
-    sp_impl::SerialConsolePacketizer, version, IgnitionCommand, IgnitionState,
-    Request, RequestKind, ResponseError, ResponseKind, SerialConsole,
-    SerializedSize, SpComponent, SpMessage, SpMessageKind,
-};
-use slog::{debug, error, info, o, Logger};
-use std::{
-    collections::HashMap,
-    io,
-    net::SocketAddr,
-    sync::{atomic::AtomicU32, Arc, Mutex},
-    time::Duration,
-};
+use gateway_messages::sp_impl::SerialConsolePacketizer;
+use gateway_messages::version;
+use gateway_messages::IgnitionCommand;
+use gateway_messages::IgnitionState;
+use gateway_messages::Request;
+use gateway_messages::RequestKind;
+use gateway_messages::ResponseError;
+use gateway_messages::ResponseKind;
+use gateway_messages::SerialConsole;
+use gateway_messages::SerializedSize;
+use gateway_messages::SpComponent;
+use gateway_messages::SpMessage;
+use gateway_messages::SpMessageKind;
+use gateway_sp_comms::error::StartupError;
+use gateway_sp_comms::KnownSps;
+use gateway_sp_comms::ManagementSwitch;
+use gateway_sp_comms::ManagementSwitchDiscovery;
+use gateway_sp_comms::SpIdentifier;
+use gateway_sp_comms::SpSocket;
+use gateway_sp_comms::SwitchPort;
+use slog::debug;
+use slog::error;
+use slog::info;
+use slog::o;
+use slog::Logger;
+use std::collections::HashMap;
+use std::io;
+use std::net::SocketAddr;
+use std::sync::atomic::AtomicU32;
+use std::sync::Arc;
+use std::sync::Mutex;
+use std::time::Duration;
 use thiserror::Error;
-use tokio::{
-    net::UdpSocket,
-    sync::oneshot::{self, error::RecvError, Receiver, Sender},
-    task::JoinHandle,
-};
-
-#[derive(Debug, Error)]
-pub enum StartupError {
-    #[error("error binding to UDP address {addr}: {err}")]
-    UdpBind { addr: SocketAddr, err: io::Error },
-}
+use tokio::sync::oneshot;
+use tokio::sync::oneshot::error::RecvError;
+use tokio::sync::oneshot::Receiver;
+use tokio::sync::oneshot::Sender;
+use tokio::time::Instant;
 
 // TODO This has some duplication with `gateway::error::Error`. This might be
 // right if these comms are going to move to their own crate, but at the moment
 // it's confusing. For now we'll keep them separate, but maybe we should split
 // this module out into its own crate sooner rather than later.
-#[derive(Debug, Error)]
+#[derive(Debug, Clone, Error)]
 pub enum Error {
+    // ----
+    // internal errors
+    // ----
+    // `Error` needs to be `Clone` because we hold onto `Result<SpState, Error>`
+    // in memory during bulk "get all SP state" requests, and then we clone
+    // those results to give to any clients that want info for that request.
+    // `io::Error` isn't `Clone`, so we wrap it in an `Arc`.
     #[error("error sending to UDP address {addr}: {err}")]
-    UdpSend { addr: SocketAddr, err: io::Error },
+    UdpSend { addr: SocketAddr, err: Arc<io::Error> },
     #[error(
         "SP sent a bogus response type (got `{got}`; expected `{expected}`)"
     )]
@@ -55,16 +81,50 @@ pub enum Error {
     #[error("error from SP: {0}")]
     SpError(#[from] ResponseError),
     #[error("timeout")]
-    Timeout(#[from] tokio::time::error::Elapsed),
-    #[error("no known SP at {0}")]
-    SpDoesNotExist(SocketAddr),
+    Timeout,
+    #[error("received ignition target for an unknown port ({0})")]
+    UnknownIgnitionTargetPort(usize),
+    #[error("unknown SP destination address for {0:?}")]
+    UnknownSpAddress(SwitchPort),
+    #[error("nonexistent SP {0:?}")]
+    SpDoesNotExist(SpIdentifier),
+
+    // ----
+    // client errors
+    // ----
+    #[error("invalid page token (no such request)")]
+    NoSuchRequest,
+    #[error("invalid page token (invalid last SP seen)")]
+    InvalidLastSpSeen,
+}
+
+impl From<tokio::time::error::Elapsed> for Error {
+    fn from(_: tokio::time::error::Elapsed) -> Self {
+        Self::Timeout
+    }
 }
 
 impl From<Error> for HttpError {
     fn from(err: Error) -> Self {
-        // none of `Error`'s cases are caused by the client; they're all
-        // internal to gateway <-> SP failures
-        HttpError::for_internal_error(err.to_string())
+        match err {
+            Error::NoSuchRequest => HttpError::for_bad_request(
+                Some(String::from("NoSuchRequest")),
+                err.to_string(),
+            ),
+            Error::InvalidLastSpSeen => HttpError::for_bad_request(
+                Some(String::from("InvalidLastSpSeen")),
+                err.to_string(),
+            ),
+            Error::UdpSend { .. }
+            | Error::BogusResponseType { .. }
+            | Error::SpError(_)
+            | Error::Timeout
+            | Error::UnknownIgnitionTargetPort(_)
+            | Error::UnknownSpAddress(_)
+            | Error::SpDoesNotExist(_) => {
+                HttpError::for_internal_error(err.to_string())
+            }
+        }
     }
 }
 
@@ -108,73 +168,95 @@ mod response_kind_names {
 #[derive(Debug)]
 pub struct SpCommunicator {
     log: Logger,
-    socket: Arc<UdpSocket>,
-    known_sps: KnownSps,
+    switch: ManagementSwitch,
     sp_state: Arc<AllSpState>,
+    bulk_state_requests: OutstandingSpStateRequests,
     request_id: AtomicU32,
-    recv_task: JoinHandle<()>,
-}
-
-impl Drop for SpCommunicator {
-    fn drop(&mut self) {
-        // default `JoinHandle` drop behavior is to detach; we want to kill our
-        // recv task if we're dropped.
-        self.recv_task.abort();
-    }
 }
 
 impl SpCommunicator {
     pub async fn new(
-        bind_addr: SocketAddr,
         known_sps: KnownSps,
         log: &Logger,
     ) -> Result<Self, StartupError> {
-        let socket =
-            Arc::new(UdpSocket::bind(bind_addr).await.map_err(|err| {
-                StartupError::UdpBind { addr: bind_addr, err }
-            })?);
-        let log = log.new(o!(
-            "componennt" => "SpCommunicator",
-            "local_addr" => bind_addr,
-        ));
-
-        // build our fixed-keys-after-this-point map of known SP IPs
-        let sp_state = Arc::new(AllSpState::new(&known_sps));
-
-        let recv_task = RecvTask::new(
-            Arc::clone(&socket),
-            Arc::clone(&sp_state),
+        let log = log.new(o!("componennt" => "SpCommunicator"));
+        let discovery = ManagementSwitchDiscovery::placeholder_start(
+            known_sps,
             log.clone(),
-        );
-        let recv_task = tokio::spawn(recv_task.run());
-        info!(&log, "started sp-server");
+        )
+        .await?;
+
+        // build our map of switch ports to state-of-the-SP-on-that-port
+        let sp_state = Arc::new(AllSpState::new(&discovery));
+
+        let recv_handler = RecvHandler::new(Arc::clone(&sp_state), log.clone());
+        let switch = discovery
+            .start_recv_task(move |port, data| recv_handler.handle(port, data));
+
+        info!(&log, "started SP communicator");
         Ok(Self {
             log,
-            socket,
-            known_sps,
+            switch,
             sp_state,
+            bulk_state_requests: OutstandingSpStateRequests::default(),
             request_id: AtomicU32::new(0),
-            recv_task,
         })
     }
 
-    pub fn placeholder_known_sps(&self) -> &KnownSps {
-        &self.known_sps
+    fn id_to_port(&self, sp: SpIdentifier) -> Result<SwitchPort, Error> {
+        self.switch.switch_port(sp).ok_or(Error::SpDoesNotExist(sp))
+    }
+
+    pub(crate) fn port_to_id(&self, port: SwitchPort) -> SpIdentifier {
+        self.switch.switch_port_to_id(port)
     }
 
     pub(crate) async fn state_get(
         &self,
-        sp: SocketAddr,
-        timeout: Duration,
+        sp: SpIdentifier,
+        timeout: Instant,
     ) -> Result<SpState, Error> {
-        tokio::time::timeout(timeout, self.state_get_impl(sp)).await?
+        self.state_get_by_port(self.id_to_port(sp)?, timeout).await
     }
 
-    pub(crate) async fn state_get_impl(
+    async fn state_get_by_port(
         &self,
-        sp: SocketAddr,
+        port: SwitchPort,
+        timeout: Instant,
     ) -> Result<SpState, Error> {
-        match self.request_response(sp, RequestKind::SpState).await? {
+        tokio::time::timeout_at(timeout, self.state_get_impl(port)).await?
+    }
+
+    pub(crate) fn bulk_state_start(
+        self: &Arc<Self>,
+        timeout: Instant,
+        retain_grace_period: Duration,
+        sps: impl Iterator<Item = (SwitchPort, IgnitionState)>,
+    ) -> SpStateRequestId {
+        self.bulk_state_requests.start(timeout, retain_grace_period, sps, self)
+    }
+
+    pub(crate) async fn bulk_state_get_progress(
+        &self,
+        id: &SpStateRequestId,
+        last_seen: Option<SpIdentifier>,
+        timeout: Duration,
+        limit: usize,
+    ) -> Result<BulkStateProgress, Error> {
+        let last_seen = match last_seen {
+            Some(sp) => Some(self.id_to_port(sp)?),
+            None => None,
+        };
+        self.bulk_state_requests
+            .get(id, last_seen, timeout, limit, &self.log)
+            .await
+    }
+
+    async fn state_get_impl(&self, port: SwitchPort) -> Result<SpState, Error> {
+        let sp =
+            self.switch.sp_socket(port).ok_or(Error::UnknownSpAddress(port))?;
+
+        match self.request_response(&sp, RequestKind::SpState).await? {
             ResponseKind::SpState(state) => Ok(SpState::Enabled {
                 serial_number: hex::encode(&state.serial_number[..]),
             }),
@@ -187,17 +269,16 @@ impl SpCommunicator {
 
     pub(crate) fn serial_console_get(
         &self,
-        sp: SocketAddr,
+        sp: SpIdentifier,
         component: &SpComponent,
     ) -> Result<Option<SerialConsoleContents>, Error> {
-        let sp =
-            self.sp_state.all_sps.get(&sp).ok_or(Error::SpDoesNotExist(sp))?;
-        Ok(sp.serial_console_from_sp.lock().unwrap().contents(component))
+        let state = self.sp_state.get(self.id_to_port(sp)?);
+        Ok(state.serial_console_from_sp.lock().unwrap().contents(component))
     }
 
     pub(crate) async fn serial_console_post(
         &self,
-        sp: SocketAddr,
+        sp: SpIdentifier,
         component: SpComponent,
         data: &[u8],
         timeout: Duration,
@@ -209,17 +290,19 @@ impl SpCommunicator {
         .await?
     }
 
-    pub(crate) async fn serial_console_post_impl(
+    async fn serial_console_post_impl(
         &self,
-        sp: SocketAddr,
+        sp: SpIdentifier,
         component: SpComponent,
         data: &[u8],
     ) -> Result<(), Error> {
-        let sp_state = self
-            .sp_state
-            .all_sps
-            .get(&sp)
-            .ok_or_else(|| Error::SpDoesNotExist(sp))?;
+        let sp_port = self.id_to_port(sp)?;
+        let sp_state = self.sp_state.get(self.id_to_port(sp)?);
+
+        let sp_sock = self
+            .switch
+            .sp_socket(sp_port)
+            .ok_or(Error::UnknownSpAddress(sp_port))?;
 
         let mut packetizers = sp_state.serial_console_to_sp.lock().await;
         let packetizer = packetizers
@@ -228,7 +311,7 @@ impl SpCommunicator {
 
         for packet in packetizer.packetize(data) {
             let request = RequestKind::SerialConsoleWrite(packet);
-            match self.request_response(sp, request).await? {
+            match self.request_response(&sp_sock, request).await? {
                 ResponseKind::SerialConsoleWriteAck => (),
                 other => {
                     return Err(Error::from_unhandled_response_kind(
@@ -245,25 +328,33 @@ impl SpCommunicator {
     pub async fn bulk_ignition_get(
         &self,
         timeout: Duration,
-    ) -> Result<Vec<IgnitionState>, Error> {
+    ) -> Result<Vec<(SwitchPort, IgnitionState)>, Error> {
         tokio::time::timeout(timeout, self.bulk_ignition_get_impl()).await?
     }
 
     async fn bulk_ignition_get_impl(
         &self,
-    ) -> Result<Vec<IgnitionState>, Error> {
-        // XXX We currently assume we know which ignition controller is our
-        // local one, and only use it for ignition interactions.
-        let controller = self.known_sps.ignition_controller;
-
+    ) -> Result<Vec<(SwitchPort, IgnitionState)>, Error> {
+        let controller = self.switch.ignition_controller();
         let request = RequestKind::BulkIgnitionState;
 
-        match self.request_response(controller, request).await? {
-            ResponseKind::BulkIgnitionState(state) => Ok(state.targets
-                [..usize::from(state.num_targets)]
-                .iter()
-                .copied()
-                .collect()),
+        match self.request_response(&controller, request).await? {
+            ResponseKind::BulkIgnitionState(state) => {
+                let mut results = Vec::new();
+                for (i, state) in state.targets
+                    [..usize::from(state.num_targets)]
+                    .iter()
+                    .copied()
+                    .enumerate()
+                {
+                    let port = self
+                        .switch
+                        .switch_port_from_ignition_target(i)
+                        .ok_or_else(|| Error::UnknownIgnitionTargetPort(i))?;
+                    results.push((port, state));
+                }
+                Ok(results)
+            }
             other => {
                 return Err(Error::from_unhandled_response_kind(
                     &other,
@@ -277,23 +368,22 @@ impl SpCommunicator {
     // send a u8 in the UDP message, so just take that for now.
     pub async fn ignition_get(
         &self,
-        target: u8,
+        sp: SpIdentifier,
         timeout: Duration,
     ) -> Result<IgnitionState, Error> {
-        tokio::time::timeout(timeout, self.ignition_get_impl(target)).await?
+        tokio::time::timeout(timeout, self.ignition_get_impl(sp)).await?
     }
 
     async fn ignition_get_impl(
         &self,
-        target: u8,
+        sp: SpIdentifier,
     ) -> Result<IgnitionState, Error> {
-        // XXX We currently assume we know which ignition controller is our
-        // local one, and only use it for ignition interactions.
-        let controller = self.known_sps.ignition_controller;
+        let controller = self.switch.ignition_controller();
+        let port = self.id_to_port(sp)?;
+        let request =
+            RequestKind::IgnitionState { target: port.as_ignition_target() };
 
-        let request = RequestKind::IgnitionState { target };
-
-        match self.request_response(controller, request).await? {
+        match self.request_response(&controller, request).await? {
             ResponseKind::IgnitionState(state) => Ok(state),
             other => {
                 return Err(Error::from_unhandled_response_kind(
@@ -306,39 +396,41 @@ impl SpCommunicator {
 
     pub async fn ignition_power_on(
         &self,
-        target: u8,
+        sp: SpIdentifier,
         timeout: Duration,
     ) -> Result<(), Error> {
         tokio::time::timeout(
             timeout,
-            self.ignition_command(target, IgnitionCommand::PowerOn),
+            self.ignition_command(sp, IgnitionCommand::PowerOn),
         )
         .await?
     }
 
     pub async fn ignition_power_off(
         &self,
-        target: u8,
+        sp: SpIdentifier,
         timeout: Duration,
     ) -> Result<(), Error> {
         tokio::time::timeout(
             timeout,
-            self.ignition_command(target, IgnitionCommand::PowerOff),
+            self.ignition_command(sp, IgnitionCommand::PowerOff),
         )
         .await?
     }
 
     async fn ignition_command(
         &self,
-        target: u8,
+        sp: SpIdentifier,
         command: IgnitionCommand,
     ) -> Result<(), Error> {
-        // XXX We currently assume we know which ignition controller is our
-        // local one, and only use it for ignition interactions.
-        let controller = self.known_sps.ignition_controller;
-        let request = RequestKind::IgnitionCommand { target, command };
+        let controller = self.switch.ignition_controller();
+        let port = self.id_to_port(sp)?;
+        let request = RequestKind::IgnitionCommand {
+            target: port.as_ignition_target(),
+            command,
+        };
 
-        match self.request_response(controller, request).await? {
+        match self.request_response(&controller, request).await? {
             ResponseKind::IgnitionCommandAck => Ok(()),
             other => {
                 return Err(Error::from_unhandled_response_kind(
@@ -351,7 +443,7 @@ impl SpCommunicator {
 
     async fn request_response(
         &self,
-        sp: SocketAddr,
+        sp: &SpSocket<'_>,
         request: RequestKind,
     ) -> Result<ResponseKind, Error> {
         // request IDs will eventually roll over; since we enforce timeouts
@@ -360,7 +452,8 @@ impl SpCommunicator {
             self.request_id.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
 
         // tell our background receiver to expect a response to this request
-        let response = self.sp_state.insert_expected_response(sp, request_id);
+        let response =
+            self.sp_state.insert_expected_response(sp.port(), request_id);
 
         // Serialize and send our request. We know `buf` is large enough for any
         // `Request`, so unwrapping here is fine.
@@ -370,11 +463,11 @@ impl SpCommunicator {
         let n = gateway_messages::serialize(&mut buf, &request).unwrap();
 
         let serialized_request = &buf[..n];
-        debug!(&self.log, "sending {:?} to SP {}", request, sp);
-        self.socket
-            .send_to(serialized_request, sp)
-            .await
-            .map_err(|err| Error::UdpSend { addr: sp, err })?;
+        debug!(&self.log, "sending {:?} to SP {:?}", request, sp);
+        sp.send(serialized_request).await.map_err(|err| Error::UdpSend {
+            addr: sp.addr(),
+            err: Arc::new(err),
+        })?;
 
         // recv() can only fail if the sender is dropped, but we're holding it
         // in `self.outstanding_requests`; unwrap() is fine.
@@ -382,30 +475,21 @@ impl SpCommunicator {
     }
 }
 
-/// Handle for the background tokio task responsible for receiving incoming UDP
-/// messages.
+/// Handler for incoming packets received on management switch ports.
 ///
-/// TODO We currently assume that we know (before this task is spawned) the IP
-/// address of all SPs with which we want to communicate, and that those IP
-/// addresses will not change while we're running. These assumptions are wrong -
-/// hot swapping sleds will lead to both being violated.
+/// When the communicator wants to send a request on behalf of an HTTP request:
 ///
-/// This task is spawned when `SpCommunicator` is created, and runs until it is
-/// dropped. When the communicator wants to send a request on behalf of an HTTP
-/// request:
-///
-/// 1. `SpCommunicator` creates a tokio oneshot channel for this task to use to
-///    send the response.
+/// 1. `SpCommunicator` creates a tokio oneshot channel for this handler to use
+///    to send the response.
 /// 2. `SpCommunicator` inserts the sending half of that channel into
-///    `outstanding_requests`, which is keyed by both the SP IP address and the
+///    `outstanding_requests`, which is keyed by both the switch port and the
 ///    u32 ID attached to the request.
 /// 3. `SpCommunicator` sends the UDP packet containing the request to the
 ///    target SP, and waits for a response on the channel it created in 1.
 /// 4. When we receive a packet, we check:
-///    a. Did it come from an IP address in our list of SP IPs?
-///    b. Does it parse as a `Response`?
-///    c. Is there a corresponding entry in `outstanding_requests` for this IP +
-///    request ID?
+///    a. Does it parse as a `Response`?
+///    b. Is there a corresponding entry in `outstanding_requests` for this port
+///       + request ID?
 ///    If so, we send the response on the channel, which unblocks
 ///    `SpCommunicator`, who can now return the response to its caller.
 ///
@@ -416,93 +500,74 @@ impl SpCommunicator {
 /// We can also receive messages from SPs that are not responses to oustanding
 /// requests. These are handled on a case-by-case basis; e.g., serial console
 /// data is pushed into the in-memory ringbuffer corresponding to the source.
-struct RecvTask {
-    socket: Arc<UdpSocket>,
+struct RecvHandler {
     sp_state: Arc<AllSpState>,
     log: Logger,
 }
 
-impl RecvTask {
-    fn new(
-        socket: Arc<UdpSocket>,
-        sp_state: Arc<AllSpState>,
-        log: Logger,
-    ) -> Self {
-        Self { socket, sp_state, log }
+impl RecvHandler {
+    fn new(sp_state: Arc<AllSpState>, log: Logger) -> Self {
+        Self { sp_state, log }
     }
 
-    async fn run(self) {
-        let mut buf = [0; SpMessage::MAX_SIZE];
-        loop {
-            // raw recv
-            let (n, addr) = match self.socket.recv_from(&mut buf).await {
-                Ok((n, addr)) => (n, addr),
-                Err(err) => {
-                    error!(&self.log, "recv_from() failed: {}", err);
-                    continue;
-                }
-            };
-            debug!(&self.log, "received {} bytes from {}", n, addr);
+    fn handle(&self, port: SwitchPort, buf: &[u8]) {
+        debug!(&self.log, "received {} bytes from {:?}", buf.len(), port);
 
-            // parse into an `SpMessage`
-            let sp_msg =
-                match gateway_messages::deserialize::<SpMessage>(&buf[..n]) {
-                    Ok((msg, _extra)) => {
-                        // TODO should we check that `extra` is empty? if the
-                        // response is maximal size any extra data is silently
-                        // discarded anyway, so probably not?
-                        msg
-                    }
-                    Err(err) => {
-                        error!(
-                            &self.log,
-                            "discarding malformed message ({})", err
-                        );
-                        continue;
-                    }
-                };
-            debug!(&self.log, "received {:?} from {}", sp_msg, addr);
-
-            // `version` is intentionally the first 4 bytes of the packet; we
-            // could check it before trying to deserialize?
-            if sp_msg.version != version::V1 {
-                error!(
-                    &self.log,
-                    "discarding message with unsupported version {}",
-                    sp_msg.version
-                );
-                continue;
+        // parse into an `SpMessage`
+        let sp_msg = match gateway_messages::deserialize::<SpMessage>(buf) {
+            Ok((msg, _extra)) => {
+                // TODO should we check that `extra` is empty? if the
+                // response is maximal size any extra data is silently
+                // discarded anyway, so probably not?
+                msg
             }
+            Err(err) => {
+                error!(&self.log, "discarding malformed message ({})", err);
+                return;
+            }
+        };
+        debug!(&self.log, "received {:?} from {:?}", sp_msg, port);
 
-            // decide whether this is a response to an outstanding request or an
-            // unprompted message
-            match sp_msg.kind {
-                SpMessageKind::Response { request_id, result } => {
-                    self.handle_response(addr, request_id, result);
-                }
-                SpMessageKind::SerialConsole(serial_console) => {
-                    self.handle_serial_console(addr, serial_console);
-                }
+        // `version` is intentionally the first 4 bytes of the packet; we
+        // could check it before trying to deserialize?
+        if sp_msg.version != version::V1 {
+            error!(
+                &self.log,
+                "discarding message with unsupported version {}",
+                sp_msg.version
+            );
+            return;
+        }
+
+        // decide whether this is a response to an outstanding request or an
+        // unprompted message
+        match sp_msg.kind {
+            SpMessageKind::Response { request_id, result } => {
+                self.handle_response(port, request_id, result);
+            }
+            SpMessageKind::SerialConsole(serial_console) => {
+                self.handle_serial_console(port, serial_console);
             }
         }
     }
 
     fn handle_response(
         &self,
-        addr: SocketAddr,
+        port: SwitchPort,
         request_id: u32,
         result: Result<ResponseKind, ResponseError>,
     ) {
         // see if we know who to send the response to
-        let tx = match self.sp_state.remove_expected_response(addr, request_id)
+        let tx = match self.sp_state.remove_expected_response(port, request_id)
         {
             Some(tx) => tx,
             None => {
-                error!(&self.log,
-                        "discarding unexpected response {} from {} (possibly past timeout?)",
-                        request_id,
-                        addr,
-                    );
+                error!(
+                    &self.log,
+                    "discarding unexpected response {} from {:?} (possibly past timeout?)",
+                    request_id,
+                    port,
+                );
                 return;
             }
         };
@@ -524,73 +589,71 @@ impl RecvTask {
             // a garbage response somehow.
             error!(
                 &self.log,
-                "discarding unexpected response {} from {} (receiver gone)",
+                "discarding unexpected response {} from {:?} (receiver gone)",
                 request_id,
-                addr,
+                port,
             );
         }
     }
 
-    fn handle_serial_console(&self, addr: SocketAddr, packet: SerialConsole) {
+    fn handle_serial_console(&self, port: SwitchPort, packet: SerialConsole) {
         debug!(
             &self.log,
-            "received serial console data from {}: {:?}", addr, packet
+            "received serial console data from {:?}: {:?}", port, packet
         );
-        self.sp_state.push_serial_console(addr, packet, &self.log);
+        self.sp_state.push_serial_console(port, packet, &self.log);
     }
 }
 
 #[derive(Debug)]
 struct AllSpState {
-    all_sps: HashMap<SocketAddr, SingleSpState>,
+    all_sps: HashMap<SwitchPort, SingleSpState>,
 }
 
 impl AllSpState {
-    fn new(known_sps: &KnownSps) -> Self {
-        let mut all_sps = HashMap::new();
-        for sp_list in [
-            &known_sps.switches,
-            &known_sps.sleds,
-            &known_sps.power_controllers,
-        ] {
-            for &sp in sp_list {
-                all_sps.insert(sp, SingleSpState::default());
-            }
+    fn new(switch: &ManagementSwitchDiscovery) -> Self {
+        let all_ports = switch.all_ports();
+        let mut all_sps = HashMap::with_capacity(all_ports.len());
+        for port in all_ports {
+            all_sps.insert(port, SingleSpState::default());
         }
         Self { all_sps }
     }
 
+    fn get(&self, port: SwitchPort) -> &SingleSpState {
+        // we initialize `all_sps` with state for every switch port, so the only
+        // way to panic here is to construct a port that didn't exist when we
+        // were created
+        self.all_sps
+            .get(&port)
+            .expect("sp state doesn't contain an entry for a valid switch port")
+    }
+
     fn push_serial_console(
         &self,
-        sp: SocketAddr,
+        port: SwitchPort,
         packet: SerialConsole,
         log: &Logger,
     ) {
-        // caller should never try to send a request to an SP we don't know
-        // about, since it created us with all SPs it knows.
-        let state = self.all_sps.get(&sp).expect("nonexistent SP");
+        let state = self.get(port);
         state.serial_console_from_sp.lock().unwrap().push(packet, log);
     }
 
     fn insert_expected_response(
         &self,
-        sp: SocketAddr,
+        port: SwitchPort,
         request_id: u32,
     ) -> ResponseReceiver {
-        // caller should never try to send a request to an SP we don't know
-        // about, since it created us with all SPs it knows.
-        let state = self.all_sps.get(&sp).expect("nonexistent SP");
+        let state = self.get(port);
         state.outstanding_requests.insert(request_id)
     }
 
     fn remove_expected_response(
         &self,
-        sp: SocketAddr,
+        port: SwitchPort,
         request_id: u32,
     ) -> Option<Sender<Result<ResponseKind, ResponseError>>> {
-        // caller should never try to send a request to an SP we don't know
-        // about, since it created us with all SPs it knows.
-        let state = self.all_sps.get(&sp).expect("nonexistent SP");
+        let state = self.get(port);
         state.outstanding_requests.remove(request_id)
     }
 }

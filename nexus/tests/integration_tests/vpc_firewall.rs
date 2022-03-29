@@ -4,6 +4,12 @@
 
 use http::method::Method;
 use http::StatusCode;
+use nexus_test_utils::http_testing::{AuthnMode, NexusRequest};
+use nexus_test_utils::resource_helpers::{
+    create_organization, create_project, create_vpc,
+};
+use nexus_test_utils::ControlPlaneTestContext;
+use nexus_test_utils_macros::nexus_test;
 use omicron_common::api::external::{
     IdentityMetadata, L4Port, L4PortRange, VpcFirewallRule,
     VpcFirewallRuleAction, VpcFirewallRuleDirection, VpcFirewallRuleFilter,
@@ -15,19 +21,11 @@ use omicron_nexus::external_api::views::Vpc;
 use std::convert::TryFrom;
 use uuid::Uuid;
 
-use dropshot::test_util::{object_delete, object_get};
-
-use nexus_test_utils::resource_helpers::{
-    create_organization, create_project, create_vpc,
-};
-use nexus_test_utils::ControlPlaneTestContext;
-use nexus_test_utils_macros::nexus_test;
-
 #[nexus_test]
 async fn test_vpc_firewall(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
 
-    /* Create a project that we'll use for testing. */
+    // Create a project that we'll use for testing.
     let org_name = "test-org";
     create_organization(&client, &org_name).await;
     let project_name = "springfield-squidport";
@@ -37,12 +35,16 @@ async fn test_vpc_firewall(cptestctx: &ControlPlaneTestContext) {
 
     // Each project has a default VPC. Make sure it has the default rules.
     let default_vpc_url = format!("{}/default", vpcs_url);
-    let default_vpc = object_get::<Vpc>(client, &default_vpc_url).await;
+    let default_vpc: Vpc = NexusRequest::object_get(client, &default_vpc_url)
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .unwrap()
+        .parsed_body()
+        .unwrap();
 
     let default_vpc_firewall = format!("{}/firewall/rules", default_vpc_url);
-    let rules = object_get::<VpcFirewallRules>(client, &default_vpc_firewall)
-        .await
-        .rules;
+    let rules = get_rules(client, &default_vpc_firewall).await;
     assert!(rules.iter().all(|r| r.vpc_id == default_vpc.identity.id));
     assert!(is_default_firewall_rules(&rules));
 
@@ -51,8 +53,7 @@ async fn test_vpc_firewall(cptestctx: &ControlPlaneTestContext) {
     let other_vpc_firewall =
         format!("{}/{}/firewall/rules", vpcs_url, other_vpc);
     let vpc2 = create_vpc(&client, &org_name, &project_name, &other_vpc).await;
-    let rules =
-        object_get::<VpcFirewallRules>(client, &other_vpc_firewall).await.rules;
+    let rules = get_rules(client, &other_vpc_firewall).await;
     assert!(rules.iter().all(|r| r.vpc_id == vpc2.identity.id));
     assert!(is_default_firewall_rules(&rules));
 
@@ -93,48 +94,79 @@ async fn test_vpc_firewall(cptestctx: &ControlPlaneTestContext) {
     ];
     let update_params =
         VpcFirewallRuleUpdateParams { rules: new_rules.clone() };
-    client
-        .make_request(
-            Method::PUT,
-            &default_vpc_firewall,
-            Some(update_params),
-            StatusCode::OK,
-        )
-        .await
-        .unwrap();
+    let updated_rules = NexusRequest::object_put(
+        client,
+        &default_vpc_firewall,
+        Some(&update_params),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap()
+    .parsed_body::<VpcFirewallRules>()
+    .unwrap()
+    .rules;
+    assert!(!is_default_firewall_rules(&updated_rules));
+    assert_eq!(updated_rules.len(), new_rules.len());
+    assert_eq!(updated_rules[0].identity.name, "allow-icmp");
+    assert_eq!(updated_rules[1].identity.name, "deny-all-incoming");
 
     // Make sure the firewall is changed
-    let rules = object_get::<VpcFirewallRules>(client, &default_vpc_firewall)
-        .await
-        .rules;
+    let rules = get_rules(client, &default_vpc_firewall).await;
     assert!(!is_default_firewall_rules(&rules));
     assert_eq!(rules.len(), new_rules.len());
     assert_eq!(rules[0].identity.name, "allow-icmp");
     assert_eq!(rules[1].identity.name, "deny-all-incoming");
 
     // Make sure the other firewall is unchanged
-    let rules =
-        object_get::<VpcFirewallRules>(client, &other_vpc_firewall).await.rules;
+    let rules = get_rules(client, &other_vpc_firewall).await;
     assert!(is_default_firewall_rules(&rules));
 
-    // DELETE is unspported
-    client
-        .make_request_error(
-            Method::DELETE,
-            &default_vpc_firewall,
-            StatusCode::METHOD_NOT_ALLOWED,
-        )
-        .await;
+    // DELETE is unsupported
+    NexusRequest::expect_failure(
+        client,
+        StatusCode::METHOD_NOT_ALLOWED,
+        Method::DELETE,
+        &default_vpc_firewall,
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap();
 
     // Delete a VPC and ensure we can't read its firewall anymore
-    object_delete(client, format!("{}/{}", vpcs_url, other_vpc).as_str()).await;
-    client
-        .make_request_error(
-            Method::GET,
-            &other_vpc_firewall,
-            StatusCode::NOT_FOUND,
-        )
-        .await;
+    NexusRequest::object_delete(
+        client,
+        format!("{}/{}", vpcs_url, other_vpc).as_str(),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap();
+    NexusRequest::expect_failure(
+        client,
+        StatusCode::NOT_FOUND,
+        Method::GET,
+        &other_vpc_firewall,
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap();
+}
+
+async fn get_rules(
+    client: &dropshot::test_util::ClientTestContext,
+    url: &str,
+) -> Vec<VpcFirewallRule> {
+    NexusRequest::object_get(client, url)
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .unwrap()
+        .parsed_body::<VpcFirewallRules>()
+        .unwrap()
+        .rules
 }
 
 fn is_default_firewall_rules(rules: &Vec<VpcFirewallRule>) -> bool {

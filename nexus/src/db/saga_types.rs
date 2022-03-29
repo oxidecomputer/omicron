@@ -2,17 +2,15 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-/*!
- * Types used for sagas
- *
- * Just like elsewhere, we run into Rust's orphan rules here.  There are types
- * in Steno that we want to put into the database, but we can't impl
- * `ToSql`/`FromSql` directly on them because they're in different crates.  We
- * could create wrapper types and impl `ToSql`/`FromSql` on those.  Instead, we
- * use the Steno types directly in our own types, and the handful of places that
- * actually serialize them to and from SQL take care of the necessary
- * conversions.
- */
+//! Types used for sagas
+//!
+//! Just like elsewhere, we run into Rust's orphan rules here.  There are types
+//! in Steno that we want to put into the database, but we can't impl
+//! `ToSql`/`FromSql` directly on them because they're in different crates.  We
+//! could create wrapper types and impl `ToSql`/`FromSql` on those.  Instead, we
+//! use the Steno types directly in our own types, and the handful of places that
+//! actually serialize them to and from SQL take care of the necessary
+//! conversions.
 
 use super::schema::{saga, saga_node_event};
 use diesel::backend::{Backend, RawValue};
@@ -25,12 +23,10 @@ use std::convert::TryFrom;
 use std::sync::Arc;
 use uuid::Uuid;
 
-/**
- * Unique identifier for an SEC (saga execution coordinator) instance
- *
- * For us, these will generally be Nexus instances, and the SEC id will match
- * the Nexus id.
- */
+/// Unique identifier for an SEC (saga execution coordinator) instance
+///
+/// For us, these will generally be Nexus instances, and the SEC id will match
+/// the Nexus id.
 #[derive(
     AsExpression, FromSqlRow, Clone, Copy, Eq, Ord, PartialEq, PartialOrd,
 )]

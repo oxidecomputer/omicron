@@ -30,16 +30,12 @@ fn test_gateway_openapi_sled() {
     let spec: OpenAPI = serde_json::from_str(&stdout_text)
         .expect("stdout was not valid OpenAPI");
 
-    /*
-     * Check for lint errors.
-     */
+    // Check for lint errors.
     let errors = openapi_lint::validate(&spec);
     assert!(errors.is_empty(), "{}", errors.join("\n\n"));
 
-    /*
-     * Confirm that the output hasn't changed. It's expected that we'll change
-     * this file as the API evolves, but pay attention to the diffs to ensure
-     * that the changes match your expectations.
-     */
+    // Confirm that the output hasn't changed. It's expected that we'll change
+    // this file as the API evolves, but pay attention to the diffs to ensure
+    // that the changes match your expectations.
     assert_contents("../openapi/gateway.json", &stdout_text);
 }

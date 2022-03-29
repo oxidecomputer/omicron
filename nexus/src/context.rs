@@ -2,18 +2,15 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-/*!
- * Shared state used by API request handlers
- */
+//! Shared state used by API request handlers
 use super::authn;
 use super::authz;
 use super::config;
 use super::db;
 use super::Nexus;
 use crate::authn::external::session_cookie::{Session, SessionStore};
-use crate::authn::Actor;
+use crate::authn::ConsoleSessionWithSiloId;
 use crate::authz::AuthorizedResource;
-use crate::db::model::ConsoleSession;
 use crate::db::DataStore;
 use crate::saga_interface::SagaContext;
 use async_trait::async_trait;
@@ -34,46 +31,42 @@ use std::time::Instant;
 use std::time::SystemTime;
 use uuid::Uuid;
 
-/**
- * Shared state available to all API request handlers
- */
+/// Shared state available to all API request handlers
 pub struct ServerContext {
-    /** reference to the underlying nexus */
+    /// reference to the underlying nexus
     pub nexus: Arc<Nexus>,
-    /** debug log */
+    /// debug log
     pub log: Logger,
-    /** authenticator for external HTTP requests */
+    /// authenticator for external HTTP requests
     pub external_authn: authn::external::Authenticator<Arc<ServerContext>>,
-    /** authentication context used for internal HTTP requests */
+    /// authentication context used for internal HTTP requests
     pub internal_authn: Arc<authn::Context>,
-    /** authorizer */
+    /// authorizer
     pub authz: Arc<authz::Authz>,
-    /** internal API request latency tracker */
+    /// internal API request latency tracker
     pub internal_latencies: LatencyTracker,
-    /** external API request latency tracker */
+    /// external API request latency tracker
     pub external_latencies: LatencyTracker,
-    /** registry of metric producers */
+    /// registry of metric producers
     pub producer_registry: ProducerRegistry,
-    /** tunable settings needed for the console at runtime */
+    /// tunable settings needed for the console at runtime
     pub console_config: ConsoleConfig,
 }
 
 pub struct ConsoleConfig {
-    /** how long a session can be idle before expiring */
+    /// how long a session can be idle before expiring
     pub session_idle_timeout: Duration,
-    /** how long a session can exist before expiring */
+    /// how long a session can exist before expiring
     pub session_absolute_timeout: Duration,
-    /** how long browsers can cache static assets */
+    /// how long browsers can cache static assets
     pub cache_control_max_age: Duration,
-    /** directory containing static file to serve */
+    /// directory containing static file to serve
     pub static_dir: Option<PathBuf>,
 }
 
 impl ServerContext {
-    /**
-     * Create a new context with the given rack id and log.  This creates the
-     * underlying nexus as well.
-     */
+    /// Create a new context with the given rack id and log.  This creates the
+    /// underlying nexus as well.
     pub fn new(
         rack_id: Uuid,
         log: Logger,
@@ -280,7 +273,8 @@ impl OpContext {
     ) -> (slog::Logger, BTreeMap<String, String>) {
         let mut metadata = BTreeMap::new();
 
-        let log = if let Some(Actor(actor_id)) = authn.actor() {
+        let log = if let Some(actor) = authn.actor() {
+            let actor_id = actor.id;
             metadata
                 .insert(String::from("authenticated"), String::from("true"));
             metadata.insert(String::from("actor"), actor_id.to_string());
@@ -412,12 +406,10 @@ impl OpContext {
     where
         Resource: AuthorizedResource + Debug + Clone,
     {
-        /*
-         * TODO-cleanup In an ideal world, Oso would consume &Action and
-         * &Resource.  Instead, it consumes owned types.  As a result, they're
-         * not available to us (even for logging) after we make the authorize()
-         * call.  We work around this by cloning.
-         */
+        // TODO-cleanup In an ideal world, Oso would consume &Action and
+        // &Resource.  Instead, it consumes owned types.  As a result, they're
+        // not available to us (even for logging) after we make the authorize()
+        // call.  We work around this by cloning.
         trace!(self.log, "authorize begin";
             "actor" => ?self.authn.actor(),
             "action" => ?action,
@@ -501,7 +493,7 @@ mod test {
 
 #[async_trait]
 impl SessionStore for Arc<ServerContext> {
-    type SessionModel = ConsoleSession;
+    type SessionModel = ConsoleSessionWithSiloId;
 
     async fn session_fetch(&self, token: String) -> Option<Self::SessionModel> {
         self.nexus.session_fetch(token).await.ok()
@@ -527,14 +519,17 @@ impl SessionStore for Arc<ServerContext> {
     }
 }
 
-impl Session for ConsoleSession {
-    fn user_id(&self) -> Uuid {
-        self.user_id
+impl Session for ConsoleSessionWithSiloId {
+    fn silo_user_id(&self) -> Uuid {
+        self.console_session.silo_user_id
+    }
+    fn silo_id(&self) -> Uuid {
+        self.silo_id
     }
     fn time_last_used(&self) -> DateTime<Utc> {
-        self.time_last_used
+        self.console_session.time_last_used
     }
     fn time_created(&self) -> DateTime<Utc> {
-        self.time_created
+        self.console_session.time_created
     }
 }

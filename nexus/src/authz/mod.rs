@@ -158,7 +158,6 @@
 //! in [`roles`] about how this is set up.)  If Oso finds a role granting this
 //! permission that's associated with this actor and resource, the action is
 //! allowed.  Otherwise, it's not.
-//!
 
 mod actor;
 
@@ -168,8 +167,14 @@ pub use api_resources::Disk;
 pub use api_resources::Fleet;
 pub use api_resources::FleetChild;
 pub use api_resources::Instance;
+pub use api_resources::NetworkInterface;
 pub use api_resources::Organization;
 pub use api_resources::Project;
+pub use api_resources::RouterRoute;
+pub use api_resources::Sled;
+pub use api_resources::Vpc;
+pub use api_resources::VpcRouter;
+pub use api_resources::VpcSubnet;
 pub use api_resources::FLEET;
 
 mod context;

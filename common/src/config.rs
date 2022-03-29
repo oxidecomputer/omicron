@@ -2,32 +2,26 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-/*!
- * Common objects used for configuration
- */
+//! Common objects used for configuration
 
 use std::fmt;
 use std::ops::Deref;
 use std::str::FromStr;
 
-/**
- * Describes a URL for connecting to a PostgreSQL server
- */
-/*
- * The config pattern that we're using requires that types in the config impl
- * Serialize.  If tokio_postgres::config::Config impl'd Serialize or even
- * Display, we'd just use that directly instead of this type.  But it doesn't.
- * We could implement a serialize function ourselves, but URLs support many
- * different properties, and this could be brittle and easy to get wrong.
- * Instead, this type just wraps tokio_postgres::config::Config and keeps the
- * original String around.  (The downside is that a consumer _generating_ a
- * nexus::db::Config needs to generate a URL that matches the
- * tokio_postgres::config::Config that they construct here, but this is not
- * currently an important use case.)
- *
- * To ensure that the URL and config are kept in sync, we currently only support
- * constructing one of these via `FromStr` and the fields are not public.
- */
+/// Describes a URL for connecting to a PostgreSQL server
+// The config pattern that we're using requires that types in the config impl
+// Serialize.  If tokio_postgres::config::Config impl'd Serialize or even
+// Display, we'd just use that directly instead of this type.  But it doesn't.
+// We could implement a serialize function ourselves, but URLs support many
+// different properties, and this could be brittle and easy to get wrong.
+// Instead, this type just wraps tokio_postgres::config::Config and keeps the
+// original String around.  (The downside is that a consumer _generating_ a
+// nexus::db::Config needs to generate a URL that matches the
+// tokio_postgres::config::Config that they construct here, but this is not
+// currently an important use case.)
+//
+// To ensure that the URL and config are kept in sync, we currently only support
+// constructing one of these via `FromStr` and the fields are not public.
 #[derive(Clone, Debug, PartialEq)]
 pub struct PostgresConfigWithUrl {
     url_raw: String,
@@ -68,11 +62,9 @@ mod test {
 
     #[test]
     fn test_bad_url() {
-        /*
-         * There is surprisingly little that we can rely on the
-         * tokio_postgres::config::Config parser to include in the error
-         * message.
-         */
+        // There is surprisingly little that we can rely on the
+        // tokio_postgres::config::Config parser to include in the error
+        // message.
         let error = "foo".parse::<PostgresConfigWithUrl>().unwrap_err();
         assert!(error.to_string().contains("unexpected EOF"));
         "http://127.0.0.1:1234".parse::<PostgresConfigWithUrl>().unwrap_err();

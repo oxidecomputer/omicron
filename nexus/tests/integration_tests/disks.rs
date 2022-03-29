@@ -81,9 +81,16 @@ async fn test_disk_not_found_before_creation(
 
     // Make sure we get a 404 if we fetch one.
     let disk_url = format!("{}/{}", disks_url, DISK_NAME);
-    let error = client
-        .make_request_error(Method::GET, &disk_url, StatusCode::NOT_FOUND)
-        .await;
+    let error = NexusRequest::new(
+        RequestBuilder::new(client, Method::GET, &disk_url)
+            .expect_status(Some(StatusCode::NOT_FOUND)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .expect("unexpected success")
+    .parsed_body::<dropshot::HttpErrorResponseBody>()
+    .unwrap();
     assert_eq!(
         error.message,
         format!("not found: disk with name \"{}\"", DISK_NAME)
@@ -222,9 +229,19 @@ async fn test_disk_create_attach_detach_delete(
     assert_eq!(disks_list(&client, &disks_url).await.len(), 0);
 
     // We shouldn't find it if we request it explicitly.
-    let error = client
-        .make_request_error(Method::GET, &disk_url, StatusCode::NOT_FOUND)
-        .await;
+    let error = NexusRequest::expect_failure(
+        client,
+        StatusCode::NOT_FOUND,
+        Method::GET,
+        &disk_url,
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap()
+    .parsed_body::<dropshot::HttpErrorResponseBody>()
+    .unwrap();
+
     assert_eq!(
         error.message,
         format!("not found: disk with name \"{}\"", DISK_NAME)
@@ -712,9 +729,7 @@ fn disks_eq(disk1: &Disk, disk2: &Disk) {
     assert_eq!(disk1.device_path, disk2.device_path);
 }
 
-/**
- * Simulate completion of an ongoing disk state transition.
- */
+/// Simulate completion of an ongoing disk state transition.
 async fn disk_simulate(nexus: &Arc<Nexus>, id: &Uuid) {
     let sa = nexus.disk_sled_by_id(id).await.unwrap();
     sa.disk_finish_transition(id.clone()).await;

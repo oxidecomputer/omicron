@@ -15,9 +15,11 @@ mod oximeter;
 mod projects;
 mod roles_builtin;
 mod router_routes;
+mod silos;
 mod subnet_allocation;
 mod timeseries;
 mod unauthorized;
+mod unauthorized_coverage;
 mod updates;
 mod users_builtin;
 mod vpc_firewall;
@@ -25,3 +27,6 @@ mod vpc_routers;
 mod vpc_subnets;
 mod vpcs;
 mod zpools;
+
+// This module is used only for shared data, not test cases.
+mod endpoints;

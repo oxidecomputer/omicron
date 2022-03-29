@@ -4,20 +4,26 @@
 
 # Identifier for this instance of MGS
 id = "8afcb12d-f625-4df9-bdf2-f495c3bbd323"
-udp_bind_address = "127.0.0.1:22222"
 
 [known_sps]
-# TODO we repeat the ignition_controller IP as a switch; should we specify it as
-# an index into `switches` instead? Punting since this isn't how we want to map
-# our known SPs anyway.
-ignition_controller = "127.0.0.1:23456"
-switches = ["127.0.0.1:23456"]
-sleds = ["127.0.0.1:23457", "127.0.0.1:23458"]
-power_controllers = []
+switches = [
+    # first switch is assumed to be the local ignition controller
+    { sp = "127.0.0.1:23456", switch_port = "127.0.0.1:33456" },
+]
+sleds = [
+    { sp = "127.0.0.1:23457", switch_port = "127.0.0.1:33457" },
+    { sp = "127.0.0.1:23458", switch_port = "127.0.0.1:33458" },
+]
+power_controllers = [
+]
 
 [timeouts]
-ignition_controller_milliseconds = 1_000
-sp_request_milliseconds = 1_000
+ignition_controller_millis = 1_000
+sp_request_millis = 1_000
+bulk_request_default_millis = 5_000
+bulk_request_max_millis = 60_000
+bulk_request_page_millis = 1_000
+bulk_request_retain_grace_period_millis = 10_000
 
 [dropshot]
 # IP address and TCP port on which to listen for the external API

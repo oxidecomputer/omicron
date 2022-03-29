@@ -1,19 +1,16 @@
 // This Source Code Form is subject to the terms of the Mozilla Public
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
+#![feature(async_closure)]
 
-/*!
- * Library interface to the Nexus, the heart of the control plane
- */
+//! Library interface to the Nexus, the heart of the control plane
 
-/*
- * We only use rustdoc for internal documentation, including private items, so
- * it's expected that we'll have links to private items in the docs.
- */
+// We only use rustdoc for internal documentation, including private items, so
+// it's expected that we'll have links to private items in the docs.
 #![allow(rustdoc::private_intra_doc_links)]
-/* TODO(#40): Remove this exception once resolved. */
+// TODO(#40): Remove this exception once resolved.
 #![allow(clippy::unnecessary_wraps)]
-/* Clippy's style lints are useful, but not worth running automatically. */
+// Clippy's style lints are useful, but not worth running automatically.
 #![allow(clippy::style)]
 
 pub mod authn; // Public only for testing
@@ -48,10 +45,8 @@ extern crate newtype_derive;
 #[macro_use]
 extern crate diesel;
 
-/**
- * Run the OpenAPI generator for the external API, which emits the OpenAPI spec
- * to stdout.
- */
+/// Run the OpenAPI generator for the external API, which emits the OpenAPI spec
+/// to stdout.
 pub fn run_openapi_external() -> Result<(), String> {
     external_api()
         .openapi("Oxide Region API", "0.0.1")
@@ -72,23 +67,19 @@ pub fn run_openapi_internal() -> Result<(), String> {
         .map_err(|e| e.to_string())
 }
 
-/**
- * Packages up a [`Nexus`], running both external and internal HTTP API servers
- * wired up to Nexus
- */
+/// Packages up a [`Nexus`], running both external and internal HTTP API servers
+/// wired up to Nexus
 pub struct Server {
-    /** shared state used by API request handlers */
+    /// shared state used by API request handlers
     pub apictx: Arc<ServerContext>,
-    /** dropshot server for external API */
+    /// dropshot server for external API
     pub http_server_external: dropshot::HttpServer<Arc<ServerContext>>,
-    /** dropshot server for internal API */
+    /// dropshot server for internal API
     pub http_server_internal: dropshot::HttpServer<Arc<ServerContext>>,
 }
 
 impl Server {
-    /**
-     * Start a nexus server.
-     */
+    /// Start a nexus server.
     pub async fn start(
         config: &Config,
         rack_id: Uuid,
@@ -123,13 +114,11 @@ impl Server {
         Ok(Server { apictx, http_server_external, http_server_internal })
     }
 
-    /**
-     * Wait for the given server to shut down
-     *
-     * Note that this doesn't initiate a graceful shutdown, so if you call this
-     * immediately after calling `start()`, the program will block indefinitely
-     * or until something else initiates a graceful shutdown.
-     */
+    /// Wait for the given server to shut down
+    ///
+    /// Note that this doesn't initiate a graceful shutdown, so if you call this
+    /// immediately after calling `start()`, the program will block indefinitely
+    /// or until something else initiates a graceful shutdown.
     pub async fn wait_for_finish(self) -> Result<(), String> {
         let errors = vec![
             self.http_server_external
@@ -152,9 +141,7 @@ impl Server {
         }
     }
 
-    /**
-     * Register the Nexus server as a metric producer with `oximeter.
-     */
+    /// Register the Nexus server as a metric producer with `oximeter.
     pub async fn register_as_producer(&self) {
         self.apictx
             .nexus
@@ -163,9 +150,7 @@ impl Server {
     }
 }
 
-/**
- * Run an instance of the [Server].
- */
+/// Run an instance of the [Server].
 pub async fn run_server(config: &Config) -> Result<(), String> {
     use slog::Drain;
     let (drain, registration) = slog_dtrace::with_drain(

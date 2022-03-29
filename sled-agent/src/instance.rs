@@ -14,14 +14,15 @@ use crate::illumos::vnic::VnicAllocator;
 use crate::illumos::zone::{AddressRequest, PROPOLIS_ZONE_PREFIX};
 use crate::instance_manager::InstanceTicket;
 use crate::nexus::NexusClient;
+use crate::params::{
+    InstanceHardware, InstanceMigrateParams, InstanceRuntimeStateRequested,
+};
 use anyhow::anyhow;
 use futures::lock::{Mutex, MutexGuard};
 use omicron_common::api::external::NetworkInterface;
 use omicron_common::api::internal::nexus::InstanceRuntimeState;
-use omicron_common::api::internal::sled_agent::InstanceHardware;
-use omicron_common::api::internal::sled_agent::InstanceMigrateParams;
-use omicron_common::api::internal::sled_agent::InstanceRuntimeStateRequested;
 use omicron_common::backoff;
+use propolis_client::api::DiskRequest;
 use propolis_client::Client as PropolisClient;
 use slog::Logger;
 use std::net::SocketAddr;
@@ -62,6 +63,9 @@ pub enum Error {
 
     #[error(transparent)]
     RunningZone(#[from] crate::illumos::running_zone::Error),
+
+    #[error("serde_json failure: {0}")]
+    SerdeJsonError(#[from] serde_json::Error),
 }
 
 // Issues read-only, idempotent HTTP requests at propolis until it responds with
@@ -95,7 +99,7 @@ async fn wait_for_http_server(
                         // request, instead of a connection error.
                         return Ok(());
                     }
-                    return Err(backoff::BackoffError::Transient(value));
+                    return Err(backoff::BackoffError::transient(value));
                 }
             }
         },
@@ -169,17 +173,21 @@ struct PropolisSetup {
 }
 
 struct InstanceInner {
-    id: Uuid,
-
     log: Logger,
 
     // Properties visible to Propolis
     properties: propolis_client::api::InstanceProperties,
 
+    // The ID of the Propolis server (and zone) running this instance
+    propolis_id: Uuid,
+
     // NIC-related properties
     vnic_allocator: VnicAllocator,
     requested_nics: Vec<NetworkInterface>,
     vlan: Option<VlanID>,
+
+    // Disk related properties
+    requested_disks: Vec<DiskRequest>,
 
     // Internal State management
     state: InstanceStates,
@@ -191,12 +199,12 @@ struct InstanceInner {
 
 impl InstanceInner {
     fn id(&self) -> &Uuid {
-        &self.id
+        &self.properties.id
     }
 
     /// UUID of the underlying propolis-server process
     fn propolis_id(&self) -> &Uuid {
-        &self.properties.id
+        &self.propolis_id
     }
 
     async fn observe_state(
@@ -219,7 +227,7 @@ impl InstanceInner {
             .cpapi_instances_put(
                 self.id(),
                 &nexus_client::types::InstanceRuntimeState::from(
-                    self.state.current(),
+                    self.state.current().clone(),
                 ),
             )
             .await
@@ -241,7 +249,7 @@ impl InstanceInner {
             .as_ref()
             .expect("Propolis client should be initialized before usage")
             .client
-            .instance_state_put(*self.propolis_id(), request)
+            .instance_state_put(*self.id(), request)
             .await?;
         Ok(())
     }
@@ -284,9 +292,9 @@ impl InstanceInner {
         let request = propolis_client::api::InstanceEnsureRequest {
             properties: self.properties.clone(),
             nics,
-            // TODO: Actual disks need to be wired up here.
-            disks: vec![],
+            disks: self.requested_disks.clone(),
             migrate,
+            cloud_init_bytes: None,
         };
 
         info!(self.log, "Sending ensure request to propolis: {:?}", request);
@@ -400,10 +408,9 @@ impl Instance {
         info!(log, "Instance::new w/initial HW: {:?}", initial);
         let instance = InstanceInner {
             log: log.new(o!("instance id" => id.to_string())),
-            id,
             // NOTE: Mostly lies.
             properties: propolis_client::api::InstanceProperties {
-                id: initial.runtime.propolis_uuid,
+                id,
                 name: initial.runtime.hostname.clone(),
                 description: "Test description".to_string(),
                 image_id: Uuid::nil(),
@@ -414,8 +421,10 @@ impl Instance {
                 // InstanceCpuCount here, to avoid any casting...
                 vcpus: initial.runtime.ncpus.0 as u8,
             },
+            propolis_id: initial.runtime.propolis_uuid,
             vnic_allocator,
             requested_nics: initial.nics,
+            requested_disks: initial.disks,
             vlan,
             state: InstanceStates::new(initial.runtime),
             running_state: None,
@@ -460,7 +469,8 @@ impl Instance {
             &inner.vnic_allocator,
             "propolis-server",
             Some(&inner.propolis_id().to_string()),
-            /* dataset= */ &[],
+            // dataset=
+            &[],
             &[
                 zone::Device { name: "/dev/vmm/*".to_string() },
                 zone::Device { name: "/dev/vmmctl".to_string() },
@@ -574,9 +584,9 @@ impl Instance {
         //
         // They aren't modified after being initialized, so it's fine to grab
         // a copy.
-        let (propolis_id, client) = {
+        let (instance_id, client) = {
             let inner = self.inner.lock().await;
-            let id = *inner.propolis_id();
+            let id = *inner.id();
             let client = inner.running_state.as_ref().unwrap().client.clone();
             (id, client)
         };
@@ -586,7 +596,7 @@ impl Instance {
             // State monitoring always returns the most recent state/gen pair
             // known to Propolis.
             let response =
-                client.instance_state_monitor(propolis_id, gen).await?;
+                client.instance_state_monitor(instance_id, gen).await?;
             let reaction =
                 self.inner.lock().await.observe_state(response.state).await?;
 
@@ -635,13 +645,13 @@ impl Instance {
 mod test {
     use super::*;
     use crate::mocks::MockNexusClient;
+    use crate::params::InstanceStateRequested;
     use chrono::Utc;
     use omicron_common::api::external::{
         ByteCount, Generation, InstanceCpuCount, InstanceState,
     };
-    use omicron_common::api::internal::{
-        nexus::InstanceRuntimeState, sled_agent::InstanceStateRequested,
-    };
+    use omicron_common::api::internal::nexus::InstanceRuntimeState;
+
     static INST_UUID_STR: &str = "e398c5d5-5059-4e55-beac-3a1071083aaa";
     static PROPOLIS_UUID_STR: &str = "ed895b13-55d5-4e0b-88e9-3f4e74d0d936";
 
@@ -677,6 +687,7 @@ mod test {
                 time_updated: Utc::now(),
             },
             nics: vec![],
+            disks: vec![],
         }
     }
 

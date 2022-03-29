@@ -135,7 +135,8 @@ impl Fleet {
     }
 
     /// Returns an authz resource representing some other kind of child (e.g.,
-    /// a built-in user, built-in role, etc. -- but _not_ an Organization)
+    /// a built-in user, built-in role, etc. -- but _not_ an Organization or
+    /// Sled)
     ///
     /// Aside from Organizations (which you create with
     /// [`Fleet::organization()`] instead), all instances of all types of Fleet
@@ -148,6 +149,11 @@ impl Fleet {
         lookup_type: LookupType,
     ) -> FleetChild {
         FleetChild { resource_type, lookup_type }
+    }
+
+    /// Returns an authz resource representing a Sled
+    pub fn sled(&self, sled_id: Uuid, lookup_type: LookupType) -> Sled {
+        Sled { sled_id, lookup_type }
     }
 }
 
@@ -232,7 +238,7 @@ impl oso::PolarClass for FleetChild {
         oso::Class::builder()
             .add_method(
                 "has_role",
-                /* Roles are not supported on FleetChilds today. */
+                // Roles are not supported on FleetChilds today.
                 |_: &FleetChild, _: AuthenticatedActor, _: String| false,
             )
             .add_attribute_getter("fleet", |_: &FleetChild| FLEET)
@@ -252,6 +258,52 @@ impl ApiResource for FleetChild {
 impl ApiResourceError for FleetChild {
     fn not_found(&self) -> Error {
         self.lookup_type.clone().into_not_found(self.resource_type)
+    }
+}
+
+/// Represents a Sled for authz purposes
+///
+/// This object is used for authorization checks on such resources by passing
+/// this as the `resource` argument to
+/// [`crate::context::OpContext::authorize()`].  You construct one of these
+/// using [`Fleet::sled()`].
+#[derive(Clone, Debug)]
+pub struct Sled {
+    sled_id: Uuid,
+    lookup_type: LookupType,
+}
+
+impl Sled {
+    pub fn id(&self) -> Uuid {
+        self.sled_id
+    }
+}
+
+impl oso::PolarClass for Sled {
+    fn get_polar_class_builder() -> oso::ClassBuilder<Self> {
+        oso::Class::builder()
+            .add_method(
+                "has_role",
+                // Roles are not supported on Sleds today.
+                |_: &Sled, _: AuthenticatedActor, _: String| false,
+            )
+            .add_attribute_getter("fleet", |_: &Sled| FLEET)
+    }
+}
+
+impl ApiResource for Sled {
+    fn db_resource(&self) -> Option<(ResourceType, Uuid)> {
+        None
+    }
+
+    fn parent(&self) -> Option<&dyn AuthorizedResource> {
+        Some(&FLEET)
+    }
+}
+
+impl ApiResourceError for Sled {
+    fn not_found(&self) -> Error {
+        self.lookup_type.clone().into_not_found(ResourceType::Sled)
     }
 }
 
@@ -363,7 +415,7 @@ impl Project {
         lookup_type: LookupType,
     ) -> ProjectChild {
         ProjectChild {
-            parent: self.clone(),
+            parent: ProjectChildKind::Direct(self.clone()),
             resource_type,
             resource_id,
             lookup_type,
@@ -425,10 +477,16 @@ impl ApiResourceError for Project {
 /// using [`Project::child_generic()`].
 #[derive(Clone, Debug)]
 pub struct ProjectChild {
-    parent: Project,
+    parent: ProjectChildKind,
     resource_type: ResourceType,
     resource_id: Uuid,
     lookup_type: LookupType,
+}
+
+#[derive(Clone, Debug)]
+enum ProjectChildKind {
+    Direct(Project),
+    Indirect(Box<ProjectChild>),
 }
 
 impl ProjectChild {
@@ -437,7 +495,32 @@ impl ProjectChild {
     }
 
     pub fn project(&self) -> &Project {
-        &self.parent
+        match &self.parent {
+            ProjectChildKind::Direct(p) => p,
+            ProjectChildKind::Indirect(p) => p.project(),
+        }
+    }
+
+    /// Returns an authz resource representing a child of this Project child.
+    ///
+    /// This is currently only used for children of Vpc, which include
+    /// VpcSubnets.
+    // TODO-cleanup It would be more type-safe to have a more explicit resource
+    // hierarchy -- i.e., Project -> Vpc -> VpcSubnet.  However, it would also
+    // mean a bunch more boilerplate and it'd be more confusing: you'd have
+    // Projects with children Vpc _or_ ProjectChild.
+    pub fn child_generic(
+        &self,
+        resource_type: ResourceType,
+        resource_id: Uuid,
+        lookup_type: LookupType,
+    ) -> ProjectChild {
+        ProjectChild {
+            parent: ProjectChildKind::Indirect(Box::new(self.clone())),
+            resource_type,
+            resource_id,
+            lookup_type,
+        }
     }
 }
 
@@ -455,7 +538,7 @@ impl oso::PolarClass for ProjectChild {
                 },
             )
             .add_attribute_getter("project", |pr: &ProjectChild| {
-                pr.parent.clone()
+                pr.project().clone()
             })
     }
 }
@@ -467,7 +550,10 @@ impl ApiResource for ProjectChild {
     }
 
     fn parent(&self) -> Option<&dyn AuthorizedResource> {
-        Some(&self.parent)
+        match &self.parent {
+            ProjectChildKind::Direct(p) => Some(p),
+            ProjectChildKind::Indirect(p) => Some(p.as_ref()),
+        }
     }
 }
 
@@ -479,3 +565,8 @@ impl ApiResourceError for ProjectChild {
 
 pub type Disk = ProjectChild;
 pub type Instance = ProjectChild;
+pub type RouterRoute = ProjectChild;
+pub type Vpc = ProjectChild;
+pub type VpcRouter = ProjectChild;
+pub type VpcSubnet = ProjectChild;
+pub type NetworkInterface = ProjectChild;

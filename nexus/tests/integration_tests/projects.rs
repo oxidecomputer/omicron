@@ -17,7 +17,7 @@ async fn test_projects(cptestctx: &ControlPlaneTestContext) {
     let org_name = "test-org";
     create_organization(&client, &org_name).await;
 
-    /* Create a project that we'll use for testing. */
+    // Create a project that we'll use for testing.
     let p1_name = "springfield-squidport";
     let p2_name = "cairo-airport";
     let org_p1_id =
@@ -33,7 +33,7 @@ async fn test_projects(cptestctx: &ControlPlaneTestContext) {
     let project: Project = project_get(&client, &p2_url).await;
     assert_eq!(project.identity.name, p2_name);
 
-    /* Verify the list of Projects. */
+    // Verify the list of Projects.
     let projects_url = format!("/organizations/{}/projects", org_name);
     let projects = NexusRequest::iter_collection_authn::<Project>(
         &client,
@@ -49,8 +49,8 @@ async fn test_projects(cptestctx: &ControlPlaneTestContext) {
     assert_eq!(projects[0].identity.name, p2_name);
     assert_eq!(projects[1].identity.name, p1_name);
 
-    /* Create a second organization and make sure we can have two projects with
-     * the same name across organizations */
+    // Create a second organization and make sure we can have two projects with
+    // the same name across organizations
     let org2_name = "test-org2";
     create_organization(&client, &org2_name).await;
     let org2_p1_id =

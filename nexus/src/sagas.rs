@@ -2,16 +2,12 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-/*!
- * Saga actions, undo actions, and saga constructors used in Nexus.
- */
+//! Saga actions, undo actions, and saga constructors used in Nexus.
 
-/*
- * NOTE: We want to be careful about what interfaces we expose to saga actions.
- * In the future, we expect to mock these out for comprehensive testing of
- * correctness, idempotence, etc.  The more constrained this interface is, the
- * easier it will be to test, version, and update in deployed systems.
- */
+// NOTE: We want to be careful about what interfaces we expose to saga actions.
+// In the future, we expect to mock these out for comprehensive testing of
+// correctness, idempotence, etc.  The more constrained this interface is, the
+// easier it will be to test, version, and update in deployed systems.
 
 use crate::context::OpContext;
 use crate::db::identity::{Asset, Resource};
@@ -33,10 +29,17 @@ use omicron_common::api::external::InstanceState;
 use omicron_common::api::external::Name;
 use omicron_common::api::external::NetworkInterface;
 use omicron_common::api::internal::nexus::InstanceRuntimeState;
-use omicron_common::api::internal::sled_agent::InstanceHardware;
 use omicron_common::backoff::{self, BackoffError};
+use rand::{rngs::StdRng, RngCore, SeedableRng};
 use serde::Deserialize;
 use serde::Serialize;
+use sled_agent_client::types::InstanceEnsureBody;
+use sled_agent_client::types::InstanceHardware;
+use sled_agent_client::types::InstanceMigrateParams;
+use sled_agent_client::types::InstanceRuntimeStateMigrateParams;
+use sled_agent_client::types::InstanceRuntimeStateRequested;
+use sled_agent_client::types::InstanceStateRequested;
+use slog::warn;
 use slog::Logger;
 use std::collections::BTreeMap;
 use std::convert::{TryFrom, TryInto};
@@ -51,9 +54,7 @@ use steno::SagaTemplateGeneric;
 use steno::SagaType;
 use uuid::Uuid;
 
-/*
- * We'll need a richer mechanism for registering sagas, but this works for now.
- */
+// We'll need a richer mechanism for registering sagas, but this works for now.
 pub const SAGA_INSTANCE_CREATE_NAME: &'static str = "instance-create";
 pub const SAGA_INSTANCE_MIGRATE_NAME: &'static str = "instance-migrate";
 pub const SAGA_DISK_CREATE_NAME: &'static str = "disk-create";
@@ -108,12 +109,13 @@ async fn saga_generate_uuid<UserType: SagaType>(
     Ok(Uuid::new_v4())
 }
 
-/*
- * "Create Instance" saga template
- */
+// "Create Instance" saga template
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct ParamsInstanceCreate {
+    pub serialized_authn: authn::saga::Serialized,
+    pub organization_name: Name,
+    pub project_name: Name,
     pub project_id: Uuid,
     pub create_params: params::InstanceCreate,
 }
@@ -150,19 +152,94 @@ pub fn saga_instance_create() -> SagaTemplate<SagaInstanceCreate> {
     );
 
     template_builder.append(
-        "network_interface",
-        "CreateNetworkInterface",
+        "instance_name",
+        "CreateInstanceRecord",
         ActionFunc::new_action(
-            sic_create_network_interface,
-            sic_create_network_interface_undo,
+            sic_create_instance_record,
+            sic_delete_instance_record,
+        ),
+    );
+
+    // NOTE: The separation of the ID-allocation and NIC creation nodes is
+    // intentional.
+    //
+    // The Nexus API supports creating multiple network interfaces at the time
+    // an instance is provisioned. However, each NIC creation is independent,
+    // and each can fail. For example, someone might specify multiple NICs with
+    // the same IP address. The first will be created successfully, but the
+    // later ones will fail. We need to handle this case gracefully, and always
+    // delete any NICs we create, even if the NIC creation node itself fails.
+    //
+    // To do that, we create an action that only allocates the UUIDs for each
+    // interface. This has an undo action that actually deletes any NICs for the
+    // instance to be provisioned. The forward action is infallible, so this
+    // undo action will always run, even (and especially) if the NIC creation
+    // action fails.
+    //
+    // It's also important that we allocate the UUIDs first. It's possible that
+    // we crash partway through the NIC creation action. In this case, the saga
+    // recovery machinery will pick it up where it left off, without first
+    // destroying the NICs we created before crashing. By allocating the UUIDs
+    // first, we can make the insertion idempotent, by ignoring conflicts on the
+    // UUID.
+    template_builder.append(
+        "network_interface_ids",
+        "NetworkInterfaceIds",
+        ActionFunc::new_action(
+            sic_allocate_network_interface_ids,
+            sic_create_network_interfaces_undo,
         ),
     );
 
     template_builder.append(
-        "initial_runtime",
-        "CreateInstanceRecord",
-        new_action_noop_undo(sic_create_instance_record),
+        "network_interfaces",
+        "CreateNetworkInterfaces",
+        new_action_noop_undo(sic_create_network_interfaces),
     );
+
+    // Saga actions must be atomic - they have to fully complete or fully abort.
+    // This is because Steno assumes that the saga actions are atomic and
+    // therefore undo actions are *not* run for the failing node.
+    //
+    // For this reason, each disk is created and attached with a separate saga
+    // node. If a saga node had a loop to attach or detach all disks, and one
+    // failed, any disks that were attached would not be detached because the
+    // corresponding undo action would not be run. Separate each disk create and
+    // attach to their own saga node and ensure that each function behaves
+    // atomically.
+    //
+    // Currently, instances can have a maximum of 8 disks attached. Create two
+    // saga nodes for each disk that will unconditionally run but contain
+    // conditional logic depending on if that disk index is going to be used.
+    // Steno does not currently support the saga node graph changing shape.
+    for i in 0..crate::nexus::MAX_DISKS_PER_INSTANCE {
+        template_builder.append(
+            &format!("create_disks{}", i),
+            "CreateDisksForInstance",
+            ActionFunc::new_action(
+                async move |sagactx| {
+                    sic_create_disks_for_instance(sagactx, i as usize).await
+                },
+                async move |sagactx| {
+                    sic_create_disks_for_instance_undo(sagactx, i as usize)
+                        .await
+                },
+            ),
+        );
+
+        template_builder.append(
+            &format!("attach_disks{}", i),
+            "AttachDisksToInstance",
+            ActionFunc::new_action(
+                async move |sagactx| {
+                    sic_attach_disks_to_instance(sagactx, i as usize).await
+                },
+                async move |sagactx| {
+                    sic_attach_disks_to_instance_undo(sagactx, i as usize).await
+                },
+            ),
+        );
+    }
 
     template_builder.append(
         "instance_ensure",
@@ -184,85 +261,408 @@ async fn sic_alloc_server(
         .map_err(ActionError::action_failed)
 }
 
-async fn sic_create_network_interface(
+async fn sic_allocate_network_interface_ids(
     sagactx: ActionContext<SagaInstanceCreate>,
-) -> Result<NetworkInterface, ActionError> {
-    let osagactx = sagactx.user_data();
-    let params = sagactx.saga_params();
-    let instance_id = sagactx.lookup::<Uuid>("instance_id")?;
+) -> Result<Vec<Uuid>, ActionError> {
+    match sagactx.saga_params().create_params.network_interfaces {
+        params::InstanceNetworkInterfaceAttachment::None => Ok(vec![]),
+        params::InstanceNetworkInterfaceAttachment::Default => {
+            Ok(vec![Uuid::new_v4()])
+        }
+        params::InstanceNetworkInterfaceAttachment::Create(
+            ref create_params,
+        ) => {
+            if create_params.params.len()
+                > crate::nexus::MAX_NICS_PER_INSTANCE.try_into().unwrap()
+            {
+                return Err(ActionError::action_failed(
+                    Error::invalid_request(
+                        format!(
+                            "Instances may not have more than {}
+                            network interfaces",
+                            crate::nexus::MAX_NICS_PER_INSTANCE
+                        )
+                        .as_str(),
+                    ),
+                ));
+            }
+            let mut ids = Vec::with_capacity(create_params.params.len());
+            for _ in 0..create_params.params.len() {
+                ids.push(Uuid::new_v4());
+            }
+            Ok(ids)
+        }
+    }
+}
 
-    let default_name =
-        db::model::Name(Name::try_from("default".to_string()).unwrap());
-    let vpc = osagactx
-        .datastore()
-        .vpc_fetch_by_name(&params.project_id, &default_name)
+async fn sic_create_network_interfaces(
+    sagactx: ActionContext<SagaInstanceCreate>,
+) -> Result<Option<Vec<NetworkInterface>>, ActionError> {
+    match sagactx.saga_params().create_params.network_interfaces {
+        params::InstanceNetworkInterfaceAttachment::None => Ok(None),
+        params::InstanceNetworkInterfaceAttachment::Default => {
+            sic_create_default_network_interface(&sagactx).await
+        }
+        params::InstanceNetworkInterfaceAttachment::Create(
+            ref create_params,
+        ) => {
+            sic_create_custom_network_interfaces(
+                &sagactx,
+                &create_params.params,
+            )
+            .await
+        }
+    }
+}
+
+/// Create one or more custom (non-default) network interfaces for the provided
+/// instance.
+async fn sic_create_custom_network_interfaces(
+    sagactx: &ActionContext<SagaInstanceCreate>,
+    interface_params: &[params::NetworkInterfaceCreate],
+) -> Result<Option<Vec<NetworkInterface>>, ActionError> {
+    if interface_params.is_empty() {
+        return Ok(Some(vec![]));
+    }
+
+    let osagactx = sagactx.user_data();
+    let datastore = osagactx.datastore();
+    let saga_params = sagactx.saga_params();
+    let opctx =
+        OpContext::for_saga_action(&sagactx, &saga_params.serialized_authn);
+    let instance_id = sagactx.lookup::<Uuid>("instance_id")?;
+    let ids = sagactx.lookup::<Vec<Uuid>>("network_interface_ids")?;
+
+    // Lookup authz objects, used in the call to create the NIC itself.
+    let authz_instance = datastore
+        .instance_lookup_by_id(instance_id)
         .await
         .map_err(ActionError::action_failed)?;
-    let subnet = osagactx
-        .datastore()
-        .vpc_subnet_fetch_by_name(&vpc.id(), &default_name)
+    let authz_project = datastore
+        .project_lookup_by_id(saga_params.project_id)
+        .await
+        .map_err(ActionError::action_failed)?;
+    let (authz_vpc, db_vpc) = datastore
+        .vpc_fetch(
+            &opctx,
+            &authz_project,
+            &db::model::Name::from(interface_params[0].vpc_name.clone()),
+        )
+        .await
+        .map_err(ActionError::action_failed)?;
+
+    // Check that all VPC names are the same.
+    //
+    // This isn't strictly necessary, as the queries would fail below, but it's
+    // easier to handle here.
+    if interface_params.iter().any(|p| p.vpc_name != db_vpc.name().0) {
+        return Err(ActionError::action_failed(Error::invalid_request(
+            "All interfaces must be in the same VPC",
+        )));
+    }
+
+    let mut interfaces = Vec::with_capacity(interface_params.len());
+    if ids.len() != interface_params.len() {
+        return Err(ActionError::action_failed(Error::internal_error(
+            "found differing number of network interface IDs and interface \
+            parameters",
+        )));
+    }
+    for (interface_id, params) in ids.into_iter().zip(interface_params.iter()) {
+        // TODO-correctness: It seems racy to fetch the subnet and create the
+        // interface in separate requests, but outside of a transaction. This
+        // should probably either be in a transaction, or the
+        // `subnet_create_network_interface` function/query needs some JOIN
+        // on the `vpc_subnet` table.
+        let (authz_subnet, db_subnet) = datastore
+            .vpc_subnet_fetch(
+                &opctx,
+                &authz_vpc,
+                &db::model::Name::from(params.subnet_name.clone()),
+            )
+            .await
+            .map_err(ActionError::action_failed)?;
+        let mac =
+            db::model::MacAddr::new().map_err(ActionError::action_failed)?;
+        let interface = db::model::IncompleteNetworkInterface::new(
+            interface_id,
+            instance_id,
+            authz_vpc.id(),
+            db_subnet,
+            mac,
+            params.identity.clone(),
+            params.ip,
+        )
+        .map_err(ActionError::action_failed)?;
+        let result = datastore
+            .instance_create_network_interface(
+                &opctx,
+                &authz_subnet,
+                &authz_instance,
+                interface,
+            )
+            .await;
+
+        use crate::db::subnet_allocation::NetworkInterfaceError;
+        let interface = match result {
+            Ok(interface) => Ok(interface),
+
+            // Detect the specific error arising from this node being partially
+            // completed.
+            //
+            // The query used to insert network interfaces first checks for an
+            // existing record with the same primary key. It will attempt to
+            // insert that record if it exists, which obviously fails with a
+            // primary key violation. (If the record does _not_ exist, one will
+            // be inserted as usual, see
+            // `db::subnet_name::InsertNetworkInterfaceQuery` for details).
+            //
+            // In this one specific case, we're asserting that any primary key
+            // duplicate arises because this saga node ran partway and then
+            // crashed. The saga recovery machinery will replay just this node,
+            // without first unwinding it, so any previously-inserted interfaces
+            // will still exist. This is expected.
+            Err(NetworkInterfaceError::DuplicatePrimaryKey(_)) => {
+                // TODO-observability: We should bump a counter here.
+                let log = osagactx.log();
+                warn!(
+                    log,
+                    "Detected duplicate primary key during saga to \
+                    create network interfaces for instance '{}'. \
+                    This likely occurred because \
+                    the saga action 'sic_create_custom_network_interfaces' \
+                    crashed and has been recovered.",
+                    instance_id;
+                    "primary_key" => interface_id.to_string(),
+                );
+
+                // Refetch the interface itself, to serialize it for the next
+                // saga node.
+                datastore
+                    .instance_lookup_network_interface(
+                        &opctx,
+                        &authz_instance,
+                        &db::model::Name(params.identity.name.clone()),
+                    )
+                    .await
+            }
+            Err(e) => Err(e.into_external()),
+        }
+        .map_err(ActionError::action_failed)?;
+        interfaces.push(NetworkInterface::from(interface))
+    }
+    Ok(Some(interfaces))
+}
+
+/// Create the default network interface for an instance during the create saga
+async fn sic_create_default_network_interface(
+    sagactx: &ActionContext<SagaInstanceCreate>,
+) -> Result<Option<Vec<NetworkInterface>>, ActionError> {
+    let osagactx = sagactx.user_data();
+    let datastore = osagactx.datastore();
+    let saga_params = sagactx.saga_params();
+    let opctx =
+        OpContext::for_saga_action(&sagactx, &saga_params.serialized_authn);
+    let instance_id = sagactx.lookup::<Uuid>("instance_id")?;
+    let default_name = Name::try_from("default".to_string()).unwrap();
+    let internal_default_name = db::model::Name::from(default_name.clone());
+    let interface_params = params::NetworkInterfaceCreate {
+        identity: IdentityMetadataCreateParams {
+            name: default_name.clone(),
+            description: format!(
+                "default interface for {}",
+                saga_params.create_params.identity.name,
+            ),
+        },
+        vpc_name: default_name.clone(),
+        subnet_name: default_name.clone(),
+        ip: None, // Request an IP address allocation
+    };
+
+    // Lookup authz objects, used in the call to actually create the NIC.
+    let authz_instance = datastore
+        .instance_lookup_by_id(instance_id)
+        .await
+        .map_err(ActionError::action_failed)?;
+    let authz_project = datastore
+        .project_lookup_by_id(saga_params.project_id)
+        .await
+        .map_err(ActionError::action_failed)?;
+    let (authz_vpc, _) = datastore
+        .vpc_fetch(&opctx, &authz_project, &internal_default_name.clone())
+        .await
+        .map_err(ActionError::action_failed)?;
+    let (authz_subnet, db_subnet) = datastore
+        .vpc_subnet_fetch(&opctx, &authz_vpc, &internal_default_name)
         .await
         .map_err(ActionError::action_failed)?;
 
     let mac = db::model::MacAddr::new().map_err(ActionError::action_failed)?;
     let interface_id = Uuid::new_v4();
-    // Request an allocation
-    let ip = None;
     let interface = db::model::IncompleteNetworkInterface::new(
         interface_id,
         instance_id,
-        // TODO-correctness: vpc_id here is used for name uniqueness. Should
-        // interface names be unique to the subnet's VPC or to the
-        // VPC associated with the instance's default interface?
-        vpc.id(),
-        subnet,
+        authz_vpc.id(),
+        db_subnet,
         mac,
-        ip,
-        params::NetworkInterfaceCreate {
-            identity: IdentityMetadataCreateParams {
-                // By naming the interface after the instance id, we should
-                // avoid name conflicts on creation.
-                name: format!("default-{}", instance_id).parse().unwrap(),
-                description: format!(
-                    "default interface for {}",
-                    params.create_params.identity.name
-                ),
-            },
-        },
-    );
-
-    let interface = osagactx
-        .datastore()
-        .instance_create_network_interface(interface)
+        interface_params.identity.clone(),
+        interface_params.ip,
+    )
+    .map_err(ActionError::action_failed)?;
+    let interface = datastore
+        .instance_create_network_interface(
+            &opctx,
+            &authz_subnet,
+            &authz_instance,
+            interface,
+        )
         .await
+        .map_err(db::subnet_allocation::NetworkInterfaceError::into_external)
         .map_err(ActionError::action_failed)?;
-    Ok(interface.into())
+    Ok(Some(vec![interface.into()]))
 }
 
-async fn sic_create_network_interface_undo(
+async fn sic_create_network_interfaces_undo(
     sagactx: ActionContext<SagaInstanceCreate>,
 ) -> Result<(), anyhow::Error> {
+    // We issue a request to delete any interfaces associated with this instance.
+    // In the case we failed partway through allocating interfaces, we won't
+    // have cached the interface records in the saga log, but they're definitely
+    // still in the database. Just delete every interface that exists, even if
+    // there are zero such records.
     let osagactx = sagactx.user_data();
-    let network_interface =
-        sagactx.lookup::<NetworkInterface>("network_interface")?;
-
+    let instance_id = sagactx.lookup::<Uuid>("instance_id")?;
     osagactx
         .datastore()
-        .instance_delete_network_interface(&network_interface.identity.id)
-        .await?;
+        .instance_delete_all_network_interfaces(&instance_id)
+        .await
+        .map_err(ActionError::action_failed)?;
+    Ok(())
+}
+
+/// Create disks during instance creation, and return a list of disk names
+// TODO implement
+async fn sic_create_disks_for_instance(
+    sagactx: ActionContext<SagaInstanceCreate>,
+    disk_index: usize,
+) -> Result<Option<String>, ActionError> {
+    let saga_params = sagactx.saga_params();
+    let saga_disks = &saga_params.create_params.disks;
+
+    if disk_index >= saga_disks.len() {
+        return Ok(None);
+    }
+
+    let disk = &saga_disks[disk_index];
+
+    match disk {
+        params::InstanceDiskAttachment::Create(_create_params) => {
+            return Err(ActionError::action_failed(
+                "Creating disk during instance create unsupported!".to_string(),
+            ));
+        }
+
+        _ => {}
+    }
+
+    Ok(None)
+}
+
+/// Undo disks created during instance creation
+// TODO implement
+async fn sic_create_disks_for_instance_undo(
+    _sagactx: ActionContext<SagaInstanceCreate>,
+    _disk_index: usize,
+) -> Result<(), anyhow::Error> {
+    Ok(())
+}
+
+async fn sic_attach_disks_to_instance(
+    sagactx: ActionContext<SagaInstanceCreate>,
+    disk_index: usize,
+) -> Result<(), ActionError> {
+    ensure_instance_disk_attach_state(sagactx, disk_index, true).await
+}
+
+async fn sic_attach_disks_to_instance_undo(
+    sagactx: ActionContext<SagaInstanceCreate>,
+    disk_index: usize,
+) -> Result<(), anyhow::Error> {
+    Ok(ensure_instance_disk_attach_state(sagactx, disk_index, false).await?)
+}
+
+async fn ensure_instance_disk_attach_state(
+    sagactx: ActionContext<SagaInstanceCreate>,
+    disk_index: usize,
+    attached: bool,
+) -> Result<(), ActionError> {
+    let osagactx = sagactx.user_data();
+    let saga_params = sagactx.saga_params();
+    let opctx =
+        OpContext::for_saga_action(&sagactx, &saga_params.serialized_authn);
+
+    let saga_disks = &saga_params.create_params.disks;
+    let instance_name = sagactx.lookup::<db::model::Name>("instance_name")?;
+
+    if disk_index >= saga_disks.len() {
+        return Ok(());
+    }
+
+    let disk = &saga_disks[disk_index];
+
+    let organization_name: db::model::Name =
+        saga_params.organization_name.clone().into();
+    let project_name: db::model::Name = saga_params.project_name.clone().into();
+
+    match disk {
+        params::InstanceDiskAttachment::Create(_) => {
+            // TODO grab disks created in sic_create_disks_for_instance
+            return Err(ActionError::action_failed(Error::invalid_request(
+                "creating disks while creating an instance not supported",
+            )));
+        }
+        params::InstanceDiskAttachment::Attach(instance_disk_attach) => {
+            let disk_name: db::model::Name =
+                instance_disk_attach.disk.clone().into();
+
+            if attached {
+                osagactx
+                    .nexus()
+                    .instance_attach_disk(
+                        &opctx,
+                        &organization_name,
+                        &project_name,
+                        &instance_name,
+                        &disk_name,
+                    )
+                    .await
+            } else {
+                osagactx
+                    .nexus()
+                    .instance_detach_disk(
+                        &opctx,
+                        &organization_name,
+                        &project_name,
+                        &instance_name,
+                        &disk_name,
+                    )
+                    .await
+            }
+            .map_err(ActionError::action_failed)?;
+        }
+    }
+
     Ok(())
 }
 
 async fn sic_create_instance_record(
     sagactx: ActionContext<SagaInstanceCreate>,
-) -> Result<InstanceHardware, ActionError> {
+) -> Result<db::model::Name, ActionError> {
     let osagactx = sagactx.user_data();
     let params = sagactx.saga_params();
     let sled_uuid = sagactx.lookup::<Uuid>("server_id");
     let instance_id = sagactx.lookup::<Uuid>("instance_id");
     let propolis_uuid = sagactx.lookup::<Uuid>("propolis_id");
-    let network_interface =
-        sagactx.lookup::<NetworkInterface>("network_interface")?;
 
     let runtime = InstanceRuntimeState {
         run_state: InstanceState::Creating,
@@ -291,69 +691,108 @@ async fn sic_create_instance_record(
         .await
         .map_err(ActionError::action_failed)?;
 
-    // See also: instance_set_runtime in nexus.rs for a similar construction.
-    Ok(InstanceHardware {
-        runtime: instance.runtime().clone().into(),
-        nics: vec![network_interface],
-    })
+    Ok(instance.name().clone())
+}
+
+async fn sic_delete_instance_record(
+    sagactx: ActionContext<SagaInstanceCreate>,
+) -> Result<(), anyhow::Error> {
+    let osagactx = sagactx.user_data();
+    let params = sagactx.saga_params();
+    let opctx = OpContext::for_saga_action(&sagactx, &params.serialized_authn);
+    let instance_id = sagactx.lookup::<Uuid>("instance_id")?;
+    let instance_name = sagactx.lookup::<db::model::Name>("instance_name")?;
+
+    // We currently only support deleting an instance if it is stopped or
+    // failed, so update the state accordingly to allow deletion.
+    let authz_project = osagactx
+        .datastore()
+        .project_lookup_by_id(params.project_id)
+        .await
+        .map_err(ActionError::action_failed)?;
+
+    let (authz_instance, db_instance) = osagactx
+        .datastore()
+        .instance_fetch(&opctx, &authz_project, &instance_name)
+        .await
+        .map_err(ActionError::action_failed)?;
+
+    let runtime_state = db::model::InstanceRuntimeState {
+        state: db::model::InstanceState::new(InstanceState::Failed),
+        // Must update the generation, or the database query will fail.
+        //
+        // The runtime state of the instance record is only changed as a result
+        // of the successful completion of the saga, or in this action during
+        // saga unwinding. So we're guaranteed that the cached generation in the
+        // saga log is the most recent in the database.
+        gen: db::model::Generation::from(db_instance.runtime_state.gen.next()),
+        ..db_instance.runtime_state
+    };
+
+    let updated = osagactx
+        .datastore()
+        .instance_update_runtime(&instance_id, &runtime_state)
+        .await
+        .map_err(ActionError::action_failed)?;
+
+    if !updated {
+        warn!(
+            osagactx.log(),
+            "failed to update instance runtime state from creating to failed",
+        );
+    }
+
+    // Actually delete the record.
+    osagactx
+        .datastore()
+        .project_delete_instance(&opctx, &authz_instance)
+        .await
+        .map_err(ActionError::action_failed)?;
+
+    Ok(())
 }
 
 async fn sic_instance_ensure(
     sagactx: ActionContext<SagaInstanceCreate>,
 ) -> Result<(), ActionError> {
-    /*
-     * TODO-correctness is this idempotent?
-     */
+    // TODO-correctness is this idempotent?
     let osagactx = sagactx.user_data();
-    let runtime_params =
-        sled_agent_client::types::InstanceRuntimeStateRequested {
-            run_state:
-                sled_agent_client::types::InstanceStateRequested::Running,
-            migration_params: None,
-        };
-    let instance_id = sagactx.lookup::<Uuid>("instance_id")?;
-    let sled_uuid = sagactx.lookup::<Uuid>("server_id")?;
-    let initial_runtime =
-        sagactx.lookup::<InstanceHardware>("initial_runtime")?;
-    let sa = osagactx
-        .sled_client(&sled_uuid)
+    let params = sagactx.saga_params();
+    let runtime_params = InstanceRuntimeStateRequested {
+        run_state: InstanceStateRequested::Running,
+        migration_params: None,
+    };
+
+    let instance_name = sagactx.lookup::<db::model::Name>("instance_name")?;
+    let opctx = OpContext::for_saga_action(&sagactx, &params.serialized_authn);
+
+    let authz_project = osagactx
+        .datastore()
+        .project_lookup_by_id(params.project_id)
         .await
         .map_err(ActionError::action_failed)?;
 
-    /*
-     * Ask the sled agent to begin the state change.  Then update the database
-     * to reflect the new intermediate state.  If this update is not the newest
-     * one, that's fine.  That might just mean the sled agent beat us to it.
-     */
-    let new_runtime_state = sa
-        .instance_put(
-            &instance_id,
-            &sled_agent_client::types::InstanceEnsureBody {
-                initial: sled_agent_client::types::InstanceHardware::from(
-                    initial_runtime,
-                ),
-                target: runtime_params,
-                migrate: None,
-            },
-        )
+    let (authz_instance, instance) = osagactx
+        .datastore()
+        .instance_fetch(&opctx, &authz_project, &instance_name)
         .await
-        .map_err(omicron_common::api::external::Error::from)
         .map_err(ActionError::action_failed)?;
-
-    let new_runtime_state: InstanceRuntimeState =
-        new_runtime_state.into_inner().into();
 
     osagactx
-        .datastore()
-        .instance_update_runtime(&instance_id, &new_runtime_state.into())
+        .nexus()
+        .instance_set_runtime(
+            &opctx,
+            &authz_instance,
+            &instance,
+            runtime_params,
+        )
         .await
-        .map(|_| ())
-        .map_err(ActionError::action_failed)
+        .map_err(ActionError::action_failed)?;
+
+    Ok(())
 }
 
-/*
- * "Migrate Instance" saga template
- */
+// "Migrate Instance" saga template
 #[derive(Debug, Deserialize, Serialize)]
 pub struct ParamsInstanceMigrate {
     pub serialized_authn: authn::saga::Serialized,
@@ -454,19 +893,19 @@ async fn sim_instance_migrate(
         propolis_addr: None,
         ..old_runtime
     };
-    let instance_hardware = sled_agent_client::types::InstanceHardware {
+    let instance_hardware = InstanceHardware {
         runtime: runtime.into(),
         // TODO: populate NICs
         nics: vec![],
+        // TODO: populate disks
+        disks: vec![],
     };
-    let target = sled_agent_client::types::InstanceRuntimeStateRequested {
-        run_state: sled_agent_client::types::InstanceStateRequested::Migrating,
-        migration_params: Some(
-            sled_agent_client::types::InstanceRuntimeStateMigrateParams {
-                migration_id,
-                dst_propolis_id: dst_propolis_uuid,
-            },
-        ),
+    let target = InstanceRuntimeStateRequested {
+        run_state: InstanceStateRequested::Migrating,
+        migration_params: Some(InstanceRuntimeStateMigrateParams {
+            migration_id,
+            dst_propolis_id: dst_propolis_uuid,
+        }),
     };
 
     let src_propolis_uuid = old_runtime.propolis_uuid;
@@ -484,13 +923,13 @@ async fn sim_instance_migrate(
     let new_runtime_state: InstanceRuntimeState = dst_sa
         .instance_put(
             &instance_id,
-            &sled_agent_client::types::InstanceEnsureBody {
+            &InstanceEnsureBody {
                 initial: instance_hardware,
                 target,
-                migrate: Some(omicron_common::api::internal::sled_agent::InstanceMigrateParams {
-                    src_propolis_addr,
+                migrate: Some(InstanceMigrateParams {
+                    src_propolis_addr: src_propolis_addr.to_string(),
                     src_propolis_uuid,
-                }.into()),
+                }),
             },
         )
         .await
@@ -669,7 +1108,6 @@ async fn ensure_region_in_dataset(
         // TODO: Can we avoid casting from UUID to string?
         // NOTE: This'll require updating the crucible agent client.
         id: RegionId(region.id().to_string()),
-        volume_id: region.volume_id().to_string(),
         encrypted: region.encrypted(),
         cert_pem: None,
         key_pem: None,
@@ -682,7 +1120,7 @@ async fn ensure_region_in_dataset(
             .await
             .map_err(|e| BackoffError::Permanent(e.into()))?;
         match region.state {
-            RegionState::Requested => Err(BackoffError::Transient(anyhow!(
+            RegionState::Requested => Err(BackoffError::transient(anyhow!(
                 "Region creation in progress"
             ))),
             RegionState::Created => Ok(region),
@@ -717,30 +1155,113 @@ const MAX_CONCURRENT_REGION_REQUESTS: usize = 3;
 
 async fn sdc_regions_ensure(
     sagactx: ActionContext<SagaDiskCreate>,
-) -> Result<(), ActionError> {
+) -> Result<String, ActionError> {
     let log = sagactx.user_data().log();
     let datasets_and_regions = sagactx
         .lookup::<Vec<(db::model::Dataset, db::model::Region)>>(
             "datasets_and_regions",
         )?;
+
     let request_count = datasets_and_regions.len();
-    futures::stream::iter(datasets_and_regions)
+
+    // Allocate regions, and additionally return the dataset that the region was
+    // allocated in.
+    let datasets_and_regions: Vec<(
+        db::model::Dataset,
+        crucible_agent_client::types::Region,
+    )> = futures::stream::iter(datasets_and_regions)
         .map(|(dataset, region)| async move {
-            ensure_region_in_dataset(log, &dataset, &region).await
+            match ensure_region_in_dataset(log, &dataset, &region).await {
+                Ok(result) => Ok((dataset, result)),
+                Err(e) => Err(e),
+            }
         })
         // Execute the allocation requests concurrently.
         .buffer_unordered(std::cmp::min(
             request_count,
             MAX_CONCURRENT_REGION_REQUESTS,
         ))
-        .collect::<Vec<Result<_, _>>>()
+        .collect::<Vec<
+            Result<
+                (db::model::Dataset, crucible_agent_client::types::Region),
+                Error,
+            >,
+        >>()
         .await
         .into_iter()
-        .collect::<Result<Vec<_>, _>>()
+        .collect::<Result<
+            Vec<(db::model::Dataset, crucible_agent_client::types::Region)>,
+            Error,
+        >>()
         .map_err(ActionError::action_failed)?;
 
-    // TODO: Region has a port value, we could store this in the DB?
-    Ok(())
+    // Assert each region has the same block size, otherwise Volume creation
+    // will fail.
+    let all_region_have_same_block_size = datasets_and_regions
+        .windows(2)
+        .all(|w| w[0].1.block_size == w[1].1.block_size);
+
+    if !all_region_have_same_block_size {
+        return Err(ActionError::action_failed(Error::internal_error(
+            "volume creation will fail due to block size mismatch",
+        )));
+    }
+
+    let block_size = datasets_and_regions[0].1.block_size;
+
+    // Store volume details in db
+    let mut rng = StdRng::from_entropy();
+    let volume_construction_request =
+        sled_agent_client::types::VolumeConstructionRequest::Volume {
+            block_size,
+            sub_volumes: vec![
+                sled_agent_client::types::VolumeConstructionRequest::Region {
+                    block_size,
+                    // gen of 0 is here, these regions were just allocated.
+                    gen: 0,
+                    opts: sled_agent_client::types::CrucibleOpts {
+                        target: datasets_and_regions
+                            .iter()
+                            .map(|(dataset, region)| {
+                                dataset
+                                    .address_with_port(region.port_number)
+                                    .to_string()
+                            })
+                            .collect(),
+
+                        lossy: false,
+
+                        // all downstairs will expect encrypted blocks
+                        key: Some(base64::encode({
+                            // TODO the current encryption key
+                            // requirement is 32 bytes, what if that
+                            // changes?
+                            let mut random_bytes: [u8; 32] = [0; 32];
+                            rng.fill_bytes(&mut random_bytes);
+                            random_bytes
+                        })),
+
+                        // TODO TLS, which requires sending X509 stuff during
+                        // downstairs region allocation too.
+                        cert_pem: None,
+                        key_pem: None,
+                        root_cert_pem: None,
+
+                        // TODO open a control socket for the whole volume, not
+                        // in the sub volumes
+                        control: None,
+                    },
+                },
+            ],
+            read_only_parent: None,
+        };
+
+    let volume_data = serde_json::to_string(&volume_construction_request)
+        .map_err(|e| {
+            ActionError::action_failed(Error::internal_error(&e.to_string()))
+        })?;
+
+    Ok(volume_data)
 }
 
 async fn delete_regions(
@@ -798,16 +1319,16 @@ async fn sdc_create_volume_record(
     let osagactx = sagactx.user_data();
 
     let volume_id = sagactx.lookup::<Uuid>("volume_id")?;
-    let volume = db::model::Volume::new(
-        volume_id,
-        // TODO: Patch this up with serialized contents that Crucible can use.
-        "Some Data".to_string(),
-    );
+    let volume_data = sagactx.lookup::<String>("regions_ensure")?;
+
+    let volume = db::model::Volume::new(volume_id, volume_data);
+
     let volume_created = osagactx
         .datastore()
         .volume_create(volume)
         .await
         .map_err(ActionError::action_failed)?;
+
     Ok(volume_created)
 }
 

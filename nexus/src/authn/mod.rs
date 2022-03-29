@@ -29,9 +29,11 @@ pub mod saga;
 
 pub use crate::db::fixed_data::user_builtin::USER_DB_INIT;
 pub use crate::db::fixed_data::user_builtin::USER_INTERNAL_API;
+pub use crate::db::fixed_data::user_builtin::USER_INTERNAL_READ;
 pub use crate::db::fixed_data::user_builtin::USER_SAGA_RECOVERY;
 pub use crate::db::fixed_data::user_builtin::USER_TEST_PRIVILEGED;
 pub use crate::db::fixed_data::user_builtin::USER_TEST_UNPRIVILEGED;
+use crate::db::model::ConsoleSession;
 
 use serde::Deserialize;
 use serde::Serialize;
@@ -63,15 +65,23 @@ impl Context {
     }
 
     /// Returns the authenticated actor if present, Unauthenticated error otherwise
-    pub fn actor_required(&self) -> Result<&Actor, dropshot::HttpError> {
+    pub fn actor_required(
+        &self,
+    ) -> Result<&Actor, omicron_common::api::external::Error> {
         match &self.kind {
             Kind::Authenticated(Details { actor }) => Ok(actor),
-            Kind::Unauthenticated => Err(dropshot::HttpError::from(
-                omicron_common::api::external::Error::Unauthenticated {
+            Kind::Unauthenticated => {
+                Err(omicron_common::api::external::Error::Unauthenticated {
                     internal_message: "Actor required".to_string(),
-                },
-            )),
+                })
+            }
         }
+    }
+
+    pub fn silo_required(
+        &self,
+    ) -> Result<Uuid, omicron_common::api::external::Error> {
+        self.actor_required().map(|actor| actor.silo_id)
     }
 
     /// Returns the list of schemes tried, in order
@@ -88,23 +98,39 @@ impl Context {
 
     /// Returns an authenticated context for handling internal API contexts
     pub fn internal_api() -> Context {
-        Context::context_for_actor(USER_INTERNAL_API.id)
+        Context::context_for_actor(
+            USER_INTERNAL_API.id,
+            USER_INTERNAL_API.silo_id,
+        )
     }
 
     /// Returns an authenticated context for saga recovery
     pub fn internal_saga_recovery() -> Context {
-        Context::context_for_actor(USER_SAGA_RECOVERY.id)
+        Context::context_for_actor(
+            USER_SAGA_RECOVERY.id,
+            USER_SAGA_RECOVERY.silo_id,
+        )
+    }
+
+    /// Returns an authenticated context for use by internal resource allocation
+    pub fn internal_read() -> Context {
+        Context::context_for_actor(
+            USER_INTERNAL_READ.id,
+            USER_INTERNAL_READ.silo_id,
+        )
     }
 
     /// Returns an authenticated context for Nexus-startup database
     /// initialization
     pub fn internal_db_init() -> Context {
-        Context::context_for_actor(USER_DB_INIT.id)
+        Context::context_for_actor(USER_DB_INIT.id, USER_DB_INIT.silo_id)
     }
 
-    fn context_for_actor(actor_id: Uuid) -> Context {
+    fn context_for_actor(actor_id: Uuid, silo_id: Uuid) -> Context {
         Context {
-            kind: Kind::Authenticated(Details { actor: Actor(actor_id) }),
+            kind: Kind::Authenticated(Details {
+                actor: Actor { id: actor_id, silo_id: silo_id },
+            }),
             schemes_tried: Vec::new(),
         }
     }
@@ -118,7 +144,10 @@ impl Context {
     ///
     /// This is used for testing.
     pub fn test_context_for_actor(actor_id: Uuid) -> Context {
-        Context::context_for_actor(actor_id)
+        Context::context_for_actor(
+            actor_id,
+            *crate::db::fixed_data::silo_builtin::SILO_ID,
+        )
     }
 }
 
@@ -127,6 +156,7 @@ mod test {
     use super::Context;
     use super::USER_DB_INIT;
     use super::USER_INTERNAL_API;
+    use super::USER_INTERNAL_READ;
     use super::USER_SAGA_RECOVERY;
     use super::USER_TEST_PRIVILEGED;
 
@@ -141,19 +171,23 @@ mod test {
         // The privileges are (or will be) verified in authz tests.
         let authn = Context::internal_test_user();
         let actor = authn.actor().unwrap();
-        assert_eq!(actor.0, USER_TEST_PRIVILEGED.id);
+        assert_eq!(actor.id, USER_TEST_PRIVILEGED.id);
+
+        let authn = Context::internal_read();
+        let actor = authn.actor().unwrap();
+        assert_eq!(actor.id, USER_INTERNAL_READ.id);
 
         let authn = Context::internal_db_init();
         let actor = authn.actor().unwrap();
-        assert_eq!(actor.0, USER_DB_INIT.id);
+        assert_eq!(actor.id, USER_DB_INIT.id);
 
         let authn = Context::internal_saga_recovery();
         let actor = authn.actor().unwrap();
-        assert_eq!(actor.0, USER_SAGA_RECOVERY.id);
+        assert_eq!(actor.id, USER_SAGA_RECOVERY.id);
 
         let authn = Context::internal_api();
         let actor = authn.actor().unwrap();
-        assert_eq!(actor.0, USER_INTERNAL_API.id);
+        assert_eq!(actor.id, USER_INTERNAL_API.id);
     }
 }
 
@@ -179,7 +213,17 @@ pub struct Details {
 
 /// Who is performing an operation
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
-pub struct Actor(pub Uuid);
+pub struct Actor {
+    pub id: Uuid, // silo user id
+    pub silo_id: Uuid,
+}
+
+/// A console session with the silo id of the authenticated user
+#[derive(Clone, Debug)]
+pub struct ConsoleSessionWithSiloId {
+    pub console_session: ConsoleSession,
+    pub silo_id: Uuid,
+}
 
 /// Label for a particular authentication scheme (used in log messages and
 /// internal error messages)
@@ -201,7 +245,6 @@ NewtypeDisplay! { () pub struct SchemeName(&'static str); }
 ///    type.  This will generally have a lot less information to avoid leaking
 ///    information to attackers, but it's still useful to distinguish between
 ///    400 and 401/403, for example.
-///
 #[derive(Debug, thiserror::Error)]
 #[error("authentication failed (tried schemes: {schemes_tried:?})")]
 pub struct Error {

@@ -2,20 +2,21 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use std::net::{IpAddr, Ipv4Addr};
-
-use dropshot::test_util::{
-    object_delete, object_get, objects_list_page, objects_post,
-};
 use dropshot::Method;
 use http::StatusCode;
+use nexus_test_utils::http_testing::AuthnMode;
+use nexus_test_utils::http_testing::NexusRequest;
+use nexus_test_utils::identity_eq;
+use nexus_test_utils::resource_helpers::objects_list_page_authz;
 use nexus_test_utils::ControlPlaneTestContext;
 use nexus_test_utils_macros::nexus_test;
 use omicron_common::api::external::{
-    IdentityMetadataCreateParams, IdentityMetadataUpdateParams, Name,
+    IdentityMetadataCreateParams, IdentityMetadataUpdateParams,
     RouteDestination, RouteTarget, RouterRoute, RouterRouteCreateParams,
     RouterRouteKind, RouterRouteUpdateParams,
 };
+use std::net::IpAddr;
+use std::net::Ipv4Addr;
 
 use nexus_test_utils::resource_helpers::{
     create_organization, create_project, create_router, create_vpc,
@@ -51,7 +52,7 @@ async fn test_router_routes(cptestctx: &ControlPlaneTestContext) {
     create_vpc(&client, organization_name, project_name, vpc_name).await;
 
     // Get the system router's routes
-    let system_router_routes = objects_list_page::<RouterRoute>(
+    let system_router_routes = objects_list_page_authz::<RouterRoute>(
         client,
         get_routes_url("system").as_str(),
     )
@@ -66,13 +67,18 @@ async fn test_router_routes(cptestctx: &ControlPlaneTestContext) {
     assert_eq!(default_route.kind, RouterRouteKind::Default);
 
     // It errors if you try to delete the default route
-    let error = client
-        .make_request_error(
-            Method::DELETE,
-            get_route_url("system", "default").as_str(),
-            StatusCode::METHOD_NOT_ALLOWED,
-        )
-        .await;
+    let error: dropshot::HttpErrorResponseBody = NexusRequest::expect_failure(
+        client,
+        StatusCode::METHOD_NOT_ALLOWED,
+        Method::DELETE,
+        get_route_url("system", "default").as_str(),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap()
+    .parsed_body()
+    .unwrap();
     assert_eq!(error.message, "DELETE not allowed on system routes");
 
     // Create a custom router
@@ -86,7 +92,7 @@ async fn test_router_routes(cptestctx: &ControlPlaneTestContext) {
     .await;
 
     // Get routes list for custom router
-    let routes = objects_list_page::<RouterRoute>(
+    let routes = objects_list_page_authz::<RouterRoute>(
         client,
         get_routes_url(router_name).as_str(),
     )
@@ -99,27 +105,40 @@ async fn test_router_routes(cptestctx: &ControlPlaneTestContext) {
     let route_url = get_route_url(router_name, route_name);
 
     // Create a new custom route
-    objects_post::<RouterRouteCreateParams, RouterRoute>(
+    let route_created: RouterRoute = NexusRequest::objects_post(
         client,
         get_routes_url(router_name).as_str(),
-        RouterRouteCreateParams {
+        &RouterRouteCreateParams {
             identity: IdentityMetadataCreateParams {
                 name: route_name.parse().unwrap(),
                 description: "It's a route, what else can I say?".to_string(),
             },
-            target: RouteTarget::Ip(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1))),
+            target: RouteTarget::Ip(IpAddr::from(Ipv4Addr::new(127, 0, 0, 1))),
             destination: RouteDestination::Subnet("loopback".parse().unwrap()),
         },
     )
-    .await;
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap()
+    .parsed_body()
+    .unwrap();
+    assert_eq!(route_created.identity.name.to_string(), route_name);
 
     // Get the route and verify its state
-    let route = object_get::<RouterRoute>(client, route_url.as_str()).await;
-    assert_eq!(route.identity.name, route_name.parse::<Name>().unwrap());
+    let route: RouterRoute =
+        NexusRequest::object_get(client, route_url.as_str())
+            .authn_as(AuthnMode::PrivilegedUser)
+            .execute()
+            .await
+            .unwrap()
+            .parsed_body()
+            .unwrap();
+    identity_eq(&route_created.identity, &route.identity);
     assert_eq!(route.kind, RouterRouteKind::Custom);
     assert_eq!(
         route.target,
-        RouteTarget::Ip(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)))
+        RouteTarget::Ip(IpAddr::from(Ipv4Addr::new(127, 0, 0, 1)))
     );
     assert_eq!(
         route.destination,
@@ -127,42 +146,53 @@ async fn test_router_routes(cptestctx: &ControlPlaneTestContext) {
     );
 
     // Ensure a route can be updated
-    client
-        .make_request(
-            Method::PUT,
-            route_url.as_str(),
-            Some(RouterRouteUpdateParams {
-                identity: IdentityMetadataUpdateParams {
-                    name: Some(route_name.parse().unwrap()),
-                    description: None,
-                },
-                target: RouteTarget::Ip(IpAddr::V4(Ipv4Addr::new(
-                    192, 168, 1, 1,
-                ))),
-                destination: RouteDestination::Subnet(
-                    "loopback".parse().unwrap(),
-                ),
-            }),
-            StatusCode::NO_CONTENT,
-        )
-        .await
-        .unwrap();
-    let route = object_get::<RouterRoute>(client, route_url.as_str()).await;
-
+    NexusRequest::object_put(
+        client,
+        route_url.as_str(),
+        Some(&RouterRouteUpdateParams {
+            identity: IdentityMetadataUpdateParams {
+                name: Some(route_name.parse().unwrap()),
+                description: None,
+            },
+            target: RouteTarget::Ip(IpAddr::from(Ipv4Addr::new(
+                192, 168, 1, 1,
+            ))),
+            destination: RouteDestination::Subnet("loopback".parse().unwrap()),
+        }),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap();
+    let route: RouterRoute =
+        NexusRequest::object_get(client, route_url.as_str())
+            .authn_as(AuthnMode::PrivilegedUser)
+            .execute()
+            .await
+            .unwrap()
+            .parsed_body()
+            .unwrap();
     assert_eq!(route.identity.name, route_name);
     assert_eq!(
         route.target,
-        RouteTarget::Ip(IpAddr::V4(Ipv4Addr::new(192, 168, 1, 1,)))
+        RouteTarget::Ip(IpAddr::from(Ipv4Addr::new(192, 168, 1, 1,)))
     );
 
-    object_delete(client, route_url.as_str()).await;
+    NexusRequest::object_delete(client, route_url.as_str())
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .unwrap();
 
     // Requesting the deleted route 404s
-    client
-        .make_request_error(
-            Method::GET,
-            get_route_url(router_name, route_name).as_str(),
-            StatusCode::NOT_FOUND,
-        )
-        .await;
+    NexusRequest::expect_failure(
+        client,
+        StatusCode::NOT_FOUND,
+        Method::GET,
+        get_route_url(router_name, route_name).as_str(),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap();
 }

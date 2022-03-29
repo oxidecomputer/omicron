@@ -2,13 +2,11 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-/*!
- * Handler functions (entrypoints) for console-related routes.
- *
- * This was originally conceived as a separate dropshot server from the external API,
- * but in order to avoid CORS issues for now, we are serving these routes directly
- * from the external API.
- */
+//! Handler functions (entrypoints) for console-related routes.
+//!
+//! This was originally conceived as a separate dropshot server from the external API,
+//! but in order to avoid CORS issues for now, we are serving these routes directly
+//! from the external API.
 use super::views;
 use crate::authn::external::{
     cookies::Cookies,
@@ -67,10 +65,10 @@ pub async fn spoof_login(
             .body("".into())?); // TODO: failed login response body?
     }
 
-    let session = nexus
-        // TODO: obviously
-        .session_create(user_id.unwrap())
-        .await?;
+    let user_id = user_id.unwrap();
+
+    let session = nexus.session_create(user_id).await?;
+
     Ok(Response::builder()
         .status(StatusCode::OK)
         .header(
@@ -181,7 +179,6 @@ fn get_login_url(state: Option<String>) -> String {
 }
 
 /// Redirect to IdP login URL
-//
 // Currently hard-coded to redirect to our own fake login form.
 #[endpoint {
    method = GET,

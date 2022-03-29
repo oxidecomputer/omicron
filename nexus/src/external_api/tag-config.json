@@ -1,0 +1,120 @@
+{
+  "allow_other_tags": false,
+  "endpoint_tag_policy": "ExactlyOne",
+  "tag_definitions": {
+    "disks": {
+      "description": "Virtual disks are used to store instance-local data which includes the operating system.",
+      "external_docs": {
+        "url": "http://oxide.computer/docs/#xxx"
+      }
+    },
+    "firewall": {
+      "description": "Firewall operation controls the flow of network data into a VPC",
+      "external_docs": {
+        "url": "http://oxide.computer/docs/#xxx"
+      }
+    },
+    "hidden": {
+      "description": "TODO operations that will not ship to customers",
+      "external_docs": {
+        "url": "http://oxide.computer/docs/#xxx"
+      }
+    },
+    "instances": {
+      "description": "Virtual machine instances are the basic unit of computation. These operations are used for provisioning, controlling, and destroying instances.",
+      "external_docs": {
+        "url": "http://oxide.computer/docs/#xxx"
+      }
+    },
+    "metrics": {
+      "description": "Metrics provide insight into the operation of the Oxide deployment. These include telemetry on hardware and software components that can be used to understand the current state as well as to diagnose issues.",
+      "external_docs": {
+        "url": "http://oxide.computer/docs/#xxx"
+      }
+    },
+    "silos": {
+      "description": "Silos represent a logical partition of users and resources.",
+      "external_docs": {
+        "url": "http://oxide.computer/docs/#xxx"
+      }
+    },
+    "organizations": {
+      "description": "Organizations represent a subset of users and projects in an Oxide deployment.",
+      "external_docs": {
+        "url": "http://oxide.computer/docs/#xxx"
+      }
+    },
+    "projects": {
+      "description": "Projects are a grouping of associated resources such as instances and disks within an organization for purposes of billing and access control.",
+      "external_docs": {
+        "url": "http://oxide.computer/docs/#xxx"
+      }
+    },
+    "racks": {
+      "description": "These operations pertain to hardware inventory and management. Racks are the unit of expansion of an Oxide deployment. Racks are in turn composed of sleds, switches, power supplies, and a cabled backplane.",
+      "external_docs": {
+        "url": "http://oxide.computer/docs/#xxx"
+      }
+    },
+    "roles": {
+      "description": "Roles are a component of Identity and Access Management (IAM) that allow a user or agent account access to additional permissions.",
+      "external_docs": {
+        "url": "http://oxide.computer/docs/#xxx"
+      }
+    },
+    "routers": {
+      "description": "Routers direct the flow of network traffic into, out of, and within a VPC via routes.",
+      "external_docs": {
+        "url": "http://oxide.computer/docs/#xxx"
+      }
+    },
+    "routes": {
+      "description": "Routes define router policy.",
+      "external_docs": {
+        "url": "http://oxide.computer/docs/#xxx"
+      }
+    },
+    "sagas": {
+      "description": "Sagas are the abstraction used to represent multi-step operations within the Oxide deployment. These operations can be used to query saga status and report errors.",
+      "external_docs": {
+        "url": "http://oxide.computer/docs/#xxx"
+      }
+    },
+    "sleds": {
+      "description": "This tag should be moved into hardware",
+      "external_docs": {
+        "url": "http://oxide.computer/docs/#xxx"
+      }
+    },
+    "snapshots": {
+      "description": "Snapshots of Virtual Disks at a particular point in time.",
+      "external_docs": {
+        "url": "http://oxide.computer/docs/#xxx"
+      }
+    },
+    "subnets": {
+      "description": "This tag should be moved into a generic network tag",
+      "external_docs": {
+        "url": "http://oxide.computer/docs/#xxx"
+      }
+    },
+    "updates": {
+      "description": "This tag should be moved into a operations tag",
+      "external_docs": {
+        "url": "http://oxide.computer/docs/#xxx"
+      }
+    },
+    "users": {
+      "description": "This tag should be moved into an IAM tag",
+      "external_docs": {
+        "url": "http://oxide.computer/docs/#xxx"
+      }
+    },
+    "vpcs": {
+      "description": "A Virtual Private Cloud (VPC) is an isolated network environment that should probaby be moved into a more generic networking tag",
+      "external_docs": {
+        "url": "http://oxide.computer/docs/#xxx"
+      }
+    }
+  }
+}

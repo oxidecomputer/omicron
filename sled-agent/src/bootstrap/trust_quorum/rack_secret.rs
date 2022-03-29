@@ -58,7 +58,6 @@ impl Eq for RackSecret {}
 /// We use verifiable secret sharing to detect invalid shares from being
 /// combined and generating an incorrect secret. Each share must be verified
 /// before the secret is reconstructed.
-//
 // This is just a wrapper around a FeldmanVerifier from the vsss-rs crate.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Verifier {

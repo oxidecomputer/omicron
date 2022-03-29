@@ -27,7 +27,7 @@ pub mod http_testing;
 pub mod resource_helpers;
 
 pub const SLED_AGENT_UUID: &str = "b6d65341-167c-41df-9b5c-41cded99c229";
-const RACK_UUID: &str = "c19a698f-c6f9-4a17-ae30-20d711b8f7dc";
+pub const RACK_UUID: &str = "c19a698f-c6f9-4a17-ae30-20d711b8f7dc";
 pub const OXIMETER_UUID: &str = "39e6175b-4df2-4730-b11d-cbc1e60a2e78";
 pub const PRODUCER_UUID: &str = "a6458b7d-87c3-4483-be96-854d814c20de";
 
@@ -57,23 +57,21 @@ impl ControlPlaneTestContext {
 }
 
 pub fn load_test_config() -> omicron_nexus::Config {
-    /*
-     * We load as much configuration as we can from the test suite configuration
-     * file.  In practice, TestContext requires that:
-     *
-     * - the Nexus TCP listen port be 0,
-     * - the CockroachDB TCP listen port be 0, and
-     * - if the log will go to a file then the path must be the sentinel value
-     *   "UNUSED".
-     * - each Nexus created for testing gets its own id so they don't see each
-     *   others sagas and try to recover them
-     *
-     * (See LogContext::new() for details.)  Given these restrictions, it may
-     * seem barely worth reading a config file at all.  However, developers can
-     * change the logging level and local IP if they want, and as we add more
-     * configuration options, we expect many of those can be usefully configured
-     * (and reconfigured) for the test suite.
-     */
+    // We load as much configuration as we can from the test suite configuration
+    // file.  In practice, TestContext requires that:
+    //
+    // - the Nexus TCP listen port be 0,
+    // - the CockroachDB TCP listen port be 0, and
+    // - if the log will go to a file then the path must be the sentinel value
+    //   "UNUSED".
+    // - each Nexus created for testing gets its own id so they don't see each
+    //   others sagas and try to recover them
+    //
+    // (See LogContext::new() for details.)  Given these restrictions, it may
+    // seem barely worth reading a config file at all.  However, developers can
+    // change the logging level and local IP if they want, and as we add more
+    // configuration options, we expect many of those can be usefully configured
+    // (and reconfigured) for the test suite.
     let config_file_path = Path::new("tests/config.test.toml");
     let mut config = omicron_nexus::Config::from_file(config_file_path)
         .expect("failed to load config.test.toml");
@@ -94,13 +92,13 @@ pub async fn test_setup_with_config(
     let rack_id = Uuid::parse_str(RACK_UUID).unwrap();
     let log = &logctx.log;
 
-    /* Start up CockroachDB. */
+    // Start up CockroachDB.
     let database = db::test_setup_database(log).await;
 
-    /* Start ClickHouse database server. */
+    // Start ClickHouse database server.
     let clickhouse = dev::clickhouse::ClickHouseInstance::new(0).await.unwrap();
 
-    /* Store actual address/port information for the databases after they start. */
+    // Store actual address/port information for the databases after they start.
     config.database.url = database.pg_config().clone();
     config.timeseries_db.address.set_port(clickhouse.port());
 
@@ -123,7 +121,7 @@ pub async fn test_setup_with_config(
         logctx.log.new(o!("component" => "internal client test context")),
     );
 
-    /* Set up a single sled agent. */
+    // Set up a single sled agent.
     let sa_id = Uuid::parse_str(SLED_AGENT_UUID).unwrap();
     let sled_agent = start_sled_agent(
         logctx.log.new(o!(
@@ -179,9 +177,10 @@ pub async fn start_sled_agent(
         nexus_address,
         dropshot: ConfigDropshot {
             bind_address: SocketAddr::new("127.0.0.1".parse().unwrap(), 0),
+            request_body_max_bytes: 1024 * 1024,
             ..Default::default()
         },
-        /* TODO-cleanup this is unused */
+        // TODO-cleanup this is unused
         log: ConfigLogging::StderrTerminal { level: ConfigLoggingLevel::Debug },
         storage: sim::ConfigStorage {
             zpools: vec![],
@@ -290,7 +289,7 @@ pub async fn start_producer_server(
     Ok(server)
 }
 
-/** Returns whether the two identity metadata objects are identical. */
+/// Returns whether the two identity metadata objects are identical.
 pub fn identity_eq(ident1: &IdentityMetadata, ident2: &IdentityMetadata) {
     assert_eq!(ident1.id, ident2.id);
     assert_eq!(ident1.name, ident2.name);

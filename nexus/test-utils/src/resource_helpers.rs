@@ -2,9 +2,9 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+use crate::http_testing::RequestBuilder;
 use crate::ControlPlaneTestContext;
 
-use super::http_testing::dropshot_compat::objects_post;
 use super::http_testing::AuthnMode;
 use super::http_testing::NexusRequest;
 use dropshot::test_util::ClientTestContext;
@@ -16,10 +16,11 @@ use omicron_common::api::external::Disk;
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::Instance;
 use omicron_common::api::external::InstanceCpuCount;
-use omicron_common::api::external::VpcRouter;
 use omicron_nexus::crucible_agent_client::types::State as RegionState;
 use omicron_nexus::external_api::params;
-use omicron_nexus::external_api::views::{Organization, Project, Vpc};
+use omicron_nexus::external_api::views::{
+    Organization, Project, Silo, Vpc, VpcRouter,
+};
 use omicron_sled_agent::sim::SledAgent;
 use std::sync::Arc;
 use uuid::Uuid;
@@ -56,6 +57,25 @@ where
         .expect("failed to make \"create\" request")
         .parsed_body()
         .unwrap()
+}
+
+pub async fn create_silo(
+    client: &ClientTestContext,
+    silo_name: &str,
+    discoverable: bool,
+) -> Silo {
+    object_create(
+        client,
+        "/silos",
+        &params::SiloCreate {
+            identity: IdentityMetadataCreateParams {
+                name: silo_name.parse().unwrap(),
+                description: "a silo".to_string(),
+            },
+            discoverable,
+        },
+    )
+    .await
 }
 
 pub async fn create_organization(
@@ -140,6 +160,9 @@ pub async fn create_instance(
             ncpus: InstanceCpuCount(4),
             memory: ByteCount::from_mebibytes_u32(256),
             hostname: String::from("the_host"),
+            network_interfaces:
+                params::InstanceNetworkInterfaceAttachment::Default,
+            disks: vec![],
         },
     )
     .await
@@ -151,14 +174,14 @@ pub async fn create_vpc(
     project_name: &str,
     vpc_name: &str,
 ) -> Vpc {
-    objects_post(
+    object_create(
         &client,
         format!(
             "/organizations/{}/projects/{}/vpcs",
             &organization_name, &project_name
         )
         .as_str(),
-        params::VpcCreate {
+        &params::VpcCreate {
             identity: IdentityMetadataCreateParams {
                 name: vpc_name.parse().unwrap(),
                 description: "vpc description".to_string(),
@@ -179,25 +202,32 @@ pub async fn create_vpc_with_error(
     vpc_name: &str,
     status: StatusCode,
 ) -> HttpErrorResponseBody {
-    client
-        .make_request_error_body(
+    NexusRequest::new(
+        RequestBuilder::new(
+            client,
             Method::POST,
             format!(
                 "/organizations/{}/projects/{}/vpcs",
                 &organization_name, &project_name
             )
             .as_str(),
-            params::VpcCreate {
-                identity: IdentityMetadataCreateParams {
-                    name: vpc_name.parse().unwrap(),
-                    description: String::from("vpc description"),
-                },
-                ipv6_prefix: None,
-                dns_name: "abc".parse().unwrap(),
-            },
-            status,
         )
-        .await
+        .body(Some(&params::VpcCreate {
+            identity: IdentityMetadataCreateParams {
+                name: vpc_name.parse().unwrap(),
+                description: String::from("vpc description"),
+            },
+            ipv6_prefix: None,
+            dns_name: "abc".parse().unwrap(),
+        }))
+        .expect_status(Some(status)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap()
+    .parsed_body()
+    .unwrap()
 }
 
 pub async fn create_router(
@@ -207,21 +237,26 @@ pub async fn create_router(
     vpc_name: &str,
     router_name: &str,
 ) -> VpcRouter {
-    objects_post(
+    NexusRequest::objects_post(
         &client,
         format!(
             "/organizations/{}/projects/{}/vpcs/{}/routers",
             &organization_name, &project_name, &vpc_name
         )
         .as_str(),
-        params::VpcRouterCreate {
+        &params::VpcRouterCreate {
             identity: IdentityMetadataCreateParams {
                 name: router_name.parse().unwrap(),
                 description: String::from("router description"),
             },
         },
     )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
     .await
+    .unwrap()
+    .parsed_body()
+    .unwrap()
 }
 
 pub async fn project_get(

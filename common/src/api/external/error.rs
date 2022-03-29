@@ -2,11 +2,9 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-/*!
- * Error handling facilities for the Oxide control plane
- *
- * For HTTP-level error handling, see Dropshot.
- */
+//! Error handling facilities for the Oxide control plane
+//!
+//! For HTTP-level error handling, see Dropshot.
 
 use crate::api::external::Name;
 use crate::api::external::ResourceType;
@@ -15,65 +13,61 @@ use serde::Deserialize;
 use serde::Serialize;
 use uuid::Uuid;
 
-/**
- * An error that can be generated within a control plane component
- *
- * These may be generated while handling a client request or as part of
- * background operation.  When generated as part of an HTTP request, an
- * `Error` will be converted into an HTTP error as one of the last steps in
- * processing the request.  This allows most of the system to remain agnostic to
- * the transport with which the system communicates with clients.
- *
- * General best practices for error design apply here.  Where possible, we want
- * to reuse existing variants rather than inventing new ones to distinguish
- * cases that no programmatic consumer needs to distinguish.
- */
+/// An error that can be generated within a control plane component
+///
+/// These may be generated while handling a client request or as part of
+/// background operation.  When generated as part of an HTTP request, an
+/// `Error` will be converted into an HTTP error as one of the last steps in
+/// processing the request.  This allows most of the system to remain agnostic to
+/// the transport with which the system communicates with clients.
+///
+/// General best practices for error design apply here.  Where possible, we want
+/// to reuse existing variants rather than inventing new ones to distinguish
+/// cases that no programmatic consumer needs to distinguish.
 #[derive(Debug, Deserialize, thiserror::Error, PartialEq, Serialize)]
 pub enum Error {
-    /** An object needed as part of this operation was not found. */
+    /// An object needed as part of this operation was not found.
     #[error("Object (of type {lookup_type:?}) not found: {type_name}")]
     ObjectNotFound { type_name: ResourceType, lookup_type: LookupType },
-    /** An object already exists with the specified name or identifier. */
+    /// An object already exists with the specified name or identifier.
     #[error("Object (of type {type_name:?}) already exists: {object_name}")]
     ObjectAlreadyExists { type_name: ResourceType, object_name: String },
-    /**
-     * The request was well-formed, but the operation cannot be completed given
-     * the current state of the system.
-     */
+    /// The request was well-formed, but the operation cannot be completed given
+    /// the current state of the system.
     #[error("Invalid Request: {message}")]
     InvalidRequest { message: String },
-    /**
-     * Authentication credentials were required but either missing or invalid.
-     * The HTTP status code is called "Unauthorized", but it's more accurate to
-     * call it "Unauthenticated".
-     */
+    /// Authentication credentials were required but either missing or invalid.
+    /// The HTTP status code is called "Unauthorized", but it's more accurate to
+    /// call it "Unauthenticated".
     #[error("Missing or invalid credentials")]
     Unauthenticated { internal_message: String },
-    /** The specified input field is not valid. */
+    /// The specified input field is not valid.
     #[error("Invalid Value: {label}, {message}")]
     InvalidValue { label: String, message: String },
-    /** The request is not authorized to perform the requested operation. */
+    /// The request is not authorized to perform the requested operation.
     #[error("Forbidden")]
     Forbidden,
 
-    /** The system encountered an unhandled operational error. */
+    /// The system encountered an unhandled operational error.
     #[error("Internal Error: {internal_message}")]
     InternalError { internal_message: String },
-    /** The system (or part of it) is unavailable. */
+    /// The system (or part of it) is unavailable.
     #[error("Service Unavailable: {internal_message}")]
     ServiceUnavailable { internal_message: String },
-    /** Method Not Allowed */
+    /// Method Not Allowed
     #[error("Method Not Allowed: {internal_message}")]
     MethodNotAllowed { internal_message: String },
 }
 
-/** Indicates how an object was looked up (for an `ObjectNotFound` error) */
+/// Indicates how an object was looked up (for an `ObjectNotFound` error)
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub enum LookupType {
-    /** a specific name was requested */
+    /// a specific name was requested
     ByName(String),
-    /** a specific id was requested */
+    /// a specific id was requested
     ById(Uuid),
+    /// a session token was requested
+    BySessionToken(String),
 }
 
 impl LookupType {
@@ -97,10 +91,8 @@ impl From<&Name> for LookupType {
 }
 
 impl Error {
-    /**
-     * Returns whether the error is likely transient and could reasonably be
-     * retried
-     */
+    /// Returns whether the error is likely transient and could reasonably be
+    /// retried
     pub fn retryable(&self) -> bool {
         match self {
             Error::ServiceUnavailable { .. } => true,
@@ -116,70 +108,61 @@ impl Error {
         }
     }
 
-    /**
-     * Generates an [`Error::ObjectNotFound`] error for a lookup by object
-     * name.
-     */
+    /// Generates an [`Error::ObjectNotFound`] error for a lookup by object
+    /// name.
     pub fn not_found_by_name(type_name: ResourceType, name: &Name) -> Error {
         LookupType::from(name).into_not_found(type_name)
     }
 
-    /**
-     * Generates an [`Error::ObjectNotFound`] error for a lookup by object id.
-     */
+    /// Generates an [`Error::ObjectNotFound`] error for a lookup by object id.
     pub fn not_found_by_id(type_name: ResourceType, id: &Uuid) -> Error {
         LookupType::ById(*id).into_not_found(type_name)
     }
 
-    /**
-     * Generates an [`Error::InternalError`] error with the specific message
-     *
-     * InternalError should be used for operational conditions that should not
-     * happen but that we cannot reasonably handle at runtime (e.g.,
-     * deserializing a value from the database, or finding two records for
-     * something that is supposed to be unique).
-     */
+    /// Generates an [`Error::InternalError`] error with the specific message
+    ///
+    /// InternalError should be used for operational conditions that should not
+    /// happen but that we cannot reasonably handle at runtime (e.g.,
+    /// deserializing a value from the database, or finding two records for
+    /// something that is supposed to be unique).
     pub fn internal_error(internal_message: &str) -> Error {
         Error::InternalError { internal_message: internal_message.to_owned() }
     }
 
-    /**
-     * Generates an [`Error::InvalidRequest`] error with the specific message
-     *
-     * This should be used for failures due possibly to invalid client input
-     * or malformed requests.
-     */
+    /// Generates an [`Error::InvalidRequest`] error with the specific message
+    ///
+    /// This should be used for failures due possibly to invalid client input
+    /// or malformed requests.
     pub fn invalid_request(message: &str) -> Error {
         Error::InvalidRequest { message: message.to_owned() }
     }
 
-    /**
-     * Generates an [`Error::ServiceUnavailable`] error with the specific
-     * message
-     *
-     * This should be used for transient failures where the caller might be
-     * expected to retry.  Logic errors or other problems indicating that a
-     * retry would not work should probably be an InternalError (if it's a
-     * server problem) or InvalidRequest (if it's a client problem) instead.
-     */
+    /// Generates an [`Error::ServiceUnavailable`] error with the specific
+    /// message
+    ///
+    /// This should be used for transient failures where the caller might be
+    /// expected to retry.  Logic errors or other problems indicating that a
+    /// retry would not work should probably be an InternalError (if it's a
+    /// server problem) or InvalidRequest (if it's a client problem) instead.
     pub fn unavail(message: &str) -> Error {
         Error::ServiceUnavailable { internal_message: message.to_owned() }
     }
 }
 
 impl From<Error> for HttpError {
-    /**
-     * Converts an `Error` error into an `HttpError`.  This defines how
-     * errors that are represented internally using `Error` are ultimately
-     * exposed to clients over HTTP.
-     */
+    /// Converts an `Error` error into an `HttpError`.  This defines how
+    /// errors that are represented internally using `Error` are ultimately
+    /// exposed to clients over HTTP.
     fn from(error: Error) -> HttpError {
         match error {
             Error::ObjectNotFound { type_name: t, lookup_type: lt } => {
-                /* TODO-cleanup is there a better way to express this? */
+                // TODO-cleanup is there a better way to express this?
                 let (lookup_field, lookup_value) = match lt {
                     LookupType::ByName(name) => ("name", name),
                     LookupType::ById(id) => ("id", id.to_string()),
+                    LookupType::BySessionToken(token) => {
+                        ("session token", token)
+                    }
                 };
                 let message = format!(
                     "not found: {} with {} \"{}\"",
@@ -318,11 +301,15 @@ impl<T: ClientError> From<progenitor::progenitor_client::Error<T>> for Error {
     }
 }
 
-/**
- * Like [`assert!`], except that instead of panicking, this function returns an
- * `Err(Error::InternalError)` with an appropriate message if the given
- * condition is not true.
- */
+impl From<serde_json::Error> for Error {
+    fn from(e: serde_json::Error) -> Self {
+        Error::internal_error(&e.to_string())
+    }
+}
+
+/// Like [`assert!`], except that instead of panicking, this function returns an
+/// `Err(Error::InternalError)` with an appropriate message if the given
+/// condition is not true.
 #[macro_export]
 macro_rules! bail_unless {
     ($cond:expr $(,)?) => {
@@ -343,7 +330,7 @@ mod test {
     #[test]
     fn test_bail_unless() {
         #![allow(clippy::eq_op)]
-        /* Success cases */
+        // Success cases
         let no_bail = || {
             bail_unless!(1 + 1 == 2, "wrong answer: {}", 3);
             Ok(())
@@ -355,7 +342,7 @@ mod test {
         assert_eq!(Ok(()), no_bail());
         assert_eq!(Ok(()), no_bail_label_args());
 
-        /* Failure cases */
+        // Failure cases
         let do_bail = || {
             bail_unless!(1 + 1 == 3);
             Ok(())
