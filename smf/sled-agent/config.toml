@@ -15,6 +15,11 @@ zpools = [
   "oxp_f4b4dc87-ab46-49fb-a4b4-d361ae214c03",
 ]
 
+# An optional data link on which VNICs should be created.
+# If empty, this will be equivalent to the first result from:
+# $ dladm show-phys -p -o LINK
+# data_link = "igb0"
+
 # Address of the Sled Agent itself
 #
 # With the usage of non-global zones, we no longer can use localhost addresses,
