@@ -466,11 +466,12 @@ fn record_operation(whichtest: WhichTest<'_>) {
     // the mess of numbers that shows up in the table for the different response
     // codes.
     let t = term::stdout();
-    if let Some(term) = t {
-        t.fg(term::color::GREEN).unwrap();
-    }
-    write!(t, "{}", c).unwrap();
-    if let Some(term) = t {
-        t.reset().unwrap();
+    if let Some(mut term) = t {
+        term.fg(term::color::GREEN).unwrap();
+        write!(term, "{}", c).unwrap();
+        term.reset().unwrap();
+        term.flush().unwrap();
+    } else {
+        print!("{}", c);
     }
 }
