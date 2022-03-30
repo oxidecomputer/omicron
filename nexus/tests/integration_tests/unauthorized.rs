@@ -76,21 +76,17 @@ async fn test_unauthorized(cptestctx: &ControlPlaneTestContext) {
 const VERIFY_HEADER: &str = r#"
 SUMMARY OF REQUESTS MADE
 
-KEY:
+KEY, USING HEADER AND EXAMPLE ROW:
 
           +----------------------------> privileged GET (expects 200)
           |                              (digit = last digit of 200-level
           |                              response)
           |
-          |   +----+----+----+----+----> HTTP methods tested (see below)
-          |   |    |    |    |    |      (digit = last digit of 400-level
-          |   |    |    |    |    |       response)
-          |   |    |    |    |    |
-          |   |    |    |    |    |  +-> privileged GET (expects same as above)
-          |   |    |    |    |    |  |   (digit = last digit of 200-level
-          |   |    |    |    |    |  |    response)
-          |  _|   _|   _|   _|   _|  |   ('-' => skipped (N/A))
-          ^ /  \ /  \ /  \ /  \ /  \ ^
+          |                          +-> privileged GET (expects same as above)
+          |                          |   (digit = last digit of 200-level
+          |                          |    response)
+          |                          |   ('-' => skipped (N/A))
+          ^                          ^
 HEADER:   G GET  PUT  POST DEL  TRCE G  URL
 EXAMPLE:  0 3111 5555 3111 5555 5555 0  /organizations
     ROW     ^^^^
@@ -99,6 +95,12 @@ EXAMPLE:  0 3111 5555 3111 5555 5555 0  /organizations
              +||----------------------< unauthenticated request
               +|----------------------< bad authentication: no such user
                +----------------------< bad authentication: invalid syntax
+
+            \__/ \__/ \__/ \__/ \__/
+            GET  PUT  etc.  The test cases are repeated for each HTTP method.
+
+            The number in each cell is the last digit of the 400-level response
+            that was expected for this test case.
 
     In this case, an unauthenthicated request to "GET /organizations" returned
     401.  All requests to "PUT /organizations" returned 405.
