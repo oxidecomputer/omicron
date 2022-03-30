@@ -67,9 +67,9 @@ pub struct Config {
     authz_kind: AuthzKind,
 
     // The path to the resource
-    /// list of `authz` types for this resource and its parents
-    /// (e.g., [`authz::Organization`, `authz::Project`])
-    path_authz_types: Vec<TokenStream>,
+    /// list of type names for this resource and its parents
+    /// (e.g., [`Organization`, `Project`])
+    path_types: Vec<syn::Ident>,
 
     /// list of identifiers used for the authz objects for this resource and its
     /// parents, in the same order as `authz_path_types`
@@ -144,30 +144,21 @@ pub fn lookup_resource(
 fn configure(input: Input) -> Config {
     let resource = Resource::for_name(&input.name);
 
-    // XXX-dap TODO Can we just make this an array of the PascalCase
-    // identifiers?
-    let mut path_authz_types: Vec<_> = input
-        .ancestors
-        .iter()
-        .map(|a| {
-            let name = format_ident!("{}", a);
-            quote! { authz::#name }
-        })
-        .collect();
-    path_authz_types.push(resource.authz_type.clone());
+    let mut path_types: Vec<_> =
+        input.ancestors.iter().map(|a| format_ident!("{}", a)).collect();
+    path_types.push(resource.name.clone());
 
-    let authz_ancestors_values: Vec<_> = input
+    let mut path_authz_names: Vec<_> = input
         .ancestors
         .iter()
         .map(|a| format_ident!("authz_{}", heck::AsSnakeCase(&a).to_string()))
         .collect();
-    let mut path_authz_names = authz_ancestors_values.clone();
     path_authz_names.push(resource.authz_name.clone());
 
     Config {
         resource,
         authz_kind: input.authz_kind,
-        path_authz_types,
+        path_types,
         path_authz_names,
         parent: input.ancestors.last().map(|s| Resource::for_name(&s)),
         child_resources: input.children,
@@ -296,8 +287,8 @@ fn generate_misc_helpers(config: &Config) -> TokenStream {
 /// Generates the lookup-related methods, including the public ones (`fetch()`,
 /// `fetch_for()`, and `lookup_for()`) and the private helper (`lookup()`).
 fn generate_lookup_methods(config: &Config) -> TokenStream {
+    let path_types = &config.path_types;
     let path_authz_names = &config.path_authz_names;
-    let path_authz_types = &config.path_authz_types;
     let resource_authz_name = &config.resource.authz_name;
     let resource_model_type = &config.resource.model_type;
     let (ancestors_authz_names_assign, parent_lookup_arg_actual) =
@@ -321,7 +312,7 @@ fn generate_lookup_methods(config: &Config) -> TokenStream {
         /// This is equivalent to `fetch_for(authz::Action::Read)`.
         pub async fn fetch(
             &self,
-        ) -> LookupResult<(#(#path_authz_types,)* #resource_model_type)> {
+        ) -> LookupResult<(#(authz::#path_types,)* #resource_model_type)> {
             self.fetch_for(authz::Action::Read).await
         }
 
@@ -337,7 +328,7 @@ fn generate_lookup_methods(config: &Config) -> TokenStream {
         pub async fn fetch_for(
             &self,
             action: authz::Action,
-        ) -> LookupResult<(#(#path_authz_types,)* #resource_model_type)> {
+        ) -> LookupResult<(#(authz::#path_types,)* #resource_model_type)> {
             let lookup = self.lookup_root();
             let opctx = &lookup.opctx;
             let datastore = &lookup.datastore;
@@ -377,7 +368,7 @@ fn generate_lookup_methods(config: &Config) -> TokenStream {
         pub async fn lookup_for(
             &self,
             action: authz::Action,
-        ) -> LookupResult<(#(#path_authz_types,)*)> {
+        ) -> LookupResult<(#(authz::#path_types,)*)> {
             let lookup = self.lookup_root();
             let opctx = &lookup.opctx;
             let (#(#path_authz_names,)*) = self.lookup().await?;
@@ -395,7 +386,7 @@ fn generate_lookup_methods(config: &Config) -> TokenStream {
         // lookup_for().  It's exposed in a safer way via lookup_for().
         async fn lookup(
             &self,
-        ) -> LookupResult<(#(#path_authz_types,)*)> {
+        ) -> LookupResult<(#(authz::#path_types,)*)> {
             let lookup = self.lookup_root();
             let opctx = &lookup.opctx;
             let datastore = &lookup.datastore;
@@ -457,8 +448,8 @@ fn generate_database_functions(config: &Config) -> TokenStream {
     let resource_authz_name = &config.resource.authz_name;
     let resource_model_type = &config.resource.model_type;
     let resource_as_snake = format_ident!("{}", &config.resource.name_as_snake);
+    let path_types = &config.path_types;
     let path_authz_names = &config.path_authz_names;
-    let path_authz_types = &config.path_authz_types;
     let (
         parent_lookup_arg_formal,
         parent_lookup_arg_actual,
@@ -567,7 +558,7 @@ fn generate_database_functions(config: &Config) -> TokenStream {
             datastore: &DataStore,
             id: Uuid,
             action: authz::Action,
-        ) -> LookupResult<(#(#path_authz_types,)* #resource_model_type)> {
+        ) -> LookupResult<(#(authz::#path_types,)* #resource_model_type)> {
             let (#(#path_authz_names,)* db_row) =
                 Self::lookup_by_id_no_authz(
                     opctx,
@@ -589,7 +580,7 @@ fn generate_database_functions(config: &Config) -> TokenStream {
             _opctx: &OpContext,
             datastore: &DataStore,
             id: Uuid,
-        ) -> LookupResult<(#(#path_authz_types,)* #resource_model_type)> {
+        ) -> LookupResult<(#(authz::#path_types,)* #resource_model_type)> {
             use db::schema::#resource_as_snake::dsl;
 
             // TODO-security This could use pool_authorized() instead.
