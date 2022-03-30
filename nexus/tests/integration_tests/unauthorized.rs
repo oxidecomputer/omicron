@@ -465,8 +465,12 @@ fn record_operation(whichtest: WhichTest<'_>) {
     // think the color is pointless, but it does help the reader make sense of
     // the mess of numbers that shows up in the table for the different response
     // codes.
-    let mut t = term::stdout().unwrap();
-    t.fg(term::color::GREEN).unwrap();
+    let t = term::stdout();
+    if let Some(term) = t {
+        t.fg(term::color::GREEN).unwrap();
+    }
     write!(t, "{}", c).unwrap();
-    t.reset().unwrap();
+    if let Some(term) = t {
+        t.reset().unwrap();
+    }
 }
