@@ -2455,6 +2455,7 @@ dependencies = [
  "structopt",
  "subprocess",
  "tempfile",
+ "term",
  "thiserror",
  "tokio",
  "tokio-postgres",

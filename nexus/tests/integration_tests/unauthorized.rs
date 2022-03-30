@@ -67,10 +67,46 @@ async fn test_unauthorized(cptestctx: &ControlPlaneTestContext) {
 
     // Verify the hardcoded endpoints.
     info!(log, "verifying endpoints");
+    print!("{}", VERIFY_HEADER);
     for endpoint in &*VERIFY_ENDPOINTS {
         verify_endpoint(&log, client, endpoint).await;
     }
 }
+
+const VERIFY_HEADER: &str = r#"
+SUMMARY OF REQUESTS MADE
+
+KEY, USING HEADER AND EXAMPLE ROW:
+
+          +----------------------------> privileged GET (expects 200)
+          |                              (digit = last digit of 200-level
+          |                              response)
+          |
+          |                          +-> privileged GET (expects same as above)
+          |                          |   (digit = last digit of 200-level
+          |                          |    response)
+          |                          |   ('-' => skipped (N/A))
+          ^                          ^
+HEADER:   G GET  PUT  POST DEL  TRCE G  URL
+EXAMPLE:  0 3111 5555 3111 5555 5555 0  /organizations
+    ROW     ^^^^
+            ||||                      TEST CASES FOR EACH HTTP METHOD:
+            +|||----------------------< authenticated, unauthorized request
+             +||----------------------< unauthenticated request
+              +|----------------------< bad authentication: no such user
+               +----------------------< bad authentication: invalid syntax
+
+            \__/ \__/ \__/ \__/ \__/
+            GET  PUT  etc.  The test cases are repeated for each HTTP method.
+
+            The number in each cell is the last digit of the 400-level response
+            that was expected for this test case.
+
+    In this case, an unauthenthicated request to "GET /organizations" returned
+    401.  All requests to "PUT /organizations" returned 405.
+
+G GET  PUT  POST DEL  TRCE G  URL
+"#;
 
 //
 // SETUP PHASE
@@ -216,6 +252,7 @@ async fn verify_endpoint(
         .any(|allowed| matches!(allowed, AllowedMethod::Get));
     let resource_before: Option<serde_json::Value> = if get_allowed {
         info!(log, "test: privileged GET");
+        record_operation(WhichTest::PrivilegedGet(Some(&http::StatusCode::OK)));
         Some(
             NexusRequest::object_get(client, endpoint.url)
                 .authn_as(AuthnMode::PrivilegedUser)
@@ -227,8 +264,11 @@ async fn verify_endpoint(
         )
     } else {
         warn!(log, "test: skipping privileged GET (method not allowed)");
+        record_operation(WhichTest::PrivilegedGet(None));
         None
     };
+
+    print!(" ");
 
     // For each of the HTTP methods we use in the API as well as TRACE, we'll
     // make several requests to this URL and verify the results.
@@ -258,6 +298,7 @@ async fn verify_endpoint(
         .await
         .unwrap();
         verify_response(&response);
+        record_operation(WhichTest::Unprivileged(&expected_status));
 
         // Next, make an unauthenticated request.
         info!(log, "test: unauthenticated"; "method" => ?method);
@@ -273,6 +314,7 @@ async fn verify_endpoint(
                 .await
                 .unwrap();
         verify_response(&response);
+        record_operation(WhichTest::Unauthenticated(&expected_status));
 
         // Now try a few requests with bogus credentials.  We should get the
         // same error as if we were unauthenticated.  This is sort of duplicated
@@ -304,6 +346,7 @@ async fn verify_endpoint(
                 .await
                 .unwrap();
         verify_response(&response);
+        record_operation(WhichTest::UnknownUser(&expected_status));
 
         // Now try a syntactically invalid authn header.
         info!(log, "test: bogus creds: bad cred syntax"; "method" => ?method);
@@ -320,6 +363,9 @@ async fn verify_endpoint(
                 .await
                 .unwrap();
         verify_response(&response);
+        record_operation(WhichTest::InvalidHeader(&expected_status));
+
+        print!(" ");
     }
 
     // If we fetched the resource earlier, fetch it again and check the state.
@@ -348,7 +394,14 @@ async fn verify_endpoint(
             resource_before, resource_after,
             "resource changed after making a bunch of failed requests"
         );
+        record_operation(WhichTest::PrivilegedGetCheck(Some(
+            &http::StatusCode::OK,
+        )));
+    } else {
+        record_operation(WhichTest::PrivilegedGetCheck(None));
     }
+
+    println!("  {}", endpoint.url);
 }
 
 /// Verifies the body of an HTTP response for status codes 401, 403, 404, or 405
@@ -377,5 +430,48 @@ fn verify_response(response: &TestResponse) {
             assert_eq!(error.message, "Method Not Allowed");
         }
         _ => unimplemented!(),
+    }
+}
+
+/// Describes the tests run by [`verify_endpoint()`].
+enum WhichTest<'a> {
+    PrivilegedGet(Option<&'a http::StatusCode>),
+    Unprivileged(&'a http::StatusCode),
+    Unauthenticated(&'a http::StatusCode),
+    UnknownUser(&'a http::StatusCode),
+    InvalidHeader(&'a http::StatusCode),
+    PrivilegedGetCheck(Option<&'a http::StatusCode>),
+}
+
+/// Prints one cell of the giant summary table describing the successful result
+/// of one HTTP request.
+fn record_operation(whichtest: WhichTest<'_>) {
+    // Extract the status code for the test.
+    let status_code = match whichtest {
+        WhichTest::PrivilegedGet(s) | WhichTest::PrivilegedGetCheck(s) => s,
+        WhichTest::Unprivileged(s) => Some(s),
+        WhichTest::Unauthenticated(s) => Some(s),
+        WhichTest::UnknownUser(s) => Some(s),
+        WhichTest::InvalidHeader(s) => Some(s),
+    };
+
+    // We'll print out the third digit of the HTTP status code.
+    let c = match status_code {
+        Some(s) => s.as_str().chars().nth(2).unwrap(),
+        None => '-',
+    };
+
+    // We only get here for successful results, so they're all green.  You might
+    // think the color is pointless, but it does help the reader make sense of
+    // the mess of numbers that shows up in the table for the different response
+    // codes.
+    let t = term::stdout();
+    if let Some(mut term) = t {
+        term.fg(term::color::GREEN).unwrap();
+        write!(term, "{}", c).unwrap();
+        term.reset().unwrap();
+        term.flush().unwrap();
+    } else {
+        print!("{}", c);
     }
 }
