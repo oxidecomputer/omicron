@@ -78,7 +78,7 @@ pub struct Config {
     /// list of identifiers used for the authz objects for this resource and its
     /// parents, in the same order as `authz_path_types`
     /// (e.g., [`authz_organization`, `authz_project`])
-    path_authz_types: Vec<syn::Ident>,
+    path_authz_names: Vec<syn::Ident>,
 
     // Child resources
     /// list of names of child resources (PascalCase, raw input to the macro)
@@ -123,7 +123,7 @@ fn generate(config: &Config) -> TokenStream {
     let authz_resource = config2.resource_authz_type;
     let model_resource = config2.resource_model_type;
     let authz_path_types = config2.path_authz_types;
-    let authz_path_values = config2.path_authz_types;
+    let authz_path_values = config2.path_authz_names;
 
     let (
         parent_lookup_arg,
@@ -158,7 +158,7 @@ fn generate(config: &Config) -> TokenStream {
     };
 
     let the_struct = generate_struct(&config);
-    let helper_authz = generate_authz_helper(&config);
+    let misc_helpers = generate_misc_helpers(&config);
     let child_selectors = generate_child_selectors(&config);
 
     quote! {
@@ -167,19 +167,7 @@ fn generate(config: &Config) -> TokenStream {
         impl<'a> #resource_name<'a> {
             #child_selectors
 
-            #helper_authz
-
-            /// Getting the [`LookupPath`] for this lookup
-            ///
-            /// This is used when we actually query the database.  At that
-            /// point, we need the `OpContext` and `DataStore` that are being
-            /// used for this lookup.
-            fn lookup_root(&self) -> &LookupPath<'a> {
-                match &self.key {
-                    Key::Name(parent, _) => parent.lookup_root(),
-                    Key::Id(root, _) => root.lookup_root(),
-                }
-            }
+            #misc_helpers
 
             /// Fetch the record corresponding to the selected resource
             ///
@@ -449,13 +437,13 @@ fn generate(config: &Config) -> TokenStream {
 fn configure(input: Input) -> Config {
     let resource_name = format_ident!("{}", input.name);
     // XXX-dap TODO I removed a comma from resource_authz
-    let resource_authz = quote! { authz::#resource_name };
-    let resource_model = quote! { model::#resource_name };
+    let resource_authz_type = quote! { authz::#resource_name };
+    let resource_model_type = quote! { model::#resource_name };
 
     // XXX-dap TODO I removed a comma from these elements
     // XXX-dap TODO Can we just make this an array of the PascalCase
     // identifiers?
-    let mut authz_path_types: Vec<_> = input
+    let mut path_authz_types: Vec<_> = input
         .ancestors
         .iter()
         .map(|a| {
@@ -463,7 +451,7 @@ fn configure(input: Input) -> Config {
             quote! { authz::#name }
         })
         .collect();
-    authz_path_types.push(resource_authz.clone());
+    path_authz_types.push(resource_authz_type.clone());
 
     // XXX-dap TODO I removed a comma from these elements
     // (authz_ancestors_values and authz_path_values)
@@ -472,9 +460,9 @@ fn configure(input: Input) -> Config {
         .iter()
         .map(|a| format_ident!("authz_{}", heck::AsSnakeCase(&a).to_string()))
         .collect();
-    let mut authz_path_values = authz_ancestors_values.clone();
+    let mut path_authz_names = authz_ancestors_values.clone();
     // XXX-dap TODO replace authz_self with resource_authz?
-    authz_path_values.push(format_ident!("authz_self"));
+    path_authz_names.push(format_ident!("authz_self"));
 
     let parent = input.ancestors.last().map(|parent_resource_name| {
         // XXX working here
@@ -514,11 +502,11 @@ fn configure(input: Input) -> Config {
             "{}",
             heck::AsSnakeCase(&input.name).to_string()
         ),
-        resource_authz_type: resource_authz,
-        resource_model_type: resource_model,
+        resource_authz_type,
+        resource_model_type,
         authz_kind: input.authz_kind,
-        path_authz_types: authz_path_types,
-        path_authz_types: authz_path_values,
+        path_authz_types,
+        path_authz_names,
         child_resources: input.children,
         parent,
     }
@@ -591,17 +579,26 @@ fn generate_child_selectors(config: &Config) -> TokenStream {
     }
 }
 
-/// Generates the `make_authz()` helper function for this resource
-fn generate_authz_helper(config: &Config) -> TokenStream {
-    let fleet = quote! { authz::Fleet };
+/// Generates the simple helper functions for this resource
+fn generate_misc_helpers(config: &Config) -> TokenStream {
+    let fleet_type = quote! { authz::Fleet };
     let resource_name = &config.resource_name;
     let resource_authz_type = &config.resource_authz_type;
-    let resource_model = &config.resource_model_type;
+    let resource_model_type = &config.resource_model_type;
     let parent_authz_type = config
         .parent
         .as_ref()
         .map(|p| &p.resource_authz_type)
-        .unwrap_or(&fleet);
+        .unwrap_or(&fleet_type);
+
+    // Given a parent authz type, when we want to construct an authz object for
+    // a child resource, there are two different patterns.  We need to pick the
+    // right one.  For "typed" resources (`AuthzKind::Typed`), the parent
+    // resource has a method with the snake case name of the child resource.
+    // For example: `authz_organization.project()`.  For "generic" resources
+    // (`AuthzKind::Generic`), the parent has a function called `child_generic`
+    // that's used to construct all child resources, and there's an extra
+    // `ResourceType` argument to say what resource it is.
     let (mkauthz_func, mkauthz_arg) = match &config.authz_kind {
         AuthzKind::Generic => (
             format_ident!("child_generic"),
@@ -614,7 +611,7 @@ fn generate_authz_helper(config: &Config) -> TokenStream {
         /// Build the `authz` object for this resource
         fn make_authz(
             authz_parent: &#parent_authz_type,
-            db_row: &#resource_model,
+            db_row: &#resource_model_type,
             lookup_type: LookupType,
         ) -> #resource_authz_type {
             authz_parent.#mkauthz_func(
@@ -622,6 +619,18 @@ fn generate_authz_helper(config: &Config) -> TokenStream {
                 db_row.id(),
                 lookup_type
             )
+        }
+
+        /// Getting the [`LookupPath`] for this lookup
+        ///
+        /// This is used when we actually query the database.  At that
+        /// point, we need the `OpContext` and `DataStore` that are being
+        /// used for this lookup.
+        fn lookup_root(&self) -> &LookupPath<'a> {
+            match &self.key {
+                Key::Name(parent, _) => parent.lookup_root(),
+                Key::Id(root, _) => root.lookup_root(),
+            }
         }
     }
 }
