@@ -553,7 +553,7 @@ impl Nexus {
         // Until then, we just perform the operations sequentially.
 
         // Create a default VPC associated with the project.
-        // XXX-dap We need to be using the project_id we just created.
+        // TODO-correctness We need to be using the project_id we just created.
         // project_create() should return authz::Project and we should use that
         // here.
         let _ = self

@@ -96,6 +96,63 @@ use uuid::Uuid;
 ///         .await?;
 /// # }
 /// ```
+// Implementation notes
+//
+// We say that a caller using `LookupPath` is building a _selection path_ for a
+// resource.  They use this builder interface to _select_ a specific resource.
+// Example selection paths:
+//
+// - From the root, select Organization with name "org1", then Project with name
+//   "proj1", then Instance with name "instance1".
+//
+// - From the root, select Project with id 123, then Instance "instance1".
+//
+// A selection path always starts at the root, then _may_ contain a lookup-by-id
+// node, and then _may_ contain any number of lookup-by-name nodes.  It must
+// include at least one lookup-by-id or lookup-by-name node.
+//
+// Once constructed, it looks like this:
+//
+//    Instance
+//        key: Key::Name(p, "instance1")
+//                       |
+//            +----------+
+//            |
+//            v
+//          Project
+//              key: Key::Name(o, "proj")
+//                             |
+//                  +----------+
+//                  |
+//                  v
+//              Organization
+//                  key: Key::Name(r, "org1")
+//                                 |
+//                      +----------+
+//                      |
+//                      v
+//                  Root
+//                      lookup_root: LookupPath (references OpContext and
+//                                               DataStore)
+//
+// This is essentially a singly-linked list, except that each node _owns_
+// (rather than references) the previous node.  This is important: the caller's
+// going to do something like this:
+//
+//     let (authz_org, authz_project, authz_instance, db_instance) =
+//         LookupPath::new(opctx, datastore)   // returns LookupPath
+//             .organization_name("org1")      // consumes LookupPath,
+//                                             //   returns Organization
+//             .project_name("proj1")          // consumes Organization,
+//                                                  returns Project
+//             .instance_name("instance1")     // consumes Project,
+//                                                  returns Instance
+//             .fetch().await?;
+//
+// As you can see, at each step, a selection function (like "organization_name")
+// consumes the current tail of the list and returns a new tail.  We don't want
+// the caller to have to keep track of multiple objects, so that implies that
+// the tail must own all the state that we're building up as we go.
 pub struct LookupPath<'a> {
     opctx: &'a OpContext,
     datastore: &'a DataStore,
@@ -115,6 +172,9 @@ impl<'a> LookupPath<'a> {
     {
         LookupPath { opctx, datastore }
     }
+
+    // The top-level selection functions are implemented by hand because the
+    // macro is not in a great position to do this.
 
     /// Select a resource of type Organization, identified by its name
     pub fn organization_name<'b, 'c>(self, name: &'b Name) -> Organization<'c>
@@ -146,13 +206,19 @@ impl<'a> LookupPath<'a> {
     }
 }
 
+/// Describes a node along the selection path of a resource
 enum Key<'a, P> {
+    /// We're looking for a resource with the given name within the given parent
+    /// collection
     Name(P, &'a Name),
+
+    /// We're looking for a resource with the given id
+    ///
+    /// This has no parent container -- a by-id lookup is always global.
     Id(Root<'a>, Uuid),
 }
 
-/// `Root` represents the root of whatever path the caller is using to select a
-/// resource (whether it's by-id, by-name, or a combination)
+/// Represents the head of the selection path for a resource
 struct Root<'a> {
     lookup_root: LookupPath<'a>,
 }
@@ -162,6 +228,11 @@ impl<'a> Root<'a> {
         &self.lookup_root
     }
 }
+
+// Define the specific builder types for each resource.  The `lookup_resource`
+// macro defines a struct for the resource, helper functions for selecting child
+// resources, and the publicly-exposed fetch functions (fetch(), fetch_for(),
+// and lookup_for()).
 
 lookup_resource! {
     name = "Organization",
@@ -204,6 +275,7 @@ mod test {
     use omicron_test_utils::dev;
     use std::sync::Arc;
 
+    /* This is a smoke test that things basically appear to work. */
     #[tokio::test]
     async fn test_lookup() {
         let logctx = dev::test_setup_log("test_lookup");
