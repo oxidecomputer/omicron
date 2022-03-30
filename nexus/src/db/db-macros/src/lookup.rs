@@ -613,6 +613,13 @@ fn generate_database_functions(config: &Config) -> TokenStream {
     }
 }
 
+// This isn't so much a test (although it does make sure we don't panic on some
+// basic cases).  This is a way to dump the output of the macro for some common
+// inputs.  This is invaluable for debugging.  If there's a bug where the macro
+// generates syntactically invalid Rust, `cargo expand` will often not print the
+// macro's output.  Instead, you can paste the output of this test into
+// lookup.rs, replacing the call to the macro, then reformat the file, and then
+// build it in order to see the compiler error in context.
 #[cfg(test)]
 #[test]
 fn test_lookup_dump() {
