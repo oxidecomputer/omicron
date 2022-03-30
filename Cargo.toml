@@ -1,6 +1,7 @@
 [workspace]
 members = [
     "common",
+    "deploy",
     "gateway",
     "gateway-client",
     "gateway-messages",
@@ -29,6 +30,7 @@ members = [
 
 default-members = [
     "common",
+    "deploy",
     "gateway",
     "gateway-client",
     "gateway-messages",

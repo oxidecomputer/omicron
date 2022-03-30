@@ -2348,6 +2348,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "omicron-deploy"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "crossbeam",
+ "omicron-package",
+ "omicron-sled-agent",
+ "serde",
+ "serde_derive",
+ "structopt",
+ "thiserror",
+]
+
+[[package]]
 name = "omicron-gateway"
 version = "0.1.0"
 dependencies = [
@@ -2456,8 +2470,6 @@ name = "omicron-package"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "crossbeam",
- "flate2",
  "futures",
  "hex",
  "indicatif",
