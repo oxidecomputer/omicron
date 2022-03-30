@@ -63,15 +63,35 @@ use uuid::Uuid;
 ///         .fetch()
 ///         .await?;
 ///
+/// // Lookup a Project with the intent of creating an Instance inside it.  For
+/// // this purpose, we don't need the database row for the Project, so we use
+/// // `lookup_for()`.
+/// let project_name = db::model::Name("omicron".parse().unwrap());
+/// let (authz_org, authz_project) =
+///     LookupPath::new(opctx, datastore)
+///         .organization_name(&organization_name)
+///         .project_name(&project_name)
+///         .lookup_for(authz::Action::CreateChild)
+///         .await?;
+///
 /// // Fetch an Instance by a path of names (Organization name, Project name,
 /// // Instance name)
-/// let project_name = db::model::Name("omicron".parse().unwrap());
 /// let instance_name = db::model::Name("test-server".parse().unwrap());
 /// let (authz_org, authz_project, authz_instance, db_instance) =
 ///     LookupPath::new(opctx, datastore)
 ///         .organization_name(&organization_name)
 ///         .project_name(&project_name)
 ///         .instance_name(&instance_name)
+///         .fetch()
+///         .await?;
+///
+/// // Having looked up the Instance, you have the `authz::Project`.  Use this
+/// // to look up a Disk that you expect is in the same Project.
+/// let disk_name = db::model::Name("my-disk".parse().unwrap());
+/// let (_, _, authz_disk, db_disk) =
+///     LookupPath::new(opctx, datastore)
+///         .project_id(authz_project.id())
+///         .disk_name(&disk_name)
 ///         .fetch()
 ///         .await?;
 /// # }
@@ -82,6 +102,9 @@ pub struct LookupPath<'a> {
 }
 
 impl<'a> LookupPath<'a> {
+    /// Begin selecting a resource for lookup
+    ///
+    /// Authorization checks will be applied to the caller in `opctx`.
     pub fn new<'b, 'c>(
         opctx: &'b OpContext,
         datastore: &'c DataStore,
@@ -93,6 +116,7 @@ impl<'a> LookupPath<'a> {
         LookupPath { opctx, datastore }
     }
 
+    /// Select a resource of type Organization, identified by its name
     pub fn organization_name<'b, 'c>(self, name: &'b Name) -> Organization<'c>
     where
         'a: 'c,
@@ -101,18 +125,22 @@ impl<'a> LookupPath<'a> {
         Organization { key: Key::Name(Root { lookup_root: self }, name) }
     }
 
+    /// Select a resource of type Organization, identified by its id
     pub fn organization_id(self, id: Uuid) -> Organization<'a> {
         Organization { key: Key::Id(Root { lookup_root: self }, id) }
     }
 
+    /// Select a resource of type Project, identified by its id
     pub fn project_id(self, id: Uuid) -> Project<'a> {
         Project { key: Key::Id(Root { lookup_root: self }, id) }
     }
 
+    /// Select a resource of type Instance, identified by its id
     pub fn instance_id(self, id: Uuid) -> Instance<'a> {
         Instance { key: Key::Id(Root { lookup_root: self }, id) }
     }
 
+    /// Select a resource of type Disk, identified by its id
     pub fn disk_id(self, id: Uuid) -> Disk<'a> {
         Disk { key: Key::Id(Root { lookup_root: self }, id) }
     }
