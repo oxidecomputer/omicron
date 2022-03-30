@@ -125,8 +125,6 @@ struct Resource {
     authz_type: TokenStream,
     /// identifier for an authz object for this resource (e.g., `authz_project`)
     authz_name: syn::Ident,
-    /// name of the `model` type for this resource (e.g., `db::model::Project`)
-    model_type: TokenStream,
 }
 
 impl Resource {
@@ -135,8 +133,7 @@ impl Resource {
         let name = format_ident!("{}", name);
         let authz_name = format_ident!("authz_{}", name_as_snake);
         let authz_type = quote! { authz::#name };
-        let model_type = quote! { model::#name };
-        Resource { name, authz_name, authz_type, name_as_snake, model_type }
+        Resource { name, authz_name, authz_type, name_as_snake }
     }
 }
 
@@ -242,7 +239,6 @@ fn generate_misc_helpers(config: &Config) -> TokenStream {
     let fleet_type = quote! { authz::Fleet };
     let resource_name = &config.resource.name;
     let resource_authz_type = &config.resource.authz_type;
-    let resource_model_type = &config.resource.model_type;
     let parent_authz_type =
         config.parent.as_ref().map(|p| &p.authz_type).unwrap_or(&fleet_type);
 
@@ -268,7 +264,7 @@ fn generate_misc_helpers(config: &Config) -> TokenStream {
         /// Build the `authz` object for this resource
         fn make_authz(
             authz_parent: &#parent_authz_type,
-            db_row: &#resource_model_type,
+            db_row: &model::#resource_name,
             lookup_type: LookupType,
         ) -> #resource_authz_type {
             authz_parent.#mkauthz_func(
@@ -297,8 +293,8 @@ fn generate_misc_helpers(config: &Config) -> TokenStream {
 fn generate_lookup_methods(config: &Config) -> TokenStream {
     let path_types = &config.path_types;
     let path_authz_names = &config.path_authz_names;
+    let resource_name = &config.resource.name;
     let resource_authz_name = &config.resource.authz_name;
-    let resource_model_type = &config.resource.model_type;
     let (ancestors_authz_names_assign, parent_lookup_arg_actual) =
         if let Some(p) = &config.parent {
             let nancestors = config.path_authz_names.len() - 1;
@@ -320,7 +316,7 @@ fn generate_lookup_methods(config: &Config) -> TokenStream {
         /// This is equivalent to `fetch_for(authz::Action::Read)`.
         pub async fn fetch(
             &self,
-        ) -> LookupResult<(#(authz::#path_types,)* #resource_model_type)> {
+        ) -> LookupResult<(#(authz::#path_types,)* model::#resource_name)> {
             self.fetch_for(authz::Action::Read).await
         }
 
@@ -336,7 +332,7 @@ fn generate_lookup_methods(config: &Config) -> TokenStream {
         pub async fn fetch_for(
             &self,
             action: authz::Action,
-        ) -> LookupResult<(#(authz::#path_types,)* #resource_model_type)> {
+        ) -> LookupResult<(#(authz::#path_types,)* model::#resource_name)> {
             let lookup = self.lookup_root();
             let opctx = &lookup.opctx;
             let datastore = &lookup.datastore;
@@ -454,7 +450,6 @@ fn generate_database_functions(config: &Config) -> TokenStream {
     let resource_name = &config.resource.name;
     let resource_authz_type = &config.resource.authz_type;
     let resource_authz_name = &config.resource.authz_name;
-    let resource_model_type = &config.resource.model_type;
     let resource_as_snake = format_ident!("{}", &config.resource.name_as_snake);
     let path_types = &config.path_types;
     let path_authz_names = &config.path_authz_names;
@@ -501,7 +496,7 @@ fn generate_database_functions(config: &Config) -> TokenStream {
             #parent_lookup_arg_formal
             name: &Name,
             action: authz::Action,
-        ) -> LookupResult<(#resource_authz_type, #resource_model_type)> {
+        ) -> LookupResult<(#resource_authz_type, model::#resource_name)> {
             let (#resource_authz_name, db_row) = Self::lookup_by_name_no_authz(
                 opctx,
                 datastore,
@@ -524,7 +519,7 @@ fn generate_database_functions(config: &Config) -> TokenStream {
             datastore: &DataStore,
             #parent_lookup_arg_formal
             name: &Name,
-        ) -> LookupResult<(#resource_authz_type, #resource_model_type)> {
+        ) -> LookupResult<(#resource_authz_type, model::#resource_name)> {
             use db::schema::#resource_as_snake::dsl;
 
             // TODO-security See the note about pool_authorized() below.
@@ -533,7 +528,7 @@ fn generate_database_functions(config: &Config) -> TokenStream {
                 .filter(dsl::time_deleted.is_null())
                 .filter(dsl::name.eq(name.clone()))
                 #lookup_filter
-                .select(#resource_model_type::as_select())
+                .select(model::#resource_name::as_select())
                 .get_result_async(conn)
                 .await
                 .map_err(|e| {
@@ -566,7 +561,7 @@ fn generate_database_functions(config: &Config) -> TokenStream {
             datastore: &DataStore,
             id: Uuid,
             action: authz::Action,
-        ) -> LookupResult<(#(authz::#path_types,)* #resource_model_type)> {
+        ) -> LookupResult<(#(authz::#path_types,)* model::#resource_name)> {
             let (#(#path_authz_names,)* db_row) =
                 Self::lookup_by_id_no_authz(
                     opctx,
@@ -588,7 +583,7 @@ fn generate_database_functions(config: &Config) -> TokenStream {
             _opctx: &OpContext,
             datastore: &DataStore,
             id: Uuid,
-        ) -> LookupResult<(#(authz::#path_types,)* #resource_model_type)> {
+        ) -> LookupResult<(#(authz::#path_types,)* model::#resource_name)> {
             use db::schema::#resource_as_snake::dsl;
 
             // TODO-security This could use pool_authorized() instead.
@@ -601,7 +596,7 @@ fn generate_database_functions(config: &Config) -> TokenStream {
             let db_row = dsl::#resource_as_snake
                 .filter(dsl::time_deleted.is_null())
                 .filter(dsl::id.eq(id))
-                .select(#resource_model_type::as_select())
+                .select(model::#resource_name::as_select())
                 .get_result_async(conn)
                 .await
                 .map_err(|e| {
