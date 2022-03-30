@@ -73,8 +73,6 @@ fn test_unauthorized_coverage() {
         })
         .collect();
 
-    println!("spec operations: {:?}", spec_operations);
-
     // Go through each of the authz test cases and match each one against an
     // OpenAPI operation.
     let mut unexpected_endpoints = String::from(
