@@ -9,6 +9,10 @@
 use proc_macro2::TokenStream;
 use quote::{format_ident, quote};
 
+//
+// INPUT (arguments to the macro)
+//
+
 /// Arguments for [`lookup_resource!`]
 // NOTE: this is only "pub" for the `cargo doc` link on [`lookup_resource!`].
 #[derive(serde::Deserialize)]
@@ -45,26 +49,19 @@ enum AuthzKind {
     Typed,
 }
 
+//
+// MACRO STATE
+//
+
 /// Configuration for [`lookup_resource`] and its helper functions
 ///
 /// This is all computable from [`Input`].  The purpose is to put the various
 /// output strings that need to appear in various chunks of output into one
 /// place with uniform names and documentation.
 pub struct Config {
-    // The resource itself
-    /// PascalCase (raw input) name of the resource we're generating
-    /// (e.g., `Project`")
-    resource_name: syn::Ident,
-
-    /// Snake case name of the resource we're generating
-    /// (e.g., `project`)
-    resource_as_snake: syn::Ident,
-
-    /// name of the `authz` type for this resource (e.g., `authz::Project`)
-    resource_authz_type: TokenStream,
-
-    /// name of the `model` type for this resource (e.g., `db::model::Project`)
-    resource_model_type: TokenStream,
+    // The resource itself that we're generating
+    /// Basic information about the resource we're generating
+    resource: Resource,
 
     /// See [`AuthzKind`]
     authz_kind: AuthzKind,
@@ -86,15 +83,33 @@ pub struct Config {
 
     // Parent resource, if any
     /// Information about the parent resource, if any
-    parent: Option<Parent>,
+    parent: Option<Resource>,
 }
 
-// XXX-dap TODO-doc
-struct Parent {
-    resource_name: syn::Ident,
-    resource_as_snake: String,
-    resource_authz_type: TokenStream,
-    resource_authz_name: syn::Ident,
+/// Information about a resource (either the one we're generating or an
+/// ancestor in the path)
+struct Resource {
+    /// PascalCase resource name itself (e.g., `Project`)
+    name: syn::Ident,
+    /// snake_case resource name (e.g., `project`)
+    name_as_snake: String,
+    /// name of the `authz` type for this resource (e.g., `authz::Project`)
+    authz_type: TokenStream,
+    /// identifier for an authz object for this resource (e.g., `authz_project`)
+    authz_name: syn::Ident,
+    /// name of the `model` type for this resource (e.g., `db::model::Project`)
+    model_type: TokenStream,
+}
+
+impl Resource {
+    fn for_name(name: &str) -> Resource {
+        let name_as_snake = heck::AsSnakeCase(&name).to_string();
+        let name = format_ident!("{}", name);
+        let authz_name = format_ident!("authz_{}", name_as_snake);
+        let authz_type = quote! { authz::#name };
+        let model_type = quote! { model::#name };
+        Resource { name, authz_name, authz_type, name_as_snake, model_type }
+    }
 }
 
 /// Implementation of [`lookup_resource!]'.
@@ -103,18 +118,15 @@ pub fn lookup_resource(
 ) -> Result<TokenStream, syn::Error> {
     let input = serde_tokenstream::from_tokenstream::<Input>(&raw_input)?;
     let config = configure(input);
-    Ok(generate(&config))
-}
 
-fn generate(config: &Config) -> TokenStream {
-    let resource_name = &config.resource_name;
+    let resource_name = &config.resource.name;
     let the_struct = generate_struct(&config);
     let misc_helpers = generate_misc_helpers(&config);
     let child_selectors = generate_child_selectors(&config);
     let lookup_methods = generate_lookup_methods(&config);
     let database_functions = generate_database_functions(&config);
 
-    quote! {
+    Ok(quote! {
         #the_struct
 
         impl<'a> #resource_name<'a> {
@@ -126,13 +138,11 @@ fn generate(config: &Config) -> TokenStream {
 
             #database_functions
         }
-    }
+    })
 }
 
 fn configure(input: Input) -> Config {
-    let resource_name = format_ident!("{}", input.name);
-    let resource_authz_type = quote! { authz::#resource_name };
-    let resource_model_type = quote! { model::#resource_name };
+    let resource = Resource::for_name(&input.name);
 
     // XXX-dap TODO Can we just make this an array of the PascalCase
     // identifiers?
@@ -144,7 +154,7 @@ fn configure(input: Input) -> Config {
             quote! { authz::#name }
         })
         .collect();
-    path_authz_types.push(resource_authz_type.clone());
+    path_authz_types.push(resource.authz_type.clone());
 
     let authz_ancestors_values: Vec<_> = input
         .ancestors
@@ -152,52 +162,28 @@ fn configure(input: Input) -> Config {
         .map(|a| format_ident!("authz_{}", heck::AsSnakeCase(&a).to_string()))
         .collect();
     let mut path_authz_names = authz_ancestors_values.clone();
-    // XXX-dap TODO replace authz_self with resource_authz?
-    path_authz_names.push(format_ident!("authz_self"));
-
-    let parent = input.ancestors.last().map(|parent_resource_name| {
-        let resource_name = format_ident!("{}", parent_resource_name);
-        let resource_as_snake =
-            heck::AsSnakeCase(parent_resource_name).to_string();
-        let resource_authz_type = quote! { authz::#resource_name };
-        let resource_authz_name = format_ident!("authz_{}", resource_as_snake);
-        Parent {
-            resource_name,
-            resource_as_snake,
-            resource_authz_type,
-            resource_authz_name,
-        }
-    });
+    path_authz_names.push(resource.authz_name.clone());
 
     Config {
-        resource_name,
-        resource_as_snake: format_ident!(
-            "{}",
-            heck::AsSnakeCase(&input.name).to_string()
-        ),
-        resource_authz_type,
-        resource_model_type,
+        resource,
         authz_kind: input.authz_kind,
         path_authz_types,
         path_authz_names,
+        parent: input.ancestors.last().map(|s| Resource::for_name(&s)),
         child_resources: input.children,
-        parent,
     }
 }
 
 /// Generates the struct definition for this resource
 fn generate_struct(config: &Config) -> TokenStream {
     let root_sym = format_ident!("Root");
-    let resource_name = &config.resource_name;
-    let parent_resource_name = config
-        .parent
-        .as_ref()
-        .map(|p| &p.resource_name)
-        .unwrap_or_else(|| &root_sym);
+    let resource_name = &config.resource.name;
+    let parent_resource_name =
+        config.parent.as_ref().map(|p| &p.name).unwrap_or_else(|| &root_sym);
     let doc_struct = format!(
         "Selects a resource of type {} (or any of its children, using the \
         functions on this struct) for lookup or fetch",
-        config.resource_name.to_string(),
+        config.resource.name.to_string(),
     );
 
     quote! {
@@ -228,7 +214,7 @@ fn generate_child_selectors(config: &Config) -> TokenStream {
             format!(
                 "Select a resource of type {} within this {}, \
                 identified by its name",
-                child, config.resource_name,
+                child, config.resource.name,
             )
         })
         .collect();
@@ -255,14 +241,11 @@ fn generate_child_selectors(config: &Config) -> TokenStream {
 /// Generates the simple helper functions for this resource
 fn generate_misc_helpers(config: &Config) -> TokenStream {
     let fleet_type = quote! { authz::Fleet };
-    let resource_name = &config.resource_name;
-    let resource_authz_type = &config.resource_authz_type;
-    let resource_model_type = &config.resource_model_type;
-    let parent_authz_type = config
-        .parent
-        .as_ref()
-        .map(|p| &p.resource_authz_type)
-        .unwrap_or(&fleet_type);
+    let resource_name = &config.resource.name;
+    let resource_authz_type = &config.resource.authz_type;
+    let resource_model_type = &config.resource.model_type;
+    let parent_authz_type =
+        config.parent.as_ref().map(|p| &p.authz_type).unwrap_or(&fleet_type);
 
     // Given a parent authz type, when we want to construct an authz object for
     // a child resource, there are two different patterns.  We need to pick the
@@ -277,7 +260,9 @@ fn generate_misc_helpers(config: &Config) -> TokenStream {
             format_ident!("child_generic"),
             quote! { ResourceType::#resource_name, },
         ),
-        AuthzKind::Typed => (config.resource_as_snake.clone(), quote! {}),
+        AuthzKind::Typed => {
+            (format_ident!("{}", config.resource.name_as_snake), quote! {})
+        }
     };
 
     quote! {
@@ -313,12 +298,13 @@ fn generate_misc_helpers(config: &Config) -> TokenStream {
 fn generate_lookup_methods(config: &Config) -> TokenStream {
     let path_authz_names = &config.path_authz_names;
     let path_authz_types = &config.path_authz_types;
-    let resource_model_type = &config.resource_model_type;
+    let resource_authz_name = &config.resource.authz_name;
+    let resource_model_type = &config.resource.model_type;
     let (ancestors_authz_names_assign, parent_lookup_arg_actual) =
         if let Some(p) = &config.parent {
             let nancestors = config.path_authz_names.len() - 1;
             let ancestors_authz_names = &config.path_authz_names[0..nancestors];
-            let parent_authz_name = &p.resource_authz_name;
+            let parent_authz_name = &p.authz_name;
             (
                 quote! {
                     let (#(#ancestors_authz_names,)*) = parent.lookup().await?;
@@ -359,7 +345,7 @@ fn generate_lookup_methods(config: &Config) -> TokenStream {
             match &self.key {
                 Key::Name(parent, name) => {
                     #ancestors_authz_names_assign
-                    let (authz_self, db_row) = Self::fetch_by_name_for(
+                    let (#resource_authz_name, db_row) = Self::fetch_by_name_for(
                         opctx,
                         datastore,
                         #parent_lookup_arg_actual
@@ -395,7 +381,7 @@ fn generate_lookup_methods(config: &Config) -> TokenStream {
             let lookup = self.lookup_root();
             let opctx = &lookup.opctx;
             let (#(#path_authz_names,)*) = self.lookup().await?;
-            opctx.authorize(action, &authz_self).await?;
+            opctx.authorize(action, &#resource_authz_name).await?;
             Ok((#(#path_authz_names,)*))
         }
 
@@ -426,12 +412,13 @@ fn generate_lookup_methods(config: &Config) -> TokenStream {
                     // each level of recursion, we could be building up one
                     // big "join" query and hit the database just once.
                     #ancestors_authz_names_assign
-                    let (authz_self, _) = Self::lookup_by_name_no_authz(
-                        opctx,
-                        datastore,
-                        #parent_lookup_arg_actual
-                        *name
-                    ).await?;
+                    let (#resource_authz_name, _) =
+                        Self::lookup_by_name_no_authz(
+                            opctx,
+                            datastore,
+                            #parent_lookup_arg_actual
+                            *name
+                        ).await?;
                     Ok((#(#path_authz_names,)*))
                 }
                 Key::Id(_, id) => {
@@ -465,10 +452,11 @@ fn generate_lookup_methods(config: &Config) -> TokenStream {
 /// objects than do the methods: authz objects (representing parent ids), names,
 /// and ids.  They also take the `opctx` and `datastore` directly as arguments.
 fn generate_database_functions(config: &Config) -> TokenStream {
-    let resource_name = &config.resource_name;
-    let resource_authz_type = &config.resource_authz_type;
-    let resource_model_type = &config.resource_model_type;
-    let resource_as_snake = &config.resource_as_snake;
+    let resource_name = &config.resource.name;
+    let resource_authz_type = &config.resource.authz_type;
+    let resource_authz_name = &config.resource.authz_name;
+    let resource_model_type = &config.resource.model_type;
+    let resource_as_snake = format_ident!("{}", &config.resource.name_as_snake);
     let path_authz_names = &config.path_authz_names;
     let path_authz_types = &config.path_authz_types;
     let (
@@ -480,10 +468,10 @@ fn generate_database_functions(config: &Config) -> TokenStream {
     ) = if let Some(p) = &config.parent {
         let nancestors = config.path_authz_names.len() - 1;
         let ancestors_authz_names = &config.path_authz_names[0..nancestors];
-        let parent_resource_name = &p.resource_name;
-        let parent_authz_name = &p.resource_authz_name;
-        let parent_authz_type = &p.resource_authz_type;
-        let parent_id = format_ident!("{}_id", &p.resource_as_snake);
+        let parent_resource_name = &p.name;
+        let parent_authz_name = &p.authz_name;
+        let parent_authz_type = &p.authz_type;
+        let parent_id = format_ident!("{}_id", &p.name_as_snake);
         (
             quote! { #parent_authz_name: &#parent_authz_type, },
             quote! { #parent_authz_name, },
@@ -515,14 +503,14 @@ fn generate_database_functions(config: &Config) -> TokenStream {
             name: &Name,
             action: authz::Action,
         ) -> LookupResult<(#resource_authz_type, #resource_model_type)> {
-            let (authz_self, db_row) = Self::lookup_by_name_no_authz(
+            let (#resource_authz_name, db_row) = Self::lookup_by_name_no_authz(
                 opctx,
                 datastore,
                 #parent_lookup_arg_actual
                 name
             ).await?;
-            opctx.authorize(action, &authz_self).await?;
-            Ok((authz_self, db_row))
+            opctx.authorize(action, &#resource_authz_name).await?;
+            Ok((#resource_authz_name, db_row))
         }
 
         /// Lowest-level function for looking up a resource in the database
@@ -586,7 +574,7 @@ fn generate_database_functions(config: &Config) -> TokenStream {
                     datastore,
                     id
                 ).await?;
-            opctx.authorize(action, &authz_self).await?;
+            opctx.authorize(action, &#resource_authz_name).await?;
             Ok((#(#path_authz_names,)* db_row))
         }
 
@@ -627,7 +615,7 @@ fn generate_database_functions(config: &Config) -> TokenStream {
                     )
                 })?;
             #ancestors_authz_names_assign
-            let authz_self = Self::make_authz(
+            let #resource_authz_name = Self::make_authz(
                 &#parent_authz_value,
                 &db_row,
                 LookupType::ById(id)
