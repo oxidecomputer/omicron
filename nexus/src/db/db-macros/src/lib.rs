@@ -24,7 +24,7 @@ mod lookup;
 ///
 /// # Examples
 ///
-/// ```
+/// ```ignore
 /// lookup_resource! {
 ///     name = "Organization",
 ///     ancestors = [],
@@ -42,7 +42,7 @@ mod lookup;
 ///
 /// Building on that, we have:
 ///
-/// ```
+/// ```ignore
 /// lookup_resource! {
 ///     name = "Organization",
 ///     ancestors = [],
