@@ -34,7 +34,7 @@ pub struct Input {
 ///
 /// This ought to be made more uniform with more typed authz objects, but that's
 /// not the way they work today.
-#[derive(Clone, serde::Deserialize)] // XXX-dap
+#[derive(serde::Deserialize)]
 enum AuthzKind {
     /// The authz object is constructed using
     /// `authz_parent.child_generic(ResourceType, Uuid, LookupType)`
@@ -50,7 +50,6 @@ enum AuthzKind {
 /// This is all computable from [`Input`].  The purpose is to put the various
 /// output strings that need to appear in various chunks of output into one
 /// place with uniform names and documentation.
-#[derive(Clone)] // XXX-dap
 pub struct Config {
     // The resource itself
     /// PascalCase (raw input) name of the resource we're generating
@@ -91,17 +90,11 @@ pub struct Config {
 }
 
 // XXX-dap TODO-doc
-#[derive(Clone)] // XXX-dap
 struct Parent {
     resource_name: syn::Ident,
-    lookup_arg: TokenStream,
-    lookup_arg_value: TokenStream,
-    lookup_arg_value_deref: TokenStream,
-    lookup_filter: TokenStream,
+    resource_as_snake: String,
     resource_authz_type: TokenStream,
     resource_authz_name: syn::Ident,
-    ancestors_values_assign: TokenStream,
-    ancestors_values_assign_lookup: TokenStream,
 }
 
 /// Implementation of [`lookup_resource!]'.
@@ -114,52 +107,12 @@ pub fn lookup_resource(
 }
 
 fn generate(config: &Config) -> TokenStream {
-    // XXX-dap TODO take another edit pass.  For now, I'm going to try to assign
-    // variables to the elements of "config" and produce the same (working)
-    // output.
-    let config2 = config.clone();
-    let resource_name = config2.resource_name;
-    let resource_as_snake = config2.resource_as_snake;
-    let authz_resource = config2.resource_authz_type;
-    let model_resource = config2.resource_model_type;
-    let authz_path_types = config2.path_authz_types;
-    let authz_path_values = config2.path_authz_names;
-
-    let (
-        parent_lookup_arg,
-        parent_lookup_arg_value,
-        parent_lookup_arg_value_deref,
-        parent_filter,
-        authz_ancestors_values_assign,
-        parent_authz,
-        authz_ancestors_values_assign_lookup,
-    ) = match config2.parent {
-        Some(parent) => {
-            let parent_authz_arg = parent.resource_authz_name;
-            (
-                parent.lookup_arg,
-                parent.lookup_arg_value,
-                parent.lookup_arg_value_deref,
-                parent.lookup_filter,
-                parent.ancestors_values_assign,
-                quote! { #parent_authz_arg, },
-                parent.ancestors_values_assign_lookup,
-            )
-        }
-        None => (
-            quote! {},
-            quote! {},
-            quote! {},
-            quote! {},
-            quote! {},
-            quote! { &authz::FLEET, },
-            quote! {},
-        ),
-    };
-
+    let resource_name = &config.resource_name;
     let the_struct = generate_struct(&config);
     let misc_helpers = generate_misc_helpers(&config);
     let child_selectors = generate_child_selectors(&config);
+    let lookup_methods = generate_lookup_methods(&config);
+    let database_functions = generate_database_functions(&config);
 
     quote! {
         #the_struct
@@ -167,280 +120,20 @@ fn generate(config: &Config) -> TokenStream {
         impl<'a> #resource_name<'a> {
             #child_selectors
 
+            #lookup_methods
+
             #misc_helpers
 
-            /// Fetch the record corresponding to the selected resource
-            ///
-            /// This is equivalent to `fetch_for(authz::Action::Read)`.
-            pub async fn fetch(
-                &self,
-            ) -> LookupResult<(#(#authz_path_types,)* #model_resource)> {
-                self.fetch_for(authz::Action::Read).await
-            }
-
-            /// Fetch the record corresponding to the selected resource and
-            /// check whether the caller is allowed to do the specified `action`
-            ///
-            /// The return value is a tuple that also includes the `authz`
-            /// objects for all resources along the path to this one (i.e., all
-            /// parent resources) and the authz object for this resource itself.
-            /// These objects are useful for identifying those resources by
-            /// id, for doing other authz checks, or for looking up related
-            /// objects.
-            pub async fn fetch_for(
-                &self,
-                action: authz::Action,
-            ) -> LookupResult<(#(#authz_path_types,)* #model_resource)> {
-                let lookup = self.lookup_root();
-                let opctx = &lookup.opctx;
-                let datastore = &lookup.datastore;
-
-                match &self.key {
-                    Key::Name(parent, name) => {
-                        #authz_ancestors_values_assign_lookup
-                        let (authz_self, db_row) = Self::fetch_by_name_for(
-                            opctx,
-                            datastore,
-                            #parent_lookup_arg_value
-                            *name,
-                            action,
-                        ).await?;
-                        Ok((#(#authz_path_values,)* db_row))
-                    }
-                    Key::Id(_, id) => {
-                        Self::fetch_by_id_for(
-                            opctx,
-                            datastore,
-                            *id,
-                            action,
-                        ).await
-                    }
-
-                }
-            }
-
-            /// Fetch an `authz` object for the selected resource and check
-            /// whether the caller is allowed to do the specified `action`
-            ///
-            /// The return value is a tuple that also includes the `authz`
-            /// objects for all resources along the path to this one (i.e., all
-            /// parent resources) and the authz object for this resource itself.
-            /// These objects are useful for identifying those resources by
-            /// id, for doing other authz checks, or for looking up related
-            /// objects.
-            pub async fn lookup_for(
-                &self,
-                action: authz::Action,
-            ) -> LookupResult<(#(#authz_path_types,)*)> {
-                let lookup = self.lookup_root();
-                let opctx = &lookup.opctx;
-                let (#(#authz_path_values,)*) = self.lookup().await?;
-                opctx.authorize(action, &authz_self).await?;
-                Ok((#(#authz_path_values,)*))
-            }
-
-            /// Fetch the "authz" objects for the selected resource and all its
-            /// parents
-            ///
-            /// This function does not check whether the caller has permission
-            /// to read this information.  That's why it's not `pub`.  Outside
-            /// this module, you want `lookup_for(authz::Action)`.
-            // Do NOT make this function public.  It's a helper for fetch() and
-            // lookup_for().  It's exposed in a safer way via lookup_for().
-            async fn lookup(
-                &self,
-            ) -> LookupResult<(#(#authz_path_types,)*)> {
-                let lookup = self.lookup_root();
-                let opctx = &lookup.opctx;
-                let datastore = &lookup.datastore;
-
-                match &self.key {
-                    Key::Name(parent, name) => {
-                        // When doing a by-name lookup, we have to look up the
-                        // parent first.  Since this is recursive, we wind up
-                        // hitting the database once for each item in the path,
-                        // in order descending from the root of the tree.  (So
-                        // we'll look up Organization, then Project, then
-                        // Instance, etc.)
-                        // TODO-performance Instead of doing database queries at
-                        // each level of recursion, we could be building up one
-                        // big "join" query and hit the database just once.
-                        #authz_ancestors_values_assign_lookup
-                        let (authz_self, _) = Self::lookup_by_name_no_authz(
-                            opctx,
-                            datastore,
-                            #parent_lookup_arg_value
-                            *name
-                        ).await?;
-                        Ok((#(#authz_path_values,)*))
-                    }
-                    Key::Id(_, id) => {
-                        // When doing a by-id lookup, we start directly with the
-                        // resource we're looking up.  But we still want to
-                        // return a full path of authz objects.  So we look up
-                        // the parent by id, then its parent, etc.  Like the
-                        // by-name case, we wind up hitting the database once
-                        // for each item in the path, but in the reverse order.
-                        // So we'll look up the Instance, then the Project, then
-                        // the Organization.
-                        // TODO-performance Instead of doing database queries at
-                        // each level of recursion, we could be building up one
-                        // big "join" query and hit the database just once.
-                        let (#(#authz_path_values,)* _) =
-                            Self::lookup_by_id_no_authz(
-                                opctx,
-                                datastore,
-                                *id
-                            ).await?;
-                        Ok((#(#authz_path_values,)*))
-                    }
-                }
-            }
-
-            /// Fetch the database row for a resource by doing a lookup by name,
-            /// possibly within a collection
-            ///
-            /// This function checks whether the caller has permissions to read
-            /// the requested data.  However, it's not intended to be used
-            /// outside this module.  See `fetch_for(authz::Action)`.
-            // Do NOT make this function public.
-            async fn fetch_by_name_for(
-                opctx: &OpContext,
-                datastore: &DataStore,
-                #parent_lookup_arg
-                name: &Name,
-                action: authz::Action,
-            ) -> LookupResult<(#authz_resource, #model_resource)> {
-                let (authz_self, db_row) = Self::lookup_by_name_no_authz(
-                    opctx,
-                    datastore,
-                    #parent_lookup_arg_value_deref
-                    name
-                ).await?;
-                opctx.authorize(action, &authz_self).await?;
-                Ok((authz_self, db_row))
-            }
-
-            /// Lowest-level function for looking up a resource in the database
-            /// by name, possibly within a collection
-            ///
-            /// This function does not check whether the caller has permission
-            /// to read this information.  That's why it's not `pub`.  Outside
-            /// this module, you want `fetch()` or `lookup_for(authz::Action)`.
-            // Do NOT make this function public.
-            async fn lookup_by_name_no_authz(
-                _opctx: &OpContext,
-                datastore: &DataStore,
-                #parent_lookup_arg
-                name: &Name,
-            ) -> LookupResult<(#authz_resource, #model_resource)> {
-                use db::schema::#resource_as_snake::dsl;
-
-                // TODO-security See the note about pool_authorized() below.
-                let conn = datastore.pool();
-                dsl::#resource_as_snake
-                    .filter(dsl::time_deleted.is_null())
-                    .filter(dsl::name.eq(name.clone()))
-                    #parent_filter
-                    .select(model::#resource_name::as_select())
-                    .get_result_async(conn)
-                    .await
-                    .map_err(|e| {
-                        public_error_from_diesel_pool(
-                            e,
-                            ErrorHandler::NotFoundByLookup(
-                                ResourceType::#resource_name,
-                                LookupType::ByName(name.as_str().to_string())
-                            )
-                        )
-                    })
-                    .map(|db_row| {(
-                        Self::make_authz(
-                            #parent_authz
-                            &db_row,
-                            LookupType::ByName(name.as_str().to_string())
-                        ),
-                        db_row
-                    )})
-            }
-
-            /// Fetch the database row for a resource by doing a lookup by id
-            ///
-            /// This function checks whether the caller has permissions to read
-            /// the requested data.  However, it's not intended to be used
-            /// outside this module.  See `fetch_for(authz::Action)`.
-            // Do NOT make this function public.
-            async fn fetch_by_id_for(
-                opctx: &OpContext,
-                datastore: &DataStore,
-                id: Uuid,
-                action: authz::Action,
-            ) -> LookupResult<(#(#authz_path_types,)* #model_resource)> {
-                let (#(#authz_path_values,)* db_row) =
-                    Self::lookup_by_id_no_authz(
-                        opctx,
-                        datastore,
-                        id
-                    ).await?;
-                opctx.authorize(action, &authz_self).await?;
-                Ok((#(#authz_path_values,)* db_row))
-            }
-
-            /// Lowest-level function for looking up a resource in the database
-            /// by id
-            ///
-            /// This function does not check whether the caller has permission
-            /// to read this information.  That's why it's not `pub`.  Outside
-            /// this module, you want `fetch()` or `lookup_for(authz::Action)`.
-            // Do NOT make this function public.
-            async fn lookup_by_id_no_authz(
-                _opctx: &OpContext,
-                datastore: &DataStore,
-                id: Uuid,
-            ) -> LookupResult<(#(#authz_path_types,)* #model_resource)> {
-                use db::schema::#resource_as_snake::dsl;
-
-                // TODO-security This could use pool_authorized() instead.
-                // However, it will change the response code for this case:
-                // unauthenticated users will get a 401 rather than a 404
-                // because we'll kick them out sooner than we used to -- they
-                // won't even be able to make this database query.  That's a
-                // good thing but this change can be deferred to a follow-up PR.
-                let conn = datastore.pool();
-                let db_row = dsl::#resource_as_snake
-                    .filter(dsl::time_deleted.is_null())
-                    .filter(dsl::id.eq(id))
-                    .select(model::#resource_name::as_select())
-                    .get_result_async(conn)
-                    .await
-                    .map_err(|e| {
-                        public_error_from_diesel_pool(
-                            e,
-                            ErrorHandler::NotFoundByLookup(
-                                ResourceType::#resource_name,
-                                LookupType::ById(id)
-                            )
-                        )
-                    })?;
-                #authz_ancestors_values_assign
-                let authz_self = Self::make_authz(
-                    &#parent_authz
-                    &db_row,
-                    LookupType::ById(id)
-                );
-                Ok((#(#authz_path_values,)* db_row))
-            }
+            #database_functions
         }
     }
 }
 
 fn configure(input: Input) -> Config {
     let resource_name = format_ident!("{}", input.name);
-    // XXX-dap TODO I removed a comma from resource_authz
     let resource_authz_type = quote! { authz::#resource_name };
     let resource_model_type = quote! { model::#resource_name };
 
-    // XXX-dap TODO I removed a comma from these elements
     // XXX-dap TODO Can we just make this an array of the PascalCase
     // identifiers?
     let mut path_authz_types: Vec<_> = input
@@ -453,8 +146,6 @@ fn configure(input: Input) -> Config {
         .collect();
     path_authz_types.push(resource_authz_type.clone());
 
-    // XXX-dap TODO I removed a comma from these elements
-    // (authz_ancestors_values and authz_path_values)
     let authz_ancestors_values: Vec<_> = input
         .ancestors
         .iter()
@@ -465,34 +156,16 @@ fn configure(input: Input) -> Config {
     path_authz_names.push(format_ident!("authz_self"));
 
     let parent = input.ancestors.last().map(|parent_resource_name| {
-        // XXX working here
         let resource_name = format_ident!("{}", parent_resource_name);
-        let resource_snake_name =
+        let resource_as_snake =
             heck::AsSnakeCase(parent_resource_name).to_string();
-        let parent_id = format_ident!("{}_id", resource_snake_name);
         let resource_authz_type = quote! { authz::#resource_name };
-        let resource_authz_name =
-            format_ident!("authz_{}", resource_snake_name);
-        let lookup_filter =
-            quote! { .filter(dsl::#parent_id.eq(#resource_authz_name.id())) };
-        let ancestors_values_assign = quote! {
-                let (#(#authz_ancestors_values,)* _) =
-                    #resource_name::lookup_by_id_no_authz(
-                        _opctx, datastore, db_row.#parent_id
-                    ).await?;
-        };
+        let resource_authz_name = format_ident!("authz_{}", resource_as_snake);
         Parent {
             resource_name,
-            lookup_arg: quote! { #resource_authz_name: &#resource_authz_type, },
-            lookup_arg_value: quote! { &#resource_authz_name, },
-            lookup_arg_value_deref: quote! { #resource_authz_name, },
-            lookup_filter,
+            resource_as_snake,
             resource_authz_type,
             resource_authz_name,
-            ancestors_values_assign,
-            ancestors_values_assign_lookup: quote! {
-                let (#(#authz_ancestors_values,)*) = parent.lookup().await?;
-            },
         }
     });
 
@@ -635,20 +308,349 @@ fn generate_misc_helpers(config: &Config) -> TokenStream {
     }
 }
 
+/// Generates the lookup-related methods, including the public ones (`fetch()`,
+/// `fetch_for()`, and `lookup_for()`) and the private helper (`lookup()`).
+fn generate_lookup_methods(config: &Config) -> TokenStream {
+    let path_authz_names = &config.path_authz_names;
+    let path_authz_types = &config.path_authz_types;
+    let resource_model_type = &config.resource_model_type;
+    let (ancestors_authz_names_assign, parent_lookup_arg_actual) =
+        if let Some(p) = &config.parent {
+            let nancestors = config.path_authz_names.len() - 1;
+            let ancestors_authz_names = &config.path_authz_names[0..nancestors];
+            let parent_authz_name = &p.resource_authz_name;
+            (
+                quote! {
+                    let (#(#ancestors_authz_names,)*) = parent.lookup().await?;
+                },
+                quote! { &#parent_authz_name, },
+            )
+        } else {
+            (quote! {}, quote! {})
+        };
+
+    quote! {
+        /// Fetch the record corresponding to the selected resource
+        ///
+        /// This is equivalent to `fetch_for(authz::Action::Read)`.
+        pub async fn fetch(
+            &self,
+        ) -> LookupResult<(#(#path_authz_types,)* #resource_model_type)> {
+            self.fetch_for(authz::Action::Read).await
+        }
+
+        /// Fetch the record corresponding to the selected resource and
+        /// check whether the caller is allowed to do the specified `action`
+        ///
+        /// The return value is a tuple that also includes the `authz`
+        /// objects for all resources along the path to this one (i.e., all
+        /// parent resources) and the authz object for this resource itself.
+        /// These objects are useful for identifying those resources by
+        /// id, for doing other authz checks, or for looking up related
+        /// objects.
+        pub async fn fetch_for(
+            &self,
+            action: authz::Action,
+        ) -> LookupResult<(#(#path_authz_types,)* #resource_model_type)> {
+            let lookup = self.lookup_root();
+            let opctx = &lookup.opctx;
+            let datastore = &lookup.datastore;
+
+            match &self.key {
+                Key::Name(parent, name) => {
+                    #ancestors_authz_names_assign
+                    let (authz_self, db_row) = Self::fetch_by_name_for(
+                        opctx,
+                        datastore,
+                        #parent_lookup_arg_actual
+                        *name,
+                        action,
+                    ).await?;
+                    Ok((#(#path_authz_names,)* db_row))
+                }
+                Key::Id(_, id) => {
+                    Self::fetch_by_id_for(
+                        opctx,
+                        datastore,
+                        *id,
+                        action,
+                    ).await
+                }
+            }
+        }
+
+        /// Fetch an `authz` object for the selected resource and check
+        /// whether the caller is allowed to do the specified `action`
+        ///
+        /// The return value is a tuple that also includes the `authz`
+        /// objects for all resources along the path to this one (i.e., all
+        /// parent resources) and the authz object for this resource itself.
+        /// These objects are useful for identifying those resources by
+        /// id, for doing other authz checks, or for looking up related
+        /// objects.
+        pub async fn lookup_for(
+            &self,
+            action: authz::Action,
+        ) -> LookupResult<(#(#path_authz_types,)*)> {
+            let lookup = self.lookup_root();
+            let opctx = &lookup.opctx;
+            let (#(#path_authz_names,)*) = self.lookup().await?;
+            opctx.authorize(action, &authz_self).await?;
+            Ok((#(#path_authz_names,)*))
+        }
+
+        /// Fetch the "authz" objects for the selected resource and all its
+        /// parents
+        ///
+        /// This function does not check whether the caller has permission
+        /// to read this information.  That's why it's not `pub`.  Outside
+        /// this module, you want `lookup_for(authz::Action)`.
+        // Do NOT make this function public.  It's a helper for fetch() and
+        // lookup_for().  It's exposed in a safer way via lookup_for().
+        async fn lookup(
+            &self,
+        ) -> LookupResult<(#(#path_authz_types,)*)> {
+            let lookup = self.lookup_root();
+            let opctx = &lookup.opctx;
+            let datastore = &lookup.datastore;
+
+            match &self.key {
+                Key::Name(parent, name) => {
+                    // When doing a by-name lookup, we have to look up the
+                    // parent first.  Since this is recursive, we wind up
+                    // hitting the database once for each item in the path,
+                    // in order descending from the root of the tree.  (So
+                    // we'll look up Organization, then Project, then
+                    // Instance, etc.)
+                    // TODO-performance Instead of doing database queries at
+                    // each level of recursion, we could be building up one
+                    // big "join" query and hit the database just once.
+                    #ancestors_authz_names_assign
+                    let (authz_self, _) = Self::lookup_by_name_no_authz(
+                        opctx,
+                        datastore,
+                        #parent_lookup_arg_actual
+                        *name
+                    ).await?;
+                    Ok((#(#path_authz_names,)*))
+                }
+                Key::Id(_, id) => {
+                    // When doing a by-id lookup, we start directly with the
+                    // resource we're looking up.  But we still want to
+                    // return a full path of authz objects.  So we look up
+                    // the parent by id, then its parent, etc.  Like the
+                    // by-name case, we wind up hitting the database once
+                    // for each item in the path, but in the reverse order.
+                    // So we'll look up the Instance, then the Project, then
+                    // the Organization.
+                    // TODO-performance Instead of doing database queries at
+                    // each level of recursion, we could be building up one
+                    // big "join" query and hit the database just once.
+                    let (#(#path_authz_names,)* _) =
+                        Self::lookup_by_id_no_authz(
+                            opctx,
+                            datastore,
+                            *id
+                        ).await?;
+                    Ok((#(#path_authz_names,)*))
+                }
+            }
+        }
+    }
+}
+
+/// Generates low-level functions to fetch database records for this resource
+///
+/// These are standalone functions, not methods.  They operate on more primitive
+/// objects than do the methods: authz objects (representing parent ids), names,
+/// and ids.  They also take the `opctx` and `datastore` directly as arguments.
+fn generate_database_functions(config: &Config) -> TokenStream {
+    let resource_name = &config.resource_name;
+    let resource_authz_type = &config.resource_authz_type;
+    let resource_model_type = &config.resource_model_type;
+    let resource_as_snake = &config.resource_as_snake;
+    let path_authz_names = &config.path_authz_names;
+    let path_authz_types = &config.path_authz_types;
+    let (
+        parent_lookup_arg_formal,
+        parent_lookup_arg_actual,
+        ancestors_authz_names_assign,
+        lookup_filter,
+        parent_authz_value,
+    ) = if let Some(p) = &config.parent {
+        let nancestors = config.path_authz_names.len() - 1;
+        let ancestors_authz_names = &config.path_authz_names[0..nancestors];
+        let parent_resource_name = &p.resource_name;
+        let parent_authz_name = &p.resource_authz_name;
+        let parent_authz_type = &p.resource_authz_type;
+        let parent_id = format_ident!("{}_id", &p.resource_as_snake);
+        (
+            quote! { #parent_authz_name: &#parent_authz_type, },
+            quote! { #parent_authz_name, },
+            quote! {
+                let (#(#ancestors_authz_names,)* _) =
+                    #parent_resource_name::lookup_by_id_no_authz(
+                        _opctx, datastore, db_row.#parent_id
+                    ).await?;
+            },
+            quote! { .filter(dsl::#parent_id.eq(#parent_authz_name.id())) },
+            quote! { #parent_authz_name },
+        )
+    } else {
+        (quote! {}, quote! {}, quote! {}, quote! {}, quote! { &authz::FLEET })
+    };
+
+    quote! {
+        /// Fetch the database row for a resource by doing a lookup by name,
+        /// possibly within a collection
+        ///
+        /// This function checks whether the caller has permissions to read
+        /// the requested data.  However, it's not intended to be used
+        /// outside this module.  See `fetch_for(authz::Action)`.
+        // Do NOT make this function public.
+        async fn fetch_by_name_for(
+            opctx: &OpContext,
+            datastore: &DataStore,
+            #parent_lookup_arg_formal
+            name: &Name,
+            action: authz::Action,
+        ) -> LookupResult<(#resource_authz_type, #resource_model_type)> {
+            let (authz_self, db_row) = Self::lookup_by_name_no_authz(
+                opctx,
+                datastore,
+                #parent_lookup_arg_actual
+                name
+            ).await?;
+            opctx.authorize(action, &authz_self).await?;
+            Ok((authz_self, db_row))
+        }
+
+        /// Lowest-level function for looking up a resource in the database
+        /// by name, possibly within a collection
+        ///
+        /// This function does not check whether the caller has permission
+        /// to read this information.  That's why it's not `pub`.  Outside
+        /// this module, you want `fetch()` or `lookup_for(authz::Action)`.
+        // Do NOT make this function public.
+        async fn lookup_by_name_no_authz(
+            _opctx: &OpContext,
+            datastore: &DataStore,
+            #parent_lookup_arg_formal
+            name: &Name,
+        ) -> LookupResult<(#resource_authz_type, #resource_model_type)> {
+            use db::schema::#resource_as_snake::dsl;
+
+            // TODO-security See the note about pool_authorized() below.
+            let conn = datastore.pool();
+            dsl::#resource_as_snake
+                .filter(dsl::time_deleted.is_null())
+                .filter(dsl::name.eq(name.clone()))
+                #lookup_filter
+                .select(#resource_model_type::as_select())
+                .get_result_async(conn)
+                .await
+                .map_err(|e| {
+                    public_error_from_diesel_pool(
+                        e,
+                        ErrorHandler::NotFoundByLookup(
+                            ResourceType::#resource_name,
+                            LookupType::ByName(name.as_str().to_string())
+                        )
+                    )
+                })
+                .map(|db_row| {(
+                    Self::make_authz(
+                        #parent_authz_value,
+                        &db_row,
+                        LookupType::ByName(name.as_str().to_string())
+                    ),
+                    db_row
+                )})
+        }
+
+        /// Fetch the database row for a resource by doing a lookup by id
+        ///
+        /// This function checks whether the caller has permissions to read
+        /// the requested data.  However, it's not intended to be used
+        /// outside this module.  See `fetch_for(authz::Action)`.
+        // Do NOT make this function public.
+        async fn fetch_by_id_for(
+            opctx: &OpContext,
+            datastore: &DataStore,
+            id: Uuid,
+            action: authz::Action,
+        ) -> LookupResult<(#(#path_authz_types,)* #resource_model_type)> {
+            let (#(#path_authz_names,)* db_row) =
+                Self::lookup_by_id_no_authz(
+                    opctx,
+                    datastore,
+                    id
+                ).await?;
+            opctx.authorize(action, &authz_self).await?;
+            Ok((#(#path_authz_names,)* db_row))
+        }
+
+        /// Lowest-level function for looking up a resource in the database
+        /// by id
+        ///
+        /// This function does not check whether the caller has permission
+        /// to read this information.  That's why it's not `pub`.  Outside
+        /// this module, you want `fetch()` or `lookup_for(authz::Action)`.
+        // Do NOT make this function public.
+        async fn lookup_by_id_no_authz(
+            _opctx: &OpContext,
+            datastore: &DataStore,
+            id: Uuid,
+        ) -> LookupResult<(#(#path_authz_types,)* #resource_model_type)> {
+            use db::schema::#resource_as_snake::dsl;
+
+            // TODO-security This could use pool_authorized() instead.
+            // However, it will change the response code for this case:
+            // unauthenticated users will get a 401 rather than a 404
+            // because we'll kick them out sooner than we used to -- they
+            // won't even be able to make this database query.  That's a
+            // good thing but this change can be deferred to a follow-up PR.
+            let conn = datastore.pool();
+            let db_row = dsl::#resource_as_snake
+                .filter(dsl::time_deleted.is_null())
+                .filter(dsl::id.eq(id))
+                .select(#resource_model_type::as_select())
+                .get_result_async(conn)
+                .await
+                .map_err(|e| {
+                    public_error_from_diesel_pool(
+                        e,
+                        ErrorHandler::NotFoundByLookup(
+                            ResourceType::#resource_name,
+                            LookupType::ById(id)
+                        )
+                    )
+                })?;
+            #ancestors_authz_names_assign
+            let authz_self = Self::make_authz(
+                &#parent_authz_value,
+                &db_row,
+                LookupType::ById(id)
+            );
+            Ok((#(#path_authz_names,)* db_row))
+        }
+    }
+}
+
 #[cfg(test)]
 #[test]
-fn test_lookup() {
-    //    let output = lookup_resource(
-    //        quote! {
-    //            name = "Organization",
-    //            ancestors = [],
-    //            children = [ "Project" ],
-    //            authz_kind = Typed
-    //        }
-    //        .into(),
-    //    )
-    //    .unwrap();
-    //    println!("{}", output);
+fn test_lookup_dump() {
+    let output = lookup_resource(
+        quote! {
+            name = "Organization",
+            ancestors = [],
+            children = [ "Project" ],
+            authz_kind = Typed
+        }
+        .into(),
+    )
+    .unwrap();
+    println!("{}", output);
 
     let output = lookup_resource(
         quote! {
