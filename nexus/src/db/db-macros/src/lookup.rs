@@ -121,8 +121,6 @@ struct Resource {
     name: syn::Ident,
     /// snake_case resource name (e.g., `project`)
     name_as_snake: String,
-    /// name of the `authz` type for this resource (e.g., `authz::Project`)
-    authz_type: TokenStream,
     /// identifier for an authz object for this resource (e.g., `authz_project`)
     authz_name: syn::Ident,
 }
@@ -132,8 +130,7 @@ impl Resource {
         let name_as_snake = heck::AsSnakeCase(&name).to_string();
         let name = format_ident!("{}", name);
         let authz_name = format_ident!("authz_{}", name_as_snake);
-        let authz_type = quote! { authz::#name };
-        Resource { name, authz_name, authz_type, name_as_snake }
+        Resource { name, authz_name, name_as_snake }
     }
 }
 
@@ -236,11 +233,10 @@ fn generate_child_selectors(config: &Config) -> TokenStream {
 
 /// Generates the simple helper functions for this resource
 fn generate_misc_helpers(config: &Config) -> TokenStream {
-    let fleet_type = quote! { authz::Fleet };
+    let fleet_name = format_ident!("Fleet");
     let resource_name = &config.resource.name;
-    let resource_authz_type = &config.resource.authz_type;
-    let parent_authz_type =
-        config.parent.as_ref().map(|p| &p.authz_type).unwrap_or(&fleet_type);
+    let parent_resource_name =
+        config.parent.as_ref().map(|p| &p.name).unwrap_or(&fleet_name);
 
     // Given a parent authz type, when we want to construct an authz object for
     // a child resource, there are two different patterns.  We need to pick the
@@ -263,10 +259,10 @@ fn generate_misc_helpers(config: &Config) -> TokenStream {
     quote! {
         /// Build the `authz` object for this resource
         fn make_authz(
-            authz_parent: &#parent_authz_type,
+            authz_parent: &authz::#parent_resource_name,
             db_row: &model::#resource_name,
             lookup_type: LookupType,
-        ) -> #resource_authz_type {
+        ) -> authz::#resource_name {
             authz_parent.#mkauthz_func(
                 #mkauthz_arg
                 db_row.id(),
@@ -448,7 +444,6 @@ fn generate_lookup_methods(config: &Config) -> TokenStream {
 /// and ids.  They also take the `opctx` and `datastore` directly as arguments.
 fn generate_database_functions(config: &Config) -> TokenStream {
     let resource_name = &config.resource.name;
-    let resource_authz_type = &config.resource.authz_type;
     let resource_authz_name = &config.resource.authz_name;
     let resource_as_snake = format_ident!("{}", &config.resource.name_as_snake);
     let path_types = &config.path_types;
@@ -464,10 +459,9 @@ fn generate_database_functions(config: &Config) -> TokenStream {
         let ancestors_authz_names = &config.path_authz_names[0..nancestors];
         let parent_resource_name = &p.name;
         let parent_authz_name = &p.authz_name;
-        let parent_authz_type = &p.authz_type;
         let parent_id = format_ident!("{}_id", &p.name_as_snake);
         (
-            quote! { #parent_authz_name: &#parent_authz_type, },
+            quote! { #parent_authz_name: &authz::#parent_resource_name, },
             quote! { #parent_authz_name, },
             quote! {
                 let (#(#ancestors_authz_names,)* _) =
@@ -496,7 +490,7 @@ fn generate_database_functions(config: &Config) -> TokenStream {
             #parent_lookup_arg_formal
             name: &Name,
             action: authz::Action,
-        ) -> LookupResult<(#resource_authz_type, model::#resource_name)> {
+        ) -> LookupResult<(authz::#resource_name, model::#resource_name)> {
             let (#resource_authz_name, db_row) = Self::lookup_by_name_no_authz(
                 opctx,
                 datastore,
@@ -519,7 +513,7 @@ fn generate_database_functions(config: &Config) -> TokenStream {
             datastore: &DataStore,
             #parent_lookup_arg_formal
             name: &Name,
-        ) -> LookupResult<(#resource_authz_type, model::#resource_name)> {
+        ) -> LookupResult<(authz::#resource_name, model::#resource_name)> {
             use db::schema::#resource_as_snake::dsl;
 
             // TODO-security See the note about pool_authorized() below.
