@@ -22,6 +22,7 @@ use crucible_agent_client::{
 };
 use futures::StreamExt;
 use lazy_static::lazy_static;
+use omicron_common::api::external;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::Generation;
 use omicron_common::api::external::IdentityMetadataCreateParams;
@@ -244,7 +245,7 @@ pub fn saga_instance_create() -> SagaTemplate<SagaInstanceCreate> {
     template_builder.append(
         "instance_ensure",
         "InstanceEnsure",
-        new_action_noop_undo(sic_instance_ensure),
+        ActionFunc::new_action(sic_instance_ensure, sic_instance_ensure_undo),
     );
 
     template_builder.build()
@@ -789,6 +790,45 @@ async fn sic_instance_ensure(
         .await
         .map_err(ActionError::action_failed)?;
 
+    Ok(())
+}
+
+async fn sic_instance_ensure_undo(
+    sagactx: ActionContext<SagaInstanceCreate>,
+) -> Result<(), anyhow::Error> {
+    let osagactx = sagactx.user_data();
+    let params = sagactx.saga_params();
+    let instance_name = sagactx.lookup::<db::model::Name>("instance_name")?;
+    let opctx = OpContext::for_saga_action(&sagactx, &params.serialized_authn);
+
+    let authz_project = osagactx
+        .datastore()
+        .project_lookup_by_id(params.project_id)
+        .await
+        .map_err(ActionError::action_failed)?;
+
+    let (authz_instance, instance) = osagactx
+        .datastore()
+        .instance_fetch(&opctx, &authz_project, &instance_name)
+        .await
+        .map_err(ActionError::action_failed)?;
+
+    let new_state = db::model::InstanceRuntimeState {
+        state: db::model::InstanceState::new(external::InstanceState::Failed),
+        ..instance.runtime_state
+    };
+
+    osagactx
+        .datastore()
+        .instance_update_runtime(&authz_instance.id(), &new_state)
+        .await
+        .map_err(ActionError::action_failed)?;
+
+    osagactx
+        .datastore()
+        .project_delete_instance(&opctx, &authz_instance)
+        .await
+        .map_err(ActionError::action_failed)?;
     Ok(())
 }
 
