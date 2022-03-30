@@ -176,7 +176,7 @@ fn generate_struct(config: &Config) -> TokenStream {
     let doc_struct = format!(
         "Selects a resource of type {} (or any of its children, using the \
         functions on this struct) for lookup or fetch",
-        resource_name.to_string(),
+        resource_name
     );
 
     quote! {
