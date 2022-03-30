@@ -55,9 +55,9 @@ enum AuthzKind {
 
 /// Configuration for [`lookup_resource`] and its helper functions
 ///
-/// This is all computable from [`Input`].  The purpose is to put the various
-/// output strings that need to appear in various chunks of output into one
-/// place with uniform names and documentation.
+/// This is all computable from [`Input`].  This precomputes a bunch of useful
+/// identifiers and token streams, which makes the generator functions a lot
+/// easier to grok.
 pub struct Config {
     // The resource itself that we're generating
     /// Basic information about the resource we're generating
@@ -86,8 +86,36 @@ pub struct Config {
     parent: Option<Resource>,
 }
 
+impl Config {
+    fn for_input(input: Input) -> Config {
+        let resource = Resource::for_name(&input.name);
+
+        let mut path_types: Vec<_> =
+            input.ancestors.iter().map(|a| format_ident!("{}", a)).collect();
+        path_types.push(resource.name.clone());
+
+        let mut path_authz_names: Vec<_> = input
+            .ancestors
+            .iter()
+            .map(|a| {
+                format_ident!("authz_{}", heck::AsSnakeCase(&a).to_string())
+            })
+            .collect();
+        path_authz_names.push(resource.authz_name.clone());
+
+        Config {
+            resource,
+            authz_kind: input.authz_kind,
+            path_types,
+            path_authz_names,
+            parent: input.ancestors.last().map(|s| Resource::for_name(&s)),
+            child_resources: input.children,
+        }
+    }
+}
+
 /// Information about a resource (either the one we're generating or an
-/// ancestor in the path)
+/// ancestor in its path)
 struct Resource {
     /// PascalCase resource name itself (e.g., `Project`)
     name: syn::Ident,
@@ -112,12 +140,16 @@ impl Resource {
     }
 }
 
+//
+// MACRO IMPLEMENTATION
+//
+
 /// Implementation of [`lookup_resource!]'.
 pub fn lookup_resource(
     raw_input: TokenStream,
 ) -> Result<TokenStream, syn::Error> {
     let input = serde_tokenstream::from_tokenstream::<Input>(&raw_input)?;
-    let config = configure(input);
+    let config = Config::for_input(input);
 
     let resource_name = &config.resource.name;
     let the_struct = generate_struct(&config);
@@ -141,30 +173,6 @@ pub fn lookup_resource(
     })
 }
 
-fn configure(input: Input) -> Config {
-    let resource = Resource::for_name(&input.name);
-
-    let mut path_types: Vec<_> =
-        input.ancestors.iter().map(|a| format_ident!("{}", a)).collect();
-    path_types.push(resource.name.clone());
-
-    let mut path_authz_names: Vec<_> = input
-        .ancestors
-        .iter()
-        .map(|a| format_ident!("authz_{}", heck::AsSnakeCase(&a).to_string()))
-        .collect();
-    path_authz_names.push(resource.authz_name.clone());
-
-    Config {
-        resource,
-        authz_kind: input.authz_kind,
-        path_types,
-        path_authz_names,
-        parent: input.ancestors.last().map(|s| Resource::for_name(&s)),
-        child_resources: input.children,
-    }
-}
-
 /// Generates the struct definition for this resource
 fn generate_struct(config: &Config) -> TokenStream {
     let root_sym = format_ident!("Root");
@@ -174,7 +182,7 @@ fn generate_struct(config: &Config) -> TokenStream {
     let doc_struct = format!(
         "Selects a resource of type {} (or any of its children, using the \
         functions on this struct) for lookup or fetch",
-        config.resource.name.to_string(),
+        resource_name.to_string(),
     );
 
     quote! {
