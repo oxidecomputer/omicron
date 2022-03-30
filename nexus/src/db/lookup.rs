@@ -20,6 +20,104 @@ use diesel::{ExpressionMethods, QueryDsl, SelectableHelper};
 use omicron_common::api::external::{LookupResult, LookupType, ResourceType};
 use uuid::Uuid;
 
+/// Look up an API resource in the database
+///
+/// `LookupPath` provides a builder-like interface for identifying a resource by
+/// id or a path of names.  Once you've selected a resource, you can use one of
+/// a few different functions to get information about it from the database:
+///
+/// * `fetch()`: fetches the database record and `authz` objects for all parents
+///   in the path to this object.  This function checks that the caller has
+///   permission to `authz::Action::Read` the resoure.
+/// * `fetch_for(authz::Action)`: like `fetch()`, but allows you to specify some
+///   other action that will be checked rather than `authz::Action::Read`.
+/// * `lookup_for(authz::Action)`: fetch just the `authz` objects for a resource
+///   and its parents.  This function checks that the caller has permissions to
+///   perform the specified action.
+///
+/// # Examples
+///
+/// ```
+/// # use omicron_nexus::authz;
+/// # use omicron_nexus::context::OpContext;
+/// # use omicron_nexus::db;
+/// # use omicron_nexus::db::DataStore;
+/// # use omicron_nexus::db::lookup::LookupPath;
+/// # use uuid::Uuid;
+/// # async fn foo(opctx: &OpContext, datastore: &DataStore)
+/// # -> Result<(), omicron_common::api::external::Error> {
+///
+/// // Fetch an organization by name
+/// let organization_name = db::model::Name("engineering".parse().unwrap());
+/// let (authz_org, db_org): (authz::Organization, db::model::Organization) =
+///     LookupPath::new(opctx, datastore)
+///         .organization_name(&organization_name)
+///         .fetch()
+///         .await?;
+///
+/// // Fetch an organization by id
+/// let id: Uuid = todo!();
+/// let (authz_org, db_org): (authz::Organization, db::model::Organization) =
+///     LookupPath::new(opctx, datastore)
+///         .organization_id(id)
+///         .fetch()
+///         .await?;
+///
+/// // Fetch an Instance by a path of names (Organization name, Project name,
+/// // Instance name)
+/// let project_name = db::model::Name("omicron".parse().unwrap());
+/// let instance_name = db::model::Name("test-server".parse().unwrap());
+/// let (authz_org, authz_project, authz_instance, db_instance) =
+///     LookupPath::new(opctx, datastore)
+///         .organization_name(&organization_name)
+///         .project_name(&project_name)
+///         .instance_name(&instance_name)
+///         .fetch()
+///         .await?;
+/// # }
+/// ```
+pub struct LookupPath<'a> {
+    opctx: &'a OpContext,
+    datastore: &'a DataStore,
+}
+
+impl<'a> LookupPath<'a> {
+    pub fn new<'b, 'c>(
+        opctx: &'b OpContext,
+        datastore: &'c DataStore,
+    ) -> LookupPath<'a>
+    where
+        'b: 'a,
+        'c: 'a,
+    {
+        LookupPath { opctx, datastore }
+    }
+
+    pub fn organization_name<'b, 'c>(self, name: &'b Name) -> Organization<'c>
+    where
+        'a: 'c,
+        'b: 'c,
+    {
+        Organization { key: Key::Name(Root { lookup_root: self }, name) }
+    }
+
+    pub fn organization_id(self, id: Uuid) -> Organization<'a> {
+        Organization { key: Key::Id(Root { lookup_root: self }, id) }
+    }
+
+    pub fn project_id(self, id: Uuid) -> Project<'a> {
+        Project { key: Key::Id(Root { lookup_root: self }, id) }
+    }
+
+    pub fn instance_id(self, id: Uuid) -> Instance<'a> {
+        Instance { key: Key::Id(Root { lookup_root: self }, id) }
+    }
+
+    pub fn disk_id(self, id: Uuid) -> Disk<'a> {
+        Disk { key: Key::Id(Root { lookup_root: self }, id) }
+    }
+}
+
 enum Key<'a, P> {
     Name(P, &'a Name),
     Id(Root<'a>, Uuid),
@@ -61,48 +159,6 @@ lookup_resource! {
     ancestors = [ "Organization", "Project" ],
     children = [],
     authz_kind = Generic
-}
-
-pub struct LookupPath<'a> {
-    opctx: &'a OpContext,
-    datastore: &'a DataStore,
-}
-
-impl<'a> LookupPath<'a> {
-    pub fn new<'b, 'c>(
-        opctx: &'b OpContext,
-        datastore: &'c DataStore,
-    ) -> LookupPath<'a>
-    where
-        'b: 'a,
-        'c: 'a,
-    {
-        LookupPath { opctx, datastore }
-    }
-
-    pub fn organization_name<'b, 'c>(self, name: &'b Name) -> Organization<'c>
-    where
-        'a: 'c,
-        'b: 'c,
-    {
-        Organization { key: Key::Name(Root { lookup_root: self }, name) }
-    }
-
-    pub fn organization_id(self, id: Uuid) -> Organization<'a> {
-        Organization { key: Key::Id(Root { lookup_root: self }, id) }
-    }
-
-    pub fn project_id(self, id: Uuid) -> Project<'a> {
-        Project { key: Key::Id(Root { lookup_root: self }, id) }
-    }
-
-    pub fn instance_id(self, id: Uuid) -> Instance<'a> {
-        Instance { key: Key::Id(Root { lookup_root: self }, id) }
-    }
-
-    pub fn disk_id(self, id: Uuid) -> Disk<'a> {
-        Disk { key: Key::Id(Root { lookup_root: self }, id) }
-    }
 }
 
 #[cfg(test)]

@@ -13,13 +13,13 @@
 #![allow(clippy::style)]
 
 pub mod authn; // Public only for testing
-pub mod authz;
-pub mod config; // public for testing
-mod context;
-pub mod db; // Public only for some documentation examples
+pub mod authz; // Public for documentation examples
+pub mod config; // Public for testing
+pub mod context; // Public for documentation examples
+pub mod db; // Public for documentation examples
 mod defaults;
-pub mod external_api; // public for testing
-pub mod internal_api; // public for testing
+pub mod external_api; // Public for testing
+pub mod internal_api; // Public for testing
 mod nexus;
 mod populate;
 mod saga_interface;
