@@ -442,7 +442,7 @@ $ sudo ./target/debug/omicron-package uninstall
 When we deploy, we're effectively creating a number of different zones
 for all the components that make up Omicron (Nexus, Clickhouse, Crucible, etc).
 Since all these services run in different zones they cannot communicate with
-each other (and Sled Agent in the global zone) via `localhost`. In practise,
+each other (and Sled Agent in the global zone) via `localhost`. In practice,
 we'll assign addresses as per RFD 63 as well as incorporating DNS based
 service discovery.
 
