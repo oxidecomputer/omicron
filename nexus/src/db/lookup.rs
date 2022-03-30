@@ -151,6 +151,8 @@ enum Key<'a, P> {
     Id(Root<'a>, Uuid),
 }
 
+/// `Root` represents the root of whatever path the caller is using to select a
+/// resource (whether it's by-id, by-name, or a combination)
 struct Root<'a> {
     lookup_root: LookupPath<'a>,
 }
