@@ -133,7 +133,7 @@ async fn test_basic_failures(cptestctx: &ControlPlaneTestContext) {
     ];
 
     for test_case in test_cases {
-        let error = if let Some(body) = test_case.body {
+        let error: HttpErrorResponseBody = if let Some(body) = test_case.body {
             NexusRequest::expect_failure_with_body(
                 client,
                 test_case.expected_code,
