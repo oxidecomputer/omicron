@@ -190,16 +190,16 @@ fn do_sync(config: &Config) -> Result<()> {
     Ok(())
 }
 
-// Build omicron-package and omicron-sled-agent on the builder
+// Build omicron-package and omicron-deploy on the builder
 //
-// We need to build omicron-sled-agent for overlay file generation
+// We need to build omicron-deploy for overlay file generation
 fn do_build_minimal(config: &Config) -> Result<()> {
     let server = &config.servers[&config.builder.server];
     let cmd = format!(
         "cd {} && cargo build -p {} -p {}",
         config.builder.omicron_path.to_string_lossy(),
         "omicron-package",
-        "omicron-sled-agent"
+        "omicron-deploy"
     );
     ssh_exec(&server, &cmd, false)
 }

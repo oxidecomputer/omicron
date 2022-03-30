@@ -1,5 +1,6 @@
 [package]
 name = "omicron-sled-agent"
+description = "Services for managing sled-local resources"
 version = "0.1.0"
 edition = "2021"
 license = "MPL-2.0"
@@ -66,8 +67,4 @@ doc = false
 
 [[bin]]
 name = "sled-agent"
-doc = false
-
-[[bin]]
-name = "sled-agent-overlay-files"
 doc = false
