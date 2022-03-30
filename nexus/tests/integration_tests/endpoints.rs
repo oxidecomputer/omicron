@@ -141,7 +141,9 @@ lazy_static! {
                 description: "".parse().unwrap(),
             },
             snapshot_id: None,
+            image_id: None,
             size: ByteCount::from_gibibytes_u32(16),
+            block_size: ByteCount::from(512),
         };
 
     // Instance used for testing

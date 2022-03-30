@@ -3930,7 +3930,9 @@ mod test {
                 description: name.to_string(),
             },
             snapshot_id: None,
+            image_id: None,
             size,
+            block_size: ByteCount::from(4096),
         }
     }
 

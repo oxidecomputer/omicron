@@ -4364,6 +4364,9 @@
         "description": "Client view of an [`Disk`]",
         "type": "object",
         "properties": {
+          "block_size": {
+            "$ref": "#/components/schemas/ByteCount"
+          },
           "description": {
             "description": "human-readable free-form text about a resource",
             "type": "string"
@@ -4373,6 +4376,11 @@
           },
           "id": {
             "description": "unique, immutable, system-controlled identifier for each resource",
+            "type": "string",
+            "format": "uuid"
+          },
+          "image_id": {
+            "nullable": true,
             "type": "string",
             "format": "uuid"
           },
@@ -4411,6 +4419,7 @@
           }
         },
         "required": [
+          "block_size",
           "description",
           "device_path",
           "id",
@@ -4426,8 +4435,22 @@
         "description": "Create-time parameters for a [`Disk`](omicron_common::api::external::Disk)",
         "type": "object",
         "properties": {
+          "block_size": {
+            "description": "block size for this disk",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ByteCount"
+              }
+            ]
+          },
           "description": {
             "type": "string"
+          },
+          "image_id": {
+            "nullable": true,
+            "description": "id for image from which the Disk should be created, if any",
+            "type": "string",
+            "format": "uuid"
           },
           "name": {
             "$ref": "#/components/schemas/Name"
@@ -4448,6 +4471,7 @@
           }
         },
         "required": [
+          "block_size",
           "description",
           "name",
           "size"
@@ -4803,8 +4827,22 @@
             "description": "During instance creation, create and attach disks",
             "type": "object",
             "properties": {
+              "block_size": {
+                "description": "block size for this disk",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/ByteCount"
+                  }
+                ]
+              },
               "description": {
                 "type": "string"
+              },
+              "image_id": {
+                "nullable": true,
+                "description": "id for image from which the Disk should be created, if any",
+                "type": "string",
+                "format": "uuid"
               },
               "name": {
                 "$ref": "#/components/schemas/Name"
@@ -4831,6 +4869,7 @@
               }
             },
             "required": [
+              "block_size",
               "description",
               "name",
               "size",

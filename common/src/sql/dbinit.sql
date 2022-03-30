@@ -400,7 +400,9 @@ CREATE TABLE omicron.public.disk (
 
     /* Disk configuration */
     size_bytes INT NOT NULL,
-    origin_snapshot UUID
+    block_size INT NOT NULL,
+    origin_snapshot UUID,
+    origin_image UUID
 );
 
 CREATE UNIQUE INDEX ON omicron.public.disk (

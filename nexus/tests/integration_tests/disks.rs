@@ -130,7 +130,9 @@ async fn test_disk_create_attach_detach_delete(
     assert_eq!(disk.identity.description, "sells rainsticks");
     assert_eq!(disk.project_id, project_id);
     assert_eq!(disk.snapshot_id, None);
+    assert_eq!(disk.image_id, None);
     assert_eq!(disk.size.to_whole_mebibytes(), 1024);
+    assert_eq!(disk.block_size.to_bytes(), 512);
     assert_eq!(disk.state, DiskState::Creating);
 
     // Fetch the disk and expect it to match what we just created except that
@@ -141,7 +143,9 @@ async fn test_disk_create_attach_detach_delete(
     assert_eq!(disk.identity.description, "sells rainsticks");
     assert_eq!(disk.project_id, project_id);
     assert_eq!(disk.snapshot_id, None);
+    assert_eq!(disk.image_id, None);
     assert_eq!(disk.size.to_whole_mebibytes(), 1024);
+    assert_eq!(disk.block_size.to_bytes(), 512);
     assert_eq!(disk.state, DiskState::Detached);
 
     // List disks again and expect to find the one we just created.
@@ -264,7 +268,9 @@ async fn test_disk_create_disk_that_already_exists_fails(
             description: String::from("sells rainsticks"),
         },
         snapshot_id: None,
+        image_id: None,
         size: ByteCount::from_gibibytes_u32(1),
+        block_size: ByteCount::from(512),
     };
     let _ = create_disk(&client, ORG_NAME, PROJECT_NAME, DISK_NAME).await;
     let disk_url = format!("{}/{}", disks_url, DISK_NAME);
@@ -643,7 +649,9 @@ async fn test_disk_region_creation_failure(
             description: String::from("sells rainsticks"),
         },
         snapshot_id: None,
+        image_id: None,
         size: disk_size,
+        block_size: ByteCount::from(512),
     };
 
     // Unfortunately, the error message is only posted internally to the
@@ -724,7 +732,9 @@ fn disks_eq(disk1: &Disk, disk2: &Disk) {
     identity_eq(&disk1.identity, &disk2.identity);
     assert_eq!(disk1.project_id, disk2.project_id);
     assert_eq!(disk1.snapshot_id, disk2.snapshot_id);
+    assert_eq!(disk1.image_id, disk2.image_id);
     assert_eq!(disk1.size.to_bytes(), disk2.size.to_bytes());
+    assert_eq!(disk1.block_size.to_bytes(), disk2.block_size.to_bytes());
     assert_eq!(disk1.state, disk2.state);
     assert_eq!(disk1.device_path, disk2.device_path);
 }

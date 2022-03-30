@@ -751,12 +751,37 @@ impl Nexus {
         // (if possibly redundant) to check this here.
         opctx.authorize(authz::Action::CreateChild, &authz_project).await?;
 
-        // Until we implement snapshots, do not allow disks to be created with a
-        // snapshot id.
+        // Reject invalid block sizes
+        match params.block_size.to_bytes() {
+            512 | 4096 => {
+                // ok
+            }
+
+            _ => {
+                return Err(Error::InvalidValue {
+                    label: String::from("block_size"),
+                    message: String::from(
+                        "supported block sizes are 512 and 4096",
+                    ),
+                });
+            }
+        }
+
+        // Until we implement snapshots, do not allow disks to be created from a
+        // snapshot.
         if params.snapshot_id.is_some() {
             return Err(Error::InvalidValue {
                 label: String::from("snapshot_id"),
                 message: String::from("snapshots are not yet supported"),
+            });
+        }
+
+        // Until we implement images, do not allow disks to be created from an
+        // image.
+        if params.image_id.is_some() {
+            return Err(Error::InvalidValue {
+                label: String::from("image_id"),
+                message: String::from("images are not yet supported"),
             });
         }
 

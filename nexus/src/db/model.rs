@@ -1313,10 +1313,19 @@ pub struct Disk {
     /// size of the Disk
     #[column_name = "size_bytes"]
     pub size: ByteCount,
+
+    /// size of blocks
+    pub block_size: ByteCount,
+
     /// id for the snapshot from which this Disk was created (None means a blank
     /// disk)
     #[column_name = "origin_snapshot"]
     pub create_snapshot_id: Option<Uuid>,
+
+    /// id for the image from which this Disk was created (None means a blank
+    /// disk)
+    #[column_name = "origin_image"]
+    pub create_image_id: Option<Uuid>,
 }
 
 impl Disk {
@@ -1335,7 +1344,9 @@ impl Disk {
             volume_id,
             runtime_state: runtime_initial,
             size: params.size.into(),
+            block_size: params.block_size.into(),
             create_snapshot_id: params.snapshot_id,
+            create_image_id: params.image_id,
         }
     }
 
@@ -1358,9 +1369,12 @@ impl Into<external::Disk> for Disk {
         let device_path = format!("/mnt/{}", self.name().as_str());
         external::Disk {
             identity: self.identity(),
+            // TODO these should be names!
             project_id: self.project_id,
             snapshot_id: self.create_snapshot_id,
+            image_id: self.create_image_id,
             size: self.size.into(),
+            block_size: self.block_size.into(),
             state: self.state().into(),
             device_path,
         }

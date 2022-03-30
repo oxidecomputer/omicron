@@ -1033,6 +1033,7 @@ async fn sdc_create_disk_record(
     // but this should be acceptable because the disk remains in a "Creating"
     // state until the saga has completed.
     let volume_id = sagactx.lookup::<Uuid>("volume_id")?;
+
     let disk = db::model::Disk::new(
         disk_id,
         params.project_id,
@@ -1040,11 +1041,13 @@ async fn sdc_create_disk_record(
         params.create_params.clone(),
         db::model::DiskRuntimeState::new(),
     );
+
     let disk_created = osagactx
         .datastore()
         .project_create_disk(disk)
         .await
         .map_err(ActionError::action_failed)?;
+
     Ok(disk_created)
 }
 

@@ -242,20 +242,23 @@ pub struct DiskCreate {
     pub identity: IdentityMetadataCreateParams,
     /// id for snapshot from which the Disk should be created, if any
     pub snapshot_id: Option<Uuid>, // TODO should be a name?
+    /// id for image from which the Disk should be created, if any
+    pub image_id: Option<Uuid>, // TODO should be a name?
     /// size of the Disk
     pub size: ByteCount,
+    /// block size for this disk
+    pub block_size: ByteCount,
 }
 
-const BLOCK_SIZE: u32 = 1_u32 << 12;
 const EXTENT_SIZE: u32 = 1_u32 << 20;
 
 impl DiskCreate {
     pub fn block_size(&self) -> ByteCount {
-        ByteCount::from(BLOCK_SIZE)
+        self.block_size
     }
 
     pub fn blocks_per_extent(&self) -> i64 {
-        EXTENT_SIZE as i64 / BLOCK_SIZE as i64
+        EXTENT_SIZE as i64 / i64::from(self.block_size)
     }
 
     pub fn extent_count(&self) -> i64 {
@@ -319,7 +322,9 @@ mod test {
                 description: "desc".to_string(),
             },
             snapshot_id: None,
+            image_id: None,
             size,
+            block_size: ByteCount::from(512),
         }
     }
 
