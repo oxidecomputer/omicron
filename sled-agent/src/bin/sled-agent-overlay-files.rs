@@ -21,7 +21,7 @@ use structopt::StructOpt;
     about = "Generate server unique files for deployment"
 )]
 struct Args {
-    //// The rack secret threshold
+    /// The rack secret threshold
     #[structopt(short, long)]
     threshold: usize,
 

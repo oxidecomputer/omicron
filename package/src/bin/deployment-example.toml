@@ -3,23 +3,20 @@
 #
 # It is ingested by the `thing-flinger` tool.
 
-# This must be an absolute path
-local_source = "/Users/ajs/oxide/omicron"
+# This must be an absolute path. It refers to the path to Omicron on the
+# machine where thing-flinger is being executed.
+omicron_path = "/local/path/to/omicron"
 
 [builder]
 # `server` must refer to one of the `servers` in the servers table
-server = "atrium"
-
-# This must be an absolute path
-omicron_path = "/home/andrew/oxide/omicron"
-
-# Git branch, sha, etc...
-git_treeish = "thing-flinger2"
+server = "foo"
+# This must be an absolute path. It refers to the path to Omicron on the
+# builder server.
+omicron_path = "/remote/path/to/omicron"
 
 [deployment]
-servers = ["sock", "buskin"]
+servers = ["foo", "bar"]
 rack_secret_threshold = 2
-
 # Location where files to install will be placed before running
 # `omicron-package install`
 #
@@ -27,20 +24,10 @@ rack_secret_threshold = 2
 # We specifically allow for $HOME in validating the absolute path
 staging_dir = "$HOME/omicron_staging"
 
-[servers.tarz]
-username = "ajs"
-addr = "tarz.local"
+[servers.foo]
+username = "me"
+addr = "foo"
 
-[servers.atrium]
-username = "andrew"
-addr = "atrium.eng.oxide.computer"
-
-[servers.sock]
-username = "andrew"
-addr = "sock.eng.oxide.computer"
-
-[servers.buskin]
-username = "andrew"
-addr = "buskin.eng.oxide.computer"
-
-
+[servers.bar]
+username = "me"
+addr = "bar"
