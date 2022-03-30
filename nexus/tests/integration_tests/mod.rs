@@ -15,6 +15,7 @@ mod oximeter;
 mod projects;
 mod roles_builtin;
 mod router_routes;
+mod silos;
 mod subnet_allocation;
 mod timeseries;
 mod unauthorized;

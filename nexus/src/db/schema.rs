@@ -91,12 +91,38 @@ table! {
         subnet_id -> Uuid,
         mac -> Text,
         ip -> Inet,
+        slot -> Int2,
+    }
+}
+
+table! {
+    silo (id) {
+        id -> Uuid,
+        name -> Text,
+        description -> Text,
+        discoverable -> Bool,
+        time_created -> Timestamptz,
+        time_modified -> Timestamptz,
+        time_deleted -> Nullable<Timestamptz>,
+        rcgen -> Int8,
+    }
+}
+
+table! {
+    silo_user (id) {
+        id -> Uuid,
+        silo_id -> Uuid,
+
+        time_created -> Timestamptz,
+        time_modified -> Timestamptz,
+        time_deleted -> Nullable<Timestamptz>,
     }
 }
 
 table! {
     organization (id) {
         id -> Uuid,
+        silo_id -> Uuid,
         name -> Text,
         description -> Text,
         time_created -> Timestamptz,
@@ -167,7 +193,7 @@ table! {
         token -> Text,
         time_created -> Timestamptz,
         time_last_used -> Timestamptz,
-        user_id -> Uuid,
+        silo_user_id -> Uuid,
     }
 }
 

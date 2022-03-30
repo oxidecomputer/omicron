@@ -5,6 +5,7 @@
 //! Interfaces for working with sled agent configuration
 
 use crate::common::vlan::VlanID;
+use crate::illumos::dladm::PhysicalLink;
 use crate::illumos::zpool::ZpoolName;
 use dropshot::ConfigDropshot;
 use dropshot::ConfigLogging;
@@ -30,6 +31,11 @@ pub struct Config {
     pub vlan: Option<VlanID>,
     /// Optional list of zpools to be used as "discovered disks".
     pub zpools: Option<Vec<ZpoolName>>,
+
+    /// The data link on which to allocate VNICs.
+    ///
+    /// If unsupplied, we default to the first physical device.
+    pub data_link: Option<PhysicalLink>,
 }
 
 #[derive(Debug, thiserror::Error)]

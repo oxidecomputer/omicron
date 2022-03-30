@@ -17,6 +17,25 @@ use serde::{Deserialize, Serialize};
 use std::net::SocketAddr;
 use uuid::Uuid;
 
+// SILOS
+
+/// Client view of a ['Silo']
+#[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct Silo {
+    #[serde(flatten)]
+    pub identity: IdentityMetadata,
+
+    /// A silo where discoverable is false can be retrieved only by its id - it
+    /// will not be part of the "list all silos" output.
+    pub discoverable: bool,
+}
+
+impl Into<Silo> for model::Silo {
+    fn into(self) -> Silo {
+        Silo { identity: self.identity(), discoverable: self.discoverable }
+    }
+}
+
 // ORGANIZATIONS
 
 /// Client view of an [`Organization`]
@@ -24,6 +43,7 @@ use uuid::Uuid;
 pub struct Organization {
     #[serde(flatten)]
     pub identity: IdentityMetadata,
+    // Important: Silo ID does not get presented to user
 }
 
 impl From<model::Organization> for Organization {
@@ -227,7 +247,7 @@ pub struct SessionUser {
 
 impl From<authn::Actor> for SessionUser {
     fn from(actor: authn::Actor) -> Self {
-        Self { id: actor.0 }
+        Self { id: actor.id }
     }
 }
 

@@ -1,17 +1,20 @@
 [package]
 name = "omicron-package"
+description = "Tools for building and installing Omicron packages"
 version = "0.1.0"
 edition = "2021"
 license = "MPL-2.0"
 
 [dependencies]
 anyhow = "1.0"
-crossbeam = "0.8"
-flate2 = "1.0.22"
+futures = "0.3.21"
+hex = "0.4.3"
+indicatif = { version = "0.16.2", features = ["rayon"] }
 omicron-common = { path = "../common" }
-omicron-zone-package = { version = "0.1.2" }
+omicron-zone-package = { version = "0.2.0" }
 rayon = "1.5"
 reqwest = { version = "0.11", default-features = false, features = ["rustls-tls"] }
+ring = "0.16"
 serde = { version = "1.0", features = [ "derive" ] }
 serde_derive = "1.0"
 smf = "0.2"
@@ -27,8 +30,4 @@ walkdir = "2.3"
 # rust-lang/cargo#8373.  These docs would not be very useful anyway.
 [[bin]]
 name = "omicron-package"
-doc = false
-
-[[bin]]
-name = "thing-flinger"
 doc = false

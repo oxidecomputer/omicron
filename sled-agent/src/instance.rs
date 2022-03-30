@@ -22,6 +22,7 @@ use futures::lock::{Mutex, MutexGuard};
 use omicron_common::api::external::NetworkInterface;
 use omicron_common::api::internal::nexus::InstanceRuntimeState;
 use omicron_common::backoff;
+use propolis_client::api::DiskRequest;
 use propolis_client::Client as PropolisClient;
 use slog::Logger;
 use std::net::SocketAddr;
@@ -29,10 +30,10 @@ use std::sync::Arc;
 use tokio::task::JoinHandle;
 use uuid::Uuid;
 
-#[cfg(not(test))]
-use crate::illumos::{dladm::Dladm, zone::Zones};
 #[cfg(test)]
-use crate::illumos::{dladm::MockDladm as Dladm, zone::MockZones as Zones};
+use crate::illumos::zone::MockZones as Zones;
+#[cfg(not(test))]
+use crate::illumos::zone::Zones;
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
@@ -62,6 +63,9 @@ pub enum Error {
 
     #[error(transparent)]
     RunningZone(#[from] crate::illumos::running_zone::Error),
+
+    #[error("serde_json failure: {0}")]
+    SerdeJsonError(#[from] serde_json::Error),
 }
 
 // Issues read-only, idempotent HTTP requests at propolis until it responds with
@@ -95,7 +99,7 @@ async fn wait_for_http_server(
                         // request, instead of a connection error.
                         return Ok(());
                     }
-                    return Err(backoff::BackoffError::Transient(value));
+                    return Err(backoff::BackoffError::transient(value));
                 }
             }
         },
@@ -169,17 +173,21 @@ struct PropolisSetup {
 }
 
 struct InstanceInner {
-    id: Uuid,
-
     log: Logger,
 
     // Properties visible to Propolis
     properties: propolis_client::api::InstanceProperties,
 
+    // The ID of the Propolis server (and zone) running this instance
+    propolis_id: Uuid,
+
     // NIC-related properties
     vnic_allocator: VnicAllocator,
     requested_nics: Vec<NetworkInterface>,
     vlan: Option<VlanID>,
+
+    // Disk related properties
+    requested_disks: Vec<DiskRequest>,
 
     // Internal State management
     state: InstanceStates,
@@ -191,12 +199,12 @@ struct InstanceInner {
 
 impl InstanceInner {
     fn id(&self) -> &Uuid {
-        &self.id
+        &self.properties.id
     }
 
     /// UUID of the underlying propolis-server process
     fn propolis_id(&self) -> &Uuid {
-        &self.properties.id
+        &self.propolis_id
     }
 
     async fn observe_state(
@@ -241,7 +249,7 @@ impl InstanceInner {
             .as_ref()
             .expect("Propolis client should be initialized before usage")
             .client
-            .instance_state_put(*self.propolis_id(), request)
+            .instance_state_put(*self.id(), request)
             .await?;
         Ok(())
     }
@@ -284,9 +292,9 @@ impl InstanceInner {
         let request = propolis_client::api::InstanceEnsureRequest {
             properties: self.properties.clone(),
             nics,
-            // TODO: Actual disks need to be wired up here.
-            disks: vec![],
+            disks: self.requested_disks.clone(),
             migrate,
+            cloud_init_bytes: None,
         };
 
         info!(self.log, "Sending ensure request to propolis: {:?}", request);
@@ -400,10 +408,9 @@ impl Instance {
         info!(log, "Instance::new w/initial HW: {:?}", initial);
         let instance = InstanceInner {
             log: log.new(o!("instance id" => id.to_string())),
-            id,
             // NOTE: Mostly lies.
             properties: propolis_client::api::InstanceProperties {
-                id: initial.runtime.propolis_uuid,
+                id,
                 name: initial.runtime.hostname.clone(),
                 description: "Test description".to_string(),
                 image_id: Uuid::nil(),
@@ -414,8 +421,10 @@ impl Instance {
                 // InstanceCpuCount here, to avoid any casting...
                 vcpus: initial.runtime.ncpus.0 as u8,
             },
+            propolis_id: initial.runtime.propolis_uuid,
             vnic_allocator,
             requested_nics: initial.nics,
+            requested_disks: initial.disks,
             vlan,
             state: InstanceStates::new(initial.runtime),
             running_state: None,
@@ -438,7 +447,6 @@ impl Instance {
         // doesn't exist in illumos.
         //
         // https://github.com/illumos/ipd/blob/master/ipd/0003/README.md
-        let physical_dl = Dladm::find_physical()?;
         let guest_nics = inner
             .requested_nics
             .clone()
@@ -446,7 +454,7 @@ impl Instance {
             .map(|nic| {
                 inner
                     .vnic_allocator
-                    .new_guest(&physical_dl, Some(nic.mac), inner.vlan)
+                    .new_guest(Some(nic.mac), inner.vlan)
                     .map_err(|e| e.into())
             })
             .collect::<Result<Vec<_>, Error>>()?;
@@ -575,9 +583,9 @@ impl Instance {
         //
         // They aren't modified after being initialized, so it's fine to grab
         // a copy.
-        let (propolis_id, client) = {
+        let (instance_id, client) = {
             let inner = self.inner.lock().await;
-            let id = *inner.propolis_id();
+            let id = *inner.id();
             let client = inner.running_state.as_ref().unwrap().client.clone();
             (id, client)
         };
@@ -587,7 +595,7 @@ impl Instance {
             // State monitoring always returns the most recent state/gen pair
             // known to Propolis.
             let response =
-                client.instance_state_monitor(propolis_id, gen).await?;
+                client.instance_state_monitor(instance_id, gen).await?;
             let reaction =
                 self.inner.lock().await.observe_state(response.state).await?;
 
@@ -635,6 +643,7 @@ impl Instance {
 #[cfg(test)]
 mod test {
     use super::*;
+    use crate::illumos::dladm::PhysicalLink;
     use crate::mocks::MockNexusClient;
     use crate::params::InstanceStateRequested;
     use chrono::Utc;
@@ -678,6 +687,7 @@ mod test {
                 time_updated: Utc::now(),
             },
             nics: vec![],
+            disks: vec![],
         }
     }
 
@@ -700,7 +710,11 @@ mod test {
     )]
     async fn transition_before_start() {
         let log = logger();
-        let vnic_allocator = VnicAllocator::new("Test".to_string());
+        let vnic_allocator = VnicAllocator::new(
+            "Test".to_string(),
+            Some(PhysicalLink("mylink".to_string())),
+        )
+        .unwrap();
         let nexus_client = MockNexusClient::default();
 
         let inst = Instance::new(

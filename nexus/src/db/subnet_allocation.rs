@@ -396,6 +396,8 @@ pub enum NetworkInterfaceError {
     /// A primary key violation, which is intentionally caused in some cases
     /// during instance creation sagas.
     DuplicatePrimaryKey(Uuid),
+    /// There are no slots available on the instance
+    NoSlotsAvailable,
     /// Any other error
     External(external::Error),
 }
@@ -459,6 +461,12 @@ impl NetworkInterfaceError {
                     ),
                 }
             }
+            NetworkInterfaceError::NoSlotsAvailable => {
+                external::Error::invalid_request(&format!(
+                    "Instances may not have more than {} network interfaces",
+                    crate::nexus::MAX_NICS_PER_INSTANCE
+                ))
+            }
             NetworkInterfaceError::External(e) => e,
         }
     }
@@ -516,6 +524,13 @@ fn decode_database_error(
     // should likely be converted to a 500-level server error
     const PRIMARY_KEY_CONSTRAINT: &str = "primary";
 
+    // The check  violated in the case where we try to insert more that the
+    // maximum number of NICs (`crate::nexus::MAX_NICS_PER_INSTANCE`).
+    const NO_SLOTS_AVAILABLE_ERROR_MESSAGE: &str = concat!(
+        "failed to satisfy CHECK constraint ",
+        "((slot >= 0:::INT8) AND (slot < 8:::INT8))",
+    );
+
     match err {
         // If the address allocation subquery fails, we'll attempt to insert
         // NULL for the `ip` column. This checks that the non-NULL constraint on
@@ -531,11 +546,19 @@ fn decode_database_error(
         // UUID parsing error if an instance is already associated with
         // another VPC.
         PoolError::Connection(ConnectionError::Query(
-            Error::DatabaseError(DatabaseErrorKind::Unknown, info),
+            Error::DatabaseError(DatabaseErrorKind::Unknown, ref info),
         )) if info.message() == MULTIPLE_VPC_ERROR_MESSAGE => {
             NetworkInterfaceError::InstanceSpansMultipleVpcs(
                 interface.instance_id,
             )
+        }
+
+        // This checks the constraint on the interface slot numbers, used to
+        // limit instances to a maximum number.
+        PoolError::Connection(ConnectionError::Query(
+            Error::DatabaseError(DatabaseErrorKind::CheckViolation, ref info),
+        )) if info.message() == NO_SLOTS_AVAILABLE_ERROR_MESSAGE => {
+            NetworkInterfaceError::NoSlotsAvailable
         }
 
         // This path looks specifically at constraint names.
@@ -933,6 +956,79 @@ fn push_interface_allocation_subquery(
     }
     out.push_sql(" AS ");
     out.push_identifier(dsl::ip::NAME)?;
+
+    // Push the suqbuery used to select and validate the slot number for the
+    // interface, including validating that there are available slots on the
+    // instance.
+    out.push_sql(", (");
+    push_select_next_available_nic_slot_query(
+        out.reborrow(),
+        &interface.instance_id,
+    )?;
+    out.push_sql(") AS ");
+    out.push_identifier(dsl::slot::NAME)?;
+
+    Ok(())
+}
+
+/// Push a subquery that selects the next empty slot for an interface.
+///
+/// Instances are limited to 8 interfaces (RFD 135). This pushes a subquery that
+/// looks like:
+///
+/// ```sql
+/// SELECT COALESCE((
+///     SELECT
+///         next_slot
+///     FROM
+///         generate_series(0, <max nics per instance>)
+///     AS
+///         next_slot
+///     LEFT OUTER JOIN
+///         network_interface
+///     ON
+///         (instance_id, time_deleted IS NULL, slot) =
+///         (<instance_id>, TRUE, next_slot)
+///     WHERE
+///         slot IS NULL
+///     LIMIT 1)
+/// ), 0)
+/// ```
+///
+/// That is, we select the lowest slot that has not yet been claimed by an
+/// interface on this instance, or zero if there is no such instance at all.
+///
+/// Errors
+/// ------
+///
+/// Note that the `generate_series` function is inclusive of its upper bound.
+/// We intentionally use the upper bound of the maximum number of NICs per
+/// instance. In the case where there are no available slots (the current max
+/// slot number is 7), this query will return 8. However, this violates the
+/// check on the slot column being between `[0, 8)`. This check violation is
+/// used to detect the case when there are no slots available.
+fn push_select_next_available_nic_slot_query(
+    mut out: AstPass<Pg>,
+    instance_id: &Uuid,
+) -> QueryResult<()> {
+    use db::schema::network_interface::dsl;
+    out.push_sql(&format!(
+        "SELECT COALESCE((SELECT next_slot FROM generate_series(0, {}) ",
+        crate::nexus::MAX_NICS_PER_INSTANCE,
+    ));
+    out.push_sql("AS next_slot LEFT OUTER JOIN ");
+    dsl::network_interface.from_clause().walk_ast(out.reborrow())?;
+    out.push_sql(" ON (");
+    out.push_identifier(dsl::instance_id::NAME)?;
+    out.push_sql(", ");
+    out.push_identifier(dsl::time_deleted::NAME)?;
+    out.push_sql(" IS NULL, ");
+    out.push_identifier(dsl::slot::NAME)?;
+    out.push_sql(") = (");
+    out.push_bind_param::<sql_types::Uuid, Uuid>(instance_id)?;
+    out.push_sql(", TRUE, next_slot) WHERE ");
+    out.push_identifier(dsl::slot::NAME)?;
+    out.push_sql(" IS NULL LIMIT 1), 0)");
     Ok(())
 }
 
@@ -1049,6 +1145,8 @@ impl QueryFragment<Pg> for InsertNetworkInterfaceQuery {
             out.push_identifier(dsl::mac::NAME)?;
             out.push_sql(", ");
             out.push_identifier(dsl::ip::NAME)?;
+            out.push_sql(", ");
+            out.push_identifier(dsl::slot::NAME)?;
             Ok(())
         };
 
@@ -1125,6 +1223,8 @@ impl QueryFragment<Pg> for InsertNetworkInterfaceQueryValues {
         out.push_identifier(dsl::mac::NAME)?;
         out.push_sql(", ");
         out.push_identifier(dsl::ip::NAME)?;
+        out.push_sql(", ");
+        out.push_identifier(dsl::slot::NAME)?;
         out.push_sql(") ");
         self.0.walk_ast(out)
     }
@@ -1472,10 +1572,13 @@ mod test {
         // Subnet. That has a subnet of 172.30.0.0/28, so 16 total addresses are
         // available, but there are 6 reserved. Assert that we fail after
         // allocating 16 - 6 - 2 = 8 more interfaces, with an address exhaustion error.
+        //
+        // Note that we do this on _different_ instances, to avoid hitting the
+        // per-instance limit of 8 NICs.
         for i in 0..8 {
             let interface = IncompleteNetworkInterface::new(
                 Uuid::new_v4(),
-                instance_id,
+                Uuid::new_v4(),
                 vpc_id,
                 subnet.clone(),
                 model::MacAddr::new().unwrap(),
@@ -1635,6 +1738,92 @@ mod test {
                 error when inserting the exact same interface"
             );
         }
+
+        db.cleanup().await.unwrap();
+        logctx.cleanup_successful();
+    }
+
+    // Test that we fail to insert an interface if there are no available slots
+    // on the instance.
+    #[tokio::test]
+    async fn test_limit_number_of_interfaces_per_instance_query() {
+        // Setup the test database
+        let logctx = dev::test_setup_log(
+            "test_limit_number_of_interfaces_per_instance_query",
+        );
+        let log = logctx.log.new(o!());
+        let mut db = test_setup_database(&log).await;
+        let cfg = crate::db::Config { url: db.pg_config().clone() };
+        let pool = Arc::new(crate::db::Pool::new(&cfg));
+        let db_datastore =
+            Arc::new(crate::db::DataStore::new(Arc::clone(&pool)));
+        let opctx = OpContext::for_tests(log.new(o!()), db_datastore.clone());
+        let ipv4_block = Ipv4Net("172.30.0.0/26".parse().unwrap());
+        let ipv6_block = Ipv6Net("fd12:3456:7890::/64".parse().unwrap());
+        let subnet_name = "subnet-a".to_string().try_into().unwrap();
+        let description = "some description".to_string();
+        let vpc_id = "d402369d-c9ec-c5ad-9138-9fbee732d53e".parse().unwrap();
+        let subnet_id = "093ad2db-769b-e3c2-bc1c-b46e84ce5532".parse().unwrap();
+        let subnet = VpcSubnet::new(
+            subnet_id,
+            vpc_id,
+            IdentityMetadataCreateParams {
+                name: subnet_name,
+                description: description.to_string(),
+            },
+            ipv4_block,
+            ipv6_block,
+        );
+        let instance_id =
+            "90d8542f-52dc-cacb-fa2b-ea0940d6bcb7".parse().unwrap();
+        for slot in 0..crate::nexus::MAX_NICS_PER_INSTANCE {
+            let interface = IncompleteNetworkInterface::new(
+                Uuid::new_v4(),
+                instance_id,
+                vpc_id,
+                subnet.clone(),
+                model::MacAddr::new().unwrap(),
+                IdentityMetadataCreateParams {
+                    name: format!("interface-{}", slot).parse().unwrap(),
+                    description: String::from("description"),
+                },
+                None,
+            )
+            .unwrap();
+            let inserted_interface = db_datastore
+                .instance_create_network_interface_raw(
+                    &opctx,
+                    interface.clone(),
+                )
+                .await
+                .expect("Should be able to insert up to 8 interfaces");
+            let actual_slot =
+                u32::try_from(inserted_interface.slot).expect("Bad slot index");
+            assert_eq!(
+                slot, actual_slot,
+                "Failed to allocate next available interface slot"
+            );
+        }
+
+        // The next one should fail
+        let interface = IncompleteNetworkInterface::new(
+            Uuid::new_v4(),
+            instance_id,
+            vpc_id,
+            subnet,
+            model::MacAddr::new().unwrap(),
+            IdentityMetadataCreateParams {
+                name: "interface-8".parse().unwrap(),
+                description: String::from("description"),
+            },
+            None,
+        )
+        .unwrap();
+        let result = db_datastore
+            .instance_create_network_interface_raw(&opctx, interface.clone())
+            .await
+            .expect_err("Should not be able to insert more than 8 interfaces");
+        assert!(matches!(result, NetworkInterfaceError::NoSlotsAvailable,));
 
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();

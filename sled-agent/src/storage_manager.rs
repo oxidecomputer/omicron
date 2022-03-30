@@ -4,6 +4,7 @@
 
 //! Management of sled-local storage.
 
+use crate::illumos::dladm::PhysicalLink;
 use crate::illumos::running_zone::{
     Error as RunningZoneError, InstalledZone, RunningZone,
 };
@@ -262,7 +263,7 @@ impl DatasetInfo {
                     let http_addr = SocketAddr::new(address.ip(), 8080);
                     reqwest::get(format!("http://{}/health?ready=1", http_addr))
                         .await
-                        .map_err(backoff::BackoffError::Transient)
+                        .map_err(backoff::BackoffError::transient)
                 };
                 let log_failure = |_, _| {
                     warn!(log, "cockroachdb not yet alive");
@@ -573,7 +574,7 @@ impl StorageWorker {
                 nexus
                     .zpool_put(&sled_id, &pool_id, &zpool_request)
                     .await
-                    .map_err(backoff::BackoffError::Transient)?;
+                    .map_err(backoff::BackoffError::transient)?;
                 Ok::<
                     (),
                     backoff::BackoffError<
@@ -620,7 +621,7 @@ impl StorageWorker {
                     nexus
                         .dataset_put(&pool_id, &id, &request)
                         .await
-                        .map_err(backoff::BackoffError::Transient)?;
+                        .map_err(backoff::BackoffError::transient)?;
                 }
 
                 Ok::<
@@ -812,6 +813,7 @@ impl StorageManager {
         log: &Logger,
         sled_id: Uuid,
         nexus_client: Arc<NexusClient>,
+        physical_link: Option<PhysicalLink>,
     ) -> Result<Self, Error> {
         let log = log.new(o!("component" => "sled agent storage manager"));
         let pools = Arc::new(Mutex::new(HashMap::new()));
@@ -824,7 +826,7 @@ impl StorageManager {
             pools: pools.clone(),
             new_pools_rx,
             new_filesystems_rx,
-            vnic_allocator: VnicAllocator::new("Storage"),
+            vnic_allocator: VnicAllocator::new("Storage", physical_link)?,
         };
         Ok(StorageManager {
             pools,

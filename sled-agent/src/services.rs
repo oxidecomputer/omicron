@@ -4,6 +4,7 @@
 
 //! Support for miscellaneous services managed by the sled.
 
+use crate::illumos::dladm::PhysicalLink;
 use crate::illumos::running_zone::{InstalledZone, RunningZone};
 use crate::illumos::vnic::VnicAllocator;
 use crate::illumos::zone::AddressRequest;
@@ -27,6 +28,9 @@ pub enum Error {
 
     #[error(transparent)]
     RunningZone(#[from] crate::illumos::running_zone::Error),
+
+    #[error(transparent)]
+    Dladm(#[from] crate::illumos::dladm::Error),
 
     #[error("Services already configured for this Sled Agent")]
     ServicesAlreadyConfigured,
@@ -54,11 +58,14 @@ pub struct ServiceManager {
 impl ServiceManager {
     /// Creates a service manager, which returns once all requested services
     /// have been started.
-    pub async fn new(log: Logger) -> Result<Self, Error> {
+    pub async fn new(
+        log: Logger,
+        physical_link: Option<PhysicalLink>,
+    ) -> Result<Self, Error> {
         let mgr = Self {
             log,
             zones: Mutex::new(vec![]),
-            vnic_allocator: VnicAllocator::new("Service"),
+            vnic_allocator: VnicAllocator::new("Service", physical_link)?,
         };
 
         let config_path = services_config_path();

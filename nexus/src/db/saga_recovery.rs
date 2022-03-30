@@ -103,7 +103,7 @@ where
             || async {
                 list_unfinished_sagas(&opctx, &datastore, &sec_id)
                     .await
-                    .map_err(BackoffError::Transient)
+                    .map_err(BackoffError::transient)
             },
             |error, duration| {
                 warn!(

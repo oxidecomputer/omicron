@@ -67,13 +67,13 @@ use futures::Future;
 use futures::FutureExt;
 use futures::StreamExt;
 use gateway_messages::{IgnitionFlags, IgnitionState};
+use gateway_sp_comms::SwitchPort;
 use serde::{Deserialize, Serialize};
 use slog::debug;
 use slog::error;
 use slog::trace;
 use slog::Logger;
 use std::collections::HashMap;
-use std::net::SocketAddr;
 use std::sync::Arc;
 use std::sync::Mutex;
 use std::sync::RwLock;
@@ -109,7 +109,7 @@ impl OutstandingSpStateRequests {
         &self,
         timeout: Instant,
         retain_grace_period: Duration,
-        sps: impl Iterator<Item = (usize, IgnitionState, Option<SocketAddr>)>,
+        sps: impl Iterator<Item = (SwitchPort, IgnitionState)>,
         communicator: &Arc<SpCommunicator>,
     ) -> SpStateRequestId {
         // set up the receiving end of all SP responses
@@ -119,37 +119,26 @@ impl OutstandingSpStateRequests {
 
         // build collection of futures to contact all SPs
         let futures = sps
-            .map(move |(target, state, addr)| {
+            .map(move |(port, state)| {
                 let communicator = Arc::clone(communicator);
                 async move {
-                    // only query the SP if it's powered on and we know its
-                    // address
-                    //
-                    // TODO is `addr == None` even meaningful? this is dependent
-                    // on how we end up mapping topology / management network
-                    // ports, so leaving this as-is for now.
-                    let fut = match (
-                        state.flags.intersects(IgnitionFlags::POWER),
-                        addr,
-                    ) {
-                        (true, Some(addr)) => Either::Left(
-                            communicator.state_get(addr, timeout).map(
+                    // only query the SP if it's powered on
+                    let fut = if state.flags.intersects(IgnitionFlags::POWER) {
+                        Either::Left(
+                            communicator.state_get_by_port(port, timeout).map(
                                 move |result| BulkSpStateSingleResult {
-                                    target,
+                                    port,
                                     state,
                                     result,
                                 },
                             ),
-                        ),
-                        // either powered off or we don't have an address; mark
-                        // it as disabled
-                        _ => Either::Right(future::ready(
-                            BulkSpStateSingleResult {
-                                target,
-                                state,
-                                result: Ok(SpState::Disabled),
-                            },
-                        )),
+                        )
+                    } else {
+                        Either::Right(future::ready(BulkSpStateSingleResult {
+                            port,
+                            state,
+                            result: Ok(SpState::Disabled),
+                        }))
                     };
                     fut.await
                 }
@@ -178,7 +167,7 @@ impl OutstandingSpStateRequests {
     pub(super) async fn get(
         &self,
         id: &SpStateRequestId,
-        last_seen_target: Option<u8>,
+        last_seen: Option<SwitchPort>,
         timeout: Duration,
         limit: usize,
         log: &Logger,
@@ -223,10 +212,10 @@ impl OutstandingSpStateRequests {
 
             // scan forward until we find the last seen target
             let mut skip_results = 0;
-            if let Some(last_seen_target) = last_seen_target.map(usize::from) {
+            if let Some(last_seen) = last_seen {
                 for (i, result) in collector.received_states.iter().enumerate()
                 {
-                    if result.target == last_seen_target {
+                    if result.port == last_seen {
                         skip_results = i + 1;
                         trace!(
                             log,
@@ -243,7 +232,7 @@ impl OutstandingSpStateRequests {
                     error!(
                         log,
                         "client reported last seeing {:?}, but it isn't in our list of collected responses",
-                        last_seen_target
+                        last_seen
                     );
                     return Err(Error::InvalidLastSpSeen);
                 }
@@ -421,7 +410,7 @@ impl SpStateRequestId {
 
 #[derive(Debug, Clone)]
 pub(crate) struct BulkSpStateSingleResult {
-    pub(crate) target: usize,
+    pub(crate) port: SwitchPort,
     pub(crate) state: IgnitionState,
     pub(crate) result: Result<SpState, Error>,
 }

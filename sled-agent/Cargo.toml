@@ -1,18 +1,19 @@
 [package]
 name = "omicron-sled-agent"
+description = "Services for managing sled-local resources"
 version = "0.1.0"
 edition = "2021"
 license = "MPL-2.0"
 
 [dependencies]
 anyhow = "1.0.56"
-async-trait = "0.1.51"
+async-trait = "0.1.53"
 bincode = "1.3.3"
 bytes = "1.1"
 cfg-if = "1.0"
 chrono = { version = "0.4", features = [ "serde" ] }
 # Only used by the simulated sled agent.
-crucible-agent-client = { git = "https://github.com/oxidecomputer/crucible", rev = "3e7e49eeb88fa8ad74375b0642aabd4224b1f2cb" }
+crucible-agent-client = { git = "https://github.com/oxidecomputer/crucible", rev = "945daedb88cefa790f1d994b3a038b8fa9ac514a" }
 dropshot = { git = "https://github.com/oxidecomputer/dropshot", branch = "main", features = [ "usdt-probes" ] }
 futures = "0.3.21"
 ipnetwork = "0.18"
@@ -21,7 +22,7 @@ omicron-common = { path = "../common" }
 p256 = "0.9.0"
 percent-encoding = "2.1.0"
 progenitor = { git = "https://github.com/oxidecomputer/progenitor" }
-propolis-client = { git = "https://github.com/oxidecomputer/propolis", rev = "0e3798510ae190131f63b9df767ec01b2beacf91" }
+propolis-client = { git = "https://github.com/oxidecomputer/propolis", rev = "3a4fd8fa54ce8e1117bfa259bea39bca87f8ea14" }
 rand = { version = "0.8.5", features = ["getrandom"] }
 reqwest = { version = "0.11.8", default-features = false, features = ["rustls-tls", "stream"] }
 schemars = { version = "0.8", features = [ "chrono", "uuid" ] }
@@ -41,7 +42,7 @@ tokio = { version = "1.17", features = [ "full" ] }
 tokio-util = { version = "0.7", features = ["codec"] }
 toml = "0.5.6"
 uuid = { version = "0.8", features = [ "serde", "v4" ] }
-vsss-rs = { version = "2.0.0-pre0", features = ["std"] }
+vsss-rs = { version = "2.0.0-pre0", default-features = false, features = ["std"] }
 zone = "0.1"
 
 [dev-dependencies]
@@ -66,8 +67,4 @@ doc = false
 
 [[bin]]
 name = "sled-agent"
-doc = false
-
-[[bin]]
-name = "sled-agent-overlay-files"
 doc = false

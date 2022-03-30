@@ -403,6 +403,7 @@ impl TestResponse {
 pub enum AuthnMode {
     UnprivilegedUser,
     PrivilegedUser,
+    Session(String),
 }
 
 /// Helper for constructing requests to Nexus's external API
@@ -431,15 +432,32 @@ impl<'a> NexusRequest<'a> {
     /// `mode`
     pub fn authn_as(mut self, mode: AuthnMode) -> Self {
         use omicron_nexus::authn;
-        let header_value = match mode {
-            AuthnMode::UnprivilegedUser => authn::USER_TEST_UNPRIVILEGED.id,
-            AuthnMode::PrivilegedUser => authn::USER_TEST_PRIVILEGED.id,
-        };
 
-        self.request_builder = self.request_builder.header(
-            &http::header::AUTHORIZATION,
-            spoof::make_header_value(header_value).0.encode(),
-        );
+        match mode {
+            AuthnMode::UnprivilegedUser | AuthnMode::PrivilegedUser => {
+                let header_value = match mode {
+                    AuthnMode::UnprivilegedUser => {
+                        authn::USER_TEST_UNPRIVILEGED.id
+                    }
+                    AuthnMode::PrivilegedUser => authn::USER_TEST_PRIVILEGED.id,
+                    _ => {
+                        panic!("unreachable!")
+                    }
+                };
+
+                self.request_builder = self.request_builder.header(
+                    &http::header::AUTHORIZATION,
+                    spoof::make_header_value(header_value).0.encode(),
+                );
+            }
+            AuthnMode::Session(session_token) => {
+                self.request_builder = self.request_builder.header(
+                    &http::header::COOKIE,
+                    format!("session={}", session_token),
+                );
+            }
+        }
+
         self
     }
 
@@ -511,6 +529,20 @@ impl<'a> NexusRequest<'a> {
     ) -> Self {
         NexusRequest::new(
             RequestBuilder::new(testctx, method, uri)
+                .expect_status(Some(expected_status)),
+        )
+    }
+
+    pub fn expect_failure_with_body<B: serde::Serialize>(
+        testctx: &'a ClientTestContext,
+        expected_status: http::StatusCode,
+        method: http::Method,
+        uri: &str,
+        body: &B,
+    ) -> Self {
+        NexusRequest::new(
+            RequestBuilder::new(testctx, method, uri)
+                .body(Some(body))
                 .expect_status(Some(expected_status)),
         )
     }

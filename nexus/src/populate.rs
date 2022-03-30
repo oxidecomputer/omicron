@@ -53,10 +53,14 @@ async fn populate(
         async { datastore.load_builtin_role_asgns(opctx).await.map(|_| ()) }
             .boxed()
     };
+    let populate_silos = || {
+        async { datastore.load_builtin_silos(opctx).await.map(|_| ()) }.boxed()
+    };
     let populators = [
         Populator { name: "users", func: &populate_users },
         Populator { name: "roles", func: &populate_roles },
         Populator { name: "role assignments", func: &populate_role_asgns },
+        Populator { name: "silos", func: &populate_silos },
     ];
 
     for p in populators {
@@ -65,7 +69,7 @@ async fn populate(
             || async {
                 (p.func)().await.map_err(|error| match &error {
                     Error::ServiceUnavailable { .. } => {
-                        backoff::BackoffError::Transient(error)
+                        backoff::BackoffError::transient(error)
                     }
                     _ => backoff::BackoffError::Permanent(error),
                 })

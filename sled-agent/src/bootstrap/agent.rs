@@ -127,7 +127,7 @@ impl Agent {
                         &self.log,
                         "Not enough peers to start establishing quorum"
                     );
-                    return Err(BackoffError::Transient(
+                    return Err(BackoffError::transient(
                         TrustQuorumError::NotEnoughPeers,
                     ));
                 }
@@ -156,7 +156,7 @@ impl Agent {
                     let share = agent.get_share().await
                         .map_err(|e| {
                             info!(&self.log, "Bootstrap: failed to retreive share from peer: {:?}", e);
-                            BackoffError::Transient(e)
+                            BackoffError::transient(e)
                         })?;
                     info!(
                         &self.log,
@@ -179,7 +179,7 @@ impl Agent {
                     // handling routine that gives up in some cases based on
                     // the error returned from `RackSecret::combine_shares`.
                     // See https://github.com/oxidecomputer/omicron/issues/516
-                    BackoffError::Transient(
+                    BackoffError::transient(
                         TrustQuorumError::RackSecretConstructionFailed(e),
                     )
                 })?;
@@ -298,7 +298,7 @@ impl Agent {
                             info!(self.log, "creating new filesystem: {:?}", partition);
                             client.filesystem_put(&partition.clone().into())
                                 .await
-                                .map_err(BackoffError::Transient)?;
+                                .map_err(BackoffError::transient)?;
                             Ok::<
                                 (),
                                 BackoffError<
@@ -347,7 +347,7 @@ impl Agent {
                                 services: request.services.iter().map(|s| s.clone().into()).collect()
                             })
                             .await
-                            .map_err(BackoffError::Transient)?;
+                            .map_err(BackoffError::transient)?;
                         Ok::<
                             (),
                             BackoffError<
