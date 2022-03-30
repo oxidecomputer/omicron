@@ -179,7 +179,6 @@ CREATE TABLE omicron.public.volume (
 CREATE TABLE omicron.public.silo (
     /* Identity metadata */
     id UUID PRIMARY KEY,
-
     name STRING(128) NOT NULL,
     description STRING(512) NOT NULL,
 
@@ -202,10 +201,48 @@ CREATE UNIQUE INDEX ON omicron.public.silo (
  * Silo users
  */
 CREATE TABLE omicron.public.silo_user (
-    /* silo user id */
     id UUID PRIMARY KEY,
 
     silo_id UUID NOT NULL,
+
+    time_created TIMESTAMPTZ NOT NULL,
+    time_modified TIMESTAMPTZ NOT NULL,
+    time_deleted TIMESTAMPTZ
+);
+
+/*
+ * Silo identity provider list
+ */
+CREATE TABLE omicron.public.silo_identity_provider (
+    silo_id UUID NOT NULL,
+    provider_type TEXT NOT NULL,
+    provider_id UUID NOT NULL,
+
+    PRIMARY KEY (silo_id, provider_id)
+);
+
+/*
+ * Silo SAML identity provider
+ */
+CREATE TABLE omicron.public.silo_saml_identity_provider (
+    /* Identity metadata */
+    id UUID PRIMARY KEY,
+    name STRING(128) NOT NULL,
+    description STRING(512) NOT NULL,
+
+    silo_id UUID NOT NULL,
+
+    idp_metadata_url TEXT NOT NULL,
+    idp_metadata_document_string TEXT NOT NULL,
+
+    idp_entity_id TEXT NOT NULL,
+    sp_client_id TEXT NOT NULL,
+    acs_url TEXT NOT NULL,
+    slo_url TEXT NOT NULL,
+    technical_contact_email TEXT NOT NULL,
+
+    public_cert TEXT,
+    private_key TEXT,
 
     time_created TIMESTAMPTZ NOT NULL,
     time_modified TIMESTAMPTZ NOT NULL,

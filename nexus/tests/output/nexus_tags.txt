@@ -45,6 +45,11 @@ project_instances_instance_stop          /organizations/{organization_name}/proj
 project_instances_migrate_instance       /organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/migrate
 project_instances_post                   /organizations/{organization_name}/projects/{project_name}/instances
 
+API operations found with tag "login"
+OPERATION ID                             URL PATH
+ask_user_to_login_to_provider            /login/{provider_id}
+consume_credentials_and_authn_user       /login/{provider_id}
+
 API operations found with tag "metrics"
 OPERATION ID                             URL PATH
 timeseries_schema_get                    /timeseries/schema
@@ -98,6 +103,8 @@ sagas_get_saga                           /sagas/{saga_id}
 
 API operations found with tag "silos"
 OPERATION ID                             URL PATH
+identity_provider_list                   /identity_provider
+silo_saml_idp_create                     /silos/{silo_name}/saml_identity_provider
 silos_delete_silo                        /silos/{silo_name}
 silos_get                                /silos
 silos_get_silo                           /silos/{silo_name}

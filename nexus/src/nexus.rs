@@ -3335,6 +3335,90 @@ impl Nexus {
     ) -> LookupResult<SiloUser> {
         self.db_datastore.silo_user_fetch(silo_user_id).await
     }
+
+    pub async fn silo_saml_identity_provider_create(
+        &self,
+        opctx: &OpContext,
+        silo_name: &Name,
+        params: params::SiloSamlIdentityProviderCreate,
+    ) -> CreateResult<db::model::SiloSamlIdentityProvider> {
+        let db_silo = self.silo_fetch(&opctx, silo_name).await?;
+
+        // Download the SAML IdP descriptor, and write it into the DB. This is
+        // so that it can be deserialized later.
+        //
+        // Importantly, do this only once and store it. It would introduce
+        // attack surface to download it each time it was required.
+        let idp_metadata_document_string =
+            reqwest::get(&params.idp_metadata_url)
+                .await
+                .map_err(|e| Error::invalid_request(&e.to_string()))?
+                .text()
+                .await
+                .map_err(|e| Error::invalid_request(&e.to_string()))?;
+
+        let provider = db::model::SiloSamlIdentityProvider {
+            identity: db::model::SiloSamlIdentityProviderIdentity::new(
+                Uuid::new_v4(),
+                params.identity,
+            ),
+            silo_id: db_silo.id(),
+
+            idp_metadata_url: params.idp_metadata_url,
+            idp_metadata_document_string,
+
+            idp_entity_id: params.idp_entity_id,
+            sp_client_id: params.sp_client_id,
+            acs_url: params.acs_url,
+            slo_url: params.slo_url,
+            technical_contact_email: params.technical_contact_email,
+            public_cert: params.public_cert,
+            private_key: params.private_key,
+        };
+
+        provider
+            .validate()
+            .map_err(|e| Error::invalid_request(&e.to_string()))?;
+
+        self.db_datastore.silo_saml_identity_provider_create(provider).await
+    }
+
+    pub async fn silo_saml_identity_provider_fetch(
+        &self,
+        provider_id: Uuid,
+    ) -> LookupResult<db::model::SiloSamlIdentityProvider> {
+        self.db_datastore.silo_saml_identity_provider_fetch(provider_id).await
+    }
+
+    pub async fn get_silo_identity_provider(
+        &self,
+        provider_id: Uuid,
+    ) -> LookupResult<authn::silos::SiloIdentityProviderType> {
+        let silo_provider_type =
+            self.db_datastore.silo_identity_provider_type(provider_id).await?;
+
+        match silo_provider_type {
+            db::model::SiloIdentityProviderTypeEnum::Local => {
+                todo!()
+            }
+            db::model::SiloIdentityProviderTypeEnum::Ldap => {
+                todo!()
+            }
+            db::model::SiloIdentityProviderTypeEnum::Saml => {
+                let silo_saml_identity_provider =
+                    self.silo_saml_identity_provider_fetch(provider_id).await?;
+                Ok(authn::silos::SiloIdentityProviderType::Saml(Box::new(
+                    silo_saml_identity_provider,
+                )))
+            }
+        }
+    }
+
+    pub async fn get_discoverable_identity_providers(
+        &self,
+    ) -> LookupResult<Vec<db::model::SiloIdentityProvider>> {
+        self.db_datastore.get_discoverable_identity_providers().await
+    }
 }
 
 fn generate_session_token() -> String {

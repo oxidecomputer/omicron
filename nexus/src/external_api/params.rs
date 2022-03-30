@@ -24,6 +24,39 @@ pub struct SiloCreate {
     pub discoverable: bool,
 }
 
+// Silo identity providers
+
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct SiloSamlIdentityProviderCreate {
+    #[serde(flatten)]
+    pub identity: IdentityMetadataCreateParams,
+
+    pub silo_id: Uuid,
+
+    /// url where identity provider metadata descriptor is
+    pub idp_metadata_url: String,
+
+    /// idp's entity id
+    pub idp_entity_id: String,
+
+    /// sp's client id
+    pub sp_client_id: String,
+
+    /// service provider endpoint where the response will be sent
+    pub acs_url: String,
+
+    /// service provider endpoint where the idp should send log out requests
+    pub slo_url: String,
+
+    /// customer's technical contact for saml configuration
+    pub technical_contact_email: String,
+
+    /// optional request signing key pair (base64 encoded der files)
+    pub public_cert: Option<String>,
+    #[serde(skip_serializing)]
+    pub private_key: Option<String>,
+}
+
 // ORGANIZATIONS
 
 /// Create-time parameters for an [`Organization`](crate::external_api::views::Organization)

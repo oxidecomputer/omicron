@@ -2833,6 +2833,91 @@ impl DataStore {
 
         Ok(())
     }
+
+    pub async fn silo_identity_provider_type(
+        &self,
+        provider_id: Uuid,
+    ) -> LookupResult<db::model::SiloIdentityProviderTypeEnum> {
+        use db::schema::silo_identity_provider::dsl;
+
+        let result: String = dsl::silo_identity_provider
+            .filter(dsl::provider_id.eq(provider_id))
+            .select(dsl::provider_type)
+            .get_result_async(self.pool())
+            .await
+            .map_err(|e| {
+                public_error_from_diesel_pool(e, ErrorHandler::Server)
+            })?;
+
+        Ok(result.as_str().parse().map_err(|e: anyhow::Error| {
+            Error::internal_error(&e.to_string())
+        })?)
+    }
+
+    pub async fn silo_saml_identity_provider_create(
+        &self,
+        provider: db::model::SiloSamlIdentityProvider,
+    ) -> CreateResult<db::model::SiloSamlIdentityProvider> {
+        self.pool()
+            .transaction(move |conn| {
+                use db::schema::silo_identity_provider::dsl as idp_dsl;
+                diesel::insert_into(idp_dsl::silo_identity_provider)
+                    .values(db::model::SiloIdentityProvider {
+                        silo_id: provider.silo_id,
+                        provider_type:
+                            db::model::SiloIdentityProviderTypeEnum::Saml,
+                        provider_id: provider.id(),
+                    })
+                    .execute(conn)?;
+
+                use db::schema::silo_saml_identity_provider::dsl;
+                let result =
+                    diesel::insert_into(dsl::silo_saml_identity_provider)
+                        .values(provider)
+                        .returning(
+                            db::model::SiloSamlIdentityProvider::as_returning(),
+                        )
+                        .get_result(conn)?;
+
+                Ok(result)
+            })
+            .await
+            .map_err(|e: TransactionError<Error>| {
+                Error::internal_error(&format!("Transaction error: {}", e))
+            })
+    }
+
+    pub async fn silo_saml_identity_provider_fetch(
+        &self,
+        provider_id: Uuid,
+    ) -> LookupResult<db::model::SiloSamlIdentityProvider> {
+        use db::schema::silo_saml_identity_provider::dsl;
+        dsl::silo_saml_identity_provider
+            .filter(dsl::id.eq(provider_id))
+            .filter(dsl::time_deleted.is_null())
+            .select(db::model::SiloSamlIdentityProvider::as_select())
+            .get_result_async(self.pool())
+            .await
+            .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
+    }
+
+    pub async fn get_discoverable_identity_providers(
+        &self,
+    ) -> LookupResult<Vec<db::model::SiloIdentityProvider>> {
+        use db::schema::silo::dsl as silo_dsl;
+        use db::schema::silo_identity_provider::dsl as idp_dsl;
+
+        silo_dsl::silo
+            .filter(silo_dsl::discoverable.eq(true))
+            .inner_join(
+                idp_dsl::silo_identity_provider
+                    .on(idp_dsl::silo_id.eq(silo_dsl::id)),
+            )
+            .select(db::model::SiloIdentityProvider::as_select())
+            .get_results_async(self.pool())
+            .await
+            .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
+    }
 }
 
 /// Constructs a DataStore for use in test suites that has preloaded the

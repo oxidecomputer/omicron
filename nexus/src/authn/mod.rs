@@ -26,6 +26,7 @@
 
 pub mod external;
 pub mod saga;
+pub mod silos;
 
 pub use crate::db::fixed_data::user_builtin::USER_DB_INIT;
 pub use crate::db::fixed_data::user_builtin::USER_INTERNAL_API;

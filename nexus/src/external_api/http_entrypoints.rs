@@ -11,8 +11,8 @@ use crate::ServerContext;
 use super::{
     console_api, params,
     views::{
-        Image, Organization, Project, Rack, Role, Silo, Sled, Snapshot, User,
-        Vpc, VpcRouter, VpcSubnet,
+        Image, Organization, Project, Rack, Role, Silo, SiloIdentityProvider,
+        Sled, Snapshot, User, Vpc, VpcRouter, VpcSubnet,
     },
 };
 use crate::context::OpContext;
@@ -56,6 +56,7 @@ use omicron_common::api::external::RouterRouteCreateParams;
 use omicron_common::api::external::RouterRouteKind;
 use omicron_common::api::external::RouterRouteUpdateParams;
 use omicron_common::api::external::Saga;
+use omicron_common::api::external::SiloSamlIdentityProvider;
 use omicron_common::api::external::VpcFirewallRuleUpdateParams;
 use omicron_common::api::external::VpcFirewallRules;
 use ref_cast::RefCast;
@@ -74,6 +75,9 @@ pub fn external_api() -> NexusApiDescription {
         api.register(silos_post)?;
         api.register(silos_get_silo)?;
         api.register(silos_delete_silo)?;
+
+        api.register(identity_provider_list)?;
+        api.register(silo_saml_idp_create)?;
 
         api.register(organizations_get)?;
         api.register(organizations_post)?;
@@ -181,6 +185,8 @@ pub fn external_api() -> NexusApiDescription {
         api.register(console_api::logout)?;
         api.register(console_api::console_page)?;
         api.register(console_api::asset)?;
+        api.register(console_api::ask_user_to_login_to_provider)?;
+        api.register(console_api::consume_credentials_and_authn_user)?;
 
         Ok(())
     }
@@ -230,7 +236,7 @@ pub fn external_api() -> NexusApiDescription {
 // clients. Client generators use operationId to name API methods, so changing
 // a function name is a breaking change from a client perspective.
 
-// TODO authz for silo endpoints
+// TODO-security: authz for silo endpoints
 
 // List all silos (that are discoverable).
 #[endpoint {
@@ -339,6 +345,61 @@ async fn silos_delete_silo(
         let opctx = OpContext::for_external_api(&rqctx).await?;
         nexus.silo_delete(&opctx, &silo_name).await?;
         Ok(HttpResponseDeleted())
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+// Silo identity providers
+
+/// Return a list of all identity providers for all discoverable silos
+#[endpoint {
+    method = GET,
+    path = "/identity_provider",
+    tags = ["silos"],
+}]
+async fn identity_provider_list(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+) -> Result<HttpResponseOk<Vec<SiloIdentityProvider>>, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let nexus = &apictx.nexus;
+        let identity_providers = nexus
+            .get_discoverable_identity_providers()
+            .await?
+            .iter()
+            .map(|x| x.clone().into())
+            .collect();
+        Ok(HttpResponseOk(identity_providers))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+// Silo SAML identity providers
+
+/// Create a new SAML identity provider for a silo.
+#[endpoint {
+    method = POST,
+    path = "/silos/{silo_name}/saml_identity_provider",
+    tags = ["silos"],
+}]
+async fn silo_saml_idp_create(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    path_params: Path<SiloPathParam>,
+    new_provider: TypedBody<params::SiloSamlIdentityProviderCreate>,
+) -> Result<HttpResponseCreated<SiloSamlIdentityProvider>, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+
+    let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let provider = nexus
+            .silo_saml_identity_provider_create(
+                &opctx,
+                &path_params.into_inner().silo_name,
+                new_provider.into_inner(),
+            )
+            .await?;
+        Ok(HttpResponseCreated(provider.into()))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
