@@ -12,7 +12,7 @@ use quote::{format_ident, quote};
 /// Arguments for [`lookup_resource!`]
 // NOTE: this is only "pub" for the `cargo doc` link on [`lookup_resource!`].
 #[derive(serde::Deserialize)]
-pub struct Config {
+pub struct Input {
     /// Name of the resource (PascalCase)
     name: String,
     /// ordered list of resources that are ancestors of this resource, starting
@@ -45,52 +45,79 @@ enum AuthzKind {
     Typed,
 }
 
+/// Configuration for [`lookup_resource`] and its helper functions
+///
+/// This is all computable from [`Input`].  The purpose is to put the various
+/// output strings that need to appear in various chunks of output into one
+/// place with uniform names and documentation.
+pub struct Config {
+    // The resource itself
+    /// PascalCase (raw input) name of the resource we're generating
+    /// (e.g., `Project`")
+    resource_name: syn::Ident,
+
+    /// Snake case name of the resource we're generating
+    /// (e.g., `project`)
+    resource_as_snake: syn::Ident,
+
+    /// name of the `authz` type for this resource (e.g., `authz::Project`)
+    resource_authz: TokenStream,
+
+    /// name of the `model` type for this resource (e.g., `db::model::Project`)
+    resource_model: TokenStream,
+
+    /// See [`AuthzKind`]
+    authz_kind: AuthzKind,
+
+    // The path to the resource
+    /// list of `authz` types for this resource and its parents
+    /// (e.g., [`authz::Organization`, `authz::Project`])
+    authz_path_types: Vec<TokenStream>,
+
+    /// list of identifiers used for the authz objects for this resource and its
+    /// parents, in the same order as `authz_path_types`
+    /// (e.g., [`authz_organization`, `authz_project`])
+    authz_path_values: Vec<syn::Ident>,
+
+    // Child resources
+    /// list of names of child resources (PascalCase, raw input to the macro)
+    /// (e.g., [`Instance`, `Disk`])
+    child_resources: Vec<String>,
+
+    // Parent resource, if any
+    /// Information about the parent resource, if any
+    parent: Option<Parent>,
+}
+
+// XXX-dap TODO-doc
+struct Parent {
+    resource_name: syn::Ident,
+    lookup_arg: TokenStream,
+    lookup_arg_value: TokenStream,
+    lookup_arg_value_deref: TokenStream,
+    lookup_filter: TokenStream,
+    resource_authz_type: TokenStream,
+    resource_authz_name: syn::Ident,
+    ancestors_values_assign: TokenStream,
+    ancestors_values_assign_lookup: TokenStream,
+}
+
 /// Implementation of [`lookup_resource!]'.
-pub fn lookup_resource(input: TokenStream) -> Result<TokenStream, syn::Error> {
-    let config = serde_tokenstream::from_tokenstream::<Config>(&input)?;
-    let resource_name = format_ident!("{}", config.name);
-    let resource_as_snake = format_ident!(
-        "{}",
-        heck::AsSnakeCase(resource_name.to_string()).to_string()
-    );
-    let authz_resource = quote! { authz::#resource_name, };
-    let model_resource = quote! { model::#resource_name };
+pub fn lookup_resource(
+    raw_input: TokenStream,
+) -> Result<TokenStream, syn::Error> {
+    let input = serde_tokenstream::from_tokenstream::<Input>(&raw_input)?;
+    let config = configure(input);
 
-    // It's important that even if there's only one item in this list, it should
-    // still have a trailing comma.
-    let mut authz_path_types_vec: Vec<_> = config
-        .ancestors
-        .iter()
-        .map(|a| {
-            let name = format_ident!("{}", a);
-            quote! { authz::#name, }
-        })
-        .collect();
-    authz_path_types_vec.push(authz_resource.clone());
-
-    let authz_ancestors_values_vec: Vec<_> = config
-        .ancestors
-        .iter()
-        .map(|a| {
-            let v = format_ident!(
-                "authz_{}",
-                heck::AsSnakeCase(a.to_string()).to_string()
-            );
-            quote! { #v , }
-        })
-        .collect();
-    let mut authz_path_values_vec = authz_ancestors_values_vec.clone();
-    authz_path_values_vec.push(quote! { authz_self, });
-
-    let authz_ancestors_values = quote! {
-        #(#authz_ancestors_values_vec)*
-    };
-    let authz_path_types = quote! {
-        #(#authz_path_types_vec)*
-    };
-    let authz_path_values = quote! {
-        #(#authz_path_values_vec)*
-    };
+    // XXX-dap TODO take another edit pass.  For now, I'm going to try to assign
+    // variables to the elements of "config" and produce the same (working)
+    // output.
+    let resource_name = config.resource_name;
+    let resource_as_snake = config.resource_as_snake;
+    let authz_resource = config.resource_authz;
+    let model_resource = config.resource_model;
+    let authz_path_types = config.authz_path_types;
+    let authz_path_values = config.authz_path_values;
 
     let (
         parent_resource_name,
@@ -102,42 +129,19 @@ pub fn lookup_resource(input: TokenStream) -> Result<TokenStream, syn::Error> {
         parent_authz,
         parent_authz_type,
         authz_ancestors_values_assign_lookup,
-    ) = match config.ancestors.last() {
-        Some(parent_resource_name) => {
-            let parent_snake_str =
-                heck::AsSnakeCase(parent_resource_name).to_string();
-            let parent_id = format_ident!("{}_id", parent_snake_str,);
-            let parent_resource_name =
-                format_ident!("{}", parent_resource_name);
-            let parent_authz_type = quote! { &authz::#parent_resource_name };
-            let authz_parent = format_ident!("authz_{}", parent_snake_str);
-            let parent_lookup_arg =
-                quote! { #authz_parent: #parent_authz_type, };
-            let parent_lookup_arg_value = quote! { &#authz_parent , };
-            let parent_lookup_arg_value_deref = quote! { #authz_parent , };
-            let parent_filter =
-                quote! { .filter(dsl::#parent_id.eq( #authz_parent.id())) };
-            let authz_ancestors_values_assign = quote! {
-                let (#authz_ancestors_values _) =
-                    #parent_resource_name::lookup_by_id_no_authz(
-                        _opctx, datastore, db_row.#parent_id
-                    ).await?;
-            };
-            let authz_ancestors_values_assign_lookup = quote! {
-                let (#authz_ancestors_values) = parent.lookup().await?;
-            };
-            let parent_authz = &authz_ancestors_values_vec
-                [authz_ancestors_values_vec.len() - 1];
+    ) = match config.parent {
+        Some(parent) => {
+            let parent_authz_arg = parent.resource_authz_name;
             (
-                parent_resource_name,
-                parent_lookup_arg,
-                parent_lookup_arg_value,
-                parent_lookup_arg_value_deref,
-                parent_filter,
-                authz_ancestors_values_assign,
-                quote! { #parent_authz },
-                parent_authz_type,
-                authz_ancestors_values_assign_lookup,
+                parent.resource_name,
+                parent.lookup_arg,
+                parent.lookup_arg_value,
+                parent.lookup_arg_value_deref,
+                parent.lookup_filter,
+                parent.ancestors_values_assign,
+                quote! { #parent_authz_arg, },
+                parent.resource_authz_type,
+                parent.ancestors_values_assign_lookup,
             )
         }
         None => (
@@ -147,8 +151,8 @@ pub fn lookup_resource(input: TokenStream) -> Result<TokenStream, syn::Error> {
             quote! {},
             quote! {},
             quote! {},
-            quote! { authz::FLEET, },
-            quote! { &authz::Fleet },
+            quote! { &authz::FLEET, },
+            quote! { authz::Fleet },
             quote! {},
         ),
     };
@@ -162,25 +166,25 @@ pub fn lookup_resource(input: TokenStream) -> Result<TokenStream, syn::Error> {
     };
 
     let child_names: Vec<_> =
-        config.children.iter().map(|c| format_ident!("{}", c)).collect();
+        config.child_resources.iter().map(|c| format_ident!("{}", c)).collect();
     let child_by_names: Vec<_> = config
-        .children
+        .child_resources
         .iter()
         .map(|c| format_ident!("{}_name", heck::AsSnakeCase(c).to_string()))
         .collect();
     let doc_struct = format!(
         "Selects a resource of type {} (or any of its children, using the \
         functions on this struct) for lookup or fetch",
-        &config.name,
+        resource_name,
     );
     let child_docs: Vec<_> = config
-        .children
+        .child_resources
         .iter()
         .map(|child| {
             format!(
                 "Select a resource of type {} within this {}, \
                 identified by its name",
-                child, &config.name
+                child, resource_name,
             )
         })
         .collect();
@@ -206,7 +210,7 @@ pub fn lookup_resource(input: TokenStream) -> Result<TokenStream, syn::Error> {
 
             /// Build the `authz` object for this resource
             fn make_authz(
-                authz_parent: #parent_authz_type,
+                authz_parent: &#parent_authz_type,
                 db_row: &#model_resource,
                 lookup_type: LookupType,
             ) -> authz::#resource_name {
@@ -222,7 +226,7 @@ pub fn lookup_resource(input: TokenStream) -> Result<TokenStream, syn::Error> {
             /// This is equivalent to `fetch_for(authz::Action::Read)`.
             pub async fn fetch(
                 &self,
-            ) -> LookupResult<(#authz_path_types #model_resource)> {
+            ) -> LookupResult<(#(#authz_path_types,)* #model_resource)> {
                 self.fetch_for(authz::Action::Read).await
             }
 
@@ -238,7 +242,7 @@ pub fn lookup_resource(input: TokenStream) -> Result<TokenStream, syn::Error> {
             pub async fn fetch_for(
                 &self,
                 action: authz::Action,
-            ) -> LookupResult<(#authz_path_types #model_resource)> {
+            ) -> LookupResult<(#(#authz_path_types,)* #model_resource)> {
                 let lookup = self.lookup_root();
                 let opctx = &lookup.opctx;
                 let datastore = &lookup.datastore;
@@ -253,7 +257,7 @@ pub fn lookup_resource(input: TokenStream) -> Result<TokenStream, syn::Error> {
                             *name,
                             action,
                         ).await?;
-                        Ok((#authz_path_values db_row))
+                        Ok((#(#authz_path_values,)* db_row))
                     }
                     Key::Id(_, id) => {
                         Self::fetch_by_id_for(
@@ -279,12 +283,12 @@ pub fn lookup_resource(input: TokenStream) -> Result<TokenStream, syn::Error> {
             pub async fn lookup_for(
                 &self,
                 action: authz::Action,
-            ) -> LookupResult<(#authz_path_types)> {
+            ) -> LookupResult<(#(#authz_path_types,)*)> {
                 let lookup = self.lookup_root();
                 let opctx = &lookup.opctx;
-                let (#authz_path_values) = self.lookup().await?;
+                let (#(#authz_path_values,)*) = self.lookup().await?;
                 opctx.authorize(action, &authz_self).await?;
-                Ok((#authz_path_values))
+                Ok((#(#authz_path_values,)*))
             }
 
             /// Fetch the "authz" objects for the selected resource and all its
@@ -297,7 +301,7 @@ pub fn lookup_resource(input: TokenStream) -> Result<TokenStream, syn::Error> {
             // lookup_for().  It's exposed in a safer way via lookup_for().
             async fn lookup(
                 &self,
-            ) -> LookupResult<(#authz_path_types)> {
+            ) -> LookupResult<(#(#authz_path_types,)*)> {
                 let lookup = self.lookup_root();
                 let opctx = &lookup.opctx;
                 let datastore = &lookup.datastore;
@@ -320,7 +324,7 @@ pub fn lookup_resource(input: TokenStream) -> Result<TokenStream, syn::Error> {
                             #parent_lookup_arg_value
                             *name
                         ).await?;
-                        Ok((#authz_path_values))
+                        Ok((#(#authz_path_values,)*))
                     }
                     Key::Id(_, id) => {
                         // When doing a by-id lookup, we start directly with the
@@ -334,13 +338,13 @@ pub fn lookup_resource(input: TokenStream) -> Result<TokenStream, syn::Error> {
                         // TODO-performance Instead of doing database queries at
                         // each level of recursion, we could be building up one
                         // big "join" query and hit the database just once.
-                        let (#authz_path_values _) =
+                        let (#(#authz_path_values,)* _) =
                             Self::lookup_by_id_no_authz(
                                 opctx,
                                 datastore,
                                 *id
                             ).await?;
-                        Ok((#authz_path_values))
+                        Ok((#(#authz_path_values,)*))
                     }
                 }
             }
@@ -358,7 +362,7 @@ pub fn lookup_resource(input: TokenStream) -> Result<TokenStream, syn::Error> {
                 #parent_lookup_arg
                 name: &Name,
                 action: authz::Action,
-            ) -> LookupResult<(#authz_resource #model_resource)> {
+            ) -> LookupResult<(#authz_resource, #model_resource)> {
                 let (authz_self, db_row) = Self::lookup_by_name_no_authz(
                     opctx,
                     datastore,
@@ -381,7 +385,7 @@ pub fn lookup_resource(input: TokenStream) -> Result<TokenStream, syn::Error> {
                 datastore: &DataStore,
                 #parent_lookup_arg
                 name: &Name,
-            ) -> LookupResult<(#authz_resource #model_resource)> {
+            ) -> LookupResult<(#authz_resource, #model_resource)> {
                 use db::schema::#resource_as_snake::dsl;
 
                 // TODO-security See the note about pool_authorized() below.
@@ -404,7 +408,7 @@ pub fn lookup_resource(input: TokenStream) -> Result<TokenStream, syn::Error> {
                     })
                     .map(|db_row| {(
                         Self::make_authz(
-                            &#parent_authz
+                            #parent_authz
                             &db_row,
                             LookupType::ByName(name.as_str().to_string())
                         ),
@@ -423,14 +427,15 @@ pub fn lookup_resource(input: TokenStream) -> Result<TokenStream, syn::Error> {
                 datastore: &DataStore,
                 id: Uuid,
                 action: authz::Action,
-            ) -> LookupResult<(#authz_path_types #model_resource)> {
-                let (#authz_path_values db_row) = Self::lookup_by_id_no_authz(
-                    opctx,
-                    datastore,
-                    id
-                ).await?;
+            ) -> LookupResult<(#(#authz_path_types,)* #model_resource)> {
+                let (#(#authz_path_values,)* db_row) =
+                    Self::lookup_by_id_no_authz(
+                        opctx,
+                        datastore,
+                        id
+                    ).await?;
                 opctx.authorize(action, &authz_self).await?;
-                Ok((#authz_path_values db_row))
+                Ok((#(#authz_path_values,)* db_row))
             }
 
             /// Lowest-level function for looking up a resource in the database
@@ -444,7 +449,7 @@ pub fn lookup_resource(input: TokenStream) -> Result<TokenStream, syn::Error> {
                 _opctx: &OpContext,
                 datastore: &DataStore,
                 id: Uuid,
-            ) -> LookupResult<(#authz_path_types #model_resource)> {
+            ) -> LookupResult<(#(#authz_path_types,)* #model_resource)> {
                 use db::schema::#resource_as_snake::dsl;
 
                 // TODO-security This could use pool_authorized() instead.
@@ -475,7 +480,7 @@ pub fn lookup_resource(input: TokenStream) -> Result<TokenStream, syn::Error> {
                     &db_row,
                     LookupType::ById(id)
                 );
-                Ok((#authz_path_values db_row))
+                Ok((#(#authz_path_values,)* db_row))
             }
 
             #(
@@ -493,4 +498,110 @@ pub fn lookup_resource(input: TokenStream) -> Result<TokenStream, syn::Error> {
             )*
         }
     })
+}
+
+fn configure(input: Input) -> Config {
+    let resource_name = format_ident!("{}", input.name);
+    // XXX-dap TODO I removed a comma from resource_authz
+    let resource_authz = quote! { authz::#resource_name };
+    let resource_model = quote! { model::#resource_name };
+
+    // XXX-dap TODO I removed a comma from these elements
+    // XXX-dap TODO Can we just make this an array of the PascalCase
+    // identifiers?
+    let mut authz_path_types: Vec<_> = input
+        .ancestors
+        .iter()
+        .map(|a| {
+            let name = format_ident!("{}", a);
+            quote! { authz::#name }
+        })
+        .collect();
+    authz_path_types.push(resource_authz.clone());
+
+    // XXX-dap TODO I removed a comma from these elements
+    // (authz_ancestors_values and authz_path_values)
+    let authz_ancestors_values: Vec<_> = input
+        .ancestors
+        .iter()
+        .map(|a| format_ident!("authz_{}", heck::AsSnakeCase(&a).to_string()))
+        .collect();
+    let mut authz_path_values = authz_ancestors_values.clone();
+    // XXX-dap TODO replace authz_self with resource_authz?
+    authz_path_values.push(format_ident!("authz_self"));
+
+    let parent = input.ancestors.last().map(|parent_resource_name| {
+        // XXX working here
+        let resource_name = format_ident!("{}", parent_resource_name);
+        let resource_snake_name =
+            heck::AsSnakeCase(parent_resource_name).to_string();
+        let parent_id = format_ident!("{}_id", resource_snake_name);
+        let resource_authz_type = quote! { authz::#resource_name };
+        let resource_authz_name =
+            format_ident!("authz_{}", resource_snake_name);
+        let lookup_filter =
+            quote! { .filter(dsl::#parent_id.eq(#resource_authz_name.id())) };
+        let ancestors_values_assign = quote! {
+                let (#(#authz_ancestors_values,)* _) =
+                    #resource_name::lookup_by_id_no_authz(
+                        _opctx, datastore, db_row.#parent_id
+                    ).await?;
+        };
+        Parent {
+            resource_name,
+            lookup_arg: quote! { #resource_authz_name: &#resource_authz_type, },
+            lookup_arg_value: quote! { &#resource_authz_name, },
+            lookup_arg_value_deref: quote! { #resource_authz_name, },
+            lookup_filter,
+            resource_authz_type,
+            resource_authz_name,
+            ancestors_values_assign,
+            ancestors_values_assign_lookup: quote! {
+                let (#(#authz_ancestors_values,)*) = parent.lookup().await?;
+            },
+        }
+    });
+
+    Config {
+        resource_name,
+        resource_as_snake: format_ident!(
+            "{}",
+            heck::AsSnakeCase(&input.name).to_string()
+        ),
+        resource_authz,
+        resource_model,
+        authz_kind: input.authz_kind,
+        authz_path_types: authz_path_types,
+        authz_path_values,
+        child_resources: input.children,
+        parent,
+    }
+}
+
+#[cfg(test)]
+#[test]
+fn test_lookup() {
+    //    let output = lookup_resource(
+    //        quote! {
+    //            name = "Organization",
+    //            ancestors = [],
+    //            children = [ "Project" ],
+    //            authz_kind = Typed
+    //        }
+    //        .into(),
+    //    )
+    //    .unwrap();
+    //    println!("{}", output);
+
+    let output = lookup_resource(
+        quote! {
+            name = "Project",
+            ancestors = ["Organization"],
+            children = [ "Disk", "Instance" ],
+            authz_kind = Typed
+        }
+        .into(),
+    )
+    .unwrap();
+    println!("{}", output);
 }

@@ -33,7 +33,7 @@ mod lookup;
 /// }
 /// ```
 ///
-/// See [`lookup::Config`] for documentation on the named arguments.
+/// See [`lookup::Input`] for documentation on the named arguments.
 ///
 /// This defines a struct `Organization<'a>` with functions `fetch()`,
 /// `fetch_for(authz::Action)`, and `lookup_for(authz::Action)` for looking up
@@ -60,7 +60,7 @@ mod lookup;
 ///
 /// These define `Project<'a>` and `Instance<'a>`.  For more on these structs
 /// and how they're used, see nexus/src/db/lookup.rs.
-// Allow private intra-doc links.  This is useful because the `Config` struct
+// Allow private intra-doc links.  This is useful because the `Input` struct
 // cannot be exported (since we're a proc macro crate, and we can't expose
 // a struct), but its documentation is very useful.
 #[allow(rustdoc::private_intra_doc_links)]
