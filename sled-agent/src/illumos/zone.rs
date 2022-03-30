@@ -428,10 +428,7 @@ impl Zones {
         Self::ensure_address(
             None,
             &gz_link_local_addrobj.on_same_interface("v6route")?,
-            AddressRequest::new_static(
-                "fd00:1234::".parse().unwrap(),
-                Some(16),
-            ),
+            AddressRequest::new_static("fd00:1de::".parse().unwrap(), Some(16)),
         )?;
         Ok(())
     }
