@@ -204,6 +204,21 @@ impl<'a> LookupPath<'a> {
     pub fn disk_id(self, id: Uuid) -> Disk<'a> {
         Disk { key: Key::Id(Root { lookup_root: self }, id) }
     }
+
+    /// Select a resource of type Vpc, identified by its id
+    pub fn vpc_id(self, id: Uuid) -> Vpc<'a> {
+        Vpc { key: Key::Id(Root { lookup_root: self }, id) }
+    }
+
+    /// Select a resource of type VpcRouter, identified by its id
+    pub fn vpc_router_id(self, id: Uuid) -> VpcRouter<'a> {
+        VpcRouter { key: Key::Id(Root { lookup_root: self }, id) }
+    }
+
+    /// Select a resource of type RouterRoute, identified by its id
+    pub fn router_route_id(self, id: Uuid) -> RouterRoute<'a> {
+        RouterRoute { key: Key::Id(Root { lookup_root: self }, id) }
+    }
 }
 
 /// Describes a node along the selection path of a resource
@@ -244,7 +259,7 @@ lookup_resource! {
 lookup_resource! {
     name = "Project",
     ancestors = [ "Organization" ],
-    children = [ "Disk", "Instance" ],
+    children = [ "Disk", "Instance", "Vpc" ],
     authz_kind = Typed
 }
 
@@ -258,6 +273,27 @@ lookup_resource! {
 lookup_resource! {
     name = "Disk",
     ancestors = [ "Organization", "Project" ],
+    children = [],
+    authz_kind = Generic
+}
+
+lookup_resource! {
+    name = "Vpc",
+    ancestors = [ "Organization", "Project" ],
+    children = [ "VpcRouter" ],
+    authz_kind = Generic
+}
+
+lookup_resource! {
+    name = "VpcRouter",
+    ancestors = [ "Organization", "Project", "Vpc" ],
+    children = [ "RouterRoute" ],
+    authz_kind = Generic
+}
+
+lookup_resource! {
+    name = "RouterRoute",
+    ancestors = [ "Organization", "Project", "Vpc", "VpcRouter" ],
     children = [],
     authz_kind = Generic
 }

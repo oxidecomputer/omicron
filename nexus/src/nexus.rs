@@ -2535,20 +2535,15 @@ impl Nexus {
         router_name: &Name,
         route_name: &Name,
     ) -> LookupResult<db::model::RouterRoute> {
-        let authz_router = self
-            .db_datastore
-            .vpc_router_lookup_by_path(
-                organization_name,
-                project_name,
-                vpc_name,
-                router_name,
-            )
+        let (.., db_route) = LookupPath::new(opctx, &self.db_datastore)
+            .organization_name(organization_name)
+            .project_name(project_name)
+            .vpc_name(vpc_name)
+            .vpc_router_name(router_name)
+            .router_route_name(route_name)
+            .fetch()
             .await?;
-        Ok(self
-            .db_datastore
-            .route_fetch(&opctx, &authz_router, route_name)
-            .await?
-            .1)
+        Ok(db_route)
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -2594,19 +2589,16 @@ impl Nexus {
         router_name: &Name,
         route_name: &Name,
     ) -> DeleteResult {
-        let authz_router = self
-            .db_datastore
-            .vpc_router_lookup_by_path(
-                organization_name,
-                project_name,
-                vpc_name,
-                router_name,
-            )
-            .await?;
-        let (authz_route, db_route) = self
-            .db_datastore
-            .route_fetch(opctx, &authz_router, route_name)
-            .await?;
+        let (.., authz_route, db_route) =
+            LookupPath::new(opctx, &self.db_datastore)
+                .organization_name(organization_name)
+                .project_name(project_name)
+                .vpc_name(vpc_name)
+                .vpc_router_name(router_name)
+                .router_route_name(route_name)
+                .fetch()
+                .await?;
+
         // Only custom routes can be deleted
         // TODO Shouldn't this constraint be checked by the database query?
         if db_route.kind.0 != RouterRouteKind::Custom {
@@ -2629,19 +2621,15 @@ impl Nexus {
         route_name: &Name,
         params: &RouterRouteUpdateParams,
     ) -> UpdateResult<RouterRoute> {
-        let authz_router = self
-            .db_datastore
-            .vpc_router_lookup_by_path(
-                organization_name,
-                project_name,
-                vpc_name,
-                router_name,
-            )
-            .await?;
-        let (authz_route, db_route) = self
-            .db_datastore
-            .route_fetch(opctx, &authz_router, route_name)
-            .await?;
+        let (.., authz_route, db_route) =
+            LookupPath::new(opctx, &self.db_datastore)
+                .organization_name(organization_name)
+                .project_name(project_name)
+                .vpc_name(vpc_name)
+                .vpc_router_name(router_name)
+                .router_route_name(route_name)
+                .fetch()
+                .await?;
         // TODO: Write a test for this once there's a way to test it (i.e.
         // subnets automatically register to the system router table)
         match db_route.kind.0 {
