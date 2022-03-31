@@ -7,7 +7,6 @@
 use omicron_package::{parse, SubCommand as PackageSubCommand};
 
 use std::collections::{BTreeMap, BTreeSet};
-use std::fmt::Write;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -43,6 +42,19 @@ struct Config {
     pub builder: Builder,
     pub servers: BTreeMap<String, Server>,
     pub deployment: Deployment,
+
+    #[serde(default)]
+    pub debug: bool,
+}
+
+impl Config {
+    fn release_arg(&self) -> &str {
+        if self.debug {
+            ""
+        } else {
+            "--release"
+        }
+    }
 }
 
 fn parse_into_set(src: &str) -> BTreeSet<String> {
@@ -70,11 +82,6 @@ enum SubCommand {
 
     /// Build omicron-package and everything needed to run thing-flinger
     /// commands on the build host.
-    ///
-    /// Package always builds everything, but it can be set in release mode, and
-    /// we expect the existing tools to run from 'target/debug'. Additionally,
-    /// you can't run `Package` until you have actually built `omicron-package`,
-    /// which `BuildMinimal` does.
     BuildMinimal,
 
     /// Use all subcommands from omicron-package
@@ -92,7 +99,10 @@ enum SubCommand {
 }
 
 #[derive(Debug, StructOpt)]
-#[structopt(name = "thing-flinger")]
+#[structopt(
+    name = "thing-flinger",
+    about = "A tool for synchronizing packages and configs between machines"
+)]
 struct Args {
     /// The path to the deployment manifest TOML file
     #[structopt(short, long, help = "Path to deployment manifest toml file")]
@@ -196,8 +206,9 @@ fn do_sync(config: &Config) -> Result<()> {
 fn do_build_minimal(config: &Config) -> Result<()> {
     let server = &config.servers[&config.builder.server];
     let cmd = format!(
-        "cd {} && cargo build -p {} -p {}",
+        "cd {} && cargo build {} -p {} -p {}",
         config.builder.omicron_path.to_string_lossy(),
+        config.release_arg(),
         "omicron-package",
         "omicron-deploy"
     );
@@ -206,8 +217,6 @@ fn do_build_minimal(config: &Config) -> Result<()> {
 
 fn do_package(config: &Config, artifact_dir: PathBuf) -> Result<()> {
     let server = &config.servers[&config.builder.server];
-    let mut cmd = String::new();
-    let cmd_path = "./target/debug/omicron-package";
     let artifact_dir = artifact_dir
         .to_str()
         .ok_or_else(|| FlingError::BadString("artifact_dir".to_string()))?;
@@ -217,28 +226,28 @@ fn do_package(config: &Config, artifact_dir: PathBuf) -> Result<()> {
     // nexus.
     //
     // See https://github.com/oxidecomputer/omicron/blob/8757ec542ea4ffbadd6f26094ed4ba357715d70d/rpaths/src/lib.rs
-    write!(
-        &mut cmd,
-        "bash -lc 'cd {} && {} package --out {}'",
+    let cmd = format!(
+        "bash -lc \
+            'cd {} && \
+             cargo run {} --bin omicron-package -- package --out {}'",
         config.builder.omicron_path.to_string_lossy(),
-        cmd_path,
+        config.release_arg(),
         &artifact_dir,
-    )?;
+    );
 
     ssh_exec(&server, &cmd, false)
 }
 
 fn do_check(config: &Config) -> Result<()> {
     let server = &config.servers[&config.builder.server];
-    let mut cmd = String::new();
-    let cmd_path = "./target/debug/omicron-package";
 
-    write!(
-        &mut cmd,
-        "bash -lc 'cd {} && {} check'",
+    let cmd = format!(
+        "bash -lc \
+            'cd {} && \
+             cargo run {} --bin omicron-package -- check'",
         config.builder.omicron_path.to_string_lossy(),
-        cmd_path,
-    )?;
+        config.release_arg(),
+    );
 
     ssh_exec(&server, &cmd, false)
 }
@@ -345,9 +354,10 @@ fn overlay_sled_agent(
     let cmd = format!(
         "sh -c 'for dir in {}; do mkdir -p $dir; done' && \
             cd {} && \
-            cargo run --bin sled-agent-overlay-files -- --threshold {} --directories {}",
+            cargo run {} --bin sled-agent-overlay-files -- --threshold {} --directories {}",
         dirs,
         config.builder.omicron_path.to_string_lossy(),
+        config.release_arg(),
         config.deployment.rack_secret_threshold,
         dirs
     );
@@ -410,7 +420,10 @@ fn copy_omicron_package_binary_to_staging(
     destination: &Server,
 ) -> Result<()> {
     let mut bin_path = PathBuf::from(&config.builder.omicron_path);
-    bin_path.push("target/debug/omicron-package");
+    bin_path.push(format!(
+        "target/{}/omicron-package",
+        if config.debug { "debug" } else { "release" }
+    ));
     let cmd = format!(
         "rsync -avz {} {}@{}:{}",
         bin_path.to_string_lossy(),
