@@ -61,7 +61,7 @@ enum AuthzKind {
 // MACRO STATE
 //
 
-/// Configuration for [`lookup_resource`] and its helper functions
+/// Configuration for [`lookup_resource()`] and its helper functions
 ///
 /// This is all computable from [`Input`].  This precomputes a bunch of useful
 /// identifiers and token streams, which makes the generator functions a lot
