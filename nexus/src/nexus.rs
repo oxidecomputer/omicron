@@ -2535,13 +2535,13 @@ impl Nexus {
         router_name: &Name,
         route_name: &Name,
     ) -> LookupResult<db::model::RouterRoute> {
-        let (.., authz_route, db_route) =
+        let (.., db_route) =
             LookupPath::new(opctx, &self.db_datastore)
                 .organization_name(organization_name)
                 .project_name(project_name)
                 .vpc_name(vpc_name)
                 .vpc_router_name(router_name)
-                .route_name(route_name)
+                .router_route_name(route_name)
                 .fetch()
                 .await?;
         Ok(db_route)
@@ -2596,7 +2596,7 @@ impl Nexus {
                 .project_name(project_name)
                 .vpc_name(vpc_name)
                 .vpc_router_name(router_name)
-                .route_name(route_name)
+                .router_route_name(route_name)
                 .fetch()
                 .await?;
 
@@ -2628,7 +2628,7 @@ impl Nexus {
                 .project_name(project_name)
                 .vpc_name(vpc_name)
                 .vpc_router_name(router_name)
-                .route_name(route_name)
+                .router_route_name(route_name)
                 .fetch()
                 .await?;
         // TODO: Write a test for this once there's a way to test it (i.e.

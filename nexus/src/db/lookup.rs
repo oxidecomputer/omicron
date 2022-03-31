@@ -216,7 +216,7 @@ impl<'a> LookupPath<'a> {
     }
 
     /// Select a resource of type RouterRoute, identified by its id
-    pub fn router_router_id(self, id: Uuid) -> RouterRoute<'a> {
+    pub fn router_route_id(self, id: Uuid) -> RouterRoute<'a> {
         RouterRoute { key: Key::Id(Root { lookup_root: self }, id) }
     }
 }
