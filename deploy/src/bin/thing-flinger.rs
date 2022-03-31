@@ -84,8 +84,7 @@ enum SubCommand {
     /// commands on the build host.
     BuildMinimal,
 
-    /// Use all subcommands from omicron-package
-    #[structopt(flatten)]
+    /// Runs a packaging command on the "builder" server.
     Package(PackageSubCommand),
 
     /// Create an overlay directory tree for each deployment server
@@ -216,7 +215,7 @@ fn do_build_minimal(config: &Config) -> Result<()> {
 }
 
 fn do_package(config: &Config, artifact_dir: PathBuf) -> Result<()> {
-    let server = &config.servers[&config.builder.server];
+    let builder = &config.servers[&config.builder.server];
     let artifact_dir = artifact_dir
         .to_str()
         .ok_or_else(|| FlingError::BadString("artifact_dir".to_string()))?;
@@ -235,7 +234,7 @@ fn do_package(config: &Config, artifact_dir: PathBuf) -> Result<()> {
         &artifact_dir,
     );
 
-    ssh_exec(&server, &cmd, false)
+    ssh_exec(&builder, &cmd, false)
 }
 
 fn do_check(config: &Config) -> Result<()> {
