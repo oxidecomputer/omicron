@@ -271,6 +271,13 @@ lookup_resource! {
 lookup_resource! {
     name = "Instance",
     ancestors = [ "Organization", "Project" ],
+    children = [ "NetworkInterface" ],
+    authz_kind = Generic
+}
+
+lookup_resource! {
+    name = "NetworkInterface",
+    ancestors = [ "Organization", "Project", "Instance" ],
     children = [],
     authz_kind = Generic
 }
