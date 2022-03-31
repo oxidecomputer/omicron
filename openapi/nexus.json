@@ -4436,7 +4436,7 @@
         "type": "object",
         "properties": {
           "block_size": {
-            "description": "block size for this disk",
+            "description": "size of blocks for this Disk. valid values are currently 512 or 4096",
             "allOf": [
               {
                 "$ref": "#/components/schemas/ByteCount"
@@ -4456,7 +4456,7 @@
             "$ref": "#/components/schemas/Name"
           },
           "size": {
-            "description": "size of the Disk",
+            "description": "total size of the Disk in bytes",
             "allOf": [
               {
                 "$ref": "#/components/schemas/ByteCount"
@@ -4828,7 +4828,7 @@
             "type": "object",
             "properties": {
               "block_size": {
-                "description": "block size for this disk",
+                "description": "size of blocks for this Disk. valid values are currently 512 or 4096",
                 "allOf": [
                   {
                     "$ref": "#/components/schemas/ByteCount"
@@ -4848,7 +4848,7 @@
                 "$ref": "#/components/schemas/Name"
               },
               "size": {
-                "description": "size of the Disk",
+                "description": "total size of the Disk in bytes",
                 "allOf": [
                   {
                     "$ref": "#/components/schemas/ByteCount"

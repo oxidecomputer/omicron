@@ -244,9 +244,9 @@ pub struct DiskCreate {
     pub snapshot_id: Option<Uuid>, // TODO should be a name?
     /// id for image from which the Disk should be created, if any
     pub image_id: Option<Uuid>, // TODO should be a name?
-    /// size of the Disk
+    /// total size of the Disk in bytes
     pub size: ByteCount,
-    /// block size for this disk
+    /// size of blocks for this Disk. valid values are currently 512 or 4096
     pub block_size: ByteCount,
 }
 
