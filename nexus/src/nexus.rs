@@ -2407,15 +2407,14 @@ impl Nexus {
         vpc_name: &Name,
         router_name: &Name,
     ) -> LookupResult<db::model::VpcRouter> {
-        let authz_vpc = self
-            .db_datastore
-            .vpc_lookup_by_path(organization_name, project_name, vpc_name)
+        let (.., db_router) = LookupPath::new(opctx, &self.db_datastore)
+            .organization_name(organization_name)
+            .project_name(project_name)
+            .vpc_name(vpc_name)
+            .vpc_router_name(router_name)
+            .fetch()
             .await?;
-        Ok(self
-            .db_datastore
-            .vpc_router_fetch(&opctx, &authz_vpc, router_name)
-            .await?
-            .1)
+        Ok(db_router)
     }
 
     pub async fn vpc_create_router(
@@ -2456,14 +2455,14 @@ impl Nexus {
         vpc_name: &Name,
         router_name: &Name,
     ) -> DeleteResult {
-        let authz_vpc = self
-            .db_datastore
-            .vpc_lookup_by_path(organization_name, project_name, vpc_name)
-            .await?;
-        let (authz_router, db_router) = self
-            .db_datastore
-            .vpc_router_fetch(opctx, &authz_vpc, router_name)
-            .await?;
+        let (.., authz_router, db_router) =
+            LookupPath::new(opctx, &self.db_datastore)
+                .organization_name(organization_name)
+                .project_name(project_name)
+                .vpc_name(vpc_name)
+                .vpc_router_name(router_name)
+                .fetch()
+                .await?;
         // TODO-performance shouldn't this check be part of the "update"
         // database query?  This shouldn't affect correctness, assuming that a
         // router kind cannot be changed, but it might be able to save us a
@@ -2485,14 +2484,12 @@ impl Nexus {
         router_name: &Name,
         params: &params::VpcRouterUpdate,
     ) -> UpdateResult<VpcRouter> {
-        let authz_router = self
-            .db_datastore
-            .vpc_router_lookup_by_path(
-                organization_name,
-                project_name,
-                vpc_name,
-                router_name,
-            )
+        let (.., authz_router) = LookupPath::new(opctx, &self.db_datastore)
+            .organization_name(organization_name)
+            .project_name(project_name)
+            .vpc_name(vpc_name)
+            .vpc_router_name(router_name)
+            .lookup_for(authz::Action::Modify)
             .await?;
         self.db_datastore
             .vpc_update_router(opctx, &authz_router, params.clone().into())
@@ -2510,20 +2507,16 @@ impl Nexus {
         router_name: &Name,
         pagparams: &DataPageParams<'_, Name>,
     ) -> ListResultVec<db::model::RouterRoute> {
-        let authz_router = self
-            .db_datastore
-            .vpc_router_lookup_by_path(
-                organization_name,
-                project_name,
-                vpc_name,
-                router_name,
-            )
+        let (.., authz_router) = LookupPath::new(opctx, &self.db_datastore)
+            .organization_name(organization_name)
+            .project_name(project_name)
+            .vpc_name(vpc_name)
+            .vpc_router_name(router_name)
+            .lookup_for(authz::Action::ListChildren)
             .await?;
-        let routes = self
-            .db_datastore
+        self.db_datastore
             .router_list_routes(opctx, &authz_router, pagparams)
-            .await?;
-        Ok(routes)
+            .await
     }
 
     pub async fn route_fetch(
@@ -2557,14 +2550,12 @@ impl Nexus {
         kind: &RouterRouteKind,
         params: &RouterRouteCreateParams,
     ) -> CreateResult<db::model::RouterRoute> {
-        let authz_router = self
-            .db_datastore
-            .vpc_router_lookup_by_path(
-                organization_name,
-                project_name,
-                vpc_name,
-                router_name,
-            )
+        let (.., authz_router) = LookupPath::new(opctx, &self.db_datastore)
+            .organization_name(organization_name)
+            .project_name(project_name)
+            .vpc_name(vpc_name)
+            .vpc_router_name(router_name)
+            .lookup_for(authz::Action::CreateChild)
             .await?;
         let id = Uuid::new_v4();
         let route = db::model::RouterRoute::new(
