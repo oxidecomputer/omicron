@@ -767,6 +767,17 @@ impl Nexus {
             }
         }
 
+        // Reject disks where the block size doesn't evenly divide the total
+        // size
+        if (params.size.to_bytes() % params.block_size.to_bytes()) != 0 {
+            return Err(Error::InvalidValue {
+                label: String::from("size and block_size"),
+                message: String::from(
+                    "total size must be a multiple of block size",
+                ),
+            });
+        }
+
         // Until we implement snapshots, do not allow disks to be created from a
         // snapshot.
         if params.snapshot_id.is_some() {
