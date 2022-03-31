@@ -17,7 +17,15 @@ use quote::{format_ident, quote};
 // NOTE: this is only "pub" for the `cargo doc` link on [`lookup_resource!`].
 #[derive(serde::Deserialize)]
 pub struct Input {
-    /// Name of the resource (PascalCase)
+    /// Name of the resource
+    ///
+    /// This is taken as the name of the database model type in
+    /// `omicron_nexus::db::model`, the name of the authz type in
+    /// `omicron_nexus::authz`, and will be the name of the new type created by
+    /// this macro.  The snake case version of the name is taken as the name of
+    /// the Diesel table interface in `db::schema`.
+    ///
+    /// This value is typically PascalCase (e.g., "Organization").
     name: String,
     /// ordered list of resources that are ancestors of this resource, starting
     /// with the top of the hierarchy
@@ -53,7 +61,7 @@ enum AuthzKind {
 // MACRO STATE
 //
 
-/// Configuration for [`lookup_resource`] and its helper functions
+/// Configuration for [`lookup_resource()`] and its helper functions
 ///
 /// This is all computable from [`Input`].  This precomputes a bunch of useful
 /// identifiers and token streams, which makes the generator functions a lot
@@ -77,8 +85,8 @@ pub struct Config {
     path_authz_names: Vec<syn::Ident>,
 
     // Child resources
-    /// list of names of child resources (PascalCase, raw input to the macro)
-    /// (e.g., [`Instance`, `Disk`])
+    /// list of names of child resources, in the same form and with the same
+    /// assumptions as [`Input::name`] (i.e., typically PascalCase)
     child_resources: Vec<String>,
 
     // Parent resource, if any
@@ -118,6 +126,8 @@ impl Config {
 /// ancestor in its path)
 struct Resource {
     /// PascalCase resource name itself (e.g., `Project`)
+    ///
+    /// See [`Input::name`] for more on the assumptions and how it's used.
     name: syn::Ident,
     /// snake_case resource name (e.g., `project`)
     name_as_snake: String,
