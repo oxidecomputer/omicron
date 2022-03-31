@@ -12,10 +12,10 @@ use ipnetwork::IpNetwork;
 use slog::Logger;
 use std::path::PathBuf;
 
-#[cfg(not(test))]
-use crate::illumos::{dladm::Dladm, zone::Zones};
 #[cfg(test)]
-use crate::illumos::{dladm::MockDladm as Dladm, zone::MockZones as Zones};
+use crate::illumos::zone::MockZones as Zones;
+#[cfg(not(test))]
+use crate::illumos::zone::Zones;
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
@@ -195,8 +195,7 @@ impl InstalledZone {
         devices: &[zone::Device],
         vnics: Vec<Vnic>,
     ) -> Result<InstalledZone, Error> {
-        let physical_dl = Dladm::find_physical()?;
-        let control_vnic = vnic_allocator.new_control(&physical_dl, None)?;
+        let control_vnic = vnic_allocator.new_control(None)?;
 
         // The zone name is based on:
         // - A unique Oxide prefix ("oxz_")

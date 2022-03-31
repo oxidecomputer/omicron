@@ -27,7 +27,7 @@ pub mod http_testing;
 pub mod resource_helpers;
 
 pub const SLED_AGENT_UUID: &str = "b6d65341-167c-41df-9b5c-41cded99c229";
-const RACK_UUID: &str = "c19a698f-c6f9-4a17-ae30-20d711b8f7dc";
+pub const RACK_UUID: &str = "c19a698f-c6f9-4a17-ae30-20d711b8f7dc";
 pub const OXIMETER_UUID: &str = "39e6175b-4df2-4730-b11d-cbc1e60a2e78";
 pub const PRODUCER_UUID: &str = "a6458b7d-87c3-4483-be96-854d814c20de";
 
@@ -177,7 +177,7 @@ pub async fn start_sled_agent(
         nexus_address,
         dropshot: ConfigDropshot {
             bind_address: SocketAddr::new("127.0.0.1".parse().unwrap(), 0),
-            request_body_max_bytes: 2048,
+            request_body_max_bytes: 1024 * 1024,
             ..Default::default()
         },
         // TODO-cleanup this is unused

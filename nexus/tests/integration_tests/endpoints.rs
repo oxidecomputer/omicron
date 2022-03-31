@@ -9,6 +9,8 @@
 
 use http::method::Method;
 use lazy_static::lazy_static;
+use nexus_test_utils::RACK_UUID;
+use nexus_test_utils::SLED_AGENT_UUID;
 use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::IdentityMetadataUpdateParams;
@@ -26,6 +28,11 @@ use std::net::IpAddr;
 use std::net::Ipv4Addr;
 
 lazy_static! {
+    pub static ref HARDWARE_RACK_URL: String =
+        format!("/hardware/racks/{}", RACK_UUID);
+    pub static ref HARDWARE_SLED_URL: String =
+        format!("/hardware/sleds/{}", SLED_AGENT_UUID);
+
     // Organization used for testing
     pub static ref DEMO_ORG_NAME: Name = "demo-org".parse().unwrap();
     pub static ref DEMO_ORG_URL: String =
@@ -166,6 +173,7 @@ lazy_static! {
             hostname: String::from("demo-instance"),
             network_interfaces:
                 params::InstanceNetworkInterfaceAttachment::Default,
+            disks: vec![],
         };
 }
 
@@ -224,6 +232,12 @@ pub enum AllowedMethod {
     Delete,
     /// HTTP "GET" method
     Get,
+    /// HTTP "GET" method, but where we cannot statically define a URL that will
+    /// work (so the test runner should not expect to get a 200).  This should
+    /// be uncommon.  In most cases, resources are identified either by names
+    /// that we define here or uuids that we control in the test suite (e.g.,
+    /// the rack and sled uuids).
+    GetNonexistent,
     /// HTTP "POST" method, with sample input (which should be valid input for
     /// this endpoint)
     Post(serde_json::Value),
@@ -238,6 +252,7 @@ impl AllowedMethod {
         match self {
             AllowedMethod::Delete => &Method::DELETE,
             AllowedMethod::Get => &Method::GET,
+            AllowedMethod::GetNonexistent => &Method::GET,
             AllowedMethod::Post(_) => &Method::POST,
             AllowedMethod::Put(_) => &Method::PUT,
         }
@@ -249,7 +264,9 @@ impl AllowedMethod {
     /// If this returns `None`, the request body should be empty.
     pub fn body(&self) -> Option<&serde_json::Value> {
         match self {
-            AllowedMethod::Delete | AllowedMethod::Get => None,
+            AllowedMethod::Delete
+            | AllowedMethod::Get
+            | AllowedMethod::GetNonexistent => None,
             AllowedMethod::Post(body) => Some(&body),
             AllowedMethod::Put(body) => Some(&body),
         }
@@ -589,6 +606,64 @@ lazy_static! {
             url: &*URL_USERS_DB_INIT,
             visibility: Visibility::Protected,
             allowed_methods: vec![AllowedMethod::Get],
+        },
+
+        /* Hardware */
+
+        VerifyEndpoint {
+            url: "/hardware/racks",
+            visibility: Visibility::Public,
+            allowed_methods: vec![AllowedMethod::Get],
+        },
+
+        VerifyEndpoint {
+            url: &*HARDWARE_RACK_URL,
+            visibility: Visibility::Protected,
+            allowed_methods: vec![AllowedMethod::Get],
+        },
+
+        VerifyEndpoint {
+            url: "/hardware/sleds",
+            visibility: Visibility::Public,
+            allowed_methods: vec![AllowedMethod::Get],
+        },
+
+        VerifyEndpoint {
+            url: &*HARDWARE_SLED_URL,
+            visibility: Visibility::Protected,
+            allowed_methods: vec![AllowedMethod::Get],
+        },
+
+        /* Sagas */
+
+        VerifyEndpoint {
+            url: "/sagas",
+            visibility: Visibility::Public,
+            allowed_methods: vec![AllowedMethod::Get],
+        },
+
+        VerifyEndpoint {
+            url: "/sagas/48a1b8c8-fc1c-6fea-9de9-fdeb8dda7823",
+            visibility: Visibility::Public,
+            allowed_methods: vec![AllowedMethod::GetNonexistent],
+        },
+
+        /* Timeseries schema */
+
+        VerifyEndpoint {
+            url: "/timeseries/schema",
+            visibility: Visibility::Public,
+            allowed_methods: vec![AllowedMethod::Get],
+        },
+
+        /* Updates */
+
+        VerifyEndpoint {
+            url: "/updates/refresh",
+            visibility: Visibility::Public,
+            allowed_methods: vec![AllowedMethod::Post(
+                serde_json::Value::Null
+            )],
         },
     ];
 }

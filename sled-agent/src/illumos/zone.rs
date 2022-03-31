@@ -9,7 +9,7 @@ use slog::Logger;
 use std::net::IpAddr;
 
 use crate::illumos::addrobj::AddrObject;
-use crate::illumos::dladm::{Dladm, VNIC_PREFIX_CONTROL};
+use crate::illumos::dladm::{Dladm, PhysicalLink, VNIC_PREFIX_CONTROL};
 use crate::illumos::zfs::ZONE_ZFS_DATASET_MOUNTPOINT;
 use crate::illumos::{execute, PFEXEC};
 
@@ -404,6 +404,35 @@ impl Zones {
         Ok(())
     }
 
+    // TODO(https://github.com/oxidecomputer/omicron/issues/821): We
+    // should remove this function when Sled Agents are provided IPv6 addresses
+    // from RSS.
+    pub fn ensure_has_global_zone_v6_address(
+        physical_link: Option<PhysicalLink>,
+    ) -> Result<(), Error> {
+        // Ensure that addrconf has been set up in the Global
+        // Zone.
+
+        let link = if let Some(link) = physical_link {
+            link
+        } else {
+            Dladm::find_physical()?
+        };
+        let gz_link_local_addrobj = AddrObject::new(&link.0, "linklocal")?;
+        Self::ensure_has_link_local_v6_address(None, &gz_link_local_addrobj)?;
+
+        // Ensure that a static IPv6 address has been allocated
+        // to the Global Zone. Without this, we don't have a way
+        // to route to IP addresses that we want to create in
+        // the non-GZ.
+        Self::ensure_address(
+            None,
+            &gz_link_local_addrobj.on_same_interface("v6route")?,
+            AddressRequest::new_static("fd00:1de::".parse().unwrap(), Some(16)),
+        )?;
+        Ok(())
+    }
+
     // Creates an IP address within a Zone.
     #[allow(clippy::needless_lifetimes)]
     fn create_address<'a>(
@@ -421,31 +450,6 @@ impl Zones {
                 AddressRequest::Dhcp => {}
                 AddressRequest::Static(addr) => {
                     if addr.is_ipv6() {
-                        // Ensure that addrconf has been set up in the Global
-                        // Zone.
-                        let gz_link_local_addrobj = AddrObject::new(
-                            &Dladm::find_physical()?.0,
-                            "linklocal",
-                        )?;
-                        Self::ensure_has_link_local_v6_address(
-                            None,
-                            &gz_link_local_addrobj,
-                        )?;
-
-                        // Ensure that a static IPv6 address has been allocated
-                        // to the Global Zone. Without this, we don't have a way
-                        // to route to IP addresses that we want to create in
-                        // the non-GZ.
-                        Self::ensure_address(
-                            None,
-                            &gz_link_local_addrobj
-                                .on_same_interface("v6route")?,
-                            AddressRequest::new_static(
-                                "fd00:1234::".parse().unwrap(),
-                                Some(16),
-                            ),
-                        )?;
-
                         // Finally, actually ensure that the v6 address we want
                         // exists within the zone.
                         Self::ensure_has_link_local_v6_address(

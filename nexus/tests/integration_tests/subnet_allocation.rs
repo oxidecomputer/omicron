@@ -40,6 +40,7 @@ async fn create_instance_expect_failure(
         memory: ByteCount::from_mebibytes_u32(256),
         hostname: name.to_string(),
         network_interfaces: params::InstanceNetworkInterfaceAttachment::Default,
+        disks: vec![],
     };
 
     NexusRequest::new(

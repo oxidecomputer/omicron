@@ -1,0 +1,26 @@
+[package]
+name = "omicron-deploy"
+description = "Tools for deploying Omicron software to target machines"
+version = "0.1.0"
+edition = "2021"
+license = "MPL-2.0"
+
+[dependencies]
+anyhow = "1.0"
+crossbeam = "0.8"
+omicron-sled-agent = { path = "../sled-agent" }
+omicron-package = { path = "../package" }
+serde = { version = "1.0", features = [ "derive" ] }
+serde_derive = "1.0"
+structopt = "0.3"
+thiserror = "1.0"
+
+# Disable doc builds by default for our binaries to work around issue
+# rust-lang/cargo#8373.  These docs would not be very useful anyway.
+[[bin]]
+name = "sled-agent-overlay-files"
+doc = false
+
+[[bin]]
+name = "thing-flinger"
+doc = false

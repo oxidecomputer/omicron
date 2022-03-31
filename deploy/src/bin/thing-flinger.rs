@@ -21,7 +21,6 @@ use thiserror::Error;
 struct Builder {
     pub server: String,
     pub omicron_path: PathBuf,
-    pub git_treeish: String,
 }
 
 // A server on which an omicron package is deployed
@@ -40,7 +39,7 @@ struct Deployment {
 
 #[derive(Debug, Deserialize)]
 struct Config {
-    pub local_source: PathBuf,
+    pub omicron_path: PathBuf,
     pub builder: Builder,
     pub servers: BTreeMap<String, Server>,
     pub deployment: Deployment,
@@ -74,8 +73,8 @@ enum SubCommand {
     ///
     /// Package always builds everything, but it can be set in release mode, and
     /// we expect the existing tools to run from 'target/debug'. Additionally,
-    // you can't run `Package` until you have actually built `omicron-package`,
-    // which `BuildMinimal` does.
+    /// you can't run `Package` until you have actually built `omicron-package`,
+    /// which `BuildMinimal` does.
     BuildMinimal,
 
     /// Use all subcommands from omicron-package
@@ -153,7 +152,7 @@ fn do_sync(config: &Config) -> Result<()> {
     // For rsync to copy from the source appropriately we must guarantee a
     // trailing slash.
     let src =
-        format!("{}/", config.local_source.canonicalize()?.to_string_lossy());
+        format!("{}/", config.omicron_path.canonicalize()?.to_string_lossy());
     let dst = format!(
         "{}@{}:{}",
         server.username,
@@ -171,11 +170,13 @@ fn do_sync(config: &Config) -> Result<()> {
         .arg("--exclude")
         .arg("out/")
         .arg("--exclude")
-        .arg("cockroachdb/")
+        .arg("/cockroachdb/")
         .arg("--exclude")
-        .arg("clickhouse/")
+        .arg("/clickhouse/")
         .arg("--exclude")
         .arg("*.swp")
+        .arg("--exclude")
+        .arg(".git/")
         .arg("--out-format")
         .arg("File changed: %o %t %f")
         .arg(&src)
@@ -189,17 +190,16 @@ fn do_sync(config: &Config) -> Result<()> {
     Ok(())
 }
 
-// Build omicron-package and omicron-sled-agent on the builder
+// Build omicron-package and omicron-deploy on the builder
 //
-// We need to build omicron-sled-agent for overlay file generation
+// We need to build omicron-deploy for overlay file generation
 fn do_build_minimal(config: &Config) -> Result<()> {
     let server = &config.servers[&config.builder.server];
     let cmd = format!(
-        "cd {} && git checkout {} && cargo build -p {} -p {}",
+        "cd {} && cargo build -p {} -p {}",
         config.builder.omicron_path.to_string_lossy(),
-        config.builder.git_treeish,
         "omicron-package",
-        "omicron-sled-agent"
+        "omicron-deploy"
     );
     ssh_exec(&server, &cmd, false)
 }
@@ -219,9 +219,8 @@ fn do_package(config: &Config, artifact_dir: PathBuf) -> Result<()> {
     // See https://github.com/oxidecomputer/omicron/blob/8757ec542ea4ffbadd6f26094ed4ba357715d70d/rpaths/src/lib.rs
     write!(
         &mut cmd,
-        "bash -lc 'cd {} && git checkout {} && {} package --out {}'",
+        "bash -lc 'cd {} && {} package --out {}'",
         config.builder.omicron_path.to_string_lossy(),
-        config.builder.git_treeish,
         cmd_path,
         &artifact_dir,
     )?;
@@ -236,9 +235,8 @@ fn do_check(config: &Config) -> Result<()> {
 
     write!(
         &mut cmd,
-        "bash -lc 'cd {} && git checkout {} && {} check'",
+        "bash -lc 'cd {} && {} check'",
         config.builder.omicron_path.to_string_lossy(),
-        config.builder.git_treeish,
         cmd_path,
     )?;
 
@@ -324,8 +322,8 @@ fn do_overlay(config: &Config) -> Result<()> {
     // TODO: This needs to match the artifact_dir in `package`
     root_path.push("out/overlay");
     let server_dirs = dir_per_deploy_server(config, &root_path);
-    let server = &config.servers[&config.builder.server];
-    overlay_sled_agent(&server, config, &server_dirs)
+    let builder = &config.servers[&config.builder.server];
+    overlay_sled_agent(&builder, config, &server_dirs)
 }
 
 fn overlay_sled_agent(
@@ -344,12 +342,11 @@ fn overlay_sled_agent(
 
     // Create directories on builder
     let dirs = dir_string(&sled_agent_dirs);
-    let cmd = format!("sh -c 'for dir in {}; do mkdir -p $dir; done'", dirs);
-
     let cmd = format!(
-        "{} && cd {} && ./target/debug/sled-agent-overlay-files \
-            --threshold {} --directories {}",
-        cmd,
+        "sh -c 'for dir in {}; do mkdir -p $dir; done' && \
+            cd {} && \
+            cargo run --bin sled-agent-overlay-files -- --threshold {} --directories {}",
+        dirs,
         config.builder.omicron_path.to_string_lossy(),
         config.deployment.rack_secret_threshold,
         dirs
@@ -506,6 +503,12 @@ fn dir_string(dirs: &[PathBuf]) -> String {
     dirs.iter().map(|dir| dir.to_string_lossy().to_string() + " ").collect()
 }
 
+// For each server to be deployed, append the server name to `root`.
+//
+// Example (for servers "foo", "bar", "baz"):
+//
+//  dir_per_deploy_server(&config, "/my/path") ->
+//  vec!["/my/path/foo", "/my/path/bar", "/my/path/baz"]
 fn dir_per_deploy_server(config: &Config, root: &Path) -> Vec<PathBuf> {
     config
         .deployment
@@ -570,7 +573,7 @@ fn validate_absolute_path(
 }
 
 fn validate(config: &Config) -> Result<(), FlingError> {
-    validate_absolute_path(&config.local_source, "local_source")?;
+    validate_absolute_path(&config.omicron_path, "omicron_path")?;
     validate_absolute_path(
         &config.builder.omicron_path,
         "builder.omicron_path",

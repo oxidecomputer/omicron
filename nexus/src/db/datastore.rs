@@ -30,6 +30,7 @@ use crate::authz;
 use crate::context::OpContext;
 use crate::db::fixed_data::role_assignment_builtin::BUILTIN_ROLE_ASSIGNMENTS;
 use crate::db::fixed_data::role_builtin::BUILTIN_ROLES;
+use crate::db::fixed_data::silo_builtin::SILO_ID;
 use crate::external_api::params;
 use async_bb8_diesel::{AsyncConnection, AsyncRunQueryDsl, ConnectionManager};
 use chrono::Utc;
@@ -66,9 +67,9 @@ use crate::db::{
         Name, NetworkInterface, Organization, OrganizationUpdate, OximeterInfo,
         ProducerEndpoint, Project, ProjectUpdate, Region,
         RoleAssignmentBuiltin, RoleBuiltin, RouterRoute, RouterRouteUpdate,
-        Sled, UpdateArtifactKind, UpdateAvailableArtifact, UserBuiltin, Volume,
-        Vpc, VpcFirewallRule, VpcRouter, VpcRouterUpdate, VpcSubnet,
-        VpcSubnetUpdate, VpcUpdate, Zpool,
+        Silo, SiloUser, Sled, UpdateArtifactKind, UpdateAvailableArtifact,
+        UserBuiltin, Volume, Vpc, VpcFirewallRule, VpcRouter, VpcRouterUpdate,
+        VpcSubnet, VpcSubnetUpdate, VpcUpdate, Zpool,
     },
     pagination::paginated,
     pagination::paginated_multicolumn,
@@ -158,30 +159,34 @@ impl DataStore {
 
     pub async fn sled_list(
         &self,
+        opctx: &OpContext,
         pagparams: &DataPageParams<'_, Uuid>,
     ) -> ListResultVec<Sled> {
+        opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
         use db::schema::sled::dsl;
         paginated(dsl::sled, dsl::id, pagparams)
             .select(Sled::as_select())
-            .load_async(self.pool())
+            .load_async(self.pool_authorized(opctx).await?)
             .await
             .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
     }
 
-    pub async fn sled_fetch(&self, id: Uuid) -> LookupResult<Sled> {
+    pub async fn sled_fetch(
+        &self,
+        opctx: &OpContext,
+        authz_sled: &authz::Sled,
+    ) -> LookupResult<Sled> {
+        opctx.authorize(authz::Action::Read, authz_sled).await?;
         use db::schema::sled::dsl;
         dsl::sled
-            .filter(dsl::id.eq(id))
+            .filter(dsl::id.eq(authz_sled.id()))
             .select(Sled::as_select())
-            .first_async(self.pool())
+            .first_async(self.pool_authorized(opctx).await?)
             .await
             .map_err(|e| {
                 public_error_from_diesel_pool(
                     e,
-                    ErrorHandler::NotFoundByLookup(
-                        ResourceType::Sled,
-                        LookupType::ById(id),
-                    ),
+                    ErrorHandler::NotFoundByResource(authz_sled),
                 )
             })
     }
@@ -536,20 +541,25 @@ impl DataStore {
         opctx.authorize(authz::Action::CreateChild, &authz::FLEET).await?;
 
         let name = organization.name().as_str().to_string();
-        diesel::insert_into(dsl::organization)
-            .values(organization)
-            .returning(Organization::as_returning())
-            .get_result_async(self.pool_authorized(opctx).await?)
-            .await
-            .map_err(|e| {
+        let silo_id = organization.silo_id();
+
+        Silo::insert_resource(
+            silo_id,
+            diesel::insert_into(dsl::organization).values(organization),
+        )
+        .insert_and_get_result_async(self.pool_authorized(opctx).await?)
+        .await
+        .map_err(|e| match e {
+            AsyncInsertError::CollectionNotFound => Error::InternalError {
+                internal_message: format!("attempting to create an organization under non-existent silo {}", silo_id),
+            },
+            AsyncInsertError::DatabaseError(e) => {
                 public_error_from_diesel_pool(
                     e,
-                    ErrorHandler::Conflict(
-                        ResourceType::Organization,
-                        name.as_str(),
-                    ),
+                    ErrorHandler::Conflict(ResourceType::Organization, &name),
                 )
-            })
+            }
+        })
     }
 
     /// Fetches an Organization from the database and returns both the database
@@ -586,9 +596,15 @@ impl DataStore {
         name: &Name,
     ) -> LookupResult<(authz::Organization, Organization)> {
         use db::schema::organization::dsl;
+
+        // TODO-security uncomment when all endpoints are protected by authn
+        //let silo_id = opctx.authn.silo_required()?;
+        let silo_id = *SILO_ID;
+
         dsl::organization
             .filter(dsl::time_deleted.is_null())
             .filter(dsl::name.eq(name.clone()))
+            .filter(dsl::silo_id.eq(silo_id))
             .select(Organization::as_select())
             .get_result_async::<Organization>(self.pool())
             .await
@@ -613,6 +629,7 @@ impl DataStore {
     /// Fetch an [`authz::Organization`] based on its id
     pub async fn organization_lookup_by_id(
         &self,
+        // TODO: OpContext, to verify actor has permission to lookup
         organization_id: Uuid,
     ) -> LookupResult<authz::Organization> {
         use db::schema::organization::dsl;
@@ -3024,19 +3041,31 @@ impl DataStore {
     pub async fn session_fetch(
         &self,
         token: String,
-    ) -> LookupResult<ConsoleSession> {
+    ) -> LookupResult<authn::ConsoleSessionWithSiloId> {
         use db::schema::console_session::dsl;
-        dsl::console_session
+
+        let console_session = dsl::console_session
             .filter(dsl::token.eq(token.clone()))
             .select(ConsoleSession::as_select())
             .first_async(self.pool())
             .await
             .map_err(|e| {
-                Error::internal_error(&format!(
-                    "error fetching session: {:?}",
-                    e
-                ))
-            })
+                public_error_from_diesel_pool(
+                    e,
+                    ErrorHandler::NotFoundByLookup(
+                        ResourceType::ConsoleSession,
+                        LookupType::BySessionToken(token),
+                    ),
+                )
+            })?;
+
+        let silo_user =
+            self.silo_user_fetch(console_session.silo_user_id).await?;
+
+        Ok(authn::ConsoleSessionWithSiloId {
+            console_session,
+            silo_id: silo_user.silo_id,
+        })
     }
 
     pub async fn session_create(
@@ -3061,10 +3090,10 @@ impl DataStore {
     pub async fn session_update_last_used(
         &self,
         token: String,
-    ) -> UpdateResult<ConsoleSession> {
+    ) -> UpdateResult<authn::ConsoleSessionWithSiloId> {
         use db::schema::console_session::dsl;
 
-        diesel::update(dsl::console_session)
+        let console_session = diesel::update(dsl::console_session)
             .filter(dsl::token.eq(token.clone()))
             .set((dsl::time_last_used.eq(Utc::now()),))
             .returning(ConsoleSession::as_returning())
@@ -3075,7 +3104,22 @@ impl DataStore {
                     "error renewing session: {:?}",
                     e
                 ))
-            })
+            })?;
+
+        let silo_user = self
+            .silo_user_fetch(console_session.silo_user_id)
+            .await
+            .map_err(|e| {
+                Error::internal_error(&format!(
+                    "error fetching silo id: {:?}",
+                    e
+                ))
+            })?;
+
+        Ok(authn::ConsoleSessionWithSiloId {
+            console_session,
+            silo_id: silo_user.silo_id,
+        })
     }
 
     // putting "hard" in the name because we don't do this with any other model
@@ -3153,6 +3197,7 @@ impl DataStore {
             // Note: "db_init" is also a builtin user, but that one by necessity
             // is created with the database.
             &*authn::USER_INTERNAL_API,
+            &*authn::USER_INTERNAL_READ,
             &*authn::USER_SAGA_RECOVERY,
             &*authn::USER_TEST_PRIVILEGED,
             &*authn::USER_TEST_UNPRIVILEGED,
@@ -3171,6 +3216,18 @@ impl DataStore {
         })
         .collect::<Vec<UserBuiltin>>();
 
+        debug!(opctx.log, "creating silo_user entries for built-in users");
+
+        for builtin_user in &builtin_users {
+            self.silo_user_create(SiloUser::new(
+                *SILO_ID,
+                builtin_user.identity.id, /* silo user id */
+            ))
+            .await?;
+        }
+
+        info!(opctx.log, "created silo_user entries for built-in users");
+
         debug!(opctx.log, "attempting to create built-in users");
         let count = diesel::insert_into(dsl::user_builtin)
             .values(builtin_users)
@@ -3182,6 +3239,7 @@ impl DataStore {
                 public_error_from_diesel_pool(e, ErrorHandler::Server)
             })?;
         info!(opctx.log, "created {} built-in users", count);
+
         Ok(())
     }
 
@@ -3338,8 +3396,11 @@ impl DataStore {
 
     pub async fn update_available_artifact_upsert(
         &self,
+        opctx: &OpContext,
         artifact: UpdateAvailableArtifact,
     ) -> CreateResult<UpdateAvailableArtifact> {
+        opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
+
         use db::schema::update_available_artifact::dsl;
         diesel::insert_into(dsl::update_available_artifact)
             .values(artifact.clone())
@@ -3347,21 +3408,25 @@ impl DataStore {
             .do_update()
             .set(artifact.clone())
             .returning(UpdateAvailableArtifact::as_returning())
-            .get_result_async(self.pool())
+            .get_result_async(self.pool_authorized(opctx).await?)
             .await
             .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
     }
 
     pub async fn update_available_artifact_hard_delete_outdated(
         &self,
+        opctx: &OpContext,
         current_targets_role_version: i64,
     ) -> DeleteResult {
-        // We use the `targets_role_version` column in the table to delete any old rows, keeping
-        // the table in sync with the current copy of artifacts.json.
+        opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
+
+        // We use the `targets_role_version` column in the table to delete any
+        // old rows, keeping the table in sync with the current copy of
+        // artifacts.json.
         use db::schema::update_available_artifact::dsl;
         diesel::delete(dsl::update_available_artifact)
             .filter(dsl::targets_role_version.lt(current_targets_role_version))
-            .execute_async(self.pool())
+            .execute_async(self.pool_authorized(opctx).await?)
             .await
             .map(|_rows_deleted| ())
             .map_err(|e| {
@@ -3374,8 +3439,11 @@ impl DataStore {
 
     pub async fn update_available_artifact_fetch(
         &self,
+        opctx: &OpContext,
         artifact: &UpdateArtifact,
     ) -> LookupResult<UpdateAvailableArtifact> {
+        opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
+
         use db::schema::update_available_artifact::dsl;
         dsl::update_available_artifact
             .filter(
@@ -3385,7 +3453,7 @@ impl DataStore {
                     .and(dsl::kind.eq(UpdateArtifactKind(artifact.kind))),
             )
             .select(UpdateAvailableArtifact::as_select())
-            .first_async(self.pool())
+            .first_async(self.pool_authorized(opctx).await?)
             .await
             .map_err(|e| {
                 Error::internal_error(&format!(
@@ -3393,6 +3461,258 @@ impl DataStore {
                     e
                 ))
             })
+    }
+
+    pub async fn silo_user_fetch(
+        &self,
+        silo_user_id: Uuid,
+    ) -> LookupResult<SiloUser> {
+        use db::schema::silo_user::dsl;
+
+        dsl::silo_user
+            .filter(dsl::id.eq(silo_user_id))
+            .filter(dsl::time_deleted.is_null())
+            .select(SiloUser::as_select())
+            .first_async(self.pool())
+            .await
+            .map_err(|e| {
+                Error::internal_error(&format!(
+                    "error fetching silo user: {:?}",
+                    e
+                ))
+            })
+    }
+
+    pub async fn silo_user_create(
+        &self,
+        silo_user: SiloUser,
+    ) -> CreateResult<SiloUser> {
+        use db::schema::silo_user::dsl;
+
+        diesel::insert_into(dsl::silo_user)
+            .values(silo_user)
+            .returning(SiloUser::as_returning())
+            .get_result_async(self.pool())
+            .await
+            .map_err(|e| {
+                Error::internal_error(&format!(
+                    "error creating silo user: {:?}",
+                    e
+                ))
+            })
+    }
+
+    /// Load built-in silos into the database
+    pub async fn load_builtin_silos(
+        &self,
+        opctx: &OpContext,
+    ) -> Result<(), Error> {
+        debug!(opctx.log, "attempting to create built-in silo");
+
+        let builtin_silo = Silo::new_with_id(
+            *SILO_ID,
+            params::SiloCreate {
+                identity: IdentityMetadataCreateParams {
+                    name: "fakesilo".parse().unwrap(),
+                    description: "fake silo".to_string(),
+                },
+                discoverable: false,
+            },
+        );
+
+        let _create_result = self.silo_create(opctx, builtin_silo).await?;
+        info!(opctx.log, "created built-in silo");
+
+        Ok(())
+    }
+
+    pub async fn silo_create(
+        &self,
+        opctx: &OpContext,
+        silo: Silo,
+    ) -> CreateResult<Silo> {
+        use db::schema::silo::dsl;
+
+        // TODO opctx.authorize
+
+        let silo_id = silo.id();
+
+        diesel::insert_into(dsl::silo)
+            .values(silo)
+            .returning(Silo::as_returning())
+            .get_result_async(self.pool_authorized(opctx).await?)
+            .await
+            .map_err(|e| {
+                public_error_from_diesel_pool(
+                    e,
+                    ErrorHandler::Conflict(
+                        ResourceType::Silo,
+                        silo_id.to_string().as_str(),
+                    ),
+                )
+            })
+    }
+
+    pub async fn silos_list_by_id(
+        &self,
+        opctx: &OpContext,
+        pagparams: &DataPageParams<'_, Uuid>,
+    ) -> ListResultVec<Silo> {
+        use db::schema::silo::dsl;
+        // TODO opctx.authorize
+        paginated(dsl::silo, dsl::id, pagparams)
+            .filter(dsl::time_deleted.is_null())
+            .filter(dsl::discoverable.eq(true))
+            .select(Silo::as_select())
+            .load_async::<Silo>(self.pool_authorized(opctx).await?)
+            .await
+            .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
+    }
+
+    pub async fn silos_list_by_name(
+        &self,
+        opctx: &OpContext,
+        pagparams: &DataPageParams<'_, Name>,
+    ) -> ListResultVec<Silo> {
+        use db::schema::silo::dsl;
+        // TODO opctx.authorize
+        paginated(dsl::silo, dsl::name, pagparams)
+            .filter(dsl::time_deleted.is_null())
+            .filter(dsl::discoverable.eq(true))
+            .select(Silo::as_select())
+            .load_async::<Silo>(self.pool_authorized(opctx).await?)
+            .await
+            .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
+    }
+
+    pub async fn silo_fetch(
+        &self,
+        _opctx: &OpContext,
+        name: &Name,
+    ) -> LookupResult<Silo> {
+        // TODO opctx.authorize
+        self.silo_lookup_noauthz(name).await
+    }
+
+    pub async fn silo_lookup_noauthz(
+        &self,
+        // XXX enable when all endpoints are protected by authn
+        // opctx: &OpContext,
+        name: &Name,
+    ) -> LookupResult<Silo> {
+        use db::schema::silo::dsl;
+
+        // TODO opctx.authorize
+
+        dsl::silo
+            .filter(dsl::time_deleted.is_null())
+            .filter(dsl::name.eq(name.clone()))
+            .select(Silo::as_select())
+            .get_result_async::<Silo>(self.pool())
+            .await
+            .map_err(|e| {
+                public_error_from_diesel_pool(
+                    e,
+                    ErrorHandler::NotFoundByLookup(
+                        ResourceType::Silo,
+                        LookupType::ByName(name.as_str().to_owned()),
+                    ),
+                )
+            })
+    }
+
+    pub async fn silo_delete(
+        &self,
+        opctx: &OpContext,
+        name: &Name,
+    ) -> DeleteResult {
+        use db::schema::organization;
+        use db::schema::silo;
+        use db::schema::silo_user;
+
+        // TODO opctx.authorize
+
+        let (id, rcgen) = silo::dsl::silo
+            .filter(silo::dsl::time_deleted.is_null())
+            .filter(silo::dsl::name.eq(name.clone()))
+            .select((silo::dsl::id, silo::dsl::rcgen))
+            .get_result_async::<(Uuid, Generation)>(self.pool())
+            .await
+            .map_err(|e| {
+                public_error_from_diesel_pool(
+                    e,
+                    ErrorHandler::NotFoundByLookup(
+                        ResourceType::Silo,
+                        LookupType::ByName(name.to_string()),
+                    ),
+                )
+            })?;
+
+        // Make sure there are no organizations present within this silo.
+        let org_found = diesel_pool_result_optional(
+            organization::dsl::organization
+                .filter(organization::dsl::silo_id.eq(id))
+                .filter(organization::dsl::time_deleted.is_null())
+                .select(organization::dsl::id)
+                .limit(1)
+                .first_async::<Uuid>(self.pool())
+                .await,
+        )
+        .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))?;
+
+        if org_found.is_some() {
+            return Err(Error::InvalidRequest {
+                message: "silo to be deleted contains an organization"
+                    .to_string(),
+            });
+        }
+
+        let now = Utc::now();
+        let updated_rows = diesel::update(silo::dsl::silo)
+            .filter(silo::dsl::time_deleted.is_null())
+            .filter(silo::dsl::id.eq(id))
+            .filter(silo::dsl::rcgen.eq(rcgen))
+            .set(silo::dsl::time_deleted.eq(now))
+            .execute_async(self.pool())
+            .await
+            .map_err(|e| {
+                public_error_from_diesel_pool(
+                    e,
+                    ErrorHandler::NotFoundByLookup(
+                        ResourceType::Silo,
+                        LookupType::ById(id),
+                    ),
+                )
+            })?;
+
+        if updated_rows == 0 {
+            return Err(Error::InvalidRequest {
+                message: "silo deletion failed due to concurrent modification"
+                    .to_string(),
+            });
+        }
+
+        info!(opctx.log, "deleted silo {}", id);
+
+        // If silo deletion succeeded, delete all silo users
+        let updated_rows = diesel::update(silo_user::dsl::silo_user)
+            .filter(silo_user::dsl::silo_id.eq(id))
+            .set(silo_user::dsl::time_deleted.eq(now))
+            .execute_async(self.pool())
+            .await
+            .map_err(|e| {
+                public_error_from_diesel_pool(
+                    e,
+                    ErrorHandler::NotFoundByLookup(
+                        ResourceType::Silo,
+                        LookupType::ById(id),
+                    ),
+                )
+            })?;
+
+        info!(opctx.log, "deleted {} silo users for silo {}", updated_rows, id,);
+
+        Ok(())
     }
 }
 
@@ -3419,6 +3739,7 @@ pub async fn datastore_test(
     datastore.load_builtin_users(&opctx).await.unwrap();
     datastore.load_builtin_roles(&opctx).await.unwrap();
     datastore.load_builtin_role_asgns(&opctx).await.unwrap();
+    datastore.load_builtin_silos(&opctx).await.unwrap();
 
     // Create an OpContext with the credentials of "test-privileged" for general
     // testing.
@@ -3454,12 +3775,16 @@ mod test {
         let logctx = dev::test_setup_log("test_project_creation");
         let mut db = test_setup_database(&logctx.log).await;
         let (opctx, datastore) = datastore_test(&logctx, &db).await;
-        let organization = Organization::new(params::OrganizationCreate {
-            identity: IdentityMetadataCreateParams {
-                name: "org".parse().unwrap(),
-                description: "desc".to_string(),
+        let organization = Organization::new(
+            params::OrganizationCreate {
+                identity: IdentityMetadataCreateParams {
+                    name: "org".parse().unwrap(),
+                    description: "desc".to_string(),
+                },
             },
-        });
+            *SILO_ID,
+        );
+
         let organization =
             datastore.organization_create(&opctx, organization).await.unwrap();
 
@@ -3477,6 +3802,7 @@ mod test {
             LookupType::ById(organization.id()),
         );
         datastore.project_create(&opctx, &org, project).await.unwrap();
+
         let (_, organization_after_project_create) = datastore
             .organization_fetch(&opctx, organization.name())
             .await
@@ -3492,19 +3818,40 @@ mod test {
         let logctx = dev::test_setup_log("test_session_methods");
         let mut db = test_setup_database(&logctx.log).await;
         let (_, datastore) = datastore_test(&logctx, &db).await;
+
         let token = "a_token".to_string();
+        let silo_user_id = Uuid::new_v4();
+
         let session = ConsoleSession {
             token: token.clone(),
             time_created: Utc::now() - Duration::minutes(5),
             time_last_used: Utc::now() - Duration::minutes(5),
-            user_id: Uuid::new_v4(),
+            silo_user_id,
         };
 
         let _ = datastore.session_create(session.clone()).await;
 
+        // Associate silo with user
+        let silo_user = datastore
+            .silo_user_create(SiloUser::new(
+                Uuid::new_v4(), /* silo id */
+                silo_user_id,
+            ))
+            .await
+            .unwrap();
+
+        assert_eq!(
+            silo_user.silo_id,
+            datastore
+                .silo_user_fetch(session.silo_user_id)
+                .await
+                .unwrap()
+                .silo_id,
+        );
+
         // fetch the one we just created
         let fetched = datastore.session_fetch(token.clone()).await.unwrap();
-        assert_eq!(session.user_id, fetched.user_id);
+        assert_eq!(session.silo_user_id, fetched.console_session.silo_user_id);
 
         // trying to insert the same one again fails
         let duplicate = datastore.session_create(session.clone()).await;
@@ -3516,11 +3863,15 @@ mod test {
         // update last used (i.e., renew token)
         let renewed =
             datastore.session_update_last_used(token.clone()).await.unwrap();
-        assert!(renewed.time_last_used > session.time_last_used);
+        assert!(
+            renewed.console_session.time_last_used > session.time_last_used
+        );
 
         // time_last_used change persists in DB
         let fetched = datastore.session_fetch(token.clone()).await.unwrap();
-        assert!(fetched.time_last_used > session.time_last_used);
+        assert!(
+            fetched.console_session.time_last_used > session.time_last_used
+        );
 
         // delete it and fetch should come back with nothing
         let delete = datastore.session_hard_delete(token.clone()).await;
@@ -3530,7 +3881,7 @@ mod test {
         let fetched = datastore.session_fetch(token.clone()).await;
         assert!(matches!(
             fetched,
-            Err(Error::InternalError { internal_message: _ })
+            Err(Error::ObjectNotFound { type_name: _, lookup_type: _ })
         ));
 
         // deleting an already nonexistent is considered a success
