@@ -10,6 +10,7 @@ use crate::config;
 use crate::context::OpContext;
 use crate::db;
 use crate::db::identity::{Asset, Resource};
+use crate::db::lookup::LookupPath;
 use crate::db::model::DatasetKind;
 use crate::db::model::Name;
 use crate::db::model::RouterRoute;
@@ -602,15 +603,18 @@ impl Nexus {
         organization_name: &Name,
         new_project: &params::ProjectCreate,
     ) -> CreateResult<db::model::Project> {
-        let org = self
-            .db_datastore
-            .organization_lookup_by_path(organization_name)
+        let (authz_org,) = LookupPath::new(opctx, &self.db_datastore)
+            .organization_name(organization_name)
+            .lookup_for(authz::Action::CreateChild)
             .await?;
 
         // Create a project.
-        let db_project = db::model::Project::new(org.id(), new_project.clone());
         let db_project =
-            self.db_datastore.project_create(opctx, &org, db_project).await?;
+            db::model::Project::new(authz_org.id(), new_project.clone());
+        let db_project = self
+            .db_datastore
+            .project_create(opctx, &authz_org, db_project)
+            .await?;
 
         // TODO: We probably want to have "project creation" and "default VPC
         // creation" co-located within a saga for atomicity.
@@ -618,6 +622,9 @@ impl Nexus {
         // Until then, we just perform the operations sequentially.
 
         // Create a default VPC associated with the project.
+        // TODO-correctness We need to be using the project_id we just created.
+        // project_create() should return authz::Project and we should use that
+        // here.
         let _ = self
             .project_create_vpc(
                 opctx,
@@ -646,15 +653,12 @@ impl Nexus {
         organization_name: &Name,
         project_name: &Name,
     ) -> LookupResult<db::model::Project> {
-        let authz_org = self
-            .db_datastore
-            .organization_lookup_by_path(organization_name)
-            .await?;
-        Ok(self
-            .db_datastore
-            .project_fetch(opctx, &authz_org, project_name)
+        Ok(LookupPath::new(opctx, &self.db_datastore)
+            .organization_name(organization_name)
+            .project_name(project_name)
+            .fetch()
             .await?
-            .1)
+            .2)
     }
 
     pub async fn projects_list_by_name(
@@ -663,9 +667,9 @@ impl Nexus {
         organization_name: &Name,
         pagparams: &DataPageParams<'_, Name>,
     ) -> ListResultVec<db::model::Project> {
-        let authz_org = self
-            .db_datastore
-            .organization_lookup_by_path(organization_name)
+        let (authz_org,) = LookupPath::new(opctx, &self.db_datastore)
+            .organization_name(organization_name)
+            .lookup_for(authz::Action::CreateChild)
             .await?;
         self.db_datastore
             .projects_list_by_name(opctx, &authz_org, pagparams)
@@ -678,9 +682,9 @@ impl Nexus {
         organization_name: &Name,
         pagparams: &DataPageParams<'_, Uuid>,
     ) -> ListResultVec<db::model::Project> {
-        let authz_org = self
-            .db_datastore
-            .organization_lookup_by_path(organization_name)
+        let (authz_org,) = LookupPath::new(opctx, &self.db_datastore)
+            .organization_name(organization_name)
+            .lookup_for(authz::Action::CreateChild)
             .await?;
         self.db_datastore
             .projects_list_by_id(opctx, &authz_org, pagparams)
@@ -1424,20 +1428,19 @@ impl Nexus {
         instance_name: &Name,
         disk_name: &Name,
     ) -> UpdateResult<db::model::Disk> {
-        // TODO: This shouldn't be looking up multiple database entries by name,
-        // it should resolve names to IDs first.
-        let authz_project = self
-            .db_datastore
-            .project_lookup_by_path(organization_name, project_name)
-            .await?;
-        let (authz_disk, db_disk) = self
-            .db_datastore
-            .disk_fetch(opctx, &authz_project, disk_name)
-            .await?;
-        let (authz_instance, db_instance) = self
-            .db_datastore
-            .instance_fetch(opctx, &authz_project, instance_name)
-            .await?;
+        let (_, authz_project, authz_disk, db_disk) =
+            LookupPath::new(opctx, &self.db_datastore)
+                .organization_name(organization_name)
+                .project_name(project_name)
+                .disk_name(disk_name)
+                .fetch()
+                .await?;
+        let (_, _, authz_instance, db_instance) =
+            LookupPath::new(opctx, &self.db_datastore)
+                .project_id(authz_project.id())
+                .instance_name(instance_name)
+                .fetch()
+                .await?;
         let instance_id = &authz_instance.id();
 
         // Enforce attached disks limit
@@ -1574,20 +1577,19 @@ impl Nexus {
         instance_name: &Name,
         disk_name: &Name,
     ) -> UpdateResult<db::model::Disk> {
-        // TODO: This shouldn't be looking up multiple database entries by name,
-        // it should resolve names to IDs first.
-        let authz_project = self
-            .db_datastore
-            .project_lookup_by_path(organization_name, project_name)
-            .await?;
-        let (authz_disk, db_disk) = self
-            .db_datastore
-            .disk_fetch(opctx, &authz_project, disk_name)
-            .await?;
-        let (authz_instance, db_instance) = self
-            .db_datastore
-            .instance_fetch(opctx, &authz_project, instance_name)
-            .await?;
+        let (_, authz_project, authz_disk, db_disk) =
+            LookupPath::new(opctx, &self.db_datastore)
+                .organization_name(organization_name)
+                .project_name(project_name)
+                .disk_name(disk_name)
+                .fetch()
+                .await?;
+        let (_, _, authz_instance, db_instance) =
+            LookupPath::new(opctx, &self.db_datastore)
+                .project_id(authz_project.id())
+                .instance_name(instance_name)
+                .fetch()
+                .await?;
         let instance_id = &authz_instance.id();
 
         match &db_disk.state().into() {
