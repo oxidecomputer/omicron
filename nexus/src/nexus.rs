@@ -2535,15 +2535,14 @@ impl Nexus {
         router_name: &Name,
         route_name: &Name,
     ) -> LookupResult<db::model::RouterRoute> {
-        let (.., db_route) =
-            LookupPath::new(opctx, &self.db_datastore)
-                .organization_name(organization_name)
-                .project_name(project_name)
-                .vpc_name(vpc_name)
-                .vpc_router_name(router_name)
-                .router_route_name(route_name)
-                .fetch()
-                .await?;
+        let (.., db_route) = LookupPath::new(opctx, &self.db_datastore)
+            .organization_name(organization_name)
+            .project_name(project_name)
+            .vpc_name(vpc_name)
+            .vpc_router_name(router_name)
+            .router_route_name(route_name)
+            .fetch()
+            .await?;
         Ok(db_route)
     }
 
