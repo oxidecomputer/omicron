@@ -241,9 +241,9 @@ pub struct DiskCreate {
     #[serde(flatten)]
     pub identity: IdentityMetadataCreateParams,
     /// id for snapshot from which the Disk should be created, if any
-    pub snapshot_id: Option<Uuid>, // TODO should be a name?
+    pub snapshot_id: Option<Uuid>,
     /// id for image from which the Disk should be created, if any
-    pub image_id: Option<Uuid>, // TODO should be a name?
+    pub image_id: Option<Uuid>,
     /// total size of the Disk in bytes
     pub size: ByteCount,
     /// size of blocks for this Disk. valid values are currently 512 or 4096

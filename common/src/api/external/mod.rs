@@ -753,7 +753,6 @@ pub struct Instance {
 pub struct Disk {
     #[serde(flatten)]
     pub identity: IdentityMetadata,
-    // TODO these should be names!
     pub project_id: Uuid,
     pub snapshot_id: Option<Uuid>,
     pub image_id: Option<Uuid>,

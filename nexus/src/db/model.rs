@@ -1369,7 +1369,6 @@ impl Into<external::Disk> for Disk {
         let device_path = format!("/mnt/{}", self.name().as_str());
         external::Disk {
             identity: self.identity(),
-            // TODO these should be names!
             project_id: self.project_id,
             snapshot_id: self.create_snapshot_id,
             image_id: self.create_image_id,
