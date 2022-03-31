@@ -25,8 +25,6 @@ pub use communicator::Communicator;
 pub use communicator::FuturesUnorderedImpl;
 pub use management_switch::SpIdentifier;
 pub use management_switch::SpType;
-pub use recv_handler::SerialConsoleChunk;
-pub use recv_handler::SerialConsoleContents;
 
 // TODO these will remain public for a while, but eventually will be removed
 // altogther; currently these provide a way to hard-code the rack topology,

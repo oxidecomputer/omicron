@@ -17,7 +17,7 @@ use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tokio::net::{TcpListener, UdpSocket};
+use tokio::net::{TcpListener, TcpStream, UdpSocket};
 use tokio::select;
 use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
 use tokio::sync::oneshot;
@@ -189,7 +189,7 @@ impl SerialConsoleTcpTask {
         loop {
             // wait for incoming connections, discarding any serial console
             // packets received while we don't have one
-            let (mut conn, addr) = loop {
+            let (conn, addr) = loop {
                 select! {
                     try_conn = self.listener.accept() => {
                         match try_conn {
@@ -211,49 +211,53 @@ impl SerialConsoleTcpTask {
                 self.log,
                 "accepted serial console TCP connection from {}", addr
             );
-            let mut buf = [0; 512];
+            match self.drive_tcp_connection(conn).await {
+                Ok(()) => {
+                    info!(self.log, "closing serial console TCP connection")
+                }
+                Err(err) => {
+                    error!(
+                        self.log,
+                        "serial TCP connection failed";
+                        "err" => %err,
+                    )
+                }
+            }
+        }
+    }
 
-            // copy serial console data in both directions
-            loop {
-                select! {
-                    res = conn.read(&mut buf) => {
-                        let n = match res {
-                            Ok(n) => n,
-                            Err(err) => {
-                                error!(self.log, "closing serial console TCP connection ({})", err);
-                                break;
-                            }
-                        };
-                        if n == 0 {
-                            error!(self.log, "closing serial console TCP connection (read 0 bytes)");
-                            break;
-                        }
-                        match self.send_serial_console(&buf[..n]).await {
-                            Ok(()) => (),
-                            Err(err) => {
-                                error!(self.log, "ignoring UDP send ({} bytes) failure {}", n, err);
-                                continue;
-                            }
-                        }
+    async fn drive_tcp_connection(
+        &mut self,
+        mut conn: TcpStream,
+    ) -> Result<()> {
+        let mut buf = [0; 512];
+
+        // copy serial console data in both directions
+        loop {
+            select! {
+                res = conn.read(&mut buf) => {
+                    let n = res?;
+                    if n == 0 {
+                        return Ok(());
                     }
-                    incoming = self.incoming_serial_console.recv() => {
-                        // we can only get `None` if the tx half was dropped,
-                        // which means we're in the process of shutting down
-                        let incoming = match incoming {
-                            Some(incoming) => incoming,
-                            None => return,
-                        };
-                        // we're the sim; don't bother bounds checking
-                        // `incoming.len` - panicking if we get bogus data is
-                        // fine
-                        match conn.write_all(&incoming.data[..usize::from(incoming.len)]).await {
-                            Ok(()) => (),
-                            Err(err) => {
-                                error!(self.log, "closing serial console TCP connection ({})", err);
-                                break;
-                            }
-                        }
-                    }
+                    self
+                        .send_serial_console(&buf[..n])
+                        .await
+                        .with_context(||"UDP send error")?;
+                }
+                incoming = self.incoming_serial_console.recv() => {
+                    // we can only get `None` if the tx half was dropped,
+                    // which means we're in the process of shutting down
+                    let incoming = match incoming {
+                        Some(incoming) => incoming,
+                        None => return Ok(()),
+                    };
+
+                    let data = &incoming.data[..usize::from(incoming.len)];
+                    conn
+                        .write_all(data)
+                        .await
+                        .with_context(|| "TCP write error")?;
                 }
             }
         }

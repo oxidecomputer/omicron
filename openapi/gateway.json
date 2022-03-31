@@ -454,11 +454,11 @@
         }
       }
     },
-    "/sp/{type}/{slot}/component/{component}/serial_console": {
+    "/sp/{type}/{slot}/component/{component}/serial_console/attach": {
       "get": {
-        "summary": "Get the currently-buffered data for an SP component's serial console.",
-        "description": "This does not require any communication with the target SP; it returns any buffered data we have received from that SP (subject to limitations on how much we keep around; see [`SerialConsoleContents`] for details.",
-        "operationId": "sp_component_serial_console_get",
+        "summary": "Upgrade into a websocket connection attached to the given SP component's",
+        "description": "serial console.",
+        "operationId": "sp_component_serial_console_attach",
         "parameters": [
           {
             "in": "path",
@@ -492,28 +492,22 @@
           }
         ],
         "responses": {
-          "200": {
-            "description": "successful operation",
+          "default": {
+            "description": "",
             "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/SerialConsoleContents"
-                }
+              "*/*": {
+                "schema": {}
               }
             }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
           }
         }
-      },
+      }
+    },
+    "/sp/{type}/{slot}/component/{component}/serial_console/detach": {
       "post": {
-        "summary": "Send data to an SP component's serial console.",
-        "description": "If this request returns successfully, the SP acknowledged that the data arrived. If it fails, we do not know whether or not the data arrived (or will eventually arrive).",
-        "operationId": "sp_component_serial_console_post",
+        "summary": "Detach the websocket connection attached to the given SP component's serial",
+        "description": "console, if such a connection exists.",
+        "operationId": "sp_component_serial_console_detach",
         "parameters": [
           {
             "in": "path",
@@ -546,17 +540,6 @@
             "style": "simple"
           }
         ],
-        "requestBody": {
-          "content": {
-            "application/octet-stream": {
-              "schema": {
-                "type": "string",
-                "format": "binary"
-              }
-            }
-          },
-          "required": true
-        },
         "responses": {
           "204": {
             "description": "resource updated"
@@ -747,77 +730,6 @@
         "required": [
           "message",
           "request_id"
-        ]
-      },
-      "SerialConsoleChunk": {
-        "description": "A chunk of serial console data: either actual data, or an amount of data we missed (presumably due to dropped packets or something similar).",
-        "oneOf": [
-          {
-            "type": "object",
-            "properties": {
-              "bytes": {
-                "type": "array",
-                "items": {
-                  "type": "integer",
-                  "format": "uint8",
-                  "minimum": 0
-                }
-              },
-              "kind": {
-                "type": "string",
-                "enum": [
-                  "data"
-                ]
-              }
-            },
-            "required": [
-              "bytes",
-              "kind"
-            ]
-          },
-          {
-            "type": "object",
-            "properties": {
-              "kind": {
-                "type": "string",
-                "enum": [
-                  "missing"
-                ]
-              },
-              "len": {
-                "type": "integer",
-                "format": "uint64",
-                "minimum": 0
-              }
-            },
-            "required": [
-              "kind",
-              "len"
-            ]
-          }
-        ]
-      },
-      "SerialConsoleContents": {
-        "description": "Current in-memory contents of an SP component's serial console.\n\nIf we have not received any serial console data from this SP component, `start` will be `0` and `chunks` will be empty.",
-        "type": "object",
-        "properties": {
-          "chunks": {
-            "description": "Chunks of serial console data.\n\nWe collapse contiguous regions of data (present or missing) into a single chunk: any two consecutive elements of `chunks` are guaranteed to be different (i.e., one will be [`SerialConsoleChunk::Missing`] and the other will be [`SerialConsoleChunk::Data`]). If `chunks` is not empty, its final element is guaranteed to be a [`SerialConsoleChunk::Data`].",
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/SerialConsoleChunk"
-            }
-          },
-          "start": {
-            "description": "Position since SP component start of the first byte of the first element of `chunks`.\n\nThis is equal to the number of bytes that we've discarded since the SP started.",
-            "type": "integer",
-            "format": "uint64",
-            "minimum": 0
-          }
-        },
-        "required": [
-          "chunks",
-          "start"
         ]
       },
       "SpComponentInfo": {
