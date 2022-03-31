@@ -626,34 +626,6 @@ impl DataStore {
             })
     }
 
-    /// Fetch an [`authz::Organization`] based on its id
-    pub async fn organization_lookup_by_id(
-        &self,
-        // TODO: OpContext, to verify actor has permission to lookup
-        organization_id: Uuid,
-    ) -> LookupResult<authz::Organization> {
-        use db::schema::organization::dsl;
-        // We only do this database lookup to verify that the Organization with
-        // this id exists and hasn't been deleted.
-        let _: Uuid = dsl::organization
-            .filter(dsl::time_deleted.is_null())
-            .filter(dsl::id.eq(organization_id))
-            .select(dsl::id)
-            .first_async(self.pool())
-            .await
-            .map_err(|e| {
-                public_error_from_diesel_pool(
-                    e,
-                    ErrorHandler::NotFoundByLookup(
-                        ResourceType::Organization,
-                        LookupType::ById(organization_id),
-                    ),
-                )
-            })?;
-        Ok(authz::FLEET
-            .organization(organization_id, LookupType::ById(organization_id)))
-    }
-
     /// Look up the id for an organization based on its name
     ///
     /// Returns an [`authz::Organization`] (which makes the id available).
@@ -882,32 +854,6 @@ impl DataStore {
             })
     }
 
-    /// Fetch an [`authz::Project`] based on its id
-    pub async fn project_lookup_by_id(
-        &self,
-        project_id: Uuid,
-    ) -> LookupResult<authz::Project> {
-        use db::schema::project::dsl;
-        let organization_id = dsl::project
-            .filter(dsl::time_deleted.is_null())
-            .filter(dsl::id.eq(project_id))
-            .select(dsl::organization_id)
-            .first_async(self.pool())
-            .await
-            .map_err(|e| {
-                public_error_from_diesel_pool(
-                    e,
-                    ErrorHandler::NotFoundByLookup(
-                        ResourceType::Project,
-                        LookupType::ById(project_id),
-                    ),
-                )
-            })?;
-        let authz_organization =
-            self.organization_lookup_by_id(organization_id).await?;
-        Ok(authz_organization.project(project_id, LookupType::ById(project_id)))
-    }
-
     /// Look up the id for a Project based on its name
     ///
     /// Returns an [`authz::Project`] (which makes the id available).
@@ -1072,35 +1018,6 @@ impl DataStore {
                     d,
                 )
             })
-    }
-
-    /// Fetch an [`authz::Instance`] based on its id
-    pub async fn instance_lookup_by_id(
-        &self,
-        instance_id: Uuid,
-    ) -> LookupResult<authz::Instance> {
-        use db::schema::instance::dsl;
-        let project_id = dsl::instance
-            .filter(dsl::time_deleted.is_null())
-            .filter(dsl::id.eq(instance_id))
-            .select(dsl::project_id)
-            .first_async(self.pool())
-            .await
-            .map_err(|e| {
-                public_error_from_diesel_pool(
-                    e,
-                    ErrorHandler::NotFoundByLookup(
-                        ResourceType::Instance,
-                        LookupType::ById(instance_id),
-                    ),
-                )
-            })?;
-        let authz_project = self.project_lookup_by_id(project_id).await?;
-        Ok(authz_project.child_generic(
-            ResourceType::Instance,
-            instance_id,
-            LookupType::ById(instance_id),
-        ))
     }
 
     /// Look up the id for an Instance based on its name
@@ -1381,35 +1298,6 @@ impl DataStore {
             })
     }
 
-    /// Fetch an [`authz::Disk`] based on its id
-    pub async fn disk_lookup_by_id(
-        &self,
-        disk_id: Uuid,
-    ) -> LookupResult<authz::Disk> {
-        use db::schema::disk::dsl;
-        let project_id = dsl::disk
-            .filter(dsl::time_deleted.is_null())
-            .filter(dsl::id.eq(disk_id))
-            .select(dsl::project_id)
-            .first_async(self.pool())
-            .await
-            .map_err(|e| {
-                public_error_from_diesel_pool(
-                    e,
-                    ErrorHandler::NotFoundByLookup(
-                        ResourceType::Disk,
-                        LookupType::ById(disk_id),
-                    ),
-                )
-            })?;
-        let authz_project = self.project_lookup_by_id(project_id).await?;
-        Ok(authz_project.child_generic(
-            ResourceType::Disk,
-            disk_id,
-            LookupType::ById(disk_id),
-        ))
-    }
-
     /// Look up the id for a Disk based on its name
     ///
     /// Returns an [`authz::Disk`] (which makes the id available).
@@ -1420,7 +1308,7 @@ impl DataStore {
     // Projects), we don't do an authz check in the "lookup_by_path" functions
     // because we don't know if the caller has access to do the lookup.  For
     // leaf resources (like Instances and Disks), though, we do.  We could do
-    // the authz check here, and in disk_lookup_by_id() too.  Should we?
+    // the authz check here.  Should we?
     pub async fn disk_lookup_by_path(
         &self,
         organization_name: &Name,

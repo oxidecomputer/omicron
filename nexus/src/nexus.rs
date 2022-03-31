@@ -999,9 +999,11 @@ impl Nexus {
         //
         // TODO Even worse, post-authz, we do two lookups here instead of one.
         // Maybe sagas should be able to emit `authz::Instance`-type objects.
-        let authz_instance =
-            self.db_datastore.instance_lookup_by_id(instance_id).await?;
-        self.db_datastore.instance_refetch(opctx, &authz_instance).await
+        let (.., db_instance) = LookupPath::new(opctx, &self.db_datastore)
+            .instance_id(instance_id)
+            .fetch()
+            .await?;
+        Ok(db_instance)
     }
 
     // TODO-correctness It's not totally clear what the semantics and behavior
@@ -1276,10 +1278,12 @@ impl Nexus {
         migration_id: Uuid,
         dst_propolis_id: Uuid,
     ) -> UpdateResult<db::model::Instance> {
-        let authz_instance =
-            self.db_datastore.instance_lookup_by_id(instance_id).await?;
-        let db_instance =
-            self.db_datastore.instance_refetch(opctx, &authz_instance).await?;
+        let (.., authz_instance, db_instance) =
+            LookupPath::new(opctx, &self.db_datastore)
+                .instance_id(instance_id)
+                .fetch()
+                .await
+                .unwrap();
         let requested = InstanceRuntimeStateRequested {
             run_state: InstanceStateRequested::Migrating,
             migration_params: Some(InstanceRuntimeStateMigrateParams {
@@ -2846,7 +2850,10 @@ impl Nexus {
         new_state: &DiskRuntimeState,
     ) -> Result<(), Error> {
         let log = &self.log;
-        let authz_disk = self.db_datastore.disk_lookup_by_id(id).await?;
+        let (.., authz_disk) = LookupPath::new(&opctx, &self.db_datastore)
+            .disk_id(id)
+            .lookup_for(authz::Action::Modify)
+            .await?;
 
         let result = self
             .db_datastore
@@ -3293,10 +3300,10 @@ impl TestInterfaces for Nexus {
             self.log.new(o!()),
             Arc::clone(&self.db_datastore),
         );
-        let authz_instance =
-            self.db_datastore.instance_lookup_by_id(*id).await?;
-        let db_instance =
-            self.db_datastore.instance_refetch(&opctx, &authz_instance).await?;
+        let (.., db_instance) = LookupPath::new(&opctx, &self.db_datastore)
+            .instance_id(*id)
+            .fetch()
+            .await?;
         self.instance_sled(&db_instance).await
     }
 
@@ -3308,14 +3315,14 @@ impl TestInterfaces for Nexus {
             self.log.new(o!()),
             Arc::clone(&self.db_datastore),
         );
-        let authz_disk = self.db_datastore.disk_lookup_by_id(*id).await?;
-        let db_disk =
-            self.db_datastore.disk_refetch(&opctx, &authz_disk).await?;
-        let instance_id = db_disk.runtime().attach_instance_id.unwrap();
-        let authz_instance =
-            self.db_datastore.instance_lookup_by_id(instance_id).await?;
-        let db_instance =
-            self.db_datastore.instance_refetch(&opctx, &authz_instance).await?;
+        let (.., db_disk) = LookupPath::new(&opctx, &self.db_datastore)
+            .disk_id(*id)
+            .fetch()
+            .await?;
+        let (.., db_instance) = LookupPath::new(&opctx, &self.db_datastore)
+            .instance_id(db_disk.runtime().attach_instance_id.unwrap())
+            .fetch()
+            .await?;
         self.instance_sled(&db_instance).await
     }
 
@@ -3332,9 +3339,11 @@ impl TestInterfaces for Nexus {
             Arc::clone(&self.db_datastore),
         );
 
-        let authz_disk = self.db_datastore.disk_lookup_by_id(*disk_id).await?;
-        let db_disk =
-            self.db_datastore.disk_refetch(&opctx, &authz_disk).await?;
+        let (.., authz_disk, db_disk) =
+            LookupPath::new(&opctx, &self.db_datastore)
+                .disk_id(*disk_id)
+                .fetch()
+                .await?;
 
         let new_runtime = db_disk.runtime_state.faulted();
 

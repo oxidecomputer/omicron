@@ -14,7 +14,7 @@ use crate::db::identity::{Asset, Resource};
 use crate::db::lookup::LookupPath;
 use crate::external_api::params;
 use crate::saga_interface::SagaContext;
-use crate::{authn, db};
+use crate::{authn, authz, db};
 use anyhow::anyhow;
 use chrono::Utc;
 use crucible_agent_client::{
@@ -335,8 +335,9 @@ async fn sic_create_custom_network_interfaces(
     let ids = sagactx.lookup::<Vec<Uuid>>("network_interface_ids")?;
 
     // Lookup authz objects, used in the call to create the NIC itself.
-    let authz_instance = datastore
-        .instance_lookup_by_id(instance_id)
+    let (.., authz_instance) = LookupPath::new(&opctx, &datastore)
+        .instance_id(instance_id)
+        .lookup_for(authz::Action::CreateChild)
         .await
         .map_err(ActionError::action_failed)?;
     let (.., authz_vpc, db_vpc) = LookupPath::new(&opctx, &datastore)
@@ -473,17 +474,14 @@ async fn sic_create_default_network_interface(
     };
 
     // Lookup authz objects, used in the call to actually create the NIC.
-    let authz_instance = datastore
-        .instance_lookup_by_id(instance_id)
-        .await
-        .map_err(ActionError::action_failed)?;
-    let authz_project = datastore
-        .project_lookup_by_id(saga_params.project_id)
+    let (.., authz_instance) = LookupPath::new(&opctx, &datastore)
+        .instance_id(instance_id)
+        .lookup_for(authz::Action::CreateChild)
         .await
         .map_err(ActionError::action_failed)?;
     let (.., authz_vpc, authz_subnet, db_subnet) =
         LookupPath::new(&opctx, &datastore)
-            .project_id(authz_project.id())
+            .project_id(saga_params.project_id)
             .vpc_name(&internal_default_name)
             .vpc_subnet_name(&internal_default_name)
             .fetch()
@@ -692,21 +690,17 @@ async fn sic_delete_instance_record(
 ) -> Result<(), anyhow::Error> {
     let osagactx = sagactx.user_data();
     let params = sagactx.saga_params();
+    let datastore = osagactx.datastore();
     let opctx = OpContext::for_saga_action(&sagactx, &params.serialized_authn);
     let instance_id = sagactx.lookup::<Uuid>("instance_id")?;
     let instance_name = sagactx.lookup::<db::model::Name>("instance_name")?;
 
     // We currently only support deleting an instance if it is stopped or
     // failed, so update the state accordingly to allow deletion.
-    let authz_project = osagactx
-        .datastore()
-        .project_lookup_by_id(params.project_id)
-        .await
-        .map_err(ActionError::action_failed)?;
-
-    let (authz_instance, db_instance) = osagactx
-        .datastore()
-        .instance_fetch(&opctx, &authz_project, &instance_name)
+    let (.., authz_instance, db_instance) = LookupPath::new(&opctx, &datastore)
+        .project_id(params.project_id)
+        .instance_name(&instance_name)
+        .fetch()
         .await
         .map_err(ActionError::action_failed)?;
 
@@ -722,8 +716,7 @@ async fn sic_delete_instance_record(
         ..db_instance.runtime_state
     };
 
-    let updated = osagactx
-        .datastore()
+    let updated = datastore
         .instance_update_runtime(&instance_id, &runtime_state)
         .await
         .map_err(ActionError::action_failed)?;
@@ -736,8 +729,7 @@ async fn sic_delete_instance_record(
     }
 
     // Actually delete the record.
-    osagactx
-        .datastore()
+    datastore
         .project_delete_instance(&opctx, &authz_instance)
         .await
         .map_err(ActionError::action_failed)?;
@@ -751,6 +743,7 @@ async fn sic_instance_ensure(
     // TODO-correctness is this idempotent?
     let osagactx = sagactx.user_data();
     let params = sagactx.saga_params();
+    let datastore = osagactx.datastore();
     let runtime_params = InstanceRuntimeStateRequested {
         run_state: InstanceStateRequested::Running,
         migration_params: None,
@@ -759,15 +752,10 @@ async fn sic_instance_ensure(
     let instance_name = sagactx.lookup::<db::model::Name>("instance_name")?;
     let opctx = OpContext::for_saga_action(&sagactx, &params.serialized_authn);
 
-    let authz_project = osagactx
-        .datastore()
-        .project_lookup_by_id(params.project_id)
-        .await
-        .map_err(ActionError::action_failed)?;
-
-    let (authz_instance, instance) = osagactx
-        .datastore()
-        .instance_fetch(&opctx, &authz_project, &instance_name)
+    let (.., authz_instance, db_instance) = LookupPath::new(&opctx, &datastore)
+        .project_id(params.project_id)
+        .instance_name(&instance_name)
+        .fetch()
         .await
         .map_err(ActionError::action_failed)?;
 
@@ -776,7 +764,7 @@ async fn sic_instance_ensure(
         .instance_set_runtime(
             &opctx,
             &authz_instance,
-            &instance,
+            &db_instance,
             runtime_params,
         )
         .await
@@ -1345,8 +1333,9 @@ async fn sdc_finalize_disk_record(
 
     let disk_id = sagactx.lookup::<Uuid>("disk_id")?;
     let disk_created = sagactx.lookup::<db::model::Disk>("created_disk")?;
-    let authz_disk = datastore
-        .disk_lookup_by_id(disk_id)
+    let (.., authz_disk) = LookupPath::new(&opctx, &datastore)
+        .disk_id(disk_id)
+        .lookup_for(authz::Action::Modify)
         .await
         .map_err(ActionError::action_failed)?;
     // TODO-security Review whether this can ever fail an authz check.  We don't
