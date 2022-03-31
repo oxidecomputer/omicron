@@ -11,6 +11,7 @@
 
 use crate::context::OpContext;
 use crate::db::identity::{Asset, Resource};
+use crate::db::lookup::LookupPath;
 use crate::external_api::params;
 use crate::saga_interface::SagaContext;
 use crate::{authn, db};
@@ -338,16 +339,10 @@ async fn sic_create_custom_network_interfaces(
         .instance_lookup_by_id(instance_id)
         .await
         .map_err(ActionError::action_failed)?;
-    let authz_project = datastore
-        .project_lookup_by_id(saga_params.project_id)
-        .await
-        .map_err(ActionError::action_failed)?;
-    let (authz_vpc, db_vpc) = datastore
-        .vpc_fetch(
-            &opctx,
-            &authz_project,
-            &db::model::Name::from(interface_params[0].vpc_name.clone()),
-        )
+    let (.., authz_vpc, db_vpc) = LookupPath::new(&opctx, &datastore)
+        .project_id(saga_params.project_id)
+        .vpc_name(&db::model::Name::from(interface_params[0].vpc_name.clone()))
+        .fetch()
         .await
         .map_err(ActionError::action_failed)?;
 
@@ -374,12 +369,10 @@ async fn sic_create_custom_network_interfaces(
         // should probably either be in a transaction, or the
         // `subnet_create_network_interface` function/query needs some JOIN
         // on the `vpc_subnet` table.
-        let (authz_subnet, db_subnet) = datastore
-            .vpc_subnet_fetch(
-                &opctx,
-                &authz_vpc,
-                &db::model::Name::from(params.subnet_name.clone()),
-            )
+        let (.., authz_subnet, db_subnet) = LookupPath::new(&opctx, &datastore)
+            .vpc_id(authz_vpc.id())
+            .vpc_subnet_name(&db::model::Name::from(params.subnet_name.clone()))
+            .fetch()
             .await
             .map_err(ActionError::action_failed)?;
         let mac =
@@ -488,14 +481,14 @@ async fn sic_create_default_network_interface(
         .project_lookup_by_id(saga_params.project_id)
         .await
         .map_err(ActionError::action_failed)?;
-    let (authz_vpc, _) = datastore
-        .vpc_fetch(&opctx, &authz_project, &internal_default_name.clone())
-        .await
-        .map_err(ActionError::action_failed)?;
-    let (authz_subnet, db_subnet) = datastore
-        .vpc_subnet_fetch(&opctx, &authz_vpc, &internal_default_name)
-        .await
-        .map_err(ActionError::action_failed)?;
+    let (.., authz_vpc, authz_subnet, db_subnet) =
+        LookupPath::new(&opctx, &datastore)
+            .project_id(authz_project.id())
+            .vpc_name(&internal_default_name)
+            .vpc_subnet_name(&internal_default_name)
+            .fetch()
+            .await
+            .map_err(ActionError::action_failed)?;
 
     let mac = db::model::MacAddr::new().map_err(ActionError::action_failed)?;
     let interface_id = Uuid::new_v4();

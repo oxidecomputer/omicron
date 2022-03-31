@@ -1728,14 +1728,13 @@ impl Nexus {
         instance_name: &Name,
         params: &params::NetworkInterfaceCreate,
     ) -> CreateResult<db::model::NetworkInterface> {
-        let authz_project = self
-            .db_datastore
-            .project_lookup_by_path(organization_name, project_name)
-            .await?;
-        let (authz_instance, db_instance) = self
-            .db_datastore
-            .instance_fetch(opctx, &authz_project, instance_name)
-            .await?;
+        let (_, authz_project, authz_instance, db_instance) =
+            LookupPath::new(opctx, &self.db_datastore)
+                .organization_name(organization_name)
+                .project_name(project_name)
+                .instance_name(instance_name)
+                .fetch()
+                .await?;
 
         // TODO-completeness: We'd like to relax this once hot-plug is
         // supported.
@@ -1757,14 +1756,13 @@ impl Nexus {
         // IDs for creating the network interface.
         let vpc_name = db::model::Name(params.vpc_name.clone());
         let subnet_name = db::model::Name(params.subnet_name.clone());
-        let (authz_vpc, _) = self
-            .db_datastore
-            .vpc_fetch(opctx, &authz_project, &vpc_name)
-            .await?;
-        let (authz_subnet, db_subnet) = self
-            .db_datastore
-            .vpc_subnet_fetch(opctx, &authz_vpc, &subnet_name)
-            .await?;
+        let (.., authz_vpc, authz_subnet, db_subnet) =
+            LookupPath::new(opctx, &self.db_datastore)
+                .project_id(authz_project.id())
+                .vpc_name(&vpc_name)
+                .vpc_subnet_name(&subnet_name)
+                .fetch()
+                .await?;
         let mac = db::model::MacAddr::new()?;
         let interface_id = Uuid::new_v4();
         let interface = db::model::IncompleteNetworkInterface::new(
@@ -2019,15 +2017,13 @@ impl Nexus {
         project_name: &Name,
         vpc_name: &Name,
     ) -> LookupResult<db::model::Vpc> {
-        let authz_project = self
-            .db_datastore
-            .project_lookup_by_path(organization_name, project_name)
+        let (.., db_vpc) = LookupPath::new(opctx, &self.db_datastore)
+            .organization_name(organization_name)
+            .project_name(project_name)
+            .vpc_name(vpc_name)
+            .fetch()
             .await?;
-        Ok(self
-            .db_datastore
-            .vpc_fetch(opctx, &authz_project, vpc_name)
-            .await?
-            .1)
+        Ok(db_vpc)
     }
 
     pub async fn project_update_vpc(
@@ -2038,9 +2034,11 @@ impl Nexus {
         vpc_name: &Name,
         params: &params::VpcUpdate,
     ) -> UpdateResult<db::model::Vpc> {
-        let authz_vpc = self
-            .db_datastore
-            .vpc_lookup_by_path(organization_name, project_name, vpc_name)
+        let (.., authz_vpc) = LookupPath::new(opctx, &self.db_datastore)
+            .organization_name(organization_name)
+            .project_name(project_name)
+            .vpc_name(vpc_name)
+            .lookup_for(authz::Action::Modify)
             .await?;
         self.db_datastore
             .project_update_vpc(opctx, &authz_vpc, params.clone().into())
@@ -2054,14 +2052,14 @@ impl Nexus {
         project_name: &Name,
         vpc_name: &Name,
     ) -> DeleteResult {
-        let authz_project = self
-            .db_datastore
-            .project_lookup_by_path(organization_name, project_name)
-            .await?;
-        let (authz_vpc, db_vpc) = self
-            .db_datastore
-            .vpc_fetch(opctx, &authz_project, vpc_name)
-            .await?;
+        let (.., authz_vpc, db_vpc) =
+            LookupPath::new(opctx, &self.db_datastore)
+                .organization_name(organization_name)
+                .project_name(project_name)
+                .vpc_name(vpc_name)
+                .fetch()
+                .await?;
+
         let authz_vpc_router = authz_vpc.child_generic(
             ResourceType::VpcRouter,
             db_vpc.system_router_id,
@@ -2087,9 +2085,11 @@ impl Nexus {
         project_name: &Name,
         vpc_name: &Name,
     ) -> ListResultVec<db::model::VpcFirewallRule> {
-        let authz_vpc = self
-            .db_datastore
-            .vpc_lookup_by_path(organization_name, project_name, vpc_name)
+        let (.., authz_vpc) = LookupPath::new(opctx, &self.db_datastore)
+            .organization_name(organization_name)
+            .project_name(project_name)
+            .vpc_name(vpc_name)
+            .lookup_for(authz::Action::Read)
             .await?;
         let rules = self
             .db_datastore
@@ -2106,9 +2106,11 @@ impl Nexus {
         vpc_name: &Name,
         params: &VpcFirewallRuleUpdateParams,
     ) -> UpdateResult<Vec<db::model::VpcFirewallRule>> {
-        let authz_vpc = self
-            .db_datastore
-            .vpc_lookup_by_path(organization_name, project_name, vpc_name)
+        let (.., authz_vpc) = LookupPath::new(opctx, &self.db_datastore)
+            .organization_name(organization_name)
+            .project_name(project_name)
+            .vpc_name(vpc_name)
+            .lookup_for(authz::Action::Modify)
             .await?;
         let rules = db::model::VpcFirewallRule::vec_from_params(
             authz_vpc.id(),
@@ -2127,9 +2129,11 @@ impl Nexus {
         vpc_name: &Name,
         pagparams: &DataPageParams<'_, Name>,
     ) -> ListResultVec<db::model::VpcSubnet> {
-        let authz_vpc = self
-            .db_datastore
-            .vpc_lookup_by_path(organization_name, project_name, vpc_name)
+        let (.., authz_vpc) = LookupPath::new(opctx, &self.db_datastore)
+            .organization_name(organization_name)
+            .project_name(project_name)
+            .vpc_name(vpc_name)
+            .lookup_for(authz::Action::ListChildren)
             .await?;
         self.db_datastore.vpc_list_subnets(opctx, &authz_vpc, pagparams).await
     }
@@ -2142,15 +2146,14 @@ impl Nexus {
         vpc_name: &Name,
         subnet_name: &Name,
     ) -> LookupResult<db::model::VpcSubnet> {
-        let authz_vpc = self
-            .db_datastore
-            .vpc_lookup_by_path(organization_name, project_name, vpc_name)
+        let (.., db_vpc) = LookupPath::new(opctx, &self.db_datastore)
+            .organization_name(organization_name)
+            .project_name(project_name)
+            .vpc_name(vpc_name)
+            .vpc_subnet_name(subnet_name)
+            .fetch()
             .await?;
-        Ok(self
-            .db_datastore
-            .vpc_subnet_fetch(opctx, &authz_vpc, subnet_name)
-            .await?
-            .1)
+        Ok(db_vpc)
     }
 
     // TODO: When a subnet is created it should add a route entry into the VPC's
@@ -2163,14 +2166,13 @@ impl Nexus {
         vpc_name: &Name,
         params: &params::VpcSubnetCreate,
     ) -> CreateResult<db::model::VpcSubnet> {
-        let authz_project = self
-            .db_datastore
-            .project_lookup_by_path(organization_name, project_name)
-            .await?;
-        let (authz_vpc, db_vpc) = self
-            .db_datastore
-            .vpc_fetch(opctx, &authz_project, vpc_name)
-            .await?;
+        let (.., authz_vpc, db_vpc) =
+            LookupPath::new(opctx, &self.db_datastore)
+                .organization_name(organization_name)
+                .project_name(project_name)
+                .vpc_name(vpc_name)
+                .fetch()
+                .await?;
 
         // Validate IPv4 range
         if !params.ipv4_block.network().is_private() {
@@ -2322,14 +2324,12 @@ impl Nexus {
         vpc_name: &Name,
         subnet_name: &Name,
     ) -> DeleteResult {
-        let authz_subnet = self
-            .db_datastore
-            .vpc_subnet_lookup_by_path(
-                organization_name,
-                project_name,
-                vpc_name,
-                subnet_name,
-            )
+        let (.., authz_subnet) = LookupPath::new(opctx, &self.db_datastore)
+            .organization_name(organization_name)
+            .project_name(project_name)
+            .vpc_name(vpc_name)
+            .vpc_subnet_name(subnet_name)
+            .lookup_for(authz::Action::Delete)
             .await?;
         self.db_datastore.vpc_delete_subnet(opctx, &authz_subnet).await
     }
@@ -2343,14 +2343,12 @@ impl Nexus {
         subnet_name: &Name,
         params: &params::VpcSubnetUpdate,
     ) -> UpdateResult<VpcSubnet> {
-        let authz_subnet = self
-            .db_datastore
-            .vpc_subnet_lookup_by_path(
-                organization_name,
-                project_name,
-                vpc_name,
-                subnet_name,
-            )
+        let (.., authz_subnet) = LookupPath::new(opctx, &self.db_datastore)
+            .organization_name(organization_name)
+            .project_name(project_name)
+            .vpc_name(vpc_name)
+            .vpc_subnet_name(subnet_name)
+            .lookup_for(authz::Action::Modify)
             .await?;
         self.db_datastore
             .vpc_update_subnet(&opctx, &authz_subnet, params.clone().into())
@@ -2366,14 +2364,12 @@ impl Nexus {
         subnet_name: &Name,
         pagparams: &DataPageParams<'_, Name>,
     ) -> ListResultVec<db::model::NetworkInterface> {
-        let authz_subnet = self
-            .db_datastore
-            .vpc_subnet_lookup_by_path(
-                organization_name,
-                project_name,
-                vpc_name,
-                subnet_name,
-            )
+        let (.., authz_subnet) = LookupPath::new(opctx, &self.db_datastore)
+            .organization_name(organization_name)
+            .project_name(project_name)
+            .vpc_name(vpc_name)
+            .vpc_subnet_name(subnet_name)
+            .lookup_for(authz::Action::ListChildren)
             .await?;
         self.db_datastore
             .subnet_list_network_interfaces(opctx, &authz_subnet, pagparams)
@@ -2388,9 +2384,11 @@ impl Nexus {
         vpc_name: &Name,
         pagparams: &DataPageParams<'_, Name>,
     ) -> ListResultVec<db::model::VpcRouter> {
-        let authz_vpc = self
-            .db_datastore
-            .vpc_lookup_by_path(organization_name, project_name, vpc_name)
+        let (.., authz_vpc) = LookupPath::new(opctx, &self.db_datastore)
+            .organization_name(organization_name)
+            .project_name(project_name)
+            .vpc_name(vpc_name)
+            .lookup_for(authz::Action::ListChildren)
             .await?;
         let routers = self
             .db_datastore
@@ -2426,9 +2424,11 @@ impl Nexus {
         kind: &VpcRouterKind,
         params: &params::VpcRouterCreate,
     ) -> CreateResult<db::model::VpcRouter> {
-        let authz_vpc = self
-            .db_datastore
-            .vpc_lookup_by_path(organization_name, project_name, vpc_name)
+        let (.., authz_vpc) = LookupPath::new(opctx, &self.db_datastore)
+            .organization_name(organization_name)
+            .project_name(project_name)
+            .vpc_name(vpc_name)
+            .lookup_for(authz::Action::CreateChild)
             .await?;
         let id = Uuid::new_v4();
         let router = db::model::VpcRouter::new(

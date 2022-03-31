@@ -210,6 +210,11 @@ impl<'a> LookupPath<'a> {
         Vpc { key: Key::Id(Root { lookup_root: self }, id) }
     }
 
+    /// Select a resource of type VpcSubnet, identified by its id
+    pub fn vpc_subnet_id(self, id: Uuid) -> VpcSubnet<'a> {
+        VpcSubnet { key: Key::Id(Root { lookup_root: self }, id) }
+    }
+
     /// Select a resource of type VpcRouter, identified by its id
     pub fn vpc_router_id(self, id: Uuid) -> VpcRouter<'a> {
         VpcRouter { key: Key::Id(Root { lookup_root: self }, id) }
@@ -280,7 +285,14 @@ lookup_resource! {
 lookup_resource! {
     name = "Vpc",
     ancestors = [ "Organization", "Project" ],
-    children = [ "VpcRouter" ],
+    children = [ "VpcRouter", "VpcSubnet" ],
+    authz_kind = Generic
+}
+
+lookup_resource! {
+    name = "VpcSubnet",
+    ancestors = [ "Organization", "Project", "Vpc" ],
+    children = [ ],
     authz_kind = Generic
 }
 
