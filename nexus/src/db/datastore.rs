@@ -2854,7 +2854,7 @@ impl DataStore {
         use db::schema::router_route::dsl;
         paginated(dsl::router_route, dsl::name, pagparams)
             .filter(dsl::time_deleted.is_null())
-            .filter(dsl::router_id.eq(authz_router.id()))
+            .filter(dsl::vpc_router_id.eq(authz_router.id()))
             .select(RouterRoute::as_select())
             .load_async::<db::model::RouterRoute>(
                 self.pool_authorized(opctx).await?,
@@ -2877,7 +2877,7 @@ impl DataStore {
         use db::schema::router_route::dsl;
         dsl::router_route
             .filter(dsl::time_deleted.is_null())
-            .filter(dsl::router_id.eq(authz_vpc_router.id()))
+            .filter(dsl::vpc_router_id.eq(authz_vpc_router.id()))
             .filter(dsl::name.eq(route_name.clone()))
             .select(RouterRoute::as_select())
             .get_result_async(self.pool())
@@ -2950,11 +2950,11 @@ impl DataStore {
         authz_router: &authz::VpcRouter,
         route: RouterRoute,
     ) -> CreateResult<RouterRoute> {
-        assert_eq!(authz_router.id(), route.router_id);
+        assert_eq!(authz_router.id(), route.vpc_router_id);
         opctx.authorize(authz::Action::CreateChild, authz_router).await?;
 
         use db::schema::router_route::dsl;
-        let router_id = route.router_id;
+        let router_id = route.vpc_router_id;
         let name = route.name().clone();
 
         VpcRouter::insert_resource(
