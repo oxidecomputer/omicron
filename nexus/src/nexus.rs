@@ -791,15 +791,13 @@ impl Nexus {
         project_name: &Name,
         disk_name: &Name,
     ) -> LookupResult<db::model::Disk> {
-        let authz_project = self
-            .db_datastore
-            .project_lookup_by_path(organization_name, project_name)
+        let (.., db_disk) = LookupPath::new(opctx, &self.db_datastore)
+            .organization_name(organization_name)
+            .project_name(project_name)
+            .disk_name(disk_name)
+            .fetch()
             .await?;
-        Ok(self
-            .db_datastore
-            .disk_fetch(opctx, &authz_project, disk_name)
-            .await?
-            .1)
+        Ok(db_disk)
     }
 
     pub async fn project_delete_disk(
@@ -809,18 +807,12 @@ impl Nexus {
         project_name: &Name,
         disk_name: &Name,
     ) -> DeleteResult {
-        let authz_disk = self
-            .db_datastore
-            .disk_lookup_by_path(organization_name, project_name, disk_name)
+        let (.., authz_disk) = LookupPath::new(opctx, &self.db_datastore)
+            .organization_name(organization_name)
+            .project_name(project_name)
+            .disk_name(disk_name)
+            .lookup_for(authz::Action::Delete)
             .await?;
-
-        // TODO: We need to sort out the authorization checks.
-        //
-        // Normally, this would be coupled alongside access to the
-        // datastore, but now that disk deletion exists within a Saga,
-        // this would require OpContext to be serialized (which is
-        // not trivial).
-        opctx.authorize(authz::Action::Delete, &authz_disk).await?;
 
         let saga_params =
             Arc::new(sagas::ParamsDiskDelete { disk_id: authz_disk.id() });

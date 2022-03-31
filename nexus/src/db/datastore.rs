@@ -1183,85 +1183,6 @@ impl DataStore {
 
     // Disks
 
-    /// Fetches a Disk from the database and returns both the database row
-    /// and an [`authz::Disk`] for doing authz checks
-    ///
-    /// See [`DataStore::organization_lookup_noauthz()`] for intended use cases
-    /// and caveats.
-    // TODO-security See the note on organization_lookup_noauthz().
-    async fn disk_lookup_noauthz(
-        &self,
-        authz_project: &authz::Project,
-        disk_name: &Name,
-    ) -> LookupResult<(authz::Disk, Disk)> {
-        use db::schema::disk::dsl;
-        dsl::disk
-            .filter(dsl::time_deleted.is_null())
-            .filter(dsl::project_id.eq(authz_project.id()))
-            .filter(dsl::name.eq(disk_name.clone()))
-            .select(Disk::as_select())
-            .first_async(self.pool())
-            .await
-            .map_err(|e| {
-                public_error_from_diesel_pool(
-                    e,
-                    ErrorHandler::NotFoundByLookup(
-                        ResourceType::Disk,
-                        LookupType::ByName(disk_name.as_str().to_owned()),
-                    ),
-                )
-            })
-            .map(|d| {
-                (
-                    authz_project.child_generic(
-                        ResourceType::Disk,
-                        d.id(),
-                        LookupType::from(&disk_name.0),
-                    ),
-                    d,
-                )
-            })
-    }
-
-    /// Look up the id for a Disk based on its name
-    ///
-    /// Returns an [`authz::Disk`] (which makes the id available).
-    ///
-    /// Like the other "lookup_by_path()" functions, this function does no authz
-    /// checks.
-    // TODO-security For Containers in the hierarchy (like Organizations and
-    // Projects), we don't do an authz check in the "lookup_by_path" functions
-    // because we don't know if the caller has access to do the lookup.  For
-    // leaf resources (like Instances and Disks), though, we do.  We could do
-    // the authz check here.  Should we?
-    pub async fn disk_lookup_by_path(
-        &self,
-        organization_name: &Name,
-        project_name: &Name,
-        disk_name: &Name,
-    ) -> LookupResult<authz::Disk> {
-        let authz_project = self
-            .project_lookup_by_path(organization_name, project_name)
-            .await?;
-        self.disk_lookup_noauthz(&authz_project, disk_name)
-            .await
-            .map(|(d, _)| d)
-    }
-
-    /// Lookup a Disk by name and return the full database record, along with
-    /// an [`authz::Disk`] for subsequent authorization checks
-    pub async fn disk_fetch(
-        &self,
-        opctx: &OpContext,
-        authz_project: &authz::Project,
-        name: &Name,
-    ) -> LookupResult<(authz::Disk, Disk)> {
-        let (authz_disk, db_disk) =
-            self.disk_lookup_noauthz(authz_project, name).await?;
-        opctx.authorize(authz::Action::Read, &authz_disk).await?;
-        Ok((authz_disk, db_disk))
-    }
-
     /// List disks associated with a given instance.
     pub async fn instance_list_disks(
         &self,
@@ -1376,14 +1297,14 @@ impl DataStore {
 
     /// Fetches information about a Disk that the caller has previously fetched
     ///
-    /// The principal difference from `disk_fetch` is that this function takes
-    /// an `authz_disk` and does a lookup by id rather than the full path of
-    /// names (organization name, project name, and disk name).  This could be
-    /// called `disk_lookup_by_id`, except that you might expect to get back an
-    /// `authz::Disk` as well.  We cannot return you a new `authz::Disk` because
-    /// we don't know how you looked up the Disk in the first place.  However,
-    /// you must have previously looked it up, which is why we call this
-    /// `refetch`.
+    /// The principal difference from fetching a disk is that this function
+    /// takes an `authz_disk` and does a lookup by id rather than the full path
+    /// of names (organization name, project name, and disk name).  This could
+    /// be called `disk_lookup_by_id`, except that you might expect to get back
+    /// an `authz::Disk` as well.  We cannot return you a new `authz::Disk`
+    /// because we don't know how you looked up the Disk in the first place.
+    /// However, you must have previously looked it up, which is why we call
+    /// this `refetch`.
     pub async fn disk_refetch(
         &self,
         opctx: &OpContext,
