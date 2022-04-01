@@ -309,8 +309,9 @@ impl Zones {
         let prefix =
             if let Some(zone) = zone { vec![ZLOGIN, zone] } else { vec![] };
 
+        let interface = format!("{}/", addrobj.interface());
         let show_addr_args =
-            &[IPADM, "show-addr", "-p", "-o", "TYPE", &addrobj.to_string()];
+            &[IPADM, "show-addr", "-p", "-o", "TYPE", &interface];
 
         let args = prefix.iter().chain(show_addr_args);
         let cmd = command.args(args);
