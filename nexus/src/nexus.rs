@@ -166,6 +166,7 @@ pub struct Nexus {
 // particularly good example is probably list() (or even lookup()), where
 // with the right type parameters, generic code can be written to work on all
 // types.
+//
 // TODO update and delete need to accommodate both with-etag and don't-care
 // TODO audit logging ought to be part of this structure and its functions
 impl Nexus {
