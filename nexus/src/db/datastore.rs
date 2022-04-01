@@ -119,11 +119,11 @@ impl DataStore {
     // the database.  Eventually, this function should only be used for doing
     // authentication in the first place (since we can't do an authz check in
     // that case).
-    fn pool(&self) -> &bb8::Pool<ConnectionManager<DbConnection>> {
+    pub(super) fn pool(&self) -> &bb8::Pool<ConnectionManager<DbConnection>> {
         self.pool.pool()
     }
 
-    async fn pool_authorized(
+    pub(super) async fn pool_authorized(
         &self,
         opctx: &OpContext,
     ) -> Result<&bb8::Pool<ConnectionManager<DbConnection>>, Error> {
@@ -626,34 +626,6 @@ impl DataStore {
             })
     }
 
-    /// Fetch an [`authz::Organization`] based on its id
-    pub async fn organization_lookup_by_id(
-        &self,
-        // TODO: OpContext, to verify actor has permission to lookup
-        organization_id: Uuid,
-    ) -> LookupResult<authz::Organization> {
-        use db::schema::organization::dsl;
-        // We only do this database lookup to verify that the Organization with
-        // this id exists and hasn't been deleted.
-        let _: Uuid = dsl::organization
-            .filter(dsl::time_deleted.is_null())
-            .filter(dsl::id.eq(organization_id))
-            .select(dsl::id)
-            .first_async(self.pool())
-            .await
-            .map_err(|e| {
-                public_error_from_diesel_pool(
-                    e,
-                    ErrorHandler::NotFoundByLookup(
-                        ResourceType::Organization,
-                        LookupType::ById(organization_id),
-                    ),
-                )
-            })?;
-        Ok(authz::FLEET
-            .organization(organization_id, LookupType::ById(organization_id)))
-    }
-
     /// Look up the id for an organization based on its name
     ///
     /// Returns an [`authz::Organization`] (which makes the id available).
@@ -882,32 +854,6 @@ impl DataStore {
             })
     }
 
-    /// Fetch an [`authz::Project`] based on its id
-    pub async fn project_lookup_by_id(
-        &self,
-        project_id: Uuid,
-    ) -> LookupResult<authz::Project> {
-        use db::schema::project::dsl;
-        let organization_id = dsl::project
-            .filter(dsl::time_deleted.is_null())
-            .filter(dsl::id.eq(project_id))
-            .select(dsl::organization_id)
-            .first_async(self.pool())
-            .await
-            .map_err(|e| {
-                public_error_from_diesel_pool(
-                    e,
-                    ErrorHandler::NotFoundByLookup(
-                        ResourceType::Project,
-                        LookupType::ById(project_id),
-                    ),
-                )
-            })?;
-        let authz_organization =
-            self.organization_lookup_by_id(organization_id).await?;
-        Ok(authz_organization.project(project_id, LookupType::ById(project_id)))
-    }
-
     /// Look up the id for a Project based on its name
     ///
     /// Returns an [`authz::Project`] (which makes the id available).
@@ -1033,110 +979,6 @@ impl DataStore {
     }
 
     // Instances
-
-    /// Fetches an Instance from the database and returns both the database row
-    /// and an [`authz::Instance`] for doing authz checks
-    ///
-    /// See [`DataStore::organization_lookup_noauthz()`] for intended use cases
-    /// and caveats.
-    // TODO-security See the note on organization_lookup_noauthz().
-    async fn instance_lookup_noauthz(
-        &self,
-        authz_project: &authz::Project,
-        instance_name: &Name,
-    ) -> LookupResult<(authz::Instance, Instance)> {
-        use db::schema::instance::dsl;
-        dsl::instance
-            .filter(dsl::time_deleted.is_null())
-            .filter(dsl::project_id.eq(authz_project.id()))
-            .filter(dsl::name.eq(instance_name.clone()))
-            .select(Instance::as_select())
-            .first_async(self.pool())
-            .await
-            .map_err(|e| {
-                public_error_from_diesel_pool(
-                    e,
-                    ErrorHandler::NotFoundByLookup(
-                        ResourceType::Instance,
-                        LookupType::ByName(instance_name.as_str().to_owned()),
-                    ),
-                )
-            })
-            .map(|d| {
-                (
-                    authz_project.child_generic(
-                        ResourceType::Instance,
-                        d.id(),
-                        LookupType::from(&instance_name.0),
-                    ),
-                    d,
-                )
-            })
-    }
-
-    /// Fetch an [`authz::Instance`] based on its id
-    pub async fn instance_lookup_by_id(
-        &self,
-        instance_id: Uuid,
-    ) -> LookupResult<authz::Instance> {
-        use db::schema::instance::dsl;
-        let project_id = dsl::instance
-            .filter(dsl::time_deleted.is_null())
-            .filter(dsl::id.eq(instance_id))
-            .select(dsl::project_id)
-            .first_async(self.pool())
-            .await
-            .map_err(|e| {
-                public_error_from_diesel_pool(
-                    e,
-                    ErrorHandler::NotFoundByLookup(
-                        ResourceType::Instance,
-                        LookupType::ById(instance_id),
-                    ),
-                )
-            })?;
-        let authz_project = self.project_lookup_by_id(project_id).await?;
-        Ok(authz_project.child_generic(
-            ResourceType::Instance,
-            instance_id,
-            LookupType::ById(instance_id),
-        ))
-    }
-
-    /// Look up the id for an Instance based on its name
-    ///
-    /// Returns an [`authz::Instance`] (which makes the id available).
-    ///
-    /// Like the other "lookup_by_path()" functions, this function does no authz
-    /// checks.
-    // TODO-security See note on disk_lookup_by_path().
-    pub async fn instance_lookup_by_path(
-        &self,
-        organization_name: &Name,
-        project_name: &Name,
-        instance_name: &Name,
-    ) -> LookupResult<authz::Instance> {
-        let authz_project = self
-            .project_lookup_by_path(organization_name, project_name)
-            .await?;
-        self.instance_lookup_noauthz(&authz_project, instance_name)
-            .await
-            .map(|(d, _)| d)
-    }
-
-    /// Lookup an Instance by name and return the full database record, along
-    /// with an [`authz::Instance`] for subsequent authorization checks
-    pub async fn instance_fetch(
-        &self,
-        opctx: &OpContext,
-        authz_project: &authz::Project,
-        name: &Name,
-    ) -> LookupResult<(authz::Instance, Instance)> {
-        let (authz_instance, db_instance) =
-            self.instance_lookup_noauthz(authz_project, name).await?;
-        opctx.authorize(authz::Action::Read, &authz_instance).await?;
-        Ok((authz_instance, db_instance))
-    }
 
     /// Idempotently insert a database record for an Instance
     ///
@@ -1381,35 +1223,6 @@ impl DataStore {
             })
     }
 
-    /// Fetch an [`authz::Disk`] based on its id
-    pub async fn disk_lookup_by_id(
-        &self,
-        disk_id: Uuid,
-    ) -> LookupResult<authz::Disk> {
-        use db::schema::disk::dsl;
-        let project_id = dsl::disk
-            .filter(dsl::time_deleted.is_null())
-            .filter(dsl::id.eq(disk_id))
-            .select(dsl::project_id)
-            .first_async(self.pool())
-            .await
-            .map_err(|e| {
-                public_error_from_diesel_pool(
-                    e,
-                    ErrorHandler::NotFoundByLookup(
-                        ResourceType::Disk,
-                        LookupType::ById(disk_id),
-                    ),
-                )
-            })?;
-        let authz_project = self.project_lookup_by_id(project_id).await?;
-        Ok(authz_project.child_generic(
-            ResourceType::Disk,
-            disk_id,
-            LookupType::ById(disk_id),
-        ))
-    }
-
     /// Look up the id for a Disk based on its name
     ///
     /// Returns an [`authz::Disk`] (which makes the id available).
@@ -1420,7 +1233,7 @@ impl DataStore {
     // Projects), we don't do an authz check in the "lookup_by_path" functions
     // because we don't know if the caller has access to do the lookup.  For
     // leaf resources (like Instances and Disks), though, we do.  We could do
-    // the authz check here, and in disk_lookup_by_id() too.  Should we?
+    // the authz check here.  Should we?
     pub async fn disk_lookup_by_path(
         &self,
         organization_name: &Name,
@@ -1738,94 +1551,35 @@ impl DataStore {
     // in other situations, such as moving an instance between VPC Subnets.
     pub async fn instance_delete_all_network_interfaces(
         &self,
-        instance_id: &Uuid,
+        opctx: &OpContext,
+        authz_instance: &authz::Instance,
     ) -> DeleteResult {
+        opctx.authorize(authz::Action::Modify, authz_instance).await?;
+
         use db::schema::network_interface::dsl;
         let now = Utc::now();
         diesel::update(dsl::network_interface)
-            .filter(dsl::instance_id.eq(*instance_id))
+            .filter(dsl::instance_id.eq(authz_instance.id()))
             .filter(dsl::time_deleted.is_null())
             .set(dsl::time_deleted.eq(now))
-            .execute_async(self.pool())
+            .execute_async(self.pool_authorized(opctx).await?)
             .await
             .map_err(|e| {
                 public_error_from_diesel_pool(
                     e,
-                    ErrorHandler::NotFoundByLookup(
-                        ResourceType::Instance,
-                        LookupType::ById(*instance_id),
-                    ),
+                    ErrorHandler::NotFoundByResource(authz_instance),
                 )
             })?;
         Ok(())
-    }
-
-    /// Fetches a `NetworkInterface` from the database and returns both the
-    /// database row and an [`authz::NetworkInterface`] for doing authz checks.
-    ///
-    /// See [`DataStore::organization_lookup_noauthz()`] for intended use cases
-    /// and caveats.
-    // TODO-security See the note on organization_lookup_noauthz().
-    async fn network_interface_lookup_noauthz(
-        &self,
-        authz_instance: &authz::Instance,
-        interface_name: &Name,
-    ) -> LookupResult<(authz::NetworkInterface, NetworkInterface)> {
-        use db::schema::network_interface::dsl;
-        dsl::network_interface
-            .filter(dsl::time_deleted.is_null())
-            .filter(dsl::instance_id.eq(authz_instance.id()))
-            .filter(dsl::name.eq(interface_name.clone()))
-            .select(NetworkInterface::as_select())
-            .first_async(self.pool())
-            .await
-            .map_err(|e| {
-                public_error_from_diesel_pool(
-                    e,
-                    ErrorHandler::NotFoundByLookup(
-                        ResourceType::NetworkInterface,
-                        LookupType::ByName(interface_name.as_str().to_owned()),
-                    ),
-                )
-            })
-            .map(|d| {
-                (
-                    authz_instance.child_generic(
-                        ResourceType::NetworkInterface,
-                        d.id(),
-                        LookupType::from(&interface_name.0),
-                    ),
-                    d,
-                )
-            })
-    }
-
-    /// Lookup a `NetworkInterface` by name and return the full database record,
-    /// along with an [`authz::NetworkInterface`] for subsequent authorization
-    /// checks.
-    pub async fn network_interface_fetch(
-        &self,
-        opctx: &OpContext,
-        authz_instance: &authz::Instance,
-        name: &Name,
-    ) -> LookupResult<(authz::NetworkInterface, NetworkInterface)> {
-        let (authz_interface, db_interface) =
-            self.network_interface_lookup_noauthz(authz_instance, name).await?;
-        opctx.authorize(authz::Action::Read, &authz_interface).await?;
-        Ok((authz_interface, db_interface))
     }
 
     /// Delete a `NetworkInterface` attached to a provided instance.
     pub async fn instance_delete_network_interface(
         &self,
         opctx: &OpContext,
-        authz_instance: &authz::Instance,
-        interface_name: &Name,
+        authz_interface: &authz::NetworkInterface,
     ) -> DeleteResult {
-        let (authz_interface, _) = self
-            .network_interface_fetch(opctx, &authz_instance, interface_name)
-            .await?;
-        opctx.authorize(authz::Action::Delete, &authz_interface).await?;
+        opctx.authorize(authz::Action::Delete, authz_interface).await?;
 
         use db::schema::network_interface::dsl;
         let now = Utc::now();
@@ -1839,10 +1593,7 @@ impl DataStore {
             .map_err(|e| {
                 public_error_from_diesel_pool(
                     e,
-                    ErrorHandler::NotFoundByLookup(
-                        ResourceType::NetworkInterface,
-                        LookupType::ById(interface_id),
-                    ),
+                    ErrorHandler::NotFoundByResource(authz_interface),
                 )
             })?;
         Ok(())
@@ -1865,19 +1616,6 @@ impl DataStore {
             .load_async::<NetworkInterface>(self.pool_authorized(opctx).await?)
             .await
             .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
-    }
-
-    /// Get a network interface by name attached to an instance
-    pub async fn instance_lookup_network_interface(
-        &self,
-        opctx: &OpContext,
-        authz_instance: &authz::Instance,
-        interface_name: &Name,
-    ) -> LookupResult<NetworkInterface> {
-        Ok(self
-            .network_interface_fetch(opctx, &authz_instance, interface_name)
-            .await?
-            .1)
     }
 
     // Create a record for a new Oximeter instance
@@ -2144,78 +1882,6 @@ impl DataStore {
 
     // VPCs
 
-    /// Fetches a Vpc from the database and returns both the database row
-    /// and an [`authz::Vpc`] for doing authz checks
-    ///
-    /// See [`DataStore::organization_lookup_noauthz()`] for intended use cases
-    /// and caveats.
-    // TODO-security See the note on organization_lookup_noauthz().
-    async fn vpc_lookup_noauthz(
-        &self,
-        authz_project: &authz::Project,
-        vpc_name: &Name,
-    ) -> LookupResult<(authz::Vpc, Vpc)> {
-        use db::schema::vpc::dsl;
-        dsl::vpc
-            .filter(dsl::time_deleted.is_null())
-            .filter(dsl::project_id.eq(authz_project.id()))
-            .filter(dsl::name.eq(vpc_name.clone()))
-            .select(Vpc::as_select())
-            .first_async(self.pool())
-            .await
-            .map_err(|e| {
-                public_error_from_diesel_pool(
-                    e,
-                    ErrorHandler::NotFoundByLookup(
-                        ResourceType::Vpc,
-                        LookupType::ByName(vpc_name.as_str().to_owned()),
-                    ),
-                )
-            })
-            .map(|d| {
-                (
-                    authz_project.child_generic(
-                        ResourceType::Vpc,
-                        d.id(),
-                        LookupType::from(&vpc_name.0),
-                    ),
-                    d,
-                )
-            })
-    }
-
-    /// Look up the id for a Vpc based on its name
-    ///
-    /// Returns an [`authz::Vpc`] (which makes the id available).
-    ///
-    /// Like the other "lookup_by_path()" functions, this function does no authz
-    /// checks.
-    pub async fn vpc_lookup_by_path(
-        &self,
-        organization_name: &Name,
-        project_name: &Name,
-        vpc_name: &Name,
-    ) -> LookupResult<authz::Vpc> {
-        let authz_project = self
-            .project_lookup_by_path(organization_name, project_name)
-            .await?;
-        self.vpc_lookup_noauthz(&authz_project, vpc_name).await.map(|(v, _)| v)
-    }
-
-    /// Lookup a Vpc by name and return the full database record, along
-    /// with an [`authz::Vpc`] for subsequent authorization checks
-    pub async fn vpc_fetch(
-        &self,
-        opctx: &OpContext,
-        authz_project: &authz::Project,
-        name: &Name,
-    ) -> LookupResult<(authz::Vpc, Vpc)> {
-        let (authz_vpc, db_vpc) =
-            self.vpc_lookup_noauthz(authz_project, name).await?;
-        opctx.authorize(authz::Action::Read, &authz_vpc).await?;
-        Ok((authz_vpc, db_vpc))
-    }
-
     pub async fn project_list_vpcs(
         &self,
         opctx: &OpContext,
@@ -2288,33 +1954,6 @@ impl DataStore {
                 public_error_from_diesel_pool(
                     e,
                     ErrorHandler::NotFoundByResource(authz_vpc),
-                )
-            })
-    }
-
-    // TODO-security TODO-cleanup Remove this function.  Update callers to use
-    // vpc_lookup_by_path() or vpc_fetch() instead.
-    pub async fn vpc_fetch_by_name(
-        &self,
-        project_id: &Uuid,
-        vpc_name: &Name,
-    ) -> LookupResult<Vpc> {
-        use db::schema::vpc::dsl;
-
-        dsl::vpc
-            .filter(dsl::time_deleted.is_null())
-            .filter(dsl::project_id.eq(*project_id))
-            .filter(dsl::name.eq(vpc_name.clone()))
-            .select(Vpc::as_select())
-            .get_result_async(self.pool())
-            .await
-            .map_err(|e| {
-                public_error_from_diesel_pool(
-                    e,
-                    ErrorHandler::NotFoundByLookup(
-                        ResourceType::Vpc,
-                        LookupType::ByName(vpc_name.as_str().to_owned()),
-                    ),
                 )
             })
     }
@@ -2489,81 +2128,6 @@ impl DataStore {
             .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
     }
 
-    /// Fetches a VpcSubnet from the database and returns both the database row
-    /// and an [`authz::VpcSubnet`] for doing authz checks
-    ///
-    /// See [`DataStore::organization_lookup_noauthz()`] for intended use cases
-    /// and caveats.
-    // TODO-security See the note on organization_lookup_noauthz().
-    async fn vpc_subnet_lookup_noauthz(
-        &self,
-        authz_vpc: &authz::Vpc,
-        subnet_name: &Name,
-    ) -> LookupResult<(authz::VpcSubnet, VpcSubnet)> {
-        use db::schema::vpc_subnet::dsl;
-        dsl::vpc_subnet
-            .filter(dsl::time_deleted.is_null())
-            .filter(dsl::vpc_id.eq(authz_vpc.id()))
-            .filter(dsl::name.eq(subnet_name.clone()))
-            .select(VpcSubnet::as_select())
-            .first_async(self.pool())
-            .await
-            .map_err(|e| {
-                public_error_from_diesel_pool(
-                    e,
-                    ErrorHandler::NotFoundByLookup(
-                        ResourceType::VpcSubnet,
-                        LookupType::ByName(subnet_name.as_str().to_owned()),
-                    ),
-                )
-            })
-            .map(|d| {
-                (
-                    authz_vpc.child_generic(
-                        ResourceType::VpcSubnet,
-                        d.id(),
-                        LookupType::from(&subnet_name.0),
-                    ),
-                    d,
-                )
-            })
-    }
-
-    /// Look up the id for a VpcSubnet based on its name
-    ///
-    /// Returns an [`authz::VpcSubnet`] (which makes the id available).
-    ///
-    /// Like the other "lookup_by_path()" functions, this function does no authz
-    /// checks.
-    pub async fn vpc_subnet_lookup_by_path(
-        &self,
-        organization_name: &Name,
-        project_name: &Name,
-        vpc_name: &Name,
-        subnet_name: &Name,
-    ) -> LookupResult<authz::Vpc> {
-        let authz_vpc = self
-            .vpc_lookup_by_path(organization_name, project_name, vpc_name)
-            .await?;
-        self.vpc_subnet_lookup_noauthz(&authz_vpc, subnet_name)
-            .await
-            .map(|(v, _)| v)
-    }
-
-    /// Lookup a VpcSubnet by name and return the full database record, along
-    /// with an [`authz::VpcSubnet`] for subsequent authorization checks
-    pub async fn vpc_subnet_fetch(
-        &self,
-        opctx: &OpContext,
-        authz_vpc: &authz::Vpc,
-        name: &Name,
-    ) -> LookupResult<(authz::VpcSubnet, VpcSubnet)> {
-        let (authz_vpc_subnet, db_vpc_subnet) =
-            self.vpc_subnet_lookup_noauthz(authz_vpc, name).await?;
-        opctx.authorize(authz::Action::Read, &authz_vpc_subnet).await?;
-        Ok((authz_vpc_subnet, db_vpc_subnet))
-    }
-
     /// Insert a VPC Subnet, checking for unique IP address ranges.
     pub async fn vpc_create_subnet(
         &self,
@@ -2683,81 +2247,6 @@ impl DataStore {
             .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
     }
 
-    /// Fetches a VpcRouter from the database and returns both the database row
-    /// and an [`authz::VpcRouter`] for doing authz checks
-    ///
-    /// See [`DataStore::organization_lookup_noauthz()`] for intended use cases
-    /// and caveats.
-    // TODO-security See the note on organization_lookup_noauthz().
-    async fn vpc_router_lookup_noauthz(
-        &self,
-        authz_vpc: &authz::Vpc,
-        router_name: &Name,
-    ) -> LookupResult<(authz::VpcRouter, VpcRouter)> {
-        use db::schema::vpc_router::dsl;
-        dsl::vpc_router
-            .filter(dsl::time_deleted.is_null())
-            .filter(dsl::vpc_id.eq(authz_vpc.id()))
-            .filter(dsl::name.eq(router_name.clone()))
-            .select(VpcRouter::as_select())
-            .get_result_async(self.pool())
-            .await
-            .map_err(|e| {
-                public_error_from_diesel_pool(
-                    e,
-                    ErrorHandler::NotFoundByLookup(
-                        ResourceType::VpcRouter,
-                        LookupType::ByName(router_name.as_str().to_owned()),
-                    ),
-                )
-            })
-            .map(|r| {
-                (
-                    authz_vpc.child_generic(
-                        ResourceType::VpcRouter,
-                        r.id(),
-                        LookupType::ByName(router_name.to_string()),
-                    ),
-                    r,
-                )
-            })
-    }
-
-    /// Lookup a VpcRouter by name and return the full database record, along
-    /// with an [`authz::VpcRouter`] for subsequent authorization checks
-    pub async fn vpc_router_fetch(
-        &self,
-        opctx: &OpContext,
-        authz_vpc: &authz::Vpc,
-        name: &Name,
-    ) -> LookupResult<(authz::VpcRouter, VpcRouter)> {
-        let (authz_vpc_router, db_vpc_router) =
-            self.vpc_router_lookup_noauthz(authz_vpc, name).await?;
-        opctx.authorize(authz::Action::Read, &authz_vpc_router).await?;
-        Ok((authz_vpc_router, db_vpc_router))
-    }
-
-    /// Look up the id for a VpcRouter based on its name
-    ///
-    /// Returns an [`authz::VpcRouter`] (which makes the id available).
-    ///
-    /// Like the other "lookup_by_path()" functions, this function does no authz
-    /// checks.
-    pub async fn vpc_router_lookup_by_path(
-        &self,
-        organization_name: &Name,
-        project_name: &Name,
-        vpc_name: &Name,
-        router_name: &Name,
-    ) -> LookupResult<authz::VpcRouter> {
-        let authz_vpc = self
-            .vpc_lookup_by_path(organization_name, project_name, vpc_name)
-            .await?;
-        self.vpc_router_lookup_noauthz(&authz_vpc, router_name)
-            .await
-            .map(|(v, _)| v)
-    }
-
     pub async fn vpc_create_router(
         &self,
         opctx: &OpContext,
@@ -2854,7 +2343,7 @@ impl DataStore {
         use db::schema::router_route::dsl;
         paginated(dsl::router_route, dsl::name, pagparams)
             .filter(dsl::time_deleted.is_null())
-            .filter(dsl::router_id.eq(authz_router.id()))
+            .filter(dsl::vpc_router_id.eq(authz_router.id()))
             .select(RouterRoute::as_select())
             .load_async::<db::model::RouterRoute>(
                 self.pool_authorized(opctx).await?,
@@ -2863,98 +2352,17 @@ impl DataStore {
             .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
     }
 
-    /// Fetches a RouterRoute from the database and returns both the database
-    /// row and an [`authz::RouterRoute`] for doing authz checks
-    ///
-    /// See [`DataStore::organization_lookup_noauthz()`] for intended use cases
-    /// and caveats.
-    // TODO-security See the note on organization_lookup_noauthz().
-    async fn route_lookup_noauthz(
-        &self,
-        authz_vpc_router: &authz::VpcRouter,
-        route_name: &Name,
-    ) -> LookupResult<(authz::RouterRoute, RouterRoute)> {
-        use db::schema::router_route::dsl;
-        dsl::router_route
-            .filter(dsl::time_deleted.is_null())
-            .filter(dsl::router_id.eq(authz_vpc_router.id()))
-            .filter(dsl::name.eq(route_name.clone()))
-            .select(RouterRoute::as_select())
-            .get_result_async(self.pool())
-            .await
-            .map_err(|e| {
-                public_error_from_diesel_pool(
-                    e,
-                    ErrorHandler::NotFoundByLookup(
-                        ResourceType::RouterRoute,
-                        LookupType::ByName(route_name.as_str().to_owned()),
-                    ),
-                )
-            })
-            .map(|r| {
-                (
-                    authz_vpc_router.child_generic(
-                        ResourceType::RouterRoute,
-                        r.id(),
-                        LookupType::ByName(route_name.to_string()),
-                    ),
-                    r,
-                )
-            })
-    }
-
-    /// Lookup a RouterRoute by name and return the full database record, along
-    /// with an [`authz::RouterRoute`] for subsequent authorization checks
-    pub async fn route_fetch(
-        &self,
-        opctx: &OpContext,
-        authz_vpc_router: &authz::VpcRouter,
-        name: &Name,
-    ) -> LookupResult<(authz::RouterRoute, RouterRoute)> {
-        let (authz_route, db_route) =
-            self.route_lookup_noauthz(authz_vpc_router, name).await?;
-        opctx.authorize(authz::Action::Read, &authz_route).await?;
-        Ok((authz_route, db_route))
-    }
-
-    /// Look up the id for a RouterRoute based on its name
-    ///
-    /// Returns an [`authz::RouterRoute`] (which makes the id available).
-    ///
-    /// Like the other "lookup_by_path()" functions, this function does no authz
-    /// checks.
-    pub async fn route_lookup_by_path(
-        &self,
-        organization_name: &Name,
-        project_name: &Name,
-        vpc_name: &Name,
-        router_name: &Name,
-        route_name: &Name,
-    ) -> LookupResult<authz::RouterRoute> {
-        let authz_vpc_router = self
-            .vpc_router_lookup_by_path(
-                organization_name,
-                project_name,
-                vpc_name,
-                router_name,
-            )
-            .await?;
-        self.vpc_router_lookup_noauthz(&authz_vpc_router, route_name)
-            .await
-            .map(|(v, _)| v)
-    }
-
     pub async fn router_create_route(
         &self,
         opctx: &OpContext,
         authz_router: &authz::VpcRouter,
         route: RouterRoute,
     ) -> CreateResult<RouterRoute> {
-        assert_eq!(authz_router.id(), route.router_id);
+        assert_eq!(authz_router.id(), route.vpc_router_id);
         opctx.authorize(authz::Action::CreateChild, authz_router).await?;
 
         use db::schema::router_route::dsl;
-        let router_id = route.router_id;
+        let router_id = route.vpc_router_id;
         let name = route.name().clone();
 
         VpcRouter::insert_resource(

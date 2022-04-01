@@ -1300,7 +1300,7 @@ async fn instance_network_interfaces_get_interface(
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
         let interface = nexus
-            .instance_lookup_network_interface(
+            .network_interface_fetch(
                 &opctx,
                 organization_name,
                 project_name,

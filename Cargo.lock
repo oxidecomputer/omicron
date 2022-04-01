@@ -802,8 +802,11 @@ checksum = "3ee2393c4a91429dffb4bedf19f4d6abf27d8a732c8ce4980305d782e5426d57"
 name = "db-macros"
 version = "0.1.0"
 dependencies = [
+ "heck 0.4.0",
  "proc-macro2",
  "quote",
+ "serde",
+ "serde_tokenstream",
  "syn",
 ]
 

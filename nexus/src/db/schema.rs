@@ -324,7 +324,7 @@ table! {
         time_modified -> Timestamptz,
         time_deleted -> Nullable<Timestamptz>,
         kind -> crate::db::model::RouterRouteKindEnum,
-        router_id -> Uuid,
+        vpc_router_id -> Uuid,
         target -> Text,
         destination -> Text,
     }
