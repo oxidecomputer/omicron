@@ -555,8 +555,12 @@ fn ssh_exec(
         .arg(&server.addr)
         .arg(&remote_cmd);
     cmd.env("SSH_AUTH_SOCK", auth_sock);
-    cmd.status()
+    let exit_status = cmd
+        .status()
         .context(format!("Failed to run {} on {}", remote_cmd, server.addr))?;
+    if !exit_status.success() {
+        anyhow::bail!("Command failed: {}", exit_status);
+    }
 
     Ok(())
 }
