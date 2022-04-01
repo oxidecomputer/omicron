@@ -61,7 +61,13 @@ pub enum SpType {
     Power,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+// We derive `Serialize` to be able to send `SwitchPort`s to usdt probes, but
+// critically we do _not_ implement `Deserialize` - the only way to construct a
+// `SwitchPort` should be to receive one from a `ManagementSwitch`.
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize,
+)]
+#[serde(transparent)]
 pub(crate) struct SwitchPort(usize);
 
 impl SwitchPort {
@@ -359,6 +365,13 @@ where
 
         match sock.try_recv_from(&mut buf) {
             Ok((n, addr)) => {
+                let buf = &buf[..n];
+                probes::recv_packet!(|| (
+                    &addr,
+                    &port,
+                    buf.as_ptr() as usize as u64,
+                    buf.len() as u64
+                ));
                 if Some(addr) != inner.sp_socket(port).map(|s| s.addr) {
                     // TODO-security: we received a packet from an address that
                     // doesn't match what we believe is the SP's address. for
@@ -371,7 +384,7 @@ where
                     );
                 } else {
                     debug!(inner.log, "received {} bytes", n; "port" => ?port);
-                    callback(port, &buf[..n]);
+                    callback(port, buf);
                 }
             }
             // spurious wakeup; no need to log, just continue
@@ -580,5 +593,16 @@ mod tests {
                 assert_eq!(addr, switch.inner.local_addr(port).unwrap());
             }
         }
+    }
+}
+
+#[usdt::provider(provider = "gateway_sp_comms")]
+mod probes {
+    fn recv_packet(
+        _source: &SocketAddr,
+        _port: &SwitchPort,
+        _data: u64, // TODO actually a `*const u8`, but that isn't allowed by usdt
+        _len: u64,
+    ) {
     }
 }

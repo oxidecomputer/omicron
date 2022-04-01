@@ -4,6 +4,10 @@
 
 // Copyright 2022 Oxide Computer Company
 
+// Required nightly features for `usdt`
+#![cfg_attr(target_os = "macos", feature(asm_sym))]
+#![feature(asm)]
+
 //! This crate provides UDP-based communication across the Oxide management
 //! switch to a collection of SPs.
 //!
@@ -12,6 +16,8 @@
 mod communicator;
 mod management_switch;
 mod recv_handler;
+
+pub use usdt::register_probes;
 
 pub mod error;
 

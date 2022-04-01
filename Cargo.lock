@@ -1442,6 +1442,7 @@ dependencies = [
  "slog",
  "thiserror",
  "tokio",
+ "usdt 0.3.2",
  "uuid",
 ]
 
