@@ -504,10 +504,16 @@ async fn main() -> Result<()> {
             do_package(&config, &artifact_dir).await?;
         }
         SubCommand::Build(BuildCommand::Check) => do_check(&config).await?,
-        SubCommand::Deploy(DeployCommand::Install { artifact_dir, install_dir }) => {
+        SubCommand::Deploy(DeployCommand::Install {
+            artifact_dir,
+            install_dir,
+        }) => {
             do_install(&config, &artifact_dir, &install_dir)?;
         }
-        SubCommand::Deploy(DeployCommand::Uninstall { artifact_dir, install_dir }) => {
+        SubCommand::Deploy(DeployCommand::Uninstall {
+            artifact_dir,
+            install_dir,
+        }) => {
             do_uninstall(&config, &artifact_dir, &install_dir)?;
         }
     }
