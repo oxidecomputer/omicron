@@ -7,7 +7,7 @@
 use anyhow::{anyhow, bail, Context, Result};
 use futures::stream::{self, StreamExt, TryStreamExt};
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
-use omicron_package::{parse, SubCommand};
+use omicron_package::{parse, BuildCommand, DeployCommand};
 use omicron_zone_package::package::{Package, Progress};
 use rayon::prelude::*;
 use ring::digest::{Context as DigestContext, Digest, SHA256};
@@ -24,7 +24,7 @@ use tokio::process::Command;
 /// Describes the origin of an externally-built package.
 #[derive(Deserialize, Debug)]
 #[serde(tag = "type", rename_all = "lowercase")]
-pub enum ExternalPackageSource {
+enum ExternalPackageSource {
     /// Downloads the package from the following URL:
     ///
     /// <https://buildomat.eng.oxide.computer/public/file/oxidecomputer/REPO/image/COMMIT/PACKAGE>
@@ -36,24 +36,33 @@ pub enum ExternalPackageSource {
 
 /// Describes a package which originates from outside this repo.
 #[derive(Deserialize, Debug)]
-pub struct ExternalPackage {
+struct ExternalPackage {
     #[serde(flatten)]
-    pub package: Package,
+    package: Package,
 
-    pub source: ExternalPackageSource,
+    source: ExternalPackageSource,
 }
 
 /// Describes the configuration for a set of packages.
 #[derive(Deserialize, Debug)]
-pub struct Config {
+struct Config {
     /// Packages to be built and installed.
     #[serde(default, rename = "package")]
-    pub packages: BTreeMap<String, Package>,
+    packages: BTreeMap<String, Package>,
 
     /// Packages to be installed, but which have been created outside this
     /// repository.
     #[serde(default, rename = "external_package")]
-    pub external_packages: BTreeMap<String, ExternalPackage>,
+    external_packages: BTreeMap<String, ExternalPackage>,
+}
+
+/// All packaging subcommands.
+#[derive(Debug, StructOpt)]
+enum SubCommand {
+    #[structopt(flatten)]
+    Build(BuildCommand),
+    #[structopt(flatten)]
+    Deploy(DeployCommand),
 }
 
 #[derive(Debug, StructOpt)]
@@ -491,14 +500,20 @@ async fn main() -> Result<()> {
     }
 
     match &args.subcommand {
-        SubCommand::Package { artifact_dir } => {
+        SubCommand::Build(BuildCommand::Package { artifact_dir }) => {
             do_package(&config, &artifact_dir).await?;
         }
-        SubCommand::Check => do_check(&config).await?,
-        SubCommand::Install { artifact_dir, install_dir } => {
+        SubCommand::Build(BuildCommand::Check) => do_check(&config).await?,
+        SubCommand::Deploy(DeployCommand::Install {
+            artifact_dir,
+            install_dir,
+        }) => {
             do_install(&config, &artifact_dir, &install_dir)?;
         }
-        SubCommand::Uninstall { artifact_dir, install_dir } => {
+        SubCommand::Deploy(DeployCommand::Uninstall {
+            artifact_dir,
+            install_dir,
+        }) => {
             do_uninstall(&config, &artifact_dir, &install_dir)?;
         }
     }
