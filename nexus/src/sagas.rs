@@ -432,13 +432,14 @@ async fn sic_create_custom_network_interfaces(
 
                 // Refetch the interface itself, to serialize it for the next
                 // saga node.
-                datastore
-                    .instance_lookup_network_interface(
-                        &opctx,
-                        &authz_instance,
-                        &db::model::Name(params.identity.name.clone()),
-                    )
+                LookupPath::new(&opctx, &datastore)
+                    .instance_id(authz_instance.id())
+                    .network_interface_name(&db::model::Name(
+                        params.identity.name.clone(),
+                    ))
+                    .fetch()
                     .await
+                    .map(|(.., db_interface)| db_interface)
             }
             Err(e) => Err(e.into_external()),
         }
@@ -516,16 +517,24 @@ async fn sic_create_default_network_interface(
 async fn sic_create_network_interfaces_undo(
     sagactx: ActionContext<SagaInstanceCreate>,
 ) -> Result<(), anyhow::Error> {
-    // We issue a request to delete any interfaces associated with this instance.
-    // In the case we failed partway through allocating interfaces, we won't
-    // have cached the interface records in the saga log, but they're definitely
-    // still in the database. Just delete every interface that exists, even if
-    // there are zero such records.
+    // We issue a request to delete any interfaces associated with this
+    // instance.  In the case we failed partway through allocating interfaces,
+    // we won't have cached the interface records in the saga log, but they're
+    // definitely still in the database. Just delete every interface that
+    // exists, even if there are zero such records.
     let osagactx = sagactx.user_data();
+    let datastore = osagactx.datastore();
+    let saga_params = sagactx.saga_params();
+    let opctx =
+        OpContext::for_saga_action(&sagactx, &saga_params.serialized_authn);
     let instance_id = sagactx.lookup::<Uuid>("instance_id")?;
-    osagactx
-        .datastore()
-        .instance_delete_all_network_interfaces(&instance_id)
+    let (.., authz_instance) = LookupPath::new(&opctx, &datastore)
+        .instance_id(instance_id)
+        .lookup_for(authz::Action::Modify)
+        .await
+        .map_err(ActionError::action_failed)?;
+    datastore
+        .instance_delete_all_network_interfaces(&opctx, &authz_instance)
         .await
         .map_err(ActionError::action_failed)?;
     Ok(())

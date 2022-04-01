@@ -980,81 +980,6 @@ impl DataStore {
 
     // Instances
 
-    /// Fetches an Instance from the database and returns both the database row
-    /// and an [`authz::Instance`] for doing authz checks
-    ///
-    /// See [`DataStore::organization_lookup_noauthz()`] for intended use cases
-    /// and caveats.
-    // TODO-security See the note on organization_lookup_noauthz().
-    async fn instance_lookup_noauthz(
-        &self,
-        authz_project: &authz::Project,
-        instance_name: &Name,
-    ) -> LookupResult<(authz::Instance, Instance)> {
-        use db::schema::instance::dsl;
-        dsl::instance
-            .filter(dsl::time_deleted.is_null())
-            .filter(dsl::project_id.eq(authz_project.id()))
-            .filter(dsl::name.eq(instance_name.clone()))
-            .select(Instance::as_select())
-            .first_async(self.pool())
-            .await
-            .map_err(|e| {
-                public_error_from_diesel_pool(
-                    e,
-                    ErrorHandler::NotFoundByLookup(
-                        ResourceType::Instance,
-                        LookupType::ByName(instance_name.as_str().to_owned()),
-                    ),
-                )
-            })
-            .map(|d| {
-                (
-                    authz_project.child_generic(
-                        ResourceType::Instance,
-                        d.id(),
-                        LookupType::from(&instance_name.0),
-                    ),
-                    d,
-                )
-            })
-    }
-
-    /// Look up the id for an Instance based on its name
-    ///
-    /// Returns an [`authz::Instance`] (which makes the id available).
-    ///
-    /// Like the other "lookup_by_path()" functions, this function does no authz
-    /// checks.
-    // TODO-security See note on disk_lookup_by_path().
-    pub async fn instance_lookup_by_path(
-        &self,
-        organization_name: &Name,
-        project_name: &Name,
-        instance_name: &Name,
-    ) -> LookupResult<authz::Instance> {
-        let authz_project = self
-            .project_lookup_by_path(organization_name, project_name)
-            .await?;
-        self.instance_lookup_noauthz(&authz_project, instance_name)
-            .await
-            .map(|(d, _)| d)
-    }
-
-    /// Lookup an Instance by name and return the full database record, along
-    /// with an [`authz::Instance`] for subsequent authorization checks
-    pub async fn instance_fetch(
-        &self,
-        opctx: &OpContext,
-        authz_project: &authz::Project,
-        name: &Name,
-    ) -> LookupResult<(authz::Instance, Instance)> {
-        let (authz_instance, db_instance) =
-            self.instance_lookup_noauthz(authz_project, name).await?;
-        opctx.authorize(authz::Action::Read, &authz_instance).await?;
-        Ok((authz_instance, db_instance))
-    }
-
     /// Idempotently insert a database record for an Instance
     ///
     /// This is intended to be used by a saga action.  When we say this is
@@ -1626,94 +1551,35 @@ impl DataStore {
     // in other situations, such as moving an instance between VPC Subnets.
     pub async fn instance_delete_all_network_interfaces(
         &self,
-        instance_id: &Uuid,
+        opctx: &OpContext,
+        authz_instance: &authz::Instance,
     ) -> DeleteResult {
+        opctx.authorize(authz::Action::Modify, authz_instance).await?;
+
         use db::schema::network_interface::dsl;
         let now = Utc::now();
         diesel::update(dsl::network_interface)
-            .filter(dsl::instance_id.eq(*instance_id))
+            .filter(dsl::instance_id.eq(authz_instance.id()))
             .filter(dsl::time_deleted.is_null())
             .set(dsl::time_deleted.eq(now))
-            .execute_async(self.pool())
+            .execute_async(self.pool_authorized(opctx).await?)
             .await
             .map_err(|e| {
                 public_error_from_diesel_pool(
                     e,
-                    ErrorHandler::NotFoundByLookup(
-                        ResourceType::Instance,
-                        LookupType::ById(*instance_id),
-                    ),
+                    ErrorHandler::NotFoundByResource(authz_instance),
                 )
             })?;
         Ok(())
-    }
-
-    /// Fetches a `NetworkInterface` from the database and returns both the
-    /// database row and an [`authz::NetworkInterface`] for doing authz checks.
-    ///
-    /// See [`DataStore::organization_lookup_noauthz()`] for intended use cases
-    /// and caveats.
-    // TODO-security See the note on organization_lookup_noauthz().
-    async fn network_interface_lookup_noauthz(
-        &self,
-        authz_instance: &authz::Instance,
-        interface_name: &Name,
-    ) -> LookupResult<(authz::NetworkInterface, NetworkInterface)> {
-        use db::schema::network_interface::dsl;
-        dsl::network_interface
-            .filter(dsl::time_deleted.is_null())
-            .filter(dsl::instance_id.eq(authz_instance.id()))
-            .filter(dsl::name.eq(interface_name.clone()))
-            .select(NetworkInterface::as_select())
-            .first_async(self.pool())
-            .await
-            .map_err(|e| {
-                public_error_from_diesel_pool(
-                    e,
-                    ErrorHandler::NotFoundByLookup(
-                        ResourceType::NetworkInterface,
-                        LookupType::ByName(interface_name.as_str().to_owned()),
-                    ),
-                )
-            })
-            .map(|d| {
-                (
-                    authz_instance.child_generic(
-                        ResourceType::NetworkInterface,
-                        d.id(),
-                        LookupType::from(&interface_name.0),
-                    ),
-                    d,
-                )
-            })
-    }
-
-    /// Lookup a `NetworkInterface` by name and return the full database record,
-    /// along with an [`authz::NetworkInterface`] for subsequent authorization
-    /// checks.
-    pub async fn network_interface_fetch(
-        &self,
-        opctx: &OpContext,
-        authz_instance: &authz::Instance,
-        name: &Name,
-    ) -> LookupResult<(authz::NetworkInterface, NetworkInterface)> {
-        let (authz_interface, db_interface) =
-            self.network_interface_lookup_noauthz(authz_instance, name).await?;
-        opctx.authorize(authz::Action::Read, &authz_interface).await?;
-        Ok((authz_interface, db_interface))
     }
 
     /// Delete a `NetworkInterface` attached to a provided instance.
     pub async fn instance_delete_network_interface(
         &self,
         opctx: &OpContext,
-        authz_instance: &authz::Instance,
-        interface_name: &Name,
+        authz_interface: &authz::NetworkInterface,
     ) -> DeleteResult {
-        let (authz_interface, _) = self
-            .network_interface_fetch(opctx, &authz_instance, interface_name)
-            .await?;
-        opctx.authorize(authz::Action::Delete, &authz_interface).await?;
+        opctx.authorize(authz::Action::Delete, authz_interface).await?;
 
         use db::schema::network_interface::dsl;
         let now = Utc::now();
@@ -1727,10 +1593,7 @@ impl DataStore {
             .map_err(|e| {
                 public_error_from_diesel_pool(
                     e,
-                    ErrorHandler::NotFoundByLookup(
-                        ResourceType::NetworkInterface,
-                        LookupType::ById(interface_id),
-                    ),
+                    ErrorHandler::NotFoundByResource(authz_interface),
                 )
             })?;
         Ok(())
@@ -1753,19 +1616,6 @@ impl DataStore {
             .load_async::<NetworkInterface>(self.pool_authorized(opctx).await?)
             .await
             .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
-    }
-
-    /// Get a network interface by name attached to an instance
-    pub async fn instance_lookup_network_interface(
-        &self,
-        opctx: &OpContext,
-        authz_instance: &authz::Instance,
-        interface_name: &Name,
-    ) -> LookupResult<NetworkInterface> {
-        Ok(self
-            .network_interface_fetch(opctx, &authz_instance, interface_name)
-            .await?
-            .1)
     }
 
     // Create a record for a new Oximeter instance
