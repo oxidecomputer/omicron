@@ -27,6 +27,7 @@ use super::pool::DbConnection;
 use super::Pool;
 use crate::authn;
 use crate::authz;
+use crate::authz::ApiResourceError;
 use crate::context::OpContext;
 use crate::db::fixed_data::role_assignment_builtin::BUILTIN_ROLE_ASSIGNMENTS;
 use crate::db::fixed_data::role_builtin::BUILTIN_ROLES;
@@ -58,6 +59,7 @@ use std::convert::{TryFrom, TryInto};
 use std::sync::Arc;
 use uuid::Uuid;
 
+use crate::db::lookup::LookupPath;
 use crate::db::{
     self,
     error::{public_error_from_diesel_pool, ErrorHandler, TransactionError},
@@ -886,22 +888,18 @@ impl DataStore {
         opctx: &OpContext,
         authz_instance: &authz::Instance,
     ) -> LookupResult<Instance> {
-        use db::schema::instance::dsl;
-
-        opctx.authorize(authz::Action::Read, authz_instance).await?;
-
-        dsl::instance
-            .filter(dsl::time_deleted.is_null())
-            .filter(dsl::id.eq(authz_instance.id()))
-            .select(Instance::as_select())
-            .get_result_async(self.pool_authorized(opctx).await?)
+        let (.., db_instance) = LookupPath::new(opctx, self)
+            .instance_id(authz_instance.id())
+            .fetch()
             .await
-            .map_err(|e| {
-                public_error_from_diesel_pool(
-                    e,
-                    ErrorHandler::NotFoundByResource(authz_instance),
-                )
-            })
+            .map_err(|e| match e {
+                // Use the "not found" message of the authz object we were
+                // given, which will reflect however the caller originally
+                // looked it up.
+                Error::ObjectNotFound { .. } => authz_instance.not_found(),
+                e => e,
+            })?;
+        Ok(db_instance)
     }
 
     // TODO-design It's tempting to return the updated state of the Instance
@@ -1116,35 +1114,29 @@ impl DataStore {
 
     /// Fetches information about a Disk that the caller has previously fetched
     ///
-    /// The principal difference from fetching a disk is that this function
-    /// takes an `authz_disk` and does a lookup by id rather than the full path
-    /// of names (organization name, project name, and disk name).  This could
-    /// be called `disk_lookup_by_id`, except that you might expect to get back
-    /// an `authz::Disk` as well.  We cannot return you a new `authz::Disk`
-    /// because we don't know how you looked up the Disk in the first place.
-    /// However, you must have previously looked it up, which is why we call
-    /// this `refetch`.
+    /// The only difference between this function and a new fetch by id is that
+    /// this function preserves the `authz_disk` that you started with -- which
+    /// keeps track of how you looked it up.  So if you looked it up by name,
+    /// the authz you get back will reflect that, whereas if you did a fresh
+    /// lookup by id, it wouldn't.
+    /// TODO-cleanup this could be provided by the Lookup API for any resource
     pub async fn disk_refetch(
         &self,
         opctx: &OpContext,
         authz_disk: &authz::Disk,
     ) -> LookupResult<Disk> {
-        use db::schema::disk::dsl;
-
-        opctx.authorize(authz::Action::Read, authz_disk).await?;
-
-        dsl::disk
-            .filter(dsl::time_deleted.is_null())
-            .filter(dsl::id.eq(authz_disk.id()))
-            .select(Disk::as_select())
-            .get_result_async(self.pool_authorized(opctx).await?)
+        let (.., db_disk) = LookupPath::new(opctx, self)
+            .disk_id(authz_disk.id())
+            .fetch()
             .await
-            .map_err(|e| {
-                public_error_from_diesel_pool(
-                    e,
-                    ErrorHandler::NotFoundByResource(authz_disk),
-                )
-            })
+            .map_err(|e| match e {
+                // Use the "not found" message of the authz object we were
+                // given, which will reflect however the caller originally
+                // looked it up.
+                Error::ObjectNotFound { .. } => authz_disk.not_found(),
+                e => e,
+            })?;
+        Ok(db_disk)
     }
 
     /// Updates a disk record to indicate it has been deleted.
@@ -1390,27 +1382,6 @@ impl DataStore {
                 )
             })?;
         Ok(())
-    }
-
-    // Fetch a record for an Oximeter instance, by its ID.
-    pub async fn oximeter_fetch(
-        &self,
-        id: Uuid,
-    ) -> Result<OximeterInfo, Error> {
-        use db::schema::oximeter::dsl;
-        dsl::oximeter
-            .filter(dsl::id.eq(id))
-            .first_async::<OximeterInfo>(self.pool())
-            .await
-            .map_err(|e| {
-                public_error_from_diesel_pool(
-                    e,
-                    ErrorHandler::NotFoundByLookup(
-                        ResourceType::Oximeter,
-                        LookupType::ById(id),
-                    ),
-                )
-            })
     }
 
     // List the oximeter collector instances
@@ -2742,7 +2713,7 @@ impl DataStore {
         self.silo_lookup_noauthz(name).await
     }
 
-    pub async fn silo_lookup_noauthz(
+    async fn silo_lookup_noauthz(
         &self,
         // XXX enable when all endpoints are protected by authn
         // opctx: &OpContext,
