@@ -4,7 +4,7 @@
 
 //! Utility for deploying Omicron to remote machines
 
-use omicron_package::{parse, SubCommand as PackageSubCommand};
+use omicron_package::{parse, BuildCommand, DeployCommand};
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
@@ -16,35 +16,36 @@ use serde_derive::Deserialize;
 use structopt::StructOpt;
 use thiserror::Error;
 
+// A server on which omicron source should be compiled into packages.
 #[derive(Deserialize, Debug)]
 struct Builder {
-    pub server: String,
-    pub omicron_path: PathBuf,
+    server: String,
+    omicron_path: PathBuf,
 }
 
-// A server on which an omicron package is deployed
+// A server on which an omicron package is deployed.
 #[derive(Deserialize, Debug)]
 struct Server {
-    pub username: String,
-    pub addr: String,
+    username: String,
+    addr: String,
 }
 
 #[derive(Deserialize, Debug)]
 struct Deployment {
-    pub servers: BTreeSet<String>,
-    pub rack_secret_threshold: usize,
-    pub staging_dir: PathBuf,
+    servers: BTreeSet<String>,
+    rack_secret_threshold: usize,
+    staging_dir: PathBuf,
 }
 
 #[derive(Debug, Deserialize)]
 struct Config {
-    pub omicron_path: PathBuf,
-    pub builder: Builder,
-    pub servers: BTreeMap<String, Server>,
-    pub deployment: Deployment,
+    omicron_path: PathBuf,
+    builder: Builder,
+    servers: BTreeMap<String, Server>,
+    deployment: Deployment,
 
     #[serde(default)]
-    pub debug: bool,
+    debug: bool,
 }
 
 impl Config {
@@ -64,7 +65,7 @@ fn parse_into_set(src: &str) -> BTreeSet<String> {
 #[derive(Debug, StructOpt)]
 enum SubCommand {
     /// Run the given command on the given servers, or all servers if none are
-    /// given.
+    /// specified.
     ///
     /// Be careful!
     Exec {
@@ -80,12 +81,12 @@ enum SubCommand {
     /// Sync our local source to the build host
     Sync,
 
-    /// Build omicron-package and everything needed to run thing-flinger
-    /// commands on the build host.
-    BuildMinimal,
+    /// Runs a command on the "builder" server.
+    #[structopt(name = "build")]
+    Builder(BuildCommand),
 
-    /// Runs a packaging command on the "builder" server.
-    Package(PackageSubCommand),
+    /// Runs a command on all the "deploy" servers.
+    Deploy(DeployCommand),
 
     /// Create an overlay directory tree for each deployment server
     ///
@@ -153,7 +154,7 @@ fn do_exec(
 }
 
 fn do_sync(config: &Config) -> Result<()> {
-    let server =
+    let builder =
         config.servers.get(&config.builder.server).ok_or_else(|| {
             FlingError::InvalidServers(vec![config.builder.server.clone()])
         })?;
@@ -164,10 +165,13 @@ fn do_sync(config: &Config) -> Result<()> {
         format!("{}/", config.omicron_path.canonicalize()?.to_string_lossy());
     let dst = format!(
         "{}@{}:{}",
-        server.username,
-        server.addr,
+        builder.username,
+        builder.addr,
         config.builder.omicron_path.to_str().unwrap()
     );
+
+    println!("Synchronizing source files to: {}", dst);
+
     let mut cmd = Command::new("rsync");
     cmd.arg("-az")
         .arg("-e")
@@ -238,7 +242,7 @@ fn do_package(config: &Config, artifact_dir: PathBuf) -> Result<()> {
 }
 
 fn do_check(config: &Config) -> Result<()> {
-    let server = &config.servers[&config.builder.server];
+    let builder = &config.servers[&config.builder.server];
 
     let cmd = format!(
         "bash -lc \
@@ -248,7 +252,7 @@ fn do_check(config: &Config) -> Result<()> {
         config.release_arg(),
     );
 
-    ssh_exec(&server, &cmd, false)
+    ssh_exec(&builder, &cmd, false)
 }
 
 fn do_uninstall(
@@ -259,7 +263,11 @@ fn do_uninstall(
     let mut deployment_src = PathBuf::from(&config.deployment.staging_dir);
     deployment_src.push(&artifact_dir);
     for server_name in &config.deployment.servers {
+        let builder = &config.servers[&config.builder.server];
         let server = &config.servers[server_name];
+
+        copy_omicron_package_binary_to_staging(config, builder, server)?;
+
         // Run `omicron-package uninstall` on the deployment server
         let cmd = format!(
             "cd {} && pfexec ./omicron-package uninstall --in {} --out {}",
@@ -373,15 +381,24 @@ fn single_server_install(
 ) -> Result<()> {
     let server = &config.servers[server_name];
 
+    println!("COPYING packages from builder -> deploy server");
     copy_package_artifacts_to_staging(config, pkg_dir, builder, server)?;
+
+    println!("COPYING deploy tool from builder -> deploy server");
     copy_omicron_package_binary_to_staging(config, builder, server)?;
+
+    println!("COPYING manifest from builder -> deploy server");
     copy_package_manifest_to_staging(config, builder, server)?;
-    run_omicron_package_from_staging(
+
+    println!("INSTALLING packages on deploy server");
+    run_omicron_package_install_from_staging(
         config,
         server,
         &artifact_dir,
         &install_dir,
     )?;
+
+    println!("COPYING overlay files from builder -> deploy server");
     copy_overlay_files_to_staging(
         config,
         pkg_dir,
@@ -389,12 +406,19 @@ fn single_server_install(
         server,
         server_name,
     )?;
+
+    println!("INSTALLING overlay files into the install directory of the deploy server");
     install_overlay_files_from_staging(config, server, &install_dir)?;
+
+    println!("RESTARTING services on the deploy server");
     restart_services(server)
 }
 
 // Copy package artifacts as a result of `omicron-package package` from the
 // builder to the deployment server staging directory.
+//
+// This staging directory acts as an intermediate location where
+// packages may reside prior to being installed.
 fn copy_package_artifacts_to_staging(
     config: &Config,
     pkg_dir: &str,
@@ -452,7 +476,7 @@ fn copy_package_manifest_to_staging(
     ssh_exec(builder, &cmd, true)
 }
 
-fn run_omicron_package_from_staging(
+fn run_omicron_package_install_from_staging(
     config: &Config,
     destination: &Server,
     artifact_dir: &Path,
@@ -554,8 +578,11 @@ fn ssh_exec(
         .arg(&server.addr)
         .arg(&remote_cmd);
     cmd.env("SSH_AUTH_SOCK", auth_sock);
-    cmd.status()
+    let exit_status = cmd.status()
         .context(format!("Failed to run {} on {}", remote_cmd, server.addr))?;
+    if !exit_status.success() {
+        anyhow::bail!("Command failed: {}", exit_status);
+    }
 
     Ok(())
 }
@@ -614,23 +641,24 @@ fn main() -> Result<()> {
             do_exec(&config, cmd, servers)?;
         }
         SubCommand::Sync => do_sync(&config)?,
-        SubCommand::BuildMinimal => do_build_minimal(&config)?,
-        SubCommand::Package(PackageSubCommand::Package { artifact_dir }) => {
+        SubCommand::Builder(BuildCommand::Package { artifact_dir }) => {
             do_package(&config, artifact_dir)?;
         }
-        SubCommand::Package(PackageSubCommand::Install {
+        SubCommand::Builder(BuildCommand::Check) => do_check(&config)?,
+        SubCommand::Deploy(DeployCommand::Install {
             artifact_dir,
             install_dir,
         }) => {
+            do_build_minimal(&config)?;
             do_install(&config, &artifact_dir, &install_dir);
         }
-        SubCommand::Package(PackageSubCommand::Uninstall {
+        SubCommand::Deploy(DeployCommand::Uninstall {
             artifact_dir,
             install_dir,
         }) => {
+            do_build_minimal(&config)?;
             do_uninstall(&config, artifact_dir, install_dir)?;
         }
-        SubCommand::Package(PackageSubCommand::Check) => do_check(&config)?,
         SubCommand::Overlay => do_overlay(&config)?,
     }
     Ok(())
