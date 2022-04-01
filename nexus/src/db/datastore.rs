@@ -2903,6 +2903,7 @@ mod test {
     use crate::authz;
     use crate::db::explain::ExplainableAsync;
     use crate::db::identity::Resource;
+    use crate::db::lookup::LookupPath;
     use crate::db::model::{
         ConsoleSession, DatasetKind, Organization, Project,
     };
