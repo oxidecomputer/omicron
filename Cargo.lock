@@ -1436,6 +1436,7 @@ dependencies = [
  "futures",
  "gateway-messages",
  "omicron-test-utils",
+ "once_cell",
  "ringbuffer",
  "serde",
  "slog",

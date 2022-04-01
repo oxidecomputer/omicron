@@ -4,18 +4,23 @@
 
 // Copyright 2022 Oxide Computer Company
 
-pub mod error;
-mod management_switch;
+//! This crate provides UDP-based communication across the Oxide management
+//! switch to a collection of SPs.
+//!
+//! The primary entry point is [`Communicator`].
 
+mod communicator;
+mod management_switch;
+mod recv_handler;
+
+pub mod error;
+
+pub use communicator::Communicator;
+pub use communicator::FuturesUnorderedImpl;
 pub use management_switch::SpIdentifier;
 pub use management_switch::SpType;
-
-// TODO the following should probably not be pub once this crate is more
-// complete; for now make them pub so `gateway` can use them directly
-pub use management_switch::ManagementSwitch;
-pub use management_switch::ManagementSwitchDiscovery;
-pub use management_switch::SpSocket;
-pub use management_switch::SwitchPort;
+pub use recv_handler::SerialConsoleChunk;
+pub use recv_handler::SerialConsoleContents;
 
 // TODO these will remain public for a while, but eventually will be removed
 // altogther; currently these provide a way to hard-code the rack topology,
