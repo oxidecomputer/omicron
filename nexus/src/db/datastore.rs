@@ -27,6 +27,7 @@ use super::pool::DbConnection;
 use super::Pool;
 use crate::authn;
 use crate::authz;
+use crate::authz::ApiResourceError;
 use crate::context::OpContext;
 use crate::db::fixed_data::role_assignment_builtin::BUILTIN_ROLE_ASSIGNMENTS;
 use crate::db::fixed_data::role_builtin::BUILTIN_ROLES;
@@ -58,6 +59,7 @@ use std::convert::{TryFrom, TryInto};
 use std::sync::Arc;
 use uuid::Uuid;
 
+use crate::db::lookup::LookupPath;
 use crate::db::{
     self,
     error::{public_error_from_diesel_pool, ErrorHandler, TransactionError},
@@ -562,134 +564,26 @@ impl DataStore {
         })
     }
 
-    /// Fetches an Organization from the database and returns both the database
-    /// row and an authz::Organization for doing authz checks
-    ///
-    /// There are a few different ways this can be used:
-    ///
-    /// * If a code path wants to use anything in the database row _aside_ from
-    ///   the id, it should do an authz check for `authz::Action::Read` on the
-    ///   returned [`authz::Organization`].  `organization_fetch()` does this,
-    ///   for example.
-    /// * If a code path is only doing this lookup to get the id so that it can
-    ///   look up something else inside the Organization, then the database
-    ///   record is not required -- and neither is an authz check on the
-    ///   Organization.  Callers usually use `organization_lookup_id()` for
-    ///   this.  That function does not expose the database row to the caller.
-    ///
-    ///   Callers in this bucket should still do _some_ authz check.  Clients
-    ///   must not be able to discover whether an Organization exists with a
-    ///   particular name.  It's just that we don't know at this point whether
-    ///   they're allowed to see the Organization.  It depends on whether, as we
-    ///   look up things inside the Organization, we find something that they
-    ///   _are_ able to see.
-    ///
-    /// **This is an internal-only function.** This function cannot know what
-    /// authz checks are required.  As a result, it should not be made
-    /// accessible outside the DataStore.  It should always be wrapped by
-    /// something that does the appropriate authz check.
-    // TODO-security We should refactor things so that it's harder to
-    // accidentally mark this "pub" or otherwise expose database data without
-    // doing an authz check.
-    async fn organization_lookup_noauthz(
-        &self,
-        name: &Name,
-    ) -> LookupResult<(authz::Organization, Organization)> {
-        use db::schema::organization::dsl;
-
-        // TODO-security uncomment when all endpoints are protected by authn
-        //let silo_id = opctx.authn.silo_required()?;
-        let silo_id = *SILO_ID;
-
-        dsl::organization
-            .filter(dsl::time_deleted.is_null())
-            .filter(dsl::name.eq(name.clone()))
-            .filter(dsl::silo_id.eq(silo_id))
-            .select(Organization::as_select())
-            .get_result_async::<Organization>(self.pool())
-            .await
-            .map_err(|e| {
-                public_error_from_diesel_pool(
-                    e,
-                    ErrorHandler::NotFoundByLookup(
-                        ResourceType::Organization,
-                        LookupType::ByName(name.as_str().to_owned()),
-                    ),
-                )
-            })
-            .map(|o| {
-                (
-                    authz::FLEET
-                        .organization(o.id(), LookupType::from(&name.0)),
-                    o,
-                )
-            })
-    }
-
-    /// Look up the id for an organization based on its name
-    ///
-    /// Returns an [`authz::Organization`] (which makes the id available).
-    ///
-    /// This function does no authz checks because it is not possible to know
-    /// just by looking up an Organization's id what privileges are required.
-    pub async fn organization_lookup_by_path(
-        &self,
-        name: &Name,
-    ) -> LookupResult<authz::Organization> {
-        self.organization_lookup_noauthz(name).await.map(|(o, _)| o)
-    }
-
-    /// Lookup an organization by name.
-    pub async fn organization_fetch(
-        &self,
-        opctx: &OpContext,
-        name: &Name,
-    ) -> LookupResult<(authz::Organization, Organization)> {
-        let (authz_org, db_org) =
-            self.organization_lookup_noauthz(name).await?;
-        opctx.authorize(authz::Action::Read, &authz_org).await?;
-        Ok((authz_org, db_org))
-    }
-
     /// Delete a organization
     pub async fn organization_delete(
         &self,
         opctx: &OpContext,
-        name: &Name,
+        authz_org: &authz::Organization,
+        db_org: &db::model::Organization,
     ) -> DeleteResult {
+        opctx.authorize(authz::Action::Delete, authz_org).await?;
+
         use db::schema::organization::dsl;
         use db::schema::project;
-
-        let (id, rcgen) = dsl::organization
-            .filter(dsl::time_deleted.is_null())
-            .filter(dsl::name.eq(name.clone()))
-            .select((dsl::id, dsl::rcgen))
-            .get_result_async::<(Uuid, Generation)>(self.pool())
-            .await
-            .map_err(|e| {
-                public_error_from_diesel_pool(
-                    e,
-                    ErrorHandler::NotFoundByLookup(
-                        ResourceType::Organization,
-                        LookupType::ByName(name.as_str().to_owned()),
-                    ),
-                )
-            })?;
-
-        // TODO-cleanup TODO-security This should use a more common lookup
-        // function.
-        let authz_org =
-            authz::FLEET.organization(id, LookupType::from(&name.0));
-        opctx.authorize(authz::Action::Delete, &authz_org).await?;
 
         // Make sure there are no projects present within this organization.
         let project_found = diesel_pool_result_optional(
             project::dsl::project
-                .filter(project::dsl::organization_id.eq(id))
+                .filter(project::dsl::organization_id.eq(authz_org.id()))
                 .filter(project::dsl::time_deleted.is_null())
                 .select(project::dsl::id)
                 .limit(1)
-                .first_async::<Uuid>(self.pool())
+                .first_async::<Uuid>(self.pool_authorized(opctx).await?)
                 .await,
         )
         .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))?;
@@ -703,18 +597,15 @@ impl DataStore {
         let now = Utc::now();
         let updated_rows = diesel::update(dsl::organization)
             .filter(dsl::time_deleted.is_null())
-            .filter(dsl::id.eq(id))
-            .filter(dsl::rcgen.eq(rcgen))
+            .filter(dsl::id.eq(authz_org.id()))
+            .filter(dsl::rcgen.eq(db_org.rcgen))
             .set(dsl::time_deleted.eq(now))
-            .execute_async(self.pool())
+            .execute_async(self.pool_authorized(opctx).await?)
             .await
             .map_err(|e| {
                 public_error_from_diesel_pool(
                     e,
-                    ErrorHandler::NotFoundByLookup(
-                        ResourceType::Organization,
-                        LookupType::ById(id),
-                    ),
+                    ErrorHandler::NotFoundByResource(authz_org),
                 )
             })?;
 
@@ -761,14 +652,12 @@ impl DataStore {
     pub async fn organization_update(
         &self,
         opctx: &OpContext,
-        name: &Name,
+        authz_org: &authz::Organization,
         updates: OrganizationUpdate,
     ) -> UpdateResult<Organization> {
         use db::schema::organization::dsl;
 
-        let authz_org = self.organization_lookup_by_path(name).await?;
-        opctx.authorize(authz::Action::Modify, &authz_org).await?;
-
+        opctx.authorize(authz::Action::Modify, authz_org).await?;
         diesel::update(dsl::organization)
             .filter(dsl::time_deleted.is_null())
             .filter(dsl::id.eq(authz_org.id()))
@@ -779,7 +668,7 @@ impl DataStore {
             .map_err(|e| {
                 public_error_from_diesel_pool(
                     e,
-                    ErrorHandler::NotFoundByResource(&authz_org),
+                    ErrorHandler::NotFoundByResource(authz_org),
                 )
             })
     }
@@ -815,74 +704,6 @@ impl DataStore {
                 )
             }
         })
-    }
-
-    /// Fetches a Project from the database and returns both the database row
-    /// and an authz::Project for doing authz checks
-    ///
-    /// See [`DataStore::organization_lookup_noauthz()`] for intended use cases
-    /// and caveats.
-    // TODO-security See the note on organization_lookup_noauthz().
-    async fn project_lookup_noauthz(
-        &self,
-        authz_org: &authz::Organization,
-        project_name: &Name,
-    ) -> LookupResult<(authz::Project, Project)> {
-        use db::schema::project::dsl;
-        dsl::project
-            .filter(dsl::time_deleted.is_null())
-            .filter(dsl::organization_id.eq(authz_org.id()))
-            .filter(dsl::name.eq(project_name.clone()))
-            .select(Project::as_select())
-            .first_async(self.pool())
-            .await
-            .map_err(|e| {
-                public_error_from_diesel_pool(
-                    e,
-                    ErrorHandler::NotFoundByLookup(
-                        ResourceType::Project,
-                        LookupType::ByName(project_name.as_str().to_owned()),
-                    ),
-                )
-            })
-            .map(|p| {
-                (
-                    authz_org
-                        .project(p.id(), LookupType::from(&project_name.0)),
-                    p,
-                )
-            })
-    }
-
-    /// Look up the id for a Project based on its name
-    ///
-    /// Returns an [`authz::Project`] (which makes the id available).
-    ///
-    /// This function does no authz checks because it is not possible to know
-    /// just by looking up an Project's id what privileges are required.
-    pub async fn project_lookup_by_path(
-        &self,
-        organization_name: &Name,
-        project_name: &Name,
-    ) -> LookupResult<authz::Project> {
-        let authz_org =
-            self.organization_lookup_by_path(organization_name).await?;
-        self.project_lookup_noauthz(&authz_org, project_name)
-            .await
-            .map(|(p, _)| p)
-    }
-
-    /// Lookup a project by name.
-    pub async fn project_fetch(
-        &self,
-        opctx: &OpContext,
-        authz_org: &authz::Organization,
-        name: &Name,
-    ) -> LookupResult<(authz::Project, Project)> {
-        let (authz_project, db_project) =
-            self.project_lookup_noauthz(authz_org, name).await?;
-        opctx.authorize(authz::Action::Read, &authz_project).await?;
-        Ok((authz_project, db_project))
     }
 
     /// Delete a project
@@ -1067,22 +888,18 @@ impl DataStore {
         opctx: &OpContext,
         authz_instance: &authz::Instance,
     ) -> LookupResult<Instance> {
-        use db::schema::instance::dsl;
-
-        opctx.authorize(authz::Action::Read, authz_instance).await?;
-
-        dsl::instance
-            .filter(dsl::time_deleted.is_null())
-            .filter(dsl::id.eq(authz_instance.id()))
-            .select(Instance::as_select())
-            .get_result_async(self.pool_authorized(opctx).await?)
+        let (.., db_instance) = LookupPath::new(opctx, self)
+            .instance_id(authz_instance.id())
+            .fetch()
             .await
-            .map_err(|e| {
-                public_error_from_diesel_pool(
-                    e,
-                    ErrorHandler::NotFoundByResource(authz_instance),
-                )
-            })
+            .map_err(|e| match e {
+                // Use the "not found" message of the authz object we were
+                // given, which will reflect however the caller originally
+                // looked it up.
+                Error::ObjectNotFound { .. } => authz_instance.not_found(),
+                e => e,
+            })?;
+        Ok(db_instance)
     }
 
     // TODO-design It's tempting to return the updated state of the Instance
@@ -1182,85 +999,6 @@ impl DataStore {
     }
 
     // Disks
-
-    /// Fetches a Disk from the database and returns both the database row
-    /// and an [`authz::Disk`] for doing authz checks
-    ///
-    /// See [`DataStore::organization_lookup_noauthz()`] for intended use cases
-    /// and caveats.
-    // TODO-security See the note on organization_lookup_noauthz().
-    async fn disk_lookup_noauthz(
-        &self,
-        authz_project: &authz::Project,
-        disk_name: &Name,
-    ) -> LookupResult<(authz::Disk, Disk)> {
-        use db::schema::disk::dsl;
-        dsl::disk
-            .filter(dsl::time_deleted.is_null())
-            .filter(dsl::project_id.eq(authz_project.id()))
-            .filter(dsl::name.eq(disk_name.clone()))
-            .select(Disk::as_select())
-            .first_async(self.pool())
-            .await
-            .map_err(|e| {
-                public_error_from_diesel_pool(
-                    e,
-                    ErrorHandler::NotFoundByLookup(
-                        ResourceType::Disk,
-                        LookupType::ByName(disk_name.as_str().to_owned()),
-                    ),
-                )
-            })
-            .map(|d| {
-                (
-                    authz_project.child_generic(
-                        ResourceType::Disk,
-                        d.id(),
-                        LookupType::from(&disk_name.0),
-                    ),
-                    d,
-                )
-            })
-    }
-
-    /// Look up the id for a Disk based on its name
-    ///
-    /// Returns an [`authz::Disk`] (which makes the id available).
-    ///
-    /// Like the other "lookup_by_path()" functions, this function does no authz
-    /// checks.
-    // TODO-security For Containers in the hierarchy (like Organizations and
-    // Projects), we don't do an authz check in the "lookup_by_path" functions
-    // because we don't know if the caller has access to do the lookup.  For
-    // leaf resources (like Instances and Disks), though, we do.  We could do
-    // the authz check here.  Should we?
-    pub async fn disk_lookup_by_path(
-        &self,
-        organization_name: &Name,
-        project_name: &Name,
-        disk_name: &Name,
-    ) -> LookupResult<authz::Disk> {
-        let authz_project = self
-            .project_lookup_by_path(organization_name, project_name)
-            .await?;
-        self.disk_lookup_noauthz(&authz_project, disk_name)
-            .await
-            .map(|(d, _)| d)
-    }
-
-    /// Lookup a Disk by name and return the full database record, along with
-    /// an [`authz::Disk`] for subsequent authorization checks
-    pub async fn disk_fetch(
-        &self,
-        opctx: &OpContext,
-        authz_project: &authz::Project,
-        name: &Name,
-    ) -> LookupResult<(authz::Disk, Disk)> {
-        let (authz_disk, db_disk) =
-            self.disk_lookup_noauthz(authz_project, name).await?;
-        opctx.authorize(authz::Action::Read, &authz_disk).await?;
-        Ok((authz_disk, db_disk))
-    }
 
     /// List disks associated with a given instance.
     pub async fn instance_list_disks(
@@ -1376,35 +1114,29 @@ impl DataStore {
 
     /// Fetches information about a Disk that the caller has previously fetched
     ///
-    /// The principal difference from `disk_fetch` is that this function takes
-    /// an `authz_disk` and does a lookup by id rather than the full path of
-    /// names (organization name, project name, and disk name).  This could be
-    /// called `disk_lookup_by_id`, except that you might expect to get back an
-    /// `authz::Disk` as well.  We cannot return you a new `authz::Disk` because
-    /// we don't know how you looked up the Disk in the first place.  However,
-    /// you must have previously looked it up, which is why we call this
-    /// `refetch`.
+    /// The only difference between this function and a new fetch by id is that
+    /// this function preserves the `authz_disk` that you started with -- which
+    /// keeps track of how you looked it up.  So if you looked it up by name,
+    /// the authz you get back will reflect that, whereas if you did a fresh
+    /// lookup by id, it wouldn't.
+    /// TODO-cleanup this could be provided by the Lookup API for any resource
     pub async fn disk_refetch(
         &self,
         opctx: &OpContext,
         authz_disk: &authz::Disk,
     ) -> LookupResult<Disk> {
-        use db::schema::disk::dsl;
-
-        opctx.authorize(authz::Action::Read, authz_disk).await?;
-
-        dsl::disk
-            .filter(dsl::time_deleted.is_null())
-            .filter(dsl::id.eq(authz_disk.id()))
-            .select(Disk::as_select())
-            .get_result_async(self.pool_authorized(opctx).await?)
+        let (.., db_disk) = LookupPath::new(opctx, self)
+            .disk_id(authz_disk.id())
+            .fetch()
             .await
-            .map_err(|e| {
-                public_error_from_diesel_pool(
-                    e,
-                    ErrorHandler::NotFoundByResource(authz_disk),
-                )
-            })
+            .map_err(|e| match e {
+                // Use the "not found" message of the authz object we were
+                // given, which will reflect however the caller originally
+                // looked it up.
+                Error::ObjectNotFound { .. } => authz_disk.not_found(),
+                e => e,
+            })?;
+        Ok(db_disk)
     }
 
     /// Updates a disk record to indicate it has been deleted.
@@ -1650,27 +1382,6 @@ impl DataStore {
                 )
             })?;
         Ok(())
-    }
-
-    // Fetch a record for an Oximeter instance, by its ID.
-    pub async fn oximeter_fetch(
-        &self,
-        id: Uuid,
-    ) -> Result<OximeterInfo, Error> {
-        use db::schema::oximeter::dsl;
-        dsl::oximeter
-            .filter(dsl::id.eq(id))
-            .first_async::<OximeterInfo>(self.pool())
-            .await
-            .map_err(|e| {
-                public_error_from_diesel_pool(
-                    e,
-                    ErrorHandler::NotFoundByLookup(
-                        ResourceType::Oximeter,
-                        LookupType::ById(id),
-                    ),
-                )
-            })
     }
 
     // List the oximeter collector instances
@@ -3002,7 +2713,7 @@ impl DataStore {
         self.silo_lookup_noauthz(name).await
     }
 
-    pub async fn silo_lookup_noauthz(
+    async fn silo_lookup_noauthz(
         &self,
         // XXX enable when all endpoints are protected by authn
         // opctx: &OpContext,
@@ -3163,6 +2874,7 @@ mod test {
     use crate::authz;
     use crate::db::explain::ExplainableAsync;
     use crate::db::identity::Resource;
+    use crate::db::lookup::LookupPath;
     use crate::db::model::{
         ConsoleSession, DatasetKind, Organization, Project,
     };
@@ -3211,10 +2923,12 @@ mod test {
         );
         datastore.project_create(&opctx, &org, project).await.unwrap();
 
-        let (_, organization_after_project_create) = datastore
-            .organization_fetch(&opctx, organization.name())
-            .await
-            .unwrap();
+        let (.., organization_after_project_create) =
+            LookupPath::new(&opctx, &datastore)
+                .organization_name(organization.name())
+                .fetch()
+                .await
+                .unwrap();
         assert!(organization_after_project_create.rcgen > organization.rcgen);
 
         db.cleanup().await.unwrap();

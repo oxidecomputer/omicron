@@ -166,6 +166,7 @@ pub struct Nexus {
 // particularly good example is probably list() (or even lookup()), where
 // with the right type parameters, generic code can be written to work on all
 // types.
+//
 // TODO update and delete need to accommodate both with-etag and don't-care
 // TODO audit logging ought to be part of this structure and its functions
 impl Nexus {
@@ -555,9 +556,13 @@ impl Nexus {
     pub async fn organization_fetch(
         &self,
         opctx: &OpContext,
-        name: &Name,
+        organization_name: &Name,
     ) -> LookupResult<db::model::Organization> {
-        Ok(self.db_datastore.organization_fetch(opctx, name).await?.1)
+        let (.., db_organization) = LookupPath::new(opctx, &self.db_datastore)
+            .organization_name(organization_name)
+            .fetch()
+            .await?;
+        Ok(db_organization)
     }
 
     pub async fn organizations_list_by_name(
@@ -579,19 +584,33 @@ impl Nexus {
     pub async fn organization_delete(
         &self,
         opctx: &OpContext,
-        name: &Name,
+        organization_name: &Name,
     ) -> DeleteResult {
-        self.db_datastore.organization_delete(opctx, name).await
+        let (.., authz_org, db_org) =
+            LookupPath::new(opctx, &self.db_datastore)
+                .organization_name(organization_name)
+                .fetch()
+                .await?;
+        self.db_datastore.organization_delete(opctx, &authz_org, &db_org).await
     }
 
     pub async fn organization_update(
         &self,
         opctx: &OpContext,
-        name: &Name,
+        organization_name: &Name,
         new_params: &params::OrganizationUpdate,
     ) -> UpdateResult<db::model::Organization> {
+        let (.., authz_organization) =
+            LookupPath::new(opctx, &self.db_datastore)
+                .organization_name(organization_name)
+                .lookup_for(authz::Action::Modify)
+                .await?;
         self.db_datastore
-            .organization_update(opctx, name, new_params.clone().into())
+            .organization_update(
+                opctx,
+                &authz_organization,
+                new_params.clone().into(),
+            )
             .await
     }
 
@@ -603,7 +622,7 @@ impl Nexus {
         organization_name: &Name,
         new_project: &params::ProjectCreate,
     ) -> CreateResult<db::model::Project> {
-        let (authz_org,) = LookupPath::new(opctx, &self.db_datastore)
+        let (.., authz_org) = LookupPath::new(opctx, &self.db_datastore)
             .organization_name(organization_name)
             .lookup_for(authz::Action::CreateChild)
             .await?;
@@ -653,12 +672,12 @@ impl Nexus {
         organization_name: &Name,
         project_name: &Name,
     ) -> LookupResult<db::model::Project> {
-        Ok(LookupPath::new(opctx, &self.db_datastore)
+        let (.., db_project) = LookupPath::new(opctx, &self.db_datastore)
             .organization_name(organization_name)
             .project_name(project_name)
             .fetch()
-            .await?
-            .2)
+            .await?;
+        Ok(db_project)
     }
 
     pub async fn projects_list_by_name(
@@ -697,9 +716,10 @@ impl Nexus {
         organization_name: &Name,
         project_name: &Name,
     ) -> DeleteResult {
-        let authz_project = self
-            .db_datastore
-            .project_lookup_by_path(organization_name, project_name)
+        let (.., authz_project) = LookupPath::new(opctx, &self.db_datastore)
+            .organization_name(organization_name)
+            .project_name(project_name)
+            .lookup_for(authz::Action::Delete)
             .await?;
         self.db_datastore.project_delete(opctx, &authz_project).await
     }
@@ -711,9 +731,10 @@ impl Nexus {
         project_name: &Name,
         new_params: &params::ProjectUpdate,
     ) -> UpdateResult<db::model::Project> {
-        let authz_project = self
-            .db_datastore
-            .project_lookup_by_path(organization_name, project_name)
+        let (.., authz_project) = LookupPath::new(opctx, &self.db_datastore)
+            .organization_name(organization_name)
+            .project_name(project_name)
+            .lookup_for(authz::Action::Modify)
             .await?;
         self.db_datastore
             .project_update(opctx, &authz_project, new_params.clone().into())
@@ -729,9 +750,10 @@ impl Nexus {
         project_name: &Name,
         pagparams: &DataPageParams<'_, Name>,
     ) -> ListResultVec<db::model::Disk> {
-        let authz_project = self
-            .db_datastore
-            .project_lookup_by_path(organization_name, project_name)
+        let (.., authz_project) = LookupPath::new(opctx, &self.db_datastore)
+            .organization_name(organization_name)
+            .project_name(project_name)
+            .lookup_for(authz::Action::ListChildren)
             .await?;
         self.db_datastore
             .project_list_disks(opctx, &authz_project, pagparams)
@@ -745,15 +767,11 @@ impl Nexus {
         project_name: &Name,
         params: &params::DiskCreate,
     ) -> CreateResult<db::model::Disk> {
-        let authz_project = self
-            .db_datastore
-            .project_lookup_by_path(organization_name, project_name)
+        let (.., authz_project) = LookupPath::new(opctx, &self.db_datastore)
+            .organization_name(organization_name)
+            .project_name(project_name)
+            .lookup_for(authz::Action::CreateChild)
             .await?;
-
-        // TODO-security This may need to be revisited once we implement authz
-        // checks for saga actions.  Even then, though, it still will be correct
-        // (if possibly redundant) to check this here.
-        opctx.authorize(authz::Action::CreateChild, &authz_project).await?;
 
         // Until we implement snapshots, do not allow disks to be created with a
         // snapshot id.
@@ -791,15 +809,13 @@ impl Nexus {
         project_name: &Name,
         disk_name: &Name,
     ) -> LookupResult<db::model::Disk> {
-        let authz_project = self
-            .db_datastore
-            .project_lookup_by_path(organization_name, project_name)
+        let (.., db_disk) = LookupPath::new(opctx, &self.db_datastore)
+            .organization_name(organization_name)
+            .project_name(project_name)
+            .disk_name(disk_name)
+            .fetch()
             .await?;
-        Ok(self
-            .db_datastore
-            .disk_fetch(opctx, &authz_project, disk_name)
-            .await?
-            .1)
+        Ok(db_disk)
     }
 
     pub async fn project_delete_disk(
@@ -809,18 +825,12 @@ impl Nexus {
         project_name: &Name,
         disk_name: &Name,
     ) -> DeleteResult {
-        let authz_disk = self
-            .db_datastore
-            .disk_lookup_by_path(organization_name, project_name, disk_name)
+        let (.., authz_disk) = LookupPath::new(opctx, &self.db_datastore)
+            .organization_name(organization_name)
+            .project_name(project_name)
+            .disk_name(disk_name)
+            .lookup_for(authz::Action::Delete)
             .await?;
-
-        // TODO: We need to sort out the authorization checks.
-        //
-        // Normally, this would be coupled alongside access to the
-        // datastore, but now that disk deletion exists within a Saga,
-        // this would require OpContext to be serialized (which is
-        // not trivial).
-        opctx.authorize(authz::Action::Delete, &authz_disk).await?;
 
         let saga_params =
             Arc::new(sagas::ParamsDiskDelete { disk_id: authz_disk.id() });
@@ -913,9 +923,10 @@ impl Nexus {
         project_name: &Name,
         pagparams: &DataPageParams<'_, Name>,
     ) -> ListResultVec<db::model::Instance> {
-        let authz_project = self
-            .db_datastore
-            .project_lookup_by_path(organization_name, project_name)
+        let (.., authz_project) = LookupPath::new(opctx, &self.db_datastore)
+            .organization_name(organization_name)
+            .project_name(project_name)
+            .lookup_for(authz::Action::ListChildren)
             .await?;
         self.db_datastore
             .project_list_instances(opctx, &authz_project, pagparams)
@@ -929,12 +940,11 @@ impl Nexus {
         project_name: &Name,
         params: &params::InstanceCreate,
     ) -> CreateResult<db::model::Instance> {
-        let authz_project = self
-            .db_datastore
-            .project_lookup_by_path(organization_name, project_name)
+        let (.., authz_project) = LookupPath::new(opctx, &self.db_datastore)
+            .organization_name(organization_name)
+            .project_name(project_name)
+            .lookup_for(authz::Action::CreateChild)
             .await?;
-
-        opctx.authorize(authz::Action::CreateChild, &authz_project).await?;
 
         // Validate parameters
         if params.disks.len() > MAX_DISKS_PER_INSTANCE as usize {
@@ -1838,15 +1848,14 @@ impl Nexus {
         project_name: &Name,
         pagparams: &DataPageParams<'_, Name>,
     ) -> ListResultVec<db::model::Vpc> {
-        let authz_project = self
-            .db_datastore
-            .project_lookup_by_path(organization_name, project_name)
+        let (.., authz_project) = LookupPath::new(opctx, &self.db_datastore)
+            .organization_name(organization_name)
+            .project_name(project_name)
+            .lookup_for(authz::Action::ListChildren)
             .await?;
-        let vpcs = self
-            .db_datastore
+        self.db_datastore
             .project_list_vpcs(&opctx, &authz_project, pagparams)
-            .await?;
-        Ok(vpcs)
+            .await
     }
 
     pub async fn project_create_vpc(
@@ -1856,9 +1865,10 @@ impl Nexus {
         project_name: &Name,
         params: &params::VpcCreate,
     ) -> CreateResult<db::model::Vpc> {
-        let authz_project = self
-            .db_datastore
-            .project_lookup_by_path(organization_name, project_name)
+        let (.., authz_project) = LookupPath::new(opctx, &self.db_datastore)
+            .organization_name(organization_name)
+            .project_name(project_name)
+            .lookup_for(authz::Action::CreateChild)
             .await?;
         let vpc_id = Uuid::new_v4();
         let system_router_id = Uuid::new_v4();
