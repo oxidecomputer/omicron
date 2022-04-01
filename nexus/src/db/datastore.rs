@@ -121,7 +121,7 @@ impl DataStore {
     // the database.  Eventually, this function should only be used for doing
     // authentication in the first place (since we can't do an authz check in
     // that case).
-    pub(super) fn pool(&self) -> &bb8::Pool<ConnectionManager<DbConnection>> {
+    fn pool(&self) -> &bb8::Pool<ConnectionManager<DbConnection>> {
         self.pool.pool()
     }
 
@@ -164,11 +164,15 @@ impl DataStore {
         opctx: &OpContext,
         pagparams: &DataPageParams<'_, Uuid>,
     ) -> ListResultVec<Sled> {
+        // This is a little cheesy, but we grab the connection before
+        // authorizing in order to kick out unauthenticated users with a 401
+        // rather than a 404 (for consistency with other endpoints).
+        let conn = self.pool_authorized(opctx).await?;
         opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
         use db::schema::sled::dsl;
         paginated(dsl::sled, dsl::id, pagparams)
             .select(Sled::as_select())
-            .load_async(self.pool_authorized(opctx).await?)
+            .load_async(conn)
             .await
             .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
     }
@@ -178,12 +182,16 @@ impl DataStore {
         opctx: &OpContext,
         authz_sled: &authz::Sled,
     ) -> LookupResult<Sled> {
+        // This is a little cheesy, but we grab the connection before
+        // authorizing in order to kick out unauthenticated users with a 401
+        // rather than a 404 (for consistency with other endpoints).
+        let conn = self.pool_authorized(opctx).await?;
         opctx.authorize(authz::Action::Read, authz_sled).await?;
         use db::schema::sled::dsl;
         dsl::sled
             .filter(dsl::id.eq(authz_sled.id()))
             .select(Sled::as_select())
-            .first_async(self.pool_authorized(opctx).await?)
+            .first_async(conn)
             .await
             .map_err(|e| {
                 public_error_from_diesel_pool(
@@ -2263,11 +2271,15 @@ impl DataStore {
         opctx: &OpContext,
         pagparams: &DataPageParams<'_, Name>,
     ) -> ListResultVec<UserBuiltin> {
+        // This is a little cheesy, but we grab the connection before
+        // authorizing in order to kick out unauthenticated users with a 401
+        // rather than a 404 (for consistency with other endpoints).
+        let conn = self.pool_authorized(opctx).await?;
         use db::schema::user_builtin::dsl;
         opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
         paginated(dsl::user_builtin, dsl::name, pagparams)
             .select(UserBuiltin::as_select())
-            .load_async::<UserBuiltin>(self.pool_authorized(opctx).await?)
+            .load_async::<UserBuiltin>(conn)
             .await
             .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
     }
@@ -2278,16 +2290,7 @@ impl DataStore {
         name: &Name,
     ) -> LookupResult<UserBuiltin> {
         use db::schema::user_builtin::dsl;
-        opctx
-            .authorize(
-                authz::Action::Read,
-                &authz::FLEET.child_generic(
-                    ResourceType::User,
-                    LookupType::from(&name.0),
-                ),
-            )
-            .await?;
-        dsl::user_builtin
+        let db_user = dsl::user_builtin
             .filter(dsl::name.eq(name.clone()))
             .select(UserBuiltin::as_select())
             .first_async::<UserBuiltin>(self.pool_authorized(opctx).await?)
@@ -2300,7 +2303,21 @@ impl DataStore {
                         LookupType::ByName(name.as_str().to_owned()),
                     ),
                 )
-            })
+            })?;
+
+        // We could have authorized this before the database query, but we do it
+        // afterwards for consistency with the way other lookups work, both in
+        // terms of code structure and end user behavior.
+        opctx
+            .authorize(
+                authz::Action::Read,
+                &authz::FLEET.child_generic(
+                    ResourceType::User,
+                    LookupType::from(&name.0),
+                ),
+            )
+            .await?;
+        Ok(db_user)
     }
 
     /// Load built-in users into the database
@@ -2369,6 +2386,10 @@ impl DataStore {
         pagparams: &DataPageParams<'_, (String, String)>,
     ) -> ListResultVec<RoleBuiltin> {
         use db::schema::role_builtin::dsl;
+        // This is a little cheesy, but we grab the connection before
+        // authorizing in order to kick out unauthenticated users with a 401
+        // rather than a 404 (for consistency with other endpoints).
+        let conn = self.pool_authorized(opctx).await?;
         opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
         paginated_multicolumn(
             dsl::role_builtin,
@@ -2376,7 +2397,7 @@ impl DataStore {
             pagparams,
         )
         .select(RoleBuiltin::as_select())
-        .load_async::<RoleBuiltin>(self.pool_authorized(opctx).await?)
+        .load_async::<RoleBuiltin>(conn)
         .await
         .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
     }
@@ -2387,13 +2408,6 @@ impl DataStore {
         name: &str,
     ) -> LookupResult<RoleBuiltin> {
         use db::schema::role_builtin::dsl;
-        opctx
-            .authorize(
-                authz::Action::Read,
-                &authz::FLEET
-                    .child_generic(ResourceType::Role, LookupType::from(name)),
-            )
-            .await?;
 
         let (resource_type, role_name) =
             name.split_once(".").ok_or_else(|| Error::ObjectNotFound {
@@ -2401,7 +2415,7 @@ impl DataStore {
                 lookup_type: LookupType::ByName(String::from(name)),
             })?;
 
-        dsl::role_builtin
+        let db_role = dsl::role_builtin
             .filter(dsl::resource_type.eq(String::from(resource_type)))
             .filter(dsl::role_name.eq(String::from(role_name)))
             .select(RoleBuiltin::as_select())
@@ -2415,7 +2429,19 @@ impl DataStore {
                         LookupType::ByName(String::from(name)),
                     ),
                 )
-            })
+            })?;
+
+        // We could have authorized this before the database query, but we do it
+        // afterwards for consistency with the way other lookups work, both in
+        // terms of code structure and end user behavior.
+        opctx
+            .authorize(
+                authz::Action::Read,
+                &authz::FLEET
+                    .child_generic(ResourceType::Role, LookupType::from(name)),
+            )
+            .await?;
+        Ok(db_role)
     }
 
     /// Load built-in roles into the database

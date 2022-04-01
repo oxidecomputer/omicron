@@ -2719,6 +2719,9 @@ impl Nexus {
         opctx: &OpContext,
         pagparams: &DataPageParams<'_, Uuid>,
     ) -> ListResult<db::model::Rack> {
+        // For consistency with other endpoints, kick out unauthenticated users
+        // with a 401 before doing an authz check.
+        let _ = opctx.authn.actor_required()?;
         opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
 
         if let Some(marker) = pagparams.marker {
@@ -2735,6 +2738,9 @@ impl Nexus {
         opctx: &OpContext,
         rack_id: &Uuid,
     ) -> LookupResult<db::model::Rack> {
+        // For consistency with other endpoints, kick out unauthenticated users
+        // with a 401 before doing an authz check.
+        let _ = opctx.authn.actor_required()?;
         let authz_rack = authz::FLEET
             .child_generic(ResourceType::Rack, LookupType::ById(*rack_id));
         opctx.authorize(authz::Action::Read, &authz_rack).await?;
@@ -2773,6 +2779,10 @@ impl Nexus {
         opctx: &OpContext,
         pagparams: &DataPageParams<'_, Uuid>,
     ) -> ListResult<external::Saga> {
+        // For consistency with other endpoints, kick out unauthenticated users
+        // with a 401 before doing an authz check.
+        let _ = opctx.authn.actor_required()?;
+
         // The endpoint we're serving only supports `ScanById`, which only
         // supports an ascending scan.
         bail_unless!(
@@ -2795,6 +2805,10 @@ impl Nexus {
         opctx: &OpContext,
         id: Uuid,
     ) -> LookupResult<external::Saga> {
+        // For consistency with other endpoints, kick out unauthenticated users
+        // with a 401 before doing an authz check.
+        let _ = opctx.authn.actor_required()?;
+
         opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
         self.sec_client
             .saga_get(steno::SagaId::from(id))
@@ -2969,6 +2983,10 @@ impl Nexus {
         pag_params: &TimeseriesSchemaPaginationParams,
         limit: NonZeroU32,
     ) -> Result<dropshot::ResultsPage<TimeseriesSchema>, Error> {
+        // For consistency with other endpoints, kick out unauthenticated users
+        // with a 401 before doing an authz check.
+        let _ = opctx.authn.actor_required()?;
+
         opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
         self.timeseries_client
             .timeseries_schema_list(&pag_params.page, limit)
@@ -3070,6 +3088,10 @@ impl Nexus {
         &self,
         opctx: &OpContext,
     ) -> Result<(), Error> {
+        // For consistency with other endpoints, kick out unauthenticated users
+        // with a 401 before doing an authz check.
+        let _ = opctx.authn.actor_required()?;
+
         opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
 
         let updates_config = self.updates_config.as_ref().ok_or_else(|| {

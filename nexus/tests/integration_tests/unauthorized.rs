@@ -227,12 +227,11 @@ async fn verify_endpoint(
     let log = log.new(o!("url" => endpoint.url));
     info!(log, "test: begin endpoint");
 
-    // Determine the expected status code for unauthenticated requests, based on
-    // the endpoint's visibility.
-    let unauthn_status = match endpoint.visibility {
-        Visibility::Public => StatusCode::UNAUTHORIZED,
-        Visibility::Protected => StatusCode::NOT_FOUND,
-    };
+    // Unauthenticated users always get a 401.  That's not intrinsically true
+    // But it's true today because every endpoint that we test here requires a
+    // database access, and most of them require a Silo too (which is implicitly
+    // specified in a user's authentication credentials).
+    let unauthn_status = StatusCode::UNAUTHORIZED;
 
     // Determine the expected status code for authenticated, unauthorized
     // requests, based on the endpoint's visibility.
