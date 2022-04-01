@@ -86,6 +86,7 @@ use crate::db::{
 // TODO: This should likely turn into a configuration option.
 const REGION_REDUNDANCY_THRESHOLD: usize = 3;
 
+
 // Represents a query that is ready to be executed.
 //
 // This helper trait lets the statement either be executed or explained.

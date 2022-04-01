@@ -2,7 +2,6 @@
 :toc: left
 :icons: font
 
-
 = Oxide Control Plane
 
 This repo houses the work-in-progress Oxide Rack control plane.
