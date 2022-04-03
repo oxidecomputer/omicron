@@ -110,14 +110,14 @@ jobs:
       uses: actions/cache@26968a09c0ea4f3e233fdddbafd1166051a095f6
       with:
         key: ${{ runner.os }}-cockroach-binary-${{ hashFiles('tools/cockroachdb_checksums') }}
-        path: "cockroachdb"
+        path: "./out/cockroachdb"
     - name: Configure GitHub cache for ClickHouse binaries
       id: cache-clickhouse
       # actions/cache@v2.1.4
       uses: actions/cache@26968a09c0ea4f3e233fdddbafd1166051a095f6
       with:
         key: ${{ runner.os }}-clickhouse-binary-${{ hashFiles('tools/clickhouse_checksums') }}
-        path: "clickhouse"
+        path: "./out/clickhouse"
     - name: Download ClickHouse
       if: steps.cache-clickhouse.outputs.cache-hit != 'true'
       run: ./tools/ci_download_clickhouse
@@ -146,7 +146,7 @@ jobs:
       # rebuild here.
       # Put "./cockroachdb/bin" and "./clickhouse" on the PATH for the test
       # suite.
-      run: TMPDIR=$OMICRON_TMP PATH="$PATH:$PWD/cockroachdb/bin:$PWD/clickhouse" RUSTFLAGS="-D warnings" RUSTDOCFLAGS="-D warnings" cargo test --no-fail-fast --workspace --locked --verbose
+      run: TMPDIR=$OMICRON_TMP PATH="$PATH:$PWD/out/cockroachdb/bin:$PWD/out/clickhouse" RUSTFLAGS="-D warnings" RUSTDOCFLAGS="-D warnings" cargo test --no-fail-fast --workspace --locked --verbose
     - name: Archive any failed test results
       if: ${{ failure() }}
       # actions/upload-artifact@v2.3.1
