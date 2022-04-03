@@ -21,7 +21,8 @@ elif [[ "${HOST_OS}" == "SunOS" ]]; then
 
   # Perform updates
   if (( ${#need[@]} > 0 )); then
-    pfexec pkg install -v "${need[@]}" && rc=$? || rc=$?
+    rc=0
+    pfexec pkg install -v "${need[@]}" || rc=$?
     # Return codes:
     #  0: Normal Success
     #  4: Failure because we're already up-to-date. Also acceptable.
@@ -41,3 +42,30 @@ fi
 
 ./tools/ci_download_cockroachdb
 ./tools/ci_download_clickhouse
+
+# Validate the PATH:
+expected_in_path=(
+  'pg_config'
+  'pkg-config'
+)
+
+declare -A illumos_hints=(
+  ['pg_config']="On illumos, this is typically found in '/opt/ooce/bin'"
+  ['pkg-config']="On illumos, this is typically found in '/usr/bin'"
+)
+
+for command in "${expected_in_path[@]}"; do
+  rc=0
+  which "$command" &> /dev/null || rc=$?
+  if [ "$rc" -ne 0 ]; then
+    echo "$command seems installed, but not found in PATH. Please add it."
+
+
+    if [[ "${HOST_OS}" == "SunOS" ]]; then
+      if [ "${illumos_hints[$command]+_}" ]; then
+        echo "${illumos_hints[$command]}"
+      fi
+    fi
+    exit -1
+  fi
+done

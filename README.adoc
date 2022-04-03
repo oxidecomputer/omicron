@@ -41,56 +41,6 @@ The following software may be installed automatically with the following scripts
 $ ./tools/install_prerequisites.sh
 ----
 
-Alternatively, the manual installation steps as follows:
-
-Both normal execution and the test suite expect certain binaries (described below) on your PATH.
-
-. libpq, the PostgreSQL client library
-+
---
-We use Diesel's PostgreSQL support to connect to CockroachDB (which is wire-compatible with PostgreSQL).  Diesel uses the native libpq to do this.  You can get the client library with:
-
-* Helios: `pkg install library/postgresql-13`
-* Linux: `sudo apt-get install libpq-dev`
-* Mac: `brew install postgresql`
-
-After doing this, you should have the `pg_config` command on your PATH.  For example, on Helios, you'd want `/opt/ooce/bin` on your PATH.
---
-. pkg-config, a tool for querying installed libraries
-+
---
-
-* Helios: `pkg install pkg-config`
-* Linux: `sudo apt-get install pkg-config`
-* Mac: `brew install pkg-config`
-
-After doing this, you should have the `pkg-config` command on your PATH.  For
-example, on Helios, you'd want `/usr/bin` on your PATH.
---
-. CockroachDB v21.1.10.
-+
-The build and test suite expects to be able to start a single-node CockroachDB cluster using the `cockroach` executable on your PATH.
-On illumos, MacOS, and Linux, you should be able to use the `tools/ci_download_cockroachdb` script to fetch the official CockroachDB binary.  It will be put into `./out/cockroachdb/bin/cockroach`.
-Alternatively, you can follow the https://www.cockroachlabs.com/docs/stable/install-cockroachdb.html[official CockroachDB installation instructions for your platform].
-
-. ClickHouse >= v21.7.1.
-+
-The test suite expects a running instance of the ClickHouse database server.
-The script `./tools/ci_download_clickhouse` can be used to download a pre-built binary for illumos, Linux, or macOS platforms. Once complete, you must manually add the binary (located at `./out/clickhouse/clickhouse`) to your PATH.
-You may also install ClickHouse manually; instructions can be found https://clickhouse.tech/docs/en/getting-started/install[here].
-See <<_configuring_clickhouse>> for details on ClickHouse's setup and configuration files.
-+
-. Additional software requirements:
-+
-On an illumos-based machine (Helios, OmniOS), if you want to run the real (non-simulated) Sled Agent to run actual VMs with Propolis, make sure your packages are up to date, and you have the `brand/omicron1/tools` package:
-+
-[source,text]
-----
-pkg install brand/omicron1/tools
-pkg install pkg:/package/pkg
-pkg update
-----
-
 === Running (Simulated) Omicron
 
 NOTE: If you'd like to run on Helios, refer to <<Deploying Omicron>> below.
