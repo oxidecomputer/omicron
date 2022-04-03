@@ -60,7 +60,6 @@ for command in "${expected_in_path[@]}"; do
   if [ "$rc" -ne 0 ]; then
     echo "$command seems installed, but not found in PATH. Please add it."
 
-
     if [[ "${HOST_OS}" == "SunOS" ]]; then
       if [ "${illumos_hints[$command]+_}" ]; then
         echo "${illumos_hints[$command]}"
