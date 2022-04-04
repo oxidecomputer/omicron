@@ -51,8 +51,10 @@ pub struct SiloSamlIdentityProviderCreate {
     /// customer's technical contact for saml configuration
     pub technical_contact_email: String,
 
-    /// optional request signing key pair (base64 encoded der files)
+    /// optional request signing public certificate (base64 encoded der file)
     pub public_cert: Option<String>,
+
+    /// optional request signing private key (base64 encoded der file)
     #[serde(skip_serializing)]
     pub private_key: Option<String>,
 }

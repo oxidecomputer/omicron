@@ -6901,11 +6901,12 @@
           "private_key": {
             "nullable": true,
             "writeOnly": true,
+            "description": "optional request signing private key (base64 encoded der file)",
             "type": "string"
           },
           "public_cert": {
             "nullable": true,
-            "description": "optional request signing key pair (base64 encoded der files)",
+            "description": "optional request signing public certificate (base64 encoded der file)",
             "type": "string"
           },
           "silo_id": {
