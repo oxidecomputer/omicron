@@ -2,6 +2,12 @@
 
 set -eu
 
+on_exit () {
+    echo "Something went wrong, but this script is idempotent - If you can fix the issue, try re-running"
+}
+
+trap on_exit ERR
+
 # Set the CWD to Omicron's source.
 SOURCE_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
 cd "${SOURCE_DIR}/.."
