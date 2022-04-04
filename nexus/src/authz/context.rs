@@ -93,16 +93,26 @@ impl Context {
                 error
             ))),
             Ok(false) => {
-                let error = if is_authn {
-                    Error::Forbidden
-                } else {
-                    // If the user did not authenticate successfully, this will
-                    // become a 401 rather than a 403.
+                if !is_authn {
+                    // If the user did not authenticate successfully, they're
+                    // getting a 401.  A 404 would also be reasonable in some
+                    // cases -- GitHub appears to do this, for example.  But
+                    // most of our endpoints require credentials to even locate
+                    // the resource (because your creds are tied to a Silo
+                    // that's the root of the resource lookup path).  Those will
+                    // have to return a 401 if you have no credentials.
+                    // XXX Actually, they don't have to!  The other option is
+                    // that if you hit silo_required() or actor_required(), you
+                    // always get a 404.
                     Error::Unauthenticated {
                         internal_message: String::from(
                             "authorization failed for unauthenticated request",
                         ),
                     }
+                }
+                let error = if is_authn {
+                    Error::Forbidden
+                } else {
                 };
 
                 Err(resource.on_unauthorized(&self.authz, error, actor, action))
