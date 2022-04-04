@@ -14,17 +14,14 @@ set -o xtrace
 cargo --version
 rustc --version
 
-banner clickhouse
-ptime -m ./tools/ci_download_clickhouse
-
-banner cockroach
-ptime -m bash ./tools/ci_download_cockroachdb
-
 #
 # Put "./cockroachdb/bin" and "./clickhouse" on the PATH for the test
 # suite.
 #
 export PATH="$PATH:$PWD/out/cockroachdb/bin:$PWD/out/clickhouse"
+
+banner prerequisites
+ptime -m bash ./tools/install_prerequisites.sh
 
 #
 # We build with:
