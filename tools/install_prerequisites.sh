@@ -84,15 +84,29 @@ expected_in_path=(
   'clickhouse'
 )
 
-declare -A illumos_path_hints=(
-  ['pg_config']="On illumos, this is typically found in '/opt/ooce/bin'"
-  ['pkg-config']="On illumos, this is typically found in '/usr/bin'"
-)
-
-declare -A path_hints=(
-  ['cockroach']="This should have been installed to '$PWD/out/cockroachdb/bin'"
-  ['clickhouse']="This should have been installed to '$PWD/out/clickhouse'"
-)
+function show_hint
+{
+  case "$1" in
+    "pg_config")
+      if [[ "${HOST_OS}" == "SunOS" ]]; then
+        echo "On illumos, $1 is typically found in '/opt/ooce/bin'"
+      fi
+      ;;
+    "pkg-config")
+      if [[ "${HOST_OS}" == "SunOS" ]]; then
+        echo "On illumos, $1 is typically found in '/usr/bin'"
+      fi
+      ;;
+    "cockroach")
+      echo "$1 should have been installed to '$PWD/out/cockroachdb/bin'"
+      ;;
+    "clickhouse")
+      echo "$1 should have been installed to '$PWD/out/clickhouse'"
+      ;;
+    *)
+      ;;
+  esac
+}
 
 # Check all paths before returning an error.
 ANY_PATH_ERROR="false"
@@ -100,18 +114,8 @@ for command in "${expected_in_path[@]}"; do
   rc=0
   which "$command" &> /dev/null || rc=$?
   if [ "$rc" -ne 0 ]; then
-    echo "$command seems installed, but not found in PATH. Please add it."
-
-    if [[ "${HOST_OS}" == "SunOS" ]]; then
-      if [ "${illumos_path_hints[$command]+_}" ]; then
-        echo "${illumos_path_hints[$command]}"
-      fi
-    fi
-
-    if [ "${path_hints[$command]+_}" ]; then
-      echo "${path_hints[$command]}"
-    fi
-
+    echo "ERROR: $command seems installed, but was not found in PATH. Please add it."
+    show_hint "$command"
     ANY_PATH_ERROR="true"
   fi
 done
