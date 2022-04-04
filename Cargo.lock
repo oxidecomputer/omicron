@@ -4931,9 +4931,9 @@ dependencies = [
 
 [[package]]
 name = "trust-dns-server"
-version = "0.21.1"
+version = "0.21.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4058838790565ba870cb800008c7b3b8a3f154afaece824ad9a91a80a4b81dfb"
+checksum = "a395a2e0fd8aac9b4613767a5b4ba4b2040de1b767fa03ace8c9d6f351d60b2d"
 dependencies = [
  "async-trait",
  "bytes",
