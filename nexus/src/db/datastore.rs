@@ -2829,7 +2829,48 @@ impl DataStore {
                 )
             })?;
 
-        info!(opctx.log, "deleted {} silo users for silo {}", updated_rows, id,);
+        info!(opctx.log, "deleted {} silo users for silo {}", updated_rows, id);
+
+        // delete all silo identity providers
+        use db::schema::silo_identity_provider::dsl as idp_dsl;
+
+        let updated_rows = diesel::delete(idp_dsl::silo_identity_provider)
+            .filter(idp_dsl::silo_id.eq(id))
+            .execute_async(self.pool())
+            .await
+            .map_err(|e| {
+                public_error_from_diesel_pool(
+                    e,
+                    ErrorHandler::NotFoundByLookup(
+                        ResourceType::Silo,
+                        LookupType::ById(id),
+                    ),
+                )
+            })?;
+
+        info!(opctx.log, "deleted {} silo IdPs for silo {}", updated_rows, id);
+
+        use db::schema::silo_saml_identity_provider::dsl as saml_idp_dsl;
+
+        let updated_rows =
+            diesel::delete(saml_idp_dsl::silo_saml_identity_provider)
+                .filter(saml_idp_dsl::silo_id.eq(id))
+                .execute_async(self.pool())
+                .await
+                .map_err(|e| {
+                    public_error_from_diesel_pool(
+                        e,
+                        ErrorHandler::NotFoundByLookup(
+                            ResourceType::Silo,
+                            LookupType::ById(id),
+                        ),
+                    )
+                })?;
+
+        info!(
+            opctx.log,
+            "deleted {} silo saml IdPs for silo {}", updated_rows, id
+        );
 
         Ok(())
     }

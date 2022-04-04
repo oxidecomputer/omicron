@@ -265,6 +265,81 @@ async fn test_create_a_saml_idp(cptestctx: &ControlPlaneTestContext) {
     assert_eq!(identity_providers[0].provider_id, silo_saml_idp.identity.id);
 }
 
+// Test that deleting the silo deletes the idp
+#[nexus_test]
+async fn test_deleting_a_silo_deletes_the_idp(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+
+    let silo: Silo = create_silo(&client, "discoverable", true).await;
+
+    let saml_idp_descriptor = SAML_IDP_DESCRIPTOR;
+
+    let server = Server::run();
+    server.expect(
+        Expectation::matching(request::method_path("GET", "/descriptor"))
+            .respond_with(status_code(200).body(saml_idp_descriptor)),
+    );
+
+    let silo_saml_idp: SiloSamlIdentityProvider = object_create(
+        client,
+        "/silos/discoverable/saml_identity_provider",
+        &params::SiloSamlIdentityProviderCreate {
+            identity: IdentityMetadataCreateParams {
+                name: "some-totally-real-saml-provider"
+                    .to_string()
+                    .parse()
+                    .unwrap(),
+                description: "an org".to_string(),
+            },
+
+            silo_id: silo.identity.id,
+            idp_metadata_url: server.url("/descriptor").to_string(),
+
+            idp_entity_id: "entity_id".to_string(),
+            sp_client_id: "client_id".to_string(),
+            acs_url: "http://acs".to_string(),
+            slo_url: "http://slo".to_string(),
+            technical_contact_email: "technical@fake".to_string(),
+
+            public_cert: None,
+            private_key: None,
+        },
+    )
+    .await;
+
+    // Expect that the list of providers contains this
+    let identity_providers: Vec<SiloIdentityProvider> =
+        NexusRequest::object_get(client, "/identity_provider")
+            .execute()
+            .await
+            .expect("success")
+            .parsed_body()
+            .unwrap();
+
+    assert_eq!(identity_providers.len(), 1);
+    assert_eq!(identity_providers[0].provider_id, silo_saml_idp.identity.id);
+
+    // Delete the silo
+    NexusRequest::object_delete(&client, &"/silos/discoverable")
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .expect("failed to make request");
+
+    // Expect that the provider is gone
+    let identity_providers: Vec<SiloIdentityProvider> =
+        NexusRequest::object_get(client, "/identity_provider")
+            .execute()
+            .await
+            .expect("success")
+            .parsed_body()
+            .unwrap();
+
+    assert_eq!(identity_providers.len(), 0);
+}
+
 // Fail to create a SAML IdP out of an invalid descriptor
 #[nexus_test]
 async fn test_create_a_saml_idp_invalid_descriptor_truncated(
