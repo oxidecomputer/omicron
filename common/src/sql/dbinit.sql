@@ -707,14 +707,14 @@ CREATE TABLE omicron.public.router_route (
     /* Indicates that the object has been deleted */
     time_deleted TIMESTAMPTZ,
 
-    router_id UUID NOT NULL,
+    vpc_router_id UUID NOT NULL,
     kind omicron.public.router_route_kind NOT NULL,
     target STRING(128) NOT NULL,
     destination STRING(128) NOT NULL
 );
 
 CREATE UNIQUE INDEX ON omicron.public.router_route (
-    router_id,
+    vpc_router_id,
     name
 ) WHERE
     time_deleted IS NULL;

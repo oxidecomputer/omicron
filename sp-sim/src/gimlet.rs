@@ -224,10 +224,14 @@ impl SerialConsoleTcpTask {
                                 break;
                             }
                         };
+                        if n == 0 {
+                            error!(self.log, "closing serial console TCP connection (read 0 bytes)");
+                            break;
+                        }
                         match self.send_serial_console(&buf[..n]).await {
                             Ok(()) => (),
                             Err(err) => {
-                                error!(self.log, "ignoring UDP send failure {}", err);
+                                error!(self.log, "ignoring UDP send ({} bytes) failure {}", n, err);
                                 continue;
                             }
                         }

@@ -23,8 +23,9 @@ pub fn parse<P: AsRef<Path>, C: DeserializeOwned>(
     Ok(cfg)
 }
 
+/// Commands which should execute on a host building packages.
 #[derive(Debug, StructOpt)]
-pub enum SubCommand {
+pub enum BuildCommand {
     /// Builds the packages specified in a manifest, and places them into a target
     /// directory.
     Package {
@@ -36,6 +37,11 @@ pub enum SubCommand {
     },
     /// Checks the packages specified in a manifest, without building.
     Check,
+}
+
+/// Commands which should execute on a host installing packages.
+#[derive(Debug, StructOpt)]
+pub enum DeployCommand {
     /// Installs the packages to a target machine.
     Install {
         /// The directory from which artifacts will be pulled.

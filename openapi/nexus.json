@@ -6203,11 +6203,6 @@
               }
             ]
           },
-          "router_id": {
-            "description": "The VPC Router to which the route belongs.",
-            "type": "string",
-            "format": "uuid"
-          },
           "target": {
             "$ref": "#/components/schemas/RouteTarget"
           },
@@ -6220,6 +6215,11 @@
             "description": "timestamp when this resource was last modified",
             "type": "string",
             "format": "date-time"
+          },
+          "vpc_router_id": {
+            "description": "The VPC Router to which the route belongs.",
+            "type": "string",
+            "format": "uuid"
           }
         },
         "required": [
@@ -6228,10 +6228,10 @@
           "id",
           "kind",
           "name",
-          "router_id",
           "target",
           "time_created",
-          "time_modified"
+          "time_modified",
+          "vpc_router_id"
         ]
       },
       "RouterRouteCreateParams": {

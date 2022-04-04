@@ -4,6 +4,7 @@
 
 //! Management of sled-local storage.
 
+use crate::illumos::dladm::PhysicalLink;
 use crate::illumos::running_zone::{
     Error as RunningZoneError, InstalledZone, RunningZone,
 };
@@ -812,6 +813,7 @@ impl StorageManager {
         log: &Logger,
         sled_id: Uuid,
         nexus_client: Arc<NexusClient>,
+        physical_link: Option<PhysicalLink>,
     ) -> Result<Self, Error> {
         let log = log.new(o!("component" => "sled agent storage manager"));
         let pools = Arc::new(Mutex::new(HashMap::new()));
@@ -824,7 +826,7 @@ impl StorageManager {
             pools: pools.clone(),
             new_pools_rx,
             new_filesystems_rx,
-            vnic_allocator: VnicAllocator::new("Storage"),
+            vnic_allocator: VnicAllocator::new("Storage", physical_link)?,
         };
         Ok(StorageManager {
             pools,

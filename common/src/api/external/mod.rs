@@ -1256,7 +1256,7 @@ pub struct RouterRoute {
     pub identity: IdentityMetadata,
 
     /// The VPC Router to which the route belongs.
-    pub router_id: Uuid,
+    pub vpc_router_id: Uuid,
 
     /// Describes the kind of router. Set at creation. `read-only`
     pub kind: RouterRouteKind,

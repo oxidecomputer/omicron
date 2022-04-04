@@ -39,18 +39,6 @@ async fn test_basic_failures(cptestctx: &ControlPlaneTestContext) {
     let org_name = "test-org";
     create_organization(&client, &org_name).await;
 
-    // Error case: GET /nonexistent (a path with no route at all)
-    let error = client
-        .make_request(
-            Method::GET,
-            "/nonexistent",
-            None as Option<()>,
-            StatusCode::NOT_FOUND,
-        )
-        .await
-        .expect_err("expected error");
-    assert_eq!("Not Found", error.message);
-
     struct TestCase<'a> {
         method: http::Method,
         uri: &'a str,
@@ -60,6 +48,15 @@ async fn test_basic_failures(cptestctx: &ControlPlaneTestContext) {
     }
 
     let test_cases = vec![
+        // Error case: GET /nonexistent (a path with no route at all)(
+        TestCase {
+            method: Method::GET,
+            uri: "/nonexistent",
+            expected_code: StatusCode::NOT_FOUND,
+            expected_error: "Not Found",
+            body: None,
+        },
+
         // Error case: GET /organizations/test-org/projects/nonexistent (a
         // possible value that does not exist inside a collection that does
         // exist) from an authorized user results in a 404.
@@ -136,7 +133,7 @@ async fn test_basic_failures(cptestctx: &ControlPlaneTestContext) {
     ];
 
     for test_case in test_cases {
-        let error = if let Some(body) = test_case.body {
+        let error: HttpErrorResponseBody = if let Some(body) = test_case.body {
             NexusRequest::expect_failure_with_body(
                 client,
                 test_case.expected_code,
@@ -153,11 +150,8 @@ async fn test_basic_failures(cptestctx: &ControlPlaneTestContext) {
             )
         }
         .authn_as(AuthnMode::PrivilegedUser)
-        .execute()
-        .await
-        .unwrap()
-        .parsed_body::<dropshot::HttpErrorResponseBody>()
-        .unwrap();
+        .execute_and_parse_unwrap()
+        .await;
 
         assert_eq!(test_case.expected_error, error.message);
     }
