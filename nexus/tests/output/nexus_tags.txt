@@ -22,10 +22,6 @@ images_delete_image                      /images/{image_name}
 images_get                               /images
 images_get_image                         /images/{image_name}
 images_post                              /images
-project_images_delete_image              /organizations/{organization_name}/projects/{project_name}/images/{image_name}
-project_images_get                       /organizations/{organization_name}/projects/{project_name}/images
-project_images_get_image                 /organizations/{organization_name}/projects/{project_name}/images/{image_name}
-project_images_post                      /organizations/{organization_name}/projects/{project_name}/images
 
 API operations found with tag "instances"
 OPERATION ID                             URL PATH
@@ -64,6 +60,10 @@ organization_projects_get                /organizations/{organization_name}/proj
 organization_projects_get_project        /organizations/{organization_name}/projects/{project_name}
 organization_projects_post               /organizations/{organization_name}/projects
 organization_projects_put_project        /organizations/{organization_name}/projects/{project_name}
+project_images_delete_image              /organizations/{organization_name}/projects/{project_name}/images/{image_name}
+project_images_get                       /organizations/{organization_name}/projects/{project_name}/images
+project_images_get_image                 /organizations/{organization_name}/projects/{project_name}/images/{image_name}
+project_images_post                      /organizations/{organization_name}/projects/{project_name}/images
 
 API operations found with tag "racks"
 OPERATION ID                             URL PATH

@@ -1139,7 +1139,7 @@
     "/organizations/{organization_name}/projects/{project_name}/images": {
       "get": {
         "tags": [
-          "images"
+          "projects"
         ],
         "summary": "List images",
         "description": "List images in a project. The images are returned sorted by creation date, with the most recent images appearing first.",
@@ -1218,7 +1218,7 @@
       },
       "post": {
         "tags": [
-          "images"
+          "projects"
         ],
         "summary": "Create an image",
         "description": "Create a new image in a project.",
@@ -1278,7 +1278,7 @@
     "/organizations/{organization_name}/projects/{project_name}/images/{image_name}": {
       "get": {
         "tags": [
-          "images"
+          "projects"
         ],
         "summary": "Get an image",
         "description": "Get the details of a specific image in a project.",
@@ -1333,7 +1333,7 @@
       },
       "delete": {
         "tags": [
-          "images"
+          "projects"
         ],
         "summary": "Delete an image",
         "description": "Permanently delete an image from a project. This operation cannot be undone. Any instances in the project using the image will continue to run, however new instances can not be created with this image.",
