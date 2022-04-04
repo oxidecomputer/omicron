@@ -1302,7 +1302,7 @@ async fn images_delete_image(
 #[endpoint {
     method = GET,
     path = "/organizations/{organization_name}/projects/{project_name}/images",
-    tags = ["images"],
+    tags = ["projects"],
 }]
 async fn project_images_get(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
@@ -1340,7 +1340,7 @@ async fn project_images_get(
 #[endpoint {
     method = POST,
     path = "/organizations/{organization_name}/projects/{project_name}/images",
-    tags = ["images"]
+    tags = ["projects"]
 }]
 async fn project_images_post(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
@@ -1382,7 +1382,7 @@ struct ImagePathParam {
 #[endpoint {
     method = GET,
     path = "/organizations/{organization_name}/projects/{project_name}/images/{image_name}",
-    tags = ["images"],
+    tags = ["projects"],
 }]
 async fn project_images_get_image(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
@@ -1417,7 +1417,7 @@ async fn project_images_get_image(
 #[endpoint {
     method = DELETE,
     path = "/organizations/{organization_name}/projects/{project_name}/images/{image_name}",
-    tags = ["images"],
+    tags = ["projects"],
 }]
 async fn project_images_delete_image(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
