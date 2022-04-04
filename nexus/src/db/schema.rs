@@ -27,6 +27,21 @@ table! {
 }
 
 table! {
+    image (id) {
+        id -> Uuid,
+        name -> Text,
+        description -> Text,
+        time_created -> Timestamptz,
+        time_modified -> Timestamptz,
+        time_deleted -> Nullable<Timestamptz>,
+        project_id -> Nullable<Uuid>,
+        volume_id -> Uuid,
+        url -> Text,
+        size_bytes -> Int8,
+    }
+}
+
+table! {
     snapshot (id) {
         id -> Uuid,
         name -> Text,

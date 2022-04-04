@@ -27,7 +27,7 @@ if [[ "${HOST_OS}" == "Linux" ]]; then
   sudo apt-get install libpq-dev
   sudo apt-get install pkg-config
 elif [[ "${HOST_OS}" == "SunOS" ]]; then
-  need=(
+  packages=(
     'pkg:/package/pkg'
     'build-essential'
     'library/postgresql-13'
@@ -35,19 +35,19 @@ elif [[ "${HOST_OS}" == "SunOS" ]]; then
     'brand/omicron1/tools'
   )
 
-  # Perform updates
-  if (( ${#need[@]} > 0 )); then
-    rc=0
-    pfexec pkg install -v "${need[@]}" || rc=$?
-    # Return codes:
-    #  0: Normal Success
-    #  4: Failure because we're already up-to-date. Also acceptable.
-    if [ "$rc" -ne 4 ] && [ "$rc" -ne 0 ]; then
-      exit "$rc"
-    fi
+  # Install/update the set of packages.
+  # Explicitly manage the return code using "rc" to observe the result of this
+  # command without exiting the script entirely (due to bash's "errexit").
+  rc=0
+  pfexec pkg install -v "${packages[@]}" || rc=$?
+  # Return codes:
+  #  0: Normal Success
+  #  4: Failure because we're already up-to-date. Also acceptable.
+  if [[ "$rc" -ne 4 ]] && [[ "$rc" -ne 0 ]]; then
+    exit "$rc"
   fi
 
-  pkg list -v "${need[@]}"
+  pkg list -v "${packages[@]}"
 elif [[ "${HOST_OS}" == "Darwin" ]]; then
   brew install postgresql
   brew install pkg-config
@@ -110,7 +110,7 @@ for command in "${expected_in_path[@]}"; do
   fi
 done
 
-if [ "$ANY_PATH_ERROR" == "true" ]; then
+if [[ "$ANY_PATH_ERROR" == "true" ]]; then
   exit -1
 fi
 
