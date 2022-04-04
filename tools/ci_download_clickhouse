@@ -142,7 +142,7 @@ function do_md5sum
 
 function do_untar
 {
-		mkdir -p "$2" && tar xzf "$1" -C "$2"
+	mkdir -p "$2" && tar xzf "$1" -C "$2"
 }
 
 main "$@"
