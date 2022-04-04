@@ -82,6 +82,7 @@ pub struct Image {
     pub identity: IdentityMetadata,
 
     pub project_id: Option<Uuid>,
+    pub url: Option<String>,
     pub size: ByteCount,
 }
 

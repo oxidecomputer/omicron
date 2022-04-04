@@ -424,8 +424,12 @@ CREATE TABLE omicron.public.image (
     /* Indicates that the object has been deleted */
     time_deleted TIMESTAMPTZ,
 
+    /* Optional project UUID: Images may or may not be global */
     project_id UUID,
-    volume_id UUID NOT NULL,
+    /* Optional volume ID: Images may exist without backing volumes */
+    volume_id UUID,
+    /* Optional URL: Images may be backed by either a URL or a volume */
+    url STRING(8192),
     size_bytes INT NOT NULL
 );
 

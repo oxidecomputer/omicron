@@ -283,6 +283,13 @@ pub struct NetworkInterfaceIdentifier {
 
 // IMAGES
 
+/// The source of the underlying image.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub enum ImageSource {
+    Url(String),
+    Snapshot(Uuid),
+}
+
 /// Create-time parameters for an
 /// [`Image`](omicron_common::api::external::Image)
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
@@ -290,6 +297,9 @@ pub struct ImageCreate {
     /// common identifying metadata
     #[serde(flatten)]
     pub identity: IdentityMetadataCreateParams,
+
+    /// The source of the image's contents.
+    pub source: ImageSource,
 }
 
 // SNAPSHOTS

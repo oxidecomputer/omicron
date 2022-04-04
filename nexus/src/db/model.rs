@@ -1521,7 +1521,8 @@ pub struct Image {
     identity: ImageIdentity,
 
     project_id: Option<Uuid>,
-    volume_id: Uuid,
+    volume_id: Option<Uuid>,
+    url: Option<String>,
     #[column_name = "size_bytes"]
     size: ByteCount,
 }
@@ -1531,6 +1532,7 @@ impl From<Image> for views::Image {
         Self {
             identity: image.identity(),
             project_id: image.project_id,
+            url: image.url,
             size: image.size.into(),
         }
     }

@@ -36,6 +36,7 @@ table! {
         time_deleted -> Nullable<Timestamptz>,
         project_id -> Nullable<Uuid>,
         volume_id -> Uuid,
+        url -> Text,
         size_bytes -> Int8,
     }
 }
