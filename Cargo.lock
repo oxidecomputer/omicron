@@ -115,7 +115,7 @@ version = "0.1.0"
 source = "git+https://github.com/oxidecomputer/async-bb8-diesel?rev=c849b717be#c849b717be1e33528c7c3950fefcb431a65ef469"
 dependencies = [
  "async-trait",
- "bb8",
+ "bb8 0.7.1",
  "diesel",
  "thiserror",
  "tokio",
@@ -200,6 +200,19 @@ dependencies = [
  "futures-channel",
  "futures-util",
  "parking_lot 0.11.2",
+ "tokio",
+]
+
+[[package]]
+name = "bb8"
+version = "0.8.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1627eccf3aa91405435ba240be23513eeca466b5dc33866422672264de061582"
+dependencies = [
+ "async-trait",
+ "futures-channel",
+ "futures-util",
+ "parking_lot 0.12.0",
  "tokio",
 ]
 
@@ -2406,7 +2419,7 @@ dependencies = [
  "async-bb8-diesel",
  "async-trait",
  "base64",
- "bb8",
+ "bb8 0.8.0",
  "chrono",
  "cookie",
  "criterion",
@@ -3251,7 +3264,7 @@ dependencies = [
 [[package]]
 name = "progenitor"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/progenitor#75348207d7405db3371a98b5348bef3fbd0ef79e"
+source = "git+https://github.com/oxidecomputer/progenitor#bbf81dfe7d107302241f9eb37c74556ffb2854ac"
 dependencies = [
  "anyhow",
  "getopts",
@@ -3266,7 +3279,7 @@ dependencies = [
 [[package]]
 name = "progenitor-client"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/progenitor#75348207d7405db3371a98b5348bef3fbd0ef79e"
+source = "git+https://github.com/oxidecomputer/progenitor#bbf81dfe7d107302241f9eb37c74556ffb2854ac"
 dependencies = [
  "bytes",
  "futures-core",
@@ -3279,7 +3292,7 @@ dependencies = [
 [[package]]
 name = "progenitor-impl"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/progenitor#75348207d7405db3371a98b5348bef3fbd0ef79e"
+source = "git+https://github.com/oxidecomputer/progenitor#bbf81dfe7d107302241f9eb37c74556ffb2854ac"
 dependencies = [
  "convert_case 0.4.0",
  "getopts",
@@ -3301,7 +3314,7 @@ dependencies = [
 [[package]]
 name = "progenitor-macro"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/progenitor#75348207d7405db3371a98b5348bef3fbd0ef79e"
+source = "git+https://github.com/oxidecomputer/progenitor#bbf81dfe7d107302241f9eb37c74556ffb2854ac"
 dependencies = [
  "openapiv3",
  "proc-macro2",
@@ -4911,9 +4924,9 @@ dependencies = [
 
 [[package]]
 name = "trust-dns-resolver"
-version = "0.21.1"
+version = "0.21.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d9e737a252a617bd4774649e245dbf705e207275db0893b9fa824d49f074fc1c"
+checksum = "e4ba72c2ea84515690c9fcef4c6c660bb9df3036ed1051686de84605b74fd558"
 dependencies = [
  "cfg-if",
  "futures-util",
@@ -4931,9 +4944,9 @@ dependencies = [
 
 [[package]]
 name = "trust-dns-server"
-version = "0.21.1"
+version = "0.21.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4058838790565ba870cb800008c7b3b8a3f154afaece824ad9a91a80a4b81dfb"
+checksum = "a395a2e0fd8aac9b4613767a5b4ba4b2040de1b767fa03ace8c9d6f351d60b2d"
 dependencies = [
  "async-trait",
  "bytes",
