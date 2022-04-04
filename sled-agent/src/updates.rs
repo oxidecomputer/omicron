@@ -15,6 +15,7 @@ pub enum Error {
     #[error("I/O Error: {0}")]
     Io(#[from] std::io::Error),
 
+    #[cfg(target_os = "illumos")]
     #[error("Failed to contact nexus: {0}")]
     Nexus(anyhow::Error),
 

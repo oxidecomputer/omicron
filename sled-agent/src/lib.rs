@@ -16,23 +16,27 @@
 pub mod sim;
 
 // Modules shared by both simulated and non-simulated sled agents.
-pub mod common;
-
-// Modules for the non-simulated sled agent.
 pub mod bootstrap;
-pub mod config;
+pub mod common;
 mod http_entrypoints;
-mod illumos;
-mod instance;
-mod instance_manager;
 mod nexus;
 mod params;
-pub mod rack_setup;
-pub mod server;
-mod services;
-mod sled_agent;
-mod storage_manager;
 mod updates;
+
+// Modules for the non-simulated sled agent.
+cfg_if::cfg_if! {
+    if #[cfg(target_os = "illumos")] {
+        pub mod config;
+        mod illumos;
+        mod instance;
+        mod instance_manager;
+        pub mod rack_setup;
+        pub mod server;
+        mod services;
+        mod sled_agent;
+        mod storage_manager;
+    }
+}
 
 #[cfg(test)]
 mod mocks;
@@ -41,4 +45,5 @@ mod mocks;
 extern crate slog;
 
 /// Location on internal storage where sled-specific information is stored.
+#[cfg(target_os = "illumos")]
 pub(crate) const OMICRON_CONFIG_PATH: &'static str = "/var/tmp/oxide";

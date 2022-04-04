@@ -2357,6 +2357,7 @@ name = "omicron-deploy"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "cfg-if",
  "crossbeam",
  "omicron-package",
  "omicron-sled-agent",

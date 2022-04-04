@@ -6,19 +6,26 @@
 
 #![feature(async_closure)]
 
-use dropshot::ConfigDropshot;
-use dropshot::ConfigLogging;
-use dropshot::ConfigLoggingLevel;
-use omicron_common::api::external::Error;
 use omicron_common::cmd::fatal;
 use omicron_common::cmd::CmdError;
-use omicron_sled_agent::bootstrap::{
-    config::Config as BootstrapConfig, server as bootstrap_server,
-};
-use omicron_sled_agent::rack_setup::config::SetupServiceConfig as RssConfig;
-use omicron_sled_agent::{config::Config as SledConfig, server as sled_server};
+use omicron_common::api::external::Error;
+use omicron_sled_agent::bootstrap::run_openapi as run_bootstrap_openapi;
+use omicron_sled_agent::server::run_openapi as run_sled_agent_openapi;
 use std::path::PathBuf;
 use structopt::StructOpt;
+
+cfg_if::cfg_if! {
+    if #[cfg(target_os = "illumos")] {
+        use dropshot::ConfigDropshot;
+        use dropshot::ConfigLogging;
+        use dropshot::ConfigLoggingLevel;
+        use omicron_sled_agent::bootstrap::{
+            config::Config as BootstrapConfig, server as bootstrap_server,
+        };
+        use omicron_sled_agent::rack_setup::config::SetupServiceConfig as RssConfig;
+        use omicron_sled_agent::{config::Config as SledConfig, server as sled_server};
+    }
+}
 
 #[derive(Debug)]
 enum ApiRequest {
@@ -74,85 +81,93 @@ async fn do_run() -> Result<(), CmdError> {
     match args {
         Args::Openapi { api_requested } => match api_requested {
             ApiRequest::Bootstrap => {
-                bootstrap_server::run_openapi().map_err(CmdError::Failure)
+                run_bootstrap_openapi().map_err(CmdError::Failure)
             }
             ApiRequest::Sled => {
-                sled_server::run_openapi().map_err(CmdError::Failure)
+                run_sled_agent_openapi().map_err(CmdError::Failure)
             }
         },
         Args::Run { config_path } => {
-            let mut config = SledConfig::from_file(&config_path)
-                .map_err(|e| CmdError::Failure(e.to_string()))?;
-            config.dropshot.request_body_max_bytes = 1024 * 1024;
-            let config = config;
+            cfg_if::cfg_if! {
+                if #[cfg(target_os = "illumos")] {
+                    let mut config = SledConfig::from_file(&config_path)
+                        .map_err(|e| CmdError::Failure(e.to_string()))?;
+                    config.dropshot.request_body_max_bytes = 1024 * 1024;
+                    let config = config;
 
-            // - Sled agent starts with the normal config file - typically
-            // called "config.toml".
-            // - Thing-flinger likes allowing "sled-specific" configs to arrive
-            // by overlaying files in the package...
-            // - ... so we need a way to *possibly* supply this extra config,
-            // without otherwise changing the package.
-            //
-            // This means we must possibly ingest a config file, without
-            // *explicitly* being told about it.
-            //
-            // Hence, this approach: look around in the same directory as the
-            // expected config file.
-            let rss_config_path = {
-                let mut rss_config_path = config_path.clone();
-                rss_config_path.pop();
-                rss_config_path.push("config-rss.toml");
-                rss_config_path
-            };
-            let rss_config = if rss_config_path.exists() {
-                Some(
-                    RssConfig::from_file(rss_config_path)
-                        .map_err(|e| CmdError::Failure(e.to_string()))?,
-                )
-            } else {
-                None
-            };
+                    // - Sled agent starts with the normal config file - typically
+                    // called "config.toml".
+                    // - Thing-flinger likes allowing "sled-specific" configs to arrive
+                    // by overlaying files in the package...
+                    // - ... so we need a way to *possibly* supply this extra config,
+                    // without otherwise changing the package.
+                    //
+                    // This means we must possibly ingest a config file, without
+                    // *explicitly* being told about it.
+                    //
+                    // Hence, this approach: look around in the same directory as the
+                    // expected config file.
+                    let rss_config_path = {
+                        let mut rss_config_path = config_path.clone();
+                        rss_config_path.pop();
+                        rss_config_path.push("config-rss.toml");
+                        rss_config_path
+                    };
+                    let rss_config = if rss_config_path.exists() {
+                        Some(
+                            RssConfig::from_file(rss_config_path)
+                                .map_err(|e| CmdError::Failure(e.to_string()))?,
+                        )
+                    } else {
+                        None
+                    };
 
-            // Configure and run the Bootstrap server.
-            let bootstrap_config = BootstrapConfig {
-                id: config.id,
-                dropshot: ConfigDropshot {
-                    bind_address: config.bootstrap_address,
-                    request_body_max_bytes: 1024 * 1024,
-                    ..Default::default()
-                },
-                log: ConfigLogging::StderrTerminal {
-                    level: ConfigLoggingLevel::Info,
-                },
-                rss_config,
-            };
-            let run_bootstrap = async move || -> Result<(), CmdError> {
-                bootstrap_server::Server::start(&bootstrap_config)
-                    .await
-                    .map_err(CmdError::Failure)?
-                    .wait_for_finish()
-                    .await
-                    .map_err(CmdError::Failure)
-            };
+                    // Configure and run the Bootstrap server.
+                    let bootstrap_config = BootstrapConfig {
+                        id: config.id,
+                        dropshot: ConfigDropshot {
+                            bind_address: config.bootstrap_address,
+                            request_body_max_bytes: 1024 * 1024,
+                            ..Default::default()
+                        },
+                        log: ConfigLogging::StderrTerminal {
+                            level: ConfigLoggingLevel::Info,
+                        },
+                        rss_config,
+                    };
+                    let run_bootstrap = async move || -> Result<(), CmdError> {
+                        bootstrap_server::Server::start(&bootstrap_config)
+                            .await
+                            .map_err(CmdError::Failure)?
+                            .wait_for_finish()
+                            .await
+                            .map_err(CmdError::Failure)
+                    };
 
-            let run_sled_server = async move || -> Result<(), CmdError> {
-                sled_server::Server::start(&config)
-                    .await
-                    .map_err(CmdError::Failure)?
-                    .wait_for_finish()
-                    .await
-                    .map_err(CmdError::Failure)
-            };
+                    let run_sled_server = async move || -> Result<(), CmdError> {
+                        sled_server::Server::start(&config)
+                            .await
+                            .map_err(CmdError::Failure)?
+                            .wait_for_finish()
+                            .await
+                            .map_err(CmdError::Failure)
+                    };
 
-            tokio::select! {
-                Err(e) = run_bootstrap() => {
-                    eprintln!("Boot server exited unexpectedly: {:?}", e);
-                },
-                Err(e) = run_sled_server() => {
-                    eprintln!("Sled server exited unexpectedly: {:?}", e);
-                },
+                    tokio::select! {
+                        Err(e) = run_bootstrap() => {
+                            eprintln!("Boot server exited unexpectedly: {:?}", e);
+                        },
+                        Err(e) = run_sled_server() => {
+                            eprintln!("Sled server exited unexpectedly: {:?}", e);
+                        },
+                    }
+                    Ok(())
+                } else {
+                    Err(CmdError::Failure(
+                        String::from("Real sled agent is only available on illumos systems")
+                    ))
+                }
             }
-            Ok(())
         }
     }
 }
