@@ -2,7 +2,7 @@
 #:
 #: name = "helios / build-and-test"
 #: variety = "basic"
-#: target = "helios"
+#: target = "helios-20220404"
 #: rust_toolchain = "nightly-2021-11-24"
 #: output_rules = []
 #:
