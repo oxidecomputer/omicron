@@ -1,7 +1,7 @@
 # RSS (Rack Setup Service) "stand-in" configuration.
 
 [[request]]
-sled_address = "[fd00:1de::]:12345"
+sled_address = "[fd00:1de::1]:12345"
 
 [[request.partition]]
 zpool_uuid = "d462a7f7-b628-40fe-80ff-4e4189e2d62b"
