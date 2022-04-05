@@ -17,14 +17,14 @@ pub enum SetupServiceError {
     #[error("Error accessing filesystem: {0}")]
     Io(#[from] std::io::Error),
 
-    #[error("Error making HTTP request to Nexus: {0}")]
-    NexusApi(#[from] nexus_client::Error<nexus_client::types::Error>),
-
     #[error("Error making HTTP request to Sled Agent: {0}")]
     SledApi(#[from] sled_agent_client::Error<sled_agent_client::types::Error>),
 
     #[error("Cannot deserialize TOML file")]
     Toml(#[from] toml::de::Error),
+
+    #[error(transparent)]
+    Http(#[from] reqwest::Error),
 
     #[error("Configuration changed")]
     Configuration,
@@ -136,8 +136,7 @@ impl ServiceInner {
                 let client = reqwest::ClientBuilder::new()
                     .connect_timeout(dur)
                     .timeout(dur)
-                    .build()
-                    .map_err(|e| nexus_client::Error::<nexus_client::types::Error>::from(e))?;
+                    .build()?;
                 let client = sled_agent_client::Client::new_with_client(
                     &format!("http://{}", request.sled_address),
                     client,
@@ -183,8 +182,7 @@ impl ServiceInner {
                 let client = reqwest::ClientBuilder::new()
                     .connect_timeout(dur)
                     .timeout(dur)
-                    .build()
-                    .map_err(|e| nexus_client::Error::<nexus_client::types::Error>::from(e))?;
+                    .build()?;
                 let client = sled_agent_client::Client::new_with_client(
                     &format!("http://{}", request.sled_address),
                     client,
