@@ -13,9 +13,9 @@ use omicron_common::api::external::Error;
 use omicron_common::cmd::fatal;
 use omicron_common::cmd::CmdError;
 use omicron_sled_agent::bootstrap::{
-    config::Config as BootstrapConfig, config::SetupServiceConfig as RssConfig,
-    server as bootstrap_server,
+    config::Config as BootstrapConfig, server as bootstrap_server,
 };
+use omicron_sled_agent::rack_setup::config::SetupServiceConfig as RssConfig;
 use omicron_sled_agent::{config::Config as SledConfig, server as sled_server};
 use std::path::PathBuf;
 use structopt::StructOpt;
