@@ -90,6 +90,8 @@ lazy_static! {
         "demo-vpc-subnet".parse().unwrap();
     pub static ref DEMO_VPC_SUBNET_URL: String =
         format!("{}/{}", *DEMO_VPC_URL_SUBNETS, *DEMO_VPC_SUBNET_NAME);
+    pub static ref DEMO_VPC_SUBNET_INTERFACES_URL: String =
+        format!("{}/network-interfaces", *DEMO_VPC_SUBNET_URL);
     pub static ref DEMO_VPC_SUBNET_CREATE: params::VpcSubnetCreate =
         params::VpcSubnetCreate {
             identity: IdentityMetadataCreateParams {
@@ -434,6 +436,14 @@ lazy_static! {
                     }).unwrap()
                 ),
                 AllowedMethod::Delete,
+            ],
+        },
+
+        VerifyEndpoint {
+            url: &*DEMO_VPC_SUBNET_INTERFACES_URL,
+            visibility: Visibility::Protected,
+            allowed_methods: vec![
+                AllowedMethod::Get,
             ],
         },
 

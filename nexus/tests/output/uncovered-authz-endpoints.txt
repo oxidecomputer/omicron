@@ -10,7 +10,6 @@ project_images_get_image                 (get    "/organizations/{organization_n
 instance_disks_get                       (get    "/organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/disks")
 project_snapshots_get                    (get    "/organizations/{organization_name}/projects/{project_name}/snapshots")
 project_snapshots_get_snapshot           (get    "/organizations/{organization_name}/projects/{project_name}/snapshots/{snapshot_name}")
-subnet_network_interfaces_get            (get    "/organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/subnets/{subnet_name}/network-interfaces")
 session_me                               (get    "/session/me")
 silos_get                                (get    "/silos")
 silos_get_silo                           (get    "/silos/{silo_name}")
