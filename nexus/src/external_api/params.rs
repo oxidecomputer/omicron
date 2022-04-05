@@ -231,6 +231,7 @@ pub struct VpcRouterUpdate {
 // DISKS
 
 #[derive(Copy, Clone, Debug, Deserialize, Serialize)]
+#[serde(try_from = "u32")] // invoke the try_from validation routine below
 pub struct BlockSize(pub u32);
 
 impl TryFrom<u32> for BlockSize {
@@ -247,6 +248,12 @@ impl TryFrom<u32> for BlockSize {
 impl Into<ByteCount> for BlockSize {
     fn into(self) -> ByteCount {
         ByteCount::from(self.0)
+    }
+}
+
+impl Into<u64> for BlockSize {
+    fn into(self) -> u64 {
+        self.0 as u64
     }
 }
 
@@ -356,6 +363,9 @@ pub struct ImageCreate {
     /// common identifying metadata
     #[serde(flatten)]
     pub identity: IdentityMetadataCreateParams,
+
+    /// block size in bytes
+    pub block_size: BlockSize,
 
     /// The source of the image's contents.
     pub source: ImageSource,

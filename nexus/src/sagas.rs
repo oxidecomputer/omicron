@@ -1289,6 +1289,86 @@ async fn sdc_regions_ensure(
 
     let block_size = datasets_and_regions[0].1.block_size;
 
+    // If requested, back disk by image
+    let osagactx = sagactx.user_data();
+    let params = sagactx.saga_params();
+    let opctx = OpContext::for_saga_action(&sagactx, &params.serialized_authn);
+    let read_only_parent: Option<
+        Box<sled_agent_client::types::VolumeConstructionRequest>,
+    > = if let Some(image_id) = params.create_params.image_id {
+        let log = osagactx.log();
+        warn!(log, "grabbing image {}", image_id);
+
+        // TODO: support project images too
+        let global_image = osagactx
+            .datastore()
+            .global_image_fetch(&opctx, image_id)
+            .await
+            .map_err(|e| {
+                ActionError::action_failed(Error::internal_error(
+                    &e.to_string(),
+                ))
+            })?;
+
+        warn!(log, "retrieved global image {}", global_image.id());
+
+        // If the block size of the requested disk doesn't match the image,
+        // return an error
+        if global_image.block_size.to_bytes() as u64
+            != params.create_params.block_size().to_bytes()
+        {
+            return Err(ActionError::action_failed(Error::invalid_request(
+                &format!(
+                    "image block size {} does not match disk block size {}",
+                    global_image.block_size.to_bytes(),
+                    params.create_params.block_size().to_bytes()
+                ),
+            )));
+        }
+
+        // If the size of the image is greater than the size of the disk,
+        // return an error.
+        if global_image.size.to_bytes() > params.create_params.size.to_bytes() {
+            return Err(ActionError::action_failed(Error::invalid_request(
+                &format!(
+                    "image size {} is greater than disk size {}",
+                    global_image.size.to_bytes(),
+                    params.create_params.size.to_bytes()
+                ),
+            )));
+        }
+
+        warn!(
+            log,
+            "grabbing global image {} volume {}",
+            global_image.id(),
+            global_image.volume_id
+        );
+
+        let volume = osagactx
+            .datastore()
+            .volume_get(global_image.volume_id)
+            .await
+            .map_err(|e| {
+                ActionError::action_failed(Error::internal_error(
+                    &e.to_string(),
+                ))
+            })?;
+
+        warn!(
+            log,
+            "grabbed volume {}, with data {}",
+            volume.id(),
+            volume.data()
+        );
+
+        Some(Box::new(serde_json::from_str(volume.data()).map_err(|e| {
+            ActionError::action_failed(Error::internal_error(&e.to_string()))
+        })?))
+    } else {
+        None
+    };
+
     // Store volume details in db
     let mut rng = StdRng::from_entropy();
     let volume_construction_request =
@@ -1333,7 +1413,7 @@ async fn sdc_regions_ensure(
                     },
                 },
             ],
-            read_only_parent: None,
+            read_only_parent,
         };
 
     let volume_data = serde_json::to_string(&volume_construction_request)

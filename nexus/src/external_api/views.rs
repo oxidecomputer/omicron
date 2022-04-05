@@ -9,8 +9,8 @@ use crate::db::identity::{Asset, Resource};
 use crate::db::model;
 use api_identity::ObjectIdentity;
 use omicron_common::api::external::{
-    ByteCount, IdentityMetadata, Ipv4Net, Ipv6Net, Name, ObjectIdentity,
-    RoleName,
+    ByteCount, Digest, IdentityMetadata, Ipv4Net, Ipv6Net, Name,
+    ObjectIdentity, RoleName,
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -81,8 +81,22 @@ pub struct Image {
     #[serde(flatten)]
     pub identity: IdentityMetadata,
 
+    /// The project the disk belongs to, if not a global image.
     pub project_id: Option<Uuid>,
+
+    /// URL source of this image, if any
     pub url: Option<String>,
+
+    /// Version of this, if any
+    pub version: Option<String>,
+
+    /// Hash of the image contents, if applicable
+    pub digest: Option<Digest>,
+
+    /// size of blocks in bytes
+    pub block_size: ByteCount,
+
+    /// total size in bytes
     pub size: ByteCount,
 }
 

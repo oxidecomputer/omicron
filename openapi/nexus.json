@@ -4779,6 +4779,22 @@
           "HistogramF64"
         ]
       },
+      "Digest": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "Sha256": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "Sha256"
+            ],
+            "additionalProperties": false
+          }
+        ]
+      },
       "Disk": {
         "description": "Client view of an [`Disk`]",
         "type": "object",
@@ -5116,9 +5132,26 @@
         "description": "Client view of Images",
         "type": "object",
         "properties": {
+          "block_size": {
+            "description": "size of blocks in bytes",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ByteCount"
+              }
+            ]
+          },
           "description": {
             "description": "human-readable free-form text about a resource",
             "type": "string"
+          },
+          "digest": {
+            "nullable": true,
+            "description": "Hash of the image contents, if applicable",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Digest"
+              }
+            ]
           },
           "id": {
             "description": "unique, immutable, system-controlled identifier for each resource",
@@ -5135,11 +5168,17 @@
           },
           "project_id": {
             "nullable": true,
+            "description": "The project the disk belongs to, if not a global image.",
             "type": "string",
             "format": "uuid"
           },
           "size": {
-            "$ref": "#/components/schemas/ByteCount"
+            "description": "total size in bytes",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ByteCount"
+              }
+            ]
           },
           "time_created": {
             "description": "timestamp when this resource was created",
@@ -5153,10 +5192,17 @@
           },
           "url": {
             "nullable": true,
+            "description": "URL source of this image, if any",
+            "type": "string"
+          },
+          "version": {
+            "nullable": true,
+            "description": "Version of this, if any",
             "type": "string"
           }
         },
         "required": [
+          "block_size",
           "description",
           "id",
           "name",
@@ -5169,6 +5215,14 @@
         "description": "Create-time parameters for an [`Image`](omicron_common::api::external::Image)",
         "type": "object",
         "properties": {
+          "block_size": {
+            "description": "block size in bytes",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/BlockSize"
+              }
+            ]
+          },
           "description": {
             "type": "string"
           },
@@ -5185,6 +5239,7 @@
           }
         },
         "required": [
+          "block_size",
           "description",
           "name",
           "source"

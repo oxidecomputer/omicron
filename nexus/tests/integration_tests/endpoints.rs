@@ -201,10 +201,8 @@ lazy_static! {
             ip: None,
         };
 
-    // Images
+    // Project Images
     pub static ref DEMO_IMAGE_NAME: Name = "demo-image".parse().unwrap();
-    pub static ref DEMO_IMAGE_URL: String =
-        format!("/images/{}", *DEMO_IMAGE_NAME);
     pub static ref DEMO_PROJECT_IMAGE_URL: String =
         format!("{}/{}", *DEMO_PROJECT_URL_IMAGES, *DEMO_IMAGE_NAME);
     pub static ref DEMO_IMAGE_CREATE: params::ImageCreate =
@@ -213,8 +211,13 @@ lazy_static! {
                 name: DEMO_IMAGE_NAME.clone(),
                 description: String::from(""),
             },
-            source: params::ImageSource::Url(String::from("dummy"))
+            source: params::ImageSource::Url(String::from("http://127.0.0.1:55555/image.raw")),
+            block_size: params::BlockSize::try_from(4096).unwrap(),
         };
+
+    // Global Images
+    pub static ref DEMO_GLOBAL_IMAGE_URL: String =
+        format!("/images/{}", *DEMO_IMAGE_NAME);
 
     // Snapshots
     pub static ref DEMO_SNAPSHOT_NAME: Name = "demo-snapshot".parse().unwrap();
@@ -813,23 +816,24 @@ lazy_static! {
             )],
         },
 
-        /* Images */
+        /* Global Images */
 
         VerifyEndpoint {
             url: "/images",
             visibility: Visibility::Public,
             allowed_methods: vec![
-                AllowedMethod::GetUnimplemented,
+                AllowedMethod::Get,
                 AllowedMethod::Post(
                     serde_json::to_value(&*DEMO_IMAGE_CREATE).unwrap()
                 ),
             ],
         },
+
         VerifyEndpoint {
-            url: &*DEMO_IMAGE_URL,
+            url: &*DEMO_GLOBAL_IMAGE_URL,
             visibility: Visibility::Protected,
             allowed_methods: vec![
-                AllowedMethod::GetUnimplemented,
+                AllowedMethod::Get,
                 AllowedMethod::Delete,
             ],
         },

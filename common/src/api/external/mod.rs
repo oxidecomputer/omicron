@@ -517,6 +517,8 @@ pub enum ResourceType {
     Silo,
     SiloUser,
     ConsoleSession,
+    GlobalImage,
+    GlobalImageList,
     Organization,
     Project,
     Dataset,
@@ -1685,6 +1687,56 @@ pub struct NetworkInterface {
     // V6 address, at least one of which must be specified.
 }
 
+#[derive(
+    Clone,
+    Debug,
+    Deserialize,
+    Serialize,
+    JsonSchema,
+    Eq,
+    PartialEq,
+    Ord,
+    PartialOrd,
+)]
+pub enum Digest {
+    Sha256(String),
+}
+
+impl FromStr for Digest {
+    type Err = anyhow::Error;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        if s.starts_with("sha256:") {
+            let parts: Vec<&str> = s.split(':').collect();
+            if parts.len() != 2 {
+                anyhow::bail!("digest string {} should have two parts", s);
+            }
+
+            if parts[1].len() != 64 {
+                anyhow::bail!("sha256 length must be 64");
+            }
+
+            return Ok(Digest::Sha256(parts[1].to_string()));
+        }
+
+        anyhow::bail!("invalid digest string {}", s);
+    }
+}
+
+impl std::fmt::Display for Digest {
+    fn fmt(
+        &self,
+        f: &mut std::fmt::Formatter<'_>,
+    ) -> Result<(), std::fmt::Error> {
+        write!(
+            f,
+            "{}",
+            match self {
+                Digest::Sha256(value) => format!("sha256:{}", value),
+            }
+        )
+    }
+}
+
 #[cfg(test)]
 mod test {
     use super::RouteDestination;
@@ -1692,8 +1744,8 @@ mod test {
     use super::VpcFirewallRuleHostFilter;
     use super::VpcFirewallRuleTarget;
     use super::{
-        ByteCount, L4Port, L4PortRange, Name, RoleName, VpcFirewallRuleAction,
-        VpcFirewallRuleDirection, VpcFirewallRuleFilter,
+        ByteCount, Digest, L4Port, L4PortRange, Name, RoleName,
+        VpcFirewallRuleAction, VpcFirewallRuleDirection, VpcFirewallRuleFilter,
         VpcFirewallRulePriority, VpcFirewallRuleProtocol,
         VpcFirewallRuleStatus, VpcFirewallRuleUpdate,
         VpcFirewallRuleUpdateParams,
@@ -2169,5 +2221,29 @@ mod test {
         );
         assert!("foo:foo".parse::<VpcFirewallRuleHostFilter>().is_err());
         assert!("foo".parse::<VpcFirewallRuleHostFilter>().is_err());
+    }
+
+    #[test]
+    fn test_digest() {
+        // No prefix
+        assert!(
+            "5cc9d1620911c280b0b1dad1413603702baccf340a1e74ade9d0521bcd826acf"
+                .parse::<Digest>()
+                .is_err()
+        );
+
+        // Valid sha256
+        let actual: Digest =
+            "sha256:5cc9d1620911c280b0b1dad1413603702baccf340a1e74ade9d0521bcd826acf".to_string().parse().unwrap();
+        assert_eq!(
+            actual,
+            Digest::Sha256("5cc9d1620911c280b0b1dad1413603702baccf340a1e74ade9d0521bcd826acf".to_string()),
+        );
+
+        // Too short for sha256
+        assert!("sha256:5cc9d1620911c280b".parse::<Digest>().is_err());
+
+        // Bad prefix
+        assert!("hash:super_random".parse::<Digest>().is_err());
     }
 }

@@ -65,13 +65,13 @@ use crate::db::{
     error::{public_error_from_diesel_pool, ErrorHandler, TransactionError},
     model::{
         ConsoleSession, Dataset, DatasetKind, Disk, DiskRuntimeState,
-        Generation, IncompleteNetworkInterface, Instance, InstanceRuntimeState,
-        Name, NetworkInterface, Organization, OrganizationUpdate, OximeterInfo,
-        ProducerEndpoint, Project, ProjectUpdate, Region,
-        RoleAssignmentBuiltin, RoleBuiltin, RouterRoute, RouterRouteUpdate,
-        Silo, SiloUser, Sled, UpdateAvailableArtifact, UserBuiltin, Volume,
-        Vpc, VpcFirewallRule, VpcRouter, VpcRouterUpdate, VpcSubnet,
-        VpcSubnetUpdate, VpcUpdate, Zpool,
+        Generation, GlobalImage, IncompleteNetworkInterface, Instance,
+        InstanceRuntimeState, Name, NetworkInterface, Organization,
+        OrganizationUpdate, OximeterInfo, ProducerEndpoint, Project,
+        ProjectUpdate, Region, RoleAssignmentBuiltin, RoleBuiltin, RouterRoute,
+        RouterRouteUpdate, Silo, SiloUser, Sled, UpdateAvailableArtifact,
+        UserBuiltin, Volume, Vpc, VpcFirewallRule, VpcRouter, VpcRouterUpdate,
+        VpcSubnet, VpcSubnetUpdate, VpcUpdate, Zpool,
     },
     pagination::paginated,
     pagination::paginated_multicolumn,
@@ -2718,6 +2718,75 @@ impl DataStore {
                 internal_message: String::from("Sled IP address must be IPv6"),
             }),
         }
+    }
+
+    pub async fn global_image_list_images(
+        &self,
+        opctx: &OpContext,
+        pagparams: &DataPageParams<'_, Name>,
+    ) -> ListResultVec<GlobalImage> {
+        opctx
+            .authorize(authz::Action::ListChildren, &authz::GLOBAL_IMAGE_LIST)
+            .await?;
+
+        use db::schema::global_image::dsl;
+        paginated(dsl::global_image, dsl::name, pagparams)
+            .filter(dsl::time_deleted.is_null())
+            .select(GlobalImage::as_select())
+            .load_async::<GlobalImage>(self.pool_authorized(opctx).await?)
+            .await
+            .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
+    }
+
+    pub async fn global_image_create_image(
+        &self,
+        opctx: &OpContext,
+        image: GlobalImage,
+    ) -> CreateResult<GlobalImage> {
+        opctx
+            .authorize(authz::Action::CreateChild, &authz::GLOBAL_IMAGE_LIST)
+            .await?;
+
+        use db::schema::global_image::dsl;
+        let name = image.name().clone();
+        diesel::insert_into(dsl::global_image)
+            .values(image)
+            .on_conflict(dsl::id)
+            .do_nothing()
+            .returning(GlobalImage::as_returning())
+            .get_result_async(self.pool())
+            .await
+            .map_err(|e| {
+                public_error_from_diesel_pool(
+                    e,
+                    ErrorHandler::Conflict(ResourceType::Image, name.as_str()),
+                )
+            })
+    }
+
+    pub async fn global_image_fetch(
+        &self,
+        opctx: &OpContext,
+        id: Uuid,
+    ) -> LookupResult<GlobalImage> {
+        opctx
+            .authorize(
+                authz::Action::Read,
+                &authz::GlobalImage::new(
+                    authz::FLEET, // XXX both GlobalImage and GlobalImageList have FLEET as a parent
+                    id,
+                    LookupType::ById(id),
+                ),
+            )
+            .await?;
+
+        use db::schema::global_image::dsl;
+        dsl::global_image
+            .filter(dsl::id.eq(id))
+            .select(GlobalImage::as_select())
+            .first_async(self.pool_authorized(opctx).await?)
+            .await
+            .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
     }
 }
 
