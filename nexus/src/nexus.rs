@@ -273,6 +273,59 @@ impl Nexus {
         }
     }
 
+    /// Used as the body of an unimplemented API endpoint (that we intend to
+    /// implement)
+    ///
+    /// The body of this function doesn't matter very much, since we're
+    /// eventually going to replace it with a real implementation.  We do a
+    /// superuser-level authz check to ensure the correct behavior This function
+    /// checks for superuser privilege, really just so that
+    // XXX-dap TODO-doc review the above comment
+    // XXX-dap TODO-doc give examples in case the internal usages are removed by
+    // the time someone needs to use this
+    async fn unimplemented_todo(
+        &self,
+        opctx: &OpContext,
+        visibility: Unimpl,
+    ) -> Error {
+        // Do a super-user-level authz check first.  This is really for our
+        // convenience: it causes this endpoint to do the expected thing for
+        // unauthenticated and unprivileged users, which in turn allows the
+        // authz integration test to cover this endpoint.  When we do implement
+        // the endpoint, it will need to correctly authenticate and authorize
+        // the request.
+        match opctx.authorize(authz::Action::Modify, &authz::FLEET).await {
+            Err(error @ Error::Forbidden) => {
+                if let Unimpl::ProtectedLookup(lookup_error) = visibility {
+                    lookup_error
+                } else {
+                    error
+                }
+            }
+            Err(error) => error,
+            Ok(_) => {
+                // In the event that a superuser actually gets this far, produce
+                // a server error.
+                //
+                // It's tempting to use other status codes here:
+                //
+                // "501 Not Implemented" is specifically when we don't recognize
+                // the HTTP method and cannot implement it on _any_ resource.
+                //
+                // "405 Method Not Allowed" is specifically when an HTTP method
+                // isn't supported.  That doesn't feel quite right either --
+                // this is usually interpreted to mean "not part of the API",
+                // which it obviously _is_, since the client found it in the API
+                // spec.
+                //
+                // Neither of these is true: this HTTP method on this HTTP
+                // resource is part of the API, and it will be supported by the
+                // server, but it doesn't work yet.
+                Error::internal_error("endpoint is not implemented")
+            }
+        }
+    }
+
     // TODO-robustness we should have a limit on how many sled agents there can
     // be (for graceful degradation at large scale).
     pub async fn upsert_sled(
@@ -846,114 +899,178 @@ impl Nexus {
 
     pub async fn list_images(
         &self,
-        _opctx: &OpContext,
+        opctx: &OpContext,
         _pagparams: &DataPageParams<'_, Name>,
     ) -> ListResultVec<db::model::Image> {
-        unimplemented!();
+        Err(self.unimplemented_todo(opctx, Unimpl::Public).await)
     }
 
     pub async fn create_image(
         self: &Arc<Self>,
-        _opctx: &OpContext,
+        opctx: &OpContext,
         _params: &params::ImageCreate,
     ) -> CreateResult<db::model::Image> {
-        unimplemented!();
+        Err(self.unimplemented_todo(opctx, Unimpl::Public).await)
     }
 
     pub async fn image_fetch(
         &self,
-        _opctx: &OpContext,
-        _image_name: &Name,
+        opctx: &OpContext,
+        image_name: &Name,
     ) -> LookupResult<db::model::Image> {
-        unimplemented!();
+        let lookup_type = LookupType::ByName(image_name.to_string());
+        let error = lookup_type.into_not_found(ResourceType::Image);
+        Err(self
+            .unimplemented_todo(opctx, Unimpl::ProtectedLookup(error))
+            .await)
     }
 
     pub async fn delete_image(
         self: &Arc<Self>,
-        _opctx: &OpContext,
-        _image_name: &Name,
+        opctx: &OpContext,
+        image_name: &Name,
     ) -> DeleteResult {
-        unimplemented!();
+        let lookup_type = LookupType::ByName(image_name.to_string());
+        let error = lookup_type.into_not_found(ResourceType::Image);
+        Err(self
+            .unimplemented_todo(opctx, Unimpl::ProtectedLookup(error))
+            .await)
     }
 
     pub async fn project_list_images(
         &self,
-        _opctx: &OpContext,
-        _organization_name: &Name,
-        _project_name: &Name,
+        opctx: &OpContext,
+        organization_name: &Name,
+        project_name: &Name,
         _pagparams: &DataPageParams<'_, Name>,
     ) -> ListResultVec<db::model::Image> {
-        unimplemented!();
+        let _ = LookupPath::new(opctx, &self.db_datastore)
+            .organization_name(organization_name)
+            .project_name(project_name)
+            .lookup_for(authz::Action::ListChildren)
+            .await?;
+        Err(self.unimplemented_todo(opctx, Unimpl::Public).await)
     }
 
     pub async fn project_create_image(
         self: &Arc<Self>,
-        _opctx: &OpContext,
-        _organization_name: &Name,
-        _project_name: &Name,
+        opctx: &OpContext,
+        organization_name: &Name,
+        project_name: &Name,
         _params: &params::ImageCreate,
     ) -> CreateResult<db::model::Image> {
-        unimplemented!();
+        let _ = LookupPath::new(opctx, &self.db_datastore)
+            .organization_name(organization_name)
+            .project_name(project_name)
+            .lookup_for(authz::Action::ListChildren)
+            .await?;
+        Err(self.unimplemented_todo(opctx, Unimpl::Public).await)
     }
 
     pub async fn project_image_fetch(
         &self,
-        _opctx: &OpContext,
-        _organization_name: &Name,
-        _project_name: &Name,
-        _image_name: &Name,
+        opctx: &OpContext,
+        organization_name: &Name,
+        project_name: &Name,
+        image_name: &Name,
     ) -> LookupResult<db::model::Image> {
-        unimplemented!();
+        let _ = LookupPath::new(opctx, &self.db_datastore)
+            .organization_name(organization_name)
+            .project_name(project_name)
+            .lookup_for(authz::Action::ListChildren)
+            .await?;
+        let lookup_type = LookupType::ByName(image_name.to_string());
+        let error = lookup_type.into_not_found(ResourceType::Image);
+        Err(self
+            .unimplemented_todo(opctx, Unimpl::ProtectedLookup(error))
+            .await)
     }
 
     pub async fn project_delete_image(
         self: &Arc<Self>,
-        _opctx: &OpContext,
-        _organization_name: &Name,
-        _project_name: &Name,
-        _image_name: &Name,
+        opctx: &OpContext,
+        organization_name: &Name,
+        project_name: &Name,
+        image_name: &Name,
     ) -> DeleteResult {
-        unimplemented!();
+        let _ = LookupPath::new(opctx, &self.db_datastore)
+            .organization_name(organization_name)
+            .project_name(project_name)
+            .lookup_for(authz::Action::ListChildren)
+            .await?;
+        let lookup_type = LookupType::ByName(image_name.to_string());
+        let error = lookup_type.into_not_found(ResourceType::Image);
+        Err(self
+            .unimplemented_todo(opctx, Unimpl::ProtectedLookup(error))
+            .await)
     }
 
     pub async fn project_create_snapshot(
         self: &Arc<Self>,
-        _opctx: &OpContext,
-        _organization_name: &Name,
-        _project_name: &Name,
+        opctx: &OpContext,
+        organization_name: &Name,
+        project_name: &Name,
         _params: &params::SnapshotCreate,
     ) -> CreateResult<db::model::Snapshot> {
-        unimplemented!();
+        let _ = LookupPath::new(opctx, &self.db_datastore)
+            .organization_name(organization_name)
+            .project_name(project_name)
+            .lookup_for(authz::Action::ListChildren)
+            .await?;
+        Err(self.unimplemented_todo(opctx, Unimpl::Public).await)
     }
 
     pub async fn project_list_snapshots(
         &self,
-        _opctx: &OpContext,
-        _organization_name: &Name,
-        _project_name: &Name,
+        opctx: &OpContext,
+        organization_name: &Name,
+        project_name: &Name,
         _pagparams: &DataPageParams<'_, Name>,
     ) -> ListResultVec<db::model::Snapshot> {
-        unimplemented!();
+        let _ = LookupPath::new(opctx, &self.db_datastore)
+            .organization_name(organization_name)
+            .project_name(project_name)
+            .lookup_for(authz::Action::ListChildren)
+            .await?;
+        Err(self.unimplemented_todo(opctx, Unimpl::Public).await)
     }
 
     pub async fn snapshot_fetch(
         &self,
-        _opctx: &OpContext,
-        _organization_name: &Name,
-        _project_name: &Name,
-        _snapshot_name: &Name,
+        opctx: &OpContext,
+        organization_name: &Name,
+        project_name: &Name,
+        snapshot_name: &Name,
     ) -> LookupResult<db::model::Snapshot> {
-        unimplemented!();
+        let _ = LookupPath::new(opctx, &self.db_datastore)
+            .organization_name(organization_name)
+            .project_name(project_name)
+            .lookup_for(authz::Action::ListChildren)
+            .await?;
+        let lookup_type = LookupType::ByName(snapshot_name.to_string());
+        let error = lookup_type.into_not_found(ResourceType::Snapshot);
+        Err(self
+            .unimplemented_todo(opctx, Unimpl::ProtectedLookup(error))
+            .await)
     }
 
     pub async fn project_delete_snapshot(
         self: &Arc<Self>,
-        _opctx: &OpContext,
-        _organization_name: &Name,
-        _project_name: &Name,
-        _snapshot_name: &Name,
+        opctx: &OpContext,
+        organization_name: &Name,
+        project_name: &Name,
+        snapshot_name: &Name,
     ) -> DeleteResult {
-        unimplemented!();
+        let _ = LookupPath::new(opctx, &self.db_datastore)
+            .organization_name(organization_name)
+            .project_name(project_name)
+            .lookup_for(authz::Action::ListChildren)
+            .await?;
+        let lookup_type = LookupType::ByName(snapshot_name.to_string());
+        let error = lookup_type.into_not_found(ResourceType::Snapshot);
+        Err(self
+            .unimplemented_todo(opctx, Unimpl::ProtectedLookup(error))
+            .await)
     }
 
     // Instances
@@ -3335,6 +3452,21 @@ impl Nexus {
     ) -> LookupResult<SiloUser> {
         self.db_datastore.silo_user_fetch(silo_user_id).await
     }
+}
+
+/// For unimplemented endpoints, indicates whether the resource identified
+/// by this endpoint will always be publicly visible or not
+///
+/// For example, the resource "/images" is well-known (it's part of the
+/// API).  Being unauthorized to list images will result in a "403
+/// Forbidden".  It's `UnimplResourceVisibility::Public'.
+///
+/// By contrast, the resource "/images/some-image" is not publicly-known.
+/// If you're not authorized to view it, you'll get a "404 Not Found".  It's
+/// `Unimpl::ProtectedLookup(LookupType::ByName("some-image"))`.
+enum Unimpl {
+    Public,
+    ProtectedLookup(Error),
 }
 
 fn generate_session_token() -> String {

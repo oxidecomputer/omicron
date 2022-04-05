@@ -126,7 +126,8 @@ fn test_unauthorized_coverage() {
     // If you're here because this assertion failed, check that if you've added
     // any API operations to Nexus, you've also added a corresponding test in
     // "unauthorized.rs" so that it will automatically be checked for its
-    // behavior for unauthenticated and unauthorized users.
+    // behavior for unauthenticated and unauthorized users.  DO NOT SKIP THIS.
+    // Even if you're just adding a stub, see [`Nexus::unimplemented_todo()`].
     assert_contents(
         "tests/output/uncovered-authz-endpoints.txt",
         &uncovered_endpoints,

@@ -194,6 +194,19 @@ lazy_static! {
             subnet_name: DEMO_VPC_SUBNET_NAME.clone(),
             ip: None,
         };
+
+    // Images
+    pub static ref DEMO_IMAGE_NAME: Name = "demo-image".parse().unwrap();
+    pub static ref DEMO_IMAGE_URL: String =
+        format!("/images/{}", *DEMO_IMAGE_NAME);
+    pub static ref DEMO_IMAGE_CREATE: params::ImageCreate =
+        params::ImageCreate {
+            identity: IdentityMetadataCreateParams {
+                name: DEMO_IMAGE_NAME.clone(),
+                description: String::from(""),
+            },
+            source: params::ImageSource::Url(String::from("dummy"))
+        };
 }
 
 /// Describes an API endpoint to be verified by the "unauthorized" test
@@ -257,6 +270,10 @@ pub enum AllowedMethod {
     /// that we define here or uuids that we control in the test suite (e.g.,
     /// the rack and sled uuids).
     GetNonexistent,
+    /// HTTP "GET" method that is not yet implemented
+    ///
+    /// This should be a transient state, used only for stub APIs
+    GetUnimplemented,
     /// HTTP "POST" method, with sample input (which should be valid input for
     /// this endpoint)
     Post(serde_json::Value),
@@ -272,6 +289,7 @@ impl AllowedMethod {
             AllowedMethod::Delete => &Method::DELETE,
             AllowedMethod::Get => &Method::GET,
             AllowedMethod::GetNonexistent => &Method::GET,
+            AllowedMethod::GetUnimplemented => &Method::GET,
             AllowedMethod::Post(_) => &Method::POST,
             AllowedMethod::Put(_) => &Method::PUT,
         }
@@ -285,7 +303,8 @@ impl AllowedMethod {
         match self {
             AllowedMethod::Delete
             | AllowedMethod::Get
-            | AllowedMethod::GetNonexistent => None,
+            | AllowedMethod::GetNonexistent
+            | AllowedMethod::GetUnimplemented => None,
             AllowedMethod::Post(body) => Some(&body),
             AllowedMethod::Put(body) => Some(&body),
         }
@@ -718,6 +737,27 @@ lazy_static! {
             allowed_methods: vec![AllowedMethod::Post(
                 serde_json::Value::Null
             )],
+        },
+
+        /* Images */
+        VerifyEndpoint {
+            url: "/images",
+            visibility: Visibility::Public,
+            allowed_methods: vec![
+                AllowedMethod::GetUnimplemented,
+                AllowedMethod::Post(
+                    serde_json::to_value(&*DEMO_IMAGE_CREATE).unwrap()
+                ),
+            ],
+        },
+
+        VerifyEndpoint {
+            url: &*DEMO_IMAGE_URL,
+            visibility: Visibility::Protected,
+            allowed_methods: vec![
+                AllowedMethod::GetUnimplemented,
+                AllowedMethod::Delete,
+            ],
         },
     ];
 }

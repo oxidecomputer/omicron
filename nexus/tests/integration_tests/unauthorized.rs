@@ -77,13 +77,11 @@ SUMMARY OF REQUESTS MADE
 
 KEY, USING HEADER AND EXAMPLE ROW:
 
-          +----------------------------> privileged GET (expects 200)
-          |                              (digit = last digit of 200-level
-          |                              response)
+          +----------------------------> privileged GET (expects 200 or 500)
+          |                              (digit = last digit of status code)
           |
           |                          +-> privileged GET (expects same as above)
-          |                          |   (digit = last digit of 200-level
-          |                          |    response)
+          |                          |   (digit = last digit of status code)
           |                          |   ('-' => skipped (N/A))
           ^                          ^
 HEADER:   G GET  PUT  POST DEL  TRCE G  URL
@@ -245,26 +243,47 @@ async fn verify_endpoint(
     // response.  Otherwise, the test might later succeed by coincidence.  We
     // might find a 404 because of something that actually doesn't exist rather
     // than something that's just hidden from unauthorized users.
-    let get_allowed = endpoint
-        .allowed_methods
-        .iter()
-        .any(|allowed| matches!(allowed, AllowedMethod::Get));
-    let resource_before: Option<serde_json::Value> = if get_allowed {
-        info!(log, "test: privileged GET");
-        record_operation(WhichTest::PrivilegedGet(Some(&http::StatusCode::OK)));
-        Some(
-            NexusRequest::object_get(client, endpoint.url)
-                .authn_as(AuthnMode::PrivilegedUser)
-                .execute()
-                .await
-                .unwrap()
-                .parsed_body()
-                .unwrap(),
-        )
-    } else {
-        warn!(log, "test: skipping privileged GET (method not allowed)");
-        record_operation(WhichTest::PrivilegedGet(None));
-        None
+    let get_allowed = endpoint.allowed_methods.iter().find(|allowed| {
+        matches!(allowed, AllowedMethod::Get | AllowedMethod::GetUnimplemented)
+    });
+    let resource_before = match get_allowed {
+        Some(AllowedMethod::Get) => {
+            info!(log, "test: privileged GET");
+            record_operation(WhichTest::PrivilegedGet(Some(
+                &http::StatusCode::OK,
+            )));
+            Some(
+                NexusRequest::object_get(client, endpoint.url)
+                    .authn_as(AuthnMode::PrivilegedUser)
+                    .execute()
+                    .await
+                    .unwrap()
+                    .parsed_body::<serde_json::Value>()
+                    .unwrap(),
+            )
+        }
+        Some(AllowedMethod::GetUnimplemented) => {
+            info!(log, "test: privileged GET (unimplemented)");
+            let expected_status = http::StatusCode::INTERNAL_SERVER_ERROR;
+            record_operation(WhichTest::PrivilegedGet(Some(&expected_status)));
+            NexusRequest::expect_failure(
+                client,
+                expected_status,
+                http::Method::GET,
+                endpoint.url,
+            )
+            .authn_as(AuthnMode::PrivilegedUser)
+            .execute()
+            .await
+            .unwrap();
+            None
+        }
+        Some(_) => unimplemented!(),
+        None => {
+            warn!(log, "test: skipping privileged GET (method not allowed)");
+            record_operation(WhichTest::PrivilegedGet(None));
+            None
+        }
     };
 
     print!(" ");
