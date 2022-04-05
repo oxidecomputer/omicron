@@ -238,13 +238,13 @@
         ]
       },
       "DatasetEnsureBody": {
-        "description": "Used to request a new partition kind exists within a zpool.\n\nMany partition types are associated with services that will be instantiated when the partition is detected.",
+        "description": "Used to request a new dataset kind exists within a zpool.\n\nMany dataset types are associated with services that will be instantiated when the dataset is detected.",
         "type": "object",
         "properties": {
           "address": {
             "type": "string"
           },
-          "partition_kind": {
+          "dataset_kind": {
             "$ref": "#/components/schemas/DatasetKind"
           },
           "zpool_uuid": {
@@ -254,7 +254,7 @@
         },
         "required": [
           "address",
-          "partition_kind",
+          "dataset_kind",
           "zpool_uuid"
         ]
       },
@@ -941,7 +941,7 @@
         ]
       },
       "ServiceEnsureBody": {
-        "description": "Used to request that the Sled initialize certain services on initialization.\n\nThis may be used to record that certain sleds are responsible for launching services which may not be associated with a partition, such as Nexus.",
+        "description": "Used to request that the Sled initialize certain services on initialization.\n\nThis may be used to record that certain sleds are responsible for launching services which may not be associated with a dataset, such as Nexus.",
         "type": "object",
         "properties": {
           "services": {

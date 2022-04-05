@@ -33,9 +33,9 @@ pub struct SledRequest {
     /// The Sled Agent address receiving these requests.
     pub sled_address: SocketAddr,
 
-    /// Partitions to be created.
-    #[serde(default, rename = "partition")]
-    pub partitions: Vec<DatasetEnsureBody>,
+    /// Datasets to be created.
+    #[serde(default, rename = "dataset")]
+    pub datasets: Vec<DatasetEnsureBody>,
 
     /// Services to be instantiated.
     #[serde(default, rename = "service")]
