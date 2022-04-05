@@ -68,7 +68,7 @@ impl From<Error> for omicron_common::api::external::Error {
 ///
 /// Contains both a connection to the Nexus, as well as managed instances.
 pub struct SledAgent {
-    // Component of Sled Agent responsible for storage and partition management.
+    // Component of Sled Agent responsible for storage and dataset management.
     storage: StorageManager,
 
     // Component of Sled Agent responsible for managing Propolis instances.
@@ -182,11 +182,11 @@ impl SledAgent {
     pub async fn filesystem_ensure(
         &self,
         zpool_uuid: Uuid,
-        partition_kind: DatasetKind,
+        dataset_kind: DatasetKind,
         address: SocketAddr,
     ) -> Result<(), Error> {
         self.storage
-            .upsert_filesystem(zpool_uuid, partition_kind, address)
+            .upsert_filesystem(zpool_uuid, dataset_kind, address)
             .await?;
         Ok(())
     }
