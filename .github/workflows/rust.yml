@@ -104,6 +104,8 @@ jobs:
       if: ${{ github.ref != 'refs/heads/main' }}
     - name: Report cargo version
       run: cargo --version
+    - name: Report disk space
+      run: df -h .
     - name: Configure GitHub cache for CockroachDB binaries
       id: cache-cockroachdb
       # actions/cache@v2.1.4
