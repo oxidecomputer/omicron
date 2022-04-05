@@ -1,7 +1,7 @@
 # RSS (Rack Setup Service) "stand-in" configuration.
 
 [[request]]
-sled_address = "[fd00:1de::]:12345"
+sled_address = "[fd00:1de::1]:12345"
 
 # TODO(https://github.com/oxidecomputer/omicron/issues/732): Nexus
 # should allocate crucible datasets.
