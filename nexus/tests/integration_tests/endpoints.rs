@@ -535,6 +535,13 @@ lazy_static! {
         },
 
         VerifyEndpoint {
+            url: &*DEMO_INSTANCE_DISKS_URL,
+            visibility: Visibility::Protected,
+            allowed_methods: vec![
+                AllowedMethod::Get,
+            ],
+        },
+        VerifyEndpoint {
             url: &*DEMO_INSTANCE_DISKS_ATTACH_URL,
             visibility: Visibility::Protected,
             allowed_methods: vec![
