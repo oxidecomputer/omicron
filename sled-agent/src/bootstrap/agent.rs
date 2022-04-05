@@ -9,7 +9,8 @@ use super::discovery;
 use super::trust_quorum::{
     self, RackSecret, ShareDistribution, TrustQuorumError,
 };
-use super::views::ShareResponse;
+use super::params::SledAgentRequest;
+use super::views::{SledAgentResponse, ShareResponse};
 use crate::rack_setup::service::Service as RackSetupService;
 use omicron_common::api::external::Error as ExternalError;
 use omicron_common::backoff::{
@@ -95,6 +96,16 @@ impl Agent {
         info!(&self.log, "request_share, received identity: {:x?}", identity);
 
         Ok(ShareResponse { shared_secret: vec![] })
+    }
+
+    /// Initializes the Sled Agent on behalf of the RSS, if one has not already
+    /// been initialized.
+    pub async fn request_agent(
+        &self,
+        request: SledAgentRequest,
+    ) -> Result<SledAgentResponse, BootstrapError> {
+
+        panic!("no");
     }
 
     /// Communicates with peers, sharing secrets, until the rack has been
