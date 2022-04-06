@@ -1189,7 +1189,7 @@ async fn instance_disks_detach(
 #[endpoint {
     method = GET,
     path = "/images",
-    tags = ["global_images"],
+    tags = ["images:global"],
 }]
 async fn images_get(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
@@ -1222,7 +1222,7 @@ async fn images_get(
 #[endpoint {
     method = POST,
     path = "/images",
-    tags = ["global_images"]
+    tags = ["images:global"]
 }]
 async fn images_post(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
@@ -1251,7 +1251,7 @@ struct GlobalImagePathParam {
 #[endpoint {
     method = GET,
     path = "/images/{image_name}",
-    tags = ["global_images"],
+    tags = ["images:global"],
 }]
 async fn images_get_image(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
@@ -1277,7 +1277,7 @@ async fn images_get_image(
 #[endpoint {
     method = DELETE,
     path = "/images/{image_name}",
-    tags = ["global_images"],
+    tags = ["images:global"],
 }]
 async fn images_delete_image(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
