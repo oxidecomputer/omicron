@@ -161,7 +161,8 @@ impl SledAgent {
             config.data_link.clone(),
         )?;
         let services =
-            ServiceManager::new(log.clone(), config.data_link.clone()).await?;
+            ServiceManager::new(log.clone(), config.data_link.clone(), None)
+                .await?;
 
         Ok(SledAgent { storage, instances, nexus_client, services })
     }

@@ -186,6 +186,27 @@ pub struct InstalledZone {
 }
 
 impl InstalledZone {
+    /// Returns the name of a zone, based on the service name plus any unique
+    /// identifying info.
+    ///
+    /// The zone name is based on:
+    /// - A unique Oxide prefix ("oxz_")
+    /// - The name of the service being hosted (e.g., "nexus")
+    /// - An optional, service-unique identifier (typically a UUID).
+    ///
+    /// This results in a zone name which is distinct across different zpools,
+    /// but stable and predictable across reboots.
+    pub fn get_zone_name(
+        service_name: &str,
+        unique_name: Option<&str>,
+    ) -> String {
+        let mut zone_name = format!("{}{}", ZONE_PREFIX, service_name);
+        if let Some(suffix) = unique_name {
+            zone_name.push_str(&format!("_{}", suffix));
+        }
+        zone_name
+    }
+
     pub async fn install(
         log: &Logger,
         vnic_allocator: &VnicAllocator,
@@ -197,18 +218,7 @@ impl InstalledZone {
     ) -> Result<InstalledZone, Error> {
         let control_vnic = vnic_allocator.new_control(None)?;
 
-        // The zone name is based on:
-        // - A unique Oxide prefix ("oxz_")
-        // - The name of the service being hosted (e.g., "nexus")
-        // - An optional, service-unique identifier (typically a UUID).
-        //
-        // This results in a zone name which is distinct across different zpools,
-        // but stable and predictable across reboots.
-        let mut zone_name = format!("{}{}", ZONE_PREFIX, service_name);
-        if let Some(suffix) = unique_name {
-            zone_name.push_str(&format!("_{}", suffix));
-        }
-
+        let zone_name = Self::get_zone_name(service_name, unique_name);
         let zone_image_path =
             PathBuf::from(&format!("/opt/oxide/{}.tar.gz", service_name));
 
