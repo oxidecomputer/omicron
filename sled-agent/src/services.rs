@@ -360,6 +360,8 @@ mod test {
 
         ensure_new_service(&mgr).await;
         drop_service_manager(mgr);
+
+        logctx.cleanup_successful();
     }
 
     #[tokio::test]
@@ -383,6 +385,8 @@ mod test {
         ensure_new_service(&mgr).await;
         ensure_existing_service(&mgr).await;
         drop_service_manager(mgr);
+
+        logctx.cleanup_successful();
     }
 
     #[tokio::test]
@@ -418,6 +422,8 @@ mod test {
         .await
         .unwrap();
         drop_service_manager(mgr);
+
+        logctx.cleanup_successful();
     }
 
     #[tokio::test]
@@ -455,5 +461,7 @@ mod test {
         .await
         .unwrap();
         drop_service_manager(mgr);
+
+        logctx.cleanup_successful();
     }
 }
