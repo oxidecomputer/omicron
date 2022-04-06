@@ -225,12 +225,9 @@ async fn verify_endpoint(
     let log = log.new(o!("url" => endpoint.url));
     info!(log, "test: begin endpoint");
 
-    // Determine the expected status code for unauthenticated requests, based on
-    // the endpoint's visibility.
-    let unauthn_status = match endpoint.visibility {
-        Visibility::Public => StatusCode::UNAUTHORIZED,
-        Visibility::Protected => StatusCode::NOT_FOUND,
-    };
+    // When the user is not authenticated, failing any authz check results in a
+    // "401 Unauthorized" status code.
+    let unauthn_status = StatusCode::UNAUTHORIZED;
 
     // Determine the expected status code for authenticated, unauthorized
     // requests, based on the endpoint's visibility.
