@@ -128,10 +128,12 @@ fn test_unauthorized_coverage() {
     // "unauthorized.rs" so that it will automatically be checked for its
     // behavior for unauthenticated and unauthorized users.  DO NOT SKIP THIS.
     // Even if you're just adding a stub, see [`Nexus::unimplemented_todo()`].
-    assert_contents(
-        "tests/output/uncovered-authz-endpoints.txt",
-        &uncovered_endpoints,
-    );
+    // If you _added_ a test that covered an endpoint from the allowlist --
+    // hooray!  Just delete the corresponding line from this file.
+    let expected_uncovered_endpoints =
+        std::fs::read_to_string("tests/output/uncovered-authz-endpoints.txt")
+            .expect("failed to load file of allowed uncovered endpoints");
+    assert_eq!(expected_uncovered_endpoints, uncovered_endpoints);
 }
 
 #[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
