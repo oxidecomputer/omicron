@@ -273,29 +273,173 @@ impl Nexus {
         }
     }
 
-    /// Used as the body of an unimplemented API endpoint (that we intend to
-    /// implement)
+    /// Used as the body of a "stub" endpoint -- one that's currently
+    /// unimplemented but that we eventually intend to implement
     ///
-    /// The body of this function doesn't matter very much, since we're
-    /// eventually going to replace it with a real implementation.  We do a
-    /// superuser-level authz check to ensure the correct behavior This function
-    /// checks for superuser privilege, really just so that
-    // XXX-dap TODO-doc review the above comment
-    // XXX-dap TODO-doc give examples in case the internal usages are removed by
-    // the time someone needs to use this
-    async fn unimplemented_todo(
+    /// Even though an endpoint is unimplemented, it's useful if it implements
+    /// the correct authn/authz behaviors behaviors for unauthenticated and
+    /// authenticated, unauthorized requests.  This allows us to maintain basic
+    /// authn/authz test coverage for stub endpoints, which in turn helps us
+    /// ensure that all endpoints are covered.
+    ///
+    /// In order to implement the correct authn/authz behavior, we need to know
+    /// a little about the endpoint.  This is given by the `visibility`
+    /// argument.  See the examples below.
+    ///
+    /// # Examples
+    ///
+    /// ## A top-level API endpoint (always visible)
+    ///
+    /// For example, "/my-new-kind-of-resource".  The assumption is that the
+    /// _existence_ of this endpoint is not a secret.  Use:
+    ///
+    /// ```
+    /// use omicron_nexus::context::OpContext;
+    /// use omicron_nexus::db::DataStore;
+    /// use omicron_nexus::nexus::Nexus;
+    /// use omicron_nexus::nexus::Unimpl;
+    /// use omicron_common::api::external::Error;
+    ///
+    /// async fn my_things_list(
+    ///     nexus: &Nexus,
+    ///     datastore: &DataStore,
+    ///     opctx: &OpContext,
+    /// ) -> Result<(), Error>
+    /// {
+    ///     Err(nexus.unimplemented_todo(opctx, Unimpl::Public).await)
+    /// }
+    /// ```
+    ///
+    /// ## An authz-protected resource under the top level
+    ///
+    /// For example, "/my-new-kind-of-resource/demo" (where "demo" is the name
+    /// of a specific resource of type "my-new-kind-of-resource").  Use:
+    ///
+    /// ```
+    /// use omicron_nexus::context::OpContext;
+    /// use omicron_nexus::db::model::Name;
+    /// use omicron_nexus::db::DataStore;
+    /// use omicron_nexus::nexus::Nexus;
+    /// use omicron_nexus::nexus::Unimpl;
+    /// use omicron_common::api::external::Error;
+    /// use omicron_common::api::external::LookupType;
+    /// use omicron_common::api::external::ResourceType;
+    ///
+    /// async fn my_thing_fetch(
+    ///     nexus: &Nexus,
+    ///     datastore: &DataStore,
+    ///     opctx: &OpContext,
+    ///     the_name: &Name,
+    /// ) -> Result<(), Error>
+    /// {
+    ///     // You will want to have defined your OWN ResourceType for this
+    ///     // resource, even though it's still a stub.
+    ///     let resource_type = ResourceType::Snapshot;
+    ///     let lookup_type = LookupType::ByName(the_name.to_string());
+    ///     let not_found_error = lookup_type.into_not_found(resource_type);
+    ///     let unimp = Unimpl::ProtectedLookup(not_found_error);
+    ///     Err(nexus.unimplemented_todo(opctx, unimp).await)
+    /// }
+    /// ```
+    ///
+    /// This does the bare minimum to produce an appropriate 404 "Not Found"
+    /// error for authenticated, unauthorized users.
+    ///
+    /// ## An authz-protected API endpoint under some other (non-stub) resource
+    ///
+    /// For example, "/organizations/my-org/my-new-kind-of-resource" or
+    /// "/organizations/my-org/my-new-kind-of-resource/demo", where "my-org" is
+    /// the name of an Organization and "demo" is the name of a specific
+    /// resource of my-new-kind-of-resource.
+    ///
+    /// In this case, your function should do whatever lookup of the non-stub
+    /// resource that the function will eventually do, and then treat it like
+    /// one of the first two examples.  If the URL describes a specific
+    /// resource, use `Unimpl::ProtectedLookup` as in the second example above.
+    /// Otherwise, use `Unimpl::Public` as in the first example above.
+    ///
+    /// Here's an example stub for the "list" endpoint for a new resource
+    /// underneath Organizations:
+    ///
+    /// ```
+    /// use omicron_nexus::authz;
+    /// use omicron_nexus::context::OpContext;
+    /// use omicron_nexus::db::lookup::LookupPath;
+    /// use omicron_nexus::db::model::Name;
+    /// use omicron_nexus::db::DataStore;
+    /// use omicron_nexus::nexus::Nexus;
+    /// use omicron_nexus::nexus::Unimpl;
+    /// use omicron_common::api::external::Error;
+    ///
+    /// async fn organization_list_my_thing(
+    ///     nexus: &Nexus,
+    ///     datastore: &DataStore,
+    ///     opctx: &OpContext,
+    ///     organization_name: &Name,
+    /// ) -> Result<(), Error>
+    /// {
+    ///     let (.., _authz_org) = LookupPath::new(opctx, datastore)
+    ///         .organization_name(organization_name)
+    ///         .lookup_for(authz::Action::ListChildren)
+    ///         .await?;
+    ///     Err(nexus.unimplemented_todo(opctx, Unimpl::Public).await)
+    /// }
+    /// ```
+    ///
+    /// Here's an example stub for the "get" endpoint for that same resource:
+    ///
+    /// ```
+    /// use omicron_nexus::authz;
+    /// use omicron_nexus::context::OpContext;
+    /// use omicron_nexus::db::lookup::LookupPath;
+    /// use omicron_nexus::db::model::Name;
+    /// use omicron_nexus::db::DataStore;
+    /// use omicron_nexus::nexus::Nexus;
+    /// use omicron_nexus::nexus::Unimpl;
+    /// use omicron_common::api::external::Error;
+    /// use omicron_common::api::external::LookupType;
+    /// use omicron_common::api::external::ResourceType;
+    ///
+    /// async fn my_thing_fetch(
+    ///     nexus: &Nexus,
+    ///     datastore: &DataStore,
+    ///     opctx: &OpContext,
+    ///     organization_name: &Name,
+    ///     the_name: &Name,
+    /// ) -> Result<(), Error>
+    /// {
+    ///     let _ = LookupPath::new(opctx, datastore)
+    ///         .organization_name(organization_name)
+    ///         .lookup_for(authz::Action::ListChildren)
+    ///         .await?;
+    ///     // You will want to have defined your OWN ResourceType for this
+    ///     // resource, even though it's still a stub.
+    ///     let resource_type = ResourceType::Snapshot;
+    ///     let lookup_type = LookupType::ByName(the_name.to_string());
+    ///     let not_found_error = lookup_type.into_not_found(resource_type);
+    ///     let unimp = Unimpl::ProtectedLookup(not_found_error);
+    ///     Err(nexus.unimplemented_todo(opctx, unimp).await)
+    /// }
+    /// ```
+    ///
+    /// This isn't _quite_ the lookup that this endpoint will eventually do,
+    /// but the real one cannot be done until you actually implement the
+    /// resource.  This lookup is close, and sufficient to kick out unauthorized
+    /// requests with the correct 404.
+    pub async fn unimplemented_todo(
         &self,
         opctx: &OpContext,
         visibility: Unimpl,
     ) -> Error {
-        // Do a super-user-level authz check first.  This is really for our
-        // convenience: it causes this endpoint to do the expected thing for
-        // unauthenticated and unprivileged users, which in turn allows the
-        // authz integration test to cover this endpoint.  When we do implement
-        // the endpoint, it will need to correctly authenticate and authorize
-        // the request.
+        // Deny access to non-super-users.  This is really just for the benefit
+        // of the authz coverage tests.  By requiring (and testing) correct
+        // authz behavior for stubs, we ensure that that behavior is preserved
+        // when the stub's implementation is fleshed out.
         match opctx.authorize(authz::Action::Modify, &authz::FLEET).await {
             Err(error @ Error::Forbidden) => {
+                // Emulate the behavior of `Authz::authorize()`: if this is a
+                // non-public resource, then the user should get a 404, not a
+                // 403, when authorization fails.
                 if let Unimpl::ProtectedLookup(lookup_error) = visibility {
                     lookup_error
                 } else {
@@ -3464,7 +3608,7 @@ impl Nexus {
 /// By contrast, the resource "/images/some-image" is not publicly-known.
 /// If you're not authorized to view it, you'll get a "404 Not Found".  It's
 /// `Unimpl::ProtectedLookup(LookupType::ByName("some-image"))`.
-enum Unimpl {
+pub enum Unimpl {
     Public,
     ProtectedLookup(Error),
 }
