@@ -347,16 +347,12 @@ impl Nexus {
     ///
     /// ## An authz-protected API endpoint under some other (non-stub) resource
     ///
-    /// For example, "/organizations/my-org/my-new-kind-of-resource" or
-    /// "/organizations/my-org/my-new-kind-of-resource/demo", where "my-org" is
-    /// the name of an Organization and "demo" is the name of a specific
-    /// resource of my-new-kind-of-resource.
+    /// ### ... when the endpoint never returns 404 (e.g., "list", "create")
     ///
-    /// In this case, your function should do whatever lookup of the non-stub
-    /// resource that the function will eventually do, and then treat it like
-    /// one of the first two examples.  If the URL describes a specific
-    /// resource, use `Unimpl::ProtectedLookup` as in the second example above.
-    /// Otherwise, use `Unimpl::Public` as in the first example above.
+    /// For example, "/organizations/my-org/my-new-kind-of-resource".  In this
+    /// case, your function should do whatever lookup of the non-stub resource
+    /// that the function will eventually do, and then treat it like the first
+    /// example.
     ///
     /// Here's an example stub for the "list" endpoint for a new resource
     /// underneath Organizations:
@@ -386,7 +382,10 @@ impl Nexus {
     /// }
     /// ```
     ///
-    /// Here's an example stub for the "get" endpoint for that same resource:
+    /// ### ... when the endpoint can return 404 (e.g., "get", "delete")
+    ///
+    /// You can treat this exactly like the second example above.  Here's an
+    /// example stub for the "get" endpoint for that same resource:
     ///
     /// ```
     /// use omicron_nexus::authz;
@@ -408,10 +407,6 @@ impl Nexus {
     ///     the_name: &Name,
     /// ) -> Result<(), Error>
     /// {
-    ///     let _ = LookupPath::new(opctx, datastore)
-    ///         .organization_name(organization_name)
-    ///         .lookup_for(authz::Action::ListChildren)
-    ///         .await?;
     ///     // You will want to have defined your OWN ResourceType for this
     ///     // resource, even though it's still a stub.
     ///     let resource_type = ResourceType::Snapshot;
@@ -421,11 +416,6 @@ impl Nexus {
     ///     Err(nexus.unimplemented_todo(opctx, unimp).await)
     /// }
     /// ```
-    ///
-    /// This isn't _quite_ the lookup that this endpoint will eventually do,
-    /// but the real one cannot be done until you actually implement the
-    /// resource.  This lookup is close, and sufficient to kick out unauthorized
-    /// requests with the correct 404.
     pub async fn unimplemented_todo(
         &self,
         opctx: &OpContext,
@@ -1114,39 +1104,27 @@ impl Nexus {
     pub async fn project_image_fetch(
         &self,
         opctx: &OpContext,
-        organization_name: &Name,
-        project_name: &Name,
+        _organization_name: &Name,
+        _project_name: &Name,
         image_name: &Name,
     ) -> LookupResult<db::model::Image> {
-        let _ = LookupPath::new(opctx, &self.db_datastore)
-            .organization_name(organization_name)
-            .project_name(project_name)
-            .lookup_for(authz::Action::ListChildren)
-            .await?;
         let lookup_type = LookupType::ByName(image_name.to_string());
-        let error = lookup_type.into_not_found(ResourceType::Image);
-        Err(self
-            .unimplemented_todo(opctx, Unimpl::ProtectedLookup(error))
-            .await)
+        let not_found_error = lookup_type.into_not_found(ResourceType::Image);
+        let unimp = Unimpl::ProtectedLookup(not_found_error);
+        Err(self.unimplemented_todo(opctx, unimp).await)
     }
 
     pub async fn project_delete_image(
         self: &Arc<Self>,
         opctx: &OpContext,
-        organization_name: &Name,
-        project_name: &Name,
+        _organization_name: &Name,
+        _project_name: &Name,
         image_name: &Name,
     ) -> DeleteResult {
-        let _ = LookupPath::new(opctx, &self.db_datastore)
-            .organization_name(organization_name)
-            .project_name(project_name)
-            .lookup_for(authz::Action::ListChildren)
-            .await?;
         let lookup_type = LookupType::ByName(image_name.to_string());
-        let error = lookup_type.into_not_found(ResourceType::Image);
-        Err(self
-            .unimplemented_todo(opctx, Unimpl::ProtectedLookup(error))
-            .await)
+        let not_found_error = lookup_type.into_not_found(ResourceType::Image);
+        let unimp = Unimpl::ProtectedLookup(not_found_error);
+        Err(self.unimplemented_todo(opctx, unimp).await)
     }
 
     pub async fn project_create_snapshot(
@@ -1182,39 +1160,29 @@ impl Nexus {
     pub async fn snapshot_fetch(
         &self,
         opctx: &OpContext,
-        organization_name: &Name,
-        project_name: &Name,
+        _organization_name: &Name,
+        _project_name: &Name,
         snapshot_name: &Name,
     ) -> LookupResult<db::model::Snapshot> {
-        let _ = LookupPath::new(opctx, &self.db_datastore)
-            .organization_name(organization_name)
-            .project_name(project_name)
-            .lookup_for(authz::Action::ListChildren)
-            .await?;
         let lookup_type = LookupType::ByName(snapshot_name.to_string());
-        let error = lookup_type.into_not_found(ResourceType::Snapshot);
-        Err(self
-            .unimplemented_todo(opctx, Unimpl::ProtectedLookup(error))
-            .await)
+        let not_found_error =
+            lookup_type.into_not_found(ResourceType::Snapshot);
+        let unimp = Unimpl::ProtectedLookup(not_found_error);
+        Err(self.unimplemented_todo(opctx, unimp).await)
     }
 
     pub async fn project_delete_snapshot(
         self: &Arc<Self>,
         opctx: &OpContext,
-        organization_name: &Name,
-        project_name: &Name,
+        _organization_name: &Name,
+        _project_name: &Name,
         snapshot_name: &Name,
     ) -> DeleteResult {
-        let _ = LookupPath::new(opctx, &self.db_datastore)
-            .organization_name(organization_name)
-            .project_name(project_name)
-            .lookup_for(authz::Action::ListChildren)
-            .await?;
         let lookup_type = LookupType::ByName(snapshot_name.to_string());
-        let error = lookup_type.into_not_found(ResourceType::Snapshot);
-        Err(self
-            .unimplemented_todo(opctx, Unimpl::ProtectedLookup(error))
-            .await)
+        let not_found_error =
+            lookup_type.into_not_found(ResourceType::Snapshot);
+        let unimp = Unimpl::ProtectedLookup(not_found_error);
+        Err(self.unimplemented_todo(opctx, unimp).await)
     }
 
     // Instances
