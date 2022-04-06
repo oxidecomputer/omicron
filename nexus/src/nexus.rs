@@ -1096,7 +1096,7 @@ impl Nexus {
         let _ = LookupPath::new(opctx, &self.db_datastore)
             .organization_name(organization_name)
             .project_name(project_name)
-            .lookup_for(authz::Action::ListChildren)
+            .lookup_for(authz::Action::CreateChild)
             .await?;
         Err(self.unimplemented_todo(opctx, Unimpl::Public).await)
     }
