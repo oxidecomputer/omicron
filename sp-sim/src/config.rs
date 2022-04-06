@@ -17,8 +17,8 @@ use thiserror::Error;
 /// Configuration of a simulated sidecar SP
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct SidecarConfig {
-    /// UDP address
-    pub bind_address: SocketAddr,
+    /// UDP address of the two (fake) KSZ8463 ports
+    pub bind_addrs: [SocketAddr; 2],
     /// Fake serial number
     pub serial_number: SerialNumber,
 }
@@ -26,8 +26,8 @@ pub struct SidecarConfig {
 /// Configuration of a simulated gimlet SP
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct GimletConfig {
-    /// UDP address
-    pub bind_address: SocketAddr,
+    /// UDP address of the two (fake) KSZ8463 ports
+    pub bind_addrs: [SocketAddr; 2],
     /// Fake serial number
     pub serial_number: SerialNumber,
     /// Attached components

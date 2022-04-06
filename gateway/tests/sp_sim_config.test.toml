@@ -8,22 +8,22 @@
 # concurrently.
 #
 [[simulated_sps.sidecar]]
-bind_address = "127.0.0.1:0"
+bind_addrs = ["[::1]:0", "[::1]:0"]
 serial_number = [0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1]
 
 [[simulated_sps.gimlet]]
-bind_address = "127.0.0.1:0"
+bind_addrs = ["[::1]:0", "[::1]:0"]
 serial_number = [0, 0, 0, 0, 1, 1, 1, 1, 2, 2, 2, 2, 3, 3, 3, 3]
 [[simulated_sps.gimlet.components]]
 name = "sp3"
-serial_console = "127.0.0.1:0"
+serial_console = "[::1]:0"
 
 [[simulated_sps.gimlet]]
-bind_address = "127.0.0.1:0"
+bind_addrs = ["[::1]:0", "[::1]:0"]
 serial_number = [4, 4, 4, 4, 5, 5, 5, 5, 6, 6, 6, 6, 7, 7, 7, 7]
 [[simulated_sps.gimlet.components]]
 name = "sp3"
-serial_console = "127.0.0.1:0"
+serial_console = "[::1]:0"
 
 #
 # NOTE: for the test suite, the [log] section is ignored; sp-sim logs are rolled

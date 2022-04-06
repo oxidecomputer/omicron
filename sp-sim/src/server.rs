@@ -12,6 +12,7 @@ use tokio::net::UdpSocket;
 /// Thin wrapper pairing a [`UdpSocket`] with a buffer sized for [`Request`]s.
 pub(crate) struct UdpServer {
     sock: Arc<UdpSocket>,
+    local_addr: SocketAddr,
     buf: [u8; Request::MAX_SIZE],
 }
 
@@ -21,12 +22,19 @@ impl UdpServer {
             Arc::new(UdpSocket::bind(bind_address).await.with_context(
                 || format!("failed to bind to {}", bind_address),
             )?);
+        let local_addr = sock
+            .local_addr()
+            .with_context(|| "failed to get local address of bound socket")?;
 
-        Ok(Self { sock, buf: [0; Request::MAX_SIZE] })
+        Ok(Self { sock, local_addr, buf: [0; Request::MAX_SIZE] })
     }
 
     pub(crate) fn socket(&self) -> &Arc<UdpSocket> {
         &self.sock
+    }
+
+    pub(crate) fn local_addr(&self) -> SocketAddr {
+        self.local_addr
     }
 
     pub(crate) async fn recv_from(&mut self) -> Result<(&[u8], SocketAddr)> {

@@ -7,14 +7,17 @@ use std::net::SocketAddr;
 use crate::config::{Config, SidecarConfig};
 use crate::server::UdpServer;
 use crate::{ignition_id, Responsiveness, SimulatedSp};
-use anyhow::{Context, Result};
+use anyhow::anyhow;
+use anyhow::Context;
+use anyhow::Result;
 use async_trait::async_trait;
+use futures::future;
 use gateway_messages::sp_impl::{SpHandler, SpServer};
 use gateway_messages::{
     BulkIgnitionState, IgnitionCommand, IgnitionFlags, IgnitionState,
     ResponseError, SerialNumber, SpState,
 };
-use slog::{debug, error, info, warn, Logger};
+use slog::{debug, info, warn, Logger};
 use tokio::sync::{mpsc, oneshot};
 use tokio::{
     select,
@@ -22,7 +25,7 @@ use tokio::{
 };
 
 pub struct Sidecar {
-    local_addr: SocketAddr,
+    local_addrs: [SocketAddr; 2],
     serial_number: SerialNumber,
     commands:
         mpsc::UnboundedSender<(Command, oneshot::Sender<CommandResponse>)>,
@@ -42,8 +45,8 @@ impl SimulatedSp for Sidecar {
         hex::encode(self.serial_number)
     }
 
-    fn local_addr(&self) -> SocketAddr {
-        self.local_addr
+    fn local_addr(&self, port: usize) -> SocketAddr {
+        self.local_addrs[port]
     }
 
     async fn set_responsiveness(&self, r: Responsiveness) {
@@ -59,15 +62,19 @@ impl SimulatedSp for Sidecar {
 impl Sidecar {
     pub async fn spawn(
         config: &Config,
-        sidecar_config: &SidecarConfig,
+        sidecar: &SidecarConfig,
         log: Logger,
     ) -> Result<Self> {
         info!(log, "setting up simualted sidecar");
-        let server = UdpServer::new(sidecar_config.bind_address).await?;
-        let local_addr = server
-            .socket()
-            .local_addr()
-            .with_context(|| "could not get local address of bound socket")?;
+        // bind to our two local "KSZ" ports
+        assert_eq!(sidecar.bind_addrs.len(), 2);
+        let servers = future::try_join(
+            UdpServer::new(sidecar.bind_addrs[0]),
+            UdpServer::new(sidecar.bind_addrs[1]),
+        )
+        .await?;
+        let servers = [servers.0, servers.1];
+        let local_addrs = [servers[0].local_addr(), servers[1].local_addr()];
 
         let mut ignition_targets = Vec::new();
         for _ in &config.simulated_sps.sidecar {
@@ -85,16 +92,16 @@ impl Sidecar {
 
         let (commands, commands_rx) = mpsc::unbounded_channel();
         let inner = Inner::new(
-            server,
-            sidecar_config.serial_number,
+            servers,
+            sidecar.serial_number,
             ignition_targets,
             commands_rx,
             log,
         );
         let inner_task = task::spawn(async move { inner.run().await.unwrap() });
         Ok(Self {
-            local_addr,
-            serial_number: sidecar_config.serial_number,
+            local_addrs,
+            serial_number: sidecar.serial_number,
             commands,
             inner_task,
         })
@@ -127,14 +134,15 @@ enum CommandResponse {
 
 struct Inner {
     handler: Handler,
-    udp: UdpServer,
+    udp0: UdpServer,
+    udp1: UdpServer,
     commands:
         mpsc::UnboundedReceiver<(Command, oneshot::Sender<CommandResponse>)>,
 }
 
 impl Inner {
     fn new(
-        server: UdpServer,
+        servers: [UdpServer; 2],
         serial_number: SerialNumber,
         ignition_targets: Vec<IgnitionState>,
         commands: mpsc::UnboundedReceiver<(
@@ -143,9 +151,11 @@ impl Inner {
         )>,
         log: Logger,
     ) -> Self {
+        let [udp0, udp1] = servers;
         Self {
             handler: Handler { log, serial_number, ignition_targets },
-            udp: server,
+            udp0,
+            udp1,
             commands,
         }
     }
@@ -155,25 +165,28 @@ impl Inner {
         let mut responsiveness = Responsiveness::Responsive;
         loop {
             select! {
-                recv = self.udp.recv_from() => {
-                    if responsiveness != Responsiveness::Responsive {
-                        continue;
+                recv0 = self.udp0.recv_from() => {
+                    if let Some((resp, addr)) = handle_request(
+                        &mut self.handler,
+                        recv0,
+                        &mut server,
+                        responsiveness,
+                        0,
+                    ).await? {
+                        self.udp0.send_to(resp, addr).await?;
                     }
+                }
 
-                    let (data, addr) = recv?;
-
-                    let resp = match server.dispatch(data, &mut self.handler) {
-                        Ok(resp) => resp,
-                        Err(err) => {
-                            error!(
-                                self.handler.log,
-                                "dispatching message failed: {:?}", err,
-                            );
-                            continue;
-                        }
-                    };
-
-                    self.udp.send_to(resp, addr).await?;
+                recv1 = self.udp1.recv_from() => {
+                    if let Some((resp, addr)) = handle_request(
+                        &mut self.handler,
+                        recv1,
+                        &mut server,
+                        responsiveness,
+                        1,
+                    ).await? {
+                        self.udp1.send_to(resp, addr).await?;
+                    }
                 }
 
                 command = self.commands.recv() => {
@@ -199,6 +212,31 @@ impl Inner {
             }
         }
     }
+}
+
+async fn handle_request<'a>(
+    handler: &mut Handler,
+    recv: Result<(&[u8], SocketAddr)>,
+    server: &'a mut SpServer,
+    responsiveness: Responsiveness,
+    port_num: usize,
+) -> Result<Option<(&'a [u8], SocketAddr)>> {
+    match responsiveness {
+        Responsiveness::Responsive => (), // proceed
+        Responsiveness::Unresponsive => {
+            // pretend to be unresponsive - drop this packet
+            return Ok(None);
+        }
+    }
+
+    let (data, addr) =
+        recv.with_context(|| format!("recv on port {}", port_num))?;
+
+    let resp = server
+        .dispatch(data, handler)
+        .map_err(|err| anyhow!("dispatching message failed: {:?}", err))?;
+
+    Ok(Some((resp, addr)))
 }
 
 struct Handler {

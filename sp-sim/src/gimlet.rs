@@ -7,6 +7,7 @@ use crate::server::UdpServer;
 use crate::{Responsiveness, SimulatedSp};
 use anyhow::{anyhow, Context, Result};
 use async_trait::async_trait;
+use futures::future;
 use gateway_messages::sp_impl::{SerialConsolePacketizer, SpHandler, SpServer};
 use gateway_messages::{
     version, ResponseError, SerialConsole, SerialNumber, SerializedSize,
@@ -24,7 +25,7 @@ use tokio::sync::oneshot;
 use tokio::task::{self, JoinHandle};
 
 pub struct Gimlet {
-    local_addr: SocketAddr,
+    local_addrs: [SocketAddr; 2],
     serial_number: SerialNumber,
     serial_console_addrs: HashMap<String, SocketAddr>,
     commands:
@@ -47,8 +48,8 @@ impl SimulatedSp for Gimlet {
         hex::encode(self.serial_number)
     }
 
-    fn local_addr(&self) -> SocketAddr {
-        self.local_addr
+    fn local_addr(&self, port: usize) -> SocketAddr {
+        self.local_addrs[port]
     }
 
     async fn set_responsiveness(&self, r: Responsiveness) {
@@ -65,23 +66,29 @@ impl Gimlet {
     pub async fn spawn(gimlet: &GimletConfig, log: Logger) -> Result<Self> {
         info!(log, "setting up simualted gimlet");
 
-        let server = UdpServer::new(gimlet.bind_address).await?;
-        let sock = Arc::clone(server.socket());
-        let local_addr = sock
-            .local_addr()
-            .with_context(|| "could not get local address of bound socket")?;
+        // bind to our two local "KSZ" ports
+        assert_eq!(gimlet.bind_addrs.len(), 2); // gimlet SP always has 2 ports
+        let servers = future::try_join(
+            UdpServer::new(gimlet.bind_addrs[0]),
+            UdpServer::new(gimlet.bind_addrs[1]),
+        )
+        .await?;
+        let servers = [servers.0, servers.1];
+        let local_addrs = [servers[0].local_addr(), servers[1].local_addr()];
 
         let mut incoming_console_tx = HashMap::new();
         let mut inner_tasks = Vec::new();
 
-        // We want to be able to start without knowing the gateway's socket
-        // address, but we're spawning both the primary UDP task (which receives
-        // messages from the gateway) and a helper TCP task (which emulates a
-        // serial console and sends messages to the gateway unprompted). We'll
-        // share a locked `Option<SocketAddr>` between the tasks, and have the
-        // UDP task populate it. If the TCP task receives data but doesn't know
-        // the gateways address, it will just discard it.
-        let gateway_address: Arc<Mutex<Option<SocketAddr>>> = Arc::default();
+        // We want to be able to start without knowing the gateways' socket
+        // addresses, but we're spawning both the primary UDP task (which
+        // receives messages from the gateway) and a helper TCP task (which
+        // emulates a serial console and sends messages to the gateway
+        // unprompted). We'll share a locked `Option<SocketAddr>` between the
+        // tasks, and have the UDP task populate it. If the TCP task receives
+        // data but doesn't know either of the gateways addresses, it will just
+        // discard it.
+        let gateway_addresses: Arc<Mutex<[Option<SocketAddr>; 2]>> =
+            Arc::default();
 
         let mut serial_console_addrs = HashMap::new();
 
@@ -108,8 +115,11 @@ impl Gimlet {
                     component,
                     listener,
                     rx,
-                    Arc::clone(&sock),
-                    Arc::clone(&gateway_address),
+                    [
+                        Arc::clone(servers[0].socket()),
+                        Arc::clone(servers[1].socket()),
+                    ],
+                    Arc::clone(&gateway_addresses),
                     log.new(slog::o!("serial-console" => name.to_string())),
                 );
                 inner_tasks.push(task::spawn(async move {
@@ -120,8 +130,8 @@ impl Gimlet {
 
         let (commands, commands_rx) = mpsc::unbounded_channel();
         let inner = UdpTask::new(
-            server,
-            gateway_address,
+            servers,
+            gateway_addresses,
             gimlet.serial_number,
             incoming_console_tx,
             commands_rx,
@@ -131,7 +141,7 @@ impl Gimlet {
             .push(task::spawn(async move { inner.run().await.unwrap() }));
 
         Ok(Self {
-            local_addr,
+            local_addrs,
             serial_number: gimlet.serial_number,
             serial_console_addrs,
             commands,
@@ -147,8 +157,8 @@ impl Gimlet {
 struct SerialConsoleTcpTask {
     listener: TcpListener,
     incoming_serial_console: UnboundedReceiver<SerialConsole>,
-    sock: Arc<UdpSocket>,
-    gateway_address: Arc<Mutex<Option<SocketAddr>>>,
+    socks: [Arc<UdpSocket>; 2],
+    gateway_addresses: Arc<Mutex<[Option<SocketAddr>; 2]>>,
     console_packetizer: SerialConsolePacketizer,
     log: Logger,
 }
@@ -158,42 +168,61 @@ impl SerialConsoleTcpTask {
         component: SpComponent,
         listener: TcpListener,
         incoming_serial_console: UnboundedReceiver<SerialConsole>,
-        sock: Arc<UdpSocket>,
-        gateway_address: Arc<Mutex<Option<SocketAddr>>>,
+        socks: [Arc<UdpSocket>; 2],
+        gateway_addresses: Arc<Mutex<[Option<SocketAddr>; 2]>>,
         log: Logger,
     ) -> Self {
         Self {
             listener,
             incoming_serial_console,
-            sock,
-            gateway_address,
+            socks,
+            gateway_addresses,
             console_packetizer: SerialConsolePacketizer::new(component),
             log,
         }
     }
 
     async fn send_serial_console(&mut self, mut data: &[u8]) -> Result<()> {
-        let gateway_address = self.gateway_address.lock().unwrap().ok_or_else(|| anyhow!("serial console task does not know gateway's UDP address (yet?)"))?;
-
-        // if we're told to send something starting with "SKIP ", emulate a
-        // dropped packet spanning 10 bytes before sending the rest of the data.
-        if let Some(remaining) = data.strip_prefix(b"SKIP ") {
-            self.console_packetizer.danger_emulate_dropped_packets(10);
-            data = remaining;
-        }
-
-        let mut out = [0; SpMessage::MAX_SIZE];
-        for packet in self.console_packetizer.packetize(data) {
-            let message = SpMessage {
-                version: version::V1,
-                kind: SpMessageKind::SerialConsole(packet),
+        let gateway_addrs = *self.gateway_addresses.lock().unwrap();
+        for (i, (sock, &gateway_addr)) in
+            self.socks.iter().zip(&gateway_addrs).enumerate()
+        {
+            let gateway_addr = match gateway_addr {
+                Some(addr) => addr,
+                None => {
+                    info!(
+                        self.log,
+                        concat!(
+                            "MGS address on port {} not known - ",
+                            "not sending it serial console data",
+                        ),
+                        i,
+                    );
+                    continue;
+                }
             };
 
-            // We know `out` is big enough for any `SpMessage`, so no need to
-            // bubble up an error here.
-            let n =
-                gateway_messages::serialize(&mut out[..], &message).unwrap();
-            self.sock.send_to(&out[..n], gateway_address).await?;
+            // if we're told to send something starting with "SKIP ", emulate a
+            // dropped packet spanning 10 bytes before sending the rest of the
+            // data.
+            if let Some(remaining) = data.strip_prefix(b"SKIP ") {
+                self.console_packetizer.danger_emulate_dropped_packets(10);
+                data = remaining;
+            }
+
+            let mut out = [0; SpMessage::MAX_SIZE];
+            for packet in self.console_packetizer.packetize(data) {
+                let message = SpMessage {
+                    version: version::V1,
+                    kind: SpMessageKind::SerialConsole(packet),
+                };
+
+                // We know `out` is big enough for any `SpMessage`, so no need
+                // to bubble up an error here.
+                let n = gateway_messages::serialize(&mut out[..], &message)
+                    .unwrap();
+                sock.send_to(&out[..n], gateway_addr).await?;
+            }
         }
 
         Ok(())
@@ -287,8 +316,9 @@ enum CommandResponse {
 }
 
 struct UdpTask {
-    udp: UdpServer,
-    gateway_address: Arc<Mutex<Option<SocketAddr>>>,
+    udp0: UdpServer,
+    udp1: UdpServer,
+    gateway_addresses: Arc<Mutex<[Option<SocketAddr>; 2]>>,
     handler: Handler,
     commands:
         mpsc::UnboundedReceiver<(Command, oneshot::Sender<CommandResponse>)>,
@@ -296,8 +326,8 @@ struct UdpTask {
 
 impl UdpTask {
     fn new(
-        server: UdpServer,
-        gateway_address: Arc<Mutex<Option<SocketAddr>>>,
+        servers: [UdpServer; 2],
+        gateway_addresses: Arc<Mutex<[Option<SocketAddr>; 2]>>,
         serial_number: SerialNumber,
         incoming_serial_console: HashMap<
             SpComponent,
@@ -309,9 +339,11 @@ impl UdpTask {
         )>,
         log: Logger,
     ) -> Self {
+        let [udp0, udp1] = servers;
         Self {
-            udp: server,
-            gateway_address,
+            udp0,
+            udp1,
+            gateway_addresses,
             handler: Handler { log, serial_number, incoming_serial_console },
             commands,
         }
@@ -322,26 +354,30 @@ impl UdpTask {
         let mut responsiveness = Responsiveness::Responsive;
         loop {
             select! {
-                recv = self.udp.recv_from() => {
-                    if responsiveness != Responsiveness::Responsive {
-                        continue;
+                recv0 = self.udp0.recv_from() => {
+                    if let Some((resp, addr)) = handle_request(
+                        &self.gateway_addresses,
+                        &mut self.handler,
+                        recv0,
+                        &mut server,
+                        responsiveness,
+                        0,
+                    ).await? {
+                        self.udp0.send_to(resp, addr).await?;
                     }
+                }
 
-                    let (data, addr) = recv?;
-                    *self.gateway_address.lock().unwrap() = Some(addr);
-
-                    let resp = match server.dispatch(data, &mut self.handler) {
-                        Ok(resp) => resp,
-                        Err(err) => {
-                            error!(
-                                self.handler.log,
-                                "dispatching message failed: {:?}", err,
-                            );
-                            continue;
-                        }
-                    };
-
-                    self.udp.send_to(resp, addr).await?;
+                recv1 = self.udp1.recv_from() => {
+                    if let Some((resp, addr)) = handle_request(
+                        &self.gateway_addresses,
+                        &mut self.handler,
+                        recv1,
+                        &mut server,
+                        responsiveness,
+                        1,
+                    ).await? {
+                        self.udp1.send_to(resp, addr).await?;
+                    }
                 }
 
                 command = self.commands.recv() => {
@@ -362,6 +398,34 @@ impl UdpTask {
             }
         }
     }
+}
+
+async fn handle_request<'a>(
+    gateway_addresses: &Mutex<[Option<SocketAddr>; 2]>,
+    handler: &mut Handler,
+    recv: Result<(&[u8], SocketAddr)>,
+    server: &'a mut SpServer,
+    responsiveness: Responsiveness,
+    port_num: usize,
+) -> Result<Option<(&'a [u8], SocketAddr)>> {
+    match responsiveness {
+        Responsiveness::Responsive => (), // proceed
+        Responsiveness::Unresponsive => {
+            // pretend to be unresponsive - drop this packet
+            return Ok(None);
+        }
+    }
+
+    let (data, addr) =
+        recv.with_context(|| format!("recv on port {}", port_num))?;
+
+    gateway_addresses.lock().unwrap()[port_num] = Some(addr);
+
+    let resp = server
+        .dispatch(data, handler)
+        .map_err(|err| anyhow!("dispatching message failed: {:?}", err))?;
+
+    Ok(Some((resp, addr)))
 }
 
 struct Handler {
