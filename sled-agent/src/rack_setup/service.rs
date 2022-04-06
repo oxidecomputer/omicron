@@ -105,16 +105,16 @@ impl ServiceInner {
 
             // TODO(https://github.com/oxidecomputer/omicron/issues/724):
             // We could potentially handle this case by deleting all
-            // partitions (in preparation for applying the new
+            // datasets (in preparation for applying the new
             // configuration), but at the moment it's an error.
             warn!(
                 self.log,
                 "Rack Setup Service Config was already applied, but has changed.
-                This means that you may have partitions set up on this sled, but they
+                This means that you may have datasets set up on this sled, but they
                 may not match the ones requested by the supplied configuration.\n
                 To re-initialize this sled:
                    - Disable all Oxide services
-                   - Delete all partitions within the attached zpool
+                   - Delete all datasets within the attached zpool
                    - Delete the configuration file ({})
                    - Restart the sled agent",
                 rss_config_path.to_string_lossy()
@@ -143,11 +143,11 @@ impl ServiceInner {
                     self.log.new(o!("SledAgentClient" => request.sled_address)),
                 );
 
-                info!(self.log, "sending partition requests...");
-                for partition in &request.partitions {
+                info!(self.log, "sending dataset requests...");
+                for dataset in &request.datasets {
                     let filesystem_put = || async {
-                        info!(self.log, "creating new filesystem: {:?}", partition);
-                        client.filesystem_put(&partition.clone().into())
+                        info!(self.log, "creating new filesystem: {:?}", dataset);
+                        client.filesystem_put(&dataset.clone().into())
                             .await
                             .map_err(BackoffError::transient)?;
                         Ok::<
@@ -172,7 +172,7 @@ impl ServiceInner {
 
         // Issue service initialization requests.
         //
-        // Note that this must happen *after* the partition initialization,
+        // Note that this must happen *after* the dataset initialization,
         // to ensure that CockroachDB has been initialized before Nexus
         // starts.
         futures::future::join_all(

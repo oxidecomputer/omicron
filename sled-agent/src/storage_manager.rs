@@ -513,7 +513,7 @@ impl StorageWorker {
     // If requested via the `do_format` parameter, may also initialize
     // these resources.
     //
-    // Returns the UUID attached to the underlying ZFS partition.
+    // Returns the UUID attached to the underlying ZFS dataset.
     // Returns (was_inserted, Uuid).
     async fn initialize_dataset_and_zone(
         &self,
