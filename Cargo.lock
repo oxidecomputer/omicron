@@ -112,10 +112,10 @@ dependencies = [
 [[package]]
 name = "async-bb8-diesel"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/async-bb8-diesel?rev=c849b717be#c849b717be1e33528c7c3950fefcb431a65ef469"
+source = "git+https://github.com/oxidecomputer/async-bb8-diesel?rev=8c6685f0b33c7bbc6418384850cb9c897896cda5#8c6685f0b33c7bbc6418384850cb9c897896cda5"
 dependencies = [
  "async-trait",
- "bb8 0.7.1",
+ "bb8",
  "diesel",
  "thiserror",
  "tokio",
@@ -189,19 +189,6 @@ name = "base64"
 version = "0.13.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "904dfeac50f3cdaba28fc6f57fdcddb75f49ed61346676a78c4ffe55877802fd"
-
-[[package]]
-name = "bb8"
-version = "0.7.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2e9f4fa9768efd269499d8fba693260cfc670891cf6de3adc935588447a77cc8"
-dependencies = [
- "async-trait",
- "futures-channel",
- "futures-util",
- "parking_lot 0.11.2",
- "tokio",
-]
 
 [[package]]
 name = "bb8"
@@ -2419,7 +2406,7 @@ dependencies = [
  "async-bb8-diesel",
  "async-trait",
  "base64",
- "bb8 0.8.0",
+ "bb8",
  "chrono",
  "cookie",
  "criterion",
