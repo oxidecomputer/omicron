@@ -41,3 +41,4 @@ openapiv3 = "1.0"
 serde_json = "1.0"
 sp-sim = { path = "../sp-sim" }
 subprocess = "0.2.8"
+tokio-tungstenite = "0.17"

@@ -2375,6 +2375,7 @@ dependencies = [
  "subprocess",
  "thiserror",
  "tokio",
+ "tokio-tungstenite",
  "toml",
  "uuid",
 ]

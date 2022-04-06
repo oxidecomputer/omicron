@@ -26,6 +26,7 @@ use tokio::task::{self, JoinHandle};
 pub struct Gimlet {
     local_addr: SocketAddr,
     serial_number: SerialNumber,
+    serial_console_addrs: HashMap<String, SocketAddr>,
     commands:
         mpsc::UnboundedSender<(Command, oneshot::Sender<CommandResponse>)>,
     inner_tasks: Vec<JoinHandle<()>>,
@@ -82,6 +83,8 @@ impl Gimlet {
         // the gateways address, it will just discard it.
         let gateway_address: Arc<Mutex<Option<SocketAddr>>> = Arc::default();
 
+        let mut serial_console_addrs = HashMap::new();
+
         for component_config in &gimlet.components {
             let name = component_config.name.as_str();
             let component = SpComponent::try_from(name)
@@ -91,6 +94,12 @@ impl Gimlet {
                 let listener = TcpListener::bind(addr)
                     .await
                     .with_context(|| format!("failed to bind to {}", addr))?;
+                serial_console_addrs.insert(
+                    component.as_str().unwrap().to_string(),
+                    listener.local_addr().with_context(|| {
+                        "failed to get local address of bound socket"
+                    })?,
+                );
 
                 let (tx, rx) = mpsc::unbounded_channel();
                 incoming_console_tx.insert(component, tx);
@@ -124,9 +133,14 @@ impl Gimlet {
         Ok(Self {
             local_addr,
             serial_number: gimlet.serial_number,
+            serial_console_addrs,
             commands,
             inner_tasks,
         })
+    }
+
+    pub fn serial_console_addr(&self, component: &str) -> Option<SocketAddr> {
+        self.serial_console_addrs.get(component).copied()
     }
 }
 
