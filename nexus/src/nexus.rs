@@ -1031,7 +1031,7 @@ impl Nexus {
         Ok(())
     }
 
-    pub async fn list_images(
+    pub async fn images_list(
         &self,
         opctx: &OpContext,
         _pagparams: &DataPageParams<'_, Name>,
@@ -1039,7 +1039,7 @@ impl Nexus {
         Err(self.unimplemented_todo(opctx, Unimpl::Public).await)
     }
 
-    pub async fn create_image(
+    pub async fn image_create(
         self: &Arc<Self>,
         opctx: &OpContext,
         _params: &params::ImageCreate,
@@ -1059,7 +1059,7 @@ impl Nexus {
             .await)
     }
 
-    pub async fn delete_image(
+    pub async fn image_delete(
         self: &Arc<Self>,
         opctx: &OpContext,
         image_name: &Name,
