@@ -53,8 +53,12 @@ lazy_static! {
         format!("{}/{}", *DEMO_ORG_PROJECTS_URL, *DEMO_PROJECT_NAME);
     pub static ref DEMO_PROJECT_URL_DISKS: String =
         format!("{}/disks", *DEMO_PROJECT_URL);
+    pub static ref DEMO_PROJECT_URL_IMAGES: String =
+        format!("{}/images", *DEMO_PROJECT_URL);
     pub static ref DEMO_PROJECT_URL_INSTANCES: String =
         format!("{}/instances", *DEMO_PROJECT_URL);
+    pub static ref DEMO_PROJECT_URL_SNAPSHOTS: String =
+        format!("{}/snapshots", *DEMO_PROJECT_URL);
     pub static ref DEMO_PROJECT_URL_VPCS: String =
         format!("{}/vpcs", *DEMO_PROJECT_URL);
     pub static ref DEMO_PROJECT_CREATE: params::ProjectCreate =
@@ -199,6 +203,8 @@ lazy_static! {
     pub static ref DEMO_IMAGE_NAME: Name = "demo-image".parse().unwrap();
     pub static ref DEMO_IMAGE_URL: String =
         format!("/images/{}", *DEMO_IMAGE_NAME);
+    pub static ref DEMO_PROJECT_IMAGE_URL: String =
+        format!("{}/{}", *DEMO_PROJECT_URL_IMAGES, *DEMO_IMAGE_NAME);
     pub static ref DEMO_IMAGE_CREATE: params::ImageCreate =
         params::ImageCreate {
             identity: IdentityMetadataCreateParams {
@@ -206,6 +212,19 @@ lazy_static! {
                 description: String::from(""),
             },
             source: params::ImageSource::Url(String::from("dummy"))
+        };
+
+    // Snapshots
+    pub static ref DEMO_SNAPSHOT_NAME: Name = "demo-snapshot".parse().unwrap();
+    pub static ref DEMO_SNAPSHOT_URL: String =
+        format!("{}/{}", *DEMO_PROJECT_URL_SNAPSHOTS, *DEMO_SNAPSHOT_NAME);
+    pub static ref DEMO_SNAPSHOT_CREATE: params::SnapshotCreate =
+        params::SnapshotCreate {
+            identity: IdentityMetadataCreateParams {
+                name: DEMO_SNAPSHOT_NAME.clone(),
+                description: String::from(""),
+            },
+            disk: DEMO_DISK_NAME.clone(),
         };
 }
 
@@ -583,6 +602,49 @@ lazy_static! {
             ],
         },
 
+        /* Project images */
+
+        VerifyEndpoint {
+            url: &*DEMO_PROJECT_URL_IMAGES,
+            visibility: Visibility::Protected,
+            allowed_methods: vec![
+                AllowedMethod::GetUnimplemented,
+                AllowedMethod::Post(
+                    serde_json::to_value(&*DEMO_IMAGE_CREATE).unwrap()
+                ),
+            ],
+        },
+
+        VerifyEndpoint {
+            url: &*DEMO_PROJECT_IMAGE_URL,
+            visibility: Visibility::Protected,
+            allowed_methods: vec![
+                AllowedMethod::GetUnimplemented,
+                AllowedMethod::Delete,
+            ],
+        },
+
+        /* Snapshots */
+
+        VerifyEndpoint {
+            url: &*DEMO_PROJECT_URL_SNAPSHOTS,
+            visibility: Visibility::Protected,
+            allowed_methods: vec![
+                AllowedMethod::GetUnimplemented,
+                AllowedMethod::Post(
+                    serde_json::to_value(DEMO_SNAPSHOT_CREATE.clone()).unwrap(),
+                )
+            ]
+        },
+        VerifyEndpoint {
+            url: &*DEMO_SNAPSHOT_URL,
+            visibility: Visibility::Protected,
+            allowed_methods: vec![
+                AllowedMethod::GetUnimplemented,
+                AllowedMethod::Delete,
+            ]
+        },
+
         /* Instances */
         VerifyEndpoint {
             url: &*DEMO_PROJECT_URL_INSTANCES,
@@ -740,6 +802,7 @@ lazy_static! {
         },
 
         /* Images */
+
         VerifyEndpoint {
             url: "/images",
             visibility: Visibility::Public,
@@ -750,7 +813,6 @@ lazy_static! {
                 ),
             ],
         },
-
         VerifyEndpoint {
             url: &*DEMO_IMAGE_URL,
             visibility: Visibility::Protected,
