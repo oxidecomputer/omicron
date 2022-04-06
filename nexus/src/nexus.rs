@@ -332,9 +332,9 @@ impl Nexus {
     ///     the_name: &Name,
     /// ) -> Result<(), Error>
     /// {
-    ///     // You will want to have defined your OWN ResourceType for this
-    ///     // resource, even though it's still a stub.
-    ///     let resource_type = ResourceType::Snapshot;
+    ///     // You will want to have defined your own ResourceType variant for
+    ///     // this resource, even though it's still a stub.
+    ///     let resource_type: ResourceType = todo!();
     ///     let lookup_type = LookupType::ByName(the_name.to_string());
     ///     let not_found_error = lookup_type.into_not_found(resource_type);
     ///     let unimp = Unimpl::ProtectedLookup(not_found_error);
@@ -407,9 +407,9 @@ impl Nexus {
     ///     the_name: &Name,
     /// ) -> Result<(), Error>
     /// {
-    ///     // You will want to have defined your OWN ResourceType for this
-    ///     // resource, even though it's still a stub.
-    ///     let resource_type = ResourceType::Snapshot;
+    ///     // You will want to have defined your own ResourceType variant for
+    ///     // this resource, even though it's still a stub.
+    ///     let resource_type: ResourceType = todo!();
     ///     let lookup_type = LookupType::ByName(the_name.to_string());
     ///     let not_found_error = lookup_type.into_not_found(resource_type);
     ///     let unimp = Unimpl::ProtectedLookup(not_found_error);
