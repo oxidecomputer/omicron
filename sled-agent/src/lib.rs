@@ -27,6 +27,7 @@ mod instance;
 mod instance_manager;
 mod nexus;
 mod params;
+pub mod rack_setup;
 pub mod server;
 mod services;
 mod sled_agent;

@@ -844,6 +844,78 @@ impl Nexus {
         Ok(())
     }
 
+    pub async fn list_images(
+        &self,
+        _opctx: &OpContext,
+        _pagparams: &DataPageParams<'_, Name>,
+    ) -> ListResultVec<db::model::Image> {
+        unimplemented!();
+    }
+
+    pub async fn create_image(
+        self: &Arc<Self>,
+        _opctx: &OpContext,
+        _params: &params::ImageCreate,
+    ) -> CreateResult<db::model::Image> {
+        unimplemented!();
+    }
+
+    pub async fn image_fetch(
+        &self,
+        _opctx: &OpContext,
+        _image_name: &Name,
+    ) -> LookupResult<db::model::Image> {
+        unimplemented!();
+    }
+
+    pub async fn delete_image(
+        self: &Arc<Self>,
+        _opctx: &OpContext,
+        _image_name: &Name,
+    ) -> DeleteResult {
+        unimplemented!();
+    }
+
+    pub async fn project_list_images(
+        &self,
+        _opctx: &OpContext,
+        _organization_name: &Name,
+        _project_name: &Name,
+        _pagparams: &DataPageParams<'_, Name>,
+    ) -> ListResultVec<db::model::Image> {
+        unimplemented!();
+    }
+
+    pub async fn project_create_image(
+        self: &Arc<Self>,
+        _opctx: &OpContext,
+        _organization_name: &Name,
+        _project_name: &Name,
+        _params: &params::ImageCreate,
+    ) -> CreateResult<db::model::Image> {
+        unimplemented!();
+    }
+
+    pub async fn project_image_fetch(
+        &self,
+        _opctx: &OpContext,
+        _organization_name: &Name,
+        _project_name: &Name,
+        _image_name: &Name,
+    ) -> LookupResult<db::model::Image> {
+        unimplemented!();
+    }
+
+    pub async fn project_delete_image(
+        self: &Arc<Self>,
+        _opctx: &OpContext,
+        _organization_name: &Name,
+        _project_name: &Name,
+        _image_name: &Name,
+    ) -> DeleteResult {
+        unimplemented!();
+    }
+
     pub async fn project_create_snapshot(
         self: &Arc<Self>,
         _opctx: &OpContext,
