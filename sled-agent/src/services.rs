@@ -47,7 +47,7 @@ impl From<Error> for omicron_common::api::external::Error {
 /// The default path to service configuration, if one is not
 /// explicitly provided.
 pub fn default_services_config_path() -> PathBuf {
-    Path::new(crate::OMICRON_CONFIG_PATH).join("services.toml")
+    Path::new(omicron_common::OMICRON_CONFIG_PATH).join("services.toml")
 }
 
 /// Manages miscellaneous Sled-local services.
