@@ -4,6 +4,8 @@
 
 //! Bootstrap-related APIs.
 
+use crate::config::Config as SledConfig;
+use crate::server::Server as SledServer;
 use super::config::Config;
 use super::discovery;
 use super::trust_quorum::{
@@ -19,7 +21,7 @@ use omicron_common::backoff::{
 
 use slog::Logger;
 use std::io;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use thiserror::Error;
 use tokio::sync::Mutex;
 
@@ -34,6 +36,12 @@ pub enum BootstrapError {
 
     #[error("Error modifying SMF service: {0}")]
     SmfAdm(#[from] smf::AdmError),
+
+    #[error("Error starting sled agent: {0}")]
+    SledError(String),
+
+    #[error(transparent)]
+    Toml(#[from] toml::de::Error),
 
     #[error(transparent)]
     TrustQuorum(#[from] TrustQuorumError),
@@ -75,13 +83,40 @@ pub(crate) struct Agent {
     share: Option<ShareDistribution>,
 
     rss: Mutex<Option<RackSetupService>>,
+    sled_agent: Mutex<Option<SledServer>>,
+    sled_config: SledConfig,
+}
+
+fn get_subnet_path() -> PathBuf {
+    Path::new(crate::OMICRON_CONFIG_PATH).join("subnet.toml")
 }
 
 impl Agent {
-    pub fn new(log: Logger) -> Result<Self, BootstrapError> {
+    pub async fn new(
+        log: Logger,
+        sled_config: SledConfig,
+    ) -> Result<Self, BootstrapError> {
         let peer_monitor = discovery::PeerMonitor::new(&log)?;
         let share = read_key_share()?;
-        Ok(Agent { log, peer_monitor, share, rss: Mutex::new(None) })
+        let agent = Agent {
+            log,
+            peer_monitor,
+            share,
+            rss: Mutex::new(None),
+            sled_agent: Mutex::new(None),
+            sled_config,
+        };
+
+        let subnet_path = get_subnet_path();
+        if subnet_path.exists() {
+            info!(agent.log, "Sled already configured, loading sled agent");
+            let sled_request: SledAgentRequest = toml::from_str(
+                &tokio::fs::read_to_string(&subnet_path).await?
+            )?;
+            agent.request_agent(sled_request).await?;
+        }
+
+        Ok(agent)
     }
 
     /// Implements the "request share" API.
@@ -104,8 +139,24 @@ impl Agent {
         &self,
         request: SledAgentRequest,
     ) -> Result<SledAgentResponse, BootstrapError> {
+        info!(&self.log, "Loading Sled Agent: {:?}", request);
+        // TODO: actually use request.ip
+        // TODO: actually use request.uuid
 
-        panic!("no");
+        let mut maybe_agent = self.sled_agent.lock().await;
+        if let Some(server) = &*maybe_agent {
+            // Server already exists, return it.
+            return Ok(SledAgentResponse {
+               id: server.id()
+            });
+        }
+        // Server does not exist, initialize it.
+        let server = SledServer::start(&self.sled_config).await.map_err(|e| BootstrapError::SledError(e))?;
+        maybe_agent.replace(server);
+
+        Ok(SledAgentResponse {
+            id: self.sled_config.id,
+        })
     }
 
     /// Communicates with peers, sharing secrets, until the rack has been
@@ -216,6 +267,7 @@ impl Agent {
             let rss = RackSetupService::new(
                 self.log.new(o!("component" => "RSS")),
                 rss_config.clone(),
+                self.peer_monitor.observer().await,
             );
             self.rss.lock().await.replace(rss);
         }

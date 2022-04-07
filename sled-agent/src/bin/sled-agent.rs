@@ -127,7 +127,8 @@ async fn do_run() -> Result<(), CmdError> {
                 rss_config,
             };
             let run_bootstrap = async move || -> Result<(), CmdError> {
-                bootstrap_server::Server::start(&bootstrap_config)
+                // TODO: It's a little silly to pass the config this way.
+                bootstrap_server::Server::start(bootstrap_config, config)
                     .await
                     .map_err(CmdError::Failure)?
                     .wait_for_finish()
@@ -135,6 +136,7 @@ async fn do_run() -> Result<(), CmdError> {
                     .map_err(CmdError::Failure)
             };
 
+            /*
             let run_sled_server = async move || -> Result<(), CmdError> {
                 sled_server::Server::start(&config)
                     .await
@@ -143,14 +145,17 @@ async fn do_run() -> Result<(), CmdError> {
                     .await
                     .map_err(CmdError::Failure)
             };
+            */
 
             tokio::select! {
                 Err(e) = run_bootstrap() => {
                     eprintln!("Boot server exited unexpectedly: {:?}", e);
                 },
+                /*
                 Err(e) = run_sled_server() => {
                     eprintln!("Sled server exited unexpectedly: {:?}", e);
                 },
+                */
             }
             Ok(())
         }

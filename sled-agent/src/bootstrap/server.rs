@@ -4,6 +4,7 @@
 
 //! Server API for bootstrap-related functionality.
 
+use crate::config::Config as SledConfig;
 use super::agent::Agent;
 use super::config::Config;
 use super::http_entrypoints::ba_api as http_api;
@@ -18,7 +19,7 @@ pub struct Server {
 }
 
 impl Server {
-    pub async fn start(config: &Config) -> Result<Self, String> {
+    pub async fn start(config: Config, sled_config: SledConfig) -> Result<Self, String> {
         let (drain, registration) = slog_dtrace::with_drain(
             config.log.to_logger("bootstrap-agent").map_err(|message| {
                 format!("initializing logger: {}", message)
@@ -39,7 +40,7 @@ impl Server {
             "server" => config.id.clone().to_string()
         ));
         let bootstrap_agent =
-            Arc::new(Agent::new(ba_log).map_err(|e| e.to_string())?);
+            Arc::new(Agent::new(ba_log, sled_config).await.map_err(|e| e.to_string())?);
 
         let ba = Arc::clone(&bootstrap_agent);
         let dropshot_log = log.new(o!("component" => "dropshot"));
@@ -58,7 +59,7 @@ impl Server {
         // This ordering allows the bootstrap agent to communicate with
         // other bootstrap agents on the rack during the initialization
         // process.
-        if let Err(e) = server.bootstrap_agent.initialize(config).await {
+        if let Err(e) = server.bootstrap_agent.initialize(&config).await {
             let _ = server.close().await;
             return Err(e.to_string());
         }

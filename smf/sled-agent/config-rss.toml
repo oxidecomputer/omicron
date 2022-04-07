@@ -1,7 +1,10 @@
 # RSS (Rack Setup Service) "stand-in" configuration.
 
-[[request]]
-sled_address = "[fd00:1de::1]:12345"
+# The /56 subnet for the rack.
+# Also implies the /48 AZ subnet.
+#              |............|    <- This /48 is the AZ Subnet
+#              |...............| <- This /56 is the Rack Subnet
+rack_subnet = "fd00:1122:3344:01::"
 
 # TODO(https://github.com/oxidecomputer/omicron/issues/732): Nexus
 # should allocate crucible datasets.

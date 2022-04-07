@@ -9,7 +9,7 @@ use super::http_entrypoints::api as http_api;
 use super::sled_agent::SledAgent;
 use crate::nexus::NexusClient;
 use slog::Drain;
-
+use uuid::Uuid;
 use omicron_common::backoff::{
     internal_service_policy, retry_notify, BackoffError,
 };
@@ -23,6 +23,10 @@ pub struct Server {
 }
 
 impl Server {
+    pub fn id(&self) -> Uuid {
+        self.http_server.app_private().id()
+    }
+
     /// Starts a SledAgent server
     pub async fn start(config: &Config) -> Result<Server, String> {
         let (drain, registration) = slog_dtrace::with_drain(

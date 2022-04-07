@@ -5,9 +5,9 @@
 //! Bootstrap-related utilities
 
 pub mod agent;
-mod client;
+pub mod client;
 pub mod config;
-mod discovery;
+pub mod discovery;
 mod http_entrypoints;
 mod multicast;
 mod params;

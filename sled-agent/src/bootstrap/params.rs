@@ -17,11 +17,11 @@ pub struct ShareRequest {
 }
 
 /// Configuration information for launching a Sled Agent.
-#[derive(Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
 pub struct SledAgentRequest {
     /// ID of the Sled to be initialized.
     pub uuid: Uuid,
 
-    /// Portion of the IP space to be managed by the Sled Agnet.
+    /// Portion of the IP space to be managed by the Sled Agent.
     pub ip: Ipv6Net,
 }

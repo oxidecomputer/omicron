@@ -8,7 +8,6 @@ use crate::config::ConfigError;
 use crate::params::{DatasetEnsureBody, ServiceRequest};
 use serde::Deserialize;
 use serde::Serialize;
-use std::net::SocketAddr;
 use std::path::Path;
 
 /// Configuration for the "rack setup service", which is controlled during
@@ -23,6 +22,8 @@ use std::path::Path;
 /// can act as a stand-in initialization service.
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
 pub struct SetupServiceConfig {
+    pub rack_subnet: std::net::Ipv6Addr,
+
     #[serde(default, rename = "request")]
     pub requests: Vec<SledRequest>,
 }
@@ -30,9 +31,6 @@ pub struct SetupServiceConfig {
 /// A request to initialize a sled.
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
 pub struct SledRequest {
-    /// The Sled Agent address receiving these requests.
-    pub sled_address: SocketAddr,
-
     /// Datasets to be created.
     #[serde(default, rename = "dataset")]
     pub datasets: Vec<DatasetEnsureBody>,
@@ -48,5 +46,23 @@ impl SetupServiceConfig {
         let contents = std::fs::read_to_string(path)?;
         let config = toml::from_str(&contents)?;
         Ok(config)
+    }
+
+    pub fn az_subnet(&self) -> ipnetwork::Ipv6Network {
+        ipnetwork::Ipv6Network::new(self.rack_subnet, 48).unwrap()
+    }
+
+    pub fn rack_subnet(&self) -> ipnetwork::Ipv6Network {
+        ipnetwork::Ipv6Network::new(self.rack_subnet, 56).unwrap()
+    }
+
+    pub fn sled_subnet(&self, index: u8) -> ipnetwork::Ipv6Network {
+        let mut rack_network = self.rack_subnet().network().octets();
+
+        // To set bits distinguishing the /64 from the /56, we modify the 7th octet.
+        //
+        // 0001:0203:0405:0607::
+        rack_network[7] = index;
+        ipnetwork::Ipv6Network::new(std::net::Ipv6Addr::from(rack_network), 64).unwrap()
     }
 }
