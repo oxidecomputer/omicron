@@ -476,7 +476,7 @@ fn generate_database_functions(config: &Config) -> TokenStream {
             quote! {
                 let (#(#ancestors_authz_names,)* _) =
                     #parent_resource_name::lookup_by_id_no_authz(
-                        _opctx, datastore, db_row.#parent_id
+                        opctx, datastore, db_row.#parent_id
                     ).await?;
             },
             quote! { .filter(dsl::#parent_id.eq(#parent_authz_name.id())) },
@@ -519,21 +519,19 @@ fn generate_database_functions(config: &Config) -> TokenStream {
         /// this module, you want `fetch()` or `lookup_for(authz::Action)`.
         // Do NOT make this function public.
         async fn lookup_by_name_no_authz(
-            _opctx: &OpContext,
+            opctx: &OpContext,
             datastore: &DataStore,
             #parent_lookup_arg_formal
             name: &Name,
         ) -> LookupResult<(authz::#resource_name, model::#resource_name)> {
             use db::schema::#resource_as_snake::dsl;
 
-            // TODO-security See the note about pool_authorized() below.
-            let conn = datastore.pool();
             dsl::#resource_as_snake
                 .filter(dsl::time_deleted.is_null())
                 .filter(dsl::name.eq(name.clone()))
                 #lookup_filter
                 .select(model::#resource_name::as_select())
-                .get_result_async(conn)
+                .get_result_async(datastore.pool_authorized(opctx).await?)
                 .await
                 .map_err(|e| {
                     public_error_from_diesel_pool(
@@ -584,24 +582,17 @@ fn generate_database_functions(config: &Config) -> TokenStream {
         /// this module, you want `fetch()` or `lookup_for(authz::Action)`.
         // Do NOT make this function public.
         async fn lookup_by_id_no_authz(
-            _opctx: &OpContext,
+            opctx: &OpContext,
             datastore: &DataStore,
             id: Uuid,
         ) -> LookupResult<(#(authz::#path_types,)* model::#resource_name)> {
             use db::schema::#resource_as_snake::dsl;
 
-            // TODO-security This could use pool_authorized() instead.
-            // However, it will change the response code for this case:
-            // unauthenticated users will get a 401 rather than a 404
-            // because we'll kick them out sooner than we used to -- they
-            // won't even be able to make this database query.  That's a
-            // good thing but this change can be deferred to a follow-up PR.
-            let conn = datastore.pool();
             let db_row = dsl::#resource_as_snake
                 .filter(dsl::time_deleted.is_null())
                 .filter(dsl::id.eq(id))
                 .select(model::#resource_name::as_select())
-                .get_result_async(conn)
+                .get_result_async(datastore.pool_authorized(opctx).await?)
                 .await
                 .map_err(|e| {
                     public_error_from_diesel_pool(

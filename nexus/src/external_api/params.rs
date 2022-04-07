@@ -94,7 +94,7 @@ pub struct NetworkInterfaceCreate {
 #[serde(tag = "type", content = "params")]
 pub enum InstanceNetworkInterfaceAttachment {
     /// Create one or more `NetworkInterface`s for the `Instance`
-    Create(InstanceNetworkInterfaceCreate),
+    Create(Vec<NetworkInterfaceCreate>),
 
     /// Default networking setup, which creates a single interface with an
     /// auto-assigned IP address from project's "default" VPC and "default" VPC
@@ -103,11 +103,6 @@ pub enum InstanceNetworkInterfaceAttachment {
 
     /// No network interfaces at all will be created for the instance.
     None,
-}
-
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-pub struct InstanceNetworkInterfaceCreate {
-    pub params: Vec<NetworkInterfaceCreate>,
 }
 
 impl Default for InstanceNetworkInterfaceAttachment {
