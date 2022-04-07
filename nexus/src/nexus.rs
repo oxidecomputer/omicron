@@ -775,7 +775,7 @@ impl Nexus {
 
         // Reject disks where the block size doesn't evenly divide the total
         // size
-        if (params.size.to_bytes() % (params.block_size as u64)) != 0 {
+        if (params.size.to_bytes() % params.block_size.to_bytes()) != 0 {
             return Err(Error::InvalidValue {
                 label: String::from("size and block_size"),
                 message: String::from(

@@ -1312,12 +1312,14 @@ impl Into<external::ByteCount> for BlockSize {
     }
 }
 
-impl From<params::BlockSize> for BlockSize {
-    fn from(block_size: params::BlockSize) -> BlockSize {
-        match block_size {
-            params::BlockSize::Traditional => BlockSize::Traditional,
-            params::BlockSize::Iso => BlockSize::Iso,
-            params::BlockSize::AdvancedFormat => BlockSize::AdvancedFormat,
+impl TryFrom<external::ByteCount> for BlockSize {
+    type Error = anyhow::Error;
+    fn try_from(block_size: external::ByteCount) -> Result<Self, Self::Error> {
+        match block_size.to_bytes() {
+            512 => Ok(BlockSize::Traditional),
+            2048 => Ok(BlockSize::Iso),
+            4096 => Ok(BlockSize::AdvancedFormat),
+            _ => anyhow::bail!("invalid block size {}", block_size.to_bytes()),
         }
     }
 }
@@ -1376,19 +1378,19 @@ impl Disk {
         volume_id: Uuid,
         params: params::DiskCreate,
         runtime_initial: DiskRuntimeState,
-    ) -> Self {
+    ) -> Result<Self, anyhow::Error> {
         let identity = DiskIdentity::new(disk_id, params.identity);
-        Self {
+        Ok(Self {
             identity,
             rcgen: external::Generation::new().into(),
             project_id,
             volume_id,
             runtime_state: runtime_initial,
             size: params.size.into(),
-            block_size: params.block_size.into(),
+            block_size: params.block_size.try_into()?,
             create_snapshot_id: params.snapshot_id,
             create_image_id: params.image_id,
-        }
+        })
     }
 
     pub fn state(&self) -> DiskState {

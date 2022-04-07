@@ -270,7 +270,7 @@ async fn test_disk_create_disk_that_already_exists_fails(
         snapshot_id: None,
         image_id: None,
         size: ByteCount::from_gibibytes_u32(1),
-        block_size: params::BlockSize::Traditional,
+        block_size: ByteCount::from(512),
     };
     let _ = create_disk(&client, ORG_NAME, PROJECT_NAME, DISK_NAME).await;
     let disk_url = format!("{}/{}", disks_url, DISK_NAME);
@@ -651,7 +651,7 @@ async fn test_disk_region_creation_failure(
         snapshot_id: None,
         image_id: None,
         size: disk_size,
-        block_size: params::BlockSize::Traditional,
+        block_size: ByteCount::from(512),
     };
 
     // Unfortunately, the error message is only posted internally to the
@@ -693,6 +693,50 @@ async fn test_disk_region_creation_failure(
     let _ = create_disk(client, ORG_NAME, PROJECT_NAME, DISK_NAME).await;
 }
 
+// Tests that invalid block sizes are rejected
+#[nexus_test]
+async fn test_disk_invalid_block_size_rejected(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+    let test = DiskTest::new(&cptestctx).await;
+    create_org_and_project(client).await;
+
+    let disk_size = ByteCount::from_gibibytes_u32(3);
+    let dataset_count = test.dataset_ids.len() as u64;
+    assert!(
+        disk_size.to_bytes() * dataset_count < test.zpool_size.to_bytes(),
+        "Disk size too big for Zpool size"
+    );
+    assert!(
+        2 * disk_size.to_bytes() * dataset_count > test.zpool_size.to_bytes(),
+        "(test constraint) Zpool needs to be smaller (to store only one disk)",
+    );
+
+    // Attempt to allocate the disk, observe a server error.
+    let disks_url = get_disks_url();
+    let new_disk = params::DiskCreate {
+        identity: IdentityMetadataCreateParams {
+            name: DISK_NAME.parse().unwrap(),
+            description: String::from("sells rainsticks"),
+        },
+        snapshot_id: None,
+        image_id: None,
+        size: disk_size,
+        block_size: ByteCount::from(1024),
+    };
+
+    NexusRequest::new(
+        RequestBuilder::new(client, Method::POST, &disks_url)
+            .body(Some(&new_disk))
+            .expect_status(Some(StatusCode::BAD_REQUEST)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap();
+}
+
 // Tests that a disk is rejected if the total size isn't divided by the block size
 #[nexus_test]
 async fn test_disk_reject_total_size_not_divisible_by_block_size(
@@ -723,7 +767,7 @@ async fn test_disk_reject_total_size_not_divisible_by_block_size(
         snapshot_id: None,
         image_id: None,
         size: disk_size,
-        block_size: params::BlockSize::Traditional,
+        block_size: ByteCount::from(512),
     };
 
     NexusRequest::new(

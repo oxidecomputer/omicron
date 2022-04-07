@@ -1026,7 +1026,10 @@ async fn sdc_create_disk_record(
         volume_id,
         params.create_params.clone(),
         db::model::DiskRuntimeState::new(),
-    );
+    )
+    .map_err(|e| {
+        ActionError::action_failed(Error::invalid_request(&e.to_string()))
+    })?;
 
     let disk_created = osagactx
         .datastore()
