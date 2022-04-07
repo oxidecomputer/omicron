@@ -33,7 +33,15 @@ You can **format the code** using `cargo fmt`.  Make sure to run this before pus
 
 You can **run the https://github.com/rust-lang/rust-clippy[Clippy linter]** using `cargo clippy \-- -D warnings -A clippy::style`.  Make sure to run this before pushing changes.  The CI checks that the code is clippy-clean.
 
-**Prerequisites:**
+=== Installing Prerequisite Software
+
+The following software may be installed automatically with the following scripts:
+
+----
+$ ./tools/install_prerequisites.sh
+----
+
+Alternatively, the manual installation steps as follows:
 
 Both normal execution and the test suite expect certain binaries (described below) on your PATH.
 
@@ -82,6 +90,10 @@ pkg install brand/omicron1/tools
 pkg install pkg:/package/pkg
 pkg update
 ----
+
+=== Running (Simulated) Omicron
+
+NOTE: If you'd like to run on Helios, refer to <<Deploying Omicron>> below.
 
 To **run Omicron** you need to run four programs:
 
