@@ -1291,9 +1291,9 @@ impl_enum_type!(
     pub enum BlockSize;
 
     // Enum values
-    Traditional => b"traditional"
-    Iso => b"iso"
-    AdvancedFormat => b"advancedformat"
+    Traditional => b"512"
+    Iso => b"2048"
+    AdvancedFormat => b"4096"
 );
 
 impl BlockSize {

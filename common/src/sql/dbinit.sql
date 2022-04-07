@@ -366,9 +366,9 @@ CREATE UNIQUE INDEX ON omicron.public.instance (
 -- );
 
 CREATE TYPE omicron.public.block_size AS ENUM (
-  'traditional',
-  'iso',
-  'advancedformat'
+  '512',
+  '2048',
+  '4096'
 );
 
 CREATE TABLE omicron.public.disk (
