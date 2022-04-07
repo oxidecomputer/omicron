@@ -4339,6 +4339,14 @@
       }
     },
     "schemas": {
+      "BlockSize": {
+        "type": "string",
+        "enum": [
+          "Traditional",
+          "Iso",
+          "AdvancedFormat"
+        ]
+      },
       "ByteCount": {
         "description": "A count of bytes, typically used either for memory or storage capacity\n\nThe maximum supported byte count is [`i64::MAX`].  This makes it somewhat inconvenient to define constructors: a u32 constructor can be infallible, but an i64 constructor can fail (if the value is negative) and a u64 constructor can fail (if the value is larger than i64::MAX).  We provide all of these for consumers' convenience.",
         "type": "integer",
@@ -4436,10 +4444,10 @@
         "type": "object",
         "properties": {
           "block_size": {
-            "description": "size of blocks for this Disk. valid values are currently 512 or 4096",
+            "description": "size of blocks for this Disk.",
             "allOf": [
               {
-                "$ref": "#/components/schemas/ByteCount"
+                "$ref": "#/components/schemas/BlockSize"
               }
             ]
           },
@@ -4828,10 +4836,10 @@
             "type": "object",
             "properties": {
               "block_size": {
-                "description": "size of blocks for this Disk. valid values are currently 512 or 4096",
+                "description": "size of blocks for this Disk.",
                 "allOf": [
                   {
-                    "$ref": "#/components/schemas/ByteCount"
+                    "$ref": "#/components/schemas/BlockSize"
                   }
                 ]
               },

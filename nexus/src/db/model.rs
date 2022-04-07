@@ -120,9 +120,9 @@ macro_rules! impl_enum_type {
 
         $(#[$model_meta:meta])*
         pub enum $model_type:ident;
+
         $($enum_item:ident => $sql_value:literal)+
     ) => {
-
         $(#[$enum_meta])*
         pub struct $diesel_type;
 
@@ -1281,6 +1281,47 @@ impl From<InstanceState> for sled_agent_client::types::InstanceState {
     }
 }
 
+impl_enum_type!(
+    #[derive(SqlType, Debug, QueryId)]
+    #[postgres(type_name = "block_size", type_schema = "public")]
+    pub struct BlockSizeEnum;
+
+    #[derive(Copy, Clone, Debug, AsExpression, FromSqlRow, Serialize, Deserialize, PartialEq)]
+    #[sql_type = "BlockSizeEnum"]
+    pub enum BlockSize;
+
+    // Enum values
+    Traditional => b"traditional"
+    Iso => b"iso"
+    AdvancedFormat => b"advancedformat"
+);
+
+impl BlockSize {
+    pub fn to_bytes(&self) -> u32 {
+        match self {
+            BlockSize::Traditional => 512,
+            BlockSize::Iso => 2048,
+            BlockSize::AdvancedFormat => 4096,
+        }
+    }
+}
+
+impl Into<external::ByteCount> for BlockSize {
+    fn into(self) -> external::ByteCount {
+        external::ByteCount::from(self.to_bytes())
+    }
+}
+
+impl From<params::BlockSize> for BlockSize {
+    fn from(block_size: params::BlockSize) -> BlockSize {
+        match block_size {
+            params::BlockSize::Traditional => BlockSize::Traditional,
+            params::BlockSize::Iso => BlockSize::Iso,
+            params::BlockSize::AdvancedFormat => BlockSize::AdvancedFormat,
+        }
+    }
+}
+
 /// A Disk (network block device).
 #[derive(
     Queryable,
@@ -1314,8 +1355,8 @@ pub struct Disk {
     #[column_name = "size_bytes"]
     pub size: ByteCount,
 
-    /// size of blocks
-    pub block_size: ByteCount,
+    /// size of blocks (512, 2048, or 4096)
+    pub block_size: BlockSize,
 
     /// id for the snapshot from which this Disk was created (None means a blank
     /// disk)

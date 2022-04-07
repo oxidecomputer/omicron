@@ -751,25 +751,9 @@ impl Nexus {
         // (if possibly redundant) to check this here.
         opctx.authorize(authz::Action::CreateChild, &authz_project).await?;
 
-        // Reject invalid block sizes
-        match params.block_size.to_bytes() {
-            512 | 4096 => {
-                // ok
-            }
-
-            _ => {
-                return Err(Error::InvalidValue {
-                    label: String::from("block_size"),
-                    message: String::from(
-                        "supported block sizes are 512 and 4096",
-                    ),
-                });
-            }
-        }
-
         // Reject disks where the block size doesn't evenly divide the total
         // size
-        if (params.size.to_bytes() % params.block_size.to_bytes()) != 0 {
+        if (params.size.to_bytes() % (params.block_size as u64)) != 0 {
             return Err(Error::InvalidValue {
                 label: String::from("size and block_size"),
                 message: String::from(

@@ -234,6 +234,18 @@ pub struct VpcRouterUpdate {
 
 // DISKS
 
+#[derive(Copy, Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub enum BlockSize {
+    /// 512 byte blocks
+    Traditional = 512,
+
+    /// 2048 byte blocks
+    Iso = 2048,
+
+    /// 4096 byte blocks
+    AdvancedFormat = 4096,
+}
+
 /// Create-time parameters for a [`Disk`](omicron_common::api::external::Disk)
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct DiskCreate {
@@ -246,19 +258,19 @@ pub struct DiskCreate {
     pub image_id: Option<Uuid>,
     /// total size of the Disk in bytes
     pub size: ByteCount,
-    /// size of blocks for this Disk. valid values are currently 512 or 4096
-    pub block_size: ByteCount,
+    /// size of blocks for this Disk.
+    pub block_size: BlockSize,
 }
 
 const EXTENT_SIZE: u32 = 1_u32 << 20;
 
 impl DiskCreate {
     pub fn block_size(&self) -> ByteCount {
-        self.block_size
+        ByteCount::from(self.block_size as u32)
     }
 
     pub fn blocks_per_extent(&self) -> i64 {
-        EXTENT_SIZE as i64 / i64::from(self.block_size)
+        EXTENT_SIZE as i64 / i64::from(self.block_size as u32)
     }
 
     pub fn extent_count(&self) -> i64 {
@@ -324,7 +336,7 @@ mod test {
             snapshot_id: None,
             image_id: None,
             size,
-            block_size: ByteCount::from(512),
+            block_size: BlockSize::AdvancedFormat,
         }
     }
 

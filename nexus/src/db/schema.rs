@@ -22,7 +22,7 @@ table! {
         state_generation -> Int8,
         time_state_updated -> Timestamptz,
         size_bytes -> Int8,
-        block_size -> Int8,
+        block_size -> crate::db::model::BlockSizeEnum,
         origin_snapshot -> Nullable<Uuid>,
         origin_image -> Nullable<Uuid>,
     }

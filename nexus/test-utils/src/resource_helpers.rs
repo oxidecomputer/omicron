@@ -135,7 +135,7 @@ pub async fn create_disk(
             snapshot_id: None,
             image_id: None,
             size: ByteCount::from_gibibytes_u32(1),
-            block_size: ByteCount::from(512),
+            block_size: params::BlockSize::Traditional,
         },
     )
     .await
