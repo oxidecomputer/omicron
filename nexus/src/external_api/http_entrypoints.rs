@@ -1201,7 +1201,7 @@ async fn images_get(
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
         let images = nexus
-            .list_images(
+            .images_list(
                 &opctx,
                 &data_page_params_for(&rqctx, &query)?
                     .map_name(|n| Name::ref_cast(n)),
@@ -1233,7 +1233,7 @@ async fn images_post(
     let new_image_params = &new_image.into_inner();
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
-        let image = nexus.create_image(&opctx, &new_image_params).await?;
+        let image = nexus.image_create(&opctx, &new_image_params).await?;
         Ok(HttpResponseCreated(image.into()))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
@@ -1289,7 +1289,7 @@ async fn images_delete_image(
     let image_name = &path.image_name;
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
-        nexus.delete_image(&opctx, &image_name).await?;
+        nexus.image_delete(&opctx, &image_name).await?;
         Ok(HttpResponseDeleted())
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
