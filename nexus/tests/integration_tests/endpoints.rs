@@ -288,10 +288,20 @@ pub enum AllowedMethod {
     /// be uncommon.  In most cases, resources are identified either by names
     /// that we define here or uuids that we control in the test suite (e.g.,
     /// the rack and sled uuids).
+    ///
+    /// This is not necessary for methods other than `GET`.  We only need this
+    /// to configure the test's expectation for *privileged* requests.  For the
+    /// other HTTP methods, we only make unprivileged requests, and they should
+    /// always fail in the correct way.
     GetNonexistent,
     /// HTTP "GET" method that is not yet implemented
     ///
-    /// This should be a transient state, used only for stub APIs
+    /// This should be a transient state, used only for stub APIs.
+    ///
+    /// This is not necessary for methods other than `GET`.  We only need this
+    /// to configure the test's expectation for *privileged* requests.  For the
+    /// other HTTP methods, we only make unprivileged requests, and they should
+    /// always fail in the correct way.
     GetUnimplemented,
     /// HTTP "POST" method, with sample input (which should be valid input for
     /// this endpoint)
