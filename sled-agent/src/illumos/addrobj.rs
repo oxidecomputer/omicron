@@ -44,6 +44,10 @@ impl AddrObject {
         }
         Ok(Self { interface: interface.to_string(), name: name.to_string() })
     }
+
+    pub fn interface(&self) -> &str {
+        &self.interface
+    }
 }
 
 impl ToString for AddrObject {

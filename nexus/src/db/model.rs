@@ -7,7 +7,7 @@
 use crate::db::collection_insert::DatastoreCollection;
 use crate::db::identity::{Asset, Resource};
 use crate::db::schema::{
-    console_session, dataset, disk, instance, metric_producer,
+    console_session, dataset, disk, image, instance, metric_producer,
     network_interface, organization, oximeter, project, rack, region,
     role_assignment_builtin, role_builtin, router_route, silo, silo_user, sled,
     snapshot, update_available_artifact, user_builtin, volume, vpc,
@@ -1569,6 +1569,39 @@ impl Into<external::DiskState> for DiskState {
     Serialize,
     Deserialize,
 )]
+#[table_name = "image"]
+pub struct Image {
+    #[diesel(embed)]
+    identity: ImageIdentity,
+
+    project_id: Option<Uuid>,
+    volume_id: Option<Uuid>,
+    url: Option<String>,
+    #[column_name = "size_bytes"]
+    size: ByteCount,
+}
+
+impl From<Image> for views::Image {
+    fn from(image: Image) -> Self {
+        Self {
+            identity: image.identity(),
+            project_id: image.project_id,
+            url: image.url,
+            size: image.size.into(),
+        }
+    }
+}
+
+#[derive(
+    Queryable,
+    Insertable,
+    Selectable,
+    Clone,
+    Debug,
+    Resource,
+    Serialize,
+    Deserialize,
+)]
 #[table_name = "snapshot"]
 pub struct Snapshot {
     #[diesel(embed)]
@@ -1864,7 +1897,7 @@ impl DatastoreCollection<RouterRoute> for VpcRouter {
     type CollectionId = Uuid;
     type GenerationNumberColumn = vpc_router::dsl::rcgen;
     type CollectionTimeDeletedColumn = vpc_router::dsl::time_deleted;
-    type CollectionIdColumn = router_route::dsl::router_id;
+    type CollectionIdColumn = router_route::dsl::vpc_router_id;
 }
 
 #[derive(AsChangeset)]
@@ -1976,7 +2009,7 @@ pub struct RouterRoute {
     identity: RouterRouteIdentity,
 
     pub kind: RouterRouteKind,
-    pub router_id: Uuid,
+    pub vpc_router_id: Uuid,
     pub target: RouteTarget,
     pub destination: RouteDestination,
 }
@@ -1984,14 +2017,14 @@ pub struct RouterRoute {
 impl RouterRoute {
     pub fn new(
         route_id: Uuid,
-        router_id: Uuid,
+        vpc_router_id: Uuid,
         kind: external::RouterRouteKind,
         params: external::RouterRouteCreateParams,
     ) -> Self {
         let identity = RouterRouteIdentity::new(route_id, params.identity);
         Self {
             identity,
-            router_id,
+            vpc_router_id,
             kind: RouterRouteKind(kind),
             target: RouteTarget(params.target),
             destination: RouteDestination::new(params.destination),
@@ -2003,7 +2036,7 @@ impl Into<external::RouterRoute> for RouterRoute {
     fn into(self) -> external::RouterRoute {
         external::RouterRoute {
             identity: self.identity(),
-            router_id: self.router_id,
+            vpc_router_id: self.vpc_router_id,
             kind: self.kind.0,
             target: self.target.0.clone(),
             destination: self.destination.state().clone(),

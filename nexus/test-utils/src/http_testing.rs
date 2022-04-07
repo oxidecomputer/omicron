@@ -466,6 +466,14 @@ impl<'a> NexusRequest<'a> {
         self.request_builder.execute().await
     }
 
+    /// Convenience function that executes the request, parses the body, and
+    /// unwraps any `Result`s along the way.
+    pub async fn execute_and_parse_unwrap<T: serde::de::DeserializeOwned>(
+        self,
+    ) -> T {
+        self.execute().await.unwrap().parsed_body().unwrap()
+    }
+
     /// Returns a new `NexusRequest` suitable for `POST $uri` with the given
     /// `body`
     pub fn objects_post<BodyType: serde::Serialize>(

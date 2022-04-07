@@ -29,6 +29,21 @@ table! {
 }
 
 table! {
+    image (id) {
+        id -> Uuid,
+        name -> Text,
+        description -> Text,
+        time_created -> Timestamptz,
+        time_modified -> Timestamptz,
+        time_deleted -> Nullable<Timestamptz>,
+        project_id -> Nullable<Uuid>,
+        volume_id -> Uuid,
+        url -> Text,
+        size_bytes -> Int8,
+    }
+}
+
+table! {
     snapshot (id) {
         id -> Uuid,
         name -> Text,
@@ -326,7 +341,7 @@ table! {
         time_modified -> Timestamptz,
         time_deleted -> Nullable<Timestamptz>,
         kind -> crate::db::model::RouterRouteKindEnum,
-        router_id -> Uuid,
+        vpc_router_id -> Uuid,
         target -> Text,
         destination -> Text,
     }

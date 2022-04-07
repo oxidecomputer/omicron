@@ -4,44 +4,53 @@
 
 //! Error handling facilities for the management gateway.
 
-use crate::http_entrypoints::SpIdentifier;
+use std::borrow::Borrow;
+
 use dropshot::HttpError;
-use serde::{Deserialize, Serialize};
+use gateway_sp_comms::error::Error as SpCommsError;
 
-/// An error that can be generated within the gateway.
-#[derive(Debug, Deserialize, thiserror::Error, PartialEq, Serialize)]
+#[derive(Debug, thiserror::Error)]
 pub(crate) enum Error {
-    /// A requested SP does not exist.
-    ///
-    /// This is not the same as the requested SP target being offline; this
-    /// error indicates a fatal, invalid request (e.g., asing for the SP on the
-    /// 17th switch when there are only two switches).
-    #[error("SP {} (of type {:?}) does not exist", .0.slot, .0.typ)]
-    SpDoesNotExist(SpIdentifier),
+    #[error("invalid page token ({0})")]
+    InvalidPageToken(InvalidPageToken),
+    #[error(transparent)]
+    CommunicationsError(#[from] SpCommsError),
+}
 
-    /// The requested SP component ID is invalid (i.e., too long).
-    #[error("invalid SP component ID `{0}`")]
-    InvalidSpComponentId(String),
-
-    /// The system encountered an unhandled operational error.
-    #[error("internal error: {internal_message}")]
-    InternalError { internal_message: String },
+#[derive(Debug, thiserror::Error)]
+pub(crate) enum InvalidPageToken {
+    #[error("no such ID")]
+    NoSuchId,
+    #[error("invalid value for last seen item")]
+    InvalidLastSeenItem,
 }
 
 impl From<Error> for HttpError {
     fn from(err: Error) -> Self {
         match err {
-            Error::SpDoesNotExist(_) => HttpError::for_bad_request(
-                Some(String::from("SpDoesNotExist")),
+            Error::InvalidPageToken(_) => HttpError::for_bad_request(
+                Some("InvalidPageToken".to_string()),
                 err.to_string(),
             ),
-            Error::InvalidSpComponentId(_) => HttpError::for_bad_request(
-                Some(String::from("InvalidSpComponentId")),
-                err.to_string(),
-            ),
-            Error::InternalError { internal_message } => {
-                HttpError::for_internal_error(internal_message)
-            }
+            Error::CommunicationsError(err) => http_err_from_comms_err(err),
+        }
+    }
+}
+
+pub(crate) fn http_err_from_comms_err<E>(err: E) -> HttpError
+where
+    E: Borrow<SpCommsError>,
+{
+    let err = err.borrow();
+    match err {
+        SpCommsError::SpDoesNotExist(_) => HttpError::for_bad_request(
+            Some("InvalidSp".to_string()),
+            err.to_string(),
+        ),
+        SpCommsError::SpAddressUnknown(_)
+        | SpCommsError::Timeout
+        | SpCommsError::SpCommunicationFailed(_) => {
+            HttpError::for_internal_error(err.to_string())
         }
     }
 }

@@ -421,6 +421,10 @@ impl Project {
             lookup_type,
         }
     }
+
+    pub fn organization(&self) -> &Organization {
+        &self.parent
+    }
 }
 
 impl Eq for Project {}

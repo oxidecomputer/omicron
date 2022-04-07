@@ -309,8 +309,9 @@ impl Zones {
         let prefix =
             if let Some(zone) = zone { vec![ZLOGIN, zone] } else { vec![] };
 
+        let interface = format!("{}/", addrobj.interface());
         let show_addr_args =
-            &[IPADM, "show-addr", "-p", "-o", "TYPE", &addrobj.to_string()];
+            &[IPADM, "show-addr", "-p", "-o", "TYPE", &interface];
 
         let args = prefix.iter().chain(show_addr_args);
         let cmd = command.args(args);
@@ -409,7 +410,12 @@ impl Zones {
     // from RSS.
     pub fn ensure_has_global_zone_v6_address(
         physical_link: Option<PhysicalLink>,
+        address: IpAddr,
     ) -> Result<(), Error> {
+        if !address.is_ipv6() {
+            return Err(Error::Ip(address.into()));
+        }
+
         // Ensure that addrconf has been set up in the Global
         // Zone.
 
@@ -424,14 +430,13 @@ impl Zones {
         // Ensure that a static IPv6 address has been allocated
         // to the Global Zone. Without this, we don't have a way
         // to route to IP addresses that we want to create in
-        // the non-GZ.
+        // the non-GZ. Note that we use a `/64` prefix, as all addresses
+        // allocated for services on this sled itself are within the underlay
+        // prefix. Anything else must be routed through Sidecar.
         Self::ensure_address(
             None,
-            &gz_link_local_addrobj.on_same_interface("v6route")?,
-            AddressRequest::new_static(
-                "fd00:1234::".parse().unwrap(),
-                Some(16),
-            ),
+            &gz_link_local_addrobj.on_same_interface("sled6")?,
+            AddressRequest::new_static(address, Some(64)),
         )?;
         Ok(())
     }

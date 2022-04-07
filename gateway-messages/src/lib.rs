@@ -129,6 +129,12 @@ pub struct IgnitionState {
     pub flags: IgnitionFlags,
 }
 
+impl IgnitionState {
+    pub fn is_powered_on(self) -> bool {
+        self.flags.intersects(IgnitionFlags::POWER)
+    }
+}
+
 bitflags! {
     #[derive(Default, SerializedSize, Serialize, Deserialize)]
     pub struct IgnitionFlags: u8 {
@@ -305,6 +311,7 @@ impl fmt::Debug for SpComponent {
 
 /// Error type returned from `TryFrom<&str> for SpComponent` if the provided ID
 /// is too long.
+#[derive(Debug)]
 pub struct SpComponentIdTooLong;
 
 impl TryFrom<&str> for SpComponent {

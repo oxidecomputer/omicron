@@ -94,7 +94,7 @@ pub struct NetworkInterfaceCreate {
 #[serde(tag = "type", content = "params")]
 pub enum InstanceNetworkInterfaceAttachment {
     /// Create one or more `NetworkInterface`s for the `Instance`
-    Create(InstanceNetworkInterfaceCreate),
+    Create(Vec<NetworkInterfaceCreate>),
 
     /// Default networking setup, which creates a single interface with an
     /// auto-assigned IP address from project's "default" VPC and "default" VPC
@@ -103,11 +103,6 @@ pub enum InstanceNetworkInterfaceAttachment {
 
     /// No network interfaces at all will be created for the instance.
     None,
-}
-
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-pub struct InstanceNetworkInterfaceCreate {
-    pub params: Vec<NetworkInterfaceCreate>,
 }
 
 impl Default for InstanceNetworkInterfaceAttachment {
@@ -294,6 +289,27 @@ pub struct DiskIdentifier {
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct NetworkInterfaceIdentifier {
     pub interface_name: Name,
+}
+
+// IMAGES
+
+/// The source of the underlying image.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub enum ImageSource {
+    Url(String),
+    Snapshot(Uuid),
+}
+
+/// Create-time parameters for an
+/// [`Image`](omicron_common::api::external::Image)
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct ImageCreate {
+    /// common identifying metadata
+    #[serde(flatten)]
+    pub identity: IdentityMetadataCreateParams,
+
+    /// The source of the image's contents.
+    pub source: ImageSource,
 }
 
 // SNAPSHOTS

@@ -4,10 +4,9 @@
 
 //! Utility for deploying Omicron to remote machines
 
-use omicron_package::{parse, SubCommand as PackageSubCommand};
+use omicron_package::{parse, BuildCommand, DeployCommand};
 
 use std::collections::{BTreeMap, BTreeSet};
-use std::fmt::Write;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -17,33 +16,46 @@ use serde_derive::Deserialize;
 use structopt::StructOpt;
 use thiserror::Error;
 
+// A server on which omicron source should be compiled into packages.
 #[derive(Deserialize, Debug)]
 struct Builder {
-    pub server: String,
-    pub omicron_path: PathBuf,
-    pub git_treeish: String,
+    server: String,
+    omicron_path: PathBuf,
 }
 
-// A server on which an omicron package is deployed
+// A server on which an omicron package is deployed.
 #[derive(Deserialize, Debug)]
 struct Server {
-    pub username: String,
-    pub addr: String,
+    username: String,
+    addr: String,
 }
 
 #[derive(Deserialize, Debug)]
 struct Deployment {
-    pub servers: BTreeSet<String>,
-    pub rack_secret_threshold: usize,
-    pub staging_dir: PathBuf,
+    servers: BTreeSet<String>,
+    rack_secret_threshold: usize,
+    staging_dir: PathBuf,
 }
 
 #[derive(Debug, Deserialize)]
 struct Config {
-    pub local_source: PathBuf,
-    pub builder: Builder,
-    pub servers: BTreeMap<String, Server>,
-    pub deployment: Deployment,
+    omicron_path: PathBuf,
+    builder: Builder,
+    servers: BTreeMap<String, Server>,
+    deployment: Deployment,
+
+    #[serde(default)]
+    debug: bool,
+}
+
+impl Config {
+    fn release_arg(&self) -> &str {
+        if self.debug {
+            ""
+        } else {
+            "--release"
+        }
+    }
 }
 
 fn parse_into_set(src: &str) -> BTreeSet<String> {
@@ -53,7 +65,7 @@ fn parse_into_set(src: &str) -> BTreeSet<String> {
 #[derive(Debug, StructOpt)]
 enum SubCommand {
     /// Run the given command on the given servers, or all servers if none are
-    /// given.
+    /// specified.
     ///
     /// Be careful!
     Exec {
@@ -69,18 +81,12 @@ enum SubCommand {
     /// Sync our local source to the build host
     Sync,
 
-    /// Build omicron-package and everything needed to run thing-flinger
-    /// commands on the build host.
-    ///
-    /// Package always builds everything, but it can be set in release mode, and
-    /// we expect the existing tools to run from 'target/debug'. Additionally,
-    // you can't run `Package` until you have actually built `omicron-package`,
-    // which `BuildMinimal` does.
-    BuildMinimal,
+    /// Runs a command on the "builder" server.
+    #[structopt(name = "build")]
+    Builder(BuildCommand),
 
-    /// Use all subcommands from omicron-package
-    #[structopt(flatten)]
-    Package(PackageSubCommand),
+    /// Runs a command on all the "deploy" servers.
+    Deploy(DeployCommand),
 
     /// Create an overlay directory tree for each deployment server
     ///
@@ -93,7 +99,10 @@ enum SubCommand {
 }
 
 #[derive(Debug, StructOpt)]
-#[structopt(name = "thing-flinger")]
+#[structopt(
+    name = "thing-flinger",
+    about = "A tool for synchronizing packages and configs between machines"
+)]
 struct Args {
     /// The path to the deployment manifest TOML file
     #[structopt(short, long, help = "Path to deployment manifest toml file")]
@@ -145,7 +154,7 @@ fn do_exec(
 }
 
 fn do_sync(config: &Config) -> Result<()> {
-    let server =
+    let builder =
         config.servers.get(&config.builder.server).ok_or_else(|| {
             FlingError::InvalidServers(vec![config.builder.server.clone()])
         })?;
@@ -153,13 +162,16 @@ fn do_sync(config: &Config) -> Result<()> {
     // For rsync to copy from the source appropriately we must guarantee a
     // trailing slash.
     let src =
-        format!("{}/", config.local_source.canonicalize()?.to_string_lossy());
+        format!("{}/", config.omicron_path.canonicalize()?.to_string_lossy());
     let dst = format!(
         "{}@{}:{}",
-        server.username,
-        server.addr,
+        builder.username,
+        builder.addr,
         config.builder.omicron_path.to_str().unwrap()
     );
+
+    println!("Synchronizing source files to: {}", dst);
+
     let mut cmd = Command::new("rsync");
     cmd.arg("-az")
         .arg("-e")
@@ -171,11 +183,13 @@ fn do_sync(config: &Config) -> Result<()> {
         .arg("--exclude")
         .arg("out/")
         .arg("--exclude")
-        .arg("cockroachdb/")
+        .arg("/cockroachdb/")
         .arg("--exclude")
-        .arg("clickhouse/")
+        .arg("/clickhouse/")
         .arg("--exclude")
         .arg("*.swp")
+        .arg("--exclude")
+        .arg(".git/")
         .arg("--out-format")
         .arg("File changed: %o %t %f")
         .arg(&src)
@@ -189,25 +203,23 @@ fn do_sync(config: &Config) -> Result<()> {
     Ok(())
 }
 
-// Build omicron-package and omicron-sled-agent on the builder
+// Build omicron-package and omicron-deploy on the builder
 //
-// We need to build omicron-sled-agent for overlay file generation
+// We need to build omicron-deploy for overlay file generation
 fn do_build_minimal(config: &Config) -> Result<()> {
     let server = &config.servers[&config.builder.server];
     let cmd = format!(
-        "cd {} && git checkout {} && cargo build -p {} -p {}",
+        "cd {} && cargo build {} -p {} -p {}",
         config.builder.omicron_path.to_string_lossy(),
-        config.builder.git_treeish,
+        config.release_arg(),
         "omicron-package",
-        "omicron-sled-agent"
+        "omicron-deploy"
     );
     ssh_exec(&server, &cmd, false)
 }
 
 fn do_package(config: &Config, artifact_dir: PathBuf) -> Result<()> {
-    let server = &config.servers[&config.builder.server];
-    let mut cmd = String::new();
-    let cmd_path = "./target/debug/omicron-package";
+    let builder = &config.servers[&config.builder.server];
     let artifact_dir = artifact_dir
         .to_str()
         .ok_or_else(|| FlingError::BadString("artifact_dir".to_string()))?;
@@ -217,32 +229,30 @@ fn do_package(config: &Config, artifact_dir: PathBuf) -> Result<()> {
     // nexus.
     //
     // See https://github.com/oxidecomputer/omicron/blob/8757ec542ea4ffbadd6f26094ed4ba357715d70d/rpaths/src/lib.rs
-    write!(
-        &mut cmd,
-        "bash -lc 'cd {} && git checkout {} && {} package --out {}'",
+    let cmd = format!(
+        "bash -lc \
+            'cd {} && \
+             cargo run {} --bin omicron-package -- package --out {}'",
         config.builder.omicron_path.to_string_lossy(),
-        config.builder.git_treeish,
-        cmd_path,
+        config.release_arg(),
         &artifact_dir,
-    )?;
+    );
 
-    ssh_exec(&server, &cmd, false)
+    ssh_exec(&builder, &cmd, false)
 }
 
 fn do_check(config: &Config) -> Result<()> {
-    let server = &config.servers[&config.builder.server];
-    let mut cmd = String::new();
-    let cmd_path = "./target/debug/omicron-package";
+    let builder = &config.servers[&config.builder.server];
 
-    write!(
-        &mut cmd,
-        "bash -lc 'cd {} && git checkout {} && {} check'",
+    let cmd = format!(
+        "bash -lc \
+            'cd {} && \
+             cargo run {} --bin omicron-package -- check'",
         config.builder.omicron_path.to_string_lossy(),
-        config.builder.git_treeish,
-        cmd_path,
-    )?;
+        config.release_arg(),
+    );
 
-    ssh_exec(&server, &cmd, false)
+    ssh_exec(&builder, &cmd, false)
 }
 
 fn do_uninstall(
@@ -253,7 +263,11 @@ fn do_uninstall(
     let mut deployment_src = PathBuf::from(&config.deployment.staging_dir);
     deployment_src.push(&artifact_dir);
     for server_name in &config.deployment.servers {
+        let builder = &config.servers[&config.builder.server];
         let server = &config.servers[server_name];
+
+        copy_omicron_package_binary_to_staging(config, builder, server)?;
+
         // Run `omicron-package uninstall` on the deployment server
         let cmd = format!(
             "cd {} && pfexec ./omicron-package uninstall --in {} --out {}",
@@ -324,8 +338,8 @@ fn do_overlay(config: &Config) -> Result<()> {
     // TODO: This needs to match the artifact_dir in `package`
     root_path.push("out/overlay");
     let server_dirs = dir_per_deploy_server(config, &root_path);
-    let server = &config.servers[&config.builder.server];
-    overlay_sled_agent(&server, config, &server_dirs)
+    let builder = &config.servers[&config.builder.server];
+    overlay_sled_agent(&builder, config, &server_dirs)
 }
 
 fn overlay_sled_agent(
@@ -344,13 +358,13 @@ fn overlay_sled_agent(
 
     // Create directories on builder
     let dirs = dir_string(&sled_agent_dirs);
-    let cmd = format!("sh -c 'for dir in {}; do mkdir -p $dir; done'", dirs);
-
     let cmd = format!(
-        "{} && cd {} && ./target/debug/sled-agent-overlay-files \
-            --threshold {} --directories {}",
-        cmd,
+        "sh -c 'for dir in {}; do mkdir -p $dir; done' && \
+            cd {} && \
+            cargo run {} --bin sled-agent-overlay-files -- --threshold {} --directories {}",
+        dirs,
         config.builder.omicron_path.to_string_lossy(),
+        config.release_arg(),
         config.deployment.rack_secret_threshold,
         dirs
     );
@@ -367,15 +381,24 @@ fn single_server_install(
 ) -> Result<()> {
     let server = &config.servers[server_name];
 
+    println!("COPYING packages from builder -> deploy server");
     copy_package_artifacts_to_staging(config, pkg_dir, builder, server)?;
+
+    println!("COPYING deploy tool from builder -> deploy server");
     copy_omicron_package_binary_to_staging(config, builder, server)?;
+
+    println!("COPYING manifest from builder -> deploy server");
     copy_package_manifest_to_staging(config, builder, server)?;
-    run_omicron_package_from_staging(
+
+    println!("INSTALLING packages on deploy server");
+    run_omicron_package_install_from_staging(
         config,
         server,
         &artifact_dir,
         &install_dir,
     )?;
+
+    println!("COPYING overlay files from builder -> deploy server");
     copy_overlay_files_to_staging(
         config,
         pkg_dir,
@@ -383,12 +406,19 @@ fn single_server_install(
         server,
         server_name,
     )?;
+
+    println!("INSTALLING overlay files into the install directory of the deploy server");
     install_overlay_files_from_staging(config, server, &install_dir)?;
+
+    println!("RESTARTING services on the deploy server");
     restart_services(server)
 }
 
 // Copy package artifacts as a result of `omicron-package package` from the
 // builder to the deployment server staging directory.
+//
+// This staging directory acts as an intermediate location where
+// packages may reside prior to being installed.
 fn copy_package_artifacts_to_staging(
     config: &Config,
     pkg_dir: &str,
@@ -413,7 +443,10 @@ fn copy_omicron_package_binary_to_staging(
     destination: &Server,
 ) -> Result<()> {
     let mut bin_path = PathBuf::from(&config.builder.omicron_path);
-    bin_path.push("target/debug/omicron-package");
+    bin_path.push(format!(
+        "target/{}/omicron-package",
+        if config.debug { "debug" } else { "release" }
+    ));
     let cmd = format!(
         "rsync -avz {} {}@{}:{}",
         bin_path.to_string_lossy(),
@@ -443,7 +476,7 @@ fn copy_package_manifest_to_staging(
     ssh_exec(builder, &cmd, true)
 }
 
-fn run_omicron_package_from_staging(
+fn run_omicron_package_install_from_staging(
     config: &Config,
     destination: &Server,
     artifact_dir: &Path,
@@ -506,6 +539,12 @@ fn dir_string(dirs: &[PathBuf]) -> String {
     dirs.iter().map(|dir| dir.to_string_lossy().to_string() + " ").collect()
 }
 
+// For each server to be deployed, append the server name to `root`.
+//
+// Example (for servers "foo", "bar", "baz"):
+//
+//  dir_per_deploy_server(&config, "/my/path") ->
+//  vec!["/my/path/foo", "/my/path/bar", "/my/path/baz"]
 fn dir_per_deploy_server(config: &Config, root: &Path) -> Vec<PathBuf> {
     config
         .deployment
@@ -539,8 +578,12 @@ fn ssh_exec(
         .arg(&server.addr)
         .arg(&remote_cmd);
     cmd.env("SSH_AUTH_SOCK", auth_sock);
-    cmd.status()
+    let exit_status = cmd
+        .status()
         .context(format!("Failed to run {} on {}", remote_cmd, server.addr))?;
+    if !exit_status.success() {
+        anyhow::bail!("Command failed: {}", exit_status);
+    }
 
     Ok(())
 }
@@ -570,7 +613,7 @@ fn validate_absolute_path(
 }
 
 fn validate(config: &Config) -> Result<(), FlingError> {
-    validate_absolute_path(&config.local_source, "local_source")?;
+    validate_absolute_path(&config.omicron_path, "omicron_path")?;
     validate_absolute_path(
         &config.builder.omicron_path,
         "builder.omicron_path",
@@ -599,23 +642,24 @@ fn main() -> Result<()> {
             do_exec(&config, cmd, servers)?;
         }
         SubCommand::Sync => do_sync(&config)?,
-        SubCommand::BuildMinimal => do_build_minimal(&config)?,
-        SubCommand::Package(PackageSubCommand::Package { artifact_dir }) => {
+        SubCommand::Builder(BuildCommand::Package { artifact_dir }) => {
             do_package(&config, artifact_dir)?;
         }
-        SubCommand::Package(PackageSubCommand::Install {
+        SubCommand::Builder(BuildCommand::Check) => do_check(&config)?,
+        SubCommand::Deploy(DeployCommand::Install {
             artifact_dir,
             install_dir,
         }) => {
+            do_build_minimal(&config)?;
             do_install(&config, &artifact_dir, &install_dir);
         }
-        SubCommand::Package(PackageSubCommand::Uninstall {
+        SubCommand::Deploy(DeployCommand::Uninstall {
             artifact_dir,
             install_dir,
         }) => {
+            do_build_minimal(&config)?;
             do_uninstall(&config, artifact_dir, install_dir)?;
         }
-        SubCommand::Package(PackageSubCommand::Check) => do_check(&config)?,
         SubCommand::Overlay => do_overlay(&config)?,
     }
     Ok(())

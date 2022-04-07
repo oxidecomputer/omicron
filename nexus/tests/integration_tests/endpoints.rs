@@ -90,6 +90,8 @@ lazy_static! {
         "demo-vpc-subnet".parse().unwrap();
     pub static ref DEMO_VPC_SUBNET_URL: String =
         format!("{}/{}", *DEMO_VPC_URL_SUBNETS, *DEMO_VPC_SUBNET_NAME);
+    pub static ref DEMO_VPC_SUBNET_INTERFACES_URL: String =
+        format!("{}/network-interfaces", *DEMO_VPC_SUBNET_URL);
     pub static ref DEMO_VPC_SUBNET_CREATE: params::VpcSubnetCreate =
         params::VpcSubnetCreate {
             identity: IdentityMetadataCreateParams {
@@ -164,11 +166,13 @@ lazy_static! {
         format!("{}/attach", *DEMO_INSTANCE_DISKS_URL);
     pub static ref DEMO_INSTANCE_DISKS_DETACH_URL: String =
         format!("{}/detach", *DEMO_INSTANCE_DISKS_URL);
+    pub static ref DEMO_INSTANCE_NICS_URL: String =
+        format!("{}/network-interfaces", *DEMO_INSTANCE_URL);
     pub static ref DEMO_INSTANCE_CREATE: params::InstanceCreate =
         params::InstanceCreate {
             identity: IdentityMetadataCreateParams {
                 name: DEMO_INSTANCE_NAME.clone(),
-                description: "".parse().unwrap(),
+                description: String::from(""),
             },
             ncpus: InstanceCpuCount(1),
             memory: ByteCount::from_gibibytes_u32(16),
@@ -176,6 +180,21 @@ lazy_static! {
             network_interfaces:
                 params::InstanceNetworkInterfaceAttachment::Default,
             disks: vec![],
+        };
+
+    // The instance needs a network interface, too.
+    pub static ref DEMO_INSTANCE_NIC_NAME: Name = "default".parse().unwrap();
+    pub static ref DEMO_INSTANCE_NIC_URL: String =
+        format!("{}/{}", *DEMO_INSTANCE_NICS_URL, *DEMO_INSTANCE_NIC_NAME);
+    pub static ref DEMO_INSTANCE_NIC_CREATE: params::NetworkInterfaceCreate =
+        params::NetworkInterfaceCreate {
+            identity: IdentityMetadataCreateParams {
+                name: DEMO_INSTANCE_NIC_NAME.clone(),
+                description: String::from(""),
+            },
+            vpc_name: DEMO_VPC_NAME.clone(),
+            subnet_name: DEMO_VPC_SUBNET_NAME.clone(),
+            ip: None,
         };
 }
 
@@ -422,6 +441,14 @@ lazy_static! {
             ],
         },
 
+        VerifyEndpoint {
+            url: &*DEMO_VPC_SUBNET_INTERFACES_URL,
+            visibility: Visibility::Protected,
+            allowed_methods: vec![
+                AllowedMethod::Get,
+            ],
+        },
+
         /* VPC Routers */
 
         VerifyEndpoint {
@@ -510,6 +537,13 @@ lazy_static! {
         },
 
         VerifyEndpoint {
+            url: &*DEMO_INSTANCE_DISKS_URL,
+            visibility: Visibility::Protected,
+            allowed_methods: vec![
+                AllowedMethod::Get,
+            ],
+        },
+        VerifyEndpoint {
             url: &*DEMO_INSTANCE_DISKS_ATTACH_URL,
             visibility: Visibility::Protected,
             allowed_methods: vec![
@@ -583,6 +617,26 @@ lazy_static! {
                         dst_sled_uuid: uuid::Uuid::new_v4(),
                     }
                 ).unwrap()),
+            ],
+        },
+
+        /* Instance NICs */
+        VerifyEndpoint {
+            url: &*DEMO_INSTANCE_NICS_URL,
+            visibility: Visibility::Protected,
+            allowed_methods: vec![
+                AllowedMethod::Get,
+                AllowedMethod::Post(
+                    serde_json::to_value(&*DEMO_INSTANCE_NIC_CREATE).unwrap()
+                ),
+            ],
+        },
+        VerifyEndpoint {
+            url: &*DEMO_INSTANCE_NIC_URL,
+            visibility: Visibility::Protected,
+            allowed_methods: vec![
+                AllowedMethod::Get,
+                AllowedMethod::Delete,
             ],
         },
 

@@ -27,7 +27,7 @@ pub enum Error {
 }
 
 /// The name of a physical datalink.
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
 pub struct PhysicalLink(pub String);
 
 /// Wraps commands for interacting with data links.
