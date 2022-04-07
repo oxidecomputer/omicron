@@ -1312,14 +1312,14 @@ impl Into<external::ByteCount> for BlockSize {
     }
 }
 
-impl TryFrom<external::ByteCount> for BlockSize {
+impl TryFrom<params::BlockSize> for BlockSize {
     type Error = anyhow::Error;
-    fn try_from(block_size: external::ByteCount) -> Result<Self, Self::Error> {
-        match block_size.to_bytes() {
+    fn try_from(block_size: params::BlockSize) -> Result<Self, Self::Error> {
+        match block_size.0 {
             512 => Ok(BlockSize::Traditional),
             2048 => Ok(BlockSize::Iso),
             4096 => Ok(BlockSize::AdvancedFormat),
-            _ => anyhow::bail!("invalid block size {}", block_size.to_bytes()),
+            _ => anyhow::bail!("invalid block size {}", block_size.0),
         }
     }
 }

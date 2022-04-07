@@ -4749,6 +4749,15 @@
       }
     },
     "schemas": {
+      "BlockSize": {
+        "title": "disk block size in bytes",
+        "type": "integer",
+        "enum": [
+          512,
+          2048,
+          4096
+        ]
+      },
       "ByteCount": {
         "description": "A count of bytes, typically used either for memory or storage capacity\n\nThe maximum supported byte count is [`i64::MAX`].  This makes it somewhat inconvenient to define constructors: a u32 constructor can be infallible, but an i64 constructor can fail (if the value is negative) and a u64 constructor can fail (if the value is larger than i64::MAX).  We provide all of these for consumers' convenience.",
         "type": "integer",
@@ -4849,7 +4858,7 @@
             "description": "size of blocks for this Disk. valid values are: 512, 2048, or 4096",
             "allOf": [
               {
-                "$ref": "#/components/schemas/ByteCount"
+                "$ref": "#/components/schemas/BlockSize"
               }
             ]
           },
@@ -5370,7 +5379,7 @@
                 "description": "size of blocks for this Disk. valid values are: 512, 2048, or 4096",
                 "allOf": [
                   {
-                    "$ref": "#/components/schemas/ByteCount"
+                    "$ref": "#/components/schemas/BlockSize"
                   }
                 ]
               },
