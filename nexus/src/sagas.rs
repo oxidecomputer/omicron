@@ -656,16 +656,27 @@ async fn sic_create_instance_record(
 ) -> Result<db::model::Name, ActionError> {
     let osagactx = sagactx.user_data();
     let params = sagactx.saga_params();
-    let sled_uuid = sagactx.lookup::<Uuid>("server_id");
-    let instance_id = sagactx.lookup::<Uuid>("instance_id");
-    let propolis_uuid = sagactx.lookup::<Uuid>("propolis_id");
+    let opctx = OpContext::for_saga_action(&sagactx, &params.serialized_authn);
+    let sled_uuid = sagactx.lookup::<Uuid>("server_id")?;
+    let instance_id = sagactx.lookup::<Uuid>("instance_id")?;
+    let propolis_uuid = sagactx.lookup::<Uuid>("propolis_id")?;
+
+    // Allocate an IP address on the destination sled for the Propolis server
+    let propolis_addr = osagactx
+        .datastore()
+        .next_ipv6_address(&opctx, sled_uuid)
+        .await
+        .map_err(ActionError::action_failed)?;
 
     let runtime = InstanceRuntimeState {
         run_state: InstanceState::Creating,
-        sled_uuid: sled_uuid?,
-        propolis_uuid: propolis_uuid?,
+        sled_uuid,
+        propolis_uuid,
         dst_propolis_uuid: None,
-        propolis_addr: None,
+        propolis_addr: Some(std::net::SocketAddr::new(
+            propolis_addr.into(),
+            12400,
+        )),
         migration_uuid: None,
         hostname: params.create_params.hostname.clone(),
         memory: params.create_params.memory,
@@ -675,7 +686,7 @@ async fn sic_create_instance_record(
     };
 
     let new_instance = db::model::Instance::new(
-        instance_id?,
+        instance_id,
         params.project_id,
         &params.create_params,
         runtime.into(),
@@ -866,6 +877,7 @@ async fn sim_instance_migrate(
 ) -> Result<(), ActionError> {
     let osagactx = sagactx.user_data();
     let params = sagactx.saga_params();
+    let opctx = OpContext::for_saga_action(&sagactx, &params.serialized_authn);
 
     let migration_id = sagactx.lookup::<Uuid>("migrate_id")?;
     let dst_sled_uuid = params.migrate_params.dst_sled_uuid;
@@ -873,10 +885,20 @@ async fn sim_instance_migrate(
     let (instance_id, old_runtime) =
         sagactx.lookup::<(Uuid, InstanceRuntimeState)>("migrate_instance")?;
 
+    // Allocate an IP address the destination sled for the new Propolis server.
+    let propolis_addr = osagactx
+        .datastore()
+        .next_ipv6_address(&opctx, dst_sled_uuid)
+        .await
+        .map_err(ActionError::action_failed)?;
+
     let runtime = InstanceRuntimeState {
         sled_uuid: dst_sled_uuid,
         propolis_uuid: dst_propolis_uuid,
-        propolis_addr: None,
+        propolis_addr: Some(std::net::SocketAddr::new(
+            propolis_addr.into(),
+            12400,
+        )),
         ..old_runtime
     };
     let instance_hardware = InstanceHardware {

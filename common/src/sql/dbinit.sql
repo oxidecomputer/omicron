@@ -65,7 +65,8 @@ CREATE TABLE omicron.public.sled (
     rcgen INT NOT NULL,
 
     ip INET NOT NULL,
-    port INT4 NOT NULL
+    port INT4 NOT NULL,
+    last_used_address INET NOT NULL
 );
 
 /*

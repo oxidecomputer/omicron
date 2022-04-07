@@ -631,16 +631,48 @@ pub struct Sled {
     pub ip: ipnetwork::IpNetwork,
     // TODO: Make use of SqlU16
     pub port: i32,
+
+    /// The last IP address provided to an Oxide service on this sled
+    pub last_used_address: IpNetwork,
 }
 
+// TODO-correctness: We need a small offset here, while services and
+// their addresses are still hardcoded in the mock RSS config file at
+// `./smf/sled-agent/config-rss.toml`. This avoids conflicts with those
+// addresses, but should be removed when they are entirely under the
+// control of Nexus or RSS.
+pub(crate) const STATIC_IPV6_ADDRESS_OFFSET: u16 = 20;
 impl Sled {
+    // TODO-cleanup: We should be using IPv6 only for Oxide services, including
+    // `std::net::Ipv6Addr` and `SocketAddrV6`. The v4/v6 enums should only be
+    // used for managing customer addressing information, or when needed to
+    // interact with the database.
     pub fn new(id: Uuid, addr: SocketAddr) -> Self {
+        let last_used_address = {
+            match addr.ip() {
+                IpAddr::V6(ip) => {
+                    let mut segments = ip.segments();
+                    segments[7] += STATIC_IPV6_ADDRESS_OFFSET;
+                    ipnetwork::IpNetwork::from(IpAddr::from(Ipv6Addr::from(
+                        segments,
+                    )))
+                }
+                IpAddr::V4(ip) => {
+                    // TODO-correctness: This match arm should disappear when we
+                    // support only IPv6 for underlay addressing.
+                    let x = u32::from_be_bytes(ip.octets())
+                        + u32::from(STATIC_IPV6_ADDRESS_OFFSET);
+                    ipnetwork::IpNetwork::from(IpAddr::from(Ipv4Addr::from(x)))
+                }
+            }
+        };
         Self {
             identity: SledIdentity::new(id),
             time_deleted: None,
             rcgen: Generation::new(),
             ip: addr.ip().into(),
             port: addr.port().into(),
+            last_used_address,
         }
     }
 
@@ -1143,10 +1175,10 @@ pub struct InstanceRuntimeState {
     pub sled_uuid: Uuid,
     #[column_name = "active_propolis_id"]
     pub propolis_uuid: Uuid,
-    #[column_name = "target_propolis_id"]
-    pub dst_propolis_uuid: Option<Uuid>,
     #[column_name = "active_propolis_ip"]
     pub propolis_ip: Option<ipnetwork::IpNetwork>,
+    #[column_name = "target_propolis_id"]
+    pub dst_propolis_uuid: Option<Uuid>,
     #[column_name = "migration_id"]
     pub migration_uuid: Option<Uuid>,
     #[column_name = "ncpus"]
