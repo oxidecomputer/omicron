@@ -359,7 +359,7 @@ async fn test_disk_move_between_instances(cptestctx: &ControlPlaneTestContext) {
     let error: HttpErrorResponseBody = NexusRequest::new(
         RequestBuilder::new(client, Method::POST, &url_instance2_attach_disk)
             .body(Some(&params::DiskIdentifier {
-                disk: disk.identity.name.clone(),
+                name: disk.identity.name.clone(),
             }))
             .expect_status(Some(StatusCode::BAD_REQUEST)),
     )
@@ -391,7 +391,7 @@ async fn test_disk_move_between_instances(cptestctx: &ControlPlaneTestContext) {
     let error: HttpErrorResponseBody = NexusRequest::new(
         RequestBuilder::new(client, Method::POST, &url_instance2_attach_disk)
             .body(Some(&params::DiskIdentifier {
-                disk: disk.identity.name.clone(),
+                name: disk.identity.name.clone(),
             }))
             .expect_status(Some(StatusCode::BAD_REQUEST)),
     )
@@ -413,7 +413,7 @@ async fn test_disk_move_between_instances(cptestctx: &ControlPlaneTestContext) {
     let error: HttpErrorResponseBody = NexusRequest::new(
         RequestBuilder::new(client, Method::POST, &url_instance_attach_disk)
             .body(Some(&params::DiskIdentifier {
-                disk: disk.identity.name.clone(),
+                name: disk.identity.name.clone(),
             }))
             .expect_status(Some(StatusCode::BAD_REQUEST)),
     )
@@ -471,7 +471,7 @@ async fn test_disk_move_between_instances(cptestctx: &ControlPlaneTestContext) {
     let error: HttpErrorResponseBody = NexusRequest::new(
         RequestBuilder::new(client, Method::POST, &url_instance_attach_disk)
             .body(Some(&params::DiskIdentifier {
-                disk: disk.identity.name.clone(),
+                name: disk.identity.name.clone(),
             }))
             .expect_status(Some(StatusCode::BAD_REQUEST)),
     )
@@ -709,7 +709,7 @@ async fn disk_post(
 ) -> Disk {
     NexusRequest::new(
         RequestBuilder::new(client, Method::POST, url)
-            .body(Some(&params::DiskIdentifier { disk: disk_name }))
+            .body(Some(&params::DiskIdentifier { name: disk_name }))
             .expect_status(Some(StatusCode::ACCEPTED)),
     )
     .authn_as(AuthnMode::PrivilegedUser)

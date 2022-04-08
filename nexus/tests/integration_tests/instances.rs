@@ -1137,7 +1137,7 @@ async fn test_attach_one_disk_to_instance(cptestctx: &ControlPlaneTestContext) {
         network_interfaces: params::InstanceNetworkInterfaceAttachment::Default,
         disks: vec![params::InstanceDiskAttachment::Attach(
             params::InstanceDiskAttach {
-                disk: Name::try_from(String::from("probablydata")).unwrap(),
+                name: Name::try_from(String::from("probablydata")).unwrap(),
             },
         )],
     };
@@ -1234,7 +1234,7 @@ async fn test_attach_eight_disks_to_instance(
             .map(|i| {
                 params::InstanceDiskAttachment::Attach(
                     params::InstanceDiskAttach {
-                        disk: Name::try_from(
+                        name: Name::try_from(
                             format!("probablydata{}", i).to_string(),
                         )
                         .unwrap(),
@@ -1339,7 +1339,7 @@ async fn test_cannot_attach_nine_disks_to_instance(
             .map(|i| {
                 params::InstanceDiskAttachment::Attach(
                     params::InstanceDiskAttach {
-                        disk: Name::try_from(
+                        name: Name::try_from(
                             format!("probablydata{}", i).to_string(),
                         )
                         .unwrap(),
@@ -1465,7 +1465,7 @@ async fn test_cannot_attach_faulted_disks(cptestctx: &ControlPlaneTestContext) {
             .map(|i| {
                 params::InstanceDiskAttachment::Attach(
                     params::InstanceDiskAttach {
-                        disk: Name::try_from(
+                        name: Name::try_from(
                             format!("probablydata{}", i).to_string(),
                         )
                         .unwrap(),

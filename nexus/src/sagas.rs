@@ -619,7 +619,7 @@ async fn ensure_instance_disk_attach_state(
         }
         params::InstanceDiskAttachment::Attach(instance_disk_attach) => {
             let disk_name: db::model::Name =
-                instance_disk_attach.disk.clone().into();
+                instance_disk_attach.name.clone().into();
 
             if attached {
                 osagactx

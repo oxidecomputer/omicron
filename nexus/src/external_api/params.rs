@@ -125,7 +125,7 @@ pub enum InstanceDiskAttachment {
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct InstanceDiskAttach {
     /// A disk name to attach
-    pub disk: Name,
+    pub name: Name,
 }
 
 /// Create-time parameters for an [`Instance`](omicron_common::api::external::Instance)
@@ -265,7 +265,7 @@ impl DiskCreate {
 /// attached or detached to an instance
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct DiskIdentifier {
-    pub disk: Name,
+    pub name: Name,
 }
 
 /// Parameters for the
