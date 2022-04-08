@@ -18,7 +18,18 @@ use quote::{format_ident, quote};
 use syn::spanned::Spanned;
 use syn::{Data, DataStruct, DeriveInput, Error, Fields, Ident, Lit, Meta};
 
+mod authz;
 mod lookup;
+
+#[proc_macro]
+pub fn authz_resource(
+    input: proc_macro::TokenStream,
+) -> proc_macro::TokenStream {
+    match authz::authz_resource(input.into()) {
+        Ok(output) => output.into(),
+        Err(error) => error.to_compile_error().into(),
+    }
+}
 
 /// Defines a structure and helper functions for looking up resources
 ///

@@ -148,7 +148,7 @@ impl Resource {
 // MACRO IMPLEMENTATION
 //
 
-/// Implementation of [`lookup_resource!]'.
+/// Implementation of [`lookup_resource!`]
 pub fn lookup_resource(
     raw_input: TokenStream,
 ) -> Result<TokenStream, syn::Error> {
@@ -273,6 +273,7 @@ fn generate_misc_helpers(config: &Config) -> TokenStream {
             db_row: &model::#resource_name,
             lookup_type: LookupType,
         ) -> authz::#resource_name {
+            authz::#resource_name::new(
             authz_parent.#mkauthz_func(
                 #mkauthz_arg
                 db_row.id(),
