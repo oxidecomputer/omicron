@@ -2985,7 +2985,7 @@ impl Nexus {
         rack_id: &Uuid,
     ) -> LookupResult<db::model::Rack> {
         let authz_rack = authz::Rack::new(
-            authz::FLEET.clone(),
+            authz::FLEET,
             *rack_id,
             LookupType::ById(*rack_id),
         );
@@ -3014,7 +3014,7 @@ impl Nexus {
         sled_id: &Uuid,
     ) -> LookupResult<db::model::Sled> {
         let authz_sled = authz::Sled::new(
-            authz::FLEET.clone(),
+            authz::FLEET,
             *sled_id,
             LookupType::ById(*sled_id),
         );

@@ -43,6 +43,10 @@ has_role(_actor: AuthenticatedActor, "user", _resource: Database);
 has_role(actor: AuthenticatedActor, "init", _resource: Database)
 	if actor = USER_DB_INIT;
 
+# Define role relationships
+has_role(actor: AuthenticatedActor, role: String, resource: Resource)
+	if resource.has_role(actor, role);
+
 #
 # Permissions and predefined roles for resources in the
 # Fleet/Organization/Project hierarchy
@@ -139,6 +143,8 @@ resource Organization {
 	relations = { parent_fleet: Fleet };
 	"admin" if "admin" on "parent_fleet";
 }
+has_relation(fleet: Fleet, "parent_fleet", organization: Organization)
+	if organization.fleet = fleet;
 
 resource Project {
 	permissions = [
@@ -169,42 +175,15 @@ resource Project {
 	relations = { parent_organization: Organization };
 	"admin" if "admin" on "parent_organization";
 }
+has_relation(organization: Organization, "parent_organization", project: Project)
+	if project.organization = organization;
 
-# For now, we use one generic resource to represent every kind of thing inside
-# the Project.  That's because they all have the same behavior.
-resource ProjectChild {
-	permissions = [
-		"list_children",
-		"modify",
-		"read",
-		"create_child",
-	];
-
-	relations = { parent_project: Project };
-	"list_children" if "viewer" on "parent_project";
-	"read" if "viewer" on "parent_project";
-
-	"modify" if "collaborator" on "parent_project";
-	"create_child" if "collaborator" on "parent_project";
-}
-
-# Similarly, we use a generic resource to represent every kind of fleet-wide
-# resource that's not part of the Organization/Project hierarchy and not a Sled.
-resource FleetChild {
-	permissions = [
-		"list_children",
-		"modify",
-		"read",
-		"create_child",
-	];
-
-	relations = { parent_fleet: Fleet };
-	"list_children" if "viewer" on "parent_fleet";
-	"read" if "viewer" on "parent_fleet";
-	"modify" if "admin" on "parent_fleet";
-	"create_child" if "admin" on "parent_fleet";
-}
-
+# XXX-dap This is very close to the generated snippet except that we require
+# "admin" on "parent_fleet" here instead of "collaborator".  For things in the
+# normal hierarchy, we require "collaborator".  I don't think we want that here,
+# though.  We might event want a separate role (e.g., "hardware_admin").  What
+# this suggests is that the polar snippet needs to be a little more
+# configurable.
 resource Sled {
 	permissions = [
 		"list_children",
@@ -219,19 +198,5 @@ resource Sled {
 	"modify" if "admin" on "parent_fleet";
 	"create_child" if "admin" on "parent_fleet";
 }
-
-# Define relationships
-has_relation(fleet: Fleet, "parent_fleet", organization: Organization)
-	if organization.fleet = fleet;
-has_relation(organization: Organization, "parent_organization", project: Project)
-	if project.organization = organization;
-has_relation(project: Project, "parent_project", project_child: ProjectChild)
-	if project_child.project = project;
-has_relation(fleet: Fleet, "parent_fleet", fleet_child: FleetChild)
-	if fleet_child.fleet = fleet;
 has_relation(fleet: Fleet, "parent_fleet", sled: Sled)
 	if sled.fleet = fleet;
-
-# Define role relationships
-has_role(actor: AuthenticatedActor, role: String, resource: Resource)
-	if resource.has_role(actor, role);

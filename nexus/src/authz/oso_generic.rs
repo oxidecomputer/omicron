@@ -28,12 +28,12 @@ pub const OMICRON_AUTHZ_CONFIG: &str = include_str!("omicron.polar");
 /// rules
 pub fn make_omicron_oso() -> Result<Oso, anyhow::Error> {
     let mut oso = Oso::new();
-    // TODO-cleanup There is a lot of boilerplate in the definitions of these
-    // structures as they relate to Polar.  For example, most of them impl Eq
-    // and PartialEq, and the corresponding PolarClass should have an equality
-    // impl as well.  The resources all have a "has_role" Polar method that all
-    // do the same thing.  It'd be nice to find a way to commonize these.  A
-    // macro might help.
+    // XXX-dap
+    // - it's annoying that we have to list all of the structs here
+    // - it's even worse that we have to include Polar snippets for _some_
+    //   objects here
+    // - we probably want at least some minimal test suite of the policy to make
+    //   sure this update does what we think it does
     let classes = [
         Action::get_polar_class(),
         AnyActor::get_polar_class(),
@@ -42,6 +42,7 @@ pub fn make_omicron_oso() -> Result<Oso, anyhow::Error> {
         Fleet::get_polar_class(),
         Organization::get_polar_class(),
         Project::get_polar_class(),
+        Rack::get_polar_class(),
         Sled::get_polar_class(),
         Instance::get_polar_class(),
         NetworkInterface::get_polar_class(),
@@ -50,12 +51,28 @@ pub fn make_omicron_oso() -> Result<Oso, anyhow::Error> {
         VpcSubnet::get_polar_class(),
         VpcRouter::get_polar_class(),
         RouterRoute::get_polar_class(),
+        Role::get_polar_class(),
+        User::get_polar_class(),
     ];
     for c in classes {
         oso.register_class(c).context("registering class")?;
     }
-    oso.load_str(OMICRON_AUTHZ_CONFIG)
-        .context("loading built-in Polar (Oso) config")?;
+    let mut s = String::from(OMICRON_AUTHZ_CONFIG);
+    for c in [
+        INSTANCE_POLAR,
+        NETWORK_INTERFACE_POLAR,
+        DISK_POLAR,
+        VPC_POLAR,
+        VPC_SUBNET_POLAR,
+        VPC_ROUTER_POLAR,
+        ROUTER_ROUTE_POLAR,
+        RACK_POLAR,
+        ROLE_POLAR,
+        USER_POLAR,
+    ] {
+        s.push_str(c);
+    }
+    oso.load_str(&s).context("loading Polar (Oso) config")?;
     Ok(oso)
 }
 
