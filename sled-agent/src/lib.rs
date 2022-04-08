@@ -27,6 +27,7 @@ mod instance;
 mod instance_manager;
 mod nexus;
 mod params;
+pub mod rack_setup;
 pub mod server;
 mod services;
 mod sled_agent;
@@ -38,6 +39,3 @@ mod mocks;
 
 #[macro_use]
 extern crate slog;
-
-/// Location on internal storage where sled-specific information is stored.
-pub(crate) const OMICRON_CONFIG_PATH: &'static str = "/var/tmp/oxide";

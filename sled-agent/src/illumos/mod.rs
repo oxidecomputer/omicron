@@ -4,6 +4,8 @@
 
 //! Wrappers around illumos-specific commands.
 
+use cfg_if::cfg_if;
+
 pub mod addrobj;
 pub mod dladm;
 pub mod running_zone;
@@ -26,20 +28,35 @@ pub enum ExecutionError {
     CommandFailure { status: std::process::ExitStatus, stderr: String },
 }
 
-// Helper function for starting the process and checking the
-// exit code result.
-fn execute(
-    command: &mut std::process::Command,
-) -> Result<std::process::Output, ExecutionError> {
-    let output =
-        command.output().map_err(|e| ExecutionError::ExecutionStart(e))?;
+// We wrap this method in an inner module to make it possible to mock
+// these free functions.
+#[cfg_attr(test, mockall::automock, allow(dead_code))]
+mod inner {
+    use super::*;
 
-    if !output.status.success() {
-        return Err(ExecutionError::CommandFailure {
-            status: output.status,
-            stderr: String::from_utf8_lossy(&output.stderr).to_string(),
-        });
+    // Helper function for starting the process and checking the
+    // exit code result.
+    pub fn execute(
+        command: &mut std::process::Command,
+    ) -> Result<std::process::Output, ExecutionError> {
+        let output =
+            command.output().map_err(|e| ExecutionError::ExecutionStart(e))?;
+
+        if !output.status.success() {
+            return Err(ExecutionError::CommandFailure {
+                status: output.status,
+                stderr: String::from_utf8_lossy(&output.stderr).to_string(),
+            });
+        }
+
+        Ok(output)
     }
+}
 
-    Ok(output)
+cfg_if! {
+    if #[cfg(test)] {
+        pub use mock_inner::*;
+    } else {
+        pub use inner::*;
+    }
 }

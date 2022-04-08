@@ -35,7 +35,7 @@ You can **run the https://github.com/rust-lang/rust-clippy[Clippy linter]** usin
 
 === Installing Prerequisite Software
 
-The following software may be installed automatically with the following scripts:
+The following software may be installed automatically with the following script:
 
 ----
 $ ./tools/install_prerequisites.sh
@@ -415,7 +415,7 @@ unique local addresses in `fd00:1de::/16`:
 |===================================================================================================
 | Service                    | Endpoint                                                             
 | Sled Agent: Bootstrap      | `[::]:12346`                                                         
-| Sled Agent: Dropshot API   | `[fd00:1de::]:12345`                                                 
+| Sled Agent: Dropshot API   | `[fd00:1de::1]:12345`                                                 
 | Cockroach DB               | `[fd00:1de::5]:32221`                                                
 | Oximeter                   | `[fd00:1de::6]:12223`                                                
 | Nexus: External API        | `[fd00:1de::7]:12220`                                                
