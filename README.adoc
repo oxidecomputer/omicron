@@ -70,13 +70,13 @@ example, on Helios, you'd want `/usr/bin` on your PATH.
 . CockroachDB v21.1.10.
 +
 The build and test suite expects to be able to start a single-node CockroachDB cluster using the `cockroach` executable on your PATH.
-On illumos, MacOS, and Linux, you should be able to use the `tools/ci_download_cockroachdb` script to fetch the official CockroachDB binary.  It will be put into `./cockroachdb/bin/cockroach`.
+On illumos, MacOS, and Linux, you should be able to use the `tools/ci_download_cockroachdb` script to fetch the official CockroachDB binary.  It will be put into `./out/cockroachdb/bin/cockroach`.
 Alternatively, you can follow the https://www.cockroachlabs.com/docs/stable/install-cockroachdb.html[official CockroachDB installation instructions for your platform].
 
 . ClickHouse >= v21.7.1.
 +
 The test suite expects a running instance of the ClickHouse database server.
-The script `./tools/ci_download_clickhouse` can be used to download a pre-built binary for illumos, Linux, or macOS platforms. Once complete, you must manually add the binary (located at `clickhouse/clickhouse`) to your PATH.
+The script `./tools/ci_download_clickhouse` can be used to download a pre-built binary for illumos, Linux, or macOS platforms. Once complete, you must manually add the binary (located at `./out/clickhouse/clickhouse`) to your PATH.
 You may also install ClickHouse manually; instructions can be found https://clickhouse.tech/docs/en/getting-started/install[here].
 See <<_configuring_clickhouse>> for details on ClickHouse's setup and configuration files.
 +

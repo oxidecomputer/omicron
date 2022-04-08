@@ -36,7 +36,7 @@ to = "/var/svc/manifest/site/oximeter"
 service_name = "clickhouse"
 zone = true
 [[package.clickhouse.paths]]
-from = "clickhouse"
+from = "out/clickhouse"
 to = "/opt/oxide/clickhouse"
 [[package.clickhouse.paths]]
 from = "smf/clickhouse"
@@ -46,7 +46,7 @@ to = "/var/svc/manifest/site/clickhouse"
 service_name = "cockroachdb"
 zone = true
 [[package.cockroachdb.paths]]
-from = "cockroachdb"
+from = "out/cockroachdb"
 to = "/opt/oxide/cockroachdb"
 [[package.cockroachdb.paths]]
 from = "common/src/sql"

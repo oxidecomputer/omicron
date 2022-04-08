@@ -13,10 +13,15 @@ set -o errexit
 SOURCE_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
 ARG0="$(basename ${BASH_SOURCE[0]})"
 
+TARGET_DIR="out"
+# Location where intermediate artifacts are downloaded / unpacked.
+DOWNLOAD_DIR="$TARGET_DIR/downloads"
+# Location where the final clickhouse directory should end up.
+DEST_DIR="./$TARGET_DIR/clickhouse"
+
 # If you change this, you must also update the md5sums below
 CIDL_VERSION="v21.7"
 source "$SOURCE_DIR/clickhouse_checksums"
-CIDL_ASSEMBLE_DIR="./clickhouse"
 
 # Download from manually-populated S3 bucket for now
 CIDL_URL_BASE="https://oxide-clickhouse-build.s3.us-west-2.amazonaws.com"
@@ -24,7 +29,7 @@ CIDL_URL_BASE="https://oxide-clickhouse-build.s3.us-west-2.amazonaws.com"
 function main
 {
 	#
-	# Process command-line arguments.  We generally don't expect any, but
+	# Process command-line arguments. We generally don't expect any, but
 	# we allow callers to specify a value to override OSTYPE, just for
 	# testing.
 	#
@@ -42,27 +47,44 @@ function main
 
 	# Configure this program
 	configure_os "$CIDL_OS"
-	CIDL_URL="$CIDL_URL_BASE/$CIDL_FILE"
+	CIDL_URL="$CIDL_URL_BASE/$TARBALL_FILENAME"
 
 	# Download the file.
 	echo "URL: $CIDL_URL"
-	echo "Local file: $CIDL_FILE"
-	do_download_curl "$CIDL_URL" "$CIDL_FILE" || \
-	    fail "failed to download file"
+	echo "Local file: $TARBALL_FILE"
 
-	# Verify the md5sum.
-	calculated_md5="$($CIDL_MD5FUNC "$CIDL_FILE")" || \
-	    fail "failed to calculate md5sum"
-	if [[ "$calculated_md5" != "$CIDL_MD5" ]]; then
-		fail "md5sum mismatch \
-		    (expected $CIDL_MD5, found $calculated_md5)"
+	mkdir -p "$DOWNLOAD_DIR"
+	mkdir -p "$DEST_DIR"
+
+	local DO_DOWNLOAD="true"
+	if [[ -f "$TARBALL_FILE" ]]; then
+		# If the file exists with a valid checksum, we can skip downloading.
+		calculated_md5="$($CIDL_MD5FUNC "$TARBALL_FILE")" || \
+				fail "failed to calculate md5sum"
+		if [[ "$calculated_md5" == "$CIDL_MD5" ]]; then
+			DO_DOWNLOAD="false"
+		fi
+	fi
+
+	if [ "$DO_DOWNLOAD" == "true" ]; then
+		echo "Downloading..."
+		do_download_curl "$CIDL_URL" "$TARBALL_FILE" || \
+				fail "failed to download file"
+
+		# Verify the md5sum.
+		calculated_md5="$($CIDL_MD5FUNC "$TARBALL_FILE")" || \
+				fail "failed to calculate md5sum"
+		if [[ "$calculated_md5" != "$CIDL_MD5" ]]; then
+			fail "md5sum mismatch \
+					(expected $CIDL_MD5, found $calculated_md5)"
+		fi
 	fi
 
 	# Unpack the tarball into a local directory
-	do_untar "$CIDL_FILE" "$CIDL_ASSEMBLE_DIR"
+	do_untar "$TARBALL_FILE" "$DEST_DIR"
 
 	# Run the binary as a sanity-check.
-	"$CIDL_ASSEMBLE_DIR/clickhouse" server --version
+	"$DEST_DIR/clickhouse" server --version
 }
 
 function fail
@@ -77,17 +99,17 @@ function configure_os
 	echo "configuring based on OS: \"$1\""
 	case "$1" in
 		darwin*)
-            CIDL_PLATFORM="macos"
+			CIDL_PLATFORM="macos"
 			CIDL_MD5="$CIDL_MD5_DARWIN"
 			CIDL_MD5FUNC="do_md5"
 			;;
-		linux-gnu*) 
-            CIDL_PLATFORM="linux"
+		linux-gnu*)
+			CIDL_PLATFORM="linux"
 			CIDL_MD5="$CIDL_MD5_LINUX"
 			CIDL_MD5FUNC="do_md5sum"
 			;;
 		solaris*)
-            CIDL_PLATFORM="illumos"
+			CIDL_PLATFORM="illumos"
 			CIDL_MD5="$CIDL_MD5_ILLUMOS"
 			CIDL_MD5FUNC="do_md5sum"
 			;;
@@ -96,8 +118,11 @@ function configure_os
 			;;
 	esac
 
-	CIDL_DIR="clickhouse-$CIDL_VERSION"
-	CIDL_FILE="$CIDL_DIR.$CIDL_PLATFORM.tar.gz"
+	TARBALL_DIRNAME="clickhouse-$CIDL_VERSION"
+	TARBALL_FILENAME="$TARBALL_DIRNAME.$CIDL_PLATFORM.tar.gz"
+
+	TARBALL_FILE="$DOWNLOAD_DIR/$TARBALL_FILENAME"
+	TARBALL_DIR="$DOWNLOAD_DIR/$TARBALL_DIRNAME"
 }
 
 function do_download_curl
@@ -117,7 +142,7 @@ function do_md5sum
 
 function do_untar
 {
-    mkdir -p "$2" && tar xzf "$1" -C "$2"
+	mkdir -p "$2" && tar xzf "$1" -C "$2"
 }
 
 main "$@"

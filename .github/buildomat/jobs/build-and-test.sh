@@ -24,7 +24,7 @@ ptime -m bash ./tools/ci_download_cockroachdb
 # Put "./cockroachdb/bin" and "./clickhouse" on the PATH for the test
 # suite.
 #
-export PATH="$PATH:$PWD/cockroachdb/bin:$PWD/clickhouse"
+export PATH="$PATH:$PWD/out/cockroachdb/bin:$PWD/out/clickhouse"
 
 #
 # We build with:
