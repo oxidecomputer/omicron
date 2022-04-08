@@ -595,7 +595,7 @@ lazy_static! {
             allowed_methods: vec![
                 AllowedMethod::Post(
                     serde_json::to_value(params::DiskIdentifier {
-                        disk: DEMO_DISK_NAME.clone()
+                        name: DEMO_DISK_NAME.clone()
                     }).unwrap()
                 )
             ],
@@ -606,7 +606,7 @@ lazy_static! {
             allowed_methods: vec![
                 AllowedMethod::Post(
                     serde_json::to_value(params::DiskIdentifier {
-                        disk: DEMO_DISK_NAME.clone()
+                        name: DEMO_DISK_NAME.clone()
                     }).unwrap()
                 )
             ],

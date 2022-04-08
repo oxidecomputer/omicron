@@ -4867,12 +4867,12 @@
         "description": "Parameters for the [`Disk`](omicron_common::api::external::Disk) to be attached or detached to an instance",
         "type": "object",
         "properties": {
-          "disk": {
+          "name": {
             "$ref": "#/components/schemas/Name"
           }
         },
         "required": [
-          "disk"
+          "name"
         ]
       },
       "DiskResultsPage": {
@@ -5380,7 +5380,7 @@
             "description": "During instance creation, attach this disk",
             "type": "object",
             "properties": {
-              "disk": {
+              "name": {
                 "description": "A disk name to attach",
                 "allOf": [
                   {
@@ -5396,7 +5396,7 @@
               }
             },
             "required": [
-              "disk",
+              "name",
               "type"
             ]
           }

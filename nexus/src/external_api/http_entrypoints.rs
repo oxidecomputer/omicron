@@ -1140,7 +1140,7 @@ async fn instance_disks_attach(
                 &organization_name,
                 &project_name,
                 &instance_name,
-                &disk_to_attach.into_inner().disk.into(),
+                &disk_to_attach.into_inner().name.into(),
             )
             .await?;
         Ok(HttpResponseAccepted(disk.into()))
@@ -1172,7 +1172,7 @@ async fn instance_disks_detach(
                 &organization_name,
                 &project_name,
                 &instance_name,
-                &disk_to_detach.into_inner().disk.into(),
+                &disk_to_detach.into_inner().name.into(),
             )
             .await?;
         Ok(HttpResponseAccepted(disk.into()))
