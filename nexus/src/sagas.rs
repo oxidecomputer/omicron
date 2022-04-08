@@ -44,6 +44,7 @@ use slog::warn;
 use slog::Logger;
 use std::collections::BTreeMap;
 use std::convert::{TryFrom, TryInto};
+use std::net::Ipv6Addr;
 use std::sync::Arc;
 use steno::new_action_noop_undo;
 use steno::ActionContext;
@@ -110,6 +111,26 @@ async fn saga_generate_uuid<UserType: SagaType>(
     Ok(Uuid::new_v4())
 }
 
+/// A trait for sagas with serialized authentication information.
+///
+/// This allows sharing code in different sagas which rely on some
+/// authentication information, for example when doing database lookups.
+trait AuthenticatedSagaParams {
+    fn serialized_authn(&self) -> &authn::saga::Serialized;
+}
+
+/// A helper macro which implements the `AuthenticatedSagaParams` trait for saga
+/// parameter types which have a field called `serialized_authn`.
+macro_rules! impl_authenticated_saga_params {
+    ($typ:ty) => {
+        impl AuthenticatedSagaParams for <$typ as SagaType>::SagaParamsType {
+            fn serialized_authn(&self) -> &authn::saga::Serialized {
+                &self.serialized_authn
+            }
+        }
+    };
+}
+
 // "Create Instance" saga template
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -127,6 +148,7 @@ impl SagaType for SagaInstanceCreate {
     type SagaParamsType = Arc<ParamsInstanceCreate>;
     type ExecContextType = Arc<SagaContext>;
 }
+impl_authenticated_saga_params!(SagaInstanceCreate);
 
 pub fn saga_instance_create() -> SagaTemplate<SagaInstanceCreate> {
     let mut template_builder = SagaTemplateBuilder::new();
@@ -150,6 +172,12 @@ pub fn saga_instance_create() -> SagaTemplate<SagaInstanceCreate> {
         // keep track of resources and reservations, etc.  See the comment on
         // SagaContext::alloc_server()
         new_action_noop_undo(sic_alloc_server),
+    );
+
+    template_builder.append(
+        "propolis_ip",
+        "AllocatePropolisIp",
+        new_action_noop_undo(sic_allocate_propolis_ip),
     );
 
     template_builder.append(
@@ -619,7 +647,7 @@ async fn ensure_instance_disk_attach_state(
         }
         params::InstanceDiskAttachment::Attach(instance_disk_attach) => {
             let disk_name: db::model::Name =
-                instance_disk_attach.disk.clone().into();
+                instance_disk_attach.name.clone().into();
 
             if attached {
                 osagactx
@@ -651,21 +679,56 @@ async fn ensure_instance_disk_attach_state(
     Ok(())
 }
 
+/// Helper function to allocate a new IPv6 address for an Oxide service running
+/// on the provided sled.
+///
+/// `sled_id_name` is the name of the serialized output containing the UUID for
+/// the targeted sled.
+async fn allocate_sled_ipv6<T>(
+    sagactx: ActionContext<T>,
+    sled_id_name: &str,
+) -> Result<Ipv6Addr, ActionError>
+where
+    T: SagaType<ExecContextType = Arc<SagaContext>>,
+    T::SagaParamsType: AuthenticatedSagaParams,
+{
+    let osagactx = sagactx.user_data();
+    let params = sagactx.saga_params();
+    let opctx = OpContext::for_saga_action(&sagactx, params.serialized_authn());
+    let sled_uuid = sagactx.lookup::<Uuid>(sled_id_name)?;
+    osagactx
+        .datastore()
+        .next_ipv6_address(&opctx, sled_uuid)
+        .await
+        .map_err(ActionError::action_failed)
+}
+
+// Allocate an IP address on the destination sled for the Propolis server
+async fn sic_allocate_propolis_ip(
+    sagactx: ActionContext<SagaInstanceCreate>,
+) -> Result<Ipv6Addr, ActionError> {
+    allocate_sled_ipv6(sagactx, "server_id").await
+}
+
 async fn sic_create_instance_record(
     sagactx: ActionContext<SagaInstanceCreate>,
 ) -> Result<db::model::Name, ActionError> {
     let osagactx = sagactx.user_data();
     let params = sagactx.saga_params();
-    let sled_uuid = sagactx.lookup::<Uuid>("server_id");
-    let instance_id = sagactx.lookup::<Uuid>("instance_id");
-    let propolis_uuid = sagactx.lookup::<Uuid>("propolis_id");
+    let sled_uuid = sagactx.lookup::<Uuid>("server_id")?;
+    let instance_id = sagactx.lookup::<Uuid>("instance_id")?;
+    let propolis_uuid = sagactx.lookup::<Uuid>("propolis_id")?;
+    let propolis_addr = sagactx.lookup::<Ipv6Addr>("propolis_ip")?;
 
     let runtime = InstanceRuntimeState {
         run_state: InstanceState::Creating,
-        sled_uuid: sled_uuid?,
-        propolis_uuid: propolis_uuid?,
+        sled_uuid,
+        propolis_uuid,
         dst_propolis_uuid: None,
-        propolis_addr: None,
+        propolis_addr: Some(std::net::SocketAddr::new(
+            propolis_addr.into(),
+            12400,
+        )),
         migration_uuid: None,
         hostname: params.create_params.hostname.clone(),
         memory: params.create_params.memory,
@@ -675,7 +738,7 @@ async fn sic_create_instance_record(
     };
 
     let new_instance = db::model::Instance::new(
-        instance_id?,
+        instance_id,
         params.project_id,
         &params.create_params,
         runtime.into(),
@@ -792,6 +855,7 @@ impl SagaType for SagaInstanceMigrate {
     type SagaParamsType = Arc<ParamsInstanceMigrate>;
     type ExecContextType = Arc<SagaContext>;
 }
+impl_authenticated_saga_params!(SagaInstanceMigrate);
 
 pub fn saga_instance_migrate() -> SagaTemplate<SagaInstanceMigrate> {
     let mut template_builder = SagaTemplateBuilder::new();
@@ -806,6 +870,12 @@ pub fn saga_instance_migrate() -> SagaTemplate<SagaInstanceMigrate> {
         "dst_propolis_id",
         "GeneratePropolisId",
         new_action_noop_undo(saga_generate_uuid),
+    );
+
+    template_builder.append(
+        "dst_propolis_ip",
+        "AllocatePropolisIp",
+        new_action_noop_undo(sim_allocate_propolis_ip),
     );
 
     template_builder.append(
@@ -861,11 +931,19 @@ async fn sim_migrate_prep(
     Ok((instance_id, instance.runtime_state.into()))
 }
 
+// Allocate an IP address on the destination sled for the Propolis server.
+async fn sim_allocate_propolis_ip(
+    sagactx: ActionContext<SagaInstanceMigrate>,
+) -> Result<Ipv6Addr, ActionError> {
+    allocate_sled_ipv6(sagactx, "dst_sled_uuid").await
+}
+
 async fn sim_instance_migrate(
     sagactx: ActionContext<SagaInstanceMigrate>,
 ) -> Result<(), ActionError> {
     let osagactx = sagactx.user_data();
     let params = sagactx.saga_params();
+    let opctx = OpContext::for_saga_action(&sagactx, &params.serialized_authn);
 
     let migration_id = sagactx.lookup::<Uuid>("migrate_id")?;
     let dst_sled_uuid = params.migrate_params.dst_sled_uuid;
@@ -873,10 +951,20 @@ async fn sim_instance_migrate(
     let (instance_id, old_runtime) =
         sagactx.lookup::<(Uuid, InstanceRuntimeState)>("migrate_instance")?;
 
+    // Allocate an IP address the destination sled for the new Propolis server.
+    let propolis_addr = osagactx
+        .datastore()
+        .next_ipv6_address(&opctx, dst_sled_uuid)
+        .await
+        .map_err(ActionError::action_failed)?;
+
     let runtime = InstanceRuntimeState {
         sled_uuid: dst_sled_uuid,
         propolis_uuid: dst_propolis_uuid,
-        propolis_addr: None,
+        propolis_addr: Some(std::net::SocketAddr::new(
+            propolis_addr.into(),
+            12400,
+        )),
         ..old_runtime
     };
     let instance_hardware = InstanceHardware {
@@ -1019,18 +1107,24 @@ async fn sdc_create_disk_record(
     // but this should be acceptable because the disk remains in a "Creating"
     // state until the saga has completed.
     let volume_id = sagactx.lookup::<Uuid>("volume_id")?;
+
     let disk = db::model::Disk::new(
         disk_id,
         params.project_id,
         volume_id,
         params.create_params.clone(),
         db::model::DiskRuntimeState::new(),
-    );
+    )
+    .map_err(|e| {
+        ActionError::action_failed(Error::invalid_request(&e.to_string()))
+    })?;
+
     let disk_created = osagactx
         .datastore()
         .project_create_disk(disk)
         .await
         .map_err(ActionError::action_failed)?;
+
     Ok(disk_created)
 }
 

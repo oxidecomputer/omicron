@@ -4749,6 +4749,15 @@
       }
     },
     "schemas": {
+      "BlockSize": {
+        "title": "disk block size in bytes",
+        "type": "integer",
+        "enum": [
+          512,
+          2048,
+          4096
+        ]
+      },
       "ByteCount": {
         "description": "A count of bytes, typically used either for memory or storage capacity\n\nThe maximum supported byte count is [`i64::MAX`].  This makes it somewhat inconvenient to define constructors: a u32 constructor can be infallible, but an i64 constructor can fail (if the value is negative) and a u64 constructor can fail (if the value is larger than i64::MAX).  We provide all of these for consumers' convenience.",
         "type": "integer",
@@ -4774,6 +4783,9 @@
         "description": "Client view of an [`Disk`]",
         "type": "object",
         "properties": {
+          "block_size": {
+            "$ref": "#/components/schemas/ByteCount"
+          },
           "description": {
             "description": "human-readable free-form text about a resource",
             "type": "string"
@@ -4783,6 +4795,11 @@
           },
           "id": {
             "description": "unique, immutable, system-controlled identifier for each resource",
+            "type": "string",
+            "format": "uuid"
+          },
+          "image_id": {
+            "nullable": true,
             "type": "string",
             "format": "uuid"
           },
@@ -4821,6 +4838,7 @@
           }
         },
         "required": [
+          "block_size",
           "description",
           "device_path",
           "id",
@@ -4836,14 +4854,28 @@
         "description": "Create-time parameters for a [`Disk`](omicron_common::api::external::Disk)",
         "type": "object",
         "properties": {
+          "block_size": {
+            "description": "size of blocks for this Disk. valid values are: 512, 2048, or 4096",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/BlockSize"
+              }
+            ]
+          },
           "description": {
             "type": "string"
+          },
+          "image_id": {
+            "nullable": true,
+            "description": "id for image from which the Disk should be created, if any",
+            "type": "string",
+            "format": "uuid"
           },
           "name": {
             "$ref": "#/components/schemas/Name"
           },
           "size": {
-            "description": "size of the Disk",
+            "description": "total size of the Disk in bytes",
             "allOf": [
               {
                 "$ref": "#/components/schemas/ByteCount"
@@ -4858,6 +4890,7 @@
           }
         },
         "required": [
+          "block_size",
           "description",
           "name",
           "size"
@@ -4867,12 +4900,12 @@
         "description": "Parameters for the [`Disk`](omicron_common::api::external::Disk) to be attached or detached to an instance",
         "type": "object",
         "properties": {
-          "disk": {
+          "name": {
             "$ref": "#/components/schemas/Name"
           }
         },
         "required": [
-          "disk"
+          "name"
         ]
       },
       "DiskResultsPage": {
@@ -5342,14 +5375,28 @@
             "description": "During instance creation, create and attach disks",
             "type": "object",
             "properties": {
+              "block_size": {
+                "description": "size of blocks for this Disk. valid values are: 512, 2048, or 4096",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/BlockSize"
+                  }
+                ]
+              },
               "description": {
                 "type": "string"
+              },
+              "image_id": {
+                "nullable": true,
+                "description": "id for image from which the Disk should be created, if any",
+                "type": "string",
+                "format": "uuid"
               },
               "name": {
                 "$ref": "#/components/schemas/Name"
               },
               "size": {
-                "description": "size of the Disk",
+                "description": "total size of the Disk in bytes",
                 "allOf": [
                   {
                     "$ref": "#/components/schemas/ByteCount"
@@ -5370,6 +5417,7 @@
               }
             },
             "required": [
+              "block_size",
               "description",
               "name",
               "size",
@@ -5380,7 +5428,7 @@
             "description": "During instance creation, attach this disk",
             "type": "object",
             "properties": {
-              "disk": {
+              "name": {
                 "description": "A disk name to attach",
                 "allOf": [
                   {
@@ -5396,7 +5444,7 @@
               }
             },
             "required": [
-              "disk",
+              "name",
               "type"
             ]
           }

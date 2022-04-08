@@ -64,8 +64,12 @@ CREATE TABLE omicron.public.sled (
     time_deleted TIMESTAMPTZ,
     rcgen INT NOT NULL,
 
+    /* The IP address and bound port of the sled agent server. */
     ip INET NOT NULL,
-    port INT4 NOT NULL
+    port INT4 NOT NULL,
+
+    /* The last address allocated to an Oxide service on this sled. */
+    last_used_address INET NOT NULL
 );
 
 /*
@@ -365,6 +369,12 @@ CREATE UNIQUE INDEX ON omicron.public.instance (
 --     'faulted'
 -- );
 
+CREATE TYPE omicron.public.block_size AS ENUM (
+  '512',
+  '2048',
+  '4096'
+);
+
 CREATE TABLE omicron.public.disk (
     /* Identity metadata (resource) */
     id UUID PRIMARY KEY,
@@ -400,7 +410,9 @@ CREATE TABLE omicron.public.disk (
 
     /* Disk configuration */
     size_bytes INT NOT NULL,
-    origin_snapshot UUID
+    block_size omicron.public.block_size NOT NULL,
+    origin_snapshot UUID,
+    origin_image UUID
 );
 
 CREATE UNIQUE INDEX ON omicron.public.disk (

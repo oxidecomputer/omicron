@@ -120,9 +120,9 @@ macro_rules! impl_enum_type {
 
         $(#[$model_meta:meta])*
         pub enum $model_type:ident;
+
         $($enum_item:ident => $sql_value:literal)+
     ) => {
-
         $(#[$enum_meta])*
         pub struct $diesel_type;
 
@@ -631,16 +631,50 @@ pub struct Sled {
     pub ip: ipnetwork::IpNetwork,
     // TODO: Make use of SqlU16
     pub port: i32,
+
+    /// The last IP address provided to an Oxide service on this sled
+    pub last_used_address: IpNetwork,
 }
 
+// TODO-correctness: We need a small offset here, while services and
+// their addresses are still hardcoded in the mock RSS config file at
+// `./smf/sled-agent/config-rss.toml`. This avoids conflicts with those
+// addresses, but should be removed when they are entirely under the
+// control of Nexus or RSS.
+//
+// See https://github.com/oxidecomputer/omicron/issues/732 for tracking issue.
+pub(crate) const STATIC_IPV6_ADDRESS_OFFSET: u16 = 20;
 impl Sled {
+    // TODO-cleanup: We should be using IPv6 only for Oxide services, including
+    // `std::net::Ipv6Addr` and `SocketAddrV6`. The v4/v6 enums should only be
+    // used for managing customer addressing information, or when needed to
+    // interact with the database.
     pub fn new(id: Uuid, addr: SocketAddr) -> Self {
+        let last_used_address = {
+            match addr.ip() {
+                IpAddr::V6(ip) => {
+                    let mut segments = ip.segments();
+                    segments[7] += STATIC_IPV6_ADDRESS_OFFSET;
+                    ipnetwork::IpNetwork::from(IpAddr::from(Ipv6Addr::from(
+                        segments,
+                    )))
+                }
+                IpAddr::V4(ip) => {
+                    // TODO-correctness: This match arm should disappear when we
+                    // support only IPv6 for underlay addressing.
+                    let x = u32::from_be_bytes(ip.octets())
+                        + u32::from(STATIC_IPV6_ADDRESS_OFFSET);
+                    ipnetwork::IpNetwork::from(IpAddr::from(Ipv4Addr::from(x)))
+                }
+            }
+        };
         Self {
             identity: SledIdentity::new(id),
             time_deleted: None,
             rcgen: Generation::new(),
             ip: addr.ip().into(),
             port: addr.port().into(),
+            last_used_address,
         }
     }
 
@@ -1143,10 +1177,10 @@ pub struct InstanceRuntimeState {
     pub sled_uuid: Uuid,
     #[column_name = "active_propolis_id"]
     pub propolis_uuid: Uuid,
-    #[column_name = "target_propolis_id"]
-    pub dst_propolis_uuid: Option<Uuid>,
     #[column_name = "active_propolis_ip"]
     pub propolis_ip: Option<ipnetwork::IpNetwork>,
+    #[column_name = "target_propolis_id"]
+    pub dst_propolis_uuid: Option<Uuid>,
     #[column_name = "migration_id"]
     pub migration_uuid: Option<Uuid>,
     #[column_name = "ncpus"]
@@ -1281,6 +1315,49 @@ impl From<InstanceState> for sled_agent_client::types::InstanceState {
     }
 }
 
+impl_enum_type!(
+    #[derive(SqlType, Debug, QueryId)]
+    #[postgres(type_name = "block_size", type_schema = "public")]
+    pub struct BlockSizeEnum;
+
+    #[derive(Copy, Clone, Debug, AsExpression, FromSqlRow, Serialize, Deserialize, PartialEq)]
+    #[sql_type = "BlockSizeEnum"]
+    pub enum BlockSize;
+
+    // Enum values
+    Traditional => b"512"
+    Iso => b"2048"
+    AdvancedFormat => b"4096"
+);
+
+impl BlockSize {
+    pub fn to_bytes(&self) -> u32 {
+        match self {
+            BlockSize::Traditional => 512,
+            BlockSize::Iso => 2048,
+            BlockSize::AdvancedFormat => 4096,
+        }
+    }
+}
+
+impl Into<external::ByteCount> for BlockSize {
+    fn into(self) -> external::ByteCount {
+        external::ByteCount::from(self.to_bytes())
+    }
+}
+
+impl TryFrom<params::BlockSize> for BlockSize {
+    type Error = anyhow::Error;
+    fn try_from(block_size: params::BlockSize) -> Result<Self, Self::Error> {
+        match block_size.0 {
+            512 => Ok(BlockSize::Traditional),
+            2048 => Ok(BlockSize::Iso),
+            4096 => Ok(BlockSize::AdvancedFormat),
+            _ => anyhow::bail!("invalid block size {}", block_size.0),
+        }
+    }
+}
+
 /// A Disk (network block device).
 #[derive(
     Queryable,
@@ -1313,10 +1390,19 @@ pub struct Disk {
     /// size of the Disk
     #[column_name = "size_bytes"]
     pub size: ByteCount,
+
+    /// size of blocks (512, 2048, or 4096)
+    pub block_size: BlockSize,
+
     /// id for the snapshot from which this Disk was created (None means a blank
     /// disk)
     #[column_name = "origin_snapshot"]
     pub create_snapshot_id: Option<Uuid>,
+
+    /// id for the image from which this Disk was created (None means a blank
+    /// disk)
+    #[column_name = "origin_image"]
+    pub create_image_id: Option<Uuid>,
 }
 
 impl Disk {
@@ -1326,17 +1412,19 @@ impl Disk {
         volume_id: Uuid,
         params: params::DiskCreate,
         runtime_initial: DiskRuntimeState,
-    ) -> Self {
+    ) -> Result<Self, anyhow::Error> {
         let identity = DiskIdentity::new(disk_id, params.identity);
-        Self {
+        Ok(Self {
             identity,
             rcgen: external::Generation::new().into(),
             project_id,
             volume_id,
             runtime_state: runtime_initial,
             size: params.size.into(),
+            block_size: params.block_size.try_into()?,
             create_snapshot_id: params.snapshot_id,
-        }
+            create_image_id: params.image_id,
+        })
     }
 
     pub fn state(&self) -> DiskState {
@@ -1360,7 +1448,9 @@ impl Into<external::Disk> for Disk {
             identity: self.identity(),
             project_id: self.project_id,
             snapshot_id: self.create_snapshot_id,
+            image_id: self.create_image_id,
             size: self.size.into(),
+            block_size: self.block_size.into(),
             state: self.state().into(),
             device_path,
         }

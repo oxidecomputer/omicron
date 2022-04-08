@@ -75,6 +75,9 @@ pub enum Error {
 
 /// Describes the type of addresses which may be requested from a zone.
 #[derive(Copy, Clone, Debug)]
+// TODO-cleanup: Remove, along with moving to IPv6 addressing everywhere.
+// See https://github.com/oxidecomputer/omicron/issues/889.
+#[allow(dead_code)]
 pub enum AddressRequest {
     Dhcp,
     Static(IpNetwork),

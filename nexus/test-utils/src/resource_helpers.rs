@@ -133,7 +133,9 @@ pub async fn create_disk(
                 description: String::from("sells rainsticks"),
             },
             snapshot_id: None,
+            image_id: None,
             size: ByteCount::from_gibibytes_u32(1),
+            block_size: params::BlockSize::try_from(512).unwrap(),
         },
     )
     .await
