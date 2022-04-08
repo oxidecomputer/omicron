@@ -395,7 +395,8 @@ fn uninstall_all_packages(config: &Config) {
 
     // Once all packages have been removed, also remove any locally-stored
     // configuration.
-    std::fs::remove_dir_all(omicron_common::OMICRON_CONFIG_PATH).unwrap();
+    remove_all_unless_already_removed(omicron_common::OMICRON_CONFIG_PATH)
+        .unwrap();
 }
 
 fn remove_all_unless_already_removed<P: AsRef<Path>>(path: P) -> Result<()> {
