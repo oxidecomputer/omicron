@@ -482,8 +482,20 @@ fn record_operation(whichtest: WhichTest<'_>) {
     // codes.
     let t = term::stdout();
     if let Some(mut term) = t {
+        // We just want to write one green character to stdout.  But we also
+        // want it to be captured by the test runner like people usually expect
+        // when they haven't passed "--nocapture".  The test runner only
+        // captures output from the `print!` family of macros, not all writes to
+        // stdout.  So we write the formatting control character, flush that (to
+        // make sure it gets emitted before our character), use print for our
+        // character, reset the terminal, then flush that.
+        //
+        // Note that this likely still writes the color-changing control
+        // characters to the real stdout, even without "--nocapture".  That
+        // sucks, but at least you don't see them.
         term.fg(term::color::GREEN).unwrap();
-        write!(term, "{}", c).unwrap();
+        term.flush().unwrap();
+        print!("{}", c);
         term.reset().unwrap();
         term.flush().unwrap();
     } else {
