@@ -14,6 +14,7 @@ use omicron_common::backoff::{
     internal_service_policy, retry_notify, BackoffError,
 };
 use std::sync::Arc;
+use std::net::SocketAddr;
 
 /// Packages up a [`SledAgent`], running the sled agent API under a Dropshot
 /// server wired up to the sled agent
@@ -28,7 +29,7 @@ impl Server {
     }
 
     /// Starts a SledAgent server
-    pub async fn start(config: &Config) -> Result<Server, String> {
+    pub async fn start(config: &Config, addr: SocketAddr) -> Result<Server, String> {
         let (drain, registration) = slog_dtrace::with_drain(
             config.log.to_logger("sled-agent").map_err(|message| {
                 format!("initializing logger: {}", message)
@@ -54,13 +55,16 @@ impl Server {
             "component" => "SledAgent",
             "server" => config.id.clone().to_string()
         ));
-        let sled_agent = SledAgent::new(&config, sa_log, nexus_client.clone())
+        let sled_agent = SledAgent::new(&config, sa_log, nexus_client.clone(), addr)
             .await
             .map_err(|e| e.to_string())?;
 
+        let mut dropshot_config = dropshot::ConfigDropshot::default();
+        dropshot_config.request_body_max_bytes = 1024 * 1024;
+        dropshot_config.bind_address = addr;
         let dropshot_log = log.new(o!("component" => "dropshot"));
         let http_server = dropshot::HttpServerStarter::new(
-            &config.dropshot,
+            &dropshot_config,
             http_api(),
             sled_agent,
             &dropshot_log,

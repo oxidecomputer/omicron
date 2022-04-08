@@ -140,7 +140,6 @@ impl Agent {
         request: SledAgentRequest,
     ) -> Result<SledAgentResponse, BootstrapError> {
         info!(&self.log, "Loading Sled Agent: {:?}", request);
-        // TODO: actually use request.ip
         // TODO: actually use request.uuid
 
         let mut maybe_agent = self.sled_agent.lock().await;
@@ -151,8 +150,20 @@ impl Agent {
             });
         }
         // Server does not exist, initialize it.
-        let server = SledServer::start(&self.sled_config).await.map_err(|e| BootstrapError::SledError(e))?;
+        let sled_address = crate::config::get_sled_address(request.ip);
+        let server = SledServer::start(&self.sled_config, sled_address)
+            .await
+            .map_err(|e| BootstrapError::SledError(e))?;
         maybe_agent.replace(server);
+
+        // Record the subnet, so the sled agent can be automatically
+        // initialized on the next boot.
+        tokio::fs::write(
+            get_subnet_path(),
+            &toml::to_string(
+                &toml::Value::try_from(&request.ip).expect("Cannot serialize IP")
+            ).expect("Cannot convert toml to string")
+        ).await?;
 
         Ok(SledAgentResponse {
             id: self.sled_config.id,

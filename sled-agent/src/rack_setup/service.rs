@@ -6,20 +6,15 @@
 
 use crate::bootstrap::client as bootstrap_agent_client;
 use crate::bootstrap::discovery::PeerMonitorObserver;
+use crate::config::get_sled_address;
 use super::config::SetupServiceConfig as Config;
+use omicron_common::api::external::Ipv6Net;
 use omicron_common::backoff::{
     internal_service_policy, retry_notify, BackoffError,
 };
 use slog::Logger;
-use std::net::Ipv6Addr;
 use thiserror::Error;
 use tokio::sync::Mutex;
-
-const SLED_AGENT_PORT: u16 = 12345;
-
-fn next_address(addr: Ipv6Addr) -> Ipv6Addr {
-    Ipv6Addr::from(u128::from(addr) + 1)
-}
 
 /// Describes errors which may occur while operating the setup service.
 #[derive(Error, Debug)]
@@ -302,13 +297,8 @@ impl ServiceInner {
                 let subnet = config.sled_subnet(sled_subnet_index);
                 self.initialize_sled_agent(*bootstrap_addr, subnet).await?;
 
-                let sled_agent_ip = next_address(subnet.ip());
-                let sled_address = std::net::SocketAddr::new(
-                    std::net::IpAddr::V6(sled_agent_ip),
-                    SLED_AGENT_PORT,
-                );
-
                 // Next, initialize any datasets on sleds that need it.
+                let sled_address = get_sled_address(Ipv6Net(subnet));
                 self.initialize_datasets(
                     sled_address,
                     &request.datasets,

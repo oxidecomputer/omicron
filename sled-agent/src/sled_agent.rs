@@ -89,6 +89,7 @@ impl SledAgent {
         config: &Config,
         log: Logger,
         nexus_client: Arc<NexusClient>,
+        sled_address: SocketAddr,
     ) -> Result<SledAgent, Error> {
         let id = &config.id;
         let vlan = config.vlan;
@@ -113,7 +114,7 @@ impl SledAgent {
         // configuration file.
         Zones::ensure_has_global_zone_v6_address(
             config.data_link.clone(),
-            config.dropshot.bind_address.ip(),
+            sled_address.ip(),
         )?;
 
         // Identify all existing zones which should be managed by the Sled

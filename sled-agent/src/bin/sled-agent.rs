@@ -81,10 +81,8 @@ async fn do_run() -> Result<(), CmdError> {
             }
         },
         Args::Run { config_path } => {
-            let mut config = SledConfig::from_file(&config_path)
+            let config = SledConfig::from_file(&config_path)
                 .map_err(|e| CmdError::Failure(e.to_string()))?;
-            config.dropshot.request_body_max_bytes = 1024 * 1024;
-            let config = config;
 
             // - Sled agent starts with the normal config file - typically
             // called "config.toml".
