@@ -49,6 +49,30 @@ pub fn authz_resource(
         "{}_POLAR",
         heck::AsShoutySnakeCase(input.name).to_string()
     );
+    // XXX-dap concrete proposed steps:
+    //
+    // - let's not try to change how this works with this change.  most
+    //   importantly: it'll still be the case that things inside a Project
+    //   "roll up" to the Project-level roles, rather than having their own
+    // - to make this possible, let's say that the macro requires another input,
+    //   which is a PolarSnippet enum, which is one of "Custom" and
+    //   "ProjectResource".  It uses this to generate one of three Polar
+    //   snippets for this resource:
+    //   - Custom: generates nothing -- assume the real content is in the
+    //     hardcoded omicron.polar file.  We'll use this for everything that's
+    //     not inside a Project.
+    //   - ProjectResource, when parent = "Project"
+    //   - ProjectResource, when parent != "Project": define a relation between
+    //     this thing and containing_project that relies on the _parent's_
+    //     relation to the containing project.  Permissions are defined in terms
+    //     of this relationship.  (there's still a separate relationship to the
+    //     parent.)
+    // - to make initialization less nightmarish, we could define a trait that's
+    //   a subtrait of "oso::PolarClass" that has one thing: a const String
+    //   Polar snippet (or maybe an Option).  Then during initialization, we
+    //   have a Vec of these, and for each one, we register the class _and_
+    //   append its snippet.
+    //
     // XXX-dap There are some problems with the Polar snippet here:
     // - This is currently intended for things inside a project, though
     //   we also use it for Racks, Users, and Roles.  We *don't* use it for
