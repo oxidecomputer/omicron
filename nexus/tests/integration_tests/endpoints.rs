@@ -53,8 +53,12 @@ lazy_static! {
         format!("{}/{}", *DEMO_ORG_PROJECTS_URL, *DEMO_PROJECT_NAME);
     pub static ref DEMO_PROJECT_URL_DISKS: String =
         format!("{}/disks", *DEMO_PROJECT_URL);
+    pub static ref DEMO_PROJECT_URL_IMAGES: String =
+        format!("{}/images", *DEMO_PROJECT_URL);
     pub static ref DEMO_PROJECT_URL_INSTANCES: String =
         format!("{}/instances", *DEMO_PROJECT_URL);
+    pub static ref DEMO_PROJECT_URL_SNAPSHOTS: String =
+        format!("{}/snapshots", *DEMO_PROJECT_URL);
     pub static ref DEMO_PROJECT_URL_VPCS: String =
         format!("{}/vpcs", *DEMO_PROJECT_URL);
     pub static ref DEMO_PROJECT_CREATE: params::ProjectCreate =
@@ -194,6 +198,34 @@ lazy_static! {
             subnet_name: DEMO_VPC_SUBNET_NAME.clone(),
             ip: None,
         };
+
+    // Images
+    pub static ref DEMO_IMAGE_NAME: Name = "demo-image".parse().unwrap();
+    pub static ref DEMO_IMAGE_URL: String =
+        format!("/images/{}", *DEMO_IMAGE_NAME);
+    pub static ref DEMO_PROJECT_IMAGE_URL: String =
+        format!("{}/{}", *DEMO_PROJECT_URL_IMAGES, *DEMO_IMAGE_NAME);
+    pub static ref DEMO_IMAGE_CREATE: params::ImageCreate =
+        params::ImageCreate {
+            identity: IdentityMetadataCreateParams {
+                name: DEMO_IMAGE_NAME.clone(),
+                description: String::from(""),
+            },
+            source: params::ImageSource::Url(String::from("dummy"))
+        };
+
+    // Snapshots
+    pub static ref DEMO_SNAPSHOT_NAME: Name = "demo-snapshot".parse().unwrap();
+    pub static ref DEMO_SNAPSHOT_URL: String =
+        format!("{}/{}", *DEMO_PROJECT_URL_SNAPSHOTS, *DEMO_SNAPSHOT_NAME);
+    pub static ref DEMO_SNAPSHOT_CREATE: params::SnapshotCreate =
+        params::SnapshotCreate {
+            identity: IdentityMetadataCreateParams {
+                name: DEMO_SNAPSHOT_NAME.clone(),
+                description: String::from(""),
+            },
+            disk: DEMO_DISK_NAME.clone(),
+        };
 }
 
 /// Describes an API endpoint to be verified by the "unauthorized" test
@@ -256,7 +288,21 @@ pub enum AllowedMethod {
     /// be uncommon.  In most cases, resources are identified either by names
     /// that we define here or uuids that we control in the test suite (e.g.,
     /// the rack and sled uuids).
+    ///
+    /// This is not necessary for methods other than `GET`.  We only need this
+    /// to configure the test's expectation for *privileged* requests.  For the
+    /// other HTTP methods, we only make unprivileged requests, and they should
+    /// always fail in the correct way.
     GetNonexistent,
+    /// HTTP "GET" method that is not yet implemented
+    ///
+    /// This should be a transient state, used only for stub APIs.
+    ///
+    /// This is not necessary for methods other than `GET`.  We only need this
+    /// to configure the test's expectation for *privileged* requests.  For the
+    /// other HTTP methods, we only make unprivileged requests, and they should
+    /// always fail in the correct way.
+    GetUnimplemented,
     /// HTTP "POST" method, with sample input (which should be valid input for
     /// this endpoint)
     Post(serde_json::Value),
@@ -272,6 +318,7 @@ impl AllowedMethod {
             AllowedMethod::Delete => &Method::DELETE,
             AllowedMethod::Get => &Method::GET,
             AllowedMethod::GetNonexistent => &Method::GET,
+            AllowedMethod::GetUnimplemented => &Method::GET,
             AllowedMethod::Post(_) => &Method::POST,
             AllowedMethod::Put(_) => &Method::PUT,
         }
@@ -285,7 +332,8 @@ impl AllowedMethod {
         match self {
             AllowedMethod::Delete
             | AllowedMethod::Get
-            | AllowedMethod::GetNonexistent => None,
+            | AllowedMethod::GetNonexistent
+            | AllowedMethod::GetUnimplemented => None,
             AllowedMethod::Post(body) => Some(&body),
             AllowedMethod::Put(body) => Some(&body),
         }
@@ -564,6 +612,49 @@ lazy_static! {
             ],
         },
 
+        /* Project images */
+
+        VerifyEndpoint {
+            url: &*DEMO_PROJECT_URL_IMAGES,
+            visibility: Visibility::Protected,
+            allowed_methods: vec![
+                AllowedMethod::GetUnimplemented,
+                AllowedMethod::Post(
+                    serde_json::to_value(&*DEMO_IMAGE_CREATE).unwrap()
+                ),
+            ],
+        },
+
+        VerifyEndpoint {
+            url: &*DEMO_PROJECT_IMAGE_URL,
+            visibility: Visibility::Protected,
+            allowed_methods: vec![
+                AllowedMethod::GetUnimplemented,
+                AllowedMethod::Delete,
+            ],
+        },
+
+        /* Snapshots */
+
+        VerifyEndpoint {
+            url: &*DEMO_PROJECT_URL_SNAPSHOTS,
+            visibility: Visibility::Protected,
+            allowed_methods: vec![
+                AllowedMethod::GetUnimplemented,
+                AllowedMethod::Post(
+                    serde_json::to_value(DEMO_SNAPSHOT_CREATE.clone()).unwrap(),
+                )
+            ]
+        },
+        VerifyEndpoint {
+            url: &*DEMO_SNAPSHOT_URL,
+            visibility: Visibility::Protected,
+            allowed_methods: vec![
+                AllowedMethod::GetUnimplemented,
+                AllowedMethod::Delete,
+            ]
+        },
+
         /* Instances */
         VerifyEndpoint {
             url: &*DEMO_PROJECT_URL_INSTANCES,
@@ -718,6 +809,27 @@ lazy_static! {
             allowed_methods: vec![AllowedMethod::Post(
                 serde_json::Value::Null
             )],
+        },
+
+        /* Images */
+
+        VerifyEndpoint {
+            url: "/images",
+            visibility: Visibility::Public,
+            allowed_methods: vec![
+                AllowedMethod::GetUnimplemented,
+                AllowedMethod::Post(
+                    serde_json::to_value(&*DEMO_IMAGE_CREATE).unwrap()
+                ),
+            ],
+        },
+        VerifyEndpoint {
+            url: &*DEMO_IMAGE_URL,
+            visibility: Visibility::Protected,
+            allowed_methods: vec![
+                AllowedMethod::GetUnimplemented,
+                AllowedMethod::Delete,
+            ],
         },
     ];
 }

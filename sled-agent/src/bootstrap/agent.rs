@@ -88,7 +88,7 @@ pub(crate) struct Agent {
 }
 
 fn get_subnet_path() -> PathBuf {
-    Path::new(crate::OMICRON_CONFIG_PATH).join("subnet.toml")
+    Path::new(omicron_common::OMICRON_CONFIG_PATH).join("subnet.toml")
 }
 
 impl Agent {

@@ -273,6 +273,193 @@ impl Nexus {
         }
     }
 
+    /// Used as the body of a "stub" endpoint -- one that's currently
+    /// unimplemented but that we eventually intend to implement
+    ///
+    /// Even though an endpoint is unimplemented, it's useful if it implements
+    /// the correct authn/authz behaviors behaviors for unauthenticated and
+    /// authenticated, unauthorized requests.  This allows us to maintain basic
+    /// authn/authz test coverage for stub endpoints, which in turn helps us
+    /// ensure that all endpoints are covered.
+    ///
+    /// In order to implement the correct authn/authz behavior, we need to know
+    /// a little about the endpoint.  This is given by the `visibility`
+    /// argument.  See the examples below.
+    ///
+    /// # Examples
+    ///
+    /// ## A top-level API endpoint (always visible)
+    ///
+    /// For example, "/my-new-kind-of-resource".  The assumption is that the
+    /// _existence_ of this endpoint is not a secret.  Use:
+    ///
+    /// ```
+    /// use omicron_nexus::context::OpContext;
+    /// use omicron_nexus::db::DataStore;
+    /// use omicron_nexus::nexus::Nexus;
+    /// use omicron_nexus::nexus::Unimpl;
+    /// use omicron_common::api::external::Error;
+    ///
+    /// async fn my_things_list(
+    ///     nexus: &Nexus,
+    ///     datastore: &DataStore,
+    ///     opctx: &OpContext,
+    /// ) -> Result<(), Error>
+    /// {
+    ///     Err(nexus.unimplemented_todo(opctx, Unimpl::Public).await)
+    /// }
+    /// ```
+    ///
+    /// ## An authz-protected resource under the top level
+    ///
+    /// For example, "/my-new-kind-of-resource/demo" (where "demo" is the name
+    /// of a specific resource of type "my-new-kind-of-resource").  Use:
+    ///
+    /// ```
+    /// use omicron_nexus::context::OpContext;
+    /// use omicron_nexus::db::model::Name;
+    /// use omicron_nexus::db::DataStore;
+    /// use omicron_nexus::nexus::Nexus;
+    /// use omicron_nexus::nexus::Unimpl;
+    /// use omicron_common::api::external::Error;
+    /// use omicron_common::api::external::LookupType;
+    /// use omicron_common::api::external::ResourceType;
+    ///
+    /// async fn my_thing_fetch(
+    ///     nexus: &Nexus,
+    ///     datastore: &DataStore,
+    ///     opctx: &OpContext,
+    ///     the_name: &Name,
+    /// ) -> Result<(), Error>
+    /// {
+    ///     // You will want to have defined your own ResourceType variant for
+    ///     // this resource, even though it's still a stub.
+    ///     let resource_type: ResourceType = todo!();
+    ///     let lookup_type = LookupType::ByName(the_name.to_string());
+    ///     let not_found_error = lookup_type.into_not_found(resource_type);
+    ///     let unimp = Unimpl::ProtectedLookup(not_found_error);
+    ///     Err(nexus.unimplemented_todo(opctx, unimp).await)
+    /// }
+    /// ```
+    ///
+    /// This does the bare minimum to produce an appropriate 404 "Not Found"
+    /// error for authenticated, unauthorized users.
+    ///
+    /// ## An authz-protected API endpoint under some other (non-stub) resource
+    ///
+    /// ### ... when the endpoint never returns 404 (e.g., "list", "create")
+    ///
+    /// For example, "/organizations/my-org/my-new-kind-of-resource".  In this
+    /// case, your function should do whatever lookup of the non-stub resource
+    /// that the function will eventually do, and then treat it like the first
+    /// example.
+    ///
+    /// Here's an example stub for the "list" endpoint for a new resource
+    /// underneath Organizations:
+    ///
+    /// ```
+    /// use omicron_nexus::authz;
+    /// use omicron_nexus::context::OpContext;
+    /// use omicron_nexus::db::lookup::LookupPath;
+    /// use omicron_nexus::db::model::Name;
+    /// use omicron_nexus::db::DataStore;
+    /// use omicron_nexus::nexus::Nexus;
+    /// use omicron_nexus::nexus::Unimpl;
+    /// use omicron_common::api::external::Error;
+    ///
+    /// async fn organization_list_my_thing(
+    ///     nexus: &Nexus,
+    ///     datastore: &DataStore,
+    ///     opctx: &OpContext,
+    ///     organization_name: &Name,
+    /// ) -> Result<(), Error>
+    /// {
+    ///     let (.., _authz_org) = LookupPath::new(opctx, datastore)
+    ///         .organization_name(organization_name)
+    ///         .lookup_for(authz::Action::ListChildren)
+    ///         .await?;
+    ///     Err(nexus.unimplemented_todo(opctx, Unimpl::Public).await)
+    /// }
+    /// ```
+    ///
+    /// ### ... when the endpoint can return 404 (e.g., "get", "delete")
+    ///
+    /// You can treat this exactly like the second example above.  Here's an
+    /// example stub for the "get" endpoint for that same resource:
+    ///
+    /// ```
+    /// use omicron_nexus::authz;
+    /// use omicron_nexus::context::OpContext;
+    /// use omicron_nexus::db::lookup::LookupPath;
+    /// use omicron_nexus::db::model::Name;
+    /// use omicron_nexus::db::DataStore;
+    /// use omicron_nexus::nexus::Nexus;
+    /// use omicron_nexus::nexus::Unimpl;
+    /// use omicron_common::api::external::Error;
+    /// use omicron_common::api::external::LookupType;
+    /// use omicron_common::api::external::ResourceType;
+    ///
+    /// async fn my_thing_fetch(
+    ///     nexus: &Nexus,
+    ///     datastore: &DataStore,
+    ///     opctx: &OpContext,
+    ///     organization_name: &Name,
+    ///     the_name: &Name,
+    /// ) -> Result<(), Error>
+    /// {
+    ///     // You will want to have defined your own ResourceType variant for
+    ///     // this resource, even though it's still a stub.
+    ///     let resource_type: ResourceType = todo!();
+    ///     let lookup_type = LookupType::ByName(the_name.to_string());
+    ///     let not_found_error = lookup_type.into_not_found(resource_type);
+    ///     let unimp = Unimpl::ProtectedLookup(not_found_error);
+    ///     Err(nexus.unimplemented_todo(opctx, unimp).await)
+    /// }
+    /// ```
+    pub async fn unimplemented_todo(
+        &self,
+        opctx: &OpContext,
+        visibility: Unimpl,
+    ) -> Error {
+        // Deny access to non-super-users.  This is really just for the benefit
+        // of the authz coverage tests.  By requiring (and testing) correct
+        // authz behavior for stubs, we ensure that that behavior is preserved
+        // when the stub's implementation is fleshed out.
+        match opctx.authorize(authz::Action::Modify, &authz::FLEET).await {
+            Err(error @ Error::Forbidden) => {
+                // Emulate the behavior of `Authz::authorize()`: if this is a
+                // non-public resource, then the user should get a 404, not a
+                // 403, when authorization fails.
+                if let Unimpl::ProtectedLookup(lookup_error) = visibility {
+                    lookup_error
+                } else {
+                    error
+                }
+            }
+            Err(error) => error,
+            Ok(_) => {
+                // In the event that a superuser actually gets this far, produce
+                // a server error.
+                //
+                // It's tempting to use other status codes here:
+                //
+                // "501 Not Implemented" is specifically when we don't recognize
+                // the HTTP method and cannot implement it on _any_ resource.
+                //
+                // "405 Method Not Allowed" is specifically when an HTTP method
+                // isn't supported.  That doesn't feel quite right either --
+                // this is usually interpreted to mean "not part of the API",
+                // which it obviously _is_, since the client found it in the API
+                // spec.
+                //
+                // Neither of these is true: this HTTP method on this HTTP
+                // resource is part of the API, and it will be supported by the
+                // server, but it doesn't work yet.
+                Error::internal_error("endpoint is not implemented")
+            }
+        }
+    }
+
     // TODO-robustness we should have a limit on how many sled agents there can
     // be (for graceful degradation at large scale).
     pub async fn upsert_sled(
@@ -844,116 +1031,158 @@ impl Nexus {
         Ok(())
     }
 
-    pub async fn list_images(
+    pub async fn images_list(
         &self,
-        _opctx: &OpContext,
+        opctx: &OpContext,
         _pagparams: &DataPageParams<'_, Name>,
     ) -> ListResultVec<db::model::Image> {
-        unimplemented!();
+        Err(self.unimplemented_todo(opctx, Unimpl::Public).await)
     }
 
-    pub async fn create_image(
+    pub async fn image_create(
         self: &Arc<Self>,
-        _opctx: &OpContext,
+        opctx: &OpContext,
         _params: &params::ImageCreate,
     ) -> CreateResult<db::model::Image> {
-        unimplemented!();
+        Err(self.unimplemented_todo(opctx, Unimpl::Public).await)
     }
 
     pub async fn image_fetch(
         &self,
-        _opctx: &OpContext,
-        _image_name: &Name,
+        opctx: &OpContext,
+        image_name: &Name,
     ) -> LookupResult<db::model::Image> {
-        unimplemented!();
+        let lookup_type = LookupType::ByName(image_name.to_string());
+        let error = lookup_type.into_not_found(ResourceType::Image);
+        Err(self
+            .unimplemented_todo(opctx, Unimpl::ProtectedLookup(error))
+            .await)
     }
 
-    pub async fn delete_image(
+    pub async fn image_delete(
         self: &Arc<Self>,
-        _opctx: &OpContext,
-        _image_name: &Name,
+        opctx: &OpContext,
+        image_name: &Name,
     ) -> DeleteResult {
-        unimplemented!();
+        let lookup_type = LookupType::ByName(image_name.to_string());
+        let error = lookup_type.into_not_found(ResourceType::Image);
+        Err(self
+            .unimplemented_todo(opctx, Unimpl::ProtectedLookup(error))
+            .await)
     }
 
     pub async fn project_list_images(
         &self,
-        _opctx: &OpContext,
-        _organization_name: &Name,
-        _project_name: &Name,
+        opctx: &OpContext,
+        organization_name: &Name,
+        project_name: &Name,
         _pagparams: &DataPageParams<'_, Name>,
     ) -> ListResultVec<db::model::Image> {
-        unimplemented!();
+        let _ = LookupPath::new(opctx, &self.db_datastore)
+            .organization_name(organization_name)
+            .project_name(project_name)
+            .lookup_for(authz::Action::ListChildren)
+            .await?;
+        Err(self.unimplemented_todo(opctx, Unimpl::Public).await)
     }
 
     pub async fn project_create_image(
         self: &Arc<Self>,
-        _opctx: &OpContext,
-        _organization_name: &Name,
-        _project_name: &Name,
+        opctx: &OpContext,
+        organization_name: &Name,
+        project_name: &Name,
         _params: &params::ImageCreate,
     ) -> CreateResult<db::model::Image> {
-        unimplemented!();
+        let _ = LookupPath::new(opctx, &self.db_datastore)
+            .organization_name(organization_name)
+            .project_name(project_name)
+            .lookup_for(authz::Action::CreateChild)
+            .await?;
+        Err(self.unimplemented_todo(opctx, Unimpl::Public).await)
     }
 
     pub async fn project_image_fetch(
         &self,
-        _opctx: &OpContext,
+        opctx: &OpContext,
         _organization_name: &Name,
         _project_name: &Name,
-        _image_name: &Name,
+        image_name: &Name,
     ) -> LookupResult<db::model::Image> {
-        unimplemented!();
+        let lookup_type = LookupType::ByName(image_name.to_string());
+        let not_found_error = lookup_type.into_not_found(ResourceType::Image);
+        let unimp = Unimpl::ProtectedLookup(not_found_error);
+        Err(self.unimplemented_todo(opctx, unimp).await)
     }
 
     pub async fn project_delete_image(
         self: &Arc<Self>,
-        _opctx: &OpContext,
+        opctx: &OpContext,
         _organization_name: &Name,
         _project_name: &Name,
-        _image_name: &Name,
+        image_name: &Name,
     ) -> DeleteResult {
-        unimplemented!();
+        let lookup_type = LookupType::ByName(image_name.to_string());
+        let not_found_error = lookup_type.into_not_found(ResourceType::Image);
+        let unimp = Unimpl::ProtectedLookup(not_found_error);
+        Err(self.unimplemented_todo(opctx, unimp).await)
     }
 
     pub async fn project_create_snapshot(
         self: &Arc<Self>,
-        _opctx: &OpContext,
-        _organization_name: &Name,
-        _project_name: &Name,
+        opctx: &OpContext,
+        organization_name: &Name,
+        project_name: &Name,
         _params: &params::SnapshotCreate,
     ) -> CreateResult<db::model::Snapshot> {
-        unimplemented!();
+        let _ = LookupPath::new(opctx, &self.db_datastore)
+            .organization_name(organization_name)
+            .project_name(project_name)
+            .lookup_for(authz::Action::ListChildren)
+            .await?;
+        Err(self.unimplemented_todo(opctx, Unimpl::Public).await)
     }
 
     pub async fn project_list_snapshots(
         &self,
-        _opctx: &OpContext,
-        _organization_name: &Name,
-        _project_name: &Name,
+        opctx: &OpContext,
+        organization_name: &Name,
+        project_name: &Name,
         _pagparams: &DataPageParams<'_, Name>,
     ) -> ListResultVec<db::model::Snapshot> {
-        unimplemented!();
+        let _ = LookupPath::new(opctx, &self.db_datastore)
+            .organization_name(organization_name)
+            .project_name(project_name)
+            .lookup_for(authz::Action::ListChildren)
+            .await?;
+        Err(self.unimplemented_todo(opctx, Unimpl::Public).await)
     }
 
     pub async fn snapshot_fetch(
         &self,
-        _opctx: &OpContext,
+        opctx: &OpContext,
         _organization_name: &Name,
         _project_name: &Name,
-        _snapshot_name: &Name,
+        snapshot_name: &Name,
     ) -> LookupResult<db::model::Snapshot> {
-        unimplemented!();
+        let lookup_type = LookupType::ByName(snapshot_name.to_string());
+        let not_found_error =
+            lookup_type.into_not_found(ResourceType::Snapshot);
+        let unimp = Unimpl::ProtectedLookup(not_found_error);
+        Err(self.unimplemented_todo(opctx, unimp).await)
     }
 
     pub async fn project_delete_snapshot(
         self: &Arc<Self>,
-        _opctx: &OpContext,
+        opctx: &OpContext,
         _organization_name: &Name,
         _project_name: &Name,
-        _snapshot_name: &Name,
+        snapshot_name: &Name,
     ) -> DeleteResult {
-        unimplemented!();
+        let lookup_type = LookupType::ByName(snapshot_name.to_string());
+        let not_found_error =
+            lookup_type.into_not_found(ResourceType::Snapshot);
+        let unimp = Unimpl::ProtectedLookup(not_found_error);
+        Err(self.unimplemented_todo(opctx, unimp).await)
     }
 
     // Instances
@@ -3335,6 +3564,21 @@ impl Nexus {
     ) -> LookupResult<SiloUser> {
         self.db_datastore.silo_user_fetch(silo_user_id).await
     }
+}
+
+/// For unimplemented endpoints, indicates whether the resource identified
+/// by this endpoint will always be publicly visible or not
+///
+/// For example, the resource "/images" is well-known (it's part of the
+/// API).  Being unauthorized to list images will result in a "403
+/// Forbidden".  It's `UnimplResourceVisibility::Public'.
+///
+/// By contrast, the resource "/images/some-image" is not publicly-known.
+/// If you're not authorized to view it, you'll get a "404 Not Found".  It's
+/// `Unimpl::ProtectedLookup(LookupType::ByName("some-image"))`.
+pub enum Unimpl {
+    Public,
+    ProtectedLookup(Error),
 }
 
 fn generate_session_token() -> String {

@@ -77,13 +77,11 @@ SUMMARY OF REQUESTS MADE
 
 KEY, USING HEADER AND EXAMPLE ROW:
 
-          +----------------------------> privileged GET (expects 200)
-          |                              (digit = last digit of 200-level
-          |                              response)
+          +----------------------------> privileged GET (expects 200 or 500)
+          |                              (digit = last digit of status code)
           |
           |                          +-> privileged GET (expects same as above)
-          |                          |   (digit = last digit of 200-level
-          |                          |    response)
+          |                          |   (digit = last digit of status code)
           |                          |   ('-' => skipped (N/A))
           ^                          ^
 HEADER:   G GET  PUT  POST DEL  TRCE G  URL
@@ -242,26 +240,47 @@ async fn verify_endpoint(
     // response.  Otherwise, the test might later succeed by coincidence.  We
     // might find a 404 because of something that actually doesn't exist rather
     // than something that's just hidden from unauthorized users.
-    let get_allowed = endpoint
-        .allowed_methods
-        .iter()
-        .any(|allowed| matches!(allowed, AllowedMethod::Get));
-    let resource_before: Option<serde_json::Value> = if get_allowed {
-        info!(log, "test: privileged GET");
-        record_operation(WhichTest::PrivilegedGet(Some(&http::StatusCode::OK)));
-        Some(
-            NexusRequest::object_get(client, endpoint.url)
-                .authn_as(AuthnMode::PrivilegedUser)
-                .execute()
-                .await
-                .unwrap()
-                .parsed_body()
-                .unwrap(),
-        )
-    } else {
-        warn!(log, "test: skipping privileged GET (method not allowed)");
-        record_operation(WhichTest::PrivilegedGet(None));
-        None
+    let get_allowed = endpoint.allowed_methods.iter().find(|allowed| {
+        matches!(allowed, AllowedMethod::Get | AllowedMethod::GetUnimplemented)
+    });
+    let resource_before = match get_allowed {
+        Some(AllowedMethod::Get) => {
+            info!(log, "test: privileged GET");
+            record_operation(WhichTest::PrivilegedGet(Some(
+                &http::StatusCode::OK,
+            )));
+            Some(
+                NexusRequest::object_get(client, endpoint.url)
+                    .authn_as(AuthnMode::PrivilegedUser)
+                    .execute()
+                    .await
+                    .unwrap()
+                    .parsed_body::<serde_json::Value>()
+                    .unwrap(),
+            )
+        }
+        Some(AllowedMethod::GetUnimplemented) => {
+            info!(log, "test: privileged GET (unimplemented)");
+            let expected_status = http::StatusCode::INTERNAL_SERVER_ERROR;
+            record_operation(WhichTest::PrivilegedGet(Some(&expected_status)));
+            NexusRequest::expect_failure(
+                client,
+                expected_status,
+                http::Method::GET,
+                endpoint.url,
+            )
+            .authn_as(AuthnMode::PrivilegedUser)
+            .execute()
+            .await
+            .unwrap();
+            None
+        }
+        Some(_) => unimplemented!(),
+        None => {
+            warn!(log, "test: skipping privileged GET (method not allowed)");
+            record_operation(WhichTest::PrivilegedGet(None));
+            None
+        }
     };
 
     print!(" ");
@@ -463,8 +482,20 @@ fn record_operation(whichtest: WhichTest<'_>) {
     // codes.
     let t = term::stdout();
     if let Some(mut term) = t {
+        // We just want to write one green character to stdout.  But we also
+        // want it to be captured by the test runner like people usually expect
+        // when they haven't passed "--nocapture".  The test runner only
+        // captures output from the `print!` family of macros, not all writes to
+        // stdout.  So we write the formatting control character, flush that (to
+        // make sure it gets emitted before our character), use print for our
+        // character, reset the terminal, then flush that.
+        //
+        // Note that this likely still writes the color-changing control
+        // characters to the real stdout, even without "--nocapture".  That
+        // sucks, but at least you don't see them.
         term.fg(term::color::GREEN).unwrap();
-        write!(term, "{}", c).unwrap();
+        term.flush().unwrap();
+        print!("{}", c);
         term.reset().unwrap();
         term.flush().unwrap();
     } else {

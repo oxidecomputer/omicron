@@ -232,8 +232,9 @@ impl ServiceInner {
         //
         // We do this by storing the configuration at "rss_config_path"
         // after successfully performing initialization.
-        let rss_config_path = std::path::Path::new(crate::OMICRON_CONFIG_PATH)
-            .join("config-rss.toml");
+        let rss_config_path =
+            std::path::Path::new(omicron_common::OMICRON_CONFIG_PATH)
+                .join("config-rss.toml");
         if rss_config_path.exists() {
             info!(
                 self.log,

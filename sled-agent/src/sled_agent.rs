@@ -109,8 +109,12 @@ impl SledAgent {
         //
         // TODO(https://github.com/oxidecomputer/omicron/issues/821): This
         // should be removed once the Sled Agent is initialized with a
-        // RSS-provided IP address. In the meantime, we just pick one.
-        Zones::ensure_has_global_zone_v6_address(config.data_link.clone())?;
+        // RSS-provided IP address. In the meantime, we use one from the
+        // configuration file.
+        Zones::ensure_has_global_zone_v6_address(
+            config.data_link.clone(),
+            config.dropshot.bind_address.ip(),
+        )?;
 
         // Identify all existing zones which should be managed by the Sled
         // Agent.
