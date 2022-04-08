@@ -64,8 +64,11 @@ CREATE TABLE omicron.public.sled (
     time_deleted TIMESTAMPTZ,
     rcgen INT NOT NULL,
 
+    /* The IP address and bound port of the sled agent server. */
     ip INET NOT NULL,
     port INT4 NOT NULL,
+
+    /* The last address allocated to an Oxide service on this sled. */
     last_used_address INET NOT NULL
 );
 

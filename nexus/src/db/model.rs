@@ -641,6 +641,8 @@ pub struct Sled {
 // `./smf/sled-agent/config-rss.toml`. This avoids conflicts with those
 // addresses, but should be removed when they are entirely under the
 // control of Nexus or RSS.
+//
+// See https://github.com/oxidecomputer/omicron/issues/732 for tracking issue.
 pub(crate) const STATIC_IPV6_ADDRESS_OFFSET: u16 = 20;
 impl Sled {
     // TODO-cleanup: We should be using IPv6 only for Oxide services, including
