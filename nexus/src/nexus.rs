@@ -960,12 +960,32 @@ impl Nexus {
             .lookup_for(authz::Action::CreateChild)
             .await?;
 
-        // Until we implement snapshots, do not allow disks to be created with a
-        // snapshot id.
+        // Reject disks where the block size doesn't evenly divide the total
+        // size
+        if (params.size.to_bytes() % params.block_size().to_bytes()) != 0 {
+            return Err(Error::InvalidValue {
+                label: String::from("size and block_size"),
+                message: String::from(
+                    "total size must be a multiple of block size",
+                ),
+            });
+        }
+
+        // Until we implement snapshots, do not allow disks to be created from a
+        // snapshot.
         if params.snapshot_id.is_some() {
             return Err(Error::InvalidValue {
                 label: String::from("snapshot_id"),
                 message: String::from("snapshots are not yet supported"),
+            });
+        }
+
+        // Until we implement images, do not allow disks to be created from an
+        // image.
+        if params.image_id.is_some() {
+            return Err(Error::InvalidValue {
+                label: String::from("image_id"),
+                message: String::from("images are not yet supported"),
             });
         }
 

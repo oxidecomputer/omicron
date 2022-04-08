@@ -757,7 +757,9 @@ pub struct Disk {
     pub identity: IdentityMetadata,
     pub project_id: Uuid,
     pub snapshot_id: Option<Uuid>,
+    pub image_id: Option<Uuid>,
     pub size: ByteCount,
+    pub block_size: ByteCount,
     pub state: DiskState,
     pub device_path: String,
 }
