@@ -35,6 +35,81 @@ use futures::FutureExt;
 use omicron_common::api::external::{Error, LookupType, ResourceType};
 use uuid::Uuid;
 
+// XXX Current status:
+// - I've sort of pseudocoded a new approach here using the ApiResourceNew
+//   trait.  It's still very repetitive.  I think we'd want to stamp these out
+//   with a macro.  It may be worth writing out what it would look like for
+//   Instance and VpcRouter as examples.
+// - It'd be great to do something incremental:
+//   - replace the various constructors on parent classes with constructors of
+//      the child class instead.
+//     - should mostly affect the Lookup API, plus things that are implementing
+//       their own lookups
+//   - next phase: typed resources for everything that's currently
+//     {Fleet,Project}Child.
+//     (this may be split up into phases)
+//     - probably want a macro:
+//       - input:
+//         - PascalCase name,
+//         - parent struct name, if any
+//         - whether roles are allowed
+//         - primary key type
+//       - output: 
+//         - the struct, including:
+//           - primary key field(s)
+//           - parent field (if any),
+//           - lookup_type
+//         - impl ApiResourceNew
+//           - the constants and types are easily derived
+//           - "new" function (we should be able to strike "make()", right,
+//             since we always know what type the thing is?)
+//           - key(), parent(), lookup_type() just fetch the fields
+//         - impl Eq, PartialEq
+//         - impl Oso::PolarClass
+//           - has_role method
+//           - attribute for the parent
+//   - last phase: clean up the various traits involved here
+//     - my new trait
+//     - ApiResource
+//     - ApiResourceError
+//     - AuthorizedResource
+//
+trait ApiResourceNew {
+    const RESOURCE_TYPE: ResourceType;
+    const ROLES_ALLOWED: bool;
+    type PrimaryKey;
+    type Parent;
+
+    fn make(
+        p: Self::Parent,
+        id: Self::PrimaryKey,
+        lookup_type: LookupType,
+    ) -> Self;
+    fn key(&self) -> &Self::PrimaryKey;
+    fn parent(&self) -> &Self::Parent;
+    fn lookup_type(&self) -> &LookupType;
+}
+
+impl<T: ApiResourceNew<PrimaryKey = Uuid>> ApiResource for T {
+    fn db_resource(&self) -> Option<(ResourceType, Uuid)> {
+        if T::ROLES_ALLOWED {
+            Some((Self::RESOURCE_TYPE, *self.key()))
+        } else {
+            None
+        }
+    }
+
+    fn parent(&self) -> Option<&dyn AuthorizedResource> {
+        Some(&self.parent())
+    }
+}
+
+impl<T: ApiResourceNew> ApiResourceError for T {
+    fn not_found(&self) -> Error {
+        self.lookup_type().clone().into_not_found(T::RESOURCE_TYPE)
+    }
+}
+
 /// Describes an authz resource that corresponds to an API resource that has a
 /// corresponding ResourceType and is stored in the database
 pub trait ApiResource: Clone + Send + Sync + 'static {
@@ -124,38 +199,38 @@ pub struct Fleet;
 /// Singleton representing the [`Fleet`] itself for authz purposes
 pub const FLEET: Fleet = Fleet;
 
-impl Fleet {
-    /// Returns an authz resource representing a child Organization
-    pub fn organization(
-        &self,
-        organization_id: Uuid,
-        lookup_type: LookupType,
-    ) -> Organization {
-        Organization { organization_id, lookup_type }
-    }
-
-    /// Returns an authz resource representing some other kind of child (e.g.,
-    /// a built-in user, built-in role, etc. -- but _not_ an Organization or
-    /// Sled)
-    ///
-    /// Aside from Organizations (which you create with
-    /// [`Fleet::organization()`] instead), all instances of all types of Fleet
-    /// children are treated interchangeably by the authz subsystem.  That's
-    /// because we do not currently support assigning roles to these resources,
-    /// so all that matters for authz is that they are a child of the Fleet.
-    pub fn child_generic(
-        &self,
-        resource_type: ResourceType,
-        lookup_type: LookupType,
-    ) -> FleetChild {
-        FleetChild { resource_type, lookup_type }
-    }
-
-    /// Returns an authz resource representing a Sled
-    pub fn sled(&self, sled_id: Uuid, lookup_type: LookupType) -> Sled {
-        Sled { sled_id, lookup_type }
-    }
-}
+//impl Fleet {
+//    /// Returns an authz resource representing a child Organization
+//    pub fn organization(
+//        &self,
+//        organization_id: Uuid,
+//        lookup_type: LookupType,
+//    ) -> Organization {
+//        Organization { organization_id, lookup_type }
+//    }
+//
+//    /// Returns an authz resource representing some other kind of child (e.g.,
+//    /// a built-in user, built-in role, etc. -- but _not_ an Organization or
+//    /// Sled)
+//    ///
+//    /// Aside from Organizations (which you create with
+//    /// [`Fleet::organization()`] instead), all instances of all types of Fleet
+//    /// children are treated interchangeably by the authz subsystem.  That's
+//    /// because we do not currently support assigning roles to these resources,
+//    /// so all that matters for authz is that they are a child of the Fleet.
+//    pub fn child_generic(
+//        &self,
+//        resource_type: ResourceType,
+//        lookup_type: LookupType,
+//    ) -> FleetChild {
+//        FleetChild { resource_type, lookup_type }
+//    }
+//
+//    /// Returns an authz resource representing a Sled
+//    pub fn sled(&self, sled_id: Uuid, lookup_type: LookupType) -> Sled {
+//        Sled { sled_id, lookup_type }
+//    }
+//}
 
 impl Eq for Fleet {}
 impl PartialEq for Fleet {
@@ -213,53 +288,53 @@ impl AuthorizedResource for Fleet {
     }
 }
 
-/// Represents any child of a Fleet _except_ for Organizations for authz
-/// purposes
-///
-/// This includes [`crate::db::model::UserBuiltin`], similar authz-related
-/// resources, and potentially future resources describing hardware.
-///
-/// This object is used for authorization checks on such resources by passing
-/// this as the `resource` argument to
-/// [`crate::context::OpContext::authorize()`].  You construct one of these
-/// using [`Fleet::child_generic()`].
-// We do not currently store any state here because we don't do anything with
-// it, so if callers provided it, we'd have no way to test that it was correct.
-// If we wind up supporting attaching roles to these, then we could add a
-// resource type and id like we have with ProjectChild.
-#[derive(Clone, Debug)]
-pub struct FleetChild {
-    resource_type: ResourceType,
-    lookup_type: LookupType,
-}
-
-impl oso::PolarClass for FleetChild {
-    fn get_polar_class_builder() -> oso::ClassBuilder<Self> {
-        oso::Class::builder()
-            .add_method(
-                "has_role",
-                // Roles are not supported on FleetChilds today.
-                |_: &FleetChild, _: AuthenticatedActor, _: String| false,
-            )
-            .add_attribute_getter("fleet", |_: &FleetChild| FLEET)
-    }
-}
-
-impl ApiResource for FleetChild {
-    fn db_resource(&self) -> Option<(ResourceType, Uuid)> {
-        None
-    }
-
-    fn parent(&self) -> Option<&dyn AuthorizedResource> {
-        Some(&FLEET)
-    }
-}
-
-impl ApiResourceError for FleetChild {
-    fn not_found(&self) -> Error {
-        self.lookup_type.clone().into_not_found(self.resource_type)
-    }
-}
+///// Represents any child of a Fleet _except_ for Organizations for authz
+///// purposes
+/////
+///// This includes [`crate::db::model::UserBuiltin`], similar authz-related
+///// resources, and potentially future resources describing hardware.
+/////
+///// This object is used for authorization checks on such resources by passing
+///// this as the `resource` argument to
+///// [`crate::context::OpContext::authorize()`].  You construct one of these
+///// using [`Fleet::child_generic()`].
+//// We do not currently store any state here because we don't do anything with
+//// it, so if callers provided it, we'd have no way to test that it was correct.
+//// If we wind up supporting attaching roles to these, then we could add a
+//// resource type and id like we have with ProjectChild.
+//#[derive(Clone, Debug)]
+//pub struct FleetChild {
+//    resource_type: ResourceType,
+//    lookup_type: LookupType,
+//}
+//
+//impl oso::PolarClass for FleetChild {
+//    fn get_polar_class_builder() -> oso::ClassBuilder<Self> {
+//        oso::Class::builder()
+//            .add_method(
+//                "has_role",
+//                // Roles are not supported on FleetChilds today.
+//                |_: &FleetChild, _: AuthenticatedActor, _: String| false,
+//            )
+//            .add_attribute_getter("fleet", |_: &FleetChild| FLEET)
+//    }
+//}
+//
+//impl ApiResource for FleetChild {
+//    fn db_resource(&self) -> Option<(ResourceType, Uuid)> {
+//        None
+//    }
+//
+//    fn parent(&self) -> Option<&dyn AuthorizedResource> {
+//        Some(&FLEET)
+//    }
+//}
+//
+//impl ApiResourceError for FleetChild {
+//    fn not_found(&self) -> Error {
+//        self.lookup_type.clone().into_not_found(self.resource_type)
+//    }
+//}
 
 /// Represents a Sled for authz purposes
 ///
@@ -273,11 +348,38 @@ pub struct Sled {
     lookup_type: LookupType,
 }
 
-impl Sled {
-    pub fn id(&self) -> Uuid {
-        self.sled_id
+impl ApiResourceNew for Sled {
+    const RESOURCE_TYPE: ResourceType = ResourceType::Sled;
+    const ROLES_ALLOWED: bool = false;
+    type PrimaryKey = Uuid;
+    type Parent = Fleet;
+
+    fn make(
+        _: Self::Parent,
+        sled_id: Self::PrimaryKey,
+        lookup_type: LookupType,
+    ) -> Self {
+        Sled { sled_id, lookup_type }
+    }
+
+    fn key(&self) -> &Self::PrimaryKey {
+        &self.sled_id
+    }
+
+    fn parent(&self) -> &Self::Parent {
+        &FLEET
+    }
+
+    fn lookup_type(&self) -> &LookupType {
+        &self.lookup_type
     }
 }
+
+//impl Sled {
+//    pub fn id(&self) -> Uuid {
+//        self.sled_id
+//    }
+//}
 
 impl oso::PolarClass for Sled {
     fn get_polar_class_builder() -> oso::ClassBuilder<Self> {
@@ -291,21 +393,21 @@ impl oso::PolarClass for Sled {
     }
 }
 
-impl ApiResource for Sled {
-    fn db_resource(&self) -> Option<(ResourceType, Uuid)> {
-        None
-    }
+//impl ApiResource for Sled {
+//    fn db_resource(&self) -> Option<(ResourceType, Uuid)> {
+//        None
+//    }
+//
+//    fn parent(&self) -> Option<&dyn AuthorizedResource> {
+//        Some(&FLEET)
+//    }
+//}
 
-    fn parent(&self) -> Option<&dyn AuthorizedResource> {
-        Some(&FLEET)
-    }
-}
-
-impl ApiResourceError for Sled {
-    fn not_found(&self) -> Error {
-        self.lookup_type.clone().into_not_found(ResourceType::Sled)
-    }
-}
+//impl ApiResourceError for Sled {
+//    fn not_found(&self) -> Error {
+//        self.lookup_type.clone().into_not_found(ResourceType::Sled)
+//    }
+//}
 
 /// Represents a [`crate::db::model::Organization`] for authz purposes
 ///
@@ -321,23 +423,50 @@ pub struct Organization {
     lookup_type: LookupType,
 }
 
-impl Organization {
-    // TODO-cleanup It seems like we shouldn't need this.  It's currently used
-    // for compatibility so we don't have to change a ton of callers as we
-    // iterate on the lookup APIs.
-    pub fn id(&self) -> Uuid {
-        self.organization_id
+impl ApiResourceNew for Organization {
+    const RESOURCE_TYPE: ResourceType = ResourceType::Organization;
+    const ROLES_ALLOWED: bool = true;
+    type PrimaryKey = Uuid;
+    type Parent = Fleet;
+
+    fn make(
+        _: Fleet,
+        organization_id: Uuid,
+        lookup_type: LookupType,
+    ) -> Self {
+        Organization { organization_id, lookup_type }
     }
 
-    /// Returns an authz resource representing a child Project
-    pub fn project(
-        &self,
-        project_id: Uuid,
-        lookup_type: LookupType,
-    ) -> Project {
-        Project { parent: self.clone(), project_id, lookup_type }
+    fn key(&self) -> &Self::PrimaryKey {
+        &self.organization_id
+    }
+
+    fn parent(&self) -> &Self::Parent {
+        &FLEET
+    }
+
+    fn lookup_type(&self) -> &LookupType {
+        &self.lookup_type
     }
 }
+
+//impl Organization {
+//    // TODO-cleanup It seems like we shouldn't need this.  It's currently used
+//    // for compatibility so we don't have to change a ton of callers as we
+//    // iterate on the lookup APIs.
+//    pub fn id(&self) -> Uuid {
+//        self.organization_id
+//    }
+//
+//    /// Returns an authz resource representing a child Project
+//    pub fn project(
+//        &self,
+//        project_id: Uuid,
+//        lookup_type: LookupType,
+//    ) -> Project {
+//        Project { parent: self.clone(), project_id, lookup_type }
+//    }
+//}
 
 impl Eq for Organization {}
 impl PartialEq for Organization {
@@ -364,21 +493,21 @@ impl oso::PolarClass for Organization {
     }
 }
 
-impl ApiResource for Organization {
-    fn db_resource(&self) -> Option<(ResourceType, Uuid)> {
-        Some((ResourceType::Organization, self.organization_id))
-    }
-
-    fn parent(&self) -> Option<&dyn AuthorizedResource> {
-        Some(&FLEET)
-    }
-}
-
-impl ApiResourceError for Organization {
-    fn not_found(&self) -> Error {
-        self.lookup_type.clone().into_not_found(ResourceType::Organization)
-    }
-}
+// impl ApiResource for Organization {
+//     fn db_resource(&self) -> Option<(ResourceType, Uuid)> {
+//         Some((ResourceType::Organization, self.organization_id))
+//     }
+// 
+//     fn parent(&self) -> Option<&dyn AuthorizedResource> {
+//         Some(&FLEET)
+//     }
+// }
+// 
+// impl ApiResourceError for Organization {
+//     fn not_found(&self) -> Error {
+//         self.lookup_type.clone().into_not_found(ResourceType::Organization)
+//     }
+// }
 
 /// Represents a [`crate::db::model::Project`] for authz purposes
 ///
@@ -395,37 +524,65 @@ pub struct Project {
     lookup_type: LookupType,
 }
 
-impl Project {
-    // TODO-cleanup see note on Organization::id above.
-    pub fn id(&self) -> Uuid {
-        self.project_id
-    }
+impl ApiResourceNew for Project {
+    const RESOURCE_TYPE: ResourceType = ResourceType::Project;
+    const ROLES_ALLOWED: bool = true;
+    type PrimaryKey = Uuid;
+    type Parent = Organization;
 
-    /// Returns an authz resource representing any child of this Project (e.g.,
-    /// an Instance or Disk)
-    ///
-    /// All instances of all types of Project children are treated
-    /// interchangeably by the authz subsystem.  That's because we do not
-    /// currently support assigning roles to these resources, so all that
-    /// matters for authz is that they are a child of a particular Project.
-    pub fn child_generic(
-        &self,
-        resource_type: ResourceType,
-        resource_id: Uuid,
+    fn make(
+        parent: Organization,
+        project_id: Uuid,
         lookup_type: LookupType,
-    ) -> ProjectChild {
-        ProjectChild {
-            parent: ProjectChildKind::Direct(self.clone()),
-            resource_type,
-            resource_id,
-            lookup_type,
-        }
+    ) -> Self {
+        Project { parent, project_id, lookup_type }
     }
 
-    pub fn organization(&self) -> &Organization {
+    fn key(&self) -> &Self::PrimaryKey {
+        &self.project_id
+    }
+
+    fn parent(&self) -> &Self::Parent {
         &self.parent
     }
+
+    fn lookup_type(&self) -> &LookupType {
+        &self.lookup_type
+    }
 }
+
+
+//impl Project {
+//    // TODO-cleanup see note on Organization::id above.
+//    pub fn id(&self) -> Uuid {
+//        self.project_id
+//    }
+//
+//    /// Returns an authz resource representing any child of this Project (e.g.,
+//    /// an Instance or Disk)
+//    ///
+//    /// All instances of all types of Project children are treated
+//    /// interchangeably by the authz subsystem.  That's because we do not
+//    /// currently support assigning roles to these resources, so all that
+//    /// matters for authz is that they are a child of a particular Project.
+//    pub fn child_generic(
+//        &self,
+//        resource_type: ResourceType,
+//        resource_id: Uuid,
+//        lookup_type: LookupType,
+//    ) -> ProjectChild {
+//        ProjectChild {
+//            parent: ProjectChildKind::Direct(self.clone()),
+//            resource_type,
+//            resource_id,
+//            lookup_type,
+//        }
+//    }
+//
+//    pub fn organization(&self) -> &Organization {
+//        &self.parent
+//    }
+//}
 
 impl Eq for Project {}
 impl PartialEq for Project {
@@ -454,21 +611,22 @@ impl oso::PolarClass for Project {
     }
 }
 
-impl ApiResource for Project {
-    fn db_resource(&self) -> Option<(ResourceType, Uuid)> {
-        Some((ResourceType::Project, self.project_id))
-    }
 
-    fn parent(&self) -> Option<&dyn AuthorizedResource> {
-        Some(&self.parent)
-    }
-}
+// impl ApiResource for Project {
+//     fn db_resource(&self) -> Option<(ResourceType, Uuid)> {
+//         Some((ResourceType::Project, self.project_id))
+//     }
+// 
+//     fn parent(&self) -> Option<&dyn AuthorizedResource> {
+//         Some(&self.parent)
+//     }
+// }
 
-impl ApiResourceError for Project {
-    fn not_found(&self) -> Error {
-        self.lookup_type.clone().into_not_found(ResourceType::Project)
-    }
-}
+// impl ApiResourceError for Project {
+//     fn not_found(&self) -> Error {
+//         self.lookup_type.clone().into_not_found(ResourceType::Project)
+//     }
+// }
 
 /// Represents any child of a Project for authz purposes
 ///
