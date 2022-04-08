@@ -56,6 +56,7 @@ use omicron_common::api::external::{
 use omicron_common::api::internal::nexus::UpdateArtifact;
 use omicron_common::bail_unless;
 use std::convert::{TryFrom, TryInto};
+use std::net::Ipv6Addr;
 use std::sync::Arc;
 use uuid::Uuid;
 
@@ -2833,6 +2834,42 @@ impl DataStore {
 
         Ok(())
     }
+
+    /// Return the next available IPv6 address for an Oxide service running on
+    /// the provided sled.
+    pub async fn next_ipv6_address(
+        &self,
+        opctx: &OpContext,
+        sled_id: Uuid,
+    ) -> Result<Ipv6Addr, Error> {
+        use db::schema::sled::dsl;
+        let net = diesel::update(
+            dsl::sled.find(sled_id).filter(dsl::time_deleted.is_null()),
+        )
+        .set(dsl::last_used_address.eq(dsl::last_used_address + 1))
+        .returning(dsl::last_used_address)
+        .get_result_async(self.pool_authorized(opctx).await?)
+        .await
+        .map_err(|e| {
+            public_error_from_diesel_pool(
+                e,
+                ErrorHandler::NotFoundByLookup(
+                    ResourceType::Sled,
+                    LookupType::ById(sled_id),
+                ),
+            )
+        })?;
+
+        // TODO-correctness: We need to ensure that this address is actually
+        // within the sled's underlay prefix, once that's included in the
+        // database record.
+        match net {
+            ipnetwork::IpNetwork::V6(net) => Ok(net.ip()),
+            _ => Err(Error::InternalError {
+                internal_message: String::from("Sled IP address must be IPv6"),
+            }),
+        }
+    }
 }
 
 /// Constructs a DataStore for use in test suites that has preloaded the
@@ -3334,5 +3371,71 @@ mod test {
         );
 
         let _ = db.cleanup().await;
+    }
+
+    // Test sled-specific IPv6 address allocation
+    #[tokio::test]
+    async fn test_sled_ipv6_address_allocation() {
+        use crate::db::model::STATIC_IPV6_ADDRESS_OFFSET;
+        use std::net::Ipv6Addr;
+
+        let logctx = dev::test_setup_log("test_sled_ipv6_address_allocation");
+        let mut db = test_setup_database(&logctx.log).await;
+        let cfg = db::Config { url: db.pg_config().clone() };
+        let pool = Arc::new(db::Pool::new(&cfg));
+        let datastore = Arc::new(DataStore::new(Arc::clone(&pool)));
+        let opctx =
+            OpContext::for_tests(logctx.log.new(o!()), datastore.clone());
+
+        let addr1 = "[fd00:1de::1]:12345".parse().unwrap();
+        let sled1_id = "0de4b299-e0b4-46f0-d528-85de81a7095f".parse().unwrap();
+        let sled1 = db::model::Sled::new(sled1_id, addr1);
+        datastore.sled_upsert(sled1).await.unwrap();
+
+        let addr2 = "[fd00:1df::1]:12345".parse().unwrap();
+        let sled2_id = "66285c18-0c79-43e0-e54f-95271f271314".parse().unwrap();
+        let sled2 = db::model::Sled::new(sled2_id, addr2);
+        datastore.sled_upsert(sled2).await.unwrap();
+
+        let ip = datastore.next_ipv6_address(&opctx, sled1_id).await.unwrap();
+        let expected_ip = Ipv6Addr::new(
+            0xfd00,
+            0x1de,
+            0,
+            0,
+            0,
+            0,
+            0,
+            2 + STATIC_IPV6_ADDRESS_OFFSET,
+        );
+        assert_eq!(ip, expected_ip);
+        let ip = datastore.next_ipv6_address(&opctx, sled1_id).await.unwrap();
+        let expected_ip = Ipv6Addr::new(
+            0xfd00,
+            0x1de,
+            0,
+            0,
+            0,
+            0,
+            0,
+            3 + STATIC_IPV6_ADDRESS_OFFSET,
+        );
+        assert_eq!(ip, expected_ip);
+
+        let ip = datastore.next_ipv6_address(&opctx, sled2_id).await.unwrap();
+        let expected_ip = Ipv6Addr::new(
+            0xfd00,
+            0x1df,
+            0,
+            0,
+            0,
+            0,
+            0,
+            2 + STATIC_IPV6_ADDRESS_OFFSET,
+        );
+        assert_eq!(ip, expected_ip);
+
+        let _ = db.cleanup().await;
+        logctx.cleanup_successful();
     }
 }
