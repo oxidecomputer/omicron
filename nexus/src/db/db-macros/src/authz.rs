@@ -19,8 +19,6 @@ pub struct Input {
     parent: String,
     /// Whether roles are allowed to be attached to this resource
     roles_allowed: bool,
-    /// Type of the primary key for this resource
-    primary_key_type: String,
 }
 
 /// Implementation of [`authz_resource!`]
@@ -30,20 +28,25 @@ pub fn authz_resource(
     let input = serde_tokenstream::from_tokenstream::<Input>(&raw_input)?;
     let resource_name = format_ident!("{}", input.name);
     let parent_resource_name = format_ident!("{}", input.parent);
-    let primary_key_type = format_ident!("{}", input.primary_key_type);
     let parent_as_snake = heck::AsSnakeCase(input.parent).to_string();
+    let db_resource_body = if input.roles_allowed {
+        quote! { Some((ResourceType::#resource_name, self.key)) }
+    } else {
+        quote! { None }
+    };
 
     Ok(quote! {
-        struct #resource_name {
+        #[derive(Clone, Debug)]
+        pub struct #resource_name {
             parent: #parent_resource_name,
-            key: #primary_key_type,
+            key: Uuid,
             lookup_type: LookupType,
         }
 
         impl #resource_name {
-            fn new(
+            pub fn new(
                 parent: #parent_resource_name,
-                key: #primary_key_type,
+                key: Uuid,
                 lookup_type: LookupType,
             ) -> #resource_name {
                 #resource_name {
@@ -52,16 +55,10 @@ pub fn authz_resource(
                     lookup_type,
                 }
             }
-        }
 
-        impl ApiResourceNew for #resource_name {
-            const RESOURCE_TYPE: ResourceType = ResourceType::#resource_name;
-            type PrimaryKey = #primary_key_type;
-            type Parent = #paent_resource_name;
-
-            fn key(&self) -> &Self::PrimaryKey { &self.key }
-            fn parent(&self) -> &Self::Parent { &self.parent }
-            fn lookup_type(&self) -> &LookupType { &self.lookup_type }
+            pub fn id(&self) -> Uuid {
+                self.key
+            }
         }
 
         impl Eq for #resource_name {}
@@ -84,16 +81,50 @@ pub fn authz_resource(
                         | {
                             actor.has_role_resource(
                                 ResourceType::#resource_name,
-                                r.key(),
+                                r.key,
                                 &role,
                             )
                         },
-                    ).
+                    )
                     .add_attribute_getter(
                         #parent_as_snake,
                         |r: &#resource_name| r.parent.clone()
                     )
             }
         }
+
+        impl ApiResource for #resource_name {
+            fn db_resource(&self) -> Option<(ResourceType, Uuid)> {
+                #db_resource_body
+            }
+
+            fn parent(&self) -> Option<&dyn AuthorizedResource> {
+                Some(&self.parent)
+            }
+        }
+
+        impl ApiResourceError for #resource_name {
+            fn not_found(&self) -> Error {
+                self.lookup_type
+                    .clone()
+                    .into_not_found(ResourceType::#resource_name)
+            }
+        }
     })
+}
+
+// See the test for lookup_resource.
+#[cfg(test)]
+#[test]
+fn test_authz_dump() {
+    let output = authz_resource(
+        quote! {
+            name = "Organization",
+            parent = "Fleet",
+            roles_allowed = false
+        }
+        .into(),
+    )
+    .unwrap();
+    println!("{}", output);
 }

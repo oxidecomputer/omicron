@@ -40,7 +40,6 @@ pub fn authz_resource(
 ///     name = "Organization",
 ///     ancestors = [],
 ///     children = [ "Project" ],
-///     authz_kind = Typed
 /// }
 /// ```
 ///
@@ -58,14 +57,12 @@ pub fn authz_resource(
 ///     name = "Organization",
 ///     ancestors = [],
 ///     children = [ "Project" ],
-///     authz_kind = Typed
 /// }
 ///
 /// lookup_resource! {
 ///     name = "Instance",
 ///     ancestors = [ "Organization", "Project" ],
 ///     children = [],
-///     authz_kind = Generic
 /// }
 /// ```
 ///

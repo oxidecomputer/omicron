@@ -6,12 +6,7 @@
 
 use super::actor::AnyActor;
 use super::actor::AuthenticatedActor;
-use super::api_resources::Fleet;
-use super::api_resources::FleetChild;
-use super::api_resources::Organization;
-use super::api_resources::Project;
-use super::api_resources::ProjectChild;
-use super::api_resources::Sled;
+use super::api_resources::*;
 use super::context::AuthorizedResource;
 use super::roles::RoleSet;
 use super::Authz;
@@ -47,9 +42,14 @@ pub fn make_omicron_oso() -> Result<Oso, anyhow::Error> {
         Fleet::get_polar_class(),
         Organization::get_polar_class(),
         Project::get_polar_class(),
-        ProjectChild::get_polar_class(),
-        FleetChild::get_polar_class(),
         Sled::get_polar_class(),
+        Instance::get_polar_class(),
+        NetworkInterface::get_polar_class(),
+        Disk::get_polar_class(),
+        Vpc::get_polar_class(),
+        VpcSubnet::get_polar_class(),
+        VpcRouter::get_polar_class(),
+        RouterRoute::get_polar_class(),
     ];
     for c in classes {
         oso.register_class(c).context("registering class")?;

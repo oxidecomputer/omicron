@@ -1637,8 +1637,8 @@ impl DataStore {
                 )
             })?;
         Ok((
-            authz_project.child_generic(
-                ResourceType::Vpc,
+            authz::Vpc::new(
+                authz_project.clone(),
                 vpc.id(),
                 LookupType::ByName(vpc.name().to_string()),
             ),
@@ -1986,8 +1986,8 @@ impl DataStore {
                 )
             })?;
         Ok((
-            authz_vpc.child_generic(
-                ResourceType::VpcRouter,
+            authz::VpcRouter::new(
+                authz_vpc.clone(),
                 router.id(),
                 LookupType::ById(router.id()),
             ),

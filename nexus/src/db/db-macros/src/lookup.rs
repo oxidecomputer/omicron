@@ -34,27 +34,6 @@ pub struct Input {
     /// unordered list of resources that are direct children of this resource
     /// (e.g., for a Project, these would include "Instance" and "Disk")
     children: Vec<String>,
-    /// describes how the authz object for a resource is constructed from its
-    /// parent's authz object
-    authz_kind: AuthzKind,
-}
-
-/// Describes how the authz object for a resource is constructed from its
-/// parent's authz object
-///
-/// By "authz object", we mean the objects in nexus/src/authz/api_resources.rs.
-///
-/// This ought to be made more uniform with more typed authz objects, but that's
-/// not the way they work today.
-#[derive(serde::Deserialize)]
-enum AuthzKind {
-    /// The authz object is constructed using
-    /// `authz_parent.child_generic(ResourceType, Uuid, LookupType)`
-    Generic,
-
-    /// The authz object is constructed using
-    /// `authz_parent.$resource_type(Uuid, LookupType)`.
-    Typed,
 }
 
 //
@@ -70,9 +49,6 @@ pub struct Config {
     // The resource itself that we're generating
     /// Basic information about the resource we're generating
     resource: Resource,
-
-    /// See [`AuthzKind`]
-    authz_kind: AuthzKind,
 
     // The path to the resource
     /// list of type names for this resource and its parents
@@ -113,7 +89,6 @@ impl Config {
 
         Config {
             resource,
-            authz_kind: input.authz_kind,
             path_types,
             path_authz_names,
             parent: input.ancestors.last().map(|s| Resource::for_name(&s)),
@@ -248,24 +223,6 @@ fn generate_misc_helpers(config: &Config) -> TokenStream {
     let parent_resource_name =
         config.parent.as_ref().map(|p| &p.name).unwrap_or(&fleet_name);
 
-    // Given a parent authz type, when we want to construct an authz object for
-    // a child resource, there are two different patterns.  We need to pick the
-    // right one.  For "typed" resources (`AuthzKind::Typed`), the parent
-    // resource has a method with the snake case name of the child resource.
-    // For example: `authz_organization.project()`.  For "generic" resources
-    // (`AuthzKind::Generic`), the parent has a function called `child_generic`
-    // that's used to construct all child resources, and there's an extra
-    // `ResourceType` argument to say what resource it is.
-    let (mkauthz_func, mkauthz_arg) = match &config.authz_kind {
-        AuthzKind::Generic => (
-            format_ident!("child_generic"),
-            quote! { ResourceType::#resource_name, },
-        ),
-        AuthzKind::Typed => {
-            (format_ident!("{}", config.resource.name_as_snake), quote! {})
-        }
-    };
-
     quote! {
         /// Build the `authz` object for this resource
         fn make_authz(
@@ -274,8 +231,7 @@ fn generate_misc_helpers(config: &Config) -> TokenStream {
             lookup_type: LookupType,
         ) -> authz::#resource_name {
             authz::#resource_name::new(
-            authz_parent.#mkauthz_func(
-                #mkauthz_arg
+                authz_parent.clone(),
                 db_row.id(),
                 lookup_type
             )
@@ -630,7 +586,6 @@ fn test_lookup_dump() {
             name = "Organization",
             ancestors = [],
             children = [ "Project" ],
-            authz_kind = Typed
         }
         .into(),
     )
@@ -642,7 +597,6 @@ fn test_lookup_dump() {
             name = "Project",
             ancestors = ["Organization"],
             children = [ "Disk", "Instance" ],
-            authz_kind = Typed
         }
         .into(),
     )

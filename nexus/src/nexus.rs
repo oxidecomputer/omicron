@@ -2373,8 +2373,8 @@ impl Nexus {
                 .fetch()
                 .await?;
 
-        let authz_vpc_router = authz_vpc.child_generic(
-            ResourceType::VpcRouter,
+        let authz_vpc_router = authz::VpcRouter::new(
+            authz_vpc.clone(),
             db_vpc.system_router_id,
             LookupType::ById(db_vpc.system_router_id),
         );
@@ -2984,8 +2984,11 @@ impl Nexus {
         opctx: &OpContext,
         rack_id: &Uuid,
     ) -> LookupResult<db::model::Rack> {
-        let authz_rack = authz::FLEET
-            .child_generic(ResourceType::Rack, LookupType::ById(*rack_id));
+        let authz_rack = authz::Rack::new(
+            authz::FLEET.clone(),
+            *rack_id,
+            LookupType::ById(*rack_id),
+        );
         opctx.authorize(authz::Action::Read, &authz_rack).await?;
 
         if *rack_id == self.rack_id {
@@ -3010,8 +3013,11 @@ impl Nexus {
         opctx: &OpContext,
         sled_id: &Uuid,
     ) -> LookupResult<db::model::Sled> {
-        let authz_sled =
-            authz::FLEET.sled(*sled_id, LookupType::ById(*sled_id));
+        let authz_sled = authz::Sled::new(
+            authz::FLEET.clone(),
+            *sled_id,
+            LookupType::ById(*sled_id),
+        );
         self.db_datastore.sled_fetch(&opctx, &authz_sled).await
     }
 

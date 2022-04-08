@@ -258,63 +258,54 @@ lookup_resource! {
     name = "Organization",
     ancestors = [],
     children = [ "Project" ],
-    authz_kind = Typed
 }
 
 lookup_resource! {
     name = "Project",
     ancestors = [ "Organization" ],
     children = [ "Disk", "Instance", "Vpc" ],
-    authz_kind = Typed
 }
 
 lookup_resource! {
     name = "Instance",
     ancestors = [ "Organization", "Project" ],
     children = [ "NetworkInterface" ],
-    authz_kind = Generic
 }
 
 lookup_resource! {
     name = "NetworkInterface",
     ancestors = [ "Organization", "Project", "Instance" ],
     children = [],
-    authz_kind = Generic
 }
 
 lookup_resource! {
     name = "Disk",
     ancestors = [ "Organization", "Project" ],
     children = [],
-    authz_kind = Generic
 }
 
 lookup_resource! {
     name = "Vpc",
     ancestors = [ "Organization", "Project" ],
     children = [ "VpcRouter", "VpcSubnet" ],
-    authz_kind = Generic
 }
 
 lookup_resource! {
     name = "VpcSubnet",
     ancestors = [ "Organization", "Project", "Vpc" ],
     children = [ ],
-    authz_kind = Generic
 }
 
 lookup_resource! {
     name = "VpcRouter",
     ancestors = [ "Organization", "Project", "Vpc" ],
     children = [ "RouterRoute" ],
-    authz_kind = Generic
 }
 
 lookup_resource! {
     name = "RouterRoute",
     ancestors = [ "Organization", "Project", "Vpc", "VpcRouter" ],
     children = [],
-    authz_kind = Generic
 }
 
 #[cfg(test)]
