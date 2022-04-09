@@ -23,8 +23,9 @@ use omicron_common::api::external::{Error, LookupType, ResourceType};
 use uuid::Uuid;
 
 // XXX-dap TODO-doc
-pub trait AuthzResourceInit: oso::PolarClass {
-    const POLAR_SNIPPET: &'static str;
+pub struct Init {
+    pub polar_snippet: &'static str,
+    pub polar_class: oso::Class,
 }
 
 /// Describes an authz resource that corresponds to an API resource that has a

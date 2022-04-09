@@ -171,6 +171,14 @@ pub fn authz_resource(
             pub fn id(&self) -> #primary_key_type {
                 self.key.clone()
             }
+
+            pub(super) fn init() -> Init {
+                use oso::PolarClass;
+                Init {
+                    polar_snippet: #polar_snippet,
+                    polar_class: #resource_name::get_polar_class(),
+                }
+            }
         }
 
         impl Eq for #resource_name {}
@@ -215,10 +223,6 @@ pub fn authz_resource(
                     .clone()
                     .into_not_found(ResourceType::#resource_name)
             }
-        }
-
-        impl AuthzResourceInit for #resource_name {
-            const POLAR_SNIPPET: &'static str = #polar_snippet;
         }
     })
 }
