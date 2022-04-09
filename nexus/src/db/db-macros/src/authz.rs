@@ -24,6 +24,22 @@ pub struct Input {
     primary_key: ParseWrapper<syn::Type>,
     /// Whether roles may be attached directly to this resource
     roles_allowed: bool,
+    /// How to generate the Polar snippet for this resource
+    polar_snippet: PolarSnippet,
+}
+
+/// How to generate the Polar snippet for this resource
+#[derive(serde::Deserialize)]
+enum PolarSnippet {
+    /// Don't generate it at all -- it's generated elsewhere
+    Custom,
+
+    /// Generate it as a global resource, manipulable only to administrators
+    FleetChild,
+
+    /// Generate it as a resource nested within a Project (either directly or
+    /// indirectly)
+    InProject,
 }
 
 /// Implementation of [`authz_resource!`]
@@ -33,7 +49,7 @@ pub fn authz_resource(
     let input = serde_tokenstream::from_tokenstream::<Input>(&raw_input)?;
     let resource_name = format_ident!("{}", input.name);
     let parent_resource_name = format_ident!("{}", input.parent);
-    let parent_as_snake = heck::AsSnakeCase(input.parent).to_string();
+    let parent_as_snake = heck::AsSnakeCase(&input.parent).to_string();
     let primary_key_type = &*input.primary_key;
     let (has_role_body, db_resource_body) = if input.roles_allowed {
         (
@@ -45,110 +61,93 @@ pub fn authz_resource(
     };
     // XXX-dap fail if roles_allowed and primary_key != Uuid
 
-    let polar_snippet_name = format_ident!(
-        "{}_POLAR",
-        heck::AsShoutySnakeCase(input.name).to_string()
-    );
-    // XXX-dap concrete proposed steps:
-    //
-    // - let's not try to change how this works with this change.  most
-    //   importantly: it'll still be the case that things inside a Project
-    //   "roll up" to the Project-level roles, rather than having their own
-    // - to make this possible, let's say that the macro requires another input,
-    //   which is a PolarSnippet enum, which is one of "Custom" and
-    //   "ProjectResource".  It uses this to generate one of three Polar
-    //   snippets for this resource:
-    //   - Custom: generates nothing -- assume the real content is in the
-    //     hardcoded omicron.polar file.  We'll use this for everything that's
-    //     not inside a Project.
-    //   - ProjectResource, when parent = "Project"
-    //   - ProjectResource, when parent != "Project": define a relation between
-    //     this thing and containing_project that relies on the _parent's_
-    //     relation to the containing project.  Permissions are defined in terms
-    //     of this relationship.  (there's still a separate relationship to the
-    //     parent.)
-    // - to make initialization less nightmarish, we could define a trait that's
-    //   a subtrait of "oso::PolarClass" that has one thing: a const String
-    //   Polar snippet (or maybe an Option).  Then during initialization, we
-    //   have a Vec of these, and for each one, we register the class _and_
-    //   append its snippet.
-    //
-    // XXX-dap There are some problems with the Polar snippet here:
-    // - This is currently intended for things inside a project, though
-    //   we also use it for Racks, Users, and Roles.  We *don't* use it for
-    //   Sleds -- see the comment in omicron.polar about why
-    // - One difference from what was before this change: for all the resources
-    //   underneath Projects, we're defining roles on them.  If we didn't do
-    //   this, then things two levels beneath Projects wouldn't work -- the
-    //   rules for VpcSubnets will reference various roles on the parent, so Vpc
-    //   needs to have those roles.  An alternative would be: for things inside
-    //   a Project, we define a relationship between the thing and its
-    //   containing Project.  We could define that as:
-    //   - at the level immediately beneath Project: resource.project = project
-    //   - at the levels below that: has_relation(project, "containing_project",
-    //     resource.$parent).
-    //   This seems truer to what we're really intending.
-    //
-    // All of this, plus the note in omicron.polar, suggest that this Polar
-    // snippet needs to be a little more configurable in some way.  We have a
-    // few different cases:
-    //
-    // - [Silo, ]Fleet, Organization, Project: probably want this to be fully
-    //   custom
-    // - things immediately inside the Project: fully generated based on Project
-    //   roles
-    // - things further below the Project: fully generated based on Project
-    //   roles, but different from the previous category (maybe just in the
-    //   implementation of `has_relation(_, "containing_project", _)`.
-    // - things outside of the main hierarchy (roles, users, sleds, racks)
-    //   - Should these be fully custom too?  It's not yet clear what the
-    //     patterns are going to be for these.
-    //
-    // That means we somehow have to know this with the input to this macro.
-    //
-    // Also worth asking at this point: is the special-casing of Project roles
-    // actually helping us at this point?  _Would_ it be better to say in this
-    // policy file that roles can exist for every resource and roles are
-    // inherited as below?  If we go _this_ route, we should definitely think
-    // about whether the composition makes sense the way we've defined it (i.e.,
-    // is it _always_ true that you should get "modify" if you have "modify" on
-    // the parent?)
-    let polar_snippet = format!(
-        r#"
-        resource {} {{
-        	permissions = [
-        		"list_children",
-        		"modify",
-        		"read",
-        		"create_child",
-        	];
+    let polar_snippet = match (input.polar_snippet, input.parent.as_str()) {
+        (PolarSnippet::Custom, _) => String::new(),
 
-                roles = [ "admin", "collaborator", "viewer" ];
-                "admin" if "admin" on "parent";
-                "collaborator" if "collaborator" on "parent";
-                "viewer" if "viewer" on "parent";
+        // The FleetChild case is similar to the InProject case, but we require
+        // a different role (and, of course, the parent is the Fleet)
+        (PolarSnippet::FleetChild, _) => format!(
+            r#"
+                resource {} {{
+                    permissions = [
+                        "list_children",
+                        "modify",
+                        "read",
+                        "create_child",
+                    ];
+                    
+                    relations = {{ parent_fleet: Fleet }};
+                    "list_children" if "viewer" on "parent_fleet";
+                    "read" if "viewer" on "parent_fleet";
+                    "modify" if "admin" on "parent_fleet";
+                    "create_child" if "admin" on "parent_fleet";
+                }}
+                has_relation(fleet: Fleet, "parent_fleet", child: {})
+                    if child.fleet = fleet;
+            "#,
+            resource_name, resource_name,
+        ),
 
-        	relations = {{ parent: {} }};
-        	"list_children" if "viewer" on "parent";
-        	"read" if "viewer" on "parent";
-        
-        	"modify" if "collaborator" on "parent";
-        	"create_child" if "collaborator" on "parent";
-        }}
+        (PolarSnippet::InProject, "Project") => format!(
+            r#"
+                resource {} {{
+                    permissions = [
+                        "list_children",
+                        "modify",
+                        "read",
+                        "create_child",
+                    ];
 
-        has_relation(parent: {}, "parent", child: {})
-        	if child.{} = parent;
-    "#,
-        resource_name,
-        parent_resource_name,
-        parent_resource_name,
-        resource_name,
-        parent_as_snake,
-    );
+                    relations = {{ containing_project: Project }};
+                    "list_children" if "viewer" on "containing_project";
+                    "read" if "viewer" on "containing_project";
+                    "modify" if "collaborator" on "containing_project";
+                    "create_child" if "collaborator" on "containing_project";
+                }}
+
+                has_relation(parent: Project, "containing_project", child: {})
+                        if child.project = parent;
+            "#,
+            resource_name, resource_name,
+        ),
+
+        (PolarSnippet::InProject, _) => format!(
+            r#"
+                resource {} {{
+                    permissions = [
+                        "list_children",
+                        "modify",
+                        "read",
+                        "create_child",
+                    ];
+
+                    relations = {{
+                        containing_project: Project,
+                        parent: {}
+                    }};
+                    "list_children" if "viewer" on "containing_project";
+                    "read" if "viewer" on "containing_project";
+                    "modify" if "collaborator" on "containing_project";
+                    "create_child" if "collaborator" on "containing_project";
+                }}
+
+                has_relation(project: Project, "containing_project", child: {})
+                    if has_relation(project, "containing_project", child.{});
+
+                has_relation(parent: {}, "parent", child: {})
+                    if child.{} = parent;
+            "#,
+            resource_name,
+            parent_resource_name,
+            resource_name,
+            parent_as_snake,
+            parent_resource_name,
+            resource_name,
+            parent_as_snake,
+        ),
+    };
 
     Ok(quote! {
-        pub const #polar_snippet_name: &str = #polar_snippet;
-
         #[derive(Clone, Debug)]
         pub struct #resource_name {
             parent: #parent_resource_name,
@@ -217,6 +216,10 @@ pub fn authz_resource(
                     .into_not_found(ResourceType::#resource_name)
             }
         }
+
+        impl AuthzResourceInit for #resource_name {
+            const POLAR_SNIPPET: &'static str = #polar_snippet;
+        }
     })
 }
 
@@ -229,7 +232,8 @@ fn test_authz_dump() {
             name = "Organization",
             parent = "Fleet",
             primary_key = Uuid,
-            roles_allowed = false
+            roles_allowed = false,
+            polar_snippet = Custom,
         }
         .into(),
     )

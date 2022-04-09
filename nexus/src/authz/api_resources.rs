@@ -22,6 +22,11 @@ use futures::FutureExt;
 use omicron_common::api::external::{Error, LookupType, ResourceType};
 use uuid::Uuid;
 
+// XXX-dap TODO-doc
+pub trait AuthzResourceInit: oso::PolarClass {
+    const POLAR_SNIPPET: &'static str;
+}
+
 /// Describes an authz resource that corresponds to an API resource that has a
 /// corresponding ResourceType and is stored in the database
 pub trait ApiResource: Clone + Send + Sync + 'static {
@@ -170,6 +175,7 @@ authz_resource! {
     parent = "Fleet",
     primary_key = Uuid,
     roles_allowed = true,
+    polar_snippet = Custom,
 }
 
 authz_resource! {
@@ -177,6 +183,7 @@ authz_resource! {
     parent = "Organization",
     primary_key = Uuid,
     roles_allowed = true,
+    polar_snippet = Custom,
 }
 
 authz_resource! {
@@ -184,6 +191,7 @@ authz_resource! {
     parent = "Project",
     primary_key = Uuid,
     roles_allowed = false,
+    polar_snippet = InProject,
 }
 
 authz_resource! {
@@ -191,6 +199,7 @@ authz_resource! {
     parent = "Project",
     primary_key = Uuid,
     roles_allowed = false,
+    polar_snippet = InProject,
 }
 
 authz_resource! {
@@ -198,6 +207,7 @@ authz_resource! {
     parent = "Instance",
     primary_key = Uuid,
     roles_allowed = false,
+    polar_snippet = InProject,
 }
 
 authz_resource! {
@@ -205,6 +215,7 @@ authz_resource! {
     parent = "Project",
     primary_key = Uuid,
     roles_allowed = false,
+    polar_snippet = InProject,
 }
 
 authz_resource! {
@@ -212,6 +223,7 @@ authz_resource! {
     parent = "Vpc",
     primary_key = Uuid,
     roles_allowed = false,
+    polar_snippet = InProject,
 }
 
 authz_resource! {
@@ -219,6 +231,7 @@ authz_resource! {
     parent = "VpcRouter",
     primary_key = Uuid,
     roles_allowed = false,
+    polar_snippet = InProject,
 }
 
 authz_resource! {
@@ -226,6 +239,7 @@ authz_resource! {
     parent = "Vpc",
     primary_key = Uuid,
     roles_allowed = false,
+    polar_snippet = InProject,
 }
 
 // Miscellaneous resources nested directly below "Fleet"
@@ -235,6 +249,7 @@ authz_resource! {
     parent = "Fleet",
     primary_key = (String, String),
     roles_allowed = false,
+    polar_snippet = FleetChild,
 }
 
 authz_resource! {
@@ -242,6 +257,7 @@ authz_resource! {
     parent = "Fleet",
     primary_key = Name,
     roles_allowed = false,
+    polar_snippet = FleetChild,
 }
 
 authz_resource! {
@@ -249,6 +265,7 @@ authz_resource! {
     parent = "Fleet",
     primary_key = Uuid,
     roles_allowed = false,
+    polar_snippet = FleetChild,
 }
 
 authz_resource! {
@@ -256,4 +273,5 @@ authz_resource! {
     parent = "Fleet",
     primary_key = Uuid,
     roles_allowed = false,
+    polar_snippet = FleetChild,
 }
