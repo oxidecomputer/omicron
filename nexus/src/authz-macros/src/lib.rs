@@ -2,23 +2,132 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! Procedure macro for generating authz structures and related impls
-//!
-//! See nexus/src/authz/api_resources.rs
+//! Authz-related macro implementations
+//! XXX-dap move to authz module
 
-// XXX-dap consider whether this should be upleveled to `resource-macros`?
+extern crate proc_macro;
 
 use proc_macro2::TokenStream;
 use quote::{format_ident, quote};
 use serde_tokenstream::ParseWrapper;
 
+/// Defines a structure and helpers for describing an API resource for authz
+///
+/// For context, see the module-level documentation for `omicron-nexus::authz`.
+///
+/// See [`Input`] for arguments to this macro.
+///
+/// # Examples
+///
+/// ## Resource that users can directly share with other users
+///
+/// This example generates `authz::Organization`:
+///
+/// ```
+/// # use uuid::Uuid;
+/// authz_resource! {
+///     name = "Organization",
+///     parent = "Fleet",
+///     primary_key = Uuid,
+///     roles_allowed = true,
+///     polar_snippet = Custom,
+/// }
+/// ```
+///
+/// This is a pretty high-level resource and users will be allowed to assign
+/// roles directly to it.  The Polar snippet for it is totally custom and
+/// contained in the "omicron.polar" base file.
+///
+/// ## Resource within a Project
+///
+/// We do not yet support assigning roles to resources below the Project level.
+/// For these, we use an auto-generated "in-project" Polar snippet:
+///
+/// ```
+/// # use uuid::Uuid;
+/// authz_resource! {
+///     name = "Instance",
+///     parent = "Project",
+///     primary_key = Uuid,
+///     roles_allowed = false,
+///     polar_snippet = InProject,
+/// }
+/// ```
+///
+/// It's the same for resources whose parent is not "Project", but something
+/// else that itself is under a Project:
+///
+/// ```
+/// # use uuid::Uuid;
+/// authz_resource! {
+///     name = "VpcRouter",
+///     parent = "Vpc",
+///     primary_key = Uuid,
+///     roles_allowed = false,
+///     polar_snippet = InProject,
+/// }
+/// ```
+///
+/// ## Resources outside the Organization / Project hierarchy
+///
+/// Many resources today are not part of the main Organization / Project
+/// hierarchy.  In some cases it's still TBD how we intend to structure the
+/// roles for these resources.  They generally live directly under the `Fleet`
+/// and require "fleet.admin" to do anything with them.  Here's an example:
+///
+/// ```
+/// # use authz_macros::authz_resource;
+/// # use uuid::Uuid;
+///
+/// authz_resource! {
+///     name = "Rack",
+///     parent = "Fleet",
+///     primary_key = Uuid,
+///     roles_allowed = false,
+///     polar_snippet = FleetChild,
+/// }
+/// ```
+///
+/// ## Resources with non-id primary keys
+///
+/// Most API resources use "id" (a Uuid) as an immutable, unique identifier.
+/// Some don't, though, and that's supported too:
+///
+/// ```
+/// # use authz_macros::authz_resource;
+/// # use uuid::Uuid;
+///
+/// authz_resource! {
+///     name = "Role",
+///     parent = "Fleet",
+///     primary_key = (String, String),
+///     roles_allowed = false,
+///     polar_snippet = FleetChild,
+/// }
+/// ```
+// Allow private intra-doc links.  This is useful because the `Input` struct
+// cannot be exported (since we're a proc macro crate, and we can't expose
+// a struct), but its documentation is very useful.
+#[allow(rustdoc::private_intra_doc_links)]
+#[proc_macro]
+pub fn authz_resource(
+    input: proc_macro::TokenStream,
+) -> proc_macro::TokenStream {
+    match do_authz_resource(input.into()) {
+        Ok(output) => output.into(),
+        Err(error) => error.to_compile_error().into(),
+    }
+}
+
 /// Arguments for [`authz_resource!`]
-// NOTE: this is only "pub" for the `cargo doc` link on [`authz_resource!`].
 #[derive(serde::Deserialize)]
-pub struct Input {
+struct Input {
     /// Name of the resource
+    ///
+    /// This much match a corresponding variant of the `ResourceType` enum.
+    /// It's usually PascalCase.
     name: String,
-    /// Name of the parent resource
+    /// Name of the parent `authz` resource
     parent: String,
     /// Rust type for the primary key for this resource
     primary_key: ParseWrapper<syn::Type>,
@@ -43,7 +152,7 @@ enum PolarSnippet {
 }
 
 /// Implementation of [`authz_resource!`]
-pub fn authz_resource(
+fn do_authz_resource(
     raw_input: TokenStream,
 ) -> Result<TokenStream, syn::Error> {
     let input = serde_tokenstream::from_tokenstream::<Input>(&raw_input)?;
@@ -53,7 +162,13 @@ pub fn authz_resource(
     let primary_key_type = &*input.primary_key;
     let (has_role_body, db_resource_body) = if input.roles_allowed {
         (
-            quote! { actor.has_role_resource(ResourceType::#resource_name, r.key, &role) },
+            quote! {
+                actor.has_role_resource(
+                    ResourceType::#resource_name,
+                    r.key,
+                    &role
+                )
+            },
             quote! { Some((ResourceType::#resource_name, self.key)) },
         )
     } else {
@@ -87,6 +202,8 @@ pub fn authz_resource(
             resource_name, resource_name,
         ),
 
+        // If this resource is directly inside a Project, we only need to define
+        // permissions that are contingent on having roles on that Project.
         (PolarSnippet::InProject, "Project") => format!(
             r#"
                 resource {} {{
@@ -110,6 +227,11 @@ pub fn authz_resource(
             resource_name, resource_name,
         ),
 
+        // If this resource is nested under something else within the Project,
+        // we need to define both the "parent" relationship and the (indirect)
+        // relationship to the containing Project.  Permissions are still
+        // contingent on having roles on the Project, but to get to the Project,
+        // we have to go through the parent resource.
         (PolarSnippet::InProject, _) => format!(
             r#"
                 resource {} {{
@@ -146,7 +268,17 @@ pub fn authz_resource(
         ),
     };
 
+    let doc_struct = format!(
+        "`authz` type for a {}\
+        \
+        Used to uniquely identify a {} across renames, moves, etc., and to do \
+        authorization checks (see [`crate::context::OpContext::authorize()`]).\
+        See [`crate::authz`] module-level documentation for more information.",
+        resource_name
+    );
+
     Ok(quote! {
+        #[doc = #doc_struct]
         #[derive(Clone, Debug)]
         pub struct #resource_name {
             parent: #parent_resource_name,
@@ -155,6 +287,9 @@ pub fn authz_resource(
         }
 
         impl #resource_name {
+            /// Makes a new `authz` struct for this resource with the given
+            /// `parent`, unique key `key`, looked up as described by
+            /// `lookup_type`
             pub fn new(
                 parent: #parent_resource_name,
                 key: #primary_key_type,
@@ -171,6 +306,7 @@ pub fn authz_resource(
                 self.key.clone()
             }
 
+            /// Describes how to register this type with Oso
             pub(super) fn init() -> Init {
                 use oso::PolarClass;
                 Init {
@@ -230,7 +366,7 @@ pub fn authz_resource(
 #[cfg(test)]
 #[test]
 fn test_authz_dump() {
-    let output = authz_resource(
+    let output = do_authz_resource(
         quote! {
             name = "Organization",
             parent = "Fleet",
