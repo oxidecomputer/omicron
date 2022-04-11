@@ -22,8 +22,7 @@ use serde_tokenstream::ParseWrapper;
 ///
 /// This example generates `authz::Organization`:
 ///
-/// ```
-/// # use uuid::Uuid;
+/// ```ignore
 /// authz_resource! {
 ///     name = "Organization",
 ///     parent = "Fleet",
@@ -42,8 +41,7 @@ use serde_tokenstream::ParseWrapper;
 /// We do not yet support assigning roles to resources below the Project level.
 /// For these, we use an auto-generated "in-project" Polar snippet:
 ///
-/// ```
-/// # use uuid::Uuid;
+/// ```ignore
 /// authz_resource! {
 ///     name = "Instance",
 ///     parent = "Project",
@@ -56,8 +54,7 @@ use serde_tokenstream::ParseWrapper;
 /// It's the same for resources whose parent is not "Project", but something
 /// else that itself is under a Project:
 ///
-/// ```
-/// # use uuid::Uuid;
+/// ```ignore
 /// authz_resource! {
 ///     name = "VpcRouter",
 ///     parent = "Vpc",
@@ -74,9 +71,7 @@ use serde_tokenstream::ParseWrapper;
 /// roles for these resources.  They generally live directly under the `Fleet`
 /// and require "fleet.admin" to do anything with them.  Here's an example:
 ///
-/// ```
-/// # use uuid::Uuid;
-///
+/// ```ignore
 /// authz_resource! {
 ///     name = "Rack",
 ///     parent = "Fleet",
@@ -91,9 +86,7 @@ use serde_tokenstream::ParseWrapper;
 /// Most API resources use "id" (a Uuid) as an immutable, unique identifier.
 /// Some don't, though, and that's supported too:
 ///
-/// ```
-/// # use uuid::Uuid;
-///
+/// ```ignore
 /// authz_resource! {
 ///     name = "Role",
 ///     parent = "Fleet",
