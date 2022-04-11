@@ -8,6 +8,7 @@
 
 use proc_macro2::TokenStream;
 use quote::{format_ident, quote};
+use serde_tokenstream::ParseWrapper;
 
 //
 // INPUT (arguments to the macro)
@@ -34,6 +35,45 @@ pub struct Input {
     /// unordered list of resources that are direct children of this resource
     /// (e.g., for a Project, these would include "Instance" and "Disk")
     children: Vec<String>,
+    // what kinds of lookup should be supported
+    // XXX-dap would be nice to replace this with Vec<SupportedLookup> enum.
+    // That requires implementing non-unit variant support in serde_tokenstream.
+    lookup_by_name_in_parent: bool,
+    lookup_by_primary_key: Option<ParseWrapper<syn::Type>>,
+}
+
+// XXX-dap working here:
+// - the next step is to try to _do_ something with the SupportedLookup
+//   variants.  Skimming the code, the obvious impact is to
+//   generate_lookup_methods().  But looking at functions like fetch_for():
+//   they're doing a `match` on two variants of `Key`: `Id` and `Name`.  That's
+//   not really right any more.  For something that only supports a ById lookup,
+//   there shouldn't be a `Name` variant.  And for something by `Id`, the id's
+//   datum's type is going to vary.
+//   some ideas:
+//   - Just panic in the branches that don't apply.  My intuition/experience
+//     is that this is a road to sadness.
+//   - Create a couple of other enums: KeyIdOnly (only has "id" variant),
+//     KeyNameOnly (has no "id" variant) and use the right one in each class.
+//   - Create a new enum for each class.  This seems to separate concerns
+//     better.
+//   - Don't use an enum at all unless we support both lookups
+//     - internally (and maybe externally), instead of an array with supported
+//       lookups, it could be an enum with values ByIdOnly(IdType),
+//       ByNameInParentCollectionOnly, ByIdOrNameInParentCollection(IdType).
+//     - maybe: it's easy enough to factor out the contents of the match arms.
+//       We generate a match only for the third variant.
+//       - This improves the behavior for one class of user input error: suppose
+//         somebody defines a resource Foo that does _not_ support lookup by
+//         name, but they mistakenly put Foo in the "children" list of some
+//         other resource.  Then that resource will have a "foo_name()" function
+//         that will construct a Foo lookup by name -- which is invalid!  That
+//         would trigger a panic if we took approach 1 above.  Now, this will at
+//         least fail to compile.
+
+enum SupportedLookup {
+    PrimaryKey(syn::Type),
+    ByNameWithinParent,
 }
 
 //
@@ -68,6 +108,9 @@ pub struct Config {
     // Parent resource, if any
     /// Information about the parent resource, if any
     parent: Option<Resource>,
+
+    /// Supported lookups
+    supported_lookups: Vec<SupportedLookup>,
 }
 
 impl Config {
@@ -87,12 +130,24 @@ impl Config {
             .collect();
         path_authz_names.push(resource.authz_name.clone());
 
+        let child_resources = input.children;
+        let parent = input.ancestors.last().map(|s| Resource::for_name(&s));
+        let mut supported_lookups = Vec::new();
+        if input.lookup_by_name_in_parent {
+            supported_lookups.push(SupportedLookup::ByNameWithinParent);
+        }
+        if let Some(pkey_type) = input.lookup_by_primary_key {
+            supported_lookups
+                .push(SupportedLookup::PrimaryKey(pkey_type.into_inner()));
+        }
+
         Config {
             resource,
             path_types,
             path_authz_names,
-            parent: input.ancestors.last().map(|s| Resource::for_name(&s)),
-            child_resources: input.children,
+            parent,
+            child_resources,
+            supported_lookups,
         }
     }
 }
@@ -584,8 +639,10 @@ fn test_lookup_dump() {
     let output = lookup_resource(
         quote! {
             name = "Organization",
-            ancestors = [],
+            ancestors = ["Silo"],
             children = [ "Project" ],
+            lookup_by_name_in_parent = true,
+            lookup_by_primary_key = Some(Uuid),
         }
         .into(),
     )
@@ -597,6 +654,8 @@ fn test_lookup_dump() {
             name = "Project",
             ancestors = ["Organization"],
             children = [ "Disk", "Instance" ],
+            lookup_by_name_in_parent = true,
+            lookup_by_primary_key = Some(Uuid),
         }
         .into(),
     )
