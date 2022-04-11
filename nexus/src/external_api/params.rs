@@ -433,6 +433,19 @@ pub struct UserBuiltinCreate {
     pub identity: IdentityMetadataCreateParams,
 }
 
+// SSH PUBLIC KEYS
+//
+// The SSH key mangement endpoints are currently under `/session/me`,
+// and so have an implicit silo user ID which must be passed seperately
+// to the creation routine. Note that this disagrees with RFD 44.
+
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct SshKeyCreate {
+    #[serde(flatten)]
+    pub identity: IdentityMetadataCreateParams,
+    pub public_key: String, // e.g., "ssh-ed25519 AAAAC3NzaC..."
+}
+
 #[cfg(test)]
 mod test {
     use super::*;

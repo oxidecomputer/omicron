@@ -304,7 +304,7 @@ impl<'a> LookupPath<'a> {
         Silo { key: SiloKey::PrimaryKey(Root { lookup_root: self }, id) }
     }
 
-    /// Select a resource of type Silo, identified by its id
+    /// Select a resource of type Silo, identified by its name
     pub fn silo_name<'b, 'c>(self, name: &'b Name) -> Silo<'c>
     where
         'a: 'c,
@@ -323,6 +323,31 @@ impl<'a> LookupPath<'a> {
     /// Select a resource of type Sled, identified by its id
     pub fn sled_id(self, id: Uuid) -> Sled<'a> {
         Sled { key: SledKey::PrimaryKey(Root { lookup_root: self }, id) }
+    }
+
+    /// Select a resource of type SshKey, identified by its id
+    pub fn ssh_key_id(self, id: Uuid) -> SshKey<'a> {
+        SshKey { key: SshKeyKey::PrimaryKey(Root { lookup_root: self }, id) }
+    }
+
+    /// Select a resource of type SshKey, identified by its name
+    pub fn ssh_key_name<'b, 'c>(self, name: &'b Name) -> SshKey<'c>
+    where
+        'a: 'c,
+        'b: 'c,
+    {
+        let key = match self.opctx.authn.actor_required() {
+            Ok(actor) => {
+                let root = Root { lookup_root: self };
+                let silo_user_key = SiloUserKey::PrimaryKey(root, actor.id);
+                SshKeyKey::Name(SiloUser { key: silo_user_key }, name)
+            }
+            Err(error) => {
+                let root = Root { lookup_root: self };
+                SshKeyKey::Error(root, error)
+            }
+        };
+        SshKey { key }
     }
 
     /// Select a resource of type UpdateAvailableArtifact, identified by its
@@ -377,6 +402,24 @@ lookup_resource! {
     name = "Silo",
     ancestors = [],
     children = [ "Organization" ],
+    lookup_by_name = true,
+    soft_deletes = true,
+    primary_key_columns = [ { column_name = "id", rust_type = Uuid } ]
+}
+
+lookup_resource! {
+    name = "SiloUser",
+    ancestors = [ "Silo" ],
+    children = [ "SshKey" ],
+    lookup_by_name = false,
+    soft_deletes = true,
+    primary_key_columns = [ { column_name = "id", rust_type = Uuid } ]
+}
+
+lookup_resource! {
+    name = "SshKey",
+    ancestors = [ "Silo", "SiloUser" ],
+    children = [],
     lookup_by_name = true,
     soft_deletes = true,
     primary_key_columns = [ { column_name = "id", rust_type = Uuid } ]
@@ -486,15 +529,6 @@ lookup_resource! {
         { column_name = "resource_type", rust_type = String },
         { column_name = "role_name", rust_type = String },
     ]
-}
-
-lookup_resource! {
-    name = "SiloUser",
-    ancestors = [],
-    children = [],
-    lookup_by_name = false,
-    soft_deletes = true,
-    primary_key_columns = [ { column_name = "id", rust_type = Uuid } ]
 }
 
 lookup_resource! {

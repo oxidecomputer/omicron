@@ -15,6 +15,7 @@ use crate::db::model::DatasetKind;
 use crate::db::model::Name;
 use crate::db::model::RouterRoute;
 use crate::db::model::SiloUser;
+use crate::db::model::SshKey;
 use crate::db::model::UpdateArtifactKind;
 use crate::db::model::VpcRouter;
 use crate::db::model::VpcRouterKind;
@@ -3665,6 +3666,57 @@ impl Nexus {
             .fetch()
             .await?;
         Ok(db_silo_user)
+    }
+
+    // SSH public keys
+
+    /// Following GitHub, we do not bother to authorize this request.
+    /// After all, they are *public* keys.
+    pub async fn ssh_keys_list(
+        &self,
+        _opctx: &OpContext,
+        silo_user_id: Uuid,
+        page_params: &DataPageParams<'_, Uuid>,
+    ) -> ListResultVec<SshKey> {
+        self.db_datastore.ssh_keys_list(silo_user_id, page_params).await
+    }
+
+    pub async fn ssh_key_fetch(
+        &self,
+        opctx: &OpContext,
+        ssh_key_name: &Name,
+    ) -> LookupResult<SshKey> {
+        let (.., ssh_key) = LookupPath::new(opctx, &self.datastore())
+            .ssh_key_name(ssh_key_name)
+            .fetch()
+            .await?;
+        assert_eq!(ssh_key.name(), ssh_key_name);
+        Ok(ssh_key)
+    }
+
+    pub async fn ssh_key_create(
+        &self,
+        _opctx: &OpContext,
+        silo_user_id: Uuid,
+        params: params::SshKeyCreate,
+    ) -> CreateResult<db::model::SshKey> {
+        let ssh_key = db::model::SshKey::new(silo_user_id, params);
+        Ok(self.db_datastore.ssh_key_create(ssh_key).await?)
+    }
+
+    pub async fn ssh_key_delete(
+        &self,
+        opctx: &OpContext,
+        ssh_key_name: &Name,
+    ) -> DeleteResult {
+        let (.., authz_ssh_key, ssh_key) =
+            LookupPath::new(opctx, &self.datastore())
+                .ssh_key_name(ssh_key_name)
+                .fetch()
+                .await?;
+        assert_eq!(ssh_key.name(), ssh_key_name);
+
+        self.db_datastore.ssh_key_delete(opctx, &authz_ssh_key).await
     }
 }
 

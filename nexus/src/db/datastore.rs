@@ -42,8 +42,8 @@ use crate::db::{
         Name, NetworkInterface, Organization, OrganizationUpdate, OximeterInfo,
         ProducerEndpoint, Project, ProjectUpdate, Region,
         RoleAssignmentBuiltin, RoleBuiltin, RouterRoute, RouterRouteUpdate,
-        Silo, SiloUser, Sled, UpdateAvailableArtifact, UserBuiltin, Volume,
-        Vpc, VpcFirewallRule, VpcRouter, VpcRouterUpdate, VpcSubnet,
+        Silo, SiloUser, Sled, SshKey, UpdateAvailableArtifact, UserBuiltin,
+        Volume, Vpc, VpcFirewallRule, VpcRouter, VpcRouterUpdate, VpcSubnet,
         VpcSubnetUpdate, VpcUpdate, Zpool,
     },
     pagination::paginated,
@@ -2679,6 +2679,70 @@ impl DataStore {
             }),
         }
     }
+
+    // SSH public keys
+
+    pub async fn ssh_keys_list(
+        &self,
+        silo_user_id: Uuid,
+        page_params: &DataPageParams<'_, Uuid>,
+    ) -> ListResultVec<SshKey> {
+        use db::schema::ssh_key::dsl;
+
+        paginated(dsl::ssh_key, dsl::id, page_params)
+            .filter(dsl::silo_user_id.eq(silo_user_id))
+            .filter(dsl::time_deleted.is_null())
+            .select(SshKey::as_select())
+            .load_async(self.pool())
+            .await
+            .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
+    }
+
+    /// Create a new SSH public key for a user.
+    pub async fn ssh_key_create(
+        &self,
+        ssh_key: SshKey,
+    ) -> CreateResult<SshKey> {
+        use db::schema::ssh_key::dsl;
+
+        diesel::insert_into(dsl::ssh_key)
+            .values(ssh_key)
+            .returning(SshKey::as_returning())
+            .get_result_async(self.pool())
+            .await
+            .map_err(|e| {
+                Error::internal_error(&format!(
+                    "error creating SSH key: {:?}",
+                    e
+                ))
+            })
+    }
+
+    /// Delete an existing SSH public key.
+    pub async fn ssh_key_delete(
+        &self,
+        opctx: &OpContext,
+        authz_ssh_key: &authz::SshKey,
+    ) -> DeleteResult {
+        opctx.authorize(authz::Action::Delete, authz_ssh_key).await?;
+
+        use db::schema::ssh_key::dsl;
+
+        let now = Utc::now();
+        diesel::update(dsl::ssh_key)
+            .filter(dsl::id.eq(authz_ssh_key.id()))
+            .filter(dsl::time_deleted.is_null())
+            .set(dsl::time_deleted.eq(now))
+            .execute_async(self.pool_authorized(opctx).await?)
+            .await
+            .map_err(|e| {
+                public_error_from_diesel_pool(
+                    e,
+                    ErrorHandler::NotFoundByResource(authz_ssh_key),
+                )
+            })?;
+        Ok(())
+    }
 }
 
 /// Constructs a DataStore for use in test suites that has preloaded the
@@ -2801,7 +2865,7 @@ mod test {
         // Associate silo with user
         let silo_user = datastore
             .silo_user_create(SiloUser::new(
-                Uuid::new_v4(), /* silo id */
+                *SILO_ID,
                 silo_user_id,
             ))
             .await
@@ -3266,6 +3330,63 @@ mod test {
         assert_eq!(ip, expected_ip);
 
         let _ = db.cleanup().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn test_ssh_keys() {
+        let logctx = dev::test_setup_log("test_ssh_keys");
+        let mut db = test_setup_database(&logctx.log).await;
+        let (opctx, datastore) = datastore_test(&logctx, &db).await;
+
+        // Create a new Silo user so that we can lookup their keys.
+        let silo_user_id = Uuid::new_v4();
+        let silo_user = datastore
+            .silo_user_create(SiloUser::new(*SILO_ID, silo_user_id))
+            .await
+            .unwrap();
+        assert_eq!(silo_user.id(), silo_user_id);
+
+        // Create a new SSH public key for the new user.
+        let public_key = "ssh-test AAAAAAAAKEY".to_string();
+        let ssh_key = SshKey::new(
+            silo_user_id,
+            params::SshKeyCreate {
+                identity: IdentityMetadataCreateParams {
+                    name: "sshkey".parse().unwrap(),
+                    description: "my SSH public key".to_string(),
+                },
+                public_key,
+            },
+        );
+        let created = datastore.ssh_key_create(ssh_key.clone()).await.unwrap();
+        assert_eq!(created.silo_user_id, ssh_key.silo_user_id);
+        assert_eq!(created.public_key, ssh_key.public_key);
+
+        // Lookup the key we just created.
+        let (authz_silo, authz_silo_user, authz_ssh_key, found) =
+            LookupPath::new(&opctx, &datastore)
+                .ssh_key_id(ssh_key.id())
+                .fetch()
+                .await
+                .unwrap();
+        assert_eq!(authz_silo.id(), *SILO_ID);
+        assert_eq!(authz_silo_user.id(), silo_user_id);
+        assert_eq!(found.silo_user_id, ssh_key.silo_user_id);
+        assert_eq!(found.public_key, ssh_key.public_key);
+
+        // Trying to insert the same one again fails.
+        let duplicate = datastore.ssh_key_create(ssh_key.clone()).await;
+        assert!(matches!(
+            duplicate,
+            Err(Error::InternalError { internal_message: _ })
+        ));
+
+        // Delete the key we just created.
+        datastore.ssh_key_delete(&opctx, &authz_ssh_key).await.unwrap();
+
+        // Clean up.
+        db.cleanup().await.unwrap();
         logctx.cleanup_successful();
     }
 }

@@ -217,6 +217,33 @@ CREATE TABLE omicron.public.silo_user (
 );
 
 /*
+ * Users' public SSH keys, per RFD 44
+ */
+CREATE TABLE omicron.public.ssh_key (
+    id UUID PRIMARY KEY,
+    name STRING(63) NOT NULL,
+    description STRING(512) NOT NULL,
+    time_created TIMESTAMPTZ NOT NULL,
+    time_modified TIMESTAMPTZ NOT NULL,
+    time_deleted TIMESTAMPTZ,
+
+    /* FK into silo_user table */
+    silo_user_id UUID NOT NULL,
+
+    /*
+     * A 4096 bit RSA key without comment encodes to 726 ASCII characters.
+     * A (256 bit) Ed25519 key w/o comment encodes to 82 ASCII characters.
+     */
+    public_key STRING(1023) NOT NULL
+);
+
+CREATE UNIQUE INDEX ON omicron.public.ssh_key (
+    silo_user_id,
+    name
+) WHERE
+    time_deleted IS NULL;
+
+/*
  * Organizations
  */
 

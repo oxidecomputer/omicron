@@ -104,6 +104,12 @@
         "url": "http://oxide.computer/docs/#xxx"
       }
     },
+    "sshkeys": {
+      "description": "Public SSH keys for an individual user",
+      "external_docs": {
+        "url": "http://oxide.computer/docs/#xxx"
+      }
+    },
     "subnets": {
       "description": "This tag should be moved into a generic network tag",
       "external_docs": {

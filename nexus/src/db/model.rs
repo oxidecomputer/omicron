@@ -11,7 +11,7 @@ use crate::db::schema::{
     console_session, dataset, disk, image, instance, metric_producer,
     network_interface, organization, oximeter, project, rack, region,
     role_assignment_builtin, role_builtin, router_route, silo, silo_user, sled,
-    snapshot, update_available_artifact, user_builtin, volume, vpc,
+    snapshot, ssh_key, update_available_artifact, user_builtin, volume, vpc,
     vpc_firewall_rule, vpc_router, vpc_subnet, zpool,
 };
 use crate::defaults;
@@ -993,6 +993,32 @@ impl SiloUser {
             identity: SiloUserIdentity::new(user_id),
             silo_id,
             time_deleted: None,
+        }
+    }
+}
+
+/// Describes a user's public SSH key within the database.
+#[derive(Clone, Debug, Insertable, Queryable, Resource, Selectable)]
+#[table_name = "ssh_key"]
+pub struct SshKey {
+    #[diesel(embed)]
+    identity: SshKeyIdentity,
+
+    pub silo_user_id: Uuid,
+    pub public_key: String,
+}
+
+impl SshKey {
+    pub fn new(silo_user_id: Uuid, params: params::SshKeyCreate) -> Self {
+        Self::new_with_id(Uuid::new_v4(), silo_user_id, params)
+    }
+
+
+    pub fn new_with_id(id: Uuid, silo_user_id: Uuid, params: params::SshKeyCreate) -> Self {
+        Self {
+            identity: SshKeyIdentity::new(id, params.identity),
+            silo_user_id,
+            public_key: params.public_key,
         }
     }
 }

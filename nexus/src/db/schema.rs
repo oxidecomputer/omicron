@@ -138,6 +138,19 @@ table! {
 }
 
 table! {
+    ssh_key (id) {
+        id -> Uuid,
+        name -> Text,
+        description -> Text,
+        time_created -> Timestamptz,
+        time_modified -> Timestamptz,
+        time_deleted -> Nullable<Timestamptz>,
+        silo_user_id -> Uuid,
+        public_key -> Text,
+    }
+}
+
+table! {
     organization (id) {
         id -> Uuid,
         silo_id -> Uuid,

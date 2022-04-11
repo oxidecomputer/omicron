@@ -11,8 +11,8 @@ use crate::ServerContext;
 use super::{
     console_api, params,
     views::{
-        Image, Organization, Project, Rack, Role, Silo, Sled, Snapshot, User,
-        Vpc, VpcRouter, VpcSubnet,
+        Image, Organization, Project, Rack, Role, Silo, Sled, Snapshot, SshKey,
+        User, Vpc, VpcRouter, VpcSubnet,
     },
 };
 use crate::context::OpContext;
@@ -173,6 +173,11 @@ pub fn external_api() -> NexusApiDescription {
 
         api.register(roles_get)?;
         api.register(roles_get_role)?;
+
+        api.register(sshkeys_get)?;
+        api.register(sshkeys_get_key)?;
+        api.register(sshkeys_post)?;
+        api.register(sshkeys_delete_key)?;
 
         api.register(console_api::spoof_login)?;
         api.register(console_api::spoof_login_form)?;
@@ -2849,6 +2854,114 @@ async fn roles_get_role(
         let opctx = OpContext::for_external_api(&rqctx).await?;
         let role = nexus.role_builtin_fetch(&opctx, &role_name).await?;
         Ok(HttpResponseOk(role.into()))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+// Per-user SSH public keys
+
+/// List the current user's SSH public keys
+#[endpoint {
+    method = GET,
+    path = "/session/me/sshkeys",
+    tags = ["sshkeys"],
+}]
+async fn sshkeys_get(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    query_params: Query<PaginatedById>,
+) -> Result<HttpResponseOk<ResultsPage<SshKey>>, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let query = query_params.into_inner();
+    let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let &actor = opctx.authn.actor_required()?;
+        let silo_user_id = actor.id;
+        let ssh_keys = nexus
+            .ssh_keys_list(
+                &opctx,
+                silo_user_id,
+                &data_page_params_for(&rqctx, &query)?
+            )
+            .await?
+            .into_iter()
+            .map(SshKey::from)
+            .collect::<Vec<SshKey>>();
+        Ok(HttpResponseOk(ScanById::results_page(&query, ssh_keys)?))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Create a new SSH public key for the current user
+#[endpoint {
+    method = POST,
+    path = "/session/me/sshkeys",
+    tags = ["sshkeys"],
+}]
+async fn sshkeys_post(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    new_key: TypedBody<params::SshKeyCreate>,
+) -> Result<HttpResponseOk<SshKey>, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let &actor = opctx.authn.actor_required()?;
+        let silo_user_id = actor.id;
+        let ssh_key = nexus
+            .ssh_key_create(&opctx, silo_user_id, new_key.into_inner())
+            .await?;
+        Ok(HttpResponseOk(ssh_key.into()))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Path parameters for SSH key requests by name
+#[derive(Deserialize, JsonSchema)]
+struct SshKeyPathParams {
+    ssh_key_name: Name,
+}
+
+/// Get (by name) an SSH public key belonging to the current user
+#[endpoint {
+    method = GET,
+    path = "/session/me/sshkeys/{ssh_key_name}",
+    tags = ["sshkeys"],
+}]
+async fn sshkeys_get_key(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    path_params: Path<SshKeyPathParams>,
+) -> Result<HttpResponseOk<SshKey>, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let path = path_params.into_inner();
+    let ssh_key_name = &path.ssh_key_name;
+    let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let ssh_key = nexus.ssh_key_fetch(&opctx, ssh_key_name).await?;
+        Ok(HttpResponseOk(ssh_key.into()))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Delete (by name) an SSH public key belonging to the current user
+#[endpoint {
+    method = DELETE,
+    path = "/session/me/sshkeys/{ssh_key_name}",
+    tags = ["sshkeys"],
+}]
+async fn sshkeys_delete_key(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    path_params: Path<SshKeyPathParams>,
+) -> Result<HttpResponseDeleted, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let path = path_params.into_inner();
+    let ssh_key_name = &path.ssh_key_name;
+    let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        nexus.ssh_key_delete(&opctx, ssh_key_name).await?;
+        Ok(HttpResponseDeleted())
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }

@@ -281,3 +281,26 @@ impl From<model::RoleBuiltin> for Role {
         }
     }
 }
+
+// SSH KEYS
+
+/// Client view of a [`SshKey`]
+#[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct SshKey {
+    #[serde(flatten)]
+    pub identity: IdentityMetadata,
+    /// The user to whom this key belongs
+    pub silo_user_id: Uuid,
+    /// The SSH public key
+    pub public_key: String,
+}
+
+impl From<model::SshKey> for SshKey {
+    fn from(ssh_key: model::SshKey) -> Self {
+        Self {
+            identity: ssh_key.identity(),
+            silo_user_id: ssh_key.silo_user_id,
+            public_key: ssh_key.public_key,
+        }
+    }
+}
