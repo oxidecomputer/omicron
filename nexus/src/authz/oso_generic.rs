@@ -21,8 +21,16 @@ use oso::Oso;
 use oso::PolarClass;
 use std::fmt;
 
-/// Polar configuration describing control plane authorization rules
-pub const OMICRON_AUTHZ_CONFIG: &str = include_str!("omicron.polar");
+/// Base Polar configuration describing control plane authorization rules
+const OMICRON_AUTHZ_CONFIG_BASE: &str = include_str!("omicron.polar");
+
+/// Used to configure Polar resources
+pub(super) struct Init {
+    /// snippet of Polar describing a resource
+    pub polar_snippet: &'static str,
+    /// description of Rust type implementing the Polar resource
+    pub polar_class: oso::Class,
+}
 
 /// Returns an Oso handle suitable for authorizing using Omicron's authorization
 /// rules
@@ -60,7 +68,7 @@ pub fn make_omicron_oso() -> Result<Oso, anyhow::Error> {
         Sled::init(),
     ];
 
-    let polar_config = std::iter::once(OMICRON_AUTHZ_CONFIG)
+    let polar_config = std::iter::once(OMICRON_AUTHZ_CONFIG_BASE)
         .chain(generated_inits.iter().map(|init| init.polar_snippet))
         .collect::<Vec<&'static str>>()
         .join("\n");

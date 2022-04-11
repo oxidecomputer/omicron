@@ -6,6 +6,7 @@
 
 use super::actor::AnyActor;
 use super::context::AuthorizedResource;
+use super::oso_generic::Init;
 use super::roles::{
     load_roles_for_resource, load_roles_for_resource_tree, RoleSet,
 };
@@ -21,12 +22,6 @@ use futures::future::BoxFuture;
 use futures::FutureExt;
 use omicron_common::api::external::{Error, LookupType, ResourceType};
 use uuid::Uuid;
-
-// XXX-dap TODO-doc
-pub struct Init {
-    pub polar_snippet: &'static str,
-    pub polar_class: oso::Class,
-}
 
 /// Describes an authz resource that corresponds to an API resource that has a
 /// corresponding ResourceType and is stored in the database
