@@ -59,7 +59,6 @@ pub fn authz_resource(
     } else {
         (quote! { false }, quote! { None })
     };
-    // XXX-dap fail if roles_allowed and primary_key != Uuid
 
     let polar_snippet = match (input.polar_snippet, input.parent.as_str()) {
         (PolarSnippet::Custom, _) => String::new(),

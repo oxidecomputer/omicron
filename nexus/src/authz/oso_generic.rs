@@ -36,9 +36,6 @@ pub(super) struct Init {
 /// rules
 pub fn make_omicron_oso() -> Result<Oso, anyhow::Error> {
     let mut oso = Oso::new();
-    // XXX-dap
-    // - we probably want at least some minimal test suite of the policy to make
-    //   sure this update does what we think it does
     let classes = [
         // Hand-written classes
         Action::get_polar_class(),
