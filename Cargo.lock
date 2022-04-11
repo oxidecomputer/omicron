@@ -634,7 +634,7 @@ dependencies = [
  "tokio-util 0.7.1",
  "toml",
  "tracing",
- "usdt 0.3.2",
+ "usdt",
  "uuid",
 ]
 
@@ -852,11 +852,11 @@ dependencies = [
 [[package]]
 name = "diesel-dtrace"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/diesel-dtrace?branch=main#f74c1db52e86f53d9234969541673d1d9aecb101"
+source = "git+https://github.com/oxidecomputer/diesel-dtrace?branch=main#3bce2661bca09feded88f6415a877c2996e302f0"
 dependencies = [
  "diesel",
  "serde",
- "usdt 0.3.2",
+ "usdt",
  "uuid",
 ]
 
@@ -994,7 +994,7 @@ dependencies = [
  "tokio",
  "tokio-rustls",
  "toml",
- "usdt 0.3.2",
+ "usdt",
  "uuid",
 ]
 
@@ -1032,7 +1032,7 @@ dependencies = [
  "tokio",
  "tokio-rustls",
  "toml",
- "usdt 0.3.2",
+ "usdt",
  "uuid",
 ]
 
@@ -1454,7 +1454,7 @@ dependencies = [
  "slog",
  "thiserror",
  "tokio",
- "usdt 0.3.2",
+ "usdt",
  "uuid",
 ]
 
@@ -1987,9 +1987,9 @@ checksum = "e2abad23fbc42b3700f2f279844dc832adb2b2eb069b2df918f455c4e18cc646"
 
 [[package]]
 name = "libc"
-version = "0.2.121"
+version = "0.2.122"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "efaa7b300f3b5fe8eb6bf21ce3895e1751d9665086af2d64b42f19701015ff4f"
+checksum = "ec647867e2bf0772e28c8bcde4f0d19a9216916e890543b5a03ed8ef27b8f259"
 
 [[package]]
 name = "libsqlite3-sys"
@@ -2479,7 +2479,7 @@ dependencies = [
  "tokio-postgres",
  "toml",
  "tough",
- "usdt 0.3.2",
+ "usdt",
  "uuid",
 ]
 
@@ -3254,9 +3254,9 @@ dependencies = [
 
 [[package]]
 name = "proc-macro2"
-version = "1.0.36"
+version = "1.0.37"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c7342d5883fbccae1cc37a2353b09c87c9b0f3afd73f5fb9bba687a1f733b029"
+checksum = "ec757218438d5fda206afc041538b2f6d889286160d649a86a24d37e1235afd1"
 dependencies = [
  "unicode-xid",
 ]
@@ -3351,9 +3351,9 @@ checksum = "a1d01941d82fa2ab50be1e79e6714289dd7cde78eba4c074bc5a4374f650dfe0"
 
 [[package]]
 name = "quote"
-version = "1.0.17"
+version = "1.0.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "632d02bff7f874a36f33ea8bb416cd484b90cc66c1194b1a1110d067a7013f58"
+checksum = "a1feb54ed693b93a84e14094943b84b7c4eae204c512b7ccb95ab0c66d278ad1"
 dependencies = [
  "proc-macro2",
 ]
@@ -3618,9 +3618,9 @@ dependencies = [
 
 [[package]]
 name = "ringbuffer"
-version = "0.8.2"
+version = "0.8.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "72dfeba9c94fdc308dcfe165efa6855c698f317484b736605ff859c5fa81d992"
+checksum = "b30a00730a27595dcf899dce512aa031dd650f86aafcb132fd8dd9f409b369d0"
 dependencies = [
  "array-init",
 ]
@@ -3932,9 +3932,9 @@ dependencies = [
 
 [[package]]
 name = "serde_with"
-version = "1.12.0"
+version = "1.12.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ec1e6ec4d8950e5b1e894eac0d360742f3b1407a6078a604a731c4b3f49cefbc"
+checksum = "946fa04a8ac43ff78a1f4b811990afb9ddbdf5890b46d6dda0ba1998230138b7"
 dependencies = [
  "rustversion",
  "serde",
@@ -4148,15 +4148,16 @@ dependencies = [
 
 [[package]]
 name = "slog-dtrace"
-version = "0.2.0"
+version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c4ec6883908a7f628be97d107387c45de771d8a2fa8af147337ec38549f93cdd"
+checksum = "190194b8b00b629b1003daf2a4e40167b7b6b35b00598a131b6b0481205e96a4"
 dependencies = [
  "chrono",
  "serde",
  "serde_json",
  "slog",
- "usdt 0.2.1",
+ "usdt",
+ "version_check",
 ]
 
 [[package]]
@@ -4452,9 +4453,9 @@ checksum = "6bdef32e8150c2a081110b42772ffe7d7c9032b606bc226c8260fd97e0976601"
 
 [[package]]
 name = "syn"
-version = "1.0.90"
+version = "1.0.91"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "704df27628939572cd88d33f171cd6f896f4eaca85252c6e0a72d8d8287ee86f"
+checksum = "b683b2b825c8eef438b77c36a06dc262294da3d5a5813fac20da149241dcd44d"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -5128,20 +5129,6 @@ dependencies = [
 
 [[package]]
 name = "usdt"
-version = "0.2.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0ede7ff58821fee096f60fd731d56f61b56883a4808a290cac15df29baf1bc50"
-dependencies = [
- "dof",
- "dtrace-parser",
- "serde",
- "usdt-attr-macro 0.2.1",
- "usdt-impl 0.2.1",
- "usdt-macro 0.2.1",
-]
-
-[[package]]
-name = "usdt"
 version = "0.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5409e16f35fdba646ff4290e6f96f0bb958b43e0bd09d790c3714456a76c11ac"
@@ -5149,23 +5136,9 @@ dependencies = [
  "dof",
  "dtrace-parser",
  "serde",
- "usdt-attr-macro 0.3.2",
- "usdt-impl 0.3.2",
- "usdt-macro 0.3.2",
-]
-
-[[package]]
-name = "usdt-attr-macro"
-version = "0.2.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8233e148b2767bf47aa1620bfe72c982da8abe2da05090c3b716f2fd1865e94d"
-dependencies = [
- "dtrace-parser",
- "proc-macro2",
- "quote",
- "serde_tokenstream",
- "syn",
- "usdt-impl 0.2.1",
+ "usdt-attr-macro",
+ "usdt-impl",
+ "usdt-macro",
 ]
 
 [[package]]
@@ -5179,26 +5152,7 @@ dependencies = [
  "quote",
  "serde_tokenstream",
  "syn",
- "usdt-impl 0.3.2",
-]
-
-[[package]]
-name = "usdt-impl"
-version = "0.2.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d6e158f113f80db319e54f62c59ea4329a31190a43ed7db07578982021209014"
-dependencies = [
- "byteorder",
- "dof",
- "dtrace-parser",
- "libc",
- "proc-macro2",
- "quote",
- "serde",
- "serde_json",
- "syn",
- "thiserror",
- "thread-id",
+ "usdt-impl",
 ]
 
 [[package]]
@@ -5223,20 +5177,6 @@ dependencies = [
 
 [[package]]
 name = "usdt-macro"
-version = "0.2.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "af8dae3bb94dfc25189d8566b8da97ad05003fe24346b118c697c6671b4b7d10"
-dependencies = [
- "dtrace-parser",
- "proc-macro2",
- "quote",
- "serde_tokenstream",
- "syn",
- "usdt-impl 0.2.1",
-]
-
-[[package]]
-name = "usdt-macro"
 version = "0.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8dddab3586eaf539e2daddc425261daef6a6d2f85131bac7345caa8e6a423b27"
@@ -5246,7 +5186,7 @@ dependencies = [
  "quote",
  "serde_tokenstream",
  "syn",
- "usdt-impl 0.3.2",
+ "usdt-impl",
 ]
 
 [[package]]
