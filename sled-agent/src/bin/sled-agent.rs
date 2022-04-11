@@ -4,8 +4,6 @@
 
 //! Executable program to run the sled agent
 
-#![feature(async_closure)]
-
 use dropshot::ConfigDropshot;
 use dropshot::ConfigLogging;
 use dropshot::ConfigLoggingLevel;
@@ -13,10 +11,12 @@ use omicron_common::api::external::Error;
 use omicron_common::cmd::fatal;
 use omicron_common::cmd::CmdError;
 use omicron_sled_agent::bootstrap::{
-    config::Config as BootstrapConfig, server as bootstrap_server,
+    agent::bootstrap_address, config::Config as BootstrapConfig,
+    server as bootstrap_server,
 };
 use omicron_sled_agent::rack_setup::config::SetupServiceConfig as RssConfig;
 use omicron_sled_agent::{config::Config as SledConfig, server as sled_server};
+use std::net::SocketAddr;
 use std::path::PathBuf;
 use structopt::StructOpt;
 
@@ -111,11 +111,18 @@ async fn do_run() -> Result<(), CmdError> {
                 None
             };
 
+            // Derive the bootstrap address from the data link's MAC address.
+            let link = config
+                .get_link()
+                .map_err(|e| CmdError::Failure(e.to_string()))?;
+            let bootstrap_address = bootstrap_address(link)
+                .map_err(|e| CmdError::Failure(e.to_string()))?;
+
             // Configure and run the Bootstrap server.
             let bootstrap_config = BootstrapConfig {
                 id: config.id,
                 dropshot: ConfigDropshot {
-                    bind_address: config.bootstrap_address,
+                    bind_address: SocketAddr::V6(bootstrap_address),
                     request_body_max_bytes: 1024 * 1024,
                     ..Default::default()
                 },
@@ -124,37 +131,21 @@ async fn do_run() -> Result<(), CmdError> {
                 },
                 rss_config,
             };
-            let run_bootstrap = async move || -> Result<(), CmdError> {
-                // TODO: It's a little silly to pass the config this way.
-                bootstrap_server::Server::start(bootstrap_config, config)
-                    .await
-                    .map_err(CmdError::Failure)?
-                    .wait_for_finish()
-                    .await
-                    .map_err(CmdError::Failure)
-            };
 
-            /*
-            let run_sled_server = async move || -> Result<(), CmdError> {
-                sled_server::Server::start(&config)
-                    .await
-                    .map_err(CmdError::Failure)?
-                    .wait_for_finish()
-                    .await
-                    .map_err(CmdError::Failure)
-            };
-            */
+            // TODO: It's a little silly to pass the config this way - namely,
+            // that we construct the bootstrap config from `config`, but then
+            // pass it separately just so the sled agent can ingest it later on.
+            bootstrap_server::Server::start(
+                *bootstrap_address.ip(),
+                bootstrap_config,
+                config,
+            )
+            .await
+            .map_err(CmdError::Failure)?
+            .wait_for_finish()
+            .await
+            .map_err(CmdError::Failure)?;
 
-            tokio::select! {
-                Err(e) = run_bootstrap() => {
-                    eprintln!("Boot server exited unexpectedly: {:?}", e);
-                },
-                /*
-                Err(e) = run_sled_server() => {
-                    eprintln!("Sled server exited unexpectedly: {:?}", e);
-                },
-                */
-            }
             Ok(())
         }
     }

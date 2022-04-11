@@ -5,24 +5,21 @@
 //! Interfaces for working with sled agent configuration
 
 use crate::common::vlan::VlanID;
-use crate::illumos::dladm::PhysicalLink;
+use crate::illumos::dladm::{self, Dladm, PhysicalLink};
 use crate::illumos::zpool::ZpoolName;
 use dropshot::ConfigLogging;
 use omicron_common::api::external::Ipv6Net;
 use serde::Deserialize;
-use std::net::{IpAddr, Ipv6Addr, SocketAddr};
+use std::net::{Ipv6Addr, SocketAddr, SocketAddrV6};
 use std::path::Path;
 use uuid::Uuid;
 
 pub const SLED_AGENT_PORT: u16 = 12345;
 
 /// Given a subnet, return the sled agent address.
-pub(crate) fn get_sled_address(subnet: Ipv6Net) -> SocketAddr {
+pub(crate) fn get_sled_address(subnet: Ipv6Net) -> SocketAddrV6 {
     let sled_agent_ip = Ipv6Addr::from(u128::from(subnet.ip()) + 1);
-    SocketAddr::new(
-        IpAddr::V6(sled_agent_ip),
-        SLED_AGENT_PORT,
-    )
+    SocketAddrV6::new(sled_agent_ip, SLED_AGENT_PORT, 0, 0)
 }
 
 /// Configuration for a sled agent
@@ -30,8 +27,6 @@ pub(crate) fn get_sled_address(subnet: Ipv6Net) -> SocketAddr {
 pub struct Config {
     /// Unique id for the sled
     pub id: Uuid,
-    /// Address of the Bootstrap Agent interface.
-    pub bootstrap_address: SocketAddr,
     /// Address of Nexus instance
     pub nexus_address: SocketAddr,
     /// Configuration for the sled agent debug log
@@ -61,5 +56,14 @@ impl Config {
         let contents = std::fs::read_to_string(path)?;
         let config = toml::from_str(&contents)?;
         Ok(config)
+    }
+
+    pub fn get_link(&self) -> Result<PhysicalLink, dladm::Error> {
+        let link = if let Some(link) = self.data_link.clone() {
+            link
+        } else {
+            Dladm::find_physical()?
+        };
+        Ok(link)
     }
 }

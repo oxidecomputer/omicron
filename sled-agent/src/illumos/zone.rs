@@ -6,7 +6,7 @@
 
 use ipnetwork::IpNetwork;
 use slog::Logger;
-use std::net::IpAddr;
+use std::net::{IpAddr, Ipv6Addr};
 
 use crate::illumos::addrobj::AddrObject;
 use crate::illumos::dladm::{Dladm, PhysicalLink, VNIC_PREFIX_CONTROL};
@@ -413,15 +413,10 @@ impl Zones {
     // from RSS.
     pub fn ensure_has_global_zone_v6_address(
         physical_link: Option<PhysicalLink>,
-        address: IpAddr,
+        address: Ipv6Addr,
+        name: &str,
     ) -> Result<(), Error> {
-        if !address.is_ipv6() {
-            return Err(Error::Ip(address.into()));
-        }
-
-        // Ensure that addrconf has been set up in the Global
-        // Zone.
-
+        // Ensure that addrconf has been set up in the Global Zone.
         let link = if let Some(link) = physical_link {
             link
         } else {
@@ -438,8 +433,8 @@ impl Zones {
         // prefix. Anything else must be routed through Sidecar.
         Self::ensure_address(
             None,
-            &gz_link_local_addrobj.on_same_interface("sled6")?,
-            AddressRequest::new_static(address, Some(64)),
+            &gz_link_local_addrobj.on_same_interface(name)?,
+            AddressRequest::new_static(IpAddr::V6(address), Some(64)),
         )?;
         Ok(())
     }

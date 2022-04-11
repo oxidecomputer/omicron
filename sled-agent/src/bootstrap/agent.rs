@@ -4,23 +4,26 @@
 
 //! Bootstrap-related APIs.
 
-use crate::config::Config as SledConfig;
-use crate::server::Server as SledServer;
-use super::config::Config;
+use super::config::{Config, BOOTSTRAP_AGENT_PORT};
 use super::discovery;
+use super::params::SledAgentRequest;
 use super::trust_quorum::{
     self, RackSecret, ShareDistribution, TrustQuorumError,
 };
-use super::params::SledAgentRequest;
-use super::views::{SledAgentResponse, ShareResponse};
+use super::views::{ShareResponse, SledAgentResponse};
+use crate::config::Config as SledConfig;
+use crate::illumos::dladm::{self, Dladm, PhysicalLink};
+use crate::illumos::zone::{self, Zones};
 use crate::rack_setup::service::Service as RackSetupService;
-use omicron_common::api::external::Error as ExternalError;
+use crate::server::Server as SledServer;
+use omicron_common::api::external::{Error as ExternalError, MacAddr};
 use omicron_common::backoff::{
     internal_service_policy, retry_notify, BackoffError,
 };
 
 use slog::Logger;
 use std::io;
+use std::net::{Ipv6Addr, SocketAddrV6};
 use std::path::{Path, PathBuf};
 use thiserror::Error;
 use tokio::sync::Mutex;
@@ -45,6 +48,9 @@ pub enum BootstrapError {
 
     #[error(transparent)]
     TrustQuorum(#[from] TrustQuorumError),
+
+    #[error(transparent)]
+    Zone(#[from] zone::Error),
 }
 
 impl From<BootstrapError> for ExternalError {
@@ -91,12 +97,44 @@ fn get_subnet_path() -> PathBuf {
     Path::new(omicron_common::OMICRON_CONFIG_PATH).join("subnet.toml")
 }
 
+fn mac_to_socket_addr(mac: MacAddr) -> SocketAddrV6 {
+    let mac_bytes = mac.into_array();
+    assert_eq!(6, mac_bytes.len());
+
+    let address = Ipv6Addr::new(
+        0xfdb0,
+        ((mac_bytes[0] as u16) << 8) | mac_bytes[1] as u16,
+        ((mac_bytes[2] as u16) << 8) | mac_bytes[3] as u16,
+        ((mac_bytes[4] as u16) << 8) | mac_bytes[5] as u16,
+        0,
+        0,
+        0,
+        1,
+    );
+
+    SocketAddrV6::new(address, BOOTSTRAP_AGENT_PORT, 0, 0)
+}
+
+pub fn bootstrap_address(
+    link: PhysicalLink,
+) -> Result<SocketAddrV6, dladm::Error> {
+    let mac = Dladm::get_mac(link)?;
+    Ok(mac_to_socket_addr(mac))
+}
+
 impl Agent {
     pub async fn new(
         log: Logger,
         sled_config: SledConfig,
+        address: Ipv6Addr,
     ) -> Result<Self, BootstrapError> {
-        let peer_monitor = discovery::PeerMonitor::new(&log)?;
+        Zones::ensure_has_global_zone_v6_address(
+            sled_config.data_link.clone(),
+            address,
+            "bootstrap6",
+        )?;
+
+        let peer_monitor = discovery::PeerMonitor::new(&log, address)?;
         let share = read_key_share()?;
         let agent = Agent {
             log,
@@ -111,7 +149,7 @@ impl Agent {
         if subnet_path.exists() {
             info!(agent.log, "Sled already configured, loading sled agent");
             let sled_request: SledAgentRequest = toml::from_str(
-                &tokio::fs::read_to_string(&subnet_path).await?
+                &tokio::fs::read_to_string(&subnet_path).await?,
             )?;
             agent.request_agent(sled_request).await?;
         }
@@ -145,9 +183,7 @@ impl Agent {
         let mut maybe_agent = self.sled_agent.lock().await;
         if let Some(server) = &*maybe_agent {
             // Server already exists, return it.
-            return Ok(SledAgentResponse {
-               id: server.id()
-            });
+            return Ok(SledAgentResponse { id: server.id() });
         }
         // Server does not exist, initialize it.
         let sled_address = crate::config::get_sled_address(request.ip);
@@ -161,13 +197,14 @@ impl Agent {
         tokio::fs::write(
             get_subnet_path(),
             &toml::to_string(
-                &toml::Value::try_from(&request.ip).expect("Cannot serialize IP")
-            ).expect("Cannot convert toml to string")
-        ).await?;
+                &toml::Value::try_from(&request.ip)
+                    .expect("Cannot serialize IP"),
+            )
+            .expect("Cannot convert toml to string"),
+        )
+        .await?;
 
-        Ok(SledAgentResponse {
-            id: self.sled_config.id,
-        })
+        Ok(SledAgentResponse { id: self.sled_config.id })
     }
 
     /// Communicates with peers, sharing secrets, until the rack has been
@@ -178,7 +215,7 @@ impl Agent {
         let rack_secret = retry_notify(
             internal_service_policy(),
             || async {
-                let other_agents = self.peer_monitor.addrs().await;
+                let other_agents = self.peer_monitor.peer_addrs().await;
                 info!(
                     &self.log,
                     "Bootstrap: Communicating with peers: {:?}", other_agents
@@ -204,8 +241,13 @@ impl Agent {
                 // Retrieve verified rack_secret shares from a quorum of agents
                 let other_agents: Vec<trust_quorum::Client> = other_agents
                     .into_iter()
-                    .map(|mut addr| {
-                        addr.set_port(trust_quorum::PORT);
+                    .map(|addr| {
+                        let addr = SocketAddrV6::new(
+                            addr,
+                            trust_quorum::PORT,
+                            0,
+                            0,
+                        );
                         trust_quorum::Client::new(
                             &self.log,
                             share.verifier.clone(),
@@ -305,5 +347,21 @@ impl Agent {
         self.start_rss(config).await?;
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use macaddr::MacAddr6;
+
+    #[test]
+    fn test_mac_to_socket_addr() {
+        let mac = MacAddr("a8:40:25:10:00:01".parse::<MacAddr6>().unwrap());
+
+        assert_eq!(
+            mac_to_socket_addr(mac).ip(),
+            &"fdb0:a840:2510:1::1".parse::<Ipv6Addr>().unwrap(),
+        );
     }
 }

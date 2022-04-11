@@ -8,7 +8,7 @@ use super::multicast;
 use slog::Logger;
 use std::collections::HashSet;
 use std::io;
-use std::net::{Ipv6Addr, SocketAddr, SocketAddrV6};
+use std::net::{Ipv6Addr, SocketAddr};
 use std::sync::Arc;
 use tokio::net::UdpSocket;
 use tokio::sync::{broadcast, Mutex};
@@ -34,18 +34,18 @@ pub struct PeerMonitor {
     // sleds here into "the sleds which we know were connected within the past
     // hour", for example.
     // - Have some other interface to identify the detachment of a peer.
-    sleds: Arc<Mutex<HashSet<SocketAddr>>>,
-    notification_sender: broadcast::Sender<SocketAddr>,
+    our_address: Ipv6Addr,
+    sleds: Arc<Mutex<HashSet<Ipv6Addr>>>,
+    notification_sender: broadcast::Sender<Ipv6Addr>,
     _worker: JoinHandle<()>,
 }
 
 async fn monitor_worker(
     log: Logger,
-    address: SocketAddrV6,
     sender: UdpSocket,
     listener: UdpSocket,
-    sleds: Arc<Mutex<HashSet<SocketAddr>>>,
-    notification_sender: broadcast::Sender<SocketAddr>,
+    sleds: Arc<Mutex<HashSet<Ipv6Addr>>>,
+    notification_sender: broadcast::Sender<Ipv6Addr>,
 ) {
     // Let this message be a reminder that this content is *not*
     // encrypted, authenticated, or otherwise verified. We're just using
@@ -56,20 +56,24 @@ async fn monitor_worker(
         let mut buf = vec![0u8; 128];
         tokio::select! {
             _ = tokio::time::sleep(tokio::time::Duration::from_millis(5000)) => {
-                trace!(log, "Bootstrap Peer Monitor: Broadcasting our own address: {}", address);
-                if let Err(e) = sender.try_send_to(message, address.into()) {
+                if let Err(e) = sender.try_send_to(message, SocketAddr::V6(multicast::multicast_address())) {
                     warn!(log, "PeerMonitor failed to broadcast: {}", e);
                 }
             }
             result = listener.recv_from(&mut buf) => {
                 match result {
                     Ok((_, addr)) => {
-                        info!(log, "Bootstrap Peer Monitor: Successfully received an address: {}", addr);
-                        let mut sleds = sleds.lock().await;
-                        if sleds.insert(addr) {
-                            // We don't actually care if no one is listening, so
-                            // drop the error if that's the case.
-                            let _ = notification_sender.send(addr);
+                        match addr {
+                            SocketAddr::V6(addr) =>  {
+                                let mut sleds = sleds.lock().await;
+                                if sleds.insert(*addr.ip()) {
+                                    info!(log, "Bootstrap Peer Monitor: Successfully received an address: {}", addr);
+                                    // We don't actually care if no one is listening, so
+                                    // drop the error if that's the case.
+                                    let _ = notification_sender.send(*addr.ip());
+                                }
+                            }
+                            _ => continue,
                         }
                     },
                     Err(e) => warn!(log, "PeerMonitor failed to receive: {}", e),
@@ -81,16 +85,7 @@ async fn monitor_worker(
 
 impl PeerMonitor {
     /// Creates a new [`PeerMonitor`].
-    // TODO: Address, port, interface, etc, probably should be
-    // configuration options.
-    pub fn new(log: &Logger) -> Result<Self, io::Error> {
-        let scope = multicast::Ipv6MulticastScope::LinkLocal.first_hextet();
-        let address = SocketAddrV6::new(
-            Ipv6Addr::new(scope, 0, 0, 0, 0, 0, 0, 0x1),
-            7645,
-            0,
-            0,
-        );
+    pub fn new(log: &Logger, address: Ipv6Addr) -> Result<Self, io::Error> {
         let loopback = false;
         let interface = 0;
         let (sender, listener) =
@@ -104,11 +99,22 @@ impl PeerMonitor {
 
         let notification_sender = tx.clone();
         let worker = tokio::task::spawn(async move {
-            monitor_worker(log, address, sender, listener, sleds_for_worker, notification_sender)
-                .await
+            monitor_worker(
+                log,
+                sender,
+                listener,
+                sleds_for_worker,
+                notification_sender,
+            )
+            .await
         });
 
-        Ok(PeerMonitor { sleds, notification_sender: tx, _worker: worker })
+        Ok(PeerMonitor {
+            our_address: address,
+            sleds,
+            notification_sender: tx,
+            _worker: worker,
+        })
     }
 
     /// Returns the addresses of connected sleds.
@@ -118,7 +124,7 @@ impl PeerMonitor {
     /// [`Self::observer`].
     ///
     /// Note: These sleds have not yet been verified.
-    pub async fn addrs(&self) -> Vec<SocketAddr> {
+    pub async fn peer_addrs(&self) -> Vec<Ipv6Addr> {
         self.sleds.lock().await.iter().map(|addr| *addr).collect()
     }
 
@@ -137,8 +143,9 @@ impl PeerMonitor {
         let sleds = self.sleds.lock().await.clone();
 
         PeerMonitorObserver {
-            their_sleds: self.sleds.clone(),
-            our_sleds: sleds,
+            our_address: self.our_address,
+            actual_sleds: self.sleds.clone(),
+            observed_sleds: sleds,
             receiver,
         }
     }
@@ -147,73 +154,86 @@ impl PeerMonitor {
 /// Provides a read-only view of monitored peers, with a mechanism for
 /// observing the incoming queue of new peers.
 pub struct PeerMonitorObserver {
+    our_address: Ipv6Addr,
     // A shared reference to the "true" set of sleds.
     //
     // This is only used to re-synchronize our set of sleds
     // if we get out-of-sync due to long notification queues.
-    their_sleds: Arc<Mutex<HashSet<SocketAddr>>>,
+    actual_sleds: Arc<Mutex<HashSet<Ipv6Addr>>>,
     // A local copy of the set of sleds. This lets observers
     // access + iterate over the set of sleds directly,
     // without any possibility of blocking the actual monitoring task.
-    our_sleds: HashSet<SocketAddr>,
-    receiver: broadcast::Receiver<SocketAddr>,
+    observed_sleds: HashSet<Ipv6Addr>,
+    receiver: broadcast::Receiver<Ipv6Addr>,
 }
 
 impl PeerMonitorObserver {
-    /// Returns the addresses of all connected sleds.
+    /// Returns the address of this sled.
+    pub fn our_address(&self) -> Ipv6Addr {
+        self.our_address
+    }
+
+    /// Returns the addresses of all connected sleds, excluding
+    /// our own.
     ///
     /// This returns the most "up-to-date" view of peers, but a new
     /// peer may be added immediately after this function returns.
     ///
     /// To monitor for changes, a call to [`Self::recv`]
     /// can be made, to observe changes beyond an initial call to
-    /// [`Self::addrs`].
-    pub async fn addrs(&mut self) -> &HashSet<SocketAddr> {
+    /// [`Self::peer_addrs`].
+    pub async fn peer_addrs(&mut self) -> &HashSet<Ipv6Addr> {
         // First, drain the incoming queue of sled updates.
         loop {
             match self.receiver.try_recv() {
                 Ok(new_addr) => {
-                    self.our_sleds.insert(new_addr);
+                    self.observed_sleds.insert(new_addr);
                 }
                 Err(broadcast::error::TryRecvError::Empty) => break,
-                Err(broadcast::error::TryRecvError::Closed) => panic!("Remote closed"),
+                Err(broadcast::error::TryRecvError::Closed) => {
+                    panic!("Remote closed")
+                }
                 Err(broadcast::error::TryRecvError::Lagged(_)) => {
-                    self.our_sleds = self.their_sleds.lock().await.clone();
-                },
+                    self.observed_sleds =
+                        self.actual_sleds.lock().await.clone();
+                }
             }
         }
         while let Ok(new_addr) = self.receiver.try_recv() {
-            self.our_sleds.insert(new_addr);
+            self.observed_sleds.insert(new_addr);
         }
 
         // Next, return the most up-to-date set of sleds.
         //
-        // Note that this set may change immediately after `addrs()` returns,
+        // Note that this set may change immediately after `peer_addrs()` returns,
         // but a caller can see exactly what sleds were added by calling
         // `recv()`.
-        &self.our_sleds
+        &self.observed_sleds
     }
 
     /// Returns information about a new connected sled.
     ///
     /// Note that this does not provide the "initial set" of connected
-    /// sleds - to access that information, call [`Self::addrs`].
+    /// sleds - to access that information, call [`Self::peer_addrs`].
     ///
     /// Returns [`Option::None`] if the notification queue overflowed,
     /// and we needed to re-synchronize the set of sleds.
-    pub async fn recv(&mut self) -> Option<SocketAddr> {
+    pub async fn recv(&mut self) -> Option<Ipv6Addr> {
         loop {
             match self.receiver.recv().await {
                 Ok(new_addr) => {
-                    if self.our_sleds.insert(new_addr) {
+                    if self.observed_sleds.insert(new_addr) {
                         return Some(new_addr);
                     }
                 }
-                Err(broadcast::error::RecvError::Closed) => panic!("Remote closed"),
+                Err(broadcast::error::RecvError::Closed) => {
+                    panic!("Remote closed")
+                }
                 Err(broadcast::error::RecvError::Lagged(_)) => {
-                    self.our_sleds = self.their_sleds.lock().await.clone();
+                    self.observed_sleds =
+                        self.actual_sleds.lock().await.clone();
                     return None;
-                },
+                }
             }
         }
     }

@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use std::net::SocketAddr;
+use std::net::{SocketAddr, SocketAddrV6};
 
 use slog::Logger;
 use tokio::net::TcpStream;
@@ -16,15 +16,15 @@ use crate::bootstrap::spdm;
 pub struct Client {
     log: Logger,
     verifier: Verifier,
-    addr: SocketAddr,
+    addr: SocketAddrV6,
 }
 
 impl Client {
-    pub fn new(log: &Logger, verifier: Verifier, addr: SocketAddr) -> Client {
+    pub fn new(log: &Logger, verifier: Verifier, addr: SocketAddrV6) -> Client {
         Client { log: log.clone(), verifier, addr }
     }
 
-    pub fn addr(&self) -> &SocketAddr {
+    pub fn addr(&self) -> &SocketAddrV6 {
         &self.addr
     }
 
@@ -49,7 +49,7 @@ impl Client {
         if self.verifier.verify(&share) {
             Ok(share)
         } else {
-            Err(TrustQuorumError::InvalidShare(self.addr))
+            Err(TrustQuorumError::InvalidShare(SocketAddr::V6(self.addr)))
         }
     }
 }

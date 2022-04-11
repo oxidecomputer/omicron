@@ -4,15 +4,18 @@
 
 //! Rack Setup Service implementation
 
-use crate::bootstrap::client as bootstrap_agent_client;
-use crate::bootstrap::discovery::PeerMonitorObserver;
-use crate::config::get_sled_address;
 use super::config::SetupServiceConfig as Config;
+use crate::bootstrap::discovery::PeerMonitorObserver;
+use crate::bootstrap::{
+    client as bootstrap_agent_client, config::BOOTSTRAP_AGENT_PORT,
+};
+use crate::config::get_sled_address;
 use omicron_common::api::external::Ipv6Net;
 use omicron_common::backoff::{
     internal_service_policy, retry_notify, BackoffError,
 };
 use slog::Logger;
+use std::net::{SocketAddr, SocketAddrV6};
 use thiserror::Error;
 use tokio::sync::Mutex;
 
@@ -23,7 +26,10 @@ pub enum SetupServiceError {
     Io(#[from] std::io::Error),
 
     #[error("Error making HTTP request to Bootstrap Agent: {0}")]
-    BootstrapApi(#[from] bootstrap_agent_client::Error<bootstrap_agent_client::types::Error>),
+    BootstrapApi(
+        #[from]
+        bootstrap_agent_client::Error<bootstrap_agent_client::types::Error>,
+    ),
 
     #[error("Error making HTTP request to Sled Agent: {0}")]
     SledApi(#[from] sled_agent_client::Error<sled_agent_client::types::Error>),
@@ -51,7 +57,11 @@ impl Service {
     /// - `config`: The config file, which is used to setup the rack.
     /// - `peer_monitor`: The mechanism by which the setup service discovers
     ///   bootstrap agents on nearby sleds.
-    pub fn new(log: Logger, config: Config, peer_monitor: PeerMonitorObserver) -> Self {
+    pub fn new(
+        log: Logger,
+        config: Config,
+        peer_monitor: PeerMonitorObserver,
+    ) -> Self {
         let handle = tokio::task::spawn(async move {
             let svc = ServiceInner::new(log, peer_monitor);
             svc.inject_rack_setup_requests(&config).await
@@ -79,7 +89,7 @@ impl ServiceInner {
 
     async fn initialize_sled_agent(
         &self,
-        bootstrap_addr: std::net::SocketAddr,
+        bootstrap_addr: SocketAddrV6,
         subnet: ipnetwork::Ipv6Network,
     ) -> Result<(), SetupServiceError> {
         let dur = std::time::Duration::from_secs(60);
@@ -88,22 +98,38 @@ impl ServiceInner {
             .connect_timeout(dur)
             .timeout(dur)
             .build()?;
+
+        // TODO: Can we just use a type that avoids the need for this
+        // conversion?
+        let url = format!(
+            "http://[{}]:{}",
+            bootstrap_addr.ip(),
+            BOOTSTRAP_AGENT_PORT,
+        );
+        info!(self.log, "Sending request to peer agent: {}", url);
         let client = bootstrap_agent_client::Client::new_with_client(
-            &format!("http://{}", bootstrap_addr),
+            &url,
             client,
-            self.log.new(o!("BootstrapAgentClient" => bootstrap_addr.clone())),
+            self.log.new(o!("BootstrapAgentClient" => url.clone())),
         );
 
         let sled_agent_initialize = || async {
-            client.start_sled(&bootstrap_agent_client::types::SledAgentRequest {
-                uuid: uuid::Uuid::new_v4(), // TODO: not rando
-                ip: bootstrap_agent_client::types::Ipv6Net(subnet.to_string()),
-            }).await.map_err(BackoffError::transient)?;
+            client
+                .start_sled(&bootstrap_agent_client::types::SledAgentRequest {
+                    uuid: uuid::Uuid::new_v4(), // TODO: not rando
+                    ip: bootstrap_agent_client::types::Ipv6Net(
+                        subnet.to_string(),
+                    ),
+                })
+                .await
+                .map_err(BackoffError::transient)?;
 
             Ok::<
                 (),
                 BackoffError<
-                    bootstrap_agent_client::Error<bootstrap_agent_client::types::Error>,
+                    bootstrap_agent_client::Error<
+                        bootstrap_agent_client::types::Error,
+                    >,
                 >,
             >(())
         };
@@ -115,13 +141,15 @@ impl ServiceInner {
             internal_service_policy(),
             sled_agent_initialize,
             log_failure,
-        ).await?;
+        )
+        .await?;
+        info!(self.log, "Peer agent at {} initialized", url);
         Ok(())
     }
 
     async fn initialize_datasets(
         &self,
-        sled_address: std::net::SocketAddr,
+        sled_address: SocketAddr,
         datasets: &Vec<crate::params::DatasetEnsureBody>,
     ) -> Result<(), SetupServiceError> {
         let dur = std::time::Duration::from_secs(60);
@@ -140,13 +168,16 @@ impl ServiceInner {
         for dataset in datasets {
             let filesystem_put = || async {
                 info!(self.log, "creating new filesystem: {:?}", dataset);
-                client.filesystem_put(&dataset.clone().into())
+                client
+                    .filesystem_put(&dataset.clone().into())
                     .await
                     .map_err(BackoffError::transient)?;
                 Ok::<
                     (),
                     BackoffError<
-                        sled_agent_client::Error<sled_agent_client::types::Error>,
+                        sled_agent_client::Error<
+                            sled_agent_client::types::Error,
+                        >,
                     >,
                 >(())
             };
@@ -157,14 +188,15 @@ impl ServiceInner {
                 internal_service_policy(),
                 filesystem_put,
                 log_failure,
-            ).await?;
+            )
+            .await?;
         }
         Ok(())
     }
 
     async fn initialize_services(
         &self,
-        sled_address: std::net::SocketAddr,
+        sled_address: SocketAddr,
         services: &Vec<crate::params::ServiceRequest>,
     ) -> Result<(), SetupServiceError> {
         let dur = std::time::Duration::from_secs(60);
@@ -181,9 +213,12 @@ impl ServiceInner {
         info!(self.log, "sending service requests...");
         let services_put = || async {
             info!(self.log, "initializing sled services: {:?}", services);
-            client.services_put(
-                &sled_agent_client::types::ServiceEnsureBody {
-                    services: services.iter().map(|s| s.clone().into()).collect()
+            client
+                .services_put(&sled_agent_client::types::ServiceEnsureBody {
+                    services: services
+                        .iter()
+                        .map(|s| s.clone().into())
+                        .collect(),
                 })
                 .await
                 .map_err(BackoffError::transient)?;
@@ -197,11 +232,8 @@ impl ServiceInner {
         let log_failure = |error, _| {
             warn!(self.log, "failed to initialize services"; "error" => ?error);
         };
-        retry_notify(
-            internal_service_policy(),
-            services_put,
-            log_failure,
-        ).await?;
+        retry_notify(internal_service_policy(), services_put, log_failure)
+            .await?;
         Ok(())
     }
 
@@ -272,11 +304,21 @@ impl ServiceInner {
         // Wait until we see enough neighbors to be able to set the
         // initial set of requests.
         let mut peer_monitor = self.peer_monitor.lock().await;
-        while peer_monitor.addrs().await.len() < config.requests.len() {
+        let our_address = peer_monitor.our_address();
+        let mut addrs = peer_monitor.peer_addrs().await;
+        while addrs.len() + 1 < config.requests.len() {
+            info!(
+                self.log,
+                "# of peers ({}) < # of requests ({}), waiting for more to join...",
+                addrs.len(), config.requests.len()
+            );
             peer_monitor.recv().await;
+            addrs = peer_monitor.peer_addrs().await;
         }
+        info!(self.log, "Enough peers to start configuring rack: {:?}", addrs);
 
-        let peers = peer_monitor.addrs().await.into_iter().enumerate();
+        let addrs =
+            addrs.into_iter().chain([&our_address].into_iter()).enumerate();
 
         // XXX Questions to consider:
         // - What if a sled comes online *right after* this setup? How does
@@ -286,38 +328,52 @@ impl ServiceInner {
         // is assigning `/64`s based on the order peers have been seen.
 
         // Issue the dataset initialization requests to all sleds.
-        let requests = futures::future::join_all(
-            config.requests.iter().zip(peers).map(|(request, sled)| async move {
-                info!(self.log, "observing request: {:#?}", request);
-                let (idx, bootstrap_addr) = sled;
-                let sled_subnet_index = u8::try_from(idx + 1).expect("Too many peers!");
+        let requests =
+            futures::future::join_all(config.requests.iter().zip(addrs).map(
+                |(request, sled)| async move {
+                    info!(self.log, "observing request: {:#?}", request);
+                    let (idx, bootstrap_addr) = sled;
+                    let bootstrap_addr = SocketAddrV6::new(
+                        *bootstrap_addr,
+                        BOOTSTRAP_AGENT_PORT,
+                        0,
+                        0,
+                    );
+                    let sled_subnet_index =
+                        u8::try_from(idx + 1).expect("Too many peers!");
 
-                // First, connect to the Bootstrap Agent and tell it to
-                // initialize the Sled Agent with the specified subnet.
-                let subnet = config.sled_subnet(sled_subnet_index);
-                self.initialize_sled_agent(*bootstrap_addr, subnet).await?;
+                    // First, connect to the Bootstrap Agent and tell it to
+                    // initialize the Sled Agent with the specified subnet.
+                    let subnet = config.sled_subnet(sled_subnet_index);
+                    self.initialize_sled_agent(bootstrap_addr, subnet).await?;
 
-                // Next, initialize any datasets on sleds that need it.
-                let sled_address = get_sled_address(Ipv6Net(subnet));
-                self.initialize_datasets(
-                    sled_address,
-                    &request.datasets,
-                ).await?;
-                Ok((request, sled_address))
-            })
-        ).await.into_iter().collect::<Result<Vec<_>, SetupServiceError>>()?;
+                    // Next, initialize any datasets on sleds that need it.
+                    let sled_address =
+                        SocketAddr::V6(get_sled_address(Ipv6Net(subnet)));
+                    self.initialize_datasets(sled_address, &request.datasets)
+                        .await?;
+                    Ok((request, sled_address))
+                },
+            ))
+            .await
+            .into_iter()
+            .collect::<Result<Vec<_>, SetupServiceError>>()?;
 
         // Issue service initialization requests.
         //
         // Note that this must happen *after* the dataset initialization,
         // to ensure that CockroachDB has been initialized before Nexus
         // starts.
-        futures::future::join_all(
-            requests.iter().map(|(request, sled_address)| async move {
-                self.initialize_services(*sled_address, &request.services).await?;
+        futures::future::join_all(requests.iter().map(
+            |(request, sled_address)| async move {
+                self.initialize_services(*sled_address, &request.services)
+                    .await?;
                 Ok(())
-            })
-        ).await.into_iter().collect::<Result<Vec<()>, SetupServiceError>>()?;
+            },
+        ))
+        .await
+        .into_iter()
+        .collect::<Result<Vec<()>, SetupServiceError>>()?;
 
         // Finally, make sure the configuration is saved so we don't inject
         // the requests on the next iteration.

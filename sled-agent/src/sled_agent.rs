@@ -21,7 +21,7 @@ use omicron_common::api::{
     internal::nexus::UpdateArtifact,
 };
 use slog::Logger;
-use std::net::SocketAddr;
+use std::net::{SocketAddr, SocketAddrV6};
 use std::sync::Arc;
 use uuid::Uuid;
 
@@ -89,7 +89,7 @@ impl SledAgent {
         config: &Config,
         log: Logger,
         nexus_client: Arc<NexusClient>,
-        sled_address: SocketAddr,
+        sled_address: SocketAddrV6,
     ) -> Result<SledAgent, Error> {
         let id = &config.id;
         let vlan = config.vlan;
@@ -114,7 +114,8 @@ impl SledAgent {
         // configuration file.
         Zones::ensure_has_global_zone_v6_address(
             config.data_link.clone(),
-            sled_address.ip(),
+            *sled_address.ip(),
+            "sled6",
         )?;
 
         // Identify all existing zones which should be managed by the Sled
@@ -177,11 +178,13 @@ impl SledAgent {
             storage,
             instances,
             nexus_client,
-            services
+            services,
         })
     }
 
-    pub fn id(&self) -> Uuid { self.id }
+    pub fn id(&self) -> Uuid {
+        self.id
+    }
 
     /// Ensures that particular services should be initialized.
     ///

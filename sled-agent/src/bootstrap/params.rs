@@ -4,10 +4,10 @@
 
 //! Request body types for the bootstrap agent
 
+use omicron_common::api::external::Ipv6Net;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
-use omicron_common::api::external::Ipv6Net;
 
 /// Identity signed by local RoT and Oxide certificate chain.
 #[derive(Serialize, Deserialize, JsonSchema)]

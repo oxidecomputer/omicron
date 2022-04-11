@@ -8,13 +8,13 @@ use super::config::Config;
 use super::http_entrypoints::api as http_api;
 use super::sled_agent::SledAgent;
 use crate::nexus::NexusClient;
-use slog::Drain;
-use uuid::Uuid;
 use omicron_common::backoff::{
     internal_service_policy, retry_notify, BackoffError,
 };
+use slog::Drain;
+use std::net::{SocketAddr, SocketAddrV6};
 use std::sync::Arc;
-use std::net::SocketAddr;
+use uuid::Uuid;
 
 /// Packages up a [`SledAgent`], running the sled agent API under a Dropshot
 /// server wired up to the sled agent
@@ -29,7 +29,10 @@ impl Server {
     }
 
     /// Starts a SledAgent server
-    pub async fn start(config: &Config, addr: SocketAddr) -> Result<Server, String> {
+    pub async fn start(
+        config: &Config,
+        addr: SocketAddrV6,
+    ) -> Result<Server, String> {
         let (drain, registration) = slog_dtrace::with_drain(
             config.log.to_logger("sled-agent").map_err(|message| {
                 format!("initializing logger: {}", message)
@@ -55,13 +58,14 @@ impl Server {
             "component" => "SledAgent",
             "server" => config.id.clone().to_string()
         ));
-        let sled_agent = SledAgent::new(&config, sa_log, nexus_client.clone(), addr)
-            .await
-            .map_err(|e| e.to_string())?;
+        let sled_agent =
+            SledAgent::new(&config, sa_log, nexus_client.clone(), addr)
+                .await
+                .map_err(|e| e.to_string())?;
 
         let mut dropshot_config = dropshot::ConfigDropshot::default();
         dropshot_config.request_body_max_bytes = 1024 * 1024;
-        dropshot_config.bind_address = addr;
+        dropshot_config.bind_address = SocketAddr::V6(addr);
         let dropshot_log = log.new(o!("component" => "dropshot"));
         let http_server = dropshot::HttpServerStarter::new(
             &dropshot_config,

@@ -9,7 +9,7 @@ pub mod client;
 pub mod config;
 pub mod discovery;
 mod http_entrypoints;
-mod multicast;
+pub mod multicast;
 mod params;
 pub mod server;
 mod spdm;

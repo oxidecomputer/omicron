@@ -1,0 +1,71 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
+use omicron_sled_agent::bootstrap;
+use omicron_sled_agent::illumos::{dladm, zone};
+use std::io;
+use std::net::IpAddr;
+
+#[tokio::test]
+async fn test_multicast_bootstrap_address() {
+    // Setup the bootstrap address.
+    //
+    // This modifies global state of the target machine, creating
+    // an address named "bootstrap6", akin to what the bootstrap
+    // agent should do.
+    let link = dladm::Dladm::find_physical().unwrap();
+    let address = bootstrap::agent::bootstrap_address(link.clone()).unwrap();
+    zone::Zones::ensure_has_global_zone_v6_address(
+        Some(link),
+        *address.ip(),
+        "bootstrap6",
+    )
+    .unwrap();
+
+    // Create the multicast pair.
+    let loopback = true;
+    let interface = 0;
+    let (sender, listener) = bootstrap::multicast::new_ipv6_udp_pair(
+        address.ip(),
+        loopback,
+        interface,
+    )
+    .unwrap();
+
+    // Create a receiver task which reads for messages that have
+    // been broadcast, verifies the message, and returns the
+    // calling address.
+    let message = b"Hello World!";
+    let receiver_task_handle = tokio::task::spawn(async move {
+        let mut buf = vec![0u8; 32];
+        let (len, addr) = listener.recv_from(&mut buf).await?;
+        assert_eq!(message.len(), len);
+        assert_eq!(message, &buf[..message.len()]);
+        assert_eq!(addr.ip(), IpAddr::V6(*address.ip()));
+        Ok::<_, io::Error>(addr)
+    });
+
+    // Send a message repeatedly, and exit successfully if we
+    // manage to receive the response.
+    tokio::pin!(receiver_task_handle);
+    let mut send_count = 0;
+    loop {
+        tokio::select! {
+            result = sender.send_to(message, bootstrap::multicast::multicast_address()) => {
+                assert_eq!(message.len(), result.unwrap());
+                send_count += 1;
+                if send_count > 10 {
+                    panic!("10 multicast UDP messages sent with no response");
+                }
+                tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
+            }
+            result = &mut receiver_task_handle => {
+                let addr = result.unwrap().unwrap();
+                eprintln!("Receiver received message: {:#?}", addr);
+                assert_eq!(addr.ip(), IpAddr::V6(*address.ip()));
+                break;
+            }
+        }
+    }
+}

@@ -35,14 +35,8 @@ use std::sync::Arc;
 
 use super::agent::Agent;
 use super::{
-    params::{
-        ShareRequest,
-        SledAgentRequest,
-    },
-    views::{
-        ShareResponse,
-        SledAgentResponse,
-    },
+    params::{ShareRequest, SledAgentRequest},
+    views::{ShareResponse, SledAgentResponse},
 };
 
 /// Returns a description of the bootstrap agent API
