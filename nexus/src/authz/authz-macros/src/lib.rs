@@ -76,7 +76,6 @@ use serde_tokenstream::ParseWrapper;
 /// and require "fleet.admin" to do anything with them.  Here's an example:
 ///
 /// ```
-/// # use authz_macros::authz_resource;
 /// # use uuid::Uuid;
 ///
 /// authz_resource! {
@@ -94,7 +93,6 @@ use serde_tokenstream::ParseWrapper;
 /// Some don't, though, and that's supported too:
 ///
 /// ```
-/// # use authz_macros::authz_resource;
 /// # use uuid::Uuid;
 ///
 /// authz_resource! {
