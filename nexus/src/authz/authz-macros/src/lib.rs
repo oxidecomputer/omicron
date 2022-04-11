@@ -267,12 +267,13 @@ fn do_authz_resource(
     };
 
     let doc_struct = format!(
-        "`authz` type for a {}\
+        "`authz` type for a resource of type {}\
         \
-        Used to uniquely identify a {} across renames, moves, etc., and to do \
-        authorization checks (see [`crate::context::OpContext::authorize()`]).\
-        See [`crate::authz`] module-level documentation for more information.",
-        resource_name
+        Used to uniquely identify a resource of type {} across renames, moves, \
+        etc., and to do authorization checks (see  \
+        [`crate::context::OpContext::authorize()`]).  See [`crate::authz`] \
+        module-level documentation for more information.",
+        resource_name, resource_name,
     );
 
     Ok(quote! {
