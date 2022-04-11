@@ -28,7 +28,7 @@ uuid = { version = "0.8.2", features = [ "v4", "serde" ] }
 [dev-dependencies]
 itertools = "0.10.1"
 omicron-test-utils = { path = "../../test-utils" }
-slog-dtrace = "0.2.0"
+slog-dtrace = "0.2.1"
 
 [[bin]]
 name = "oxdb"
