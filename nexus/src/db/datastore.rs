@@ -1637,8 +1637,8 @@ impl DataStore {
                 )
             })?;
         Ok((
-            authz_project.child_generic(
-                ResourceType::Vpc,
+            authz::Vpc::new(
+                authz_project.clone(),
                 vpc.id(),
                 LookupType::ByName(vpc.name().to_string()),
             ),
@@ -1986,8 +1986,8 @@ impl DataStore {
                 )
             })?;
         Ok((
-            authz_vpc.child_generic(
-                ResourceType::VpcRouter,
+            authz::VpcRouter::new(
+                authz_vpc.clone(),
                 router.id(),
                 LookupType::ById(router.id()),
             ),
@@ -2279,15 +2279,12 @@ impl DataStore {
         name: &Name,
     ) -> LookupResult<UserBuiltin> {
         use db::schema::user_builtin::dsl;
-        opctx
-            .authorize(
-                authz::Action::Read,
-                &authz::FLEET.child_generic(
-                    ResourceType::User,
-                    LookupType::from(&name.0),
-                ),
-            )
-            .await?;
+        let authz_user = authz::User::new(
+            authz::FLEET,
+            name.clone(),
+            LookupType::from(&name.0),
+        );
+        opctx.authorize(authz::Action::Read, &authz_user).await?;
         dsl::user_builtin
             .filter(dsl::name.eq(name.clone()))
             .select(UserBuiltin::as_select())
@@ -2388,19 +2385,19 @@ impl DataStore {
         name: &str,
     ) -> LookupResult<RoleBuiltin> {
         use db::schema::role_builtin::dsl;
-        opctx
-            .authorize(
-                authz::Action::Read,
-                &authz::FLEET
-                    .child_generic(ResourceType::Role, LookupType::from(name)),
-            )
-            .await?;
 
         let (resource_type, role_name) =
             name.split_once(".").ok_or_else(|| Error::ObjectNotFound {
                 type_name: ResourceType::Role,
                 lookup_type: LookupType::ByName(String::from(name)),
             })?;
+
+        let authz_role = authz::Role::new(
+            authz::FLEET,
+            (resource_type.to_string(), role_name.to_string()),
+            LookupType::from(name),
+        );
+        opctx.authorize(authz::Action::Read, &authz_role).await?;
 
         dsl::role_builtin
             .filter(dsl::resource_type.eq(String::from(resource_type)))
@@ -2954,7 +2951,8 @@ mod test {
                 },
             },
         );
-        let org = authz::FLEET.organization(
+        let org = authz::Organization::new(
+            authz::FLEET,
             organization.id(),
             LookupType::ById(organization.id()),
         );
