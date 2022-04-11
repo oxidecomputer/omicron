@@ -3,7 +3,6 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 //! Authz-related macro implementations
-//! XXX-dap move to authz module
 
 extern crate proc_macro;
 
