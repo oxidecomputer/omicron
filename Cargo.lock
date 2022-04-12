@@ -817,6 +817,7 @@ dependencies = [
  "heck 0.4.0",
  "proc-macro2",
  "quote",
+ "rustfmt-wrapper",
  "serde",
  "serde_tokenstream",
  "syn",

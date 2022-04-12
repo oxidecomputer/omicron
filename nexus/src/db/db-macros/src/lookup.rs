@@ -39,7 +39,8 @@ pub struct Input {
     // XXX-dap would be nice to replace this with Vec<SupportedLookup> enum.
     // That requires implementing non-unit variant support in serde_tokenstream.
     lookup_by_name_in_parent: bool,
-    lookup_by_primary_key: Option<ParseWrapper<syn::Type>>,
+    lookup_by_primary_key_supported: bool,
+    primary_key_type: ParseWrapper<syn::Type>,
 }
 
 // XXX-dap working here:
@@ -71,9 +72,11 @@ pub struct Input {
 //         would trigger a panic if we took approach 1 above.  Now, this will at
 //         least fail to compile.
 
-enum SupportedLookup {
-    PrimaryKey(syn::Type),
-    ByNameWithinParent,
+#[derive(Debug)]
+enum SupportedLookups {
+    PrimaryKeyOnly(syn::Type),
+    NameWithinParentOnly,
+    PrimaryKeyAndNameWithinParent(syn::Type),
 }
 
 //
@@ -90,14 +93,17 @@ pub struct Config {
     /// Basic information about the resource we're generating
     resource: Resource,
 
+    /// Name of the enum describing how we're looking up this resource
+    lookup_enum: syn::Ident,
+
     // The path to the resource
     /// list of type names for this resource and its parents
     /// (e.g., [`Organization`, `Project`])
     path_types: Vec<syn::Ident>,
 
     /// list of identifiers used for the authz objects for this resource and its
-    /// parents, in the same order as `authz_path_types`
-    /// (e.g., [`authz_organization`, `authz_project`])
+    /// parents, in the same order as `authz_path_types` (e.g.,
+    /// [`authz_organization`, `authz_project`])
     path_authz_names: Vec<syn::Ident>,
 
     // Child resources
@@ -110,12 +116,13 @@ pub struct Config {
     parent: Option<Resource>,
 
     /// Supported lookups
-    supported_lookups: Vec<SupportedLookup>,
+    supported_lookups: SupportedLookups,
 }
 
 impl Config {
     fn for_input(input: Input) -> Config {
         let resource = Resource::for_name(&input.name);
+        let lookup_enum = format_ident!("{}Key", resource.name);
 
         let mut path_types: Vec<_> =
             input.ancestors.iter().map(|a| format_ident!("{}", a)).collect();
@@ -132,17 +139,29 @@ impl Config {
 
         let child_resources = input.children;
         let parent = input.ancestors.last().map(|s| Resource::for_name(&s));
-        let mut supported_lookups = Vec::new();
-        if input.lookup_by_name_in_parent {
-            supported_lookups.push(SupportedLookup::ByNameWithinParent);
-        }
-        if let Some(pkey_type) = input.lookup_by_primary_key {
-            supported_lookups
-                .push(SupportedLookup::PrimaryKey(pkey_type.into_inner()));
-        }
+        let supported_lookups = match (
+            input.lookup_by_name_in_parent,
+            input.lookup_by_primary_key_supported,
+            input.primary_key_type,
+        ) {
+            (true, true, pkey_type) => {
+                SupportedLookups::PrimaryKeyAndNameWithinParent(
+                    pkey_type.into_inner(),
+                )
+            }
+            (true, false, _) => SupportedLookups::NameWithinParentOnly,
+            (false, true, pkey_type) => {
+                SupportedLookups::PrimaryKeyOnly(pkey_type.into_inner())
+            }
+            (false, false, _) => {
+                // XXX-dap
+                todo!("must support at least one lookup");
+            }
+        };
 
         Config {
             resource,
+            lookup_enum,
             path_types,
             path_authz_names,
             parent,
@@ -186,14 +205,14 @@ pub fn lookup_resource(
     let config = Config::for_input(input);
 
     let resource_name = &config.resource.name;
-    let the_struct = generate_struct(&config);
+    let the_basics = generate_struct(&config);
     let misc_helpers = generate_misc_helpers(&config);
     let child_selectors = generate_child_selectors(&config);
     let lookup_methods = generate_lookup_methods(&config);
     let database_functions = generate_database_functions(&config);
 
     Ok(quote! {
-        #the_struct
+        #the_basics
 
         impl<'a> #resource_name<'a> {
             #child_selectors
@@ -219,10 +238,49 @@ fn generate_struct(config: &Config) -> TokenStream {
         resource_name
     );
 
+    /* configure the lookup enum */
+    let lookup_enum = &config.lookup_enum;
+    let pkey_type = match &config.supported_lookups {
+        SupportedLookups::PrimaryKeyOnly(pkey_type) => Some(pkey_type),
+        SupportedLookups::PrimaryKeyAndNameWithinParent(pkey_type) => {
+            Some(pkey_type)
+        }
+        SupportedLookups::NameWithinParentOnly => None,
+    };
+    let pkey_variant = match pkey_type {
+        Some(actual_pkey_type) => {
+            quote! {
+                /// We're looking for a resource with the given id
+                ///
+                /// This has no parent container -- a by-id lookup is always
+                /// global
+                Id(Root<'a>, #actual_pkey_type),
+            }
+        }
+        None => quote! {},
+    };
+    let name_variant = match &config.supported_lookups {
+        SupportedLookups::PrimaryKeyAndNameWithinParent(_)
+        | SupportedLookups::NameWithinParentOnly => {
+            quote! {
+                /// We're looking for a resource with the given name in the
+                /// given parent collection
+                Name(#parent_resource_name<'a>, &'a Name),
+            }
+        }
+        SupportedLookups::PrimaryKeyOnly(_) => quote! {},
+    };
+
     quote! {
         #[doc = #doc_struct]
         pub struct #resource_name<'a> {
-            key: Key<'a, #parent_resource_name<'a>>
+            key: #lookup_enum<'a>
+        }
+
+        /// Describes how we're looking up this resource
+        enum #lookup_enum<'a>{
+            #name_variant
+            #pkey_variant
         }
     }
 }
@@ -235,6 +293,8 @@ fn generate_struct(config: &Config) -> TokenStream {
 fn generate_child_selectors(config: &Config) -> TokenStream {
     let child_resource_types: Vec<_> =
         config.child_resources.iter().map(|c| format_ident!("{}", c)).collect();
+    let child_resource_key_types: Vec<_> =
+        config.child_resources.iter().map(|c| format_ident!("{}Key", c)).collect();
     let child_selector_fn_names: Vec<_> = config
         .child_resources
         .iter()
@@ -264,7 +324,7 @@ fn generate_child_selectors(config: &Config) -> TokenStream {
                 'b: 'c,
             {
                 #child_resource_types {
-                    key: Key::Name(self, name),
+                    key: #child_resource_key_types::Name(self, name),
                 }
             }
         )*
@@ -277,6 +337,7 @@ fn generate_misc_helpers(config: &Config) -> TokenStream {
     let resource_name = &config.resource.name;
     let parent_resource_name =
         config.parent.as_ref().map(|p| &p.name).unwrap_or(&fleet_name);
+    let lookup_enum = &config.lookup_enum;
 
     quote! {
         /// Build the `authz` object for this resource
@@ -299,8 +360,8 @@ fn generate_misc_helpers(config: &Config) -> TokenStream {
         /// used for this lookup.
         fn lookup_root(&self) -> &LookupPath<'a> {
             match &self.key {
-                Key::Name(parent, _) => parent.lookup_root(),
-                Key::Id(root, _) => root.lookup_root(),
+                #lookup_enum::Name(parent, _) => parent.lookup_root(),
+                #lookup_enum::Id(root, _) => root.lookup_root(),
             }
         }
     }
@@ -313,6 +374,7 @@ fn generate_lookup_methods(config: &Config) -> TokenStream {
     let path_authz_names = &config.path_authz_names;
     let resource_name = &config.resource.name;
     let resource_authz_name = &config.resource.authz_name;
+    let lookup_enum = &config.lookup_enum;
     let (ancestors_authz_names_assign, parent_lookup_arg_actual) =
         if let Some(p) = &config.parent {
             let nancestors = config.path_authz_names.len() - 1;
@@ -356,7 +418,7 @@ fn generate_lookup_methods(config: &Config) -> TokenStream {
             let datastore = &lookup.datastore;
 
             match &self.key {
-                Key::Name(parent, name) => {
+                #lookup_enum::Name(parent, name) => {
                     #ancestors_authz_names_assign
                     let (#resource_authz_name, db_row) = Self::fetch_by_name_for(
                         opctx,
@@ -367,7 +429,7 @@ fn generate_lookup_methods(config: &Config) -> TokenStream {
                     ).await?;
                     Ok((#(#path_authz_names,)* db_row))
                 }
-                Key::Id(_, id) => {
+                #lookup_enum::Id(_, id) => {
                     Self::fetch_by_id_for(
                         opctx,
                         datastore,
@@ -414,7 +476,7 @@ fn generate_lookup_methods(config: &Config) -> TokenStream {
             let datastore = &lookup.datastore;
 
             match &self.key {
-                Key::Name(parent, name) => {
+                #lookup_enum::Name(parent, name) => {
                     // When doing a by-name lookup, we have to look up the
                     // parent first.  Since this is recursive, we wind up
                     // hitting the database once for each item in the path,
@@ -434,7 +496,7 @@ fn generate_lookup_methods(config: &Config) -> TokenStream {
                         ).await?;
                     Ok((#(#path_authz_names,)*))
                 }
-                Key::Id(_, id) => {
+                #lookup_enum::Id(_, id) => {
                     // When doing a by-id lookup, we start directly with the
                     // resource we're looking up.  But we still want to
                     // return a full path of authz objects.  So we look up
@@ -634,31 +696,68 @@ fn generate_database_functions(config: &Config) -> TokenStream {
 // lookup.rs, replacing the call to the macro, then reformat the file, and then
 // build it in order to see the compiler error in context.
 #[cfg(test)]
-#[test]
-fn test_lookup_dump() {
-    let output = lookup_resource(
-        quote! {
-            name = "Organization",
-            ancestors = ["Silo"],
-            children = [ "Project" ],
-            lookup_by_name_in_parent = true,
-            lookup_by_primary_key = Some(Uuid),
-        }
-        .into(),
-    )
-    .unwrap();
-    println!("{}", output);
+mod test {
+    use super::lookup_resource;
+    use quote::quote;
+    use rustfmt_wrapper::rustfmt;
 
-    let output = lookup_resource(
-        quote! {
-            name = "Project",
-            ancestors = ["Organization"],
-            children = [ "Disk", "Instance" ],
-            lookup_by_name_in_parent = true,
-            lookup_by_primary_key = Some(Uuid),
-        }
-        .into(),
-    )
-    .unwrap();
-    println!("{}", output);
+    #[test]
+    #[ignore]
+    fn test_lookup_dump() {
+        let output = lookup_resource(
+            quote! {
+                name = "Organization",
+                ancestors = ["Silo"],
+                children = [ "Project" ],
+                lookup_by_name_in_parent = true,
+                lookup_by_primary_key_supported = true,
+                primary_key_type = Uuid,
+            }
+            .into(),
+        )
+        .unwrap();
+        println!("{}", rustfmt(output).unwrap());
+
+        let output = lookup_resource(
+            quote! {
+                name = "Project",
+                ancestors = ["Organization"],
+                children = [ "Disk", "Instance" ],
+                lookup_by_name_in_parent = true,
+                lookup_by_primary_key_supported = true,
+                primary_key_type = Uuid,
+            }
+            .into(),
+        )
+        .unwrap();
+        println!("{}", rustfmt(output).unwrap());
+
+        let output = lookup_resource(
+            quote! {
+                name = "SiloUser",
+                ancestors = [],
+                children = [],
+                lookup_by_name_in_parent = false,
+                lookup_by_primary_key_supported = true,
+                primary_key_type = Uuid,
+            }
+            .into(),
+        )
+        .unwrap();
+        println!("{}", rustfmt(output).unwrap());
+
+        let output = lookup_resource(
+            quote! {
+                name = "WhatThing",
+                ancestors = [ "WhatThingParent" ],
+                children = [],
+                lookup_by_name_in_parent = true,
+                lookup_by_primary_key_supported = false,
+                primary_key_type = None,
+            }
+            .into(),
+        )
+        .unwrap();
+        println!("{}", rustfmt(output).unwrap());
+    }
 }
