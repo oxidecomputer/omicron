@@ -217,7 +217,11 @@ impl DatasetInfo {
                 ])?;
 
                 // Set parameters which are passed to the CRDB binary.
-                info!(log, "start_zone: setting CRDB's config/listen_addr: {}", address);
+                info!(
+                    log,
+                    "start_zone: setting CRDB's config/listen_addr: {}",
+                    address
+                );
                 zone.run_cmd(&[
                     crate::illumos::zone::SVCCFG,
                     "-s",
