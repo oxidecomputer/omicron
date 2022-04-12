@@ -293,8 +293,11 @@ fn generate_struct(config: &Config) -> TokenStream {
 fn generate_child_selectors(config: &Config) -> TokenStream {
     let child_resource_types: Vec<_> =
         config.child_resources.iter().map(|c| format_ident!("{}", c)).collect();
-    let child_resource_key_types: Vec<_> =
-        config.child_resources.iter().map(|c| format_ident!("{}Key", c)).collect();
+    let child_resource_key_types: Vec<_> = config
+        .child_resources
+        .iter()
+        .map(|c| format_ident!("{}Key", c))
+        .collect();
     let child_selector_fn_names: Vec<_> = config
         .child_resources
         .iter()
@@ -339,6 +342,21 @@ fn generate_misc_helpers(config: &Config) -> TokenStream {
         config.parent.as_ref().map(|p| &p.name).unwrap_or(&fleet_name);
     let lookup_enum = &config.lookup_enum;
 
+    let pkey_variant = match config.supported_lookups {
+        SupportedLookups::PrimaryKeyOnly(_)
+        | SupportedLookups::PrimaryKeyAndNameWithinParent(_) => {
+            quote! { #lookup_enum::Id(root, _) => root.lookup_root(), }
+        }
+        SupportedLookups::NameWithinParentOnly => quote! {},
+    };
+    let name_variant = match config.supported_lookups {
+        SupportedLookups::NameWithinParentOnly
+        | SupportedLookups::PrimaryKeyAndNameWithinParent(_) => quote! {
+            #lookup_enum::Name(parent, _) => parent.lookup_root(),
+        },
+        SupportedLookups::PrimaryKeyOnly(_) => quote! {},
+    };
+
     quote! {
         /// Build the `authz` object for this resource
         fn make_authz(
@@ -360,8 +378,8 @@ fn generate_misc_helpers(config: &Config) -> TokenStream {
         /// used for this lookup.
         fn lookup_root(&self) -> &LookupPath<'a> {
             match &self.key {
-                #lookup_enum::Name(parent, _) => parent.lookup_root(),
-                #lookup_enum::Id(root, _) => root.lookup_root(),
+                #name_variant
+                #pkey_variant
             }
         }
     }
@@ -389,6 +407,92 @@ fn generate_lookup_methods(config: &Config) -> TokenStream {
         } else {
             (quote! {}, quote! {})
         };
+
+    // Generate the branches of the main match arm in "fetch_for()".
+    let fetch_for_name_variant = match config.supported_lookups {
+        SupportedLookups::NameWithinParentOnly
+        | SupportedLookups::PrimaryKeyAndNameWithinParent(_) => quote! {
+            #lookup_enum::Name(parent, name) => {
+                #ancestors_authz_names_assign
+                let (#resource_authz_name, db_row) = Self::fetch_by_name_for(
+                    opctx,
+                    datastore,
+                    #parent_lookup_arg_actual
+                    *name,
+                    action,
+                ).await?;
+                Ok((#(#path_authz_names,)* db_row))
+            }
+        },
+        SupportedLookups::PrimaryKeyOnly(_) => quote! {},
+    };
+    let fetch_for_pkey_variant = match config.supported_lookups {
+        SupportedLookups::PrimaryKeyOnly(_)
+        | SupportedLookups::PrimaryKeyAndNameWithinParent(_) => {
+            quote! {
+                #lookup_enum::Id(_, id) => {
+                    Self::fetch_by_id_for(opctx, datastore, *id, action).await
+                }
+            }
+        }
+        SupportedLookups::NameWithinParentOnly => quote! {},
+    };
+
+    // Generate the branches of the main match arm in "lookup()"
+    let lookup_name_variant = match config.supported_lookups {
+        SupportedLookups::NameWithinParentOnly
+        | SupportedLookups::PrimaryKeyAndNameWithinParent(_) => quote! {
+            #lookup_enum::Name(parent, name) => {
+                // When doing a by-name lookup, we have to look up the
+                // parent first.  Since this is recursive, we wind up
+                // hitting the database once for each item in the path,
+                // in order descending from the root of the tree.  (So
+                // we'll look up Organization, then Project, then
+                // Instance, etc.)
+                // TODO-performance Instead of doing database queries at
+                // each level of recursion, we could be building up one
+                // big "join" query and hit the database just once.
+                #ancestors_authz_names_assign
+                let (#resource_authz_name, _) =
+                    Self::lookup_by_name_no_authz(
+                        opctx,
+                        datastore,
+                        #parent_lookup_arg_actual
+                        *name
+                    ).await?;
+                Ok((#(#path_authz_names,)*))
+            }
+        },
+        SupportedLookups::PrimaryKeyOnly(_) => quote! {},
+    };
+    let lookup_pkey_variant = match config.supported_lookups {
+        SupportedLookups::PrimaryKeyOnly(_)
+        | SupportedLookups::PrimaryKeyAndNameWithinParent(_) => {
+            quote! {
+                #lookup_enum::Id(_, id) => {
+                    // When doing a by-id lookup, we start directly with the
+                    // resource we're looking up.  But we still want to
+                    // return a full path of authz objects.  So we look up
+                    // the parent by id, then its parent, etc.  Like the
+                    // by-name case, we wind up hitting the database once
+                    // for each item in the path, but in the reverse order.
+                    // So we'll look up the Instance, then the Project, then
+                    // the Organization.
+                    // TODO-performance Instead of doing database queries at
+                    // each level of recursion, we could be building up one
+                    // big "join" query and hit the database just once.
+                    let (#(#path_authz_names,)* _) =
+                        Self::lookup_by_id_no_authz(
+                            opctx,
+                            datastore,
+                            *id
+                        ).await?;
+                    Ok((#(#path_authz_names,)*))
+                }
+            }
+        }
+        SupportedLookups::NameWithinParentOnly => quote! {},
+    };
 
     quote! {
         /// Fetch the record corresponding to the selected resource
@@ -418,25 +522,8 @@ fn generate_lookup_methods(config: &Config) -> TokenStream {
             let datastore = &lookup.datastore;
 
             match &self.key {
-                #lookup_enum::Name(parent, name) => {
-                    #ancestors_authz_names_assign
-                    let (#resource_authz_name, db_row) = Self::fetch_by_name_for(
-                        opctx,
-                        datastore,
-                        #parent_lookup_arg_actual
-                        *name,
-                        action,
-                    ).await?;
-                    Ok((#(#path_authz_names,)* db_row))
-                }
-                #lookup_enum::Id(_, id) => {
-                    Self::fetch_by_id_for(
-                        opctx,
-                        datastore,
-                        *id,
-                        action,
-                    ).await
-                }
+                #fetch_for_name_variant
+                #fetch_for_pkey_variant
             }
         }
 
@@ -476,46 +563,8 @@ fn generate_lookup_methods(config: &Config) -> TokenStream {
             let datastore = &lookup.datastore;
 
             match &self.key {
-                #lookup_enum::Name(parent, name) => {
-                    // When doing a by-name lookup, we have to look up the
-                    // parent first.  Since this is recursive, we wind up
-                    // hitting the database once for each item in the path,
-                    // in order descending from the root of the tree.  (So
-                    // we'll look up Organization, then Project, then
-                    // Instance, etc.)
-                    // TODO-performance Instead of doing database queries at
-                    // each level of recursion, we could be building up one
-                    // big "join" query and hit the database just once.
-                    #ancestors_authz_names_assign
-                    let (#resource_authz_name, _) =
-                        Self::lookup_by_name_no_authz(
-                            opctx,
-                            datastore,
-                            #parent_lookup_arg_actual
-                            *name
-                        ).await?;
-                    Ok((#(#path_authz_names,)*))
-                }
-                #lookup_enum::Id(_, id) => {
-                    // When doing a by-id lookup, we start directly with the
-                    // resource we're looking up.  But we still want to
-                    // return a full path of authz objects.  So we look up
-                    // the parent by id, then its parent, etc.  Like the
-                    // by-name case, we wind up hitting the database once
-                    // for each item in the path, but in the reverse order.
-                    // So we'll look up the Instance, then the Project, then
-                    // the Organization.
-                    // TODO-performance Instead of doing database queries at
-                    // each level of recursion, we could be building up one
-                    // big "join" query and hit the database just once.
-                    let (#(#path_authz_names,)* _) =
-                        Self::lookup_by_id_no_authz(
-                            opctx,
-                            datastore,
-                            *id
-                        ).await?;
-                    Ok((#(#path_authz_names,)*))
-                }
+                #lookup_name_variant
+                #lookup_pkey_variant
             }
         }
     }
