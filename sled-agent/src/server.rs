@@ -21,6 +21,7 @@ use uuid::Uuid;
 pub struct Server {
     /// Dropshot server for the API.
     http_server: dropshot::HttpServer<SledAgent>,
+    _nexus_notifier_handle: tokio::task::JoinHandle<()>,
 }
 
 impl Server {
@@ -76,42 +77,48 @@ impl Server {
         .map_err(|error| format!("initializing server: {}", error))?
         .start();
 
-        // Notify the control plane that we're up, and continue trying this
-        // until it succeeds. We retry with an randomized, capped exponential
-        // backoff.
-        //
-        // TODO-robustness if this returns a 400 error, we probably want to
-        // return a permanent error from the `notify_nexus` closure.
-        let sa_address = http_server.local_addr();
-        let notify_nexus = || async {
-            info!(
-                log,
-                "contacting server nexus, registering sled: {}", config.id
-            );
-            nexus_client
-                .cpapi_sled_agents_post(
-                    &config.id,
-                    &nexus_client::types::SledAgentStartupInfo {
-                        sa_address: sa_address.to_string(),
-                    },
-                )
-                .await
-                .map_err(BackoffError::transient)
-        };
-        let log_notification_failure = |_, delay| {
-            warn!(
-                log,
-                "failed to contact nexus, will retry in {:?}", delay;
-            );
-        };
-        retry_notify(
-            internal_service_policy(),
-            notify_nexus,
-            log_notification_failure,
-        )
-        .await
-        .expect("Expected an infinite retry loop contacting Nexus");
-        Ok(Server { http_server })
+        let sled_address = http_server.local_addr();
+        let sled_id = config.id;
+        let nexus_notifier_handle = tokio::task::spawn(async move {
+            // Notify the control plane that we're up, and continue trying this
+            // until it succeeds. We retry with an randomized, capped exponential
+            // backoff.
+            //
+            // TODO-robustness if this returns a 400 error, we probably want to
+            // return a permanent error from the `notify_nexus` closure.
+            let notify_nexus = || async {
+                info!(
+                    log,
+                    "contacting server nexus, registering sled: {}", sled_id
+                );
+                nexus_client
+                    .cpapi_sled_agents_post(
+                        &sled_id,
+                        &nexus_client::types::SledAgentStartupInfo {
+                            sa_address: sled_address.to_string(),
+                        },
+                    )
+                    .await
+                    .map_err(BackoffError::transient)
+            };
+            let log_notification_failure = |_, delay| {
+                warn!(
+                    log,
+                    "failed to contact nexus, will retry in {:?}", delay;
+                );
+            };
+            retry_notify(
+                internal_service_policy(),
+                notify_nexus,
+                log_notification_failure,
+            )
+            .await
+            .expect("Expected an infinite retry loop contacting Nexus");
+        });
+        Ok(Server {
+            http_server,
+            _nexus_notifier_handle: nexus_notifier_handle,
+        })
     }
 
     /// Wait for the given server to shut down

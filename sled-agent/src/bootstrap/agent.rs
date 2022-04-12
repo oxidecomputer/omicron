@@ -183,6 +183,7 @@ impl Agent {
         let mut maybe_agent = self.sled_agent.lock().await;
         if let Some(server) = &*maybe_agent {
             // Server already exists, return it.
+            info!(&self.log, "Sled Agent already loaded");
             return Ok(SledAgentResponse { id: server.id() });
         }
         // Server does not exist, initialize it.
@@ -191,6 +192,7 @@ impl Agent {
             .await
             .map_err(|e| BootstrapError::SledError(e))?;
         maybe_agent.replace(server);
+        info!(&self.log, "Sled Agent loaded; recording configuration");
 
         // Record the subnet, so the sled agent can be automatically
         // initialized on the next boot.

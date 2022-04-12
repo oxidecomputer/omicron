@@ -2,10 +2,10 @@
 
 id = "1da65e5b-210c-4859-a7d7-200c1e659972"
 # Internal address of nexus
-nexus_address = "[fd00:1de::7]:12221"
+nexus_address = "[fd00:1122:3344:01::7]:12221"
 
 [db]
-address = "[fd00:1de::8]:8123"
+address = "[fd00:1122:3344:01::8]:8123"
 batch_size = 1000
 batch_interval = 5 # In seconds
 
@@ -14,4 +14,4 @@ level = "debug"
 mode = "stderr-terminal"
 
 [dropshot]
-bind_address = "[fd00:1de::6]:12223"
+bind_address = "[fd00:1122:3344:01::6]:12223"
