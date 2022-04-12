@@ -34,14 +34,14 @@ $ oxide project create myproject \
 $ oxide instance create myinstance \
     --description "My instance" \
     --project myproject \
-    --org myorg \
+    --organization myorg \
     --hostname "myinstance.maze-war.com" \
 	  --ncpus 1 \
 	  --memory 8
 ✔ Created instance myinstance in myorg/myproject
 
 $ oxide instance view myinstance \
-    --org myorg \
+    --organization myorg \
     --project myproject \
     --format json
 {
@@ -67,7 +67,7 @@ $ oxide disk create nginx \
 
 
 $ oxide disk view nginx \
-    --org myorg \
+    --organization myorg \
     --project myproject \
     --format json
 {
