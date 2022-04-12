@@ -29,6 +29,8 @@ mod lookup;
 ///     name = "Organization",
 ///     ancestors = [],
 ///     children = [ "Project" ],
+///     lookup_by_name = true,
+///     primary_key_type = Uuid,
 /// }
 /// ```
 ///
@@ -46,12 +48,16 @@ mod lookup;
 ///     name = "Organization",
 ///     ancestors = [],
 ///     children = [ "Project" ],
+///     lookup_by_name = true,
+///     primary_key_type = Uuid,
 /// }
 ///
 /// lookup_resource! {
 ///     name = "Instance",
 ///     ancestors = [ "Organization", "Project" ],
 ///     children = [],
+///     lookup_by_name = true,
+///     primary_key_type = Uuid,
 /// }
 /// ```
 ///

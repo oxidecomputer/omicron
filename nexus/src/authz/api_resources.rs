@@ -262,7 +262,6 @@ authz_resource! {
 
 // Miscellaneous resources nested directly below "Fleet"
 
-// XXX-dap
 authz_resource! {
     name = "SiloUser",
     parent = "Fleet",

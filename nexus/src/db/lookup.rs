@@ -263,8 +263,7 @@ lookup_resource! {
     name = "Organization",
     ancestors = [],
     children = [ "Project" ],
-    lookup_by_name_in_parent = true,
-    lookup_by_primary_key_supported = true,
+    lookup_by_name = true,
     primary_key_type = Uuid,
 }
 
@@ -272,8 +271,7 @@ lookup_resource! {
     name = "Project",
     ancestors = [ "Organization" ],
     children = [ "Disk", "Instance", "Vpc" ],
-    lookup_by_name_in_parent = true,
-    lookup_by_primary_key_supported = true,
+    lookup_by_name = true,
     primary_key_type = Uuid,
 }
 
@@ -281,8 +279,7 @@ lookup_resource! {
     name = "Instance",
     ancestors = [ "Organization", "Project" ],
     children = [ "NetworkInterface" ],
-    lookup_by_name_in_parent = true,
-    lookup_by_primary_key_supported = true,
+    lookup_by_name = true,
     primary_key_type = Uuid,
 }
 
@@ -290,8 +287,7 @@ lookup_resource! {
     name = "NetworkInterface",
     ancestors = [ "Organization", "Project", "Instance" ],
     children = [],
-    lookup_by_name_in_parent = true,
-    lookup_by_primary_key_supported = true,
+    lookup_by_name = true,
     primary_key_type = Uuid,
 }
 
@@ -299,8 +295,7 @@ lookup_resource! {
     name = "Disk",
     ancestors = [ "Organization", "Project" ],
     children = [],
-    lookup_by_name_in_parent = true,
-    lookup_by_primary_key_supported = true,
+    lookup_by_name = true,
     primary_key_type = Uuid,
 }
 
@@ -308,8 +303,7 @@ lookup_resource! {
     name = "Vpc",
     ancestors = [ "Organization", "Project" ],
     children = [ "VpcRouter", "VpcSubnet" ],
-    lookup_by_name_in_parent = true,
-    lookup_by_primary_key_supported = true,
+    lookup_by_name = true,
     primary_key_type = Uuid,
 }
 
@@ -317,8 +311,7 @@ lookup_resource! {
     name = "VpcSubnet",
     ancestors = [ "Organization", "Project", "Vpc" ],
     children = [ ],
-    lookup_by_name_in_parent = true,
-    lookup_by_primary_key_supported = true,
+    lookup_by_name = true,
     primary_key_type = Uuid,
 }
 
@@ -326,8 +319,7 @@ lookup_resource! {
     name = "VpcRouter",
     ancestors = [ "Organization", "Project", "Vpc" ],
     children = [ "RouterRoute" ],
-    lookup_by_name_in_parent = true,
-    lookup_by_primary_key_supported = true,
+    lookup_by_name = true,
     primary_key_type = Uuid,
 }
 
@@ -335,8 +327,7 @@ lookup_resource! {
     name = "RouterRoute",
     ancestors = [ "Organization", "Project", "Vpc", "VpcRouter" ],
     children = [],
-    lookup_by_name_in_parent = true,
-    lookup_by_primary_key_supported = true,
+    lookup_by_name = true,
     primary_key_type = Uuid,
 }
 
@@ -344,8 +335,7 @@ lookup_resource! {
     name = "SiloUser",
     ancestors = [],
     children = [],
-    lookup_by_name_in_parent = false,
-    lookup_by_primary_key_supported = true,
+    lookup_by_name = false,
     primary_key_type = Uuid,
 }
 

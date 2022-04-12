@@ -35,48 +35,10 @@ pub struct Input {
     /// unordered list of resources that are direct children of this resource
     /// (e.g., for a Project, these would include "Instance" and "Disk")
     children: Vec<String>,
-    // what kinds of lookup should be supported
-    // XXX-dap would be nice to replace this with Vec<SupportedLookup> enum.
-    // That requires implementing non-unit variant support in serde_tokenstream.
-    lookup_by_name_in_parent: bool,
-    lookup_by_primary_key_supported: bool,
+    /// whether lookup by name is supported (usually within the parent collection)
+    lookup_by_name: bool,
+    /// Rust type used for the primary key
     primary_key_type: ParseWrapper<syn::Type>,
-}
-
-// XXX-dap working here:
-// - the next step is to try to _do_ something with the SupportedLookup
-//   variants.  Skimming the code, the obvious impact is to
-//   generate_lookup_methods().  But looking at functions like fetch_for():
-//   they're doing a `match` on two variants of `Key`: `Id` and `Name`.  That's
-//   not really right any more.  For something that only supports a ById lookup,
-//   there shouldn't be a `Name` variant.  And for something by `Id`, the id's
-//   datum's type is going to vary.
-//   some ideas:
-//   - Just panic in the branches that don't apply.  My intuition/experience
-//     is that this is a road to sadness.
-//   - Create a couple of other enums: KeyIdOnly (only has "id" variant),
-//     KeyNameOnly (has no "id" variant) and use the right one in each class.
-//   - Create a new enum for each class.  This seems to separate concerns
-//     better.
-//   - Don't use an enum at all unless we support both lookups
-//     - internally (and maybe externally), instead of an array with supported
-//       lookups, it could be an enum with values ByIdOnly(IdType),
-//       ByNameInParentCollectionOnly, ByIdOrNameInParentCollection(IdType).
-//     - maybe: it's easy enough to factor out the contents of the match arms.
-//       We generate a match only for the third variant.
-//       - This improves the behavior for one class of user input error: suppose
-//         somebody defines a resource Foo that does _not_ support lookup by
-//         name, but they mistakenly put Foo in the "children" list of some
-//         other resource.  Then that resource will have a "foo_name()" function
-//         that will construct a Foo lookup by name -- which is invalid!  That
-//         would trigger a panic if we took approach 1 above.  Now, this will at
-//         least fail to compile.
-
-#[derive(Debug)]
-enum SupportedLookups {
-    PrimaryKeyOnly(syn::Type),
-    NameWithinParentOnly,
-    PrimaryKeyAndNameWithinParent(syn::Type),
 }
 
 //
@@ -115,8 +77,11 @@ pub struct Config {
     /// Information about the parent resource, if any
     parent: Option<Resource>,
 
-    /// Supported lookups
-    supported_lookups: SupportedLookups,
+    /// whether lookup by name is supported
+    lookup_by_name: bool,
+
+    /// Rust type used for the primary key
+    primary_key_type: syn::Type,
 }
 
 impl Config {
@@ -139,25 +104,6 @@ impl Config {
 
         let child_resources = input.children;
         let parent = input.ancestors.last().map(|s| Resource::for_name(&s));
-        let supported_lookups = match (
-            input.lookup_by_name_in_parent,
-            input.lookup_by_primary_key_supported,
-            input.primary_key_type,
-        ) {
-            (true, true, pkey_type) => {
-                SupportedLookups::PrimaryKeyAndNameWithinParent(
-                    pkey_type.into_inner(),
-                )
-            }
-            (true, false, _) => SupportedLookups::NameWithinParentOnly,
-            (false, true, pkey_type) => {
-                SupportedLookups::PrimaryKeyOnly(pkey_type.into_inner())
-            }
-            (false, false, _) => {
-                // XXX-dap
-                todo!("must support at least one lookup");
-            }
-        };
 
         Config {
             resource,
@@ -166,7 +112,8 @@ impl Config {
             path_authz_names,
             parent,
             child_resources,
-            supported_lookups,
+            lookup_by_name: input.lookup_by_name,
+            primary_key_type: input.primary_key_type.into_inner(),
         }
     }
 }
@@ -228,47 +175,30 @@ pub fn lookup_resource(
 
 /// Generates the struct definition for this resource
 fn generate_struct(config: &Config) -> TokenStream {
-    let root_sym = format_ident!("Root");
     let resource_name = &config.resource.name;
-    let parent_resource_name =
-        config.parent.as_ref().map(|p| &p.name).unwrap_or_else(|| &root_sym);
     let doc_struct = format!(
         "Selects a resource of type {} (or any of its children, using the \
         functions on this struct) for lookup or fetch",
         resource_name
     );
+    let pkey_type = &config.primary_key_type;
 
     /* configure the lookup enum */
     let lookup_enum = &config.lookup_enum;
-    let pkey_type = match &config.supported_lookups {
-        SupportedLookups::PrimaryKeyOnly(pkey_type) => Some(pkey_type),
-        SupportedLookups::PrimaryKeyAndNameWithinParent(pkey_type) => {
-            Some(pkey_type)
+    let name_variant = if config.lookup_by_name {
+        let root_sym = format_ident!("Root");
+        let parent_resource_name = config
+            .parent
+            .as_ref()
+            .map(|p| &p.name)
+            .unwrap_or_else(|| &root_sym);
+        quote! {
+            /// We're looking for a resource with the given name in the given
+            /// parent collection
+            Name(#parent_resource_name<'a>, &'a Name),
         }
-        SupportedLookups::NameWithinParentOnly => None,
-    };
-    let pkey_variant = match pkey_type {
-        Some(actual_pkey_type) => {
-            quote! {
-                /// We're looking for a resource with the given id
-                ///
-                /// This has no parent container -- a by-id lookup is always
-                /// global
-                Id(Root<'a>, #actual_pkey_type),
-            }
-        }
-        None => quote! {},
-    };
-    let name_variant = match &config.supported_lookups {
-        SupportedLookups::PrimaryKeyAndNameWithinParent(_)
-        | SupportedLookups::NameWithinParentOnly => {
-            quote! {
-                /// We're looking for a resource with the given name in the
-                /// given parent collection
-                Name(#parent_resource_name<'a>, &'a Name),
-            }
-        }
-        SupportedLookups::PrimaryKeyOnly(_) => quote! {},
+    } else {
+        quote! {}
     };
 
     quote! {
@@ -280,7 +210,11 @@ fn generate_struct(config: &Config) -> TokenStream {
         /// Describes how we're looking up this resource
         enum #lookup_enum<'a>{
             #name_variant
-            #pkey_variant
+
+            /// We're looking for a resource with the given id
+            ///
+            /// This has no parent container -- a by-id lookup is always global
+            Id(Root<'a>, #pkey_type),
         }
     }
 }
@@ -342,19 +276,10 @@ fn generate_misc_helpers(config: &Config) -> TokenStream {
         config.parent.as_ref().map(|p| &p.name).unwrap_or(&fleet_name);
     let lookup_enum = &config.lookup_enum;
 
-    let pkey_variant = match config.supported_lookups {
-        SupportedLookups::PrimaryKeyOnly(_)
-        | SupportedLookups::PrimaryKeyAndNameWithinParent(_) => {
-            quote! { #lookup_enum::Id(root, _) => root.lookup_root(), }
-        }
-        SupportedLookups::NameWithinParentOnly => quote! {},
-    };
-    let name_variant = match config.supported_lookups {
-        SupportedLookups::NameWithinParentOnly
-        | SupportedLookups::PrimaryKeyAndNameWithinParent(_) => quote! {
-            #lookup_enum::Name(parent, _) => parent.lookup_root(),
-        },
-        SupportedLookups::PrimaryKeyOnly(_) => quote! {},
+    let name_variant = if config.lookup_by_name {
+        quote! { #lookup_enum::Name(parent, _) => parent.lookup_root(), }
+    } else {
+        quote! {}
     };
 
     quote! {
@@ -379,7 +304,8 @@ fn generate_misc_helpers(config: &Config) -> TokenStream {
         fn lookup_root(&self) -> &LookupPath<'a> {
             match &self.key {
                 #name_variant
-                #pkey_variant
+
+                #lookup_enum::Id(root, _) => root.lookup_root(),
             }
         }
     }
@@ -408,10 +334,9 @@ fn generate_lookup_methods(config: &Config) -> TokenStream {
             (quote! {}, quote! {})
         };
 
-    // Generate the branches of the main match arm in "fetch_for()".
-    let fetch_for_name_variant = match config.supported_lookups {
-        SupportedLookups::NameWithinParentOnly
-        | SupportedLookups::PrimaryKeyAndNameWithinParent(_) => quote! {
+    // Generate the by-name branch of the match arm in "fetch_for()"
+    let fetch_for_name_variant = if config.lookup_by_name {
+        quote! {
             #lookup_enum::Name(parent, name) => {
                 #ancestors_authz_names_assign
                 let (#resource_authz_name, db_row) = Self::fetch_by_name_for(
@@ -423,25 +348,14 @@ fn generate_lookup_methods(config: &Config) -> TokenStream {
                 ).await?;
                 Ok((#(#path_authz_names,)* db_row))
             }
-        },
-        SupportedLookups::PrimaryKeyOnly(_) => quote! {},
-    };
-    let fetch_for_pkey_variant = match config.supported_lookups {
-        SupportedLookups::PrimaryKeyOnly(_)
-        | SupportedLookups::PrimaryKeyAndNameWithinParent(_) => {
-            quote! {
-                #lookup_enum::Id(_, id) => {
-                    Self::fetch_by_id_for(opctx, datastore, *id, action).await
-                }
-            }
         }
-        SupportedLookups::NameWithinParentOnly => quote! {},
+    } else {
+        quote! {}
     };
 
-    // Generate the branches of the main match arm in "lookup()"
-    let lookup_name_variant = match config.supported_lookups {
-        SupportedLookups::NameWithinParentOnly
-        | SupportedLookups::PrimaryKeyAndNameWithinParent(_) => quote! {
+    // Generate the by-name branch of the match arm in "lookup()"
+    let lookup_name_variant = if config.lookup_by_name {
+        quote! {
             #lookup_enum::Name(parent, name) => {
                 // When doing a by-name lookup, we have to look up the
                 // parent first.  Since this is recursive, we wind up
@@ -462,36 +376,9 @@ fn generate_lookup_methods(config: &Config) -> TokenStream {
                     ).await?;
                 Ok((#(#path_authz_names,)*))
             }
-        },
-        SupportedLookups::PrimaryKeyOnly(_) => quote! {},
-    };
-    let lookup_pkey_variant = match config.supported_lookups {
-        SupportedLookups::PrimaryKeyOnly(_)
-        | SupportedLookups::PrimaryKeyAndNameWithinParent(_) => {
-            quote! {
-                #lookup_enum::Id(_, id) => {
-                    // When doing a by-id lookup, we start directly with the
-                    // resource we're looking up.  But we still want to
-                    // return a full path of authz objects.  So we look up
-                    // the parent by id, then its parent, etc.  Like the
-                    // by-name case, we wind up hitting the database once
-                    // for each item in the path, but in the reverse order.
-                    // So we'll look up the Instance, then the Project, then
-                    // the Organization.
-                    // TODO-performance Instead of doing database queries at
-                    // each level of recursion, we could be building up one
-                    // big "join" query and hit the database just once.
-                    let (#(#path_authz_names,)* _) =
-                        Self::lookup_by_id_no_authz(
-                            opctx,
-                            datastore,
-                            *id
-                        ).await?;
-                    Ok((#(#path_authz_names,)*))
-                }
-            }
         }
-        SupportedLookups::NameWithinParentOnly => quote! {},
+    } else {
+        quote! {}
     };
 
     quote! {
@@ -523,7 +410,10 @@ fn generate_lookup_methods(config: &Config) -> TokenStream {
 
             match &self.key {
                 #fetch_for_name_variant
-                #fetch_for_pkey_variant
+
+                #lookup_enum::Id(_, id) => {
+                    Self::fetch_by_id_for(opctx, datastore, *id, action).await
+                }
             }
         }
 
@@ -564,7 +454,27 @@ fn generate_lookup_methods(config: &Config) -> TokenStream {
 
             match &self.key {
                 #lookup_name_variant
-                #lookup_pkey_variant
+
+                #lookup_enum::Id(_, id) => {
+                    // When doing a by-id lookup, we start directly with the
+                    // resource we're looking up.  But we still want to
+                    // return a full path of authz objects.  So we look up
+                    // the parent by id, then its parent, etc.  Like the
+                    // by-name case, we wind up hitting the database once
+                    // for each item in the path, but in the reverse order.
+                    // So we'll look up the Instance, then the Project, then
+                    // the Organization.
+                    // TODO-performance Instead of doing database queries at
+                    // each level of recursion, we could be building up one
+                    // big "join" query and hit the database just once.
+                    let (#(#path_authz_names,)* _) =
+                        Self::lookup_by_id_no_authz(
+                            opctx,
+                            datastore,
+                            *id
+                        ).await?;
+                    Ok((#(#path_authz_names,)*))
+                }
             }
         }
     }
@@ -609,85 +519,83 @@ fn generate_database_functions(config: &Config) -> TokenStream {
         (quote! {}, quote! {}, quote! {}, quote! {}, quote! { &authz::FLEET })
     };
 
-    let by_name_funcs = match &config.supported_lookups {
-        SupportedLookups::PrimaryKeyOnly(_) => quote! {},
-        SupportedLookups::NameWithinParentOnly
-        | SupportedLookups::PrimaryKeyAndNameWithinParent(_) => {
-            quote! {
-                /// Fetch the database row for a resource by doing a lookup by
-                /// name, possibly within a collection
-                ///
-                /// This function checks whether the caller has permissions to
-                /// read the requested data.  However, it's not intended to be
-                /// used outside this module.  See `fetch_for(authz::Action)`.
-                // Do NOT make this function public.
-                async fn fetch_by_name_for(
-                    opctx: &OpContext,
-                    datastore: &DataStore,
-                    #parent_lookup_arg_formal
-                    name: &Name,
-                    action: authz::Action,
-                ) -> LookupResult<(authz::#resource_name, model::#resource_name)> {
-                    let (#resource_authz_name, db_row) =
-                        Self::lookup_by_name_no_authz(
-                            opctx,
-                            datastore,
-                            #parent_lookup_arg_actual
-                            name
-                        ).await?;
-                    opctx.authorize(action, &#resource_authz_name).await?;
-                    Ok((#resource_authz_name, db_row))
-                }
+    let by_name_funcs = if config.lookup_by_name {
+        quote! {
+            /// Fetch the database row for a resource by doing a lookup by
+            /// name, possibly within a collection
+            ///
+            /// This function checks whether the caller has permissions to
+            /// read the requested data.  However, it's not intended to be
+            /// used outside this module.  See `fetch_for(authz::Action)`.
+            // Do NOT make this function public.
+            async fn fetch_by_name_for(
+                opctx: &OpContext,
+                datastore: &DataStore,
+                #parent_lookup_arg_formal
+                name: &Name,
+                action: authz::Action,
+            ) -> LookupResult<(authz::#resource_name, model::#resource_name)> {
+                let (#resource_authz_name, db_row) =
+                    Self::lookup_by_name_no_authz(
+                        opctx,
+                        datastore,
+                        #parent_lookup_arg_actual
+                        name
+                    ).await?;
+                opctx.authorize(action, &#resource_authz_name).await?;
+                Ok((#resource_authz_name, db_row))
+            }
 
-                /// Lowest-level function for looking up a resource in the
-                /// database by name, possibly within a collection
-                ///
-                /// This function does not check whether the caller has
-                /// permission to read this information.  That's why it's not
-                /// `pub`.  Outside this module, you want `fetch()` or
-                /// `lookup_for(authz::Action)`.
-                // Do NOT make this function public.
-                async fn lookup_by_name_no_authz(
-                    opctx: &OpContext,
-                    datastore: &DataStore,
-                    #parent_lookup_arg_formal
-                    name: &Name,
-                ) -> LookupResult<
-                    (authz::#resource_name, model::#resource_name)
-                > {
-                    use db::schema::#resource_as_snake::dsl;
+            /// Lowest-level function for looking up a resource in the
+            /// database by name, possibly within a collection
+            ///
+            /// This function does not check whether the caller has
+            /// permission to read this information.  That's why it's not
+            /// `pub`.  Outside this module, you want `fetch()` or
+            /// `lookup_for(authz::Action)`.
+            // Do NOT make this function public.
+            async fn lookup_by_name_no_authz(
+                opctx: &OpContext,
+                datastore: &DataStore,
+                #parent_lookup_arg_formal
+                name: &Name,
+            ) -> LookupResult<
+                (authz::#resource_name, model::#resource_name)
+            > {
+                use db::schema::#resource_as_snake::dsl;
 
-                    dsl::#resource_as_snake
-                        .filter(dsl::time_deleted.is_null())
-                        .filter(dsl::name.eq(name.clone()))
-                        #lookup_filter
-                        .select(model::#resource_name::as_select())
-                        .get_result_async(
-                            datastore.pool_authorized(opctx).await?
-                        )
-                        .await
-                        .map_err(|e| {
-                            public_error_from_diesel_pool(
-                                e,
-                                ErrorHandler::NotFoundByLookup(
-                                    ResourceType::#resource_name,
-                                    LookupType::ByName(
-                                        name.as_str().to_string()
-                                    )
+                dsl::#resource_as_snake
+                    .filter(dsl::time_deleted.is_null())
+                    .filter(dsl::name.eq(name.clone()))
+                    #lookup_filter
+                    .select(model::#resource_name::as_select())
+                    .get_result_async(
+                        datastore.pool_authorized(opctx).await?
+                    )
+                    .await
+                    .map_err(|e| {
+                        public_error_from_diesel_pool(
+                            e,
+                            ErrorHandler::NotFoundByLookup(
+                                ResourceType::#resource_name,
+                                LookupType::ByName(
+                                    name.as_str().to_string()
                                 )
                             )
-                        })
-                        .map(|db_row| {(
-                            Self::make_authz(
-                                #parent_authz_value,
-                                &db_row,
-                                LookupType::ByName(name.as_str().to_string())
-                            ),
-                            db_row
-                        )})
-                }
+                        )
+                    })
+                    .map(|db_row| {(
+                        Self::make_authz(
+                            #parent_authz_value,
+                            &db_row,
+                            LookupType::ByName(name.as_str().to_string())
+                        ),
+                        db_row
+                    )})
             }
         }
+    } else {
+        quote! {}
     };
 
     quote! {
@@ -776,8 +684,7 @@ mod test {
                 name = "Organization",
                 ancestors = ["Silo"],
                 children = [ "Project" ],
-                lookup_by_name_in_parent = true,
-                lookup_by_primary_key_supported = true,
+                lookup_by_name = true,
                 primary_key_type = Uuid,
             }
             .into(),
@@ -790,8 +697,7 @@ mod test {
                 name = "Project",
                 ancestors = ["Organization"],
                 children = [ "Disk", "Instance" ],
-                lookup_by_name_in_parent = true,
-                lookup_by_primary_key_supported = true,
+                lookup_by_name = true,
                 primary_key_type = Uuid,
             }
             .into(),
@@ -804,8 +710,7 @@ mod test {
                 name = "SiloUser",
                 ancestors = [],
                 children = [],
-                lookup_by_name_in_parent = false,
-                lookup_by_primary_key_supported = true,
+                lookup_by_name = false,
                 primary_key_type = Uuid,
             }
             .into(),
@@ -818,9 +723,7 @@ mod test {
                 name = "WhatThing",
                 ancestors = [ "WhatThingParent" ],
                 children = [],
-                lookup_by_name_in_parent = true,
-                lookup_by_primary_key_supported = false,
-                primary_key_type = None,
+                lookup_by_name = true,
             }
             .into(),
         )

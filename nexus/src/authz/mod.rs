@@ -162,23 +162,7 @@
 mod actor;
 
 mod api_resources;
-pub use api_resources::ApiResourceError;
-pub use api_resources::Disk;
-pub use api_resources::Fleet;
-pub use api_resources::Instance;
-pub use api_resources::NetworkInterface;
-pub use api_resources::Organization;
-pub use api_resources::Project;
-pub use api_resources::Rack;
-pub use api_resources::Role;
-pub use api_resources::RouterRoute;
-pub use api_resources::SiloUser;
-pub use api_resources::Sled;
-pub use api_resources::User;
-pub use api_resources::Vpc;
-pub use api_resources::VpcRouter;
-pub use api_resources::VpcSubnet;
-pub use api_resources::FLEET;
+pub use api_resources::*;
 
 mod context;
 pub use context::AuthorizedResource;
