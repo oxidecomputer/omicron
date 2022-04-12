@@ -165,6 +165,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "authz-macros"
+version = "0.1.0"
+dependencies = [
+ "heck 0.4.0",
+ "proc-macro2",
+ "quote",
+ "serde",
+ "serde_tokenstream",
+ "syn",
+]
+
+[[package]]
 name = "autocfg"
 version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2405,6 +2417,7 @@ dependencies = [
  "api_identity",
  "async-bb8-diesel",
  "async-trait",
+ "authz-macros",
  "base64",
  "bb8",
  "chrono",

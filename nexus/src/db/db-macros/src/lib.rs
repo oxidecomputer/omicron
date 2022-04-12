@@ -29,7 +29,6 @@ mod lookup;
 ///     name = "Organization",
 ///     ancestors = [],
 ///     children = [ "Project" ],
-///     authz_kind = Typed
 /// }
 /// ```
 ///
@@ -47,14 +46,12 @@ mod lookup;
 ///     name = "Organization",
 ///     ancestors = [],
 ///     children = [ "Project" ],
-///     authz_kind = Typed
 /// }
 ///
 /// lookup_resource! {
 ///     name = "Instance",
 ///     ancestors = [ "Organization", "Project" ],
 ///     children = [],
-///     authz_kind = Generic
 /// }
 /// ```
 ///

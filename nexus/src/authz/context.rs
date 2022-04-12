@@ -161,8 +161,8 @@ pub trait AuthorizedResource: oso::ToPolar + Send + Sync + 'static {
 #[cfg(test)]
 mod test {
     // These are essentially unit tests for the policy itself.
-    // TODO-coverage This is just a start.  But we need roles to do a more
-    // comprehensive test.
+    // TODO-coverage This is just a start.  But we need better support for role
+    // assignments for non-built-in users to do more here.
     // TODO If this gets any more complicated, we could consider automatically
     // generating the test cases.  We could precreate a bunch of resources and
     // some users with different roles.  Then we could run through a table that
