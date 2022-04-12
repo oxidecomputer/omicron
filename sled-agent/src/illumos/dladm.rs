@@ -79,7 +79,7 @@ impl Dladm {
         // Ensure the MAC address is zero-padded, so it may be parsed as a
         // MacAddr. This converts segments like ":a" to ":0a".
         let name = name
-            .split(":")
+            .split(':')
             .map(|segment| format!("{:0>2}", segment))
             .collect::<Vec<String>>()
             .join(":");
