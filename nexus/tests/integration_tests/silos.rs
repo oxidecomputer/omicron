@@ -16,6 +16,7 @@ use nexus_test_utils::resource_helpers::{
 
 use nexus_test_utils::ControlPlaneTestContext;
 use nexus_test_utils_macros::nexus_test;
+use omicron_nexus::db::identity::Asset;
 
 #[nexus_test]
 async fn test_silos(cptestctx: &ControlPlaneTestContext) {
@@ -74,7 +75,7 @@ async fn test_silos(cptestctx: &ControlPlaneTestContext) {
         .await
         .unwrap();
 
-    let session = nexus.session_create(new_silo_user.id).await.unwrap();
+    let session = nexus.session_create(new_silo_user.id()).await.unwrap();
 
     // Create organization with built-in user auth
     // Note: this currently goes to the built-in silo!
@@ -130,7 +131,7 @@ async fn test_silos(cptestctx: &ControlPlaneTestContext) {
 
     // Verify silo user was also deleted
     nexus
-        .silo_user_fetch(new_silo_user.id)
+        .silo_user_fetch(new_silo_user.id())
         .await
         .expect_err("unexpected success");
 

@@ -262,6 +262,15 @@ authz_resource! {
 
 // Miscellaneous resources nested directly below "Fleet"
 
+// XXX-dap
+authz_resource! {
+    name = "SiloUser",
+    parent = "Fleet",
+    primary_key = Uuid,
+    roles_allowed = false,
+    polar_snippet = FleetChild,
+}
+
 authz_resource! {
     name = "Role",
     parent = "Fleet",

@@ -989,26 +989,20 @@ impl DatastoreCollection<Organization> for Silo {
 }
 
 /// Describes a silo user within the database.
-#[derive(Queryable, Insertable, Debug, Selectable)]
+#[derive(Asset, Queryable, Insertable, Debug, Selectable)]
 #[table_name = "silo_user"]
 pub struct SiloUser {
-    pub id: Uuid,
+    #[diesel(embed)]
+    identity: SiloUserIdentity,
     pub silo_id: Uuid,
-
-    pub time_created: DateTime<Utc>,
-    pub time_modified: DateTime<Utc>,
     pub time_deleted: Option<DateTime<Utc>>,
 }
 
 impl SiloUser {
     pub fn new(silo_id: Uuid, user_id: Uuid) -> Self {
-        let now = Utc::now();
         Self {
-            id: user_id,
+            identity: SiloUserIdentity::new(user_id),
             silo_id,
-
-            time_created: now,
-            time_modified: now,
             time_deleted: None,
         }
     }

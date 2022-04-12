@@ -609,71 +609,89 @@ fn generate_database_functions(config: &Config) -> TokenStream {
         (quote! {}, quote! {}, quote! {}, quote! {}, quote! { &authz::FLEET })
     };
 
-    quote! {
-        /// Fetch the database row for a resource by doing a lookup by name,
-        /// possibly within a collection
-        ///
-        /// This function checks whether the caller has permissions to read
-        /// the requested data.  However, it's not intended to be used
-        /// outside this module.  See `fetch_for(authz::Action)`.
-        // Do NOT make this function public.
-        async fn fetch_by_name_for(
-            opctx: &OpContext,
-            datastore: &DataStore,
-            #parent_lookup_arg_formal
-            name: &Name,
-            action: authz::Action,
-        ) -> LookupResult<(authz::#resource_name, model::#resource_name)> {
-            let (#resource_authz_name, db_row) = Self::lookup_by_name_no_authz(
-                opctx,
-                datastore,
-                #parent_lookup_arg_actual
-                name
-            ).await?;
-            opctx.authorize(action, &#resource_authz_name).await?;
-            Ok((#resource_authz_name, db_row))
-        }
+    let by_name_funcs = match &config.supported_lookups {
+        SupportedLookups::PrimaryKeyOnly(_) => quote! {},
+        SupportedLookups::NameWithinParentOnly
+        | SupportedLookups::PrimaryKeyAndNameWithinParent(_) => {
+            quote! {
+                /// Fetch the database row for a resource by doing a lookup by
+                /// name, possibly within a collection
+                ///
+                /// This function checks whether the caller has permissions to
+                /// read the requested data.  However, it's not intended to be
+                /// used outside this module.  See `fetch_for(authz::Action)`.
+                // Do NOT make this function public.
+                async fn fetch_by_name_for(
+                    opctx: &OpContext,
+                    datastore: &DataStore,
+                    #parent_lookup_arg_formal
+                    name: &Name,
+                    action: authz::Action,
+                ) -> LookupResult<(authz::#resource_name, model::#resource_name)> {
+                    let (#resource_authz_name, db_row) =
+                        Self::lookup_by_name_no_authz(
+                            opctx,
+                            datastore,
+                            #parent_lookup_arg_actual
+                            name
+                        ).await?;
+                    opctx.authorize(action, &#resource_authz_name).await?;
+                    Ok((#resource_authz_name, db_row))
+                }
 
-        /// Lowest-level function for looking up a resource in the database
-        /// by name, possibly within a collection
-        ///
-        /// This function does not check whether the caller has permission
-        /// to read this information.  That's why it's not `pub`.  Outside
-        /// this module, you want `fetch()` or `lookup_for(authz::Action)`.
-        // Do NOT make this function public.
-        async fn lookup_by_name_no_authz(
-            opctx: &OpContext,
-            datastore: &DataStore,
-            #parent_lookup_arg_formal
-            name: &Name,
-        ) -> LookupResult<(authz::#resource_name, model::#resource_name)> {
-            use db::schema::#resource_as_snake::dsl;
+                /// Lowest-level function for looking up a resource in the
+                /// database by name, possibly within a collection
+                ///
+                /// This function does not check whether the caller has
+                /// permission to read this information.  That's why it's not
+                /// `pub`.  Outside this module, you want `fetch()` or
+                /// `lookup_for(authz::Action)`.
+                // Do NOT make this function public.
+                async fn lookup_by_name_no_authz(
+                    opctx: &OpContext,
+                    datastore: &DataStore,
+                    #parent_lookup_arg_formal
+                    name: &Name,
+                ) -> LookupResult<
+                    (authz::#resource_name, model::#resource_name)
+                > {
+                    use db::schema::#resource_as_snake::dsl;
 
-            dsl::#resource_as_snake
-                .filter(dsl::time_deleted.is_null())
-                .filter(dsl::name.eq(name.clone()))
-                #lookup_filter
-                .select(model::#resource_name::as_select())
-                .get_result_async(datastore.pool_authorized(opctx).await?)
-                .await
-                .map_err(|e| {
-                    public_error_from_diesel_pool(
-                        e,
-                        ErrorHandler::NotFoundByLookup(
-                            ResourceType::#resource_name,
-                            LookupType::ByName(name.as_str().to_string())
+                    dsl::#resource_as_snake
+                        .filter(dsl::time_deleted.is_null())
+                        .filter(dsl::name.eq(name.clone()))
+                        #lookup_filter
+                        .select(model::#resource_name::as_select())
+                        .get_result_async(
+                            datastore.pool_authorized(opctx).await?
                         )
-                    )
-                })
-                .map(|db_row| {(
-                    Self::make_authz(
-                        #parent_authz_value,
-                        &db_row,
-                        LookupType::ByName(name.as_str().to_string())
-                    ),
-                    db_row
-                )})
+                        .await
+                        .map_err(|e| {
+                            public_error_from_diesel_pool(
+                                e,
+                                ErrorHandler::NotFoundByLookup(
+                                    ResourceType::#resource_name,
+                                    LookupType::ByName(
+                                        name.as_str().to_string()
+                                    )
+                                )
+                            )
+                        })
+                        .map(|db_row| {(
+                            Self::make_authz(
+                                #parent_authz_value,
+                                &db_row,
+                                LookupType::ByName(name.as_str().to_string())
+                            ),
+                            db_row
+                        )})
+                }
+            }
         }
+    };
+
+    quote! {
+        #by_name_funcs
 
         /// Fetch the database row for a resource by doing a lookup by id
         ///

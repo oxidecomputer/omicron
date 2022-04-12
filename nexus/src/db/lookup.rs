@@ -5,6 +5,7 @@
 //! Look up API resources from the database
 
 use super::datastore::DataStore;
+use super::identity::Asset;
 use super::identity::Resource;
 use super::model;
 use crate::{
@@ -335,6 +336,15 @@ lookup_resource! {
     ancestors = [ "Organization", "Project", "Vpc", "VpcRouter" ],
     children = [],
     lookup_by_name_in_parent = true,
+    lookup_by_primary_key_supported = true,
+    primary_key_type = Uuid,
+}
+
+lookup_resource! {
+    name = "SiloUser",
+    ancestors = [],
+    children = [],
+    lookup_by_name_in_parent = false,
     lookup_by_primary_key_supported = true,
     primary_key_type = Uuid,
 }

@@ -172,6 +172,7 @@ pub use api_resources::Project;
 pub use api_resources::Rack;
 pub use api_resources::Role;
 pub use api_resources::RouterRoute;
+pub use api_resources::SiloUser;
 pub use api_resources::Sled;
 pub use api_resources::User;
 pub use api_resources::Vpc;
