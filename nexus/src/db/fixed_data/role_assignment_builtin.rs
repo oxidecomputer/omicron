@@ -42,5 +42,14 @@ lazy_static! {
                 *FLEET_ID,
                 role_builtin::FLEET_VIEWER.role_name,
             ),
+
+            // The "internal-authenticator" user gets the "authentiator" role on
+            // the sole fleet.  This grants them the ability to create sessions.
+            RoleAssignmentBuiltin::new(
+                user_builtin::USER_EXTERNAL_AUTHN.id,
+                role_builtin::FLEET_AUTHENTICATOR.resource_type,
+                *FLEET_ID,
+                role_builtin::FLEET_AUTHENTICATOR.role_name
+            ),
         ];
 }

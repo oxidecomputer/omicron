@@ -29,6 +29,7 @@ async fn test_roles_builtin(cptestctx: &ControlPlaneTestContext) {
 
     let expected = [
         ("fleet.admin", "Fleet Administrator"),
+        ("fleet.authenticator", "Fleet Authenticator"),
         ("fleet.collaborator", "Fleet Collaborator"),
         ("fleet.viewer", "Fleet Viewer"),
         ("organization.admin", "Organization Administrator"),

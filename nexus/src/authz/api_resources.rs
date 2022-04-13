@@ -42,6 +42,7 @@ use crate::db::DataStore;
 use authz_macros::authz_resource;
 use futures::future::BoxFuture;
 use futures::FutureExt;
+use lazy_static::lazy_static;
 use omicron_common::api::external::{Error, LookupType, ResourceType};
 use uuid::Uuid;
 
@@ -134,6 +135,11 @@ impl<T: ApiResource + ApiResourceError + oso::PolarClass> AuthorizedResource
 pub struct Fleet;
 /// Singleton representing the [`Fleet`] itself for authz purposes
 pub const FLEET: Fleet = Fleet;
+
+lazy_static! {
+    pub static ref CONSOLE_SESSION_LIST: ConsoleSessionList =
+        ConsoleSessionList::new(FLEET, (), LookupType::ById(*FLEET_ID));
+}
 
 impl Eq for Fleet {}
 impl PartialEq for Fleet {
@@ -266,6 +272,16 @@ authz_resource! {
 }
 
 // Miscellaneous resources nested directly below "Fleet"
+
+// ConsoleSessionList is a synthetic resource used for modeling who has access
+// to create sessions.
+authz_resource! {
+    name = "ConsoleSessionList",
+    parent = "Fleet",
+    primary_key = (),
+    roles_allowed = false,
+    polar_snippet = Custom,
+}
 
 authz_resource! {
     name = "ConsoleSession",

@@ -30,6 +30,7 @@ use std::sync::Arc;
 use std::time::Instant;
 use std::time::SystemTime;
 use uuid::Uuid;
+use omicron_common::api::external::LookupType;
 
 /// Shared state available to all API request handlers
 pub struct ServerContext {
@@ -505,12 +506,25 @@ impl SessionStore for Arc<ServerContext> {
         token: String,
     ) -> Option<Self::SessionModel> {
         let opctx = &self.nexus.opctx_external_authn;
-        self.nexus.session_update_last_used(&opctx, token).await.ok()
+        let session = authz::ConsoleSession::new(
+            *authz::CONSOLE_SESSION_LIST,
+            token,
+            LookupType::ByCompositeId(token),
+        );
+        self.nexus.session_update_last_used(&opctx, &session).await.ok()
     }
 
-    async fn session_expire(&self, token: String) -> Option<()> {
+    async fn session_expire(
+        &self,
+        token: String,
+    ) -> Option<()> {
         let opctx = &self.nexus.opctx_external_authn;
-        self.nexus.session_hard_delete(opctx, token).await.ok()
+        let session = authz::ConsoleSession::new(
+            *authz::CONSOLE_SESSION_LIST,
+            token,
+            LookupType::ByCompositeId(token),
+        );
+        self.nexus.session_hard_delete(opctx, session).await.ok()
     }
 
     fn session_idle_timeout(&self) -> Duration {

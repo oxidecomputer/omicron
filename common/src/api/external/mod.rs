@@ -517,6 +517,7 @@ pub enum ResourceType {
     Silo,
     SiloUser,
     ConsoleSession,
+    ConsoleSessionList,
     Organization,
     Project,
     Dataset,

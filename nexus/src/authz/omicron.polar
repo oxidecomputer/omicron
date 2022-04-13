@@ -100,7 +100,14 @@ resource Fleet {
 	    "create_child",
 	];
 
-	roles = [ "admin", "collaborator", "viewer" ];
+	roles = [
+	    "admin",
+	    "collaborator",
+	    "viewer",
+
+	    # internal roles
+	    "external_authenticator"
+	];
 
 	# Fleet viewers can view Fleet-wide data
 	"list_children" if "viewer";
@@ -178,3 +185,14 @@ resource Project {
 }
 has_relation(organization: Organization, "parent_organization", project: Project)
 	if project.organization = organization;
+
+
+# ConsoleSessionList is a synthetic resource used for modeling who has access
+# to create sessions.
+resource ConsoleSessionList {
+	permissions = [ "create_child" ];
+	relations = { parent_fleet: Fleet };
+	"create_child" if "external_authenticator"; on "parent_fleet";
+}
+has_relation(fleet: Fleet, "parent_fleet", collection: ConsoleSessionList)
+	if collection.fleet = fleet;
