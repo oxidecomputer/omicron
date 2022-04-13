@@ -15,6 +15,7 @@ use crate::db::model::DatasetKind;
 use crate::db::model::Name;
 use crate::db::model::RouterRoute;
 use crate::db::model::SiloUser;
+use crate::db::model::UpdateArtifactKind;
 use crate::db::model::VpcRouter;
 use crate::db::model::VpcRouterKind;
 use crate::db::model::VpcSubnet;
@@ -3428,9 +3429,13 @@ impl Nexus {
 
         // We cache the artifact based on its checksum, so fetch that from the
         // database.
-        let artifact_entry = self
-            .db_datastore
-            .update_available_artifact_fetch(opctx, &artifact)
+        let (.., artifact_entry) = LookupPath::new(opctx, &self.db_datastore)
+            .update_available_artifact_tuple(
+                &artifact.name,
+                artifact.version,
+                UpdateArtifactKind(artifact.kind),
+            )
+            .fetch()
             .await?;
         let filename = format!(
             "{}.{}.{}-{}",

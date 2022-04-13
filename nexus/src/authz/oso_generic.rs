@@ -60,6 +60,7 @@ pub fn make_omicron_oso() -> Result<Oso, anyhow::Error> {
         RouterRoute::init(),
         VpcSubnet::init(),
         Role::init(),
+        UpdateAvailableArtifact::init(),
         User::init(),
         Rack::init(),
         Sled::init(),

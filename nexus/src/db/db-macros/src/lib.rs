@@ -29,6 +29,9 @@ mod lookup;
 ///     name = "Organization",
 ///     ancestors = [],
 ///     children = [ "Project" ],
+///     lookup_by_name = true,
+///     soft_deletes = true,
+///     primary_key_columns = [ { column_name = "id", rust_type = Uuid } ]
 /// }
 /// ```
 ///
@@ -46,12 +49,18 @@ mod lookup;
 ///     name = "Organization",
 ///     ancestors = [],
 ///     children = [ "Project" ],
+///     lookup_by_name = true,
+///     soft_deletes = true,
+///     primary_key_columns = [ { column_name = "id", rust_type = Uuid } ]
 /// }
 ///
 /// lookup_resource! {
 ///     name = "Instance",
 ///     ancestors = [ "Organization", "Project" ],
 ///     children = [],
+///     lookup_by_name = true,
+///     soft_deletes = true,
+///     primary_key_columns = [ { column_name = "id", rust_type = Uuid } ]
 /// }
 /// ```
 ///

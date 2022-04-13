@@ -537,6 +537,7 @@ pub enum ResourceType {
     Oximeter,
     MetricProducer,
     Role,
+    UpdateAvailableArtifact,
     User,
     Zpool,
 }

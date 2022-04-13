@@ -989,26 +989,20 @@ impl DatastoreCollection<Organization> for Silo {
 }
 
 /// Describes a silo user within the database.
-#[derive(Queryable, Insertable, Debug, Selectable)]
+#[derive(Asset, Queryable, Insertable, Debug, Selectable)]
 #[table_name = "silo_user"]
 pub struct SiloUser {
-    pub id: Uuid,
+    #[diesel(embed)]
+    identity: SiloUserIdentity,
     pub silo_id: Uuid,
-
-    pub time_created: DateTime<Utc>,
-    pub time_modified: DateTime<Utc>,
     pub time_deleted: Option<DateTime<Utc>>,
 }
 
 impl SiloUser {
     pub fn new(silo_id: Uuid, user_id: Uuid) -> Self {
-        let now = Utc::now();
         Self {
-            id: user_id,
+            identity: SiloUserIdentity::new(user_id),
             silo_id,
-
-            time_created: now,
-            time_modified: now,
             time_deleted: None,
         }
     }
@@ -2553,7 +2547,7 @@ impl_enum_wrapper!(
     #[postgres(type_name = "update_artifact_kind", type_schema = "public")]
     pub struct UpdateArtifactKindEnum;
 
-    #[derive(Clone, Debug, Display, AsExpression, FromSqlRow)]
+    #[derive(Clone, Copy, Debug, Display, AsExpression, FromSqlRow, PartialEq, Eq)]
     #[display("{0}")]
     #[sql_type = "UpdateArtifactKindEnum"]
     pub struct UpdateArtifactKind(pub internal::nexus::UpdateArtifactKind);
@@ -2581,6 +2575,12 @@ pub struct UpdateAvailableArtifact {
     pub target_sha256: String,
     // FIXME this *should* be a u64
     pub target_length: i64,
+}
+
+impl UpdateAvailableArtifact {
+    pub fn id(&self) -> (String, i64, UpdateArtifactKind) {
+        (self.name.clone(), self.version, self.kind)
+    }
 }
 
 #[cfg(test)]
