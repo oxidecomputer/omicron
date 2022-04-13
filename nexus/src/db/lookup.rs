@@ -423,15 +423,6 @@ lookup_resource! {
 }
 
 lookup_resource! {
-    name = "SiloUser",
-    ancestors = [],
-    children = [],
-    lookup_by_name = false,
-    soft_deletes = true,
-    primary_key_columns = [ { column_name = "id", rust_type = Uuid } ]
-}
-
-lookup_resource! {
     name = "Silo",
     ancestors = [],
     children = [],
@@ -441,7 +432,7 @@ lookup_resource! {
 }
 
 lookup_resource! {
-    name = "Sled",
+    name = "SiloUser",
     ancestors = [],
     children = [],
     lookup_by_name = false,
@@ -450,16 +441,7 @@ lookup_resource! {
 }
 
 lookup_resource! {
-    name = "UserBuiltin",
-    ancestors = [],
-    children = [],
-    lookup_by_name = true,
-    soft_deletes = false,
-    primary_key_columns = [ { column_name = "id", rust_type = Uuid } ]
-}
-
-lookup_resource! {
-    name = "SiloUser",
+    name = "Sled",
     ancestors = [],
     children = [],
     lookup_by_name = false,
@@ -479,6 +461,16 @@ lookup_resource! {
         { column_name = "kind", rust_type = UpdateArtifactKind }
     ]
 }
+
+lookup_resource! {
+    name = "UserBuiltin",
+    ancestors = [],
+    children = [],
+    lookup_by_name = true,
+    soft_deletes = false,
+    primary_key_columns = [ { column_name = "id", rust_type = Uuid } ]
+}
+
 
 #[cfg(test)]
 mod test {
