@@ -186,10 +186,7 @@ where
         error => {
             let context = match make_not_found_error() {
                 PublicError::ObjectNotFound { type_name, lookup_type } => {
-                    format!(
-                        "looking up {:?} {:?}",
-                        type_name, lookup_type
-                    )
+                    format!("looking up {:?} {:?}", type_name, lookup_type)
                 }
                 _ => {
                     format!("during unknown operation")
