@@ -496,18 +496,21 @@ impl SessionStore for Arc<ServerContext> {
     type SessionModel = ConsoleSessionWithSiloId;
 
     async fn session_fetch(&self, token: String) -> Option<Self::SessionModel> {
-        self.nexus.session_fetch(token).await.ok()
+        let opctx = &self.nexus.opctx_external_authn;
+        self.nexus.session_fetch(opctx, token).await.ok()
     }
 
     async fn session_update_last_used(
         &self,
         token: String,
     ) -> Option<Self::SessionModel> {
-        self.nexus.session_update_last_used(token).await.ok()
+        let opctx = &self.nexus.opctx_external_authn;
+        self.nexus.session_update_last_used(&opctx, token).await.ok()
     }
 
     async fn session_expire(&self, token: String) -> Option<()> {
-        self.nexus.session_hard_delete(token).await.ok()
+        let opctx = &self.nexus.opctx_external_authn;
+        self.nexus.session_hard_delete(opctx, token).await.ok()
     }
 
     fn session_idle_timeout(&self) -> Duration {

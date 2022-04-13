@@ -2136,39 +2136,11 @@ impl DataStore {
     // the conversion to serializable user-facing errors happens elsewhere (see
     // issue #347) these methods can safely return more accurate errors, and
     // showing/hiding that info as appropriate will be handled higher up
-
-    pub async fn session_fetch(
-        &self,
-        token: String,
-    ) -> LookupResult<authn::ConsoleSessionWithSiloId> {
-        use db::schema::console_session::dsl;
-
-        let console_session = dsl::console_session
-            .filter(dsl::token.eq(token.clone()))
-            .select(ConsoleSession::as_select())
-            .first_async(self.pool())
-            .await
-            .map_err(|e| {
-                public_error_from_diesel_pool(
-                    e,
-                    ErrorHandler::NotFoundByLookup(
-                        ResourceType::ConsoleSession,
-                        LookupType::BySessionToken(token),
-                    ),
-                )
-            })?;
-
-        let silo_user =
-            self.silo_user_fetch(console_session.silo_user_id).await?;
-
-        Ok(authn::ConsoleSessionWithSiloId {
-            console_session,
-            silo_id: silo_user.silo_id,
-        })
-    }
+    // TODO-correctness this may apply at the Nexus level as well.
 
     pub async fn session_create(
         &self,
+        opctx: &OpContext,
         session: ConsoleSession,
     ) -> CreateResult<ConsoleSession> {
         use db::schema::console_session::dsl;
@@ -2176,7 +2148,7 @@ impl DataStore {
         diesel::insert_into(dsl::console_session)
             .values(session)
             .returning(ConsoleSession::as_returning())
-            .get_result_async(self.pool())
+            .get_result_async(self.pool_authorized(opctx).await?)
             .await
             .map_err(|e| {
                 Error::internal_error(&format!(
@@ -2188,6 +2160,7 @@ impl DataStore {
 
     pub async fn session_update_last_used(
         &self,
+        opctx: &OpContext,
         token: String,
     ) -> UpdateResult<authn::ConsoleSessionWithSiloId> {
         use db::schema::console_session::dsl;
@@ -2196,7 +2169,7 @@ impl DataStore {
             .filter(dsl::token.eq(token.clone()))
             .set((dsl::time_last_used.eq(Utc::now()),))
             .returning(ConsoleSession::as_returning())
-            .get_result_async(self.pool())
+            .get_result_async(self.pool_authorized(opctx).await?)
             .await
             .map_err(|e| {
                 Error::internal_error(&format!(
@@ -2205,8 +2178,9 @@ impl DataStore {
                 ))
             })?;
 
-        let silo_user = self
-            .silo_user_fetch(console_session.silo_user_id)
+        let (.., db_silo_user) = LookupPath::new(opctx, &self)
+            .silo_user_id(console_session.silo_user_id)
+            .fetch()
             .await
             .map_err(|e| {
                 Error::internal_error(&format!(
@@ -2217,17 +2191,21 @@ impl DataStore {
 
         Ok(authn::ConsoleSessionWithSiloId {
             console_session,
-            silo_id: silo_user.silo_id,
+            silo_id: db_silo_user.silo_id,
         })
     }
 
     // putting "hard" in the name because we don't do this with any other model
-    pub async fn session_hard_delete(&self, token: String) -> DeleteResult {
+    pub async fn session_hard_delete(
+        &self,
+        opctx: &OpContext,
+        token: String,
+    ) -> DeleteResult {
         use db::schema::console_session::dsl;
 
         diesel::delete(dsl::console_session)
             .filter(dsl::token.eq(token.clone()))
-            .execute_async(self.pool())
+            .execute_async(self.pool_authorized(opctx).await?)
             .await
             .map(|_rows_deleted| ())
             .map_err(|e| {
@@ -2266,6 +2244,7 @@ impl DataStore {
             // is created with the database.
             &*authn::USER_INTERNAL_API,
             &*authn::USER_INTERNAL_READ,
+            &*authn::USER_EXTERNAL_AUTHN,
             &*authn::USER_SAGA_RECOVERY,
             &*authn::USER_TEST_PRIVILEGED,
             &*authn::USER_TEST_UNPRIVILEGED,
@@ -2463,26 +2442,6 @@ impl DataStore {
             .map_err(|e| {
                 Error::internal_error(&format!(
                     "error deleting outdated available artifacts: {:?}",
-                    e
-                ))
-            })
-    }
-
-    pub async fn silo_user_fetch(
-        &self,
-        silo_user_id: Uuid,
-    ) -> LookupResult<SiloUser> {
-        use db::schema::silo_user::dsl;
-
-        dsl::silo_user
-            .filter(dsl::id.eq(silo_user_id))
-            .filter(dsl::time_deleted.is_null())
-            .select(SiloUser::as_select())
-            .first_async(self.pool())
-            .await
-            .map_err(|e| {
-                Error::internal_error(&format!(
-                    "error fetching silo user: {:?}",
                     e
                 ))
             })
@@ -2826,7 +2785,7 @@ mod test {
     async fn test_session_methods() {
         let logctx = dev::test_setup_log("test_session_methods");
         let mut db = test_setup_database(&logctx.log).await;
-        let (_, datastore) = datastore_test(&logctx, &db).await;
+        let (opctx, datastore) = datastore_test(&logctx, &db).await;
 
         let token = "a_token".to_string();
         let silo_user_id = Uuid::new_v4();
@@ -2849,17 +2808,16 @@ mod test {
             .await
             .unwrap();
 
-        assert_eq!(
-            silo_user.silo_id,
-            datastore
-                .silo_user_fetch(session.silo_user_id)
-                .await
-                .unwrap()
-                .silo_id,
-        );
+        let (.., db_silo_user) = LookupPath::new(&opctx, &datastore)
+            .silo_user_id(session.silo_user_id)
+            .fetch()
+            .await
+            .unwrap();
+        assert_eq!(silo_user.silo_id, db_silo_user.silo_id,);
 
         // fetch the one we just created
-        let fetched = datastore.session_fetch(token.clone()).await.unwrap();
+        let fetched =
+            datastore.session_fetch(&opctx, token.clone()).await.unwrap();
         assert_eq!(session.silo_user_id, fetched.console_session.silo_user_id);
 
         // trying to insert the same one again fails
@@ -2870,14 +2828,17 @@ mod test {
         ));
 
         // update last used (i.e., renew token)
-        let renewed =
-            datastore.session_update_last_used(token.clone()).await.unwrap();
+        let renewed = datastore
+            .session_update_last_used(&opctx, token.clone())
+            .await
+            .unwrap();
         assert!(
             renewed.console_session.time_last_used > session.time_last_used
         );
 
         // time_last_used change persists in DB
-        let fetched = datastore.session_fetch(token.clone()).await.unwrap();
+        let fetched =
+            datastore.session_fetch(&opctx, token.clone()).await.unwrap();
         assert!(
             fetched.console_session.time_last_used > session.time_last_used
         );
@@ -2887,7 +2848,7 @@ mod test {
         assert_eq!(delete, Ok(()));
 
         // this will be a not found after #347
-        let fetched = datastore.session_fetch(token.clone()).await;
+        let fetched = datastore.session_fetch(&opctx, token.clone()).await;
         assert!(matches!(
             fetched,
             Err(Error::ObjectNotFound { type_name: _, lookup_type: _ })

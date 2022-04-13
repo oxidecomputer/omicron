@@ -67,7 +67,11 @@ pub async fn spoof_login(
 
     let user_id = user_id.unwrap();
 
-    let session = nexus.session_create(user_id).await?;
+    // For now, we use the external authn context to create the session.
+    // Once we have real SAML login, maybe we can cons up a real OpContext for
+    // this user and use their own privileges to create the session.
+    let authn_opctx = &nexus.opctx_external_authn;
+    let session = nexus.session_create(&authn_opctx, user_id).await?;
 
     Ok(Response::builder()
         .status(StatusCode::OK)
@@ -99,7 +103,12 @@ pub async fn logout(
     let token = cookies.get(SESSION_COOKIE_COOKIE_NAME);
 
     if opctx.is_ok() && token.is_some() {
-        nexus.session_hard_delete(token.unwrap().value().to_string()).await?;
+        nexus
+            .session_hard_delete(
+                &nexus.opctx_external_authn,
+                token.unwrap().value().to_string(),
+            )
+            .await?;
     }
 
     // If user's session was already expired, they failed auth and their session

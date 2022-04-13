@@ -75,6 +75,16 @@ lazy_static! {
             "used by Nexus when recovering sagas",
         );
 
+    /// Internal user used by Nexus when authenticating external requests
+    pub static ref USER_EXTERNAL_AUTHN: UserBuiltinConfig =
+        UserBuiltinConfig::new_static(
+            // "3a8a" looks a bit like "saga".
+            "001de000-05e4-4000-8000-000000000003",
+            &SILO_ID.to_string().as_str(),
+            "external-authn",
+            "used by Nexus when authenticating external requests",
+        );
+
     /// Test user that's granted all privileges, used for automated testing and
     /// local development
     // TODO-security This eventually needs to go, maybe replaced with some kind
@@ -103,6 +113,7 @@ lazy_static! {
 mod test {
     use super::super::assert_valid_uuid;
     use super::USER_DB_INIT;
+    use super::USER_EXTERNAL_AUTHN;
     use super::USER_INTERNAL_API;
     use super::USER_INTERNAL_READ;
     use super::USER_SAGA_RECOVERY;
@@ -113,6 +124,7 @@ mod test {
     fn test_builtin_user_ids_are_valid() {
         assert_valid_uuid(&USER_DB_INIT.id);
         assert_valid_uuid(&USER_INTERNAL_API.id);
+        assert_valid_uuid(&USER_EXTERNAL_AUTHN.id);
         assert_valid_uuid(&USER_INTERNAL_READ.id);
         assert_valid_uuid(&USER_SAGA_RECOVERY.id);
         assert_valid_uuid(&USER_TEST_PRIVILEGED.id);

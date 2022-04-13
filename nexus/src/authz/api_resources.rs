@@ -268,6 +268,14 @@ authz_resource! {
 // Miscellaneous resources nested directly below "Fleet"
 
 authz_resource! {
+    name = "ConsoleSession",
+    parent = "Fleet",
+    primary_key = String,
+    roles_allowed = false,
+    polar_snippet = FleetChild,
+}
+
+authz_resource! {
     name = "SiloUser",
     parent = "Fleet",
     primary_key = Uuid,
