@@ -40,12 +40,18 @@ use tough::key_source::KeySource;
 use tough::schema::{KeyHolder, RoleKeys, RoleType, Root};
 use tough::sign::Sign;
 
-// If you're getting a double-panic here, run the test with
-// `cargo test -- --nocapture test_update_end_to_end` to get output.
-// `dropshot::HttpServer`'s `Drop` implementation panics.
+const UPDATE_IMAGE_PATH: &'static str = "/var/tmp/zones/omicron-test-component";
+
 #[tokio::test]
 async fn test_update_end_to_end() {
     let mut config = load_test_config();
+
+    // remove any existing output file from a previous run
+    match tokio::fs::remove_file(UPDATE_IMAGE_PATH).await {
+        Ok(_) => (),
+        Err(e) if matches!(e.kind(), std::io::ErrorKind::NotFound) => (),
+        Err(e) => panic!("failed to remove {:?}: {:#}", UPDATE_IMAGE_PATH, e),
+    };
 
     // build the TUF repo
     let rng = SystemRandom::new();
@@ -62,7 +68,6 @@ async fn test_update_end_to_end() {
             .unwrap()
             .start();
     let local_addr = server.local_addr();
-    tokio::spawn(async move { server.await });
 
     // stand up the test environment
     config.updates = Some(UpdatesConfig {
@@ -88,10 +93,11 @@ async fn test_update_end_to_end() {
 
     // check sled agent did the thing
     assert_eq!(
-        std::fs::read("/var/tmp/zones/cockroachdb").unwrap(),
+        tokio::fs::read(UPDATE_IMAGE_PATH).await.unwrap(),
         TARGET_CONTENTS
     );
 
+    server.close().await.expect("failed to shut down dropshot server");
     cptestctx.teardown().await;
 }
 
@@ -219,21 +225,25 @@ fn generate_targets() -> (TempDir, Vec<&'static str>) {
     let dir = TempDir::new().unwrap();
 
     // The update artifact. This will someday be a tarball of some variety.
-    std::fs::write(dir.path().join("cockroachdb-1"), TARGET_CONTENTS).unwrap();
+    std::fs::write(
+        dir.path().join("omicron-test-component-1"),
+        TARGET_CONTENTS,
+    )
+    .unwrap();
 
     // artifacts.json, which describes all available artifacts.
     let artifacts = ArtifactsDocument {
         artifacts: vec![UpdateArtifact {
-            name: "cockroachdb".into(),
+            name: "omicron-test-component".into(),
             version: 1,
             kind: Some(UpdateArtifactKind::Zone),
-            target: "cockroachdb-1".into(),
+            target: "omicron-test-component-1".into(),
         }],
     };
     let f = File::create(dir.path().join("artifacts.json")).unwrap();
     serde_json::to_writer_pretty(f, &artifacts).unwrap();
 
-    (dir, vec!["cockroachdb-1", "artifacts.json"])
+    (dir, vec!["omicron-test-component-1", "artifacts.json"])
 }
 
 // =^..^=   =^..^=   =^..^=   =^..^=   =^..^=   =^..^=   =^..^=   =^..^=

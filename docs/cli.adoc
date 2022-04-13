@@ -1,0 +1,184 @@
+:showtitle:
+:toc: left
+:icons: font
+
+= Oxide CLI
+
+The `oxide` CLI is used to access Nexus' external API, which is
+the public interface to Omicron.
+
+For more detail, refer to https://docs.oxide.computer/cli/manual[oxide's CLI Manual].
+
+== Quick demo
+
+The `oxide` CLI can be installed from the https://github.com/oxidecomputer/cli/releases[latest release].
+
+Run `oxide auth login` to authenticate with your Oxide account. Alternatively,
+`oxide` will respect the `OXIDE_TOKEN` and `OXIDE_HOST` environment variables.
+
+If you find bugs or have feedback, leave it on the https://github.com/oxidecomputer/cli/issues[cli repo].
+
+Here's a small demo that creates a project, creates an instance, and attaches a disk to it:
+
+[source,text]
+----
+$ oxide org create myorg \
+    --description "My organization"
+✔ Created organization myorg
+
+$ oxide project create myproject \
+    --description "My project" \
+    --organization myorg
+✔ Created project myorg/myproject
+
+$ oxide instance create myinstance \
+    --description "My instance" \
+    --project myproject \
+    --organization myorg \
+    --hostname "myinstance.maze-war.com" \
+	  --ncpus 1 \
+	  --memory 8
+✔ Created instance myinstance in myorg/myproject
+
+$ oxide instance view myinstance \
+    --organization myorg \
+    --project myproject \
+    --format json
+{
+  "id": "99ad2514-050c-4493-9cb9-d9ceba980a98",
+  "name": "myinstance",
+  "description": "My instance",
+  "timeCreated": "2021-11-17T01:45:07.606749Z",
+  "timeModified": "2021-11-17T01:45:07.606749Z",
+  "projectId": "c197b9d2-285c-4e9f-9461-1815ef093c8d",
+  "ncpus": 1,
+  "memory": 8,
+  "hostname": "myinstance.maze-war.com",
+  "runState": "running",
+  "timeRunStateUpdated": "2021-11-17T01:45:09.120652Z"
+
+
+$ oxide disk create nginx \
+	-D "The nginx disk." \
+	-o myorg \
+	-p myproject \
+	--size 10
+✔ Created disk nginx in myorg/myproject
+
+
+$ oxide disk view nginx \
+    --organization myorg \
+    --project myproject \
+    --format json
+{
+  "id": "551bbe67-3640-41c9-b968-249a136e5e31",
+  "name": "nginx",
+  "description": "The nginx disk.",
+  "timeCreated": "2021-11-17T01:47:36.524136Z",
+  "timeModified": "2021-11-17T01:47:36.524136Z",
+  "projectId": "c197b9d2-285c-4e9f-9461-1815ef093c8d",
+  "snapshotId": null,
+  "size": 1024,
+  "state": {
+    "state": "detached"
+  },
+  "devicePath": "/mnt/nginx"
+}
+
+$ oxide disk attach nginx myinstance \
+	-o maze-war \
+	-p prod-online
+✔ Attached disk nginx to instance myinstance in myorg/myproject
+
+$ oxide instance disks myinstance \
+	-o maze-war \
+	-p prod-online \
+  --format json
+{
+  "instanceId": "99ad2514-050c-4493-9cb9-d9ceba980a98",
+  "diskId": "551bbe67-3640-41c9-b968-249a136e5e31",
+  "diskName": "nginx",
+  "diskState": {
+    "state": "attached",
+    "instance": "99ad2514-050c-4493-9cb9-d9ceba980a98"
+  }
+}
+----
+
+Alternatively, you can use the API command to run any endpoint.
+This operates like a fancy, authenticated curl.
+
+[source,text]
+----
+$ oxide api --help
+Makes an authenticated HTTP request to the Oxide API and prints the response.
+
+The endpoint argument should be a path of a Oxide API endpoint.
+
+The default HTTP request method is "GET" normally and "POST" if any parameters
+were added. Override the method with `--method`.
+
+Pass one or more `-f/--raw-field` values in "key=value" format to add static string
+parameters to the request payload. To add non-string or otherwise dynamic values, see
+`--field` below. Note that adding request parameters will automatically switch the
+request method to POST. To send the parameters as a GET query string instead, use
+`--method GET`.
+
+The `-F/--field` flag has magic type conversion based on the format of the value:
+
+- literal values "true", "false", "null", and integer/float numbers get converted to
+  appropriate JSON types;
+- if the value starts with "@", the rest of the value is interpreted as a
+  filename to read the value from. Pass "-" to read from standard input.
+
+Raw request body may be passed from the outside via a file specified by `--input`.
+Pass "-" to read from standard input. In this mode, parameters specified via
+`--field` flags are serialized into URL query parameters.
+
+In `--paginate` mode, all pages of results will sequentially be requested until
+there are no more pages of results.
+
+USAGE:
+    oxide api [OPTIONS] <endpoint>
+
+ARGS:
+    <endpoint>
+            The endpoint to request
+
+OPTIONS:
+    -d, --debug
+            Print debug info
+
+            [env: DEBUG=]
+
+    -f, --raw-field <RAW_FIELD>
+            Add a string parameter in key=value format
+
+    -F, --field <FIELD>
+            Add a typed parameter in key=value format
+
+    -h, --help
+            Print help information
+
+    -H, --header <HEADER>
+            Add a HTTP request header in `key:value` format
+
+    -i, --include
+            Include HTTP response headers in the output
+
+        --input <INPUT>
+            The file to use as body for the HTTP request (use "-" to read from standard input)
+
+            [default: ]
+
+        --paginate
+            Make additional HTTP requests to fetch all pages of results
+
+    -X, --method <METHOD>
+            The HTTP method for the request
+
+$ oxide api /session/me
+{
+  "id": "99ad2514-050c-4493-9cb9-d9ceba980a98"
+}
+----
