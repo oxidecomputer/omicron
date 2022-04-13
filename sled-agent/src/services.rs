@@ -329,7 +329,7 @@ mod test {
     // This will shut down all allocated zones, and delete their
     // associated VNICs.
     fn drop_service_manager(mgr: ServiceManager) {
-        let halt_ctx = MockZones::halt_and_remove_context();
+        let halt_ctx = MockZones::halt_and_remove_logged_context();
         halt_ctx.expect().returning(|_, name| {
             assert_eq!(name, EXPECTED_ZONE_NAME);
             Ok(())

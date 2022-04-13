@@ -101,31 +101,51 @@ pub struct Zones {}
 #[cfg_attr(test, mockall::automock, allow(dead_code))]
 impl Zones {
     /// Ensures a zone is halted before both uninstalling and deleting it.
-    pub fn halt_and_remove(log: &Logger, name: &str) -> Result<(), Error> {
-        if let Some(zone) = Self::find(name)? {
-            info!(log, "halt_and_remove: Zone state: {:?}", zone.state());
-            let (halt, uninstall) = match zone.state() {
-                // For states where we could be running, attempt to halt.
-                zone::State::Running | zone::State::Ready => (true, true),
-                // For zones where we never performed installation, simply
-                // delete the zone - uninstallation is invalid.
-                zone::State::Configured => (false, false),
-                // For most zone states, perform uninstallation.
-                _ => (false, true),
-            };
+    ///
+    /// Returns the state the zone was in before it was removed, or None if the
+    /// zone did not exist.
+    pub fn halt_and_remove(name: &str) -> Result<Option<zone::State>, Error> {
+        match Self::find(name)? {
+            None => Ok(None),
+            Some(zone) => {
+                let state = zone.state();
+                let (halt, uninstall) = match state {
+                    // For states where we could be running, attempt to halt.
+                    zone::State::Running | zone::State::Ready => (true, true),
+                    // For zones where we never performed installation, simply
+                    // delete the zone - uninstallation is invalid.
+                    zone::State::Configured => (false, false),
+                    // For most zone states, perform uninstallation.
+                    _ => (false, true),
+                };
 
-            if halt {
-                zone::Adm::new(name).halt().map_err(Error::Halt)?;
+                if halt {
+                    zone::Adm::new(name).halt().map_err(Error::Halt)?;
+                }
+                if uninstall {
+                    zone::Adm::new(name)
+                        .uninstall(/* force= */ true)
+                        .map_err(Error::Uninstall)?;
+                }
+                zone::Config::new(name)
+                    .delete(/* force= */ true)
+                    .run()
+                    .map_err(Error::Delete)?;
+                Ok(Some(state))
             }
-            if uninstall {
-                zone::Adm::new(name)
-                    .uninstall(/* force= */ true)
-                    .map_err(Error::Uninstall)?;
-            }
-            zone::Config::new(name)
-                .delete(/* force= */ true)
-                .run()
-                .map_err(Error::Delete)?;
+        }
+    }
+
+    /// Halt and remove the zone, logging the state in which the zone was found.
+    pub fn halt_and_remove_logged(
+        log: &Logger,
+        name: &str,
+    ) -> Result<(), Error> {
+        if let Some(state) = Self::halt_and_remove(name)? {
+            info!(
+                log,
+                "halt_and_remove_logged: Previous zone state: {:?}", state
+            );
         }
         Ok(())
     }
@@ -157,7 +177,7 @@ impl Zones {
                     "Invalid state; uninstalling and deleting zone {}",
                     zone_name
                 );
-                Zones::halt_and_remove(log, zone.name())?;
+                Zones::halt_and_remove_logged(log, zone.name())?;
             }
         }
 
