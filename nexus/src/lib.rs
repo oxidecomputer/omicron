@@ -2,6 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 #![feature(async_closure)]
+#![feature(int_roundings)] // used in crate::cidata
 
 //! Library interface to the Nexus, the heart of the control plane
 
@@ -15,6 +16,7 @@
 
 pub mod authn; // Public only for testing
 pub mod authz; // Public for documentation examples
+mod cidata;
 pub mod config; // Public for testing
 pub mod context; // Public for documentation examples
 pub mod db; // Public for documentation examples

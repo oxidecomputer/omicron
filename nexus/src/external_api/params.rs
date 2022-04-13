@@ -175,6 +175,7 @@ mod serde_user_data {
     {
         match base64::decode(<&str>::deserialize(deserializer)?) {
             Ok(buf) => {
+                // if you change this, also update the stress test in crate::cidata
                 if buf.len() > 32 * 1024 {
                     Err(D::Error::invalid_length(
                         buf.len(),

@@ -1118,6 +1118,9 @@ pub struct Instance {
     /// id for the project containing this Instance
     pub project_id: Uuid,
 
+    /// user data for instance initialization systems (e.g. cloud-init)
+    pub user_data: Vec<u8>,
+
     /// runtime state of the Instance
     #[diesel(embed)]
     pub runtime_state: InstanceRuntimeState,
@@ -1132,7 +1135,12 @@ impl Instance {
     ) -> Self {
         let identity =
             InstanceIdentity::new(instance_id, params.identity.clone());
-        Self { identity, project_id, runtime_state: runtime }
+        Self {
+            identity,
+            project_id,
+            user_data: params.user_data.clone(),
+            runtime_state: runtime,
+        }
     }
 
     pub fn runtime(&self) -> &InstanceRuntimeState {
