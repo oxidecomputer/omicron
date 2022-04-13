@@ -192,6 +192,7 @@ struct InstanceInner {
 
     // Disk related properties
     requested_disks: Vec<DiskRequest>,
+    cloud_init_bytes: Option<String>,
 
     // Internal State management
     state: InstanceStates,
@@ -298,7 +299,7 @@ impl InstanceInner {
             nics,
             disks: self.requested_disks.clone(),
             migrate,
-            cloud_init_bytes: None,
+            cloud_init_bytes: self.cloud_init_bytes.clone(),
         };
 
         info!(self.log, "Sending ensure request to propolis: {:?}", request);
@@ -430,6 +431,7 @@ impl Instance {
             vnic_allocator,
             requested_nics: initial.nics,
             requested_disks: initial.disks,
+            cloud_init_bytes: initial.cloud_init_bytes,
             vlan,
             state: InstanceStates::new(initial.runtime),
             running_state: None,
@@ -693,6 +695,7 @@ mod test {
             },
             nics: vec![],
             disks: vec![],
+            cloud_init_bytes: None,
         }
     }
 

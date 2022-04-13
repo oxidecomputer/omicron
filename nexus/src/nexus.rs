@@ -1697,6 +1697,7 @@ impl Nexus {
             ),
             nics: nics.iter().map(|nic| nic.clone().into()).collect(),
             disks: disk_reqs,
+            cloud_init_bytes: None,
         };
 
         let sa = self.instance_sled(&db_instance).await?;
