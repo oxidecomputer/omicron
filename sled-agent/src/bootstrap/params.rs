@@ -7,7 +7,6 @@
 use omicron_common::api::external::Ipv6Net;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use uuid::Uuid;
 
 /// Identity signed by local RoT and Oxide certificate chain.
 #[derive(Serialize, Deserialize, JsonSchema)]
@@ -17,11 +16,8 @@ pub struct ShareRequest {
 }
 
 /// Configuration information for launching a Sled Agent.
-#[derive(Debug, Serialize, Deserialize, JsonSchema)]
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq)]
 pub struct SledAgentRequest {
-    /// ID of the Sled to be initialized.
-    pub uuid: Uuid,
-
     /// Portion of the IP space to be managed by the Sled Agent.
     pub ip: Ipv6Net,
 }

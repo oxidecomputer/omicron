@@ -156,22 +156,16 @@
         "type": "object",
         "properties": {
           "ip": {
-            "description": "Portion of the IP space to be managed by the Sled Agent.",
+            "description": "ID of the Sled to be initialized. Portion of the IP space to be managed by the Sled Agent.",
             "allOf": [
               {
                 "$ref": "#/components/schemas/Ipv6Net"
               }
             ]
-          },
-          "uuid": {
-            "description": "ID of the Sled to be initialized.",
-            "type": "string",
-            "format": "uuid"
           }
         },
         "required": [
-          "ip",
-          "uuid"
+          "ip"
         ]
       },
       "SledAgentResponse": {

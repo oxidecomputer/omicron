@@ -178,8 +178,6 @@ impl Agent {
         request: SledAgentRequest,
     ) -> Result<SledAgentResponse, BootstrapError> {
         info!(&self.log, "Loading Sled Agent: {:?}", request);
-        // TODO: actually use request.uuid
-
         let mut maybe_agent = self.sled_agent.lock().await;
         if let Some(server) = &*maybe_agent {
             // Server already exists, return it.

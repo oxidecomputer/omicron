@@ -4,18 +4,20 @@
 
 //! Rack Setup Service implementation
 
-use super::config::SetupServiceConfig as Config;
-use crate::bootstrap::discovery::PeerMonitorObserver;
+use super::config::{SetupServiceConfig as Config, SledRequest};
 use crate::bootstrap::{
     client as bootstrap_agent_client, config::BOOTSTRAP_AGENT_PORT,
+    discovery::PeerMonitorObserver, params::SledAgentRequest,
 };
 use crate::config::get_sled_address;
 use omicron_common::api::external::Ipv6Net;
 use omicron_common::backoff::{
     internal_service_policy, retry_notify, BackoffError,
 };
+use serde::{Deserialize, Serialize};
 use slog::Logger;
-use std::net::{SocketAddr, SocketAddrV6};
+use std::collections::{HashMap, HashSet};
+use std::net::{Ipv6Addr, SocketAddr, SocketAddrV6};
 use thiserror::Error;
 use tokio::sync::Mutex;
 
@@ -44,6 +46,13 @@ pub enum SetupServiceError {
     Configuration,
 }
 
+// The workload / information allocated to a single sled.
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+struct SledAllocation {
+    initialization_request: SledAgentRequest,
+    services_request: SledRequest,
+}
+
 /// The interface to the Rack Setup Service.
 pub struct Service {
     handle: tokio::task::JoinHandle<Result<(), SetupServiceError>>,
@@ -63,8 +72,13 @@ impl Service {
         peer_monitor: PeerMonitorObserver,
     ) -> Self {
         let handle = tokio::task::spawn(async move {
-            let svc = ServiceInner::new(log, peer_monitor);
-            svc.inject_rack_setup_requests(&config).await
+            let svc = ServiceInner::new(log.clone(), peer_monitor);
+            if let Err(e) = svc.inject_rack_setup_requests(&config).await {
+                warn!(log, "RSS injection failed: {}", e);
+                Err(e)
+            } else {
+                Ok(())
+            }
         });
 
         Service { handle }
@@ -74,6 +88,34 @@ impl Service {
     pub async fn join(self) -> Result<(), SetupServiceError> {
         self.handle.await.expect("Rack Setup Service Task panicked")
     }
+}
+
+fn rss_plan_path() -> std::path::PathBuf {
+    std::path::Path::new(omicron_common::OMICRON_CONFIG_PATH)
+        .join("rss-plan.toml")
+}
+
+fn rss_completed_plan_path() -> std::path::PathBuf {
+    std::path::Path::new(omicron_common::OMICRON_CONFIG_PATH)
+        .join("rss-plan-completed.toml")
+}
+
+// Describes the options when awaiting for peers.
+enum PeerExpectation {
+    // Await a set of peers that matches this group of IPv6 addresses exactly.
+    //
+    // TODO: We currently don't deal with the case where:
+    //
+    // - RSS boots, sees some sleds, comes up with a plan.
+    // - RSS reboots, sees a *different* set of sleds, and needs
+    // to adjust the plan.
+    //
+    // This case is fairly tricky because some sleds may have
+    // already received requests to initialize - modifying the
+    // allocated subnets would be non-trivial.
+    Precise(HashSet<Ipv6Addr>),
+    // Await any peers, as long as there are at least enough to make a new plan.
+    Arbitrary(usize),
 }
 
 /// The implementation of the Rack Setup Service.
@@ -90,7 +132,7 @@ impl ServiceInner {
     async fn initialize_sled_agent(
         &self,
         bootstrap_addr: SocketAddrV6,
-        subnet: ipnetwork::Ipv6Network,
+        request: &SledAgentRequest,
     ) -> Result<(), SetupServiceError> {
         let dur = std::time::Duration::from_secs(60);
 
@@ -99,13 +141,7 @@ impl ServiceInner {
             .timeout(dur)
             .build()?;
 
-        // TODO: Can we just use a type that avoids the need for this
-        // conversion?
-        let url = format!(
-            "http://[{}]:{}",
-            bootstrap_addr.ip(),
-            BOOTSTRAP_AGENT_PORT,
-        );
+        let url = format!("http://{}", bootstrap_addr);
         info!(self.log, "Sending request to peer agent: {}", url);
         let client = bootstrap_agent_client::Client::new_with_client(
             &url,
@@ -116,9 +152,8 @@ impl ServiceInner {
         let sled_agent_initialize = || async {
             client
                 .start_sled(&bootstrap_agent_client::types::SledAgentRequest {
-                    uuid: uuid::Uuid::new_v4(), // TODO: not rando
                     ip: bootstrap_agent_client::types::Ipv6Net(
-                        subnet.to_string(),
+                        request.ip.0.to_string(),
                     ),
                 })
                 .await
@@ -237,137 +272,255 @@ impl ServiceInner {
         Ok(())
     }
 
+    async fn load_plan(
+        &self,
+    ) -> Result<Option<HashMap<SocketAddrV6, SledAllocation>>, SetupServiceError>
+    {
+        // If we already created a plan for this RSS to allocate
+        // subnets/requests to sleds, re-use that existing plan.
+        let rss_plan_path = rss_plan_path();
+        if rss_plan_path.exists() {
+            info!(self.log, "RSS plan already created, loading from file");
+
+            let plan: std::collections::HashMap<SocketAddrV6, SledAllocation> =
+                toml::from_str(
+                    &tokio::fs::read_to_string(&rss_plan_path).await?,
+                )?;
+            Ok(Some(plan))
+        } else {
+            Ok(None)
+        }
+    }
+
+    async fn create_plan(
+        &self,
+        config: &Config,
+        addrs: impl IntoIterator<Item = Ipv6Addr>,
+    ) -> Result<HashMap<SocketAddrV6, SledAllocation>, SetupServiceError> {
+        let addrs = addrs.into_iter().enumerate();
+
+        // TODO: The use of "zip" here means that if we have more addrs than
+        // requests, we won't initialize some of them. Maybe that's okay?
+        // Maybe that's the responsibility of Nexus?
+        let requests_and_sleds = config.requests.iter().zip(addrs);
+
+        let allocations = requests_and_sleds.map(|(request, sled)| {
+            let (idx, bootstrap_addr) = sled;
+            info!(
+                self.log,
+                "Creating plan for the sled at {:?}", bootstrap_addr
+            );
+            let bootstrap_addr =
+                SocketAddrV6::new(bootstrap_addr, BOOTSTRAP_AGENT_PORT, 0, 0);
+            let sled_subnet_index =
+                u8::try_from(idx + 1).expect("Too many peers!");
+            let subnet = config.sled_subnet(sled_subnet_index);
+
+            (
+                bootstrap_addr,
+                SledAllocation {
+                    initialization_request: SledAgentRequest {
+                        ip: Ipv6Net(subnet),
+                    },
+                    services_request: request.clone(),
+                },
+            )
+        });
+
+        info!(self.log, "Serializing plan");
+
+        let mut plan = std::collections::HashMap::new();
+        for (addr, allocation) in allocations {
+            plan.insert(addr, allocation);
+        }
+
+        // Once we've constructed a plan, write it down to durable storage.
+        let serialized_plan = toml::Value::try_from(&plan)
+            .expect("Cannot serialize configuration");
+        let plan_str = toml::to_string(&serialized_plan)
+            .expect("Cannot turn config to string");
+
+        info!(self.log, "Plan serialized as: {}", plan_str);
+        tokio::fs::write(&rss_plan_path(), plan_str).await?;
+        info!(self.log, "Plan written to storage");
+
+        Ok(plan)
+    }
+
+    // Waits for sufficient neighbors to exist so the initial set of requests
+    // can be send out.
+    async fn wait_for_peers(
+        &self,
+        expectation: PeerExpectation,
+    ) -> Result<Vec<Ipv6Addr>, SetupServiceError> {
+        let mut peer_monitor = self.peer_monitor.lock().await;
+        let our_address = peer_monitor.our_address();
+
+        // TODO: We could likely optimize this, avoid re-making the sets
+        loop {
+            {
+                let peers = peer_monitor.peer_addrs().await;
+                let all_addrs = peers.iter().chain([&our_address].into_iter());
+                match expectation {
+                    PeerExpectation::Precise(ref expected) => {
+                        let addr_set = all_addrs
+                            .map(|a| *a)
+                            .collect::<HashSet<Ipv6Addr>>();
+                        if addr_set.is_superset(expected) {
+                            return Ok(addr_set
+                                .into_iter()
+                                .collect::<Vec<Ipv6Addr>>());
+                        }
+                        info!(self.log, "Waiting for a precise set of peers; not found yet.");
+                    }
+                    PeerExpectation::Arbitrary(count) => {
+                        if peers.len() + 1 >= count {
+                            return Ok(all_addrs
+                                .map(|a| *a)
+                                .collect::<Vec<Ipv6Addr>>());
+                        }
+                        info!(
+                            self.log,
+                            "Waiting for {} peers (currently have {})",
+                            count,
+                            peers.len() + 1
+                        );
+                    }
+                }
+            }
+
+            info!(self.log, "Waiting for more peers");
+            peer_monitor.recv().await;
+        }
+    }
+
     // In lieu of having an operator send requests to all sleds via an
     // initialization service, the sled-agent configuration may allow for the
     // automated injection of setup requests from a sled.
+    //
+    // This method has a few distinct phases, identified by files in durable
+    // storage:
+    //
+    // 1. ALLOCATION PLAN CREATION. When the RSS starts up for the first time,
+    //    it creates an allocation plan to provision subnets and services
+    //    to an initial set of sleds.
+    //
+    //    This plan is stored at "rss_plan_path()".
+    //
+    // 2. ALLOCATION PLAN EXECUTION. The RSS then carries out this plan, making
+    //    requests to the sleds enumerated within the "allocation plan".
+    //
+    // 3. MARKING SETUP COMPLETE. Once the RSS has successfully initialized the
+    //    rack, the "rss_plan_path()" file is renamed to
+    //    "rss_completed_plan_path()". This indicates that the plan executed
+    //    successfully, and no work remains.
     async fn inject_rack_setup_requests(
         &self,
         config: &Config,
     ) -> Result<(), SetupServiceError> {
         info!(self.log, "Injecting RSS configuration: {:#?}", config);
 
-        let serialized_config = toml::Value::try_from(&config)
-            .expect("Cannot serialize configuration");
-        let config_str = toml::to_string(&serialized_config)
-            .expect("Cannot turn config to string");
+        // We expect this directory to exist - ensure that it does, before any
+        // subsequent operations which may write configs here.
+        tokio::fs::create_dir_all(omicron_common::OMICRON_CONFIG_PATH).await?;
 
-        // First, check if this request has previously been made.
+        // Check if a previous RSS plan has completed successfully.
         //
-        // Normally, the rack setup service is run with a human-in-the-loop,
-        // but with this automated injection, we need a way to determine the
-        // (destructive) initialization has occurred.
-        //
-        // We do this by storing the configuration at "rss_config_path"
-        // after successfully performing initialization.
-        let rss_config_path =
-            std::path::Path::new(omicron_common::OMICRON_CONFIG_PATH)
-                .join("config-rss.toml");
-        if rss_config_path.exists() {
+        // If it has, the system should be up-and-running.
+        let rss_completed_plan_path = rss_completed_plan_path();
+        if rss_completed_plan_path.exists() {
+            // TODO(https://github.com/oxidecomputer/omicron/issues/724): If the
+            // running configuration doesn't match Config, we could try to
+            // update things.
             info!(
                 self.log,
-                "RSS configuration already exists at {}",
-                rss_config_path.to_string_lossy()
+                "RSS configuration looks like it has already been applied",
             );
-            let old_config: Config = toml::from_str(
-                &tokio::fs::read_to_string(&rss_config_path).await?,
-            )?;
-            if &old_config == config {
-                info!(
-                    self.log,
-                    "RSS config already applied from: {}",
-                    rss_config_path.to_string_lossy()
-                );
-                return Ok(());
-            }
-
-            // TODO(https://github.com/oxidecomputer/omicron/issues/724):
-            // We could potentially handle this case by deleting all
-            // datasets (in preparation for applying the new
-            // configuration), but at the moment it's an error.
-            warn!(
-                self.log,
-                "Rack Setup Service Config ({}) was already applied, but has changed.
-                This means that you may have datasets set up on this sled, but they
-                may not match the ones requested by the supplied configuration.\n
-                To re-initialize this sled, re-run 'omicron-package install'.",
-                rss_config_path.to_string_lossy()
-            );
-            return Err(SetupServiceError::Configuration);
+            return Ok(());
         } else {
-            info!(
-                self.log,
-                "No RSS configuration found at {}",
-                rss_config_path.to_string_lossy()
-            );
+            info!(self.log, "RSS configuration has not been fully applied yet",);
         }
 
-        // Wait until we see enough neighbors to be able to set the
-        // initial set of requests.
-        let mut peer_monitor = self.peer_monitor.lock().await;
-        let our_address = peer_monitor.our_address();
-        let mut addrs = peer_monitor.peer_addrs().await;
-        while addrs.len() + 1 < config.requests.len() {
-            info!(
-                self.log,
-                "# of peers ({}) < # of requests ({}), waiting for more to join...",
-                addrs.len(), config.requests.len()
-            );
-            peer_monitor.recv().await;
-            addrs = peer_monitor.peer_addrs().await;
-        }
-        info!(self.log, "Enough peers to start configuring rack: {:?}", addrs);
+        // Wait for either:
+        // - All the peers to re-load an old plan (if one exists)
+        // - Enough peers to create a new plan (if one does not exist)
+        let maybe_plan = self.load_plan().await?;
+        let expectation = if let Some(plan) = &maybe_plan {
+            PeerExpectation::Precise(plan.keys().map(|a| *a.ip()).collect())
+        } else {
+            PeerExpectation::Arbitrary(config.requests.len())
+        };
+        let addrs = self.wait_for_peers(expectation).await?;
+        info!(self.log, "Enough peers exist to enact RSS plan");
 
-        let addrs =
-            addrs.into_iter().chain([&our_address].into_iter()).enumerate();
+        // If we created a plan, reuse it. Otherwise, create a new plan.
+        let plan = if let Some(plan) = maybe_plan {
+            info!(self.log, "Re-using existing allocation plan");
+            plan
+        } else {
+            info!(self.log, "Creating new allocation plan");
+            self.create_plan(config, addrs).await?
+        };
 
-        // XXX Questions to consider:
-        // - What if a sled comes online *right after* this setup? How does
-        // it get a /64?
-        // - What is the RSS fails *after* telling a BA to start a SA?
-        // How can it reconcile that lost address? The current scheme
-        // is assigning `/64`s based on the order peers have been seen.
+        // NOTE: This is a "point-of-no-return" -- before sending any requests
+        // to neighboring sleds, ensure that we've recorded our plan to durable
+        // storage. This way, if the RSS power-cycles, it can idempotently
+        // execute the same allocation plan.
 
         // Issue the dataset initialization requests to all sleds.
-        let requests =
-            futures::future::join_all(config.requests.iter().zip(addrs).map(
-                |(request, sled)| async move {
-                    info!(self.log, "observing request: {:#?}", request);
-                    let (idx, bootstrap_addr) = sled;
-                    let bootstrap_addr = SocketAddrV6::new(
-                        *bootstrap_addr,
-                        BOOTSTRAP_AGENT_PORT,
-                        0,
-                        0,
-                    );
-                    let sled_subnet_index =
-                        u8::try_from(idx + 1).expect("Too many peers!");
+        futures::future::join_all(plan.iter().map(
+            |(bootstrap_addr, allocation)| async move {
+                info!(
+                    self.log,
+                    "Sending request: {:#?}", allocation.initialization_request
+                );
 
-                    // First, connect to the Bootstrap Agent and tell it to
-                    // initialize the Sled Agent with the specified subnet.
-                    let subnet = config.sled_subnet(sled_subnet_index);
-                    self.initialize_sled_agent(bootstrap_addr, subnet).await?;
+                // First, connect to the Bootstrap Agent and tell it to
+                // initialize the Sled Agent with the specified subnet.
+                self.initialize_sled_agent(
+                    *bootstrap_addr,
+                    &allocation.initialization_request,
+                )
+                .await?;
+                info!(
+                    self.log,
+                    "Initialized sled agent on sled with bootstrap address: {}",
+                    bootstrap_addr
+                );
 
-                    // Next, initialize any datasets on sleds that need it.
-                    let sled_address =
-                        SocketAddr::V6(get_sled_address(Ipv6Net(subnet)));
-                    self.initialize_datasets(sled_address, &request.datasets)
-                        .await?;
-                    Ok((request, sled_address))
-                },
-            ))
-            .await
-            .into_iter()
-            .collect::<Result<Vec<_>, SetupServiceError>>()?;
+                // Next, initialize any datasets on sleds that need it.
+                let sled_address = SocketAddr::V6(get_sled_address(
+                    allocation.initialization_request.ip,
+                ));
+                self.initialize_datasets(
+                    sled_address,
+                    &allocation.services_request.datasets,
+                )
+                .await?;
+                Ok(())
+            },
+        ))
+        .await
+        .into_iter()
+        .collect::<Result<_, SetupServiceError>>()?;
+
+        info!(self.log, "Finished setting up agents and datasets");
 
         // Issue service initialization requests.
         //
         // Note that this must happen *after* the dataset initialization,
         // to ensure that CockroachDB has been initialized before Nexus
         // starts.
-        futures::future::join_all(requests.iter().map(
-            |(request, sled_address)| async move {
-                self.initialize_services(*sled_address, &request.services)
-                    .await?;
+        futures::future::join_all(plan.iter().map(
+            |(_, allocation)| async move {
+                let sled_address = SocketAddr::V6(get_sled_address(
+                    allocation.initialization_request.ip,
+                ));
+                self.initialize_services(
+                    sled_address,
+                    &allocation.services_request.services,
+                )
+                .await?;
                 Ok(())
             },
         ))
@@ -375,9 +528,16 @@ impl ServiceInner {
         .into_iter()
         .collect::<Result<Vec<()>, SetupServiceError>>()?;
 
+        info!(self.log, "Finished setting up services");
+
         // Finally, make sure the configuration is saved so we don't inject
         // the requests on the next iteration.
-        tokio::fs::write(rss_config_path, config_str).await?;
+        tokio::fs::rename(rss_plan_path(), rss_completed_plan_path).await?;
+
+        // TODO Questions to consider:
+        // - What if a sled comes online *right after* this setup? How does
+        // it get a /64?
+
         Ok(())
     }
 }

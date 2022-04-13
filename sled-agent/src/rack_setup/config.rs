@@ -60,8 +60,6 @@ impl SetupServiceConfig {
         let mut rack_network = self.rack_subnet().network().octets();
 
         // To set bits distinguishing the /64 from the /56, we modify the 7th octet.
-        //
-        // 0001:0203:0405:0607::
         rack_network[7] = index;
         ipnetwork::Ipv6Network::new(std::net::Ipv6Addr::from(rack_network), 64)
             .unwrap()
