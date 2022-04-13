@@ -123,7 +123,7 @@ impl SledAgent {
         let zones = Zones::get()?;
         for z in zones {
             warn!(log, "Deleting zone: {}", z.name());
-            Zones::halt_and_remove(&log, z.name())?;
+            Zones::halt_and_remove_logged(&log, z.name())?;
         }
 
         // Identify all VNICs which should be managed by the Sled Agent.

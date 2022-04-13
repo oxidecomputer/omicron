@@ -8,6 +8,7 @@ use anyhow::{anyhow, bail, Context, Result};
 use futures::stream::{self, StreamExt, TryStreamExt};
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 use omicron_package::{parse, BuildCommand, DeployCommand};
+use omicron_sled_agent::zone;
 use omicron_zone_package::package::{Package, Progress};
 use rayon::prelude::*;
 use ring::digest::{Context as DigestContext, Digest, SHA256};
@@ -373,24 +374,26 @@ fn do_install(
     Ok(())
 }
 
+fn uninstall_all_omicron_zones() -> Result<()> {
+    for zone in zone::Zones::get()? {
+        zone::Zones::halt_and_remove(zone.name())?;
+    }
+    Ok(())
+}
+
 // Attempts to both disable and delete all requested packages.
 fn uninstall_all_packages(config: &Config) {
     for package in config
         .packages
         .values()
         .chain(config.external_packages.values().map(|epkg| &epkg.package))
+        .filter(|package| !package.zone)
     {
-        if package.zone {
-            // TODO(https://github.com/oxidecomputer/omicron/issues/723):
-            // At the moment, zones are entirely managed by the sled agent,
-            // but could be removed here.
-        } else {
-            let _ = smf::Adm::new()
-                .disable()
-                .synchronous()
-                .run(smf::AdmSelection::ByPattern(&[&package.service_name]));
-            let _ = smf::Config::delete().force().run(&package.service_name);
-        }
+        let _ = smf::Adm::new()
+            .disable()
+            .synchronous()
+            .run(smf::AdmSelection::ByPattern(&[&package.service_name]));
+        let _ = smf::Config::delete().force().run(&package.service_name);
     }
 
     // Once all packages have been removed, also remove any locally-stored
@@ -414,6 +417,8 @@ fn do_uninstall(
     artifact_dir: &Path,
     install_dir: &Path,
 ) -> Result<()> {
+    println!("Removing all Omicron zones");
+    uninstall_all_omicron_zones()?;
     println!("Uninstalling all packages");
     uninstall_all_packages(config);
     println!("Removing: {}", artifact_dir.to_string_lossy());
