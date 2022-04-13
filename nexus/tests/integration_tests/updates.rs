@@ -40,6 +40,9 @@ use tough::key_source::KeySource;
 use tough::schema::{KeyHolder, RoleKeys, RoleType, Root};
 use tough::sign::Sign;
 
+// If you're getting a double-panic here, run the test with
+// `cargo test -- --nocapture test_update_end_to_end` to get output.
+// `dropshot::HttpServer`'s `Drop` implementation panics.
 #[tokio::test]
 async fn test_update_end_to_end() {
     let mut config = load_test_config();
@@ -59,6 +62,7 @@ async fn test_update_end_to_end() {
             .unwrap()
             .start();
     let local_addr = server.local_addr();
+    tokio::spawn(async move { server.await });
 
     // stand up the test environment
     config.updates = Some(UpdatesConfig {
@@ -88,7 +92,6 @@ async fn test_update_end_to_end() {
         TARGET_CONTENTS
     );
 
-    server.close().await.expect("failed to shut down dropshot server");
     cptestctx.teardown().await;
 }
 
