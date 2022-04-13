@@ -183,10 +183,23 @@ where
         DieselError::DatabaseError(kind, info) => {
             PublicError::internal_error(&format_database_error(kind, &*info))
         }
-        error => PublicError::internal_error(&format!(
-            "Unknown diesel error: {:?}",
-            error
-        )),
+        error => {
+            let context = match make_not_found_error() {
+                PublicError::ObjectNotFound { type_name, lookup_type } => {
+                    format!(
+                        "looking up {:?} {:?}",
+                        type_name, lookup_type
+                    )
+                }
+                _ => {
+                    format!("during unknown operation")
+                }
+            };
+            PublicError::internal_error(&format!(
+                "Unknown diesel error {}: {:#}",
+                context, error
+            ))
+        }
     }
 }
 
@@ -210,8 +223,8 @@ fn public_error_from_diesel_create(
             )),
         },
         _ => PublicError::internal_error(&format!(
-            "Unknown diesel error: {:?}",
-            error
+            "Unknown diesel error creating {:?} called {:?}: {:#}",
+            resource_type, object_name, error
         )),
     }
 }
