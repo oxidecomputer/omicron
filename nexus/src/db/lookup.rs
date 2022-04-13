@@ -471,7 +471,6 @@ lookup_resource! {
     primary_key_columns = [ { column_name = "id", rust_type = Uuid } ]
 }
 
-
 #[cfg(test)]
 mod test {
     use super::Instance;
