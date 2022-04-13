@@ -37,7 +37,6 @@ use super::{actor::AuthenticatedActor, Authz};
 use crate::authn;
 use crate::context::OpContext;
 use crate::db::fixed_data::FLEET_ID;
-use crate::db::model::Name;
 use crate::db::model::UpdateArtifactKind;
 use crate::db::DataStore;
 use authz_macros::authz_resource;
@@ -272,7 +271,7 @@ authz_resource! {
 }
 
 authz_resource! {
-    name = "Role",
+    name = "RoleBuiltin",
     parent = "Fleet",
     primary_key = (String, String),
     roles_allowed = false,
@@ -280,9 +279,9 @@ authz_resource! {
 }
 
 authz_resource! {
-    name = "User",
+    name = "UserBuiltin",
     parent = "Fleet",
-    primary_key = Name,
+    primary_key = Uuid,
     roles_allowed = false,
     polar_snippet = FleetChild,
 }
@@ -292,6 +291,14 @@ authz_resource! {
     parent = "Fleet",
     primary_key = Uuid,
     roles_allowed = false,
+    polar_snippet = FleetChild,
+}
+
+authz_resource! {
+    name = "Silo",
+    parent = "Fleet",
+    primary_key = Uuid,
+    roles_allowed = true,
     polar_snippet = FleetChild,
 }
 

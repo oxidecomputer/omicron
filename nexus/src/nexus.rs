@@ -701,7 +701,11 @@ impl Nexus {
         opctx: &OpContext,
         name: &Name,
     ) -> LookupResult<db::model::Silo> {
-        self.db_datastore.silo_fetch(opctx, name).await
+        let (.., db_silo) = LookupPath::new(opctx, &self.db_datastore)
+            .silo_name(name)
+            .fetch()
+            .await?;
+        Ok(db_silo)
     }
 
     pub async fn silos_list_by_name(
@@ -3014,12 +3018,11 @@ impl Nexus {
         opctx: &OpContext,
         sled_id: &Uuid,
     ) -> LookupResult<db::model::Sled> {
-        let authz_sled = authz::Sled::new(
-            authz::FLEET,
-            *sled_id,
-            LookupType::ById(*sled_id),
-        );
-        self.db_datastore.sled_fetch(&opctx, &authz_sled).await
+        let (.., db_sled) = LookupPath::new(opctx, &self.db_datastore)
+            .sled_id(*sled_id)
+            .fetch()
+            .await?;
+        Ok(db_sled)
     }
 
     // Sagas
@@ -3077,7 +3080,11 @@ impl Nexus {
         opctx: &OpContext,
         name: &Name,
     ) -> LookupResult<db::model::UserBuiltin> {
-        self.db_datastore.user_builtin_fetch(opctx, name).await
+        let (.., db_user_builtin) = LookupPath::new(opctx, &self.db_datastore)
+            .user_builtin_name(name)
+            .fetch()
+            .await?;
+        Ok(db_user_builtin)
     }
 
     // Built-in roles
@@ -3095,7 +3102,11 @@ impl Nexus {
         opctx: &OpContext,
         name: &str,
     ) -> LookupResult<db::model::RoleBuiltin> {
-        self.db_datastore.role_builtin_fetch(opctx, name).await
+        let (.., db_role_builtin) = LookupPath::new(opctx, &self.db_datastore)
+            .role_builtin_name(name)?
+            .fetch()
+            .await?;
+        Ok(db_role_builtin)
     }
 
     // Internal control plane interfaces.

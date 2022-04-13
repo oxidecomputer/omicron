@@ -59,11 +59,13 @@ pub fn make_omicron_oso() -> Result<Oso, anyhow::Error> {
         VpcRouter::init(),
         RouterRoute::init(),
         VpcSubnet::init(),
-        Role::init(),
-        UpdateAvailableArtifact::init(),
-        User::init(),
+
         Rack::init(),
+        RoleBuiltin::init(),
+        SiloUser::init(),
         Sled::init(),
+        UpdateAvailableArtifact::init(),
+        UserBuiltin::init(),
     ];
 
     let polar_config = std::iter::once(OMICRON_AUTHZ_CONFIG_BASE)

@@ -19,6 +19,7 @@ use crate::{
 use async_bb8_diesel::AsyncRunQueryDsl;
 use db_macros::lookup_resource;
 use diesel::{ExpressionMethods, QueryDsl, SelectableHelper};
+use omicron_common::api::external::Error;
 use omicron_common::api::external::{LookupResult, LookupType, ResourceType};
 use uuid::Uuid;
 
@@ -239,6 +240,45 @@ impl<'a> LookupPath<'a> {
         }
     }
 
+    /// Select a resource of type RoleBuiltin, identified by its `name`
+    pub fn role_builtin_name(
+        self,
+        name: &str,
+    ) -> Result<RoleBuiltin<'a>, Error> {
+        let (resource_type, role_name) =
+            name.split_once(".").ok_or_else(|| Error::ObjectNotFound {
+                type_name: ResourceType::RoleBuiltin,
+                lookup_type: LookupType::ByName(String::from(name)),
+            })?;
+
+        Ok(RoleBuiltin {
+            key: RoleBuiltinKey::PrimaryKey(
+                Root { lookup_root: self },
+                resource_type.to_string(),
+                role_name.to_string(),
+            ),
+        })
+    }
+
+    /// Select a resource of type Silo, identified by its id
+    pub fn silo_id(self, id: Uuid) -> Silo<'a> {
+        Silo { key: SiloKey::PrimaryKey(Root { lookup_root: self }, id) }
+    }
+
+    /// Select a resource of type Silo, identified by its id
+    pub fn silo_name<'b, 'c>(self, name: &'b Name) -> Silo<'c>
+    where
+        'a: 'c,
+        'b: 'c,
+    {
+        Silo { key: SiloKey::Name(Root { lookup_root: self }, name) }
+    }
+
+    /// Select a resource of type Sled, identified by its id
+    pub fn sled_id(self, id: Uuid) -> Sled<'a> {
+        Sled { key: SledKey::PrimaryKey(Root { lookup_root: self }, id) }
+    }
+
     /// Select a resource of type UpdateAvailableArtifact, identified by its
     /// `(name, version, kind)` tuple
     pub fn update_available_artifact_tuple(
@@ -254,6 +294,17 @@ impl<'a> LookupPath<'a> {
                 version,
                 kind,
             ),
+        }
+    }
+
+    /// Select a resource of type UserBuiltin, identified by its `name`
+    pub fn user_builtin_name<'b, 'c>(self, name: &'b Name) -> UserBuiltin<'c>
+    where
+        'a: 'c,
+        'b: 'c,
+    {
+        UserBuiltin {
+            key: UserBuiltinKey::Name(Root { lookup_root: self }, name),
         }
     }
 }
@@ -274,6 +325,8 @@ impl<'a> Root<'a> {
 // resources, and the publicly-exposed fetch functions (fetch(), fetch_for(),
 // and lookup_for()).
 
+// Main resource hierarchy: Organizations, Projects, and their resources
+
 lookup_resource! {
     name = "Organization",
     ancestors = [],
@@ -287,6 +340,15 @@ lookup_resource! {
     name = "Project",
     ancestors = [ "Organization" ],
     children = [ "Disk", "Instance", "Vpc" ],
+    lookup_by_name = true,
+    soft_deletes = true,
+    primary_key_columns = [ { column_name = "id", rust_type = Uuid } ]
+}
+
+lookup_resource! {
+    name = "Disk",
+    ancestors = [ "Organization", "Project" ],
+    children = [],
     lookup_by_name = true,
     soft_deletes = true,
     primary_key_columns = [ { column_name = "id", rust_type = Uuid } ]
@@ -311,27 +373,9 @@ lookup_resource! {
 }
 
 lookup_resource! {
-    name = "Disk",
-    ancestors = [ "Organization", "Project" ],
-    children = [],
-    lookup_by_name = true,
-    soft_deletes = true,
-    primary_key_columns = [ { column_name = "id", rust_type = Uuid } ]
-}
-
-lookup_resource! {
     name = "Vpc",
     ancestors = [ "Organization", "Project" ],
     children = [ "VpcRouter", "VpcSubnet" ],
-    lookup_by_name = true,
-    soft_deletes = true,
-    primary_key_columns = [ { column_name = "id", rust_type = Uuid } ]
-}
-
-lookup_resource! {
-    name = "VpcSubnet",
-    ancestors = [ "Organization", "Project", "Vpc" ],
-    children = [ ],
     lookup_by_name = true,
     soft_deletes = true,
     primary_key_columns = [ { column_name = "id", rust_type = Uuid } ]
@@ -356,11 +400,61 @@ lookup_resource! {
 }
 
 lookup_resource! {
+    name = "VpcSubnet",
+    ancestors = [ "Organization", "Project", "Vpc" ],
+    children = [ ],
+    lookup_by_name = true,
+    soft_deletes = true,
+    primary_key_columns = [ { column_name = "id", rust_type = Uuid } ]
+}
+
+// Miscellaneous resources nested directly below "Fleet"
+
+lookup_resource! {
+    name = "RoleBuiltin",
+    ancestors = [],
+    children = [],
+    lookup_by_name = false,
+    soft_deletes = false,
+    primary_key_columns = [
+        { column_name = "resource_type", rust_type = String },
+        { column_name = "role_name", rust_type = String },
+    ]
+}
+
+lookup_resource! {
     name = "SiloUser",
     ancestors = [],
     children = [],
     lookup_by_name = false,
     soft_deletes = true,
+    primary_key_columns = [ { column_name = "id", rust_type = Uuid } ]
+}
+
+lookup_resource! {
+    name = "Silo",
+    ancestors = [],
+    children = [],
+    lookup_by_name = true,
+    soft_deletes = true,
+    primary_key_columns = [ { column_name = "id", rust_type = Uuid } ]
+}
+
+lookup_resource! {
+    name = "Sled",
+    ancestors = [],
+    children = [],
+    lookup_by_name = false,
+    soft_deletes = true,
+    primary_key_columns = [ { column_name = "id", rust_type = Uuid } ]
+}
+
+lookup_resource! {
+    name = "UserBuiltin",
+    ancestors = [],
+    children = [],
+    lookup_by_name = true,
+    soft_deletes = false,
     primary_key_columns = [ { column_name = "id", rust_type = Uuid } ]
 }
 
