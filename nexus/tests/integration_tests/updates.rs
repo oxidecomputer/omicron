@@ -225,7 +225,11 @@ fn generate_targets() -> (TempDir, Vec<&'static str>) {
     let dir = TempDir::new().unwrap();
 
     // The update artifact. This will someday be a tarball of some variety.
-    std::fs::write(dir.path().join("omicron-test-component-1"), TARGET_CONTENTS).unwrap();
+    std::fs::write(
+        dir.path().join("omicron-test-component-1"),
+        TARGET_CONTENTS,
+    )
+    .unwrap();
 
     // artifacts.json, which describes all available artifacts.
     let artifacts = ArtifactsDocument {
