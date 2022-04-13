@@ -7,6 +7,7 @@ use uuid::Uuid;
 
 impl Instance {
     pub fn generate_cidata(&self) -> Result<Vec<u8>, Error> {
+        // cloud-init meta-data is YAML, but YAML is a strict superset of JSON.
         let meta_data = serde_json::to_vec(&MetaData {
             instance_id: self.id(),
             local_hostname: &self.runtime().hostname,
@@ -45,7 +46,9 @@ fn build_vfat(meta_data: &[u8], user_data: &[u8]) -> std::io::Result<Vec<u8>> {
     let mut disk = Cursor::new(vec![0; sectors * 512]);
     fatfs::format_volume(
         &mut disk,
-        FormatVolumeOptions::new().bytes_per_cluster(512),
+        FormatVolumeOptions::new()
+            .bytes_per_cluster(512)
+            .volume_label(*b"CIDATA     "),
     )?;
 
     {
