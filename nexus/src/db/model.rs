@@ -2513,6 +2513,10 @@ impl RoleBuiltin {
             description: String::from(description),
         }
     }
+
+    pub fn id(&self) -> (String, String) {
+        (self.resource_type.clone(), self.role_name.clone())
+    }
 }
 
 /// Describes an assignment of a built-in role for a built-in user

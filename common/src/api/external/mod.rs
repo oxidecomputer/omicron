@@ -536,9 +536,9 @@ pub enum ResourceType {
     RouterRoute,
     Oximeter,
     MetricProducer,
-    Role,
+    RoleBuiltin,
     UpdateAvailableArtifact,
-    User,
+    UserBuiltin,
     Zpool,
 }
 
