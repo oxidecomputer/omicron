@@ -40,18 +40,9 @@ use tough::key_source::KeySource;
 use tough::schema::{KeyHolder, RoleKeys, RoleType, Root};
 use tough::sign::Sign;
 
-const UPDATE_IMAGE_PATH: &'static str = "/var/tmp/zones/cockroachdb";
-
 #[tokio::test]
 async fn test_update_end_to_end() {
     let mut config = load_test_config();
-
-    // If the output file already exists, record the mtime.
-    let mtime: Option<_> = match tokio::fs::metadata(UPDATE_IMAGE_PATH).await {
-        Ok(metadata) => Some(metadata.modified().unwrap()),
-        Err(e) if matches!(e.kind(), std::io::ErrorKind::NotFound) => None,
-        Err(e) => panic!("failed to stat {:?}: {:?}", UPDATE_IMAGE_PATH, e),
-    };
 
     // build the TUF repo
     let rng = SystemRandom::new();
@@ -92,14 +83,8 @@ async fn test_update_end_to_end() {
     .unwrap();
 
     // check sled agent did the thing
-    if let Some(old_mtime) = mtime {
-        let new_metadata = tokio::fs::metadata(UPDATE_IMAGE_PATH)
-            .await
-            .expect("failed to stat file after it was previously found");
-        assert!(old_mtime < new_metadata.modified().unwrap());
-    }
     assert_eq!(
-        tokio::fs::read(UPDATE_IMAGE_PATH).await.unwrap(),
+        std::fs::read("/var/tmp/zones/cockroachdb").unwrap(),
         TARGET_CONTENTS
     );
 
