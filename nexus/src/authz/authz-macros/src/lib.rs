@@ -344,10 +344,12 @@ fn do_authz_resource(
         }
 
         impl ApiResourceError for #resource_name {
-            fn not_found(&self) -> Error {
-                self.lookup_type
-                    .clone()
-                    .into_not_found(ResourceType::#resource_name)
+            fn resource_type(&self) -> ResourceType {
+                ResourceType::#resource_name
+            }
+
+            fn lookup_type(&self) -> &LookupType {
+                &self.lookup_type
             }
         }
     })

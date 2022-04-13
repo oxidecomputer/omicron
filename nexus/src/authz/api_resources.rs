@@ -69,7 +69,12 @@ pub trait ApiResource: Clone + Send + Sync + 'static {
 pub trait ApiResourceError {
     /// Returns an error as though this resource were not found, suitable for
     /// use when an actor should not be able to see that this resource exists
-    fn not_found(&self) -> Error;
+    fn not_found(&self) -> Error {
+        self.lookup_type().clone().into_not_found(self.resource_type())
+    }
+
+    fn resource_type(&self) -> ResourceType;
+    fn lookup_type(&self) -> &LookupType;
 }
 
 impl<T: ApiResource + ApiResourceError + oso::PolarClass> AuthorizedResource
