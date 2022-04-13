@@ -46,7 +46,7 @@ const UPDATE_IMAGE_PATH: &'static str = "/var/tmp/zones/cockroachdb";
 async fn test_update_end_to_end() {
     let mut config = load_test_config();
 
-    // If the output file already exists, record the mtime.
+    // remove any existing output file from a previous run
     match tokio::fs::remove_file(UPDATE_IMAGE_PATH).await {
         Ok(_) => (),
         Err(e) if matches!(e.kind(), std::io::ErrorKind::NotFound) => (),
