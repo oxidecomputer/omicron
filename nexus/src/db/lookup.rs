@@ -459,6 +459,15 @@ lookup_resource! {
 }
 
 lookup_resource! {
+    name = "SiloUser",
+    ancestors = [],
+    children = [],
+    lookup_by_name = false,
+    soft_deletes = true,
+    primary_key_columns = [ { column_name = "id", rust_type = Uuid } ]
+}
+
+lookup_resource! {
     name = "UpdateAvailableArtifact",
     ancestors = [],
     children = [],
