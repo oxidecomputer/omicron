@@ -121,17 +121,18 @@ pub fn public_error_from_diesel_pool(
 ) -> PublicError {
     public_error_from_diesel_pool_helper(error, |error| match handler {
         ErrorHandler::NotFoundByResource(resource) => {
-            public_error_from_diesel_lookup_helper(error, || {
-                resource.not_found()
-            })
+            public_error_from_diesel_lookup_helper(
+                error,
+                resource.resource_type(),
+                resource.lookup_type(),
+            )
         }
         ErrorHandler::NotFoundByLookup(resource_type, lookup_type) => {
-            public_error_from_diesel_lookup_helper(error, || {
-                PublicError::ObjectNotFound {
-                    type_name: resource_type,
-                    lookup_type,
-                }
-            })
+            public_error_from_diesel_lookup_helper(
+                error,
+                resource_type,
+                &lookup_type,
+            )
         }
         ErrorHandler::Conflict(resource_type, object_name) => {
             public_error_from_diesel_create(error, resource_type, object_name)
@@ -171,27 +172,21 @@ where
 
 /// Converts a Diesel error to an external error, handling "NotFound" using
 /// `make_not_found_error`.
-fn public_error_from_diesel_lookup_helper<F>(
+fn public_error_from_diesel_lookup_helper(
     error: DieselError,
-    make_not_found_error: F,
-) -> PublicError
-where
-    F: FnOnce() -> PublicError,
-{
+    resource_type: ResourceType,
+    lookup_type: &LookupType,
+) -> PublicError {
     match error {
-        DieselError::NotFound => make_not_found_error(),
+        DieselError::NotFound => {
+            lookup_type.clone().into_not_found(resource_type)
+        }
         DieselError::DatabaseError(kind, info) => {
             PublicError::internal_error(&format_database_error(kind, &*info))
         }
         error => {
-            let context = match make_not_found_error() {
-                PublicError::ObjectNotFound { type_name, lookup_type } => {
-                    format!("looking up {:?} {:?}", type_name, lookup_type)
-                }
-                _ => {
-                    format!("during unknown operation")
-                }
-            };
+            let context =
+                format!("accessing {:?} {:?}", resource_type, lookup_type);
             PublicError::internal_error(&format!(
                 "Unknown diesel error {}: {:#}",
                 context, error
