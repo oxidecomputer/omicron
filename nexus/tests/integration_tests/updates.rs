@@ -40,9 +40,18 @@ use tough::key_source::KeySource;
 use tough::schema::{KeyHolder, RoleKeys, RoleType, Root};
 use tough::sign::Sign;
 
+const UPDATE_IMAGE_PATH: &'static str = "/var/tmp/zones/cockroachdb";
+
 #[tokio::test]
 async fn test_update_end_to_end() {
     let mut config = load_test_config();
+
+    // If the output file already exists, record the mtime.
+    match tokio::fs::remove_file(UPDATE_IMAGE_PATH).await {
+        Ok(_) => (),
+        Err(e) if matches!(e.kind(), std::io::ErrorKind::NotFound) => (),
+        Err(e) => panic!("failed to remove {:?}: {:#}", UPDATE_IMAGE_PATH, e),
+    };
 
     // build the TUF repo
     let rng = SystemRandom::new();
@@ -84,7 +93,7 @@ async fn test_update_end_to_end() {
 
     // check sled agent did the thing
     assert_eq!(
-        std::fs::read("/var/tmp/zones/cockroachdb").unwrap(),
+        tokio::fs::read(UPDATE_IMAGE_PATH).await.unwrap(),
         TARGET_CONTENTS
     );
 
