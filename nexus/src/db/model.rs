@@ -2547,7 +2547,7 @@ impl_enum_wrapper!(
     #[postgres(type_name = "update_artifact_kind", type_schema = "public")]
     pub struct UpdateArtifactKindEnum;
 
-    #[derive(Clone, Debug, Display, AsExpression, FromSqlRow)]
+    #[derive(Clone, Copy, Debug, Display, AsExpression, FromSqlRow, PartialEq, Eq)]
     #[display("{0}")]
     #[sql_type = "UpdateArtifactKindEnum"]
     pub struct UpdateArtifactKind(pub internal::nexus::UpdateArtifactKind);
@@ -2575,6 +2575,12 @@ pub struct UpdateAvailableArtifact {
     pub target_sha256: String,
     // FIXME this *should* be a u64
     pub target_length: i64,
+}
+
+impl UpdateAvailableArtifact {
+    pub fn id(&self) -> (String, i64, UpdateArtifactKind) {
+        (self.name.clone(), self.version, self.kind)
+    }
 }
 
 #[cfg(test)]

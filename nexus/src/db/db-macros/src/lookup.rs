@@ -9,6 +9,7 @@
 use proc_macro2::TokenStream;
 use quote::{format_ident, quote};
 use serde_tokenstream::ParseWrapper;
+use std::ops::Deref;
 
 //
 // INPUT (arguments to the macro)
@@ -37,8 +38,16 @@ pub struct Input {
     children: Vec<String>,
     /// whether lookup by name is supported (usually within the parent collection)
     lookup_by_name: bool,
-    /// Rust type used for the primary key
-    primary_key_type: ParseWrapper<syn::Type>,
+    /// Description of the primary key columns
+    primary_key_columns: Vec<PrimaryKeyColumn>,
+    /// This resources supports soft-deletes
+    soft_deletes: bool,
+}
+
+#[derive(serde::Deserialize)]
+struct PrimaryKeyColumn {
+    column_name: String,
+    rust_type: ParseWrapper<syn::Type>,
 }
 
 //
@@ -54,6 +63,9 @@ pub struct Config {
     // The resource itself that we're generating
     /// Basic information about the resource we're generating
     resource: Resource,
+
+    /// This resources supports soft-deletes
+    soft_deletes: bool,
 
     /// Name of the enum describing how we're looking up this resource
     lookup_enum: syn::Ident,
@@ -80,8 +92,8 @@ pub struct Config {
     /// whether lookup by name is supported
     lookup_by_name: bool,
 
-    /// Rust type used for the primary key
-    primary_key_type: syn::Type,
+    /// Description of the primary key columns
+    primary_key_columns: Vec<PrimaryKeyColumn>,
 }
 
 impl Config {
@@ -113,7 +125,8 @@ impl Config {
             parent,
             child_resources,
             lookup_by_name: input.lookup_by_name,
-            primary_key_type: input.primary_key_type.into_inner(),
+            primary_key_columns: input.primary_key_columns,
+            soft_deletes: input.soft_deletes,
         }
     }
 }
@@ -181,7 +194,8 @@ fn generate_struct(config: &Config) -> TokenStream {
         functions on this struct) for lookup or fetch",
         resource_name
     );
-    let pkey_type = &config.primary_key_type;
+    let pkey_types =
+        config.primary_key_columns.iter().map(|c| c.rust_type.deref());
 
     /* configure the lookup enum */
     let lookup_enum = &config.lookup_enum;
@@ -211,10 +225,10 @@ fn generate_struct(config: &Config) -> TokenStream {
         enum #lookup_enum<'a>{
             #name_variant
 
-            /// We're looking for a resource with the given id
+            /// We're looking for a resource with the given primary key
             ///
             /// This has no parent container -- a by-id lookup is always global
-            Id(Root<'a>, #pkey_type),
+            PrimaryKey(Root<'a> #(,#pkey_types)*),
         }
     }
 }
@@ -305,7 +319,7 @@ fn generate_misc_helpers(config: &Config) -> TokenStream {
             match &self.key {
                 #name_variant
 
-                #lookup_enum::Id(root, _) => root.lookup_root(),
+                #lookup_enum::PrimaryKey(root, ..) => root.lookup_root(),
             }
         }
     }
@@ -319,6 +333,12 @@ fn generate_lookup_methods(config: &Config) -> TokenStream {
     let resource_name = &config.resource.name;
     let resource_authz_name = &config.resource.authz_name;
     let lookup_enum = &config.lookup_enum;
+    let pkey_names: Vec<_> = config
+        .primary_key_columns
+        .iter()
+        .enumerate()
+        .map(|(i, _)| format_ident!("v{}", i))
+        .collect();
     let (ancestors_authz_names_assign, parent_lookup_arg_actual) =
         if let Some(p) = &config.parent {
             let nancestors = config.path_authz_names.len() - 1;
@@ -411,8 +431,13 @@ fn generate_lookup_methods(config: &Config) -> TokenStream {
             match &self.key {
                 #fetch_for_name_variant
 
-                #lookup_enum::Id(_, id) => {
-                    Self::fetch_by_id_for(opctx, datastore, *id, action).await
+                #lookup_enum::PrimaryKey(_, #(#pkey_names,)*) => {
+                    Self::fetch_by_id_for(
+                        opctx,
+                        datastore,
+                        #(#pkey_names,)*
+                        action
+                    ).await
                 }
             }
         }
@@ -455,7 +480,7 @@ fn generate_lookup_methods(config: &Config) -> TokenStream {
             match &self.key {
                 #lookup_name_variant
 
-                #lookup_enum::Id(_, id) => {
+                #lookup_enum::PrimaryKey(_, #(#pkey_names,)*) => {
                     // When doing a by-id lookup, we start directly with the
                     // resource we're looking up.  But we still want to
                     // return a full path of authz objects.  So we look up
@@ -471,7 +496,7 @@ fn generate_lookup_methods(config: &Config) -> TokenStream {
                         Self::lookup_by_id_no_authz(
                             opctx,
                             datastore,
-                            *id
+                            #(#pkey_names,)*
                         ).await?;
                     Ok((#(#path_authz_names,)*))
                 }
@@ -491,6 +516,21 @@ fn generate_database_functions(config: &Config) -> TokenStream {
     let resource_as_snake = format_ident!("{}", &config.resource.name_as_snake);
     let path_types = &config.path_types;
     let path_authz_names = &config.path_authz_names;
+    let pkey_types: Vec<_> = config
+        .primary_key_columns
+        .iter()
+        .map(|c| c.rust_type.deref())
+        .collect();
+    let pkey_column_names = config
+        .primary_key_columns
+        .iter()
+        .map(|c| format_ident!("{}", c.column_name));
+    let pkey_names: Vec<_> = config
+        .primary_key_columns
+        .iter()
+        .enumerate()
+        .map(|(i, _)| format_ident!("v{}", i))
+        .collect();
     let (
         parent_lookup_arg_formal,
         parent_lookup_arg_actual,
@@ -509,7 +549,7 @@ fn generate_database_functions(config: &Config) -> TokenStream {
             quote! {
                 let (#(#ancestors_authz_names,)* _) =
                     #parent_resource_name::lookup_by_id_no_authz(
-                        opctx, datastore, db_row.#parent_id
+                        opctx, datastore, &db_row.#parent_id
                     ).await?;
             },
             quote! { .filter(dsl::#parent_id.eq(#parent_authz_name.id())) },
@@ -517,6 +557,12 @@ fn generate_database_functions(config: &Config) -> TokenStream {
         )
     } else {
         (quote! {}, quote! {}, quote! {}, quote! {}, quote! { &authz::FLEET })
+    };
+
+    let soft_delete_filter = if config.soft_deletes {
+        quote! { .filter(dsl::time_deleted.is_null()) }
+    } else {
+        quote! {}
     };
 
     let by_name_funcs = if config.lookup_by_name {
@@ -565,7 +611,7 @@ fn generate_database_functions(config: &Config) -> TokenStream {
                 use db::schema::#resource_as_snake::dsl;
 
                 dsl::#resource_as_snake
-                    .filter(dsl::time_deleted.is_null())
+                    #soft_delete_filter
                     .filter(dsl::name.eq(name.clone()))
                     #lookup_filter
                     .select(model::#resource_name::as_select())
@@ -598,6 +644,20 @@ fn generate_database_functions(config: &Config) -> TokenStream {
         quote! {}
     };
 
+    let lookup_type = if config.primary_key_columns.len() == 1
+        && config.primary_key_columns[0].column_name == "id"
+    {
+        quote! { LookupType::ById(#(#pkey_names.clone())*) }
+    } else {
+        let fmtstr = config
+            .primary_key_columns
+            .iter()
+            .map(|c| format!("{} = {{:?}}", c.column_name))
+            .collect::<Vec<_>>()
+            .join(", ");
+        quote! { LookupType::ByCompositeId(format!(#fmtstr, #(#pkey_names,)*)) }
+    };
+
     quote! {
         #by_name_funcs
 
@@ -610,14 +670,14 @@ fn generate_database_functions(config: &Config) -> TokenStream {
         async fn fetch_by_id_for(
             opctx: &OpContext,
             datastore: &DataStore,
-            id: Uuid,
+            #(#pkey_names: &#pkey_types,)*
             action: authz::Action,
         ) -> LookupResult<(#(authz::#path_types,)* model::#resource_name)> {
             let (#(#path_authz_names,)* db_row) =
                 Self::lookup_by_id_no_authz(
                     opctx,
                     datastore,
-                    id
+                    #(#pkey_names,)*
                 ).await?;
             opctx.authorize(action, &#resource_authz_name).await?;
             Ok((#(#path_authz_names,)* db_row))
@@ -633,13 +693,13 @@ fn generate_database_functions(config: &Config) -> TokenStream {
         async fn lookup_by_id_no_authz(
             opctx: &OpContext,
             datastore: &DataStore,
-            id: Uuid,
+            #(#pkey_names: &#pkey_types,)*
         ) -> LookupResult<(#(authz::#path_types,)* model::#resource_name)> {
             use db::schema::#resource_as_snake::dsl;
 
             let db_row = dsl::#resource_as_snake
-                .filter(dsl::time_deleted.is_null())
-                .filter(dsl::id.eq(id))
+                #soft_delete_filter
+                #(.filter(dsl::#pkey_column_names.eq(#pkey_names.clone())))*
                 .select(model::#resource_name::as_select())
                 .get_result_async(datastore.pool_authorized(opctx).await?)
                 .await
@@ -648,7 +708,7 @@ fn generate_database_functions(config: &Config) -> TokenStream {
                         e,
                         ErrorHandler::NotFoundByLookup(
                             ResourceType::#resource_name,
-                            LookupType::ById(id)
+                            #lookup_type
                         )
                     )
                 })?;
@@ -656,7 +716,7 @@ fn generate_database_functions(config: &Config) -> TokenStream {
             let #resource_authz_name = Self::make_authz(
                 &#parent_authz_value,
                 &db_row,
-                LookupType::ById(id)
+                #lookup_type
             );
             Ok((#(#path_authz_names,)* db_row))
         }
@@ -682,10 +742,11 @@ mod test {
         let output = lookup_resource(
             quote! {
                 name = "Organization",
-                ancestors = ["Silo"],
+                ancestors = [],
                 children = [ "Project" ],
                 lookup_by_name = true,
-                primary_key_type = Uuid,
+                soft_deletes = true,
+                primary_key_columns = [ { column_name = "id", rust_type = Uuid } ]
             }
             .into(),
         )
@@ -698,7 +759,8 @@ mod test {
                 ancestors = ["Organization"],
                 children = [ "Disk", "Instance" ],
                 lookup_by_name = true,
-                primary_key_type = Uuid,
+                soft_deletes = true,
+                primary_key_columns = [ { column_name = "id", rust_type = Uuid } ]
             }
             .into(),
         )
@@ -711,7 +773,8 @@ mod test {
                 ancestors = [],
                 children = [],
                 lookup_by_name = false,
-                primary_key_type = Uuid,
+                soft_deletes = true,
+                primary_key_columns = [ { column_name = "id", rust_type = Uuid } ]
             }
             .into(),
         )
@@ -720,10 +783,16 @@ mod test {
 
         let output = lookup_resource(
             quote! {
-                name = "WhatThing",
-                ancestors = [ "WhatThingParent" ],
+                name = "UpdateAvailableArtifact",
+                ancestors = [],
                 children = [],
-                lookup_by_name = true,
+                lookup_by_name = false,
+                soft_deletes = false,
+                primary_key_columns = [
+                    { column_name = "name", rust_type = String },
+                    { column_name = "version", rust_type = i64 },
+                    { column_name = "kind", rust_type = UpdateArtifactKind }
+                ]
             }
             .into(),
         )

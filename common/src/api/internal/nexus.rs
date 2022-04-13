@@ -88,7 +88,15 @@ pub struct UpdateArtifact {
 /// Kinds of update artifacts, as used by Nexus to determine what updates are available and by
 /// sled-agent to determine how to apply an update when asked.
 #[derive(
-    Clone, Copy, Debug, PartialEq, Display, Deserialize, Serialize, JsonSchema,
+    Clone,
+    Copy,
+    Debug,
+    PartialEq,
+    Eq,
+    Display,
+    Deserialize,
+    Serialize,
+    JsonSchema,
 )]
 #[display(style = "kebab-case")]
 #[serde(rename_all = "kebab-case")]

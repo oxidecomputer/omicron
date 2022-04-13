@@ -53,7 +53,6 @@ use omicron_common::api::external::UpdateResult;
 use omicron_common::api::external::{
     CreateResult, IdentityMetadataCreateParams,
 };
-use omicron_common::api::internal::nexus::UpdateArtifact;
 use omicron_common::bail_unless;
 use std::convert::{TryFrom, TryInto};
 use std::net::Ipv6Addr;
@@ -70,9 +69,9 @@ use crate::db::{
         Name, NetworkInterface, Organization, OrganizationUpdate, OximeterInfo,
         ProducerEndpoint, Project, ProjectUpdate, Region,
         RoleAssignmentBuiltin, RoleBuiltin, RouterRoute, RouterRouteUpdate,
-        Silo, SiloUser, Sled, UpdateArtifactKind, UpdateAvailableArtifact,
-        UserBuiltin, Volume, Vpc, VpcFirewallRule, VpcRouter, VpcRouterUpdate,
-        VpcSubnet, VpcSubnetUpdate, VpcUpdate, Zpool,
+        Silo, SiloUser, Sled, UpdateAvailableArtifact, UserBuiltin, Volume,
+        Vpc, VpcFirewallRule, VpcRouter, VpcRouterUpdate, VpcSubnet,
+        VpcSubnetUpdate, VpcUpdate, Zpool,
     },
     pagination::paginated,
     pagination::paginated_multicolumn,
@@ -2549,32 +2548,6 @@ impl DataStore {
             .map_err(|e| {
                 Error::internal_error(&format!(
                     "error deleting outdated available artifacts: {:?}",
-                    e
-                ))
-            })
-    }
-
-    pub async fn update_available_artifact_fetch(
-        &self,
-        opctx: &OpContext,
-        artifact: &UpdateArtifact,
-    ) -> LookupResult<UpdateAvailableArtifact> {
-        opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
-
-        use db::schema::update_available_artifact::dsl;
-        dsl::update_available_artifact
-            .filter(
-                dsl::name
-                    .eq(artifact.name.clone())
-                    .and(dsl::version.eq(artifact.version))
-                    .and(dsl::kind.eq(UpdateArtifactKind(artifact.kind))),
-            )
-            .select(UpdateAvailableArtifact::as_select())
-            .first_async(self.pool_authorized(opctx).await?)
-            .await
-            .map_err(|e| {
-                Error::internal_error(&format!(
-                    "error fetching artifact: {:?}",
                     e
                 ))
             })
