@@ -40,7 +40,7 @@ use tough::key_source::KeySource;
 use tough::schema::{KeyHolder, RoleKeys, RoleType, Root};
 use tough::sign::Sign;
 
-const UPDATE_IMAGE_PATH: &'static str = "/var/tmp/zones/cockroachdb";
+const UPDATE_IMAGE_PATH: &'static str = "/var/tmp/zones/omicron-test-component";
 
 #[tokio::test]
 async fn test_update_end_to_end() {
@@ -225,21 +225,21 @@ fn generate_targets() -> (TempDir, Vec<&'static str>) {
     let dir = TempDir::new().unwrap();
 
     // The update artifact. This will someday be a tarball of some variety.
-    std::fs::write(dir.path().join("cockroachdb-1"), TARGET_CONTENTS).unwrap();
+    std::fs::write(dir.path().join("omicron-test-component-1"), TARGET_CONTENTS).unwrap();
 
     // artifacts.json, which describes all available artifacts.
     let artifacts = ArtifactsDocument {
         artifacts: vec![UpdateArtifact {
-            name: "cockroachdb".into(),
+            name: "omicron-test-component".into(),
             version: 1,
             kind: Some(UpdateArtifactKind::Zone),
-            target: "cockroachdb-1".into(),
+            target: "omicron-test-component".into(),
         }],
     };
     let f = File::create(dir.path().join("artifacts.json")).unwrap();
     serde_json::to_writer_pretty(f, &artifacts).unwrap();
 
-    (dir, vec!["cockroachdb-1", "artifacts.json"])
+    (dir, vec!["omicron-test-component-1", "artifacts.json"])
 }
 
 // =^..^=   =^..^=   =^..^=   =^..^=   =^..^=   =^..^=   =^..^=   =^..^=
