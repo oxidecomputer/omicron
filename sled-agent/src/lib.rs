@@ -34,6 +34,8 @@ mod sled_agent;
 mod storage_manager;
 mod updates;
 
+pub use illumos::zone;
+
 #[cfg(test)]
 mod mocks;
 

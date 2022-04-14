@@ -37,7 +37,7 @@ use super::{actor::AuthenticatedActor, Authz};
 use crate::authn;
 use crate::context::OpContext;
 use crate::db::fixed_data::FLEET_ID;
-use crate::db::model::Name;
+use crate::db::model::UpdateArtifactKind;
 use crate::db::DataStore;
 use authz_macros::authz_resource;
 use futures::future::BoxFuture;
@@ -68,7 +68,12 @@ pub trait ApiResource: Clone + Send + Sync + 'static {
 pub trait ApiResourceError {
     /// Returns an error as though this resource were not found, suitable for
     /// use when an actor should not be able to see that this resource exists
-    fn not_found(&self) -> Error;
+    fn not_found(&self) -> Error {
+        self.lookup_type().clone().into_not_found(self.resource_type())
+    }
+
+    fn resource_type(&self) -> ResourceType;
+    fn lookup_type(&self) -> &LookupType;
 }
 
 impl<T: ApiResource + ApiResourceError + oso::PolarClass> AuthorizedResource
@@ -263,7 +268,15 @@ authz_resource! {
 // Miscellaneous resources nested directly below "Fleet"
 
 authz_resource! {
-    name = "Role",
+    name = "SiloUser",
+    parent = "Fleet",
+    primary_key = Uuid,
+    roles_allowed = false,
+    polar_snippet = FleetChild,
+}
+
+authz_resource! {
+    name = "RoleBuiltin",
     parent = "Fleet",
     primary_key = (String, String),
     roles_allowed = false,
@@ -271,9 +284,9 @@ authz_resource! {
 }
 
 authz_resource! {
-    name = "User",
+    name = "UserBuiltin",
     parent = "Fleet",
-    primary_key = Name,
+    primary_key = Uuid,
     roles_allowed = false,
     polar_snippet = FleetChild,
 }
@@ -287,9 +300,25 @@ authz_resource! {
 }
 
 authz_resource! {
+    name = "Silo",
+    parent = "Fleet",
+    primary_key = Uuid,
+    roles_allowed = true,
+    polar_snippet = FleetChild,
+}
+
+authz_resource! {
     name = "Sled",
     parent = "Fleet",
     primary_key = Uuid,
+    roles_allowed = false,
+    polar_snippet = FleetChild,
+}
+
+authz_resource! {
+    name = "UpdateAvailableArtifact",
+    parent = "Fleet",
+    primary_key = (String, i64, UpdateArtifactKind),
     roles_allowed = false,
     polar_snippet = FleetChild,
 }

@@ -53,7 +53,6 @@ use omicron_common::api::external::UpdateResult;
 use omicron_common::api::external::{
     CreateResult, IdentityMetadataCreateParams,
 };
-use omicron_common::api::internal::nexus::UpdateArtifact;
 use omicron_common::bail_unless;
 use std::convert::{TryFrom, TryInto};
 use std::net::Ipv6Addr;
@@ -70,9 +69,9 @@ use crate::db::{
         Name, NetworkInterface, Organization, OrganizationUpdate, OximeterInfo,
         ProducerEndpoint, Project, ProjectUpdate, Region,
         RoleAssignmentBuiltin, RoleBuiltin, RouterRoute, RouterRouteUpdate,
-        Silo, SiloUser, Sled, UpdateArtifactKind, UpdateAvailableArtifact,
-        UserBuiltin, Volume, Vpc, VpcFirewallRule, VpcRouter, VpcRouterUpdate,
-        VpcSubnet, VpcSubnetUpdate, VpcUpdate, Zpool,
+        Silo, SiloUser, Sled, UpdateAvailableArtifact, UserBuiltin, Volume,
+        Vpc, VpcFirewallRule, VpcRouter, VpcRouterUpdate, VpcSubnet,
+        VpcSubnetUpdate, VpcUpdate, Zpool,
     },
     pagination::paginated,
     pagination::paginated_multicolumn,
@@ -172,26 +171,6 @@ impl DataStore {
             .load_async(self.pool_authorized(opctx).await?)
             .await
             .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
-    }
-
-    pub async fn sled_fetch(
-        &self,
-        opctx: &OpContext,
-        authz_sled: &authz::Sled,
-    ) -> LookupResult<Sled> {
-        opctx.authorize(authz::Action::Read, authz_sled).await?;
-        use db::schema::sled::dsl;
-        dsl::sled
-            .filter(dsl::id.eq(authz_sled.id()))
-            .select(Sled::as_select())
-            .first_async(self.pool_authorized(opctx).await?)
-            .await
-            .map_err(|e| {
-                public_error_from_diesel_pool(
-                    e,
-                    ErrorHandler::NotFoundByResource(authz_sled),
-                )
-            })
     }
 
     /// Stores a new zpool in the database.
@@ -2273,34 +2252,6 @@ impl DataStore {
             .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
     }
 
-    pub async fn user_builtin_fetch(
-        &self,
-        opctx: &OpContext,
-        name: &Name,
-    ) -> LookupResult<UserBuiltin> {
-        use db::schema::user_builtin::dsl;
-        let authz_user = authz::User::new(
-            authz::FLEET,
-            name.clone(),
-            LookupType::from(&name.0),
-        );
-        opctx.authorize(authz::Action::Read, &authz_user).await?;
-        dsl::user_builtin
-            .filter(dsl::name.eq(name.clone()))
-            .select(UserBuiltin::as_select())
-            .first_async::<UserBuiltin>(self.pool_authorized(opctx).await?)
-            .await
-            .map_err(|e| {
-                public_error_from_diesel_pool(
-                    e,
-                    ErrorHandler::NotFoundByLookup(
-                        ResourceType::User,
-                        LookupType::ByName(name.as_str().to_owned()),
-                    ),
-                )
-            })
-    }
-
     /// Load built-in users into the database
     pub async fn load_builtin_users(
         &self,
@@ -2377,43 +2328,6 @@ impl DataStore {
         .load_async::<RoleBuiltin>(self.pool_authorized(opctx).await?)
         .await
         .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
-    }
-
-    pub async fn role_builtin_fetch(
-        &self,
-        opctx: &OpContext,
-        name: &str,
-    ) -> LookupResult<RoleBuiltin> {
-        use db::schema::role_builtin::dsl;
-
-        let (resource_type, role_name) =
-            name.split_once(".").ok_or_else(|| Error::ObjectNotFound {
-                type_name: ResourceType::Role,
-                lookup_type: LookupType::ByName(String::from(name)),
-            })?;
-
-        let authz_role = authz::Role::new(
-            authz::FLEET,
-            (resource_type.to_string(), role_name.to_string()),
-            LookupType::from(name),
-        );
-        opctx.authorize(authz::Action::Read, &authz_role).await?;
-
-        dsl::role_builtin
-            .filter(dsl::resource_type.eq(String::from(resource_type)))
-            .filter(dsl::role_name.eq(String::from(role_name)))
-            .select(RoleBuiltin::as_select())
-            .first_async::<RoleBuiltin>(self.pool_authorized(opctx).await?)
-            .await
-            .map_err(|e| {
-                public_error_from_diesel_pool(
-                    e,
-                    ErrorHandler::NotFoundByLookup(
-                        ResourceType::Role,
-                        LookupType::ByName(String::from(name)),
-                    ),
-                )
-            })
     }
 
     /// Load built-in roles into the database
@@ -2554,32 +2468,6 @@ impl DataStore {
             })
     }
 
-    pub async fn update_available_artifact_fetch(
-        &self,
-        opctx: &OpContext,
-        artifact: &UpdateArtifact,
-    ) -> LookupResult<UpdateAvailableArtifact> {
-        opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
-
-        use db::schema::update_available_artifact::dsl;
-        dsl::update_available_artifact
-            .filter(
-                dsl::name
-                    .eq(artifact.name.clone())
-                    .and(dsl::version.eq(artifact.version))
-                    .and(dsl::kind.eq(UpdateArtifactKind(artifact.kind))),
-            )
-            .select(UpdateAvailableArtifact::as_select())
-            .first_async(self.pool_authorized(opctx).await?)
-            .await
-            .map_err(|e| {
-                Error::internal_error(&format!(
-                    "error fetching artifact: {:?}",
-                    e
-                ))
-            })
-    }
-
     pub async fn silo_user_fetch(
         &self,
         silo_user_id: Uuid,
@@ -2700,42 +2588,6 @@ impl DataStore {
             .load_async::<Silo>(self.pool_authorized(opctx).await?)
             .await
             .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
-    }
-
-    pub async fn silo_fetch(
-        &self,
-        _opctx: &OpContext,
-        name: &Name,
-    ) -> LookupResult<Silo> {
-        // TODO opctx.authorize
-        self.silo_lookup_noauthz(name).await
-    }
-
-    async fn silo_lookup_noauthz(
-        &self,
-        // XXX enable when all endpoints are protected by authn
-        // opctx: &OpContext,
-        name: &Name,
-    ) -> LookupResult<Silo> {
-        use db::schema::silo::dsl;
-
-        // TODO opctx.authorize
-
-        dsl::silo
-            .filter(dsl::time_deleted.is_null())
-            .filter(dsl::name.eq(name.clone()))
-            .select(Silo::as_select())
-            .get_result_async::<Silo>(self.pool())
-            .await
-            .map_err(|e| {
-                public_error_from_diesel_pool(
-                    e,
-                    ErrorHandler::NotFoundByLookup(
-                        ResourceType::Silo,
-                        LookupType::ByName(name.as_str().to_owned()),
-                    ),
-                )
-            })
     }
 
     pub async fn silo_delete(

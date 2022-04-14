@@ -618,7 +618,7 @@ dependencies = [
  "crucible-common",
  "crucible-protocol",
  "crucible-scope",
- "dropshot 0.6.1-dev (git+https://github.com/oxidecomputer/dropshot?branch=main)",
+ "dropshot",
  "futures",
  "futures-core",
  "rand 0.8.5",
@@ -817,6 +817,7 @@ dependencies = [
  "heck 0.4.0",
  "proc-macro2",
  "quote",
+ "rustfmt-wrapper",
  "serde",
  "serde_tokenstream",
  "syn",
@@ -970,45 +971,7 @@ dependencies = [
  "base64",
  "bytes",
  "chrono",
- "dropshot_endpoint 0.6.1-dev (git+https://github.com/oxidecomputer/dropshot?branch=main)",
- "futures",
- "hostname",
- "http",
- "hyper",
- "indexmap",
- "openapiv3",
- "paste",
- "percent-encoding",
- "proc-macro2",
- "rustls",
- "rustls-pemfile",
- "schemars",
- "serde",
- "serde_json",
- "serde_urlencoded",
- "slog",
- "slog-async",
- "slog-bunyan",
- "slog-json",
- "slog-term",
- "tokio",
- "tokio-rustls",
- "toml",
- "usdt",
- "uuid",
-]
-
-[[package]]
-name = "dropshot"
-version = "0.6.1-dev"
-source = "git+https://github.com/oxidecomputer/dropshot#0590171143964e32d913113df85174771d4699d9"
-dependencies = [
- "async-stream",
- "async-trait",
- "base64",
- "bytes",
- "chrono",
- "dropshot_endpoint 0.6.1-dev (git+https://github.com/oxidecomputer/dropshot)",
+ "dropshot_endpoint",
  "futures",
  "hostname",
  "http",
@@ -1040,18 +1003,6 @@ dependencies = [
 name = "dropshot_endpoint"
 version = "0.6.1-dev"
 source = "git+https://github.com/oxidecomputer/dropshot?branch=main#0590171143964e32d913113df85174771d4699d9"
-dependencies = [
- "proc-macro2",
- "quote",
- "serde",
- "serde_tokenstream",
- "syn",
-]
-
-[[package]]
-name = "dropshot_endpoint"
-version = "0.6.1-dev"
-source = "git+https://github.com/oxidecomputer/dropshot#0590171143964e32d913113df85174771d4699d9"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -1850,7 +1801,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "clap 3.1.8",
- "dropshot 0.6.1-dev (git+https://github.com/oxidecomputer/dropshot)",
+ "dropshot",
  "expectorate",
  "internal-dns-client",
  "omicron-test-utils",
@@ -2221,7 +2172,7 @@ dependencies = [
  "anyhow",
  "bytes",
  "chrono",
- "dropshot 0.6.1-dev (git+https://github.com/oxidecomputer/dropshot?branch=main)",
+ "dropshot",
  "headers",
  "http",
  "hyper",
@@ -2336,7 +2287,7 @@ dependencies = [
  "api_identity",
  "backoff",
  "chrono",
- "dropshot 0.6.1-dev (git+https://github.com/oxidecomputer/dropshot?branch=main)",
+ "dropshot",
  "expectorate",
  "futures",
  "http",
@@ -2383,7 +2334,7 @@ name = "omicron-gateway"
 version = "0.1.0"
 dependencies = [
  "clap 3.1.8",
- "dropshot 0.6.1-dev (git+https://github.com/oxidecomputer/dropshot?branch=main)",
+ "dropshot",
  "expectorate",
  "futures",
  "gateway-messages",
@@ -2427,7 +2378,7 @@ dependencies = [
  "db-macros",
  "diesel",
  "diesel-dtrace",
- "dropshot 0.6.1-dev (git+https://github.com/oxidecomputer/dropshot?branch=main)",
+ "dropshot",
  "expectorate",
  "futures",
  "headers",
@@ -2492,6 +2443,7 @@ dependencies = [
  "hex",
  "indicatif",
  "omicron-common",
+ "omicron-sled-agent",
  "omicron-zone-package",
  "rayon",
  "reqwest",
@@ -2523,7 +2475,7 @@ dependencies = [
  "cfg-if",
  "chrono",
  "crucible-agent-client",
- "dropshot 0.6.1-dev (git+https://github.com/oxidecomputer/dropshot?branch=main)",
+ "dropshot",
  "expectorate",
  "futures",
  "http",
@@ -2571,7 +2523,7 @@ name = "omicron-test-utils"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "dropshot 0.6.1-dev (git+https://github.com/oxidecomputer/dropshot?branch=main)",
+ "dropshot",
  "expectorate",
  "futures",
  "libc",
@@ -2752,7 +2704,7 @@ dependencies = [
 name = "oximeter-collector"
 version = "0.1.0"
 dependencies = [
- "dropshot 0.6.1-dev (git+https://github.com/oxidecomputer/dropshot?branch=main)",
+ "dropshot",
  "expectorate",
  "nexus-client",
  "omicron-common",
@@ -2782,7 +2734,7 @@ dependencies = [
  "async-trait",
  "bytes",
  "chrono",
- "dropshot 0.6.1-dev (git+https://github.com/oxidecomputer/dropshot?branch=main)",
+ "dropshot",
  "itertools",
  "omicron-test-utils",
  "oximeter",
@@ -2806,7 +2758,7 @@ name = "oximeter-instruments"
 version = "0.1.0"
 dependencies = [
  "chrono",
- "dropshot 0.6.1-dev (git+https://github.com/oxidecomputer/dropshot?branch=main)",
+ "dropshot",
  "futures",
  "http",
  "oximeter",
@@ -2828,7 +2780,7 @@ name = "oximeter-producer"
 version = "0.1.0"
 dependencies = [
  "chrono",
- "dropshot 0.6.1-dev (git+https://github.com/oxidecomputer/dropshot?branch=main)",
+ "dropshot",
  "nexus-client",
  "omicron-common",
  "oximeter",
@@ -4276,7 +4228,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "async-trait",
- "dropshot 0.6.1-dev (git+https://github.com/oxidecomputer/dropshot?branch=main)",
+ "dropshot",
  "gateway-messages",
  "hex",
  "omicron-common",

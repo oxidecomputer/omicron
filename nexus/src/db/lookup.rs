@@ -5,6 +5,7 @@
 //! Look up API resources from the database
 
 use super::datastore::DataStore;
+use super::identity::Asset;
 use super::identity::Resource;
 use super::model;
 use crate::{
@@ -13,10 +14,12 @@ use crate::{
     db,
     db::error::{public_error_from_diesel_pool, ErrorHandler},
     db::model::Name,
+    db::model::UpdateArtifactKind,
 };
 use async_bb8_diesel::AsyncRunQueryDsl;
 use db_macros::lookup_resource;
 use diesel::{ExpressionMethods, QueryDsl, SelectableHelper};
+use omicron_common::api::external::Error;
 use omicron_common::api::external::{LookupResult, LookupType, ResourceType};
 use uuid::Uuid;
 
@@ -182,60 +185,128 @@ impl<'a> LookupPath<'a> {
         'a: 'c,
         'b: 'c,
     {
-        Organization { key: Key::Name(Root { lookup_root: self }, name) }
+        Organization {
+            key: OrganizationKey::Name(Root { lookup_root: self }, name),
+        }
     }
 
     /// Select a resource of type Organization, identified by its id
     pub fn organization_id(self, id: Uuid) -> Organization<'a> {
-        Organization { key: Key::Id(Root { lookup_root: self }, id) }
+        Organization {
+            key: OrganizationKey::PrimaryKey(Root { lookup_root: self }, id),
+        }
     }
 
     /// Select a resource of type Project, identified by its id
     pub fn project_id(self, id: Uuid) -> Project<'a> {
-        Project { key: Key::Id(Root { lookup_root: self }, id) }
+        Project { key: ProjectKey::PrimaryKey(Root { lookup_root: self }, id) }
     }
 
     /// Select a resource of type Instance, identified by its id
     pub fn instance_id(self, id: Uuid) -> Instance<'a> {
-        Instance { key: Key::Id(Root { lookup_root: self }, id) }
+        Instance {
+            key: InstanceKey::PrimaryKey(Root { lookup_root: self }, id),
+        }
     }
 
     /// Select a resource of type Disk, identified by its id
     pub fn disk_id(self, id: Uuid) -> Disk<'a> {
-        Disk { key: Key::Id(Root { lookup_root: self }, id) }
+        Disk { key: DiskKey::PrimaryKey(Root { lookup_root: self }, id) }
     }
 
     /// Select a resource of type Vpc, identified by its id
     pub fn vpc_id(self, id: Uuid) -> Vpc<'a> {
-        Vpc { key: Key::Id(Root { lookup_root: self }, id) }
+        Vpc { key: VpcKey::PrimaryKey(Root { lookup_root: self }, id) }
     }
 
     /// Select a resource of type VpcSubnet, identified by its id
     pub fn vpc_subnet_id(self, id: Uuid) -> VpcSubnet<'a> {
-        VpcSubnet { key: Key::Id(Root { lookup_root: self }, id) }
+        VpcSubnet {
+            key: VpcSubnetKey::PrimaryKey(Root { lookup_root: self }, id),
+        }
     }
 
     /// Select a resource of type VpcRouter, identified by its id
     pub fn vpc_router_id(self, id: Uuid) -> VpcRouter<'a> {
-        VpcRouter { key: Key::Id(Root { lookup_root: self }, id) }
+        VpcRouter {
+            key: VpcRouterKey::PrimaryKey(Root { lookup_root: self }, id),
+        }
     }
 
     /// Select a resource of type RouterRoute, identified by its id
     pub fn router_route_id(self, id: Uuid) -> RouterRoute<'a> {
-        RouterRoute { key: Key::Id(Root { lookup_root: self }, id) }
+        RouterRoute {
+            key: RouterRouteKey::PrimaryKey(Root { lookup_root: self }, id),
+        }
     }
-}
 
-/// Describes a node along the selection path of a resource
-enum Key<'a, P> {
-    /// We're looking for a resource with the given name within the given parent
-    /// collection
-    Name(P, &'a Name),
+    /// Select a resource of type RoleBuiltin, identified by its `name`
+    pub fn role_builtin_name(
+        self,
+        name: &str,
+    ) -> Result<RoleBuiltin<'a>, Error> {
+        let (resource_type, role_name) =
+            name.split_once(".").ok_or_else(|| Error::ObjectNotFound {
+                type_name: ResourceType::RoleBuiltin,
+                lookup_type: LookupType::ByName(String::from(name)),
+            })?;
 
-    /// We're looking for a resource with the given id
-    ///
-    /// This has no parent container -- a by-id lookup is always global.
-    Id(Root<'a>, Uuid),
+        Ok(RoleBuiltin {
+            key: RoleBuiltinKey::PrimaryKey(
+                Root { lookup_root: self },
+                resource_type.to_string(),
+                role_name.to_string(),
+            ),
+        })
+    }
+
+    /// Select a resource of type Silo, identified by its id
+    pub fn silo_id(self, id: Uuid) -> Silo<'a> {
+        Silo { key: SiloKey::PrimaryKey(Root { lookup_root: self }, id) }
+    }
+
+    /// Select a resource of type Silo, identified by its id
+    pub fn silo_name<'b, 'c>(self, name: &'b Name) -> Silo<'c>
+    where
+        'a: 'c,
+        'b: 'c,
+    {
+        Silo { key: SiloKey::Name(Root { lookup_root: self }, name) }
+    }
+
+    /// Select a resource of type Sled, identified by its id
+    pub fn sled_id(self, id: Uuid) -> Sled<'a> {
+        Sled { key: SledKey::PrimaryKey(Root { lookup_root: self }, id) }
+    }
+
+    /// Select a resource of type UpdateAvailableArtifact, identified by its
+    /// `(name, version, kind)` tuple
+    pub fn update_available_artifact_tuple(
+        self,
+        name: &str,
+        version: i64,
+        kind: UpdateArtifactKind,
+    ) -> UpdateAvailableArtifact<'a> {
+        UpdateAvailableArtifact {
+            key: UpdateAvailableArtifactKey::PrimaryKey(
+                Root { lookup_root: self },
+                name.to_string(),
+                version,
+                kind,
+            ),
+        }
+    }
+
+    /// Select a resource of type UserBuiltin, identified by its `name`
+    pub fn user_builtin_name<'b, 'c>(self, name: &'b Name) -> UserBuiltin<'c>
+    where
+        'a: 'c,
+        'b: 'c,
+    {
+        UserBuiltin {
+            key: UserBuiltinKey::Name(Root { lookup_root: self }, name),
+        }
+    }
 }
 
 /// Represents the head of the selection path for a resource
@@ -254,64 +325,155 @@ impl<'a> Root<'a> {
 // resources, and the publicly-exposed fetch functions (fetch(), fetch_for(),
 // and lookup_for()).
 
+// Main resource hierarchy: Organizations, Projects, and their resources
+
 lookup_resource! {
     name = "Organization",
     ancestors = [],
     children = [ "Project" ],
+    lookup_by_name = true,
+    soft_deletes = true,
+    primary_key_columns = [ { column_name = "id", rust_type = Uuid } ]
 }
 
 lookup_resource! {
     name = "Project",
     ancestors = [ "Organization" ],
     children = [ "Disk", "Instance", "Vpc" ],
-}
-
-lookup_resource! {
-    name = "Instance",
-    ancestors = [ "Organization", "Project" ],
-    children = [ "NetworkInterface" ],
-}
-
-lookup_resource! {
-    name = "NetworkInterface",
-    ancestors = [ "Organization", "Project", "Instance" ],
-    children = [],
+    lookup_by_name = true,
+    soft_deletes = true,
+    primary_key_columns = [ { column_name = "id", rust_type = Uuid } ]
 }
 
 lookup_resource! {
     name = "Disk",
     ancestors = [ "Organization", "Project" ],
     children = [],
+    lookup_by_name = true,
+    soft_deletes = true,
+    primary_key_columns = [ { column_name = "id", rust_type = Uuid } ]
+}
+
+lookup_resource! {
+    name = "Instance",
+    ancestors = [ "Organization", "Project" ],
+    children = [ "NetworkInterface" ],
+    lookup_by_name = true,
+    soft_deletes = true,
+    primary_key_columns = [ { column_name = "id", rust_type = Uuid } ]
+}
+
+lookup_resource! {
+    name = "NetworkInterface",
+    ancestors = [ "Organization", "Project", "Instance" ],
+    children = [],
+    lookup_by_name = true,
+    soft_deletes = true,
+    primary_key_columns = [ { column_name = "id", rust_type = Uuid } ]
 }
 
 lookup_resource! {
     name = "Vpc",
     ancestors = [ "Organization", "Project" ],
     children = [ "VpcRouter", "VpcSubnet" ],
-}
-
-lookup_resource! {
-    name = "VpcSubnet",
-    ancestors = [ "Organization", "Project", "Vpc" ],
-    children = [ ],
+    lookup_by_name = true,
+    soft_deletes = true,
+    primary_key_columns = [ { column_name = "id", rust_type = Uuid } ]
 }
 
 lookup_resource! {
     name = "VpcRouter",
     ancestors = [ "Organization", "Project", "Vpc" ],
     children = [ "RouterRoute" ],
+    lookup_by_name = true,
+    soft_deletes = true,
+    primary_key_columns = [ { column_name = "id", rust_type = Uuid } ]
 }
 
 lookup_resource! {
     name = "RouterRoute",
     ancestors = [ "Organization", "Project", "Vpc", "VpcRouter" ],
     children = [],
+    lookup_by_name = true,
+    soft_deletes = true,
+    primary_key_columns = [ { column_name = "id", rust_type = Uuid } ]
+}
+
+lookup_resource! {
+    name = "VpcSubnet",
+    ancestors = [ "Organization", "Project", "Vpc" ],
+    children = [ ],
+    lookup_by_name = true,
+    soft_deletes = true,
+    primary_key_columns = [ { column_name = "id", rust_type = Uuid } ]
+}
+
+// Miscellaneous resources nested directly below "Fleet"
+
+lookup_resource! {
+    name = "RoleBuiltin",
+    ancestors = [],
+    children = [],
+    lookup_by_name = false,
+    soft_deletes = false,
+    primary_key_columns = [
+        { column_name = "resource_type", rust_type = String },
+        { column_name = "role_name", rust_type = String },
+    ]
+}
+
+lookup_resource! {
+    name = "Silo",
+    ancestors = [],
+    children = [],
+    lookup_by_name = true,
+    soft_deletes = true,
+    primary_key_columns = [ { column_name = "id", rust_type = Uuid } ]
+}
+
+lookup_resource! {
+    name = "SiloUser",
+    ancestors = [],
+    children = [],
+    lookup_by_name = false,
+    soft_deletes = true,
+    primary_key_columns = [ { column_name = "id", rust_type = Uuid } ]
+}
+
+lookup_resource! {
+    name = "Sled",
+    ancestors = [],
+    children = [],
+    lookup_by_name = false,
+    soft_deletes = true,
+    primary_key_columns = [ { column_name = "id", rust_type = Uuid } ]
+}
+
+lookup_resource! {
+    name = "UpdateAvailableArtifact",
+    ancestors = [],
+    children = [],
+    lookup_by_name = false,
+    soft_deletes = false,
+    primary_key_columns = [
+        { column_name = "name", rust_type = String },
+        { column_name = "version", rust_type = i64 },
+        { column_name = "kind", rust_type = UpdateArtifactKind }
+    ]
+}
+
+lookup_resource! {
+    name = "UserBuiltin",
+    ancestors = [],
+    children = [],
+    lookup_by_name = true,
+    soft_deletes = false,
+    primary_key_columns = [ { column_name = "id", rust_type = Uuid } ]
 }
 
 #[cfg(test)]
 mod test {
     use super::Instance;
-    use super::Key;
     use super::LookupPath;
     use super::Organization;
     use super::Project;
@@ -340,9 +502,9 @@ mod test {
             .instance_name(&instance_name);
         assert!(matches!(&leaf,
             Instance {
-                key: Key::Name(Project {
-                    key: Key::Name(Organization {
-                        key: Key::Name(_, o)
+                key: super::InstanceKey::Name(Project {
+                    key: super::ProjectKey::Name(Organization {
+                        key: super::OrganizationKey::Name(_, o)
                     }, p)
                 }, i)
             }
@@ -353,8 +515,8 @@ mod test {
             .organization_id(org_id)
             .project_name(&project_name);
         assert!(matches!(&leaf, Project {
-            key: Key::Name(Organization {
-                key: Key::Id(_, o)
+            key: super::ProjectKey::Name(Organization {
+                key: super::OrganizationKey::PrimaryKey(_, o)
             }, p)
         } if *o == org_id && **p == project_name));
 

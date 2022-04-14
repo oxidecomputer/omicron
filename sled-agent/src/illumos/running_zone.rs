@@ -161,7 +161,7 @@ impl RunningZone {
 
 impl Drop for RunningZone {
     fn drop(&mut self) {
-        match Zones::halt_and_remove(&self.inner.log, self.name()) {
+        match Zones::halt_and_remove_logged(&self.inner.log, self.name()) {
             Ok(()) => {
                 info!(self.inner.log, "Stopped and uninstalled zone")
             }
