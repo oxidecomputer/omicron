@@ -285,8 +285,9 @@ pub async fn asset(
         Some(static_dir) => find_file(path, &static_dir.join("assets")),
         _ => Err(not_found("static_dir undefined")),
     }?;
-    let file_contents =
-        tokio::fs::read(&file).await.map_err(|_| not_found("EBADF"))?;
+    let file_contents = tokio::fs::read(&file)
+        .await
+        .map_err(|e| not_found(&format!("accessing {:?}: {:#}", file, e)))?;
 
     // Derive the MIME type from the file name
     let content_type = mime_guess::from_path(&file)
@@ -316,8 +317,9 @@ async fn serve_console_index(
         .to_owned()
         .ok_or_else(|| not_found("static_dir undefined"))?;
     let file = static_dir.join(PathBuf::from("index.html"));
-    let file_contents =
-        tokio::fs::read(&file).await.map_err(|_| not_found("EBADF"))?;
+    let file_contents = tokio::fs::read(&file)
+        .await
+        .map_err(|e| not_found(&format!("accessing {:?}: {:#}", file, e)))?;
     Ok(Response::builder()
         .status(StatusCode::OK)
         .header(http::header::CONTENT_TYPE, "text/html; charset=UTF-8")
@@ -358,7 +360,7 @@ fn find_file(
         // If we hit a non-directory thing already and we still have segments
         // left in the path, bail. We have nowhere to go.
         if !current.is_dir() {
-            return Err(not_found("ENOENT"));
+            return Err(not_found("expected a directory"));
         }
 
         current.push(segment);
@@ -366,19 +368,21 @@ fn find_file(
         // Don't follow symlinks.
         // Error means either the user doesn't have permission to pull
         // metadata or the path doesn't exist.
-        let m = current.symlink_metadata().map_err(|_| not_found("ENOENT"))?;
+        let m = current
+            .symlink_metadata()
+            .map_err(|_| not_found("failed to get file metadata"))?;
         if m.file_type().is_symlink() {
-            return Err(not_found("EMLINK"));
+            return Err(not_found("attempted to follow a symlink"));
         }
     }
 
     // can't serve a directory
     if current.is_dir() {
-        return Err(not_found("EISDIR"));
+        return Err(not_found("expected a non-directory"));
     }
 
     if !file_ext_allowed(&current) {
-        return Err(not_found("EACCES"));
+        return Err(not_found("file extension not allowed"));
     }
 
     Ok(current)
@@ -409,7 +413,7 @@ mod test {
         let error = find_file(get_path("tests/static/nonexistent.svg"), &root)
             .unwrap_err();
         assert_eq!(error.status_code, StatusCode::NOT_FOUND);
-        assert_eq!(error.internal_message, "ENOENT".to_string());
+        assert_eq!(error.internal_message, "failed to get file metadata",);
     }
 
     #[test]
@@ -419,7 +423,7 @@ mod test {
             find_file(get_path("tests/static/a/b/c/nonexistent.svg"), &root)
                 .unwrap_err();
         assert_eq!(error.status_code, StatusCode::NOT_FOUND);
-        assert_eq!(error.internal_message, "ENOENT".to_string());
+        assert_eq!(error.internal_message, "failed to get file metadata")
     }
 
     #[test]
@@ -429,7 +433,7 @@ mod test {
             find_file(get_path("tests/static/assets/a_directory"), &root)
                 .unwrap_err();
         assert_eq!(error.status_code, StatusCode::NOT_FOUND);
-        assert_eq!(error.internal_message, "EISDIR".to_string());
+        assert_eq!(error.internal_message, "expected a non-directory");
     }
 
     #[test]
@@ -448,7 +452,7 @@ mod test {
         // so we 404
         let error = find_file(get_path(path_str), &root).unwrap_err();
         assert_eq!(error.status_code, StatusCode::NOT_FOUND);
-        assert_eq!(error.internal_message, "EMLINK".to_string());
+        assert_eq!(error.internal_message, "attempted to follow a symlink");
     }
 
     #[test]
@@ -462,7 +466,7 @@ mod test {
         // but it 404s because the path goes through a symlink
         let error = find_file(get_path(path_str), &root).unwrap_err();
         assert_eq!(error.status_code, StatusCode::NOT_FOUND);
-        assert_eq!(error.internal_message, "EMLINK".to_string());
+        assert_eq!(error.internal_message, "attempted to follow a symlink");
     }
 
     #[test]
@@ -472,11 +476,11 @@ mod test {
             find_file(get_path("tests/static/assets/blocked.ext"), &root)
                 .unwrap_err();
         assert_eq!(error.status_code, StatusCode::NOT_FOUND);
-        assert_eq!(error.internal_message, "EACCES".to_string());
+        assert_eq!(error.internal_message, "file extension not allowed",);
 
         let error = find_file(get_path("tests/static/assets/no_ext"), &root)
             .unwrap_err();
         assert_eq!(error.status_code, StatusCode::NOT_FOUND);
-        assert_eq!(error.internal_message, "EACCES".to_string());
+        assert_eq!(error.internal_message, "file extension not allowed");
     }
 }
