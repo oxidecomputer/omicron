@@ -158,8 +158,7 @@ pub struct Nexus {
     opctx_alloc: OpContext,
 
     /// Operational context used for external request authentication
-    // XXX-dap should not be "pub" -- put this on ServerContext instead
-    pub opctx_external_authn: OpContext,
+    opctx_external_authn: OpContext,
 }
 
 // TODO Is it possible to make some of these operations more generic?  A
@@ -277,6 +276,11 @@ impl Nexus {
                 }
             };
         }
+    }
+
+    /// Returns an [`OpContext`] used for authenticating external requests
+    pub fn opctx_external_authn(&self) -> &OpContext {
+        &self.opctx_external_authn
     }
 
     /// Used as the body of a "stub" endpoint -- one that's currently

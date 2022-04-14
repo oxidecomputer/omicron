@@ -29,8 +29,8 @@ impl Authz {
     ///
     /// This function panics if we could not load the compiled-in Polar
     /// configuration.  That should be impossible outside of development.
-    pub fn new() -> Authz {
-        let oso = oso_generic::make_omicron_oso().expect("initializing Oso");
+    pub fn new(log: &slog::Logger) -> Authz {
+        let oso = oso_generic::make_omicron_oso(log).expect("initializing Oso");
         Authz { oso }
     }
 
@@ -179,16 +179,20 @@ mod test {
     use std::sync::Arc;
 
     fn authz_context_for_actor(
+        log: &slog::Logger,
         authn: authn::Context,
         datastore: Arc<DataStore>,
     ) -> Context {
-        let authz = Authz::new();
+        let authz = Authz::new(log);
         Context::new(Arc::new(authn), Arc::new(authz), datastore)
     }
 
-    fn authz_context_noauth(datastore: Arc<DataStore>) -> Context {
+    fn authz_context_noauth(
+        log: &slog::Logger,
+        datastore: Arc<DataStore>,
+    ) -> Context {
         let authn = authn::Context::internal_unauthenticated();
-        let authz = Authz::new();
+        let authz = Authz::new(log);
         Context::new(Arc::new(authn), Arc::new(authz), datastore)
     }
 
@@ -199,6 +203,7 @@ mod test {
         let (opctx, datastore) =
             crate::db::datastore::datastore_test(&logctx, &db).await;
         let authz_privileged = authz_context_for_actor(
+            &logctx.log,
             authn::Context::internal_test_user(),
             Arc::clone(&datastore),
         );
@@ -218,6 +223,7 @@ mod test {
             omicron_common::api::external::Error::Forbidden
         ));
         let authz_nobody = authz_context_for_actor(
+            &logctx.log,
             authn::Context::test_context_for_actor(
                 authn::USER_TEST_UNPRIVILEGED.id,
             ),
@@ -227,7 +233,8 @@ mod test {
             .authorize(&opctx, Action::Query, DATABASE)
             .await
             .expect("expected unprivileged user to be able to query database");
-        let authz_noauth = authz_context_noauth(datastore);
+        let authz_noauth =
+            authz_context_noauth(&logctx.log, datastore);
         authz_noauth
             .authorize(&opctx, Action::Query, DATABASE)
             .await
@@ -246,6 +253,7 @@ mod test {
             crate::db::datastore::datastore_test(&logctx, &db).await;
 
         let authz_privileged = authz_context_for_actor(
+            &logctx.log,
             authn::Context::internal_test_user(),
             Arc::clone(&datastore),
         );
@@ -256,6 +264,7 @@ mod test {
                 "expected privileged user to be able to create organization",
             );
         let authz_nobody = authz_context_for_actor(
+            &logctx.log,
             authn::Context::test_context_for_actor(
                 authn::USER_TEST_UNPRIVILEGED.id,
             ),
@@ -267,7 +276,7 @@ mod test {
             .expect_err(
             "expected unprivileged user not to be able to create organization",
         );
-        let authz_noauth = authz_context_noauth(datastore);
+        let authz_noauth = authz_context_noauth(&logctx.log, datastore);
         authz_noauth
             .authorize(&opctx, Action::Query, DATABASE)
             .await

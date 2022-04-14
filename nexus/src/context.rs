@@ -88,7 +88,7 @@ impl ServerContext {
             .collect();
         let external_authn = authn::external::Authenticator::new(nexus_schemes);
         let internal_authn = Arc::new(authn::Context::internal_api());
-        let authz = Arc::new(authz::Authz::new());
+        let authz = Arc::new(authz::Authz::new(&log));
         let create_tracker = |name: &str| {
             let target = HttpService { name: name.to_string(), id: config.id };
             const START_LATENCY_DECADE: i8 = -6;
@@ -382,7 +382,7 @@ impl OpContext {
         let authn = Arc::new(authn::Context::internal_test_user());
         let authz = authz::Context::new(
             Arc::clone(&authn),
-            Arc::new(authz::Authz::new()),
+            Arc::new(authz::Authz::new(&log)),
             Arc::clone(&datastore),
         );
         OpContext {
@@ -445,7 +445,7 @@ mod test {
             crate::db::datastore::datastore_test(&logctx, &db).await;
         let opctx = OpContext::for_background(
             logctx.log.new(o!()),
-            Arc::new(authz::Authz::new()),
+            Arc::new(authz::Authz::new(&logctx.log)),
             authn::Context::internal_unauthenticated(),
             datastore,
         );
@@ -496,7 +496,7 @@ impl SessionStore for Arc<ServerContext> {
     type SessionModel = ConsoleSessionWithSiloId;
 
     async fn session_fetch(&self, token: String) -> Option<Self::SessionModel> {
-        let opctx = &self.nexus.opctx_external_authn;
+        let opctx = self.nexus.opctx_external_authn();
         self.nexus.session_fetch(opctx, token).await.ok()
     }
 
@@ -504,12 +504,12 @@ impl SessionStore for Arc<ServerContext> {
         &self,
         token: String,
     ) -> Option<Self::SessionModel> {
-        let opctx = &self.nexus.opctx_external_authn;
+        let opctx = self.nexus.opctx_external_authn();
         self.nexus.session_update_last_used(&opctx, &token).await.ok()
     }
 
     async fn session_expire(&self, token: String) -> Option<()> {
-        let opctx = &self.nexus.opctx_external_authn;
+        let opctx = self.nexus.opctx_external_authn();
         self.nexus.session_hard_delete(opctx, &token).await.ok()
     }
 

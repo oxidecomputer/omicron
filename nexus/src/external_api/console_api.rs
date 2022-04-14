@@ -71,7 +71,7 @@ pub async fn spoof_login(
     // For now, we use the external authn context to create the session.
     // Once we have real SAML login, maybe we can cons up a real OpContext for
     // this user and use their own privileges to create the session.
-    let authn_opctx = &nexus.opctx_external_authn;
+    let authn_opctx = nexus.opctx_external_authn();
     let session = nexus.session_create(&authn_opctx, user_id).await?;
 
     Ok(Response::builder()

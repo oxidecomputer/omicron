@@ -21,8 +21,8 @@ lazy_static! {
     };
     pub static ref FLEET_AUTHENTICATOR: RoleBuiltinConfig = RoleBuiltinConfig {
         resource_type: api::external::ResourceType::Fleet,
-        role_name: "authenticator",
-        description: "External Authenticator",
+        role_name: "external-authenticator",
+        description: "Fleet External Authenticator",
     };
     pub static ref FLEET_VIEWER: RoleBuiltinConfig = RoleBuiltinConfig {
         resource_type: api::external::ResourceType::Fleet,

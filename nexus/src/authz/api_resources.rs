@@ -42,7 +42,6 @@ use crate::db::DataStore;
 use authz_macros::authz_resource;
 use futures::future::BoxFuture;
 use futures::FutureExt;
-use lazy_static::lazy_static;
 use omicron_common::api::external::{Error, LookupType, ResourceType};
 use uuid::Uuid;
 
@@ -136,11 +135,6 @@ pub struct Fleet;
 /// Singleton representing the [`Fleet`] itself for authz purposes
 pub const FLEET: Fleet = Fleet;
 
-lazy_static! {
-    pub static ref CONSOLE_SESSION_LIST: ConsoleSessionList =
-        ConsoleSessionList::new(FLEET, (), LookupType::ById(*FLEET_ID));
-}
-
 impl Eq for Fleet {}
 impl PartialEq for Fleet {
     fn eq(&self, _: &Self) -> bool {
@@ -161,6 +155,65 @@ impl oso::PolarClass for Fleet {
 }
 
 impl AuthorizedResource for Fleet {
+    fn load_roles<'a, 'b, 'c, 'd, 'e, 'f>(
+        &'a self,
+        opctx: &'b OpContext,
+        datastore: &'c DataStore,
+        authn: &'d authn::Context,
+        roleset: &'e mut RoleSet,
+    ) -> futures::future::BoxFuture<'f, Result<(), Error>>
+    where
+        'a: 'f,
+        'b: 'f,
+        'c: 'f,
+        'd: 'f,
+        'e: 'f,
+    {
+        load_roles_for_resource(
+            opctx,
+            datastore,
+            authn,
+            ResourceType::Fleet,
+            *FLEET_ID,
+            roleset,
+        )
+        .boxed()
+    }
+
+    fn on_unauthorized(
+        &self,
+        _: &Authz,
+        error: Error,
+        _: AnyActor,
+        _: Action,
+    ) -> Error {
+        error
+    }
+}
+
+/// ConsoleSessionList is a synthetic resource used for modeling who has access
+/// to create sessions.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct ConsoleSessionList;
+
+pub const CONSOLE_SESSION_LIST: ConsoleSessionList = ConsoleSessionList {};
+
+impl oso::PolarClass for ConsoleSessionList {
+    fn get_polar_class_builder() -> oso::ClassBuilder<Self> {
+        // Roles are not directly attached to ConsoleSessionList.
+        oso::Class::builder()
+            .with_equality_check()
+            .add_method(
+                "has_role",
+                |_: &ConsoleSessionList,
+                 _actor: AuthenticatedActor,
+                 _role: String| false,
+            )
+            .add_attribute_getter("fleet", |_| FLEET)
+    }
+}
+
+impl AuthorizedResource for ConsoleSessionList {
     fn load_roles<'a, 'b, 'c, 'd, 'e, 'f>(
         &'a self,
         opctx: &'b OpContext,
@@ -272,16 +325,6 @@ authz_resource! {
 }
 
 // Miscellaneous resources nested directly below "Fleet"
-
-// ConsoleSessionList is a synthetic resource used for modeling who has access
-// to create sessions.
-authz_resource! {
-    name = "ConsoleSessionList",
-    parent = "Fleet",
-    primary_key = (),
-    roles_allowed = false,
-    polar_snippet = Custom,
-}
 
 authz_resource! {
     name = "ConsoleSession",

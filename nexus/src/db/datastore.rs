@@ -2144,10 +2144,7 @@ impl DataStore {
         session: ConsoleSession,
     ) -> CreateResult<ConsoleSession> {
         opctx
-            .authorize(
-                authz::Action::CreateChild,
-                &*authz::CONSOLE_SESSION_LIST,
-            )
+            .authorize(authz::Action::CreateChild, &authz::CONSOLE_SESSION_LIST)
             .await?;
 
         use db::schema::console_session::dsl;
@@ -2705,7 +2702,7 @@ pub async fn datastore_test(
     // purpose of loading the built-in users, roles, and assignments.
     let opctx = OpContext::for_background(
         logctx.log.new(o!()),
-        Arc::new(authz::Authz::new()),
+        Arc::new(authz::Authz::new(&logctx.log)),
         authn::Context::internal_db_init(),
         Arc::clone(&datastore),
     );
@@ -2806,7 +2803,8 @@ mod test {
             silo_user_id,
         };
 
-        let _ = datastore.session_create(session.clone()).await;
+        let _ =
+            datastore.session_create(&opctx, session.clone()).await.unwrap();
 
         // Associate silo with user
         let silo_user = datastore
@@ -2825,20 +2823,28 @@ mod test {
         assert_eq!(silo_user.silo_id, db_silo_user.silo_id,);
 
         // fetch the one we just created
-        let fetched =
-            datastore.session_fetch(&opctx, token.clone()).await.unwrap();
-        assert_eq!(session.silo_user_id, fetched.console_session.silo_user_id);
+        let (.., fetched) = LookupPath::new(&opctx, &datastore)
+            .console_session_token(&token)
+            .fetch()
+            .await
+            .unwrap();
+        assert_eq!(session.silo_user_id, fetched.silo_user_id);
 
         // trying to insert the same one again fails
-        let duplicate = datastore.session_create(session.clone()).await;
+        let duplicate = datastore.session_create(&opctx, session.clone()).await;
         assert!(matches!(
             duplicate,
             Err(Error::InternalError { internal_message: _ })
         ));
 
         // update last used (i.e., renew token)
+        let authz_session = authz::ConsoleSession::new(
+            authz::FLEET,
+            token.clone(),
+            LookupType::ByCompositeId(token.clone()),
+        );
         let renewed = datastore
-            .session_update_last_used(&opctx, token.clone())
+            .session_update_last_used(&opctx, &authz_session)
             .await
             .unwrap();
         assert!(
@@ -2846,25 +2852,31 @@ mod test {
         );
 
         // time_last_used change persists in DB
-        let fetched =
-            datastore.session_fetch(&opctx, token.clone()).await.unwrap();
-        assert!(
-            fetched.console_session.time_last_used > session.time_last_used
-        );
+        let (.., fetched) = LookupPath::new(&opctx, &datastore)
+            .console_session_token(&token)
+            .fetch()
+            .await
+            .unwrap();
+        assert!(fetched.time_last_used > session.time_last_used);
 
         // delete it and fetch should come back with nothing
-        let delete = datastore.session_hard_delete(token.clone()).await;
+        let delete =
+            datastore.session_hard_delete(&opctx, &authz_session).await;
         assert_eq!(delete, Ok(()));
 
         // this will be a not found after #347
-        let fetched = datastore.session_fetch(&opctx, token.clone()).await;
+        let fetched = LookupPath::new(&opctx, &datastore)
+            .console_session_token(&token)
+            .fetch()
+            .await;
         assert!(matches!(
             fetched,
             Err(Error::ObjectNotFound { type_name: _, lookup_type: _ })
         ));
 
         // deleting an already nonexistent is considered a success
-        let delete_again = datastore.session_hard_delete(token.clone()).await;
+        let delete_again =
+            datastore.session_hard_delete(&opctx, &authz_session).await;
         assert_eq!(delete_again, Ok(()));
 
         db.cleanup().await.unwrap();

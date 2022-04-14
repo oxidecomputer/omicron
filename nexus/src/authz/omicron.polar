@@ -106,7 +106,7 @@ resource Fleet {
 	    "viewer",
 
 	    # internal roles
-	    "external_authenticator"
+	    "external-authenticator"
 	];
 
 	# Fleet viewers can view Fleet-wide data
@@ -192,7 +192,17 @@ has_relation(organization: Organization, "parent_organization", project: Project
 resource ConsoleSessionList {
 	permissions = [ "create_child" ];
 	relations = { parent_fleet: Fleet };
-	"create_child" if "external_authenticator"; on "parent_fleet";
+	"create_child" if "external-authenticator" on "parent_fleet";
 }
 has_relation(fleet: Fleet, "parent_fleet", collection: ConsoleSessionList)
 	if collection.fleet = fleet;
+
+# These rules grants the external authenticator role the permissions it needs to
+# read silo users and modify their sessions.  This is necessary for login to
+# work.
+has_permission(actor: AuthenticatedActor, "read", user: SiloUser)
+	if has_role(actor, "external-authenticator", user.fleet);
+has_permission(actor: AuthenticatedActor, "read", session: ConsoleSession)
+	if has_role(actor, "external-authenticator", session.fleet);
+has_permission(actor: AuthenticatedActor, "modify", session: ConsoleSession)
+	if has_role(actor, "external-authenticator", session.fleet);

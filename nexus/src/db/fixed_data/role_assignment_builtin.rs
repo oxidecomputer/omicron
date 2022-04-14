@@ -21,8 +21,17 @@ lazy_static! {
                 role_builtin::FLEET_ADMIN.role_name,
             ),
 
+            // The same user also needs "fleet authenticator" to be able to
+            // create test sessions.
+            RoleAssignmentBuiltin::new(
+                user_builtin::USER_TEST_PRIVILEGED.id,
+                role_builtin::FLEET_AUTHENTICATOR.resource_type,
+                *FLEET_ID,
+                role_builtin::FLEET_AUTHENTICATOR.role_name,
+            ),
+
             // The "internal-api" user gets the "admin" role on the sole Fleet.
-            // This will grant them all permissions on all resources.
+            // This will grant them (nearly) all permissions on all resources.
             // TODO-security We should scope this down (or, really, figure out a
             // better internal authn/authz story).
             RoleAssignmentBuiltin::new(
@@ -49,7 +58,7 @@ lazy_static! {
                 user_builtin::USER_EXTERNAL_AUTHN.id,
                 role_builtin::FLEET_AUTHENTICATOR.resource_type,
                 *FLEET_ID,
-                role_builtin::FLEET_AUTHENTICATOR.role_name
+                role_builtin::FLEET_AUTHENTICATOR.role_name,
             ),
         ];
 }
