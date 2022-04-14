@@ -508,10 +508,7 @@ impl SessionStore for Arc<ServerContext> {
         self.nexus.session_update_last_used(&opctx, &token).await.ok()
     }
 
-    async fn session_expire(
-        &self,
-        token: String,
-    ) -> Option<()> {
+    async fn session_expire(&self, token: String) -> Option<()> {
         let opctx = &self.nexus.opctx_external_authn;
         self.nexus.session_hard_delete(opctx, &token).await.ok()
     }

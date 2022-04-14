@@ -8,18 +8,16 @@
 //! external API, but in order to avoid CORS issues for now, we are serving
 //! these routes directly from the external API.
 use super::views;
+use crate::authn::external::{
+    cookies::Cookies,
+    session_cookie::{
+        clear_session_cookie_header_value, session_cookie_header_value,
+        SessionStore, SESSION_COOKIE_COOKIE_NAME,
+    },
+};
 use crate::authn::{USER_TEST_PRIVILEGED, USER_TEST_UNPRIVILEGED};
 use crate::context::OpContext;
 use crate::ServerContext;
-use crate::{
-    authn::external::{
-        cookies::Cookies,
-        session_cookie::{
-            clear_session_cookie_header_value, session_cookie_header_value,
-            SessionStore, SESSION_COOKIE_COOKIE_NAME,
-        },
-    },
-};
 use dropshot::{
     endpoint, HttpError, HttpResponseOk, Path, Query, RequestContext, TypedBody,
 };
