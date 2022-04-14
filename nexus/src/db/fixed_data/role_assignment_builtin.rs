@@ -41,10 +41,10 @@ lazy_static! {
                 role_builtin::FLEET_ADMIN.role_name,
             ),
 
-            // The "internal-read" user gets the "viewer" role on the sole Fleet.
-            // This will grant them the ability to read various control plane
-            // data (like the list of sleds), which is in turn used to talk to
-            // sleds or allocate resources.
+            // The "internal-read" user gets the "viewer" role on the sole
+            // Fleet.  This will grant them the ability to read various control
+            // plane data (like the list of sleds), which is in turn used to
+            // talk to sleds or allocate resources.
             RoleAssignmentBuiltin::new(
                 user_builtin::USER_INTERNAL_READ.id,
                 role_builtin::FLEET_VIEWER.resource_type,
@@ -52,8 +52,9 @@ lazy_static! {
                 role_builtin::FLEET_VIEWER.role_name,
             ),
 
-            // The "internal-authenticator" user gets the "authentiator" role on
-            // the sole fleet.  This grants them the ability to create sessions.
+            // The "external-authenticator" user gets the "authenticator" role
+            // on the sole fleet.  This grants them the ability to create
+            // sessions.
             RoleAssignmentBuiltin::new(
                 user_builtin::USER_EXTERNAL_AUTHN.id,
                 role_builtin::FLEET_AUTHENTICATOR.resource_type,
