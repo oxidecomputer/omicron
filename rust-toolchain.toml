@@ -1,14 +1,5 @@
-#
-# We use nightly for the "asm" unstable Rust feature, used within Propolis for
-# dtrace probes.
-#
-# We specify a specific, known-good nightly to avoid regular breakage.
-# Once all unstable features that we use are stabilized, we should switch back
-# to "stable".
-#
-
 [toolchain]
 # NOTE: This toolchain is also specified within .github/buildomat/jobs/{build-and-test,package}.sh.
 # If you update it here, update that file too.
-channel = "nightly-2022-09-27"
+channel = "stable"
 profile = "default"

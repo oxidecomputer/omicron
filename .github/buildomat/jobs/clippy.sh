@@ -3,7 +3,7 @@
 #: name = "clippy (helios)"
 #: variety = "basic"
 #: target = "helios-latest"
-#: rust_toolchain = "nightly-2022-09-27"
+#: rust_toolchain = "stable-1.66.1"
 #: output_rules = []
 #:
 
@@ -24,4 +24,4 @@ ptime -m bash ./tools/install_builder_prerequisites.sh -y
 
 banner clippy
 # See the corresponding GitHub Actions job for more about these arguments.
-ptime -m cargo +'nightly-2022-09-27' clippy --all-targets -- --deny warnings --allow clippy::style
+ptime -m cargo clippy --all-targets -- --deny warnings --allow clippy::style
