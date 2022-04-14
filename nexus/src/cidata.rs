@@ -49,7 +49,7 @@ fn build_vfat(meta_data: &[u8], user_data: &[u8]) -> std::io::Result<Vec<u8>> {
         &mut disk,
         FormatVolumeOptions::new()
             .bytes_per_cluster(512)
-            .volume_label(*b"CIDATA     "),
+            .volume_label(*b"cidata     "),
     )?;
 
     {
