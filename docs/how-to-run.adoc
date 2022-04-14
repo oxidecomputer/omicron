@@ -112,3 +112,19 @@ unique local addresses in `fd00:1de::/16`:
 
 Note that Sled Agent runs in the global zone and is the one responsible for bringing up all the other
 other services and allocating them with vNICs and IPv6 addresses.
+
+=== Make me a Gimlet!
+
+The sled agent expects to manage a real Gimlet. However, until those are built,
+developers generally make do with something else, usually a commodity machine.
+To make your machine "look" like a Gimlet, the
+`./tools/create_virtual_hardware.sh` script can be used. This creates a few
+file-based ZFS vdevs and ZFS zpools on top of those, and a couple of VNICs. The
+vdevs model the actual U.2s that will be in a Gimlet, and the VNICs model the
+two Chelsio NIC ports.
+
+You can clean up these resources with `./tools/destroy_virtual_hardware.sh`. Be
+aware that this is a best effort script. If the sled agent or other Omicron
+zones are still running, the zpools cannot be deleted. The script will warn you
+about the things it cannot remove, so you can do so yourself. Also note that all
+the networking bits are temporary, so a reboot should always clear them.
