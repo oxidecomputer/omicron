@@ -62,7 +62,7 @@ pub async fn spoof_login(
         return Ok(Response::builder()
             .status(StatusCode::UNAUTHORIZED)
             .header(header::SET_COOKIE, clear_session_cookie_header_value())
-            .body("".into())?); // TODO: failed login response body?
+            .body("unauthorized".into())?); // TODO: failed login response body?
     }
 
     let user_id = user_id.unwrap();
