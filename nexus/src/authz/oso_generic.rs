@@ -34,7 +34,7 @@ pub(super) struct Init {
 
 /// Returns an Oso handle suitable for authorizing using Omicron's authorization
 /// rules
-pub fn make_omicron_oso() -> Result<Oso, anyhow::Error> {
+pub fn make_omicron_oso(log: &slog::Logger) -> Result<Oso, anyhow::Error> {
     let mut oso = Oso::new();
     let classes = [
         // Hand-written classes
@@ -43,8 +43,10 @@ pub fn make_omicron_oso() -> Result<Oso, anyhow::Error> {
         AuthenticatedActor::get_polar_class(),
         Database::get_polar_class(),
         Fleet::get_polar_class(),
+        ConsoleSessionList::get_polar_class(),
     ];
     for c in classes {
+        trace!(log, "registering Oso class"; "class" => &c.name);
         oso.register_class(c).context("registering class")?;
     }
 
@@ -60,6 +62,7 @@ pub fn make_omicron_oso() -> Result<Oso, anyhow::Error> {
         RouterRoute::init(),
         VpcSubnet::init(),
         // Fleet-level resources
+        ConsoleSession::init(),
         Rack::init(),
         RoleBuiltin::init(),
         Silo::init(),
@@ -75,9 +78,11 @@ pub fn make_omicron_oso() -> Result<Oso, anyhow::Error> {
         .join("\n");
 
     for init in generated_inits {
+        trace!(log, "registering Oso class"; "class" => &init.polar_class.name);
         oso.register_class(init.polar_class).context("registering class")?;
     }
 
+    trace!(log, "full Oso configuration"; "config" => &polar_config);
     oso.load_str(&polar_config).context("loading Polar (Oso) config")?;
     Ok(oso)
 }

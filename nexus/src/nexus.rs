@@ -104,11 +104,6 @@ pub trait TestInterfaces {
         id: &Uuid,
     ) -> Result<Arc<SledAgentClient>, Error>;
 
-    async fn session_create_with(
-        &self,
-        session: db::model::ConsoleSession,
-    ) -> CreateResult<db::model::ConsoleSession>;
-
     async fn set_disk_as_faulted(&self, disk_id: &Uuid) -> Result<bool, Error>;
 
     async fn silo_user_create(
@@ -161,6 +156,9 @@ pub struct Nexus {
 
     /// Operational context used for Instance allocation
     opctx_alloc: OpContext,
+
+    /// Operational context used for external request authentication
+    opctx_external_authn: OpContext,
 }
 
 // TODO Is it possible to make some of these operations more generic?  A
@@ -229,6 +227,12 @@ impl Nexus {
                 authn::Context::internal_read(),
                 Arc::clone(&db_datastore),
             ),
+            opctx_external_authn: OpContext::for_background(
+                log.new(o!("component" => "ExternalAuthn")),
+                Arc::clone(&authz),
+                authn::Context::external_authn(),
+                Arc::clone(&db_datastore),
+            ),
         };
 
         // TODO-cleanup all the extra Arcs here seems wrong
@@ -272,6 +276,11 @@ impl Nexus {
                 }
             };
         }
+    }
+
+    /// Returns an [`OpContext`] used for authenticating external requests
+    pub fn opctx_external_authn(&self) -> &OpContext {
+        &self.opctx_external_authn
     }
 
     /// Used as the body of a "stub" endpoint -- one that's currently
@@ -3293,16 +3302,32 @@ impl Nexus {
 
     pub async fn session_fetch(
         &self,
+        opctx: &OpContext,
         token: String,
     ) -> LookupResult<authn::ConsoleSessionWithSiloId> {
-        self.db_datastore.session_fetch(token).await
+        let (.., db_console_session) =
+            LookupPath::new(opctx, &self.db_datastore)
+                .console_session_token(&token)
+                .fetch()
+                .await?;
+
+        let (.., db_silo_user) = LookupPath::new(opctx, &self.db_datastore)
+            .silo_user_id(db_console_session.silo_user_id)
+            .fetch()
+            .await?;
+
+        Ok(authn::ConsoleSessionWithSiloId {
+            console_session: db_console_session,
+            silo_id: db_silo_user.silo_id,
+        })
     }
 
     pub async fn session_create(
         &self,
+        opctx: &OpContext,
         user_id: Uuid,
     ) -> CreateResult<db::model::ConsoleSession> {
-        if !self.login_allowed(user_id).await? {
+        if !self.login_allowed(opctx, user_id).await? {
             return Err(Error::Unauthenticated {
                 internal_message: "User not allowed to login".to_string(),
             });
@@ -3311,19 +3336,37 @@ impl Nexus {
         let session =
             db::model::ConsoleSession::new(generate_session_token(), user_id);
 
-        Ok(self.db_datastore.session_create(session).await?)
+        Ok(self.db_datastore.session_create(opctx, session).await?)
     }
 
     // update last_used to now
     pub async fn session_update_last_used(
         &self,
-        token: String,
+        opctx: &OpContext,
+        token: &str,
     ) -> UpdateResult<authn::ConsoleSessionWithSiloId> {
-        Ok(self.db_datastore.session_update_last_used(token).await?)
+        let authz_session = authz::ConsoleSession::new(
+            authz::FLEET,
+            token.to_string(),
+            LookupType::ByCompositeId(token.to_string()),
+        );
+        Ok(self
+            .db_datastore
+            .session_update_last_used(opctx, &authz_session)
+            .await?)
     }
 
-    pub async fn session_hard_delete(&self, token: String) -> DeleteResult {
-        self.db_datastore.session_hard_delete(token).await
+    pub async fn session_hard_delete(
+        &self,
+        opctx: &OpContext,
+        token: &str,
+    ) -> DeleteResult {
+        let authz_session = authz::ConsoleSession::new(
+            authz::FLEET,
+            token.to_string(),
+            LookupType::ByCompositeId(token.to_string()),
+        );
+        self.db_datastore.session_hard_delete(opctx, &authz_session).await
     }
 
     fn tuf_base_url(&self) -> Option<String> {
@@ -3572,10 +3615,16 @@ impl Nexus {
         Ok(body)
     }
 
-    async fn login_allowed(&self, silo_user_id: Uuid) -> Result<bool, Error> {
+    async fn login_allowed(
+        &self,
+        opctx: &OpContext,
+        silo_user_id: Uuid,
+    ) -> Result<bool, Error> {
         // Was this silo user deleted?
-        let fetch_result =
-            self.db_datastore.silo_user_fetch(silo_user_id).await;
+        let fetch_result = LookupPath::new(opctx, &self.db_datastore)
+            .silo_user_id(silo_user_id)
+            .fetch()
+            .await;
 
         match fetch_result {
             Err(e) => {
@@ -3602,9 +3651,14 @@ impl Nexus {
 
     pub async fn silo_user_fetch(
         &self,
+        opctx: &OpContext,
         silo_user_id: Uuid,
     ) -> LookupResult<SiloUser> {
-        self.db_datastore.silo_user_fetch(silo_user_id).await
+        let (.., db_silo_user) = LookupPath::new(opctx, &self.db_datastore)
+            .silo_user_id(silo_user_id)
+            .fetch()
+            .await?;
+        Ok(db_silo_user)
     }
 }
 
@@ -3670,13 +3724,6 @@ impl TestInterfaces for Nexus {
             .fetch()
             .await?;
         self.instance_sled(&db_instance).await
-    }
-
-    async fn session_create_with(
-        &self,
-        session: db::model::ConsoleSession,
-    ) -> CreateResult<db::model::ConsoleSession> {
-        Ok(self.db_datastore.session_create(session).await?)
     }
 
     async fn set_disk_as_faulted(&self, disk_id: &Uuid) -> Result<bool, Error> {

@@ -4,9 +4,9 @@
 
 //! Handler functions (entrypoints) for console-related routes.
 //!
-//! This was originally conceived as a separate dropshot server from the external API,
-//! but in order to avoid CORS issues for now, we are serving these routes directly
-//! from the external API.
+//! This was originally conceived as a separate dropshot server from the
+//! external API, but in order to avoid CORS issues for now, we are serving
+//! these routes directly from the external API.
 use super::views;
 use crate::authn::external::{
     cookies::Cookies,
@@ -36,8 +36,9 @@ pub struct LoginParams {
     pub username: String,
 }
 
-// This is just for demo purposes. we will probably end up with a real username/password login
-// endpoint, but I think it will only be for use while setting up the rack
+// This is just for demo purposes. we will probably end up with a real
+// username/password login endpoint, but I think it will only be for use while
+// setting up the rack
 #[endpoint {
    method = POST,
    path = "/login",
@@ -67,7 +68,11 @@ pub async fn spoof_login(
 
     let user_id = user_id.unwrap();
 
-    let session = nexus.session_create(user_id).await?;
+    // For now, we use the external authn context to create the session.
+    // Once we have real SAML login, maybe we can cons up a real OpContext for
+    // this user and use their own privileges to create the session.
+    let authn_opctx = nexus.opctx_external_authn();
+    let session = nexus.session_create(&authn_opctx, user_id).await?;
 
     Ok(Response::builder()
         .status(StatusCode::OK)
@@ -98,8 +103,10 @@ pub async fn logout(
     let opctx = OpContext::for_external_api(&rqctx).await;
     let token = cookies.get(SESSION_COOKIE_COOKIE_NAME);
 
-    if opctx.is_ok() && token.is_some() {
-        nexus.session_hard_delete(token.unwrap().value().to_string()).await?;
+    if let Ok(opctx) = opctx {
+        if let Some(token) = token {
+            nexus.session_hard_delete(&opctx, token.value()).await?;
+        }
     }
 
     // If user's session was already expired, they failed auth and their session
@@ -143,7 +150,8 @@ pub struct StateParam {
     state: Option<String>,
 }
 
-// this happens to be the same as StateParam, but it may include other things later
+// this happens to be the same as StateParam, but it may include other things
+// later
 #[derive(Serialize)]
 pub struct LoginUrlQuery {
     // TODO: give state param the correct name. In SAML it's called RelayState.
@@ -162,14 +170,14 @@ fn get_login_url(state: Option<String>) -> String {
         Some(state) if state.is_empty() => None,
         Some(state) => Some(
             serde_urlencoded::to_string(LoginUrlQuery { state: Some(state) })
-                // unwrap is safe because query.state was just deserialized out of a
-                // query param, so we know it's serializable
+                // unwrap is safe because query.state was just deserialized out
+                // of a query param, so we know it's serializable
                 .unwrap(),
         ),
         None => None,
     };
-    // Once we have IdP integration, this will be a URL for the IdP login page. For now
-    // we point to our own placeholder login page.
+    // Once we have IdP integration, this will be a URL for the IdP login page.
+    // For now we point to our own placeholder login page.
     let mut url = "/spoof_login".to_string();
     if let Some(query) = query {
         url.push('?');
@@ -238,8 +246,8 @@ pub async fn console_page(
 
     // if authed, serve HTML page with bundle in script tag
 
-    // HTML doesn't need to be static -- we'll probably find a reason to do some minimal
-    // templating, e.g., putting a CSRF token in the page
+    // HTML doesn't need to be static -- we'll probably find a reason to do some
+    // minimal templating, e.g., putting a CSRF token in the page
 
     // amusingly, at least to start out, I don't think we care about the path
     // because the real routing is all client-side. we serve the same HTML

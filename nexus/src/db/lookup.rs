@@ -240,6 +240,25 @@ impl<'a> LookupPath<'a> {
         }
     }
 
+    // Fleet-level resources
+
+    /// Select a resource of type ConsoleSession, identified by its `token`
+    pub fn console_session_token<'b, 'c>(
+        self,
+        token: &'b str,
+    ) -> ConsoleSession<'c>
+    where
+        'a: 'c,
+        'b: 'c,
+    {
+        ConsoleSession {
+            key: ConsoleSessionKey::PrimaryKey(
+                Root { lookup_root: self },
+                token.to_string(),
+            ),
+        }
+    }
+
     /// Select a resource of type RoleBuiltin, identified by its `name`
     pub fn role_builtin_name(
         self,
@@ -272,6 +291,13 @@ impl<'a> LookupPath<'a> {
         'b: 'c,
     {
         Silo { key: SiloKey::Name(Root { lookup_root: self }, name) }
+    }
+
+    /// Select a resource of type SiloUser, identified by its id
+    pub fn silo_user_id(self, id: Uuid) -> SiloUser<'a> {
+        SiloUser {
+            key: SiloUserKey::PrimaryKey(Root { lookup_root: self }, id),
+        }
     }
 
     /// Select a resource of type Sled, identified by its id
@@ -409,6 +435,17 @@ lookup_resource! {
 }
 
 // Miscellaneous resources nested directly below "Fleet"
+
+lookup_resource! {
+    name = "ConsoleSession",
+    ancestors = [],
+    children = [],
+    lookup_by_name = false,
+    soft_deletes = false,
+    primary_key_columns = [
+        { column_name = "token", rust_type = String },
+    ]
+}
 
 lookup_resource! {
     name = "RoleBuiltin",
