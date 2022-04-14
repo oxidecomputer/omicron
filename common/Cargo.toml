@@ -35,6 +35,6 @@ parse-display = "0.5.4"
 progenitor = { git = "https://github.com/oxidecomputer/progenitor" }
 
 [dev-dependencies]
-expectorate = "1.0.4"
+expectorate = "1.0.5"
 serde_urlencoded = "0.7.1"
 tokio = { version = "1.17", features = [ "test-util" ] }

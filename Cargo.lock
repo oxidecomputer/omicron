@@ -433,7 +433,9 @@ dependencies = [
  "encode_unicode",
  "libc",
  "once_cell",
+ "regex",
  "terminal_size",
+ "unicode-width",
  "winapi",
 ]
 
@@ -878,12 +880,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0e25ea47919b1560c4e3b7fe0aaab9becf5b84a10325ddf7db0f0ba5e1026499"
 
 [[package]]
-name = "difference"
-version = "2.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "524cbf6897b527295dff137cec09ecf3a05f4fddffd7dfcd1585403449e74198"
-
-[[package]]
 name = "difflib"
 version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1119,12 +1115,13 @@ dependencies = [
 
 [[package]]
 name = "expectorate"
-version = "1.0.4"
+version = "1.0.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "804d601ea8a13ddbecf5ab4b6cf75b5d6d0539479c6fb2aea1596e352a5ee27e"
+checksum = "5d9b457178b54cf0321a39fb6643ad7b9c705cf483ad4fb6d6092054e9ce839e"
 dependencies = [
- "difference",
+ "console",
  "newline-converter",
+ "similar",
 ]
 
 [[package]]
@@ -4025,6 +4022,12 @@ dependencies = [
  "digest 0.9.0",
  "rand_core 0.6.3",
 ]
+
+[[package]]
+name = "similar"
+version = "2.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2e24979f63a11545f5f2c60141afe249d4f19f84581ea2138065e400941d83d3"
 
 [[package]]
 name = "siphasher"

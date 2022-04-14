@@ -31,7 +31,7 @@ version = "1.16"
 features = [ "full" ]
 
 [dev-dependencies]
-expectorate = "1.0.4"
+expectorate = "1.0.5"
 http = "0.2.5"
 omicron-test-utils = { path = "../test-utils" }
 openapi-lint = { git = "https://github.com/oxidecomputer/openapi-lint", branch = "main" }
