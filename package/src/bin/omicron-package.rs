@@ -402,6 +402,16 @@ fn uninstall_all_packages(config: &Config) {
         .unwrap();
 }
 
+fn remove_file_unless_already_removed<P: AsRef<Path>>(path: P) -> Result<()> {
+    if let Err(e) = std::fs::remove_file(path.as_ref()) {
+        match e.kind() {
+            std::io::ErrorKind::NotFound => {}
+            _ => bail!(e),
+        }
+    }
+    Ok(())
+}
+
 fn remove_all_unless_already_removed<P: AsRef<Path>>(path: P) -> Result<()> {
     if let Err(e) = std::fs::remove_dir_all(path.as_ref()) {
         match e.kind() {
@@ -414,13 +424,18 @@ fn remove_all_unless_already_removed<P: AsRef<Path>>(path: P) -> Result<()> {
 
 fn remove_all_except_databases<P: AsRef<Path>>(path: P) -> Result<()> {
     const TO_KEEP: [&str; 2] = ["clickhouse", "cockroachdb"];
-    for entry in path.as_ref().read_dir()? {
+    let dir = match path.as_ref().read_dir() {
+        Ok(dir) => dir,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(e) => bail!(e),
+    };
+    for entry in dir {
         let entry = entry?;
         if !TO_KEEP.contains(&&*(entry.file_name().to_string_lossy())) {
             if entry.metadata()?.is_dir() {
-                std::fs::remove_dir_all(entry.path())?;
+                remove_all_unless_already_removed(entry.path())?;
             } else {
-                std::fs::remove_file(entry.path())?;
+                remove_file_unless_already_removed(entry.path())?;
             }
         }
     }
