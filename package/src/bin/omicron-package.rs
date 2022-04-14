@@ -412,6 +412,21 @@ fn remove_all_unless_already_removed<P: AsRef<Path>>(path: P) -> Result<()> {
     Ok(())
 }
 
+fn remove_all_except_databases<P: AsRef<Path>>(path: P) -> Result<()> {
+    const TO_KEEP: [&str; 2] = ["clickhouse", "cockroachdb"];
+    for entry in path.as_ref().read_dir()? {
+        let entry = entry?;
+        if !TO_KEEP.contains(&&*(entry.file_name().to_string_lossy())) {
+            if entry.metadata()?.is_dir() {
+                std::fs::remove_dir_all(entry.path())?;
+            } else {
+                std::fs::remove_file(entry.path())?;
+            }
+        }
+    }
+    Ok(())
+}
+
 fn do_uninstall(
     config: &Config,
     artifact_dir: &Path,
@@ -421,8 +436,8 @@ fn do_uninstall(
     uninstall_all_omicron_zones()?;
     println!("Uninstalling all packages");
     uninstall_all_packages(config);
-    println!("Removing: {}", artifact_dir.to_string_lossy());
-    remove_all_unless_already_removed(artifact_dir)?;
+    println!("Removing artfiacts in: {}", artifact_dir.to_string_lossy());
+    remove_all_except_databases(artifact_dir)?;
     println!("Removing: {}", install_dir.to_string_lossy());
     remove_all_unless_already_removed(install_dir)?;
     Ok(())
