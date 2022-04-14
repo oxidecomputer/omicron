@@ -76,7 +76,7 @@ async fn do_run() -> Result<(), CmdError> {
         storage: ConfigStorage {
             // Create 10 "virtual" U.2s, with 1 TB of storage.
             zpools: vec![ConfigZpool { size: 1 << 40 }; 10],
-            ip: args.sled_agent_addr.ip().clone().into(),
+            ip: (*args.sled_agent_addr.ip()).into(),
         },
     };
 
