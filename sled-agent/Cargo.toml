@@ -46,7 +46,7 @@ vsss-rs = { version = "2.0.0-pre0", default-features = false, features = ["std"]
 zone = "0.1"
 
 [dev-dependencies]
-expectorate = "1.0.4"
+expectorate = "1.0.5"
 http = "0.2.5"
 mockall = "0.11"
 omicron-test-utils = { path = "../test-utils" }

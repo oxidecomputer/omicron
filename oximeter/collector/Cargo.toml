@@ -22,7 +22,7 @@ toml = "0.5.8"
 uuid = { version = "0.8.2", features = [ "v4", "serde" ] }
 
 [dev-dependencies]
-expectorate = "1.0.4"
+expectorate = "1.0.5"
 omicron-test-utils = { path = "../../test-utils" }
 openapiv3 = "1.0"
 serde_json = "1.0.79"
