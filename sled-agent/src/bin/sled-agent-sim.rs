@@ -15,9 +15,9 @@ use omicron_sled_agent::sim::{
     run_server, Config, ConfigStorage, ConfigZpool, SimMode,
 };
 use std::net::SocketAddr;
+use std::net::SocketAddrV6;
 use structopt::StructOpt;
 use uuid::Uuid;
-use std::net::SocketAddrV6;
 
 fn parse_sim_mode(src: &str) -> Result<SimMode, String> {
     match src {
