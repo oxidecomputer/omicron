@@ -436,7 +436,7 @@ fn do_uninstall(
     uninstall_all_omicron_zones()?;
     println!("Uninstalling all packages");
     uninstall_all_packages(config);
-    println!("Removing artfiacts in: {}", artifact_dir.to_string_lossy());
+    println!("Removing artifacts in: {}", artifact_dir.to_string_lossy());
     remove_all_except_databases(artifact_dir)?;
     println!("Removing: {}", install_dir.to_string_lossy());
     remove_all_unless_already_removed(install_dir)?;
