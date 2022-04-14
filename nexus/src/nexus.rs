@@ -3312,6 +3312,11 @@ impl Nexus {
             .await?;
 
         Ok(authn::ConsoleSessionWithSiloId {
+            authz: authz::ConsoleSession::new(
+                authz::FLEET,
+                token.clone(),
+                LookupType::ByCompositeId(token),
+            ),
             console_session: db_console_session,
             silo_id: db_silo_user.silo_id,
         })
@@ -3338,17 +3343,17 @@ impl Nexus {
     pub async fn session_update_last_used(
         &self,
         opctx: &OpContext,
-        token: String,
+        session: &authz::ConsoleSession,
     ) -> UpdateResult<authn::ConsoleSessionWithSiloId> {
-        Ok(self.db_datastore.session_update_last_used(opctx, token).await?)
+        Ok(self.db_datastore.session_update_last_used(opctx, session).await?)
     }
 
     pub async fn session_hard_delete(
         &self,
         opctx: &OpContext,
-        token: String,
+        session: &authz::ConsoleSession,
     ) -> DeleteResult {
-        self.db_datastore.session_hard_delete(opctx, token).await
+        self.db_datastore.session_hard_delete(opctx, session).await
     }
 
     fn tuf_base_url(&self) -> Option<String> {

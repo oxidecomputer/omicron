@@ -36,6 +36,7 @@ pub use crate::db::fixed_data::user_builtin::USER_TEST_PRIVILEGED;
 pub use crate::db::fixed_data::user_builtin::USER_TEST_UNPRIVILEGED;
 use crate::db::model::ConsoleSession;
 
+use crate::authz;
 use serde::Deserialize;
 use serde::Serialize;
 use uuid::Uuid;
@@ -236,6 +237,7 @@ pub struct Actor {
 /// A console session with the silo id of the authenticated user
 #[derive(Clone, Debug)]
 pub struct ConsoleSessionWithSiloId {
+    pub authz: authz::ConsoleSession,
     pub console_session: ConsoleSession,
     pub silo_id: Uuid,
 }

@@ -8,16 +8,19 @@
 //! but in order to avoid CORS issues for now, we are serving these routes directly
 //! from the external API.
 use super::views;
-use crate::authn::external::{
-    cookies::Cookies,
-    session_cookie::{
-        clear_session_cookie_header_value, session_cookie_header_value,
-        SessionStore, SESSION_COOKIE_COOKIE_NAME,
-    },
-};
 use crate::authn::{USER_TEST_PRIVILEGED, USER_TEST_UNPRIVILEGED};
 use crate::context::OpContext;
 use crate::ServerContext;
+use crate::{
+    authn::external::{
+        cookies::Cookies,
+        session_cookie::{
+            clear_session_cookie_header_value, session_cookie_header_value,
+            SessionStore, SESSION_COOKIE_COOKIE_NAME,
+        },
+    },
+    authz,
+};
 use dropshot::{
     endpoint, HttpError, HttpResponseOk, Path, Query, RequestContext, TypedBody,
 };
@@ -25,6 +28,7 @@ use http::{header, Response, StatusCode};
 use hyper::Body;
 use lazy_static::lazy_static;
 use mime_guess;
+use omicron_common::api::external::LookupType;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_urlencoded;
@@ -102,13 +106,16 @@ pub async fn logout(
     let opctx = OpContext::for_external_api(&rqctx).await;
     let token = cookies.get(SESSION_COOKIE_COOKIE_NAME);
 
-    if opctx.is_ok() && token.is_some() {
-        nexus
-            .session_hard_delete(
-                &nexus.opctx_external_authn,
-                token.unwrap().value().to_string(),
-            )
-            .await?;
+    if let Ok(opctx) = opctx {
+        if let Some(token) = token {
+            let token = token.value().to_string();
+            let authz_session = authz::ConsoleSession::new(
+                authz::FLEET,
+                token.clone(),
+                LookupType::ByCompositeId(token),
+            );
+            nexus.session_hard_delete(&opctx, &authz_session).await?;
+        }
     }
 
     // If user's session was already expired, they failed auth and their session

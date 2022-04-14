@@ -36,11 +36,11 @@ pub trait SessionStore {
     /// Extend session by updating time_last_used to now
     async fn session_update_last_used(
         &self,
-        token: String,
+        session: &Self::SessionModel,
     ) -> Option<Self::SessionModel>;
 
     /// Mark session expired
-    async fn session_expire(&self, token: String) -> Option<()>;
+    async fn session_expire(&self, session: &Self::SessionModel) -> Option<()>;
 
     /// Maximum time session can remain idle before expiring
     fn session_idle_timeout(&self) -> Duration;
@@ -113,7 +113,7 @@ where
         // if the session has gone unused for longer than idle_timeout, it is expired
         let now = Utc::now();
         if session.time_last_used() + ctx.session_idle_timeout() < now {
-            let expired_session = ctx.session_expire(token.clone()).await;
+            let expired_session = ctx.session_expire(&session).await;
             if expired_session.is_none() {
                 debug!(log, "failed to expire session")
             }
@@ -131,7 +131,7 @@ where
         // if the user is still within the idle timeout, but the session has existed longer
         // than absolute_timeout, it is expired and we can no longer extend the session
         if session.time_created() + ctx.session_absolute_timeout() < now {
-            let expired_session = ctx.session_expire(token.clone()).await;
+            let expired_session = ctx.session_expire(&session).await;
             if expired_session.is_none() {
                 debug!(log, "failed to expire session")
             }
@@ -151,7 +151,7 @@ where
         // authenticated for this request at this point. The next request might
         // be wrongly considered idle, but that's a problem for the next
         // request.
-        let updated_session = ctx.session_update_last_used(token.clone()).await;
+        let updated_session = ctx.session_update_last_used(&session).await;
         if updated_session.is_none() {
             debug!(log, "failed to extend session")
         }
@@ -192,6 +192,7 @@ mod test {
 
     #[derive(Clone, Copy)]
     struct FakeSession {
+        token: String,
         silo_user_id: Uuid,
         silo_id: Uuid,
         time_created: DateTime<Utc>,
@@ -226,18 +227,18 @@ mod test {
 
         async fn session_update_last_used(
             &self,
-            token: String,
+            session: &FakeSession,
         ) -> Option<Self::SessionModel> {
             let mut sessions = self.sessions.lock().unwrap();
-            let session = *sessions.get(&token).unwrap();
+            let session = *sessions.get(&session.token).unwrap();
             let new_session =
                 FakeSession { time_last_used: Utc::now(), ..session };
             (*sessions).insert(token, new_session)
         }
 
-        async fn session_expire(&self, token: String) -> Option<()> {
+        async fn session_expire(&self, session: &FakeSession) -> Option<()> {
             let mut sessions = self.sessions.lock().unwrap();
-            (*sessions).remove(&token);
+            (*sessions).remove(&session.token);
             Some(())
         }
 
@@ -286,6 +287,7 @@ mod test {
             sessions: Mutex::new(HashMap::from([(
                 "abc".to_string(),
                 FakeSession {
+                    token: "abc".to_string(),
                     silo_user_id: Uuid::new_v4(),
                     silo_id: Uuid::new_v4(),
                     time_last_used: Utc::now() - Duration::hours(2),
@@ -312,6 +314,7 @@ mod test {
             sessions: Mutex::new(HashMap::from([(
                 "abc".to_string(),
                 FakeSession {
+                    token: "abc".to_string(),
                     silo_user_id: Uuid::new_v4(),
                     silo_id: Uuid::new_v4(),
                     time_last_used: Utc::now(),
@@ -340,6 +343,7 @@ mod test {
             sessions: Mutex::new(HashMap::from([(
                 "abc".to_string(),
                 FakeSession {
+                    token: "abc".to_string(),
                     silo_user_id: Uuid::new_v4(),
                     silo_id: Uuid::new_v4(),
                     time_last_used,

@@ -2168,13 +2168,13 @@ impl DataStore {
     pub async fn session_update_last_used(
         &self,
         opctx: &OpContext,
-        session: &authz::ConsoleSession,
+        authz_session: &authz::ConsoleSession,
     ) -> UpdateResult<authn::ConsoleSessionWithSiloId> {
-        opctx.authorize(authz::Action::Modify, session).await?;
+        opctx.authorize(authz::Action::Modify, authz_session).await?;
 
         use db::schema::console_session::dsl;
         let console_session = diesel::update(dsl::console_session)
-            .filter(dsl::token.eq(session.id()))
+            .filter(dsl::token.eq(authz_session.id()))
             .set((dsl::time_last_used.eq(Utc::now()),))
             .returning(ConsoleSession::as_returning())
             .get_result_async(self.pool_authorized(opctx).await?)
@@ -2198,6 +2198,11 @@ impl DataStore {
             })?;
 
         Ok(authn::ConsoleSessionWithSiloId {
+            authz: authz::ConsoleSession::new(
+                authz::FLEET,
+                authz_session.id(),
+                authz_session.lookup_type().clone(),
+            ),
             console_session,
             silo_id: db_silo_user.silo_id,
         })
@@ -2207,13 +2212,13 @@ impl DataStore {
     pub async fn session_hard_delete(
         &self,
         opctx: &OpContext,
-        session: &authz::ConsoleSession,
+        authz_session: &authz::ConsoleSession,
     ) -> DeleteResult {
-        opctx.authorize(authz::Action::Delete, session).await?;
+        opctx.authorize(authz::Action::Delete, authz_session).await?;
 
         use db::schema::console_session::dsl;
         diesel::delete(dsl::console_session)
-            .filter(dsl::token.eq(session.id()))
+            .filter(dsl::token.eq(authz_session.id()))
             .execute_async(self.pool_authorized(opctx).await?)
             .await
             .map(|_rows_deleted| ())
