@@ -2002,7 +2002,7 @@ async fn vpc_subnets_post(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Delete a subnet from a VPC. Fail!
+/// Delete a subnet from a VPC.
 #[endpoint {
     method = DELETE,
     path = "/organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/subnets/{subnet_name}",
