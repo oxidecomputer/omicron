@@ -31,6 +31,7 @@ libc = "0.2.122"
 macaddr = { version = "1.0.1", features = [ "serde_std" ]}
 mime_guess = "2.0.4"
 newtype_derive = "0.1.6"
+num-integer = "0.1.44"
 oso = "0.26"
 oximeter-client = { path = "../oximeter-client" }
 oximeter-db = { path = "../oximeter/db/" }

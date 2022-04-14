@@ -2455,6 +2455,7 @@ dependencies = [
  "newtype_derive",
  "nexus-test-utils",
  "nexus-test-utils-macros",
+ "num-integer",
  "omicron-common",
  "omicron-rpaths",
  "omicron-sled-agent",

@@ -1,5 +1,6 @@
 use crate::db::{identity::Resource, model::Instance};
 use fatfs::{FileSystem, FormatVolumeOptions, FsOptions};
+use num_integer::Integer;
 use omicron_common::api::external::Error;
 use serde::Serialize;
 use std::io::{Cursor, Write};
@@ -36,8 +37,8 @@ struct MetaData<'a> {
 fn build_vfat(meta_data: &[u8], user_data: &[u8]) -> std::io::Result<Vec<u8>> {
     // requires #![feature(int_roundings)].
     // https://github.com/rust-lang/rust/issues/88581
-    let file_sectors = meta_data.len().unstable_div_ceil(512)
-        + user_data.len().unstable_div_ceil(512);
+    let file_sectors =
+        meta_data.len().div_ceil(&512) + user_data.len().div_ceil(&512);
     // this was reverse engineered by making the numbers go lower until the
     // code failed (usually because of low disk space). this only works for
     // FAT12 filesystems

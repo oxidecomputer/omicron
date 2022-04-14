@@ -2,7 +2,6 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 #![feature(async_closure)]
-#![feature(int_roundings)] // used in crate::cidata
 
 //! Library interface to the Nexus, the heart of the control plane
 
