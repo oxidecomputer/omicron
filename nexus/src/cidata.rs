@@ -11,7 +11,7 @@ impl Instance {
         let meta_data = serde_json::to_vec(&MetaData {
             instance_id: self.id(),
             local_hostname: &self.runtime().hostname,
-            public_keys: "", // TODO
+            public_keys: &[], // TODO
         })
         .map_err(|_| Error::internal_error("failed to serialize meta-data"))?;
         let cidata =
@@ -30,7 +30,7 @@ impl Instance {
 struct MetaData<'a> {
     instance_id: Uuid,
     local_hostname: &'a str,
-    public_keys: &'a str,
+    public_keys: &'a [String],
 }
 
 fn build_vfat(meta_data: &[u8], user_data: &[u8]) -> std::io::Result<Vec<u8>> {
