@@ -211,7 +211,7 @@ lazy_static! {
                 name: DEMO_IMAGE_NAME.clone(),
                 description: String::from(""),
             },
-            source: params::ImageSource::Url(String::from("http://127.0.0.1:55555/image.raw")),
+            source: params::ImageSource::Url(String::from("http://127.0.0.1:5555/image.raw")),
             block_size: params::BlockSize::try_from(4096).unwrap(),
         };
 

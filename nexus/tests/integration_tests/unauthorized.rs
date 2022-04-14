@@ -57,7 +57,7 @@ async fn test_unauthorized(cptestctx: &ControlPlaneTestContext) {
 
     // Run a httptest server
     let server = ServerBuilder::new()
-        .bind_addr("127.0.0.1:55555".parse().unwrap())
+        .bind_addr("127.0.0.1:5555".parse().unwrap())
         .run()
         .unwrap();
 
