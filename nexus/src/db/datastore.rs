@@ -2772,6 +2772,8 @@ mod test {
     };
     use omicron_test_utils::dev;
     use std::collections::HashSet;
+    use std::net::Ipv6Addr;
+    use std::net::SocketAddrV6;
     use std::net::{IpAddr, Ipv4Addr, SocketAddr};
     use std::sync::Arc;
     use uuid::Uuid;
@@ -2903,8 +2905,12 @@ mod test {
 
     // Creates a test sled, returns its UUID.
     async fn create_test_sled(datastore: &DataStore) -> Uuid {
-        let bogus_addr =
-            SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 8080);
+        let bogus_addr = SocketAddrV6::new(
+            Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 0, 1),
+            8080,
+            0,
+            0,
+        );
         let sled_id = Uuid::new_v4();
         let sled = Sled::new(sled_id, bogus_addr.clone());
         datastore.sled_upsert(sled).await.unwrap();
