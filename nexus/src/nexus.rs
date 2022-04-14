@@ -158,6 +158,7 @@ pub struct Nexus {
     opctx_alloc: OpContext,
 
     /// Operational context used for external request authentication
+    // XXX-dap should not be "pub" -- put this on ServerContext instead
     pub opctx_external_authn: OpContext,
 }
 
