@@ -144,7 +144,7 @@ pub struct InstanceCreate {
     // TODO: this should emit `"format": "byte"`, but progenitor doesn't
     // understand that yet.
     #[schemars(default, with = "String")]
-    #[serde(with = "serde_user_data")]
+    #[serde(default, with = "serde_user_data")]
     pub user_data: Vec<u8>,
 
     /// The network interfaces to be created for this instance.
