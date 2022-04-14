@@ -521,11 +521,13 @@ pub enum ResourceType {
     Project,
     Dataset,
     Disk,
+    Image,
     Instance,
     NetworkInterface,
     Rack,
     Sled,
     SagaDbg,
+    Snapshot,
     Volume,
     Vpc,
     VpcFirewallRule,
@@ -534,8 +536,9 @@ pub enum ResourceType {
     RouterRoute,
     Oximeter,
     MetricProducer,
-    Role,
-    User,
+    RoleBuiltin,
+    UpdateAvailableArtifact,
+    UserBuiltin,
     Zpool,
 }
 
@@ -755,7 +758,9 @@ pub struct Disk {
     pub identity: IdentityMetadata,
     pub project_id: Uuid,
     pub snapshot_id: Option<Uuid>,
+    pub image_id: Option<Uuid>,
     pub size: ByteCount,
+    pub block_size: ByteCount,
     pub state: DiskState,
     pub device_path: String,
 }
@@ -1256,7 +1261,7 @@ pub struct RouterRoute {
     pub identity: IdentityMetadata,
 
     /// The VPC Router to which the route belongs.
-    pub router_id: Uuid,
+    pub vpc_router_id: Uuid,
 
     /// Describes the kind of router. Set at creation. `read-only`
     pub kind: RouterRouteKind,

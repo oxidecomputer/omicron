@@ -25,6 +25,7 @@ use omicron_common::backoff;
 use propolis_client::api::DiskRequest;
 use propolis_client::Client as PropolisClient;
 use slog::Logger;
+use std::net::IpAddr;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::task::JoinHandle;
@@ -180,6 +181,9 @@ struct InstanceInner {
 
     // The ID of the Propolis server (and zone) running this instance
     propolis_id: Uuid,
+
+    // The IP address of the Propolis server running this instance
+    propolis_ip: IpAddr,
 
     // NIC-related properties
     vnic_allocator: VnicAllocator,
@@ -422,6 +426,7 @@ impl Instance {
                 vcpus: initial.runtime.ncpus.0 as u8,
             },
             propolis_id: initial.runtime.propolis_uuid,
+            propolis_ip: initial.runtime.propolis_addr.unwrap().ip(),
             vnic_allocator,
             requested_nics: initial.nics,
             requested_disks: initial.disks,
@@ -480,12 +485,12 @@ impl Instance {
         .await?;
 
         let running_zone = RunningZone::boot(installed_zone).await?;
-        let network = running_zone.ensure_address(AddressRequest::Dhcp).await?;
+        let addr_request = AddressRequest::new_static(inner.propolis_ip, None);
+        let network = running_zone.ensure_address(addr_request).await?;
         info!(inner.log, "Created address {} for zone: {}", network, zname);
 
         // Run Propolis in the Zone.
-        let server_addr = SocketAddr::new(network.ip(), PROPOLIS_PORT);
-
+        let server_addr = SocketAddr::new(inner.propolis_ip, PROPOLIS_PORT);
         running_zone.run_cmd(&[
             crate::illumos::zone::SVCCFG,
             "import",
@@ -567,7 +572,7 @@ impl Instance {
 
         let zname = propolis_zone_name(inner.propolis_id());
         warn!(inner.log, "Halting and removing zone: {}", zname);
-        Zones::halt_and_remove(&inner.log, &zname).unwrap();
+        Zones::halt_and_remove_logged(&inner.log, &zname).unwrap();
 
         inner.running_state.as_mut().unwrap().ticket.terminate();
 
@@ -678,7 +683,7 @@ mod test {
                 sled_uuid: Uuid::new_v4(),
                 propolis_uuid: test_propolis_uuid(),
                 dst_propolis_uuid: None,
-                propolis_addr: None,
+                propolis_addr: Some("[fd00:1de::74]:12400".parse().unwrap()),
                 migration_uuid: None,
                 ncpus: InstanceCpuCount(2),
                 memory: ByteCount::from_mebibytes_u32(512),

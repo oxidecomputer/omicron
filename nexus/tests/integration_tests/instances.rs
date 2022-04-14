@@ -549,11 +549,10 @@ async fn test_instance_create_saga_removes_instance_database_record(
         subnet_name: default_name.clone(),
         ip: Some(requested_address),
     };
-    let interface_params = params::InstanceNetworkInterfaceAttachment::Create(
-        params::InstanceNetworkInterfaceCreate {
-            params: vec![if0_params.clone()],
-        },
-    );
+    let interface_params =
+        params::InstanceNetworkInterfaceAttachment::Create(vec![
+            if0_params.clone()
+        ]);
 
     // Create the parameters for the instance itself, and create it.
     let instance_params = params::InstanceCreate {
@@ -611,11 +610,10 @@ async fn test_instance_create_saga_removes_instance_database_record(
         subnet_name: default_name.clone(),
         ip: Some(requested_address),
     };
-    let interface_params = params::InstanceNetworkInterfaceAttachment::Create(
-        params::InstanceNetworkInterfaceCreate {
-            params: vec![if0_params.clone()],
-        },
-    );
+    let interface_params =
+        params::InstanceNetworkInterfaceAttachment::Create(vec![
+            if0_params.clone()
+        ]);
     let instance_params = params::InstanceCreate {
         network_interfaces: interface_params,
         ..instance_params.clone()
@@ -657,11 +655,10 @@ async fn test_instance_with_single_explicit_ip_address(
         subnet_name: default_name.clone(),
         ip: Some(requested_address),
     };
-    let interface_params = params::InstanceNetworkInterfaceAttachment::Create(
-        params::InstanceNetworkInterfaceCreate {
-            params: vec![if0_params.clone()],
-        },
-    );
+    let interface_params =
+        params::InstanceNetworkInterfaceAttachment::Create(vec![
+            if0_params.clone()
+        ]);
 
     // Create the parameters for the instance itself, and create it.
     let instance_params = params::InstanceCreate {
@@ -773,11 +770,11 @@ async fn test_instance_with_new_custom_network_interfaces(
         subnet_name: non_default_subnet_name.clone(),
         ip: None,
     };
-    let interface_params = params::InstanceNetworkInterfaceAttachment::Create(
-        params::InstanceNetworkInterfaceCreate {
-            params: vec![if0_params.clone(), if1_params.clone()],
-        },
-    );
+    let interface_params =
+        params::InstanceNetworkInterfaceAttachment::Create(vec![
+            if0_params.clone(),
+            if1_params.clone(),
+        ]);
 
     // Create the parameters for the instance itself, and create it.
     let instance_params = params::InstanceCreate {
@@ -1049,11 +1046,11 @@ async fn test_instance_with_multiple_nics_unwinds_completely(
         subnet_name: default_name.clone(),
         ip: Some("172.30.0.6".parse().unwrap()),
     };
-    let interface_params = params::InstanceNetworkInterfaceAttachment::Create(
-        params::InstanceNetworkInterfaceCreate {
-            params: vec![if0_params.clone(), if1_params.clone()],
-        },
-    );
+    let interface_params =
+        params::InstanceNetworkInterfaceAttachment::Create(vec![
+            if0_params.clone(),
+            if1_params.clone(),
+        ]);
 
     // Create the parameters for the instance itself, and create it.
     let instance_params = params::InstanceCreate {
@@ -1140,7 +1137,7 @@ async fn test_attach_one_disk_to_instance(cptestctx: &ControlPlaneTestContext) {
         network_interfaces: params::InstanceNetworkInterfaceAttachment::Default,
         disks: vec![params::InstanceDiskAttachment::Attach(
             params::InstanceDiskAttach {
-                disk: Name::try_from(String::from("probablydata")).unwrap(),
+                name: Name::try_from(String::from("probablydata")).unwrap(),
             },
         )],
     };
@@ -1237,7 +1234,7 @@ async fn test_attach_eight_disks_to_instance(
             .map(|i| {
                 params::InstanceDiskAttachment::Attach(
                     params::InstanceDiskAttach {
-                        disk: Name::try_from(
+                        name: Name::try_from(
                             format!("probablydata{}", i).to_string(),
                         )
                         .unwrap(),
@@ -1342,7 +1339,7 @@ async fn test_cannot_attach_nine_disks_to_instance(
             .map(|i| {
                 params::InstanceDiskAttachment::Attach(
                     params::InstanceDiskAttach {
-                        disk: Name::try_from(
+                        name: Name::try_from(
                             format!("probablydata{}", i).to_string(),
                         )
                         .unwrap(),
@@ -1468,7 +1465,7 @@ async fn test_cannot_attach_faulted_disks(cptestctx: &ControlPlaneTestContext) {
             .map(|i| {
                 params::InstanceDiskAttachment::Attach(
                     params::InstanceDiskAttach {
-                        disk: Name::try_from(
+                        name: Name::try_from(
                             format!("probablydata{}", i).to_string(),
                         )
                         .unwrap(),

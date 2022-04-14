@@ -135,7 +135,7 @@ impl Pool {
         &self,
         dataset_id: Uuid,
     ) -> Result<PathBuf, Error> {
-        let path = std::path::Path::new(crate::OMICRON_CONFIG_PATH)
+        let path = std::path::Path::new(omicron_common::OMICRON_CONFIG_PATH)
             .join(self.id.to_string());
         create_dir_all(&path).await?;
         let mut path = path.join(dataset_id.to_string());
@@ -513,7 +513,7 @@ impl StorageWorker {
     // If requested via the `do_format` parameter, may also initialize
     // these resources.
     //
-    // Returns the UUID attached to the underlying ZFS partition.
+    // Returns the UUID attached to the underlying ZFS dataset.
     // Returns (was_inserted, Uuid).
     async fn initialize_dataset_and_zone(
         &self,

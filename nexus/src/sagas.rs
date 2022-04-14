@@ -11,9 +11,10 @@
 
 use crate::context::OpContext;
 use crate::db::identity::{Asset, Resource};
+use crate::db::lookup::LookupPath;
 use crate::external_api::params;
 use crate::saga_interface::SagaContext;
-use crate::{authn, db};
+use crate::{authn, authz, db};
 use anyhow::anyhow;
 use chrono::Utc;
 use crucible_agent_client::{
@@ -43,6 +44,7 @@ use slog::warn;
 use slog::Logger;
 use std::collections::BTreeMap;
 use std::convert::{TryFrom, TryInto};
+use std::net::Ipv6Addr;
 use std::sync::Arc;
 use steno::new_action_noop_undo;
 use steno::ActionContext;
@@ -109,6 +111,26 @@ async fn saga_generate_uuid<UserType: SagaType>(
     Ok(Uuid::new_v4())
 }
 
+/// A trait for sagas with serialized authentication information.
+///
+/// This allows sharing code in different sagas which rely on some
+/// authentication information, for example when doing database lookups.
+trait AuthenticatedSagaParams {
+    fn serialized_authn(&self) -> &authn::saga::Serialized;
+}
+
+/// A helper macro which implements the `AuthenticatedSagaParams` trait for saga
+/// parameter types which have a field called `serialized_authn`.
+macro_rules! impl_authenticated_saga_params {
+    ($typ:ty) => {
+        impl AuthenticatedSagaParams for <$typ as SagaType>::SagaParamsType {
+            fn serialized_authn(&self) -> &authn::saga::Serialized {
+                &self.serialized_authn
+            }
+        }
+    };
+}
+
 // "Create Instance" saga template
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -126,6 +148,7 @@ impl SagaType for SagaInstanceCreate {
     type SagaParamsType = Arc<ParamsInstanceCreate>;
     type ExecContextType = Arc<SagaContext>;
 }
+impl_authenticated_saga_params!(SagaInstanceCreate);
 
 pub fn saga_instance_create() -> SagaTemplate<SagaInstanceCreate> {
     let mut template_builder = SagaTemplateBuilder::new();
@@ -149,6 +172,12 @@ pub fn saga_instance_create() -> SagaTemplate<SagaInstanceCreate> {
         // keep track of resources and reservations, etc.  See the comment on
         // SagaContext::alloc_server()
         new_action_noop_undo(sic_alloc_server),
+    );
+
+    template_builder.append(
+        "propolis_ip",
+        "AllocatePropolisIp",
+        new_action_noop_undo(sic_allocate_propolis_ip),
     );
 
     template_builder.append(
@@ -272,7 +301,7 @@ async fn sic_allocate_network_interface_ids(
         params::InstanceNetworkInterfaceAttachment::Create(
             ref create_params,
         ) => {
-            if create_params.params.len()
+            if create_params.len()
                 > crate::nexus::MAX_NICS_PER_INSTANCE.try_into().unwrap()
             {
                 return Err(ActionError::action_failed(
@@ -286,8 +315,8 @@ async fn sic_allocate_network_interface_ids(
                     ),
                 ));
             }
-            let mut ids = Vec::with_capacity(create_params.params.len());
-            for _ in 0..create_params.params.len() {
+            let mut ids = Vec::with_capacity(create_params.len());
+            for _ in 0..create_params.len() {
                 ids.push(Uuid::new_v4());
             }
             Ok(ids)
@@ -306,11 +335,7 @@ async fn sic_create_network_interfaces(
         params::InstanceNetworkInterfaceAttachment::Create(
             ref create_params,
         ) => {
-            sic_create_custom_network_interfaces(
-                &sagactx,
-                &create_params.params,
-            )
-            .await
+            sic_create_custom_network_interfaces(&sagactx, &create_params).await
         }
     }
 }
@@ -334,20 +359,15 @@ async fn sic_create_custom_network_interfaces(
     let ids = sagactx.lookup::<Vec<Uuid>>("network_interface_ids")?;
 
     // Lookup authz objects, used in the call to create the NIC itself.
-    let authz_instance = datastore
-        .instance_lookup_by_id(instance_id)
+    let (.., authz_instance) = LookupPath::new(&opctx, &datastore)
+        .instance_id(instance_id)
+        .lookup_for(authz::Action::CreateChild)
         .await
         .map_err(ActionError::action_failed)?;
-    let authz_project = datastore
-        .project_lookup_by_id(saga_params.project_id)
-        .await
-        .map_err(ActionError::action_failed)?;
-    let (authz_vpc, db_vpc) = datastore
-        .vpc_fetch(
-            &opctx,
-            &authz_project,
-            &db::model::Name::from(interface_params[0].vpc_name.clone()),
-        )
+    let (.., authz_vpc, db_vpc) = LookupPath::new(&opctx, &datastore)
+        .project_id(saga_params.project_id)
+        .vpc_name(&db::model::Name::from(interface_params[0].vpc_name.clone()))
+        .fetch()
         .await
         .map_err(ActionError::action_failed)?;
 
@@ -374,12 +394,10 @@ async fn sic_create_custom_network_interfaces(
         // should probably either be in a transaction, or the
         // `subnet_create_network_interface` function/query needs some JOIN
         // on the `vpc_subnet` table.
-        let (authz_subnet, db_subnet) = datastore
-            .vpc_subnet_fetch(
-                &opctx,
-                &authz_vpc,
-                &db::model::Name::from(params.subnet_name.clone()),
-            )
+        let (.., authz_subnet, db_subnet) = LookupPath::new(&opctx, &datastore)
+            .vpc_id(authz_vpc.id())
+            .vpc_subnet_name(&db::model::Name::from(params.subnet_name.clone()))
+            .fetch()
             .await
             .map_err(ActionError::action_failed)?;
         let mac =
@@ -438,13 +456,14 @@ async fn sic_create_custom_network_interfaces(
 
                 // Refetch the interface itself, to serialize it for the next
                 // saga node.
-                datastore
-                    .instance_lookup_network_interface(
-                        &opctx,
-                        &authz_instance,
-                        &db::model::Name(params.identity.name.clone()),
-                    )
+                LookupPath::new(&opctx, &datastore)
+                    .instance_id(authz_instance.id())
+                    .network_interface_name(&db::model::Name(
+                        params.identity.name.clone(),
+                    ))
+                    .fetch()
                     .await
+                    .map(|(.., db_interface)| db_interface)
             }
             Err(e) => Err(e.into_external()),
         }
@@ -480,22 +499,19 @@ async fn sic_create_default_network_interface(
     };
 
     // Lookup authz objects, used in the call to actually create the NIC.
-    let authz_instance = datastore
-        .instance_lookup_by_id(instance_id)
+    let (.., authz_instance) = LookupPath::new(&opctx, &datastore)
+        .instance_id(instance_id)
+        .lookup_for(authz::Action::CreateChild)
         .await
         .map_err(ActionError::action_failed)?;
-    let authz_project = datastore
-        .project_lookup_by_id(saga_params.project_id)
-        .await
-        .map_err(ActionError::action_failed)?;
-    let (authz_vpc, _) = datastore
-        .vpc_fetch(&opctx, &authz_project, &internal_default_name.clone())
-        .await
-        .map_err(ActionError::action_failed)?;
-    let (authz_subnet, db_subnet) = datastore
-        .vpc_subnet_fetch(&opctx, &authz_vpc, &internal_default_name)
-        .await
-        .map_err(ActionError::action_failed)?;
+    let (.., authz_vpc, authz_subnet, db_subnet) =
+        LookupPath::new(&opctx, &datastore)
+            .project_id(saga_params.project_id)
+            .vpc_name(&internal_default_name)
+            .vpc_subnet_name(&internal_default_name)
+            .fetch()
+            .await
+            .map_err(ActionError::action_failed)?;
 
     let mac = db::model::MacAddr::new().map_err(ActionError::action_failed)?;
     let interface_id = Uuid::new_v4();
@@ -525,16 +541,24 @@ async fn sic_create_default_network_interface(
 async fn sic_create_network_interfaces_undo(
     sagactx: ActionContext<SagaInstanceCreate>,
 ) -> Result<(), anyhow::Error> {
-    // We issue a request to delete any interfaces associated with this instance.
-    // In the case we failed partway through allocating interfaces, we won't
-    // have cached the interface records in the saga log, but they're definitely
-    // still in the database. Just delete every interface that exists, even if
-    // there are zero such records.
+    // We issue a request to delete any interfaces associated with this
+    // instance.  In the case we failed partway through allocating interfaces,
+    // we won't have cached the interface records in the saga log, but they're
+    // definitely still in the database. Just delete every interface that
+    // exists, even if there are zero such records.
     let osagactx = sagactx.user_data();
+    let datastore = osagactx.datastore();
+    let saga_params = sagactx.saga_params();
+    let opctx =
+        OpContext::for_saga_action(&sagactx, &saga_params.serialized_authn);
     let instance_id = sagactx.lookup::<Uuid>("instance_id")?;
-    osagactx
-        .datastore()
-        .instance_delete_all_network_interfaces(&instance_id)
+    let (.., authz_instance) = LookupPath::new(&opctx, &datastore)
+        .instance_id(instance_id)
+        .lookup_for(authz::Action::Modify)
+        .await
+        .map_err(ActionError::action_failed)?;
+    datastore
+        .instance_delete_all_network_interfaces(&opctx, &authz_instance)
         .await
         .map_err(ActionError::action_failed)?;
     Ok(())
@@ -623,7 +647,7 @@ async fn ensure_instance_disk_attach_state(
         }
         params::InstanceDiskAttachment::Attach(instance_disk_attach) => {
             let disk_name: db::model::Name =
-                instance_disk_attach.disk.clone().into();
+                instance_disk_attach.name.clone().into();
 
             if attached {
                 osagactx
@@ -655,21 +679,56 @@ async fn ensure_instance_disk_attach_state(
     Ok(())
 }
 
+/// Helper function to allocate a new IPv6 address for an Oxide service running
+/// on the provided sled.
+///
+/// `sled_id_name` is the name of the serialized output containing the UUID for
+/// the targeted sled.
+async fn allocate_sled_ipv6<T>(
+    sagactx: ActionContext<T>,
+    sled_id_name: &str,
+) -> Result<Ipv6Addr, ActionError>
+where
+    T: SagaType<ExecContextType = Arc<SagaContext>>,
+    T::SagaParamsType: AuthenticatedSagaParams,
+{
+    let osagactx = sagactx.user_data();
+    let params = sagactx.saga_params();
+    let opctx = OpContext::for_saga_action(&sagactx, params.serialized_authn());
+    let sled_uuid = sagactx.lookup::<Uuid>(sled_id_name)?;
+    osagactx
+        .datastore()
+        .next_ipv6_address(&opctx, sled_uuid)
+        .await
+        .map_err(ActionError::action_failed)
+}
+
+// Allocate an IP address on the destination sled for the Propolis server
+async fn sic_allocate_propolis_ip(
+    sagactx: ActionContext<SagaInstanceCreate>,
+) -> Result<Ipv6Addr, ActionError> {
+    allocate_sled_ipv6(sagactx, "server_id").await
+}
+
 async fn sic_create_instance_record(
     sagactx: ActionContext<SagaInstanceCreate>,
 ) -> Result<db::model::Name, ActionError> {
     let osagactx = sagactx.user_data();
     let params = sagactx.saga_params();
-    let sled_uuid = sagactx.lookup::<Uuid>("server_id");
-    let instance_id = sagactx.lookup::<Uuid>("instance_id");
-    let propolis_uuid = sagactx.lookup::<Uuid>("propolis_id");
+    let sled_uuid = sagactx.lookup::<Uuid>("server_id")?;
+    let instance_id = sagactx.lookup::<Uuid>("instance_id")?;
+    let propolis_uuid = sagactx.lookup::<Uuid>("propolis_id")?;
+    let propolis_addr = sagactx.lookup::<Ipv6Addr>("propolis_ip")?;
 
     let runtime = InstanceRuntimeState {
         run_state: InstanceState::Creating,
-        sled_uuid: sled_uuid?,
-        propolis_uuid: propolis_uuid?,
+        sled_uuid,
+        propolis_uuid,
         dst_propolis_uuid: None,
-        propolis_addr: None,
+        propolis_addr: Some(std::net::SocketAddr::new(
+            propolis_addr.into(),
+            12400,
+        )),
         migration_uuid: None,
         hostname: params.create_params.hostname.clone(),
         memory: params.create_params.memory,
@@ -679,7 +738,7 @@ async fn sic_create_instance_record(
     };
 
     let new_instance = db::model::Instance::new(
-        instance_id?,
+        instance_id,
         params.project_id,
         &params.create_params,
         runtime.into(),
@@ -699,21 +758,17 @@ async fn sic_delete_instance_record(
 ) -> Result<(), anyhow::Error> {
     let osagactx = sagactx.user_data();
     let params = sagactx.saga_params();
+    let datastore = osagactx.datastore();
     let opctx = OpContext::for_saga_action(&sagactx, &params.serialized_authn);
     let instance_id = sagactx.lookup::<Uuid>("instance_id")?;
     let instance_name = sagactx.lookup::<db::model::Name>("instance_name")?;
 
     // We currently only support deleting an instance if it is stopped or
     // failed, so update the state accordingly to allow deletion.
-    let authz_project = osagactx
-        .datastore()
-        .project_lookup_by_id(params.project_id)
-        .await
-        .map_err(ActionError::action_failed)?;
-
-    let (authz_instance, db_instance) = osagactx
-        .datastore()
-        .instance_fetch(&opctx, &authz_project, &instance_name)
+    let (.., authz_instance, db_instance) = LookupPath::new(&opctx, &datastore)
+        .project_id(params.project_id)
+        .instance_name(&instance_name)
+        .fetch()
         .await
         .map_err(ActionError::action_failed)?;
 
@@ -729,8 +784,7 @@ async fn sic_delete_instance_record(
         ..db_instance.runtime_state
     };
 
-    let updated = osagactx
-        .datastore()
+    let updated = datastore
         .instance_update_runtime(&instance_id, &runtime_state)
         .await
         .map_err(ActionError::action_failed)?;
@@ -743,8 +797,7 @@ async fn sic_delete_instance_record(
     }
 
     // Actually delete the record.
-    osagactx
-        .datastore()
+    datastore
         .project_delete_instance(&opctx, &authz_instance)
         .await
         .map_err(ActionError::action_failed)?;
@@ -758,6 +811,7 @@ async fn sic_instance_ensure(
     // TODO-correctness is this idempotent?
     let osagactx = sagactx.user_data();
     let params = sagactx.saga_params();
+    let datastore = osagactx.datastore();
     let runtime_params = InstanceRuntimeStateRequested {
         run_state: InstanceStateRequested::Running,
         migration_params: None,
@@ -766,15 +820,10 @@ async fn sic_instance_ensure(
     let instance_name = sagactx.lookup::<db::model::Name>("instance_name")?;
     let opctx = OpContext::for_saga_action(&sagactx, &params.serialized_authn);
 
-    let authz_project = osagactx
-        .datastore()
-        .project_lookup_by_id(params.project_id)
-        .await
-        .map_err(ActionError::action_failed)?;
-
-    let (authz_instance, instance) = osagactx
-        .datastore()
-        .instance_fetch(&opctx, &authz_project, &instance_name)
+    let (.., authz_instance, db_instance) = LookupPath::new(&opctx, &datastore)
+        .project_id(params.project_id)
+        .instance_name(&instance_name)
+        .fetch()
         .await
         .map_err(ActionError::action_failed)?;
 
@@ -783,7 +832,7 @@ async fn sic_instance_ensure(
         .instance_set_runtime(
             &opctx,
             &authz_instance,
-            &instance,
+            &db_instance,
             runtime_params,
         )
         .await
@@ -806,6 +855,7 @@ impl SagaType for SagaInstanceMigrate {
     type SagaParamsType = Arc<ParamsInstanceMigrate>;
     type ExecContextType = Arc<SagaContext>;
 }
+impl_authenticated_saga_params!(SagaInstanceMigrate);
 
 pub fn saga_instance_migrate() -> SagaTemplate<SagaInstanceMigrate> {
     let mut template_builder = SagaTemplateBuilder::new();
@@ -820,6 +870,12 @@ pub fn saga_instance_migrate() -> SagaTemplate<SagaInstanceMigrate> {
         "dst_propolis_id",
         "GeneratePropolisId",
         new_action_noop_undo(saga_generate_uuid),
+    );
+
+    template_builder.append(
+        "dst_propolis_ip",
+        "AllocatePropolisIp",
+        new_action_noop_undo(sim_allocate_propolis_ip),
     );
 
     template_builder.append(
@@ -875,11 +931,19 @@ async fn sim_migrate_prep(
     Ok((instance_id, instance.runtime_state.into()))
 }
 
+// Allocate an IP address on the destination sled for the Propolis server.
+async fn sim_allocate_propolis_ip(
+    sagactx: ActionContext<SagaInstanceMigrate>,
+) -> Result<Ipv6Addr, ActionError> {
+    allocate_sled_ipv6(sagactx, "dst_sled_uuid").await
+}
+
 async fn sim_instance_migrate(
     sagactx: ActionContext<SagaInstanceMigrate>,
 ) -> Result<(), ActionError> {
     let osagactx = sagactx.user_data();
     let params = sagactx.saga_params();
+    let opctx = OpContext::for_saga_action(&sagactx, &params.serialized_authn);
 
     let migration_id = sagactx.lookup::<Uuid>("migrate_id")?;
     let dst_sled_uuid = params.migrate_params.dst_sled_uuid;
@@ -887,10 +951,20 @@ async fn sim_instance_migrate(
     let (instance_id, old_runtime) =
         sagactx.lookup::<(Uuid, InstanceRuntimeState)>("migrate_instance")?;
 
+    // Allocate an IP address the destination sled for the new Propolis server.
+    let propolis_addr = osagactx
+        .datastore()
+        .next_ipv6_address(&opctx, dst_sled_uuid)
+        .await
+        .map_err(ActionError::action_failed)?;
+
     let runtime = InstanceRuntimeState {
         sled_uuid: dst_sled_uuid,
         propolis_uuid: dst_propolis_uuid,
-        propolis_addr: None,
+        propolis_addr: Some(std::net::SocketAddr::new(
+            propolis_addr.into(),
+            12400,
+        )),
         ..old_runtime
     };
     let instance_hardware = InstanceHardware {
@@ -1033,18 +1107,24 @@ async fn sdc_create_disk_record(
     // but this should be acceptable because the disk remains in a "Creating"
     // state until the saga has completed.
     let volume_id = sagactx.lookup::<Uuid>("volume_id")?;
+
     let disk = db::model::Disk::new(
         disk_id,
         params.project_id,
         volume_id,
         params.create_params.clone(),
         db::model::DiskRuntimeState::new(),
-    );
+    )
+    .map_err(|e| {
+        ActionError::action_failed(Error::invalid_request(&e.to_string()))
+    })?;
+
     let disk_created = osagactx
         .datastore()
         .project_create_disk(disk)
         .await
         .map_err(ActionError::action_failed)?;
+
     Ok(disk_created)
 }
 
@@ -1352,8 +1432,9 @@ async fn sdc_finalize_disk_record(
 
     let disk_id = sagactx.lookup::<Uuid>("disk_id")?;
     let disk_created = sagactx.lookup::<db::model::Disk>("created_disk")?;
-    let authz_disk = datastore
-        .disk_lookup_by_id(disk_id)
+    let (.., authz_disk) = LookupPath::new(&opctx, &datastore)
+        .disk_id(disk_id)
+        .lookup_for(authz::Action::Modify)
         .await
         .map_err(ActionError::action_failed)?;
     // TODO-security Review whether this can ever fail an authz check.  We don't

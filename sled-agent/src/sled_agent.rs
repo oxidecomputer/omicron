@@ -68,7 +68,7 @@ impl From<Error> for omicron_common::api::external::Error {
 ///
 /// Contains both a connection to the Nexus, as well as managed instances.
 pub struct SledAgent {
-    // Component of Sled Agent responsible for storage and partition management.
+    // Component of Sled Agent responsible for storage and dataset management.
     storage: StorageManager,
 
     // Component of Sled Agent responsible for managing Propolis instances.
@@ -106,8 +106,12 @@ impl SledAgent {
         //
         // TODO(https://github.com/oxidecomputer/omicron/issues/821): This
         // should be removed once the Sled Agent is initialized with a
-        // RSS-provided IP address. In the meantime, we just pick one.
-        Zones::ensure_has_global_zone_v6_address(config.data_link.clone())?;
+        // RSS-provided IP address. In the meantime, we use one from the
+        // configuration file.
+        Zones::ensure_has_global_zone_v6_address(
+            config.data_link.clone(),
+            config.dropshot.bind_address.ip(),
+        )?;
 
         // Identify all existing zones which should be managed by the Sled
         // Agent.
@@ -119,7 +123,7 @@ impl SledAgent {
         let zones = Zones::get()?;
         for z in zones {
             warn!(log, "Deleting zone: {}", z.name());
-            Zones::halt_and_remove(&log, z.name())?;
+            Zones::halt_and_remove_logged(&log, z.name())?;
         }
 
         // Identify all VNICs which should be managed by the Sled Agent.
@@ -161,7 +165,8 @@ impl SledAgent {
             config.data_link.clone(),
         )?;
         let services =
-            ServiceManager::new(log.clone(), config.data_link.clone()).await?;
+            ServiceManager::new(log.clone(), config.data_link.clone(), None)
+                .await?;
 
         Ok(SledAgent { storage, instances, nexus_client, services })
     }
@@ -182,11 +187,11 @@ impl SledAgent {
     pub async fn filesystem_ensure(
         &self,
         zpool_uuid: Uuid,
-        partition_kind: DatasetKind,
+        dataset_kind: DatasetKind,
         address: SocketAddr,
     ) -> Result<(), Error> {
         self.storage
-            .upsert_filesystem(zpool_uuid, partition_kind, address)
+            .upsert_filesystem(zpool_uuid, dataset_kind, address)
             .await?;
         Ok(())
     }

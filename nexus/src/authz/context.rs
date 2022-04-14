@@ -93,19 +93,26 @@ impl Context {
                 error
             ))),
             Ok(false) => {
-                let error = if is_authn {
-                    Error::Forbidden
-                } else {
-                    // If the user did not authenticate successfully, this will
-                    // become a 401 rather than a 403.
+                Err(if !is_authn {
+                    // If we failed an authz check, and the user did not
+                    // authenticate at all, we report a 401.
                     Error::Unauthenticated {
                         internal_message: String::from(
                             "authorization failed for unauthenticated request",
                         ),
                     }
-                };
-
-                Err(resource.on_unauthorized(&self.authz, error, actor, action))
+                } else {
+                    // Otherwise, we normally think of this as a 403
+                    // "Forbidden".  However, the resource impl may choose to
+                    // override that with a 404 to avoid leaking information
+                    // about the resource existing.
+                    resource.on_unauthorized(
+                        &self.authz,
+                        Error::Forbidden,
+                        actor,
+                        action,
+                    )
+                })
             }
         }
     }
@@ -154,8 +161,8 @@ pub trait AuthorizedResource: oso::ToPolar + Send + Sync + 'static {
 #[cfg(test)]
 mod test {
     // These are essentially unit tests for the policy itself.
-    // TODO-coverage This is just a start.  But we need roles to do a more
-    // comprehensive test.
+    // TODO-coverage This is just a start.  But we need better support for role
+    // assignments for non-built-in users to do more here.
     // TODO If this gets any more complicated, we could consider automatically
     // generating the test cases.  We could precreate a bunch of resources and
     // some users with different roles.  Then we could run through a table that

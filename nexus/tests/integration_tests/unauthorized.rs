@@ -42,13 +42,12 @@ use omicron_nexus::authn::external::spoof;
 // TODO-coverage:
 // * It would be good to add a built-in test user that can read everything in
 //   the world and use that to exercise 404 vs. 401/403 behavior.
-// * It'd be nice to verify that all the endpoints listed here are within the
-//   OpenAPI spec.
-// * It'd be nice to produce a list of endpoints from the OpenAPI spec that are
-//   not checked here.  We could put this into an expectorate file and make sure
-//   that we don't add new unchecked endpoints.
 // * When we finish authz, maybe the hardcoded information here can come instead
 //   from the OpenAPI spec?
+// * For each endpoint that hits a real resource, we should hit the same
+//   endpoint with a non-existent resource to ensure that we get the same result
+//   (so that we don't leak information about existence based on, say, 401 vs.
+//   403).
 #[nexus_test]
 async fn test_unauthorized(cptestctx: &ControlPlaneTestContext) {
     DiskTest::new(cptestctx).await;
@@ -78,13 +77,11 @@ SUMMARY OF REQUESTS MADE
 
 KEY, USING HEADER AND EXAMPLE ROW:
 
-          +----------------------------> privileged GET (expects 200)
-          |                              (digit = last digit of 200-level
-          |                              response)
+          +----------------------------> privileged GET (expects 200 or 500)
+          |                              (digit = last digit of status code)
           |
           |                          +-> privileged GET (expects same as above)
-          |                          |   (digit = last digit of 200-level
-          |                          |    response)
+          |                          |   (digit = last digit of status code)
           |                          |   ('-' => skipped (N/A))
           ^                          ^
 HEADER:   G GET  PUT  POST DEL  TRCE G  URL
@@ -228,12 +225,9 @@ async fn verify_endpoint(
     let log = log.new(o!("url" => endpoint.url));
     info!(log, "test: begin endpoint");
 
-    // Determine the expected status code for unauthenticated requests, based on
-    // the endpoint's visibility.
-    let unauthn_status = match endpoint.visibility {
-        Visibility::Public => StatusCode::UNAUTHORIZED,
-        Visibility::Protected => StatusCode::NOT_FOUND,
-    };
+    // When the user is not authenticated, failing any authz check results in a
+    // "401 Unauthorized" status code.
+    let unauthn_status = StatusCode::UNAUTHORIZED;
 
     // Determine the expected status code for authenticated, unauthorized
     // requests, based on the endpoint's visibility.
@@ -246,26 +240,47 @@ async fn verify_endpoint(
     // response.  Otherwise, the test might later succeed by coincidence.  We
     // might find a 404 because of something that actually doesn't exist rather
     // than something that's just hidden from unauthorized users.
-    let get_allowed = endpoint
-        .allowed_methods
-        .iter()
-        .any(|allowed| matches!(allowed, AllowedMethod::Get));
-    let resource_before: Option<serde_json::Value> = if get_allowed {
-        info!(log, "test: privileged GET");
-        record_operation(WhichTest::PrivilegedGet(Some(&http::StatusCode::OK)));
-        Some(
-            NexusRequest::object_get(client, endpoint.url)
-                .authn_as(AuthnMode::PrivilegedUser)
-                .execute()
-                .await
-                .unwrap()
-                .parsed_body()
-                .unwrap(),
-        )
-    } else {
-        warn!(log, "test: skipping privileged GET (method not allowed)");
-        record_operation(WhichTest::PrivilegedGet(None));
-        None
+    let get_allowed = endpoint.allowed_methods.iter().find(|allowed| {
+        matches!(allowed, AllowedMethod::Get | AllowedMethod::GetUnimplemented)
+    });
+    let resource_before = match get_allowed {
+        Some(AllowedMethod::Get) => {
+            info!(log, "test: privileged GET");
+            record_operation(WhichTest::PrivilegedGet(Some(
+                &http::StatusCode::OK,
+            )));
+            Some(
+                NexusRequest::object_get(client, endpoint.url)
+                    .authn_as(AuthnMode::PrivilegedUser)
+                    .execute()
+                    .await
+                    .unwrap()
+                    .parsed_body::<serde_json::Value>()
+                    .unwrap(),
+            )
+        }
+        Some(AllowedMethod::GetUnimplemented) => {
+            info!(log, "test: privileged GET (unimplemented)");
+            let expected_status = http::StatusCode::INTERNAL_SERVER_ERROR;
+            record_operation(WhichTest::PrivilegedGet(Some(&expected_status)));
+            NexusRequest::expect_failure(
+                client,
+                expected_status,
+                http::Method::GET,
+                endpoint.url,
+            )
+            .authn_as(AuthnMode::PrivilegedUser)
+            .execute()
+            .await
+            .unwrap();
+            None
+        }
+        Some(_) => unimplemented!(),
+        None => {
+            warn!(log, "test: skipping privileged GET (method not allowed)");
+            record_operation(WhichTest::PrivilegedGet(None));
+            None
+        }
     };
 
     print!(" ");
@@ -467,8 +482,20 @@ fn record_operation(whichtest: WhichTest<'_>) {
     // codes.
     let t = term::stdout();
     if let Some(mut term) = t {
+        // We just want to write one green character to stdout.  But we also
+        // want it to be captured by the test runner like people usually expect
+        // when they haven't passed "--nocapture".  The test runner only
+        // captures output from the `print!` family of macros, not all writes to
+        // stdout.  So we write the formatting control character, flush that (to
+        // make sure it gets emitted before our character), use print for our
+        // character, reset the terminal, then flush that.
+        //
+        // Note that this likely still writes the color-changing control
+        // characters to the real stdout, even without "--nocapture".  That
+        // sucks, but at least you don't see them.
         term.fg(term::color::GREEN).unwrap();
-        write!(term, "{}", c).unwrap();
+        term.flush().unwrap();
+        print!("{}", c);
         term.reset().unwrap();
         term.flush().unwrap();
     } else {

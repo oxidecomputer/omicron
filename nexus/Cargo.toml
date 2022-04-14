@@ -9,10 +9,11 @@ path = "../rpaths"
 
 [dependencies]
 anyhow = "1.0"
-async-bb8-diesel = { git = "https://github.com/oxidecomputer/async-bb8-diesel", rev = "c849b717be" }
+async-bb8-diesel = { git = "https://github.com/oxidecomputer/async-bb8-diesel", rev = "8c6685f0b33c7bbc6418384850cb9c897896cda5" }
 async-trait = "0.1.53"
+authz-macros = { path = "src/authz/authz-macros" }
 base64 = "0.13.0"
-bb8 = "0.7.1"
+bb8 = "0.8.0"
 cookie = "0.16"
 crucible-agent-client = { git = "https://github.com/oxidecomputer/crucible", rev = "945daedb88cefa790f1d994b3a038b8fa9ac514a" }
 # Tracking pending 2.0 version.
@@ -25,7 +26,7 @@ hyper = "0.14"
 db-macros = { path = "src/db/db-macros" }
 ipnetwork = "0.18"
 lazy_static = "1.4.0"
-libc = "0.2.119"
+libc = "0.2.122"
 macaddr = { version = "1.0.1", features = [ "serde_std" ]}
 mime_guess = "2.0.4"
 newtype_derive = "0.1.6"
@@ -41,7 +42,7 @@ reqwest = { version = "0.11.8", features = [ "json" ] }
 ring = "0.16"
 serde_json = "1.0"
 serde_urlencoded = "0.7.1"
-serde_with = "1.12.0"
+serde_with = "1.12.1"
 sled-agent-client = { path = "../sled-agent-client" }
 slog-dtrace = "0.2"
 structopt = "0.3"
@@ -116,7 +117,7 @@ features = [ "serde", "v4" ]
 
 [dev-dependencies]
 criterion = { version = "0.3", features = [ "async_tokio" ] }
-expectorate = "1.0.4"
+expectorate = "1.0.5"
 nexus-test-utils-macros = { path = "test-utils-macros" }
 nexus-test-utils = { path = "test-utils" }
 omicron-test-utils = { path = "../test-utils" }

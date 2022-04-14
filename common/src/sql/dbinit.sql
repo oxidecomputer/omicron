@@ -64,8 +64,12 @@ CREATE TABLE omicron.public.sled (
     time_deleted TIMESTAMPTZ,
     rcgen INT NOT NULL,
 
+    /* The IP address and bound port of the sled agent server. */
     ip INET NOT NULL,
-    port INT4 NOT NULL
+    port INT4 NOT NULL,
+
+    /* The last address allocated to an Oxide service on this sled. */
+    last_used_address INET NOT NULL
 );
 
 /*
@@ -365,6 +369,12 @@ CREATE UNIQUE INDEX ON omicron.public.instance (
 --     'faulted'
 -- );
 
+CREATE TYPE omicron.public.block_size AS ENUM (
+  '512',
+  '2048',
+  '4096'
+);
+
 CREATE TABLE omicron.public.disk (
     /* Identity metadata (resource) */
     id UUID PRIMARY KEY,
@@ -400,7 +410,9 @@ CREATE TABLE omicron.public.disk (
 
     /* Disk configuration */
     size_bytes INT NOT NULL,
-    origin_snapshot UUID
+    block_size omicron.public.block_size NOT NULL,
+    origin_snapshot UUID,
+    origin_image UUID
 );
 
 CREATE UNIQUE INDEX ON omicron.public.disk (
@@ -414,6 +426,30 @@ CREATE INDEX ON omicron.public.disk (
 ) WHERE
     time_deleted IS NULL AND attach_instance_id IS NOT NULL;
 
+CREATE TABLE omicron.public.image (
+    /* Identity metadata (resource) */
+    id UUID PRIMARY KEY,
+    name STRING(63) NOT NULL,
+    description STRING(512) NOT NULL,
+    time_created TIMESTAMPTZ NOT NULL,
+    time_modified TIMESTAMPTZ NOT NULL,
+    /* Indicates that the object has been deleted */
+    time_deleted TIMESTAMPTZ,
+
+    /* Optional project UUID: Images may or may not be global */
+    project_id UUID,
+    /* Optional volume ID: Images may exist without backing volumes */
+    volume_id UUID,
+    /* Optional URL: Images may be backed by either a URL or a volume */
+    url STRING(8192),
+    size_bytes INT NOT NULL
+);
+
+CREATE UNIQUE INDEX on omicron.public.image (
+    project_id,
+    name
+) WHERE
+    time_deleted is NULL;
 
 CREATE TABLE omicron.public.snapshot (
     /* Identity metadata (resource) */
@@ -687,14 +723,14 @@ CREATE TABLE omicron.public.router_route (
     /* Indicates that the object has been deleted */
     time_deleted TIMESTAMPTZ,
 
-    router_id UUID NOT NULL,
+    vpc_router_id UUID NOT NULL,
     kind omicron.public.router_route_kind NOT NULL,
     target STRING(128) NOT NULL,
     destination STRING(128) NOT NULL
 );
 
 CREATE UNIQUE INDEX ON omicron.public.router_route (
-    router_id,
+    vpc_router_id,
     name
 ) WHERE
     time_deleted IS NULL;

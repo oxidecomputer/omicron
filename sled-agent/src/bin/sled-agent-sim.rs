@@ -15,6 +15,7 @@ use omicron_sled_agent::sim::{
     run_server, Config, ConfigStorage, ConfigZpool, SimMode,
 };
 use std::net::SocketAddr;
+use std::net::SocketAddrV6;
 use structopt::StructOpt;
 use uuid::Uuid;
 
@@ -44,7 +45,7 @@ struct Args {
     uuid: Uuid,
 
     #[structopt(name = "SA_IP:PORT", parse(try_from_str))]
-    sled_agent_addr: SocketAddr,
+    sled_agent_addr: SocketAddrV6,
 
     #[structopt(name = "NEXUS_IP:PORT", parse(try_from_str))]
     nexus_addr: SocketAddr,
@@ -67,7 +68,7 @@ async fn do_run() -> Result<(), CmdError> {
         sim_mode: args.sim_mode,
         nexus_address: args.nexus_addr,
         dropshot: ConfigDropshot {
-            bind_address: args.sled_agent_addr,
+            bind_address: args.sled_agent_addr.into(),
             request_body_max_bytes: 1024 * 1024,
             ..Default::default()
         },
@@ -75,7 +76,7 @@ async fn do_run() -> Result<(), CmdError> {
         storage: ConfigStorage {
             // Create 10 "virtual" U.2s, with 1 TB of storage.
             zpools: vec![ConfigZpool { size: 1 << 40 }; 10],
-            ip: args.sled_agent_addr.ip(),
+            ip: (*args.sled_agent_addr.ip()).into(),
         },
     };
 

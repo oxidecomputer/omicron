@@ -105,20 +105,40 @@ jobs:
     - uses: taiki-e/install-action@nextest
     - name: Report cargo version
       run: cargo --version
+    - name: Remove unnecessary software
+      run: |
+        echo "Disk space:"
+        df -h
+
+        if [ -d "/usr/share/dotnet" ]; then
+          echo "Removing dotnet"
+          sudo rm -rf /usr/share/dotnet
+        fi
+        if [ -d "/usr/local/lib/android" ]; then
+          echo "Removing android"
+          sudo rm -rf /usr/local/lib/android
+        fi
+        if [ -d "/opt/ghc" ]; then
+          echo "Removing haskell"
+          sudo rm -rf /opt/ghc
+        fi
+
+        echo "Disk space:"
+        df -h
     - name: Configure GitHub cache for CockroachDB binaries
       id: cache-cockroachdb
       # actions/cache@v2.1.4
       uses: actions/cache@26968a09c0ea4f3e233fdddbafd1166051a095f6
       with:
         key: ${{ runner.os }}-cockroach-binary-${{ hashFiles('tools/cockroachdb_checksums') }}
-        path: "cockroachdb"
+        path: "./out/cockroachdb"
     - name: Configure GitHub cache for ClickHouse binaries
       id: cache-clickhouse
       # actions/cache@v2.1.4
       uses: actions/cache@26968a09c0ea4f3e233fdddbafd1166051a095f6
       with:
         key: ${{ runner.os }}-clickhouse-binary-${{ hashFiles('tools/clickhouse_checksums') }}
-        path: "clickhouse"
+        path: "./out/clickhouse"
     - name: Download ClickHouse
       if: steps.cache-clickhouse.outputs.cache-hit != 'true'
       run: ./tools/ci_download_clickhouse
@@ -141,13 +161,13 @@ jobs:
       # - TMPDIR=$OMICRON_TMP: we specify a specific temporary directory so that
       #   failed test outputs will be in a known place that we can grab at the
       #   end without also grabbing random other temporary files.
-      run: TMPDIR=$OMICRON_TMP PATH="$PATH:$PWD/cockroachdb/bin:$PWD/clickhouse" RUSTFLAGS="-D warnings" RUSTDOCFLAGS="-D warnings" cargo build --locked --all-targets --verbose
+      run: TMPDIR=$OMICRON_TMP PATH="$PATH:$PWD/out/cockroachdb/bin:$PWD/out/clickhouse" RUSTFLAGS="-D warnings" RUSTDOCFLAGS="-D warnings" cargo build --locked --all-targets --verbose
     - name: Run tests
       # Use the same RUSTFLAGS and RUSTDOCFLAGS as above to avoid having to
       # rebuild here.
       # Put "./cockroachdb/bin" and "./clickhouse" on the PATH for the test
       # suite.
-      run: TMPDIR=$OMICRON_TMP PATH="$PATH:$PWD/cockroachdb/bin:$PWD/clickhouse" RUSTFLAGS="-D warnings" RUSTDOCFLAGS="-D warnings" cargo nextest run --workspace --locked --config-file .cargo/nextest.toml
+      run: TMPDIR=$OMICRON_TMP PATH="$PATH:$PWD/out/cockroachdb/bin:$PWD/out/clickhouse" RUSTFLAGS="-D warnings" RUSTDOCFLAGS="-D warnings" cargo nextest run --workspace --locked --config-file .cargo/nextest.toml
     - name: Archive any failed test results
       if: ${{ failure() }}
       # actions/upload-artifact@v2.3.1

@@ -2,15 +2,17 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+mod bulk_state_get;
 mod config;
 mod context;
 mod error;
+
 pub mod http_entrypoints; // TODO pub only for testing - is this right?
-mod sp_comms;
 
 pub use config::Config;
 pub use context::ServerContext;
-use slog::{debug, error, info, o, Logger};
+
+use slog::{debug, error, info, o, warn, Logger};
 use std::sync::Arc;
 use uuid::Uuid;
 
@@ -42,6 +44,13 @@ impl Server {
     ) -> Result<Server, String> {
         let log = log.new(o!("name" => config.id.to_string()));
         info!(log, "setting up gateway server");
+
+        match gateway_sp_comms::register_probes() {
+            Ok(_) => debug!(log, "successfully registered DTrace USDT probes"),
+            Err(err) => {
+                warn!(log, "failed to register DTrace USDT probes: {}", err);
+            }
+        }
 
         let apictx =
             ServerContext::new(config, &log).await.map_err(|error| {

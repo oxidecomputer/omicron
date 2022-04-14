@@ -73,6 +73,19 @@ impl From<model::Project> for Project {
     }
 }
 
+// IMAGES
+
+/// Client view of Images
+#[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct Image {
+    #[serde(flatten)]
+    pub identity: IdentityMetadata,
+
+    pub project_id: Option<Uuid>,
+    pub url: Option<String>,
+    pub size: ByteCount,
+}
+
 // SNAPSHOTS
 
 /// Client view of a Snapshot

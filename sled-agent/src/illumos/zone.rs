@@ -75,6 +75,9 @@ pub enum Error {
 
 /// Describes the type of addresses which may be requested from a zone.
 #[derive(Copy, Clone, Debug)]
+// TODO-cleanup: Remove, along with moving to IPv6 addressing everywhere.
+// See https://github.com/oxidecomputer/omicron/issues/889.
+#[allow(dead_code)]
 pub enum AddressRequest {
     Dhcp,
     Static(IpNetwork),
@@ -98,31 +101,51 @@ pub struct Zones {}
 #[cfg_attr(test, mockall::automock, allow(dead_code))]
 impl Zones {
     /// Ensures a zone is halted before both uninstalling and deleting it.
-    pub fn halt_and_remove(log: &Logger, name: &str) -> Result<(), Error> {
-        if let Some(zone) = Self::find(name)? {
-            info!(log, "halt_and_remove: Zone state: {:?}", zone.state());
-            let (halt, uninstall) = match zone.state() {
-                // For states where we could be running, attempt to halt.
-                zone::State::Running | zone::State::Ready => (true, true),
-                // For zones where we never performed installation, simply
-                // delete the zone - uninstallation is invalid.
-                zone::State::Configured => (false, false),
-                // For most zone states, perform uninstallation.
-                _ => (false, true),
-            };
+    ///
+    /// Returns the state the zone was in before it was removed, or None if the
+    /// zone did not exist.
+    pub fn halt_and_remove(name: &str) -> Result<Option<zone::State>, Error> {
+        match Self::find(name)? {
+            None => Ok(None),
+            Some(zone) => {
+                let state = zone.state();
+                let (halt, uninstall) = match state {
+                    // For states where we could be running, attempt to halt.
+                    zone::State::Running | zone::State::Ready => (true, true),
+                    // For zones where we never performed installation, simply
+                    // delete the zone - uninstallation is invalid.
+                    zone::State::Configured => (false, false),
+                    // For most zone states, perform uninstallation.
+                    _ => (false, true),
+                };
 
-            if halt {
-                zone::Adm::new(name).halt().map_err(Error::Halt)?;
+                if halt {
+                    zone::Adm::new(name).halt().map_err(Error::Halt)?;
+                }
+                if uninstall {
+                    zone::Adm::new(name)
+                        .uninstall(/* force= */ true)
+                        .map_err(Error::Uninstall)?;
+                }
+                zone::Config::new(name)
+                    .delete(/* force= */ true)
+                    .run()
+                    .map_err(Error::Delete)?;
+                Ok(Some(state))
             }
-            if uninstall {
-                zone::Adm::new(name)
-                    .uninstall(/* force= */ true)
-                    .map_err(Error::Uninstall)?;
-            }
-            zone::Config::new(name)
-                .delete(/* force= */ true)
-                .run()
-                .map_err(Error::Delete)?;
+        }
+    }
+
+    /// Halt and remove the zone, logging the state in which the zone was found.
+    pub fn halt_and_remove_logged(
+        log: &Logger,
+        name: &str,
+    ) -> Result<(), Error> {
+        if let Some(state) = Self::halt_and_remove(name)? {
+            info!(
+                log,
+                "halt_and_remove_logged: Previous zone state: {:?}", state
+            );
         }
         Ok(())
     }
@@ -154,7 +177,7 @@ impl Zones {
                     "Invalid state; uninstalling and deleting zone {}",
                     zone_name
                 );
-                Zones::halt_and_remove(log, zone.name())?;
+                Zones::halt_and_remove_logged(log, zone.name())?;
             }
         }
 
@@ -309,8 +332,9 @@ impl Zones {
         let prefix =
             if let Some(zone) = zone { vec![ZLOGIN, zone] } else { vec![] };
 
+        let interface = format!("{}/", addrobj.interface());
         let show_addr_args =
-            &[IPADM, "show-addr", "-p", "-o", "TYPE", &addrobj.to_string()];
+            &[IPADM, "show-addr", "-p", "-o", "TYPE", &interface];
 
         let args = prefix.iter().chain(show_addr_args);
         let cmd = command.args(args);
@@ -409,7 +433,12 @@ impl Zones {
     // from RSS.
     pub fn ensure_has_global_zone_v6_address(
         physical_link: Option<PhysicalLink>,
+        address: IpAddr,
     ) -> Result<(), Error> {
+        if !address.is_ipv6() {
+            return Err(Error::Ip(address.into()));
+        }
+
         // Ensure that addrconf has been set up in the Global
         // Zone.
 
@@ -424,11 +453,13 @@ impl Zones {
         // Ensure that a static IPv6 address has been allocated
         // to the Global Zone. Without this, we don't have a way
         // to route to IP addresses that we want to create in
-        // the non-GZ.
+        // the non-GZ. Note that we use a `/64` prefix, as all addresses
+        // allocated for services on this sled itself are within the underlay
+        // prefix. Anything else must be routed through Sidecar.
         Self::ensure_address(
             None,
-            &gz_link_local_addrobj.on_same_interface("v6route")?,
-            AddressRequest::new_static("fd00:1de::".parse().unwrap(), Some(16)),
+            &gz_link_local_addrobj.on_same_interface("sled6")?,
+            AddressRequest::new_static(address, Some(64)),
         )?;
         Ok(())
     }
