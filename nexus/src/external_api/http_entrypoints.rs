@@ -1806,7 +1806,7 @@ async fn project_vpcs_get_vpc(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Create a VPC in a project. This will cause a failure in the OpenAPI spec test.
+/// Create a VPC in a project.
 #[endpoint {
     method = POST,
     path = "/organizations/{organization_name}/projects/{project_name}/vpcs",
