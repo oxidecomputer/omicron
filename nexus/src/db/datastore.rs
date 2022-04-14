@@ -2198,11 +2198,6 @@ impl DataStore {
             })?;
 
         Ok(authn::ConsoleSessionWithSiloId {
-            authz: authz::ConsoleSession::new(
-                authz::FLEET,
-                authz_session.id(),
-                authz_session.lookup_type().clone(),
-            ),
             console_session,
             silo_id: db_silo_user.silo_id,
         })

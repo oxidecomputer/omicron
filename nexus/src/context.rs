@@ -502,20 +502,18 @@ impl SessionStore for Arc<ServerContext> {
 
     async fn session_update_last_used(
         &self,
-        session: &ConsoleSessionWithSiloId,
+        token: String,
     ) -> Option<Self::SessionModel> {
         let opctx = &self.nexus.opctx_external_authn;
-        let authz_session = &session.authz;
-        self.nexus.session_update_last_used(&opctx, &authz_session).await.ok()
+        self.nexus.session_update_last_used(&opctx, &token).await.ok()
     }
 
     async fn session_expire(
         &self,
-        session: &ConsoleSessionWithSiloId,
+        token: String,
     ) -> Option<()> {
         let opctx = &self.nexus.opctx_external_authn;
-        let authz_session = &session.authz;
-        self.nexus.session_hard_delete(opctx, &authz_session).await.ok()
+        self.nexus.session_hard_delete(opctx, &token).await.ok()
     }
 
     fn session_idle_timeout(&self) -> Duration {

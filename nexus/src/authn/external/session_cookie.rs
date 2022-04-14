@@ -36,11 +36,11 @@ pub trait SessionStore {
     /// Extend session by updating time_last_used to now
     async fn session_update_last_used(
         &self,
-        session: &Self::SessionModel,
+        token: String,
     ) -> Option<Self::SessionModel>;
 
     /// Mark session expired
-    async fn session_expire(&self, session: &Self::SessionModel) -> Option<()>;
+    async fn session_expire(&self, token: String) -> Option<()>;
 
     /// Maximum time session can remain idle before expiring
     fn session_idle_timeout(&self) -> Duration;
@@ -56,8 +56,8 @@ pub const SESSION_COOKIE_SCHEME_NAME: authn::SchemeName =
 
 /// Generate session cookie header
 pub fn session_cookie_header_value(token: &str, max_age: Duration) -> String {
-    // TODO-security:(https://github.com/oxidecomputer/omicron/issues/249): We should
-    // insert "Secure;" back into this string.
+    // TODO-security:(https://github.com/oxidecomputer/omicron/issues/249): We
+    // should insert "Secure;" back into this string.
     format!(
         "{}={}; Path=/; HttpOnly; SameSite=Lax; Max-Age={}",
         SESSION_COOKIE_COOKIE_NAME,
@@ -110,17 +110,19 @@ where
         let actor =
             Actor { id: session.silo_user_id(), silo_id: session.silo_id() };
 
-        // if the session has gone unused for longer than idle_timeout, it is expired
+        // if the session has gone unused for longer than idle_timeout, it is
+        // expired
         let now = Utc::now();
         if session.time_last_used() + ctx.session_idle_timeout() < now {
-            let expired_session = ctx.session_expire(&session).await;
+            let expired_session = ctx.session_expire(token.clone()).await;
             if expired_session.is_none() {
                 debug!(log, "failed to expire session")
             }
             return SchemeResult::Failed(Reason::BadCredentials {
                 actor,
                 source: anyhow!(
-                    "session expired due to idle timeout. last used: {}. time checked: {}. TTL: {}",
+                    "session expired due to idle timeout. last used: {}. \
+                    time checked: {}. TTL: {}",
                     session.time_last_used(),
                     now,
                     ctx.session_idle_timeout()
@@ -128,17 +130,19 @@ where
             });
         }
 
-        // if the user is still within the idle timeout, but the session has existed longer
-        // than absolute_timeout, it is expired and we can no longer extend the session
+        // if the user is still within the idle timeout, but the session has
+        // existed longer than absolute_timeout, it is expired and we can no
+        // longer extend the session
         if session.time_created() + ctx.session_absolute_timeout() < now {
-            let expired_session = ctx.session_expire(&session).await;
+            let expired_session = ctx.session_expire(token.clone()).await;
             if expired_session.is_none() {
                 debug!(log, "failed to expire session")
             }
             return SchemeResult::Failed(Reason::BadCredentials {
                 actor,
                 source: anyhow!(
-                    "session expired due to absolute timeout. created: {}. last used: {}. time checked: {}. TTL: {}",
+                    "session expired due to absolute timeout. created: {}. \
+                    last used: {}. time checked: {}. TTL: {}",
                     session.time_created(),
                     session.time_last_used(),
                     now,
@@ -151,7 +155,7 @@ where
         // authenticated for this request at this point. The next request might
         // be wrongly considered idle, but that's a problem for the next
         // request.
-        let updated_session = ctx.session_update_last_used(&session).await;
+        let updated_session = ctx.session_update_last_used(token).await;
         if updated_session.is_none() {
             debug!(log, "failed to extend session")
         }
@@ -192,7 +196,6 @@ mod test {
 
     #[derive(Clone, Copy)]
     struct FakeSession {
-        token: String,
         silo_user_id: Uuid,
         silo_id: Uuid,
         time_created: DateTime<Utc>,
@@ -227,18 +230,18 @@ mod test {
 
         async fn session_update_last_used(
             &self,
-            session: &FakeSession,
+            token: String,
         ) -> Option<Self::SessionModel> {
             let mut sessions = self.sessions.lock().unwrap();
-            let session = *sessions.get(&session.token).unwrap();
+            let session = *sessions.get(&token).unwrap();
             let new_session =
                 FakeSession { time_last_used: Utc::now(), ..session };
             (*sessions).insert(token, new_session)
         }
 
-        async fn session_expire(&self, session: &FakeSession) -> Option<()> {
+        async fn session_expire(&self, token: String) -> Option<()> {
             let mut sessions = self.sessions.lock().unwrap();
-            (*sessions).remove(&session.token);
+            (*sessions).remove(&token);
             Some(())
         }
 
@@ -287,7 +290,6 @@ mod test {
             sessions: Mutex::new(HashMap::from([(
                 "abc".to_string(),
                 FakeSession {
-                    token: "abc".to_string(),
                     silo_user_id: Uuid::new_v4(),
                     silo_id: Uuid::new_v4(),
                     time_last_used: Utc::now() - Duration::hours(2),
@@ -314,7 +316,6 @@ mod test {
             sessions: Mutex::new(HashMap::from([(
                 "abc".to_string(),
                 FakeSession {
-                    token: "abc".to_string(),
                     silo_user_id: Uuid::new_v4(),
                     silo_id: Uuid::new_v4(),
                     time_last_used: Utc::now(),
@@ -343,7 +344,6 @@ mod test {
             sessions: Mutex::new(HashMap::from([(
                 "abc".to_string(),
                 FakeSession {
-                    token: "abc".to_string(),
                     silo_user_id: Uuid::new_v4(),
                     silo_id: Uuid::new_v4(),
                     time_last_used,
