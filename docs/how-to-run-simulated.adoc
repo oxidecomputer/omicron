@@ -122,9 +122,7 @@ Nexus can also serve the web console. Instructions for generating the static ass
 +
 [source,text]
 ----
-$ cargo run --bin=sled-agent-sim -- $(uuidgen) 127.0.0.1:12345 127.0.0.1:12221
-...
-Jun 02 12:21:50.989 INFO listening, local_addr: 127.0.0.1:12345, component: dropshot
+$ cargo run --bin=sled-agent-sim -- $(uuidgen) [::1]:12345 127.0.0.1:12221
 ----
 
 . `oximeter` is similar to `nexus`, requiring a configuration file. You can use `oximeter/collector/config.toml`, and the whole thing can be run with:
