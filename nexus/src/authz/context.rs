@@ -233,8 +233,7 @@ mod test {
             .authorize(&opctx, Action::Query, DATABASE)
             .await
             .expect("expected unprivileged user to be able to query database");
-        let authz_noauth =
-            authz_context_noauth(&logctx.log, datastore);
+        let authz_noauth = authz_context_noauth(&logctx.log, datastore);
         authz_noauth
             .authorize(&opctx, Action::Query, DATABASE)
             .await
