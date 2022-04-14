@@ -178,14 +178,26 @@ impl Agent {
         request: SledAgentRequest,
     ) -> Result<SledAgentResponse, BootstrapError> {
         info!(&self.log, "Loading Sled Agent: {:?}", request);
+
+        let sled_address = crate::config::get_sled_address(request.ip);
+
         let mut maybe_agent = self.sled_agent.lock().await;
         if let Some(server) = &*maybe_agent {
             // Server already exists, return it.
             info!(&self.log, "Sled Agent already loaded");
+
+            if &server.address().ip() != sled_address.ip() {
+                let err_str = format!(
+                    "Sled Agent already running on address {}, but {} was requested",
+                    server.address().ip(),
+                    sled_address.ip(),
+                );
+                return Err(BootstrapError::SledError(err_str));
+            }
+
             return Ok(SledAgentResponse { id: server.id() });
         }
         // Server does not exist, initialize it.
-        let sled_address = crate::config::get_sled_address(request.ip);
         let server = SledServer::start(&self.sled_config, sled_address)
             .await
             .map_err(|e| BootstrapError::SledError(e))?;

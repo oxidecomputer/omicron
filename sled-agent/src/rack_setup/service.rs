@@ -39,6 +39,9 @@ pub enum SetupServiceError {
     #[error("Cannot deserialize TOML file")]
     Toml(#[from] toml::de::Error),
 
+    #[error("Failed to monitor for peers: {0}")]
+    PeerMonitor(#[from] tokio::sync::broadcast::error::RecvError),
+
     #[error(transparent)]
     Http(#[from] reqwest::Error),
 
@@ -354,43 +357,39 @@ impl ServiceInner {
         expectation: PeerExpectation,
     ) -> Result<Vec<Ipv6Addr>, SetupServiceError> {
         let mut peer_monitor = self.peer_monitor.lock().await;
-        let our_address = peer_monitor.our_address();
+        let (mut all_addrs, mut peer_rx) = peer_monitor.subscribe().await;
+        all_addrs.insert(peer_monitor.our_address());
 
-        // TODO: We could likely optimize this, avoid re-making the sets
         loop {
             {
-                let peers = peer_monitor.peer_addrs().await;
-                let all_addrs = peers.iter().chain([&our_address].into_iter());
                 match expectation {
                     PeerExpectation::Precise(ref expected) => {
-                        let addr_set = all_addrs
-                            .map(|a| *a)
-                            .collect::<HashSet<Ipv6Addr>>();
-                        if addr_set.is_superset(expected) {
-                            return Ok(addr_set
+                        if all_addrs.is_superset(expected) {
+                            return Ok(all_addrs
                                 .into_iter()
                                 .collect::<Vec<Ipv6Addr>>());
                         }
                         info!(self.log, "Waiting for a precise set of peers; not found yet.");
                     }
-                    PeerExpectation::Arbitrary(count) => {
-                        if peers.len() + 1 >= count {
+                    PeerExpectation::Arbitrary(wanted_peer_count) => {
+                        if all_addrs.len() >= wanted_peer_count {
                             return Ok(all_addrs
-                                .map(|a| *a)
+                                .into_iter()
                                 .collect::<Vec<Ipv6Addr>>());
                         }
                         info!(
                             self.log,
                             "Waiting for {} peers (currently have {})",
-                            count,
-                            peers.len() + 1
+                            wanted_peer_count,
+                            all_addrs.len(),
                         );
                     }
                 }
             }
 
             info!(self.log, "Waiting for more peers");
-            peer_monitor.recv().await;
+            let new_peer = peer_rx.recv().await?;
+            all_addrs.insert(new_peer);
         }
     }
 

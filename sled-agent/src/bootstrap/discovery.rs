@@ -131,22 +131,10 @@ impl PeerMonitor {
     /// Returns a [`PeerMonitorObserver`] which can be used to view the results
     /// of monitoring for peers.
     pub async fn observer(&self) -> PeerMonitorObserver {
-        // Subscribe for notifications of new sleds right away, so
-        // we won't miss any notifications.
-        let receiver = self.notification_sender.subscribe();
-
-        // Next, clone the exisitng set of sleds.
-        //
-        // It's possible that we get a notification for a sled which
-        // exists in this set, but we handle that in
-        // [`PeerMonitorObserver::recv`] to avoid surfacing it to a client.
-        let sleds = self.sleds.lock().await.clone();
-
         PeerMonitorObserver {
             our_address: self.our_address,
             actual_sleds: self.sleds.clone(),
-            observed_sleds: sleds,
-            receiver,
+            sender: self.notification_sender.clone(),
         }
     }
 }
@@ -160,11 +148,7 @@ pub struct PeerMonitorObserver {
     // This is only used to re-synchronize our set of sleds
     // if we get out-of-sync due to long notification queues.
     actual_sleds: Arc<Mutex<HashSet<Ipv6Addr>>>,
-    // A local copy of the set of sleds. This lets observers
-    // access + iterate over the set of sleds directly,
-    // without any possibility of blocking the actual monitoring task.
-    observed_sleds: HashSet<Ipv6Addr>,
-    receiver: broadcast::Receiver<Ipv6Addr>,
+    sender: broadcast::Sender<Ipv6Addr>,
 }
 
 impl PeerMonitorObserver {
@@ -173,68 +157,13 @@ impl PeerMonitorObserver {
         self.our_address
     }
 
-    /// Returns the addresses of all connected sleds, excluding
-    /// our own.
-    ///
-    /// This returns the most "up-to-date" view of peers, but a new
-    /// peer may be added immediately after this function returns.
-    ///
-    /// To monitor for changes, a call to [`Self::recv`]
-    /// can be made, to observe changes beyond an initial call to
-    /// [`Self::peer_addrs`].
-    pub async fn peer_addrs(&mut self) -> &HashSet<Ipv6Addr> {
-        // First, drain the incoming queue of sled updates.
-        loop {
-            match self.receiver.try_recv() {
-                Ok(new_addr) => {
-                    self.observed_sleds.insert(new_addr);
-                }
-                Err(broadcast::error::TryRecvError::Empty) => break,
-                Err(broadcast::error::TryRecvError::Closed) => {
-                    panic!("Remote closed")
-                }
-                Err(broadcast::error::TryRecvError::Lagged(_)) => {
-                    self.observed_sleds =
-                        self.actual_sleds.lock().await.clone();
-                }
-            }
-        }
-        while let Ok(new_addr) = self.receiver.try_recv() {
-            self.observed_sleds.insert(new_addr);
-        }
-
-        // Next, return the most up-to-date set of sleds.
-        //
-        // Note that this set may change immediately after `peer_addrs()` returns,
-        // but a caller can see exactly what sleds were added by calling
-        // `recv()`.
-        &self.observed_sleds
-    }
-
-    /// Returns information about a new connected sled.
-    ///
-    /// Note that this does not provide the "initial set" of connected
-    /// sleds - to access that information, call [`Self::peer_addrs`].
-    ///
-    /// Returns [`Option::None`] if the notification queue overflowed,
-    /// and we needed to re-synchronize the set of sleds.
-    pub async fn recv(&mut self) -> Option<Ipv6Addr> {
-        loop {
-            match self.receiver.recv().await {
-                Ok(new_addr) => {
-                    if self.observed_sleds.insert(new_addr) {
-                        return Some(new_addr);
-                    }
-                }
-                Err(broadcast::error::RecvError::Closed) => {
-                    panic!("Remote closed")
-                }
-                Err(broadcast::error::RecvError::Lagged(_)) => {
-                    self.observed_sleds =
-                        self.actual_sleds.lock().await.clone();
-                    return None;
-                }
-            }
-        }
+    /// Returns the current set of sleds and a receiver to hear about
+    /// new ones.
+    pub async fn subscribe(
+        &mut self,
+    ) -> (HashSet<Ipv6Addr>, broadcast::Receiver<Ipv6Addr>) {
+        let sleds = self.actual_sleds.lock().await;
+        let receiver = self.sender.subscribe();
+        (sleds.clone(), receiver)
     }
 }

@@ -25,6 +25,10 @@ pub struct Server {
 }
 
 impl Server {
+    pub fn address(&self) -> SocketAddr {
+        self.http_server.local_addr()
+    }
+
     pub fn id(&self) -> Uuid {
         self.http_server.app_private().id()
     }
