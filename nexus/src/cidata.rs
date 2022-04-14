@@ -6,6 +6,8 @@ use serde::Serialize;
 use std::io::{Cursor, Write};
 use uuid::Uuid;
 
+pub const MAX_USER_DATA_BYTES: usize = 32 * 1024; // 32 KiB
+
 impl Instance {
     pub fn generate_cidata(&self) -> Result<Vec<u8>, Error> {
         // cloud-init meta-data is YAML, but YAML is a strict superset of JSON.
@@ -80,9 +82,10 @@ mod tests {
     /// little further.)
     #[test]
     fn build_vfat_works_with_arbitrarily_sized_input() {
+        let upper = crate::cidata::MAX_USER_DATA_BYTES + 4096;
         // somewhat arbitrarily-chosen prime numbers near 1 KiB and 256 bytes
-        for md_size in (0..36 * 1024).step_by(1019) {
-            for ud_size in (0..36 * 1024).step_by(269) {
+        for md_size in (0..upper).step_by(1019) {
+            for ud_size in (0..upper).step_by(269) {
                 assert!(super::build_vfat(
                     &vec![0x5a; md_size],
                     &vec![0xa5; ud_size]
