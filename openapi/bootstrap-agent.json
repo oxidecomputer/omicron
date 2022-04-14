@@ -156,7 +156,7 @@
         "type": "object",
         "properties": {
           "ip": {
-            "description": "ID of the Sled to be initialized. Portion of the IP space to be managed by the Sled Agent.",
+            "description": "Portion of the IP space to be managed by the Sled Agent.",
             "allOf": [
               {
                 "$ref": "#/components/schemas/Ipv6Net"
