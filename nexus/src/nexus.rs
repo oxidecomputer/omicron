@@ -1185,11 +1185,9 @@ impl Nexus {
             }
 
             params::ImageSource::Snapshot(_id) => {
-                return Err(
-                    Error::unavail(
-                        &"creating images from snapshots not supported"
-                    )
-                );
+                return Err(Error::unavail(
+                    &"creating images from snapshots not supported",
+                ));
             }
         };
 

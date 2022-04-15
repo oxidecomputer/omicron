@@ -251,9 +251,9 @@ impl Into<ByteCount> for BlockSize {
     }
 }
 
-impl Into<u64> for BlockSize {
-    fn into(self) -> u64 {
-        self.0 as u64
+impl From<BlockSize> for u64 {
+    fn from(bs: BlockSize) -> u64 {
+        bs.0 as u64
     }
 }
 
