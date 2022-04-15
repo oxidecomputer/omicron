@@ -12,6 +12,11 @@ multicast_addr = "::1"
 bind_addrs = ["[::1]:0", "[::1]:0"]
 serial_number = [0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1]
 
+[[simulated_sps.sidecar]]
+multicast_addr = "::1"
+bind_addrs = ["[::1]:0", "[::1]:0"]
+serial_number = [1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0]
+
 [[simulated_sps.gimlet]]
 multicast_addr = "::1"
 bind_addrs = ["[::1]:0", "[::1]:0"]

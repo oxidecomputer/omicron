@@ -10,6 +10,7 @@ mod sidecar;
 pub use anyhow::Result;
 use async_trait::async_trait;
 pub use config::Config;
+use gateway_messages::SpPort;
 pub use gimlet::Gimlet;
 pub use server::logger;
 pub use sidecar::Sidecar;
@@ -32,7 +33,7 @@ pub trait SimulatedSp {
     /// Hexlified serial number.
     fn serial_number(&self) -> String;
     /// Listening UDP address of the given port of this simulated SP.
-    fn local_addr(&self, port: usize) -> SocketAddr;
+    fn local_addr(&self, port: SpPort) -> SocketAddr;
     /// Simulate the SP being unresponsive, in which it ignores all incoming
     /// messages.
     async fn set_responsiveness(&self, r: Responsiveness);

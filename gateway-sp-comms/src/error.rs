@@ -35,8 +35,10 @@ pub enum Error {
         .0.slot,
     )]
     SpAddressUnknown(SpIdentifier),
-    #[error("timeout ({timeout:?}) elapsed communicating with {sp:?}")]
-    Timeout { timeout: Duration, sp: SpIdentifier },
+    #[error(
+        "timeout ({timeout:?}) elapsed communicating with {sp:?} on port {port}"
+    )]
+    Timeout { timeout: Duration, port: usize, sp: Option<SpIdentifier> },
     #[error("error communicating with SP: {0}")]
     SpCommunicationFailed(#[from] SpCommunicationError),
     #[error("serial console is already attached")]
