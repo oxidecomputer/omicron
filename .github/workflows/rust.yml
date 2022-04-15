@@ -168,6 +168,14 @@ jobs:
       # Put "./cockroachdb/bin" and "./clickhouse" on the PATH for the test
       # suite.
       run: TMPDIR=$OMICRON_TMP PATH="$PATH:$PWD/out/cockroachdb/bin:$PWD/out/clickhouse" RUSTFLAGS="-D warnings" RUSTDOCFLAGS="-D warnings" cargo nextest run --workspace --locked --config-file .cargo/nextest.toml
+    - name: Archive test runner JUnit output
+      # actions/upload-artifact@v2.3.1
+      uses: actions/upload-artifact@82c141cc518b40d92cc801eee768e7aafc9c2fa2
+      with:
+        name: junit_${{ runner.os }}
+        retention-days: 90
+        path: |
+          junit.xml
     - name: Archive any failed test results
       if: ${{ failure() }}
       # actions/upload-artifact@v2.3.1

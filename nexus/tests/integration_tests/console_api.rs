@@ -54,7 +54,7 @@ async fn test_sessions(cptestctx: &ControlPlaneTestContext) {
         .expect("failed to 401 on unauthed API request");
 
     // console pages don't 401, they 302
-    RequestBuilder::new(&testctx, Method::GET, "/orgs/whatever")
+    RequestBuilder::new(&testctx, Method::GET, "/orgs/nonexistent")
         .expect_status(Some(StatusCode::FOUND))
         .execute()
         .await
@@ -70,7 +70,7 @@ async fn test_sessions(cptestctx: &ControlPlaneTestContext) {
         .await
         .expect("failed to create org with session cookie");
 
-    RequestBuilder::new(&testctx, Method::GET, "/orgs/whatever")
+    RequestBuilder::new(&testctx, Method::GET, "/orgs/nonexistent")
         .header(header::COOKIE, &session_token)
         .expect_status(Some(StatusCode::OK))
         .execute()
@@ -100,7 +100,7 @@ async fn test_sessions(cptestctx: &ControlPlaneTestContext) {
         .await
         .expect("failed to get 401 for unauthed API request");
 
-    RequestBuilder::new(&testctx, Method::GET, "/orgs/whatever")
+    RequestBuilder::new(&testctx, Method::GET, "/orgs/nonexistent")
         .header(header::COOKIE, &session_token)
         .expect_status(Some(StatusCode::FOUND))
         .execute()
