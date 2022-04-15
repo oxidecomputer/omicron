@@ -1,0 +1,22 @@
+[package]
+name = "gateway-cli"
+version = "0.1.0"
+edition = "2021"
+license = "MPL-2.0"
+
+[dependencies]
+anyhow = "1.0"
+clap = "3.1.6"
+futures = "0.3.21"
+libc = "0.2"
+slog-async = "2.6"
+slog-term = "2.9"
+tokio = { version = "1.17", features = [ "rt-multi-thread", "macros", "time" ] }
+tokio-tungstenite = "0.17"
+
+gateway-client = { path = "../gateway-client" }
+omicron-common = { path = "../common" }
+
+[dependencies.slog]
+version = "2.7"
+features = [ "max_level_trace", "release_max_level_debug" ]
