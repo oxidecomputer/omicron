@@ -251,11 +251,9 @@ impl AuthorizedResource for ConsoleSessionList {
 }
 
 #[derive(Clone, Copy, Debug)]
-pub struct GlobalImageList {
-    fleet: Fleet,
-}
+pub struct GlobalImageList;
 /// Singleton representing the [`GlobalImageList`] itself for authz purposes
-pub const GLOBAL_IMAGE_LIST: GlobalImageList = GlobalImageList { fleet: FLEET };
+pub const GLOBAL_IMAGE_LIST: GlobalImageList = GlobalImageList;
 
 impl Eq for GlobalImageList {}
 impl PartialEq for GlobalImageList {
@@ -269,7 +267,7 @@ impl oso::PolarClass for GlobalImageList {
     fn get_polar_class_builder() -> oso::ClassBuilder<Self> {
         oso::Class::builder()
             .with_equality_check()
-            .add_attribute_getter("fleet", |x: &GlobalImageList| x.fleet)
+            .add_attribute_getter("fleet", |_x: &GlobalImageList| FLEET)
     }
 }
 
