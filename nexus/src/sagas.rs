@@ -1306,7 +1306,7 @@ async fn sdc_regions_ensure(
             .await
             .map_err(ActionError::action_failed)?;
 
-        warn!(log, "retrieved global image {}", global_image.id());
+        debug!(log, "retrieved global image {}", global_image.id());
 
         // If the block size of the requested disk doesn't match the image,
         // return an error
@@ -1334,7 +1334,7 @@ async fn sdc_regions_ensure(
             )));
         }
 
-        warn!(
+        debug!(
             log,
             "grabbing global image {} volume {}",
             global_image.id(),
@@ -1351,7 +1351,7 @@ async fn sdc_regions_ensure(
                 ))
             })?;
 
-        warn!(
+        debug!(
             log,
             "grabbed volume {}, with data {}",
             volume.id(),
