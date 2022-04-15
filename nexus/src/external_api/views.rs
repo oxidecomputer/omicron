@@ -75,14 +75,36 @@ impl From<model::Project> for Project {
 
 // IMAGES
 
-/// Client view of Images
+/// Client view of global Images
+#[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct GlobalImage {
+    #[serde(flatten)]
+    pub identity: IdentityMetadata,
+
+    /// URL source of this image, if any
+    pub url: Option<String>,
+
+    /// Version of this, if any
+    pub version: Option<String>,
+
+    /// Hash of the image contents, if applicable
+    pub digest: Option<Digest>,
+
+    /// size of blocks in bytes
+    pub block_size: ByteCount,
+
+    /// total size in bytes
+    pub size: ByteCount,
+}
+
+/// Client view of project Images
 #[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct Image {
     #[serde(flatten)]
     pub identity: IdentityMetadata,
 
     /// The project the disk belongs to, if not a global image.
-    pub project_id: Option<Uuid>,
+    pub project_id: Uuid,
 
     /// URL source of this image, if any
     pub url: Option<String>,

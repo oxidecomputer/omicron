@@ -256,7 +256,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ImageResultsPage"
+                  "$ref": "#/components/schemas/GlobalImageResultsPage"
                 }
               }
             }
@@ -293,7 +293,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Image"
+                  "$ref": "#/components/schemas/GlobalImage"
                 }
               }
             }
@@ -332,7 +332,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Image"
+                  "$ref": "#/components/schemas/GlobalImage"
                 }
               }
             }
@@ -5128,8 +5128,106 @@
           "Bool"
         ]
       },
+      "GlobalImage": {
+        "description": "Client view of global Images",
+        "type": "object",
+        "properties": {
+          "block_size": {
+            "description": "size of blocks in bytes",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ByteCount"
+              }
+            ]
+          },
+          "description": {
+            "description": "human-readable free-form text about a resource",
+            "type": "string"
+          },
+          "digest": {
+            "nullable": true,
+            "description": "Hash of the image contents, if applicable",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Digest"
+              }
+            ]
+          },
+          "id": {
+            "description": "unique, immutable, system-controlled identifier for each resource",
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "description": "unique, mutable, user-controlled identifier for each resource",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Name"
+              }
+            ]
+          },
+          "size": {
+            "description": "total size in bytes",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ByteCount"
+              }
+            ]
+          },
+          "time_created": {
+            "description": "timestamp when this resource was created",
+            "type": "string",
+            "format": "date-time"
+          },
+          "time_modified": {
+            "description": "timestamp when this resource was last modified",
+            "type": "string",
+            "format": "date-time"
+          },
+          "url": {
+            "nullable": true,
+            "description": "URL source of this image, if any",
+            "type": "string"
+          },
+          "version": {
+            "nullable": true,
+            "description": "Version of this, if any",
+            "type": "string"
+          }
+        },
+        "required": [
+          "block_size",
+          "description",
+          "id",
+          "name",
+          "size",
+          "time_created",
+          "time_modified"
+        ]
+      },
+      "GlobalImageResultsPage": {
+        "description": "A single page of results",
+        "type": "object",
+        "properties": {
+          "items": {
+            "description": "list of items on this page of results",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/GlobalImage"
+            }
+          },
+          "next_page": {
+            "nullable": true,
+            "description": "token used to fetch the next page of results (if any)",
+            "type": "string"
+          }
+        },
+        "required": [
+          "items"
+        ]
+      },
       "Image": {
-        "description": "Client view of Images",
+        "description": "Client view of project Images",
         "type": "object",
         "properties": {
           "block_size": {
@@ -5167,7 +5265,6 @@
             ]
           },
           "project_id": {
-            "nullable": true,
             "description": "The project the disk belongs to, if not a global image.",
             "type": "string",
             "format": "uuid"
@@ -5206,6 +5303,7 @@
           "description",
           "id",
           "name",
+          "project_id",
           "size",
           "time_created",
           "time_modified"

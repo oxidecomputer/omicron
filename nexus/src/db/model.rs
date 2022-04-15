@@ -1671,7 +1671,7 @@ impl From<Image> for views::Image {
     fn from(image: Image) -> Self {
         Self {
             identity: image.identity(),
-            project_id: Some(image.project_id),
+            project_id: image.project_id,
             url: image.url,
             version: image.version,
             digest: image.digest.map(|x| x.into()),
@@ -1709,11 +1709,10 @@ pub struct GlobalImage {
     pub size: ByteCount,
 }
 
-impl From<GlobalImage> for views::Image {
+impl From<GlobalImage> for views::GlobalImage {
     fn from(image: GlobalImage) -> Self {
         Self {
             identity: image.identity(),
-            project_id: None,
             url: image.url,
             version: image.version,
             digest: image.digest.map(|x| x.into()),

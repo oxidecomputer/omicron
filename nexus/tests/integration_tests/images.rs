@@ -17,7 +17,7 @@ use nexus_test_utils_macros::nexus_test;
 
 use omicron_common::api::external::{ByteCount, IdentityMetadataCreateParams};
 use omicron_nexus::external_api::params;
-use omicron_nexus::external_api::views::Image;
+use omicron_nexus::external_api::views::GlobalImage;
 
 use httptest::{matchers::*, responders::*, Expectation, ServerBuilder};
 
@@ -39,7 +39,7 @@ async fn test_global_image_create(cptestctx: &ControlPlaneTestContext) {
     );
 
     // No global images yet
-    let global_images: Vec<Image> =
+    let global_images: Vec<GlobalImage> =
         NexusRequest::iter_collection_authn(client, "/images", "", None)
             .await
             .expect("failed to list images")
@@ -66,7 +66,7 @@ async fn test_global_image_create(cptestctx: &ControlPlaneTestContext) {
         .unwrap();
 
     // Verify one global image
-    let global_images: Vec<Image> =
+    let global_images: Vec<GlobalImage> =
         NexusRequest::iter_collection_authn(client, "/images", "", None)
             .await
             .expect("failed to list images")
@@ -268,7 +268,7 @@ async fn test_make_disk_from_global_image(cptestctx: &ControlPlaneTestContext) {
         block_size: params::BlockSize::try_from(512).unwrap(),
     };
 
-    let alpine_image: Image =
+    let alpine_image: GlobalImage =
         NexusRequest::objects_post(client, "/images", &image_create_params)
             .authn_as(AuthnMode::PrivilegedUser)
             .execute()
@@ -334,7 +334,7 @@ async fn test_make_disk_from_global_image_too_small(
         block_size: params::BlockSize::try_from(512).unwrap(),
     };
 
-    let alpine_image: Image =
+    let alpine_image: GlobalImage =
         NexusRequest::objects_post(client, "/images", &image_create_params)
             .authn_as(AuthnMode::PrivilegedUser)
             .execute()
@@ -414,7 +414,7 @@ async fn test_make_disk_from_global_image_blocksize_mismatch(
         block_size: params::BlockSize::try_from(512).unwrap(),
     };
 
-    let alpine_image: Image =
+    let alpine_image: GlobalImage =
         NexusRequest::objects_post(client, "/images", &image_create_params)
             .authn_as(AuthnMode::PrivilegedUser)
             .execute()
