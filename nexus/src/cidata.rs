@@ -1,9 +1,9 @@
 use crate::db::{identity::Resource, model::Instance};
-use fatfs::{FileSystem, FormatVolumeOptions, FsOptions};
+use fatfs::{FatType, FileSystem, FormatVolumeOptions, FsOptions};
 use num_integer::Integer;
 use omicron_common::api::external::Error;
 use serde::Serialize;
-use std::io::{Cursor, Write};
+use std::io::{self, Cursor, Write};
 use uuid::Uuid;
 
 pub const MAX_USER_DATA_BYTES: usize = 32 * 1024; // 32 KiB
@@ -36,19 +36,29 @@ struct MetaData<'a> {
     public_keys: &'a [String],
 }
 
-fn build_vfat(meta_data: &[u8], user_data: &[u8]) -> std::io::Result<Vec<u8>> {
+fn build_vfat(meta_data: &[u8], user_data: &[u8]) -> io::Result<Vec<u8>> {
     let file_sectors =
         meta_data.len().div_ceil(&512) + user_data.len().div_ceil(&512);
-    // this was reverse engineered by making the numbers go lower until the
-    // code failed (usually because of low disk space). this only works for
-    // FAT12 filesystems
-    let sectors = 42.max(file_sectors + 35 + ((file_sectors + 1) / 341 * 2));
+    // vfat can hold more data than this, but we don't expect to ever need that for cloud-init
+    // purposes.
+    if file_sectors > 512 {
+        return Err(io::Error::new(io::ErrorKind::Other, "too much vfat data"));
+    }
+
+    // https://github.com/oxidecomputer/omicron/pull/911#discussion_r851354213
+    // If we're storing < 170 KiB of clusters, the FAT overhead is 35 sectors;
+    // if we're storing < 341 KiB of clusters, the overhead is 37. With a limit
+    // of 512 sectors (error check above), we can assume an overhead of 37.
+    // Additionally, fatfs refuses to format a disk that is smaller than 42
+    // sectors.
+    let sectors = 42.max(file_sectors + 37);
 
     let mut disk = Cursor::new(vec![0; sectors * 512]);
     fatfs::format_volume(
         &mut disk,
         FormatVolumeOptions::new()
             .bytes_per_cluster(512)
+            .fat_type(FatType::Fat12)
             .volume_label(*b"cidata     "),
     )?;
 
@@ -70,8 +80,8 @@ fn build_vfat(meta_data: &[u8], user_data: &[u8]) -> std::io::Result<Vec<u8>> {
 #[cfg(test)]
 mod tests {
     /// the fatfs crate has some unfortunate panics if you ask it to do
-    /// incredibly stupid things, like format a filesystem with an invalid
-    /// cluster size.
+    /// incredibly stupid things, like format an empty disk or create a
+    /// filesystem with an invalid cluster size.
     ///
     /// to ensure that our math for the filesystem size is correct, and also to
     /// ensure that we don't ask fatfs to do incredibly stupid things, this
