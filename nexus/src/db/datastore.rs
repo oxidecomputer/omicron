@@ -2728,31 +2728,6 @@ impl DataStore {
                 )
             })
     }
-
-    pub async fn global_image_fetch(
-        &self,
-        opctx: &OpContext,
-        id: Uuid,
-    ) -> LookupResult<GlobalImage> {
-        opctx
-            .authorize(
-                authz::Action::Read,
-                &authz::GlobalImage::new(
-                    authz::FLEET, // XXX both GlobalImage and GlobalImageList have FLEET as a parent
-                    id,
-                    LookupType::ById(id),
-                ),
-            )
-            .await?;
-
-        use db::schema::global_image::dsl;
-        dsl::global_image
-            .filter(dsl::id.eq(id))
-            .select(GlobalImage::as_select())
-            .first_async(self.pool_authorized(opctx).await?)
-            .await
-            .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
-    }
 }
 
 /// Constructs a DataStore for use in test suites that has preloaded the

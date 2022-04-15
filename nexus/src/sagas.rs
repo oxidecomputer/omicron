@@ -1300,15 +1300,11 @@ async fn sdc_regions_ensure(
         warn!(log, "grabbing image {}", image_id);
 
         // TODO: support project images too
-        let global_image = osagactx
-            .datastore()
-            .global_image_fetch(&opctx, image_id)
+        let (.., global_image) = LookupPath::new(&opctx, &osagactx.datastore())
+            .global_image_id(image_id)
+            .fetch()
             .await
-            .map_err(|e| {
-                ActionError::action_failed(Error::internal_error(
-                    &e.to_string(),
-                ))
-            })?;
+            .map_err(ActionError::action_failed)?;
 
         warn!(log, "retrieved global image {}", global_image.id());
 

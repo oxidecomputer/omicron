@@ -344,6 +344,16 @@ impl<'a> LookupPath<'a> {
             key: GlobalImageKey::Name(Root { lookup_root: self }, name),
         }
     }
+
+    /// Select a resource of type GlobalImage, identified by its id
+    pub fn global_image_id<'b>(self, id: Uuid) -> GlobalImage<'b>
+    where
+        'a: 'b,
+    {
+        GlobalImage {
+            key: GlobalImageKey::PrimaryKey(Root { lookup_root: self }, id),
+        }
+    }
 }
 
 /// Represents the head of the selection path for a resource

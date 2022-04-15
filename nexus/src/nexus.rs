@@ -1197,11 +1197,11 @@ impl Nexus {
         opctx: &OpContext,
         image_name: &Name,
     ) -> LookupResult<db::model::GlobalImage> {
-        let (authz_image, ..) = LookupPath::new(opctx, &self.db_datastore)
+        let (.., db_disk) = LookupPath::new(opctx, &self.db_datastore)
             .global_image_name(image_name)
             .fetch()
             .await?;
-        self.db_datastore.global_image_fetch(opctx, authz_image.id()).await
+        Ok(db_disk)
     }
 
     pub async fn global_image_delete(
