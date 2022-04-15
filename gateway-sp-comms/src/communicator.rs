@@ -513,7 +513,7 @@ trait ResponseKindExt {
 impl ResponseKindExt for ResponseKind {
     fn name(&self) -> &'static str {
         match self {
-            ResponseKind::Pong => response_kind_names::PONG,
+            ResponseKind::Discover(_) => response_kind_names::DISCOVER,
             ResponseKind::IgnitionState(_) => {
                 response_kind_names::IGNITION_STATE
             }
@@ -584,7 +584,7 @@ impl ResponseKindExt for ResponseKind {
 }
 
 mod response_kind_names {
-    pub(super) const PONG: &str = "pong";
+    pub(super) const DISCOVER: &str = "discover";
     pub(super) const IGNITION_STATE: &str = "ignition_state";
     pub(super) const BULK_IGNITION_STATE: &str = "bulk_ignition_state";
     pub(super) const IGNITION_COMMAND_ACK: &str = "ignition_command_ack";

@@ -35,7 +35,7 @@ pub struct Request {
 
 #[derive(Debug, Clone, SerializedSize, Serialize, Deserialize)]
 pub enum RequestKind {
-    Ping,
+    Discover,
     // TODO do we want to be able to request IgnitionState for all targets in
     // one message?
     IgnitionState { target: u8 },
@@ -47,7 +47,15 @@ pub enum RequestKind {
 
 /// Identifier for one of of an SP's KSZ8463 management-network-facing ports.
 #[derive(
-    Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize_repr, Deserialize_repr,
+    Clone,
+    Copy,
+    Debug,
+    PartialEq,
+    Eq,
+    Hash,
+    Serialize_repr,
+    Deserialize_repr,
+    SerializedSize,
 )]
 #[repr(u8)]
 pub enum SpPort {
@@ -60,12 +68,18 @@ pub enum SpPort {
 // that okay, or should we break this up more?
 #[derive(Debug, Clone, SerializedSize, Serialize, Deserialize)]
 pub enum ResponseKind {
-    Pong,
+    Discover(DiscoverResponse),
     IgnitionState(IgnitionState),
     BulkIgnitionState(BulkIgnitionState),
     IgnitionCommandAck,
     SpState(SpState),
     SerialConsoleWriteAck,
+}
+
+#[derive(Debug, Clone, Copy, SerializedSize, Serialize, Deserialize)]
+pub struct DiscoverResponse {
+    /// Which SP port received the `Discover` request.
+    pub sp_port: SpPort,
 }
 
 // TODO how is this reported? Same/different for components?

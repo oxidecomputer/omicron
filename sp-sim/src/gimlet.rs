@@ -11,6 +11,7 @@ use async_trait::async_trait;
 use futures::future;
 use gateway_messages::sp_impl::{SerialConsolePacketizer, SpHandler, SpServer};
 use gateway_messages::version;
+use gateway_messages::DiscoverResponse;
 use gateway_messages::ResponseError;
 use gateway_messages::SerialConsole;
 use gateway_messages::SerialNumber;
@@ -433,18 +434,18 @@ impl Handler {
 }
 
 impl SpHandler for Handler {
-    fn ping(
+    fn discover(
         &mut self,
         sender: SocketAddr,
         port: SpPort,
-    ) -> Result<(), ResponseError> {
-        self.update_gateway_address(sender, port);
+    ) -> Result<DiscoverResponse, ResponseError> {
         debug!(
-            &self.log, "received ping; sending pong";
+            &self.log,
+            "received discover; sending response";
             "sender" => sender,
             "port" => ?port,
         );
-        Ok(())
+        Ok(DiscoverResponse { sp_port: port })
     }
 
     fn ignition_state(
