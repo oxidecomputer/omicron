@@ -78,4 +78,10 @@ fi
 # update the OS packages. This may require a reboot.
 pkg set-publisher -p "$OPTE_P5P_REPO_PATH" --search-first
 pkg set-publisher --non-sticky helios-dev
-pkg update
+RC=0
+pkg update || RC=$?;
+if [[ "$RC" -eq 0 ]] || [[ "$RC" -eq 4 ]]; then
+    exit 0
+else
+    exit "$RC"
+fi
