@@ -69,8 +69,8 @@ impl Gimlet {
         // bind to our two local "KSZ" ports
         assert_eq!(gimlet.bind_addrs.len(), 2); // gimlet SP always has 2 ports
         let servers = future::try_join(
-            UdpServer::new(gimlet.bind_addrs[0]),
-            UdpServer::new(gimlet.bind_addrs[1]),
+            UdpServer::new(gimlet.bind_addrs[0], gimlet.multicast_addr, &log),
+            UdpServer::new(gimlet.bind_addrs[1], gimlet.multicast_addr, &log),
         )
         .await?;
         let servers = [servers.0, servers.1];

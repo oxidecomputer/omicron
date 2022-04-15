@@ -3,10 +3,12 @@
 #
 
 [[simulated_sps.sidecar]]
+multicast_addr = "ff15:0:1de::0"
 bind_addrs = ["[::1]:33300", "[::1]:33301"]
 serial_number = [0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1]
 
 [[simulated_sps.gimlet]]
+multicast_addr = "ff15:0:1de::1"
 bind_addrs = ["[::1]:33310", "[::1]:33311"]
 serial_number = [0, 0, 0, 0, 1, 1, 1, 1, 2, 2, 2, 2, 3, 3, 3, 3]
 [[simulated_sps.gimlet.components]]
@@ -14,6 +16,7 @@ name = "sp3"
 serial_console = "[::1]:33312"
 
 [[simulated_sps.gimlet]]
+multicast_addr = "ff15:0:1de::2"
 bind_addrs = ["[::1]:33320", "[::1]:33321"]
 serial_number = [4, 4, 4, 4, 5, 5, 5, 5, 6, 6, 6, 6, 7, 7, 7, 7]
 [[simulated_sps.gimlet.components]]

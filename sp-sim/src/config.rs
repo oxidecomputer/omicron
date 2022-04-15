@@ -9,7 +9,7 @@ use dropshot::ConfigLogging;
 use gateway_messages::SerialNumber;
 use serde::{Deserialize, Serialize};
 use std::{
-    net::SocketAddr,
+    net::{Ipv6Addr, SocketAddr},
     path::{Path, PathBuf},
 };
 use thiserror::Error;
@@ -17,6 +17,8 @@ use thiserror::Error;
 /// Configuration of a simulated sidecar SP
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct SidecarConfig {
+    /// IPv6 multicast address to join.
+    pub multicast_addr: Ipv6Addr,
     /// UDP address of the two (fake) KSZ8463 ports
     pub bind_addrs: [SocketAddr; 2],
     /// Fake serial number
@@ -26,6 +28,8 @@ pub struct SidecarConfig {
 /// Configuration of a simulated gimlet SP
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct GimletConfig {
+    /// IPv6 multicast address to join.
+    pub multicast_addr: Ipv6Addr,
     /// UDP address of the two (fake) KSZ8463 ports
     pub bind_addrs: [SocketAddr; 2],
     /// Fake serial number

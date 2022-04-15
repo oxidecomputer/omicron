@@ -6,7 +6,10 @@ use crate::config::Config;
 use anyhow::{bail, Context, Result};
 use gateway_messages::{Request, SerializedSize};
 use slog::{debug, error, Logger};
-use std::{net::SocketAddr, sync::Arc};
+use std::{
+    net::{Ipv6Addr, SocketAddr},
+    sync::Arc,
+};
 use tokio::net::UdpSocket;
 
 /// Thin wrapper pairing a [`UdpSocket`] with a buffer sized for [`Request`]s.
@@ -17,14 +20,33 @@ pub(crate) struct UdpServer {
 }
 
 impl UdpServer {
-    pub(crate) async fn new(bind_address: SocketAddr) -> Result<Self> {
+    pub(crate) async fn new(
+        bind_address: SocketAddr,
+        multicast_addr: Ipv6Addr,
+        log: &Logger,
+    ) -> Result<Self> {
         let sock =
             Arc::new(UdpSocket::bind(bind_address).await.with_context(
                 || format!("failed to bind to {}", bind_address),
             )?);
+
+        // In some environments where sp-sim runs (e.g., some CI runners),
+        // we're not able to join ipv6 multicast groups. In those cases, we're
+        // configured with a "multicast_addr" that isn't actually multicast, so
+        // don't try to join the group if we have such an address.
+        if multicast_addr.is_multicast() {
+            sock.join_multicast_v6(&multicast_addr, 0).with_context(|| {
+                format!("failed to join multicast group {}", multicast_addr)
+            })?;
+        }
+
         let local_addr = sock
             .local_addr()
             .with_context(|| "failed to get local address of bound socket")?;
+        debug!(log, "UDP socket bound";
+            "local_addr" => %local_addr,
+            "multicast_addr" => %multicast_addr,
+        );
 
         Ok(Self { sock, local_addr, buf: [0; Request::MAX_SIZE] })
     }

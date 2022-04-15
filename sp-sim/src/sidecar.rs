@@ -4,25 +4,35 @@
 
 use std::net::SocketAddr;
 
-use crate::config::{Config, SidecarConfig};
+use crate::config::Config;
+use crate::config::SidecarConfig;
+use crate::ignition_id;
 use crate::server::UdpServer;
-use crate::{ignition_id, Responsiveness, SimulatedSp};
+use crate::Responsiveness;
+use crate::SimulatedSp;
 use anyhow::anyhow;
 use anyhow::Context;
 use anyhow::Result;
 use async_trait::async_trait;
 use futures::future;
-use gateway_messages::sp_impl::{SpHandler, SpServer};
-use gateway_messages::{
-    BulkIgnitionState, IgnitionCommand, IgnitionFlags, IgnitionState,
-    ResponseError, SerialNumber, SpState,
-};
-use slog::{debug, info, warn, Logger};
-use tokio::sync::{mpsc, oneshot};
-use tokio::{
-    select,
-    task::{self, JoinHandle},
-};
+use gateway_messages::sp_impl::SpHandler;
+use gateway_messages::sp_impl::SpServer;
+use gateway_messages::BulkIgnitionState;
+use gateway_messages::IgnitionCommand;
+use gateway_messages::IgnitionFlags;
+use gateway_messages::IgnitionState;
+use gateway_messages::ResponseError;
+use gateway_messages::SerialNumber;
+use gateway_messages::SpState;
+use slog::debug;
+use slog::info;
+use slog::warn;
+use slog::Logger;
+use tokio::select;
+use tokio::sync::mpsc;
+use tokio::sync::oneshot;
+use tokio::task;
+use tokio::task::JoinHandle;
 
 pub struct Sidecar {
     local_addrs: [SocketAddr; 2],
@@ -69,8 +79,8 @@ impl Sidecar {
         // bind to our two local "KSZ" ports
         assert_eq!(sidecar.bind_addrs.len(), 2);
         let servers = future::try_join(
-            UdpServer::new(sidecar.bind_addrs[0]),
-            UdpServer::new(sidecar.bind_addrs[1]),
+            UdpServer::new(sidecar.bind_addrs[0], sidecar.multicast_addr, &log),
+            UdpServer::new(sidecar.bind_addrs[1], sidecar.multicast_addr, &log),
         )
         .await?;
         let servers = [servers.0, servers.1];
