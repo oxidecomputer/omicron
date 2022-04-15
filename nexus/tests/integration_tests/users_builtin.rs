@@ -31,6 +31,8 @@ async fn test_users_builtin(cptestctx: &ControlPlaneTestContext) {
     assert_eq!(u.identity.id, authn::USER_INTERNAL_API.id);
     let u = users.remove(&authn::USER_INTERNAL_READ.name.to_string()).unwrap();
     assert_eq!(u.identity.id, authn::USER_INTERNAL_READ.id);
+    let u = users.remove(&authn::USER_EXTERNAL_AUTHN.name.to_string()).unwrap();
+    assert_eq!(u.identity.id, authn::USER_EXTERNAL_AUTHN.id);
     let u = users.remove(&authn::USER_SAGA_RECOVERY.name.to_string()).unwrap();
     assert_eq!(u.identity.id, authn::USER_SAGA_RECOVERY.id);
     let u =

@@ -47,6 +47,14 @@ where
             Some("InvalidSp".to_string()),
             err.to_string(),
         ),
+        SpCommsError::SerialConsoleAttached => HttpError::for_bad_request(
+            Some("SerialConsoleAttached".to_string()),
+            err.to_string(),
+        ),
+        SpCommsError::BadWebsocketConnection(_) => HttpError::for_bad_request(
+            Some("BadWebsocketConnection".to_string()),
+            err.to_string(),
+        ),
         SpCommsError::SpAddressUnknown(_)
         | SpCommsError::Timeout
         | SpCommsError::SpCommunicationFailed(_) => {

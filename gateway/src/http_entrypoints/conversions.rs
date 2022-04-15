@@ -6,8 +6,6 @@
 
 //! Conversions between externally-defined types and HTTP / JsonSchema types.
 
-use super::SerialConsoleChunk;
-use super::SerialConsoleContents;
 use super::SpIdentifier;
 use super::SpIgnition;
 use super::SpState;
@@ -86,35 +84,6 @@ impl From<gateway_sp_comms::SpIdentifier> for SpIdentifier {
             // id.slot comes from a trusted source (gateway_sp_comms) and will
             // not exceed u32::MAX
             slot: u32::try_from(id.slot).unwrap(),
-        }
-    }
-}
-
-impl From<gateway_sp_comms::SerialConsoleChunk> for SerialConsoleChunk {
-    fn from(chunk: gateway_sp_comms::SerialConsoleChunk) -> Self {
-        match chunk {
-            gateway_sp_comms::SerialConsoleChunk::Data { bytes } => {
-                Self::Data { bytes }
-            }
-            gateway_sp_comms::SerialConsoleChunk::Missing { len } => {
-                Self::Missing { len }
-            }
-        }
-    }
-}
-
-impl From<gateway_sp_comms::SerialConsoleContents> for SerialConsoleContents {
-    fn from(contents: gateway_sp_comms::SerialConsoleContents) -> Self {
-        // TODO this is awkward and (probably?) not free; I tried avoiding this
-        // with serde's remote derive support, but couldn't get something that
-        // satisfied all three of serde, schemars, and openapi.
-        Self {
-            start: contents.start,
-            chunks: contents
-                .chunks
-                .into_iter()
-                .map(SerialConsoleChunk::from)
-                .collect(),
         }
     }
 }

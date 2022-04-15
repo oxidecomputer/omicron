@@ -63,7 +63,7 @@ fn copy_dir(
 /// warning if it's removed from unit tests, but not during a normal build.)
 pub fn test_setup_log(test_name: &str) -> LogContext {
     let log_config = ConfigLogging::File {
-        level: ConfigLoggingLevel::Debug,
+        level: ConfigLoggingLevel::Trace,
         path: String::from("UNUSED"),
         if_exists: ConfigLoggingIfExists::Fail,
     };

@@ -519,6 +519,7 @@ pub enum ResourceType {
     ConsoleSession,
     GlobalImage,
     GlobalImageList,
+    ConsoleSessionList,
     Organization,
     Project,
     Dataset,

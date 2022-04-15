@@ -2575,6 +2575,10 @@ impl ConsoleSession {
         let now = Utc::now();
         Self { token, silo_user_id, time_last_used: now, time_created: now }
     }
+
+    pub fn id(&self) -> String {
+        self.token.clone()
+    }
 }
 
 /// Describes a built-in user, as stored in the database

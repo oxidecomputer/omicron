@@ -75,7 +75,9 @@ async fn test_silos(cptestctx: &ControlPlaneTestContext) {
         .await
         .unwrap();
 
-    let session = nexus.session_create(new_silo_user.id()).await.unwrap();
+    let authn_opctx = nexus.opctx_external_authn();
+    let session =
+        nexus.session_create(authn_opctx, new_silo_user.id()).await.unwrap();
 
     // Create organization with built-in user auth
     // Note: this currently goes to the built-in silo!
@@ -131,13 +133,13 @@ async fn test_silos(cptestctx: &ControlPlaneTestContext) {
 
     // Verify silo user was also deleted
     nexus
-        .silo_user_fetch(new_silo_user.id())
+        .silo_user_fetch(authn_opctx, new_silo_user.id())
         .await
         .expect_err("unexpected success");
 
     // Verify new user's console session isn't valid anymore.
     nexus
-        .session_fetch(session.token.clone())
+        .session_fetch(authn_opctx, session.token.clone())
         .await
         .expect_err("unexpected success");
 }
