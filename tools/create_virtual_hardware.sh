@@ -8,7 +8,7 @@
 # _simulate_ a Gimlet, allowing us to develop software that approximates the
 # eventual operation on Oxide hardware.
 #
-# See `docs/virtual-hardware.adoc` for more details.
+# See `docs/how-to-run.adoc` section "Make me a Gimlet" for more details.
 
 set -e
 set -u
