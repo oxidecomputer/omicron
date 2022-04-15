@@ -15,12 +15,20 @@ use thiserror::Error;
 pub enum StartupError {
     #[error("error binding to UDP address {addr}: {err}")]
     UdpBind { addr: SocketAddr, err: io::Error },
+    #[error("invalid configuration file: {reason}")]
+    InvalidConfig { reason: String },
+    #[error("error communicating with SP: {0}")]
+    SpCommunicationFailed(#[from] SpCommunicationError),
+    #[error("location discovery failed: {reason}")]
+    DiscoveryFailed { reason: String },
 }
 
 #[derive(Debug, Error)]
 pub enum Error {
     #[error("nonexistent SP (type {:?}, slot {})", .0.typ, .0.slot)]
     SpDoesNotExist(SpIdentifier),
+    #[error("unknown socket address for local ignition controller")]
+    LocalIgnitionControllerAddressUnknown,
     #[error(
         "unknown socket address for SP (type {:?}, slot {})",
         .0.typ,

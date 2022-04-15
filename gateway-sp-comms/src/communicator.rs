@@ -22,6 +22,7 @@ use futures::Future;
 use futures::Stream;
 use gateway_messages::version;
 use gateway_messages::BulkIgnitionState;
+use gateway_messages::DiscoverResponse;
 use gateway_messages::IgnitionCommand;
 use gateway_messages::IgnitionState;
 use gateway_messages::Request;
@@ -113,13 +114,14 @@ impl Communicator {
         let request =
             RequestKind::IgnitionState { target: port.as_ignition_target() };
 
-        self.request_response(
-            &controller,
-            request,
-            Some(timeout),
-            ResponseKindExt::try_into_ignition_state,
-        )
-        .await
+        Ok(self
+            .request_response(
+                &controller,
+                request,
+                ResponseKindExt::try_into_ignition_state,
+                Some(timeout),
+            )
+            .await?)
     }
 
     /// Ask the local ignition controller for the ignition state of all SPs.
@@ -134,8 +136,8 @@ impl Communicator {
             .request_response(
                 &controller,
                 request,
-                Some(timeout),
                 ResponseKindExt::try_into_bulk_ignition_state,
+                Some(timeout),
             )
             .await?;
 
@@ -172,13 +174,14 @@ impl Communicator {
         let target = self.id_to_port(target_sp)?.as_ignition_target();
         let request = RequestKind::IgnitionCommand { target, command };
 
-        self.request_response(
-            &controller,
-            request,
-            Some(timeout),
-            ResponseKindExt::try_into_ignition_command_ack,
-        )
-        .await
+        Ok(self
+            .request_response(
+                &controller,
+                request,
+                ResponseKindExt::try_into_ignition_command_ack,
+                Some(timeout),
+            )
+            .await?)
     }
 
     /// Set up a websocket connection that forwards data to and from the given
@@ -298,13 +301,13 @@ impl Communicator {
         let sp =
             self.switch.sp_socket(port).expect("lost address of attached SP");
 
-        self.request_response(
+        Ok(self.request_response(
             &sp,
             RequestKind::SerialConsoleWrite(packet),
-            Some(timeout),
             ResponseKindExt::try_into_serial_console_write_ack,
+            Some(timeout),
         )
-        .await
+        .await?)
     }
 
     /// Get the state of a given SP.
@@ -340,13 +343,14 @@ impl Communicator {
             self.switch.sp_socket(port).ok_or(Error::SpAddressUnknown(sp))?;
         let request = RequestKind::SpState;
 
-        self.request_response(
-            &sp,
-            request,
-            timeout,
-            ResponseKindExt::try_into_sp_state,
-        )
-        .await
+        Ok(self
+            .request_response(
+                &sp,
+                request,
+                ResponseKindExt::try_into_sp_state,
+                timeout,
+            )
+            .await?)
     }
 
     /// Query all online SPs.
@@ -393,12 +397,12 @@ impl Communicator {
             .collect::<FuturesUnordered<_>>()
     }
 
-    async fn request_response<F, T>(
+    pub(crate) async fn request_response<F, T>(
         &self,
         sp: &SpSocket<'_>,
         mut kind: RequestKind,
-        timeout: Option<Timeout>,
         mut map_response_kind: F,
+        timeout: Option<Timeout>,
     ) -> Result<T, Error>
     where
         F: FnMut(ResponseKind) -> Result<T, BadResponseType>,
@@ -494,8 +498,10 @@ impl Communicator {
 
 // When we send a request we expect a specific kind of response; the boilerplate
 // for confirming that is a little noisy, so it lives in this extension trait.
-trait ResponseKindExt {
+pub(crate) trait ResponseKindExt {
     fn name(&self) -> &'static str;
+
+    fn try_into_discover(self) -> Result<DiscoverResponse, BadResponseType>;
 
     fn try_into_ignition_state(self) -> Result<IgnitionState, BadResponseType>;
 
@@ -527,6 +533,16 @@ impl ResponseKindExt for ResponseKind {
             ResponseKind::SerialConsoleWriteAck => {
                 response_kind_names::SERIAL_CONSOLE_WRITE_ACK
             }
+        }
+    }
+
+    fn try_into_discover(self) -> Result<DiscoverResponse, BadResponseType> {
+        match self {
+            ResponseKind::Discover(discover) => Ok(discover),
+            other => Err(BadResponseType {
+                expected: response_kind_names::DISCOVER,
+                got: other.name(),
+            }),
         }
     }
 

@@ -318,6 +318,7 @@ async fn sp_list(
                     // need more refined errors?
                     SpCommsError::Timeout { .. }
                     | SpCommsError::SpCommunicationFailed(_)
+                    | SpCommsError::LocalIgnitionControllerAddressUnknown
                     | SpCommsError::SpAddressUnknown(_) => {
                         SpState::Unresponsive
                     }
