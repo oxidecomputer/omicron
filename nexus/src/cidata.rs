@@ -37,8 +37,6 @@ struct MetaData<'a> {
 }
 
 fn build_vfat(meta_data: &[u8], user_data: &[u8]) -> std::io::Result<Vec<u8>> {
-    // requires #![feature(int_roundings)].
-    // https://github.com/rust-lang/rust/issues/88581
     let file_sectors =
         meta_data.len().div_ceil(&512) + user_data.len().div_ceil(&512);
     // this was reverse engineered by making the numbers go lower until the
