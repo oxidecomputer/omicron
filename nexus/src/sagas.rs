@@ -1345,11 +1345,7 @@ async fn sdc_regions_ensure(
             .datastore()
             .volume_get(global_image.volume_id)
             .await
-            .map_err(|e| {
-                ActionError::action_failed(Error::internal_error(
-                    &e.to_string(),
-                ))
-            })?;
+            .map_err(ActionError::action_failed)?;
 
         debug!(
             log,
