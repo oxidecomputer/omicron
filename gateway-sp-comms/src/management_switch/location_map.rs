@@ -242,7 +242,8 @@ async fn discover_sps(
                     .expect("internal backoff policy gave up");
                 tokio::time::sleep(duration).await;
 
-                let result = communicator.request_response(
+                let result = communicator
+                    .request_response(
                         &socket,
                         RequestKind::Discover,
                         ResponseKindExt::try_into_discover,
