@@ -1015,7 +1015,7 @@ pub struct Organization {
     #[diesel(embed)]
     identity: OrganizationIdentity,
 
-    silo_id: Uuid,
+    pub silo_id: Uuid,
 
     /// child resource generation number, per RFD 192
     pub rcgen: Generation,
@@ -1030,10 +1030,6 @@ impl Organization {
             silo_id,
             rcgen: Generation::new(),
         }
-    }
-
-    pub fn silo_id(&self) -> Uuid {
-        self.silo_id
     }
 }
 

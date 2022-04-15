@@ -523,7 +523,7 @@ impl DataStore {
         opctx.authorize(authz::Action::CreateChild, &authz::FLEET).await?;
 
         let name = organization.name().as_str().to_string();
-        let silo_id = organization.silo_id();
+        let silo_id = organization.silo_id;
 
         Silo::insert_resource(
             silo_id,
@@ -2768,12 +2768,12 @@ mod test {
                 },
             },
         );
-        let org = authz::Organization::new(
-            authz::FLEET,
-            organization.id(),
-            LookupType::ById(organization.id()),
-        );
-        datastore.project_create(&opctx, &org, project).await.unwrap();
+        let (.., authz_org) = LookupPath::new(&opctx, &datastore)
+            .organization_id(organization.id())
+            .lookup_for(authz::Action::CreateChild)
+            .await
+            .unwrap();
+        datastore.project_create(&opctx, &authz_org, project).await.unwrap();
 
         let (.., organization_after_project_create) =
             LookupPath::new(&opctx, &datastore)

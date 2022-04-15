@@ -254,7 +254,7 @@ impl AuthorizedResource for ConsoleSessionList {
 
 authz_resource! {
     name = "Organization",
-    parent = "Fleet",
+    parent = "Silo",
     primary_key = Uuid,
     roles_allowed = true,
     polar_snippet = Custom,

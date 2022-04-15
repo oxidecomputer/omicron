@@ -223,6 +223,11 @@ fn generate_struct(config: &Config) -> TokenStream {
 
         /// Describes how we're looking up this resource
         enum #lookup_enum<'a>{
+            /// An error occurred while selecting the resource
+            ///
+            /// This error will be returned by any lookup/fetch attempts.
+            Error(Root<'a>, Error),
+
             #name_variant
 
             /// We're looking for a resource with the given primary key
@@ -317,6 +322,8 @@ fn generate_misc_helpers(config: &Config) -> TokenStream {
         /// used for this lookup.
         fn lookup_root(&self) -> &LookupPath<'a> {
             match &self.key {
+                #lookup_enum::Error(root, ..) => root.lookup_root(),
+
                 #name_variant
 
                 #lookup_enum::PrimaryKey(root, ..) => root.lookup_root(),
@@ -429,6 +436,8 @@ fn generate_lookup_methods(config: &Config) -> TokenStream {
             let datastore = &lookup.datastore;
 
             match &self.key {
+                #lookup_enum::Error(_, error) => Err(error.clone()),
+
                 #fetch_for_name_variant
 
                 #lookup_enum::PrimaryKey(_, #(#pkey_names,)*) => {
@@ -478,6 +487,8 @@ fn generate_lookup_methods(config: &Config) -> TokenStream {
             let datastore = &lookup.datastore;
 
             match &self.key {
+                #lookup_enum::Error(_, error) => Err(error.clone()),
+
                 #lookup_name_variant
 
                 #lookup_enum::PrimaryKey(_, #(#pkey_names,)*) => {
@@ -742,7 +753,7 @@ mod test {
         let output = lookup_resource(
             quote! {
                 name = "Organization",
-                ancestors = [],
+                ancestors = ["Silo"],
                 children = [ "Project" ],
                 lookup_by_name = true,
                 soft_deletes = true,

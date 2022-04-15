@@ -185,9 +185,20 @@ impl<'a> LookupPath<'a> {
         'a: 'c,
         'b: 'c,
     {
-        Organization {
-            key: OrganizationKey::Name(Root { lookup_root: self }, name),
-        }
+        // XXX-dap XXX-dap The macro needs to be updated so that the by-id
+        // functions all check whether the resource exists in the right Silo
+        let key = match self.opctx.authn.silo_required() {
+            Ok(silo_id) => {
+                let root = Root { lookup_root: self };
+                let silo_key = SiloKey::PrimaryKey(root, silo_id);
+                OrganizationKey::Name(Silo { key: silo_key }, name)
+            }
+            Err(error) => {
+                let root = Root { lookup_root: self };
+                OrganizationKey::Error(root, error)
+            }
+        };
+        Organization { key }
     }
 
     /// Select a resource of type Organization, identified by its id
@@ -260,23 +271,26 @@ impl<'a> LookupPath<'a> {
     }
 
     /// Select a resource of type RoleBuiltin, identified by its `name`
-    pub fn role_builtin_name(
-        self,
-        name: &str,
-    ) -> Result<RoleBuiltin<'a>, Error> {
-        let (resource_type, role_name) =
-            name.split_once(".").ok_or_else(|| Error::ObjectNotFound {
-                type_name: ResourceType::RoleBuiltin,
-                lookup_type: LookupType::ByName(String::from(name)),
-            })?;
-
-        Ok(RoleBuiltin {
-            key: RoleBuiltinKey::PrimaryKey(
+    pub fn role_builtin_name(self, name: &str) -> RoleBuiltin<'a> {
+        let parts = name.split_once(".");
+        let key = if let Some((resource_type, role_name)) = parts {
+            RoleBuiltinKey::PrimaryKey(
                 Root { lookup_root: self },
                 resource_type.to_string(),
                 role_name.to_string(),
-            ),
-        })
+            )
+        } else {
+            let root = Root { lookup_root: self };
+            RoleBuiltinKey::Error(
+                root,
+                Error::ObjectNotFound {
+                    type_name: ResourceType::RoleBuiltin,
+                    lookup_type: LookupType::ByName(String::from(name)),
+                },
+            )
+        };
+
+        RoleBuiltin { key }
     }
 
     /// Select a resource of type Silo, identified by its id
@@ -354,8 +368,17 @@ impl<'a> Root<'a> {
 // Main resource hierarchy: Organizations, Projects, and their resources
 
 lookup_resource! {
-    name = "Organization",
+    name = "Silo",
     ancestors = [],
+    children = [ "Organization" ],
+    lookup_by_name = true,
+    soft_deletes = true,
+    primary_key_columns = [ { column_name = "id", rust_type = Uuid } ]
+}
+
+lookup_resource! {
+    name = "Organization",
+    ancestors = [ "Silo" ],
     children = [ "Project" ],
     lookup_by_name = true,
     soft_deletes = true,
@@ -364,7 +387,7 @@ lookup_resource! {
 
 lookup_resource! {
     name = "Project",
-    ancestors = [ "Organization" ],
+    ancestors = [ "Silo", "Organization" ],
     children = [ "Disk", "Instance", "Vpc" ],
     lookup_by_name = true,
     soft_deletes = true,
@@ -373,7 +396,7 @@ lookup_resource! {
 
 lookup_resource! {
     name = "Disk",
-    ancestors = [ "Organization", "Project" ],
+    ancestors = [ "Silo", "Organization", "Project" ],
     children = [],
     lookup_by_name = true,
     soft_deletes = true,
@@ -382,7 +405,7 @@ lookup_resource! {
 
 lookup_resource! {
     name = "Instance",
-    ancestors = [ "Organization", "Project" ],
+    ancestors = [ "Silo", "Organization", "Project" ],
     children = [ "NetworkInterface" ],
     lookup_by_name = true,
     soft_deletes = true,
@@ -391,7 +414,7 @@ lookup_resource! {
 
 lookup_resource! {
     name = "NetworkInterface",
-    ancestors = [ "Organization", "Project", "Instance" ],
+    ancestors = [ "Silo", "Organization", "Project", "Instance" ],
     children = [],
     lookup_by_name = true,
     soft_deletes = true,
@@ -400,7 +423,7 @@ lookup_resource! {
 
 lookup_resource! {
     name = "Vpc",
-    ancestors = [ "Organization", "Project" ],
+    ancestors = [ "Silo", "Organization", "Project" ],
     children = [ "VpcRouter", "VpcSubnet" ],
     lookup_by_name = true,
     soft_deletes = true,
@@ -409,7 +432,7 @@ lookup_resource! {
 
 lookup_resource! {
     name = "VpcRouter",
-    ancestors = [ "Organization", "Project", "Vpc" ],
+    ancestors = [ "Silo", "Organization", "Project", "Vpc" ],
     children = [ "RouterRoute" ],
     lookup_by_name = true,
     soft_deletes = true,
@@ -418,7 +441,7 @@ lookup_resource! {
 
 lookup_resource! {
     name = "RouterRoute",
-    ancestors = [ "Organization", "Project", "Vpc", "VpcRouter" ],
+    ancestors = [ "Silo", "Organization", "Project", "Vpc", "VpcRouter" ],
     children = [],
     lookup_by_name = true,
     soft_deletes = true,
@@ -427,7 +450,7 @@ lookup_resource! {
 
 lookup_resource! {
     name = "VpcSubnet",
-    ancestors = [ "Organization", "Project", "Vpc" ],
+    ancestors = [ "Silo", "Organization", "Project", "Vpc" ],
     children = [ ],
     lookup_by_name = true,
     soft_deletes = true,
@@ -457,15 +480,6 @@ lookup_resource! {
         { column_name = "resource_type", rust_type = String },
         { column_name = "role_name", rust_type = String },
     ]
-}
-
-lookup_resource! {
-    name = "Silo",
-    ancestors = [],
-    children = [],
-    lookup_by_name = true,
-    soft_deletes = true,
-    primary_key_columns = [ { column_name = "id", rust_type = Uuid } ]
 }
 
 lookup_resource! {
