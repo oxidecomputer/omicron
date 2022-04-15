@@ -144,7 +144,13 @@ resource Silo {
 	"create_child" if "collaborator";
 	"collaborator" if "admin";
 	"modify" if "admin";
+	relations = { parent_fleet: Fleet };
+	"admin" if "admin" on "parent_fleet";
+	"collaborator" if "collaborator" on "parent_fleet";
+	"viewer" if "viewer" on "parent_fleet";
 }
+has_relation(fleet: Fleet, "parent_fleet", silo: Silo)
+	if silo.fleet = fleet;
 
 resource Organization {
 	permissions = [

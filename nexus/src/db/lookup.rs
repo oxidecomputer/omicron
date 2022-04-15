@@ -52,7 +52,8 @@ use uuid::Uuid;
 ///
 /// // Fetch an organization by name
 /// let organization_name = db::model::Name("engineering".parse().unwrap());
-/// let (authz_org, db_org): (authz::Organization, db::model::Organization) =
+/// let (authz_silo, authz_org, db_org):
+///     (authz::Silo, authz::Organization, db::model::Organization) =
 ///     LookupPath::new(opctx, datastore)
 ///         .organization_name(&organization_name)
 ///         .fetch()
@@ -60,7 +61,8 @@ use uuid::Uuid;
 ///
 /// // Fetch an organization by id
 /// let id: Uuid = todo!();
-/// let (authz_org, db_org): (authz::Organization, db::model::Organization) =
+/// let (authz_silo, authz_org, db_org):
+///     (authz::Silo, authz::Organization, db::model::Organization) =
 ///     LookupPath::new(opctx, datastore)
 ///         .organization_id(id)
 ///         .fetch()
@@ -70,7 +72,7 @@ use uuid::Uuid;
 /// // this purpose, we don't need the database row for the Project, so we use
 /// // `lookup_for()`.
 /// let project_name = db::model::Name("omicron".parse().unwrap());
-/// let (authz_org, authz_project) =
+/// let (authz_silo, authz_org, authz_project) =
 ///     LookupPath::new(opctx, datastore)
 ///         .organization_name(&organization_name)
 ///         .project_name(&project_name)
@@ -80,7 +82,7 @@ use uuid::Uuid;
 /// // Fetch an Instance by a path of names (Organization name, Project name,
 /// // Instance name)
 /// let instance_name = db::model::Name("test-server".parse().unwrap());
-/// let (authz_org, authz_project, authz_instance, db_instance) =
+/// let (authz_silo, authz_org, authz_project, authz_instance, db_instance) =
 ///     LookupPath::new(opctx, datastore)
 ///         .organization_name(&organization_name)
 ///         .project_name(&project_name)
@@ -91,7 +93,7 @@ use uuid::Uuid;
 /// // Having looked up the Instance, you have the `authz::Project`.  Use this
 /// // to look up a Disk that you expect is in the same Project.
 /// let disk_name = db::model::Name("my-disk".parse().unwrap());
-/// let (_, _, authz_disk, db_disk) =
+/// let (.., authz_disk, db_disk) =
 ///     LookupPath::new(opctx, datastore)
 ///         .project_id(authz_project.id())
 ///         .disk_name(&disk_name)
@@ -134,6 +136,12 @@ use uuid::Uuid;
 //                      +----------+
 //                      |
 //                      v
+//                  Silo
+//                      key: Key::PrimaryKey(r, id)
+//                                           |
+//                      +--------------------+
+//                      |
+//                      v
 //                  Root
 //                      lookup_root: LookupPath (references OpContext and
 //                                               DataStore)
@@ -142,7 +150,7 @@ use uuid::Uuid;
 // (rather than references) the previous node.  This is important: the caller's
 // going to do something like this:
 //
-//     let (authz_org, authz_project, authz_instance, db_instance) =
+//     let (authz_silo, authz_org, authz_project, authz_instance, db_instance) =
 //         LookupPath::new(opctx, datastore)   // returns LookupPath
 //             .organization_name("org1")      // consumes LookupPath,
 //                                             //   returns Organization
