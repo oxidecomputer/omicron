@@ -138,6 +138,15 @@ pub struct InstanceCreate {
     pub memory: ByteCount,
     pub hostname: String, // TODO-cleanup different type?
 
+    /// User data for instance initialization systems (such as cloud-init).
+    /// Must be a Base64-encoded string, as specified in RFC 4648 § 4 (+ and /
+    /// characters with padding). Maximum 32 KiB unencoded data.
+    // TODO: this should emit `"format": "byte"`, but progenitor doesn't
+    // understand that yet.
+    #[schemars(default, with = "String")]
+    #[serde(default, with = "serde_user_data")]
+    pub user_data: Vec<u8>,
+
     /// The network interfaces to be created for this instance.
     #[serde(default)]
     pub network_interfaces: InstanceNetworkInterfaceAttachment,
@@ -145,6 +154,43 @@ pub struct InstanceCreate {
     /// The disks to be created or attached for this instance.
     #[serde(default)]
     pub disks: Vec<InstanceDiskAttachment>,
+}
+
+mod serde_user_data {
+    use serde::{de::Error, Deserialize, Deserializer, Serialize, Serializer};
+
+    pub fn serialize<S>(
+        data: &Vec<u8>,
+        serializer: S,
+    ) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        base64::encode(data).serialize(serializer)
+    }
+
+    pub fn deserialize<'de, D>(deserializer: D) -> Result<Vec<u8>, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        match base64::decode(<&str>::deserialize(deserializer)?) {
+            Ok(buf) => {
+                // if you change this, also update the stress test in crate::cidata
+                if buf.len() > crate::cidata::MAX_USER_DATA_BYTES {
+                    Err(D::Error::invalid_length(
+                        buf.len(),
+                        &"less than 32 KiB",
+                    ))
+                } else {
+                    Ok(buf)
+                }
+            }
+            Err(_) => Err(D::Error::invalid_value(
+                serde::de::Unexpected::Other("invalid base64 string"),
+                &"a valid base64 string",
+            )),
+        }
+    }
 }
 
 /// Migration parameters for an [`Instance`](omicron_common::api::external::Instance)

@@ -162,6 +162,9 @@ pub async fn create_instance(
             ncpus: InstanceCpuCount(4),
             memory: ByteCount::from_mebibytes_u32(256),
             hostname: String::from("the_host"),
+            user_data:
+                b"#cloud-config\nsystem_info:\n  default_user:\n    name: oxide"
+                    .to_vec(),
             network_interfaces:
                 params::InstanceNetworkInterfaceAttachment::Default,
             disks: vec![],
