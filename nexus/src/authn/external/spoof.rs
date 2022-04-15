@@ -57,7 +57,7 @@ lazy_static! {
     /// Actor (id) used for the special "bad credentials" error
     static ref SPOOF_RESERVED_BAD_CREDS_ACTOR: Actor = Actor {
         id: "22222222-2222-2222-2222-222222222222".parse().unwrap(),
-        silo_id: *crate::db::fixed_data::silo_builtin::SILO_ID,
+        silo_id: *crate::db::fixed_data::silo::SILO_ID,
     };
     /// Complete HTTP header value to trigger the "bad actor" error
     pub static ref SPOOF_HEADER_BAD_ACTOR: Authorization<Bearer> =
@@ -122,10 +122,8 @@ fn authn_spoof(raw_value: Option<&Authorization<Bearer>>) -> SchemeResult {
 
     match Uuid::parse_str(str_value).context("parsing header value as UUID") {
         Ok(id) => {
-            let actor = Actor {
-                id,
-                silo_id: *crate::db::fixed_data::silo_builtin::SILO_ID,
-            };
+            let actor =
+                Actor { id, silo_id: *crate::db::fixed_data::silo::SILO_ID };
             SchemeResult::Authenticated(Details { actor })
         }
         Err(source) => SchemeResult::Failed(Reason::BadFormat { source }),

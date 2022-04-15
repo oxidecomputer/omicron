@@ -156,7 +156,7 @@ impl Context {
     pub fn test_context_for_actor(actor_id: Uuid) -> Context {
         Context::context_for_actor(
             actor_id,
-            *crate::db::fixed_data::silo_builtin::SILO_ID,
+            *crate::db::fixed_data::silo::SILO_ID,
         )
     }
 }
