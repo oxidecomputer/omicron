@@ -456,5 +456,5 @@ authz_resource! {
     parent = "Fleet",
     primary_key = Uuid,
     roles_allowed = false,
-    polar_snippet = Custom,
+    polar_snippet = FleetChild,
 }

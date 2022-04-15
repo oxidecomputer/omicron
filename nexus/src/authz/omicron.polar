@@ -204,22 +204,6 @@ resource GlobalImageList {
 has_relation(fleet: Fleet, "parent_fleet", global_image_list: GlobalImageList)
 	if global_image_list.fleet = fleet;
 
-resource GlobalImage {
-	permissions = [
-	    "read",
-	    "modify",
-	];
-
-	# Only admins can modify global images
-	relations = { parent_fleet: Fleet };
-	"modify" if "admin" on "parent_fleet";
-
-	# Anyone with viewer can read global images
-	"read" if "viewer" on "parent_fleet";
-}
-has_relation(fleet: Fleet, "parent_fleet", global_image: GlobalImage)
-	if global_image.fleet = fleet;
-
 # ConsoleSessionList is a synthetic resource used for modeling who has access
 # to create sessions.
 resource ConsoleSessionList {
