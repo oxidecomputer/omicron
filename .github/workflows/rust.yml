@@ -97,6 +97,7 @@ jobs:
       fail-fast: false
       matrix:
         os: [ ubuntu-18.04, macos-11 ]
+        test-cmd: [ cargo-test, nextest ]
     steps:
     # actions/checkout@v2
     - uses: actions/checkout@28c7f3d2b5162b5ddd3dfd9a45aa55eaf396478b
@@ -167,7 +168,12 @@ jobs:
       # rebuild here.
       # Put "./cockroachdb/bin" and "./clickhouse" on the PATH for the test
       # suite.
-      run: TMPDIR=$OMICRON_TMP PATH="$PATH:$PWD/out/cockroachdb/bin:$PWD/out/clickhouse" RUSTFLAGS="-D warnings" RUSTDOCFLAGS="-D warnings" cargo nextest run --profile ci --workspace --locked --config-file .cargo/nextest.toml
+      run: |
+        TMPDIR=$OMICRON_TMP PATH="$PATH:$PWD/out/cockroachdb/bin:$PWD/out/clickhouse" RUSTFLAGS="-D warnings" RUSTDOCFLAGS="-D warnings" \
+          ${{ matrix.test-cmd == 'cargo-test' 
+            && 'cargo test --no-fail-fast --workspace --locked --verbose'
+            || 'cargo nextest run --profile ci --workspace --locked --config-file .cargo/nextest.toml'
+          }}
     - name: Archive test runner JUnit output
       # actions/upload-artifact@v2.3.1
       uses: actions/upload-artifact@82c141cc518b40d92cc801eee768e7aafc9c2fa2
