@@ -6,9 +6,9 @@
 
 use super::roles::RoleSet;
 use crate::authn;
+use omicron_common::api::external::LookupType;
 use omicron_common::api::external::ResourceType;
 use uuid::Uuid;
-use omicron_common::api::external::LookupType;
 
 /// Represents [`authn::Context`] (which is either an authenticated or
 /// unauthenticated actor) for Polar

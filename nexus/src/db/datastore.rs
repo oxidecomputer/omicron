@@ -2737,9 +2737,7 @@ mod test {
     use crate::db::explain::ExplainableAsync;
     use crate::db::identity::Resource;
     use crate::db::lookup::LookupPath;
-    use crate::db::model::{
-        ConsoleSession, DatasetKind, Project,
-    };
+    use crate::db::model::{ConsoleSession, DatasetKind, Project};
     use crate::external_api::params;
     use chrono::{Duration, Utc};
     use nexus_test_utils::db::test_setup_database;
