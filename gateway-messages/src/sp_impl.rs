@@ -40,7 +40,7 @@ pub trait SpHandler {
     ) -> Result<(), ResponseError>;
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Error {
     /// Incoming data packet is larger than the largest [`Request`].
     DataTooLarge,
@@ -76,6 +76,36 @@ impl SerialConsolePacketizer {
         SerialConsolePackets { parent: self, data }
     }
 
+    /// Extract the first packet from `data`, returning that packet and any
+    /// remaining data (which may be empty).
+    ///
+    /// Panics if `data` is empty.
+    pub fn first_packet<'a>(
+        &mut self,
+        data: &'a [u8],
+    ) -> (SerialConsole, &'a [u8]) {
+        if data.is_empty() {
+            panic!();
+        }
+
+        let (this_packet, remaining) = data.split_at(usize::min(
+            data.len(),
+            SerialConsole::MAX_DATA_PER_PACKET,
+        ));
+
+        let mut packet = SerialConsole {
+            component: self.component,
+            offset: self.offset,
+            len: this_packet.len() as u16,
+            data: [0; SerialConsole::MAX_DATA_PER_PACKET],
+        };
+        packet.data[..this_packet.len()].copy_from_slice(this_packet);
+
+        self.offset += this_packet.len() as u64;
+
+        (packet, remaining)
+    }
+
     // TODO this function exists only to allow callers to inject artifical gaps
     // in the data they're sending; should we gate it behind a cargo feature?
     pub fn danger_emulate_dropped_packets(&mut self, bytes_to_skip: u64) {
@@ -97,21 +127,8 @@ impl Iterator for SerialConsolePackets<'_, '_> {
             return None;
         }
 
-        let (this_packet, remaining) = self.data.split_at(usize::min(
-            self.data.len(),
-            SerialConsole::MAX_DATA_PER_PACKET,
-        ));
-
-        let mut packet = SerialConsole {
-            component: self.parent.component,
-            offset: self.parent.offset,
-            len: this_packet.len() as u16,
-            data: [0; SerialConsole::MAX_DATA_PER_PACKET],
-        };
-        packet.data[..this_packet.len()].copy_from_slice(this_packet);
-
+        let (packet, remaining) = self.parent.first_packet(self.data);
         self.data = remaining;
-        self.parent.offset += this_packet.len() as u64;
 
         Some(packet)
     }

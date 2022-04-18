@@ -39,6 +39,7 @@ async fn create_instance_expect_failure(
         ncpus: InstanceCpuCount(1),
         memory: ByteCount::from_mebibytes_u32(256),
         hostname: name.to_string(),
+        user_data: vec![],
         network_interfaces: params::InstanceNetworkInterfaceAttachment::Default,
         disks: vec![],
     };

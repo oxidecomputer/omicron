@@ -100,6 +100,15 @@ fi
 ./tools/ci_download_cockroachdb
 ./tools/ci_download_clickhouse
 
+# Install OPTE
+#
+# OPTE is a Rust package that is consumed by a kernel module called xde. This
+# installs the `xde` driver and some kernel bits required to work with that
+# driver.
+if [[ "${HOST_OS}" == "SunOS" ]]; then
+    pfexec ./tools/install_opte.sh
+fi
+
 # Validate the PATH:
 expected_in_path=(
   'pg_config'

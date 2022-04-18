@@ -973,6 +973,8 @@ async fn sim_instance_migrate(
         nics: vec![],
         // TODO: populate disks
         disks: vec![],
+        // TODO: populate cloud init bytes
+        cloud_init_bytes: None,
     };
     let target = InstanceRuntimeStateRequested {
         run_state: InstanceStateRequested::Migrating,

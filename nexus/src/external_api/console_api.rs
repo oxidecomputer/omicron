@@ -4,9 +4,9 @@
 
 //! Handler functions (entrypoints) for console-related routes.
 //!
-//! This was originally conceived as a separate dropshot server from the external API,
-//! but in order to avoid CORS issues for now, we are serving these routes directly
-//! from the external API.
+//! This was originally conceived as a separate dropshot server from the
+//! external API, but in order to avoid CORS issues for now, we are serving
+//! these routes directly from the external API.
 use super::views;
 use crate::authn::external::{
     cookies::Cookies,
@@ -36,8 +36,9 @@ pub struct LoginParams {
     pub username: String,
 }
 
-// This is just for demo purposes. we will probably end up with a real username/password login
-// endpoint, but I think it will only be for use while setting up the rack
+// This is just for demo purposes. we will probably end up with a real
+// username/password login endpoint, but I think it will only be for use while
+// setting up the rack
 #[endpoint {
    method = POST,
    path = "/login",
@@ -62,12 +63,16 @@ pub async fn spoof_login(
         return Ok(Response::builder()
             .status(StatusCode::UNAUTHORIZED)
             .header(header::SET_COOKIE, clear_session_cookie_header_value())
-            .body("".into())?); // TODO: failed login response body?
+            .body("unauthorized".into())?); // TODO: failed login response body?
     }
 
     let user_id = user_id.unwrap();
 
-    let session = nexus.session_create(user_id).await?;
+    // For now, we use the external authn context to create the session.
+    // Once we have real SAML login, maybe we can cons up a real OpContext for
+    // this user and use their own privileges to create the session.
+    let authn_opctx = nexus.opctx_external_authn();
+    let session = nexus.session_create(&authn_opctx, user_id).await?;
 
     Ok(Response::builder()
         .status(StatusCode::OK)
@@ -98,8 +103,10 @@ pub async fn logout(
     let opctx = OpContext::for_external_api(&rqctx).await;
     let token = cookies.get(SESSION_COOKIE_COOKIE_NAME);
 
-    if opctx.is_ok() && token.is_some() {
-        nexus.session_hard_delete(token.unwrap().value().to_string()).await?;
+    if let Ok(opctx) = opctx {
+        if let Some(token) = token {
+            nexus.session_hard_delete(&opctx, token.value()).await?;
+        }
     }
 
     // If user's session was already expired, they failed auth and their session
@@ -143,7 +150,8 @@ pub struct StateParam {
     state: Option<String>,
 }
 
-// this happens to be the same as StateParam, but it may include other things later
+// this happens to be the same as StateParam, but it may include other things
+// later
 #[derive(Serialize)]
 pub struct LoginUrlQuery {
     // TODO: give state param the correct name. In SAML it's called RelayState.
@@ -162,14 +170,14 @@ fn get_login_url(state: Option<String>) -> String {
         Some(state) if state.is_empty() => None,
         Some(state) => Some(
             serde_urlencoded::to_string(LoginUrlQuery { state: Some(state) })
-                // unwrap is safe because query.state was just deserialized out of a
-                // query param, so we know it's serializable
+                // unwrap is safe because query.state was just deserialized out
+                // of a query param, so we know it's serializable
                 .unwrap(),
         ),
         None => None,
     };
-    // Once we have IdP integration, this will be a URL for the IdP login page. For now
-    // we point to our own placeholder login page.
+    // Once we have IdP integration, this will be a URL for the IdP login page.
+    // For now we point to our own placeholder login page.
     let mut url = "/spoof_login".to_string();
     if let Some(query) = query {
         url.push('?');
@@ -238,8 +246,8 @@ pub async fn console_page(
 
     // if authed, serve HTML page with bundle in script tag
 
-    // HTML doesn't need to be static -- we'll probably find a reason to do some minimal
-    // templating, e.g., putting a CSRF token in the page
+    // HTML doesn't need to be static -- we'll probably find a reason to do some
+    // minimal templating, e.g., putting a CSRF token in the page
 
     // amusingly, at least to start out, I don't think we care about the path
     // because the real routing is all client-side. we serve the same HTML
@@ -277,8 +285,9 @@ pub async fn asset(
         Some(static_dir) => find_file(path, &static_dir.join("assets")),
         _ => Err(not_found("static_dir undefined")),
     }?;
-    let file_contents =
-        tokio::fs::read(&file).await.map_err(|_| not_found("EBADF"))?;
+    let file_contents = tokio::fs::read(&file)
+        .await
+        .map_err(|e| not_found(&format!("accessing {:?}: {:#}", file, e)))?;
 
     // Derive the MIME type from the file name
     let content_type = mime_guess::from_path(&file)
@@ -308,8 +317,9 @@ async fn serve_console_index(
         .to_owned()
         .ok_or_else(|| not_found("static_dir undefined"))?;
     let file = static_dir.join(PathBuf::from("index.html"));
-    let file_contents =
-        tokio::fs::read(&file).await.map_err(|_| not_found("EBADF"))?;
+    let file_contents = tokio::fs::read(&file)
+        .await
+        .map_err(|e| not_found(&format!("accessing {:?}: {:#}", file, e)))?;
     Ok(Response::builder()
         .status(StatusCode::OK)
         .header(http::header::CONTENT_TYPE, "text/html; charset=UTF-8")
@@ -350,7 +360,7 @@ fn find_file(
         // If we hit a non-directory thing already and we still have segments
         // left in the path, bail. We have nowhere to go.
         if !current.is_dir() {
-            return Err(not_found("ENOENT"));
+            return Err(not_found("expected a directory"));
         }
 
         current.push(segment);
@@ -358,19 +368,21 @@ fn find_file(
         // Don't follow symlinks.
         // Error means either the user doesn't have permission to pull
         // metadata or the path doesn't exist.
-        let m = current.symlink_metadata().map_err(|_| not_found("ENOENT"))?;
+        let m = current
+            .symlink_metadata()
+            .map_err(|_| not_found("failed to get file metadata"))?;
         if m.file_type().is_symlink() {
-            return Err(not_found("EMLINK"));
+            return Err(not_found("attempted to follow a symlink"));
         }
     }
 
     // can't serve a directory
     if current.is_dir() {
-        return Err(not_found("EISDIR"));
+        return Err(not_found("expected a non-directory"));
     }
 
     if !file_ext_allowed(&current) {
-        return Err(not_found("EACCES"));
+        return Err(not_found("file extension not allowed"));
     }
 
     Ok(current)
@@ -401,7 +413,7 @@ mod test {
         let error = find_file(get_path("tests/static/nonexistent.svg"), &root)
             .unwrap_err();
         assert_eq!(error.status_code, StatusCode::NOT_FOUND);
-        assert_eq!(error.internal_message, "ENOENT".to_string());
+        assert_eq!(error.internal_message, "failed to get file metadata",);
     }
 
     #[test]
@@ -411,7 +423,7 @@ mod test {
             find_file(get_path("tests/static/a/b/c/nonexistent.svg"), &root)
                 .unwrap_err();
         assert_eq!(error.status_code, StatusCode::NOT_FOUND);
-        assert_eq!(error.internal_message, "ENOENT".to_string());
+        assert_eq!(error.internal_message, "failed to get file metadata")
     }
 
     #[test]
@@ -421,7 +433,7 @@ mod test {
             find_file(get_path("tests/static/assets/a_directory"), &root)
                 .unwrap_err();
         assert_eq!(error.status_code, StatusCode::NOT_FOUND);
-        assert_eq!(error.internal_message, "EISDIR".to_string());
+        assert_eq!(error.internal_message, "expected a non-directory");
     }
 
     #[test]
@@ -440,7 +452,7 @@ mod test {
         // so we 404
         let error = find_file(get_path(path_str), &root).unwrap_err();
         assert_eq!(error.status_code, StatusCode::NOT_FOUND);
-        assert_eq!(error.internal_message, "EMLINK".to_string());
+        assert_eq!(error.internal_message, "attempted to follow a symlink");
     }
 
     #[test]
@@ -454,7 +466,7 @@ mod test {
         // but it 404s because the path goes through a symlink
         let error = find_file(get_path(path_str), &root).unwrap_err();
         assert_eq!(error.status_code, StatusCode::NOT_FOUND);
-        assert_eq!(error.internal_message, "EMLINK".to_string());
+        assert_eq!(error.internal_message, "attempted to follow a symlink");
     }
 
     #[test]
@@ -464,11 +476,11 @@ mod test {
             find_file(get_path("tests/static/assets/blocked.ext"), &root)
                 .unwrap_err();
         assert_eq!(error.status_code, StatusCode::NOT_FOUND);
-        assert_eq!(error.internal_message, "EACCES".to_string());
+        assert_eq!(error.internal_message, "file extension not allowed",);
 
         let error = find_file(get_path("tests/static/assets/no_ext"), &root)
             .unwrap_err();
         assert_eq!(error.status_code, StatusCode::NOT_FOUND);
-        assert_eq!(error.internal_message, "EACCES".to_string());
+        assert_eq!(error.internal_message, "file extension not allowed");
     }
 }

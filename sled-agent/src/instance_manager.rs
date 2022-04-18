@@ -243,6 +243,7 @@ mod test {
             },
             nics: vec![],
             disks: vec![],
+            cloud_init_bytes: None,
         }
     }
 

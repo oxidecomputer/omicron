@@ -665,6 +665,10 @@
         "description": "Describes the instance hardware.",
         "type": "object",
         "properties": {
+          "cloud_init_bytes": {
+            "nullable": true,
+            "type": "string"
+          },
           "disks": {
             "type": "array",
             "items": {

@@ -168,7 +168,7 @@ impl LatencyTracker {
         let result = handler.await;
         let latency = start.elapsed();
         let status_code = match result {
-            Ok(_) => R::metadata().success.unwrap(),
+            Ok(_) => R::response_metadata().success.unwrap(),
             Err(ref e) => e.status_code,
         };
         let request = context.request.lock().await;

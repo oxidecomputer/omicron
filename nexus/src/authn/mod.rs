@@ -28,6 +28,7 @@ pub mod external;
 pub mod saga;
 
 pub use crate::db::fixed_data::user_builtin::USER_DB_INIT;
+pub use crate::db::fixed_data::user_builtin::USER_EXTERNAL_AUTHN;
 pub use crate::db::fixed_data::user_builtin::USER_INTERNAL_API;
 pub use crate::db::fixed_data::user_builtin::USER_INTERNAL_READ;
 pub use crate::db::fixed_data::user_builtin::USER_SAGA_RECOVERY;
@@ -120,6 +121,15 @@ impl Context {
         )
     }
 
+    /// Returns an authenticated context for use for authenticating external
+    /// requests
+    pub fn external_authn() -> Context {
+        Context::context_for_actor(
+            USER_EXTERNAL_AUTHN.id,
+            USER_EXTERNAL_AUTHN.silo_id,
+        )
+    }
+
     /// Returns an authenticated context for Nexus-startup database
     /// initialization
     pub fn internal_db_init() -> Context {
@@ -159,6 +169,7 @@ mod test {
     use super::USER_INTERNAL_READ;
     use super::USER_SAGA_RECOVERY;
     use super::USER_TEST_PRIVILEGED;
+    use crate::db::fixed_data::user_builtin::USER_EXTERNAL_AUTHN;
 
     #[test]
     fn test_internal_users() {
@@ -176,6 +187,10 @@ mod test {
         let authn = Context::internal_read();
         let actor = authn.actor().unwrap();
         assert_eq!(actor.id, USER_INTERNAL_READ.id);
+
+        let authn = Context::external_authn();
+        let actor = authn.actor().unwrap();
+        assert_eq!(actor.id, USER_EXTERNAL_AUTHN.id);
 
         let authn = Context::internal_db_init();
         let actor = authn.actor().unwrap();

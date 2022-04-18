@@ -24,7 +24,7 @@ tar = "0.4"
 tempfile = "3.3"
 thiserror = "1.0"
 tokio = { version = "1.17", features = [ "full" ] }
-toml = "0.5.6"
+toml = "0.5.9"
 walkdir = "2.3"
 
 # Disable doc builds by default for our binaries to work around issue

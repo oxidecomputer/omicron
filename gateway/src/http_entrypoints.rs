@@ -25,7 +25,6 @@ use dropshot::Query;
 use dropshot::RequestContext;
 use dropshot::ResultsPage;
 use dropshot::TypedBody;
-use dropshot::UntypedBody;
 use dropshot::WhichPage;
 use gateway_messages::IgnitionCommand;
 use gateway_sp_comms::error::Error as SpCommsError;
@@ -228,38 +227,6 @@ struct PathSpComponent {
     component: String,
 }
 
-/// Current in-memory contents of an SP component's serial console.
-///
-/// If we have not received any serial console data from this SP component,
-/// `start` will be `0` and `chunks` will be empty.
-#[derive(Debug, Default, PartialEq, Serialize, JsonSchema)]
-struct SerialConsoleContents {
-    /// Position since SP component start of the first byte of the first element
-    /// of `chunks`.
-    ///
-    /// This is equal to the number of bytes that we've discarded since the SP
-    /// started.
-    start: u64,
-
-    /// Chunks of serial console data.
-    ///
-    /// We collapse contiguous regions of data (present or missing) into a
-    /// single chunk: any two consecutive elements of `chunks` are guaranteed to
-    /// be different (i.e., one will be [`SerialConsoleChunk::Missing`] and the
-    /// other will be [`SerialConsoleChunk::Data`]). If `chunks` is not empty,
-    /// its final element is guaranteed to be a [`SerialConsoleChunk::Data`].
-    chunks: Vec<SerialConsoleChunk>,
-}
-
-/// A chunk of serial console data: either actual data, or an amount of data
-/// we missed (presumably due to dropped packets or something similar).
-#[derive(Debug, PartialEq, Serialize, JsonSchema)]
-#[serde(tag = "kind", rename_all = "lowercase")]
-enum SerialConsoleChunk {
-    Data { bytes: Vec<u8> },
-    Missing { len: u64 },
-}
-
 /// List SPs
 ///
 /// Since communication with SPs may be unreliable, consumers may specify an
@@ -354,9 +321,13 @@ async fn sp_list(
                     | SpCommsError::SpAddressUnknown(_) => {
                         SpState::Unresponsive
                     }
-                    // This error shouldn't be possible since we're generating
-                    // SP ids internally; fail the request if we hit it.
-                    SpCommsError::SpDoesNotExist(_) => return Err(err),
+                    // These errors should not be possible for the request we
+                    // made.
+                    SpCommsError::SpDoesNotExist(_)
+                    | SpCommsError::BadWebsocketConnection(_)
+                    | SpCommsError::SerialConsoleAttached => {
+                        unreachable!("impossible error {}", err)
+                    }
                 },
             };
             Ok(SpInfo {
@@ -474,73 +445,51 @@ async fn sp_component_get(
     todo!()
 }
 
-/// Get the currently-buffered data for an SP component's serial console.
-///
-/// This does not require any communication with the target SP; it returns any
-/// buffered data we have received from that SP (subject to limitations on how
-/// much we keep around; see [`SerialConsoleContents`] for details.
+/// Upgrade into a websocket connection attached to the given SP component's
+/// serial console.
 #[endpoint {
     method = GET,
-    path = "/sp/{type}/{slot}/component/{component}/serial_console",
+    path = "/sp/{type}/{slot}/component/{component}/serial_console/attach",
 }]
-async fn sp_component_serial_console_get(
+async fn sp_component_serial_console_attach(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path: Path<PathSpComponent>,
-) -> Result<HttpResponseOk<SerialConsoleContents>, HttpError> {
+) -> Result<http::Response<hyper::Body>, HttpError> {
+    let apictx = rqctx.context();
+    let PathSpComponent { sp, component } = path.into_inner();
+
+    let component = component_from_str(&component)?;
+    let mut request = rqctx.request.lock().await;
+
+    apictx
+        .sp_comms
+        .serial_console_attach(
+            &mut request,
+            sp.into(),
+            component,
+            apictx.timeouts.sp_request,
+        )
+        .await
+        .map_err(http_err_from_comms_err)
+}
+
+/// Detach the websocket connection attached to the given SP component's serial
+/// console, if such a connection exists.
+#[endpoint {
+    method = POST,
+    path = "/sp/{type}/{slot}/component/{component}/serial_console/detach",
+}]
+async fn sp_component_serial_console_detach(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    path: Path<PathSpComponent>,
+) -> Result<HttpResponseUpdatedNoContent, HttpError> {
     let comms = &rqctx.context().sp_comms;
     let PathSpComponent { sp, component } = path.into_inner();
 
     let component = component_from_str(&component)?;
-    let contents = comms
-        .serial_console_contents(sp.into(), &component)
-        .map_err(http_err_from_comms_err)?
-        .map(SerialConsoleContents::from);
 
-    // TODO With `unwrap_or_default()`, our caller can't tell the difference
-    // between "this component hasn't sent us any console information yet" and
-    // "this component does not have a serial console and will never send data"
-    // - both cases send back an empty `SerialConsoleContents`. To handle this
-    // more gracefully, we will need to know which components have a serial
-    // console.
-    Ok(HttpResponseOk(contents.unwrap_or_default()))
-}
-
-/// Send data to an SP component's serial console.
-///
-/// If this request returns successfully, the SP acknowledged that the data
-/// arrived. If it fails, we do not know whether or not the data arrived (or
-/// will eventually arrive).
-#[endpoint {
-    method = POST,
-    path = "/sp/{type}/{slot}/component/{component}/serial_console",
-}]
-async fn sp_component_serial_console_post(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
-    path: Path<PathSpComponent>,
-    data: UntypedBody,
-) -> Result<HttpResponseUpdatedNoContent, HttpError> {
-    let apictx = rqctx.context();
-    let comms = &apictx.sp_comms;
-    let PathSpComponent { sp, component } = path.into_inner();
-
-    let component = component_from_str(&component)?;
-
-    // TODO What is our recourse if we hit a timeout here (or some other kind of
-    // error partway through)? We don't know whether the SP received none, some,
-    // or all of the data we sent, only that it failed to ack (at least) the
-    // last packet in time. Hopefully the user can manually detect this by
-    // inspecting the serial console output from this component (if whatever
-    // they sent triggers some kind of output)? But maybe we should try to do a
-    // little better - if we had to packetize `data`, for example, we could at
-    // least report how much data was ack'd and how much we sent that hasn't
-    // been ack'd yet?
     comms
-        .serial_console_send(
-            sp.into(),
-            &component,
-            data.as_bytes(),
-            Instant::now() + apictx.timeouts.sp_request,
-        )
+        .serial_console_detach(sp.into(), &component)
         .await
         .map_err(http_err_from_comms_err)?;
 
@@ -734,8 +683,8 @@ pub fn api() -> GatewayApiDescription {
         api.register(sp_get)?;
         api.register(sp_component_list)?;
         api.register(sp_component_get)?;
-        api.register(sp_component_serial_console_get)?;
-        api.register(sp_component_serial_console_post)?;
+        api.register(sp_component_serial_console_attach)?;
+        api.register(sp_component_serial_console_detach)?;
         api.register(sp_component_update)?;
         api.register(sp_component_power_on)?;
         api.register(sp_component_power_off)?;
