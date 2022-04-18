@@ -97,7 +97,7 @@ jobs:
       fail-fast: false
       matrix:
         os: [ ubuntu-18.04, macos-11 ]
-        test-cmd: [ cargo-test, nextest ]
+        test-cmd: [ cargo-test, cargo-nextest ]
     steps:
     # actions/checkout@v2
     - uses: actions/checkout@28c7f3d2b5162b5ddd3dfd9a45aa55eaf396478b
@@ -174,14 +174,14 @@ jobs:
             && 'cargo test --no-fail-fast --workspace --locked --verbose'
             || 'cargo nextest run --profile ci --workspace --locked --config-file .cargo/nextest.toml'
           }}
-    - name: Archive test runner JUnit output
+    - name: Archive nextest JUnit output
       # actions/upload-artifact@v2.3.1
       uses: actions/upload-artifact@82c141cc518b40d92cc801eee768e7aafc9c2fa2
+      if: ${{ matrix.test-cmd == 'cargo-nextest' }}
       with:
         name: junit_${{ runner.os }}
         retention-days: 90
-        path: |
-          target/nextest/ci/junit.xml
+        path: target/nextest/ci/junit.xml
     - name: Archive any failed test results
       if: ${{ failure() }}
       # actions/upload-artifact@v2.3.1
