@@ -21,9 +21,8 @@ URL_BASE="https://dl.oxide.computer/releases/console"
 
 source "$SOURCE_DIR/console_version"
 
-TARBALL_FILENAME="$COMMIT.tar.gz"
-URL="https://dl.oxide.computer/releases/console/$TARBALL_FILENAME"
-TARBALL_FILE="$DOWNLOAD_DIR/$TARBALL_FILENAME"
+URL="https://dl.oxide.computer/releases/console/$COMMIT.tar.gz"
+TARBALL_FILE="$DOWNLOAD_DIR/console.tar.gz"
 
 function main
 {
@@ -36,12 +35,33 @@ function main
 	echo "URL: $URL"
 	echo "Local file: $TARBALL_FILE"
 
+
+	local DO_DOWNLOAD="true"
+	if [[ -f "$TARBALL_FILE" ]]; then
+		calculated_sha2="$(do_sha256sum "$TARBALL_FILE")" || \
+				fail "failed to calculate sha256sum"
+		if [[ "$calculated_sha2" == "$SHA2" ]]; then
+			DO_DOWNLOAD="false"
+		fi
+	fi
+
 	mkdir -p "$DOWNLOAD_DIR"
 	mkdir -p "$DEST_DIR"
 
-  echo "Downloading..."
-  do_download_curl "$URL" "$TARBALL_FILE" || \
-      fail "failed to download file"
+	if [ "$DO_DOWNLOAD" == "true" ]; then
+	echo "Downloading..."
+		 do_download_curl "$URL" "$TARBALL_FILE" || \
+			fail "failed to download file"
+
+		# Verify the sha256sum.
+		calculated_sha2="$(do_sha256sum "$TARBALL_FILE")" || \
+				fail "failed to calculate sha256sum"
+		if [[ "$calculated_sha2" != "$SHA2" ]]; then
+			fail "sha256sum mismatch \
+					(expected $SHA2, found $calculated_sha2)"
+		fi
+
+	fi
 
 	# Unpack the tarball into a local directory
 	do_untar "$TARBALL_FILE" "$DEST_DIR"
@@ -56,6 +76,11 @@ function fail
 function do_download_curl
 {
 	curl --silent --show-error --fail --location --output "$2" "$1"
+}
+
+function do_sha256sum
+{
+	sha256sum < "$1" | awk '{print $1}'
 }
 
 function do_untar
