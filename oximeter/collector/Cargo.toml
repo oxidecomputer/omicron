@@ -18,7 +18,7 @@ slog-dtrace = "0.2"
 structopt = "0.3"
 thiserror = "1.0.30"
 tokio = "1.17"
-toml = "0.5.8"
+toml = "0.5.9"
 uuid = { version = "0.8.2", features = [ "v4", "serde" ] }
 
 [dev-dependencies]

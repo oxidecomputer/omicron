@@ -14,7 +14,7 @@ omicron-common = { path = "../common" }
 slog-dtrace = "0.2"
 structopt = "0.3"
 thiserror = "1.0"
-toml = "0.5.6"
+toml = "0.5.9"
 
 [dependencies.serde]
 version = "1.0"
