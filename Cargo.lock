@@ -960,7 +960,7 @@ checksum = "1435fa1053d8b2fbbe9be7e97eca7f33d37b28409959813daefc1446a14247f1"
 [[package]]
 name = "dropshot"
 version = "0.6.1-dev"
-source = "git+https://github.com/oxidecomputer/dropshot?branch=main#f0306232bede6a1d1b99912a4e79621284c55a9f"
+source = "git+https://github.com/oxidecomputer/dropshot?branch=main#da09c39441e2d4c984d076f90cd550d9c6f76951"
 dependencies = [
  "async-stream",
  "async-trait",
@@ -999,7 +999,7 @@ dependencies = [
 [[package]]
 name = "dropshot_endpoint"
 version = "0.6.1-dev"
-source = "git+https://github.com/oxidecomputer/dropshot?branch=main#f0306232bede6a1d1b99912a4e79621284c55a9f"
+source = "git+https://github.com/oxidecomputer/dropshot?branch=main#da09c39441e2d4c984d076f90cd550d9c6f76951"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -1684,7 +1684,7 @@ checksum = "c4a1e36c821dbe04574f602848a19f742f4fb3c98d40449f11bcad18d6b17421"
 [[package]]
 name = "hubpack"
 version = "0.1.0"
-source = "git+https://github.com/cbiffle/hubpack?branch=main#df08cc3a6e1f97381cd0472ae348e310f0119e25"
+source = "git+https://github.com/cbiffle/hubpack?branch=main#d98084b85cc45fe589a49dd95403d7b41533375c"
 dependencies = [
  "hubpack_derive",
  "serde",
@@ -1693,7 +1693,7 @@ dependencies = [
 [[package]]
 name = "hubpack_derive"
 version = "0.1.0"
-source = "git+https://github.com/cbiffle/hubpack?branch=main#df08cc3a6e1f97381cd0472ae348e310f0119e25"
+source = "git+https://github.com/cbiffle/hubpack?branch=main#d98084b85cc45fe589a49dd95403d7b41533375c"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -4784,9 +4784,9 @@ dependencies = [
 
 [[package]]
 name = "toml"
-version = "0.5.8"
+version = "0.5.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a31142970826733df8241ef35dc040ef98c679ab14d7c3e54d827099b3acecaa"
+checksum = "8d82e1a7758622a465f8cee077614c73484dac5b836c02ff6a40d5d1010324d7"
 dependencies = [
  "serde",
 ]
