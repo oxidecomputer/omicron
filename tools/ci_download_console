@@ -35,7 +35,6 @@ function main
 	echo "URL: $URL"
 	echo "Local file: $TARBALL_FILE"
 
-
 	local DO_DOWNLOAD="true"
 	if [[ -f "$TARBALL_FILE" ]]; then
 		calculated_sha2="$(do_sha256sum "$TARBALL_FILE")" || \
