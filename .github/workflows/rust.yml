@@ -162,18 +162,24 @@ jobs:
       # - TMPDIR=$OMICRON_TMP: we specify a specific temporary directory so that
       #   failed test outputs will be in a known place that we can grab at the
       #   end without also grabbing random other temporary files.
-      run: TMPDIR=$OMICRON_TMP PATH="$PATH:$PWD/out/cockroachdb/bin:$PWD/out/clickhouse" RUSTFLAGS="-D warnings" RUSTDOCFLAGS="-D warnings" cargo build --locked --all-targets --verbose
-    - name: Run tests
-      # Use the same RUSTFLAGS and RUSTDOCFLAGS as above to avoid having to
-      # rebuild here.
-      # Put "./cockroachdb/bin" and "./clickhouse" on the PATH for the test
-      # suite.
       run: |
         TMPDIR=$OMICRON_TMP PATH="$PATH:$PWD/out/cockroachdb/bin:$PWD/out/clickhouse" RUSTFLAGS="-D warnings" RUSTDOCFLAGS="-D warnings" \
-          ${{ matrix.test-cmd == 'cargo-test' 
-            && 'cargo test --no-fail-fast --workspace --locked --verbose'
-            || 'cargo nextest run --profile ci --workspace --locked --config-file .cargo/nextest.toml'
-          }}
+          cargo build --locked --all-targets --verbose
+
+    # Only one of the following steps runs in a given job.
+    # Use the same RUSTFLAGS and RUSTDOCFLAGS as above to avoid a rebuild.
+    # Put "./cockroachdb/bin" and "./clickhouse" on the PATH.
+    - name: Run tests with cargo test
+      if: ${{ matrix.test-cmd == 'cargo-test' }}
+      run: |
+        TMPDIR=$OMICRON_TMP PATH="$PATH:$PWD/out/cockroachdb/bin:$PWD/out/clickhouse" RUSTFLAGS="-D warnings" RUSTDOCFLAGS="-D warnings" \
+          cargo test --no-fail-fast --workspace --locked --verbose
+    - name: Run tests with cargo nextest
+      if: ${{ matrix.test-cmd == 'cargo-nextest' }}
+      run: |
+        TMPDIR=$OMICRON_TMP PATH="$PATH:$PWD/out/cockroachdb/bin:$PWD/out/clickhouse" RUSTFLAGS="-D warnings" RUSTDOCFLAGS="-D warnings" \
+          cargo nextest run --profile ci --workspace --locked --config-file .cargo/nextest.toml
+
     - name: Archive nextest JUnit output
       # actions/upload-artifact@v2.3.1
       uses: actions/upload-artifact@82c141cc518b40d92cc801eee768e7aafc9c2fa2
