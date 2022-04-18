@@ -3,25 +3,41 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use omicron_sled_agent::bootstrap;
+use omicron_sled_agent::illumos::addrobj::AddrObject;
 use omicron_sled_agent::illumos::{dladm, zone};
 use std::io;
 use std::net::IpAddr;
+
+struct AddressCleanup {
+    addrobj: AddrObject,
+}
+
+impl Drop for AddressCleanup {
+    fn drop(&mut self) {
+        let _ = zone::Zones::delete_address(None, &self.addrobj);
+    }
+}
 
 #[tokio::test]
 async fn test_multicast_bootstrap_address() {
     // Setup the bootstrap address.
     //
     // This modifies global state of the target machine, creating
-    // an address named "bootstrap6", akin to what the bootstrap
+    // an address named "testbootstrap6", akin to what the bootstrap
     // agent should do.
     let link = dladm::Dladm::find_physical().unwrap();
     let address = bootstrap::agent::bootstrap_address(link.clone()).unwrap();
+    let address_name = "testbootstrap6";
+    let addrobj = AddrObject::new(&link.0, address_name).unwrap();
     zone::Zones::ensure_has_global_zone_v6_address(
         Some(link),
         *address.ip(),
-        "bootstrap6",
+        address_name,
     )
     .unwrap();
+
+    // Cleanup-on-drop removal of the bootstrap address.
+    let _cleanup = AddressCleanup { addrobj };
 
     // Create the multicast pair.
     let loopback = true;

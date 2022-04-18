@@ -393,7 +393,7 @@ impl Zones {
     }
 
     #[allow(clippy::needless_lifetimes)]
-    fn delete_address<'a>(
+    pub fn delete_address<'a>(
         zone: Option<&'a str>,
         addrobj: &AddrObject,
     ) -> Result<(), Error> {

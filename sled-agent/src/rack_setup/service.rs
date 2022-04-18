@@ -453,6 +453,11 @@ impl ServiceInner {
         info!(self.log, "Enough peers exist to enact RSS plan");
 
         // If we created a plan, reuse it. Otherwise, create a new plan.
+        //
+        // NOTE: This is a "point-of-no-return" -- before sending any requests
+        // to neighboring sleds, the plan must be recorded to durable storage.
+        // This way, if the RSS power-cycles, it can idempotently execute the
+        // same allocation plan.
         let plan = if let Some(plan) = maybe_plan {
             info!(self.log, "Re-using existing allocation plan");
             plan
@@ -460,11 +465,6 @@ impl ServiceInner {
             info!(self.log, "Creating new allocation plan");
             self.create_plan(config, addrs).await?
         };
-
-        // NOTE: This is a "point-of-no-return" -- before sending any requests
-        // to neighboring sleds, ensure that we've recorded our plan to durable
-        // storage. This way, if the RSS power-cycles, it can idempotently
-        // execute the same allocation plan.
 
         // Issue the dataset initialization requests to all sleds.
         futures::future::join_all(plan.iter().map(
