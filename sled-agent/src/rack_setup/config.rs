@@ -6,8 +6,10 @@
 
 use crate::config::ConfigError;
 use crate::params::{DatasetEnsureBody, ServiceRequest};
+use ipnetwork::Ipv6Network;
 use serde::Deserialize;
 use serde::Serialize;
+use std::net::Ipv6Addr;
 use std::path::Path;
 
 /// Configuration for the "rack setup service", which is controlled during
@@ -22,7 +24,7 @@ use std::path::Path;
 /// can act as a stand-in initialization service.
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
 pub struct SetupServiceConfig {
-    pub rack_subnet: std::net::Ipv6Addr,
+    pub rack_subnet: Ipv6Addr,
 
     #[serde(default, rename = "request")]
     pub requests: Vec<SledRequest>,
@@ -40,6 +42,18 @@ pub struct SledRequest {
     pub services: Vec<ServiceRequest>,
 }
 
+fn new_network(addr: Ipv6Addr, prefix: u8) -> Ipv6Network {
+    let net = Ipv6Network::new(addr, prefix).unwrap();
+
+    // ipnetwork inputs/outputs the provided IPv6 address, unmodified by the
+    // prefix. We manually mask `addr` based on `prefix` ourselves.
+    Ipv6Network::new(
+        Ipv6Addr::from(u128::from(addr) & u128::from(net.mask())),
+        prefix,
+    )
+    .unwrap()
+}
+
 impl SetupServiceConfig {
     pub fn from_file<P: AsRef<Path>>(path: P) -> Result<Self, ConfigError> {
         let path = path.as_ref();
@@ -48,20 +62,63 @@ impl SetupServiceConfig {
         Ok(config)
     }
 
-    pub fn az_subnet(&self) -> ipnetwork::Ipv6Network {
-        ipnetwork::Ipv6Network::new(self.rack_subnet, 48).unwrap()
+    pub fn az_subnet(&self) -> Ipv6Network {
+        new_network(self.rack_subnet, 48)
     }
 
-    pub fn rack_subnet(&self) -> ipnetwork::Ipv6Network {
-        ipnetwork::Ipv6Network::new(self.rack_subnet, 56).unwrap()
+    pub fn rack_subnet(&self) -> Ipv6Network {
+        new_network(self.rack_subnet, 56)
     }
 
-    pub fn sled_subnet(&self, index: u8) -> ipnetwork::Ipv6Network {
+    pub fn sled_subnet(&self, index: u8) -> Ipv6Network {
         let mut rack_network = self.rack_subnet().network().octets();
 
         // To set bits distinguishing the /64 from the /56, we modify the 7th octet.
         rack_network[7] = index;
-        ipnetwork::Ipv6Network::new(std::net::Ipv6Addr::from(rack_network), 64)
-            .unwrap()
+        Ipv6Network::new(Ipv6Addr::from(rack_network), 64).unwrap()
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn test_subnets() {
+        let cfg = SetupServiceConfig {
+            rack_subnet: "fd00:1122:3344:0100::".parse().unwrap(),
+            requests: vec![],
+        };
+
+        assert_eq!(
+            //              Masked out in AZ Subnet
+            //              vv
+            "fd00:1122:3344:0000::/48".parse::<Ipv6Network>().unwrap(),
+            cfg.az_subnet()
+        );
+        assert_eq!(
+            //              Shows up from Rack Subnet
+            //              vv
+            "fd00:1122:3344:0100::/56".parse::<Ipv6Network>().unwrap(),
+            cfg.rack_subnet()
+        );
+        assert_eq!(
+            //                0th Sled Subnet
+            //                vv
+            "fd00:1122:3344:0100::/64".parse::<Ipv6Network>().unwrap(),
+            cfg.sled_subnet(0)
+        );
+        assert_eq!(
+            //                1st Sled Subnet
+            //                vv
+            "fd00:1122:3344:0101::/64".parse::<Ipv6Network>().unwrap(),
+            cfg.sled_subnet(1)
+        );
+        assert_eq!(
+            //                Last Sled Subnet
+            //                vv
+            "fd00:1122:3344:01ff::/64".parse::<Ipv6Network>().unwrap(),
+            cfg.sled_subnet(255)
+        );
     }
 }
