@@ -1,0 +1,66 @@
+#!/bin/bash
+
+#
+# ci_download_console: fetches the appropriate Console assets.
+#
+
+set -o pipefail
+set -o xtrace
+set -o errexit
+
+SOURCE_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
+ARG0="$(basename ${BASH_SOURCE[0]})"
+
+TARGET_DIR="out"
+# Location where intermediate artifacts are downloaded / unpacked.
+DOWNLOAD_DIR="$TARGET_DIR/downloads"
+# Location where the final console directory should end up.
+DEST_DIR="./$TARGET_DIR/console-assets"
+# Base URL
+URL_BASE="https://dl.oxide.computer/releases/console"
+
+source "$SOURCE_DIR/console_version"
+
+TARBALL_FILENAME="$COMMIT.tar.gz"
+URL="https://dl.oxide.computer/releases/console/$TARBALL_FILENAME"
+TARBALL_FILE="$DOWNLOAD_DIR/$TARBALL_FILENAME"
+
+function main
+{
+	if [[ $# != 0 ]]; then
+		echo "unexpected arguments" >&2
+		exit 2
+	fi
+
+	# Download the file.
+	echo "URL: $URL"
+	echo "Local file: $TARBALL_FILE"
+
+	mkdir -p "$DOWNLOAD_DIR"
+	mkdir -p "$DEST_DIR"
+
+  echo "Downloading..."
+  do_download_curl "$URL" "$TARBALL_FILE" || \
+      fail "failed to download file"
+
+	# Unpack the tarball into a local directory
+	do_untar "$TARBALL_FILE" "$DEST_DIR"
+}
+
+function fail
+{
+	echo "$ARG0: $@" >&2
+	exit 1
+}
+
+function do_download_curl
+{
+	curl --silent --show-error --fail --location --output "$2" "$1"
+}
+
+function do_untar
+{
+	mkdir -p "$2" && tar xzf "$1" -C "$2"
+}
+
+main "$@"

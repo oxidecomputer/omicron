@@ -22,6 +22,9 @@ to = "/opt/ooce/pgsql-13/lib/amd64"
 [[package.omicron-nexus.paths]]
 from = "smf/nexus"
 to = "/var/svc/manifest/site/nexus"
+[[package.omicron-nexus.paths]]
+from = "out/console-assets"
+to = "/var/nexus/static"
 
 [package.oximeter-collector]
 rust.binary_names = ["oximeter"]
