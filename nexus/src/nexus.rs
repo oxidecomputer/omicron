@@ -748,10 +748,7 @@ impl Nexus {
         opctx: &OpContext,
         new_organization: &params::OrganizationCreate,
     ) -> CreateResult<db::model::Organization> {
-        let silo_id = opctx.authn.silo_required()?;
-        let db_org =
-            db::model::Organization::new(new_organization.clone(), silo_id);
-        self.db_datastore.organization_create(opctx, db_org).await
+        self.db_datastore.organization_create(opctx, new_organization).await
     }
 
     pub async fn organization_fetch(

@@ -193,12 +193,10 @@ impl<'a> LookupPath<'a> {
         'a: 'c,
         'b: 'c,
     {
-        // XXX-dap XXX-dap The macro needs to be updated so that the by-id
-        // functions all check whether the resource exists in the right Silo
         let key = match self.opctx.authn.silo_required() {
-            Ok(silo_id) => {
+            Ok(authz_silo) => {
                 let root = Root { lookup_root: self };
-                let silo_key = SiloKey::PrimaryKey(root, silo_id);
+                let silo_key = SiloKey::PrimaryKey(root, authz_silo.id());
                 OrganizationKey::Name(Silo { key: silo_key }, name)
             }
             Err(error) => {

@@ -516,14 +516,15 @@ impl DataStore {
     pub async fn organization_create(
         &self,
         opctx: &OpContext,
-        organization: Organization,
+        organization: &params::OrganizationCreate,
     ) -> CreateResult<Organization> {
+        let authz_silo = opctx.authn.silo_required()?;
+        opctx.authorize(authz::Action::CreateChild, &authz_silo).await?;
+
         use db::schema::organization::dsl;
-
-        opctx.authorize(authz::Action::CreateChild, &authz::FLEET).await?;
-
+        let silo_id = authz_silo.id();
+        let organization = Organization::new(organization.clone(), silo_id);
         let name = organization.name().as_str().to_string();
-        let silo_id = organization.silo_id;
 
         Silo::insert_resource(
             silo_id,
@@ -533,7 +534,11 @@ impl DataStore {
         .await
         .map_err(|e| match e {
             AsyncInsertError::CollectionNotFound => Error::InternalError {
-                internal_message: format!("attempting to create an organization under non-existent silo {}", silo_id),
+                internal_message: format!(
+                    "attempting to create an \
+                    organization under non-existent silo {}",
+                    silo_id
+                ),
             },
             AsyncInsertError::DatabaseError(e) => {
                 public_error_from_diesel_pool(
@@ -603,10 +608,13 @@ impl DataStore {
         opctx: &OpContext,
         pagparams: &DataPageParams<'_, Uuid>,
     ) -> ListResultVec<Organization> {
+        let authz_silo = opctx.authn.silo_required()?;
+        opctx.authorize(authz::Action::ListChildren, &authz_silo).await?;
+
         use db::schema::organization::dsl;
-        opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
         paginated(dsl::organization, dsl::id, pagparams)
             .filter(dsl::time_deleted.is_null())
+            .filter(dsl::silo_id.eq(authz_silo.id()))
             .select(Organization::as_select())
             .load_async::<Organization>(self.pool_authorized(opctx).await?)
             .await
@@ -618,10 +626,13 @@ impl DataStore {
         opctx: &OpContext,
         pagparams: &DataPageParams<'_, Name>,
     ) -> ListResultVec<Organization> {
-        use db::schema::organization::dsl;
+        let authz_silo = opctx.authn.silo_required()?;
         opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
+
+        use db::schema::organization::dsl;
         paginated(dsl::organization, dsl::name, pagparams)
             .filter(dsl::time_deleted.is_null())
+            .filter(dsl::silo_id.eq(authz_silo.id()))
             .select(Organization::as_select())
             .load_async::<Organization>(self.pool_authorized(opctx).await?)
             .await
@@ -2727,7 +2738,7 @@ mod test {
     use crate::db::identity::Resource;
     use crate::db::lookup::LookupPath;
     use crate::db::model::{
-        ConsoleSession, DatasetKind, Organization, Project,
+        ConsoleSession, DatasetKind, Project,
     };
     use crate::external_api::params;
     use chrono::{Duration, Utc};
@@ -2746,18 +2757,15 @@ mod test {
         let logctx = dev::test_setup_log("test_project_creation");
         let mut db = test_setup_database(&logctx.log).await;
         let (opctx, datastore) = datastore_test(&logctx, &db).await;
-        let organization = Organization::new(
-            params::OrganizationCreate {
-                identity: IdentityMetadataCreateParams {
-                    name: "org".parse().unwrap(),
-                    description: "desc".to_string(),
-                },
+        let organization = params::OrganizationCreate {
+            identity: IdentityMetadataCreateParams {
+                name: "org".parse().unwrap(),
+                description: "desc".to_string(),
             },
-            *SILO_ID,
-        );
+        };
 
         let organization =
-            datastore.organization_create(&opctx, organization).await.unwrap();
+            datastore.organization_create(&opctx, &organization).await.unwrap();
 
         let project = Project::new(
             organization.id(),

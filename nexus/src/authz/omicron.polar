@@ -151,6 +151,8 @@ resource Silo {
 }
 has_relation(fleet: Fleet, "parent_fleet", silo: Silo)
 	if silo.fleet = fleet;
+has_role(actor: AuthenticatedActor, "viewer", silo: Silo)
+	if actor.silo = silo;
 
 resource Organization {
 	permissions = [

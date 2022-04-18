@@ -336,8 +336,8 @@ fn generate_misc_helpers(config: &Config) -> TokenStream {
                 #resource_authz_name: &authz::#resource_name,
             ) -> Result<(), Error> {
                 let log = &opctx.log;
-                let maybe_silo_id = opctx.authn.silo_required();
-                if let Err(_) = &maybe_silo_id {
+                let maybe_silo = opctx.authn.silo_required();
+                if let Err(_) = &maybe_silo {
                     error!(
                         log,
                         "unexpected successful lookup of siloed resource\
@@ -345,7 +345,7 @@ fn generate_misc_helpers(config: &Config) -> TokenStream {
                         #resource_name_str,
                     );
                 };
-                let actor_silo_id = maybe_silo_id?;
+                let actor_silo_id = maybe_silo?.id();
 
                 let resource_silo_id = authz_silo.id();
                 if resource_silo_id != actor_silo_id {
