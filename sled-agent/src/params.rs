@@ -51,6 +51,7 @@ pub struct InstanceHardware {
     pub runtime: InstanceRuntimeState,
     pub nics: Vec<NetworkInterface>,
     pub disks: Vec<propolis_client::api::DiskRequest>,
+    pub cloud_init_bytes: Option<String>,
 }
 
 /// Sent to a sled agent to establish the runtime state of an Instance

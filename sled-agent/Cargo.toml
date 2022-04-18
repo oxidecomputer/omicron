@@ -40,7 +40,7 @@ tempfile = "3.3"
 thiserror = "1.0"
 tokio = { version = "1.17", features = [ "full" ] }
 tokio-util = { version = "0.7", features = ["codec"] }
-toml = "0.5.6"
+toml = "0.5.9"
 uuid = { version = "0.8", features = [ "serde", "v4" ] }
 vsss-rs = { version = "2.0.0-pre0", default-features = false, features = ["std"] }
 zone = "0.1"
