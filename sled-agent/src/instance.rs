@@ -89,14 +89,14 @@ async fn wait_for_http_server(
     backoff::retry_notify(
         backoff::internal_service_policy(),
         || async {
-            // This request is nonsensical - we don't expect an instance to be
-            // using the nil UUID - but getting a response that isn't a
-            // connection-based error informs us the HTTP server is alive.
+            // This request is nonsensical - we don't expect an instance to
+            // exist - but getting a response that isn't a connection-based
+            // error informs us the HTTP server is alive.
             match client.instance_get().await {
                 Ok(_) => return Ok(()),
                 Err(value) => {
                     if let propolis_client::Error::Status(_) = &value {
-                        // This means the propolis server responded to our garbage
+                        // This means the propolis server responded to our
                         // request, instead of a connection error.
                         return Ok(());
                     }
