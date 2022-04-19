@@ -19,9 +19,6 @@ pub struct ShareRequest {
 pub enum SubnetError {
     #[error("Subnet has unexpected prefix length: {0}")]
     BadPrefixLength(u8),
-
-    #[error("Subnet has unexpected prefix value: {0}")]
-    BadPrefixValue(Ipv6Net),
 }
 
 /// Represents subnets belonging to Sleds.
@@ -40,11 +37,6 @@ impl SledSubnet {
         let prefix = ip.0.prefix();
         if prefix != 64 {
             return Err(SubnetError::BadPrefixLength(prefix));
-        }
-        if ip.0.ip().segments()[0]
-            != crate::bootstrap::agent::SLED_SUBNET_SEGMENT0
-        {
-            return Err(SubnetError::BadPrefixValue(ip));
         }
         Ok(SledSubnet(ip))
     }

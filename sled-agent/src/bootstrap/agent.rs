@@ -28,8 +28,6 @@ use std::path::{Path, PathBuf};
 use thiserror::Error;
 use tokio::sync::Mutex;
 
-pub(crate) const SLED_SUBNET_SEGMENT0: u16 = 0xFDB0;
-
 /// Describes errors which may occur while operating the bootstrap service.
 #[derive(Error, Debug)]
 pub enum BootstrapError {
@@ -104,7 +102,7 @@ fn mac_to_socket_addr(mac: MacAddr) -> SocketAddrV6 {
     assert_eq!(6, mac_bytes.len());
 
     let address = Ipv6Addr::new(
-        SLED_SUBNET_SEGMENT0,
+        0xfdb0,
         ((mac_bytes[0] as u16) << 8) | mac_bytes[1] as u16,
         ((mac_bytes[2] as u16) << 8) | mac_bytes[3] as u16,
         ((mac_bytes[4] as u16) << 8) | mac_bytes[5] as u16,
