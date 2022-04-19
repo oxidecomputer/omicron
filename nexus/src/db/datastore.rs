@@ -31,7 +31,29 @@ use crate::authz::ApiResourceError;
 use crate::context::OpContext;
 use crate::db::fixed_data::role_assignment_builtin::BUILTIN_ROLE_ASSIGNMENTS;
 use crate::db::fixed_data::role_builtin::BUILTIN_ROLES;
-use crate::db::fixed_data::silo_builtin::SILO_ID;
+use crate::db::fixed_data::silo::{DEFAULT_SILO, SILO_ID};
+use crate::db::lookup::LookupPath;
+use crate::db::{
+    self,
+    error::{public_error_from_diesel_pool, ErrorHandler, TransactionError},
+    model::{
+        ConsoleSession, Dataset, DatasetKind, Disk, DiskRuntimeState,
+        Generation, IncompleteNetworkInterface, Instance, InstanceRuntimeState,
+        Name, NetworkInterface, Organization, OrganizationUpdate, OximeterInfo,
+        ProducerEndpoint, Project, ProjectUpdate, Region,
+        RoleAssignmentBuiltin, RoleBuiltin, RouterRoute, RouterRouteUpdate,
+        Silo, SiloUser, Sled, UpdateAvailableArtifact, UserBuiltin, Volume,
+        Vpc, VpcFirewallRule, VpcRouter, VpcRouterUpdate, VpcSubnet,
+        VpcSubnetUpdate, VpcUpdate, Zpool,
+    },
+    pagination::paginated,
+    pagination::paginated_multicolumn,
+    subnet_allocation::FilterConflictingVpcSubnetRangesQuery,
+    subnet_allocation::InsertNetworkInterfaceQuery,
+    subnet_allocation::NetworkInterfaceError,
+    subnet_allocation::SubnetError,
+    update_and_check::{UpdateAndCheck, UpdateStatus},
+};
 use crate::external_api::params;
 use async_bb8_diesel::{AsyncConnection, AsyncRunQueryDsl, ConnectionManager};
 use chrono::Utc;
@@ -58,29 +80,6 @@ use std::convert::{TryFrom, TryInto};
 use std::net::Ipv6Addr;
 use std::sync::Arc;
 use uuid::Uuid;
-
-use crate::db::lookup::LookupPath;
-use crate::db::{
-    self,
-    error::{public_error_from_diesel_pool, ErrorHandler, TransactionError},
-    model::{
-        ConsoleSession, Dataset, DatasetKind, Disk, DiskRuntimeState,
-        Generation, IncompleteNetworkInterface, Instance, InstanceRuntimeState,
-        Name, NetworkInterface, Organization, OrganizationUpdate, OximeterInfo,
-        ProducerEndpoint, Project, ProjectUpdate, Region,
-        RoleAssignmentBuiltin, RoleBuiltin, RouterRoute, RouterRouteUpdate,
-        Silo, SiloUser, Sled, UpdateAvailableArtifact, UserBuiltin, Volume,
-        Vpc, VpcFirewallRule, VpcRouter, VpcRouterUpdate, VpcSubnet,
-        VpcSubnetUpdate, VpcUpdate, Zpool,
-    },
-    pagination::paginated,
-    pagination::paginated_multicolumn,
-    subnet_allocation::FilterConflictingVpcSubnetRangesQuery,
-    subnet_allocation::InsertNetworkInterfaceQuery,
-    subnet_allocation::NetworkInterfaceError,
-    subnet_allocation::SubnetError,
-    update_and_check::{UpdateAndCheck, UpdateStatus},
-};
 
 // Number of unique datasets required to back a region.
 // TODO: This should likely turn into a configuration option.
@@ -2488,22 +2487,21 @@ impl DataStore {
         &self,
         opctx: &OpContext,
     ) -> Result<(), Error> {
+        opctx.authorize(authz::Action::Modify, &authz::DATABASE).await?;
+
         debug!(opctx.log, "attempting to create built-in silo");
 
-        let builtin_silo = Silo::new_with_id(
-            *SILO_ID,
-            params::SiloCreate {
-                identity: IdentityMetadataCreateParams {
-                    name: "fakesilo".parse().unwrap(),
-                    description: "fake silo".to_string(),
-                },
-                discoverable: false,
-            },
-        );
-
-        let _create_result = self.silo_create(opctx, builtin_silo).await?;
-        info!(opctx.log, "created built-in silo");
-
+        use db::schema::silo::dsl;
+        let count = diesel::insert_into(dsl::silo)
+            .values(&*DEFAULT_SILO)
+            .on_conflict(dsl::id)
+            .do_nothing()
+            .execute_async(self.pool_authorized(opctx).await?)
+            .await
+            .map_err(|e| {
+                public_error_from_diesel_pool(e, ErrorHandler::Server)
+            })?;
+        info!(opctx.log, "created {} built-in silos", count);
         Ok(())
     }
 
@@ -2512,12 +2510,11 @@ impl DataStore {
         opctx: &OpContext,
         silo: Silo,
     ) -> CreateResult<Silo> {
-        use db::schema::silo::dsl;
-
-        // TODO opctx.authorize
+        opctx.authorize(authz::Action::CreateChild, &authz::FLEET).await?;
 
         let silo_id = silo.id();
 
+        use db::schema::silo::dsl;
         diesel::insert_into(dsl::silo)
             .values(silo)
             .returning(Silo::as_returning())
@@ -2539,8 +2536,9 @@ impl DataStore {
         opctx: &OpContext,
         pagparams: &DataPageParams<'_, Uuid>,
     ) -> ListResultVec<Silo> {
+        opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
+
         use db::schema::silo::dsl;
-        // TODO opctx.authorize
         paginated(dsl::silo, dsl::id, pagparams)
             .filter(dsl::time_deleted.is_null())
             .filter(dsl::discoverable.eq(true))
@@ -2555,8 +2553,9 @@ impl DataStore {
         opctx: &OpContext,
         pagparams: &DataPageParams<'_, Name>,
     ) -> ListResultVec<Silo> {
+        opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
+
         use db::schema::silo::dsl;
-        // TODO opctx.authorize
         paginated(dsl::silo, dsl::name, pagparams)
             .filter(dsl::time_deleted.is_null())
             .filter(dsl::discoverable.eq(true))
@@ -2569,38 +2568,26 @@ impl DataStore {
     pub async fn silo_delete(
         &self,
         opctx: &OpContext,
-        name: &Name,
+        authz_silo: &authz::Silo,
+        db_silo: &db::model::Silo,
     ) -> DeleteResult {
+        assert_eq!(authz_silo.id(), db_silo.id());
+        opctx.authorize(authz::Action::Delete, authz_silo).await?;
+
         use db::schema::organization;
         use db::schema::silo;
         use db::schema::silo_user;
 
-        // TODO opctx.authorize
-
-        let (id, rcgen) = silo::dsl::silo
-            .filter(silo::dsl::time_deleted.is_null())
-            .filter(silo::dsl::name.eq(name.clone()))
-            .select((silo::dsl::id, silo::dsl::rcgen))
-            .get_result_async::<(Uuid, Generation)>(self.pool())
-            .await
-            .map_err(|e| {
-                public_error_from_diesel_pool(
-                    e,
-                    ErrorHandler::NotFoundByLookup(
-                        ResourceType::Silo,
-                        LookupType::ByName(name.to_string()),
-                    ),
-                )
-            })?;
-
         // Make sure there are no organizations present within this silo.
+        let id = authz_silo.id();
+        let rcgen = db_silo.rcgen;
         let org_found = diesel_pool_result_optional(
             organization::dsl::organization
                 .filter(organization::dsl::silo_id.eq(id))
                 .filter(organization::dsl::time_deleted.is_null())
                 .select(organization::dsl::id)
                 .limit(1)
-                .first_async::<Uuid>(self.pool())
+                .first_async::<Uuid>(self.pool_authorized(opctx).await?)
                 .await,
         )
         .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))?;
@@ -2618,15 +2605,12 @@ impl DataStore {
             .filter(silo::dsl::id.eq(id))
             .filter(silo::dsl::rcgen.eq(rcgen))
             .set(silo::dsl::time_deleted.eq(now))
-            .execute_async(self.pool())
+            .execute_async(self.pool_authorized(opctx).await?)
             .await
             .map_err(|e| {
                 public_error_from_diesel_pool(
                     e,
-                    ErrorHandler::NotFoundByLookup(
-                        ResourceType::Silo,
-                        LookupType::ById(id),
-                    ),
+                    ErrorHandler::NotFoundByResource(authz_silo),
                 )
             })?;
 
@@ -2640,22 +2624,22 @@ impl DataStore {
         info!(opctx.log, "deleted silo {}", id);
 
         // If silo deletion succeeded, delete all silo users
+        // TODO-correctness This needs to happen in a saga or some other
+        // mechanism that ensures it happens even if we crash at this point.
+        // TODO-scalability This needs to happen in batches
         let updated_rows = diesel::update(silo_user::dsl::silo_user)
             .filter(silo_user::dsl::silo_id.eq(id))
             .set(silo_user::dsl::time_deleted.eq(now))
-            .execute_async(self.pool())
+            .execute_async(self.pool_authorized(opctx).await?)
             .await
             .map_err(|e| {
                 public_error_from_diesel_pool(
                     e,
-                    ErrorHandler::NotFoundByLookup(
-                        ResourceType::Silo,
-                        LookupType::ById(id),
-                    ),
+                    ErrorHandler::NotFoundByResource(authz_silo),
                 )
             })?;
 
-        info!(opctx.log, "deleted {} silo users for silo {}", updated_rows, id,);
+        info!(opctx.log, "deleted {} silo users for silo {}", updated_rows, id);
 
         Ok(())
     }

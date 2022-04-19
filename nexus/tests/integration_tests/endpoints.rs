@@ -23,6 +23,8 @@ use omicron_common::api::external::RouterRouteCreateParams;
 use omicron_common::api::external::RouterRouteUpdateParams;
 use omicron_common::api::external::VpcFirewallRuleUpdateParams;
 use omicron_nexus::authn;
+use omicron_nexus::db::fixed_data::silo::DEFAULT_SILO;
+use omicron_nexus::db::identity::Resource;
 use omicron_nexus::external_api::params;
 use std::net::IpAddr;
 use std::net::Ipv4Addr;
@@ -32,6 +34,19 @@ lazy_static! {
         format!("/hardware/racks/{}", RACK_UUID);
     pub static ref HARDWARE_SLED_URL: String =
         format!("/hardware/sleds/{}", SLED_AGENT_UUID);
+
+    // Silo used for testing
+    pub static ref DEFAULT_SILO_NAME: &'static Name = &DEFAULT_SILO.name().0;
+    pub static ref DEFAULT_SILO_URL: String =
+        format!("/silos/{}", *DEFAULT_SILO_NAME);
+    pub static ref DEMO_SILO_CREATE: params::SiloCreate =
+        params::SiloCreate {
+            identity: IdentityMetadataCreateParams {
+                name: DEFAULT_SILO_NAME.clone(),
+                description: String::from(""),
+            },
+            discoverable: true,
+        };
 
     // Organization used for testing
     pub static ref DEMO_ORG_NAME: Name = "demo-org".parse().unwrap();
@@ -349,6 +364,27 @@ lazy_static! {
 
     /// List of endpoints to be verified
     pub static ref VERIFY_ENDPOINTS: Vec<VerifyEndpoint> = vec![
+        /* Silos */
+        VerifyEndpoint {
+            url: "/silos",
+            visibility: Visibility::Public,
+            allowed_methods: vec![
+                AllowedMethod::Get,
+                AllowedMethod::Post(
+                    serde_json::to_value(&*DEMO_SILO_CREATE).unwrap()
+                )
+            ],
+        },
+        VerifyEndpoint {
+            url: &*DEFAULT_SILO_URL,
+            visibility: Visibility::Protected,
+            allowed_methods: vec![
+                AllowedMethod::Get,
+                AllowedMethod::Delete,
+            ],
+        },
+
+
         /* Organizations */
 
         VerifyEndpoint {

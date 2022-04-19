@@ -738,7 +738,12 @@ impl Nexus {
         opctx: &OpContext,
         name: &Name,
     ) -> DeleteResult {
-        self.db_datastore.silo_delete(opctx, name).await
+        let (.., authz_silo, db_silo) =
+            LookupPath::new(opctx, &self.db_datastore)
+                .silo_name(name)
+                .fetch_for(authz::Action::Delete)
+                .await?;
+        self.db_datastore.silo_delete(opctx, &authz_silo, &db_silo).await
     }
 
     // Organizations

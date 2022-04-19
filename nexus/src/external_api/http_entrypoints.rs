@@ -230,8 +230,6 @@ pub fn external_api() -> NexusApiDescription {
 // clients. Client generators use operationId to name API methods, so changing
 // a function name is a breaking change from a client perspective.
 
-// TODO authz for silo endpoints
-
 // List all silos (that are discoverable).
 #[endpoint {
     method = GET,
