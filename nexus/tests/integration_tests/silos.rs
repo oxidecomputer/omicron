@@ -110,7 +110,7 @@ async fn test_silos(cptestctx: &ControlPlaneTestContext) {
         &client,
         StatusCode::BAD_REQUEST,
         Method::DELETE,
-        &"/silos/default-silo",
+        &"/silos/fakesilo",
     )
     .authn_as(AuthnMode::PrivilegedUser)
     .execute()

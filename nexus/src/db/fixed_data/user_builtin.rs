@@ -3,7 +3,7 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 //! Built-in users
 
-use crate::db::fixed_data::silo::SILO_ID;
+use crate::db::fixed_data::silo_builtin::SILO_ID;
 use lazy_static::lazy_static;
 use omicron_common::api;
 use uuid::Uuid;
