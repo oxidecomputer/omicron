@@ -1,6 +1,6 @@
 #!/bin/bash
 #:
-#: name = "helios / build-and-nextest"
+#: name = "helios / build-and-test"
 #: variety = "basic"
 #: target = "helios"
 #: rust_toolchain = "nightly-2021-11-24"
@@ -25,6 +25,8 @@ ptime -m bash ./tools/ci_download_cockroachdb
 # suite.
 #
 export PATH="$PATH:$PWD/out/cockroachdb/bin:$PWD/out/clickhouse"
+
+ptime -m cargo install cargo-nextest
 
 #
 # We build with:
@@ -56,4 +58,4 @@ ptime -m cargo run --bin omicron-package -- check
 # having to rebuild here.
 #
 banner test
-ptime -m cargo +'nightly-2021-11-24' test --workspace --locked --verbose
+ptime -m cargo +'nightly-2021-11-24' nextest run --profile ci --workspace --locked --config-file .cargo/nextest.toml
