@@ -647,10 +647,6 @@ pub struct Sled {
 // See https://github.com/oxidecomputer/omicron/issues/732 for tracking issue.
 pub(crate) const STATIC_IPV6_ADDRESS_OFFSET: u16 = 20;
 impl Sled {
-    // TODO-cleanup: We should be using IPv6 only for Oxide services, including
-    // `std::net::Ipv6Addr` and `SocketAddrV6`. The v4/v6 enums should only be
-    // used for managing customer addressing information, or when needed to
-    // interact with the database.
     pub fn new(id: Uuid, addr: SocketAddrV6) -> Self {
         let last_used_address = {
             let mut segments = addr.ip().segments();
