@@ -23,8 +23,6 @@ use omicron_common::api::external::RouterRouteCreateParams;
 use omicron_common::api::external::RouterRouteUpdateParams;
 use omicron_common::api::external::VpcFirewallRuleUpdateParams;
 use omicron_nexus::authn;
-use omicron_nexus::db::fixed_data::silo::DEFAULT_SILO;
-use omicron_nexus::db::identity::Resource;
 use omicron_nexus::external_api::params;
 use std::net::IpAddr;
 use std::net::Ipv4Addr;
@@ -36,13 +34,13 @@ lazy_static! {
         format!("/hardware/sleds/{}", SLED_AGENT_UUID);
 
     // Silo used for testing
-    pub static ref DEFAULT_SILO_NAME: &'static Name = &DEFAULT_SILO.name().0;
-    pub static ref DEFAULT_SILO_URL: String =
-        format!("/silos/{}", *DEFAULT_SILO_NAME);
+    pub static ref DEMO_SILO_NAME: Name = "demo-silo".parse().unwrap();
+    pub static ref DEMO_SILO_URL: String =
+        format!("/silos/{}", *DEMO_SILO_NAME);
     pub static ref DEMO_SILO_CREATE: params::SiloCreate =
         params::SiloCreate {
             identity: IdentityMetadataCreateParams {
-                name: DEFAULT_SILO_NAME.clone(),
+                name: DEMO_SILO_NAME.clone(),
                 description: String::from(""),
             },
             discoverable: true,
@@ -376,7 +374,7 @@ lazy_static! {
             ],
         },
         VerifyEndpoint {
-            url: &*DEFAULT_SILO_URL,
+            url: &*DEMO_SILO_URL,
             visibility: Visibility::Protected,
             allowed_methods: vec![
                 AllowedMethod::Get,
