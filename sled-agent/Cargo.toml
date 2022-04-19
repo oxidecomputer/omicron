@@ -23,7 +23,7 @@ omicron-common = { path = "../common" }
 p256 = "0.9.0"
 percent-encoding = "2.1.0"
 progenitor = { git = "https://github.com/oxidecomputer/progenitor" }
-propolis-client = { git = "https://github.com/oxidecomputer/propolis", rev = "3a4fd8fa54ce8e1117bfa259bea39bca87f8ea14" }
+propolis-client = { git = "https://github.com/oxidecomputer/propolis", rev = "abd372deb0a7dfa33f138f7741c5107184fa7088" }
 rand = { version = "0.8.5", features = ["getrandom"] }
 reqwest = { version = "0.11.8", default-features = false, features = ["rustls-tls", "stream"] }
 schemars = { version = "0.8", features = [ "chrono", "uuid" ] }
