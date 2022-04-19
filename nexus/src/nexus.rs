@@ -73,6 +73,7 @@ use sled_agent_client::Client as SledAgentClient;
 use slog::Logger;
 use std::convert::{TryFrom, TryInto};
 use std::net::SocketAddr;
+use std::net::SocketAddrV6;
 use std::num::NonZeroU32;
 use std::path::Path;
 use std::sync::Arc;
@@ -475,7 +476,7 @@ impl Nexus {
     pub async fn upsert_sled(
         &self,
         id: Uuid,
-        address: SocketAddr,
+        address: SocketAddrV6,
     ) -> Result<(), Error> {
         info!(self.log, "registered sled agent"; "sled_uuid" => id.to_string());
         let sled = db::model::Sled::new(id, address);

@@ -14,7 +14,7 @@ use omicron_common::api::external::{
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use std::net::SocketAddr;
+use std::net::SocketAddrV6;
 use uuid::Uuid;
 
 // SILOS
@@ -224,7 +224,7 @@ impl From<model::Rack> for Rack {
 pub struct Sled {
     #[serde(flatten)]
     pub identity: IdentityMetadata,
-    pub service_address: SocketAddr,
+    pub service_address: SocketAddrV6,
 }
 
 impl From<model::Sled> for Sled {
