@@ -6,7 +6,7 @@
 
 use ipnetwork::IpNetwork;
 use slog::Logger;
-use std::net::IpAddr;
+use std::net::{IpAddr, Ipv6Addr};
 
 use crate::illumos::addrobj::AddrObject;
 use crate::illumos::dladm::{Dladm, PhysicalLink, VNIC_PREFIX_CONTROL};
@@ -65,9 +65,6 @@ pub enum Error {
 
     #[error("Error accessing filesystem: {0}")]
     Filesystem(std::io::Error),
-
-    #[error("Unexpected IP address: {0}")]
-    Ip(IpNetwork),
 
     #[error("Value not found")]
     NotFound,
@@ -268,7 +265,10 @@ impl Zones {
             .ok_or(Error::NotFound)
     }
 
-    /// Gets the address if one exists, creates one if one does not exist.
+    /// Ensures that an IP address on an interface matches the requested value.
+    ///
+    /// - If the address exists, ensure it has the desired value.
+    /// - If the address does not exist, create it.
     ///
     /// This address may be optionally within a zone `zone`.
     /// If `None` is supplied, the address is queried from the Global Zone.
@@ -281,8 +281,13 @@ impl Zones {
         match Self::get_address(zone, addrobj) {
             Ok(addr) => {
                 if let AddressRequest::Static(expected_addr) = addrtype {
+                    // If the address is static, we need to validate that it
+                    // matches the value we asked for.
                     if addr != expected_addr {
-                        return Err(Error::Ip(addr));
+                        // If the address doesn't match, try removing the old
+                        // value before using the new one.
+                        Self::delete_address(zone, addrobj)?;
+                        return Self::create_address(zone, addrobj, addrtype);
                     }
                 }
                 Ok(addr)
@@ -357,7 +362,6 @@ impl Zones {
         addrobj: &AddrObject,
         addrtype: AddressRequest,
     ) -> Result<(), Error> {
-        // No link-local address was found, attempt to make one.
         let mut command = std::process::Command::new(PFEXEC);
         let mut args = vec![];
         if let Some(zone) = zone {
@@ -381,6 +385,27 @@ impl Zones {
                 args.push(addr.to_string());
             }
         }
+        args.push(addrobj.to_string());
+
+        let cmd = command.args(args);
+        execute(cmd)?;
+        Ok(())
+    }
+
+    #[allow(clippy::needless_lifetimes)]
+    pub fn delete_address<'a>(
+        zone: Option<&'a str>,
+        addrobj: &AddrObject,
+    ) -> Result<(), Error> {
+        let mut command = std::process::Command::new(PFEXEC);
+        let mut args = vec![];
+        if let Some(zone) = zone {
+            args.push(ZLOGIN.to_string());
+            args.push(zone.to_string());
+        };
+
+        args.push(IPADM.to_string());
+        args.push("delete-addr".to_string());
         args.push(addrobj.to_string());
 
         let cmd = command.args(args);
@@ -433,15 +458,10 @@ impl Zones {
     // from RSS.
     pub fn ensure_has_global_zone_v6_address(
         physical_link: Option<PhysicalLink>,
-        address: IpAddr,
+        address: Ipv6Addr,
+        name: &str,
     ) -> Result<(), Error> {
-        if !address.is_ipv6() {
-            return Err(Error::Ip(address.into()));
-        }
-
-        // Ensure that addrconf has been set up in the Global
-        // Zone.
-
+        // Ensure that addrconf has been set up in the Global Zone.
         let link = if let Some(link) = physical_link {
             link
         } else {
@@ -458,8 +478,8 @@ impl Zones {
         // prefix. Anything else must be routed through Sidecar.
         Self::ensure_address(
             None,
-            &gz_link_local_addrobj.on_same_interface("sled6")?,
-            AddressRequest::new_static(address, Some(64)),
+            &gz_link_local_addrobj.on_same_interface(name)?,
+            AddressRequest::new_static(IpAddr::V6(address), Some(64)),
         )?;
         Ok(())
     }

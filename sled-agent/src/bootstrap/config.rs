@@ -10,6 +10,8 @@ use serde::Deserialize;
 use serde::Serialize;
 use uuid::Uuid;
 
+pub const BOOTSTRAP_AGENT_PORT: u16 = 12346;
+
 /// Configuration for a bootstrap agent
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
 pub struct Config {

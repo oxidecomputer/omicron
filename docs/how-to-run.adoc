@@ -113,19 +113,21 @@ we'll assign addresses as per RFD 63 as well as incorporating DNS based
 service discovery.
 
 For the purposes of local development today, we specify some hardcoded IPv6
-unique local addresses in `fd00:1de::/16`:
+unique local addresses in the subnet of the first Sled Agent: `fd00:1122:3344:1::/64`:
 
 [options="header"]
 |===================================================================================================
-| Service                    | Endpoint                                                             
-| Sled Agent: Bootstrap      | `[::]:12346`                                                         
-| Sled Agent: Dropshot API   | `[fd00:1de::]:12345`                                                 
-| Cockroach DB               | `[fd00:1de::5]:32221`                                                
-| Oximeter                   | `[fd00:1de::6]:12223`                                                
-| Nexus: External API        | `[fd00:1de::7]:12220`                                                
-| Nexus: Internal API        | `[fd00:1de::7]:12221`                                                
-| Clickhouse                 | `[fd00:1de::8]:8123`                                                 
-| Crucible Downstairs        | `[fd00:1de::9]:32345`, `[fd00:1de::10]:32345`, `[fd00:1de::11]:32345`
+| Service                    | Endpoint
+| Sled Agent: Bootstrap      | Derived from MAC address of physical data link.
+| Sled Agent: Dropshot API   | `[fd00:1122:3344:1::1]:12345`
+| Cockroach DB               | `[fd00:1122:3344:1::2]:32221`
+| Nexus: External API        | `[fd00:1122:3344:1::3]:12220`
+| Nexus: Internal API        | `[fd00:1122:3344:1::3]:12221`
+| Oximeter                   | `[fd00:1122:3344:1::4]:12223`
+| Clickhouse                 | `[fd00:1122:3344:1::5]:8123`
+| Crucible Downstairs 1      | `[fd00:1122:3344:1::6]:32345`
+| Crucible Downstairs 2      | `[fd00:1122:3344:1::7]:32345`
+| Crucible Downstairs 3      | `[fd00:1122:3344:1::8]:32345`
 |===================================================================================================
 
 Note that Sled Agent runs in the global zone and is the one responsible for bringing up all the other

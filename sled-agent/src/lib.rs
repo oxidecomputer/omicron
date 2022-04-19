@@ -22,7 +22,7 @@ pub mod common;
 pub mod bootstrap;
 pub mod config;
 mod http_entrypoints;
-mod illumos;
+pub mod illumos;
 mod instance;
 mod instance_manager;
 mod nexus;
