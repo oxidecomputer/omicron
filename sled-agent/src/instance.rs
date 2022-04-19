@@ -599,8 +599,7 @@ impl Instance {
         loop {
             // State monitoring always returns the most recent state/gen pair
             // known to Propolis.
-            let response =
-                client.instance_state_monitor(gen).await?;
+            let response = client.instance_state_monitor(gen).await?;
             let reaction =
                 self.inner.lock().await.observe_state(response.state).await?;
 
