@@ -155,17 +155,17 @@
         "description": "Configuration information for launching a Sled Agent.",
         "type": "object",
         "properties": {
-          "ip": {
+          "subnet": {
             "description": "Portion of the IP space to be managed by the Sled Agent.",
             "allOf": [
               {
-                "$ref": "#/components/schemas/Ipv6Net"
+                "$ref": "#/components/schemas/SledSubnet"
               }
             ]
           }
         },
         "required": [
-          "ip"
+          "subnet"
         ]
       },
       "SledAgentResponse": {
@@ -179,6 +179,14 @@
         },
         "required": [
           "id"
+        ]
+      },
+      "SledSubnet": {
+        "description": "Represents subnets belonging to Sleds.\n\nThis is a thin wrapper around the [`Ipv6Net`] type - which may be accessed by [`AsRef<Ipv6Net>`] - which adds additional validation that this is a /64 subnet with an expected prefix.",
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/Ipv6Net"
+          }
         ]
       }
     }

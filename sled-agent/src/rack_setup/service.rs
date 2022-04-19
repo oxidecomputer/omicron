@@ -8,9 +8,9 @@ use super::config::{SetupServiceConfig as Config, SledRequest};
 use crate::bootstrap::{
     client as bootstrap_agent_client, config::BOOTSTRAP_AGENT_PORT,
     discovery::PeerMonitorObserver, params::SledAgentRequest,
+    params::SledSubnet,
 };
 use crate::config::get_sled_address;
-use omicron_common::api::external::Ipv6Net;
 use omicron_common::backoff::{
     internal_service_policy, retry_notify, BackoffError,
 };
@@ -116,9 +116,9 @@ enum PeerExpectation {
     // This case is fairly tricky because some sleds may have
     // already received requests to initialize - modifying the
     // allocated subnets would be non-trivial.
-    Precise(HashSet<Ipv6Addr>),
+    LoadOldPlan(HashSet<Ipv6Addr>),
     // Await any peers, as long as there are at least enough to make a new plan.
-    Arbitrary(usize),
+    CreateNewPlan(usize),
 }
 
 /// The implementation of the Rack Setup Service.
@@ -155,8 +155,10 @@ impl ServiceInner {
         let sled_agent_initialize = || async {
             client
                 .start_sled(&bootstrap_agent_client::types::SledAgentRequest {
-                    ip: bootstrap_agent_client::types::Ipv6Net(
-                        request.ip.0.to_string(),
+                    subnet: bootstrap_agent_client::types::SledSubnet(
+                        bootstrap_agent_client::types::Ipv6Net(
+                            request.subnet.as_ref().to_string(),
+                        ),
                     ),
                 })
                 .await
@@ -317,14 +319,14 @@ impl ServiceInner {
                 SocketAddrV6::new(bootstrap_addr, BOOTSTRAP_AGENT_PORT, 0, 0);
             let sled_subnet_index =
                 u8::try_from(idx + 1).expect("Too many peers!");
-            let subnet = config.sled_subnet(sled_subnet_index);
+            let subnet =
+                SledSubnet::new(config.sled_subnet(sled_subnet_index).into())
+                    .expect("Created Invalid Subnet");
 
             (
                 bootstrap_addr,
                 SledAllocation {
-                    initialization_request: SledAgentRequest {
-                        ip: Ipv6Net(subnet),
-                    },
+                    initialization_request: SledAgentRequest { subnet },
                     services_request: request.clone(),
                 },
             )
@@ -363,15 +365,15 @@ impl ServiceInner {
         loop {
             {
                 match expectation {
-                    PeerExpectation::Precise(ref expected) => {
+                    PeerExpectation::LoadOldPlan(ref expected) => {
                         if all_addrs.is_superset(expected) {
                             return Ok(all_addrs
                                 .into_iter()
                                 .collect::<Vec<Ipv6Addr>>());
                         }
-                        info!(self.log, "Waiting for a precise set of peers; not found yet.");
+                        info!(self.log, "Waiting for a LoadOldPlan set of peers; not found yet.");
                     }
-                    PeerExpectation::Arbitrary(wanted_peer_count) => {
+                    PeerExpectation::CreateNewPlan(wanted_peer_count) => {
                         if all_addrs.len() >= wanted_peer_count {
                             return Ok(all_addrs
                                 .into_iter()
@@ -445,9 +447,9 @@ impl ServiceInner {
         // - Enough peers to create a new plan (if one does not exist)
         let maybe_plan = self.load_plan().await?;
         let expectation = if let Some(plan) = &maybe_plan {
-            PeerExpectation::Precise(plan.keys().map(|a| *a.ip()).collect())
+            PeerExpectation::LoadOldPlan(plan.keys().map(|a| *a.ip()).collect())
         } else {
-            PeerExpectation::Arbitrary(config.requests.len())
+            PeerExpectation::CreateNewPlan(config.requests.len())
         };
         let addrs = self.wait_for_peers(expectation).await?;
         info!(self.log, "Enough peers exist to enact RSS plan");
@@ -489,7 +491,7 @@ impl ServiceInner {
 
                 // Next, initialize any datasets on sleds that need it.
                 let sled_address = SocketAddr::V6(get_sled_address(
-                    allocation.initialization_request.ip,
+                    *allocation.initialization_request.subnet.as_ref(),
                 ));
                 self.initialize_datasets(
                     sled_address,
@@ -513,7 +515,7 @@ impl ServiceInner {
         futures::future::join_all(plan.iter().map(
             |(_, allocation)| async move {
                 let sled_address = SocketAddr::V6(get_sled_address(
-                    allocation.initialization_request.ip,
+                    *allocation.initialization_request.subnet.as_ref(),
                 ));
                 self.initialize_services(
                     sled_address,

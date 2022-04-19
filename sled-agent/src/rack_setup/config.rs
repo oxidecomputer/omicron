@@ -47,11 +47,7 @@ fn new_network(addr: Ipv6Addr, prefix: u8) -> Ipv6Network {
 
     // ipnetwork inputs/outputs the provided IPv6 address, unmodified by the
     // prefix. We manually mask `addr` based on `prefix` ourselves.
-    Ipv6Network::new(
-        Ipv6Addr::from(u128::from(addr) & u128::from(net.mask())),
-        prefix,
-    )
-    .unwrap()
+    Ipv6Network::new(net.network(), prefix).unwrap()
 }
 
 impl SetupServiceConfig {

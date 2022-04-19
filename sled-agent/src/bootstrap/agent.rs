@@ -28,6 +28,8 @@ use std::path::{Path, PathBuf};
 use thiserror::Error;
 use tokio::sync::Mutex;
 
+pub(crate) const SLED_SUBNET_SEGMENT0: u16 = 0xFDB0;
+
 /// Describes errors which may occur while operating the bootstrap service.
 #[derive(Error, Debug)]
 pub enum BootstrapError {
@@ -102,7 +104,7 @@ fn mac_to_socket_addr(mac: MacAddr) -> SocketAddrV6 {
     assert_eq!(6, mac_bytes.len());
 
     let address = Ipv6Addr::new(
-        0xfdb0,
+        SLED_SUBNET_SEGMENT0,
         ((mac_bytes[0] as u16) << 8) | mac_bytes[1] as u16,
         ((mac_bytes[2] as u16) << 8) | mac_bytes[3] as u16,
         ((mac_bytes[4] as u16) << 8) | mac_bytes[5] as u16,
@@ -179,7 +181,8 @@ impl Agent {
     ) -> Result<SledAgentResponse, BootstrapError> {
         info!(&self.log, "Loading Sled Agent: {:?}", request);
 
-        let sled_address = crate::config::get_sled_address(request.ip);
+        let sled_address =
+            crate::config::get_sled_address(*request.subnet.as_ref());
 
         let mut maybe_agent = self.sled_agent.lock().await;
         if let Some(server) = &*maybe_agent {
@@ -209,7 +212,7 @@ impl Agent {
         tokio::fs::write(
             get_subnet_path(),
             &toml::to_string(
-                &toml::Value::try_from(&request.ip)
+                &toml::Value::try_from(&request.subnet)
                     .expect("Cannot serialize IP"),
             )
             .expect("Cannot convert toml to string"),

@@ -1072,6 +1072,12 @@ impl std::fmt::Display for Ipv6Net {
     }
 }
 
+impl From<ipnetwork::Ipv6Network> for Ipv6Net {
+    fn from(n: ipnetwork::Ipv6Network) -> Ipv6Net {
+        Self(n)
+    }
+}
+
 impl JsonSchema for Ipv6Net {
     fn schema_name() -> String {
         "Ipv6Net".to_string()
