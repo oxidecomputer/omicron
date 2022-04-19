@@ -3323,7 +3323,7 @@ dependencies = [
 [[package]]
 name = "propolis-client"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=3a4fd8fa54ce8e1117bfa259bea39bca87f8ea14#3a4fd8fa54ce8e1117bfa259bea39bca87f8ea14"
+source = "git+https://github.com/oxidecomputer/propolis?rev=7f370d295813be75160b5e6ecc79f6d3c7ed9368#7f370d295813be75160b5e6ecc79f6d3c7ed9368"
 dependencies = [
  "crucible",
  "reqwest",

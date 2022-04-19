@@ -89,5 +89,5 @@ zone = true
 [external_package.propolis-server.source]
 type = "prebuilt"
 repo = "propolis"
-commit = "e984409a425df97338efa2c53ba3e40c73668638"
-sha256 = "206ef42e90d157e3314f4745ddb4422b3c93a16881749824037853e6f39f3762"
+commit = "7f370d295813be75160b5e6ecc79f6d3c7ed9368"
+sha256 = "32994c25bc7481f9aeb3e0976425cf39a6ee6fd8a501929371884d9add53d310"

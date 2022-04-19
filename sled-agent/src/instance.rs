@@ -92,7 +92,7 @@ async fn wait_for_http_server(
             // This request is nonsensical - we don't expect an instance to be
             // using the nil UUID - but getting a response that isn't a
             // connection-based error informs us the HTTP server is alive.
-            match client.instance_get(Uuid::nil()).await {
+            match client.instance_get().await {
                 Ok(_) => return Ok(()),
                 Err(value) => {
                     if let propolis_client::Error::Status(_) = &value {
@@ -254,7 +254,7 @@ impl InstanceInner {
             .as_ref()
             .expect("Propolis client should be initialized before usage")
             .client
-            .instance_state_put(*self.id(), request)
+            .instance_state_put(request)
             .await?;
         Ok(())
     }
@@ -590,11 +590,9 @@ impl Instance {
         //
         // They aren't modified after being initialized, so it's fine to grab
         // a copy.
-        let (instance_id, client) = {
+        let client = {
             let inner = self.inner.lock().await;
-            let id = *inner.id();
-            let client = inner.running_state.as_ref().unwrap().client.clone();
-            (id, client)
+            inner.running_state.as_ref().unwrap().client.clone()
         };
 
         let mut gen = 0;
@@ -602,7 +600,7 @@ impl Instance {
             // State monitoring always returns the most recent state/gen pair
             // known to Propolis.
             let response =
-                client.instance_state_monitor(instance_id, gen).await?;
+                client.instance_state_monitor(gen).await?;
             let reaction =
                 self.inner.lock().await.observe_state(response.state).await?;
 
