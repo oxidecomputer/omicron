@@ -748,10 +748,7 @@ impl Nexus {
         opctx: &OpContext,
         new_organization: &params::OrganizationCreate,
     ) -> CreateResult<db::model::Organization> {
-        let silo_id = opctx.authn.silo_required()?;
-        let db_org =
-            db::model::Organization::new(new_organization.clone(), silo_id);
-        self.db_datastore.organization_create(opctx, db_org).await
+        self.db_datastore.organization_create(opctx, new_organization).await
     }
 
     pub async fn organization_fetch(
@@ -887,7 +884,7 @@ impl Nexus {
         organization_name: &Name,
         pagparams: &DataPageParams<'_, Name>,
     ) -> ListResultVec<db::model::Project> {
-        let (authz_org,) = LookupPath::new(opctx, &self.db_datastore)
+        let (.., authz_org) = LookupPath::new(opctx, &self.db_datastore)
             .organization_name(organization_name)
             .lookup_for(authz::Action::CreateChild)
             .await?;
@@ -902,7 +899,7 @@ impl Nexus {
         organization_name: &Name,
         pagparams: &DataPageParams<'_, Uuid>,
     ) -> ListResultVec<db::model::Project> {
-        let (authz_org,) = LookupPath::new(opctx, &self.db_datastore)
+        let (.., authz_org) = LookupPath::new(opctx, &self.db_datastore)
             .organization_name(organization_name)
             .lookup_for(authz::Action::CreateChild)
             .await?;
@@ -1768,14 +1765,14 @@ impl Nexus {
         instance_name: &Name,
         disk_name: &Name,
     ) -> UpdateResult<db::model::Disk> {
-        let (_, authz_project, authz_disk, db_disk) =
+        let (.., authz_project, authz_disk, db_disk) =
             LookupPath::new(opctx, &self.db_datastore)
                 .organization_name(organization_name)
                 .project_name(project_name)
                 .disk_name(disk_name)
                 .fetch()
                 .await?;
-        let (_, _, authz_instance, db_instance) =
+        let (.., authz_instance, db_instance) =
             LookupPath::new(opctx, &self.db_datastore)
                 .project_id(authz_project.id())
                 .instance_name(instance_name)
@@ -1917,14 +1914,14 @@ impl Nexus {
         instance_name: &Name,
         disk_name: &Name,
     ) -> UpdateResult<db::model::Disk> {
-        let (_, authz_project, authz_disk, db_disk) =
+        let (.., authz_project, authz_disk, db_disk) =
             LookupPath::new(opctx, &self.db_datastore)
                 .organization_name(organization_name)
                 .project_name(project_name)
                 .disk_name(disk_name)
                 .fetch()
                 .await?;
-        let (_, _, authz_instance, db_instance) =
+        let (.., authz_instance, db_instance) =
             LookupPath::new(opctx, &self.db_datastore)
                 .project_id(authz_project.id())
                 .instance_name(instance_name)
@@ -2066,7 +2063,7 @@ impl Nexus {
         instance_name: &Name,
         params: &params::NetworkInterfaceCreate,
     ) -> CreateResult<db::model::NetworkInterface> {
-        let (_, authz_project, authz_instance, db_instance) =
+        let (.., authz_project, authz_instance, db_instance) =
             LookupPath::new(opctx, &self.db_datastore)
                 .organization_name(organization_name)
                 .project_name(project_name)
@@ -3115,7 +3112,7 @@ impl Nexus {
         name: &str,
     ) -> LookupResult<db::model::RoleBuiltin> {
         let (.., db_role_builtin) = LookupPath::new(opctx, &self.db_datastore)
-            .role_builtin_name(name)?
+            .role_builtin_name(name)
             .fetch()
             .await?;
         Ok(db_role_builtin)

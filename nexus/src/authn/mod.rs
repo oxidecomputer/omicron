@@ -36,6 +36,8 @@ pub use crate::db::fixed_data::user_builtin::USER_TEST_PRIVILEGED;
 pub use crate::db::fixed_data::user_builtin::USER_TEST_UNPRIVILEGED;
 use crate::db::model::ConsoleSession;
 
+use crate::authz;
+use omicron_common::api::external::LookupType;
 use serde::Deserialize;
 use serde::Serialize;
 use uuid::Uuid;
@@ -81,8 +83,14 @@ impl Context {
 
     pub fn silo_required(
         &self,
-    ) -> Result<Uuid, omicron_common::api::external::Error> {
-        self.actor_required().map(|actor| actor.silo_id)
+    ) -> Result<authz::Silo, omicron_common::api::external::Error> {
+        self.actor_required().map(|actor| {
+            authz::Silo::new(
+                authz::FLEET,
+                actor.silo_id,
+                LookupType::ById(actor.silo_id),
+            )
+        })
     }
 
     /// Returns the list of schemes tried, in order

@@ -52,7 +52,8 @@ use uuid::Uuid;
 ///
 /// // Fetch an organization by name
 /// let organization_name = db::model::Name("engineering".parse().unwrap());
-/// let (authz_org, db_org): (authz::Organization, db::model::Organization) =
+/// let (authz_silo, authz_org, db_org):
+///     (authz::Silo, authz::Organization, db::model::Organization) =
 ///     LookupPath::new(opctx, datastore)
 ///         .organization_name(&organization_name)
 ///         .fetch()
@@ -60,7 +61,8 @@ use uuid::Uuid;
 ///
 /// // Fetch an organization by id
 /// let id: Uuid = todo!();
-/// let (authz_org, db_org): (authz::Organization, db::model::Organization) =
+/// let (authz_silo, authz_org, db_org):
+///     (authz::Silo, authz::Organization, db::model::Organization) =
 ///     LookupPath::new(opctx, datastore)
 ///         .organization_id(id)
 ///         .fetch()
@@ -70,7 +72,7 @@ use uuid::Uuid;
 /// // this purpose, we don't need the database row for the Project, so we use
 /// // `lookup_for()`.
 /// let project_name = db::model::Name("omicron".parse().unwrap());
-/// let (authz_org, authz_project) =
+/// let (authz_silo, authz_org, authz_project) =
 ///     LookupPath::new(opctx, datastore)
 ///         .organization_name(&organization_name)
 ///         .project_name(&project_name)
@@ -80,7 +82,7 @@ use uuid::Uuid;
 /// // Fetch an Instance by a path of names (Organization name, Project name,
 /// // Instance name)
 /// let instance_name = db::model::Name("test-server".parse().unwrap());
-/// let (authz_org, authz_project, authz_instance, db_instance) =
+/// let (authz_silo, authz_org, authz_project, authz_instance, db_instance) =
 ///     LookupPath::new(opctx, datastore)
 ///         .organization_name(&organization_name)
 ///         .project_name(&project_name)
@@ -91,7 +93,7 @@ use uuid::Uuid;
 /// // Having looked up the Instance, you have the `authz::Project`.  Use this
 /// // to look up a Disk that you expect is in the same Project.
 /// let disk_name = db::model::Name("my-disk".parse().unwrap());
-/// let (_, _, authz_disk, db_disk) =
+/// let (.., authz_disk, db_disk) =
 ///     LookupPath::new(opctx, datastore)
 ///         .project_id(authz_project.id())
 ///         .disk_name(&disk_name)
@@ -134,6 +136,12 @@ use uuid::Uuid;
 //                      +----------+
 //                      |
 //                      v
+//                  Silo
+//                      key: Key::PrimaryKey(r, id)
+//                                           |
+//                      +--------------------+
+//                      |
+//                      v
 //                  Root
 //                      lookup_root: LookupPath (references OpContext and
 //                                               DataStore)
@@ -142,7 +150,7 @@ use uuid::Uuid;
 // (rather than references) the previous node.  This is important: the caller's
 // going to do something like this:
 //
-//     let (authz_org, authz_project, authz_instance, db_instance) =
+//     let (authz_silo, authz_org, authz_project, authz_instance, db_instance) =
 //         LookupPath::new(opctx, datastore)   // returns LookupPath
 //             .organization_name("org1")      // consumes LookupPath,
 //                                             //   returns Organization
@@ -185,9 +193,18 @@ impl<'a> LookupPath<'a> {
         'a: 'c,
         'b: 'c,
     {
-        Organization {
-            key: OrganizationKey::Name(Root { lookup_root: self }, name),
-        }
+        let key = match self.opctx.authn.silo_required() {
+            Ok(authz_silo) => {
+                let root = Root { lookup_root: self };
+                let silo_key = SiloKey::PrimaryKey(root, authz_silo.id());
+                OrganizationKey::Name(Silo { key: silo_key }, name)
+            }
+            Err(error) => {
+                let root = Root { lookup_root: self };
+                OrganizationKey::Error(root, error)
+            }
+        };
+        Organization { key }
     }
 
     /// Select a resource of type Organization, identified by its id
@@ -260,23 +277,26 @@ impl<'a> LookupPath<'a> {
     }
 
     /// Select a resource of type RoleBuiltin, identified by its `name`
-    pub fn role_builtin_name(
-        self,
-        name: &str,
-    ) -> Result<RoleBuiltin<'a>, Error> {
-        let (resource_type, role_name) =
-            name.split_once(".").ok_or_else(|| Error::ObjectNotFound {
-                type_name: ResourceType::RoleBuiltin,
-                lookup_type: LookupType::ByName(String::from(name)),
-            })?;
-
-        Ok(RoleBuiltin {
-            key: RoleBuiltinKey::PrimaryKey(
+    pub fn role_builtin_name(self, name: &str) -> RoleBuiltin<'a> {
+        let parts = name.split_once(".");
+        let key = if let Some((resource_type, role_name)) = parts {
+            RoleBuiltinKey::PrimaryKey(
                 Root { lookup_root: self },
                 resource_type.to_string(),
                 role_name.to_string(),
-            ),
-        })
+            )
+        } else {
+            let root = Root { lookup_root: self };
+            RoleBuiltinKey::Error(
+                root,
+                Error::ObjectNotFound {
+                    type_name: ResourceType::RoleBuiltin,
+                    lookup_type: LookupType::ByName(String::from(name)),
+                },
+            )
+        };
+
+        RoleBuiltin { key }
     }
 
     /// Select a resource of type Silo, identified by its id
@@ -354,8 +374,17 @@ impl<'a> Root<'a> {
 // Main resource hierarchy: Organizations, Projects, and their resources
 
 lookup_resource! {
-    name = "Organization",
+    name = "Silo",
     ancestors = [],
+    children = [ "Organization" ],
+    lookup_by_name = true,
+    soft_deletes = true,
+    primary_key_columns = [ { column_name = "id", rust_type = Uuid } ]
+}
+
+lookup_resource! {
+    name = "Organization",
+    ancestors = [ "Silo" ],
     children = [ "Project" ],
     lookup_by_name = true,
     soft_deletes = true,
@@ -364,7 +393,7 @@ lookup_resource! {
 
 lookup_resource! {
     name = "Project",
-    ancestors = [ "Organization" ],
+    ancestors = [ "Silo", "Organization" ],
     children = [ "Disk", "Instance", "Vpc" ],
     lookup_by_name = true,
     soft_deletes = true,
@@ -373,7 +402,7 @@ lookup_resource! {
 
 lookup_resource! {
     name = "Disk",
-    ancestors = [ "Organization", "Project" ],
+    ancestors = [ "Silo", "Organization", "Project" ],
     children = [],
     lookup_by_name = true,
     soft_deletes = true,
@@ -382,7 +411,7 @@ lookup_resource! {
 
 lookup_resource! {
     name = "Instance",
-    ancestors = [ "Organization", "Project" ],
+    ancestors = [ "Silo", "Organization", "Project" ],
     children = [ "NetworkInterface" ],
     lookup_by_name = true,
     soft_deletes = true,
@@ -391,7 +420,7 @@ lookup_resource! {
 
 lookup_resource! {
     name = "NetworkInterface",
-    ancestors = [ "Organization", "Project", "Instance" ],
+    ancestors = [ "Silo", "Organization", "Project", "Instance" ],
     children = [],
     lookup_by_name = true,
     soft_deletes = true,
@@ -400,7 +429,7 @@ lookup_resource! {
 
 lookup_resource! {
     name = "Vpc",
-    ancestors = [ "Organization", "Project" ],
+    ancestors = [ "Silo", "Organization", "Project" ],
     children = [ "VpcRouter", "VpcSubnet" ],
     lookup_by_name = true,
     soft_deletes = true,
@@ -409,7 +438,7 @@ lookup_resource! {
 
 lookup_resource! {
     name = "VpcRouter",
-    ancestors = [ "Organization", "Project", "Vpc" ],
+    ancestors = [ "Silo", "Organization", "Project", "Vpc" ],
     children = [ "RouterRoute" ],
     lookup_by_name = true,
     soft_deletes = true,
@@ -418,7 +447,7 @@ lookup_resource! {
 
 lookup_resource! {
     name = "RouterRoute",
-    ancestors = [ "Organization", "Project", "Vpc", "VpcRouter" ],
+    ancestors = [ "Silo", "Organization", "Project", "Vpc", "VpcRouter" ],
     children = [],
     lookup_by_name = true,
     soft_deletes = true,
@@ -427,7 +456,7 @@ lookup_resource! {
 
 lookup_resource! {
     name = "VpcSubnet",
-    ancestors = [ "Organization", "Project", "Vpc" ],
+    ancestors = [ "Silo", "Organization", "Project", "Vpc" ],
     children = [ ],
     lookup_by_name = true,
     soft_deletes = true,
@@ -457,15 +486,6 @@ lookup_resource! {
         { column_name = "resource_type", rust_type = String },
         { column_name = "role_name", rust_type = String },
     ]
-}
-
-lookup_resource! {
-    name = "Silo",
-    ancestors = [],
-    children = [],
-    lookup_by_name = true,
-    soft_deletes = true,
-    primary_key_columns = [ { column_name = "id", rust_type = Uuid } ]
 }
 
 lookup_resource! {
