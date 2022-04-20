@@ -12,10 +12,10 @@ use ipnetwork::IpNetwork;
 use slog::Logger;
 use std::path::PathBuf;
 
-#[cfg(not(test))]
-use crate::illumos::{dladm::Dladm, zone::Zones};
 #[cfg(test)]
-use crate::illumos::{dladm::MockDladm as Dladm, zone::MockZones as Zones};
+use crate::illumos::zone::MockZones as Zones;
+#[cfg(not(test))]
+use crate::illumos::zone::Zones;
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
@@ -161,7 +161,7 @@ impl RunningZone {
 
 impl Drop for RunningZone {
     fn drop(&mut self) {
-        match Zones::halt_and_remove(&self.inner.log, self.name()) {
+        match Zones::halt_and_remove_logged(&self.inner.log, self.name()) {
             Ok(()) => {
                 info!(self.inner.log, "Stopped and uninstalled zone")
             }
@@ -186,6 +186,27 @@ pub struct InstalledZone {
 }
 
 impl InstalledZone {
+    /// Returns the name of a zone, based on the service name plus any unique
+    /// identifying info.
+    ///
+    /// The zone name is based on:
+    /// - A unique Oxide prefix ("oxz_")
+    /// - The name of the service being hosted (e.g., "nexus")
+    /// - An optional, service-unique identifier (typically a UUID).
+    ///
+    /// This results in a zone name which is distinct across different zpools,
+    /// but stable and predictable across reboots.
+    pub fn get_zone_name(
+        service_name: &str,
+        unique_name: Option<&str>,
+    ) -> String {
+        let mut zone_name = format!("{}{}", ZONE_PREFIX, service_name);
+        if let Some(suffix) = unique_name {
+            zone_name.push_str(&format!("_{}", suffix));
+        }
+        zone_name
+    }
+
     pub async fn install(
         log: &Logger,
         vnic_allocator: &VnicAllocator,
@@ -195,21 +216,9 @@ impl InstalledZone {
         devices: &[zone::Device],
         vnics: Vec<Vnic>,
     ) -> Result<InstalledZone, Error> {
-        let physical_dl = Dladm::find_physical()?;
-        let control_vnic = vnic_allocator.new_control(&physical_dl, None)?;
+        let control_vnic = vnic_allocator.new_control(None)?;
 
-        // The zone name is based on:
-        // - A unique Oxide prefix ("oxz_")
-        // - The name of the service being hosted (e.g., "nexus")
-        // - An optional, service-unique identifier (typically a UUID).
-        //
-        // This results in a zone name which is distinct across different zpools,
-        // but stable and predictable across reboots.
-        let mut zone_name = format!("{}{}", ZONE_PREFIX, service_name);
-        if let Some(suffix) = unique_name {
-            zone_name.push_str(&format!("_{}", suffix));
-        }
-
+        let zone_name = Self::get_zone_name(service_name, unique_name);
         let zone_image_path =
             PathBuf::from(&format!("/opt/oxide/{}.tar.gz", service_name));
 

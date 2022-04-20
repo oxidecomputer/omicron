@@ -9,9 +9,8 @@ use super::config;
 use super::db;
 use super::Nexus;
 use crate::authn::external::session_cookie::{Session, SessionStore};
-use crate::authn::Actor;
+use crate::authn::ConsoleSessionWithSiloId;
 use crate::authz::AuthorizedResource;
-use crate::db::model::ConsoleSession;
 use crate::db::DataStore;
 use crate::saga_interface::SagaContext;
 use async_trait::async_trait;
@@ -89,7 +88,7 @@ impl ServerContext {
             .collect();
         let external_authn = authn::external::Authenticator::new(nexus_schemes);
         let internal_authn = Arc::new(authn::Context::internal_api());
-        let authz = Arc::new(authz::Authz::new());
+        let authz = Arc::new(authz::Authz::new(&log));
         let create_tracker = |name: &str| {
             let target = HttpService { name: name.to_string(), id: config.id };
             const START_LATENCY_DECADE: i8 = -6;
@@ -274,7 +273,8 @@ impl OpContext {
     ) -> (slog::Logger, BTreeMap<String, String>) {
         let mut metadata = BTreeMap::new();
 
-        let log = if let Some(Actor(actor_id)) = authn.actor() {
+        let log = if let Some(actor) = authn.actor() {
+            let actor_id = actor.id;
             metadata
                 .insert(String::from("authenticated"), String::from("true"));
             metadata.insert(String::from("actor"), actor_id.to_string());
@@ -382,7 +382,7 @@ impl OpContext {
         let authn = Arc::new(authn::Context::internal_test_user());
         let authz = authz::Context::new(
             Arc::clone(&authn),
-            Arc::new(authz::Authz::new()),
+            Arc::new(authz::Authz::new(&log)),
             Arc::clone(&datastore),
         );
         OpContext {
@@ -445,7 +445,7 @@ mod test {
             crate::db::datastore::datastore_test(&logctx, &db).await;
         let opctx = OpContext::for_background(
             logctx.log.new(o!()),
-            Arc::new(authz::Authz::new()),
+            Arc::new(authz::Authz::new(&logctx.log)),
             authn::Context::internal_unauthenticated(),
             datastore,
         );
@@ -493,21 +493,24 @@ mod test {
 
 #[async_trait]
 impl SessionStore for Arc<ServerContext> {
-    type SessionModel = ConsoleSession;
+    type SessionModel = ConsoleSessionWithSiloId;
 
     async fn session_fetch(&self, token: String) -> Option<Self::SessionModel> {
-        self.nexus.session_fetch(token).await.ok()
+        let opctx = self.nexus.opctx_external_authn();
+        self.nexus.session_fetch(opctx, token).await.ok()
     }
 
     async fn session_update_last_used(
         &self,
         token: String,
     ) -> Option<Self::SessionModel> {
-        self.nexus.session_update_last_used(token).await.ok()
+        let opctx = self.nexus.opctx_external_authn();
+        self.nexus.session_update_last_used(&opctx, &token).await.ok()
     }
 
     async fn session_expire(&self, token: String) -> Option<()> {
-        self.nexus.session_hard_delete(token).await.ok()
+        let opctx = self.nexus.opctx_external_authn();
+        self.nexus.session_hard_delete(opctx, &token).await.ok()
     }
 
     fn session_idle_timeout(&self) -> Duration {
@@ -519,14 +522,17 @@ impl SessionStore for Arc<ServerContext> {
     }
 }
 
-impl Session for ConsoleSession {
-    fn user_id(&self) -> Uuid {
-        self.user_id
+impl Session for ConsoleSessionWithSiloId {
+    fn silo_user_id(&self) -> Uuid {
+        self.console_session.silo_user_id
+    }
+    fn silo_id(&self) -> Uuid {
+        self.silo_id
     }
     fn time_last_used(&self) -> DateTime<Utc> {
-        self.time_last_used
+        self.console_session.time_last_used
     }
     fn time_created(&self) -> DateTime<Utc> {
-        self.time_created
+        self.console_session.time_created
     }
 }

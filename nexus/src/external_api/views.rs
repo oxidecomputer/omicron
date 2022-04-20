@@ -14,8 +14,27 @@ use omicron_common::api::external::{
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use std::net::SocketAddr;
+use std::net::SocketAddrV6;
 use uuid::Uuid;
+
+// SILOS
+
+/// Client view of a ['Silo']
+#[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct Silo {
+    #[serde(flatten)]
+    pub identity: IdentityMetadata,
+
+    /// A silo where discoverable is false can be retrieved only by its id - it
+    /// will not be part of the "list all silos" output.
+    pub discoverable: bool,
+}
+
+impl Into<Silo> for model::Silo {
+    fn into(self) -> Silo {
+        Silo { identity: self.identity(), discoverable: self.discoverable }
+    }
+}
 
 // ORGANIZATIONS
 
@@ -24,6 +43,7 @@ use uuid::Uuid;
 pub struct Organization {
     #[serde(flatten)]
     pub identity: IdentityMetadata,
+    // Important: Silo ID does not get presented to user
 }
 
 impl From<model::Organization> for Organization {
@@ -51,6 +71,19 @@ impl From<model::Project> for Project {
             organization_id: project.organization_id,
         }
     }
+}
+
+// IMAGES
+
+/// Client view of Images
+#[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct Image {
+    #[serde(flatten)]
+    pub identity: IdentityMetadata,
+
+    pub project_id: Option<Uuid>,
+    pub url: Option<String>,
+    pub size: ByteCount,
 }
 
 // SNAPSHOTS
@@ -191,7 +224,7 @@ impl From<model::Rack> for Rack {
 pub struct Sled {
     #[serde(flatten)]
     pub identity: IdentityMetadata,
-    pub service_address: SocketAddr,
+    pub service_address: SocketAddrV6,
 }
 
 impl From<model::Sled> for Sled {
@@ -227,7 +260,7 @@ pub struct SessionUser {
 
 impl From<authn::Actor> for SessionUser {
     fn from(actor: authn::Actor) -> Self {
-        Self { id: actor.0 }
+        Self { id: actor.id }
     }
 }
 

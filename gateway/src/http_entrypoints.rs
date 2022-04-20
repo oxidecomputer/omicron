@@ -6,12 +6,13 @@
 
 //! HTTP entrypoint functions for the gateway service
 
-use crate::error::Error;
-use crate::sp_comms::BulkSpStateSingleResult;
-use crate::sp_comms::BulkStateProgress;
-use crate::sp_comms::Error as SpCommsError;
-use crate::sp_comms::SerialConsoleContents;
-use crate::sp_comms::SpStateRequestId;
+mod conversions;
+
+use self::conversions::component_from_str;
+use crate::bulk_state_get::BulkSpStateSingleResult;
+use crate::bulk_state_get::BulkStateProgress;
+use crate::bulk_state_get::SpStateRequestId;
+use crate::error::http_err_from_comms_err;
 use crate::ServerContext;
 use dropshot::endpoint;
 use dropshot::ApiDescription;
@@ -24,12 +25,11 @@ use dropshot::Query;
 use dropshot::RequestContext;
 use dropshot::ResultsPage;
 use dropshot::TypedBody;
-use dropshot::UntypedBody;
 use dropshot::WhichPage;
-use gateway_messages::{IgnitionFlags, SpComponent};
+use gateway_messages::IgnitionCommand;
+use gateway_sp_comms::error::Error as SpCommsError;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use std::convert::TryFrom;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::time::Instant;
@@ -116,22 +116,6 @@ pub enum SpIgnition {
     },
 }
 
-impl From<gateway_messages::IgnitionState> for SpIgnition {
-    fn from(state: gateway_messages::IgnitionState) -> Self {
-        // if we have a state, the SP was present
-        Self::Present {
-            id: state.id,
-            power: state.flags.intersects(IgnitionFlags::POWER),
-            ctrl_detect_0: state.flags.intersects(IgnitionFlags::CTRL_DETECT_0),
-            ctrl_detect_1: state.flags.intersects(IgnitionFlags::CTRL_DETECT_1),
-            flt_a3: state.flags.intersects(IgnitionFlags::FLT_A3),
-            flt_a2: state.flags.intersects(IgnitionFlags::FLT_A2),
-            flt_rot: state.flags.intersects(IgnitionFlags::FLT_ROT),
-            flt_sp: state.flags.intersects(IgnitionFlags::FLT_SP),
-        }
-    }
-}
-
 #[derive(Serialize, JsonSchema)]
 struct SpComponentInfo {}
 
@@ -171,26 +155,6 @@ pub enum SpType {
     Switch,
 }
 
-impl From<SpType> for gateway_sp_comms::SpType {
-    fn from(typ: SpType) -> Self {
-        match typ {
-            SpType::Sled => Self::Sled,
-            SpType::Power => Self::Power,
-            SpType::Switch => Self::Switch,
-        }
-    }
-}
-
-impl From<gateway_sp_comms::SpType> for SpType {
-    fn from(typ: gateway_sp_comms::SpType) -> Self {
-        match typ {
-            gateway_sp_comms::SpType::Sled => Self::Sled,
-            gateway_sp_comms::SpType::Power => Self::Power,
-            gateway_sp_comms::SpType::Switch => Self::Switch,
-        }
-    }
-}
-
 #[derive(
     Debug,
     Clone,
@@ -208,27 +172,6 @@ pub struct SpIdentifier {
     pub typ: SpType,
     #[serde(deserialize_with = "deserializer_u32_from_string")]
     pub slot: u32,
-}
-
-impl From<SpIdentifier> for gateway_sp_comms::SpIdentifier {
-    fn from(id: SpIdentifier) -> Self {
-        Self {
-            typ: id.typ.into(),
-            // id.slot may come from an untrusted source, but usize >= 32 bits
-            // on any platform that will run this code, so unwrap is fine
-            slot: usize::try_from(id.slot).unwrap(),
-        }
-    }
-}
-
-impl From<gateway_sp_comms::SpIdentifier> for SpIdentifier {
-    fn from(id: gateway_sp_comms::SpIdentifier) -> Self {
-        Self {
-            typ: id.typ.into(),
-            // id.slot comes from a trusted source and will not exceed u32::MAX
-            slot: u32::try_from(id.slot).unwrap(),
-        }
-    }
 }
 
 // We can't use the default `Deserialize` derivation for `SpIdentifier::slot`
@@ -274,14 +217,14 @@ struct PathSp {
 }
 
 #[derive(Serialize, Deserialize, JsonSchema)]
-pub(crate) struct PathSpComponent {
+struct PathSpComponent {
     /// ID for the SP that the gateway service translates into the appropriate
     /// port for communicating with the given SP.
     #[serde(flatten)]
-    pub(crate) sp: SpIdentifier,
+    sp: SpIdentifier,
     /// ID for the component of the SP; this is the internal identifier used by
     /// the SP itself to identify its components.
-    pub(crate) component: String,
+    component: String,
 }
 
 /// List SPs
@@ -313,7 +256,6 @@ async fn sp_list(
     query: Query<PaginationParams<Timeout, SpStatePageSelector>>,
 ) -> Result<HttpResponseOk<ResultsPage<SpInfo>>, HttpError> {
     let apictx = rqctx.context();
-    let sp_comms = &apictx.sp_comms;
     let page_params = query.into_inner();
     let page_limit = rqctx.page_limit(&page_params)?.get() as usize;
 
@@ -328,18 +270,14 @@ async fn sp_list(
                 .min(apictx.timeouts.bulk_request_max);
             let timeout = Instant::now() + timeout;
 
-            // query ignition to find out which SPs are on (and should therefore
-            // be queried for their state)
-            let ignition_state = sp_comms
-                .bulk_ignition_get(apictx.timeouts.ignition_controller)
+            let request_id = apictx
+                .bulk_sp_state_requests
+                .start(
+                    timeout,
+                    apictx.timeouts.bulk_request_retain_grace_period,
+                )
                 .await?;
 
-            // actually kick off the state collection process
-            let request_id = sp_comms.bulk_state_start(
-                timeout,
-                apictx.timeouts.bulk_request_retain_grace_period,
-                ignition_state.into_iter(),
-            );
             (request_id, None)
         }
         WhichPage::Next(page_selector) => {
@@ -347,11 +285,12 @@ async fn sp_list(
         }
     };
 
-    let progress = sp_comms
-        .bulk_state_get_progress(
+    let progress = apictx
+        .bulk_sp_state_requests
+        .get(
             &request_id,
             last_seen_target.map(Into::into),
-            apictx.timeouts.bulk_request_page,
+            Instant::now() + apictx.timeouts.bulk_request_page,
             page_limit,
         )
         .await?;
@@ -370,28 +309,34 @@ async fn sp_list(
 
     let items = items
         .into_iter()
-        .map(|BulkSpStateSingleResult { port, state, result }| {
+        .map(|BulkSpStateSingleResult { sp, state, result }| {
             let details = match result {
                 Ok(details) => details,
-                Err(SpCommsError::Timeout) => SpState::Unresponsive,
-                // TODO we're dropping the error on the floor here - how should
-                // we handle it? This is an SP that we actively failed to
-                // communicate with somehow, which isn't the same as
-                // "unresponsive". Should we fail the entire request? That's how
-                // we handle this kind of an error in the "get the state of a
-                // specific SP" endpoint. We could alternatively add an error
-                // variant to `SpState`?
-                Err(_) => SpState::Unresponsive,
+                Err(err) => match &*err {
+                    // TODO Treating "communication failed" and "we don't know
+                    // the IP address" as "unresponsive" may not be right. Do we
+                    // need more refined errors?
+                    SpCommsError::Timeout
+                    | SpCommsError::SpCommunicationFailed(_)
+                    | SpCommsError::SpAddressUnknown(_) => {
+                        SpState::Unresponsive
+                    }
+                    // These errors should not be possible for the request we
+                    // made.
+                    SpCommsError::SpDoesNotExist(_)
+                    | SpCommsError::BadWebsocketConnection(_)
+                    | SpCommsError::SerialConsoleAttached => {
+                        unreachable!("impossible error {}", err)
+                    }
+                },
             };
             Ok(SpInfo {
-                info: SpIgnitionInfo {
-                    id: sp_comms.port_to_id(port).into(),
-                    details: state.into(),
-                },
+                info: SpIgnitionInfo { id: sp.into(), details: state.into() },
                 details,
             })
         })
-        .collect::<Result<Vec<_>, Error>>()?;
+        .collect::<Result<Vec<_>, Arc<SpCommsError>>>()
+        .map_err(http_err_from_comms_err)?;
 
     Ok(HttpResponseOk(ResultsPage::new(
         items,
@@ -434,15 +379,16 @@ async fn sp_get(
     // ping the ignition controller first; if it says the SP is off or otherwise
     // unavailable, we're done.
     let state = comms
-        .ignition_get(sp.into(), apictx.timeouts.ignition_controller)
-        .await?;
+        .get_ignition_state(sp.into(), timeout)
+        .await
+        .map_err(http_err_from_comms_err)?;
 
-    let details = if state.flags.intersects(IgnitionFlags::POWER) {
+    let details = if state.is_powered_on() {
         // ignition indicates the SP is on; ask it for its state
-        match comms.state_get(sp.into(), timeout).await {
-            Ok(state) => state,
+        match comms.get_state(sp.into(), timeout).await {
+            Ok(state) => SpState::from(state),
             Err(SpCommsError::Timeout) => SpState::Unresponsive,
-            Err(other) => return Err(other.into()),
+            Err(other) => return Err(http_err_from_comms_err(other)),
         }
     } else {
         SpState::Disabled
@@ -499,72 +445,53 @@ async fn sp_component_get(
     todo!()
 }
 
-/// Get the currently-buffered data for an SP component's serial console.
-///
-/// This does not require any communication with the target SP; it returns any
-/// buffered data we have received from that SP (subject to limitations on how
-/// much we keep around; see [`SerialConsoleContents`] for details.
+/// Upgrade into a websocket connection attached to the given SP component's
+/// serial console.
 #[endpoint {
     method = GET,
-    path = "/sp/{type}/{slot}/component/{component}/serial_console",
+    path = "/sp/{type}/{slot}/component/{component}/serial_console/attach",
 }]
-async fn sp_component_serial_console_get(
+async fn sp_component_serial_console_attach(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path: Path<PathSpComponent>,
-) -> Result<HttpResponseOk<SerialConsoleContents>, HttpError> {
+) -> Result<http::Response<hyper::Body>, HttpError> {
+    let apictx = rqctx.context();
+    let PathSpComponent { sp, component } = path.into_inner();
+
+    let component = component_from_str(&component)?;
+    let mut request = rqctx.request.lock().await;
+
+    apictx
+        .sp_comms
+        .serial_console_attach(
+            &mut request,
+            sp.into(),
+            component,
+            apictx.timeouts.sp_request,
+        )
+        .await
+        .map_err(http_err_from_comms_err)
+}
+
+/// Detach the websocket connection attached to the given SP component's serial
+/// console, if such a connection exists.
+#[endpoint {
+    method = POST,
+    path = "/sp/{type}/{slot}/component/{component}/serial_console/detach",
+}]
+async fn sp_component_serial_console_detach(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    path: Path<PathSpComponent>,
+) -> Result<HttpResponseUpdatedNoContent, HttpError> {
     let comms = &rqctx.context().sp_comms;
     let PathSpComponent { sp, component } = path.into_inner();
 
-    let component = SpComponent::try_from(component.as_str())
-        .map_err(|_| Error::InvalidSpComponentId(component))?;
-    let contents = comms.serial_console_get(sp.into(), &component)?;
+    let component = component_from_str(&component)?;
 
-    // TODO With `unwrap_or_default()`, our caller can't tell the difference
-    // between "this component hasn't sent us any console information yet" and
-    // "this component does not have a serial console and will never send data"
-    // - both cases send back an empty `SerialConsoleContents`. To handle this
-    // more gracefully, we will need to know which components have a serial
-    // console.
-    Ok(HttpResponseOk(contents.unwrap_or_default()))
-}
-
-/// Send data to an SP component's serial console.
-///
-/// If this request returns successfully, the SP acknowledged that the data
-/// arrived. If it fails, we do not know whether or not the data arrived (or
-/// will eventually arrive).
-#[endpoint {
-    method = POST,
-    path = "/sp/{type}/{slot}/component/{component}/serial_console",
-}]
-async fn sp_component_serial_console_post(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
-    path: Path<PathSpComponent>,
-    data: UntypedBody,
-) -> Result<HttpResponseUpdatedNoContent, HttpError> {
-    let apictx = rqctx.context();
-    let comms = &apictx.sp_comms;
-    let PathSpComponent { sp, component } = path.into_inner();
-
-    let component = SpComponent::try_from(component.as_str())
-        .map_err(|_| Error::InvalidSpComponentId(component))?;
-
-    // TODO What is our recourse if we hit a timeout here? We don't know whether
-    // the SP received none, some, or all of the data we sent, only that it
-    // failed to ack (at least) the last packet in time. Hopefully the user can
-    // manually detect this by inspecting the serial console output from this
-    // component (if whatever they sent triggers some kind of output)? But maybe
-    // we should try to do a little better - if we had to packetize `data`, for
-    // example, we could at least report how much data was ack'd and how much we
-    // sent that hasn't been ack'd yet?
     comms
-        .serial_console_post(
-            sp.into(),
-            component,
-            data.as_bytes(),
-            apictx.timeouts.sp_request,
-        )
-        .await?;
+        .serial_console_detach(sp.into(), &component)
+        .await
+        .map_err(http_err_from_comms_err)?;
 
     Ok(HttpResponseUpdatedNoContent {})
 }
@@ -641,15 +568,16 @@ async fn ignition_list(
     let apictx = rqctx.context();
     let sp_comms = &apictx.sp_comms;
 
-    let all_state =
-        sp_comms.bulk_ignition_get(apictx.timeouts.ignition_controller).await?;
+    let all_state = sp_comms
+        .get_ignition_state_all(
+            Instant::now() + apictx.timeouts.ignition_controller,
+        )
+        .await
+        .map_err(http_err_from_comms_err)?;
 
     let mut out = Vec::with_capacity(all_state.len());
-    for (port, state) in all_state {
-        out.push(SpIgnitionInfo {
-            id: sp_comms.port_to_id(port).into(),
-            details: state.into(),
-        });
+    for (id, state) in all_state {
+        out.push(SpIgnitionInfo { id: id.into(), details: state.into() });
     }
     Ok(HttpResponseOk(out))
 }
@@ -672,8 +600,12 @@ async fn ignition_get(
 
     let state = apictx
         .sp_comms
-        .ignition_get(sp.into(), apictx.timeouts.ignition_controller)
-        .await?;
+        .get_ignition_state(
+            sp.into(),
+            Instant::now() + apictx.timeouts.ignition_controller,
+        )
+        .await
+        .map_err(http_err_from_comms_err)?;
 
     let info = SpIgnitionInfo { id: sp, details: state.into() };
     Ok(HttpResponseOk(info))
@@ -693,8 +625,13 @@ async fn ignition_power_on(
 
     apictx
         .sp_comms
-        .ignition_power_on(sp.into(), apictx.timeouts.ignition_controller)
-        .await?;
+        .send_ignition_command(
+            sp.into(),
+            IgnitionCommand::PowerOn,
+            Instant::now() + apictx.timeouts.ignition_controller,
+        )
+        .await
+        .map_err(http_err_from_comms_err)?;
 
     Ok(HttpResponseUpdatedNoContent {})
 }
@@ -713,8 +650,13 @@ async fn ignition_power_off(
 
     apictx
         .sp_comms
-        .ignition_power_off(sp.into(), apictx.timeouts.ignition_controller)
-        .await?;
+        .send_ignition_command(
+            sp.into(),
+            IgnitionCommand::PowerOff,
+            Instant::now() + apictx.timeouts.ignition_controller,
+        )
+        .await
+        .map_err(http_err_from_comms_err)?;
 
     Ok(HttpResponseUpdatedNoContent {})
 }
@@ -741,8 +683,8 @@ pub fn api() -> GatewayApiDescription {
         api.register(sp_get)?;
         api.register(sp_component_list)?;
         api.register(sp_component_get)?;
-        api.register(sp_component_serial_console_get)?;
-        api.register(sp_component_serial_console_post)?;
+        api.register(sp_component_serial_console_attach)?;
+        api.register(sp_component_serial_console_detach)?;
         api.register(sp_component_update)?;
         api.register(sp_component_power_on)?;
         api.register(sp_component_power_off)?;

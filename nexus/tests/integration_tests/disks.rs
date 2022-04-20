@@ -81,9 +81,16 @@ async fn test_disk_not_found_before_creation(
 
     // Make sure we get a 404 if we fetch one.
     let disk_url = format!("{}/{}", disks_url, DISK_NAME);
-    let error = client
-        .make_request_error(Method::GET, &disk_url, StatusCode::NOT_FOUND)
-        .await;
+    let error = NexusRequest::new(
+        RequestBuilder::new(client, Method::GET, &disk_url)
+            .expect_status(Some(StatusCode::NOT_FOUND)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .expect("unexpected success")
+    .parsed_body::<dropshot::HttpErrorResponseBody>()
+    .unwrap();
     assert_eq!(
         error.message,
         format!("not found: disk with name \"{}\"", DISK_NAME)
@@ -123,7 +130,9 @@ async fn test_disk_create_attach_detach_delete(
     assert_eq!(disk.identity.description, "sells rainsticks");
     assert_eq!(disk.project_id, project_id);
     assert_eq!(disk.snapshot_id, None);
+    assert_eq!(disk.image_id, None);
     assert_eq!(disk.size.to_whole_mebibytes(), 1024);
+    assert_eq!(disk.block_size.to_bytes(), 512);
     assert_eq!(disk.state, DiskState::Creating);
 
     // Fetch the disk and expect it to match what we just created except that
@@ -134,7 +143,9 @@ async fn test_disk_create_attach_detach_delete(
     assert_eq!(disk.identity.description, "sells rainsticks");
     assert_eq!(disk.project_id, project_id);
     assert_eq!(disk.snapshot_id, None);
+    assert_eq!(disk.image_id, None);
     assert_eq!(disk.size.to_whole_mebibytes(), 1024);
+    assert_eq!(disk.block_size.to_bytes(), 512);
     assert_eq!(disk.state, DiskState::Detached);
 
     // List disks again and expect to find the one we just created.
@@ -222,9 +233,19 @@ async fn test_disk_create_attach_detach_delete(
     assert_eq!(disks_list(&client, &disks_url).await.len(), 0);
 
     // We shouldn't find it if we request it explicitly.
-    let error = client
-        .make_request_error(Method::GET, &disk_url, StatusCode::NOT_FOUND)
-        .await;
+    let error = NexusRequest::expect_failure(
+        client,
+        StatusCode::NOT_FOUND,
+        Method::GET,
+        &disk_url,
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap()
+    .parsed_body::<dropshot::HttpErrorResponseBody>()
+    .unwrap();
+
     assert_eq!(
         error.message,
         format!("not found: disk with name \"{}\"", DISK_NAME)
@@ -247,7 +268,9 @@ async fn test_disk_create_disk_that_already_exists_fails(
             description: String::from("sells rainsticks"),
         },
         snapshot_id: None,
+        image_id: None,
         size: ByteCount::from_gibibytes_u32(1),
+        block_size: params::BlockSize::try_from(512).unwrap(),
     };
     let _ = create_disk(&client, ORG_NAME, PROJECT_NAME, DISK_NAME).await;
     let disk_url = format!("{}/{}", disks_url, DISK_NAME);
@@ -342,7 +365,7 @@ async fn test_disk_move_between_instances(cptestctx: &ControlPlaneTestContext) {
     let error: HttpErrorResponseBody = NexusRequest::new(
         RequestBuilder::new(client, Method::POST, &url_instance2_attach_disk)
             .body(Some(&params::DiskIdentifier {
-                disk: disk.identity.name.clone(),
+                name: disk.identity.name.clone(),
             }))
             .expect_status(Some(StatusCode::BAD_REQUEST)),
     )
@@ -374,7 +397,7 @@ async fn test_disk_move_between_instances(cptestctx: &ControlPlaneTestContext) {
     let error: HttpErrorResponseBody = NexusRequest::new(
         RequestBuilder::new(client, Method::POST, &url_instance2_attach_disk)
             .body(Some(&params::DiskIdentifier {
-                disk: disk.identity.name.clone(),
+                name: disk.identity.name.clone(),
             }))
             .expect_status(Some(StatusCode::BAD_REQUEST)),
     )
@@ -396,7 +419,7 @@ async fn test_disk_move_between_instances(cptestctx: &ControlPlaneTestContext) {
     let error: HttpErrorResponseBody = NexusRequest::new(
         RequestBuilder::new(client, Method::POST, &url_instance_attach_disk)
             .body(Some(&params::DiskIdentifier {
-                disk: disk.identity.name.clone(),
+                name: disk.identity.name.clone(),
             }))
             .expect_status(Some(StatusCode::BAD_REQUEST)),
     )
@@ -454,7 +477,7 @@ async fn test_disk_move_between_instances(cptestctx: &ControlPlaneTestContext) {
     let error: HttpErrorResponseBody = NexusRequest::new(
         RequestBuilder::new(client, Method::POST, &url_instance_attach_disk)
             .body(Some(&params::DiskIdentifier {
-                disk: disk.identity.name.clone(),
+                name: disk.identity.name.clone(),
             }))
             .expect_status(Some(StatusCode::BAD_REQUEST)),
     )
@@ -626,7 +649,9 @@ async fn test_disk_region_creation_failure(
             description: String::from("sells rainsticks"),
         },
         snapshot_id: None,
+        image_id: None,
         size: disk_size,
+        block_size: params::BlockSize::try_from(512).unwrap(),
     };
 
     // Unfortunately, the error message is only posted internally to the
@@ -668,6 +693,94 @@ async fn test_disk_region_creation_failure(
     let _ = create_disk(client, ORG_NAME, PROJECT_NAME, DISK_NAME).await;
 }
 
+// Tests that invalid block sizes are rejected
+#[nexus_test]
+async fn test_disk_invalid_block_size_rejected(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+    let test = DiskTest::new(&cptestctx).await;
+    create_org_and_project(client).await;
+
+    let disk_size = ByteCount::from_gibibytes_u32(3);
+    let dataset_count = test.dataset_ids.len() as u64;
+    assert!(
+        disk_size.to_bytes() * dataset_count < test.zpool_size.to_bytes(),
+        "Disk size too big for Zpool size"
+    );
+    assert!(
+        2 * disk_size.to_bytes() * dataset_count > test.zpool_size.to_bytes(),
+        "(test constraint) Zpool needs to be smaller (to store only one disk)",
+    );
+
+    // Attempt to allocate the disk, observe a server error.
+    let disks_url = get_disks_url();
+    let new_disk = params::DiskCreate {
+        identity: IdentityMetadataCreateParams {
+            name: DISK_NAME.parse().unwrap(),
+            description: String::from("sells rainsticks"),
+        },
+        snapshot_id: None,
+        image_id: None,
+        size: disk_size,
+        block_size: params::BlockSize(1024),
+    };
+
+    NexusRequest::new(
+        RequestBuilder::new(client, Method::POST, &disks_url)
+            .body(Some(&new_disk))
+            .expect_status(Some(StatusCode::BAD_REQUEST)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap();
+}
+
+// Tests that a disk is rejected if the total size isn't divided by the block size
+#[nexus_test]
+async fn test_disk_reject_total_size_not_divisible_by_block_size(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+    let test = DiskTest::new(&cptestctx).await;
+    create_org_and_project(client).await;
+
+    let disk_size = ByteCount::from(3 * 1024 * 1024 * 1024 + 256);
+    let dataset_count = test.dataset_ids.len() as u64;
+    assert!(
+        disk_size.to_bytes() * dataset_count < test.zpool_size.to_bytes(),
+        "Disk size too big for Zpool size"
+    );
+    assert!(
+        2 * disk_size.to_bytes() * dataset_count > test.zpool_size.to_bytes(),
+        "(test constraint) Zpool needs to be smaller (to store only one disk)",
+    );
+
+    // Attempt to allocate the disk, observe a server error.
+    let disks_url = get_disks_url();
+    let new_disk = params::DiskCreate {
+        identity: IdentityMetadataCreateParams {
+            name: DISK_NAME.parse().unwrap(),
+            description: String::from("sells rainsticks"),
+        },
+        snapshot_id: None,
+        image_id: None,
+        size: disk_size,
+        block_size: params::BlockSize::try_from(512).unwrap(),
+    };
+
+    NexusRequest::new(
+        RequestBuilder::new(client, Method::POST, &disks_url)
+            .body(Some(&new_disk))
+            .expect_status(Some(StatusCode::BAD_REQUEST)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap();
+}
+
 async fn disk_get(client: &ClientTestContext, disk_url: &str) -> Disk {
     NexusRequest::object_get(client, disk_url)
         .authn_as(AuthnMode::PrivilegedUser)
@@ -692,7 +805,7 @@ async fn disk_post(
 ) -> Disk {
     NexusRequest::new(
         RequestBuilder::new(client, Method::POST, url)
-            .body(Some(&params::DiskIdentifier { disk: disk_name }))
+            .body(Some(&params::DiskIdentifier { name: disk_name }))
             .expect_status(Some(StatusCode::ACCEPTED)),
     )
     .authn_as(AuthnMode::PrivilegedUser)
@@ -707,7 +820,9 @@ fn disks_eq(disk1: &Disk, disk2: &Disk) {
     identity_eq(&disk1.identity, &disk2.identity);
     assert_eq!(disk1.project_id, disk2.project_id);
     assert_eq!(disk1.snapshot_id, disk2.snapshot_id);
+    assert_eq!(disk1.image_id, disk2.image_id);
     assert_eq!(disk1.size.to_bytes(), disk2.size.to_bytes());
+    assert_eq!(disk1.block_size.to_bytes(), disk2.block_size.to_bytes());
     assert_eq!(disk1.state, disk2.state);
     assert_eq!(disk1.device_path, disk2.device_path);
 }

@@ -514,15 +514,20 @@ impl TryFrom<i64> for Generation {
 #[display(style = "kebab-case")]
 pub enum ResourceType {
     Fleet,
+    Silo,
+    SiloUser,
+    ConsoleSession,
     Organization,
     Project,
     Dataset,
     Disk,
+    Image,
     Instance,
     NetworkInterface,
     Rack,
     Sled,
     SagaDbg,
+    Snapshot,
     Volume,
     Vpc,
     VpcFirewallRule,
@@ -531,8 +536,9 @@ pub enum ResourceType {
     RouterRoute,
     Oximeter,
     MetricProducer,
-    Role,
-    User,
+    RoleBuiltin,
+    UpdateAvailableArtifact,
+    UserBuiltin,
     Zpool,
 }
 
@@ -752,7 +758,9 @@ pub struct Disk {
     pub identity: IdentityMetadata,
     pub project_id: Uuid,
     pub snapshot_id: Option<Uuid>,
+    pub image_id: Option<Uuid>,
     pub size: ByteCount,
+    pub block_size: ByteCount,
     pub state: DiskState,
     pub device_path: String,
 }
@@ -1064,6 +1072,12 @@ impl std::fmt::Display for Ipv6Net {
     }
 }
 
+impl From<ipnetwork::Ipv6Network> for Ipv6Net {
+    fn from(n: ipnetwork::Ipv6Network) -> Ipv6Net {
+        Self(n)
+    }
+}
+
 impl JsonSchema for Ipv6Net {
     fn schema_name() -> String {
         "Ipv6Net".to_string()
@@ -1253,7 +1267,7 @@ pub struct RouterRoute {
     pub identity: IdentityMetadata,
 
     /// The VPC Router to which the route belongs.
-    pub router_id: Uuid,
+    pub vpc_router_id: Uuid,
 
     /// Describes the kind of router. Set at creation. `read-only`
     pub kind: RouterRouteKind,

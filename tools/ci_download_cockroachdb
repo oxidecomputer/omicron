@@ -17,7 +17,11 @@ ARG0="$(basename ${BASH_SOURCE[0]})"
 CIDL_VERSION="$(cat "$SOURCE_DIR/cockroachdb_version")"
 source "$SOURCE_DIR/cockroachdb_checksums"
 
-CIDL_ASSEMBLE_DIR="./cockroachdb"
+TARGET_DIR="out"
+# Location where intermediate artifacts are downloaded / unpacked.
+DOWNLOAD_DIR="$TARGET_DIR/downloads"
+# Location where the final cockroachdb directory should end up.
+DEST_DIR="./$TARGET_DIR/cockroachdb"
 
 # Official (or unofficial) download sites
 CIDL_URL_COCKROACH="https://binaries.cockroachdb.com"
@@ -26,7 +30,7 @@ CIDL_URL_ILLUMOS="https://illumos.org/downloads"
 function main
 {
 	#
-	# Process command-line arguments.  We generally don't expect any, but
+	# Process command-line arguments. We generally don't expect any, but
 	# we allow callers to specify a value to override OSTYPE, just for
 	# testing.
 	#
@@ -44,30 +48,47 @@ function main
 
 	# Configure this program
 	configure_os "$CIDL_OS"
-	CIDL_URL="$CIDL_URL_BASE/$CIDL_FILE"
+	CIDL_URL="$CIDL_URL_BASE/$TARBALL_FILENAME"
 
 	# Download the file.
 	echo "URL: $CIDL_URL"
-	echo "Local file: $CIDL_FILE"
-	do_download_curl "$CIDL_URL" "$CIDL_FILE" || \
-	    fail "failed to download file"
+	echo "Local file: $TARBALL_FILE"
 
-	# Verify the md5sum.
-	calculated_md5="$($CIDL_MD5FUNC "$CIDL_FILE")" || \
-	    fail "failed to calculate md5sum"
-	if [[ "$calculated_md5" != "$CIDL_MD5" ]]; then
-		fail "md5sum mismatch \
-		    (expected $CIDL_MD5, found $calculated_md5)"
+	mkdir -p "$DOWNLOAD_DIR"
+	mkdir -p "$DEST_DIR"
+
+	local DO_DOWNLOAD="true"
+	if [[ -f "$TARBALL_FILE" ]]; then
+		# If the file exists with a valid checksum, we can skip downloading.
+		calculated_md5="$($CIDL_MD5FUNC "$TARBALL_FILE")" || \
+				fail "failed to calculate md5sum"
+		if [[ "$calculated_md5" == "$CIDL_MD5" ]]; then
+			DO_DOWNLOAD="false"
+		fi
+	fi
+
+	if [ "$DO_DOWNLOAD" == "true" ]; then
+		echo "Downloading..."
+		do_download_curl "$CIDL_URL" "$TARBALL_FILE" || \
+				fail "failed to download file"
+
+		# Verify the md5sum.
+		calculated_md5="$($CIDL_MD5FUNC "$TARBALL_FILE")" || \
+				fail "failed to calculate md5sum"
+		if [[ "$calculated_md5" != "$CIDL_MD5" ]]; then
+			fail "md5sum mismatch \
+					(expected $CIDL_MD5, found $calculated_md5)"
+		fi
 	fi
 
 	# Unpack the tarball.
-	do_untar "$CIDL_FILE"
+	do_untar "$TARBALL_FILE"
 
 	# Copy the "cockroach" binary to the right spot.
-	$CIDL_ASSEMBLE "$CIDL_DIR"
+	$CIDL_ASSEMBLE
 
 	# Run the binary as a sanity-check.
-	"$CIDL_ASSEMBLE_DIR/bin/cockroach" version
+	"$DEST_DIR/bin/cockroach" version
 }
 
 function fail
@@ -89,7 +110,7 @@ function configure_os
 			CIDL_URL_BASE="$CIDL_URL_COCKROACH"
 			CIDL_ASSEMBLE="do_assemble_official"
 			;;
-		linux-gnu*) 
+		linux-gnu*)
 			CIDL_BUILD="linux-amd64"
 			CIDL_SUFFIX="tgz"
 			CIDL_MD5="$CIDL_MD5_LINUX"
@@ -110,8 +131,11 @@ function configure_os
 			;;
 	esac
 
-	CIDL_DIR="cockroach-$CIDL_VERSION.$CIDL_BUILD"
-	CIDL_FILE="$CIDL_DIR.$CIDL_SUFFIX"
+	TARBALL_DIRNAME="cockroach-$CIDL_VERSION.$CIDL_BUILD"
+	TARBALL_FILENAME="$TARBALL_DIRNAME.$CIDL_SUFFIX"
+
+	TARBALL_FILE="$DOWNLOAD_DIR/$TARBALL_FILENAME"
+	TARBALL_DIR="$DOWNLOAD_DIR/$TARBALL_DIRNAME"
 }
 
 function do_download_curl
@@ -131,13 +155,13 @@ function do_md5sum
 
 function do_untar
 {
-	tar xzf "$1"
+	tar xzf "$1" -C "$DOWNLOAD_DIR"
 }
 
 #
 # "Assembling" here is taking unpacked tarball and putting together a directory
-# structure that's common for all platforms.  This allows consumers (i.e., CI)
-# to assume the same directory structure for all platforms.  This is
+# structure that's common for all platforms. This allows consumers (i.e., CI)
+# to assume the same directory structure for all platforms. This is
 # platform-specific because on illumos, the tarball itself has a different
 # structure than the official release tarballs and the `cockroach` binary has
 # dynamic library dependencies.
@@ -145,14 +169,14 @@ function do_untar
 
 function do_assemble_official
 {
-	mkdir -p "$CIDL_ASSEMBLE_DIR/bin"
-	cp "$CIDL_DIR/cockroach" "$CIDL_ASSEMBLE_DIR/bin"
+	mkdir -p "$DEST_DIR/bin"
+	cp "$TARBALL_DIR/cockroach" "$DEST_DIR/bin"
 }
 
 function do_assemble_illumos
 {
-	rm -r "$CIDL_ASSEMBLE_DIR" || true
-	cp -r "cockroach-$CIDL_VERSION" "$CIDL_ASSEMBLE_DIR"
+	rm -r "$DEST_DIR" || true
+	cp -r "$DOWNLOAD_DIR/cockroach-$CIDL_VERSION" "$DEST_DIR"
 }
 
 main "$@"

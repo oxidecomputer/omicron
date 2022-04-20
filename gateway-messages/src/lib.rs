@@ -64,6 +64,11 @@ pub struct SpState {
 
 #[derive(Debug, Clone, Copy, SerializedSize, Serialize, Deserialize)]
 pub enum ResponseError {
+    /// The SP is busy; retry the request mometarily.
+    ///
+    /// E.g., the request requires communicating on a USART whose FIFO is
+    /// currently full.
+    Busy,
     /// The [`RequestKind`] is not supported by the receiving SP; e.g., asking an
     /// SP without an attached ignition controller for ignition state.
     RequestUnsupportedForSp,
@@ -78,6 +83,9 @@ pub enum ResponseError {
 impl fmt::Display for ResponseError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            ResponseError::Busy => {
+                write!(f, "SP busy")
+            }
             ResponseError::RequestUnsupportedForSp => {
                 write!(f, "unsupported request for this SP")
             }
@@ -127,6 +135,12 @@ pub enum SpMessageKind {
 pub struct IgnitionState {
     pub id: u16,
     pub flags: IgnitionFlags,
+}
+
+impl IgnitionState {
+    pub fn is_powered_on(self) -> bool {
+        self.flags.intersects(IgnitionFlags::POWER)
+    }
 }
 
 bitflags! {
@@ -305,6 +319,7 @@ impl fmt::Debug for SpComponent {
 
 /// Error type returned from `TryFrom<&str> for SpComponent` if the provided ID
 /// is too long.
+#[derive(Debug)]
 pub struct SpComponentIdTooLong;
 
 impl TryFrom<&str> for SpComponent {

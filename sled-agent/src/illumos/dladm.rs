@@ -7,6 +7,8 @@
 use crate::common::vlan::VlanID;
 use crate::illumos::{execute, ExecutionError, PFEXEC};
 use omicron_common::api::external::MacAddr;
+use serde::{Deserialize, Serialize};
+use std::str::FromStr;
 
 pub const VNIC_PREFIX: &str = "ox";
 pub const VNIC_PREFIX_CONTROL: &str = "oxControl";
@@ -23,10 +25,13 @@ pub enum Error {
 
     #[error("Failed to parse output: {0}")]
     Parse(#[from] std::string::FromUtf8Error),
+
+    #[error("Failed to parse MAC: {0}")]
+    ParseMac(#[from] macaddr::ParseError),
 }
 
 /// The name of a physical datalink.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
 pub struct PhysicalLink(pub String);
 
 /// Wraps commands for interacting with data links.
@@ -49,6 +54,37 @@ impl Dladm {
             .ok_or_else(|| Error::NotFound)?
             .to_string();
         Ok(PhysicalLink(name))
+    }
+
+    /// Returns the MAC address of a physical link.
+    pub fn get_mac(link: PhysicalLink) -> Result<MacAddr, Error> {
+        let mut command = std::process::Command::new(PFEXEC);
+        let cmd = command.args(&[
+            DLADM,
+            "show-phys",
+            "-m",
+            "-p",
+            "-o",
+            "ADDRESS",
+            &link.0,
+        ]);
+        let output = execute(cmd)?;
+        let name = String::from_utf8(output.stdout)?
+            .lines()
+            .next()
+            .map(|s| s.trim())
+            .ok_or_else(|| Error::NotFound)?
+            .to_string();
+
+        // Ensure the MAC address is zero-padded, so it may be parsed as a
+        // MacAddr. This converts segments like ":a" to ":0a".
+        let name = name
+            .split(':')
+            .map(|segment| format!("{:0>2}", segment))
+            .collect::<Vec<String>>()
+            .join(":");
+        let mac = MacAddr::from_str(&name)?;
+        Ok(mac)
     }
 
     /// Creates a new VNIC atop a physical device.

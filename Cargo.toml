@@ -1,13 +1,16 @@
 [workspace]
 members = [
     "common",
+    "deploy",
     "gateway",
+    "gateway-cli",
     "gateway-client",
     "gateway-messages",
     "gateway-sp-comms",
     "internal-dns",
     "internal-dns-client",
     "nexus",
+    "nexus/src/authz/authz-macros",
     "nexus/src/db/db-macros",
     "nexus/test-utils",
     "nexus/test-utils-macros",
@@ -29,12 +32,16 @@ members = [
 
 default-members = [
     "common",
+    "deploy",
     "gateway",
+    "gateway-cli",
     "gateway-client",
     "gateway-messages",
+    "gateway-sp-comms",
     "internal-dns",
     "internal-dns-client",
     "nexus",
+    "nexus/src/authz/authz-macros",
     "nexus/src/db/db-macros",
     "package",
     "rpaths",

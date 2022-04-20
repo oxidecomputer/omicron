@@ -17,7 +17,7 @@ use oximeter_collector::Oximeter;
 use oximeter_producer::Server as ProducerServer;
 use slog::o;
 use slog::Logger;
-use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+use std::net::{IpAddr, Ipv6Addr, SocketAddr};
 use std::path::Path;
 use std::time::Duration;
 use uuid::Uuid;
@@ -176,15 +176,15 @@ pub async fn start_sled_agent(
         sim_mode: sim::SimMode::Explicit,
         nexus_address,
         dropshot: ConfigDropshot {
-            bind_address: SocketAddr::new("127.0.0.1".parse().unwrap(), 0),
-            request_body_max_bytes: 2048,
+            bind_address: SocketAddr::new(Ipv6Addr::LOCALHOST.into(), 0),
+            request_body_max_bytes: 1024 * 1024,
             ..Default::default()
         },
         // TODO-cleanup this is unused
         log: ConfigLogging::StderrTerminal { level: ConfigLoggingLevel::Debug },
         storage: sim::ConfigStorage {
             zpools: vec![],
-            ip: IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)),
+            ip: IpAddr::from(Ipv6Addr::LOCALHOST),
         },
     };
 
@@ -197,7 +197,7 @@ pub async fn start_oximeter(
     id: Uuid,
 ) -> Result<Oximeter, String> {
     let db = oximeter_collector::DbConfig {
-        address: SocketAddr::new("::1".parse().unwrap(), db_port),
+        address: SocketAddr::new(Ipv6Addr::LOCALHOST.into(), db_port),
         batch_size: 10,
         batch_interval: 1,
     };
@@ -206,7 +206,7 @@ pub async fn start_oximeter(
         nexus_address,
         db,
         dropshot: ConfigDropshot {
-            bind_address: SocketAddr::new("::1".parse().unwrap(), 0),
+            bind_address: SocketAddr::new(Ipv6Addr::LOCALHOST.into(), 0),
             ..Default::default()
         },
         log: ConfigLogging::StderrTerminal { level: ConfigLoggingLevel::Error },
@@ -254,7 +254,7 @@ pub async fn start_producer_server(
     //
     // This listens on any available port, and the server internally updates this to the actual
     // bound port of the Dropshot HTTP server.
-    let producer_address = SocketAddr::new("::1".parse().unwrap(), 0);
+    let producer_address = SocketAddr::new(Ipv6Addr::LOCALHOST.into(), 0);
     let server_info = ProducerEndpoint {
         id,
         address: producer_address,

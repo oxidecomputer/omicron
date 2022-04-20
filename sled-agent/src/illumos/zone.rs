@@ -6,10 +6,10 @@
 
 use ipnetwork::IpNetwork;
 use slog::Logger;
-use std::net::IpAddr;
+use std::net::{IpAddr, Ipv6Addr};
 
 use crate::illumos::addrobj::AddrObject;
-use crate::illumos::dladm::{Dladm, VNIC_PREFIX_CONTROL};
+use crate::illumos::dladm::{Dladm, PhysicalLink, VNIC_PREFIX_CONTROL};
 use crate::illumos::zfs::ZONE_ZFS_DATASET_MOUNTPOINT;
 use crate::illumos::{execute, PFEXEC};
 
@@ -66,15 +66,15 @@ pub enum Error {
     #[error("Error accessing filesystem: {0}")]
     Filesystem(std::io::Error),
 
-    #[error("Unexpected IP address: {0}")]
-    Ip(IpNetwork),
-
     #[error("Value not found")]
     NotFound,
 }
 
 /// Describes the type of addresses which may be requested from a zone.
 #[derive(Copy, Clone, Debug)]
+// TODO-cleanup: Remove, along with moving to IPv6 addressing everywhere.
+// See https://github.com/oxidecomputer/omicron/issues/889.
+#[allow(dead_code)]
 pub enum AddressRequest {
     Dhcp,
     Static(IpNetwork),
@@ -98,31 +98,51 @@ pub struct Zones {}
 #[cfg_attr(test, mockall::automock, allow(dead_code))]
 impl Zones {
     /// Ensures a zone is halted before both uninstalling and deleting it.
-    pub fn halt_and_remove(log: &Logger, name: &str) -> Result<(), Error> {
-        if let Some(zone) = Self::find(name)? {
-            info!(log, "halt_and_remove: Zone state: {:?}", zone.state());
-            let (halt, uninstall) = match zone.state() {
-                // For states where we could be running, attempt to halt.
-                zone::State::Running | zone::State::Ready => (true, true),
-                // For zones where we never performed installation, simply
-                // delete the zone - uninstallation is invalid.
-                zone::State::Configured => (false, false),
-                // For most zone states, perform uninstallation.
-                _ => (false, true),
-            };
+    ///
+    /// Returns the state the zone was in before it was removed, or None if the
+    /// zone did not exist.
+    pub fn halt_and_remove(name: &str) -> Result<Option<zone::State>, Error> {
+        match Self::find(name)? {
+            None => Ok(None),
+            Some(zone) => {
+                let state = zone.state();
+                let (halt, uninstall) = match state {
+                    // For states where we could be running, attempt to halt.
+                    zone::State::Running | zone::State::Ready => (true, true),
+                    // For zones where we never performed installation, simply
+                    // delete the zone - uninstallation is invalid.
+                    zone::State::Configured => (false, false),
+                    // For most zone states, perform uninstallation.
+                    _ => (false, true),
+                };
 
-            if halt {
-                zone::Adm::new(name).halt().map_err(Error::Halt)?;
+                if halt {
+                    zone::Adm::new(name).halt().map_err(Error::Halt)?;
+                }
+                if uninstall {
+                    zone::Adm::new(name)
+                        .uninstall(/* force= */ true)
+                        .map_err(Error::Uninstall)?;
+                }
+                zone::Config::new(name)
+                    .delete(/* force= */ true)
+                    .run()
+                    .map_err(Error::Delete)?;
+                Ok(Some(state))
             }
-            if uninstall {
-                zone::Adm::new(name)
-                    .uninstall(/* force= */ true)
-                    .map_err(Error::Uninstall)?;
-            }
-            zone::Config::new(name)
-                .delete(/* force= */ true)
-                .run()
-                .map_err(Error::Delete)?;
+        }
+    }
+
+    /// Halt and remove the zone, logging the state in which the zone was found.
+    pub fn halt_and_remove_logged(
+        log: &Logger,
+        name: &str,
+    ) -> Result<(), Error> {
+        if let Some(state) = Self::halt_and_remove(name)? {
+            info!(
+                log,
+                "halt_and_remove_logged: Previous zone state: {:?}", state
+            );
         }
         Ok(())
     }
@@ -154,7 +174,7 @@ impl Zones {
                     "Invalid state; uninstalling and deleting zone {}",
                     zone_name
                 );
-                Zones::halt_and_remove(log, zone.name())?;
+                Zones::halt_and_remove_logged(log, zone.name())?;
             }
         }
 
@@ -245,7 +265,10 @@ impl Zones {
             .ok_or(Error::NotFound)
     }
 
-    /// Gets the address if one exists, creates one if one does not exist.
+    /// Ensures that an IP address on an interface matches the requested value.
+    ///
+    /// - If the address exists, ensure it has the desired value.
+    /// - If the address does not exist, create it.
     ///
     /// This address may be optionally within a zone `zone`.
     /// If `None` is supplied, the address is queried from the Global Zone.
@@ -258,8 +281,13 @@ impl Zones {
         match Self::get_address(zone, addrobj) {
             Ok(addr) => {
                 if let AddressRequest::Static(expected_addr) = addrtype {
+                    // If the address is static, we need to validate that it
+                    // matches the value we asked for.
                     if addr != expected_addr {
-                        return Err(Error::Ip(addr));
+                        // If the address doesn't match, try removing the old
+                        // value before using the new one.
+                        Self::delete_address(zone, addrobj)?;
+                        return Self::create_address(zone, addrobj, addrtype);
                     }
                 }
                 Ok(addr)
@@ -309,8 +337,9 @@ impl Zones {
         let prefix =
             if let Some(zone) = zone { vec![ZLOGIN, zone] } else { vec![] };
 
+        let interface = format!("{}/", addrobj.interface());
         let show_addr_args =
-            &[IPADM, "show-addr", "-p", "-o", "TYPE", &addrobj.to_string()];
+            &[IPADM, "show-addr", "-p", "-o", "TYPE", &interface];
 
         let args = prefix.iter().chain(show_addr_args);
         let cmd = command.args(args);
@@ -333,7 +362,6 @@ impl Zones {
         addrobj: &AddrObject,
         addrtype: AddressRequest,
     ) -> Result<(), Error> {
-        // No link-local address was found, attempt to make one.
         let mut command = std::process::Command::new(PFEXEC);
         let mut args = vec![];
         if let Some(zone) = zone {
@@ -357,6 +385,27 @@ impl Zones {
                 args.push(addr.to_string());
             }
         }
+        args.push(addrobj.to_string());
+
+        let cmd = command.args(args);
+        execute(cmd)?;
+        Ok(())
+    }
+
+    #[allow(clippy::needless_lifetimes)]
+    pub fn delete_address<'a>(
+        zone: Option<&'a str>,
+        addrobj: &AddrObject,
+    ) -> Result<(), Error> {
+        let mut command = std::process::Command::new(PFEXEC);
+        let mut args = vec![];
+        if let Some(zone) = zone {
+            args.push(ZLOGIN.to_string());
+            args.push(zone.to_string());
+        };
+
+        args.push(IPADM.to_string());
+        args.push("delete-addr".to_string());
         args.push(addrobj.to_string());
 
         let cmd = command.args(args);
@@ -404,6 +453,37 @@ impl Zones {
         Ok(())
     }
 
+    // TODO(https://github.com/oxidecomputer/omicron/issues/821): We
+    // should remove this function when Sled Agents are provided IPv6 addresses
+    // from RSS.
+    pub fn ensure_has_global_zone_v6_address(
+        physical_link: Option<PhysicalLink>,
+        address: Ipv6Addr,
+        name: &str,
+    ) -> Result<(), Error> {
+        // Ensure that addrconf has been set up in the Global Zone.
+        let link = if let Some(link) = physical_link {
+            link
+        } else {
+            Dladm::find_physical()?
+        };
+        let gz_link_local_addrobj = AddrObject::new(&link.0, "linklocal")?;
+        Self::ensure_has_link_local_v6_address(None, &gz_link_local_addrobj)?;
+
+        // Ensure that a static IPv6 address has been allocated
+        // to the Global Zone. Without this, we don't have a way
+        // to route to IP addresses that we want to create in
+        // the non-GZ. Note that we use a `/64` prefix, as all addresses
+        // allocated for services on this sled itself are within the underlay
+        // prefix. Anything else must be routed through Sidecar.
+        Self::ensure_address(
+            None,
+            &gz_link_local_addrobj.on_same_interface(name)?,
+            AddressRequest::new_static(IpAddr::V6(address), Some(64)),
+        )?;
+        Ok(())
+    }
+
     // Creates an IP address within a Zone.
     #[allow(clippy::needless_lifetimes)]
     fn create_address<'a>(
@@ -421,31 +501,6 @@ impl Zones {
                 AddressRequest::Dhcp => {}
                 AddressRequest::Static(addr) => {
                     if addr.is_ipv6() {
-                        // Ensure that addrconf has been set up in the Global
-                        // Zone.
-                        let gz_link_local_addrobj = AddrObject::new(
-                            &Dladm::find_physical()?.0,
-                            "linklocal",
-                        )?;
-                        Self::ensure_has_link_local_v6_address(
-                            None,
-                            &gz_link_local_addrobj,
-                        )?;
-
-                        // Ensure that a static IPv6 address has been allocated
-                        // to the Global Zone. Without this, we don't have a way
-                        // to route to IP addresses that we want to create in
-                        // the non-GZ.
-                        Self::ensure_address(
-                            None,
-                            &gz_link_local_addrobj
-                                .on_same_interface("v6route")?,
-                            AddressRequest::new_static(
-                                "fd00:1234::".parse().unwrap(),
-                                Some(16),
-                            ),
-                        )?;
-
                         // Finally, actually ensure that the v6 address we want
                         // exists within the zone.
                         Self::ensure_has_link_local_v6_address(

@@ -1,6 +1,7 @@
 // This Source Code Form is subject to the terms of the Mozilla Public
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
+#![feature(async_closure)]
 
 //! Library interface to the Nexus, the heart of the control plane
 
@@ -13,14 +14,15 @@
 #![allow(clippy::style)]
 
 pub mod authn; // Public only for testing
-pub mod authz;
-pub mod config; // public for testing
-mod context;
-pub mod db; // Public only for some documentation examples
+pub mod authz; // Public for documentation examples
+mod cidata;
+pub mod config; // Public for testing
+pub mod context; // Public for documentation examples
+pub mod db; // Public for documentation examples
 mod defaults;
-pub mod external_api; // public for testing
-pub mod internal_api; // public for testing
-mod nexus;
+pub mod external_api; // Public for testing
+pub mod internal_api; // Public for testing
+pub mod nexus; // Public for documentation examples
 mod populate;
 mod saga_interface;
 mod sagas;

@@ -10,8 +10,20 @@ use omicron_common::api::external::{
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 use std::net::IpAddr;
 use uuid::Uuid;
+
+// Silos
+
+/// Create-time parameters for a [`Silo`](crate::external_api::views::Silo)
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct SiloCreate {
+    #[serde(flatten)]
+    pub identity: IdentityMetadataCreateParams,
+
+    pub discoverable: bool,
+}
 
 // ORGANIZATIONS
 
@@ -83,7 +95,7 @@ pub struct NetworkInterfaceCreate {
 #[serde(tag = "type", content = "params")]
 pub enum InstanceNetworkInterfaceAttachment {
     /// Create one or more `NetworkInterface`s for the `Instance`
-    Create(InstanceNetworkInterfaceCreate),
+    Create(Vec<NetworkInterfaceCreate>),
 
     /// Default networking setup, which creates a single interface with an
     /// auto-assigned IP address from project's "default" VPC and "default" VPC
@@ -94,15 +106,27 @@ pub enum InstanceNetworkInterfaceAttachment {
     None,
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-pub struct InstanceNetworkInterfaceCreate {
-    pub params: Vec<NetworkInterfaceCreate>,
-}
-
 impl Default for InstanceNetworkInterfaceAttachment {
     fn default() -> Self {
         Self::Default
     }
+}
+
+/// Describe the instance's disks at creation time
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum InstanceDiskAttachment {
+    /// During instance creation, create and attach disks
+    Create(DiskCreate),
+
+    /// During instance creation, attach this disk
+    Attach(InstanceDiskAttach),
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct InstanceDiskAttach {
+    /// A disk name to attach
+    pub name: Name,
 }
 
 /// Create-time parameters for an [`Instance`](omicron_common::api::external::Instance)
@@ -114,9 +138,59 @@ pub struct InstanceCreate {
     pub memory: ByteCount,
     pub hostname: String, // TODO-cleanup different type?
 
+    /// User data for instance initialization systems (such as cloud-init).
+    /// Must be a Base64-encoded string, as specified in RFC 4648 § 4 (+ and /
+    /// characters with padding). Maximum 32 KiB unencoded data.
+    // TODO: this should emit `"format": "byte"`, but progenitor doesn't
+    // understand that yet.
+    #[schemars(default, with = "String")]
+    #[serde(default, with = "serde_user_data")]
+    pub user_data: Vec<u8>,
+
     /// The network interfaces to be created for this instance.
     #[serde(default)]
     pub network_interfaces: InstanceNetworkInterfaceAttachment,
+
+    /// The disks to be created or attached for this instance.
+    #[serde(default)]
+    pub disks: Vec<InstanceDiskAttachment>,
+}
+
+mod serde_user_data {
+    use serde::{de::Error, Deserialize, Deserializer, Serialize, Serializer};
+
+    pub fn serialize<S>(
+        data: &Vec<u8>,
+        serializer: S,
+    ) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        base64::encode(data).serialize(serializer)
+    }
+
+    pub fn deserialize<'de, D>(deserializer: D) -> Result<Vec<u8>, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        match base64::decode(<&str>::deserialize(deserializer)?) {
+            Ok(buf) => {
+                // if you change this, also update the stress test in crate::cidata
+                if buf.len() > crate::cidata::MAX_USER_DATA_BYTES {
+                    Err(D::Error::invalid_length(
+                        buf.len(),
+                        &"less than 32 KiB",
+                    ))
+                } else {
+                    Ok(buf)
+                }
+            }
+            Err(_) => Err(D::Error::invalid_value(
+                serde::de::Unexpected::Other("invalid base64 string"),
+                &"a valid base64 string",
+            )),
+        }
+    }
 }
 
 /// Migration parameters for an [`Instance`](omicron_common::api::external::Instance)
@@ -202,6 +276,66 @@ pub struct VpcRouterUpdate {
 
 // DISKS
 
+#[derive(Copy, Clone, Debug, Deserialize, Serialize)]
+pub struct BlockSize(pub u32);
+
+impl TryFrom<u32> for BlockSize {
+    type Error = anyhow::Error;
+    fn try_from(x: u32) -> Result<BlockSize, Self::Error> {
+        if ![512, 2048, 4096].contains(&x) {
+            anyhow::bail!("invalid block size {}", x);
+        }
+
+        Ok(BlockSize(x))
+    }
+}
+
+impl Into<ByteCount> for BlockSize {
+    fn into(self) -> ByteCount {
+        ByteCount::from(self.0)
+    }
+}
+
+impl JsonSchema for BlockSize {
+    fn schema_name() -> String {
+        "BlockSize".to_string()
+    }
+
+    fn json_schema(
+        _gen: &mut schemars::gen::SchemaGenerator,
+    ) -> schemars::schema::Schema {
+        schemars::schema::Schema::Object(schemars::schema::SchemaObject {
+            metadata: Some(Box::new(schemars::schema::Metadata {
+                id: None,
+                title: Some("disk block size in bytes".to_string()),
+                description: None,
+                default: None,
+                deprecated: false,
+                read_only: false,
+                write_only: false,
+                examples: vec![],
+            })),
+            instance_type: Some(schemars::schema::SingleOrVec::Single(
+                Box::new(schemars::schema::InstanceType::Integer),
+            )),
+            format: None,
+            enum_values: Some(vec![
+                serde_json::json!(512),
+                serde_json::json!(2048),
+                serde_json::json!(4096),
+            ]),
+            const_value: None,
+            subschemas: None,
+            number: None,
+            string: None,
+            array: None,
+            object: None,
+            reference: None,
+            extensions: BTreeMap::new(),
+        })
+    }
+}
+
 /// Create-time parameters for a [`Disk`](omicron_common::api::external::Disk)
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct DiskCreate {
@@ -209,21 +343,24 @@ pub struct DiskCreate {
     #[serde(flatten)]
     pub identity: IdentityMetadataCreateParams,
     /// id for snapshot from which the Disk should be created, if any
-    pub snapshot_id: Option<Uuid>, // TODO should be a name?
-    /// size of the Disk
+    pub snapshot_id: Option<Uuid>,
+    /// id for image from which the Disk should be created, if any
+    pub image_id: Option<Uuid>,
+    /// total size of the Disk in bytes
     pub size: ByteCount,
+    /// size of blocks for this Disk. valid values are: 512, 2048, or 4096
+    pub block_size: BlockSize,
 }
 
-const BLOCK_SIZE: u32 = 1_u32 << 12;
 const EXTENT_SIZE: u32 = 1_u32 << 20;
 
 impl DiskCreate {
     pub fn block_size(&self) -> ByteCount {
-        ByteCount::from(BLOCK_SIZE)
+        ByteCount::from(self.block_size.0)
     }
 
     pub fn blocks_per_extent(&self) -> i64 {
-        EXTENT_SIZE as i64 / BLOCK_SIZE as i64
+        EXTENT_SIZE as i64 / i64::from(self.block_size.0)
     }
 
     pub fn extent_count(&self) -> i64 {
@@ -238,7 +375,7 @@ impl DiskCreate {
 /// attached or detached to an instance
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct DiskIdentifier {
-    pub disk: Name,
+    pub name: Name,
 }
 
 /// Parameters for the
@@ -247,6 +384,27 @@ pub struct DiskIdentifier {
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct NetworkInterfaceIdentifier {
     pub interface_name: Name,
+}
+
+// IMAGES
+
+/// The source of the underlying image.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub enum ImageSource {
+    Url(String),
+    Snapshot(Uuid),
+}
+
+/// Create-time parameters for an
+/// [`Image`](omicron_common::api::external::Image)
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct ImageCreate {
+    /// common identifying metadata
+    #[serde(flatten)]
+    pub identity: IdentityMetadataCreateParams,
+
+    /// The source of the image's contents.
+    pub source: ImageSource,
 }
 
 // SNAPSHOTS
@@ -287,7 +445,9 @@ mod test {
                 description: "desc".to_string(),
             },
             snapshot_id: None,
+            image_id: None,
             size,
+            block_size: BlockSize::try_from(4096).unwrap(),
         }
     }
 

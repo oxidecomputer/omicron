@@ -6,21 +6,7 @@ name: Rust
 on: [ push, pull_request ]
 
 jobs:
-  skip_duplicate_jobs:
-    runs-on: ubuntu-18.04
-    outputs:
-      should_skip: ${{ steps.skip_check.outputs.should_skip }}
-    steps:
-      - id: skip_check
-        # fkirc/skip-duplicate-actions@v3.4.0 (plus a bit)
-        uses: fkirc/skip-duplicate-actions@f75dd6564bb646f95277dc8c3b80612e46a4a1ea
-        with:
-          # For workflows which are triggered concurrently with the same
-          # contents, attempt to execute them exactly once.
-          concurrent_skipping: 'same_content_newer'
   check-style:
-    needs: skip_duplicate_jobs
-    if: ${{ needs.skip_duplicate_jobs.outputs.should_skip != 'true' }}
     runs-on: ubuntu-18.04
     steps:
     # actions/checkout@v2
@@ -33,8 +19,6 @@ jobs:
       run: cargo fmt -- --check
 
   check-omicron-deployment:
-    needs: skip_duplicate_jobs
-    if: ${{ needs.skip_duplicate_jobs.outputs.should_skip != 'true' }}
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -51,8 +35,6 @@ jobs:
       run: cargo run --bin omicron-package -- check
 
   clippy-lint:
-    needs: skip_duplicate_jobs
-    if: ${{ needs.skip_duplicate_jobs.outputs.should_skip != 'true' }}
     runs-on: ubuntu-18.04
     steps:
     # actions/checkout@v2
@@ -74,8 +56,6 @@ jobs:
   # This is just a test build of docs.  Publicly available docs are built via
   # the separate "rustdocs" repo.
   build-docs:
-    needs: skip_duplicate_jobs
-    if: ${{ needs.skip_duplicate_jobs.outputs.should_skip != 'true' }}
     runs-on: ubuntu-18.04
     steps:
     # actions/checkout@v2
@@ -90,8 +70,6 @@ jobs:
   build-and-test:
     env:
       OMICRON_TMP: /tmp/omicron_tmp
-    needs: skip_duplicate_jobs
-    if: ${{ needs.skip_duplicate_jobs.outputs.should_skip != 'true' }}
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -104,20 +82,40 @@ jobs:
       if: ${{ github.ref != 'refs/heads/main' }}
     - name: Report cargo version
       run: cargo --version
+    - name: Remove unnecessary software
+      run: |
+        echo "Disk space:"
+        df -h
+
+        if [ -d "/usr/share/dotnet" ]; then
+          echo "Removing dotnet"
+          sudo rm -rf /usr/share/dotnet
+        fi
+        if [ -d "/usr/local/lib/android" ]; then
+          echo "Removing android"
+          sudo rm -rf /usr/local/lib/android
+        fi
+        if [ -d "/opt/ghc" ]; then
+          echo "Removing haskell"
+          sudo rm -rf /opt/ghc
+        fi
+
+        echo "Disk space:"
+        df -h
     - name: Configure GitHub cache for CockroachDB binaries
       id: cache-cockroachdb
       # actions/cache@v2.1.4
       uses: actions/cache@26968a09c0ea4f3e233fdddbafd1166051a095f6
       with:
         key: ${{ runner.os }}-cockroach-binary-${{ hashFiles('tools/cockroachdb_checksums') }}
-        path: "cockroachdb"
+        path: "./out/cockroachdb"
     - name: Configure GitHub cache for ClickHouse binaries
       id: cache-clickhouse
       # actions/cache@v2.1.4
       uses: actions/cache@26968a09c0ea4f3e233fdddbafd1166051a095f6
       with:
         key: ${{ runner.os }}-clickhouse-binary-${{ hashFiles('tools/clickhouse_checksums') }}
-        path: "clickhouse"
+        path: "./out/clickhouse"
     - name: Download ClickHouse
       if: steps.cache-clickhouse.outputs.cache-hit != 'true'
       run: ./tools/ci_download_clickhouse
@@ -140,13 +138,13 @@ jobs:
       # - TMPDIR=$OMICRON_TMP: we specify a specific temporary directory so that
       #   failed test outputs will be in a known place that we can grab at the
       #   end without also grabbing random other temporary files.
-      run: TMPDIR=$OMICRON_TMP PATH="$PATH:$PWD/cockroachdb/bin:$PWD/clickhouse" RUSTFLAGS="-D warnings" RUSTDOCFLAGS="-D warnings" cargo build --locked --all-targets --verbose
+      run: TMPDIR=$OMICRON_TMP PATH="$PATH:$PWD/out/cockroachdb/bin:$PWD/out/clickhouse" RUSTFLAGS="-D warnings" RUSTDOCFLAGS="-D warnings" cargo build --locked --all-targets --verbose
     - name: Run tests
       # Use the same RUSTFLAGS and RUSTDOCFLAGS as above to avoid having to
       # rebuild here.
       # Put "./cockroachdb/bin" and "./clickhouse" on the PATH for the test
       # suite.
-      run: TMPDIR=$OMICRON_TMP PATH="$PATH:$PWD/cockroachdb/bin:$PWD/clickhouse" RUSTFLAGS="-D warnings" RUSTDOCFLAGS="-D warnings" cargo test --no-fail-fast --workspace --locked --verbose
+      run: TMPDIR=$OMICRON_TMP PATH="$PATH:$PWD/out/cockroachdb/bin:$PWD/out/clickhouse" RUSTFLAGS="-D warnings" RUSTDOCFLAGS="-D warnings" cargo test --no-fail-fast --workspace --locked --verbose
     - name: Archive any failed test results
       if: ${{ failure() }}
       # actions/upload-artifact@v2.3.1

@@ -18,6 +18,68 @@ use quote::{format_ident, quote};
 use syn::spanned::Spanned;
 use syn::{Data, DataStruct, DeriveInput, Error, Fields, Ident, Lit, Meta};
 
+mod lookup;
+
+/// Defines a structure and helper functions for looking up resources
+///
+/// # Examples
+///
+/// ```ignore
+/// lookup_resource! {
+///     name = "Organization",
+///     ancestors = [],
+///     children = [ "Project" ],
+///     lookup_by_name = true,
+///     soft_deletes = true,
+///     primary_key_columns = [ { column_name = "id", rust_type = Uuid } ]
+/// }
+/// ```
+///
+/// See [`lookup::Input`] for documentation on the named arguments.
+///
+/// This defines a struct `Organization<'a>` with functions `fetch()`,
+/// `fetch_for(authz::Action)`, and `lookup_for(authz::Action)` for looking up
+/// an Organization in the database.  These functions are all protected by
+/// access controls.
+///
+/// Building on that, we have:
+///
+/// ```ignore
+/// lookup_resource! {
+///     name = "Organization",
+///     ancestors = [],
+///     children = [ "Project" ],
+///     lookup_by_name = true,
+///     soft_deletes = true,
+///     primary_key_columns = [ { column_name = "id", rust_type = Uuid } ]
+/// }
+///
+/// lookup_resource! {
+///     name = "Instance",
+///     ancestors = [ "Organization", "Project" ],
+///     children = [],
+///     lookup_by_name = true,
+///     soft_deletes = true,
+///     primary_key_columns = [ { column_name = "id", rust_type = Uuid } ]
+/// }
+/// ```
+///
+/// These define `Project<'a>` and `Instance<'a>`.  For more on these structs
+/// and how they're used, see nexus/src/db/lookup.rs.
+// Allow private intra-doc links.  This is useful because the `Input` struct
+// cannot be exported (since we're a proc macro crate, and we can't expose
+// a struct), but its documentation is very useful.
+#[allow(rustdoc::private_intra_doc_links)]
+#[proc_macro]
+pub fn lookup_resource(
+    input: proc_macro::TokenStream,
+) -> proc_macro::TokenStream {
+    match lookup::lookup_resource(input.into()) {
+        Ok(output) => output.into(),
+        Err(error) => error.to_compile_error().into(),
+    }
+}
+
 /// Looks for a Meta-style attribute with a particular identifier.
 ///
 /// As an example, for an attribute like `#[foo = "bar"]`, we can find this

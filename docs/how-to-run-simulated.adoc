@@ -1,0 +1,141 @@
+:showtitle:
+:toc: left
+:icons: font
+
+= Running Omicron (Simulated)
+
+== What is "Simulated Omicron"?
+
+The "Sled-local" component of the control plane - which expects to manage local
+resources - has tight coupling with the illumos Operating System. However, a
+good portion of the control plane (interactions with the database, metrics
+collection, and the console, for example) executes within programs that are
+decoupled from the underlying Sled.
+
+To enable more flexible testing of this software, a "simulated" sled agent is
+provided, capable of running across many platforms (Linux, Mac, illumos). This
+allows developers to test the control plane flows without actually having any
+resources to manage.
+
+If you are interested in running the "real" control plane (which is necessary
+for managing instances, storage, and networking) refer to the non-simulated
+guide at xref:how-to-run.adoc[].
+
+== Installing Prerequisites
+
+Prerequisite software may be installed with the following script:
+
+[source,text]
+----
+$ ./tools/install_prerequisites.sh
+----
+
+== Running
+
+To **run Omicron** you need to run four programs:
+
+* a CockroachDB cluster.  For development, you can use the `omicron-dev` tool in this repository to start a single-node CockroachDB cluster **that will delete the database when you shut it down.**
+* a ClickHouse server. You should use the `omicron-dev` tool for this as well, see below, and as with CockroachDB,
+the database files will be deleted when you stop the program.
+* `nexus`: the guts of the control plane
+* `sled-agent-sim`: a simulator for the component that manages a single sled
+
+The easiest way to start the required databases is to use the built-in `omicron-dev` tool.  This tool assumes that the `cockroach` and `clickhouse` executables are on your PATH, and match the versions above.
+
+. Start CockroachDB using `omicron-dev db-run`:
++
+[source,text]
+----
+$ cargo run --bin=omicron-dev -- db-run
+    Finished dev [unoptimized + debuginfo] target(s) in 0.15s
+     Running `target/debug/omicron-dev db-run`
+omicron-dev: using temporary directory for database store (cleaned up on clean exit)
+omicron-dev: will run this to start CockroachDB:
+cockroach start-single-node --insecure --http-addr=:0 --store /var/tmp/omicron_tmp/.tmpM8KpTf/data --listen-addr 127.0.0.1:32221 --listening-url-file /var/tmp/omicron_tmp/.tmpM8KpTf/listen-url
+omicron-dev: temporary directory: /var/tmp/omicron_tmp/.tmpM8KpTf
+*
+* WARNING: ALL SECURITY CONTROLS HAVE BEEN DISABLED!
+*
+* This mode is intended for non-production testing only.
+*
+* In this mode:
+* - Your cluster is open to any client that can access 127.0.0.1.
+* - Intruders with access to your machine or network can observe client-server traffic.
+* - Intruders can log in without password and read or write any data in the cluster.
+* - Intruders can consume all your server's resources and cause unavailability.
+*
+*
+* INFO: To start a secure server without mandating TLS for clients,
+* consider --accept-sql-without-tls instead. For other options, see:
+*
+* - https://go.crdb.dev/issue-v/53404/v20.2
+* - https://www.cockroachlabs.com/docs/v20.2/secure-a-cluster.html
+*
+
+omicron-dev: child process: pid 3815
+omicron-dev: CockroachDB listening at: postgresql://root@127.0.0.1:32221/omicron?sslmode=disable
+omicron-dev: populating database
+*
+* INFO: Replication was disabled for this cluster.
+* When/if adding nodes in the future, update zone configurations to increase the replication factor.
+*
+CockroachDB node starting at 2021-04-13 15:58:59.680359279 +0000 UTC (took 0.4s)
+build:               OSS v20.2.5 @ 2021/03/17 21:00:51 (go1.16.2)
+webui:               http://127.0.0.1:41618
+sql:                 postgresql://root@127.0.0.1:32221?sslmode=disable
+RPC client flags:    cockroach <client cmd> --host=127.0.0.1:32221 --insecure
+logs:                /var/tmp/omicron_tmp/.tmpM8KpTf/data/logs
+temp dir:            /var/tmp/omicron_tmp/.tmpM8KpTf/data/cockroach-temp022560209
+external I/O path:   /var/tmp/omicron_tmp/.tmpM8KpTf/data/extern
+store[0]:            path=/var/tmp/omicron_tmp/.tmpM8KpTf/data
+storage engine:      pebble
+status:              initialized new cluster
+clusterID:           8ab646f0-67f0-484d-8010-e4444fb86336
+nodeID:              1
+omicron-dev: populated database
+----
++
+Note that as the output indicates, this cluster will be available to anybody that can reach 127.0.0.1.
+
+. Start the ClickHouse database server:
++
+[source,text]
+----
+$ cargo run --bin omicron-dev -- ch-run
+    Finished dev [unoptimized + debuginfo] target(s) in 0.47s
+     Running `target/debug/omicron-dev ch-run`
+omicron-dev: running ClickHouse (PID: 2463), full command is "clickhouse server --log-file /var/folders/67/2tlym22x1r3d2kwbh84j298w0000gn/T/.tmpJ5nhot/clickhouse-server.log --errorlog-file /var/folders/67/2tlym22x1r3d2kwbh84j298w0000gn/T/.tmpJ5nhot/clickhouse-server.errlog -- --http_port 8123 --path /var/folders/67/2tlym22x1r3d2kwbh84j298w0000gn/T/.tmpJ5nhot"
+omicron-dev: using /var/folders/67/2tlym22x1r3d2kwbh84j298w0000gn/T/.tmpJ5nhot for ClickHouse data storage
+----
+
+. `nexus` requires a configuration file to run.  You can use `nexus/examples/config.toml` to start with.  Build and run it like this:
++
+[source,text]
+----
+$ cargo run --bin=nexus -- nexus/examples/config.toml
+...
+listening: http://127.0.0.1:12220
+----
+Nexus can also serve the web console. Instructions for downloading (or building) the console's static assets and pointing Nexus to them are https://github.com/oxidecomputer/console/blob/main/docs/serve-from-nexus.md[here]. Without console assets, Nexus will still start and run normally as an API. A few link:./nexus/src/external_api/console_api.rs[console-specific routes] will 404.
+
+. `sled-agent-sim` only accepts configuration on the command line.  Run it with a uuid identifying itself (this would be a uuid for the sled it's managing), an IP:port for itself, and the IP:port of `nexus`'s _internal_ interface.  Using default config, this might look like this:
++
+[source,text]
+----
+$ cargo run --bin=sled-agent-sim -- $(uuidgen) [::1]:12345 127.0.0.1:12221
+----
+
+. `oximeter` is similar to `nexus`, requiring a configuration file. You can use `oximeter/collector/config.toml`, and the whole thing can be run with:
++
+[source,text]
+----
+$ cargo run --bin=oximeter -- oximeter/collector/config.toml
+Dec 02 18:00:01.062 INFO starting oximeter server
+Dec 02 18:00:01.062 DEBG creating ClickHouse client
+Dec 02 18:00:01.068 DEBG initializing ClickHouse database, component: clickhouse-client, collector_id: 1da65e5b-210c-4859-a7d7-200c1e659972, component: oximeter-agent
+Dec 02 18:00:01.093 DEBG registered endpoint, path: /producers, method: POST, local_addr: [::1]:12223, component: dropshot
+...
+----
+
+Once everything is up and running, you can use `curl` directly to hit either of
+the servers.  But it's easier to use the xref:cli.adoc[`oxide` CLI].

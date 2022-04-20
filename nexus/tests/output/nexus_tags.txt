@@ -16,6 +16,20 @@ logout                                   /logout
 session_me                               /session/me
 spoof_login                              /login
 
+API operations found with tag "images"
+OPERATION ID                             URL PATH
+project_images_delete_image              /organizations/{organization_name}/projects/{project_name}/images/{image_name}
+project_images_get                       /organizations/{organization_name}/projects/{project_name}/images
+project_images_get_image                 /organizations/{organization_name}/projects/{project_name}/images/{image_name}
+project_images_post                      /organizations/{organization_name}/projects/{project_name}/images
+
+API operations found with tag "images:global"
+OPERATION ID                             URL PATH
+images_delete_image                      /images/{image_name}
+images_get                               /images
+images_get_image                         /images/{image_name}
+images_post                              /images
+
 API operations found with tag "instances"
 OPERATION ID                             URL PATH
 instance_disks_attach                    /organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/disks/attach
@@ -84,6 +98,13 @@ API operations found with tag "sagas"
 OPERATION ID                             URL PATH
 sagas_get                                /sagas
 sagas_get_saga                           /sagas/{saga_id}
+
+API operations found with tag "silos"
+OPERATION ID                             URL PATH
+silos_delete_silo                        /silos/{silo_name}
+silos_get                                /silos
+silos_get_silo                           /silos/{silo_name}
+silos_post                               /silos
 
 API operations found with tag "sleds"
 OPERATION ID                             URL PATH

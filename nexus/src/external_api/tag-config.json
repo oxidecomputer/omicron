@@ -20,6 +20,18 @@
         "url": "http://oxide.computer/docs/#xxx"
       }
     },
+    "images": {
+      "description": "Images are read-only Virtual Disks that may be used to boot Virtual Machines",
+      "external_docs": {
+        "url": "http://oxide.computer/docs/#xxx"
+      }
+    },
+    "images:global": {
+      "description": "Images are read-only Virtual Disks that may be used to boot Virtual Machines. These images are scoped globally.",
+      "external_docs": {
+        "url": "http://oxide.computer/docs/#xxx"
+      }
+    },
     "instances": {
       "description": "Virtual machine instances are the basic unit of computation. These operations are used for provisioning, controlling, and destroying instances.",
       "external_docs": {
@@ -28,6 +40,12 @@
     },
     "metrics": {
       "description": "Metrics provide insight into the operation of the Oxide deployment. These include telemetry on hardware and software components that can be used to understand the current state as well as to diagnose issues.",
+      "external_docs": {
+        "url": "http://oxide.computer/docs/#xxx"
+      }
+    },
+    "silos": {
+      "description": "Silos represent a logical partition of users and resources.",
       "external_docs": {
         "url": "http://oxide.computer/docs/#xxx"
       }

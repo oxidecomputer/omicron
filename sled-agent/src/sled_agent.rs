@@ -21,7 +21,7 @@ use omicron_common::api::{
     internal::nexus::UpdateArtifact,
 };
 use slog::Logger;
-use std::net::SocketAddr;
+use std::net::{SocketAddr, SocketAddrV6};
 use std::sync::Arc;
 use uuid::Uuid;
 
@@ -68,7 +68,10 @@ impl From<Error> for omicron_common::api::external::Error {
 ///
 /// Contains both a connection to the Nexus, as well as managed instances.
 pub struct SledAgent {
-    // Component of Sled Agent responsible for storage and partition management.
+    // ID of the Sled
+    id: Uuid,
+
+    // Component of Sled Agent responsible for storage and dataset management.
     storage: StorageManager,
 
     // Component of Sled Agent responsible for managing Propolis instances.
@@ -86,6 +89,7 @@ impl SledAgent {
         config: &Config,
         log: Logger,
         nexus_client: Arc<NexusClient>,
+        sled_address: SocketAddrV6,
     ) -> Result<SledAgent, Error> {
         let id = &config.id;
         let vlan = config.vlan;
@@ -102,6 +106,18 @@ impl SledAgent {
             true,
         )?;
 
+        // Ensure the global zone has a functioning IPv6 address.
+        //
+        // TODO(https://github.com/oxidecomputer/omicron/issues/821): This
+        // should be removed once the Sled Agent is initialized with a
+        // RSS-provided IP address. In the meantime, we use one from the
+        // configuration file.
+        Zones::ensure_has_global_zone_v6_address(
+            config.data_link.clone(),
+            *sled_address.ip(),
+            "sled6",
+        )?;
+
         // Identify all existing zones which should be managed by the Sled
         // Agent.
         //
@@ -112,7 +128,7 @@ impl SledAgent {
         let zones = Zones::get()?;
         for z in zones {
             warn!(log, "Deleting zone: {}", z.name());
-            Zones::halt_and_remove(&log, z.name())?;
+            Zones::halt_and_remove_logged(&log, z.name())?;
         }
 
         // Identify all VNICs which should be managed by the Sled Agent.
@@ -130,8 +146,13 @@ impl SledAgent {
             Dladm::delete_vnic(&vnic)?;
         }
 
-        let storage =
-            StorageManager::new(&log, *id, nexus_client.clone()).await?;
+        let storage = StorageManager::new(
+            &log,
+            *id,
+            nexus_client.clone(),
+            config.data_link.clone(),
+        )
+        .await?;
         if let Some(pools) = &config.zpools {
             for pool in pools {
                 info!(
@@ -142,11 +163,27 @@ impl SledAgent {
                 storage.upsert_zpool(pool).await?;
             }
         }
-        let instances =
-            InstanceManager::new(log.clone(), vlan, nexus_client.clone())?;
-        let services = ServiceManager::new(log.clone()).await?;
+        let instances = InstanceManager::new(
+            log.clone(),
+            vlan,
+            nexus_client.clone(),
+            config.data_link.clone(),
+        )?;
+        let services =
+            ServiceManager::new(log.clone(), config.data_link.clone(), None)
+                .await?;
 
-        Ok(SledAgent { storage, instances, nexus_client, services })
+        Ok(SledAgent {
+            id: config.id,
+            storage,
+            instances,
+            nexus_client,
+            services,
+        })
+    }
+
+    pub fn id(&self) -> Uuid {
+        self.id
     }
 
     /// Ensures that particular services should be initialized.
@@ -165,11 +202,11 @@ impl SledAgent {
     pub async fn filesystem_ensure(
         &self,
         zpool_uuid: Uuid,
-        partition_kind: DatasetKind,
+        dataset_kind: DatasetKind,
         address: SocketAddr,
     ) -> Result<(), Error> {
         self.storage
-            .upsert_filesystem(zpool_uuid, partition_kind, address)
+            .upsert_filesystem(zpool_uuid, dataset_kind, address)
             .await?;
         Ok(())
     }

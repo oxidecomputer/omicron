@@ -7,7 +7,9 @@
 use super::agent::Agent;
 use super::config::Config;
 use super::http_entrypoints::ba_api as http_api;
+use crate::config::Config as SledConfig;
 use slog::Drain;
+use std::net::Ipv6Addr;
 use std::sync::Arc;
 
 /// Wraps a [Agent] object, and provides helper methods for exposing it
@@ -18,7 +20,11 @@ pub struct Server {
 }
 
 impl Server {
-    pub async fn start(config: &Config) -> Result<Self, String> {
+    pub async fn start(
+        address: Ipv6Addr,
+        config: Config,
+        sled_config: SledConfig,
+    ) -> Result<Self, String> {
         let (drain, registration) = slog_dtrace::with_drain(
             config.log.to_logger("bootstrap-agent").map_err(|message| {
                 format!("initializing logger: {}", message)
@@ -38,8 +44,11 @@ impl Server {
             "component" => "BootstrapAgent",
             "server" => config.id.clone().to_string()
         ));
-        let bootstrap_agent =
-            Arc::new(Agent::new(ba_log).map_err(|e| e.to_string())?);
+        let bootstrap_agent = Arc::new(
+            Agent::new(ba_log, sled_config, address)
+                .await
+                .map_err(|e| e.to_string())?,
+        );
 
         let ba = Arc::clone(&bootstrap_agent);
         let dropshot_log = log.new(o!("component" => "dropshot"));
@@ -58,7 +67,7 @@ impl Server {
         // This ordering allows the bootstrap agent to communicate with
         // other bootstrap agents on the rack during the initialization
         // process.
-        if let Err(e) = server.bootstrap_agent.initialize(config).await {
+        if let Err(e) = server.bootstrap_agent.initialize(&config).await {
             let _ = server.close().await;
             return Err(e.to_string());
         }

@@ -55,8 +55,10 @@ const SPOOF_PREFIX: &str = "oxide-spoof-";
 
 lazy_static! {
     /// Actor (id) used for the special "bad credentials" error
-    static ref SPOOF_RESERVED_BAD_CREDS_ACTOR: Actor =
-        Actor("22222222-2222-2222-2222-222222222222".parse().unwrap());
+    static ref SPOOF_RESERVED_BAD_CREDS_ACTOR: Actor = Actor {
+        id: "22222222-2222-2222-2222-222222222222".parse().unwrap(),
+        silo_id: *crate::db::fixed_data::silo::SILO_ID,
+    };
     /// Complete HTTP header value to trigger the "bad actor" error
     pub static ref SPOOF_HEADER_BAD_ACTOR: Authorization<Bearer> =
         make_header_value_str(SPOOF_RESERVED_BAD_ACTOR).unwrap();
@@ -119,7 +121,11 @@ fn authn_spoof(raw_value: Option<&Authorization<Bearer>>) -> SchemeResult {
     }
 
     match Uuid::parse_str(str_value).context("parsing header value as UUID") {
-        Ok(id) => SchemeResult::Authenticated(Details { actor: Actor(id) }),
+        Ok(id) => {
+            let actor =
+                Actor { id, silo_id: *crate::db::fixed_data::silo::SILO_ID };
+            SchemeResult::Authenticated(Details { actor })
+        }
         Err(source) => SchemeResult::Failed(Reason::BadFormat { source }),
     }
 }
@@ -160,15 +166,12 @@ pub fn make_header_value_raw(
 
 #[cfg(test)]
 mod test {
-    use super::super::super::Details;
     use super::super::super::Reason;
     use super::super::SchemeResult;
     use super::authn_spoof;
     use super::make_header_value;
     use super::make_header_value_raw;
     use super::make_header_value_str;
-    use crate::authn;
-    use authn::Actor;
     use headers::authorization::Bearer;
     use headers::authorization::Credentials;
     use headers::Authorization;
@@ -228,12 +231,14 @@ mod test {
 
         // Success case: the client provided a valid uuid in the header.
         let success_case = authn_spoof(Some(&test_header));
-        assert!(matches!(
-            success_case,
-            SchemeResult::Authenticated(
-                Details { actor: Actor(i) }
-            ) if i == test_uuid
-        ));
+        match success_case {
+            SchemeResult::Authenticated(details) => {
+                assert_eq!(details.actor.id, test_uuid);
+            }
+            _ => {
+                assert!(false);
+            }
+        };
     }
 
     #[test]

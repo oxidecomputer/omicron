@@ -22,7 +22,24 @@ table! {
         state_generation -> Int8,
         time_state_updated -> Timestamptz,
         size_bytes -> Int8,
+        block_size -> crate::db::model::BlockSizeEnum,
         origin_snapshot -> Nullable<Uuid>,
+        origin_image -> Nullable<Uuid>,
+    }
+}
+
+table! {
+    image (id) {
+        id -> Uuid,
+        name -> Text,
+        description -> Text,
+        time_created -> Timestamptz,
+        time_modified -> Timestamptz,
+        time_deleted -> Nullable<Timestamptz>,
+        project_id -> Nullable<Uuid>,
+        volume_id -> Uuid,
+        url -> Text,
+        size_bytes -> Int8,
     }
 }
 
@@ -51,13 +68,14 @@ table! {
         time_modified -> Timestamptz,
         time_deleted -> Nullable<Timestamptz>,
         project_id -> Uuid,
+        user_data -> Binary,
         state -> crate::db::model::InstanceStateEnum,
         time_state_updated -> Timestamptz,
         state_generation -> Int8,
         active_server_id -> Uuid,
         active_propolis_id -> Uuid,
-        target_propolis_id -> Nullable<Uuid>,
         active_propolis_ip -> Nullable<Inet>,
+        target_propolis_id -> Nullable<Uuid>,
         migration_id -> Nullable<Uuid>,
         ncpus -> Int8,
         memory -> Int8,
@@ -91,12 +109,38 @@ table! {
         subnet_id -> Uuid,
         mac -> Text,
         ip -> Inet,
+        slot -> Int2,
+    }
+}
+
+table! {
+    silo (id) {
+        id -> Uuid,
+        name -> Text,
+        description -> Text,
+        discoverable -> Bool,
+        time_created -> Timestamptz,
+        time_modified -> Timestamptz,
+        time_deleted -> Nullable<Timestamptz>,
+        rcgen -> Int8,
+    }
+}
+
+table! {
+    silo_user (id) {
+        id -> Uuid,
+        silo_id -> Uuid,
+
+        time_created -> Timestamptz,
+        time_modified -> Timestamptz,
+        time_deleted -> Nullable<Timestamptz>,
     }
 }
 
 table! {
     organization (id) {
         id -> Uuid,
+        silo_id -> Uuid,
         name -> Text,
         description -> Text,
         time_created -> Timestamptz,
@@ -167,7 +211,7 @@ table! {
         token -> Text,
         time_created -> Timestamptz,
         time_last_used -> Timestamptz,
-        user_id -> Uuid,
+        silo_user_id -> Uuid,
     }
 }
 
@@ -181,6 +225,7 @@ table! {
 
         ip -> Inet,
         port -> Int4,
+        last_used_address -> Inet,
     }
 }
 
@@ -298,7 +343,7 @@ table! {
         time_modified -> Timestamptz,
         time_deleted -> Nullable<Timestamptz>,
         kind -> crate::db::model::RouterRouteKindEnum,
-        router_id -> Uuid,
+        vpc_router_id -> Uuid,
         target -> Text,
         destination -> Text,
     }

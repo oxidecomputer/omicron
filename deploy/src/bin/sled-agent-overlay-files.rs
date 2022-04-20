@@ -21,7 +21,7 @@ use structopt::StructOpt;
     about = "Generate server unique files for deployment"
 )]
 struct Args {
-    //// The rack secret threshold
+    /// The rack secret threshold
     #[structopt(short, long)]
     threshold: usize,
 
@@ -37,6 +37,13 @@ fn overlay_secret_shares(
     server_dirs: &[PathBuf],
 ) -> Result<()> {
     let total_shares = server_dirs.len();
+    if total_shares < 2 {
+        println!(
+            "Skipping secret share distribution: only one server \
+             available."
+        );
+        return Ok(());
+    }
     let secret = RackSecret::new();
     let (shares, verifier) = secret
         .split(threshold, total_shares)

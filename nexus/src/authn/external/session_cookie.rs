@@ -17,7 +17,8 @@ use uuid::Uuid;
 // https://cheatsheetseries.owasp.org/cheatsheets/Session_Management_Cheat_Sheet.html
 
 pub trait Session {
-    fn user_id(&self) -> Uuid;
+    fn silo_user_id(&self) -> Uuid;
+    fn silo_id(&self) -> Uuid;
     fn time_last_used(&self) -> DateTime<Utc>;
     fn time_created(&self) -> DateTime<Utc>;
 }
@@ -55,8 +56,8 @@ pub const SESSION_COOKIE_SCHEME_NAME: authn::SchemeName =
 
 /// Generate session cookie header
 pub fn session_cookie_header_value(token: &str, max_age: Duration) -> String {
-    // TODO-security:(https://github.com/oxidecomputer/omicron/issues/249): We should
-    // insert "Secure;" back into this string.
+    // TODO-security:(https://github.com/oxidecomputer/omicron/issues/249): We
+    // should insert "Secure;" back into this string.
     format!(
         "{}={}; Path=/; HttpOnly; SameSite=Lax; Max-Age={}",
         SESSION_COOKIE_COOKIE_NAME,
@@ -106,9 +107,11 @@ where
             }
         };
 
-        let actor = Actor(session.user_id());
+        let actor =
+            Actor { id: session.silo_user_id(), silo_id: session.silo_id() };
 
-        // if the session has gone unused for longer than idle_timeout, it is expired
+        // if the session has gone unused for longer than idle_timeout, it is
+        // expired
         let now = Utc::now();
         if session.time_last_used() + ctx.session_idle_timeout() < now {
             let expired_session = ctx.session_expire(token.clone()).await;
@@ -118,7 +121,8 @@ where
             return SchemeResult::Failed(Reason::BadCredentials {
                 actor,
                 source: anyhow!(
-                    "session expired due to idle timeout. last used: {}. time checked: {}. TTL: {}",
+                    "session expired due to idle timeout. last used: {}. \
+                    time checked: {}. TTL: {}",
                     session.time_last_used(),
                     now,
                     ctx.session_idle_timeout()
@@ -126,8 +130,9 @@ where
             });
         }
 
-        // if the user is still within the idle timeout, but the session has existed longer
-        // than absolute_timeout, it is expired and we can no longer extend the session
+        // if the user is still within the idle timeout, but the session has
+        // existed longer than absolute_timeout, it is expired and we can no
+        // longer extend the session
         if session.time_created() + ctx.session_absolute_timeout() < now {
             let expired_session = ctx.session_expire(token.clone()).await;
             if expired_session.is_none() {
@@ -136,7 +141,8 @@ where
             return SchemeResult::Failed(Reason::BadCredentials {
                 actor,
                 source: anyhow!(
-                    "session expired due to absolute timeout. created: {}. last used: {}. time checked: {}. TTL: {}",
+                    "session expired due to absolute timeout. created: {}. \
+                    last used: {}. time checked: {}. TTL: {}",
                     session.time_created(),
                     session.time_last_used(),
                     now,
@@ -149,7 +155,7 @@ where
         // authenticated for this request at this point. The next request might
         // be wrongly considered idle, but that's a problem for the next
         // request.
-        let updated_session = ctx.session_update_last_used(token.clone()).await;
+        let updated_session = ctx.session_update_last_used(token).await;
         if updated_session.is_none() {
             debug!(log, "failed to extend session")
         }
@@ -190,13 +196,18 @@ mod test {
 
     #[derive(Clone, Copy)]
     struct FakeSession {
+        silo_user_id: Uuid,
+        silo_id: Uuid,
         time_created: DateTime<Utc>,
         time_last_used: DateTime<Utc>,
     }
 
     impl Session for FakeSession {
-        fn user_id(&self) -> Uuid {
-            Uuid::new_v4()
+        fn silo_user_id(&self) -> Uuid {
+            self.silo_user_id
+        }
+        fn silo_id(&self) -> Uuid {
+            self.silo_id
         }
         fn time_created(&self) -> DateTime<Utc> {
             self.time_created
@@ -279,6 +290,8 @@ mod test {
             sessions: Mutex::new(HashMap::from([(
                 "abc".to_string(),
                 FakeSession {
+                    silo_user_id: Uuid::new_v4(),
+                    silo_id: Uuid::new_v4(),
                     time_last_used: Utc::now() - Duration::hours(2),
                     time_created: Utc::now() - Duration::hours(2),
                 },
@@ -303,6 +316,8 @@ mod test {
             sessions: Mutex::new(HashMap::from([(
                 "abc".to_string(),
                 FakeSession {
+                    silo_user_id: Uuid::new_v4(),
+                    silo_id: Uuid::new_v4(),
                     time_last_used: Utc::now(),
                     time_created: Utc::now() - Duration::hours(20),
                 },
@@ -328,7 +343,12 @@ mod test {
         let context = TestServerContext {
             sessions: Mutex::new(HashMap::from([(
                 "abc".to_string(),
-                FakeSession { time_last_used, time_created: Utc::now() },
+                FakeSession {
+                    silo_user_id: Uuid::new_v4(),
+                    silo_id: Uuid::new_v4(),
+                    time_last_used,
+                    time_created: Utc::now(),
+                },
             )])),
         };
         let result = authn_with_cookie(&context, Some("session=abc")).await;

@@ -10,9 +10,12 @@ use crate::config;
 use crate::context::OpContext;
 use crate::db;
 use crate::db::identity::{Asset, Resource};
+use crate::db::lookup::LookupPath;
 use crate::db::model::DatasetKind;
 use crate::db::model::Name;
 use crate::db::model::RouterRoute;
+use crate::db::model::SiloUser;
+use crate::db::model::UpdateArtifactKind;
 use crate::db::model::VpcRouter;
 use crate::db::model::VpcRouterKind;
 use crate::db::model::VpcSubnet;
@@ -70,6 +73,7 @@ use sled_agent_client::Client as SledAgentClient;
 use slog::Logger;
 use std::convert::{TryFrom, TryInto};
 use std::net::SocketAddr;
+use std::net::SocketAddrV6;
 use std::num::NonZeroU32;
 use std::path::Path;
 use std::sync::Arc;
@@ -101,13 +105,20 @@ pub trait TestInterfaces {
         id: &Uuid,
     ) -> Result<Arc<SledAgentClient>, Error>;
 
-    async fn session_create_with(
+    async fn set_disk_as_faulted(&self, disk_id: &Uuid) -> Result<bool, Error>;
+
+    async fn silo_user_create(
         &self,
-        session: db::model::ConsoleSession,
-    ) -> CreateResult<db::model::ConsoleSession>;
+        silo_id: Uuid,
+        silo_user_id: Uuid,
+    ) -> CreateResult<SiloUser>;
 }
 
 pub static BASE_ARTIFACT_DIR: &str = "/var/tmp/oxide_artifacts";
+
+pub(crate) const MAX_DISKS_PER_INSTANCE: u32 = 8;
+
+pub(crate) const MAX_NICS_PER_INSTANCE: u32 = 8;
 
 /// Manages an Oxide fleet -- the heart of the control plane
 pub struct Nexus {
@@ -146,12 +157,16 @@ pub struct Nexus {
 
     /// Operational context used for Instance allocation
     opctx_alloc: OpContext,
+
+    /// Operational context used for external request authentication
+    opctx_external_authn: OpContext,
 }
 
 // TODO Is it possible to make some of these operations more generic?  A
 // particularly good example is probably list() (or even lookup()), where
 // with the right type parameters, generic code can be written to work on all
 // types.
+//
 // TODO update and delete need to accommodate both with-etag and don't-care
 // TODO audit logging ought to be part of this structure and its functions
 impl Nexus {
@@ -213,6 +228,12 @@ impl Nexus {
                 authn::Context::internal_read(),
                 Arc::clone(&db_datastore),
             ),
+            opctx_external_authn: OpContext::for_background(
+                log.new(o!("component" => "ExternalAuthn")),
+                Arc::clone(&authz),
+                authn::Context::external_authn(),
+                Arc::clone(&db_datastore),
+            ),
         };
 
         // TODO-cleanup all the extra Arcs here seems wrong
@@ -258,12 +279,204 @@ impl Nexus {
         }
     }
 
+    /// Returns an [`OpContext`] used for authenticating external requests
+    pub fn opctx_external_authn(&self) -> &OpContext {
+        &self.opctx_external_authn
+    }
+
+    /// Used as the body of a "stub" endpoint -- one that's currently
+    /// unimplemented but that we eventually intend to implement
+    ///
+    /// Even though an endpoint is unimplemented, it's useful if it implements
+    /// the correct authn/authz behaviors behaviors for unauthenticated and
+    /// authenticated, unauthorized requests.  This allows us to maintain basic
+    /// authn/authz test coverage for stub endpoints, which in turn helps us
+    /// ensure that all endpoints are covered.
+    ///
+    /// In order to implement the correct authn/authz behavior, we need to know
+    /// a little about the endpoint.  This is given by the `visibility`
+    /// argument.  See the examples below.
+    ///
+    /// # Examples
+    ///
+    /// ## A top-level API endpoint (always visible)
+    ///
+    /// For example, "/my-new-kind-of-resource".  The assumption is that the
+    /// _existence_ of this endpoint is not a secret.  Use:
+    ///
+    /// ```
+    /// use omicron_nexus::context::OpContext;
+    /// use omicron_nexus::db::DataStore;
+    /// use omicron_nexus::nexus::Nexus;
+    /// use omicron_nexus::nexus::Unimpl;
+    /// use omicron_common::api::external::Error;
+    ///
+    /// async fn my_things_list(
+    ///     nexus: &Nexus,
+    ///     datastore: &DataStore,
+    ///     opctx: &OpContext,
+    /// ) -> Result<(), Error>
+    /// {
+    ///     Err(nexus.unimplemented_todo(opctx, Unimpl::Public).await)
+    /// }
+    /// ```
+    ///
+    /// ## An authz-protected resource under the top level
+    ///
+    /// For example, "/my-new-kind-of-resource/demo" (where "demo" is the name
+    /// of a specific resource of type "my-new-kind-of-resource").  Use:
+    ///
+    /// ```
+    /// use omicron_nexus::context::OpContext;
+    /// use omicron_nexus::db::model::Name;
+    /// use omicron_nexus::db::DataStore;
+    /// use omicron_nexus::nexus::Nexus;
+    /// use omicron_nexus::nexus::Unimpl;
+    /// use omicron_common::api::external::Error;
+    /// use omicron_common::api::external::LookupType;
+    /// use omicron_common::api::external::ResourceType;
+    ///
+    /// async fn my_thing_fetch(
+    ///     nexus: &Nexus,
+    ///     datastore: &DataStore,
+    ///     opctx: &OpContext,
+    ///     the_name: &Name,
+    /// ) -> Result<(), Error>
+    /// {
+    ///     // You will want to have defined your own ResourceType variant for
+    ///     // this resource, even though it's still a stub.
+    ///     let resource_type: ResourceType = todo!();
+    ///     let lookup_type = LookupType::ByName(the_name.to_string());
+    ///     let not_found_error = lookup_type.into_not_found(resource_type);
+    ///     let unimp = Unimpl::ProtectedLookup(not_found_error);
+    ///     Err(nexus.unimplemented_todo(opctx, unimp).await)
+    /// }
+    /// ```
+    ///
+    /// This does the bare minimum to produce an appropriate 404 "Not Found"
+    /// error for authenticated, unauthorized users.
+    ///
+    /// ## An authz-protected API endpoint under some other (non-stub) resource
+    ///
+    /// ### ... when the endpoint never returns 404 (e.g., "list", "create")
+    ///
+    /// For example, "/organizations/my-org/my-new-kind-of-resource".  In this
+    /// case, your function should do whatever lookup of the non-stub resource
+    /// that the function will eventually do, and then treat it like the first
+    /// example.
+    ///
+    /// Here's an example stub for the "list" endpoint for a new resource
+    /// underneath Organizations:
+    ///
+    /// ```
+    /// use omicron_nexus::authz;
+    /// use omicron_nexus::context::OpContext;
+    /// use omicron_nexus::db::lookup::LookupPath;
+    /// use omicron_nexus::db::model::Name;
+    /// use omicron_nexus::db::DataStore;
+    /// use omicron_nexus::nexus::Nexus;
+    /// use omicron_nexus::nexus::Unimpl;
+    /// use omicron_common::api::external::Error;
+    ///
+    /// async fn organization_list_my_thing(
+    ///     nexus: &Nexus,
+    ///     datastore: &DataStore,
+    ///     opctx: &OpContext,
+    ///     organization_name: &Name,
+    /// ) -> Result<(), Error>
+    /// {
+    ///     let (.., _authz_org) = LookupPath::new(opctx, datastore)
+    ///         .organization_name(organization_name)
+    ///         .lookup_for(authz::Action::ListChildren)
+    ///         .await?;
+    ///     Err(nexus.unimplemented_todo(opctx, Unimpl::Public).await)
+    /// }
+    /// ```
+    ///
+    /// ### ... when the endpoint can return 404 (e.g., "get", "delete")
+    ///
+    /// You can treat this exactly like the second example above.  Here's an
+    /// example stub for the "get" endpoint for that same resource:
+    ///
+    /// ```
+    /// use omicron_nexus::authz;
+    /// use omicron_nexus::context::OpContext;
+    /// use omicron_nexus::db::lookup::LookupPath;
+    /// use omicron_nexus::db::model::Name;
+    /// use omicron_nexus::db::DataStore;
+    /// use omicron_nexus::nexus::Nexus;
+    /// use omicron_nexus::nexus::Unimpl;
+    /// use omicron_common::api::external::Error;
+    /// use omicron_common::api::external::LookupType;
+    /// use omicron_common::api::external::ResourceType;
+    ///
+    /// async fn my_thing_fetch(
+    ///     nexus: &Nexus,
+    ///     datastore: &DataStore,
+    ///     opctx: &OpContext,
+    ///     organization_name: &Name,
+    ///     the_name: &Name,
+    /// ) -> Result<(), Error>
+    /// {
+    ///     // You will want to have defined your own ResourceType variant for
+    ///     // this resource, even though it's still a stub.
+    ///     let resource_type: ResourceType = todo!();
+    ///     let lookup_type = LookupType::ByName(the_name.to_string());
+    ///     let not_found_error = lookup_type.into_not_found(resource_type);
+    ///     let unimp = Unimpl::ProtectedLookup(not_found_error);
+    ///     Err(nexus.unimplemented_todo(opctx, unimp).await)
+    /// }
+    /// ```
+    pub async fn unimplemented_todo(
+        &self,
+        opctx: &OpContext,
+        visibility: Unimpl,
+    ) -> Error {
+        // Deny access to non-super-users.  This is really just for the benefit
+        // of the authz coverage tests.  By requiring (and testing) correct
+        // authz behavior for stubs, we ensure that that behavior is preserved
+        // when the stub's implementation is fleshed out.
+        match opctx.authorize(authz::Action::Modify, &authz::FLEET).await {
+            Err(error @ Error::Forbidden) => {
+                // Emulate the behavior of `Authz::authorize()`: if this is a
+                // non-public resource, then the user should get a 404, not a
+                // 403, when authorization fails.
+                if let Unimpl::ProtectedLookup(lookup_error) = visibility {
+                    lookup_error
+                } else {
+                    error
+                }
+            }
+            Err(error) => error,
+            Ok(_) => {
+                // In the event that a superuser actually gets this far, produce
+                // a server error.
+                //
+                // It's tempting to use other status codes here:
+                //
+                // "501 Not Implemented" is specifically when we don't recognize
+                // the HTTP method and cannot implement it on _any_ resource.
+                //
+                // "405 Method Not Allowed" is specifically when an HTTP method
+                // isn't supported.  That doesn't feel quite right either --
+                // this is usually interpreted to mean "not part of the API",
+                // which it obviously _is_, since the client found it in the API
+                // spec.
+                //
+                // Neither of these is true: this HTTP method on this HTTP
+                // resource is part of the API, and it will be supported by the
+                // server, but it doesn't work yet.
+                Error::internal_error("endpoint is not implemented")
+            }
+        }
+    }
+
     // TODO-robustness we should have a limit on how many sled agents there can
     // be (for graceful degradation at large scale).
     pub async fn upsert_sled(
         &self,
         id: Uuid,
-        address: SocketAddr,
+        address: SocketAddrV6,
     ) -> Result<(), Error> {
         info!(self.log, "registered sled agent"; "sled_uuid" => id.to_string());
         let sled = db::model::Sled::new(id, address);
@@ -480,6 +693,60 @@ impl Nexus {
         })
     }
 
+    /*
+     * Silos
+     */
+
+    pub async fn silo_create(
+        &self,
+        opctx: &OpContext,
+        new_silo_params: params::SiloCreate,
+    ) -> CreateResult<db::model::Silo> {
+        let silo = db::model::Silo::new(new_silo_params);
+        self.db_datastore.silo_create(opctx, silo).await
+    }
+
+    pub async fn silo_fetch(
+        &self,
+        opctx: &OpContext,
+        name: &Name,
+    ) -> LookupResult<db::model::Silo> {
+        let (.., db_silo) = LookupPath::new(opctx, &self.db_datastore)
+            .silo_name(name)
+            .fetch()
+            .await?;
+        Ok(db_silo)
+    }
+
+    pub async fn silos_list_by_name(
+        &self,
+        opctx: &OpContext,
+        pagparams: &DataPageParams<'_, Name>,
+    ) -> ListResultVec<db::model::Silo> {
+        self.db_datastore.silos_list_by_name(opctx, pagparams).await
+    }
+
+    pub async fn silos_list_by_id(
+        &self,
+        opctx: &OpContext,
+        pagparams: &DataPageParams<'_, Uuid>,
+    ) -> ListResultVec<db::model::Silo> {
+        self.db_datastore.silos_list_by_id(opctx, pagparams).await
+    }
+
+    pub async fn silo_delete(
+        &self,
+        opctx: &OpContext,
+        name: &Name,
+    ) -> DeleteResult {
+        let (.., authz_silo, db_silo) =
+            LookupPath::new(opctx, &self.db_datastore)
+                .silo_name(name)
+                .fetch_for(authz::Action::Delete)
+                .await?;
+        self.db_datastore.silo_delete(opctx, &authz_silo, &db_silo).await
+    }
+
     // Organizations
 
     pub async fn organization_create(
@@ -487,16 +754,19 @@ impl Nexus {
         opctx: &OpContext,
         new_organization: &params::OrganizationCreate,
     ) -> CreateResult<db::model::Organization> {
-        let db_org = db::model::Organization::new(new_organization.clone());
-        self.db_datastore.organization_create(opctx, db_org).await
+        self.db_datastore.organization_create(opctx, new_organization).await
     }
 
     pub async fn organization_fetch(
         &self,
         opctx: &OpContext,
-        name: &Name,
+        organization_name: &Name,
     ) -> LookupResult<db::model::Organization> {
-        Ok(self.db_datastore.organization_fetch(opctx, name).await?.1)
+        let (.., db_organization) = LookupPath::new(opctx, &self.db_datastore)
+            .organization_name(organization_name)
+            .fetch()
+            .await?;
+        Ok(db_organization)
     }
 
     pub async fn organizations_list_by_name(
@@ -518,19 +788,33 @@ impl Nexus {
     pub async fn organization_delete(
         &self,
         opctx: &OpContext,
-        name: &Name,
+        organization_name: &Name,
     ) -> DeleteResult {
-        self.db_datastore.organization_delete(opctx, name).await
+        let (.., authz_org, db_org) =
+            LookupPath::new(opctx, &self.db_datastore)
+                .organization_name(organization_name)
+                .fetch()
+                .await?;
+        self.db_datastore.organization_delete(opctx, &authz_org, &db_org).await
     }
 
     pub async fn organization_update(
         &self,
         opctx: &OpContext,
-        name: &Name,
+        organization_name: &Name,
         new_params: &params::OrganizationUpdate,
     ) -> UpdateResult<db::model::Organization> {
+        let (.., authz_organization) =
+            LookupPath::new(opctx, &self.db_datastore)
+                .organization_name(organization_name)
+                .lookup_for(authz::Action::Modify)
+                .await?;
         self.db_datastore
-            .organization_update(opctx, name, new_params.clone().into())
+            .organization_update(
+                opctx,
+                &authz_organization,
+                new_params.clone().into(),
+            )
             .await
     }
 
@@ -542,15 +826,18 @@ impl Nexus {
         organization_name: &Name,
         new_project: &params::ProjectCreate,
     ) -> CreateResult<db::model::Project> {
-        let org = self
-            .db_datastore
-            .organization_lookup_by_path(organization_name)
+        let (.., authz_org) = LookupPath::new(opctx, &self.db_datastore)
+            .organization_name(organization_name)
+            .lookup_for(authz::Action::CreateChild)
             .await?;
 
         // Create a project.
-        let db_project = db::model::Project::new(org.id(), new_project.clone());
         let db_project =
-            self.db_datastore.project_create(opctx, &org, db_project).await?;
+            db::model::Project::new(authz_org.id(), new_project.clone());
+        let db_project = self
+            .db_datastore
+            .project_create(opctx, &authz_org, db_project)
+            .await?;
 
         // TODO: We probably want to have "project creation" and "default VPC
         // creation" co-located within a saga for atomicity.
@@ -558,6 +845,9 @@ impl Nexus {
         // Until then, we just perform the operations sequentially.
 
         // Create a default VPC associated with the project.
+        // TODO-correctness We need to be using the project_id we just created.
+        // project_create() should return authz::Project and we should use that
+        // here.
         let _ = self
             .project_create_vpc(
                 opctx,
@@ -586,15 +876,12 @@ impl Nexus {
         organization_name: &Name,
         project_name: &Name,
     ) -> LookupResult<db::model::Project> {
-        let authz_org = self
-            .db_datastore
-            .organization_lookup_by_path(organization_name)
+        let (.., db_project) = LookupPath::new(opctx, &self.db_datastore)
+            .organization_name(organization_name)
+            .project_name(project_name)
+            .fetch()
             .await?;
-        Ok(self
-            .db_datastore
-            .project_fetch(opctx, &authz_org, project_name)
-            .await?
-            .1)
+        Ok(db_project)
     }
 
     pub async fn projects_list_by_name(
@@ -603,9 +890,9 @@ impl Nexus {
         organization_name: &Name,
         pagparams: &DataPageParams<'_, Name>,
     ) -> ListResultVec<db::model::Project> {
-        let authz_org = self
-            .db_datastore
-            .organization_lookup_by_path(organization_name)
+        let (.., authz_org) = LookupPath::new(opctx, &self.db_datastore)
+            .organization_name(organization_name)
+            .lookup_for(authz::Action::CreateChild)
             .await?;
         self.db_datastore
             .projects_list_by_name(opctx, &authz_org, pagparams)
@@ -618,9 +905,9 @@ impl Nexus {
         organization_name: &Name,
         pagparams: &DataPageParams<'_, Uuid>,
     ) -> ListResultVec<db::model::Project> {
-        let authz_org = self
-            .db_datastore
-            .organization_lookup_by_path(organization_name)
+        let (.., authz_org) = LookupPath::new(opctx, &self.db_datastore)
+            .organization_name(organization_name)
+            .lookup_for(authz::Action::CreateChild)
             .await?;
         self.db_datastore
             .projects_list_by_id(opctx, &authz_org, pagparams)
@@ -633,9 +920,10 @@ impl Nexus {
         organization_name: &Name,
         project_name: &Name,
     ) -> DeleteResult {
-        let authz_project = self
-            .db_datastore
-            .project_lookup_by_path(organization_name, project_name)
+        let (.., authz_project) = LookupPath::new(opctx, &self.db_datastore)
+            .organization_name(organization_name)
+            .project_name(project_name)
+            .lookup_for(authz::Action::Delete)
             .await?;
         self.db_datastore.project_delete(opctx, &authz_project).await
     }
@@ -647,9 +935,10 @@ impl Nexus {
         project_name: &Name,
         new_params: &params::ProjectUpdate,
     ) -> UpdateResult<db::model::Project> {
-        let authz_project = self
-            .db_datastore
-            .project_lookup_by_path(organization_name, project_name)
+        let (.., authz_project) = LookupPath::new(opctx, &self.db_datastore)
+            .organization_name(organization_name)
+            .project_name(project_name)
+            .lookup_for(authz::Action::Modify)
             .await?;
         self.db_datastore
             .project_update(opctx, &authz_project, new_params.clone().into())
@@ -665,9 +954,10 @@ impl Nexus {
         project_name: &Name,
         pagparams: &DataPageParams<'_, Name>,
     ) -> ListResultVec<db::model::Disk> {
-        let authz_project = self
-            .db_datastore
-            .project_lookup_by_path(organization_name, project_name)
+        let (.., authz_project) = LookupPath::new(opctx, &self.db_datastore)
+            .organization_name(organization_name)
+            .project_name(project_name)
+            .lookup_for(authz::Action::ListChildren)
             .await?;
         self.db_datastore
             .project_list_disks(opctx, &authz_project, pagparams)
@@ -681,22 +971,38 @@ impl Nexus {
         project_name: &Name,
         params: &params::DiskCreate,
     ) -> CreateResult<db::model::Disk> {
-        let authz_project = self
-            .db_datastore
-            .project_lookup_by_path(organization_name, project_name)
+        let (.., authz_project) = LookupPath::new(opctx, &self.db_datastore)
+            .organization_name(organization_name)
+            .project_name(project_name)
+            .lookup_for(authz::Action::CreateChild)
             .await?;
 
-        // TODO-security This may need to be revisited once we implement authz
-        // checks for saga actions.  Even then, though, it still will be correct
-        // (if possibly redundant) to check this here.
-        opctx.authorize(authz::Action::CreateChild, &authz_project).await?;
+        // Reject disks where the block size doesn't evenly divide the total
+        // size
+        if (params.size.to_bytes() % params.block_size().to_bytes()) != 0 {
+            return Err(Error::InvalidValue {
+                label: String::from("size and block_size"),
+                message: String::from(
+                    "total size must be a multiple of block size",
+                ),
+            });
+        }
 
-        // Until we implement snapshots, do not allow disks to be created with a
-        // snapshot id.
+        // Until we implement snapshots, do not allow disks to be created from a
+        // snapshot.
         if params.snapshot_id.is_some() {
             return Err(Error::InvalidValue {
                 label: String::from("snapshot_id"),
                 message: String::from("snapshots are not yet supported"),
+            });
+        }
+
+        // Until we implement images, do not allow disks to be created from an
+        // image.
+        if params.image_id.is_some() {
+            return Err(Error::InvalidValue {
+                label: String::from("image_id"),
+                message: String::from("images are not yet supported"),
             });
         }
 
@@ -727,15 +1033,13 @@ impl Nexus {
         project_name: &Name,
         disk_name: &Name,
     ) -> LookupResult<db::model::Disk> {
-        let authz_project = self
-            .db_datastore
-            .project_lookup_by_path(organization_name, project_name)
+        let (.., db_disk) = LookupPath::new(opctx, &self.db_datastore)
+            .organization_name(organization_name)
+            .project_name(project_name)
+            .disk_name(disk_name)
+            .fetch()
             .await?;
-        Ok(self
-            .db_datastore
-            .disk_fetch(opctx, &authz_project, disk_name)
-            .await?
-            .1)
+        Ok(db_disk)
     }
 
     pub async fn project_delete_disk(
@@ -745,18 +1049,12 @@ impl Nexus {
         project_name: &Name,
         disk_name: &Name,
     ) -> DeleteResult {
-        let authz_disk = self
-            .db_datastore
-            .disk_lookup_by_path(organization_name, project_name, disk_name)
+        let (.., authz_disk) = LookupPath::new(opctx, &self.db_datastore)
+            .organization_name(organization_name)
+            .project_name(project_name)
+            .disk_name(disk_name)
+            .lookup_for(authz::Action::Delete)
             .await?;
-
-        // TODO: We need to sort out the authorization checks.
-        //
-        // Normally, this would be coupled alongside access to the
-        // datastore, but now that disk deletion exists within a Saga,
-        // this would require OpContext to be serialized (which is
-        // not trivial).
-        opctx.authorize(authz::Action::Delete, &authz_disk).await?;
 
         let saga_params =
             Arc::new(sagas::ParamsDiskDelete { disk_id: authz_disk.id() });
@@ -770,44 +1068,158 @@ impl Nexus {
         Ok(())
     }
 
-    pub async fn project_create_snapshot(
+    pub async fn images_list(
+        &self,
+        opctx: &OpContext,
+        _pagparams: &DataPageParams<'_, Name>,
+    ) -> ListResultVec<db::model::Image> {
+        Err(self.unimplemented_todo(opctx, Unimpl::Public).await)
+    }
+
+    pub async fn image_create(
         self: &Arc<Self>,
-        _opctx: &OpContext,
+        opctx: &OpContext,
+        _params: &params::ImageCreate,
+    ) -> CreateResult<db::model::Image> {
+        Err(self.unimplemented_todo(opctx, Unimpl::Public).await)
+    }
+
+    pub async fn image_fetch(
+        &self,
+        opctx: &OpContext,
+        image_name: &Name,
+    ) -> LookupResult<db::model::Image> {
+        let lookup_type = LookupType::ByName(image_name.to_string());
+        let error = lookup_type.into_not_found(ResourceType::Image);
+        Err(self
+            .unimplemented_todo(opctx, Unimpl::ProtectedLookup(error))
+            .await)
+    }
+
+    pub async fn image_delete(
+        self: &Arc<Self>,
+        opctx: &OpContext,
+        image_name: &Name,
+    ) -> DeleteResult {
+        let lookup_type = LookupType::ByName(image_name.to_string());
+        let error = lookup_type.into_not_found(ResourceType::Image);
+        Err(self
+            .unimplemented_todo(opctx, Unimpl::ProtectedLookup(error))
+            .await)
+    }
+
+    pub async fn project_list_images(
+        &self,
+        opctx: &OpContext,
+        organization_name: &Name,
+        project_name: &Name,
+        _pagparams: &DataPageParams<'_, Name>,
+    ) -> ListResultVec<db::model::Image> {
+        let _ = LookupPath::new(opctx, &self.db_datastore)
+            .organization_name(organization_name)
+            .project_name(project_name)
+            .lookup_for(authz::Action::ListChildren)
+            .await?;
+        Err(self.unimplemented_todo(opctx, Unimpl::Public).await)
+    }
+
+    pub async fn project_create_image(
+        self: &Arc<Self>,
+        opctx: &OpContext,
+        organization_name: &Name,
+        project_name: &Name,
+        _params: &params::ImageCreate,
+    ) -> CreateResult<db::model::Image> {
+        let _ = LookupPath::new(opctx, &self.db_datastore)
+            .organization_name(organization_name)
+            .project_name(project_name)
+            .lookup_for(authz::Action::CreateChild)
+            .await?;
+        Err(self.unimplemented_todo(opctx, Unimpl::Public).await)
+    }
+
+    pub async fn project_image_fetch(
+        &self,
+        opctx: &OpContext,
         _organization_name: &Name,
         _project_name: &Name,
+        image_name: &Name,
+    ) -> LookupResult<db::model::Image> {
+        let lookup_type = LookupType::ByName(image_name.to_string());
+        let not_found_error = lookup_type.into_not_found(ResourceType::Image);
+        let unimp = Unimpl::ProtectedLookup(not_found_error);
+        Err(self.unimplemented_todo(opctx, unimp).await)
+    }
+
+    pub async fn project_delete_image(
+        self: &Arc<Self>,
+        opctx: &OpContext,
+        _organization_name: &Name,
+        _project_name: &Name,
+        image_name: &Name,
+    ) -> DeleteResult {
+        let lookup_type = LookupType::ByName(image_name.to_string());
+        let not_found_error = lookup_type.into_not_found(ResourceType::Image);
+        let unimp = Unimpl::ProtectedLookup(not_found_error);
+        Err(self.unimplemented_todo(opctx, unimp).await)
+    }
+
+    pub async fn project_create_snapshot(
+        self: &Arc<Self>,
+        opctx: &OpContext,
+        organization_name: &Name,
+        project_name: &Name,
         _params: &params::SnapshotCreate,
     ) -> CreateResult<db::model::Snapshot> {
-        unimplemented!();
+        let _ = LookupPath::new(opctx, &self.db_datastore)
+            .organization_name(organization_name)
+            .project_name(project_name)
+            .lookup_for(authz::Action::ListChildren)
+            .await?;
+        Err(self.unimplemented_todo(opctx, Unimpl::Public).await)
     }
 
     pub async fn project_list_snapshots(
         &self,
-        _opctx: &OpContext,
-        _organization_name: &Name,
-        _project_name: &Name,
+        opctx: &OpContext,
+        organization_name: &Name,
+        project_name: &Name,
         _pagparams: &DataPageParams<'_, Name>,
     ) -> ListResultVec<db::model::Snapshot> {
-        unimplemented!();
+        let _ = LookupPath::new(opctx, &self.db_datastore)
+            .organization_name(organization_name)
+            .project_name(project_name)
+            .lookup_for(authz::Action::ListChildren)
+            .await?;
+        Err(self.unimplemented_todo(opctx, Unimpl::Public).await)
     }
 
     pub async fn snapshot_fetch(
         &self,
-        _opctx: &OpContext,
+        opctx: &OpContext,
         _organization_name: &Name,
         _project_name: &Name,
-        _snapshot_name: &Name,
+        snapshot_name: &Name,
     ) -> LookupResult<db::model::Snapshot> {
-        unimplemented!();
+        let lookup_type = LookupType::ByName(snapshot_name.to_string());
+        let not_found_error =
+            lookup_type.into_not_found(ResourceType::Snapshot);
+        let unimp = Unimpl::ProtectedLookup(not_found_error);
+        Err(self.unimplemented_todo(opctx, unimp).await)
     }
 
     pub async fn project_delete_snapshot(
         self: &Arc<Self>,
-        _opctx: &OpContext,
+        opctx: &OpContext,
         _organization_name: &Name,
         _project_name: &Name,
-        _snapshot_name: &Name,
+        snapshot_name: &Name,
     ) -> DeleteResult {
-        unimplemented!();
+        let lookup_type = LookupType::ByName(snapshot_name.to_string());
+        let not_found_error =
+            lookup_type.into_not_found(ResourceType::Snapshot);
+        let unimp = Unimpl::ProtectedLookup(not_found_error);
+        Err(self.unimplemented_todo(opctx, unimp).await)
     }
 
     // Instances
@@ -849,9 +1261,10 @@ impl Nexus {
         project_name: &Name,
         pagparams: &DataPageParams<'_, Name>,
     ) -> ListResultVec<db::model::Instance> {
-        let authz_project = self
-            .db_datastore
-            .project_lookup_by_path(organization_name, project_name)
+        let (.., authz_project) = LookupPath::new(opctx, &self.db_datastore)
+            .organization_name(organization_name)
+            .project_name(project_name)
+            .lookup_for(authz::Action::ListChildren)
             .await?;
         self.db_datastore
             .project_list_instances(opctx, &authz_project, pagparams)
@@ -865,15 +1278,24 @@ impl Nexus {
         project_name: &Name,
         params: &params::InstanceCreate,
     ) -> CreateResult<db::model::Instance> {
-        let authz_project = self
-            .db_datastore
-            .project_lookup_by_path(organization_name, project_name)
+        let (.., authz_project) = LookupPath::new(opctx, &self.db_datastore)
+            .organization_name(organization_name)
+            .project_name(project_name)
+            .lookup_for(authz::Action::CreateChild)
             .await?;
 
-        opctx.authorize(authz::Action::CreateChild, &authz_project).await?;
+        // Validate parameters
+        if params.disks.len() > MAX_DISKS_PER_INSTANCE as usize {
+            return Err(Error::invalid_request(&format!(
+                "cannot attach more than {} disks to instance!",
+                MAX_DISKS_PER_INSTANCE
+            )));
+        }
 
         let saga_params = Arc::new(sagas::ParamsInstanceCreate {
             serialized_authn: authn::saga::Serialized::for_opctx(opctx),
+            organization_name: organization_name.clone().into(),
+            project_name: project_name.clone().into(),
             project_id: authz_project.id(),
             create_params: params.clone(),
         });
@@ -925,9 +1347,11 @@ impl Nexus {
         //
         // TODO Even worse, post-authz, we do two lookups here instead of one.
         // Maybe sagas should be able to emit `authz::Instance`-type objects.
-        let authz_instance =
-            self.db_datastore.instance_lookup_by_id(instance_id).await?;
-        self.db_datastore.instance_refetch(opctx, &authz_instance).await
+        let (.., db_instance) = LookupPath::new(opctx, &self.db_datastore)
+            .instance_id(instance_id)
+            .fetch()
+            .await?;
+        Ok(db_instance)
     }
 
     // TODO-correctness It's not totally clear what the semantics and behavior
@@ -951,13 +1375,11 @@ impl Nexus {
         // TODO-robustness We need to figure out what to do with Destroyed
         // instances?  Presumably we need to clean them up at some point, but
         // not right away so that callers can see that they've been destroyed.
-        let authz_instance = self
-            .db_datastore
-            .instance_lookup_by_path(
-                organization_name,
-                project_name,
-                instance_name,
-            )
+        let (.., authz_instance) = LookupPath::new(opctx, &self.db_datastore)
+            .organization_name(organization_name)
+            .project_name(project_name)
+            .instance_name(instance_name)
+            .lookup_for(authz::Action::Delete)
             .await?;
         self.db_datastore.project_delete_instance(opctx, &authz_instance).await
     }
@@ -970,15 +1392,12 @@ impl Nexus {
         instance_name: &Name,
         params: params::InstanceMigrate,
     ) -> UpdateResult<db::model::Instance> {
-        let authz_instance = self
-            .db_datastore
-            .instance_lookup_by_path(
-                organization_name,
-                project_name,
-                instance_name,
-            )
+        let (.., authz_instance) = LookupPath::new(opctx, &self.db_datastore)
+            .organization_name(organization_name)
+            .project_name(project_name)
+            .instance_name(instance_name)
+            .lookup_for(authz::Action::Modify)
             .await?;
-        opctx.authorize(authz::Action::Modify, &authz_instance).await?;
 
         // Kick off the migration saga
         let saga_params = Arc::new(sagas::ParamsInstanceMigrate {
@@ -1006,15 +1425,13 @@ impl Nexus {
         project_name: &Name,
         instance_name: &Name,
     ) -> LookupResult<db::model::Instance> {
-        let authz_project = self
-            .db_datastore
-            .project_lookup_by_path(organization_name, project_name)
+        let (.., db_instance) = LookupPath::new(opctx, &self.db_datastore)
+            .organization_name(organization_name)
+            .project_name(project_name)
+            .instance_name(instance_name)
+            .fetch()
             .await?;
-        Ok(self
-            .db_datastore
-            .instance_fetch(opctx, &authz_project, instance_name)
-            .await?
-            .1)
+        Ok(db_instance)
     }
 
     fn check_runtime_change_allowed(
@@ -1112,14 +1529,13 @@ impl Nexus {
         // even if the whole rack powered off while this was going on, we would
         // never lose track of the fact that this Instance was supposed to be
         // running.
-        let authz_project = self
-            .db_datastore
-            .project_lookup_by_path(organization_name, project_name)
-            .await?;
-        let (authz_instance, db_instance) = self
-            .db_datastore
-            .instance_fetch(opctx, &authz_project, instance_name)
-            .await?;
+        let (.., authz_instance, db_instance) =
+            LookupPath::new(opctx, &self.db_datastore)
+                .organization_name(organization_name)
+                .project_name(project_name)
+                .instance_name(instance_name)
+                .fetch()
+                .await?;
         let requested = InstanceRuntimeStateRequested {
             run_state: InstanceStateRequested::Reboot,
             migration_params: None,
@@ -1142,14 +1558,13 @@ impl Nexus {
         project_name: &Name,
         instance_name: &Name,
     ) -> UpdateResult<db::model::Instance> {
-        let authz_project = self
-            .db_datastore
-            .project_lookup_by_path(organization_name, project_name)
-            .await?;
-        let (authz_instance, db_instance) = self
-            .db_datastore
-            .instance_fetch(opctx, &authz_project, instance_name)
-            .await?;
+        let (.., authz_instance, db_instance) =
+            LookupPath::new(opctx, &self.db_datastore)
+                .organization_name(organization_name)
+                .project_name(project_name)
+                .instance_name(instance_name)
+                .fetch()
+                .await?;
         let requested = InstanceRuntimeStateRequested {
             run_state: InstanceStateRequested::Running,
             migration_params: None,
@@ -1172,14 +1587,13 @@ impl Nexus {
         project_name: &Name,
         instance_name: &Name,
     ) -> UpdateResult<db::model::Instance> {
-        let authz_project = self
-            .db_datastore
-            .project_lookup_by_path(organization_name, project_name)
-            .await?;
-        let (authz_instance, db_instance) = self
-            .db_datastore
-            .instance_fetch(opctx, &authz_project, instance_name)
-            .await?;
+        let (.., authz_instance, db_instance) =
+            LookupPath::new(opctx, &self.db_datastore)
+                .organization_name(organization_name)
+                .project_name(project_name)
+                .instance_name(instance_name)
+                .fetch()
+                .await?;
         let requested = InstanceRuntimeStateRequested {
             run_state: InstanceStateRequested::Stopped,
             migration_params: None,
@@ -1202,10 +1616,12 @@ impl Nexus {
         migration_id: Uuid,
         dst_propolis_id: Uuid,
     ) -> UpdateResult<db::model::Instance> {
-        let authz_instance =
-            self.db_datastore.instance_lookup_by_id(instance_id).await?;
-        let db_instance =
-            self.db_datastore.instance_refetch(opctx, &authz_instance).await?;
+        let (.., authz_instance, db_instance) =
+            LookupPath::new(opctx, &self.db_datastore)
+                .instance_id(instance_id)
+                .fetch()
+                .await
+                .unwrap();
         let requested = InstanceRuntimeStateRequested {
             run_state: InstanceStateRequested::Migrating,
             migration_params: Some(InstanceRuntimeStateMigrateParams {
@@ -1225,7 +1641,7 @@ impl Nexus {
 
     /// Modifies the runtime state of the Instance as requested.  This generally
     /// means booting or halting the Instance.
-    async fn instance_set_runtime(
+    pub(crate) async fn instance_set_runtime(
         &self,
         opctx: &OpContext,
         authz_instance: &authz::Instance,
@@ -1239,22 +1655,71 @@ impl Nexus {
             &requested,
         )?;
 
-        let sa = self.instance_sled(&db_instance).await?;
+        // Gather disk information and turn that into DiskRequests
+        let disks = self
+            .db_datastore
+            .instance_list_disks(
+                &opctx,
+                &authz_instance,
+                &DataPageParams {
+                    marker: None,
+                    direction: dropshot::PaginationOrder::Ascending,
+                    limit: std::num::NonZeroU32::new(MAX_DISKS_PER_INSTANCE)
+                        .unwrap(),
+                },
+            )
+            .await?;
+
+        let mut disk_reqs = vec![];
+        for (i, disk) in disks.iter().enumerate() {
+            let volume = self.db_datastore.volume_get(disk.volume_id).await?;
+            let gen: i64 = (&disk.runtime_state.gen.0).into();
+            disk_reqs.push(sled_agent_client::types::DiskRequest {
+                name: disk.name().to_string(),
+                slot: sled_agent_client::types::Slot(i as u8),
+                read_only: false,
+                device: "nvme".to_string(),
+                gen: gen as u64,
+                volume_construction_request: serde_json::from_str(
+                    &volume.data(),
+                )?,
+            });
+        }
+
+        let nics: Vec<external::NetworkInterface> = self
+            .db_datastore
+            .instance_list_network_interfaces(
+                &opctx,
+                &authz_instance,
+                &DataPageParams {
+                    marker: None,
+                    direction: dropshot::PaginationOrder::Ascending,
+                    limit: std::num::NonZeroU32::new(MAX_NICS_PER_INSTANCE)
+                        .unwrap(),
+                },
+            )
+            .await?
+            .iter()
+            .map(|x| x.clone().into())
+            .collect();
 
         // Ask the sled agent to begin the state change.  Then update the
         // database to reflect the new intermediate state.  If this update is
         // not the newest one, that's fine.  That might just mean the sled agent
         // beat us to it.
 
-        // TODO: Populate this with an appropriate NIC.
-        // See also: sic_create_instance_record in sagas.rs for a similar
-        // construction.
         let instance_hardware = sled_agent_client::types::InstanceHardware {
             runtime: sled_agent_client::types::InstanceRuntimeState::from(
                 db_instance.runtime().clone(),
             ),
-            nics: vec![],
+            nics: nics.iter().map(|nic| nic.clone().into()).collect(),
+            disks: disk_reqs,
+            cloud_init_bytes: Some(base64::encode(
+                db_instance.generate_cidata()?,
+            )),
         };
+
+        let sa = self.instance_sled(&db_instance).await?;
 
         let new_runtime = sa
             .instance_put(
@@ -1286,13 +1751,11 @@ impl Nexus {
         instance_name: &Name,
         pagparams: &DataPageParams<'_, Name>,
     ) -> ListResultVec<db::model::Disk> {
-        let authz_instance = self
-            .db_datastore
-            .instance_lookup_by_path(
-                organization_name,
-                project_name,
-                instance_name,
-            )
+        let (.., authz_instance) = LookupPath::new(opctx, &self.db_datastore)
+            .organization_name(organization_name)
+            .project_name(project_name)
+            .instance_name(instance_name)
+            .lookup_for(authz::Action::ListChildren)
             .await?;
         self.db_datastore
             .instance_list_disks(opctx, &authz_instance, pagparams)
@@ -1308,21 +1771,43 @@ impl Nexus {
         instance_name: &Name,
         disk_name: &Name,
     ) -> UpdateResult<db::model::Disk> {
-        // TODO: This shouldn't be looking up multiple database entries by name,
-        // it should resolve names to IDs first.
-        let authz_project = self
-            .db_datastore
-            .project_lookup_by_path(organization_name, project_name)
-            .await?;
-        let (authz_disk, db_disk) = self
-            .db_datastore
-            .disk_fetch(opctx, &authz_project, disk_name)
-            .await?;
-        let (authz_instance, db_instance) = self
-            .db_datastore
-            .instance_fetch(opctx, &authz_project, instance_name)
-            .await?;
+        let (.., authz_project, authz_disk, db_disk) =
+            LookupPath::new(opctx, &self.db_datastore)
+                .organization_name(organization_name)
+                .project_name(project_name)
+                .disk_name(disk_name)
+                .fetch()
+                .await?;
+        let (.., authz_instance, db_instance) =
+            LookupPath::new(opctx, &self.db_datastore)
+                .project_id(authz_project.id())
+                .instance_name(instance_name)
+                .fetch()
+                .await?;
         let instance_id = &authz_instance.id();
+
+        // Enforce attached disks limit
+        let attached_disks = self
+            .instance_list_disks(
+                opctx,
+                organization_name,
+                project_name,
+                instance_name,
+                &DataPageParams {
+                    marker: None,
+                    direction: dropshot::PaginationOrder::Ascending,
+                    limit: std::num::NonZeroU32::new(MAX_DISKS_PER_INSTANCE)
+                        .unwrap(),
+                },
+            )
+            .await?;
+
+        if attached_disks.len() == MAX_DISKS_PER_INSTANCE as usize {
+            return Err(Error::invalid_request(&format!(
+                "cannot attach more than {} disks to instance!",
+                MAX_DISKS_PER_INSTANCE
+            )));
+        }
 
         fn disk_attachment_error(
             disk: &db::model::Disk,
@@ -1393,16 +1878,36 @@ impl Nexus {
             }
         }
 
-        self.disk_set_runtime(
-            opctx,
-            &authz_disk,
-            &db_disk,
-            self.instance_sled(&db_instance).await?,
-            sled_agent_client::types::DiskStateRequested::Attached(
-                *instance_id,
-            ),
-        )
-        .await?;
+        match &db_instance.runtime_state.state.state() {
+            // If there's a propolis zone for this instance, ask the Sled Agent
+            // to hot-plug the disk.
+            //
+            // TODO this will probably involve volume construction requests as
+            // well!
+            InstanceState::Running | InstanceState::Starting => {
+                self.disk_set_runtime(
+                    opctx,
+                    &authz_disk,
+                    &db_disk,
+                    self.instance_sled(&db_instance).await?,
+                    sled_agent_client::types::DiskStateRequested::Attached(
+                        *instance_id,
+                    ),
+                )
+                .await?;
+            }
+
+            _ => {
+                // If there is not a propolis zone, then disk attach only occurs
+                // in the DB.
+                let new_runtime = db_disk.runtime().attach(*instance_id);
+
+                self.db_datastore
+                    .disk_update_runtime(opctx, &authz_disk, &new_runtime)
+                    .await?;
+            }
+        }
+
         self.db_datastore.disk_refetch(opctx, &authz_disk).await
     }
 
@@ -1415,20 +1920,19 @@ impl Nexus {
         instance_name: &Name,
         disk_name: &Name,
     ) -> UpdateResult<db::model::Disk> {
-        // TODO: This shouldn't be looking up multiple database entries by name,
-        // it should resolve names to IDs first.
-        let authz_project = self
-            .db_datastore
-            .project_lookup_by_path(organization_name, project_name)
-            .await?;
-        let (authz_disk, db_disk) = self
-            .db_datastore
-            .disk_fetch(opctx, &authz_project, disk_name)
-            .await?;
-        let (authz_instance, db_instance) = self
-            .db_datastore
-            .instance_fetch(opctx, &authz_project, instance_name)
-            .await?;
+        let (.., authz_project, authz_disk, db_disk) =
+            LookupPath::new(opctx, &self.db_datastore)
+                .organization_name(organization_name)
+                .project_name(project_name)
+                .disk_name(disk_name)
+                .fetch()
+                .await?;
+        let (.., authz_instance, db_instance) =
+            LookupPath::new(opctx, &self.db_datastore)
+                .project_id(authz_project.id())
+                .instance_name(instance_name)
+                .fetch()
+                .await?;
         let instance_id = &authz_instance.id();
 
         match &db_disk.state().into() {
@@ -1467,14 +1971,31 @@ impl Nexus {
             DiskState::Attached(_) => (),
         }
 
-        self.disk_set_runtime(
-            opctx,
-            &authz_disk,
-            &db_disk,
-            self.instance_sled(&db_instance).await?,
-            sled_agent_client::types::DiskStateRequested::Detached,
-        )
-        .await?;
+        // If there's a propolis zone for this instance, ask the Sled
+        // Agent to hot-remove the disk.
+        match &db_instance.runtime_state.state.state() {
+            InstanceState::Running | InstanceState::Starting => {
+                self.disk_set_runtime(
+                    opctx,
+                    &authz_disk,
+                    &db_disk,
+                    self.instance_sled(&db_instance).await?,
+                    sled_agent_client::types::DiskStateRequested::Detached,
+                )
+                .await?;
+            }
+
+            _ => {
+                // If there is not a propolis zone, then disk detach only occurs
+                // in the DB.
+                let new_runtime = db_disk.runtime().detach();
+
+                self.db_datastore
+                    .disk_update_runtime(opctx, &authz_disk, &new_runtime)
+                    .await?;
+            }
+        }
+
         self.db_datastore.disk_refetch(opctx, &authz_disk).await
     }
 
@@ -1525,13 +2046,11 @@ impl Nexus {
         instance_name: &Name,
         pagparams: &DataPageParams<'_, Name>,
     ) -> ListResultVec<db::model::NetworkInterface> {
-        let authz_instance = self
-            .db_datastore
-            .instance_lookup_by_path(
-                organization_name,
-                project_name,
-                instance_name,
-            )
+        let (.., authz_instance) = LookupPath::new(opctx, &self.db_datastore)
+            .organization_name(organization_name)
+            .project_name(project_name)
+            .instance_name(instance_name)
+            .lookup_for(authz::Action::ListChildren)
             .await?;
         self.db_datastore
             .instance_list_network_interfaces(opctx, &authz_instance, pagparams)
@@ -1550,14 +2069,13 @@ impl Nexus {
         instance_name: &Name,
         params: &params::NetworkInterfaceCreate,
     ) -> CreateResult<db::model::NetworkInterface> {
-        let authz_project = self
-            .db_datastore
-            .project_lookup_by_path(organization_name, project_name)
-            .await?;
-        let (authz_instance, db_instance) = self
-            .db_datastore
-            .instance_fetch(opctx, &authz_project, instance_name)
-            .await?;
+        let (.., authz_project, authz_instance, db_instance) =
+            LookupPath::new(opctx, &self.db_datastore)
+                .organization_name(organization_name)
+                .project_name(project_name)
+                .instance_name(instance_name)
+                .fetch()
+                .await?;
 
         // TODO-completeness: We'd like to relax this once hot-plug is
         // supported.
@@ -1579,14 +2097,13 @@ impl Nexus {
         // IDs for creating the network interface.
         let vpc_name = db::model::Name(params.vpc_name.clone());
         let subnet_name = db::model::Name(params.subnet_name.clone());
-        let (authz_vpc, _) = self
-            .db_datastore
-            .vpc_fetch(opctx, &authz_project, &vpc_name)
-            .await?;
-        let (authz_subnet, db_subnet) = self
-            .db_datastore
-            .vpc_subnet_fetch(opctx, &authz_vpc, &subnet_name)
-            .await?;
+        let (.., authz_vpc, authz_subnet, db_subnet) =
+            LookupPath::new(opctx, &self.db_datastore)
+                .project_id(authz_project.id())
+                .vpc_name(&vpc_name)
+                .vpc_subnet_name(&subnet_name)
+                .fetch()
+                .await?;
         let mac = db::model::MacAddr::new()?;
         let interface_id = Uuid::new_v4();
         let interface = db::model::IncompleteNetworkInterface::new(
@@ -1620,15 +2137,18 @@ impl Nexus {
         instance_name: &Name,
         interface_name: &Name,
     ) -> DeleteResult {
-        let authz_project = self
-            .db_datastore
-            .project_lookup_by_path(organization_name, project_name)
+        let (.., authz_instance, db_instance) =
+            LookupPath::new(opctx, &self.db_datastore)
+                .organization_name(organization_name)
+                .project_name(project_name)
+                .instance_name(instance_name)
+                .fetch_for(authz::Action::Modify)
+                .await?;
+        let (.., authz_interface) = LookupPath::new(opctx, &self.db_datastore)
+            .instance_id(authz_instance.id())
+            .network_interface_name(interface_name)
+            .lookup_for(authz::Action::Delete)
             .await?;
-        let (authz_instance, db_instance) = self
-            .db_datastore
-            .instance_fetch(opctx, &authz_project, instance_name)
-            .await?;
-        opctx.authorize(authz::Action::Modify, &authz_instance).await?;
 
         // TODO-completeness: We'd like to relax this once hot-plug is supported
         let stopped =
@@ -1639,16 +2159,12 @@ impl Nexus {
             ));
         }
         self.db_datastore
-            .instance_delete_network_interface(
-                opctx,
-                &authz_instance,
-                interface_name,
-            )
+            .instance_delete_network_interface(opctx, &authz_interface)
             .await
     }
 
     /// Fetch a network interface attached to the given instance.
-    pub async fn instance_lookup_network_interface(
+    pub async fn network_interface_fetch(
         &self,
         opctx: &OpContext,
         organization_name: &Name,
@@ -1656,21 +2172,14 @@ impl Nexus {
         instance_name: &Name,
         interface_name: &Name,
     ) -> LookupResult<db::model::NetworkInterface> {
-        let authz_instance = self
-            .db_datastore
-            .instance_lookup_by_path(
-                organization_name,
-                project_name,
-                instance_name,
-            )
+        let (.., db_interface) = LookupPath::new(opctx, &self.db_datastore)
+            .organization_name(organization_name)
+            .project_name(project_name)
+            .instance_name(instance_name)
+            .network_interface_name(interface_name)
+            .fetch()
             .await?;
-        self.db_datastore
-            .instance_lookup_network_interface(
-                opctx,
-                &authz_instance,
-                interface_name,
-            )
-            .await
+        Ok(db_interface)
     }
 
     pub async fn project_list_vpcs(
@@ -1680,15 +2189,14 @@ impl Nexus {
         project_name: &Name,
         pagparams: &DataPageParams<'_, Name>,
     ) -> ListResultVec<db::model::Vpc> {
-        let authz_project = self
-            .db_datastore
-            .project_lookup_by_path(organization_name, project_name)
+        let (.., authz_project) = LookupPath::new(opctx, &self.db_datastore)
+            .organization_name(organization_name)
+            .project_name(project_name)
+            .lookup_for(authz::Action::ListChildren)
             .await?;
-        let vpcs = self
-            .db_datastore
+        self.db_datastore
             .project_list_vpcs(&opctx, &authz_project, pagparams)
-            .await?;
-        Ok(vpcs)
+            .await
     }
 
     pub async fn project_create_vpc(
@@ -1698,9 +2206,10 @@ impl Nexus {
         project_name: &Name,
         params: &params::VpcCreate,
     ) -> CreateResult<db::model::Vpc> {
-        let authz_project = self
-            .db_datastore
-            .project_lookup_by_path(organization_name, project_name)
+        let (.., authz_project) = LookupPath::new(opctx, &self.db_datastore)
+            .organization_name(organization_name)
+            .project_name(project_name)
+            .lookup_for(authz::Action::CreateChild)
             .await?;
         let vpc_id = Uuid::new_v4();
         let system_router_id = Uuid::new_v4();
@@ -1841,15 +2350,13 @@ impl Nexus {
         project_name: &Name,
         vpc_name: &Name,
     ) -> LookupResult<db::model::Vpc> {
-        let authz_project = self
-            .db_datastore
-            .project_lookup_by_path(organization_name, project_name)
+        let (.., db_vpc) = LookupPath::new(opctx, &self.db_datastore)
+            .organization_name(organization_name)
+            .project_name(project_name)
+            .vpc_name(vpc_name)
+            .fetch()
             .await?;
-        Ok(self
-            .db_datastore
-            .vpc_fetch(opctx, &authz_project, vpc_name)
-            .await?
-            .1)
+        Ok(db_vpc)
     }
 
     pub async fn project_update_vpc(
@@ -1860,9 +2367,11 @@ impl Nexus {
         vpc_name: &Name,
         params: &params::VpcUpdate,
     ) -> UpdateResult<db::model::Vpc> {
-        let authz_vpc = self
-            .db_datastore
-            .vpc_lookup_by_path(organization_name, project_name, vpc_name)
+        let (.., authz_vpc) = LookupPath::new(opctx, &self.db_datastore)
+            .organization_name(organization_name)
+            .project_name(project_name)
+            .vpc_name(vpc_name)
+            .lookup_for(authz::Action::Modify)
             .await?;
         self.db_datastore
             .project_update_vpc(opctx, &authz_vpc, params.clone().into())
@@ -1876,16 +2385,16 @@ impl Nexus {
         project_name: &Name,
         vpc_name: &Name,
     ) -> DeleteResult {
-        let authz_project = self
-            .db_datastore
-            .project_lookup_by_path(organization_name, project_name)
-            .await?;
-        let (authz_vpc, db_vpc) = self
-            .db_datastore
-            .vpc_fetch(opctx, &authz_project, vpc_name)
-            .await?;
-        let authz_vpc_router = authz_vpc.child_generic(
-            ResourceType::VpcRouter,
+        let (.., authz_vpc, db_vpc) =
+            LookupPath::new(opctx, &self.db_datastore)
+                .organization_name(organization_name)
+                .project_name(project_name)
+                .vpc_name(vpc_name)
+                .fetch()
+                .await?;
+
+        let authz_vpc_router = authz::VpcRouter::new(
+            authz_vpc.clone(),
             db_vpc.system_router_id,
             LookupType::ById(db_vpc.system_router_id),
         );
@@ -1909,9 +2418,11 @@ impl Nexus {
         project_name: &Name,
         vpc_name: &Name,
     ) -> ListResultVec<db::model::VpcFirewallRule> {
-        let authz_vpc = self
-            .db_datastore
-            .vpc_lookup_by_path(organization_name, project_name, vpc_name)
+        let (.., authz_vpc) = LookupPath::new(opctx, &self.db_datastore)
+            .organization_name(organization_name)
+            .project_name(project_name)
+            .vpc_name(vpc_name)
+            .lookup_for(authz::Action::Read)
             .await?;
         let rules = self
             .db_datastore
@@ -1928,9 +2439,11 @@ impl Nexus {
         vpc_name: &Name,
         params: &VpcFirewallRuleUpdateParams,
     ) -> UpdateResult<Vec<db::model::VpcFirewallRule>> {
-        let authz_vpc = self
-            .db_datastore
-            .vpc_lookup_by_path(organization_name, project_name, vpc_name)
+        let (.., authz_vpc) = LookupPath::new(opctx, &self.db_datastore)
+            .organization_name(organization_name)
+            .project_name(project_name)
+            .vpc_name(vpc_name)
+            .lookup_for(authz::Action::Modify)
             .await?;
         let rules = db::model::VpcFirewallRule::vec_from_params(
             authz_vpc.id(),
@@ -1949,9 +2462,11 @@ impl Nexus {
         vpc_name: &Name,
         pagparams: &DataPageParams<'_, Name>,
     ) -> ListResultVec<db::model::VpcSubnet> {
-        let authz_vpc = self
-            .db_datastore
-            .vpc_lookup_by_path(organization_name, project_name, vpc_name)
+        let (.., authz_vpc) = LookupPath::new(opctx, &self.db_datastore)
+            .organization_name(organization_name)
+            .project_name(project_name)
+            .vpc_name(vpc_name)
+            .lookup_for(authz::Action::ListChildren)
             .await?;
         self.db_datastore.vpc_list_subnets(opctx, &authz_vpc, pagparams).await
     }
@@ -1964,15 +2479,14 @@ impl Nexus {
         vpc_name: &Name,
         subnet_name: &Name,
     ) -> LookupResult<db::model::VpcSubnet> {
-        let authz_vpc = self
-            .db_datastore
-            .vpc_lookup_by_path(organization_name, project_name, vpc_name)
+        let (.., db_vpc) = LookupPath::new(opctx, &self.db_datastore)
+            .organization_name(organization_name)
+            .project_name(project_name)
+            .vpc_name(vpc_name)
+            .vpc_subnet_name(subnet_name)
+            .fetch()
             .await?;
-        Ok(self
-            .db_datastore
-            .vpc_subnet_fetch(opctx, &authz_vpc, subnet_name)
-            .await?
-            .1)
+        Ok(db_vpc)
     }
 
     // TODO: When a subnet is created it should add a route entry into the VPC's
@@ -1985,14 +2499,13 @@ impl Nexus {
         vpc_name: &Name,
         params: &params::VpcSubnetCreate,
     ) -> CreateResult<db::model::VpcSubnet> {
-        let authz_project = self
-            .db_datastore
-            .project_lookup_by_path(organization_name, project_name)
-            .await?;
-        let (authz_vpc, db_vpc) = self
-            .db_datastore
-            .vpc_fetch(opctx, &authz_project, vpc_name)
-            .await?;
+        let (.., authz_vpc, db_vpc) =
+            LookupPath::new(opctx, &self.db_datastore)
+                .organization_name(organization_name)
+                .project_name(project_name)
+                .vpc_name(vpc_name)
+                .fetch()
+                .await?;
 
         // Validate IPv4 range
         if !params.ipv4_block.network().is_private() {
@@ -2144,14 +2657,12 @@ impl Nexus {
         vpc_name: &Name,
         subnet_name: &Name,
     ) -> DeleteResult {
-        let authz_subnet = self
-            .db_datastore
-            .vpc_subnet_lookup_by_path(
-                organization_name,
-                project_name,
-                vpc_name,
-                subnet_name,
-            )
+        let (.., authz_subnet) = LookupPath::new(opctx, &self.db_datastore)
+            .organization_name(organization_name)
+            .project_name(project_name)
+            .vpc_name(vpc_name)
+            .vpc_subnet_name(subnet_name)
+            .lookup_for(authz::Action::Delete)
             .await?;
         self.db_datastore.vpc_delete_subnet(opctx, &authz_subnet).await
     }
@@ -2165,14 +2676,12 @@ impl Nexus {
         subnet_name: &Name,
         params: &params::VpcSubnetUpdate,
     ) -> UpdateResult<VpcSubnet> {
-        let authz_subnet = self
-            .db_datastore
-            .vpc_subnet_lookup_by_path(
-                organization_name,
-                project_name,
-                vpc_name,
-                subnet_name,
-            )
+        let (.., authz_subnet) = LookupPath::new(opctx, &self.db_datastore)
+            .organization_name(organization_name)
+            .project_name(project_name)
+            .vpc_name(vpc_name)
+            .vpc_subnet_name(subnet_name)
+            .lookup_for(authz::Action::Modify)
             .await?;
         self.db_datastore
             .vpc_update_subnet(&opctx, &authz_subnet, params.clone().into())
@@ -2188,14 +2697,12 @@ impl Nexus {
         subnet_name: &Name,
         pagparams: &DataPageParams<'_, Name>,
     ) -> ListResultVec<db::model::NetworkInterface> {
-        let authz_subnet = self
-            .db_datastore
-            .vpc_subnet_lookup_by_path(
-                organization_name,
-                project_name,
-                vpc_name,
-                subnet_name,
-            )
+        let (.., authz_subnet) = LookupPath::new(opctx, &self.db_datastore)
+            .organization_name(organization_name)
+            .project_name(project_name)
+            .vpc_name(vpc_name)
+            .vpc_subnet_name(subnet_name)
+            .lookup_for(authz::Action::ListChildren)
             .await?;
         self.db_datastore
             .subnet_list_network_interfaces(opctx, &authz_subnet, pagparams)
@@ -2210,9 +2717,11 @@ impl Nexus {
         vpc_name: &Name,
         pagparams: &DataPageParams<'_, Name>,
     ) -> ListResultVec<db::model::VpcRouter> {
-        let authz_vpc = self
-            .db_datastore
-            .vpc_lookup_by_path(organization_name, project_name, vpc_name)
+        let (.., authz_vpc) = LookupPath::new(opctx, &self.db_datastore)
+            .organization_name(organization_name)
+            .project_name(project_name)
+            .vpc_name(vpc_name)
+            .lookup_for(authz::Action::ListChildren)
             .await?;
         let routers = self
             .db_datastore
@@ -2229,15 +2738,14 @@ impl Nexus {
         vpc_name: &Name,
         router_name: &Name,
     ) -> LookupResult<db::model::VpcRouter> {
-        let authz_vpc = self
-            .db_datastore
-            .vpc_lookup_by_path(organization_name, project_name, vpc_name)
+        let (.., db_router) = LookupPath::new(opctx, &self.db_datastore)
+            .organization_name(organization_name)
+            .project_name(project_name)
+            .vpc_name(vpc_name)
+            .vpc_router_name(router_name)
+            .fetch()
             .await?;
-        Ok(self
-            .db_datastore
-            .vpc_router_fetch(&opctx, &authz_vpc, router_name)
-            .await?
-            .1)
+        Ok(db_router)
     }
 
     pub async fn vpc_create_router(
@@ -2249,9 +2757,11 @@ impl Nexus {
         kind: &VpcRouterKind,
         params: &params::VpcRouterCreate,
     ) -> CreateResult<db::model::VpcRouter> {
-        let authz_vpc = self
-            .db_datastore
-            .vpc_lookup_by_path(organization_name, project_name, vpc_name)
+        let (.., authz_vpc) = LookupPath::new(opctx, &self.db_datastore)
+            .organization_name(organization_name)
+            .project_name(project_name)
+            .vpc_name(vpc_name)
+            .lookup_for(authz::Action::CreateChild)
             .await?;
         let id = Uuid::new_v4();
         let router = db::model::VpcRouter::new(
@@ -2278,14 +2788,14 @@ impl Nexus {
         vpc_name: &Name,
         router_name: &Name,
     ) -> DeleteResult {
-        let authz_vpc = self
-            .db_datastore
-            .vpc_lookup_by_path(organization_name, project_name, vpc_name)
-            .await?;
-        let (authz_router, db_router) = self
-            .db_datastore
-            .vpc_router_fetch(opctx, &authz_vpc, router_name)
-            .await?;
+        let (.., authz_router, db_router) =
+            LookupPath::new(opctx, &self.db_datastore)
+                .organization_name(organization_name)
+                .project_name(project_name)
+                .vpc_name(vpc_name)
+                .vpc_router_name(router_name)
+                .fetch()
+                .await?;
         // TODO-performance shouldn't this check be part of the "update"
         // database query?  This shouldn't affect correctness, assuming that a
         // router kind cannot be changed, but it might be able to save us a
@@ -2307,14 +2817,12 @@ impl Nexus {
         router_name: &Name,
         params: &params::VpcRouterUpdate,
     ) -> UpdateResult<VpcRouter> {
-        let authz_router = self
-            .db_datastore
-            .vpc_router_lookup_by_path(
-                organization_name,
-                project_name,
-                vpc_name,
-                router_name,
-            )
+        let (.., authz_router) = LookupPath::new(opctx, &self.db_datastore)
+            .organization_name(organization_name)
+            .project_name(project_name)
+            .vpc_name(vpc_name)
+            .vpc_router_name(router_name)
+            .lookup_for(authz::Action::Modify)
             .await?;
         self.db_datastore
             .vpc_update_router(opctx, &authz_router, params.clone().into())
@@ -2332,20 +2840,16 @@ impl Nexus {
         router_name: &Name,
         pagparams: &DataPageParams<'_, Name>,
     ) -> ListResultVec<db::model::RouterRoute> {
-        let authz_router = self
-            .db_datastore
-            .vpc_router_lookup_by_path(
-                organization_name,
-                project_name,
-                vpc_name,
-                router_name,
-            )
+        let (.., authz_router) = LookupPath::new(opctx, &self.db_datastore)
+            .organization_name(organization_name)
+            .project_name(project_name)
+            .vpc_name(vpc_name)
+            .vpc_router_name(router_name)
+            .lookup_for(authz::Action::ListChildren)
             .await?;
-        let routes = self
-            .db_datastore
+        self.db_datastore
             .router_list_routes(opctx, &authz_router, pagparams)
-            .await?;
-        Ok(routes)
+            .await
     }
 
     pub async fn route_fetch(
@@ -2357,20 +2861,15 @@ impl Nexus {
         router_name: &Name,
         route_name: &Name,
     ) -> LookupResult<db::model::RouterRoute> {
-        let authz_router = self
-            .db_datastore
-            .vpc_router_lookup_by_path(
-                organization_name,
-                project_name,
-                vpc_name,
-                router_name,
-            )
+        let (.., db_route) = LookupPath::new(opctx, &self.db_datastore)
+            .organization_name(organization_name)
+            .project_name(project_name)
+            .vpc_name(vpc_name)
+            .vpc_router_name(router_name)
+            .router_route_name(route_name)
+            .fetch()
             .await?;
-        Ok(self
-            .db_datastore
-            .route_fetch(&opctx, &authz_router, route_name)
-            .await?
-            .1)
+        Ok(db_route)
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -2384,14 +2883,12 @@ impl Nexus {
         kind: &RouterRouteKind,
         params: &RouterRouteCreateParams,
     ) -> CreateResult<db::model::RouterRoute> {
-        let authz_router = self
-            .db_datastore
-            .vpc_router_lookup_by_path(
-                organization_name,
-                project_name,
-                vpc_name,
-                router_name,
-            )
+        let (.., authz_router) = LookupPath::new(opctx, &self.db_datastore)
+            .organization_name(organization_name)
+            .project_name(project_name)
+            .vpc_name(vpc_name)
+            .vpc_router_name(router_name)
+            .lookup_for(authz::Action::CreateChild)
             .await?;
         let id = Uuid::new_v4();
         let route = db::model::RouterRoute::new(
@@ -2416,19 +2913,16 @@ impl Nexus {
         router_name: &Name,
         route_name: &Name,
     ) -> DeleteResult {
-        let authz_router = self
-            .db_datastore
-            .vpc_router_lookup_by_path(
-                organization_name,
-                project_name,
-                vpc_name,
-                router_name,
-            )
-            .await?;
-        let (authz_route, db_route) = self
-            .db_datastore
-            .route_fetch(opctx, &authz_router, route_name)
-            .await?;
+        let (.., authz_route, db_route) =
+            LookupPath::new(opctx, &self.db_datastore)
+                .organization_name(organization_name)
+                .project_name(project_name)
+                .vpc_name(vpc_name)
+                .vpc_router_name(router_name)
+                .router_route_name(route_name)
+                .fetch()
+                .await?;
+
         // Only custom routes can be deleted
         // TODO Shouldn't this constraint be checked by the database query?
         if db_route.kind.0 != RouterRouteKind::Custom {
@@ -2451,19 +2945,15 @@ impl Nexus {
         route_name: &Name,
         params: &RouterRouteUpdateParams,
     ) -> UpdateResult<RouterRoute> {
-        let authz_router = self
-            .db_datastore
-            .vpc_router_lookup_by_path(
-                organization_name,
-                project_name,
-                vpc_name,
-                router_name,
-            )
-            .await?;
-        let (authz_route, db_route) = self
-            .db_datastore
-            .route_fetch(opctx, &authz_router, route_name)
-            .await?;
+        let (.., authz_route, db_route) =
+            LookupPath::new(opctx, &self.db_datastore)
+                .organization_name(organization_name)
+                .project_name(project_name)
+                .vpc_name(vpc_name)
+                .vpc_router_name(router_name)
+                .router_route_name(route_name)
+                .fetch()
+                .await?;
         // TODO: Write a test for this once there's a way to test it (i.e.
         // subnets automatically register to the system router table)
         match db_route.kind.0 {
@@ -2514,8 +3004,11 @@ impl Nexus {
         opctx: &OpContext,
         rack_id: &Uuid,
     ) -> LookupResult<db::model::Rack> {
-        let authz_rack = authz::FLEET
-            .child_generic(ResourceType::Rack, LookupType::ById(*rack_id));
+        let authz_rack = authz::Rack::new(
+            authz::FLEET,
+            *rack_id,
+            LookupType::ById(*rack_id),
+        );
         opctx.authorize(authz::Action::Read, &authz_rack).await?;
 
         if *rack_id == self.rack_id {
@@ -2540,9 +3033,11 @@ impl Nexus {
         opctx: &OpContext,
         sled_id: &Uuid,
     ) -> LookupResult<db::model::Sled> {
-        let authz_sled =
-            authz::FLEET.sled(*sled_id, LookupType::ById(*sled_id));
-        self.db_datastore.sled_fetch(&opctx, &authz_sled).await
+        let (.., db_sled) = LookupPath::new(opctx, &self.db_datastore)
+            .sled_id(*sled_id)
+            .fetch()
+            .await?;
+        Ok(db_sled)
     }
 
     // Sagas
@@ -2600,7 +3095,11 @@ impl Nexus {
         opctx: &OpContext,
         name: &Name,
     ) -> LookupResult<db::model::UserBuiltin> {
-        self.db_datastore.user_builtin_fetch(opctx, name).await
+        let (.., db_user_builtin) = LookupPath::new(opctx, &self.db_datastore)
+            .user_builtin_name(name)
+            .fetch()
+            .await?;
+        Ok(db_user_builtin)
     }
 
     // Built-in roles
@@ -2618,7 +3117,11 @@ impl Nexus {
         opctx: &OpContext,
         name: &str,
     ) -> LookupResult<db::model::RoleBuiltin> {
-        self.db_datastore.role_builtin_fetch(opctx, name).await
+        let (.., db_role_builtin) = LookupPath::new(opctx, &self.db_datastore)
+            .role_builtin_name(name)
+            .fetch()
+            .await?;
+        Ok(db_role_builtin)
     }
 
     // Internal control plane interfaces.
@@ -2689,7 +3192,10 @@ impl Nexus {
         new_state: &DiskRuntimeState,
     ) -> Result<(), Error> {
         let log = &self.log;
-        let authz_disk = self.db_datastore.disk_lookup_by_id(id).await?;
+        let (.., authz_disk) = LookupPath::new(&opctx, &self.db_datastore)
+            .disk_id(id)
+            .lookup_for(authz::Action::Modify)
+            .await?;
 
         let result = self
             .db_datastore
@@ -2802,30 +3308,71 @@ impl Nexus {
 
     pub async fn session_fetch(
         &self,
+        opctx: &OpContext,
         token: String,
-    ) -> LookupResult<db::model::ConsoleSession> {
-        self.db_datastore.session_fetch(token).await
+    ) -> LookupResult<authn::ConsoleSessionWithSiloId> {
+        let (.., db_console_session) =
+            LookupPath::new(opctx, &self.db_datastore)
+                .console_session_token(&token)
+                .fetch()
+                .await?;
+
+        let (.., db_silo_user) = LookupPath::new(opctx, &self.db_datastore)
+            .silo_user_id(db_console_session.silo_user_id)
+            .fetch()
+            .await?;
+
+        Ok(authn::ConsoleSessionWithSiloId {
+            console_session: db_console_session,
+            silo_id: db_silo_user.silo_id,
+        })
     }
 
     pub async fn session_create(
         &self,
+        opctx: &OpContext,
         user_id: Uuid,
     ) -> CreateResult<db::model::ConsoleSession> {
+        if !self.login_allowed(opctx, user_id).await? {
+            return Err(Error::Unauthenticated {
+                internal_message: "User not allowed to login".to_string(),
+            });
+        }
+
         let session =
             db::model::ConsoleSession::new(generate_session_token(), user_id);
-        Ok(self.db_datastore.session_create(session).await?)
+
+        Ok(self.db_datastore.session_create(opctx, session).await?)
     }
 
     // update last_used to now
     pub async fn session_update_last_used(
         &self,
-        token: String,
-    ) -> UpdateResult<db::model::ConsoleSession> {
-        Ok(self.db_datastore.session_update_last_used(token).await?)
+        opctx: &OpContext,
+        token: &str,
+    ) -> UpdateResult<authn::ConsoleSessionWithSiloId> {
+        let authz_session = authz::ConsoleSession::new(
+            authz::FLEET,
+            token.to_string(),
+            LookupType::ByCompositeId(token.to_string()),
+        );
+        Ok(self
+            .db_datastore
+            .session_update_last_used(opctx, &authz_session)
+            .await?)
     }
 
-    pub async fn session_hard_delete(&self, token: String) -> DeleteResult {
-        self.db_datastore.session_hard_delete(token).await
+    pub async fn session_hard_delete(
+        &self,
+        opctx: &OpContext,
+        token: &str,
+    ) -> DeleteResult {
+        let authz_session = authz::ConsoleSession::new(
+            authz::FLEET,
+            token.to_string(),
+            LookupType::ByCompositeId(token.to_string()),
+        );
+        self.db_datastore.session_hard_delete(opctx, &authz_session).await
     }
 
     fn tuf_base_url(&self) -> Option<String> {
@@ -2942,9 +3489,13 @@ impl Nexus {
 
         // We cache the artifact based on its checksum, so fetch that from the
         // database.
-        let artifact_entry = self
-            .db_datastore
-            .update_available_artifact_fetch(opctx, &artifact)
+        let (.., artifact_entry) = LookupPath::new(opctx, &self.db_datastore)
+            .update_available_artifact_tuple(
+                &artifact.name,
+                artifact.version,
+                UpdateArtifactKind(artifact.kind),
+            )
+            .fetch()
             .await?;
         let filename = format!(
             "{}.{}.{}-{}",
@@ -3069,6 +3620,67 @@ impl Nexus {
         })?;
         Ok(body)
     }
+
+    async fn login_allowed(
+        &self,
+        opctx: &OpContext,
+        silo_user_id: Uuid,
+    ) -> Result<bool, Error> {
+        // Was this silo user deleted?
+        let fetch_result = LookupPath::new(opctx, &self.db_datastore)
+            .silo_user_id(silo_user_id)
+            .fetch()
+            .await;
+
+        match fetch_result {
+            Err(e) => {
+                match e {
+                    Error::ObjectNotFound { type_name: _, lookup_type: _ } => {
+                        // if the silo user was deleted, they're not allowed to
+                        // log in :)
+                        return Ok(false);
+                    }
+
+                    _ => {
+                        return Err(e);
+                    }
+                }
+            }
+
+            Ok(_) => {
+                // they're allowed
+            }
+        }
+
+        Ok(true)
+    }
+
+    pub async fn silo_user_fetch(
+        &self,
+        opctx: &OpContext,
+        silo_user_id: Uuid,
+    ) -> LookupResult<SiloUser> {
+        let (.., db_silo_user) = LookupPath::new(opctx, &self.db_datastore)
+            .silo_user_id(silo_user_id)
+            .fetch()
+            .await?;
+        Ok(db_silo_user)
+    }
+}
+
+/// For unimplemented endpoints, indicates whether the resource identified
+/// by this endpoint will always be publicly visible or not
+///
+/// For example, the resource "/images" is well-known (it's part of the
+/// API).  Being unauthorized to list images will result in a "403
+/// Forbidden".  It's `UnimplResourceVisibility::Public'.
+///
+/// By contrast, the resource "/images/some-image" is not publicly-known.
+/// If you're not authorized to view it, you'll get a "404 Not Found".  It's
+/// `Unimpl::ProtectedLookup(LookupType::ByName("some-image"))`.
+pub enum Unimpl {
+    Public,
+    ProtectedLookup(Error),
 }
 
 fn generate_session_token() -> String {
@@ -3094,10 +3706,10 @@ impl TestInterfaces for Nexus {
             self.log.new(o!()),
             Arc::clone(&self.db_datastore),
         );
-        let authz_instance =
-            self.db_datastore.instance_lookup_by_id(*id).await?;
-        let db_instance =
-            self.db_datastore.instance_refetch(&opctx, &authz_instance).await?;
+        let (.., db_instance) = LookupPath::new(&opctx, &self.db_datastore)
+            .instance_id(*id)
+            .fetch()
+            .await?;
         self.instance_sled(&db_instance).await
     }
 
@@ -3109,21 +3721,42 @@ impl TestInterfaces for Nexus {
             self.log.new(o!()),
             Arc::clone(&self.db_datastore),
         );
-        let authz_disk = self.db_datastore.disk_lookup_by_id(*id).await?;
-        let db_disk =
-            self.db_datastore.disk_refetch(&opctx, &authz_disk).await?;
-        let instance_id = db_disk.runtime().attach_instance_id.unwrap();
-        let authz_instance =
-            self.db_datastore.instance_lookup_by_id(instance_id).await?;
-        let db_instance =
-            self.db_datastore.instance_refetch(&opctx, &authz_instance).await?;
+        let (.., db_disk) = LookupPath::new(&opctx, &self.db_datastore)
+            .disk_id(*id)
+            .fetch()
+            .await?;
+        let (.., db_instance) = LookupPath::new(&opctx, &self.db_datastore)
+            .instance_id(db_disk.runtime().attach_instance_id.unwrap())
+            .fetch()
+            .await?;
         self.instance_sled(&db_instance).await
     }
 
-    async fn session_create_with(
+    async fn set_disk_as_faulted(&self, disk_id: &Uuid) -> Result<bool, Error> {
+        let opctx = OpContext::for_tests(
+            self.log.new(o!()),
+            Arc::clone(&self.db_datastore),
+        );
+
+        let (.., authz_disk, db_disk) =
+            LookupPath::new(&opctx, &self.db_datastore)
+                .disk_id(*disk_id)
+                .fetch()
+                .await?;
+
+        let new_runtime = db_disk.runtime_state.faulted();
+
+        self.db_datastore
+            .disk_update_runtime(&opctx, &authz_disk, &new_runtime)
+            .await
+    }
+
+    async fn silo_user_create(
         &self,
-        session: db::model::ConsoleSession,
-    ) -> CreateResult<db::model::ConsoleSession> {
-        Ok(self.db_datastore.session_create(session).await?)
+        silo_id: Uuid,
+        silo_user_id: Uuid,
+    ) -> CreateResult<SiloUser> {
+        let silo_user = SiloUser::new(silo_id, silo_user_id);
+        Ok(self.db_datastore.silo_user_create(silo_user).await?)
     }
 }

@@ -9,13 +9,15 @@ clap = { version = "3.1", features = ["derive"] }
 dropshot = { git = "https://github.com/oxidecomputer/dropshot", branch = "main", features = [ "usdt-probes" ] }
 futures = "0.3.21"
 hex = "0.4"
+http = "0.2.6"
+hyper = "0.14.17"
 ringbuffer = "0.8"
 schemars = "0.8"
 serde = { version = "1.0", features = ["derive"] }
 slog-dtrace = "0.2"
 structopt = "0.3"
 thiserror = "1.0.30"
-toml = "0.5.6"
+toml = "0.5.9"
 uuid = "0.8"
 
 gateway-messages = { path = "../gateway-messages", features = ["std"] }
@@ -31,7 +33,7 @@ version = "1.16"
 features = [ "full" ]
 
 [dev-dependencies]
-expectorate = "1.0.4"
+expectorate = "1.0.5"
 http = "0.2.5"
 omicron-test-utils = { path = "../test-utils" }
 openapi-lint = { git = "https://github.com/oxidecomputer/openapi-lint", branch = "main" }
@@ -39,3 +41,4 @@ openapiv3 = "1.0"
 serde_json = "1.0"
 sp-sim = { path = "../sp-sim" }
 subprocess = "0.2.8"
+tokio-tungstenite = "0.17"

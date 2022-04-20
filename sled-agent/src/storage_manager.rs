@@ -4,6 +4,7 @@
 
 //! Management of sled-local storage.
 
+use crate::illumos::dladm::PhysicalLink;
 use crate::illumos::running_zone::{
     Error as RunningZoneError, InstalledZone, RunningZone,
 };
@@ -134,7 +135,7 @@ impl Pool {
         &self,
         dataset_id: Uuid,
     ) -> Result<PathBuf, Error> {
-        let path = std::path::Path::new(crate::OMICRON_CONFIG_PATH)
+        let path = std::path::Path::new(omicron_common::OMICRON_CONFIG_PATH)
             .join(self.id.to_string());
         create_dir_all(&path).await?;
         let mut path = path.join(dataset_id.to_string());
@@ -207,6 +208,7 @@ impl DatasetInfo {
     ) -> Result<(), Error> {
         match self.kind {
             DatasetKind::CockroachDb { .. } => {
+                info!(log, "start_zone: Loading CRDB manifest");
                 // Load the CRDB manifest.
                 zone.run_cmd(&[
                     crate::illumos::zone::SVCCFG,
@@ -215,6 +217,11 @@ impl DatasetInfo {
                 ])?;
 
                 // Set parameters which are passed to the CRDB binary.
+                info!(
+                    log,
+                    "start_zone: setting CRDB's config/listen_addr: {}",
+                    address
+                );
                 zone.run_cmd(&[
                     crate::illumos::zone::SVCCFG,
                     "-s",
@@ -222,6 +229,8 @@ impl DatasetInfo {
                     "setprop",
                     &format!("config/listen_addr={}", address),
                 ])?;
+
+                info!(log, "start_zone: setting CRDB's config/store");
                 zone.run_cmd(&[
                     crate::illumos::zone::SVCCFG,
                     "-s",
@@ -233,6 +242,7 @@ impl DatasetInfo {
                 //
                 // Set these addresses, use "start" instead of
                 // "start-single-node".
+                info!(log, "start_zone: setting CRDB's config/join_addrs");
                 zone.run_cmd(&[
                     crate::illumos::zone::SVCCFG,
                     "-s",
@@ -243,6 +253,7 @@ impl DatasetInfo {
 
                 // Refresh the manifest with the new properties we set,
                 // so they become "effective" properties when the service is enabled.
+                info!(log, "start_zone: refreshing manifest");
                 zone.run_cmd(&[
                     crate::illumos::zone::SVCCFG,
                     "-s",
@@ -250,6 +261,7 @@ impl DatasetInfo {
                     "refresh",
                 ])?;
 
+                info!(log, "start_zone: enabling CRDB service");
                 zone.run_cmd(&[
                     crate::illumos::zone::SVCADM,
                     "enable",
@@ -258,6 +270,7 @@ impl DatasetInfo {
                 ])?;
 
                 // Await liveness of the cluster.
+                info!(log, "start_zone: awaiting liveness of CRDB");
                 let check_health = || async {
                     let http_addr = SocketAddr::new(address.ip(), 8080);
                     reqwest::get(format!("http://{}/health?ready=1", http_addr))
@@ -512,7 +525,7 @@ impl StorageWorker {
     // If requested via the `do_format` parameter, may also initialize
     // these resources.
     //
-    // Returns the UUID attached to the underlying ZFS partition.
+    // Returns the UUID attached to the underlying ZFS dataset.
     // Returns (was_inserted, Uuid).
     async fn initialize_dataset_and_zone(
         &self,
@@ -657,6 +670,7 @@ impl StorageWorker {
         nexus_notifications: &mut FuturesOrdered<Pin<Box<NotifyFut>>>,
         request: &NewFilesystemRequest,
     ) -> Result<(), Error> {
+        info!(self.log, "add_dataset: {:?}", request);
         let mut pools = self.pools.lock().await;
         let name = ZpoolName::new(request.zpool_id);
         let pool = pools.get_mut(&name).ok_or_else(|| {
@@ -812,6 +826,7 @@ impl StorageManager {
         log: &Logger,
         sled_id: Uuid,
         nexus_client: Arc<NexusClient>,
+        physical_link: Option<PhysicalLink>,
     ) -> Result<Self, Error> {
         let log = log.new(o!("component" => "sled agent storage manager"));
         let pools = Arc::new(Mutex::new(HashMap::new()));
@@ -824,7 +839,7 @@ impl StorageManager {
             pools: pools.clone(),
             new_pools_rx,
             new_filesystems_rx,
-            vnic_allocator: VnicAllocator::new("Storage"),
+            vnic_allocator: VnicAllocator::new("Storage", physical_link)?,
         };
         Ok(StorageManager {
             pools,

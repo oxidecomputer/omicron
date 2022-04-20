@@ -19,7 +19,7 @@ use omicron_common::api::external::InstanceCpuCount;
 use omicron_nexus::crucible_agent_client::types::State as RegionState;
 use omicron_nexus::external_api::params;
 use omicron_nexus::external_api::views::{
-    Organization, Project, Vpc, VpcRouter,
+    Organization, Project, Silo, Vpc, VpcRouter,
 };
 use omicron_sled_agent::sim::SledAgent;
 use std::sync::Arc;
@@ -57,6 +57,25 @@ where
         .expect("failed to make \"create\" request")
         .parsed_body()
         .unwrap()
+}
+
+pub async fn create_silo(
+    client: &ClientTestContext,
+    silo_name: &str,
+    discoverable: bool,
+) -> Silo {
+    object_create(
+        client,
+        "/silos",
+        &params::SiloCreate {
+            identity: IdentityMetadataCreateParams {
+                name: silo_name.parse().unwrap(),
+                description: "a silo".to_string(),
+            },
+            discoverable,
+        },
+    )
+    .await
 }
 
 pub async fn create_organization(
@@ -114,7 +133,9 @@ pub async fn create_disk(
                 description: String::from("sells rainsticks"),
             },
             snapshot_id: None,
+            image_id: None,
             size: ByteCount::from_gibibytes_u32(1),
+            block_size: params::BlockSize::try_from(512).unwrap(),
         },
     )
     .await
@@ -141,8 +162,12 @@ pub async fn create_instance(
             ncpus: InstanceCpuCount(4),
             memory: ByteCount::from_mebibytes_u32(256),
             hostname: String::from("the_host"),
+            user_data:
+                b"#cloud-config\nsystem_info:\n  default_user:\n    name: oxide"
+                    .to_vec(),
             network_interfaces:
                 params::InstanceNetworkInterfaceAttachment::Default,
+            disks: vec![],
         },
     )
     .await

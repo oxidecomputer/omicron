@@ -4,28 +4,33 @@
 
 //! Bootstrap-related APIs.
 
-use super::config::Config;
+use super::config::{Config, BOOTSTRAP_AGENT_PORT};
 use super::discovery;
+use super::params::SledAgentRequest;
 use super::trust_quorum::{
     self, RackSecret, ShareDistribution, TrustQuorumError,
 };
-use super::views::ShareResponse;
-use omicron_common::api::external::Error as ExternalError;
+use super::views::{ShareResponse, SledAgentResponse};
+use crate::config::Config as SledConfig;
+use crate::illumos::dladm::{self, Dladm, PhysicalLink};
+use crate::illumos::zone::{self, Zones};
+use crate::rack_setup::service::Service as RackSetupService;
+use crate::server::Server as SledServer;
+use omicron_common::api::external::{Error as ExternalError, MacAddr};
 use omicron_common::backoff::{
     internal_service_policy, retry_notify, BackoffError,
 };
 
 use slog::Logger;
 use std::io;
-use std::path::Path;
+use std::net::{Ipv6Addr, SocketAddrV6};
+use std::path::{Path, PathBuf};
 use thiserror::Error;
+use tokio::sync::Mutex;
 
 /// Describes errors which may occur while operating the bootstrap service.
 #[derive(Error, Debug)]
 pub enum BootstrapError {
-    #[error("Cannot deserialize TOML file")]
-    Toml(#[from] toml::de::Error),
-
     #[error("Error accessing filesystem: {0}")]
     Io(#[from] std::io::Error),
 
@@ -35,17 +40,17 @@ pub enum BootstrapError {
     #[error("Error modifying SMF service: {0}")]
     SmfAdm(#[from] smf::AdmError),
 
-    #[error("Error making HTTP request to Sled Agent: {0}")]
-    SledApi(#[from] sled_agent_client::Error<sled_agent_client::types::Error>),
+    #[error("Error starting sled agent: {0}")]
+    SledError(String),
 
-    #[error("Error making HTTP request to Nexus: {0}")]
-    NexusApi(#[from] nexus_client::Error<nexus_client::types::Error>),
+    #[error(transparent)]
+    Toml(#[from] toml::de::Error),
 
     #[error(transparent)]
     TrustQuorum(#[from] TrustQuorumError),
 
-    #[error("Configuration changed")]
-    Configuration,
+    #[error(transparent)]
+    Zone(#[from] zone::Error),
 }
 
 impl From<BootstrapError> for ExternalError {
@@ -82,13 +87,76 @@ pub(crate) struct Agent {
     log: Logger,
     peer_monitor: discovery::PeerMonitor,
     share: Option<ShareDistribution>,
+
+    rss: Mutex<Option<RackSetupService>>,
+    sled_agent: Mutex<Option<SledServer>>,
+    sled_config: SledConfig,
+}
+
+fn get_subnet_path() -> PathBuf {
+    Path::new(omicron_common::OMICRON_CONFIG_PATH).join("subnet.toml")
+}
+
+fn mac_to_socket_addr(mac: MacAddr) -> SocketAddrV6 {
+    let mac_bytes = mac.into_array();
+    assert_eq!(6, mac_bytes.len());
+
+    let address = Ipv6Addr::new(
+        0xfdb0,
+        ((mac_bytes[0] as u16) << 8) | mac_bytes[1] as u16,
+        ((mac_bytes[2] as u16) << 8) | mac_bytes[3] as u16,
+        ((mac_bytes[4] as u16) << 8) | mac_bytes[5] as u16,
+        0,
+        0,
+        0,
+        1,
+    );
+
+    SocketAddrV6::new(address, BOOTSTRAP_AGENT_PORT, 0, 0)
+}
+
+// TODO(https://github.com/oxidecomputer/omicron/issues/945): This address
+// could be randomly generated when it no longer needs to be durable.
+pub fn bootstrap_address(
+    link: PhysicalLink,
+) -> Result<SocketAddrV6, dladm::Error> {
+    let mac = Dladm::get_mac(link)?;
+    Ok(mac_to_socket_addr(mac))
 }
 
 impl Agent {
-    pub fn new(log: Logger) -> Result<Self, BootstrapError> {
-        let peer_monitor = discovery::PeerMonitor::new(&log)?;
+    pub async fn new(
+        log: Logger,
+        sled_config: SledConfig,
+        address: Ipv6Addr,
+    ) -> Result<Self, BootstrapError> {
+        Zones::ensure_has_global_zone_v6_address(
+            sled_config.data_link.clone(),
+            address,
+            "bootstrap6",
+        )?;
+
+        let peer_monitor = discovery::PeerMonitor::new(&log, address)?;
         let share = read_key_share()?;
-        Ok(Agent { log, peer_monitor, share })
+        let agent = Agent {
+            log,
+            peer_monitor,
+            share,
+            rss: Mutex::new(None),
+            sled_agent: Mutex::new(None),
+            sled_config,
+        };
+
+        let subnet_path = get_subnet_path();
+        if subnet_path.exists() {
+            info!(agent.log, "Sled already configured, loading sled agent");
+            let sled_request: SledAgentRequest = toml::from_str(
+                &tokio::fs::read_to_string(&subnet_path).await?,
+            )?;
+            agent.request_agent(sled_request).await?;
+        }
+
+        Ok(agent)
     }
 
     /// Implements the "request share" API.
@@ -105,6 +173,55 @@ impl Agent {
         Ok(ShareResponse { shared_secret: vec![] })
     }
 
+    /// Initializes the Sled Agent on behalf of the RSS, if one has not already
+    /// been initialized.
+    pub async fn request_agent(
+        &self,
+        request: SledAgentRequest,
+    ) -> Result<SledAgentResponse, BootstrapError> {
+        info!(&self.log, "Loading Sled Agent: {:?}", request);
+
+        let sled_address =
+            crate::config::get_sled_address(*request.subnet.as_ref());
+
+        let mut maybe_agent = self.sled_agent.lock().await;
+        if let Some(server) = &*maybe_agent {
+            // Server already exists, return it.
+            info!(&self.log, "Sled Agent already loaded");
+
+            if &server.address().ip() != sled_address.ip() {
+                let err_str = format!(
+                    "Sled Agent already running on address {}, but {} was requested",
+                    server.address().ip(),
+                    sled_address.ip(),
+                );
+                return Err(BootstrapError::SledError(err_str));
+            }
+
+            return Ok(SledAgentResponse { id: server.id() });
+        }
+        // Server does not exist, initialize it.
+        let server = SledServer::start(&self.sled_config, sled_address)
+            .await
+            .map_err(|e| BootstrapError::SledError(e))?;
+        maybe_agent.replace(server);
+        info!(&self.log, "Sled Agent loaded; recording configuration");
+
+        // Record the subnet, so the sled agent can be automatically
+        // initialized on the next boot.
+        tokio::fs::write(
+            get_subnet_path(),
+            &toml::to_string(
+                &toml::Value::try_from(&request.subnet)
+                    .expect("Cannot serialize IP"),
+            )
+            .expect("Cannot convert toml to string"),
+        )
+        .await?;
+
+        Ok(SledAgentResponse { id: self.sled_config.id })
+    }
+
     /// Communicates with peers, sharing secrets, until the rack has been
     /// sufficiently unlocked.
     async fn establish_sled_quorum(
@@ -113,7 +230,7 @@ impl Agent {
         let rack_secret = retry_notify(
             internal_service_policy(),
             || async {
-                let other_agents = self.peer_monitor.addrs().await;
+                let other_agents = self.peer_monitor.peer_addrs().await;
                 info!(
                     &self.log,
                     "Bootstrap: Communicating with peers: {:?}", other_agents
@@ -139,8 +256,13 @@ impl Agent {
                 // Retrieve verified rack_secret shares from a quorum of agents
                 let other_agents: Vec<trust_quorum::Client> = other_agents
                     .into_iter()
-                    .map(|mut addr| {
-                        addr.set_port(trust_quorum::PORT);
+                    .map(|addr| {
+                        let addr = SocketAddrV6::new(
+                            addr,
+                            trust_quorum::PORT,
+                            0,
+                            0,
+                        );
                         trust_quorum::Client::new(
                             &self.log,
                             share.verifier.clone(),
@@ -207,169 +329,15 @@ impl Agent {
         Ok(())
     }
 
-    // In lieu of having an operator send requests to all sleds via an
-    // initialization service, the sled-agent configuration may allow for the
-    // automated injection of setup requests from a sled.
-    async fn inject_rack_setup_service_requests(
-        &self,
-        config: &Config,
-    ) -> Result<(), BootstrapError> {
+    // Initializes the Rack Setup Service.
+    async fn start_rss(&self, config: &Config) -> Result<(), BootstrapError> {
         if let Some(rss_config) = &config.rss_config {
-            info!(self.log, "Injecting RSS configuration: {:#?}", rss_config);
-
-            let serialized_config = toml::Value::try_from(&config)
-                .expect("Cannot serialize configuration");
-            let config_str = toml::to_string(&serialized_config)
-                .expect("Cannot turn config to string");
-
-            // First, check if this request has previously been made.
-            //
-            // Normally, the rack setup service is run with a human-in-the-loop,
-            // but with this automated injection, we need a way to determine the
-            // (destructive) initialization has occurred.
-            //
-            // We do this by storing the configuration at "rss_config_path"
-            // after successfully performing initialization.
-            let rss_config_path =
-                std::path::Path::new(crate::OMICRON_CONFIG_PATH)
-                    .join("config-rss.toml");
-            if rss_config_path.exists() {
-                info!(
-                    self.log,
-                    "RSS configuration already exists at {}",
-                    rss_config_path.to_string_lossy()
-                );
-                let old_config: Config = toml::from_str(
-                    &tokio::fs::read_to_string(&rss_config_path).await?,
-                )?;
-                if &old_config == config {
-                    info!(
-                        self.log,
-                        "RSS config already applied from: {}",
-                        rss_config_path.to_string_lossy()
-                    );
-                    return Ok(());
-                }
-
-                // TODO(https://github.com/oxidecomputer/omicron/issues/724):
-                // We could potentially handle this case by deleting all
-                // partitions (in preparation for applying the new
-                // configuration), but at the moment it's an error.
-                warn!(
-                    self.log,
-                    "Rack Setup Service Config was already applied, but has changed.
-                    This means that you may have partitions set up on this sled, but they
-                    may not match the ones requested by the supplied configuration.\n
-                    To re-initialize this sled:
-                       - Disable all Oxide services
-                       - Delete all partitions within the attached zpool
-                       - Delete the configuration file ({})
-                       - Restart the sled agent",
-                    rss_config_path.to_string_lossy()
-                );
-                return Err(BootstrapError::Configuration);
-            } else {
-                info!(
-                    self.log,
-                    "No RSS configuration found at {}",
-                    rss_config_path.to_string_lossy()
-                );
-            }
-
-            // Issue the dataset initialization requests to all sleds.
-            futures::future::join_all(
-                rss_config.requests.iter().map(|request| async move {
-                    info!(self.log, "observing request: {:#?}", request);
-                    let dur = std::time::Duration::from_secs(60);
-                    let client = reqwest::ClientBuilder::new()
-                        .connect_timeout(dur)
-                        .timeout(dur)
-                        .build()
-                        .map_err(|e| nexus_client::Error::<nexus_client::types::Error>::from(e))?;
-                    let client = sled_agent_client::Client::new_with_client(
-                        &format!("http://{}", request.sled_address),
-                        client,
-                        self.log.new(o!("SledAgentClient" => request.sled_address)),
-                    );
-
-                    info!(self.log, "sending partition requests...");
-                    for partition in &request.partitions {
-                        let filesystem_put = || async {
-                            info!(self.log, "creating new filesystem: {:?}", partition);
-                            client.filesystem_put(&partition.clone().into())
-                                .await
-                                .map_err(BackoffError::transient)?;
-                            Ok::<
-                                (),
-                                BackoffError<
-                                    sled_agent_client::Error<sled_agent_client::types::Error>,
-                                >,
-                            >(())
-                        };
-                        let log_failure = |error, _| {
-                            warn!(self.log, "failed to create filesystem"; "error" => ?error);
-                        };
-                        retry_notify(
-                            internal_service_policy(),
-                            filesystem_put,
-                            log_failure,
-                        ).await?;
-                    }
-                    Ok(())
-                })
-            ).await.into_iter().collect::<Result<Vec<()>, BootstrapError>>()?;
-
-            // Issue service initialization requests.
-            //
-            // Note that this must happen *after* the partition initialization,
-            // to ensure that CockroachDB has been initialized before Nexus
-            // starts.
-            futures::future::join_all(
-                rss_config.requests.iter().map(|request| async move {
-                    info!(self.log, "observing request: {:#?}", request);
-                    let dur = std::time::Duration::from_secs(60);
-                    let client = reqwest::ClientBuilder::new()
-                        .connect_timeout(dur)
-                        .timeout(dur)
-                        .build()
-                        .map_err(|e| nexus_client::Error::<nexus_client::types::Error>::from(e))?;
-                    let client = sled_agent_client::Client::new_with_client(
-                        &format!("http://{}", request.sled_address),
-                        client,
-                        self.log.new(o!("SledAgentClient" => request.sled_address)),
-                    );
-
-                    info!(self.log, "sending service requests...");
-                    let services_put = || async {
-                        info!(self.log, "initializing sled services: {:?}", request.services);
-                        client.services_put(
-                            &sled_agent_client::types::ServiceEnsureBody {
-                                services: request.services.iter().map(|s| s.clone().into()).collect()
-                            })
-                            .await
-                            .map_err(BackoffError::transient)?;
-                        Ok::<
-                            (),
-                            BackoffError<
-                                sled_agent_client::Error<sled_agent_client::types::Error>,
-                            >,
-                        >(())
-                    };
-                    let log_failure = |error, _| {
-                        warn!(self.log, "failed to initialize services"; "error" => ?error);
-                    };
-                    retry_notify(
-                        internal_service_policy(),
-                        services_put,
-                        log_failure,
-                    ).await?;
-                    Ok::<(), BootstrapError>(())
-                })
-            ).await.into_iter().collect::<Result<Vec<()>, BootstrapError>>()?;
-
-            // Finally, make sure the configuration is saved so we don't inject
-            // the requests on the next iteration.
-            tokio::fs::write(rss_config_path, config_str).await?;
+            let rss = RackSetupService::new(
+                self.log.new(o!("component" => "RSS")),
+                rss_config.clone(),
+                self.peer_monitor.observer().await,
+            );
+            self.rss.lock().await.replace(rss);
         }
         Ok(())
     }
@@ -391,8 +359,24 @@ impl Agent {
             self.establish_sled_quorum().await?;
         }
 
-        self.inject_rack_setup_service_requests(config).await?;
+        self.start_rss(config).await?;
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use macaddr::MacAddr6;
+
+    #[test]
+    fn test_mac_to_socket_addr() {
+        let mac = MacAddr("a8:40:25:10:00:01".parse::<MacAddr6>().unwrap());
+
+        assert_eq!(
+            mac_to_socket_addr(mac).ip(),
+            &"fdb0:a840:2510:1::1".parse::<Ipv6Addr>().unwrap(),
+        );
     }
 }
