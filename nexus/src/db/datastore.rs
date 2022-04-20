@@ -306,7 +306,7 @@ impl DataStore {
             params::DiskSource::Blank { block_size } => {
                 Ok(db::model::BlockSize::try_from(*block_size)
                     .map_err(|e| Error::invalid_request(&e.to_string()))?)
-            },
+            }
             params::DiskSource::Snapshot { snapshot_id: _ } => {
                 // Until we implement snapshots, do not allow disks to be
                 // created from a snapshot.
@@ -378,7 +378,8 @@ impl DataStore {
         let params: params::DiskCreate = params.clone();
         let block_size =
             self.get_block_size_from_disk_create(opctx, &params).await?;
-        let blocks_per_extent = params.extent_size() / block_size.to_bytes() as i64;
+        let blocks_per_extent =
+            params.extent_size() / block_size.to_bytes() as i64;
 
         self.pool()
             .transaction(move |conn| {
