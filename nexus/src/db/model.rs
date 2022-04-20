@@ -270,6 +270,12 @@ impl From<ByteCount> for sled_agent_client::types::ByteCount {
     }
 }
 
+impl From<BlockSize> for ByteCount {
+    fn from(bs: BlockSize) -> Self {
+        Self(bs.to_bytes().into())
+    }
+}
+
 #[derive(
     Copy,
     Clone,
@@ -1405,9 +1411,23 @@ impl Disk {
         project_id: Uuid,
         volume_id: Uuid,
         params: params::DiskCreate,
+        block_size: BlockSize,
         runtime_initial: DiskRuntimeState,
     ) -> Result<Self, anyhow::Error> {
         let identity = DiskIdentity::new(disk_id, params.identity);
+
+        let create_snapshot_id = match params.disk_source {
+            params::DiskSource::Snapshot { snapshot_id } => Some(snapshot_id),
+            _ => None,
+        };
+
+        // XXX further enum here for different image types?
+        let create_image_id = match params.disk_source {
+            params::DiskSource::Image { image_id } => Some(image_id),
+            params::DiskSource::GlobalImage { image_id } => Some(image_id),
+            _ => None,
+        };
+
         Ok(Self {
             identity,
             rcgen: external::Generation::new().into(),
@@ -1415,9 +1435,9 @@ impl Disk {
             volume_id,
             runtime_state: runtime_initial,
             size: params.size.into(),
-            block_size: params.block_size.try_into()?,
-            create_snapshot_id: params.snapshot_id,
-            create_image_id: params.image_id,
+            block_size: block_size,
+            create_snapshot_id,
+            create_image_id,
         })
     }
 

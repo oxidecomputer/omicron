@@ -267,10 +267,10 @@ async fn test_disk_create_disk_that_already_exists_fails(
             name: DISK_NAME.parse().unwrap(),
             description: String::from("sells rainsticks"),
         },
-        snapshot_id: None,
-        image_id: None,
+        disk_source: params::DiskSource::Blank {
+            block_size: params::BlockSize::try_from(512).unwrap(),
+        },
         size: ByteCount::from_gibibytes_u32(1),
-        block_size: params::BlockSize::try_from(512).unwrap(),
     };
     let _ = create_disk(&client, ORG_NAME, PROJECT_NAME, DISK_NAME).await;
     let disk_url = format!("{}/{}", disks_url, DISK_NAME);
@@ -648,10 +648,10 @@ async fn test_disk_region_creation_failure(
             name: DISK_NAME.parse().unwrap(),
             description: String::from("sells rainsticks"),
         },
-        snapshot_id: None,
-        image_id: None,
+        disk_source: params::DiskSource::Blank {
+            block_size: params::BlockSize::try_from(512).unwrap(),
+        },
         size: disk_size,
-        block_size: params::BlockSize::try_from(512).unwrap(),
     };
 
     // Unfortunately, the error message is only posted internally to the
@@ -720,10 +720,10 @@ async fn test_disk_invalid_block_size_rejected(
             name: DISK_NAME.parse().unwrap(),
             description: String::from("sells rainsticks"),
         },
-        snapshot_id: None,
-        image_id: None,
+        disk_source: params::DiskSource::Blank {
+            block_size: params::BlockSize(1024),
+        },
         size: disk_size,
-        block_size: params::BlockSize(1024),
     };
 
     NexusRequest::new(
@@ -764,10 +764,10 @@ async fn test_disk_reject_total_size_not_divisible_by_block_size(
             name: DISK_NAME.parse().unwrap(),
             description: String::from("sells rainsticks"),
         },
-        snapshot_id: None,
-        image_id: None,
+        disk_source: params::DiskSource::Blank {
+            block_size: params::BlockSize::try_from(512).unwrap(),
+        },
         size: disk_size,
-        block_size: params::BlockSize::try_from(512).unwrap(),
     };
 
     NexusRequest::new(

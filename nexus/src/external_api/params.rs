@@ -297,31 +297,39 @@ impl JsonSchema for BlockSize {
     }
 }
 
+/// Different sources for a disk
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub enum DiskSource {
+    /// Create a blank disk
+    Blank {
+        /// size of blocks for this Disk. valid values are: 512, 2048, or 4096
+        block_size: BlockSize,
+    },
+    /// Create a disk from a disk snapshot
+    Snapshot { snapshot_id: Uuid },
+    /// Create a disk from a project image
+    Image { image_id: Uuid },
+    /// Create a disk from a global image
+    GlobalImage { image_id: Uuid },
+}
+
 /// Create-time parameters for a [`Disk`](omicron_common::api::external::Disk)
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct DiskCreate {
     /// common identifying metadata
     #[serde(flatten)]
     pub identity: IdentityMetadataCreateParams,
-    /// id for snapshot from which the Disk should be created, if any
-    pub snapshot_id: Option<Uuid>,
-    /// id for image from which the Disk should be created, if any
-    pub image_id: Option<Uuid>,
+    /// initial source for this disk
+    pub disk_source: DiskSource,
     /// total size of the Disk in bytes
     pub size: ByteCount,
-    /// size of blocks for this Disk. valid values are: 512, 2048, or 4096
-    pub block_size: BlockSize,
 }
 
 const EXTENT_SIZE: u32 = 1_u32 << 20;
 
 impl DiskCreate {
-    pub fn block_size(&self) -> ByteCount {
-        ByteCount::from(self.block_size.0)
-    }
-
-    pub fn blocks_per_extent(&self) -> i64 {
-        EXTENT_SIZE as i64 / i64::from(self.block_size.0)
+    pub fn extent_size(&self) -> i64 {
+        EXTENT_SIZE as i64
     }
 
     pub fn extent_count(&self) -> i64 {
@@ -408,10 +416,10 @@ mod test {
                 name: Name::try_from("myobject".to_string()).unwrap(),
                 description: "desc".to_string(),
             },
-            snapshot_id: None,
-            image_id: None,
+            disk_source: DiskSource::Blank {
+                block_size: BlockSize::try_from(4096).unwrap(),
+            },
             size,
-            block_size: BlockSize::try_from(4096).unwrap(),
         }
     }
 
@@ -436,13 +444,24 @@ mod test {
         assert_eq!(2, params.extent_count());
 
         // Mostly just checking we don't blow up on an unwrap here.
-        let params =
+        let _params =
             new_disk_create_params(ByteCount::try_from(i64::MAX).unwrap());
+
+        // Note that i64::MAX bytes is an invalid disk size as it's not
+        // divisible by 4096.
+        let max_disk_size = i64::MAX - (i64::MAX % 4096);
+        let params =
+            new_disk_create_params(ByteCount::try_from(max_disk_size).unwrap());
+        let block_size: u64 = 4096;
+        let blocks_per_extent: u64 = params.extent_size() as u64 / block_size;
+        assert_eq!(params.extent_count() as u64, 8796093022208_u64);
+
+        // Assert that the regions allocated will fit this disk
         assert!(
-            params.size.to_bytes()
+            params.size.to_bytes() as u64
                 <= (params.extent_count() as u64)
-                    * (params.blocks_per_extent() as u64)
-                    * params.block_size().to_bytes()
+                    * blocks_per_extent
+                    * block_size
         );
     }
 }

@@ -285,10 +285,10 @@ async fn test_make_disk_from_global_image(cptestctx: &ControlPlaneTestContext) {
             name: "disk".parse().unwrap(),
             description: String::from("sells rainsticks"),
         },
-        snapshot_id: None,
-        image_id: Some(alpine_image.identity.id),
+        disk_source: params::DiskSource::GlobalImage {
+            image_id: alpine_image.identity.id,
+        },
         size: ByteCount::from_gibibytes_u32(1),
-        block_size: params::BlockSize::try_from(512).unwrap(),
     };
 
     NexusRequest::objects_post(
@@ -351,10 +351,10 @@ async fn test_make_disk_from_global_image_too_small(
             name: "disk".parse().unwrap(),
             description: String::from("sells rainsticks"),
         },
-        snapshot_id: None,
-        image_id: Some(alpine_image.identity.id),
+        disk_source: params::DiskSource::GlobalImage {
+            image_id: alpine_image.identity.id,
+        },
         size: ByteCount::from(4096 * 500),
-        block_size: params::BlockSize::try_from(512).unwrap(),
     };
 
     let error = NexusRequest::new(
@@ -375,88 +375,9 @@ async fn test_make_disk_from_global_image_too_small(
     assert_eq!(
         error.message,
         format!(
-            "image size {} is greater than disk size {}",
+            "disk size {} must be greater than or equal to image size {}",
+            4096 * 500,
             4096 * 1000,
-            4096 * 500
-        )
-    );
-}
-
-#[nexus_test]
-async fn test_make_disk_from_global_image_blocksize_mismatch(
-    cptestctx: &ControlPlaneTestContext,
-) {
-    let client = &cptestctx.external_client;
-    DiskTest::new(&cptestctx).await;
-
-    let server = ServerBuilder::new().run().unwrap();
-    server.expect(
-        Expectation::matching(request::method_path("HEAD", "/alpine/edge.raw"))
-            .times(1..)
-            .respond_with(
-                status_code(200).append_header(
-                    "Content-Length",
-                    format!("{}", 4096 * 1000),
-                ),
-            ),
-    );
-
-    let image_create_params = params::ImageCreate {
-        identity: IdentityMetadataCreateParams {
-            name: "alpine-edge".parse().unwrap(),
-            description: String::from(
-                "you can boot any image, as long as it's alpine",
-            ),
-        },
-        source: params::ImageSource::Url(
-            server.url("/alpine/edge.raw").to_string(),
-        ),
-        block_size: params::BlockSize::try_from(512).unwrap(),
-    };
-
-    let alpine_image: GlobalImage =
-        NexusRequest::objects_post(client, "/images", &image_create_params)
-            .authn_as(AuthnMode::PrivilegedUser)
-            .execute()
-            .await
-            .unwrap()
-            .parsed_body()
-            .unwrap();
-
-    create_organization(&client, "myorg").await;
-    create_project(client, "myorg", "myproj").await;
-
-    let new_disk = params::DiskCreate {
-        identity: IdentityMetadataCreateParams {
-            name: "disk".parse().unwrap(),
-            description: String::from("sells rainsticks"),
-        },
-        snapshot_id: None,
-        image_id: Some(alpine_image.identity.id),
-        size: ByteCount::from(4096 * 2000),
-        block_size: params::BlockSize::try_from(4096).unwrap(),
-    };
-
-    let error = NexusRequest::new(
-        RequestBuilder::new(
-            client,
-            Method::POST,
-            &"/organizations/myorg/projects/myproj/disks",
-        )
-        .body(Some(&new_disk))
-        .expect_status(Some(StatusCode::BAD_REQUEST)),
-    )
-    .authn_as(AuthnMode::PrivilegedUser)
-    .execute()
-    .await
-    .expect("unexpected success")
-    .parsed_body::<dropshot::HttpErrorResponseBody>()
-    .unwrap();
-    assert_eq!(
-        error.message,
-        format!(
-            "image block size {} does not match disk block size {}",
-            512, 4096
         )
     );
 }

@@ -975,24 +975,70 @@ impl Nexus {
             .lookup_for(authz::Action::CreateChild)
             .await?;
 
-        // Reject disks where the block size doesn't evenly divide the total
-        // size
-        if (params.size.to_bytes() % params.block_size().to_bytes()) != 0 {
-            return Err(Error::InvalidValue {
-                label: String::from("size and block_size"),
-                message: String::from(
-                    "total size must be a multiple of block size",
-                ),
-            });
-        }
+        match &params.disk_source {
+            params::DiskSource::Blank { block_size } => {
+                // Reject disks where the block size doesn't evenly divide the
+                // total size
+                if (params.size.to_bytes() % block_size.0 as u64) != 0 {
+                    return Err(Error::InvalidValue {
+                        label: String::from("size and block_size"),
+                        message: String::from(
+                            "total size must be a multiple of block size",
+                        ),
+                    });
+                }
+            }
+            params::DiskSource::Snapshot { snapshot_id: _ } => {
+                // Until we implement snapshots, do not allow disks to be
+                // created from a snapshot.
+                return Err(Error::InvalidValue {
+                    label: String::from("snapshot"),
+                    message: String::from("snapshots are not yet supported"),
+                });
+            }
+            params::DiskSource::Image { image_id: _ } => {
+                // Until we implement project images, do not allow disks to be
+                // created from a project image.
+                return Err(Error::InvalidValue {
+                    label: String::from("image"),
+                    message: String::from(
+                        "project image are not yet supported",
+                    ),
+                });
+            }
+            params::DiskSource::GlobalImage { image_id } => {
+                let (.., db_global_image) =
+                    LookupPath::new(opctx, &self.db_datastore)
+                        .global_image_id(*image_id)
+                        .fetch()
+                        .await?;
 
-        // Until we implement snapshots, do not allow disks to be created from a
-        // snapshot.
-        if params.snapshot_id.is_some() {
-            return Err(Error::InvalidValue {
-                label: String::from("snapshot_id"),
-                message: String::from("snapshots are not yet supported"),
-            });
+                // Reject disks where the block size doesn't evenly divide the
+                // total size
+                if (params.size.to_bytes()
+                    % db_global_image.block_size.to_bytes() as u64)
+                    != 0
+                {
+                    return Err(Error::InvalidValue {
+                        label: String::from("size and block_size"),
+                        message: String::from(
+                            "total size must be a multiple of global image's block size",
+                        ),
+                    });
+                }
+
+                // If the size of the image is greater than the size of the
+                // disk, return an error.
+                if db_global_image.size.to_bytes() > params.size.to_bytes() {
+                    return Err(Error::invalid_request(
+                        &format!(
+                            "disk size {} must be greater than or equal to image size {}",
+                            params.size.to_bytes(),
+                            db_global_image.size.to_bytes(),
+                        ),
+                    ));
+                }
+            }
         }
 
         let saga_params = Arc::new(sagas::ParamsDiskCreate {

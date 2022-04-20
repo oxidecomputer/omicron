@@ -4870,22 +4870,16 @@
         "description": "Create-time parameters for a [`Disk`](omicron_common::api::external::Disk)",
         "type": "object",
         "properties": {
-          "block_size": {
-            "description": "size of blocks for this Disk. valid values are: 512, 2048, or 4096",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/BlockSize"
-              }
-            ]
-          },
           "description": {
             "type": "string"
           },
-          "image_id": {
-            "nullable": true,
-            "description": "id for image from which the Disk should be created, if any",
-            "type": "string",
-            "format": "uuid"
+          "disk_source": {
+            "description": "initial source for this disk",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/DiskSource"
+              }
+            ]
           },
           "name": {
             "$ref": "#/components/schemas/Name"
@@ -4897,17 +4891,11 @@
                 "$ref": "#/components/schemas/ByteCount"
               }
             ]
-          },
-          "snapshot_id": {
-            "nullable": true,
-            "description": "id for snapshot from which the Disk should be created, if any",
-            "type": "string",
-            "format": "uuid"
           }
         },
         "required": [
-          "block_size",
           "description",
+          "disk_source",
           "name",
           "size"
         ]
@@ -4943,6 +4931,103 @@
         },
         "required": [
           "items"
+        ]
+      },
+      "DiskSource": {
+        "description": "Different sources for a disk",
+        "oneOf": [
+          {
+            "description": "Create a blank disk",
+            "type": "object",
+            "properties": {
+              "Blank": {
+                "type": "object",
+                "properties": {
+                  "block_size": {
+                    "description": "size of blocks for this Disk. valid values are: 512, 2048, or 4096",
+                    "allOf": [
+                      {
+                        "$ref": "#/components/schemas/BlockSize"
+                      }
+                    ]
+                  }
+                },
+                "required": [
+                  "block_size"
+                ]
+              }
+            },
+            "required": [
+              "Blank"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "description": "Create a disk from a disk snapshot",
+            "type": "object",
+            "properties": {
+              "Snapshot": {
+                "type": "object",
+                "properties": {
+                  "snapshot_id": {
+                    "type": "string",
+                    "format": "uuid"
+                  }
+                },
+                "required": [
+                  "snapshot_id"
+                ]
+              }
+            },
+            "required": [
+              "Snapshot"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "description": "Create a disk from a project image",
+            "type": "object",
+            "properties": {
+              "Image": {
+                "type": "object",
+                "properties": {
+                  "image_id": {
+                    "type": "string",
+                    "format": "uuid"
+                  }
+                },
+                "required": [
+                  "image_id"
+                ]
+              }
+            },
+            "required": [
+              "Image"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "description": "Create a disk from a global image",
+            "type": "object",
+            "properties": {
+              "GlobalImage": {
+                "type": "object",
+                "properties": {
+                  "image_id": {
+                    "type": "string",
+                    "format": "uuid"
+                  }
+                },
+                "required": [
+                  "image_id"
+                ]
+              }
+            },
+            "required": [
+              "GlobalImage"
+            ],
+            "additionalProperties": false
+          }
         ]
       },
       "DiskState": {
@@ -5528,22 +5613,16 @@
             "description": "During instance creation, create and attach disks",
             "type": "object",
             "properties": {
-              "block_size": {
-                "description": "size of blocks for this Disk. valid values are: 512, 2048, or 4096",
-                "allOf": [
-                  {
-                    "$ref": "#/components/schemas/BlockSize"
-                  }
-                ]
-              },
               "description": {
                 "type": "string"
               },
-              "image_id": {
-                "nullable": true,
-                "description": "id for image from which the Disk should be created, if any",
-                "type": "string",
-                "format": "uuid"
+              "disk_source": {
+                "description": "initial source for this disk",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/DiskSource"
+                  }
+                ]
               },
               "name": {
                 "$ref": "#/components/schemas/Name"
@@ -5556,12 +5635,6 @@
                   }
                 ]
               },
-              "snapshot_id": {
-                "nullable": true,
-                "description": "id for snapshot from which the Disk should be created, if any",
-                "type": "string",
-                "format": "uuid"
-              },
               "type": {
                 "type": "string",
                 "enum": [
@@ -5570,8 +5643,8 @@
               }
             },
             "required": [
-              "block_size",
               "description",
+              "disk_source",
               "name",
               "size",
               "type"
