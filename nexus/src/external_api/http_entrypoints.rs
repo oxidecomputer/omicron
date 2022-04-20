@@ -2881,7 +2881,7 @@ async fn sshkeys_get(
             .ssh_keys_list(
                 &opctx,
                 silo_user_id,
-                &data_page_params_for(&rqctx, &query)?
+                &data_page_params_for(&rqctx, &query)?,
             )
             .await?
             .into_iter()

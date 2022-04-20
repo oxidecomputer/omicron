@@ -2864,10 +2864,7 @@ mod test {
 
         // Associate silo with user
         let silo_user = datastore
-            .silo_user_create(SiloUser::new(
-                *SILO_ID,
-                silo_user_id,
-            ))
+            .silo_user_create(SiloUser::new(*SILO_ID, silo_user_id))
             .await
             .unwrap();
 

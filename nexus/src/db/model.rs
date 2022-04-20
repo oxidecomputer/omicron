@@ -1013,8 +1013,11 @@ impl SshKey {
         Self::new_with_id(Uuid::new_v4(), silo_user_id, params)
     }
 
-
-    pub fn new_with_id(id: Uuid, silo_user_id: Uuid, params: params::SshKeyCreate) -> Self {
+    pub fn new_with_id(
+        id: Uuid,
+        silo_user_id: Uuid,
+        params: params::SshKeyCreate,
+    ) -> Self {
         Self {
             identity: SshKeyIdentity::new(id, params.identity),
             silo_user_id,
