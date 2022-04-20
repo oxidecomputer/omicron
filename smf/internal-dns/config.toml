@@ -1,9 +1,9 @@
 [dropshot]
-bind_address = "[fd00:1122:3344::9]:5353"
+bind_address = "[fd00:1122:3344:1::9]:5353"
 request_body_max_bytes = 1048576
 
 [dns]
-bind_address = "[fd00:1122:3344::9]:53"
+bind_address = "[fd00:1122:3344:1::9]:53"
 
 [log]
 # Show log messages of this level and more severe
