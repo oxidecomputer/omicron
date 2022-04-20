@@ -9,6 +9,7 @@ use crate::management_switch::ManagementSwitch;
 use crate::management_switch::ManagementSwitchDiscovery;
 use crate::management_switch::SwitchPort;
 use crate::Communicator;
+use crate::Timeout;
 use futures::future::Fuse;
 use futures::FutureExt;
 use futures::SinkExt;
@@ -414,7 +415,7 @@ impl SerialConsoleTask {
                     .serial_console_send_packet(
                         self.port,
                         packet,
-                        tokio::time::Instant::now() + self.sp_ack_timeout,
+                        Timeout::from_now(self.sp_ack_timeout),
                     )
                     .map_ok(move |()| packet_data_len)
                     .fuse();

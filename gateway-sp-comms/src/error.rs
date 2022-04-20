@@ -8,6 +8,7 @@ use crate::SpIdentifier;
 use gateway_messages::ResponseError;
 use std::io;
 use std::net::SocketAddr;
+use std::time::Duration;
 use thiserror::Error;
 
 #[derive(Debug, Error)]
@@ -26,8 +27,8 @@ pub enum Error {
         .0.slot,
     )]
     SpAddressUnknown(SpIdentifier),
-    #[error("timeout elapsed")]
-    Timeout,
+    #[error("timeout ({timeout:?}) elapsed communicating with {sp:?}")]
+    Timeout { timeout: Duration, sp: SpIdentifier },
     #[error("error communicating with SP: {0}")]
     SpCommunicationFailed(#[from] SpCommunicationError),
     #[error("serial console is already attached")]
@@ -53,10 +54,4 @@ pub enum SpCommunicationError {
 pub struct BadResponseType {
     pub expected: &'static str,
     pub got: &'static str,
-}
-
-impl From<tokio::time::error::Elapsed> for Error {
-    fn from(_: tokio::time::error::Elapsed) -> Self {
-        Self::Timeout
-    }
 }

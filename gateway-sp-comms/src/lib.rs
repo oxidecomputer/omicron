@@ -16,6 +16,7 @@
 mod communicator;
 mod management_switch;
 mod recv_handler;
+mod timeout;
 
 pub use usdt::register_probes;
 
@@ -25,6 +26,8 @@ pub use communicator::Communicator;
 pub use communicator::FuturesUnorderedImpl;
 pub use management_switch::SpIdentifier;
 pub use management_switch::SpType;
+pub use timeout::Elapsed;
+pub use timeout::Timeout;
 
 // TODO these will remain public for a while, but eventually will be removed
 // altogther; currently these provide a way to hard-code the rack topology,

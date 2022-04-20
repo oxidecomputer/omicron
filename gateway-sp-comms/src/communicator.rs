@@ -13,8 +13,10 @@ use crate::management_switch::ManagementSwitchDiscovery;
 use crate::management_switch::SpSocket;
 use crate::management_switch::SwitchPort;
 use crate::recv_handler::RecvHandler;
+use crate::Elapsed;
 use crate::KnownSps;
 use crate::SpIdentifier;
+use crate::Timeout;
 use futures::stream::FuturesUnordered;
 use futures::Future;
 use futures::Stream;
@@ -43,7 +45,6 @@ use std::sync::atomic::AtomicU32;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::time::Instant;
 use tokio_tungstenite::tungstenite::handshake;
 
 /// Helper trait that allows us to return an `impl FuturesUnordered<_>` where
@@ -105,7 +106,7 @@ impl Communicator {
     pub async fn get_ignition_state(
         &self,
         sp: SpIdentifier,
-        timeout: Instant,
+        timeout: Timeout,
     ) -> Result<IgnitionState, Error> {
         let controller = self.switch.ignition_controller();
         let port = self.id_to_port(sp)?;
@@ -124,7 +125,7 @@ impl Communicator {
     /// Ask the local ignition controller for the ignition state of all SPs.
     pub async fn get_ignition_state_all(
         &self,
-        timeout: Instant,
+        timeout: Timeout,
     ) -> Result<Vec<(SpIdentifier, IgnitionState)>, Error> {
         let controller = self.switch.ignition_controller();
         let request = RequestKind::BulkIgnitionState;
@@ -165,7 +166,7 @@ impl Communicator {
         &self,
         target_sp: SpIdentifier,
         command: IgnitionCommand,
-        timeout: Instant,
+        timeout: Timeout,
     ) -> Result<(), Error> {
         let controller = self.switch.ignition_controller();
         let target = self.id_to_port(target_sp)?.as_ignition_target();
@@ -285,7 +286,7 @@ impl Communicator {
         &self,
         port: SwitchPort,
         packet: SerialConsole,
-        timeout: Instant,
+        timeout: Timeout,
     ) -> Result<(), Error> {
         // We can only send to an SP's serial console if we've attached to it,
         // which means we know its address.
@@ -310,7 +311,7 @@ impl Communicator {
     pub async fn get_state(
         &self,
         sp: SpIdentifier,
-        timeout: Instant,
+        timeout: Timeout,
     ) -> Result<SpState, Error> {
         self.get_state_maybe_timeout(sp, Some(timeout)).await
     }
@@ -318,7 +319,7 @@ impl Communicator {
     /// Get the state of a given SP without a timeout; it is the caller's
     /// responsibility to ensure a reasonable timeout is applied higher up in
     /// the chain.
-    // TODO we could have one method that takes `Option<Instant>` for a timeout,
+    // TODO we could have one method that takes `Option<Timeout>` for a timeout,
     // and/or apply that to _all_ the methods in this class. I don't want to
     // make it easy to accidentally call a method without providing a timeout,
     // though, so went with the current design.
@@ -332,7 +333,7 @@ impl Communicator {
     async fn get_state_maybe_timeout(
         &self,
         sp: SpIdentifier,
-        timeout: Option<Instant>,
+        timeout: Option<Timeout>,
     ) -> Result<SpState, Error> {
         let port = self.id_to_port(sp)?;
         let sp =
@@ -366,14 +367,10 @@ impl Communicator {
     pub fn query_all_online_sps<F, T, Fut>(
         &self,
         ignition_state: &[(SpIdentifier, IgnitionState)],
-        timeout: Instant,
+        timeout: Timeout,
         f: F,
     ) -> impl FuturesUnorderedImpl<
-        Item = (
-            SpIdentifier,
-            IgnitionState,
-            Option<Result<T, tokio::time::error::Elapsed>>,
-        ),
+        Item = (SpIdentifier, IgnitionState, Option<Result<T, Elapsed>>),
     >
     where
         F: FnMut(SpIdentifier) -> Fut + Clone,
@@ -386,7 +383,7 @@ impl Communicator {
                 let mut f = f.clone();
                 async move {
                     let val = if state.is_powered_on() {
-                        Some(tokio::time::timeout_at(timeout, f(id)).await)
+                        Some(timeout.timeout_at(f(id)).await)
                     } else {
                         None
                     };
@@ -400,7 +397,7 @@ impl Communicator {
         &self,
         sp: &SpSocket<'_>,
         mut kind: RequestKind,
-        timeout: Option<Instant>,
+        timeout: Option<Timeout>,
         mut map_response_kind: F,
     ) -> Result<T, Error>
     where
@@ -408,14 +405,14 @@ impl Communicator {
     {
         // helper to wrap a future in a timeout if we have one
         async fn maybe_with_timeout<F, U>(
-            timeout: Option<Instant>,
+            timeout: Option<Timeout>,
             fut: F,
-        ) -> Result<U, tokio::time::error::Elapsed>
+        ) -> Result<U, Elapsed>
         where
             F: Future<Output = U>,
         {
             match timeout {
-                Some(t) => tokio::time::timeout_at(t, fut).await,
+                Some(t) => t.timeout_at(fut).await,
                 None => Ok(fut.await),
             }
         }
@@ -435,7 +432,12 @@ impl Communicator {
             let duration = backoff
                 .next_backoff()
                 .expect("internal backoff policy gave up");
-            maybe_with_timeout(timeout, tokio::time::sleep(duration)).await?;
+            maybe_with_timeout(timeout, tokio::time::sleep(duration))
+                .await
+                .map_err(|err| Error::Timeout {
+                    timeout: err.duration(),
+                    sp: self.port_to_id(sp.port()),
+                })?;
 
             // request IDs will eventually roll over; since we enforce timeouts
             // this should be a non-issue in practice. does this need testing?
@@ -461,7 +463,11 @@ impl Communicator {
 
                 Ok::<ResponseKind, SpCommunicationError>(response_fut.await?)
             })
-            .await?;
+            .await
+            .map_err(|err| Error::Timeout {
+                timeout: err.duration(),
+                sp: self.port_to_id(sp.port()),
+            })?;
 
             match result {
                 Ok(response_kind) => {
