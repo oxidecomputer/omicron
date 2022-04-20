@@ -3676,7 +3676,7 @@ impl Nexus {
         &self,
         _opctx: &OpContext,
         silo_user_id: Uuid,
-        page_params: &DataPageParams<'_, Uuid>,
+        page_params: &DataPageParams<'_, Name>,
     ) -> ListResultVec<SshKey> {
         self.db_datastore.ssh_keys_list(silo_user_id, page_params).await
     }

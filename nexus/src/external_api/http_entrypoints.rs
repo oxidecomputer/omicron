@@ -2868,7 +2868,7 @@ async fn roles_get_role(
 }]
 async fn sshkeys_get(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
-    query_params: Query<PaginatedById>,
+    query_params: Query<PaginatedByName>,
 ) -> Result<HttpResponseOk<ResultsPage<SshKey>>, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
@@ -2877,17 +2877,15 @@ async fn sshkeys_get(
         let opctx = OpContext::for_external_api(&rqctx).await?;
         let &actor = opctx.authn.actor_required()?;
         let silo_user_id = actor.id;
+        let page_params =
+            data_page_params_for(&rqctx, &query)?.map_name(Name::ref_cast);
         let ssh_keys = nexus
-            .ssh_keys_list(
-                &opctx,
-                silo_user_id,
-                &data_page_params_for(&rqctx, &query)?,
-            )
+            .ssh_keys_list(&opctx, silo_user_id, &page_params)
             .await?
             .into_iter()
             .map(SshKey::from)
             .collect::<Vec<SshKey>>();
-        Ok(HttpResponseOk(ScanById::results_page(&query, ssh_keys)?))
+        Ok(HttpResponseOk(ScanByName::results_page(&query, ssh_keys)?))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
@@ -2901,7 +2899,7 @@ async fn sshkeys_get(
 async fn sshkeys_post(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     new_key: TypedBody<params::SshKeyCreate>,
-) -> Result<HttpResponseOk<SshKey>, HttpError> {
+) -> Result<HttpResponseCreated<SshKey>, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
     let handler = async {
@@ -2911,7 +2909,7 @@ async fn sshkeys_post(
         let ssh_key = nexus
             .ssh_key_create(&opctx, silo_user_id, new_key.into_inner())
             .await?;
-        Ok(HttpResponseOk(ssh_key.into()))
+        Ok(HttpResponseCreated(ssh_key.into()))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }

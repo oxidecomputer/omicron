@@ -2685,11 +2685,11 @@ impl DataStore {
     pub async fn ssh_keys_list(
         &self,
         silo_user_id: Uuid,
-        page_params: &DataPageParams<'_, Uuid>,
+        page_params: &DataPageParams<'_, Name>,
     ) -> ListResultVec<SshKey> {
         use db::schema::ssh_key::dsl;
 
-        paginated(dsl::ssh_key, dsl::id, page_params)
+        paginated(dsl::ssh_key, dsl::name, page_params)
             .filter(dsl::silo_user_id.eq(silo_user_id))
             .filter(dsl::time_deleted.is_null())
             .select(SshKey::as_select())
