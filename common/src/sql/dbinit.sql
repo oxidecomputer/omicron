@@ -439,11 +439,8 @@ CREATE TABLE omicron.public.image (
     project_id UUID NOT NULL,
     volume_id UUID NOT NULL,
 
-    /* Optional URL: Images may be backed by either a URL or a volume */
     url STRING(8192),
-    /* Optional version */
     version STRING(64),
-    /* Optional digest */
     digest TEXT,
     block_size omicron.public.block_size NOT NULL,
     size_bytes INT NOT NULL
@@ -467,11 +464,8 @@ CREATE TABLE omicron.public.global_image (
 
     volume_id UUID NOT NULL,
 
-    /* Optional URL: Images may be backed by either a URL or a volume */
     url STRING(8192),
-    /* Optional version */
     version STRING(64),
-    /* Optional digest */
     digest TEXT,
     block_size omicron.public.block_size NOT NULL,
     size_bytes INT NOT NULL
