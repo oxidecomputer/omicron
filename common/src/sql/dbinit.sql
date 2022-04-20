@@ -303,6 +303,9 @@ CREATE TABLE omicron.public.instance (
     /* Every Instance is in exactly one Project at a time. */
     project_id UUID NOT NULL,
 
+    /* user data for instance initialization systems (e.g. cloud-init) */
+    user_data BYTES NOT NULL,
+
     /*
      * TODO Would it make sense for the runtime state to live in a separate
      * table?

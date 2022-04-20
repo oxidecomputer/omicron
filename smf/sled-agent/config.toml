@@ -2,9 +2,10 @@
 
 id = "fb0f7546-4d46-40ca-9d56-cbb810684ca7"
 
-bootstrap_address = "[::]:12346"
+# TODO: Remove this address
+
 # Internal address of Nexus
-nexus_address = "[fd00:1de::7]:12221"
+nexus_address = "[fd00:1122:3344:01::3]:12221"
 
 # A file-backed zpool can be manually created with the following:
 # $ truncate -s 10GB testpool.vdev
@@ -20,16 +21,6 @@ zpools = [
 # $ dladm show-phys -p -o LINK
 # data_link = "igb0"
 
-# Address of the Sled Agent itself
-#
-# With the usage of non-global zones, we no longer can use localhost addresses,
-# as Nexus (within a Zone) is effectively "on a different machine" from the
-# sled agent.
-[dropshot]
-bind_address = "[fd00:1de::1]:12345"
-
 [log]
 level = "info"
 mode = "stderr-terminal"
-
-

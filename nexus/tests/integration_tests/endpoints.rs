@@ -33,6 +33,19 @@ lazy_static! {
     pub static ref HARDWARE_SLED_URL: String =
         format!("/hardware/sleds/{}", SLED_AGENT_UUID);
 
+    // Silo used for testing
+    pub static ref DEMO_SILO_NAME: Name = "demo-silo".parse().unwrap();
+    pub static ref DEMO_SILO_URL: String =
+        format!("/silos/{}", *DEMO_SILO_NAME);
+    pub static ref DEMO_SILO_CREATE: params::SiloCreate =
+        params::SiloCreate {
+            identity: IdentityMetadataCreateParams {
+                name: DEMO_SILO_NAME.clone(),
+                description: String::from(""),
+            },
+            discoverable: true,
+        };
+
     // Organization used for testing
     pub static ref DEMO_ORG_NAME: Name = "demo-org".parse().unwrap();
     pub static ref DEMO_ORG_URL: String =
@@ -179,6 +192,7 @@ lazy_static! {
             ncpus: InstanceCpuCount(1),
             memory: ByteCount::from_gibibytes_u32(16),
             hostname: String::from("demo-instance"),
+            user_data: vec![],
             network_interfaces:
                 params::InstanceNetworkInterfaceAttachment::Default,
             disks: vec![],
@@ -349,6 +363,27 @@ lazy_static! {
 
     /// List of endpoints to be verified
     pub static ref VERIFY_ENDPOINTS: Vec<VerifyEndpoint> = vec![
+        /* Silos */
+        VerifyEndpoint {
+            url: "/silos",
+            visibility: Visibility::Public,
+            allowed_methods: vec![
+                AllowedMethod::Get,
+                AllowedMethod::Post(
+                    serde_json::to_value(&*DEMO_SILO_CREATE).unwrap()
+                )
+            ],
+        },
+        VerifyEndpoint {
+            url: &*DEMO_SILO_URL,
+            visibility: Visibility::Protected,
+            allowed_methods: vec![
+                AllowedMethod::Get,
+                AllowedMethod::Delete,
+            ],
+        },
+
+
         /* Organizations */
 
         VerifyEndpoint {

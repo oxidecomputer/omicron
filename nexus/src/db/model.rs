@@ -6,6 +6,7 @@
 
 use crate::db::collection_insert::DatastoreCollection;
 use crate::db::identity::{Asset, Resource};
+use crate::db::ipv6;
 use crate::db::schema::{
     console_session, dataset, disk, global_image, image, instance,
     metric_producer, network_interface, organization, oximeter, project, rack,
@@ -37,6 +38,7 @@ use std::net::IpAddr;
 use std::net::Ipv4Addr;
 use std::net::Ipv6Addr;
 use std::net::SocketAddr;
+use std::net::SocketAddrV6;
 use uuid::Uuid;
 
 // TODO: Break up types into multiple files
@@ -634,12 +636,12 @@ pub struct Sled {
     rcgen: Generation,
 
     // ServiceAddress (Sled Agent).
-    pub ip: ipnetwork::IpNetwork,
+    pub ip: ipv6::Ipv6Addr,
     // TODO: Make use of SqlU16
     pub port: i32,
 
     /// The last IP address provided to an Oxide service on this sled
-    pub last_used_address: IpNetwork,
+    pub last_used_address: ipv6::Ipv6Addr,
 }
 
 // TODO-correctness: We need a small offset here, while services and
@@ -651,46 +653,33 @@ pub struct Sled {
 // See https://github.com/oxidecomputer/omicron/issues/732 for tracking issue.
 pub(crate) const STATIC_IPV6_ADDRESS_OFFSET: u16 = 20;
 impl Sled {
-    // TODO-cleanup: We should be using IPv6 only for Oxide services, including
-    // `std::net::Ipv6Addr` and `SocketAddrV6`. The v4/v6 enums should only be
-    // used for managing customer addressing information, or when needed to
-    // interact with the database.
-    pub fn new(id: Uuid, addr: SocketAddr) -> Self {
+    pub fn new(id: Uuid, addr: SocketAddrV6) -> Self {
         let last_used_address = {
-            match addr.ip() {
-                IpAddr::V6(ip) => {
-                    let mut segments = ip.segments();
-                    segments[7] += STATIC_IPV6_ADDRESS_OFFSET;
-                    ipnetwork::IpNetwork::from(IpAddr::from(Ipv6Addr::from(
-                        segments,
-                    )))
-                }
-                IpAddr::V4(ip) => {
-                    // TODO-correctness: This match arm should disappear when we
-                    // support only IPv6 for underlay addressing.
-                    let x = u32::from_be_bytes(ip.octets())
-                        + u32::from(STATIC_IPV6_ADDRESS_OFFSET);
-                    ipnetwork::IpNetwork::from(IpAddr::from(Ipv4Addr::from(x)))
-                }
-            }
+            let mut segments = addr.ip().segments();
+            segments[7] += STATIC_IPV6_ADDRESS_OFFSET;
+            ipv6::Ipv6Addr::from(Ipv6Addr::from(segments))
         };
         Self {
             identity: SledIdentity::new(id),
             time_deleted: None,
             rcgen: Generation::new(),
-            ip: addr.ip().into(),
+            ip: ipv6::Ipv6Addr::from(addr.ip()),
             port: addr.port().into(),
             last_used_address,
         }
     }
 
-    pub fn address(&self) -> SocketAddr {
+    pub fn ip(&self) -> Ipv6Addr {
+        self.ip.into()
+    }
+
+    pub fn address(&self) -> SocketAddrV6 {
         // TODO: avoid this unwrap
         self.address_with_port(u16::try_from(self.port).unwrap())
     }
 
-    pub fn address_with_port(&self, port: u16) -> SocketAddr {
-        SocketAddr::new(self.ip.ip(), port)
+    pub fn address_with_port(&self, port: u16) -> SocketAddrV6 {
+        SocketAddrV6::new(self.ip(), port, 0, 0)
     }
 }
 
@@ -1021,7 +1010,7 @@ pub struct Organization {
     #[diesel(embed)]
     identity: OrganizationIdentity,
 
-    silo_id: Uuid,
+    pub silo_id: Uuid,
 
     /// child resource generation number, per RFD 192
     pub rcgen: Generation,
@@ -1036,10 +1025,6 @@ impl Organization {
             silo_id,
             rcgen: Generation::new(),
         }
-    }
-
-    pub fn silo_id(&self) -> Uuid {
-        self.silo_id
     }
 }
 
@@ -1118,6 +1103,9 @@ pub struct Instance {
     /// id for the project containing this Instance
     pub project_id: Uuid,
 
+    /// user data for instance initialization systems (e.g. cloud-init)
+    pub user_data: Vec<u8>,
+
     /// runtime state of the Instance
     #[diesel(embed)]
     pub runtime_state: InstanceRuntimeState,
@@ -1132,7 +1120,12 @@ impl Instance {
     ) -> Self {
         let identity =
             InstanceIdentity::new(instance_id, params.identity.clone());
-        Self { identity, project_id, runtime_state: runtime }
+        Self {
+            identity,
+            project_id,
+            user_data: params.user_data.clone(),
+            runtime_state: runtime,
+        }
     }
 
     pub fn runtime(&self) -> &InstanceRuntimeState {

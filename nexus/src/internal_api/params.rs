@@ -8,6 +8,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::net::SocketAddr;
+use std::net::SocketAddrV6;
 use std::str::FromStr;
 use uuid::Uuid;
 
@@ -15,7 +16,7 @@ use uuid::Uuid;
 #[derive(Serialize, Deserialize, JsonSchema)]
 pub struct SledAgentStartupInfo {
     /// the address of the sled agent's API endpoint
-    pub sa_address: SocketAddr,
+    pub sa_address: SocketAddrV6,
 }
 
 /// Sent by a sled agent on startup to Nexus to request further instruction

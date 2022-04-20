@@ -208,6 +208,7 @@ impl DatasetInfo {
     ) -> Result<(), Error> {
         match self.kind {
             DatasetKind::CockroachDb { .. } => {
+                info!(log, "start_zone: Loading CRDB manifest");
                 // Load the CRDB manifest.
                 zone.run_cmd(&[
                     crate::illumos::zone::SVCCFG,
@@ -216,6 +217,11 @@ impl DatasetInfo {
                 ])?;
 
                 // Set parameters which are passed to the CRDB binary.
+                info!(
+                    log,
+                    "start_zone: setting CRDB's config/listen_addr: {}",
+                    address
+                );
                 zone.run_cmd(&[
                     crate::illumos::zone::SVCCFG,
                     "-s",
@@ -223,6 +229,8 @@ impl DatasetInfo {
                     "setprop",
                     &format!("config/listen_addr={}", address),
                 ])?;
+
+                info!(log, "start_zone: setting CRDB's config/store");
                 zone.run_cmd(&[
                     crate::illumos::zone::SVCCFG,
                     "-s",
@@ -234,6 +242,7 @@ impl DatasetInfo {
                 //
                 // Set these addresses, use "start" instead of
                 // "start-single-node".
+                info!(log, "start_zone: setting CRDB's config/join_addrs");
                 zone.run_cmd(&[
                     crate::illumos::zone::SVCCFG,
                     "-s",
@@ -244,6 +253,7 @@ impl DatasetInfo {
 
                 // Refresh the manifest with the new properties we set,
                 // so they become "effective" properties when the service is enabled.
+                info!(log, "start_zone: refreshing manifest");
                 zone.run_cmd(&[
                     crate::illumos::zone::SVCCFG,
                     "-s",
@@ -251,6 +261,7 @@ impl DatasetInfo {
                     "refresh",
                 ])?;
 
+                info!(log, "start_zone: enabling CRDB service");
                 zone.run_cmd(&[
                     crate::illumos::zone::SVCADM,
                     "enable",
@@ -259,6 +270,7 @@ impl DatasetInfo {
                 ])?;
 
                 // Await liveness of the cluster.
+                info!(log, "start_zone: awaiting liveness of CRDB");
                 let check_health = || async {
                     let http_addr = SocketAddr::new(address.ip(), 8080);
                     reqwest::get(format!("http://{}/health?ready=1", http_addr))
@@ -658,6 +670,7 @@ impl StorageWorker {
         nexus_notifications: &mut FuturesOrdered<Pin<Box<NotifyFut>>>,
         request: &NewFilesystemRequest,
     ) -> Result<(), Error> {
+        info!(self.log, "add_dataset: {:?}", request);
         let mut pools = self.pools.lock().await;
         let name = ZpoolName::new(request.zpool_id);
         let pool = pools.get_mut(&name).ok_or_else(|| {

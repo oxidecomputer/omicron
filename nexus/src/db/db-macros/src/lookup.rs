@@ -67,6 +67,9 @@ pub struct Config {
     /// This resources supports soft-deletes
     soft_deletes: bool,
 
+    /// This resource is nested under the Silo hierarchy
+    siloed: bool,
+
     /// Name of the enum describing how we're looking up this resource
     lookup_enum: syn::Ident,
 
@@ -116,9 +119,11 @@ impl Config {
 
         let child_resources = input.children;
         let parent = input.ancestors.last().map(|s| Resource::for_name(&s));
+        let siloed = input.ancestors.iter().any(|s| s == "Silo");
 
         Config {
             resource,
+            siloed,
             lookup_enum,
             path_types,
             path_authz_names,
@@ -223,6 +228,11 @@ fn generate_struct(config: &Config) -> TokenStream {
 
         /// Describes how we're looking up this resource
         enum #lookup_enum<'a>{
+            /// An error occurred while selecting the resource
+            ///
+            /// This error will be returned by any lookup/fetch attempts.
+            Error(Root<'a>, Error),
+
             #name_variant
 
             /// We're looking for a resource with the given primary key
@@ -286,12 +296,75 @@ fn generate_child_selectors(config: &Config) -> TokenStream {
 fn generate_misc_helpers(config: &Config) -> TokenStream {
     let fleet_name = format_ident!("Fleet");
     let resource_name = &config.resource.name;
+    let resource_name_str = resource_name.to_string();
     let parent_resource_name =
         config.parent.as_ref().map(|p| &p.name).unwrap_or(&fleet_name);
     let lookup_enum = &config.lookup_enum;
 
     let name_variant = if config.lookup_by_name {
         quote! { #lookup_enum::Name(parent, _) => parent.lookup_root(), }
+    } else {
+        quote! {}
+    };
+
+    let resource_authz_name = &config.resource.authz_name;
+    let silo_check_fn = if config.siloed {
+        quote! {
+            /// For a "siloed" resource (i.e., one that's nested under "Silo" in
+            /// the resource hierarchy), check whether a given resource's Silo
+            /// (given by `authz_silo`) matches the Silo of the actor doing the
+            /// fetch/lookup (given by `opctx`).
+            ///
+            /// This check should not be strictly necessary.  We should never
+            /// wind up hitting the error conditions here.  That's because in
+            /// order to reach this check, we must have done a successful authz
+            /// check.  That check should have failed because there's no way to
+            /// grant users access to resources in other Silos.  So why do this
+            /// check at all?  As a belt-and-suspenders way to make sure we
+            /// never return objects to a user that are from a different Silo
+            /// than the one they're attached to.  But what do we do if the
+            /// check fails?  We definitely want to know about it so that we can
+            /// determine if there's an authz bug here, and if so, fix it.
+            /// That's why we log this at "error" level.  We also override the
+            /// lookup return value with a suitable error indicating the
+            /// resource does not exist or the caller did not supply
+            /// credentials, just as if they didn't have access to the object.
+            // TODO-support These log messages should trigger support cases.
+            fn silo_check(
+                opctx: &OpContext,
+                authz_silo: &authz::Silo,
+                #resource_authz_name: &authz::#resource_name,
+            ) -> Result<(), Error> {
+                let log = &opctx.log;
+                let maybe_silo = opctx.authn.silo_required();
+                if let Err(_) = &maybe_silo {
+                    error!(
+                        log,
+                        "unexpected successful lookup of siloed resource\
+                        {:?} with no silo in OpContext",
+                        #resource_name_str,
+                    );
+                };
+                let actor_silo_id = maybe_silo?.id();
+
+                let resource_silo_id = authz_silo.id();
+                if resource_silo_id != actor_silo_id {
+                    use crate::authz::ApiResourceError;
+                    error!(
+                        log,
+                        "unexpected successful lookup of siloed resource\
+                        {:?} in a different Silo from current actor (resource\
+                        Silo {}, actor Silo {})",
+                        #resource_name_str,
+                        resource_silo_id,
+                        actor_silo_id,
+                    );
+                    Err(#resource_authz_name.not_found())
+                } else {
+                    Ok(())
+                }
+            }
+        }
     } else {
         quote! {}
     };
@@ -317,11 +390,15 @@ fn generate_misc_helpers(config: &Config) -> TokenStream {
         /// used for this lookup.
         fn lookup_root(&self) -> &LookupPath<'a> {
             match &self.key {
+                #lookup_enum::Error(root, ..) => root.lookup_root(),
+
                 #name_variant
 
                 #lookup_enum::PrimaryKey(root, ..) => root.lookup_root(),
             }
         }
+
+        #silo_check_fn
     }
 }
 
@@ -401,6 +478,39 @@ fn generate_lookup_methods(config: &Config) -> TokenStream {
         quote! {}
     };
 
+    // If this resource is "Siloed", then tack on an extra check that the
+    // resource's Silo matches the Silo of the actor doing the fetch/lookup.
+    // See the generation of `silo_check()` for details.
+    let (silo_check_lookup, silo_check_fetch) = if config.siloed {
+        (
+            quote! {
+                .and_then(|input| {
+                    let (
+                        ref authz_silo,
+                        ..,
+                        ref #resource_authz_name,
+                    ) = &input;
+                    Self::silo_check(opctx, authz_silo, #resource_authz_name)?;
+                    Ok(input)
+                })
+            },
+            quote! {
+                .and_then(|input| {
+                    let (
+                        ref authz_silo,
+                        ..,
+                        ref #resource_authz_name,
+                        ref _db_row,
+                    ) = &input;
+                    Self::silo_check(opctx, authz_silo, #resource_authz_name)?;
+                    Ok(input)
+                })
+            },
+        )
+    } else {
+        (quote! {}, quote! {})
+    };
+
     quote! {
         /// Fetch the record corresponding to the selected resource
         ///
@@ -429,6 +539,8 @@ fn generate_lookup_methods(config: &Config) -> TokenStream {
             let datastore = &lookup.datastore;
 
             match &self.key {
+                #lookup_enum::Error(_, error) => Err(error.clone()),
+
                 #fetch_for_name_variant
 
                 #lookup_enum::PrimaryKey(_, #(#pkey_names,)*) => {
@@ -440,6 +552,7 @@ fn generate_lookup_methods(config: &Config) -> TokenStream {
                     ).await
                 }
             }
+            #silo_check_fetch
         }
 
         /// Fetch an `authz` object for the selected resource and check
@@ -460,6 +573,7 @@ fn generate_lookup_methods(config: &Config) -> TokenStream {
             let (#(#path_authz_names,)*) = self.lookup().await?;
             opctx.authorize(action, &#resource_authz_name).await?;
             Ok((#(#path_authz_names,)*))
+            #silo_check_lookup
         }
 
         /// Fetch the "authz" objects for the selected resource and all its
@@ -478,6 +592,8 @@ fn generate_lookup_methods(config: &Config) -> TokenStream {
             let datastore = &lookup.datastore;
 
             match &self.key {
+                #lookup_enum::Error(_, error) => Err(error.clone()),
+
                 #lookup_name_variant
 
                 #lookup_enum::PrimaryKey(_, #(#pkey_names,)*) => {
@@ -742,7 +858,7 @@ mod test {
         let output = lookup_resource(
             quote! {
                 name = "Organization",
-                ancestors = [],
+                ancestors = ["Silo"],
                 children = [ "Project" ],
                 lookup_by_name = true,
                 soft_deletes = true,

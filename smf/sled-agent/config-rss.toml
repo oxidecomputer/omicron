@@ -1,46 +1,56 @@
 # RSS (Rack Setup Service) "stand-in" configuration.
 
+# The /56 subnet for the rack.
+# Also implies the /48 AZ subnet.
+#              |............|    <- This /48 is the AZ Subnet
+#              |...............| <- This /56 is the Rack Subnet
+rack_subnet = "fd00:1122:3344:1::"
+
 [[request]]
-sled_address = "[fd00:1de::1]:12345"
 
 # TODO(https://github.com/oxidecomputer/omicron/issues/732): Nexus
 # should allocate crucible datasets.
 [[request.dataset]]
 zpool_uuid = "d462a7f7-b628-40fe-80ff-4e4189e2d62b"
-address = "[fd00:1de::9]:32345"
+address = "[fd00:1122:3344:1::6]:32345"
 dataset_kind.type = "crucible"
 
 [[request.dataset]]
 zpool_uuid = "e4b4dc87-ab46-49fb-a4b4-d361ae214c03"
-address = "[fd00:1de::10]:32345"
+address = "[fd00:1122:3344:1::7]:32345"
 dataset_kind.type = "crucible"
 
 [[request.dataset]]
 zpool_uuid = "f4b4dc87-ab46-49fb-a4b4-d361ae214c03"
-address = "[fd00:1de::11]:32345"
+address = "[fd00:1122:3344:1::8]:32345"
 dataset_kind.type = "crucible"
 
 [[request.dataset]]
 zpool_uuid = "d462a7f7-b628-40fe-80ff-4e4189e2d62b"
-address = "[fd00:1de::5]:32221"
+address = "[fd00:1122:3344:1::2]:32221"
 dataset_kind.type = "cockroach_db"
 dataset_kind.all_addresses = [
-  "[fd00:1de::5]:32221",
+  "[fd00:1122:3344:1::2]:32221",
 ]
 
 # TODO(https://github.com/oxidecomputer/omicron/issues/732): Nexus
 # should allocate clickhouse datasets.
 [[request.dataset]]
 zpool_uuid = "d462a7f7-b628-40fe-80ff-4e4189e2d62b"
-address = "[fd00:1de::8]:8123"
+address = "[fd00:1122:3344:1::5]:8123"
 dataset_kind.type = "clickhouse"
 
 [[request.service]]
 name = "nexus"
-addresses = [ "[fd00:1de::7]:12220", "[fd00:1de::7]:12221" ]
+addresses = [
+  "[fd00:1122:3344:1::3]:12220",
+  "[fd00:1122:3344:1::3]:12221",
+]
 
 # TODO(https://github.com/oxidecomputer/omicron/issues/732): Nexus
 # should allocate Oximeter services.
 [[request.service]]
 name = "oximeter"
-addresses = [ "[fd00:1de::6]:12223" ]
+addresses = [
+  "[fd00:1122:3344:1::4]:12223",
+]

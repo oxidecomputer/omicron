@@ -315,7 +315,7 @@ impl AuthorizedResource for GlobalImageList {
 
 authz_resource! {
     name = "Organization",
-    parent = "Fleet",
+    parent = "Silo",
     primary_key = Uuid,
     roles_allowed = true,
     polar_snippet = Custom,
@@ -432,7 +432,7 @@ authz_resource! {
     parent = "Fleet",
     primary_key = Uuid,
     roles_allowed = true,
-    polar_snippet = FleetChild,
+    polar_snippet = Custom,
 }
 
 authz_resource! {

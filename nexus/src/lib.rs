@@ -15,6 +15,7 @@
 
 pub mod authn; // Public only for testing
 pub mod authz; // Public for documentation examples
+mod cidata;
 pub mod config; // Public for testing
 pub mod context; // Public for documentation examples
 pub mod db; // Public for documentation examples

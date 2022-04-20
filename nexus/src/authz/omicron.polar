@@ -50,7 +50,7 @@ has_role(actor: AuthenticatedActor, role: String, resource: Resource)
 
 #
 # Permissions and predefined roles for resources in the
-# Fleet/Organization/Project hierarchy
+# Fleet/Silo/Organization/Project hierarchy
 #
 # For now, we define the following permissions for most resources in the system:
 #
@@ -79,8 +79,11 @@ has_role(actor: AuthenticatedActor, role: String, resource: Resource)
 # The complete set of predefined roles:
 #
 # - fleet.admin           (superuser for the whole system)
-# - fleet.collaborator    (can create and own orgs)
+# - fleet.collaborator    (can create and own silos)
 # - fleet.viewer          (can read fleet-wide data)
+# - silo.admin            (superuser for the silo)
+# - silo.collaborator     (can create and own orgs)
+# - silo.viewer           (can read silo-wide data)
 # - organization.admin    (complete control over an organization)
 # - organization.collaborator (can create, modify, and delete projects)
 # - project.admin         (complete control over a project)
@@ -125,6 +128,32 @@ resource Fleet {
 	"modify" if "admin";
 }
 
+resource Silo {
+	permissions = [
+	    "list_children",
+	    "modify",
+	    "read",
+	    "create_child",
+	];
+	roles = [ "admin", "collaborator", "viewer" ];
+
+	"list_children" if "viewer";
+	"read" if "viewer";
+
+	"viewer" if "collaborator";
+	"create_child" if "collaborator";
+	"collaborator" if "admin";
+	"modify" if "admin";
+	relations = { parent_fleet: Fleet };
+	"admin" if "admin" on "parent_fleet";
+	"collaborator" if "collaborator" on "parent_fleet";
+	"viewer" if "viewer" on "parent_fleet";
+}
+has_relation(fleet: Fleet, "parent_fleet", silo: Silo)
+	if silo.fleet = fleet;
+has_role(actor: AuthenticatedActor, "viewer", silo: Silo)
+	if actor.silo = silo;
+
 resource Organization {
 	permissions = [
 	    "list_children",
@@ -148,11 +177,11 @@ resource Organization {
 	"collaborator" if "admin";
 	"modify" if "admin";
 
-	relations = { parent_fleet: Fleet };
-	"admin" if "admin" on "parent_fleet";
+	relations = { parent_silo: Silo };
+	"admin" if "admin" on "parent_silo";
 }
-has_relation(fleet: Fleet, "parent_fleet", organization: Organization)
-	if organization.fleet = fleet;
+has_relation(silo: Silo, "parent_silo", organization: Organization)
+	if organization.silo = silo;
 
 resource Project {
 	permissions = [

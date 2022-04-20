@@ -22,6 +22,9 @@ to = "/opt/ooce/pgsql-13/lib/amd64"
 [[package.omicron-nexus.paths]]
 from = "smf/nexus"
 to = "/var/svc/manifest/site/nexus"
+[[package.omicron-nexus.paths]]
+from = "out/console-assets"
+to = "/var/nexus/static"
 
 [package.oximeter-collector]
 rust.binary_names = ["oximeter"]
@@ -86,5 +89,7 @@ zone = true
 [external_package.propolis-server.source]
 type = "prebuilt"
 repo = "propolis"
-commit = "e984409a425df97338efa2c53ba3e40c73668638"
-sha256 = "206ef42e90d157e3314f4745ddb4422b3c93a16881749824037853e6f39f3762"
+commit = "abd372deb0a7dfa33f138f7741c5107184fa7088"
+# The SHA256 digest is automatically posted to:
+# https://buildomat.eng.oxide.computer/public/file/oxidecomputer/propolis/image/<commit>/propolis-server.sha256.txt
+sha256 = "80eb60d7c1eb15d261baeb3a4e9179beff491b5cc20bfb172960e78c5d331b94"

@@ -143,6 +143,11 @@ struct SetupReq {
 lazy_static! {
     /// List of requests to execute at setup time
     static ref SETUP_REQUESTS: Vec<SetupReq> = vec![
+        // Create a separate Silo (not used for anything else)
+        SetupReq {
+            url: "/silos",
+            body: serde_json::to_value(&*DEMO_SILO_CREATE).unwrap(),
+        },
         // Create an Organization
         SetupReq {
             url: "/organizations",

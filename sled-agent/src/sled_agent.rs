@@ -21,7 +21,7 @@ use omicron_common::api::{
     internal::nexus::UpdateArtifact,
 };
 use slog::Logger;
-use std::net::SocketAddr;
+use std::net::{SocketAddr, SocketAddrV6};
 use std::sync::Arc;
 use uuid::Uuid;
 
@@ -68,6 +68,9 @@ impl From<Error> for omicron_common::api::external::Error {
 ///
 /// Contains both a connection to the Nexus, as well as managed instances.
 pub struct SledAgent {
+    // ID of the Sled
+    id: Uuid,
+
     // Component of Sled Agent responsible for storage and dataset management.
     storage: StorageManager,
 
@@ -86,6 +89,7 @@ impl SledAgent {
         config: &Config,
         log: Logger,
         nexus_client: Arc<NexusClient>,
+        sled_address: SocketAddrV6,
     ) -> Result<SledAgent, Error> {
         let id = &config.id;
         let vlan = config.vlan;
@@ -110,7 +114,8 @@ impl SledAgent {
         // configuration file.
         Zones::ensure_has_global_zone_v6_address(
             config.data_link.clone(),
-            config.dropshot.bind_address.ip(),
+            *sled_address.ip(),
+            "sled6",
         )?;
 
         // Identify all existing zones which should be managed by the Sled
@@ -168,7 +173,17 @@ impl SledAgent {
             ServiceManager::new(log.clone(), config.data_link.clone(), None)
                 .await?;
 
-        Ok(SledAgent { storage, instances, nexus_client, services })
+        Ok(SledAgent {
+            id: config.id,
+            storage,
+            instances,
+            nexus_client,
+            services,
+        })
+    }
+
+    pub fn id(&self) -> Uuid {
+        self.id
     }
 
     /// Ensures that particular services should be initialized.
