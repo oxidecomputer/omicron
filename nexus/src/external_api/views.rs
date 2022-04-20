@@ -103,7 +103,7 @@ pub struct Image {
     #[serde(flatten)]
     pub identity: IdentityMetadata,
 
-    /// The project the disk belongs to, if not a global image.
+    /// The project the disk belongs to
     pub project_id: Uuid,
 
     /// URL source of this image, if any
