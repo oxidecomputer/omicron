@@ -345,6 +345,7 @@ impl JsonSchema for BlockSize {
 
 /// Different sources for a disk
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(tag = "type")]
 pub enum DiskSource {
     /// Create a blank disk
     Blank {

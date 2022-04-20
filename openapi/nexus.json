@@ -4940,93 +4940,85 @@
             "description": "Create a blank disk",
             "type": "object",
             "properties": {
-              "Blank": {
-                "type": "object",
-                "properties": {
-                  "block_size": {
-                    "description": "size of blocks for this Disk. valid values are: 512, 2048, or 4096",
-                    "allOf": [
-                      {
-                        "$ref": "#/components/schemas/BlockSize"
-                      }
-                    ]
+              "block_size": {
+                "description": "size of blocks for this Disk. valid values are: 512, 2048, or 4096",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/BlockSize"
                   }
-                },
-                "required": [
-                  "block_size"
+                ]
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "Blank"
                 ]
               }
             },
             "required": [
-              "Blank"
-            ],
-            "additionalProperties": false
+              "block_size",
+              "type"
+            ]
           },
           {
             "description": "Create a disk from a disk snapshot",
             "type": "object",
             "properties": {
-              "Snapshot": {
-                "type": "object",
-                "properties": {
-                  "snapshot_id": {
-                    "type": "string",
-                    "format": "uuid"
-                  }
-                },
-                "required": [
-                  "snapshot_id"
+              "snapshot_id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "Snapshot"
                 ]
               }
             },
             "required": [
-              "Snapshot"
-            ],
-            "additionalProperties": false
+              "snapshot_id",
+              "type"
+            ]
           },
           {
             "description": "Create a disk from a project image",
             "type": "object",
             "properties": {
-              "Image": {
-                "type": "object",
-                "properties": {
-                  "image_id": {
-                    "type": "string",
-                    "format": "uuid"
-                  }
-                },
-                "required": [
-                  "image_id"
+              "image_id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "Image"
                 ]
               }
             },
             "required": [
-              "Image"
-            ],
-            "additionalProperties": false
+              "image_id",
+              "type"
+            ]
           },
           {
             "description": "Create a disk from a global image",
             "type": "object",
             "properties": {
-              "GlobalImage": {
-                "type": "object",
-                "properties": {
-                  "image_id": {
-                    "type": "string",
-                    "format": "uuid"
-                  }
-                },
-                "required": [
-                  "image_id"
+              "image_id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "GlobalImage"
                 ]
               }
             },
             "required": [
-              "GlobalImage"
-            ],
-            "additionalProperties": false
+              "image_id",
+              "type"
+            ]
           }
         ]
       },
