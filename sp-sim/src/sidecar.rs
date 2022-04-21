@@ -6,6 +6,7 @@ use std::net::SocketAddr;
 
 use crate::config::Config;
 use crate::config::SidecarConfig;
+use crate::config::SpPort;
 use crate::ignition_id;
 use crate::server::UdpServer;
 use crate::Responsiveness;
@@ -181,7 +182,7 @@ impl Inner {
                         recv0,
                         &mut server,
                         responsiveness,
-                        0,
+                        SpPort::One,
                     ).await? {
                         self.udp0.send_to(resp, addr).await?;
                     }
@@ -193,7 +194,7 @@ impl Inner {
                         recv1,
                         &mut server,
                         responsiveness,
-                        1,
+                        SpPort::Two,
                     ).await? {
                         self.udp1.send_to(resp, addr).await?;
                     }
@@ -229,7 +230,7 @@ async fn handle_request<'a>(
     recv: Result<(&[u8], SocketAddr)>,
     server: &'a mut SpServer,
     responsiveness: Responsiveness,
-    port_num: usize,
+    port_num: SpPort,
 ) -> Result<Option<(&'a [u8], SocketAddr)>> {
     match responsiveness {
         Responsiveness::Responsive => (), // proceed
@@ -240,7 +241,7 @@ async fn handle_request<'a>(
     }
 
     let (data, addr) =
-        recv.with_context(|| format!("recv on port {}", port_num))?;
+        recv.with_context(|| format!("recv on {:?}", port_num))?;
 
     let resp = server
         .dispatch(data, handler)

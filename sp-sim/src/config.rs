@@ -7,12 +7,23 @@
 
 use dropshot::ConfigLogging;
 use gateway_messages::SerialNumber;
-use serde::{Deserialize, Serialize};
-use std::{
-    net::{Ipv6Addr, SocketAddr},
-    path::{Path, PathBuf},
-};
+use serde::Deserialize;
+use serde::Serialize;
+use serde_repr::Deserialize_repr;
+use serde_repr::Serialize_repr;
+use std::net::Ipv6Addr;
+use std::net::SocketAddr;
+use std::path::Path;
+use std::path::PathBuf;
 use thiserror::Error;
+
+/// Identifier for one of of an SP's KSZ8463 management-network-facing ports.
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize_repr, Deserialize_repr)]
+#[repr(u8)]
+pub enum SpPort {
+    One = 1,
+    Two = 2,
+}
 
 /// Configuration of a simulated sidecar SP
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
@@ -64,12 +75,6 @@ pub struct Config {
     pub simulated_sps: SimulatedSps,
     /// Server-wide logging configuration.
     pub log: ConfigLogging,
-    // Type of SP to simulate.
-    // pub sp_type: SpType,
-    // Components to simulate.
-    // pub components: SpComponents,
-    // UDP listen address.
-    // pub bind_address: SocketAddr,
 }
 
 impl Config {

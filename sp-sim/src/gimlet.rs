@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use crate::config::GimletConfig;
+use crate::config::{GimletConfig, SpPort};
 use crate::server::UdpServer;
 use crate::{Responsiveness, SimulatedSp};
 use anyhow::{anyhow, Context, Result};
@@ -361,7 +361,7 @@ impl UdpTask {
                         recv0,
                         &mut server,
                         responsiveness,
-                        0,
+                        SpPort::One,
                     ).await? {
                         self.udp0.send_to(resp, addr).await?;
                     }
@@ -374,7 +374,7 @@ impl UdpTask {
                         recv1,
                         &mut server,
                         responsiveness,
-                        1,
+                        SpPort::Two,
                     ).await? {
                         self.udp1.send_to(resp, addr).await?;
                     }
@@ -406,7 +406,7 @@ async fn handle_request<'a>(
     recv: Result<(&[u8], SocketAddr)>,
     server: &'a mut SpServer,
     responsiveness: Responsiveness,
-    port_num: usize,
+    port_num: SpPort,
 ) -> Result<Option<(&'a [u8], SocketAddr)>> {
     match responsiveness {
         Responsiveness::Responsive => (), // proceed
@@ -417,9 +417,13 @@ async fn handle_request<'a>(
     }
 
     let (data, addr) =
-        recv.with_context(|| format!("recv on port {}", port_num))?;
+        recv.with_context(|| format!("recv on {:?}", port_num))?;
 
-    gateway_addresses.lock().unwrap()[port_num] = Some(addr);
+    let port_num_index = match port_num {
+        SpPort::One => 0,
+        SpPort::Two => 1,
+    };
+    gateway_addresses.lock().unwrap()[port_num_index] = Some(addr);
 
     let resp = server
         .dispatch(data, handler)
