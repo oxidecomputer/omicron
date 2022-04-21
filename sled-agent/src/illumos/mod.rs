@@ -23,9 +23,13 @@ pub enum ExecutionError {
     ExecutionStart(std::io::Error),
 
     #[error(
-        "Command executed and failed with status: {status}. Output: {stderr}"
+        "Command [{command}] executed and failed with status: {status}. Output: {stderr}"
     )]
-    CommandFailure { status: std::process::ExitStatus, stderr: String },
+    CommandFailure {
+        command: String,
+        status: std::process::ExitStatus,
+        stderr: String,
+    },
 }
 
 // We wrap this method in an inner module to make it possible to mock
@@ -44,6 +48,7 @@ mod inner {
 
         if !output.status.success() {
             return Err(ExecutionError::CommandFailure {
+                command: command.get_args().map(|s| s.to_string_lossy().into()).collect::<Vec<String>>().join(" "),
                 status: output.status,
                 stderr: String::from_utf8_lossy(&output.stderr).to_string(),
             });

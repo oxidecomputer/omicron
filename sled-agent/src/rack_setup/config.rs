@@ -7,6 +7,7 @@
 use crate::config::ConfigError;
 use crate::params::{DatasetEnsureBody, ServiceRequest};
 use ipnetwork::Ipv6Network;
+use omicron_common::address::{AZ_PREFIX, RACK_PREFIX};
 use serde::Deserialize;
 use serde::Serialize;
 use std::net::Ipv6Addr;
@@ -31,7 +32,7 @@ pub struct SetupServiceConfig {
 }
 
 /// A request to initialize a sled.
-#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+#[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq)]
 pub struct SledRequest {
     /// Datasets to be created.
     #[serde(default, rename = "dataset")]
@@ -40,6 +41,10 @@ pub struct SledRequest {
     /// Services to be instantiated.
     #[serde(default, rename = "service")]
     pub services: Vec<ServiceRequest>,
+
+    /// DNS Services to be instantiated.
+    #[serde(default, rename = "dns_service")]
+    pub dns_services: Vec<ServiceRequest>,
 }
 
 fn new_network(addr: Ipv6Addr, prefix: u8) -> Ipv6Network {
@@ -59,19 +64,24 @@ impl SetupServiceConfig {
     }
 
     pub fn az_subnet(&self) -> Ipv6Network {
-        new_network(self.rack_subnet, 48)
+        new_network(self.rack_subnet, AZ_PREFIX)
     }
 
+    /// Returns the subnet for our rack.
     pub fn rack_subnet(&self) -> Ipv6Network {
-        new_network(self.rack_subnet, 56)
+        new_network(self.rack_subnet, RACK_PREFIX)
     }
 
-    pub fn sled_subnet(&self, index: u8) -> Ipv6Network {
-        let mut rack_network = self.rack_subnet().network().octets();
+    /// Returns the subnet for the "reserved" rack subnet.
+    ///
+    /// This is used for AZ-wide services, such as DNS.
+    pub fn reserved_rack_subnet(&self) -> Ipv6Network {
+        new_network(self.az_subnet().ip(), RACK_PREFIX)
+    }
 
-        // To set bits distinguishing the /64 from the /56, we modify the 7th octet.
-        rack_network[7] = index;
-        Ipv6Network::new(Ipv6Addr::from(rack_network), 64).unwrap()
+    /// Returns the subnet for the `index`-th sled in the rack.
+    pub fn sled_subnet(&self, index: u8) -> Ipv6Network {
+        omicron_common::address::get_64_subnet(self.rack_subnet(), index)
     }
 }
 

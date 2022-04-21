@@ -9,7 +9,7 @@ use omicron_common::api::internal::nexus::{
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::fmt::{Debug, Display, Formatter, Result as FormatResult};
-use std::net::SocketAddr;
+use std::net::{Ipv6Addr, SocketAddr, SocketAddrV6};
 use uuid::Uuid;
 
 /// Used to request a Disk state change
@@ -233,7 +233,11 @@ pub struct ServiceRequest {
     // The name of the service to be created.
     pub name: String,
     // The addresses on which the service should listen for requests.
-    pub addresses: Vec<SocketAddr>,
+    pub addresses: Vec<SocketAddrV6>,
+    // The addresses in the global zone which should be created, if necessary
+    // to route to the service.
+    #[serde(default)]
+    pub gz_addresses: Vec<Ipv6Addr>,
 }
 
 impl From<ServiceRequest> for sled_agent_client::types::ServiceRequest {
@@ -241,6 +245,7 @@ impl From<ServiceRequest> for sled_agent_client::types::ServiceRequest {
         Self {
             name: s.name,
             addresses: s.addresses.into_iter().map(|s| s.to_string()).collect(),
+            gz_addresses: s.gz_addresses,
         }
     }
 }

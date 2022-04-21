@@ -18,15 +18,15 @@ schemes_external = ["spoof", "session_cookie"]
 
 [database]
 # URL for connecting to the database
-url = "postgresql://root@[fd00:1122:3344:1::2]:32221/omicron?sslmode=disable"
+url = "postgresql://root@[fd00:1122:3344:0101::2]:32221/omicron?sslmode=disable"
 
 [dropshot_external]
 # IP address and TCP port on which to listen for the external API
-bind_address = "[fd00:1122:3344:1::3]:12220"
+bind_address = "[fd00:1122:3344:0101::3]:12220"
 
 [dropshot_internal]
 # IP address and TCP port on which to listen for the internal API
-bind_address = "[fd00:1122:3344:1::3]:12221"
+bind_address = "[fd00:1122:3344:0101::3]:12221"
 
 [log]
 # Show log messages of this level and more severe
@@ -42,4 +42,4 @@ mode = "stderr-terminal"
 
 # Configuration for interacting with the timeseries database
 [timeseries_db]
-address = "[fd00:1122:3344:1::5]:8123"
+address = "[fd00:1122:3344:0101::5]:8123"

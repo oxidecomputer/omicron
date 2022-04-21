@@ -4,7 +4,7 @@
 # Also implies the /48 AZ subnet.
 #              |............|    <- This /48 is the AZ Subnet
 #              |...............| <- This /56 is the Rack Subnet
-rack_subnet = "fd00:1122:3344:1::"
+rack_subnet = "fd00:1122:3344:0100::"
 
 [[request]]
 
@@ -12,49 +12,47 @@ rack_subnet = "fd00:1122:3344:1::"
 # should allocate crucible datasets.
 [[request.dataset]]
 zpool_uuid = "d462a7f7-b628-40fe-80ff-4e4189e2d62b"
-address = "[fd00:1122:3344:1::6]:32345"
+address = "[fd00:1122:3344:0101::6]:32345"
 dataset_kind.type = "crucible"
 
 [[request.dataset]]
 zpool_uuid = "e4b4dc87-ab46-49fb-a4b4-d361ae214c03"
-address = "[fd00:1122:3344:1::7]:32345"
+address = "[fd00:1122:3344:0101::7]:32345"
 dataset_kind.type = "crucible"
 
 [[request.dataset]]
 zpool_uuid = "f4b4dc87-ab46-49fb-a4b4-d361ae214c03"
-address = "[fd00:1122:3344:1::8]:32345"
+address = "[fd00:1122:3344:0101::8]:32345"
 dataset_kind.type = "crucible"
 
 [[request.dataset]]
 zpool_uuid = "d462a7f7-b628-40fe-80ff-4e4189e2d62b"
-address = "[fd00:1122:3344:1::2]:32221"
+address = "[fd00:1122:3344:0101::2]:32221"
 dataset_kind.type = "cockroach_db"
 dataset_kind.all_addresses = [
-  "[fd00:1122:3344:1::2]:32221",
+  "[fd00:1122:3344:0101::2]:32221",
 ]
 
 # TODO(https://github.com/oxidecomputer/omicron/issues/732): Nexus
 # should allocate clickhouse datasets.
 [[request.dataset]]
 zpool_uuid = "d462a7f7-b628-40fe-80ff-4e4189e2d62b"
-address = "[fd00:1122:3344:1::5]:8123"
+address = "[fd00:1122:3344:0101::5]:8123"
 dataset_kind.type = "clickhouse"
 
 [[request.service]]
 name = "nexus"
 addresses = [
-  "[fd00:1122:3344:1::3]:12220",
-  "[fd00:1122:3344:1::3]:12221",
+  "[fd00:1122:3344:0101::3]:12220",
+  "[fd00:1122:3344:0101::3]:12221",
 ]
+gz_addresses = []
 
 # TODO(https://github.com/oxidecomputer/omicron/issues/732): Nexus
 # should allocate Oximeter services.
 [[request.service]]
 name = "oximeter"
 addresses = [
-  "[fd00:1122:3344:1::4]:12223",
+  "[fd00:1122:3344:0101::4]:12223",
 ]
-
-[[request.service]]
-name = "internal-dns"
-addresses = [ "[fd00:1122:3344:1::9]:5353" ]
+gz_addresses = []

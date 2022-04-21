@@ -968,6 +968,13 @@
               "type": "string"
             }
           },
+          "gz_addresses": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "ipv6"
+            }
+          },
           "name": {
             "type": "string"
           }

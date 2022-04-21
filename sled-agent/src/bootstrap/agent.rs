@@ -182,7 +182,7 @@ impl Agent {
         info!(&self.log, "Loading Sled Agent: {:?}", request);
 
         let sled_address =
-            crate::config::get_sled_address(*request.subnet.as_ref());
+            omicron_common::address::get_sled_address(request.subnet.as_ref().0);
 
         let mut maybe_agent = self.sled_agent.lock().await;
         if let Some(server) = &*maybe_agent {
