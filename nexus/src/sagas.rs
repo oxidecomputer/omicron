@@ -1393,9 +1393,10 @@ async fn sdc_regions_ensure(
 
             Some(Box::new(serde_json::from_str(volume.data()).map_err(
                 |e| {
-                    ActionError::action_failed(Error::internal_error(
-                        &e.to_string(),
-                    ))
+                    ActionError::action_failed(Error::internal_error(&format!(
+                        "failed to deserialize volume data: {}",
+                        e,
+                    )))
                 },
             )?))
         }
