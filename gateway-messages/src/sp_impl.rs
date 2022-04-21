@@ -6,6 +6,7 @@
 
 use crate::version;
 use crate::BulkIgnitionState;
+use crate::DiscoverResponse;
 use crate::IgnitionCommand;
 use crate::IgnitionState;
 use crate::Request;
@@ -22,11 +23,11 @@ use hubpack::SerializedSize;
 use std::net::SocketAddr;
 
 pub trait SpHandler {
-    fn ping(
+    fn discover(
         &mut self,
         sender: SocketAddr,
         port: SpPort,
-    ) -> Result<(), ResponseError>;
+    ) -> Result<DiscoverResponse, ResponseError>;
 
     fn ignition_state(
         &mut self,
@@ -202,8 +203,8 @@ impl SpServer {
 
         // call out to handler to provide response
         let result = match request.kind {
-            RequestKind::Ping => {
-                handler.ping(sender, port).map(|()| ResponseKind::Pong)
+            RequestKind::Discover => {
+                handler.discover(sender, port).map(ResponseKind::Discover)
             }
             RequestKind::IgnitionState { target } => handler
                 .ignition_state(sender, port, target)

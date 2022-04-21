@@ -17,6 +17,7 @@ use futures::future;
 use gateway_messages::sp_impl::SpHandler;
 use gateway_messages::sp_impl::SpServer;
 use gateway_messages::BulkIgnitionState;
+use gateway_messages::DiscoverResponse;
 use gateway_messages::IgnitionCommand;
 use gateway_messages::IgnitionFlags;
 use gateway_messages::IgnitionState;
@@ -248,17 +249,18 @@ impl Handler {
 }
 
 impl SpHandler for Handler {
-    fn ping(
+    fn discover(
         &mut self,
         sender: SocketAddr,
         port: SpPort,
-    ) -> Result<(), ResponseError> {
+    ) -> Result<gateway_messages::DiscoverResponse, ResponseError> {
         debug!(
-            &self.log, "received ping; sending pong";
+            &self.log,
+            "received discover; sending response";
             "sender" => sender,
             "port" => ?port,
         );
-        Ok(())
+        Ok(DiscoverResponse { sp_port: port })
     }
 
     fn ignition_state(

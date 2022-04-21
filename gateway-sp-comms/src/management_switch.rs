@@ -11,6 +11,9 @@
 //! See RFD 250 for details.
 //!
 
+#[allow(dead_code)] // we don't use this yet, but will shortly
+mod location_map;
+
 use crate::error::StartupError;
 use futures::stream::FuturesUnordered;
 use futures::StreamExt;
@@ -48,13 +51,20 @@ pub struct KnownSps {
     pub power_controllers: Vec<KnownSp>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Deserialize, Serialize)]
 pub struct SpIdentifier {
     pub typ: SpType,
     pub slot: usize,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+impl SpIdentifier {
+    pub fn new(typ: SpType, slot: usize) -> Self {
+        Self { typ, slot }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
 pub enum SpType {
     Switch,
     Sled,
