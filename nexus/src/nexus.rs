@@ -3684,9 +3684,11 @@ impl Nexus {
     pub async fn ssh_key_fetch(
         &self,
         opctx: &OpContext,
+        authz_user: &authz::SiloUser,
         ssh_key_name: &Name,
     ) -> LookupResult<SshKey> {
         let (.., ssh_key) = LookupPath::new(opctx, &self.datastore())
+            .silo_user_id(authz_user.id())
             .ssh_key_name(ssh_key_name)
             .fetch()
             .await?;
@@ -3707,10 +3709,12 @@ impl Nexus {
     pub async fn ssh_key_delete(
         &self,
         opctx: &OpContext,
+        authz_user: &authz::SiloUser,
         ssh_key_name: &Name,
     ) -> DeleteResult {
         let (.., authz_ssh_key, ssh_key) =
             LookupPath::new(opctx, &self.datastore())
+                .silo_user_id(authz_user.id())
                 .ssh_key_name(ssh_key_name)
                 .fetch()
                 .await?;

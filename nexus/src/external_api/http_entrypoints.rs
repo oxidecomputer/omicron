@@ -2936,7 +2936,10 @@ async fn sshkeys_get_key(
     let ssh_key_name = &path.ssh_key_name;
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
-        let ssh_key = nexus.ssh_key_fetch(&opctx, ssh_key_name).await?;
+        let &actor = opctx.authn.actor_required()?;
+        let (authz_user, _) = nexus.silo_user_fetch(&opctx, actor.id).await?;
+        let ssh_key =
+            nexus.ssh_key_fetch(&opctx, &authz_user, ssh_key_name).await?;
         Ok(HttpResponseOk(ssh_key.into()))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
@@ -2958,7 +2961,9 @@ async fn sshkeys_delete_key(
     let ssh_key_name = &path.ssh_key_name;
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
-        nexus.ssh_key_delete(&opctx, ssh_key_name).await?;
+        let &actor = opctx.authn.actor_required()?;
+        let (authz_user, _) = nexus.silo_user_fetch(&opctx, actor.id).await?;
+        nexus.ssh_key_delete(&opctx, &authz_user, ssh_key_name).await?;
         Ok(HttpResponseDeleted())
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await

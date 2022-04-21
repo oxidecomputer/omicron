@@ -3355,12 +3355,13 @@ mod test {
         assert_eq!(authz_user.id(), silo_user_id);
 
         // Create a new SSH public key for the new user.
+        let key_name = Name::try_from(String::from("sshkey")).unwrap();
         let public_key = "ssh-test AAAAAAAAKEY".to_string();
         let ssh_key = SshKey::new(
             silo_user_id,
             params::SshKeyCreate {
                 identity: IdentityMetadataCreateParams {
-                    name: "sshkey".parse().unwrap(),
+                    name: key_name.clone(),
                     description: "my SSH public key".to_string(),
                 },
                 public_key,
@@ -3376,7 +3377,8 @@ mod test {
         // Lookup the key we just created.
         let (authz_silo, authz_silo_user, authz_ssh_key, found) =
             LookupPath::new(&opctx, &datastore)
-                .ssh_key_id(ssh_key.id())
+                .silo_user_id(silo_user_id)
+                .ssh_key_name(&key_name.into())
                 .fetch()
                 .await
                 .unwrap();
@@ -3386,8 +3388,9 @@ mod test {
         assert_eq!(found.public_key, ssh_key.public_key);
 
         // Trying to insert the same one again fails.
-        let duplicate =
-            datastore.ssh_key_create(&opctx, &authz_user, ssh_key.clone()).await;
+        let duplicate = datastore
+            .ssh_key_create(&opctx, &authz_user, ssh_key.clone())
+            .await;
         assert!(matches!(
             duplicate,
             Err(Error::InternalError { internal_message: _ })

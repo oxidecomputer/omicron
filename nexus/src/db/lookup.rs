@@ -325,31 +325,6 @@ impl<'a> LookupPath<'a> {
         Sled { key: SledKey::PrimaryKey(Root { lookup_root: self }, id) }
     }
 
-    /// Select a resource of type SshKey, identified by its id
-    pub fn ssh_key_id(self, id: Uuid) -> SshKey<'a> {
-        SshKey { key: SshKeyKey::PrimaryKey(Root { lookup_root: self }, id) }
-    }
-
-    /// Select a resource of type SshKey, identified by its name
-    pub fn ssh_key_name<'b, 'c>(self, name: &'b Name) -> SshKey<'c>
-    where
-        'a: 'c,
-        'b: 'c,
-    {
-        let key = match self.opctx.authn.actor_required() {
-            Ok(actor) => {
-                let root = Root { lookup_root: self };
-                let silo_user_key = SiloUserKey::PrimaryKey(root, actor.id);
-                SshKeyKey::Name(SiloUser { key: silo_user_key }, name)
-            }
-            Err(error) => {
-                let root = Root { lookup_root: self };
-                SshKeyKey::Error(root, error)
-            }
-        };
-        SshKey { key }
-    }
-
     /// Select a resource of type UpdateAvailableArtifact, identified by its
     /// `(name, version, kind)` tuple
     pub fn update_available_artifact_tuple(
