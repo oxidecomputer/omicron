@@ -8,11 +8,11 @@ id = "8afcb12d-f625-4df9-bdf2-f495c3bbd323"
 [known_sps]
 switches = [
     # first switch is assumed to be the local ignition controller
-    { sp = "127.0.0.1:23456", switch_port = "127.0.0.1:33456" },
+    { sp = "[::1]:33300", switch_port = "[::1]:33200" },
 ]
 sleds = [
-    { sp = "127.0.0.1:23457", switch_port = "127.0.0.1:33457" },
-    { sp = "127.0.0.1:23458", switch_port = "127.0.0.1:33458" },
+    { sp = "[::1]:33310", switch_port = "[::1]:33201" },
+    { sp = "[::1]:33320", switch_port = "[::1]:33202" },
 ]
 power_controllers = [
 ]

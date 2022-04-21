@@ -69,16 +69,16 @@ pub async fn test_setup_with_config(
         .sidecars
         .iter()
         .map(|simsp| KnownSp {
-            sp: simsp.local_addr(),
-            switch_port: "127.0.0.1:0".parse().unwrap(),
+            sp: simsp.local_addr(0),
+            switch_port: "[::1]:0".parse().unwrap(),
         })
         .collect::<Vec<_>>();
     let gimlets = simrack
         .gimlets
         .iter()
         .map(|simsp| KnownSp {
-            sp: simsp.local_addr(),
-            switch_port: "127.0.0.1:0".parse().unwrap(),
+            sp: simsp.local_addr(0),
+            switch_port: "[::1]:0".parse().unwrap(),
         })
         .collect::<Vec<_>>();
     server_config.known_sps = KnownSps {
