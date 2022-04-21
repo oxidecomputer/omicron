@@ -15,8 +15,8 @@ use thiserror::Error;
 pub enum StartupError {
     #[error("error binding to UDP address {addr}: {err}")]
     UdpBind { addr: SocketAddr, err: io::Error },
-    #[error("invalid configuration file: {reason}")]
-    InvalidConfig { reason: String },
+    #[error("invalid configuration file: {}", .reasons.join(", "))]
+    InvalidConfig { reasons: Vec<String> },
     #[error("error communicating with SP: {0}")]
     SpCommunicationFailed(#[from] SpCommunicationError),
     #[error("location discovery failed: {reason}")]

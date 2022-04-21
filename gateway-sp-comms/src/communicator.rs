@@ -301,13 +301,14 @@ impl Communicator {
         let sp =
             self.switch.sp_socket(port).expect("lost address of attached SP");
 
-        Ok(self.request_response(
-            &sp,
-            RequestKind::SerialConsoleWrite(packet),
-            ResponseKindExt::try_into_serial_console_write_ack,
-            Some(timeout),
-        )
-        .await?)
+        Ok(self
+            .request_response(
+                &sp,
+                RequestKind::SerialConsoleWrite(packet),
+                ResponseKindExt::try_into_serial_console_write_ack,
+                Some(timeout),
+            )
+            .await?)
     }
 
     /// Get the state of a given SP.
