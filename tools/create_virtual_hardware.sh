@@ -79,20 +79,6 @@ function ensure_simulated_chelsios {
     done
 }
 
-# Return the IP address for the provided addrobj name, or the empty string if it
-# does not exist.
-#
-# Arguments:
-#   $1: The name of the addrobj
-function get_ip_addr_if_exists {
-    ADDR="$(ipadm show-addr -p -o ADDR "$1")"
-    if [[ "$?" -eq 0 ]]; then
-        echo "$ADDR"
-    else
-        echo ""
-    fi
-}
-
 function ensure_run_as_root {
     if [[ "$(id -u)" -ne 0 ]]; then
         echo "This script must be run as root"

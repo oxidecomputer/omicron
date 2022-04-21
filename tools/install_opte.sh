@@ -53,20 +53,6 @@ function sha_from_url {
     curl -L "$SHA_URL" 2> /dev/null | cut -d ' ' -f 1
 }
 
-# Add a pkg repo by path. This will also run `pkg update`, handling the case
-# gracefully where there are no updates required
-function add_pkg_repo_and_update {
-    local REPO_PATH="$1"
-    pkg set-publisher -p "$REPO_PATH" --search-first
-    RC=0
-    pkg update || RC=$?;
-    if [[ "$RC" -eq 0 ]] || [[ "$RC" -eq 4 ]]; then
-        return 0
-    else
-        return "$RC"
-    fi
-}
-
 # The `helios-netdev` provides the XDE kernel driver and the `opteadm` userland
 # tool for interacting with it.
 HELIOS_NETDEV_REPO_URL="https://buildomat.eng.oxide.computer/wg/0/artefact/01G11AT7E4XV9J1J54GE2YDJT6/CB4WF4BVgnbvf5NI573z9osAV2LNIKogPtWJ5sfW2cNxUYQO/01G11ATFVTWAC2HSNV148PQ4ER/01G11B5MPQRBX3Q5EF45YDAW6Q/opte-0.1.60.p5p"
@@ -89,8 +75,17 @@ download_and_check_sha "$XDE_REPO_URL" "$(sha_from_url "$XDE_REPO_SHA_URL")"
 pkg set-publisher --non-sticky helios-dev
 
 # Add the OPTE and XDE repositories and update packages.
-add_pkg_repo_and_update "$HELIOS_NETDEV_REPO_PATH"
-add_pkg_repo_and_update "$XDE_REPO_PATH"
+pkg set-publisher -p "$HELIOS_NETDEV_REPO_PATH" --search-first
+pkg set-publisher -p "$XDE_REPO_PATH" --search-first
+
+# Actually update packages, handling case where no updates are needed
+RC=0
+pkg update || RC=$?;
+if [[ "$RC" -eq 0 ]] || [[ "$RC" -eq 4 ]]; then
+    return 0
+else
+    return "$RC"
+fi
 
 # Actually install the xde kernel module and opteadm tool
 pkg install driver/network/opte
