@@ -1109,12 +1109,53 @@ async fn sdc_create_disk_record(
     // but this should be acceptable because the disk remains in a "Creating"
     // state until the saga has completed.
     let volume_id = sagactx.lookup::<Uuid>("volume_id")?;
+    let opctx = OpContext::for_saga_action(&sagactx, &params.serialized_authn);
+
+    let block_size: db::model::BlockSize = match &params
+        .create_params
+        .disk_source
+    {
+        params::DiskSource::Blank { block_size } => {
+            db::model::BlockSize::try_from(*block_size).map_err(|e| {
+                ActionError::action_failed(Error::internal_error(
+                    &e.to_string(),
+                ))
+            })?
+        }
+        params::DiskSource::Snapshot { snapshot_id: _ } => {
+            // Until we implement snapshots, do not allow disks to be
+            // created from a snapshot.
+            return Err(ActionError::action_failed(Error::InvalidValue {
+                label: String::from("snapshot"),
+                message: String::from("snapshots are not yet supported"),
+            }));
+        }
+        params::DiskSource::Image { image_id: _ } => {
+            // Until we implement project images, do not allow disks to be
+            // created from a project image.
+            return Err(ActionError::action_failed(Error::InvalidValue {
+                label: String::from("image"),
+                message: String::from("project image are not yet supported"),
+            }));
+        }
+        params::DiskSource::GlobalImage { image_id } => {
+            let (.., global_image) =
+                LookupPath::new(&opctx, &osagactx.datastore())
+                    .global_image_id(*image_id)
+                    .fetch()
+                    .await
+                    .map_err(ActionError::action_failed)?;
+
+            global_image.block_size
+        }
+    };
 
     let disk = db::model::Disk::new(
         disk_id,
         params.project_id,
         volume_id,
         params.create_params.clone(),
+        block_size,
         db::model::DiskRuntimeState::new(),
     )
     .map_err(|e| {
@@ -1157,9 +1198,10 @@ async fn sdc_alloc_regions(
     // https://github.com/oxidecomputer/omicron/issues/613 , we
     // should consider using a paginated API to access regions, rather than
     // returning all of them at once.
+    let opctx = OpContext::for_saga_action(&sagactx, &params.serialized_authn);
     let datasets_and_regions = osagactx
         .datastore()
-        .region_allocate(volume_id, &params.create_params)
+        .region_allocate(&opctx, volume_id, &params.create_params)
         .await
         .map_err(ActionError::action_failed)?;
     Ok(datasets_and_regions)
@@ -1291,6 +1333,75 @@ async fn sdc_regions_ensure(
 
     let block_size = datasets_and_regions[0].1.block_size;
 
+    // If requested, back disk by image
+    let osagactx = sagactx.user_data();
+    let params = sagactx.saga_params();
+    let log = osagactx.log();
+    let opctx = OpContext::for_saga_action(&sagactx, &params.serialized_authn);
+
+    let read_only_parent: Option<
+        Box<sled_agent_client::types::VolumeConstructionRequest>,
+    > = match &params.create_params.disk_source {
+        params::DiskSource::Blank { block_size: _ } => None,
+        params::DiskSource::Snapshot { snapshot_id: _ } => {
+            // Until we implement snapshots, do not allow disks to be
+            // created from a snapshot.
+            return Err(ActionError::action_failed(Error::InvalidValue {
+                label: String::from("snapshot"),
+                message: String::from("snapshots are not yet supported"),
+            }));
+        }
+        params::DiskSource::Image { image_id: _ } => {
+            // Until we implement project images, do not allow disks to be
+            // created from a project image.
+            return Err(ActionError::action_failed(Error::InvalidValue {
+                label: String::from("image"),
+                message: String::from("project image are not yet supported"),
+            }));
+        }
+        params::DiskSource::GlobalImage { image_id } => {
+            warn!(log, "grabbing image {}", image_id);
+
+            let (.., global_image) =
+                LookupPath::new(&opctx, &osagactx.datastore())
+                    .global_image_id(*image_id)
+                    .fetch()
+                    .await
+                    .map_err(ActionError::action_failed)?;
+
+            debug!(log, "retrieved global image {}", global_image.id());
+
+            debug!(
+                log,
+                "grabbing global image {} volume {}",
+                global_image.id(),
+                global_image.volume_id
+            );
+
+            let volume = osagactx
+                .datastore()
+                .volume_get(global_image.volume_id)
+                .await
+                .map_err(ActionError::action_failed)?;
+
+            debug!(
+                log,
+                "grabbed volume {}, with data {}",
+                volume.id(),
+                volume.data()
+            );
+
+            Some(Box::new(serde_json::from_str(volume.data()).map_err(
+                |e| {
+                    ActionError::action_failed(Error::internal_error(&format!(
+                        "failed to deserialize volume data: {}",
+                        e,
+                    )))
+                },
+            )?))
+        }
+    };
+
     // Store volume details in db
     let mut rng = StdRng::from_entropy();
     let volume_construction_request =
@@ -1335,7 +1446,7 @@ async fn sdc_regions_ensure(
                     },
                 },
             ],
-            read_only_parent: None,
+            read_only_parent,
         };
 
     let volume_data = serde_json::to_string(&volume_construction_request)

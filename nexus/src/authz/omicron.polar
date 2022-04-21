@@ -80,7 +80,7 @@ has_role(actor: AuthenticatedActor, role: String, resource: Resource)
 #
 # - fleet.admin           (superuser for the whole system)
 # - fleet.collaborator    (can create and own silos)
-# - fleet.viewer    	  (can read fleet-wide data)
+# - fleet.viewer          (can read fleet-wide data)
 # - silo.admin            (superuser for the silo)
 # - silo.collaborator     (can create and own orgs)
 # - silo.viewer           (can read silo-wide data)
@@ -91,7 +91,7 @@ has_role(actor: AuthenticatedActor, role: String, resource: Resource)
 #                         the project, but cannot modify or delete the project
 #                         itself)
 # - project.viewer        (can see everything in the project, but cannot modify
-#     			  anything)
+#                         anything)
 #
 
 # At the top level is the "Fleet" resource.
@@ -215,6 +215,23 @@ resource Project {
 has_relation(organization: Organization, "parent_organization", project: Project)
 	if project.organization = organization;
 
+resource GlobalImageList {
+	permissions = [
+	    "list_children",
+	    "modify",
+	    "create_child",
+	];
+
+	# Only admins can create or modify the global images list
+	relations = { parent_fleet: Fleet };
+	"modify" if "admin" on "parent_fleet";
+	"create_child" if "admin" on "parent_fleet";
+
+	# Anyone with viewer can list global images
+	"list_children" if "viewer" on "parent_fleet";
+}
+has_relation(fleet: Fleet, "parent_fleet", global_image_list: GlobalImageList)
+	if global_image_list.fleet = fleet;
 
 # ConsoleSessionList is a synthetic resource used for modeling who has access
 # to create sessions.

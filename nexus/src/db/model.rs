@@ -8,11 +8,11 @@ use crate::db::collection_insert::DatastoreCollection;
 use crate::db::identity::{Asset, Resource};
 use crate::db::ipv6;
 use crate::db::schema::{
-    console_session, dataset, disk, image, instance, metric_producer,
-    network_interface, organization, oximeter, project, rack, region,
-    role_assignment_builtin, role_builtin, router_route, silo, silo_user, sled,
-    snapshot, update_available_artifact, user_builtin, volume, vpc,
-    vpc_firewall_rule, vpc_router, vpc_subnet, zpool,
+    console_session, dataset, disk, global_image, image, instance,
+    metric_producer, network_interface, organization, oximeter, project, rack,
+    region, role_assignment_builtin, role_builtin, router_route, silo,
+    silo_user, sled, snapshot, update_available_artifact, user_builtin, volume,
+    vpc, vpc_firewall_rule, vpc_router, vpc_subnet, zpool,
 };
 use crate::defaults;
 use crate::external_api::params;
@@ -269,6 +269,12 @@ where
 impl From<ByteCount> for sled_agent_client::types::ByteCount {
     fn from(b: ByteCount) -> Self {
         Self(b.to_bytes())
+    }
+}
+
+impl From<BlockSize> for ByteCount {
+    fn from(bs: BlockSize) -> Self {
+        Self(bs.to_bytes().into())
     }
 }
 
@@ -1398,9 +1404,23 @@ impl Disk {
         project_id: Uuid,
         volume_id: Uuid,
         params: params::DiskCreate,
+        block_size: BlockSize,
         runtime_initial: DiskRuntimeState,
     ) -> Result<Self, anyhow::Error> {
         let identity = DiskIdentity::new(disk_id, params.identity);
+
+        let create_snapshot_id = match params.disk_source {
+            params::DiskSource::Snapshot { snapshot_id } => Some(snapshot_id),
+            _ => None,
+        };
+
+        // XXX further enum here for different image types?
+        let create_image_id = match params.disk_source {
+            params::DiskSource::Image { image_id } => Some(image_id),
+            params::DiskSource::GlobalImage { image_id } => Some(image_id),
+            _ => None,
+        };
+
         Ok(Self {
             identity,
             rcgen: external::Generation::new().into(),
@@ -1408,9 +1428,9 @@ impl Disk {
             volume_id,
             runtime_state: runtime_initial,
             size: params.size.into(),
-            block_size: params.block_size.try_into()?,
-            create_snapshot_id: params.snapshot_id,
-            create_image_id: params.image_id,
+            block_size: block_size,
+            create_snapshot_id,
+            create_image_id,
         })
     }
 
@@ -1582,6 +1602,57 @@ impl Into<external::DiskState> for DiskState {
     }
 }
 
+/// Newtype wrapper around [external::Digest]
+#[derive(
+    Clone,
+    Debug,
+    Display,
+    AsExpression,
+    FromSqlRow,
+    Eq,
+    PartialEq,
+    Ord,
+    PartialOrd,
+    RefCast,
+    JsonSchema,
+    Serialize,
+    Deserialize,
+)]
+#[sql_type = "sql_types::Text"]
+#[serde(transparent)]
+#[repr(transparent)]
+#[display("{0}")]
+pub struct Digest(pub external::Digest);
+
+NewtypeFrom! { () pub struct Digest(external::Digest); }
+NewtypeDeref! { () pub struct Digest(external::Digest); }
+
+impl<DB> ToSql<sql_types::Text, DB> for Digest
+where
+    DB: Backend,
+    str: ToSql<sql_types::Text, DB>,
+{
+    fn to_sql<W: std::io::Write>(
+        &self,
+        out: &mut serialize::Output<W, DB>,
+    ) -> serialize::Result {
+        self.to_string().as_str().to_sql(out)
+    }
+}
+
+impl<DB> FromSql<sql_types::Text, DB> for Digest
+where
+    DB: Backend,
+    String: FromSql<sql_types::Text, DB>,
+{
+    fn from_sql(bytes: RawValue<DB>) -> deserialize::Result<Self> {
+        let digest: external::Digest = String::from_sql(bytes)?.parse()?;
+        Ok(Digest(digest))
+    }
+}
+
+// Project images
+
 #[derive(
     Queryable,
     Insertable,
@@ -1595,13 +1666,18 @@ impl Into<external::DiskState> for DiskState {
 #[table_name = "image"]
 pub struct Image {
     #[diesel(embed)]
-    identity: ImageIdentity,
+    pub identity: ImageIdentity,
 
-    project_id: Option<Uuid>,
-    volume_id: Option<Uuid>,
-    url: Option<String>,
+    pub project_id: Uuid,
+    pub volume_id: Uuid,
+    pub url: Option<String>,
+    pub version: Option<String>,
+    pub digest: Option<Digest>,
+
+    pub block_size: BlockSize,
+
     #[column_name = "size_bytes"]
-    size: ByteCount,
+    pub size: ByteCount,
 }
 
 impl From<Image> for views::Image {
@@ -1610,6 +1686,50 @@ impl From<Image> for views::Image {
             identity: image.identity(),
             project_id: image.project_id,
             url: image.url,
+            version: image.version,
+            digest: image.digest.map(|x| x.into()),
+            block_size: image.block_size.into(),
+            size: image.size.into(),
+        }
+    }
+}
+
+// Global images
+
+#[derive(
+    Queryable,
+    Insertable,
+    Selectable,
+    Clone,
+    Debug,
+    Resource,
+    Serialize,
+    Deserialize,
+)]
+#[table_name = "global_image"]
+pub struct GlobalImage {
+    #[diesel(embed)]
+    pub identity: GlobalImageIdentity,
+
+    pub volume_id: Uuid,
+    pub url: Option<String>,
+    pub version: Option<String>,
+    pub digest: Option<Digest>,
+
+    pub block_size: BlockSize,
+
+    #[column_name = "size_bytes"]
+    pub size: ByteCount,
+}
+
+impl From<GlobalImage> for views::GlobalImage {
+    fn from(image: GlobalImage) -> Self {
+        Self {
+            identity: image.identity(),
+            url: image.url,
+            version: image.version,
+            digest: image.digest.map(|x| x.into()),
+            block_size: image.block_size.into(),
             size: image.size.into(),
         }
     }

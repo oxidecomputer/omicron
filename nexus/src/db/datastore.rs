@@ -38,13 +38,13 @@ use crate::db::{
     error::{public_error_from_diesel_pool, ErrorHandler, TransactionError},
     model::{
         ConsoleSession, Dataset, DatasetKind, Disk, DiskRuntimeState,
-        Generation, IncompleteNetworkInterface, Instance, InstanceRuntimeState,
-        Name, NetworkInterface, Organization, OrganizationUpdate, OximeterInfo,
-        ProducerEndpoint, Project, ProjectUpdate, Region,
-        RoleAssignmentBuiltin, RoleBuiltin, RouterRoute, RouterRouteUpdate,
-        Silo, SiloUser, Sled, UpdateAvailableArtifact, UserBuiltin, Volume,
-        Vpc, VpcFirewallRule, VpcRouter, VpcRouterUpdate, VpcSubnet,
-        VpcSubnetUpdate, VpcUpdate, Zpool,
+        Generation, GlobalImage, IncompleteNetworkInterface, Instance,
+        InstanceRuntimeState, Name, NetworkInterface, Organization,
+        OrganizationUpdate, OximeterInfo, ProducerEndpoint, Project,
+        ProjectUpdate, Region, RoleAssignmentBuiltin, RoleBuiltin, RouterRoute,
+        RouterRouteUpdate, Silo, SiloUser, Sled, UpdateAvailableArtifact,
+        UserBuiltin, Volume, Vpc, VpcFirewallRule, VpcRouter, VpcRouterUpdate,
+        VpcSubnet, VpcSubnetUpdate, VpcUpdate, Zpool,
     },
     pagination::paginated,
     pagination::paginated_multicolumn,
@@ -296,12 +296,52 @@ impl DataStore {
             .limit(REGION_REDUNDANCY_THRESHOLD.try_into().unwrap())
     }
 
+    async fn get_block_size_from_disk_create(
+        &self,
+        opctx: &OpContext,
+        disk_create: &params::DiskCreate,
+    ) -> Result<db::model::BlockSize, Error> {
+        match &disk_create.disk_source {
+            params::DiskSource::Blank { block_size } => {
+                Ok(db::model::BlockSize::try_from(*block_size)
+                    .map_err(|e| Error::invalid_request(&e.to_string()))?)
+            }
+            params::DiskSource::Snapshot { snapshot_id: _ } => {
+                // Until we implement snapshots, do not allow disks to be
+                // created from a snapshot.
+                return Err(Error::InvalidValue {
+                    label: String::from("snapshot"),
+                    message: String::from("snapshots are not yet supported"),
+                });
+            }
+            params::DiskSource::Image { image_id: _ } => {
+                // Until we implement project images, do not allow disks to be
+                // created from a project image.
+                return Err(Error::InvalidValue {
+                    label: String::from("image"),
+                    message: String::from(
+                        "project image are not yet supported",
+                    ),
+                });
+            }
+            params::DiskSource::GlobalImage { image_id } => {
+                let (.., db_global_image) = LookupPath::new(opctx, &self)
+                    .global_image_id(*image_id)
+                    .fetch()
+                    .await?;
+
+                Ok(db_global_image.block_size)
+            }
+        }
+    }
+
     /// Idempotently allocates enough regions to back a disk.
     ///
     /// Returns the allocated regions, as well as the datasets to which they
     /// belong.
     pub async fn region_allocate(
         &self,
+        opctx: &OpContext,
         volume_id: Uuid,
         params: &params::DiskCreate,
     ) -> Result<Vec<(Dataset, Region)>, Error> {
@@ -333,7 +373,13 @@ impl DataStore {
             NotEnoughDatasets(usize),
         }
         type TxnError = TransactionError<RegionAllocateError>;
+
         let params: params::DiskCreate = params.clone();
+        let block_size =
+            self.get_block_size_from_disk_create(opctx, &params).await?;
+        let blocks_per_extent =
+            params.extent_size() / block_size.to_bytes() as i64;
+
         self.pool()
             .transaction(move |conn| {
                 // First, for idempotency, check if regions are already
@@ -367,8 +413,8 @@ impl DataStore {
                         Region::new(
                             dataset.id(),
                             volume_id,
-                            params.block_size().into(),
-                            params.blocks_per_extent(),
+                            block_size.into(),
+                            blocks_per_extent,
                             params.extent_count(),
                         )
                     })
@@ -380,8 +426,8 @@ impl DataStore {
 
                 // Update the tallied sizes in the source datasets containing
                 // those regions.
-                let region_size = i64::from(params.block_size())
-                    * params.blocks_per_extent()
+                let region_size = i64::from(block_size.to_bytes())
+                    * blocks_per_extent
                     * params.extent_count();
                 for dataset in source_datasets.iter_mut() {
                     dataset.size_used =
@@ -2679,6 +2725,50 @@ impl DataStore {
             }),
         }
     }
+
+    pub async fn global_image_list_images(
+        &self,
+        opctx: &OpContext,
+        pagparams: &DataPageParams<'_, Name>,
+    ) -> ListResultVec<GlobalImage> {
+        opctx
+            .authorize(authz::Action::ListChildren, &authz::GLOBAL_IMAGE_LIST)
+            .await?;
+
+        use db::schema::global_image::dsl;
+        paginated(dsl::global_image, dsl::name, pagparams)
+            .filter(dsl::time_deleted.is_null())
+            .select(GlobalImage::as_select())
+            .load_async::<GlobalImage>(self.pool_authorized(opctx).await?)
+            .await
+            .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
+    }
+
+    pub async fn global_image_create_image(
+        &self,
+        opctx: &OpContext,
+        image: GlobalImage,
+    ) -> CreateResult<GlobalImage> {
+        opctx
+            .authorize(authz::Action::CreateChild, &authz::GLOBAL_IMAGE_LIST)
+            .await?;
+
+        use db::schema::global_image::dsl;
+        let name = image.name().clone();
+        diesel::insert_into(dsl::global_image)
+            .values(image)
+            .on_conflict(dsl::id)
+            .do_nothing()
+            .returning(GlobalImage::as_returning())
+            .get_result_async(self.pool())
+            .await
+            .map_err(|e| {
+                public_error_from_diesel_pool(
+                    e,
+                    ErrorHandler::Conflict(ResourceType::Image, name.as_str()),
+                )
+            })
+    }
 }
 
 /// Constructs a DataStore for use in test suites that has preloaded the
@@ -2916,10 +3006,10 @@ mod test {
                 name: Name::try_from(name.to_string()).unwrap(),
                 description: name.to_string(),
             },
-            snapshot_id: None,
-            image_id: None,
+            disk_source: params::DiskSource::Blank {
+                block_size: params::BlockSize::try_from(4096).unwrap(),
+            },
             size,
-            block_size: params::BlockSize::try_from(4096).unwrap(),
         }
     }
 
@@ -2929,7 +3019,9 @@ mod test {
         let mut db = test_setup_database(&logctx.log).await;
         let cfg = db::Config { url: db.pg_config().clone() };
         let pool = db::Pool::new(&cfg);
-        let datastore = DataStore::new(Arc::new(pool));
+        let datastore = Arc::new(DataStore::new(Arc::new(pool)));
+        let opctx =
+            OpContext::for_tests(logctx.log.new(o!()), datastore.clone());
 
         // Create a sled...
         let sled_id = create_test_sled(&datastore).await;
@@ -2957,8 +3049,10 @@ mod test {
         let volume1_id = Uuid::new_v4();
         // Currently, we only allocate one Region Set per volume.
         let expected_region_count = REGION_REDUNDANCY_THRESHOLD;
-        let dataset_and_regions =
-            datastore.region_allocate(volume1_id, &params).await.unwrap();
+        let dataset_and_regions = datastore
+            .region_allocate(&opctx, volume1_id, &params)
+            .await
+            .unwrap();
 
         // Verify the allocation.
         assert_eq!(expected_region_count, dataset_and_regions.len());
@@ -2966,8 +3060,8 @@ mod test {
         for (dataset, region) in dataset_and_regions {
             assert!(disk1_datasets.insert(dataset.id()));
             assert_eq!(volume1_id, region.volume_id());
-            assert_eq!(params.block_size(), region.block_size());
-            assert_eq!(params.blocks_per_extent(), region.blocks_per_extent());
+            assert_eq!(ByteCount::from(4096), region.block_size());
+            assert_eq!(params.extent_size() / 4096, region.blocks_per_extent());
             assert_eq!(params.extent_count(), region.extent_count());
         }
 
@@ -2978,15 +3072,17 @@ mod test {
             ByteCount::from_mebibytes_u32(500),
         );
         let volume2_id = Uuid::new_v4();
-        let dataset_and_regions =
-            datastore.region_allocate(volume2_id, &params).await.unwrap();
+        let dataset_and_regions = datastore
+            .region_allocate(&opctx, volume2_id, &params)
+            .await
+            .unwrap();
         assert_eq!(expected_region_count, dataset_and_regions.len());
         let mut disk2_datasets = HashSet::new();
         for (dataset, region) in dataset_and_regions {
             assert!(disk2_datasets.insert(dataset.id()));
             assert_eq!(volume2_id, region.volume_id());
-            assert_eq!(params.block_size(), region.block_size());
-            assert_eq!(params.blocks_per_extent(), region.blocks_per_extent());
+            assert_eq!(ByteCount::from(4096), region.block_size());
+            assert_eq!(params.extent_size() / 4096, region.blocks_per_extent());
             assert_eq!(params.extent_count(), region.extent_count());
         }
 
@@ -3004,7 +3100,9 @@ mod test {
         let mut db = test_setup_database(&logctx.log).await;
         let cfg = db::Config { url: db.pg_config().clone() };
         let pool = db::Pool::new(&cfg);
-        let datastore = DataStore::new(Arc::new(pool));
+        let datastore = Arc::new(DataStore::new(Arc::new(pool)));
+        let opctx =
+            OpContext::for_tests(logctx.log.new(o!()), datastore.clone());
 
         // Create a sled...
         let sled_id = create_test_sled(&datastore).await;
@@ -3030,10 +3128,14 @@ mod test {
             ByteCount::from_mebibytes_u32(500),
         );
         let volume_id = Uuid::new_v4();
-        let mut dataset_and_regions1 =
-            datastore.region_allocate(volume_id, &params).await.unwrap();
-        let mut dataset_and_regions2 =
-            datastore.region_allocate(volume_id, &params).await.unwrap();
+        let mut dataset_and_regions1 = datastore
+            .region_allocate(&opctx, volume_id, &params)
+            .await
+            .unwrap();
+        let mut dataset_and_regions2 = datastore
+            .region_allocate(&opctx, volume_id, &params)
+            .await
+            .unwrap();
 
         // Give them a consistent order so we can easily compare them.
         let sort_vec = |v: &mut Vec<(Dataset, Region)>| {
@@ -3064,7 +3166,9 @@ mod test {
         let mut db = test_setup_database(&logctx.log).await;
         let cfg = db::Config { url: db.pg_config().clone() };
         let pool = db::Pool::new(&cfg);
-        let datastore = DataStore::new(Arc::new(pool));
+        let datastore = Arc::new(DataStore::new(Arc::new(pool)));
+        let opctx =
+            OpContext::for_tests(logctx.log.new(o!()), datastore.clone());
 
         // Create a sled...
         let sled_id = create_test_sled(&datastore).await;
@@ -3090,8 +3194,10 @@ mod test {
             ByteCount::from_mebibytes_u32(500),
         );
         let volume1_id = Uuid::new_v4();
-        let err =
-            datastore.region_allocate(volume1_id, &params).await.unwrap_err();
+        let err = datastore
+            .region_allocate(&opctx, volume1_id, &params)
+            .await
+            .unwrap_err();
         assert!(err
             .to_string()
             .contains("Not enough datasets to allocate disks"));
@@ -3111,7 +3217,9 @@ mod test {
         let mut db = test_setup_database(&logctx.log).await;
         let cfg = db::Config { url: db.pg_config().clone() };
         let pool = db::Pool::new(&cfg);
-        let datastore = DataStore::new(Arc::new(pool));
+        let datastore = Arc::new(DataStore::new(Arc::new(pool)));
+        let opctx =
+            OpContext::for_tests(logctx.log.new(o!()), datastore.clone());
 
         // Create a sled...
         let sled_id = create_test_sled(&datastore).await;
@@ -3140,7 +3248,7 @@ mod test {
         let volume1_id = Uuid::new_v4();
 
         // NOTE: This *should* be an error, rather than succeeding.
-        datastore.region_allocate(volume1_id, &params).await.unwrap();
+        datastore.region_allocate(&opctx, volume1_id, &params).await.unwrap();
 
         let _ = db.cleanup().await;
     }

@@ -11,6 +11,7 @@ use dropshot::HttpErrorResponseBody;
 use headers::authorization::Credentials;
 use http::method::Method;
 use http::StatusCode;
+use httptest::{matchers::*, responders::*, Expectation, ServerBuilder};
 use lazy_static::lazy_static;
 use nexus_test_utils::http_testing::AuthnMode;
 use nexus_test_utils::http_testing::NexusRequest;
@@ -53,6 +54,24 @@ async fn test_unauthorized(cptestctx: &ControlPlaneTestContext) {
     DiskTest::new(cptestctx).await;
     let client = &cptestctx.external_client;
     let log = &cptestctx.logctx.log;
+
+    // Run a httptest server
+    let server = ServerBuilder::new()
+        .bind_addr("127.0.0.1:5555".parse().unwrap())
+        .run()
+        .unwrap();
+
+    // Fake some data
+    server.expect(
+        Expectation::matching(request::method_path("HEAD", "/image.raw"))
+            .times(1..)
+            .respond_with(
+                status_code(200).append_header(
+                    "Content-Length",
+                    format!("{}", 4096 * 1000),
+                ),
+            ),
+    );
 
     // Create test data.
     info!(log, "setting up resource hierarchy");
@@ -169,6 +188,11 @@ lazy_static! {
             url: &*DEMO_PROJECT_URL_INSTANCES,
             body: serde_json::to_value(&*DEMO_INSTANCE_CREATE).unwrap(),
         },
+        // Create a GlobalImage
+        SetupReq {
+            url: "/images",
+            body: serde_json::to_value(&*DEMO_IMAGE_CREATE).unwrap(),
+        }
     ];
 }
 
