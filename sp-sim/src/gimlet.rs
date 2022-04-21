@@ -3,6 +3,7 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use crate::config::GimletConfig;
+use crate::server;
 use crate::server::UdpServer;
 use crate::{Responsiveness, SimulatedSp};
 use anyhow::{anyhow, Context, Result};
@@ -370,7 +371,7 @@ impl UdpTask {
         loop {
             select! {
                 recv0 = self.udp0.recv_from() => {
-                    if let Some((resp, addr)) = handle_request(
+                    if let Some((resp, addr)) = server::handle_request(
                         &mut self.handler,
                         recv0,
                         &mut server,
@@ -382,7 +383,7 @@ impl UdpTask {
                 }
 
                 recv1 = self.udp1.recv_from() => {
-                    if let Some((resp, addr)) = handle_request(
+                    if let Some((resp, addr)) = server::handle_request(
                         &mut self.handler,
                         recv1,
                         &mut server,
@@ -411,31 +412,6 @@ impl UdpTask {
             }
         }
     }
-}
-
-async fn handle_request<'a>(
-    handler: &mut Handler,
-    recv: Result<(&[u8], SocketAddr)>,
-    server: &'a mut SpServer,
-    responsiveness: Responsiveness,
-    port_num: SpPort,
-) -> Result<Option<(&'a [u8], SocketAddr)>> {
-    match responsiveness {
-        Responsiveness::Responsive => (), // proceed
-        Responsiveness::Unresponsive => {
-            // pretend to be unresponsive - drop this packet
-            return Ok(None);
-        }
-    }
-
-    let (data, addr) =
-        recv.with_context(|| format!("recv on {:?}", port_num))?;
-
-    let resp = server
-        .dispatch(addr, port_num, data, handler)
-        .map_err(|err| anyhow!("dispatching message failed: {:?}", err))?;
-
-    Ok(Some((resp, addr)))
 }
 
 struct Handler {

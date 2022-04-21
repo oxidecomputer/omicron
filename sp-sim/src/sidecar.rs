@@ -7,11 +7,10 @@ use std::net::SocketAddr;
 use crate::config::Config;
 use crate::config::SidecarConfig;
 use crate::ignition_id;
+use crate::server;
 use crate::server::UdpServer;
 use crate::Responsiveness;
 use crate::SimulatedSp;
-use anyhow::anyhow;
-use anyhow::Context;
 use anyhow::Result;
 use async_trait::async_trait;
 use futures::future;
@@ -177,7 +176,7 @@ impl Inner {
         loop {
             select! {
                 recv0 = self.udp0.recv_from() => {
-                    if let Some((resp, addr)) = handle_request(
+                    if let Some((resp, addr)) = server::handle_request(
                         &mut self.handler,
                         recv0,
                         &mut server,
@@ -189,7 +188,7 @@ impl Inner {
                 }
 
                 recv1 = self.udp1.recv_from() => {
-                    if let Some((resp, addr)) = handle_request(
+                    if let Some((resp, addr)) = server::handle_request(
                         &mut self.handler,
                         recv1,
                         &mut server,
@@ -223,31 +222,6 @@ impl Inner {
             }
         }
     }
-}
-
-async fn handle_request<'a>(
-    handler: &mut Handler,
-    recv: Result<(&[u8], SocketAddr)>,
-    server: &'a mut SpServer,
-    responsiveness: Responsiveness,
-    port_num: SpPort,
-) -> Result<Option<(&'a [u8], SocketAddr)>> {
-    match responsiveness {
-        Responsiveness::Responsive => (), // proceed
-        Responsiveness::Unresponsive => {
-            // pretend to be unresponsive - drop this packet
-            return Ok(None);
-        }
-    }
-
-    let (data, addr) =
-        recv.with_context(|| format!("recv on {:?}", port_num))?;
-
-    let resp = server
-        .dispatch(addr, port_num, data, handler)
-        .map_err(|err| anyhow!("dispatching message failed: {:?}", err))?;
-
-    Ok(Some((resp, addr)))
 }
 
 struct Handler {
