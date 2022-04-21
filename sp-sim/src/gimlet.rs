@@ -2,17 +2,23 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use crate::config::{GimletConfig, SpPort};
+use crate::config::GimletConfig;
 use crate::server::UdpServer;
 use crate::{Responsiveness, SimulatedSp};
 use anyhow::{anyhow, Context, Result};
 use async_trait::async_trait;
 use futures::future;
 use gateway_messages::sp_impl::{SerialConsolePacketizer, SpHandler, SpServer};
-use gateway_messages::{
-    version, ResponseError, SerialConsole, SerialNumber, SerializedSize,
-    SpComponent, SpMessage, SpMessageKind, SpState,
-};
+use gateway_messages::version;
+use gateway_messages::ResponseError;
+use gateway_messages::SerialConsole;
+use gateway_messages::SerialNumber;
+use gateway_messages::SerializedSize;
+use gateway_messages::SpComponent;
+use gateway_messages::SpMessage;
+use gateway_messages::SpMessageKind;
+use gateway_messages::SpPort;
+use gateway_messages::SpState;
 use slog::{debug, error, info, warn, Logger};
 use std::collections::HashMap;
 use std::net::SocketAddr;
@@ -426,7 +432,7 @@ async fn handle_request<'a>(
     gateway_addresses.lock().unwrap()[port_num_index] = Some(addr);
 
     let resp = server
-        .dispatch(data, handler)
+        .dispatch(addr, port_num, data, handler)
         .map_err(|err| anyhow!("dispatching message failed: {:?}", err))?;
 
     Ok(Some((resp, addr)))
@@ -440,57 +446,81 @@ struct Handler {
 }
 
 impl SpHandler for Handler {
-    fn ping(&mut self) -> Result<(), ResponseError> {
-        debug!(&self.log, "received ping; sending pong");
+    fn ping(
+        &mut self,
+        sender: SocketAddr,
+        port: SpPort,
+    ) -> Result<(), ResponseError> {
+        debug!(
+            &self.log, "received ping; sending pong";
+            "sender" => sender,
+            "port" => ?port,
+        );
         Ok(())
     }
 
     fn ignition_state(
         &mut self,
+        sender: SocketAddr,
+        port: SpPort,
         target: u8,
     ) -> Result<gateway_messages::IgnitionState, ResponseError> {
         warn!(
             &self.log,
-            "received ignition state request for {}; not supported by gimlet",
-            target,
+            "received ignition state request; not supported by gimlet";
+            "sender" => sender,
+            "port" => ?port,
+            "target" => target,
         );
         Err(ResponseError::RequestUnsupportedForSp)
     }
 
     fn bulk_ignition_state(
         &mut self,
+        sender: SocketAddr,
+        port: SpPort,
     ) -> Result<gateway_messages::BulkIgnitionState, ResponseError> {
         warn!(
             &self.log,
-            "received bulk ignition state request; not supported by gimlet",
+            "received bulk ignition state request; not supported by gimlet";
+            "sender" => sender,
+            "port" => ?port,
         );
         Err(ResponseError::RequestUnsupportedForSp)
     }
 
     fn ignition_command(
         &mut self,
+        sender: SocketAddr,
+        port: SpPort,
         target: u8,
         command: gateway_messages::IgnitionCommand,
     ) -> Result<(), ResponseError> {
         warn!(
             &self.log,
-            "received ignition command {:?} for target {}; not supported by gimlet",
-            command,
-            target
+            "received ignition command; not supported by gimlet";
+            "sender" => sender,
+            "port" => ?port,
+            "target" => target,
+            "command" => ?command,
         );
         Err(ResponseError::RequestUnsupportedForSp)
     }
 
     fn serial_console_write(
         &mut self,
+        sender: SocketAddr,
+        port: SpPort,
         packet: gateway_messages::SerialConsole,
     ) -> Result<(), ResponseError> {
         debug!(
             &self.log,
-            "received serial console packet with {} bytes at offset {} for component {:?}",
-            packet.len,
-            packet.offset,
-            packet.component,
+            "received serial console packet";
+            "sender" => sender,
+            "port" => ?port,
+            "len" => packet.len,
+            "offset" => packet.offset,
+            "component" => ?packet.component,
         );
 
         let incoming_serial_console = self
@@ -508,9 +538,18 @@ impl SpHandler for Handler {
         Ok(())
     }
 
-    fn sp_state(&mut self) -> Result<SpState, ResponseError> {
+    fn sp_state(
+        &mut self,
+        sender: SocketAddr,
+        port: SpPort,
+    ) -> Result<SpState, ResponseError> {
         let state = SpState { serial_number: self.serial_number };
-        debug!(&self.log, "received state request; sending {:?}", state);
+        debug!(
+            &self.log, "received state request";
+            "sender" => sender,
+            "port" => ?port,
+            "reply-state" => ?state,
+        );
         Ok(state)
     }
 }

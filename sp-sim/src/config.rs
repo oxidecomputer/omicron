@@ -9,21 +9,11 @@ use dropshot::ConfigLogging;
 use gateway_messages::SerialNumber;
 use serde::Deserialize;
 use serde::Serialize;
-use serde_repr::Deserialize_repr;
-use serde_repr::Serialize_repr;
 use std::net::Ipv6Addr;
 use std::net::SocketAddr;
 use std::path::Path;
 use std::path::PathBuf;
 use thiserror::Error;
-
-/// Identifier for one of of an SP's KSZ8463 management-network-facing ports.
-#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize_repr, Deserialize_repr)]
-#[repr(u8)]
-pub enum SpPort {
-    One = 1,
-    Two = 2,
-}
 
 /// Configuration of a simulated sidecar SP
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]

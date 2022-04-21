@@ -6,7 +6,6 @@ use std::net::SocketAddr;
 
 use crate::config::Config;
 use crate::config::SidecarConfig;
-use crate::config::SpPort;
 use crate::ignition_id;
 use crate::server::UdpServer;
 use crate::Responsiveness;
@@ -24,6 +23,7 @@ use gateway_messages::IgnitionFlags;
 use gateway_messages::IgnitionState;
 use gateway_messages::ResponseError;
 use gateway_messages::SerialNumber;
+use gateway_messages::SpPort;
 use gateway_messages::SpState;
 use slog::debug;
 use slog::info;
@@ -244,7 +244,7 @@ async fn handle_request<'a>(
         recv.with_context(|| format!("recv on {:?}", port_num))?;
 
     let resp = server
-        .dispatch(data, handler)
+        .dispatch(addr, port_num, data, handler)
         .map_err(|err| anyhow!("dispatching message failed: {:?}", err))?;
 
     Ok(Some((resp, addr)))
@@ -274,27 +274,41 @@ impl Handler {
 }
 
 impl SpHandler for Handler {
-    fn ping(&mut self) -> Result<(), ResponseError> {
-        debug!(&self.log, "received ping; sending pong");
+    fn ping(
+        &mut self,
+        sender: SocketAddr,
+        port: SpPort,
+    ) -> Result<(), ResponseError> {
+        debug!(
+            &self.log, "received ping; sending pong";
+            "sender" => sender,
+            "port" => ?port,
+        );
         Ok(())
     }
 
     fn ignition_state(
         &mut self,
+        sender: SocketAddr,
+        port: SpPort,
         target: u8,
     ) -> Result<IgnitionState, ResponseError> {
         let state = self.get_target(target)?;
         debug!(
             &self.log,
-            "received ignition state request for {}; sending {:?}",
-            target,
-            state
+            "received ignition state request";
+            "sender" => sender,
+            "port" => ?port,
+            "target" => target,
+            "reply-state" => ?state,
         );
         Ok(*state)
     }
 
     fn bulk_ignition_state(
         &mut self,
+        sender: SocketAddr,
+        port: SpPort,
     ) -> Result<BulkIgnitionState, ResponseError> {
         let num_targets = self.ignition_targets.len();
         assert!(
@@ -312,13 +326,17 @@ impl SpHandler for Handler {
         debug!(
             &self.log,
             "received bulk ignition state request; sending state for {} targets",
-            num_targets,
+            num_targets;
+            "sender" => sender,
+            "port" => ?port,
         );
         Ok(out)
     }
 
     fn ignition_command(
         &mut self,
+        sender: SocketAddr,
+        port: SpPort,
         target: u8,
         command: IgnitionCommand,
     ) -> Result<(), ResponseError> {
@@ -334,24 +352,41 @@ impl SpHandler for Handler {
 
         debug!(
             &self.log,
-            "received ignition command {:?} for target {}; sending ack",
-            command,
-            target
+            "received ignition command; sending ack";
+            "sender" => sender,
+            "port" => ?port,
+            "target" => target,
+            "command" => ?command,
         );
         Ok(())
     }
 
     fn serial_console_write(
         &mut self,
+        sender: SocketAddr,
+        port: SpPort,
         _packet: gateway_messages::SerialConsole,
     ) -> Result<(), ResponseError> {
-        warn!(&self.log, "received request to write to serial console (unsupported on sidecar)");
+        warn!(
+            &self.log, "received serial console write; unsupported by sidecar";
+            "sender" => sender,
+            "port" => ?port,
+        );
         Err(ResponseError::RequestUnsupportedForSp)
     }
 
-    fn sp_state(&mut self) -> Result<SpState, ResponseError> {
+    fn sp_state(
+        &mut self,
+        sender: SocketAddr,
+        port: SpPort,
+    ) -> Result<SpState, ResponseError> {
         let state = SpState { serial_number: self.serial_number };
-        debug!(&self.log, "received state request; sending {:?}", state);
+        debug!(
+            &self.log, "received state request";
+            "sender" => sender,
+            "port" => ?port,
+            "reply-state" => ?state,
+        );
         Ok(state)
     }
 }
