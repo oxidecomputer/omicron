@@ -8,8 +8,12 @@ pub mod sp_impl;
 mod variable_packet;
 
 use bitflags::bitflags;
-use core::{fmt, str};
-use serde::{Deserialize, Serialize};
+use core::fmt;
+use core::str;
+use serde::Deserialize;
+use serde::Serialize;
+use serde_repr::Deserialize_repr;
+use serde_repr::Serialize_repr;
 
 pub use hubpack::error::Error as HubpackError;
 pub use hubpack::{deserialize, serialize, SerializedSize};
@@ -39,6 +43,16 @@ pub enum RequestKind {
     IgnitionCommand { target: u8, command: IgnitionCommand },
     SpState,
     SerialConsoleWrite(SerialConsole),
+}
+
+/// Identifier for one of of an SP's KSZ8463 management-network-facing ports.
+#[derive(
+    Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize_repr, Deserialize_repr,
+)]
+#[repr(u8)]
+pub enum SpPort {
+    One = 1,
+    Two = 2,
 }
 
 // TODO: Not all SPs are capable of crafting all these response kinds, but the

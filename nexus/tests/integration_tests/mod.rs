@@ -9,6 +9,7 @@ mod commands;
 mod console_api;
 mod datasets;
 mod disks;
+mod images;
 mod instances;
 mod organizations;
 mod oximeter;

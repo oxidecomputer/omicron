@@ -7,18 +7,21 @@
 
 use dropshot::ConfigLogging;
 use gateway_messages::SerialNumber;
-use serde::{Deserialize, Serialize};
-use std::{
-    net::SocketAddr,
-    path::{Path, PathBuf},
-};
+use serde::Deserialize;
+use serde::Serialize;
+use std::net::Ipv6Addr;
+use std::net::SocketAddr;
+use std::path::Path;
+use std::path::PathBuf;
 use thiserror::Error;
 
 /// Configuration of a simulated sidecar SP
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct SidecarConfig {
-    /// UDP address
-    pub bind_address: SocketAddr,
+    /// IPv6 multicast address to join.
+    pub multicast_addr: Ipv6Addr,
+    /// UDP address of the two (fake) KSZ8463 ports
+    pub bind_addrs: [SocketAddr; 2],
     /// Fake serial number
     pub serial_number: SerialNumber,
 }
@@ -26,8 +29,10 @@ pub struct SidecarConfig {
 /// Configuration of a simulated gimlet SP
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct GimletConfig {
-    /// UDP address
-    pub bind_address: SocketAddr,
+    /// IPv6 multicast address to join.
+    pub multicast_addr: Ipv6Addr,
+    /// UDP address of the two (fake) KSZ8463 ports
+    pub bind_addrs: [SocketAddr; 2],
     /// Fake serial number
     pub serial_number: SerialNumber,
     /// Attached components
@@ -60,12 +65,6 @@ pub struct Config {
     pub simulated_sps: SimulatedSps,
     /// Server-wide logging configuration.
     pub log: ConfigLogging,
-    // Type of SP to simulate.
-    // pub sp_type: SpType,
-    // Components to simulate.
-    // pub components: SpComponents,
-    // UDP listen address.
-    // pub bind_address: SocketAddr,
 }
 
 impl Config {

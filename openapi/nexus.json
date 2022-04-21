@@ -256,7 +256,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ImageResultsPage"
+                  "$ref": "#/components/schemas/GlobalImageResultsPage"
                 }
               }
             }
@@ -293,7 +293,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Image"
+                  "$ref": "#/components/schemas/GlobalImage"
                 }
               }
             }
@@ -332,7 +332,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Image"
+                  "$ref": "#/components/schemas/GlobalImage"
                 }
               }
             }
@@ -4941,6 +4941,22 @@
           "HistogramF64"
         ]
       },
+      "Digest": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "Sha256": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "Sha256"
+            ],
+            "additionalProperties": false
+          }
+        ]
+      },
       "Disk": {
         "description": "Client view of an [`Disk`]",
         "type": "object",
@@ -5016,22 +5032,16 @@
         "description": "Create-time parameters for a [`Disk`](omicron_common::api::external::Disk)",
         "type": "object",
         "properties": {
-          "block_size": {
-            "description": "size of blocks for this Disk. valid values are: 512, 2048, or 4096",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/BlockSize"
-              }
-            ]
-          },
           "description": {
             "type": "string"
           },
-          "image_id": {
-            "nullable": true,
-            "description": "id for image from which the Disk should be created, if any",
-            "type": "string",
-            "format": "uuid"
+          "disk_source": {
+            "description": "initial source for this disk",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/DiskSource"
+              }
+            ]
           },
           "name": {
             "$ref": "#/components/schemas/Name"
@@ -5043,17 +5053,11 @@
                 "$ref": "#/components/schemas/ByteCount"
               }
             ]
-          },
-          "snapshot_id": {
-            "nullable": true,
-            "description": "id for snapshot from which the Disk should be created, if any",
-            "type": "string",
-            "format": "uuid"
           }
         },
         "required": [
-          "block_size",
           "description",
+          "disk_source",
           "name",
           "size"
         ]
@@ -5089,6 +5093,95 @@
         },
         "required": [
           "items"
+        ]
+      },
+      "DiskSource": {
+        "description": "Different sources for a disk",
+        "oneOf": [
+          {
+            "description": "Create a blank disk",
+            "type": "object",
+            "properties": {
+              "block_size": {
+                "description": "size of blocks for this Disk. valid values are: 512, 2048, or 4096",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/BlockSize"
+                  }
+                ]
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "Blank"
+                ]
+              }
+            },
+            "required": [
+              "block_size",
+              "type"
+            ]
+          },
+          {
+            "description": "Create a disk from a disk snapshot",
+            "type": "object",
+            "properties": {
+              "snapshot_id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "Snapshot"
+                ]
+              }
+            },
+            "required": [
+              "snapshot_id",
+              "type"
+            ]
+          },
+          {
+            "description": "Create a disk from a project image",
+            "type": "object",
+            "properties": {
+              "image_id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "Image"
+                ]
+              }
+            },
+            "required": [
+              "image_id",
+              "type"
+            ]
+          },
+          {
+            "description": "Create a disk from a global image",
+            "type": "object",
+            "properties": {
+              "image_id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "GlobalImage"
+                ]
+              }
+            },
+            "required": [
+              "image_id",
+              "type"
+            ]
+          }
         ]
       },
       "DiskState": {
@@ -5274,13 +5367,128 @@
           "Bool"
         ]
       },
-      "Image": {
-        "description": "Client view of Images",
+      "GlobalImage": {
+        "description": "Client view of global Images",
         "type": "object",
         "properties": {
+          "block_size": {
+            "description": "size of blocks in bytes",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ByteCount"
+              }
+            ]
+          },
           "description": {
             "description": "human-readable free-form text about a resource",
             "type": "string"
+          },
+          "digest": {
+            "nullable": true,
+            "description": "Hash of the image contents, if applicable",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Digest"
+              }
+            ]
+          },
+          "id": {
+            "description": "unique, immutable, system-controlled identifier for each resource",
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "description": "unique, mutable, user-controlled identifier for each resource",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Name"
+              }
+            ]
+          },
+          "size": {
+            "description": "total size in bytes",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ByteCount"
+              }
+            ]
+          },
+          "time_created": {
+            "description": "timestamp when this resource was created",
+            "type": "string",
+            "format": "date-time"
+          },
+          "time_modified": {
+            "description": "timestamp when this resource was last modified",
+            "type": "string",
+            "format": "date-time"
+          },
+          "url": {
+            "nullable": true,
+            "description": "URL source of this image, if any",
+            "type": "string"
+          },
+          "version": {
+            "nullable": true,
+            "description": "Version of this, if any",
+            "type": "string"
+          }
+        },
+        "required": [
+          "block_size",
+          "description",
+          "id",
+          "name",
+          "size",
+          "time_created",
+          "time_modified"
+        ]
+      },
+      "GlobalImageResultsPage": {
+        "description": "A single page of results",
+        "type": "object",
+        "properties": {
+          "items": {
+            "description": "list of items on this page of results",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/GlobalImage"
+            }
+          },
+          "next_page": {
+            "nullable": true,
+            "description": "token used to fetch the next page of results (if any)",
+            "type": "string"
+          }
+        },
+        "required": [
+          "items"
+        ]
+      },
+      "Image": {
+        "description": "Client view of project Images",
+        "type": "object",
+        "properties": {
+          "block_size": {
+            "description": "size of blocks in bytes",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ByteCount"
+              }
+            ]
+          },
+          "description": {
+            "description": "human-readable free-form text about a resource",
+            "type": "string"
+          },
+          "digest": {
+            "nullable": true,
+            "description": "Hash of the image contents, if applicable",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Digest"
+              }
+            ]
           },
           "id": {
             "description": "unique, immutable, system-controlled identifier for each resource",
@@ -5296,12 +5504,17 @@
             ]
           },
           "project_id": {
-            "nullable": true,
+            "description": "The project the disk belongs to",
             "type": "string",
             "format": "uuid"
           },
           "size": {
-            "$ref": "#/components/schemas/ByteCount"
+            "description": "total size in bytes",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ByteCount"
+              }
+            ]
           },
           "time_created": {
             "description": "timestamp when this resource was created",
@@ -5315,13 +5528,21 @@
           },
           "url": {
             "nullable": true,
+            "description": "URL source of this image, if any",
+            "type": "string"
+          },
+          "version": {
+            "nullable": true,
+            "description": "Version of this, if any",
             "type": "string"
           }
         },
         "required": [
+          "block_size",
           "description",
           "id",
           "name",
+          "project_id",
           "size",
           "time_created",
           "time_modified"
@@ -5331,6 +5552,14 @@
         "description": "Create-time parameters for an [`Image`](omicron_common::api::external::Image)",
         "type": "object",
         "properties": {
+          "block_size": {
+            "description": "block size in bytes",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/BlockSize"
+              }
+            ]
+          },
           "description": {
             "type": "string"
           },
@@ -5347,6 +5576,7 @@
           }
         },
         "required": [
+          "block_size",
           "description",
           "name",
           "source"
@@ -5541,22 +5771,16 @@
             "description": "During instance creation, create and attach disks",
             "type": "object",
             "properties": {
-              "block_size": {
-                "description": "size of blocks for this Disk. valid values are: 512, 2048, or 4096",
-                "allOf": [
-                  {
-                    "$ref": "#/components/schemas/BlockSize"
-                  }
-                ]
-              },
               "description": {
                 "type": "string"
               },
-              "image_id": {
-                "nullable": true,
-                "description": "id for image from which the Disk should be created, if any",
-                "type": "string",
-                "format": "uuid"
+              "disk_source": {
+                "description": "initial source for this disk",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/DiskSource"
+                  }
+                ]
               },
               "name": {
                 "$ref": "#/components/schemas/Name"
@@ -5569,12 +5793,6 @@
                   }
                 ]
               },
-              "snapshot_id": {
-                "nullable": true,
-                "description": "id for snapshot from which the Disk should be created, if any",
-                "type": "string",
-                "format": "uuid"
-              },
               "type": {
                 "type": "string",
                 "enum": [
@@ -5583,8 +5801,8 @@
               }
             },
             "required": [
-              "block_size",
               "description",
+              "disk_source",
               "name",
               "size",
               "type"

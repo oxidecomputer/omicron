@@ -43,6 +43,7 @@ pub fn make_omicron_oso(log: &slog::Logger) -> Result<Oso, anyhow::Error> {
         AuthenticatedActor::get_polar_class(),
         Database::get_polar_class(),
         Fleet::get_polar_class(),
+        GlobalImageList::get_polar_class(),
         ConsoleSessionList::get_polar_class(),
     ];
     for c in classes {
@@ -71,6 +72,7 @@ pub fn make_omicron_oso(log: &slog::Logger) -> Result<Oso, anyhow::Error> {
         Sled::init(),
         UpdateAvailableArtifact::init(),
         UserBuiltin::init(),
+        GlobalImage::init(),
     ];
 
     let polar_config = std::iter::once(OMICRON_AUTHZ_CONFIG_BASE)

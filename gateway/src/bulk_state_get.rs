@@ -61,8 +61,10 @@ use crate::error::InvalidPageToken;
 use futures::StreamExt;
 use gateway_messages::IgnitionState;
 use gateway_sp_comms::Communicator;
+use gateway_sp_comms::Elapsed;
 use gateway_sp_comms::FuturesUnorderedImpl;
 use gateway_sp_comms::SpIdentifier;
+use gateway_sp_comms::Timeout;
 use serde::Deserialize;
 use serde::Serialize;
 use slog::debug;
@@ -75,7 +77,6 @@ use std::sync::Mutex;
 use std::sync::RwLock;
 use std::time::Duration;
 use tokio::sync::Notify;
-use tokio::time::Instant;
 use uuid::Uuid;
 
 use crate::http_entrypoints::SpState;
@@ -144,7 +145,7 @@ impl BulkSpStateRequests {
 
     pub(crate) async fn start(
         &self,
-        timeout: Instant,
+        timeout: Timeout,
         retain_grace_period: Duration,
     ) -> Result<SpStateRequestId, Error> {
         // set up the receiving end of all SP responses
@@ -189,7 +190,7 @@ impl BulkSpStateRequests {
         &self,
         id: &SpStateRequestId,
         last_seen: Option<SpIdentifier>,
-        timeout: Instant,
+        timeout: Timeout,
         limit: usize,
     ) -> Result<BulkStateProgress, Error> {
         let log = self.log.new(slog::o!(
@@ -201,7 +202,7 @@ impl BulkSpStateRequests {
 
         // Go ahead and create (and pin) the timeout, but we don't actually
         // await it until the loop at the bottom of this function.
-        let timeout = tokio::time::sleep_until(timeout);
+        let timeout = tokio::time::sleep_until(timeout.end());
         tokio::pin!(timeout);
 
         let collector =
@@ -381,7 +382,7 @@ async fn wait_for_sp_responses<S>(
         Item = (
             SpIdentifier,
             IgnitionState,
-            Option<Result<SpStateResult, tokio::time::error::Elapsed>>,
+            Option<Result<SpStateResult, Elapsed>>,
         ),
     >,
 {
