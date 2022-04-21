@@ -169,6 +169,11 @@ lazy_static! {
             url: &*DEMO_PROJECT_URL_INSTANCES,
             body: serde_json::to_value(&*DEMO_INSTANCE_CREATE).unwrap(),
         },
+        // Create an SSH public key
+        SetupReq {
+            url: &*SSH_KEYS_URL,
+            body: serde_json::to_value(&*DEMO_SSH_KEY_CREATE).unwrap(),
+        },
     ];
 }
 
