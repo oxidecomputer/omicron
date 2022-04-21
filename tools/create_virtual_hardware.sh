@@ -50,6 +50,19 @@ function ensure_zpools {
     done
 }
 
+# Return the name of a VNIC link if it exists, or the empty string if not.
+#
+# Arguments:
+#   $1: The name of the VNIC to look for
+function get_vnic_name_if_exists {
+    NAME="$(dladm show-vnic -p -o LINK "$1")"
+    if [[ "$?" -eq 0 ]]; then
+        echo "$NAME"
+    else
+        echo ""
+    fi
+}
+
 # Create VNICs to represent the Chelsio physical links
 #
 # Arguments:
@@ -57,33 +70,26 @@ function ensure_zpools {
 #   first physical link available on the machine.
 function ensure_simulated_chelsios {
     local PHYSICAL_LINK="$1"
-    VNIC_NAMES=("vioif0" "vioif1")
+    VNIC_NAMES=("net0" "net1")
     for VNIC in "${VNIC_NAMES[@]}"; do
-        if [[ -z "$(dladm show-vnic -p -o LINK "$VNIC")" ]]; then
+        if [[ -z "$(get_vnic_name_if_exists "$VNIC")" ]]; then
             dladm create-vnic -t -l "$PHYSICAL_LINK" "$VNIC"
         fi
         success "VNIC $VNIC exists"
-        if [[ -z "$(ipadm show-addr -p -o ADDR "$VNIC/v6")" ]]; then
-            ipadm create-addr -t -T addrconf "$VNIC/v6"
-        fi
-        success "IP address $VNIC/v6 exists"
     done
-
-    # Create an address on the underlay network
-    UNDERLAY_ADDR="lo0/underlay"
-    if [[ -z "$(ipadm show-addr -p -o ADDR "$UNDERLAY_ADDR")" ]]; then
-        ipadm create-addr -t -T static -a fd00:1::1/64 lo0/underlay
-    fi
-    success "IP address $UNDERLAY_ADDR exists"
 }
 
-function ensure_xde_driver {
-    # Always remove the driver first. There seems to be a bug in the driver,
-    # preventing it from showing up in `modinfo` on boot, even if it's actually
-    # installed.
-    if [[ -z "$(modinfo | grep xde)" ]]; then
-        rem_drv xde
-        add_drv xde
+# Return the IP address for the provided addrobj name, or the empty string if it
+# does not exist.
+#
+# Arguments:
+#   $1: The name of the addrobj
+function get_ip_addr_if_exists {
+    ADDR="$(ipadm show-addr -p -o ADDR "$1")"
+    if [[ "$?" -eq 0 ]]; then
+        echo "$ADDR"
+    else
+        echo ""
     fi
 }
 
@@ -97,4 +103,3 @@ function ensure_run_as_root {
 ensure_run_as_root
 ensure_zpools
 ensure_simulated_chelsios "$PHYSICAL_LINK"
-ensure_xde_driver
