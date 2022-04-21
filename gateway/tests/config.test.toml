@@ -15,9 +15,9 @@ power_controllers = []
 [timeouts]
 ignition_controller_millis = 10_000
 sp_request_millis = 10_000
-bulk_request_default_millis = 20_000
+bulk_request_default_millis = 10_000
 bulk_request_max_millis = 40_000
-bulk_request_page_millis = 10_000
+bulk_request_page_millis = 2_000
 bulk_request_retain_grace_period_millis = 10_000
 
 #
