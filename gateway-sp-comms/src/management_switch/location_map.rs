@@ -60,8 +60,7 @@ pub struct SwitchPortConfig {
 pub struct LocationConfig {
     /// List of human-readable location names; the actual strings don't matter,
     /// but they're used in log messages and to sync with the refined locations
-    /// contained in `determination`. For "rack v1" we could use something like
-    /// "sidecar-a"/"sidecar-b".
+    /// contained in `determination`. For "rack v1" see RFD 250 § 7.2.
     pub names: Vec<String>,
 
     /// A list of switch ports that can be used to determine which location (of
@@ -310,11 +309,20 @@ async fn discover_sps(
 
 /// Given a list of possible location names (`names`) and a stream of
 /// `determinations` (coming from `discover_sps()` above), resolve which element
-/// of `names` we must be. For example, if `names` contains `["sidecar-a",
-/// "sidecar-b"]` and we receive a determination of `(SwitchPort(1),
-/// ["sidecar-a"])`, we'll return `Ok("sidecar-a")`. This process can fail if we
-/// get bogus determinations (e.g., `determinations` yields "sidecar-c") or if
-/// we exhaust `determinations` without refining to a single location.
+/// of `names` we must be. For example, if `names` contains `["switch0",
+/// "switch1"]` and we receive a determination of `(SwitchPort(1),
+/// ["switch0"])`, we'll return `Ok("switch0")`. This process can fail if we
+/// get bogus/conflicting determinations or if we exhaust `determinations`
+/// without refining to a single location.
+///
+/// Note that not all bogus/conflicting results will be detected, because this
+/// function will short circuit once it has resolved to a single location. For
+/// example, if `names` contains `["a", "b"]` and `determinations` will yield
+/// `[(SwitchPort(0), "a"), (SwitchPort(1), "b")]`, we will return `Ok("a")`
+/// upon seeing the first determination without noticing the second. On the
+/// other hand, if `names` contains `["a", "b", "c"]` and `determinations` will
+/// yield `[(SwitchPort(0), ["a", "b"]), (SwitchPort(1), ["c"])]`, we would
+/// notice the empty intersection and fail accordingly.
 async fn resolve_location<S>(
     names: Vec<String>,
     determinations: S,
@@ -323,8 +331,8 @@ async fn resolve_location<S>(
 where
     S: Stream<Item = (SwitchPort, Vec<String>)>,
 {
-    // `names` is a list of all possible locations we're in (e.g., "sidecar-a"
-    // and "sidecar-b". Convert it to a set; we'll _remove_ elements from it as
+    // `names` is a list of all possible locations we're in (e.g., "switch0"
+    // and "switch1". Convert it to a set; we'll _remove_ elements from it as
     // we pull answers out of `determinations`.
     let mut locations = names.into_iter().collect::<HashSet<_>>();
 
