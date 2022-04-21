@@ -19,7 +19,8 @@ SOURCE_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
 cd "${SOURCE_DIR}/.."
 OMICRON_TOP="$PWD"
 OUT_DIR="$OMICRON_TOP/out"
-mkdir -p "$OUT_DIR"
+XDE_DIR="$OUT_DIR/xde"
+mkdir -p "$XDE_DIR"
 
 # Compute the SHA256 of the path in $1, returning just the sum
 function file_sha {
@@ -30,7 +31,7 @@ function file_sha {
 function download_and_check_sha {
     local URL="$1"
     local FILENAME="$(basename "$URL")"
-    local OUT_PATH="$OUT_DIR/$FILENAME"
+    local OUT_PATH="$XDE_DIR/$FILENAME"
     local SHA="$2"
 
     # Check if the file already exists, with the expected SHA
@@ -52,36 +53,39 @@ function sha_from_url {
     curl -L "$SHA_URL" 2> /dev/null | cut -d ' ' -f 1
 }
 
-OPTE_P5P_URL="https://buildomat.eng.oxide.computer/wg/0/artefact/01G0MRWX9Y0X46HBEJBW245DJY/PM097Agvf89uKmVRZ890z6saoeLp6RCcVsbYRa5PDv9DnLDT/01G0MRX6GMBV34CNANABXZXX25/01G0MSFZZWPFEQBW7JRS7ST99G/opte-0.1.58.p5p"
-OPTE_P5P_SHA_URL="https://buildomat.eng.oxide.computer/wg/0/artefact/01G0MRWX9Y0X46HBEJBW245DJY/PM097Agvf89uKmVRZ890z6saoeLp6RCcVsbYRa5PDv9DnLDT/01G0MRX6GMBV34CNANABXZXX25/01G0MSG01CGP6TH9THNY39G88Z/opte-0.1.58.p5p.sha256"
-OPTE_P5P_REPO_PATH="$OUT_DIR/$(basename "$OPTE_P5P_URL")"
-XDE_URL="https://buildomat.eng.oxide.computer/wg/0/artefact/01G0DM53XR4E008D6ET5T8DXP6/wBWo0Jsg1AG19toIyAY23xAWhzmuNKmAsF6tL18ypZODNuHK/01G0DM5DMQHF5B89VGHZ05Z4E0/01G0DMHNYQ1NS7DBX8VG3JPAP0/xde"
-XDE_SHA_URL="https://buildomat.eng.oxide.computer/wg/0/artefact/01G0DM53XR4E008D6ET5T8DXP6/wBWo0Jsg1AG19toIyAY23xAWhzmuNKmAsF6tL18ypZODNuHK/01G0DM5DMQHF5B89VGHZ05Z4E0/01G0DMHP47353961S3ETXBSD2T/xde.sha256"
+# The `helios-netdev` provides the XDE kernel driver and the `opteadm` userland
+# tool for interacting with it.
+HELIOS_NETDEV_REPO_URL="https://buildomat.eng.oxide.computer/wg/0/artefact/01G11AT7E4XV9J1J54GE2YDJT6/CB4WF4BVgnbvf5NI573z9osAV2LNIKogPtWJ5sfW2cNxUYQO/01G11ATFVTWAC2HSNV148PQ4ER/01G11B5MPQRBX3Q5EF45YDAW6Q/opte-0.1.60.p5p"
+HELIOS_NETDEV_REPO_SHA_URL="https://buildomat.eng.oxide.computer/wg/0/artefact/01G11AT7E4XV9J1J54GE2YDJT6/CB4WF4BVgnbvf5NI573z9osAV2LNIKogPtWJ5sfW2cNxUYQO/01G11ATFVTWAC2HSNV148PQ4ER/01G11B5MR60H4N13NJKGWEEA69/opte-0.1.60.p5p.sha256"
+HELIOS_NETDEV_REPO_PATH="$XDE_DIR/$(basename "$HELIOS_NETDEV_REPO_URL")"
 
-download_and_check_sha "$OPTE_P5P_URL" "$(sha_from_url "$OPTE_P5P_SHA_URL")"
-XDE_SHA="$(sha_from_url "$XDE_SHA_URL")"
-download_and_check_sha "$XDE_URL" "$XDE_SHA"
+# The XDE repo provides a full OS/Net incorporation, with updated kernel bits
+# that the `xde` kernel module and OPTE rely on.
+XDE_REPO_URL="https://buildomat.eng.oxide.computer/wg/0/artefact/01G0ZKH44GQF88GB0GQBG9TQGW/7eOYj8L8E4MLrtvdTgGMyMu5qjYTRheV250bEvh2OkBrggX4/01G0ZKHBQ33K40S5ABZMRNWS5P/01G0ZYDDRXQ3Y4E5SG9QX8N9FK/repo.p5p"
+XDE_REPO_SHA_URL="https://buildomat.eng.oxide.computer/wg/0/artefact/01G0ZKH44GQF88GB0GQBG9TQGW/7eOYj8L8E4MLrtvdTgGMyMu5qjYTRheV250bEvh2OkBrggX4/01G0ZKHBQ33K40S5ABZMRNWS5P/01G0ZYDJDMJAYHFV9Z6XVE30X5/repo.p5p.sha256"
+XDE_REPO_PATH="$XDE_DIR/$(basename "$XDE_REPO_URL")"
 
-# Move the XDE driver into it the expected location to allow operating on it
-# with `add_drv` and `rem_drv`
-DRIVER_DIR="/kernel/drv/amd64"
-XDE_FILENAME="$(basename "$XDE_URL")"
-XDE_PATH="$DRIVER_DIR/$XDE_FILENAME"
-if ! [[ -f "$XDE_PATH" ]] || [[ "$XDE_SHA" != "$(file_sha "$XDE_PATH")" ]]; then
-    echo "Replacing XDE driver"
-    mv -f "$OUT_DIR/$XDE_FILENAME" "$XDE_PATH"
-else
-    echo "XDE driver already exists with correct SHA"
-fi
+# Download and verify the package repositorieies
+download_and_check_sha "$HELIOS_NETDEV_REPO_URL" "$(sha_from_url "$HELIOS_NETDEV_REPO_SHA_URL")"
+download_and_check_sha "$XDE_REPO_URL" "$(sha_from_url "$XDE_REPO_SHA_URL")"
 
-# Add the OPTE P5P package repository (at the top of the search order) and
-# update the OS packages. This may require a reboot.
-pkg set-publisher -p "$OPTE_P5P_REPO_PATH" --search-first
+# Set the `helios-dev` repo as non-sticky, meaning that packages that were
+# originally provided by it may be updated by another repository, if that repo
+# provides newer versions of the packages.
 pkg set-publisher --non-sticky helios-dev
+
+# Add the OPTE and XDE repositories and update packages.
+pkg set-publisher -p "$HELIOS_NETDEV_REPO_PATH" --search-first
+pkg set-publisher -p "$XDE_REPO_PATH" --search-first
+
+# Actually update packages, handling case where no updates are needed
 RC=0
 pkg update || RC=$?;
 if [[ "$RC" -eq 0 ]] || [[ "$RC" -eq 4 ]]; then
-    exit 0
+    return 0
 else
-    exit "$RC"
+    return "$RC"
 fi
+
+# Actually install the xde kernel module and opteadm tool
+pkg install driver/network/opte

@@ -27,20 +27,6 @@ function success {
     echo -e "\e[1;36m$1\e[0m"
 }
 
-function try_uninstall_xde {
-    RC=0
-    if ! [[ -z "$(modinfo | grep xde)" ]]; then
-        rem_drv xde
-        RC=$?
-    fi
-
-    if [[ $RC -eq 0 ]]; then
-        success "XDE kernel module uninstalled"
-    else
-        warn "Failed to uninstall XDE kernel module"
-    fi
-}
-
 function try_remove_address {
     local ADDRESS="$1"
     RC=0
@@ -71,9 +57,8 @@ function try_remove_vnic {
 
 function try_remove_vnics {
     try_remove_address "lo0/underlay"
-    VNIC_LINKS=("vioif0" "vioif1")
+    VNIC_LINKS=("net0" "net1")
     for LINK in "${VNIC_LINKS[@]}"; do
-        try_remove_address "$LINK/v6"
         try_remove_vnic "$LINK"
     done
 }
@@ -94,5 +79,5 @@ function try_destroy_zpools {
     done
 }
 
-try_uninstall_xde && try_remove_vnics
+try_remove_vnics
 try_destroy_zpools
