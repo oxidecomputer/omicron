@@ -237,12 +237,25 @@ has_permission(actor: AuthenticatedActor, "modify", session: ConsoleSession)
 	if has_role(actor, "external-authenticator", session.fleet);
 
 resource SiloUser {
-	permissions = [ "read", "modify", "create_child" ];
-        relations = { parent_silo: Silo };
+	permissions = [
+	    "list_children",
+	    "modify",
+	    "read",
+	    "create_child",
+	];
+	roles = [ "admin", "collaborator", "viewer" ];
 
-        "read" if "read" on "parent_silo";
-        "modify" if "modify" on "parent_silo";
-        "create_child" if "create_child" on "parent_silo";
+	"list_children" if "viewer";
+	"read" if "viewer";
+	"viewer" if "collaborator";
+	"create_child" if "collaborator";
+	"collaborator" if "admin";
+	"modify" if "admin";
+
+	relations = { parent_silo: Silo };
+	"admin" if "admin" on "parent_silo";
+	"collaborator" if "collaborator" on "parent_silo";
+	"viewer" if "viewer" on "parent_silo";
 }
 has_relation(silo: Silo, "parent_silo", user: SiloUser)
 	if user.silo = silo;

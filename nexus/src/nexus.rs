@@ -3660,25 +3660,25 @@ impl Nexus {
         &self,
         opctx: &OpContext,
         silo_user_id: Uuid,
-    ) -> LookupResult<SiloUser> {
-        let (.., db_silo_user) = LookupPath::new(opctx, &self.db_datastore)
-            .silo_user_id(silo_user_id)
-            .fetch()
-            .await?;
-        Ok(db_silo_user)
+    ) -> LookupResult<(authz::SiloUser, db::model::SiloUser)> {
+        let (.., authz_user, db_silo_user) =
+            LookupPath::new(opctx, &self.db_datastore)
+                .silo_user_id(silo_user_id)
+                .fetch()
+                .await?;
+        Ok((authz_user, db_silo_user))
     }
 
     // SSH public keys
 
-    /// Following GitHub, we do not bother to authorize this request.
-    /// After all, they are *public* keys.
     pub async fn ssh_keys_list(
         &self,
-        _opctx: &OpContext,
-        silo_user_id: Uuid,
+        opctx: &OpContext,
+        authz_user: &authz::SiloUser,
         page_params: &DataPageParams<'_, Name>,
     ) -> ListResultVec<SshKey> {
-        self.db_datastore.ssh_keys_list(silo_user_id, page_params).await
+        opctx.authorize(authz::Action::ListChildren, authz_user).await?;
+        self.db_datastore.ssh_keys_list(opctx, authz_user, page_params).await
     }
 
     pub async fn ssh_key_fetch(
@@ -3696,12 +3696,12 @@ impl Nexus {
 
     pub async fn ssh_key_create(
         &self,
-        _opctx: &OpContext,
-        silo_user_id: Uuid,
+        opctx: &OpContext,
+        authz_user: &authz::SiloUser,
         params: params::SshKeyCreate,
     ) -> CreateResult<db::model::SshKey> {
-        let ssh_key = db::model::SshKey::new(silo_user_id, params);
-        Ok(self.db_datastore.ssh_key_create(ssh_key).await?)
+        let ssh_key = db::model::SshKey::new(authz_user.id(), params);
+        Ok(self.db_datastore.ssh_key_create(opctx, authz_user, ssh_key).await?)
     }
 
     pub async fn ssh_key_delete(

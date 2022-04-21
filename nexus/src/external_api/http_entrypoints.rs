@@ -2876,11 +2876,11 @@ async fn sshkeys_get(
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
         let &actor = opctx.authn.actor_required()?;
-        let silo_user_id = actor.id;
+        let (authz_user, _) = nexus.silo_user_fetch(&opctx, actor.id).await?;
         let page_params =
             data_page_params_for(&rqctx, &query)?.map_name(Name::ref_cast);
         let ssh_keys = nexus
-            .ssh_keys_list(&opctx, silo_user_id, &page_params)
+            .ssh_keys_list(&opctx, &authz_user, &page_params)
             .await?
             .into_iter()
             .map(SshKey::from)
@@ -2905,9 +2905,9 @@ async fn sshkeys_post(
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
         let &actor = opctx.authn.actor_required()?;
-        let silo_user_id = actor.id;
+        let (authz_user, _) = nexus.silo_user_fetch(&opctx, actor.id).await?;
         let ssh_key = nexus
-            .ssh_key_create(&opctx, silo_user_id, new_key.into_inner())
+            .ssh_key_create(&opctx, &authz_user, new_key.into_inner())
             .await?;
         Ok(HttpResponseCreated(ssh_key.into()))
     };

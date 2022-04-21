@@ -2684,16 +2684,16 @@ impl DataStore {
 
     pub async fn ssh_keys_list(
         &self,
-        silo_user_id: Uuid,
+        opctx: &OpContext,
+        authz_user: &authz::SiloUser,
         page_params: &DataPageParams<'_, Name>,
     ) -> ListResultVec<SshKey> {
         use db::schema::ssh_key::dsl;
-
         paginated(dsl::ssh_key, dsl::name, page_params)
-            .filter(dsl::silo_user_id.eq(silo_user_id))
+            .filter(dsl::silo_user_id.eq(authz_user.id()))
             .filter(dsl::time_deleted.is_null())
             .select(SshKey::as_select())
-            .load_async(self.pool())
+            .load_async(self.pool_authorized(opctx).await?)
             .await
             .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
     }
@@ -2701,14 +2701,18 @@ impl DataStore {
     /// Create a new SSH public key for a user.
     pub async fn ssh_key_create(
         &self,
+        opctx: &OpContext,
+        authz_user: &authz::SiloUser,
         ssh_key: SshKey,
     ) -> CreateResult<SshKey> {
-        use db::schema::ssh_key::dsl;
+        assert_eq!(authz_user.id(), ssh_key.silo_user_id);
+        opctx.authorize(authz::Action::CreateChild, authz_user).await?;
 
+        use db::schema::ssh_key::dsl;
         diesel::insert_into(dsl::ssh_key)
             .values(ssh_key)
             .returning(SshKey::as_returning())
-            .get_result_async(self.pool())
+            .get_result_async(self.pool_authorized(opctx).await?)
             .await
             .map_err(|e| {
                 Error::internal_error(&format!(
@@ -2727,13 +2731,12 @@ impl DataStore {
         opctx.authorize(authz::Action::Delete, authz_ssh_key).await?;
 
         use db::schema::ssh_key::dsl;
-
-        let now = Utc::now();
         diesel::update(dsl::ssh_key)
             .filter(dsl::id.eq(authz_ssh_key.id()))
             .filter(dsl::time_deleted.is_null())
-            .set(dsl::time_deleted.eq(now))
-            .execute_async(self.pool_authorized(opctx).await?)
+            .set(dsl::time_deleted.eq(Utc::now()))
+            .check_if_exists::<SshKey>(authz_ssh_key.id())
+            .execute_and_check(self.pool_authorized(opctx).await?)
             .await
             .map_err(|e| {
                 public_error_from_diesel_pool(
@@ -3344,6 +3347,13 @@ mod test {
             .unwrap();
         assert_eq!(silo_user.id(), silo_user_id);
 
+        let (.., authz_user) = LookupPath::new(&opctx, &datastore)
+            .silo_user_id(silo_user_id)
+            .lookup_for(authz::Action::CreateChild)
+            .await
+            .unwrap();
+        assert_eq!(authz_user.id(), silo_user_id);
+
         // Create a new SSH public key for the new user.
         let public_key = "ssh-test AAAAAAAAKEY".to_string();
         let ssh_key = SshKey::new(
@@ -3356,7 +3366,10 @@ mod test {
                 public_key,
             },
         );
-        let created = datastore.ssh_key_create(ssh_key.clone()).await.unwrap();
+        let created = datastore
+            .ssh_key_create(&opctx, &authz_user, ssh_key.clone())
+            .await
+            .unwrap();
         assert_eq!(created.silo_user_id, ssh_key.silo_user_id);
         assert_eq!(created.public_key, ssh_key.public_key);
 
@@ -3373,7 +3386,8 @@ mod test {
         assert_eq!(found.public_key, ssh_key.public_key);
 
         // Trying to insert the same one again fails.
-        let duplicate = datastore.ssh_key_create(ssh_key.clone()).await;
+        let duplicate =
+            datastore.ssh_key_create(&opctx, &authz_user, ssh_key.clone()).await;
         assert!(matches!(
             duplicate,
             Err(Error::InternalError { internal_message: _ })
