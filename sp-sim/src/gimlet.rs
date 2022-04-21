@@ -107,6 +107,12 @@ impl Gimlet {
                 let listener = TcpListener::bind(addr)
                     .await
                     .with_context(|| format!("failed to bind to {}", addr))?;
+                debug!(
+                    log, "bound fake serial console to TCP port";
+                    "addr" => addr,
+                    "component" => ?component,
+                );
+
                 serial_console_addrs.insert(
                     component.as_str().unwrap().to_string(),
                     listener.local_addr().with_context(|| {
@@ -324,7 +330,6 @@ enum CommandResponse {
 struct UdpTask {
     udp0: UdpServer,
     udp1: UdpServer,
-    gateway_addresses: Arc<Mutex<[Option<SocketAddr>; 2]>>,
     handler: Handler,
     commands:
         mpsc::UnboundedReceiver<(Command, oneshot::Sender<CommandResponse>)>,
@@ -349,8 +354,12 @@ impl UdpTask {
         Self {
             udp0,
             udp1,
-            gateway_addresses,
-            handler: Handler { log, serial_number, incoming_serial_console },
+            handler: Handler {
+                log,
+                gateway_addresses,
+                serial_number,
+                incoming_serial_console,
+            },
             commands,
         }
     }
@@ -362,7 +371,6 @@ impl UdpTask {
             select! {
                 recv0 = self.udp0.recv_from() => {
                     if let Some((resp, addr)) = handle_request(
-                        &self.gateway_addresses,
                         &mut self.handler,
                         recv0,
                         &mut server,
@@ -375,7 +383,6 @@ impl UdpTask {
 
                 recv1 = self.udp1.recv_from() => {
                     if let Some((resp, addr)) = handle_request(
-                        &self.gateway_addresses,
                         &mut self.handler,
                         recv1,
                         &mut server,
@@ -407,7 +414,6 @@ impl UdpTask {
 }
 
 async fn handle_request<'a>(
-    gateway_addresses: &Mutex<[Option<SocketAddr>; 2]>,
     handler: &mut Handler,
     recv: Result<(&[u8], SocketAddr)>,
     server: &'a mut SpServer,
@@ -425,12 +431,6 @@ async fn handle_request<'a>(
     let (data, addr) =
         recv.with_context(|| format!("recv on {:?}", port_num))?;
 
-    let port_num_index = match port_num {
-        SpPort::One => 0,
-        SpPort::Two => 1,
-    };
-    gateway_addresses.lock().unwrap()[port_num_index] = Some(addr);
-
     let resp = server
         .dispatch(addr, port_num, data, handler)
         .map_err(|err| anyhow!("dispatching message failed: {:?}", err))?;
@@ -441,8 +441,19 @@ async fn handle_request<'a>(
 struct Handler {
     log: Logger,
     serial_number: SerialNumber,
+    gateway_addresses: Arc<Mutex<[Option<SocketAddr>; 2]>>,
     incoming_serial_console:
         HashMap<SpComponent, UnboundedSender<SerialConsole>>,
+}
+
+impl Handler {
+    fn update_gateway_address(&self, addr: SocketAddr, port: SpPort) {
+        let i = match port {
+            SpPort::One => 0,
+            SpPort::Two => 1,
+        };
+        self.gateway_addresses.lock().unwrap()[i] = Some(addr);
+    }
 }
 
 impl SpHandler for Handler {
@@ -451,6 +462,7 @@ impl SpHandler for Handler {
         sender: SocketAddr,
         port: SpPort,
     ) -> Result<(), ResponseError> {
+        self.update_gateway_address(sender, port);
         debug!(
             &self.log, "received ping; sending pong";
             "sender" => sender,
@@ -465,6 +477,7 @@ impl SpHandler for Handler {
         port: SpPort,
         target: u8,
     ) -> Result<gateway_messages::IgnitionState, ResponseError> {
+        self.update_gateway_address(sender, port);
         warn!(
             &self.log,
             "received ignition state request; not supported by gimlet";
@@ -480,6 +493,7 @@ impl SpHandler for Handler {
         sender: SocketAddr,
         port: SpPort,
     ) -> Result<gateway_messages::BulkIgnitionState, ResponseError> {
+        self.update_gateway_address(sender, port);
         warn!(
             &self.log,
             "received bulk ignition state request; not supported by gimlet";
@@ -496,6 +510,7 @@ impl SpHandler for Handler {
         target: u8,
         command: gateway_messages::IgnitionCommand,
     ) -> Result<(), ResponseError> {
+        self.update_gateway_address(sender, port);
         warn!(
             &self.log,
             "received ignition command; not supported by gimlet";
@@ -513,6 +528,7 @@ impl SpHandler for Handler {
         port: SpPort,
         packet: gateway_messages::SerialConsole,
     ) -> Result<(), ResponseError> {
+        self.update_gateway_address(sender, port);
         debug!(
             &self.log,
             "received serial console packet";
@@ -543,6 +559,7 @@ impl SpHandler for Handler {
         sender: SocketAddr,
         port: SpPort,
     ) -> Result<SpState, ResponseError> {
+        self.update_gateway_address(sender, port);
         let state = SpState { serial_number: self.serial_number };
         debug!(
             &self.log, "received state request";
