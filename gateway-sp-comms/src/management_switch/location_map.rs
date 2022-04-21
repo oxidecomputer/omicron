@@ -74,15 +74,15 @@ pub struct LocationDeterminationConfig {
     /// Which port to contact.
     pub switch_port: usize,
 
-    /// If the SP on `switch_port` communicates with us on its port 0, we must
-    /// be one of this set of locations (which should be a subset of our parent
-    /// [`LocationConfig`]'s `names).
-    pub sp_port_0: Vec<String>,
-
     /// If the SP on `switch_port` communicates with us on its port 1, we must
     /// be one of this set of locations (which should be a subset of our parent
     /// [`LocationConfig`]'s `names).
     pub sp_port_1: Vec<String>,
+
+    /// If the SP on `switch_port` communicates with us on its port 2, we must
+    /// be one of this set of locations (which should be a subset of our parent
+    /// [`LocationConfig`]'s `names).
+    pub sp_port_2: Vec<String>,
 }
 
 #[derive(Debug)]
@@ -293,8 +293,8 @@ async fn discover_sps(
         let determination = location_determination.remove(pos);
 
         let refined = match response.sp_port {
-            SpPort::One => determination.sp_port_0,
-            SpPort::Two => determination.sp_port_1,
+            SpPort::One => determination.sp_port_1,
+            SpPort::Two => determination.sp_port_2
         };
 
         // the only failure possible here is that the receiver is gone; that's
