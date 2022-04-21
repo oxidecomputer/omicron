@@ -7028,7 +7028,7 @@
             ]
           },
           "public_key": {
-            "description": "The SSH public key",
+            "description": "SSH public key, e.g., `\"ssh-ed25519 AAAAC3NzaC...\"`",
             "type": "string"
           },
           "silo_user_id": {
@@ -7058,7 +7058,7 @@
         ]
       },
       "SshKeyCreate": {
-        "description": "Create-time identity-related parameters",
+        "description": "Create-time parameters for an [`SshKey`](crate::external_api::views::SshKey)",
         "type": "object",
         "properties": {
           "description": {
@@ -7068,6 +7068,7 @@
             "$ref": "#/components/schemas/Name"
           },
           "public_key": {
+            "description": "SSH public key, e.g., `\"ssh-ed25519 AAAAC3NzaC...\"`",
             "type": "string"
           }
         },

@@ -439,11 +439,14 @@ pub struct UserBuiltinCreate {
 // and so have an implicit silo user ID which must be passed seperately
 // to the creation routine. Note that this disagrees with RFD 44.
 
+/// Create-time parameters for an [`SshKey`](crate::external_api::views::SshKey)
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct SshKeyCreate {
     #[serde(flatten)]
     pub identity: IdentityMetadataCreateParams,
-    pub public_key: String, // e.g., "ssh-ed25519 AAAAC3NzaC..."
+
+    /// SSH public key, e.g., `"ssh-ed25519 AAAAC3NzaC..."`
+    pub public_key: String,
 }
 
 #[cfg(test)]

@@ -289,9 +289,11 @@ impl From<model::RoleBuiltin> for Role {
 pub struct SshKey {
     #[serde(flatten)]
     pub identity: IdentityMetadata,
+
     /// The user to whom this key belongs
     pub silo_user_id: Uuid,
-    /// The SSH public key
+
+    /// SSH public key, e.g., `"ssh-ed25519 AAAAC3NzaC..."`
     pub public_key: String,
 }
 
