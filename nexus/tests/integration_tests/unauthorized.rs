@@ -522,11 +522,14 @@ fn record_operation(whichtest: WhichTest<'_>) {
         // Note that this likely still writes the color-changing control
         // characters to the real stdout, even without "--nocapture".  That
         // sucks, but at least you don't see them.
-        term.fg(term::color::GREEN).unwrap();
-        term.flush().unwrap();
+        //
+        // We also don't unwrap() the results of printing control codes
+        // in case the terminal doesn't support them.
+        let _ = term.fg(term::color::GREEN);
+        let _ = term.flush();
         print!("{}", c);
-        term.reset().unwrap();
-        term.flush().unwrap();
+        let _ = term.reset();
+        let _ = term.flush();
     } else {
         print!("{}", c);
     }
