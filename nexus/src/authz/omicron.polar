@@ -260,19 +260,12 @@ resource SiloUser {
 	    "read",
 	    "create_child",
 	];
-	roles = [ "admin", "collaborator", "viewer" ];
-
-	"list_children" if "viewer";
-	"read" if "viewer";
-	"viewer" if "collaborator";
-	"create_child" if "collaborator";
-	"collaborator" if "admin";
-	"modify" if "admin";
-
 	relations = { parent_silo: Silo };
-	"admin" if "admin" on "parent_silo";
-	"collaborator" if "collaborator" on "parent_silo";
-	"viewer" if "viewer" on "parent_silo";
+
+	"list_children" if "viewer" on "parent_silo";
+	"read" if "viewer" on "parent_silo";
+	"modify" if "admin" on "parent_silo";
+	"create_child" if "admin" on "parent_silo";
 }
 has_relation(silo: Silo, "parent_silo", user: SiloUser)
 	if user.silo = silo;
