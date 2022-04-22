@@ -340,7 +340,7 @@ fn generate_misc_helpers(config: &Config) -> TokenStream {
                 if let Err(_) = &maybe_silo {
                     error!(
                         log,
-                        "unexpected successful lookup of siloed resource\
+                        "unexpected successful lookup of siloed resource \
                         {:?} with no silo in OpContext",
                         #resource_name_str,
                     );
