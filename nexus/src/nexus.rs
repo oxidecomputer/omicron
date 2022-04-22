@@ -3870,7 +3870,10 @@ impl Nexus {
             .lookup_for(authz::Action::CreateChild)
             .await?;
         assert_eq!(authz_user.id(), silo_user_id);
-        Ok(self.db_datastore.ssh_key_create(opctx, &authz_user, ssh_key).await?)
+        Ok(self
+            .db_datastore
+            .ssh_key_create(opctx, &authz_user, ssh_key)
+            .await?)
     }
 
     pub async fn ssh_key_delete(
