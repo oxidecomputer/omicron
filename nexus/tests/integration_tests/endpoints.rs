@@ -806,25 +806,6 @@ lazy_static! {
             allowed_methods: vec![AllowedMethod::Get],
         },
 
-        VerifyEndpoint {
-            url: &*SSH_KEYS_URL,
-            visibility: Visibility::Protected,
-            allowed_methods: vec![
-                AllowedMethod::Get,
-                AllowedMethod::Post(
-                    serde_json::to_value(&*DEMO_SSH_KEY_CREATE).unwrap()
-                ),
-            ],
-        },
-        VerifyEndpoint {
-            url: &*DEMO_SSH_KEY_URL,
-            visibility: Visibility::Protected,
-            allowed_methods: vec![
-                AllowedMethod::Get,
-                AllowedMethod::Delete,
-            ],
-        },
-
         /* Hardware */
 
         VerifyEndpoint {

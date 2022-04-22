@@ -193,11 +193,6 @@ lazy_static! {
             url: "/images",
             body: serde_json::to_value(&*DEMO_IMAGE_CREATE).unwrap(),
         },
-        // Create an SSH public key
-        SetupReq {
-            url: &*SSH_KEYS_URL,
-            body: serde_json::to_value(&*DEMO_SSH_KEY_CREATE).unwrap(),
-        },
     ];
 }
 
