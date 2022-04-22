@@ -2877,11 +2877,10 @@ async fn sshkeys_get(
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
         let &actor = opctx.authn.actor_required()?;
-        let (authz_user, _) = nexus.silo_user_fetch(&opctx, actor.id).await?;
         let page_params =
             data_page_params_for(&rqctx, &query)?.map_name(Name::ref_cast);
         let ssh_keys = nexus
-            .ssh_keys_list(&opctx, &authz_user, &page_params)
+            .ssh_keys_list(&opctx, actor.id, &page_params)
             .await?
             .into_iter()
             .map(SshKey::from)
@@ -2906,9 +2905,8 @@ async fn sshkeys_post(
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
         let &actor = opctx.authn.actor_required()?;
-        let (authz_user, _) = nexus.silo_user_fetch(&opctx, actor.id).await?;
         let ssh_key = nexus
-            .ssh_key_create(&opctx, &authz_user, new_key.into_inner())
+            .ssh_key_create(&opctx, actor.id, new_key.into_inner())
             .await?;
         Ok(HttpResponseCreated(ssh_key.into()))
     };
@@ -2938,9 +2936,8 @@ async fn sshkeys_get_key(
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
         let &actor = opctx.authn.actor_required()?;
-        let (authz_user, _) = nexus.silo_user_fetch(&opctx, actor.id).await?;
         let ssh_key =
-            nexus.ssh_key_fetch(&opctx, &authz_user, ssh_key_name).await?;
+            nexus.ssh_key_fetch(&opctx, actor.id, ssh_key_name).await?;
         Ok(HttpResponseOk(ssh_key.into()))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
@@ -2963,8 +2960,7 @@ async fn sshkeys_delete_key(
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
         let &actor = opctx.authn.actor_required()?;
-        let (authz_user, _) = nexus.silo_user_fetch(&opctx, actor.id).await?;
-        nexus.ssh_key_delete(&opctx, &authz_user, ssh_key_name).await?;
+        nexus.ssh_key_delete(&opctx, actor.id, ssh_key_name).await?;
         Ok(HttpResponseDeleted())
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await

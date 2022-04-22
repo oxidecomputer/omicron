@@ -3819,13 +3819,12 @@ impl Nexus {
         &self,
         opctx: &OpContext,
         silo_user_id: Uuid,
-    ) -> LookupResult<(authz::SiloUser, db::model::SiloUser)> {
-        let (.., authz_user, db_silo_user) =
-            LookupPath::new(opctx, &self.db_datastore)
-                .silo_user_id(silo_user_id)
-                .fetch()
-                .await?;
-        Ok((authz_user, db_silo_user))
+    ) -> LookupResult<db::model::SiloUser> {
+        let (.., db_silo_user) = LookupPath::new(opctx, &self.datastore())
+            .silo_user_id(silo_user_id)
+            .fetch()
+            .await?;
+        Ok(db_silo_user)
     }
 
     // SSH public keys
@@ -3833,20 +3832,25 @@ impl Nexus {
     pub async fn ssh_keys_list(
         &self,
         opctx: &OpContext,
-        authz_user: &authz::SiloUser,
+        silo_user_id: Uuid,
         page_params: &DataPageParams<'_, Name>,
     ) -> ListResultVec<SshKey> {
-        self.db_datastore.ssh_keys_list(opctx, authz_user, page_params).await
+        let (.., authz_user) = LookupPath::new(opctx, &self.datastore())
+            .silo_user_id(silo_user_id)
+            .lookup_for(authz::Action::ListChildren)
+            .await?;
+        assert_eq!(authz_user.id(), silo_user_id);
+        self.db_datastore.ssh_keys_list(opctx, &authz_user, page_params).await
     }
 
     pub async fn ssh_key_fetch(
         &self,
         opctx: &OpContext,
-        authz_user: &authz::SiloUser,
+        silo_user_id: Uuid,
         ssh_key_name: &Name,
     ) -> LookupResult<SshKey> {
         let (.., ssh_key) = LookupPath::new(opctx, &self.datastore())
-            .silo_user_id(authz_user.id())
+            .silo_user_id(silo_user_id)
             .ssh_key_name(ssh_key_name)
             .fetch()
             .await?;
@@ -3857,27 +3861,31 @@ impl Nexus {
     pub async fn ssh_key_create(
         &self,
         opctx: &OpContext,
-        authz_user: &authz::SiloUser,
+        silo_user_id: Uuid,
         params: params::SshKeyCreate,
     ) -> CreateResult<db::model::SshKey> {
-        let ssh_key = db::model::SshKey::new(authz_user.id(), params);
-        Ok(self.db_datastore.ssh_key_create(opctx, authz_user, ssh_key).await?)
+        let ssh_key = db::model::SshKey::new(silo_user_id, params);
+        let (.., authz_user) = LookupPath::new(opctx, &self.datastore())
+            .silo_user_id(silo_user_id)
+            .lookup_for(authz::Action::CreateChild)
+            .await?;
+        assert_eq!(authz_user.id(), silo_user_id);
+        Ok(self.db_datastore.ssh_key_create(opctx, &authz_user, ssh_key).await?)
     }
 
     pub async fn ssh_key_delete(
         &self,
         opctx: &OpContext,
-        authz_user: &authz::SiloUser,
+        silo_user_id: Uuid,
         ssh_key_name: &Name,
     ) -> DeleteResult {
-        let (.., authz_ssh_key, ssh_key) =
+        let (.., authz_user, authz_ssh_key) =
             LookupPath::new(opctx, &self.datastore())
-                .silo_user_id(authz_user.id())
+                .silo_user_id(silo_user_id)
                 .ssh_key_name(ssh_key_name)
-                .fetch()
+                .lookup_for(authz::Action::Delete)
                 .await?;
-        assert_eq!(ssh_key.name(), ssh_key_name);
-
+        assert_eq!(authz_user.id(), silo_user_id);
         self.db_datastore.ssh_key_delete(opctx, &authz_ssh_key).await
     }
 }
