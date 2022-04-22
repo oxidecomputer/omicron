@@ -243,21 +243,6 @@ lazy_static! {
             },
             disk: DEMO_DISK_NAME.clone(),
         };
-
-    // SSH public keys
-    pub static ref SSH_KEYS_URL: String =
-        "/session/me/sshkeys".to_string();
-    pub static ref DEMO_SSH_KEY_NAME: Name = "demo-ssh-key".parse().unwrap();
-    pub static ref DEMO_SSH_KEY_URL: String =
-        format!("{}/{}", *SSH_KEYS_URL, *DEMO_SSH_KEY_NAME);
-    pub static ref DEMO_SSH_KEY_CREATE: params::SshKeyCreate =
-        params::SshKeyCreate {
-            identity: IdentityMetadataCreateParams {
-                name: DEMO_SSH_KEY_NAME.clone(),
-                description: String::from("my SSH public key"),
-            },
-            public_key: "ssh-test AAAAAAAAA".to_string(),
-        };
 }
 
 /// Describes an API endpoint to be verified by the "unauthorized" test
