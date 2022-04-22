@@ -516,6 +516,7 @@ pub enum ResourceType {
     Fleet,
     Silo,
     SiloUser,
+    SshKey,
     ConsoleSession,
     GlobalImage,
     Organization,

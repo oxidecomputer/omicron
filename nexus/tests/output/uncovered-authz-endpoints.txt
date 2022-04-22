@@ -1,4 +1,8 @@
 API endpoints with no coverage in authz tests:
+sshkeys_delete_key                       (delete "/session/me/sshkeys/{ssh_key_name}")
 session_me                               (get    "/session/me")
+sshkeys_get                              (get    "/session/me/sshkeys")
+sshkeys_get_key                          (get    "/session/me/sshkeys/{ssh_key_name}")
 spoof_login                              (post   "/login")
 logout                                   (post   "/logout")
+sshkeys_post                             (post   "/session/me/sshkeys")

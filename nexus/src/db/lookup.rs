@@ -304,7 +304,7 @@ impl<'a> LookupPath<'a> {
         Silo { key: SiloKey::PrimaryKey(Root { lookup_root: self }, id) }
     }
 
-    /// Select a resource of type Silo, identified by its id
+    /// Select a resource of type Silo, identified by its name
     pub fn silo_name<'b, 'c>(self, name: &'b Name) -> Silo<'c>
     where
         'a: 'c,
@@ -398,6 +398,24 @@ lookup_resource! {
     name = "Silo",
     ancestors = [],
     children = [ "Organization" ],
+    lookup_by_name = true,
+    soft_deletes = true,
+    primary_key_columns = [ { column_name = "id", rust_type = Uuid } ]
+}
+
+lookup_resource! {
+    name = "SiloUser",
+    ancestors = [ "Silo" ],
+    children = [ "SshKey" ],
+    lookup_by_name = false,
+    soft_deletes = true,
+    primary_key_columns = [ { column_name = "id", rust_type = Uuid } ]
+}
+
+lookup_resource! {
+    name = "SshKey",
+    ancestors = [ "Silo", "SiloUser" ],
+    children = [],
     lookup_by_name = true,
     soft_deletes = true,
     primary_key_columns = [ { column_name = "id", rust_type = Uuid } ]
@@ -507,15 +525,6 @@ lookup_resource! {
         { column_name = "resource_type", rust_type = String },
         { column_name = "role_name", rust_type = String },
     ]
-}
-
-lookup_resource! {
-    name = "SiloUser",
-    ancestors = [],
-    children = [],
-    lookup_by_name = false,
-    soft_deletes = true,
-    primary_key_columns = [ { column_name = "id", rust_type = Uuid } ]
 }
 
 lookup_resource! {

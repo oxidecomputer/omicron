@@ -396,14 +396,6 @@ authz_resource! {
 }
 
 authz_resource! {
-    name = "SiloUser",
-    parent = "Fleet",
-    primary_key = Uuid,
-    roles_allowed = false,
-    polar_snippet = FleetChild,
-}
-
-authz_resource! {
     name = "RoleBuiltin",
     parent = "Fleet",
     primary_key = (String, String),
@@ -432,6 +424,22 @@ authz_resource! {
     parent = "Fleet",
     primary_key = Uuid,
     roles_allowed = true,
+    polar_snippet = Custom,
+}
+
+authz_resource! {
+    name = "SiloUser",
+    parent = "Silo",
+    primary_key = Uuid,
+    roles_allowed = false,
+    polar_snippet = Custom,
+}
+
+authz_resource! {
+    name = "SshKey",
+    parent = "SiloUser",
+    primary_key = Uuid,
+    roles_allowed = false,
     polar_snippet = Custom,
 }
 

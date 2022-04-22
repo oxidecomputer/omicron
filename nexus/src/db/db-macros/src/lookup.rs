@@ -340,7 +340,7 @@ fn generate_misc_helpers(config: &Config) -> TokenStream {
                 if let Err(_) = &maybe_silo {
                     error!(
                         log,
-                        "unexpected successful lookup of siloed resource\
+                        "unexpected successful lookup of siloed resource \
                         {:?} with no silo in OpContext",
                         #resource_name_str,
                     );
@@ -352,8 +352,8 @@ fn generate_misc_helpers(config: &Config) -> TokenStream {
                     use crate::authz::ApiResourceError;
                     error!(
                         log,
-                        "unexpected successful lookup of siloed resource\
-                        {:?} in a different Silo from current actor (resource\
+                        "unexpected successful lookup of siloed resource \
+                        {:?} in a different Silo from current actor (resource \
                         Silo {}, actor Silo {})",
                         #resource_name_str,
                         resource_silo_id,

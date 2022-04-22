@@ -17,6 +17,7 @@ mod projects;
 mod roles_builtin;
 mod router_routes;
 mod silos;
+mod ssh_keys;
 mod subnet_allocation;
 mod timeseries;
 mod unauthorized;

@@ -93,6 +93,12 @@ impl From<&Name> for LookupType {
     }
 }
 
+impl From<Uuid> for LookupType {
+    fn from(uuid: Uuid) -> Self {
+        LookupType::ById(uuid)
+    }
+}
+
 impl Error {
     /// Returns whether the error is likely transient and could reasonably be
     /// retried
