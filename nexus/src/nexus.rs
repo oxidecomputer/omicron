@@ -3836,7 +3836,6 @@ impl Nexus {
         authz_user: &authz::SiloUser,
         page_params: &DataPageParams<'_, Name>,
     ) -> ListResultVec<SshKey> {
-        opctx.authorize(authz::Action::ListChildren, authz_user).await?;
         self.db_datastore.ssh_keys_list(opctx, authz_user, page_params).await
     }
 

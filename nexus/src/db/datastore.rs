@@ -2779,6 +2779,8 @@ impl DataStore {
         authz_user: &authz::SiloUser,
         page_params: &DataPageParams<'_, Name>,
     ) -> ListResultVec<SshKey> {
+        opctx.authorize(authz::Action::ListChildren, authz_user).await?;
+
         use db::schema::ssh_key::dsl;
         paginated(dsl::ssh_key, dsl::name, page_params)
             .filter(dsl::silo_user_id.eq(authz_user.id()))
