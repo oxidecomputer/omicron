@@ -5,16 +5,13 @@
 //! Rack Setup Service implementation
 
 use super::config::{SetupServiceConfig as Config, SledRequest};
-use crate::params::ServiceRequest;
 use crate::bootstrap::{
     client as bootstrap_agent_client, config::BOOTSTRAP_AGENT_PORT,
     discovery::PeerMonitorObserver, params::SledAgentRequest,
     params::SledSubnet,
 };
-use omicron_common::address::{
-    get_dns_subnets,
-    get_sled_address,
-};
+use crate::params::ServiceRequest;
+use omicron_common::address::{get_sled_address, ReservedRackSubnet};
 use omicron_common::backoff::{
     internal_service_policy, retry_notify, BackoffError,
 };
@@ -307,35 +304,37 @@ impl ServiceInner {
         bootstrap_addrs: impl IntoIterator<Item = Ipv6Addr>,
     ) -> Result<HashMap<SocketAddrV6, SledAllocation>, SetupServiceError> {
         let bootstrap_addrs = bootstrap_addrs.into_iter().enumerate();
-        let dns_subnets = get_dns_subnets(config.reserved_rack_subnet());
+        let rack_subnet = ReservedRackSubnet::new(config.rack_subnet());
+        let dns_subnets = rack_subnet.get_dns_subnets();
 
         info!(self.log, "dns_subnets: {:#?}", dns_subnets);
 
-        let requests_and_sleds = bootstrap_addrs.map(|(idx, bootstrap_addr)| {
-            // If a sled was explicitly requested from the RSS configuration,
-            // use that. Otherwise, just give it a "default" (empty) set of
-            // services.
-            let mut request = {
-                if idx < config.requests.len() {
-                    config.requests[idx].clone()
-                } else {
-                    SledRequest::default()
+        let requests_and_sleds =
+            bootstrap_addrs.map(|(idx, bootstrap_addr)| {
+                // If a sled was explicitly requested from the RSS configuration,
+                // use that. Otherwise, just give it a "default" (empty) set of
+                // services.
+                let mut request = {
+                    if idx < config.requests.len() {
+                        config.requests[idx].clone()
+                    } else {
+                        SledRequest::default()
+                    }
+                };
+
+                // The first enumerated addresses get assigned the additional
+                // responsibility of being internal DNS servers.
+                if idx < dns_subnets.len() {
+                    let dns_subnet = &dns_subnets[idx];
+                    request.dns_services.push(ServiceRequest {
+                        name: "internal-dns".to_string(),
+                        addresses: vec![dns_subnet.dns_address()],
+                        gz_addresses: vec![dns_subnet.gz_address().ip()],
+                    });
                 }
-            };
 
-            // The first enumerated addresses get assigned the additional
-            // responsibility of being internal DNS servers.
-            if idx < dns_subnets.len() {
-                let dns_subnet = &dns_subnets[idx];
-                request.dns_services.push(ServiceRequest {
-                    name: "internal-dns".to_string(),
-                    addresses: vec![dns_subnet.dns_address()],
-                    gz_addresses: vec![dns_subnet.gz_address().ip()],
-                });
-            }
-
-            (request, (idx, bootstrap_addr))
-        });
+                (request, (idx, bootstrap_addr))
+            });
 
         let allocations = requests_and_sleds.map(|(request, sled)| {
             let (idx, bootstrap_addr) = sled;
@@ -574,16 +573,15 @@ impl ServiceInner {
                     allocation.initialization_request.subnet.as_ref().0,
                 ));
 
-                let all_services = allocation.services_request.services.iter()
+                let all_services = allocation
+                    .services_request
+                    .services
+                    .iter()
                     .chain(allocation.services_request.dns_services.iter())
                     .map(|s| s.clone())
                     .collect::<Vec<_>>();
 
-                self.initialize_services(
-                    sled_address,
-                    &all_services,
-                )
-                .await?;
+                self.initialize_services(sled_address, &all_services).await?;
                 Ok(())
             },
         ))

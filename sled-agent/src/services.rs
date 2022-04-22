@@ -84,7 +84,10 @@ impl ServiceManager {
             log,
             config_path,
             zones: Mutex::new(vec![]),
-            vnic_allocator: VnicAllocator::new("Service", physical_link.clone())?,
+            vnic_allocator: VnicAllocator::new(
+                "Service",
+                physical_link.clone(),
+            )?,
             physical_link,
         };
 
@@ -163,7 +166,8 @@ impl ServiceManager {
 
             for addr in &service.addresses {
                 info!(self.log, "Ensuring address {} exists", addr.to_string());
-                let addr_request = AddressRequest::new_static(IpAddr::V6(*addr.ip()), None);
+                let addr_request =
+                    AddressRequest::new_static(IpAddr::V6(*addr.ip()), None);
                 running_zone.ensure_address(addr_request).await?;
                 info!(
                     self.log,
@@ -174,14 +178,19 @@ impl ServiceManager {
 
             info!(self.log, "GZ addresses: {:#?}", service.gz_addresses);
             for addr in &service.gz_addresses {
-                info!(self.log, "Ensuring GZ address {} exists", addr.to_string());
+                info!(
+                    self.log,
+                    "Ensuring GZ address {} exists",
+                    addr.to_string()
+                );
 
                 let addr_name = service.name.replace(&['-', '_'][..], "");
                 Zones::ensure_has_global_zone_v6_address(
                     self.physical_link.clone(),
                     *addr,
                     &addr_name,
-                ).map_err(|e| Error::GzAddressFailure(e))?;
+                )
+                .map_err(|e| Error::GzAddressFailure(e))?;
             }
 
             debug!(self.log, "importing manifest");
@@ -244,14 +253,20 @@ impl ServiceManager {
                     );
                     return Err(Error::ServicesAlreadyConfigured);
                 }
-                requested_set.difference(&known_set).map(|s| (*s).clone()).collect::<Vec<ServiceRequest>>()
+                requested_set
+                    .difference(&known_set)
+                    .map(|s| (*s).clone())
+                    .collect::<Vec<ServiceRequest>>()
             } else {
                 request.services.clone()
             }
         };
 
-        self.initialize_services_locked(&mut existing_zones, &services_to_initialize)
-            .await?;
+        self.initialize_services_locked(
+            &mut existing_zones,
+            &services_to_initialize,
+        )
+        .await?;
 
         let serialized_services = toml::Value::try_from(&request)
             .expect("Cannot serialize service list");
@@ -327,7 +342,7 @@ mod test {
             services: vec![ServiceRequest {
                 name: SVC_NAME.to_string(),
                 addresses: vec![],
-                gz_addresses: vec!{},
+                gz_addresses: vec![],
             }],
         })
         .await
@@ -341,7 +356,7 @@ mod test {
             services: vec![ServiceRequest {
                 name: SVC_NAME.to_string(),
                 addresses: vec![],
-                gz_addresses: vec!{},
+                gz_addresses: vec![],
             }],
         })
         .await

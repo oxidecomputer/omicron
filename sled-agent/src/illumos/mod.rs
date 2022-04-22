@@ -48,7 +48,11 @@ mod inner {
 
         if !output.status.success() {
             return Err(ExecutionError::CommandFailure {
-                command: command.get_args().map(|s| s.to_string_lossy().into()).collect::<Vec<String>>().join(" "),
+                command: command
+                    .get_args()
+                    .map(|s| s.to_string_lossy().into())
+                    .collect::<Vec<String>>()
+                    .join(" "),
                 status: output.status,
                 stderr: String::from_utf8_lossy(&output.stderr).to_string(),
             });

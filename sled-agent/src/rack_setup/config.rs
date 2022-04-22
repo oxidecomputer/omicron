@@ -72,13 +72,6 @@ impl SetupServiceConfig {
         new_network(self.rack_subnet, RACK_PREFIX)
     }
 
-    /// Returns the subnet for the "reserved" rack subnet.
-    ///
-    /// This is used for AZ-wide services, such as DNS.
-    pub fn reserved_rack_subnet(&self) -> Ipv6Network {
-        new_network(self.az_subnet().ip(), RACK_PREFIX)
-    }
-
     /// Returns the subnet for the `index`-th sled in the rack.
     pub fn sled_subnet(&self, index: u8) -> Ipv6Network {
         omicron_common::address::get_64_subnet(self.rack_subnet(), index)
