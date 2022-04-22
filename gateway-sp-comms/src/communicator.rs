@@ -33,9 +33,9 @@ use hyper::Body;
 use slog::info;
 use slog::o;
 use slog::Logger;
-use tokio::time::Instant;
 use std::sync::Arc;
 use std::time::Duration;
+use tokio::time::Instant;
 use tokio_tungstenite::tungstenite::handshake;
 
 /// Helper trait that allows us to return an `impl FuturesUnordered<_>` where
