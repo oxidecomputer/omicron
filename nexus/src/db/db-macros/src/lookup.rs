@@ -352,8 +352,8 @@ fn generate_misc_helpers(config: &Config) -> TokenStream {
                     use crate::authz::ApiResourceError;
                     error!(
                         log,
-                        "unexpected successful lookup of siloed resource\
-                        {:?} in a different Silo from current actor (resource\
+                        "unexpected successful lookup of siloed resource \
+                        {:?} in a different Silo from current actor (resource \
                         Silo {}, actor Silo {})",
                         #resource_name_str,
                         resource_silo_id,
