@@ -56,8 +56,12 @@ impl SimulatedSp for Sidecar {
         hex::encode(self.serial_number)
     }
 
-    fn local_addr(&self, port: usize) -> SocketAddr {
-        self.local_addrs[port]
+    fn local_addr(&self, port: SpPort) -> SocketAddr {
+        let i = match port {
+            SpPort::One => 0,
+            SpPort::Two => 1,
+        };
+        self.local_addrs[i]
     }
 
     async fn set_responsiveness(&self, r: Responsiveness) {

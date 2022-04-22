@@ -41,6 +41,6 @@ async fn do_run() -> Result<(), CmdError> {
     if args.openapi {
         run_openapi().map_err(CmdError::Failure)
     } else {
-        run_server(&config).await.map_err(CmdError::Failure)
+        run_server(config).await.map_err(CmdError::Failure)
     }
 }

@@ -9,6 +9,7 @@ use super::setup;
 use super::SpStateExt;
 use dropshot::Method;
 use futures::prelude::*;
+use gateway_messages::SpPort;
 use http::uri::Scheme;
 use http::StatusCode;
 use http::Uri;
@@ -59,7 +60,8 @@ async fn sim_sp_serial_console(
 
 #[tokio::test]
 async fn serial_console_communication() {
-    let testctx = setup::test_setup("serial_console_communication").await;
+    let testctx =
+        setup::test_setup("serial_console_communication", SpPort::One).await;
     let client = &testctx.client;
     let simrack = &testctx.simrack;
 
@@ -103,7 +105,8 @@ async fn serial_console_communication() {
 
 #[tokio::test]
 async fn serial_console_detach() {
-    let testctx = setup::test_setup("serial_console_communication").await;
+    let testctx =
+        setup::test_setup("serial_console_communication", SpPort::One).await;
     let client = &testctx.client;
     let simrack = &testctx.simrack;
 

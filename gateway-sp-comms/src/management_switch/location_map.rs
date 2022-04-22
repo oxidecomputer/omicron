@@ -108,7 +108,6 @@ impl LocationMap {
     }
 
     pub(super) async fn run_discovery(
-        communicator: Arc<crate::Communicator>,
         config: LocationConfig,
         ports: HashMap<SwitchPort, SwitchPortConfig>,
         sockets: Arc<HashMap<SwitchPort, UdpSocket>>,
@@ -131,7 +130,6 @@ impl LocationMap {
             let ports = ports.clone();
             tokio::spawn(async move {
                 discover_sps(
-                    &communicator,
                     &sockets,
                     ports,
                     &recv_handler,
@@ -360,10 +358,9 @@ impl TryFrom<(&'_ HashMap<SwitchPort, SwitchPortConfig>, LocationConfig)>
 /// and the list of locations we could be in based on the SP's response on that
 /// port. Our spawner is responsible for collecting/using those messages.
 async fn discover_sps(
-    communicator: &crate::Communicator,
     sockets: &HashMap<SwitchPort, UdpSocket>,
     port_config: HashMap<SwitchPort, SwitchPortConfig>,
-    _recv_handler: &RecvHandler,
+    recv_handler: &RecvHandler,
     mut location_determination: Vec<ValidatedLocationDeterminationConfig>,
     refined_locations: mpsc::Sender<(SwitchPort, HashSet<String>)>,
     log: &Logger,
@@ -377,6 +374,7 @@ async fn discover_sps(
             // construct a socket pointed to a multicast addr instead of a
             // specific, known addr
             let socket = SpSocket {
+                location_map: None,
                 port,
                 addr: config.multicast_addr,
                 // all ports in `port_config` also get sockets bound to them;
@@ -391,9 +389,9 @@ async fn discover_sps(
                     .expect("internal backoff policy gave up");
                 tokio::time::sleep(duration).await;
 
-                let result = communicator
+                let result = socket
                     .request_response(
-                        &socket,
+                        &recv_handler,
                         RequestKind::Discover,
                         ResponseKindExt::try_into_discover,
                         // TODO should this timeout be configurable or itself
@@ -405,6 +403,7 @@ async fn discover_sps(
                         // reasonably large number; this may solve itself when
                         // we move to some kind of authenticated comms channel.
                         Some(Timeout::from_now(Duration::from_secs(5))),
+                        &log,
                     )
                     .await;
 

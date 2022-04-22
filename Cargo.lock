@@ -1441,6 +1441,7 @@ dependencies = [
  "once_cell",
  "ringbuffer",
  "serde",
+ "serde_with",
  "slog",
  "thiserror",
  "tokio",

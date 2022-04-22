@@ -24,13 +24,11 @@ pub mod error;
 
 pub use communicator::Communicator;
 pub use communicator::FuturesUnorderedImpl;
+pub use management_switch::LocationConfig;
+pub use management_switch::LocationDeterminationConfig;
 pub use management_switch::SpIdentifier;
 pub use management_switch::SpType;
+pub use management_switch::SwitchConfig;
+pub use management_switch::SwitchPortConfig;
 pub use timeout::Elapsed;
 pub use timeout::Timeout;
-
-// TODO these will remain public for a while, but eventually will be removed
-// altogther; currently these provide a way to hard-code the rack topology,
-// which is not what we want.
-pub use management_switch::KnownSp;
-pub use management_switch::KnownSps;
