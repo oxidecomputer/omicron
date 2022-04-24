@@ -28,11 +28,24 @@ pub enum Error {
     #[error("I/O Error accessing {path}: {err}")]
     Io { path: PathBuf, err: std::io::Error },
 
-    #[error("Zone error: {message}: {err}")]
-    RunningZone { message: String, err: crate::illumos::running_zone::Error },
+    #[error("Failed to do '{intent}' by running command in zone: {err}")]
+    ZoneCommand {
+        intent: String,
+        #[source]
+        err: crate::illumos::running_zone::RunCommandError,
+    },
+
+    #[error("Failed to boot zone: {0}")]
+    ZoneBoot(#[from] crate::illumos::running_zone::BootError),
+
+    #[error(transparent)]
+    ZoneEnsureAddress(#[from] crate::illumos::running_zone::EnsureAddressError),
+
+    #[error(transparent)]
+    ZoneInstall(#[from] crate::illumos::running_zone::InstallZoneError),
 
     #[error("Failed to add GZ addresses: {message}: {err}")]
-    GzAddressFailure {
+    GzAddress {
         message: String,
         err: crate::illumos::zone::EnsureGzAddressError,
     },
@@ -169,33 +182,15 @@ impl ServiceManager {
                 // vnics=
                 vec![],
             )
-            .await
-            .map_err(|err| Error::RunningZone {
-                message: format!("Could not install {}", service.name),
-                err,
-            })?;
+            .await?;
 
-            let running_zone = RunningZone::boot(installed_zone)
-                .await
-                .map_err(|err| Error::RunningZone {
-                    message: format!("Could not boot {}", service.name),
-                    err,
-                })?;
+            let running_zone = RunningZone::boot(installed_zone).await?;
 
             for addr in &service.addresses {
                 info!(self.log, "Ensuring address {} exists", addr.to_string());
                 let addr_request =
                     AddressRequest::new_static(IpAddr::V6(*addr), None);
-                running_zone.ensure_address(addr_request).await.map_err(
-                    |err| Error::RunningZone {
-                        message: format!(
-                            "Failed to create address {} for {}",
-                            addr.to_string(),
-                            service.name
-                        ),
-                        err,
-                    },
-                )?;
+                running_zone.ensure_address(addr_request).await?;
                 info!(
                     self.log,
                     "Ensuring address {} exists - OK",
@@ -217,7 +212,7 @@ impl ServiceManager {
                     *addr,
                     &addr_name,
                 )
-                .map_err(|err| Error::GzAddressFailure {
+                .map_err(|err| Error::GzAddress {
                     message: format!(
                         "Failed adding address for {}",
                         service.name
@@ -237,8 +232,8 @@ impl ServiceManager {
                         service.name
                     ),
                 ])
-                .map_err(|err| Error::RunningZone {
-                    message: "Failed to import manifest".to_string(),
+                .map_err(|err| Error::ZoneCommand {
+                    intent: "importing manifest".to_string(),
                     err,
                 })?;
 
@@ -266,9 +261,8 @@ impl ServiceManager {
                                 address, DNS_SERVER_PORT
                             ),
                         ])
-                        .map_err(|err| Error::RunningZone {
-                            message: "Could not set server address property"
-                                .to_string(),
+                        .map_err(|err| Error::ZoneCommand {
+                            intent: "set server address".to_string(),
                             err,
                         })?;
 
@@ -283,9 +277,8 @@ impl ServiceManager {
                                 address, DNS_PORT
                             ),
                         ])
-                        .map_err(|err| Error::RunningZone {
-                            message: "Could not set DNS address property"
-                                .to_string(),
+                        .map_err(|err| Error::ZoneCommand {
+                            intent: "Set DNS address".to_string(),
                             err,
                         })?;
 
@@ -298,11 +291,8 @@ impl ServiceManager {
                             &default_smf_name,
                             "refresh",
                         ])
-                        .map_err(|err| Error::RunningZone {
-                            message: format!(
-                                "Failed to refresh SMF manifest: {}",
-                                default_smf_name
-                            ),
+                        .map_err(|err| Error::ZoneCommand {
+                            intent: format!("Refresh SMF manifest {}", default_smf_name),
                             err,
                         })?;
                 }
@@ -323,11 +313,8 @@ impl ServiceManager {
                     "-t",
                     &default_smf_name,
                 ])
-                .map_err(|err| Error::RunningZone {
-                    message: format!(
-                        "Failed to enable {} service",
-                        default_smf_name
-                    ),
+                .map_err(|err| Error::ZoneCommand {
+                    intent: format!("Enable {} service", default_smf_name),
                     err,
                 })?;
 

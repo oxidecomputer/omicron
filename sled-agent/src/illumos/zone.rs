@@ -72,8 +72,12 @@ pub struct DeleteAddressError {
 /// Error which may be returned accessing the control interface of a zone.
 #[derive(thiserror::Error, Debug)]
 pub enum GetControlInterfaceError {
-    #[error("Failed to query for control interface: {0}")]
-    Execution(#[from] crate::illumos::ExecutionError),
+    #[error("Failed to query zone '{zone}' for control interface: {err}")]
+    Execution {
+        zone: String,
+        #[source]
+        err: crate::illumos::ExecutionError,
+    },
 
     #[error("VNIC starting with 'oxControl' not found in {zone}")]
     NotFound { zone: String },
@@ -316,7 +320,12 @@ impl Zones {
             "-o",
             "LINK",
         ]);
-        let output = execute(cmd)?;
+        let output = execute(cmd).map_err(|err| {
+            GetControlInterfaceError::Execution {
+                zone: zone.to_string(),
+                err,
+            }
+        })?;
         String::from_utf8_lossy(&output.stdout)
             .lines()
             .find_map(|name| {

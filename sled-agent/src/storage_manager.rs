@@ -6,7 +6,7 @@
 
 use crate::illumos::dladm::PhysicalLink;
 use crate::illumos::running_zone::{
-    Error as RunningZoneError, InstalledZone, RunningZone,
+    InstalledZone, RunningZone,
 };
 use crate::illumos::vnic::VnicAllocator;
 use crate::illumos::zone::AddressRequest;
@@ -68,8 +68,17 @@ pub enum Error {
     #[error(transparent)]
     GetZpoolInfo(#[from] crate::illumos::zpool::GetInfoError),
 
-    #[error("Failed to manage a running zone: {0}")]
-    ZoneManagement(#[from] crate::illumos::running_zone::Error),
+    #[error(transparent)]
+    ZoneCommand(#[from] crate::illumos::running_zone::RunCommandError),
+
+    #[error(transparent)]
+    ZoneBoot(#[from] crate::illumos::running_zone::BootError),
+
+    #[error(transparent)]
+    ZoneEnsureAddress(#[from] crate::illumos::running_zone::EnsureAddressError),
+
+    #[error(transparent)]
+    ZoneInstall(#[from] crate::illumos::running_zone::InstallZoneError),
 
     #[error("Error parsing pool size: {0}")]
     BadPoolSize(#[from] ByteCountRangeError),
@@ -433,14 +442,13 @@ async fn ensure_running_zone(
     let address_request =
         AddressRequest::new_static(dataset_info.address.ip(), None);
 
-    match RunningZone::get(log, &dataset_info.zone_prefix(), address_request)
-        .await
-    {
+    let err = RunningZone::get(log, &dataset_info.zone_prefix(), address_request).await;
+    match err {
         Ok(zone) => {
             info!(log, "Zone for {} is already running", dataset_name.full());
             return Ok(zone);
         }
-        Err(RunningZoneError::NotFound) => {
+        Err(crate::illumos::running_zone::GetZoneError::NotFound { .. }) => {
             info!(log, "Zone for {} was not found", dataset_name.full());
 
             let installed_zone = InstalledZone::install(
@@ -463,14 +471,14 @@ async fn ensure_running_zone(
 
             Ok(zone)
         }
-        Err(RunningZoneError::NotRunning(_state)) => {
+        Err(crate::illumos::running_zone::GetZoneError::NotRunning { name, state }) => {
             // TODO(https://github.com/oxidecomputer/omicron/issues/725):
-            unimplemented!("Handle a zone which exists, but is not running");
+            unimplemented!("Handle a zone which exists, but is not running: {name}, in {state:?}");
         }
-        Err(_) => {
+        Err(err) => {
             // TODO(https://github.com/oxidecomputer/omicron/issues/725):
             unimplemented!(
-                "Handle a zone which exists, has some other problem"
+                "Handle a zone which exists, has some other problem: {err}"
             );
         }
     }

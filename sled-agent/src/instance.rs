@@ -61,7 +61,16 @@ pub enum Error {
     Migration(anyhow::Error),
 
     #[error(transparent)]
-    RunningZone(#[from] crate::illumos::running_zone::Error),
+    ZoneCommand(#[from] crate::illumos::running_zone::RunCommandError),
+
+    #[error(transparent)]
+    ZoneBoot(#[from] crate::illumos::running_zone::BootError),
+
+    #[error(transparent)]
+    ZoneEnsureAddress(#[from] crate::illumos::running_zone::EnsureAddressError),
+
+    #[error(transparent)]
+    ZoneInstall(#[from] crate::illumos::running_zone::InstallZoneError),
 
     #[error("serde_json failure: {0}")]
     SerdeJsonError(#[from] serde_json::Error),
