@@ -51,8 +51,19 @@ const CRUCIBLE_AGENT_DEFAULT_SVC: &str = "svc:/oxide/crucible/agent:default";
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
+    // TODO: We could add the context of "why are we doint this op", maybe?
+
     #[error(transparent)]
-    Zfs(#[from] crate::illumos::zfs::Error),
+    ZfsListFilesystems(#[from] crate::illumos::zfs::ListFilesystemsError),
+
+    #[error(transparent)]
+    ZfsEnsureFilesystem(#[from] crate::illumos::zfs::EnsureFilesystemError),
+
+    #[error(transparent)]
+    ZfsSetValue(#[from] crate::illumos::zfs::SetValueError),
+
+    #[error(transparent)]
+    ZfsGetValue(#[from] crate::illumos::zfs::GetValueError),
 
     #[error(transparent)]
     GetZpoolInfo(#[from] crate::illumos::zpool::GetInfoError),

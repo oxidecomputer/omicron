@@ -53,7 +53,7 @@ pub enum Error {
     SledSubnet { err: crate::illumos::zone::EnsureGzAddressError },
 
     #[error(transparent)]
-    Zfs(#[from] crate::illumos::zfs::Error),
+    ZfsEnsureFilesystem(#[from] crate::illumos::zfs::EnsureFilesystemError),
 
     #[error("Error managing instances: {0}")]
     Instance(#[from] crate::instance_manager::Error),
