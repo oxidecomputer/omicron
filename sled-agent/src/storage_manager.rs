@@ -60,9 +60,6 @@ pub enum Error {
     #[error(transparent)]
     Zpool(#[from] crate::illumos::zpool::Error),
 
-    #[error("Failed to configure a zone: {0}")]
-    ZoneConfiguration(crate::illumos::zone::Error),
-
     #[error("Failed to manage a running zone: {0}")]
     ZoneManagement(#[from] crate::illumos::running_zone::Error),
 

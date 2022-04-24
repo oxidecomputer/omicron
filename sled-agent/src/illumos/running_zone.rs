@@ -31,17 +31,23 @@ pub enum Error {
     #[error("Failed to parse output: {0}")]
     Parse(#[from] std::string::FromUtf8Error),
 
-    #[error("Zone operation failed: {0}")]
-    Operation(#[from] crate::illumos::zone::Error),
+    #[error("Failed to create address: {0}")]
+    AddressCreation(#[from] crate::illumos::zone::EnsureAddressError),
+
+    #[error("Zone management command failed: {0}")]
+    ZoneOperation(#[from] crate::illumos::zone::AdmError),
 
     #[error("Zone error accessing datalink: {0}")]
     Datalink(#[from] crate::illumos::dladm::Error),
 
     #[error(transparent)]
-    AddrObject(#[from] crate::illumos::addrobj::Error),
+    AddrObject(#[from] crate::illumos::addrobj::ParseError),
 
     #[error("Timeout waiting for a service: {0}")]
     Timeout(String),
+
+    #[error(transparent)]
+    NoControlInterface(#[from] crate::illumos::zone::GetControlInterfaceError),
 }
 
 /// Represents a running zone.

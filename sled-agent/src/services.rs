@@ -20,31 +20,22 @@ use tokio::sync::Mutex;
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
     #[error("Cannot serialize TOML to file {path}: {err}")]
-    TomlSerialize {
-        path: PathBuf,
-        err: toml::ser::Error,
-    },
+    TomlSerialize { path: PathBuf, err: toml::ser::Error },
 
     #[error("Cannot deserialize TOML from file {path}: {err}")]
-    TomlDeserialize {
-        path: PathBuf,
-        err: toml::de::Error,
-    },
+    TomlDeserialize { path: PathBuf, err: toml::de::Error },
 
     #[error("I/O Error accessing {path}: {err}")]
-    Io {
-        path: PathBuf,
-        err: std::io::Error,
+    Io { path: PathBuf, err: std::io::Error },
+
+    #[error("Zone error: {message}: {err}")]
+    RunningZone { message: String, err: crate::illumos::running_zone::Error },
+
+    #[error("Failed to add GZ addresses: {message}: {err}")]
+    GzAddressFailure {
+        message: String,
+        err: crate::illumos::zone::EnsureGzAddressError,
     },
-
-    #[error(transparent)]
-    RunningZone(#[from] crate::illumos::running_zone::Error),
-
-    #[error("Failed to add address to the global zone: {0}")]
-    GzAddressFailure(crate::illumos::zone::Error),
-
-    #[error(transparent)]
-    Dladm(#[from] crate::illumos::dladm::Error),
 
     #[error("Could not initialize service {service} as requested: {message}")]
     BadServiceRequest { service: String, message: String },
@@ -111,19 +102,13 @@ impl ServiceManager {
                 config_path.to_string_lossy()
             );
             let cfg: ServiceEnsureBody = toml::from_str(
-                &tokio::fs::read_to_string(&config_path)
-                    .await
-                    .map_err(|err| {
-                        Error::Io {
-                            path: config_path.clone(),
-                            err,
-                        }
-                    })?,
-            ).map_err(|err| {
-                Error::TomlDeserialize {
-                    path: config_path.clone(),
-                    err,
-                }
+                &tokio::fs::read_to_string(&config_path).await.map_err(
+                    |err| Error::Io { path: config_path.clone(), err },
+                )?,
+            )
+            .map_err(|err| Error::TomlDeserialize {
+                path: config_path.clone(),
+                err,
             })?;
             let mut existing_zones = mgr.zones.lock().await;
             mgr.initialize_services_locked(&mut existing_zones, &cfg.services)
@@ -184,15 +169,33 @@ impl ServiceManager {
                 // vnics=
                 vec![],
             )
-            .await?;
+            .await
+            .map_err(|err| Error::RunningZone {
+                message: format!("Could not install {}", service.name),
+                err,
+            })?;
 
-            let running_zone = RunningZone::boot(installed_zone).await?;
+            let running_zone = RunningZone::boot(installed_zone)
+                .await
+                .map_err(|err| Error::RunningZone {
+                    message: format!("Could not boot {}", service.name),
+                    err,
+                })?;
 
             for addr in &service.addresses {
                 info!(self.log, "Ensuring address {} exists", addr.to_string());
                 let addr_request =
                     AddressRequest::new_static(IpAddr::V6(*addr), None);
-                running_zone.ensure_address(addr_request).await?;
+                running_zone.ensure_address(addr_request).await.map_err(
+                    |err| Error::RunningZone {
+                        message: format!(
+                            "Failed to create address {} for {}",
+                            addr.to_string(),
+                            service.name
+                        ),
+                        err,
+                    },
+                )?;
                 info!(
                     self.log,
                     "Ensuring address {} exists - OK",
@@ -214,19 +217,30 @@ impl ServiceManager {
                     *addr,
                     &addr_name,
                 )
-                .map_err(|e| Error::GzAddressFailure(e))?;
+                .map_err(|err| Error::GzAddressFailure {
+                    message: format!(
+                        "Failed adding address for {}",
+                        service.name
+                    ),
+                    err,
+                })?;
             }
 
             debug!(self.log, "importing manifest");
 
-            running_zone.run_cmd(&[
-                crate::illumos::zone::SVCCFG,
-                "import",
-                &format!(
-                    "/var/svc/manifest/site/{}/manifest.xml",
-                    service.name
-                ),
-            ])?;
+            running_zone
+                .run_cmd(&[
+                    crate::illumos::zone::SVCCFG,
+                    "import",
+                    &format!(
+                        "/var/svc/manifest/site/{}/manifest.xml",
+                        service.name
+                    ),
+                ])
+                .map_err(|err| Error::RunningZone {
+                    message: "Failed to import manifest".to_string(),
+                    err,
+                })?;
 
             let smf_name = format!("svc:/system/illumos/{}", service.name);
             let default_smf_name = format!("{}:default", smf_name);
@@ -241,36 +255,56 @@ impl ServiceManager {
                                 message: "Not enough addresses".to_string(),
                             }
                         })?;
-                    running_zone.run_cmd(&[
-                        crate::illumos::zone::SVCCFG,
-                        "-s",
-                        &smf_name,
-                        "setprop",
-                        &format!(
-                            "config/server_address=[{}]:{}",
-                            address, DNS_SERVER_PORT
-                        ),
-                    ])?;
+                    running_zone
+                        .run_cmd(&[
+                            crate::illumos::zone::SVCCFG,
+                            "-s",
+                            &smf_name,
+                            "setprop",
+                            &format!(
+                                "config/server_address=[{}]:{}",
+                                address, DNS_SERVER_PORT
+                            ),
+                        ])
+                        .map_err(|err| Error::RunningZone {
+                            message: "Could not set server address property"
+                                .to_string(),
+                            err,
+                        })?;
 
-                    running_zone.run_cmd(&[
-                        crate::illumos::zone::SVCCFG,
-                        "-s",
-                        &smf_name,
-                        "setprop",
-                        &format!(
-                            "config/dns_address=[{}]:{}",
-                            address, DNS_PORT
-                        ),
-                    ])?;
+                    running_zone
+                        .run_cmd(&[
+                            crate::illumos::zone::SVCCFG,
+                            "-s",
+                            &smf_name,
+                            "setprop",
+                            &format!(
+                                "config/dns_address=[{}]:{}",
+                                address, DNS_PORT
+                            ),
+                        ])
+                        .map_err(|err| Error::RunningZone {
+                            message: "Could not set DNS address property"
+                                .to_string(),
+                            err,
+                        })?;
 
                     // Refresh the manifest with the new properties we set,
                     // so they become "effective" properties when the service is enabled.
-                    running_zone.run_cmd(&[
-                        crate::illumos::zone::SVCCFG,
-                        "-s",
-                        &default_smf_name,
-                        "refresh",
-                    ])?;
+                    running_zone
+                        .run_cmd(&[
+                            crate::illumos::zone::SVCCFG,
+                            "-s",
+                            &default_smf_name,
+                            "refresh",
+                        ])
+                        .map_err(|err| Error::RunningZone {
+                            message: format!(
+                                "Failed to refresh SMF manifest: {}",
+                                default_smf_name
+                            ),
+                            err,
+                        })?;
                 }
                 _ => {
                     info!(
@@ -282,12 +316,20 @@ impl ServiceManager {
 
             debug!(self.log, "enabling service");
 
-            running_zone.run_cmd(&[
-                crate::illumos::zone::SVCADM,
-                "enable",
-                "-t",
-                &default_smf_name,
-            ])?;
+            running_zone
+                .run_cmd(&[
+                    crate::illumos::zone::SVCADM,
+                    "enable",
+                    "-t",
+                    &default_smf_name,
+                ])
+                .map_err(|err| Error::RunningZone {
+                    message: format!(
+                        "Failed to enable {} service",
+                        default_smf_name
+                    ),
+                    err,
+                })?;
 
             existing_zones.push(running_zone);
         }
@@ -308,19 +350,13 @@ impl ServiceManager {
         let services_to_initialize = {
             if config_path.exists() {
                 let cfg: ServiceEnsureBody = toml::from_str(
-                    &tokio::fs::read_to_string(&config_path)
-                        .await
-                        .map_err(|err| {
-                            Error::Io {
-                                path: config_path.clone(),
-                                err,
-                            }
-                        })?,
-                ).map_err(|err| {
-                    Error::TomlDeserialize {
-                        path: config_path.clone(),
-                        err,
-                    }
+                    &tokio::fs::read_to_string(&config_path).await.map_err(
+                        |err| Error::Io { path: config_path.clone(), err },
+                    )?,
+                )
+                .map_err(|err| Error::TomlDeserialize {
+                    path: config_path.clone(),
+                    err,
                 })?;
                 let known_services = cfg.services;
 
@@ -358,21 +394,13 @@ impl ServiceManager {
 
         let serialized_services = toml::Value::try_from(&request)
             .expect("Cannot serialize service list");
-        let services_str = toml::to_string(&serialized_services)
-            .map_err(|err| {
-                Error::TomlSerialize {
-                    path: config_path.clone(),
-                    err,
-                }
+        let services_str =
+            toml::to_string(&serialized_services).map_err(|err| {
+                Error::TomlSerialize { path: config_path.clone(), err }
             })?;
         tokio::fs::write(&config_path, services_str)
             .await
-            .map_err(|err| {
-                Error::Io {
-                    path: config_path.clone(),
-                    err,
-                }
-            })?;
+            .map_err(|err| Error::Io { path: config_path.clone(), err })?;
 
         Ok(())
     }

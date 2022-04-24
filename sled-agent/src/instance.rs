@@ -44,9 +44,6 @@ pub enum Error {
     #[error("Failure accessing data links: {0}")]
     Datalink(#[from] crate::illumos::dladm::Error),
 
-    #[error("Error accessing zones: {0}")]
-    Zone(#[from] crate::illumos::zone::Error),
-
     #[error("Failure from Propolis Client: {0}")]
     Propolis(#[from] propolis_client::Error),
 

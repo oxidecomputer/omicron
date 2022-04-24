@@ -35,16 +35,16 @@ use crate::illumos::{
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
     #[error("Datalink error: {message}, {err}")]
-    Datalink {
-        message: String,
-        err: crate::illumos::dladm::Error,
-    },
+    Datalink { message: String, err: crate::illumos::dladm::Error },
 
     #[error(transparent)]
     Services(#[from] crate::services::Error),
 
     #[error(transparent)]
-    Zone(#[from] crate::illumos::zone::Error),
+    ZoneOperation(#[from] crate::illumos::zone::AdmError),
+
+    #[error("Failed to create Sled Subnet: {err}")]
+    SledSubnet { err: crate::illumos::zone::EnsureGzAddressError },
 
     #[error(transparent)]
     Zfs(#[from] crate::illumos::zfs::Error),
@@ -101,11 +101,9 @@ impl SledAgent {
         let data_link = if let Some(link) = config.data_link.clone() {
             link
         } else {
-            Dladm::find_physical().map_err(|err| {
-                Error::Datalink {
-                    message: "Looking up physical link".to_string(),
-                    err,
-                }
+            Dladm::find_physical().map_err(|err| Error::Datalink {
+                message: "Looking up physical link".to_string(),
+                err,
             })?
         };
 
@@ -130,7 +128,8 @@ impl SledAgent {
             data_link.clone(),
             *sled_address.ip(),
             "sled6",
-        )?;
+        )
+        .map_err(|err| Error::SledSubnet { err })?;
 
         // Identify all existing zones which should be managed by the Sled
         // Agent.
@@ -154,19 +153,15 @@ impl SledAgent {
         //
         // This should be accessible via:
         // $ dladm show-linkprop -c -p zone -o LINK,VALUE
-        let vnics = Dladm::get_vnics().map_err(|err| {
-            Error::Datalink {
-                message: "Looking up VNICs on boot".to_string(),
-                err,
-            }
+        let vnics = Dladm::get_vnics().map_err(|err| Error::Datalink {
+            message: "Looking up VNICs on boot".to_string(),
+            err,
         })?;
         for vnic in vnics {
             warn!(log, "Deleting VNIC: {}", vnic);
-            Dladm::delete_vnic(&vnic).map_err(|err| {
-                Error::Datalink {
-                    message: "Deleting VNIC during boot".to_string(),
-                    err,
-                }
+            Dladm::delete_vnic(&vnic).map_err(|err| Error::Datalink {
+                message: "Deleting VNIC during boot".to_string(),
+                err,
             })?;
         }
 
@@ -194,8 +189,7 @@ impl SledAgent {
             data_link.clone(),
         );
         let services =
-            ServiceManager::new(log.clone(), data_link.clone(), None)
-                .await?;
+            ServiceManager::new(log.clone(), data_link.clone(), None).await?;
 
         Ok(SledAgent {
             id: config.id,

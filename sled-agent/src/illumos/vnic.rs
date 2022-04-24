@@ -41,10 +41,7 @@ impl VnicAllocator {
     ///
     /// VnicAllocator::new("Storage") produces
     /// - oxControlStorage[NNN]
-    pub fn new<S: AsRef<str>>(
-        scope: S,
-        physical_link: PhysicalLink,
-    ) -> Self {
+    pub fn new<S: AsRef<str>>(scope: S, physical_link: PhysicalLink) -> Self {
         Self {
             value: Arc::new(AtomicU64::new(0)),
             scope: scope.as_ref().to_string(),

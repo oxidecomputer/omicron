@@ -26,12 +26,6 @@ use crate::instance::MockInstance as Instance;
 pub enum Error {
     #[error("Instance error: {0}")]
     Instance(#[from] crate::instance::Error),
-
-    #[error(transparent)]
-    Dladm(#[from] crate::illumos::dladm::Error),
-
-    #[error(transparent)]
-    Zone(#[from] crate::illumos::zone::Error),
 }
 
 struct InstanceManagerInternal {

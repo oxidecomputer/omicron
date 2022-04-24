@@ -13,7 +13,7 @@ use super::trust_quorum::{
 use super::views::{ShareResponse, SledAgentResponse};
 use crate::config::Config as SledConfig;
 use crate::illumos::dladm::{self, Dladm, PhysicalLink};
-use crate::illumos::zone::{self, Zones};
+use crate::illumos::zone::Zones;
 use crate::rack_setup::service::Service as RackSetupService;
 use crate::server::Server as SledServer;
 use omicron_common::api::external::{Error as ExternalError, MacAddr};
@@ -49,8 +49,8 @@ pub enum BootstrapError {
     #[error(transparent)]
     TrustQuorum(#[from] TrustQuorumError),
 
-    #[error(transparent)]
-    Zone(#[from] zone::Error),
+    #[error("Failed to initialize bootstrap address: {err}")]
+    BootstrapAddress { err: crate::illumos::zone::EnsureGzAddressError },
 }
 
 impl From<BootstrapError> for ExternalError {
@@ -134,7 +134,10 @@ impl Agent {
             link
         } else {
             Dladm::find_physical().map_err(|err| {
-                BootstrapError::SledError(format!("Can't access physical link: {}", err))
+                BootstrapError::SledError(format!(
+                    "Can't access physical link: {}",
+                    err
+                ))
             })?
         };
 
@@ -142,7 +145,8 @@ impl Agent {
             data_link.clone(),
             address,
             "bootstrap6",
-        )?;
+        )
+        .map_err(|err| BootstrapError::BootstrapAddress { err })?;
 
         let peer_monitor = discovery::PeerMonitor::new(&log, address)?;
         let share = read_key_share()?;
