@@ -5,9 +5,7 @@
 //! Management of sled-local storage.
 
 use crate::illumos::dladm::PhysicalLink;
-use crate::illumos::running_zone::{
-    InstalledZone, RunningZone,
-};
+use crate::illumos::running_zone::{InstalledZone, RunningZone};
 use crate::illumos::vnic::VnicAllocator;
 use crate::illumos::zone::AddressRequest;
 use crate::illumos::zpool::ZpoolName;
@@ -52,7 +50,6 @@ const CRUCIBLE_AGENT_DEFAULT_SVC: &str = "svc:/oxide/crucible/agent:default";
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
     // TODO: We could add the context of "why are we doint this op", maybe?
-
     #[error(transparent)]
     ZfsListFilesystems(#[from] crate::illumos::zfs::ListFilesystemsError),
 
@@ -442,13 +439,17 @@ async fn ensure_running_zone(
     let address_request =
         AddressRequest::new_static(dataset_info.address.ip(), None);
 
-    let err = RunningZone::get(log, &dataset_info.zone_prefix(), address_request).await;
+    let err =
+        RunningZone::get(log, &dataset_info.zone_prefix(), address_request)
+            .await;
     match err {
         Ok(zone) => {
             info!(log, "Zone for {} is already running", dataset_name.full());
             return Ok(zone);
         }
-        Err(crate::illumos::running_zone::GetZoneError::NotFound { .. }) => {
+        Err(crate::illumos::running_zone::GetZoneError::NotFound {
+            ..
+        }) => {
             info!(log, "Zone for {} was not found", dataset_name.full());
 
             let installed_zone = InstalledZone::install(
@@ -471,7 +472,10 @@ async fn ensure_running_zone(
 
             Ok(zone)
         }
-        Err(crate::illumos::running_zone::GetZoneError::NotRunning { name, state }) => {
+        Err(crate::illumos::running_zone::GetZoneError::NotRunning {
+            name,
+            state,
+        }) => {
             // TODO(https://github.com/oxidecomputer/omicron/issues/725):
             unimplemented!("Handle a zone which exists, but is not running: {name}, in {state:?}");
         }

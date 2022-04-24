@@ -35,7 +35,9 @@ enum EnsureFilesystemErrorRaw {
 
 /// Error returned by [`Zfs::ensure_zoned_filesystem`].
 #[derive(thiserror::Error, Debug)]
-#[error("Failed to ensure filesystem '{name}' exists at '{mountpoint:?}': {err}")]
+#[error(
+    "Failed to ensure filesystem '{name}' exists at '{mountpoint:?}': {err}"
+)]
 pub struct EnsureFilesystemError {
     name: String,
     mountpoint: Mountpoint,
@@ -45,7 +47,9 @@ pub struct EnsureFilesystemError {
 
 /// Error returned by [`Zfs::set_oxide_value`]
 #[derive(thiserror::Error, Debug)]
-#[error("Failed to set value '{name}={value}' on filesystem {filesystem}: {err}")]
+#[error(
+    "Failed to set value '{name}={value}' on filesystem {filesystem}: {err}"
+)]
 pub struct SetValueError {
     filesystem: String,
     name: String,
@@ -94,15 +98,15 @@ impl fmt::Display for Mountpoint {
 #[cfg_attr(test, mockall::automock, allow(dead_code))]
 impl Zfs {
     /// Lists all filesystems within a dataset.
-    pub fn list_filesystems(name: &str) -> Result<Vec<String>, ListFilesystemsError> {
+    pub fn list_filesystems(
+        name: &str,
+    ) -> Result<Vec<String>, ListFilesystemsError> {
         let mut command = std::process::Command::new(ZFS);
         let cmd = command.args(&["list", "-d", "1", "-rHpo", "name", name]);
 
-        let output = execute(cmd).map_err(|err| {
-            ListFilesystemsError {
-                name: name.to_string(),
-                err,
-            }
+        let output = execute(cmd).map_err(|err| ListFilesystemsError {
+            name: name.to_string(),
+            err,
         })?;
         let stdout = String::from_utf8_lossy(&output.stdout);
         let filesystems: Vec<String> = stdout
@@ -160,12 +164,10 @@ impl Zfs {
             &format!("mountpoint={}", &mountpoint),
             name,
         ]);
-        execute(cmd).map_err(|err| {
-            EnsureFilesystemError {
-                name: name.to_string(),
-                mountpoint,
-                err: err.into(),
-            }
+        execute(cmd).map_err(|err| EnsureFilesystemError {
+            name: name.to_string(),
+            mountpoint,
+            err: err.into(),
         })?;
         Ok(())
     }
@@ -186,13 +188,11 @@ impl Zfs {
         let mut command = std::process::Command::new(PFEXEC);
         let value_arg = format!("{}={}", name, value);
         let cmd = command.args(&[ZFS, "set", &value_arg, filesystem_name]);
-        execute(cmd).map_err(|err| {
-            SetValueError {
-                filesystem: filesystem_name.to_string(),
-                name: name.to_string(),
-                value: value.to_string(),
-                err,
-            }
+        execute(cmd).map_err(|err| SetValueError {
+            filesystem: filesystem_name.to_string(),
+            name: name.to_string(),
+            value: value.to_string(),
+            err,
         })?;
         Ok(())
     }
@@ -204,16 +204,17 @@ impl Zfs {
         Zfs::get_value(filesystem_name, &format!("oxide:{}", name))
     }
 
-    fn get_value(filesystem_name: &str, name: &str) -> Result<String, GetValueError> {
+    fn get_value(
+        filesystem_name: &str,
+        name: &str,
+    ) -> Result<String, GetValueError> {
         let mut command = std::process::Command::new(PFEXEC);
         let cmd =
             command.args(&[ZFS, "get", "-Ho", "value", &name, filesystem_name]);
-        let output = execute(cmd).map_err(|err| {
-            GetValueError {
-                filesystem: filesystem_name.to_string(),
-                name: name.to_string(),
-                err: err.into(),
-            }
+        let output = execute(cmd).map_err(|err| GetValueError {
+            filesystem: filesystem_name.to_string(),
+            name: name.to_string(),
+            err: err.into(),
         })?;
         let stdout = String::from_utf8_lossy(&output.stdout);
         let value = stdout.trim();

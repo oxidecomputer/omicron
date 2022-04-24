@@ -292,7 +292,10 @@ impl ServiceManager {
                             "refresh",
                         ])
                         .map_err(|err| Error::ZoneCommand {
-                            intent: format!("Refresh SMF manifest {}", default_smf_name),
+                            intent: format!(
+                                "Refresh SMF manifest {}",
+                                default_smf_name
+                            ),
                             err,
                         })?;
                 }

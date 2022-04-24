@@ -321,10 +321,7 @@ impl Zones {
             "LINK",
         ]);
         let output = execute(cmd).map_err(|err| {
-            GetControlInterfaceError::Execution {
-                zone: zone.to_string(),
-                err,
-            }
+            GetControlInterfaceError::Execution { zone: zone.to_string(), err }
         })?;
         String::from_utf8_lossy(&output.stdout)
             .lines()

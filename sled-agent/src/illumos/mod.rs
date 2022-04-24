@@ -20,10 +20,7 @@ const PFEXEC: &str = "/usr/bin/pfexec";
 #[derive(thiserror::Error, Debug)]
 pub enum ExecutionError {
     #[error("Failed to start execution of [{command}]: {err}")]
-    ExecutionStart {
-        command: String,
-        err: std::io::Error,
-    },
+    ExecutionStart { command: String, err: std::io::Error },
 
     #[error(
         "Command [{command}] executed and failed with status: {status}. Output: {stderr}"
@@ -41,9 +38,7 @@ pub enum ExecutionError {
 mod inner {
     use super::*;
 
-    fn to_string(
-        command: &mut std::process::Command
-    ) -> String {
+    fn to_string(command: &mut std::process::Command) -> String {
         command
             .get_args()
             .map(|s| s.to_string_lossy().into())
@@ -56,13 +51,9 @@ mod inner {
     pub fn execute(
         command: &mut std::process::Command,
     ) -> Result<std::process::Output, ExecutionError> {
-        let output =
-            command.output().map_err(|err| {
-                ExecutionError::ExecutionStart {
-                    command: to_string(command),
-                    err,
-                }
-            })?;
+        let output = command.output().map_err(|err| {
+            ExecutionError::ExecutionStart { command: to_string(command), err }
+        })?;
 
         if !output.status.success() {
             return Err(ExecutionError::CommandFailure {

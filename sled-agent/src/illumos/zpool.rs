@@ -61,10 +61,7 @@ impl FromStr for ZpoolHealth {
             "OFFLINE" => Ok(ZpoolHealth::Offline),
             "REMOVED" => Ok(ZpoolHealth::Removed),
             "UNAVAIL" => Ok(ZpoolHealth::Unavailable),
-            _ => Err(ParseError(format!(
-                "Unrecognized zpool 'health': {}",
-                s
-            ))),
+            _ => Err(ParseError(format!("Unrecognized zpool 'health': {}", s))),
         }
     }
 }
@@ -110,16 +107,10 @@ impl FromStr for ZpoolInfo {
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         // Lambda helpers for error handling.
         let expected_field = |name| {
-            ParseError(format!(
-                "Missing '{}' value in zpool list output",
-                name
-            ))
+            ParseError(format!("Missing '{}' value in zpool list output", name))
         };
         let failed_to_parse = |name, err| {
-            ParseError(format!(
-                "Failed to parse field '{}': {}",
-                name, err
-            ))
+            ParseError(format!("Failed to parse field '{}': {}", name, err))
         };
 
         let mut values = s.trim().split_whitespace();
@@ -163,20 +154,14 @@ impl Zpool {
             name,
         ]);
 
-        let output = execute(cmd).map_err(|err| {
-            GetInfoError {
-                name: name.to_string(),
-                err: err.into(),
-            }
+        let output = execute(cmd).map_err(|err| GetInfoError {
+            name: name.to_string(),
+            err: err.into(),
         })?;
         let stdout = String::from_utf8_lossy(&output.stdout);
-        let zpool = stdout.parse::<ZpoolInfo>()
-            .map_err(|err| {
-                GetInfoError {
-                    name: name.to_string(),
-                    err: err.into(),
-                }
-            })?;
+        let zpool = stdout.parse::<ZpoolInfo>().map_err(|err| {
+            GetInfoError { name: name.to_string(), err: err.into() }
+        })?;
         Ok(zpool)
     }
 }
