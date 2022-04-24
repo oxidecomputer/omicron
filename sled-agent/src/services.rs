@@ -19,14 +19,23 @@ use tokio::sync::Mutex;
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
-    #[error("Cannot serialize TOML file: {0}")]
-    TomlSerialize(#[from] toml::ser::Error),
+    #[error("Cannot serialize TOML to file {path}: {err}")]
+    TomlSerialize {
+        path: PathBuf,
+        err: toml::ser::Error,
+    },
 
-    #[error("Cannot deserialize TOML file: {0}")]
-    TomlDeserialize(#[from] toml::de::Error),
+    #[error("Cannot deserialize TOML from file {path}: {err}")]
+    TomlDeserialize {
+        path: PathBuf,
+        err: toml::de::Error,
+    },
 
-    #[error("Error accessing filesystem: {0}")]
-    Io(#[from] std::io::Error),
+    #[error("I/O Error accessing {path}: {err}")]
+    Io {
+        path: PathBuf,
+        err: std::io::Error,
+    },
 
     #[error(transparent)]
     RunningZone(#[from] crate::illumos::running_zone::Error),
@@ -37,7 +46,7 @@ pub enum Error {
     #[error(transparent)]
     Dladm(#[from] crate::illumos::dladm::Error),
 
-    #[error("Could not initialize service as requested: {message}")]
+    #[error("Could not initialize service {service} as requested: {message}")]
     BadServiceRequest { service: String, message: String },
 
     #[error("Services already configured for this Sled Agent")]
@@ -103,8 +112,20 @@ impl ServiceManager {
                 config_path.to_string_lossy()
             );
             let cfg: ServiceEnsureBody = toml::from_str(
-                &tokio::fs::read_to_string(&config_path).await?,
-            )?;
+                &tokio::fs::read_to_string(&config_path)
+                    .await
+                    .map_err(|err| {
+                        Error::Io {
+                            path: config_path.clone(),
+                            err,
+                        }
+                    })?,
+            ).map_err(|err| {
+                Error::TomlDeserialize {
+                    path: config_path.clone(),
+                    err,
+                }
+            })?;
             let mut existing_zones = mgr.zones.lock().await;
             mgr.initialize_services_locked(&mut existing_zones, &cfg.services)
                 .await?;
@@ -288,8 +309,20 @@ impl ServiceManager {
         let services_to_initialize = {
             if config_path.exists() {
                 let cfg: ServiceEnsureBody = toml::from_str(
-                    &tokio::fs::read_to_string(&config_path).await?,
-                )?;
+                    &tokio::fs::read_to_string(&config_path)
+                        .await
+                        .map_err(|err| {
+                            Error::Io {
+                                path: config_path.clone(),
+                                err,
+                            }
+                        })?,
+                ).map_err(|err| {
+                    Error::TomlDeserialize {
+                        path: config_path.clone(),
+                        err,
+                    }
+                })?;
                 let known_services = cfg.services;
 
                 let known_set: HashSet<&ServiceRequest> =
@@ -326,8 +359,21 @@ impl ServiceManager {
 
         let serialized_services = toml::Value::try_from(&request)
             .expect("Cannot serialize service list");
-        tokio::fs::write(&config_path, toml::to_string(&serialized_services)?)
-            .await?;
+        let services_str = toml::to_string(&serialized_services)
+            .map_err(|err| {
+                Error::TomlSerialize {
+                    path: config_path.clone(),
+                    err,
+                }
+            })?;
+        tokio::fs::write(&config_path, services_str)
+            .await
+            .map_err(|err| {
+                Error::Io {
+                    path: config_path.clone(),
+                    err,
+                }
+            })?;
 
         Ok(())
     }

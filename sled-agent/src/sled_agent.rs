@@ -34,8 +34,11 @@ use crate::illumos::{
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
-    #[error(transparent)]
-    Datalink(#[from] crate::illumos::dladm::Error),
+    #[error("Datalink error: {message}, {err}")]
+    Datalink {
+        message: String,
+        err: crate::illumos::dladm::Error,
+    },
 
     #[error(transparent)]
     Services(#[from] crate::services::Error),
@@ -140,10 +143,20 @@ impl SledAgent {
         //
         // This should be accessible via:
         // $ dladm show-linkprop -c -p zone -o LINK,VALUE
-        let vnics = Dladm::get_vnics()?;
+        let vnics = Dladm::get_vnics().map_err(|err| {
+            Error::Datalink {
+                message: "Looking up VNICs on boot".to_string(),
+                err,
+            }
+        })?;
         for vnic in vnics {
             warn!(log, "Deleting VNIC: {}", vnic);
-            Dladm::delete_vnic(&vnic)?;
+            Dladm::delete_vnic(&vnic).map_err(|err| {
+                Error::Datalink {
+                    message: "Deleting VNIC during boot".to_string(),
+                    err,
+                }
+            })?;
         }
 
         let storage = StorageManager::new(
