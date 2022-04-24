@@ -8,14 +8,9 @@ bind_address = "[fd00:1122:3344:1::9]:53"
 [log]
 # Show log messages of this level and more severe
 level = "info"
-
-# Example output to a terminal (with colors)
-mode = "stderr-terminal"
-
-# Example output to a file, appending if it already exists.
-#mode = "file"
-#path = "logs/server.log"
-#if_exists = "append"
+mode = "file"
+path = "/var/oxide/internal-dns.log"
+if_exists = "append"
 
 [data]
 nmax_messages = 16
