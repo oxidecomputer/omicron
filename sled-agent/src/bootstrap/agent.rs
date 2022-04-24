@@ -130,8 +130,16 @@ impl Agent {
         sled_config: SledConfig,
         address: Ipv6Addr,
     ) -> Result<Self, BootstrapError> {
+        let data_link = if let Some(link) = sled_config.data_link.clone() {
+            link
+        } else {
+            Dladm::find_physical().map_err(|err| {
+                BootstrapError::SledError(format!("Can't access physical link: {}", err))
+            })?
+        };
+
         Zones::ensure_has_global_zone_v6_address(
-            sled_config.data_link.clone(),
+            data_link.clone(),
             address,
             "bootstrap6",
         )?;

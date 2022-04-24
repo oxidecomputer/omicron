@@ -43,17 +43,12 @@ impl VnicAllocator {
     /// - oxControlStorage[NNN]
     pub fn new<S: AsRef<str>>(
         scope: S,
-        physical_link: Option<PhysicalLink>,
+        physical_link: PhysicalLink,
     ) -> Result<Self, crate::illumos::dladm::Error> {
-        let data_link = if let Some(link) = physical_link {
-            link
-        } else {
-            Dladm::find_physical()?
-        };
         Ok(Self {
             value: Arc::new(AtomicU64::new(0)),
             scope: scope.as_ref().to_string(),
-            data_link,
+            data_link: physical_link,
         })
     }
 

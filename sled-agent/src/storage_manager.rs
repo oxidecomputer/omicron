@@ -826,7 +826,7 @@ impl StorageManager {
         log: &Logger,
         sled_id: Uuid,
         nexus_client: Arc<NexusClient>,
-        physical_link: Option<PhysicalLink>,
+        physical_link: PhysicalLink,
     ) -> Result<Self, Error> {
         let log = log.new(o!("component" => "sled agent storage manager"));
         let pools = Arc::new(Mutex::new(HashMap::new()));

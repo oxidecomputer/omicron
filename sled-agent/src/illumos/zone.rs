@@ -9,7 +9,7 @@ use slog::Logger;
 use std::net::{IpAddr, Ipv6Addr};
 
 use crate::illumos::addrobj::AddrObject;
-use crate::illumos::dladm::{Dladm, PhysicalLink, VNIC_PREFIX_CONTROL};
+use crate::illumos::dladm::{PhysicalLink, VNIC_PREFIX_CONTROL};
 use crate::illumos::zfs::ZONE_ZFS_DATASET_MOUNTPOINT;
 use crate::illumos::{execute, PFEXEC};
 
@@ -457,16 +457,10 @@ impl Zones {
     // should remove this function when Sled Agents are provided IPv6 addresses
     // from RSS.
     pub fn ensure_has_global_zone_v6_address(
-        physical_link: Option<PhysicalLink>,
+        link: PhysicalLink,
         address: Ipv6Addr,
         name: &str,
     ) -> Result<(), Error> {
-        // Ensure that addrconf has been set up in the Global Zone.
-        let link = if let Some(link) = physical_link {
-            link
-        } else {
-            Dladm::find_physical()?
-        };
         let gz_link_local_addrobj = AddrObject::new(&link.0, "linklocal")?;
         Self::ensure_has_link_local_v6_address(None, &gz_link_local_addrobj)?;
 

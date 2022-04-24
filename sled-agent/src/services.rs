@@ -73,7 +73,7 @@ pub struct ServiceManager {
     config_path: Option<PathBuf>,
     zones: Mutex<Vec<RunningZone>>,
     vnic_allocator: VnicAllocator,
-    physical_link: Option<PhysicalLink>,
+    physical_link: PhysicalLink,
 }
 
 impl ServiceManager {
@@ -82,14 +82,13 @@ impl ServiceManager {
     ///
     /// Args:
     /// - `log`: The logger
-    /// - `physical_link`: An optional physical link on which to allocate
-    /// datalinks. By default, the first physical link is used.
+    /// - `physical_link`: A physical link on which to allocate datalinks.
     /// - `config_path`: An optional path to a configuration file to store
     /// the record of services. By default, [`default_services_config_path`]
     /// is used.
     pub async fn new(
         log: Logger,
-        physical_link: Option<PhysicalLink>,
+        physical_link: PhysicalLink,
         config_path: Option<PathBuf>,
     ) -> Result<Self, Error> {
         debug!(log, "Creating new ServiceManager");

@@ -59,7 +59,7 @@ impl InstanceManager {
         log: Logger,
         vlan: Option<VlanID>,
         nexus_client: Arc<NexusClient>,
-        physical_link: Option<PhysicalLink>,
+        physical_link: PhysicalLink,
     ) -> Result<InstanceManager, Error> {
         Ok(InstanceManager {
             inner: Arc::new(InstanceManagerInternal {

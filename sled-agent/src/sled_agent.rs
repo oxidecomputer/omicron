@@ -98,6 +98,17 @@ impl SledAgent {
         let vlan = config.vlan;
         info!(&log, "created sled agent"; "id" => ?id);
 
+        let data_link = if let Some(link) = config.data_link.clone() {
+            link
+        } else {
+            Dladm::find_physical().map_err(|err| {
+                Error::Datalink {
+                    message: "Looking up physical link".to_string(),
+                    err,
+                }
+            })?
+        };
+
         // Before we start creating zones, we need to ensure that the
         // necessary ZFS and Zone resources are ready.
         Zfs::ensure_zoned_filesystem(
@@ -116,7 +127,7 @@ impl SledAgent {
         // RSS-provided IP address. In the meantime, we use one from the
         // configuration file.
         Zones::ensure_has_global_zone_v6_address(
-            config.data_link.clone(),
+            data_link.clone(),
             *sled_address.ip(),
             "sled6",
         )?;
@@ -163,7 +174,7 @@ impl SledAgent {
             &log,
             *id,
             nexus_client.clone(),
-            config.data_link.clone(),
+            data_link.clone(),
         )
         .await?;
         if let Some(pools) = &config.zpools {
@@ -180,10 +191,10 @@ impl SledAgent {
             log.clone(),
             vlan,
             nexus_client.clone(),
-            config.data_link.clone(),
+            data_link.clone(),
         )?;
         let services =
-            ServiceManager::new(log.clone(), config.data_link.clone(), None)
+            ServiceManager::new(log.clone(), data_link.clone(), None)
                 .await?;
 
         Ok(SledAgent {
