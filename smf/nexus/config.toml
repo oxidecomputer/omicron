@@ -31,14 +31,9 @@ bind_address = "[fd00:1122:3344:0101::3]:12221"
 [log]
 # Show log messages of this level and more severe
 level = "info"
-
-# Example output to a terminal (with colors)
-mode = "stderr-terminal"
-
-# Example output to a file, appending if it already exists.
-#mode = "file"
-#path = "logs/server.log"
-#if_exists = "append"
+mode = "file"
+path = "/var/oxide/nexus.log"
+if_exists = "append"
 
 # Configuration for interacting with the timeseries database
 [timeseries_db]

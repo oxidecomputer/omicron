@@ -11,7 +11,9 @@ batch_interval = 5 # In seconds
 
 [log]
 level = "debug"
-mode = "stderr-terminal"
+mode = "file"
+path = "/var/oxide/oximeter.log"
+if_exists = "append"
 
 [dropshot]
 bind_address = "[fd00:1122:3344:0101::4]:12223"
