@@ -38,10 +38,7 @@ pub enum Error {
     Dladm(#[from] crate::illumos::dladm::Error),
 
     #[error("Could not initialize service as requested: {message}")]
-    BadServiceRequest {
-        service: String,
-        message: String,
-    },
+    BadServiceRequest { service: String, message: String },
 
     #[error("Services already configured for this Sled Agent")]
     ServicesAlreadyConfigured,
@@ -217,18 +214,22 @@ impl ServiceManager {
             match service.name.as_str() {
                 "internal-dns" => {
                     info!(self.log, "Setting up internal-dns service");
-                    let address = service.addresses.get(0).ok_or_else(|| {
-                        Error::BadServiceRequest {
-                            service: service.name.clone(),
-                            message: "Not enough addresses".to_string(),
-                        }
-                    })?;
+                    let address =
+                        service.addresses.get(0).ok_or_else(|| {
+                            Error::BadServiceRequest {
+                                service: service.name.clone(),
+                                message: "Not enough addresses".to_string(),
+                            }
+                        })?;
                     running_zone.run_cmd(&[
                         crate::illumos::zone::SVCCFG,
                         "-s",
                         &smf_name,
                         "setprop",
-                        &format!("config/server_address=[{}]:{}", address, DNS_SERVER_PORT),
+                        &format!(
+                            "config/server_address=[{}]:{}",
+                            address, DNS_SERVER_PORT
+                        ),
                     ])?;
 
                     running_zone.run_cmd(&[
@@ -236,12 +237,18 @@ impl ServiceManager {
                         "-s",
                         &smf_name,
                         "setprop",
-                        &format!("config/dns_address=[{}]:{}", address, DNS_PORT),
+                        &format!(
+                            "config/dns_address=[{}]:{}",
+                            address, DNS_PORT
+                        ),
                     ])?;
-                },
+                }
                 _ => {
-                    info!(self.log, "Service name {} did not match", service.name);
-                },
+                    info!(
+                        self.log,
+                        "Service name {} did not match", service.name
+                    );
+                }
             }
 
             debug!(self.log, "enabling service");
