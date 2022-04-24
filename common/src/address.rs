@@ -25,6 +25,7 @@ pub const DNS_REDUNDANCY: usize = 1;
 /// reserved for DNS servers.
 pub const MAX_DNS_REDUNDANCY: usize = 5;
 
+pub const DNS_PORT: u16 = 53;
 pub const DNS_SERVER_PORT: u16 = 5353;
 pub const SLED_AGENT_PORT: u16 = 12345;
 
@@ -78,9 +79,6 @@ impl ReservedRackSubnet {
     pub fn get_dns_subnets(&self) -> Vec<DnsSubnet> {
         assert_eq!(self.0.prefix(), RACK_PREFIX);
 
-        let mut iter = self.0.iter();
-        let _anycast_ip = iter.next().unwrap();
-
         (0..DNS_REDUNDANCY)
             .map(|idx| {
                 let network =
@@ -129,7 +127,7 @@ mod test {
         assert_eq!(
             //              Note that these bits (indicating the rack) are zero.
             //              vv
-            "fd00:1122:3344:0001::/56".parse::<Ipv6Network>().unwrap(),
+            "fd00:1122:3344:0000::/56".parse::<Ipv6Network>().unwrap(),
             rack_subnet.0,
         );
 

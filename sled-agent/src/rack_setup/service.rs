@@ -304,8 +304,8 @@ impl ServiceInner {
         bootstrap_addrs: impl IntoIterator<Item = Ipv6Addr>,
     ) -> Result<HashMap<SocketAddrV6, SledAllocation>, SetupServiceError> {
         let bootstrap_addrs = bootstrap_addrs.into_iter().enumerate();
-        let rack_subnet = ReservedRackSubnet::new(config.rack_subnet());
-        let dns_subnets = rack_subnet.get_dns_subnets();
+        let reserved_rack_subnet = ReservedRackSubnet::new(config.rack_subnet());
+        let dns_subnets = reserved_rack_subnet.get_dns_subnets();
 
         info!(self.log, "dns_subnets: {:#?}", dns_subnets);
 

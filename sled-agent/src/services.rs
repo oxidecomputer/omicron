@@ -9,6 +9,7 @@ use crate::illumos::running_zone::{InstalledZone, RunningZone};
 use crate::illumos::vnic::VnicAllocator;
 use crate::illumos::zone::{AddressRequest, Zones};
 use crate::params::{ServiceEnsureBody, ServiceRequest};
+use omicron_common::address::{DNS_PORT, DNS_SERVER_PORT};
 use slog::Logger;
 use std::collections::HashSet;
 use std::iter::FromIterator;
@@ -204,13 +205,54 @@ impl ServiceManager {
                 ),
             ])?;
 
+            let smf_name = format!("svc:/system/illumos/{}", service.name);
+            let default_smf_name = format!("{}:default", smf_name);
+
+            match service.name.as_str() {
+                "internal-dns" => {
+                    info!(self.log, "Setting up internal-dns service");
+                    // TODO: This is a hack!
+                    // - Should we only supply one address, and drop the port?
+                    //      ^ this seems like a good start
+                    // - Should we provide a mechanism for providing multiple addresses?
+                    let address = service.addresses[0].ip();
+                    running_zone.run_cmd(&[
+                        crate::illumos::zone::SVCCFG,
+                        "-s",
+                        &smf_name,
+                        "setprop",
+                        &format!("config/server_address=[{}]:{}", address, DNS_SERVER_PORT),
+                    ])?;
+
+                    running_zone.run_cmd(&[
+                        crate::illumos::zone::SVCCFG,
+                        "-s",
+                        &smf_name,
+                        "setprop",
+                        &format!("config/dns_address=[{}]:{}", address, DNS_PORT),
+                    ])?;
+                },
+                _ => {
+                    info!(self.log, "Service name {} did not match", service.name);
+                },
+            }
+
             debug!(self.log, "enabling service");
+
+            // Refresh the manifest with the new properties we set,
+            // so they become "effective" properties when the service is enabled.
+            running_zone.run_cmd(&[
+                crate::illumos::zone::SVCCFG,
+                "-s",
+                &default_smf_name,
+                "refresh",
+            ])?;
 
             running_zone.run_cmd(&[
                 crate::illumos::zone::SVCADM,
                 "enable",
                 "-t",
-                &format!("svc:/system/illumos/{}:default", service.name),
+                &default_smf_name,
             ])?;
 
             existing_zones.push(running_zone);

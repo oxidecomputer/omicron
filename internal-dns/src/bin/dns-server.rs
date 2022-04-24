@@ -15,21 +15,31 @@ use anyhow::Context;
 use clap::Parser;
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::net::{SocketAddr, SocketAddrV6};
 
 #[derive(Parser, Debug)]
 struct Args {
     #[clap(long)]
     config_file: PathBuf,
+
+    #[clap(long)]
+    server_address: SocketAddrV6,
+
+    #[clap(long)]
+    dns_address: SocketAddrV6,
 }
 
 #[tokio::main]
 async fn main() -> Result<(), anyhow::Error> {
     let args = Args::parse();
     let config_file = &args.config_file;
+    let dns_address = &args.dns_address;
     let config_file_contents = std::fs::read_to_string(config_file)
         .with_context(|| format!("read config file {:?}", config_file))?;
-    let config: internal_dns::Config = toml::from_str(&config_file_contents)
+    let mut config: internal_dns::Config = toml::from_str(&config_file_contents)
         .with_context(|| format!("parse config file {:?}", config_file))?;
+
+    config.dropshot.bind_address = SocketAddr::V6(args.server_address);
     eprintln!("{:?}", config);
 
     let log = config
@@ -42,10 +52,11 @@ async fn main() -> Result<(), anyhow::Error> {
     {
         let db = db.clone();
         let log = log.clone();
-        let config = config.dns.clone();
-
+        let dns_config = internal_dns::dns_server::Config {
+            bind_address: dns_address.to_string()
+        };
         tokio::spawn(async move {
-            internal_dns::dns_server::run(log, db, config).await
+            internal_dns::dns_server::run(log, db, dns_config).await
         });
     }
 

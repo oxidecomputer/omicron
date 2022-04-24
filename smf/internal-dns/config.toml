@@ -1,11 +1,5 @@
-# TODO: remove the addresses here! They're getting assigned to us!
-
 [dropshot]
-bind_address = "[fd00:1122:3344:1::1]:5353"
 request_body_max_bytes = 1048576
-
-[dns]
-bind_address = "[fd00:1122:3344:1::1]:53"
 
 [log]
 # Show log messages of this level and more severe
@@ -21,4 +15,4 @@ mode = "stderr-terminal"
 
 [data]
 nmax_messages = 16
-storage_path = "/var/tmp/oxide/dns"
+storage_path = "/var/oxide/dns"
