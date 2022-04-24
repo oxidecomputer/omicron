@@ -5,11 +5,11 @@
 // Copyright 2022 Oxide Computer Company
 
 use crate::error::Error;
-use crate::management_switch::ManagementSwitch;
-use crate::management_switch::ManagementSwitchDiscovery;
 use crate::management_switch::SwitchPort;
 use crate::Communicator;
+use crate::Timeout;
 use futures::future::Fuse;
+use futures::Future;
 use futures::FutureExt;
 use futures::SinkExt;
 use futures::StreamExt;
@@ -28,12 +28,16 @@ use slog::debug;
 use slog::error;
 use slog::info;
 use slog::trace;
+use slog::warn;
 use slog::Logger;
 use std::borrow::Cow;
 use std::collections::hash_map::Entry;
 use std::collections::HashMap;
 use std::collections::VecDeque;
 use std::convert::TryInto;
+use std::net::SocketAddr;
+use std::sync::atomic::AtomicU32;
+use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::sync::Mutex;
 use std::time::Duration;
@@ -74,6 +78,7 @@ use self::request_response_map::ResponseIngestResult;
 ///    corresponding to the future returned in step 1, fulfilling it.
 #[derive(Debug)]
 pub(crate) struct RecvHandler {
+    request_id: AtomicU32,
     sp_state: HashMap<SwitchPort, SingleSpState>,
     log: Logger,
 }
@@ -82,34 +87,25 @@ impl RecvHandler {
     /// Create a new `RecvHandler` that is aware of all ports described by
     /// `switch`.
     pub(crate) fn new(
-        switch_discovery: ManagementSwitchDiscovery,
+        ports: impl ExactSizeIterator<Item = SwitchPort>,
         log: Logger,
-    ) -> (ManagementSwitch, Arc<Self>) {
+    ) -> Arc<Self> {
         // prime `sp_state` with all known ports of the switch
-        let all_ports = switch_discovery.all_ports();
-        let mut sp_state = HashMap::with_capacity(all_ports.len());
-        for port in all_ports {
+        let mut sp_state = HashMap::with_capacity(ports.len());
+        for port in ports {
             sp_state.insert(port, SingleSpState::default());
         }
 
-        // configure a `ManagementSwitch` that notifies us of every incoming
-        // packet
-        let handler = Arc::new(Self { sp_state, log });
-        let switch = {
-            let handler = Arc::clone(&handler);
-            switch_discovery.start_recv_task(move |port, buf| {
-                handler.handle_incoming_packet(port, buf)
-            })
-        };
-
-        (switch, handler)
+        // TODO: Should we init our request_id randomly instead of always
+        // starting at 0?
+        Arc::new(Self { request_id: AtomicU32::new(0), sp_state, log })
     }
 
-    // SwitchPort instances can only be created by `ManagementSwitch`, so we
-    // should never be able to instantiate a port that we don't have in
-    // `self.sp_state` (which we initialize with all ports declared by the
-    // switch we were given).
     fn sp_state(&self, port: SwitchPort) -> &SingleSpState {
+        // SwitchPort instances can only be created by `ManagementSwitch`, so we
+        // should never be able to instantiate a port that we don't have in
+        // `self.sp_state` (which we initialize with all ports declared by the
+        // switch we were given).
         self.sp_state.get(&port).expect("invalid switch port")
     }
 
@@ -209,20 +205,37 @@ impl RecvHandler {
         Ok(())
     }
 
-    /// Returns a future that will complete when we receive a response on the
-    /// given `port` with the corresponding `request_id`.
+    /// Returns a new request ID and a future that will complete when we receive
+    /// a response on the given `port` with that request ID.
     ///
     /// Panics if `port` is not one of the ports defined by the `switch` given
     /// to this `RecvHandler` when it was constructed.
-    pub(crate) async fn register_request_id(
+    pub(crate) fn register_request_id(
         &self,
         port: SwitchPort,
-        request_id: u32,
-    ) -> Result<ResponseKind, ResponseError> {
-        self.sp_state(port).requests.wait_for_response(request_id).await
+    ) -> (u32, impl Future<Output = Result<ResponseKind, ResponseError>> + '_)
+    {
+        let request_id = self.request_id.fetch_add(1, Ordering::Relaxed);
+        (request_id, self.sp_state(port).requests.wait_for_response(request_id))
     }
 
-    fn handle_incoming_packet(&self, port: SwitchPort, buf: &[u8]) {
+    /// Returns the address of the SP connected to `port`, if we know it.
+    pub(crate) fn remote_addr(&self, port: SwitchPort) -> Option<SocketAddr> {
+        *self.sp_state(port).addr.lock().unwrap()
+    }
+
+    // Only available for tests: set the remote address of a given port.
+    #[cfg(test)]
+    pub(crate) fn set_remote_addr(&self, port: SwitchPort, addr: SocketAddr) {
+        *self.sp_state(port).addr.lock().unwrap() = Some(addr);
+    }
+
+    pub(crate) fn handle_incoming_packet(
+        &self,
+        port: SwitchPort,
+        addr: SocketAddr,
+        buf: &[u8],
+    ) {
         trace!(&self.log, "received {} bytes from {:?}", buf.len(), port);
 
         // the first four bytes of packets we expect is always a version number;
@@ -267,6 +280,35 @@ impl RecvHandler {
             }
         };
         debug!(&self.log, "received {:?} from {:?}", sp_msg, port);
+
+        // update our knowledge of the sender's address
+        let state = self.sp_state(port);
+        match state.addr.lock().unwrap().replace(addr) {
+            None => {
+                // expected but rare: our first packet on this port
+                debug!(
+                    &self.log, "discovered remote address for port";
+                    "port" => ?port,
+                    "addr" => %addr,
+                );
+            }
+            Some(old) if old == addr => {
+                // expected; we got another packet from the expected address
+            }
+            Some(old) => {
+                // unexpected; the remote address changed
+                // TODO-security - What should we do here? Could the sled have
+                // been physically replaced and we're now hearing from a new SP?
+                // This question/TODO may go away on its own if we add an
+                // authenticated channel?
+                warn!(
+                    &self.log, "updated remote address for port";
+                    "port" => ?port,
+                    "old_addr" => %old,
+                    "new_addr" => %addr,
+                );
+            }
+        }
 
         // decide whether this is a response to an outstanding request or an
         // unprompted message
@@ -340,6 +382,7 @@ impl RecvHandler {
 
 #[derive(Debug, Default)]
 struct SingleSpState {
+    addr: Mutex<Option<SocketAddr>>,
     requests: RequestResponseMap<u32, Result<ResponseKind, ResponseError>>,
     serial_console_tasks: Mutex<HashMap<SpComponent, SerialConsoleTaskHandle>>,
 }
@@ -414,7 +457,7 @@ impl SerialConsoleTask {
                     .serial_console_send_packet(
                         self.port,
                         packet,
-                        tokio::time::Instant::now() + self.sp_ack_timeout,
+                        Timeout::from_now(self.sp_ack_timeout),
                     )
                     .map_ok(move |()| packet_data_len)
                     .fuse();

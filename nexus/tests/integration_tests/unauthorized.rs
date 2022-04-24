@@ -11,6 +11,7 @@ use dropshot::HttpErrorResponseBody;
 use headers::authorization::Credentials;
 use http::method::Method;
 use http::StatusCode;
+use httptest::{matchers::*, responders::*, Expectation, ServerBuilder};
 use lazy_static::lazy_static;
 use nexus_test_utils::http_testing::AuthnMode;
 use nexus_test_utils::http_testing::NexusRequest;
@@ -53,6 +54,24 @@ async fn test_unauthorized(cptestctx: &ControlPlaneTestContext) {
     DiskTest::new(cptestctx).await;
     let client = &cptestctx.external_client;
     let log = &cptestctx.logctx.log;
+
+    // Run a httptest server
+    let server = ServerBuilder::new()
+        .bind_addr("127.0.0.1:5555".parse().unwrap())
+        .run()
+        .unwrap();
+
+    // Fake some data
+    server.expect(
+        Expectation::matching(request::method_path("HEAD", "/image.raw"))
+            .times(1..)
+            .respond_with(
+                status_code(200).append_header(
+                    "Content-Length",
+                    format!("{}", 4096 * 1000),
+                ),
+            ),
+    );
 
     // Create test data.
     info!(log, "setting up resource hierarchy");
@@ -168,6 +187,11 @@ lazy_static! {
         SetupReq {
             url: &*DEMO_PROJECT_URL_INSTANCES,
             body: serde_json::to_value(&*DEMO_INSTANCE_CREATE).unwrap(),
+        },
+        // Create a GlobalImage
+        SetupReq {
+            url: "/images",
+            body: serde_json::to_value(&*DEMO_IMAGE_CREATE).unwrap(),
         },
     ];
 }
@@ -498,11 +522,14 @@ fn record_operation(whichtest: WhichTest<'_>) {
         // Note that this likely still writes the color-changing control
         // characters to the real stdout, even without "--nocapture".  That
         // sucks, but at least you don't see them.
-        term.fg(term::color::GREEN).unwrap();
-        term.flush().unwrap();
+        //
+        // We also don't unwrap() the results of printing control codes
+        // in case the terminal doesn't support them.
+        let _ = term.fg(term::color::GREEN);
+        let _ = term.flush();
         print!("{}", c);
-        term.reset().unwrap();
-        term.flush().unwrap();
+        let _ = term.reset();
+        let _ = term.flush();
     } else {
         print!("{}", c);
     }

@@ -8,26 +8,37 @@ use crate::SpIdentifier;
 use gateway_messages::ResponseError;
 use std::io;
 use std::net::SocketAddr;
+use std::time::Duration;
 use thiserror::Error;
 
 #[derive(Debug, Error)]
 pub enum StartupError {
     #[error("error binding to UDP address {addr}: {err}")]
     UdpBind { addr: SocketAddr, err: io::Error },
+    #[error("invalid configuration file: {}", .reasons.join(", "))]
+    InvalidConfig { reasons: Vec<String> },
+    #[error("error communicating with SP: {0}")]
+    SpCommunicationFailed(#[from] SpCommunicationError),
+    #[error("location discovery failed: {reason}")]
+    DiscoveryFailed { reason: String },
 }
 
 #[derive(Debug, Error)]
 pub enum Error {
     #[error("nonexistent SP (type {:?}, slot {})", .0.typ, .0.slot)]
     SpDoesNotExist(SpIdentifier),
+    #[error("unknown socket address for local ignition controller")]
+    LocalIgnitionControllerAddressUnknown,
     #[error(
         "unknown socket address for SP (type {:?}, slot {})",
         .0.typ,
         .0.slot,
     )]
     SpAddressUnknown(SpIdentifier),
-    #[error("timeout elapsed")]
-    Timeout,
+    #[error(
+        "timeout ({timeout:?}) elapsed communicating with {sp:?} on port {port}"
+    )]
+    Timeout { timeout: Duration, port: usize, sp: Option<SpIdentifier> },
     #[error("error communicating with SP: {0}")]
     SpCommunicationFailed(#[from] SpCommunicationError),
     #[error("serial console is already attached")]
@@ -53,10 +64,4 @@ pub enum SpCommunicationError {
 pub struct BadResponseType {
     pub expected: &'static str,
     pub got: &'static str,
-}
-
-impl From<tokio::time::error::Elapsed> for Error {
-    fn from(_: tokio::time::error::Elapsed) -> Self {
-        Self::Timeout
-    }
 }
