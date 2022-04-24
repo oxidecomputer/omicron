@@ -176,7 +176,7 @@ impl SledAgent {
             nexus_client.clone(),
             data_link.clone(),
         )
-        .await?;
+        .await;
         if let Some(pools) = &config.zpools {
             for pool in pools {
                 info!(
@@ -192,7 +192,7 @@ impl SledAgent {
             vlan,
             nexus_client.clone(),
             data_link.clone(),
-        )?;
+        );
         let services =
             ServiceManager::new(log.clone(), data_link.clone(), None)
                 .await?;

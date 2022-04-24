@@ -827,7 +827,7 @@ impl StorageManager {
         sled_id: Uuid,
         nexus_client: Arc<NexusClient>,
         physical_link: PhysicalLink,
-    ) -> Result<Self, Error> {
+    ) -> Self {
         let log = log.new(o!("component" => "sled agent storage manager"));
         let pools = Arc::new(Mutex::new(HashMap::new()));
         let (new_pools_tx, new_pools_rx) = mpsc::channel(10);
@@ -839,14 +839,14 @@ impl StorageManager {
             pools: pools.clone(),
             new_pools_rx,
             new_filesystems_rx,
-            vnic_allocator: VnicAllocator::new("Storage", physical_link)?,
+            vnic_allocator: VnicAllocator::new("Storage", physical_link),
         };
-        Ok(StorageManager {
+        StorageManager {
             pools,
             new_pools_tx,
             new_filesystems_tx,
             task: tokio::task::spawn(async move { worker.do_work().await }),
-        })
+        }
     }
 
     /// Adds a zpool to the storage manager.

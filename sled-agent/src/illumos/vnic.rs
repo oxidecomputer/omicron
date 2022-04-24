@@ -44,12 +44,12 @@ impl VnicAllocator {
     pub fn new<S: AsRef<str>>(
         scope: S,
         physical_link: PhysicalLink,
-    ) -> Result<Self, crate::illumos::dladm::Error> {
-        Ok(Self {
+    ) -> Self {
+        Self {
             value: Arc::new(AtomicU64::new(0)),
             scope: scope.as_ref().to_string(),
             data_link: physical_link,
-        })
+        }
     }
 
     /// Creates a new NIC, intended for usage by the guest.
@@ -144,8 +144,7 @@ mod test {
     #[test]
     fn test_allocate() {
         let allocator =
-            VnicAllocator::new("Foo", Some(PhysicalLink("mylink".to_string())))
-                .unwrap();
+            VnicAllocator::new("Foo", PhysicalLink("mylink".to_string()));
         assert_eq!("oxFoo0", allocator.next());
         assert_eq!("oxFoo1", allocator.next());
         assert_eq!("oxFoo2", allocator.next());
@@ -154,8 +153,7 @@ mod test {
     #[test]
     fn test_allocate_within_scopes() {
         let allocator =
-            VnicAllocator::new("Foo", Some(PhysicalLink("mylink".to_string())))
-                .unwrap();
+            VnicAllocator::new("Foo", PhysicalLink("mylink".to_string()));
         assert_eq!("oxFoo0", allocator.next());
         let allocator = allocator.new_superscope("Baz");
         assert_eq!("oxBazFoo1", allocator.next());

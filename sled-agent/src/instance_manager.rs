@@ -60,16 +60,16 @@ impl InstanceManager {
         vlan: Option<VlanID>,
         nexus_client: Arc<NexusClient>,
         physical_link: PhysicalLink,
-    ) -> Result<InstanceManager, Error> {
-        Ok(InstanceManager {
+    ) -> InstanceManager {
+        InstanceManager {
             inner: Arc::new(InstanceManagerInternal {
                 log,
                 nexus_client,
                 instances: Mutex::new(BTreeMap::new()),
                 vlan,
-                vnic_allocator: VnicAllocator::new("Instance", physical_link)?,
+                vnic_allocator: VnicAllocator::new("Instance", physical_link),
             }),
-        })
+        }
     }
 
     /// Idempotently ensures that the given Instance (described by
@@ -266,9 +266,8 @@ mod test {
             log,
             None,
             nexus_client,
-            Some(PhysicalLink("mylink".to_string())),
-        )
-        .unwrap();
+            PhysicalLink("mylink".to_string()),
+        );
 
         // Verify that no instances exist.
         assert!(im.inner.instances.lock().unwrap().is_empty());
@@ -347,9 +346,8 @@ mod test {
             log,
             None,
             nexus_client,
-            Some(PhysicalLink("mylink".to_string())),
-        )
-        .unwrap();
+            PhysicalLink("mylink".to_string()),
+        );
 
         let ticket = Arc::new(std::sync::Mutex::new(None));
         let ticket_clone = ticket.clone();

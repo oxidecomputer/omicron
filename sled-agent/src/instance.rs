@@ -717,9 +717,8 @@ mod test {
         let log = logger();
         let vnic_allocator = VnicAllocator::new(
             "Test".to_string(),
-            Some(PhysicalLink("mylink".to_string())),
-        )
-        .unwrap();
+            PhysicalLink("mylink".to_string()),
+        );
         let nexus_client = MockNexusClient::default();
 
         let inst = Instance::new(

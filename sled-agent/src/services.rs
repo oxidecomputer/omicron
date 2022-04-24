@@ -99,7 +99,7 @@ impl ServiceManager {
             vnic_allocator: VnicAllocator::new(
                 "Service",
                 physical_link.clone(),
-            )?,
+            ),
             physical_link,
         };
 
@@ -492,7 +492,7 @@ mod test {
         let config = config_dir.path().join("services.toml");
         let mgr = ServiceManager::new(
             log,
-            Some(PhysicalLink(EXPECTED_LINK_NAME.to_string())),
+            PhysicalLink(EXPECTED_LINK_NAME.to_string()),
             Some(config),
         )
         .await
@@ -516,7 +516,7 @@ mod test {
         let config = config_dir.path().join("services.toml");
         let mgr = ServiceManager::new(
             log,
-            Some(PhysicalLink(EXPECTED_LINK_NAME.to_string())),
+            PhysicalLink(EXPECTED_LINK_NAME.to_string()),
             Some(config),
         )
         .await
@@ -543,7 +543,7 @@ mod test {
         // down.
         let mgr = ServiceManager::new(
             logctx.log.clone(),
-            Some(PhysicalLink(EXPECTED_LINK_NAME.to_string())),
+            PhysicalLink(EXPECTED_LINK_NAME.to_string()),
             Some(config.clone()),
         )
         .await
@@ -556,7 +556,7 @@ mod test {
         let _expectations = expect_new_service();
         let mgr = ServiceManager::new(
             logctx.log.clone(),
-            Some(PhysicalLink(EXPECTED_LINK_NAME.to_string())),
+            PhysicalLink(EXPECTED_LINK_NAME.to_string()),
             Some(config.clone()),
         )
         .await
@@ -580,7 +580,7 @@ mod test {
         // down.
         let mgr = ServiceManager::new(
             logctx.log.clone(),
-            Some(PhysicalLink(EXPECTED_LINK_NAME.to_string())),
+            PhysicalLink(EXPECTED_LINK_NAME.to_string()),
             Some(config.clone()),
         )
         .await
@@ -595,7 +595,7 @@ mod test {
         // Observe that the old service is not re-initialized.
         let mgr = ServiceManager::new(
             logctx.log.clone(),
-            Some(PhysicalLink(EXPECTED_LINK_NAME.to_string())),
+            PhysicalLink(EXPECTED_LINK_NAME.to_string()),
             Some(config.clone()),
         )
         .await
