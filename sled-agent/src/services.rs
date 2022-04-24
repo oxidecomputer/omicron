@@ -242,6 +242,15 @@ impl ServiceManager {
                             address, DNS_PORT
                         ),
                     ])?;
+
+                    // Refresh the manifest with the new properties we set,
+                    // so they become "effective" properties when the service is enabled.
+                    running_zone.run_cmd(&[
+                        crate::illumos::zone::SVCCFG,
+                        "-s",
+                        &default_smf_name,
+                        "refresh",
+                    ])?;
                 }
                 _ => {
                     info!(
@@ -252,15 +261,6 @@ impl ServiceManager {
             }
 
             debug!(self.log, "enabling service");
-
-            // Refresh the manifest with the new properties we set,
-            // so they become "effective" properties when the service is enabled.
-            running_zone.run_cmd(&[
-                crate::illumos::zone::SVCCFG,
-                "-s",
-                &default_smf_name,
-                "refresh",
-            ])?;
 
             running_zone.run_cmd(&[
                 crate::illumos::zone::SVCADM,
