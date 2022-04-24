@@ -168,7 +168,7 @@ impl ServiceManager {
             for addr in &service.addresses {
                 info!(self.log, "Ensuring address {} exists", addr.to_string());
                 let addr_request =
-                    AddressRequest::new_static(IpAddr::V6(*addr.ip()), None);
+                    AddressRequest::new_static(IpAddr::V6(*addr), None);
                 running_zone.ensure_address(addr_request).await?;
                 info!(
                     self.log,
@@ -215,7 +215,7 @@ impl ServiceManager {
                     // - Should we only supply one address, and drop the port?
                     //      ^ this seems like a good start
                     // - Should we provide a mechanism for providing multiple addresses?
-                    let address = service.addresses[0].ip();
+                    let address = service.addresses[0];
                     running_zone.run_cmd(&[
                         crate::illumos::zone::SVCCFG,
                         "-s",

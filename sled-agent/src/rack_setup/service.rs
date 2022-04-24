@@ -328,7 +328,7 @@ impl ServiceInner {
                     let dns_subnet = &dns_subnets[idx];
                     request.dns_services.push(ServiceRequest {
                         name: "internal-dns".to_string(),
-                        addresses: vec![dns_subnet.dns_address()],
+                        addresses: vec![dns_subnet.dns_address().ip()],
                         gz_addresses: vec![dns_subnet.gz_address().ip()],
                     });
                 }

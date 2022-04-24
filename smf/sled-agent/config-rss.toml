@@ -29,9 +29,7 @@ dataset_kind.type = "crucible"
 zpool_uuid = "d462a7f7-b628-40fe-80ff-4e4189e2d62b"
 address = "[fd00:1122:3344:0101::2]:32221"
 dataset_kind.type = "cockroach_db"
-dataset_kind.all_addresses = [
-  "[fd00:1122:3344:0101::2]:32221",
-]
+dataset_kind.all_addresses = [ "[fd00:1122:3344:0101::2]:32221" ]
 
 # TODO(https://github.com/oxidecomputer/omicron/issues/732): Nexus
 # should allocate clickhouse datasets.
@@ -42,17 +40,12 @@ dataset_kind.type = "clickhouse"
 
 [[request.service]]
 name = "nexus"
-addresses = [
-  "[fd00:1122:3344:0101::3]:12220",
-  "[fd00:1122:3344:0101::3]:12221",
-]
+addresses = [ "fd00:1122:3344:0101::3" ]
 gz_addresses = []
 
 # TODO(https://github.com/oxidecomputer/omicron/issues/732): Nexus
 # should allocate Oximeter services.
 [[request.service]]
 name = "oximeter"
-addresses = [
-  "[fd00:1122:3344:0101::4]:12223",
-]
+addresses = [ "fd00:1122:3344:0101::4" ]
 gz_addresses = []

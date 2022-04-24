@@ -39,11 +39,11 @@ impl DnsSubnet {
     /// Returns the DNS server address within the subnet.
     ///
     /// This is the first address within the subnet.
-    pub fn dns_address(&self) -> SocketAddrV6 {
+    pub fn dns_address(&self) -> Ipv6Network {
         let mut iter = self.network.iter();
         let _anycast_ip = iter.next().unwrap();
         let dns_ip = iter.next().unwrap();
-        SocketAddrV6::new(dns_ip, DNS_SERVER_PORT, 0, 0)
+        Ipv6Network::new(dns_ip, SLED_PREFIX).unwrap()
     }
 
     /// Returns the address which the Global Zone should create
@@ -137,7 +137,7 @@ mod test {
 
         // The DNS address and GZ address should be only differing by one.
         assert_eq!(
-            "[fd00:1122:3344:0001::1]:5353".parse::<SocketAddrV6>().unwrap(),
+            "fd00:1122:3344:0001::1/64".parse::<Ipv6Network>().unwrap(),
             dns_subnets[0].dns_address(),
         );
         assert_eq!(
