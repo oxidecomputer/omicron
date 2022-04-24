@@ -5,7 +5,6 @@
 //! Utilities for managing Zpools.
 
 use crate::illumos::execute;
-use omicron_common::api::external::Error as ExternalError;
 use serde::{Deserialize, Deserializer};
 use std::str::FromStr;
 use uuid::Uuid;
@@ -13,24 +12,24 @@ use uuid::Uuid;
 const ZPOOL: &str = "/usr/sbin/zpool";
 
 #[derive(thiserror::Error, Debug, PartialEq, Eq)]
-pub enum ParseError {
-    #[error("Failed to parse output as UTF-8: {0}")]
-    Utf8(#[from] std::string::FromUtf8Error),
-
-    #[error("Failed to parse output: {0}")]
-    Parse(String),
-}
+#[error("Failed to parse output: {0}")]
+pub struct ParseError(String);
 
 #[derive(thiserror::Error, Debug)]
-pub enum Error {
+enum Error {
     #[error("Zpool execution error: {0}")]
     Execution(#[from] crate::illumos::ExecutionError),
 
     #[error(transparent)]
     Parse(#[from] ParseError),
+}
 
-    #[error("Failed to execute subcommand: {0}")]
-    Command(ExternalError),
+#[derive(thiserror::Error, Debug)]
+#[error("Failed to get info for zpool {name}: {err}")]
+pub struct GetInfoError {
+    name: String,
+    #[source]
+    err: Error,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -62,7 +61,7 @@ impl FromStr for ZpoolHealth {
             "OFFLINE" => Ok(ZpoolHealth::Offline),
             "REMOVED" => Ok(ZpoolHealth::Removed),
             "UNAVAIL" => Ok(ZpoolHealth::Unavailable),
-            _ => Err(ParseError::Parse(format!(
+            _ => Err(ParseError(format!(
                 "Unrecognized zpool 'health': {}",
                 s
             ))),
@@ -111,13 +110,13 @@ impl FromStr for ZpoolInfo {
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         // Lambda helpers for error handling.
         let expected_field = |name| {
-            ParseError::Parse(format!(
+            ParseError(format!(
                 "Missing '{}' value in zpool list output",
                 name
             ))
         };
         let failed_to_parse = |name, err| {
-            ParseError::Parse(format!(
+            ParseError(format!(
                 "Failed to parse field '{}': {}",
                 name, err
             ))
@@ -155,7 +154,7 @@ pub struct Zpool {}
 
 #[cfg_attr(test, mockall::automock, allow(dead_code))]
 impl Zpool {
-    pub fn get_info(name: &str) -> Result<ZpoolInfo, Error> {
+    pub fn get_info(name: &str) -> Result<ZpoolInfo, GetInfoError> {
         let mut command = std::process::Command::new(ZPOOL);
         let cmd = command.args(&[
             "list",
@@ -164,11 +163,20 @@ impl Zpool {
             name,
         ]);
 
-        let output = execute(cmd)?;
-        let stdout = String::from_utf8(output.stdout)
-            .map_err(|e| ParseError::Utf8(e))?;
-
-        let zpool = stdout.parse::<ZpoolInfo>()?;
+        let output = execute(cmd).map_err(|err| {
+            GetInfoError {
+                name: name.to_string(),
+                err: err.into(),
+            }
+        })?;
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let zpool = stdout.parse::<ZpoolInfo>()
+            .map_err(|err| {
+                GetInfoError {
+                    name: name.to_string(),
+                    err: err.into(),
+                }
+            })?;
         Ok(zpool)
     }
 }
@@ -294,7 +302,7 @@ mod test {
         let input = format!("{} {} {} {}", name, size, allocated, free);
         let result: Result<ZpoolInfo, ParseError> = input.parse();
 
-        let expected_err = ParseError::Parse(
+        let expected_err = ParseError(
             "Missing 'health' value in zpool list output".to_owned(),
         );
         assert_eq!(result.unwrap_err(), expected_err,);

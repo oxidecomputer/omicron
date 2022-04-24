@@ -55,7 +55,7 @@ pub enum Error {
     Zfs(#[from] crate::illumos::zfs::Error),
 
     #[error(transparent)]
-    Zpool(#[from] crate::illumos::zpool::Error),
+    GetZpoolInfo(#[from] crate::illumos::zpool::GetInfoError),
 
     #[error("Failed to manage a running zone: {0}")]
     ZoneManagement(#[from] crate::illumos::running_zone::Error),
