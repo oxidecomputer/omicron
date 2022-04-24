@@ -56,7 +56,8 @@ where
             err.to_string(),
         ),
         SpCommsError::SpAddressUnknown(_)
-        | SpCommsError::Timeout
+        | SpCommsError::Timeout { .. }
+        | SpCommsError::LocalIgnitionControllerAddressUnknown
         | SpCommsError::SpCommunicationFailed(_) => {
             HttpError::for_internal_error(err.to_string())
         }

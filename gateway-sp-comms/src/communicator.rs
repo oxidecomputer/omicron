@@ -9,38 +9,30 @@ use crate::error::Error;
 use crate::error::SpCommunicationError;
 use crate::error::StartupError;
 use crate::management_switch::ManagementSwitch;
-use crate::management_switch::ManagementSwitchDiscovery;
 use crate::management_switch::SpSocket;
 use crate::management_switch::SwitchPort;
-use crate::recv_handler::RecvHandler;
-use crate::KnownSps;
+use crate::Elapsed;
 use crate::SpIdentifier;
+use crate::SwitchConfig;
+use crate::Timeout;
 use futures::stream::FuturesUnordered;
 use futures::Future;
 use futures::Stream;
-use gateway_messages::version;
 use gateway_messages::BulkIgnitionState;
+use gateway_messages::DiscoverResponse;
 use gateway_messages::IgnitionCommand;
 use gateway_messages::IgnitionState;
-use gateway_messages::Request;
 use gateway_messages::RequestKind;
-use gateway_messages::ResponseError;
 use gateway_messages::ResponseKind;
 use gateway_messages::SerialConsole;
-use gateway_messages::SerializedSize;
 use gateway_messages::SpComponent;
 use gateway_messages::SpState;
 use hyper::header;
 use hyper::upgrade;
 use hyper::Body;
-use omicron_common::backoff;
-use omicron_common::backoff::Backoff;
-use slog::debug;
 use slog::info;
 use slog::o;
 use slog::Logger;
-use std::sync::atomic::AtomicU32;
-use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::time::Instant;
@@ -64,28 +56,30 @@ where
 
 #[derive(Debug)]
 pub struct Communicator {
-    log: Logger,
     switch: ManagementSwitch,
-    request_id: AtomicU32,
-    recv_handler: Arc<RecvHandler>,
 }
 
 impl Communicator {
     pub async fn new(
-        known_sps: KnownSps,
+        config: SwitchConfig,
+        discovery_deadline: Instant,
         log: &Logger,
     ) -> Result<Self, StartupError> {
         let log = log.new(o!("component" => "SpCommunicator"));
-        let discovery = ManagementSwitchDiscovery::placeholder_start(
-            known_sps,
-            log.clone(),
-        )
-        .await?;
-
-        let (switch, recv_handler) = RecvHandler::new(discovery, log.clone());
+        let switch =
+            ManagementSwitch::new(config, discovery_deadline, log.clone())
+                .await?;
 
         info!(&log, "started SP communicator");
-        Ok(Self { log, switch, request_id: AtomicU32::new(0), recv_handler })
+        Ok(Self { switch })
+    }
+
+    /// Get the name of our location.
+    ///
+    /// This matches one of the names specified as a possible location in the
+    /// configuration we were given.
+    pub fn location_name(&self) -> &str {
+        &self.switch.location_name()
     }
 
     // convert an identifier to a port number; this is fallible because
@@ -101,40 +95,67 @@ impl Communicator {
         self.switch.switch_port_to_id(port)
     }
 
+    /// Returns true if we've discovered the IP address of our local ignition
+    /// controller.
+    ///
+    /// This method exists to be polled during test setup (to wait for discovery
+    /// to happen); it should not be called outside tests.
+    pub fn local_ignition_controller_address_known(&self) -> bool {
+        self.switch.ignition_controller().is_some()
+    }
+
+    /// Returns true if we've discovered the IP address of the specified SP.
+    ///
+    /// This method exists to be polled during test setup (to wait for discovery
+    /// to happen); it should not be called outside tests. In particular, it
+    /// panics instead of running an error if `sp` describes an SP that isn't
+    /// known to this communicator.
+    pub fn address_known(&self, sp: SpIdentifier) -> bool {
+        let port = self.switch.switch_port(sp).unwrap();
+        self.switch.sp_socket(port).is_some()
+    }
+
     /// Ask the local ignition controller for the ignition state of a given SP.
     pub async fn get_ignition_state(
         &self,
         sp: SpIdentifier,
-        timeout: Instant,
+        timeout: Timeout,
     ) -> Result<IgnitionState, Error> {
-        let controller = self.switch.ignition_controller();
+        let controller = self
+            .switch
+            .ignition_controller()
+            .ok_or(Error::LocalIgnitionControllerAddressUnknown)?;
         let port = self.id_to_port(sp)?;
         let request =
             RequestKind::IgnitionState { target: port.as_ignition_target() };
 
-        self.request_response(
-            &controller,
-            request,
-            Some(timeout),
-            ResponseKindExt::try_into_ignition_state,
-        )
-        .await
+        Ok(self
+            .request_response(
+                &controller,
+                request,
+                ResponseKindExt::try_into_ignition_state,
+                Some(timeout),
+            )
+            .await?)
     }
 
     /// Ask the local ignition controller for the ignition state of all SPs.
     pub async fn get_ignition_state_all(
         &self,
-        timeout: Instant,
+        timeout: Timeout,
     ) -> Result<Vec<(SpIdentifier, IgnitionState)>, Error> {
-        let controller = self.switch.ignition_controller();
+        let controller = self
+            .switch
+            .ignition_controller()
+            .ok_or(Error::LocalIgnitionControllerAddressUnknown)?;
         let request = RequestKind::BulkIgnitionState;
 
         let bulk_state = self
             .request_response(
                 &controller,
                 request,
-                Some(timeout),
                 ResponseKindExt::try_into_bulk_ignition_state,
+                Some(timeout),
             )
             .await?;
 
@@ -165,19 +186,23 @@ impl Communicator {
         &self,
         target_sp: SpIdentifier,
         command: IgnitionCommand,
-        timeout: Instant,
+        timeout: Timeout,
     ) -> Result<(), Error> {
-        let controller = self.switch.ignition_controller();
+        let controller = self
+            .switch
+            .ignition_controller()
+            .ok_or(Error::LocalIgnitionControllerAddressUnknown)?;
         let target = self.id_to_port(target_sp)?.as_ignition_target();
         let request = RequestKind::IgnitionCommand { target, command };
 
-        self.request_response(
-            &controller,
-            request,
-            Some(timeout),
-            ResponseKindExt::try_into_ignition_command_ack,
-        )
-        .await
+        Ok(self
+            .request_response(
+                &controller,
+                request,
+                ResponseKindExt::try_into_ignition_command_ack,
+                Some(timeout),
+            )
+            .await?)
     }
 
     /// Set up a websocket connection that forwards data to and from the given
@@ -192,6 +217,11 @@ impl Communicator {
     // via UDP. SPs will continuously broadcast any serial console data, even if
     // there is no attached client. Maybe this is fine, since the serial console
     // shouldn't be noisy without a corresponding client driving it?
+    //
+    // TODO Because this method doesn't contact the target SP, it succeeds even
+    // if we don't know the IP address of that SP (yet, or possibly ever)! The
+    // connection will start working if we later discover the address, but this
+    // is probably not the behavior we want.
     pub async fn serial_console_attach(
         self: &Arc<Self>,
         request: &mut http::Request<Body>,
@@ -246,7 +276,7 @@ impl Communicator {
             .map(|key| handshake::derive_accept_key(key))
             .ok_or(Error::BadWebsocketConnection("missing websocket key"))?;
 
-        self.recv_handler.serial_console_attach(
+        self.switch.serial_console_attach(
             Arc::clone(self),
             port,
             component,
@@ -277,7 +307,7 @@ impl Communicator {
         component: &SpComponent,
     ) -> Result<(), Error> {
         let port = self.id_to_port(sp)?;
-        self.recv_handler.serial_console_detach(port, component)
+        self.switch.serial_console_detach(port, component)
     }
 
     /// Send `packet` to the given SP component's serial console.
@@ -285,7 +315,7 @@ impl Communicator {
         &self,
         port: SwitchPort,
         packet: SerialConsole,
-        timeout: Instant,
+        timeout: Timeout,
     ) -> Result<(), Error> {
         // We can only send to an SP's serial console if we've attached to it,
         // which means we know its address.
@@ -297,20 +327,21 @@ impl Communicator {
         let sp =
             self.switch.sp_socket(port).expect("lost address of attached SP");
 
-        self.request_response(
-            &sp,
-            RequestKind::SerialConsoleWrite(packet),
-            Some(timeout),
-            ResponseKindExt::try_into_serial_console_write_ack,
-        )
-        .await
+        Ok(self
+            .request_response(
+                &sp,
+                RequestKind::SerialConsoleWrite(packet),
+                ResponseKindExt::try_into_serial_console_write_ack,
+                Some(timeout),
+            )
+            .await?)
     }
 
     /// Get the state of a given SP.
     pub async fn get_state(
         &self,
         sp: SpIdentifier,
-        timeout: Instant,
+        timeout: Timeout,
     ) -> Result<SpState, Error> {
         self.get_state_maybe_timeout(sp, Some(timeout)).await
     }
@@ -318,7 +349,7 @@ impl Communicator {
     /// Get the state of a given SP without a timeout; it is the caller's
     /// responsibility to ensure a reasonable timeout is applied higher up in
     /// the chain.
-    // TODO we could have one method that takes `Option<Instant>` for a timeout,
+    // TODO we could have one method that takes `Option<Timeout>` for a timeout,
     // and/or apply that to _all_ the methods in this class. I don't want to
     // make it easy to accidentally call a method without providing a timeout,
     // though, so went with the current design.
@@ -332,20 +363,21 @@ impl Communicator {
     async fn get_state_maybe_timeout(
         &self,
         sp: SpIdentifier,
-        timeout: Option<Instant>,
+        timeout: Option<Timeout>,
     ) -> Result<SpState, Error> {
         let port = self.id_to_port(sp)?;
         let sp =
             self.switch.sp_socket(port).ok_or(Error::SpAddressUnknown(sp))?;
         let request = RequestKind::SpState;
 
-        self.request_response(
-            &sp,
-            request,
-            timeout,
-            ResponseKindExt::try_into_sp_state,
-        )
-        .await
+        Ok(self
+            .request_response(
+                &sp,
+                request,
+                ResponseKindExt::try_into_sp_state,
+                timeout,
+            )
+            .await?)
     }
 
     /// Query all online SPs.
@@ -366,14 +398,10 @@ impl Communicator {
     pub fn query_all_online_sps<F, T, Fut>(
         &self,
         ignition_state: &[(SpIdentifier, IgnitionState)],
-        timeout: Instant,
+        timeout: Timeout,
         f: F,
     ) -> impl FuturesUnorderedImpl<
-        Item = (
-            SpIdentifier,
-            IgnitionState,
-            Option<Result<T, tokio::time::error::Elapsed>>,
-        ),
+        Item = (SpIdentifier, IgnitionState, Option<Result<T, Elapsed>>),
     >
     where
         F: FnMut(SpIdentifier) -> Fut + Clone,
@@ -386,7 +414,7 @@ impl Communicator {
                 let mut f = f.clone();
                 async move {
                     let val = if state.is_powered_on() {
-                        Some(tokio::time::timeout_at(timeout, f(id)).await)
+                        Some(timeout.timeout_at(f(id)).await)
                     } else {
                         None
                     };
@@ -399,97 +427,23 @@ impl Communicator {
     async fn request_response<F, T>(
         &self,
         sp: &SpSocket<'_>,
-        mut kind: RequestKind,
-        timeout: Option<Instant>,
-        mut map_response_kind: F,
+        kind: RequestKind,
+        map_response_kind: F,
+        timeout: Option<Timeout>,
     ) -> Result<T, Error>
     where
         F: FnMut(ResponseKind) -> Result<T, BadResponseType>,
     {
-        // helper to wrap a future in a timeout if we have one
-        async fn maybe_with_timeout<F, U>(
-            timeout: Option<Instant>,
-            fut: F,
-        ) -> Result<U, tokio::time::error::Elapsed>
-        where
-            F: Future<Output = U>,
-        {
-            match timeout {
-                Some(t) => tokio::time::timeout_at(t, fut).await,
-                None => Ok(fut.await),
-            }
-        }
-
-        // We'll use exponential backoff if and only if the SP responds with
-        // "busy"; any other error will cause the loop below to terminate.
-        let mut backoff = backoff::internal_service_policy();
-
-        loop {
-            // It would be nicer to use `backoff::retry()` instead of manually
-            // stepping the backoff policy, but the dance we do with `kind` to
-            // avoid cloning it is hard to map into `retry()` in a way that
-            // satisfies the borrow checker. ("The dance we do with `kind` to
-            // avoid cloning it" being that we move it into `request` below, and
-            // on a busy response from the SP we move it back out into the
-            // `kind` local var.)
-            let duration = backoff
-                .next_backoff()
-                .expect("internal backoff policy gave up");
-            maybe_with_timeout(timeout, tokio::time::sleep(duration)).await?;
-
-            // request IDs will eventually roll over; since we enforce timeouts
-            // this should be a non-issue in practice. does this need testing?
-            let request_id = self.request_id.fetch_add(1, Ordering::Relaxed);
-
-            // update our recv_handler to expect a response for this request ID
-            let response_fut =
-                self.recv_handler.register_request_id(sp.port(), request_id);
-
-            // Serialize and send our request. We know `buf` is large enough for
-            // any `Request`, so unwrapping here is fine.
-            let request = Request { version: version::V1, request_id, kind };
-            let mut buf = [0; Request::MAX_SIZE];
-            let n = gateway_messages::serialize(&mut buf, &request).unwrap();
-            let serialized_request = &buf[..n];
-
-            // Actual communication, guarded by `timeout` if it's not `None`.
-            let result = maybe_with_timeout(timeout, async {
-                debug!(&self.log, "sending {:?} to SP {:?}", request, sp);
-                sp.send(serialized_request).await.map_err(|err| {
-                    SpCommunicationError::UdpSend { addr: sp.addr(), err }
-                })?;
-
-                Ok::<ResponseKind, SpCommunicationError>(response_fut.await?)
-            })
-            .await?;
-
-            match result {
-                Ok(response_kind) => {
-                    return map_response_kind(response_kind)
-                        .map_err(SpCommunicationError::from)
-                        .map_err(Error::from)
-                }
-                Err(SpCommunicationError::SpError(ResponseError::Busy)) => {
-                    debug!(
-                        &self.log,
-                        "SP busy; sleeping before retrying send";
-                        "sp" => ?sp,
-                    );
-
-                    // move `kind` back into local var; required to satisfy
-                    // borrow check of this loop
-                    kind = request.kind;
-                }
-                Err(err) => return Err(err.into()),
-            }
-        }
+        self.switch.request_response(sp, kind, map_response_kind, timeout).await
     }
 }
 
 // When we send a request we expect a specific kind of response; the boilerplate
 // for confirming that is a little noisy, so it lives in this extension trait.
-trait ResponseKindExt {
+pub(crate) trait ResponseKindExt {
     fn name(&self) -> &'static str;
+
+    fn try_into_discover(self) -> Result<DiscoverResponse, BadResponseType>;
 
     fn try_into_ignition_state(self) -> Result<IgnitionState, BadResponseType>;
 
@@ -507,7 +461,7 @@ trait ResponseKindExt {
 impl ResponseKindExt for ResponseKind {
     fn name(&self) -> &'static str {
         match self {
-            ResponseKind::Pong => response_kind_names::PONG,
+            ResponseKind::Discover(_) => response_kind_names::DISCOVER,
             ResponseKind::IgnitionState(_) => {
                 response_kind_names::IGNITION_STATE
             }
@@ -521,6 +475,16 @@ impl ResponseKindExt for ResponseKind {
             ResponseKind::SerialConsoleWriteAck => {
                 response_kind_names::SERIAL_CONSOLE_WRITE_ACK
             }
+        }
+    }
+
+    fn try_into_discover(self) -> Result<DiscoverResponse, BadResponseType> {
+        match self {
+            ResponseKind::Discover(discover) => Ok(discover),
+            other => Err(BadResponseType {
+                expected: response_kind_names::DISCOVER,
+                got: other.name(),
+            }),
         }
     }
 
@@ -578,7 +542,7 @@ impl ResponseKindExt for ResponseKind {
 }
 
 mod response_kind_names {
-    pub(super) const PONG: &str = "pong";
+    pub(super) const DISCOVER: &str = "discover";
     pub(super) const IGNITION_STATE: &str = "ignition_state";
     pub(super) const BULK_IGNITION_STATE: &str = "bulk_ignition_state";
     pub(super) const IGNITION_COMMAND_ACK: &str = "ignition_command_ack";

@@ -250,6 +250,67 @@ impl AuthorizedResource for ConsoleSessionList {
     }
 }
 
+#[derive(Clone, Copy, Debug)]
+pub struct GlobalImageList;
+/// Singleton representing the [`GlobalImageList`] itself for authz purposes
+pub const GLOBAL_IMAGE_LIST: GlobalImageList = GlobalImageList;
+
+impl Eq for GlobalImageList {}
+impl PartialEq for GlobalImageList {
+    fn eq(&self, _: &Self) -> bool {
+        // There is only one GlobalImageList.
+        true
+    }
+}
+
+impl oso::PolarClass for GlobalImageList {
+    fn get_polar_class_builder() -> oso::ClassBuilder<Self> {
+        oso::Class::builder()
+            .with_equality_check()
+            .add_attribute_getter("fleet", |_x: &GlobalImageList| FLEET)
+    }
+}
+
+impl AuthorizedResource for GlobalImageList {
+    fn load_roles<'a, 'b, 'c, 'd, 'e, 'f>(
+        &'a self,
+        opctx: &'b OpContext,
+        datastore: &'c DataStore,
+        authn: &'d authn::Context,
+        roleset: &'e mut RoleSet,
+    ) -> futures::future::BoxFuture<'f, Result<(), Error>>
+    where
+        'a: 'f,
+        'b: 'f,
+        'c: 'f,
+        'd: 'f,
+        'e: 'f,
+    {
+        // there's no roles related to GlobalImageList, just permissions but we
+        // still need to load the fleet related roles to find if the actor has
+        // the "admin" role on the fleet
+        load_roles_for_resource(
+            opctx,
+            datastore,
+            authn,
+            ResourceType::Fleet,
+            *FLEET_ID,
+            roleset,
+        )
+        .boxed()
+    }
+
+    fn on_unauthorized(
+        &self,
+        _: &Authz,
+        error: Error,
+        _: AnyActor,
+        _: Action,
+    ) -> Error {
+        error
+    }
+}
+
 // Main resource hierarchy: Organizations, Projects, and their resources
 
 authz_resource! {
@@ -335,14 +396,6 @@ authz_resource! {
 }
 
 authz_resource! {
-    name = "SiloUser",
-    parent = "Fleet",
-    primary_key = Uuid,
-    roles_allowed = false,
-    polar_snippet = FleetChild,
-}
-
-authz_resource! {
     name = "RoleBuiltin",
     parent = "Fleet",
     primary_key = (String, String),
@@ -375,6 +428,22 @@ authz_resource! {
 }
 
 authz_resource! {
+    name = "SiloUser",
+    parent = "Silo",
+    primary_key = Uuid,
+    roles_allowed = false,
+    polar_snippet = Custom,
+}
+
+authz_resource! {
+    name = "SshKey",
+    parent = "SiloUser",
+    primary_key = Uuid,
+    roles_allowed = false,
+    polar_snippet = Custom,
+}
+
+authz_resource! {
     name = "Sled",
     parent = "Fleet",
     primary_key = Uuid,
@@ -386,6 +455,14 @@ authz_resource! {
     name = "UpdateAvailableArtifact",
     parent = "Fleet",
     primary_key = (String, i64, UpdateArtifactKind),
+    roles_allowed = false,
+    polar_snippet = FleetChild,
+}
+
+authz_resource! {
+    name = "GlobalImage",
+    parent = "Fleet",
+    primary_key = Uuid,
     roles_allowed = false,
     polar_snippet = FleetChild,
 }

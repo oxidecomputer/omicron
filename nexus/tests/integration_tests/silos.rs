@@ -66,7 +66,7 @@ async fn test_silos(cptestctx: &ControlPlaneTestContext) {
     assert_eq!(silos.len(), 1);
     assert_eq!(silos[0].identity.name, "discoverable");
 
-    // Create a new user in the discoverable silo, then create a console session
+    // Create a new user in the discoverable silo
     let new_silo_user = nexus
         .silo_user_create(
             silos[0].identity.id, /* silo id */
@@ -75,9 +75,10 @@ async fn test_silos(cptestctx: &ControlPlaneTestContext) {
         .await
         .unwrap();
 
+    // TODO-coverage, TODO-security: Add test for Silo-local session
+    // when we can use users in another Silo.
+
     let authn_opctx = nexus.opctx_external_authn();
-    let session =
-        nexus.session_create(authn_opctx, new_silo_user.id()).await.unwrap();
 
     // Create organization with built-in user auth
     // Note: this currently goes to the built-in silo!
@@ -134,12 +135,6 @@ async fn test_silos(cptestctx: &ControlPlaneTestContext) {
     // Verify silo user was also deleted
     nexus
         .silo_user_fetch(authn_opctx, new_silo_user.id())
-        .await
-        .expect_err("unexpected success");
-
-    // Verify new user's console session isn't valid anymore.
-    nexus
-        .session_fetch(authn_opctx, session.token.clone())
         .await
         .expect_err("unexpected success");
 }

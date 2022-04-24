@@ -304,7 +304,7 @@ impl<'a> LookupPath<'a> {
         Silo { key: SiloKey::PrimaryKey(Root { lookup_root: self }, id) }
     }
 
-    /// Select a resource of type Silo, identified by its id
+    /// Select a resource of type Silo, identified by its name
     pub fn silo_name<'b, 'c>(self, name: &'b Name) -> Silo<'c>
     where
         'a: 'c,
@@ -353,6 +353,27 @@ impl<'a> LookupPath<'a> {
             key: UserBuiltinKey::Name(Root { lookup_root: self }, name),
         }
     }
+
+    /// Select a resource of type GlobalImage, identified by its name
+    pub fn global_image_name<'b, 'c>(self, name: &'b Name) -> GlobalImage<'c>
+    where
+        'a: 'c,
+        'b: 'c,
+    {
+        GlobalImage {
+            key: GlobalImageKey::Name(Root { lookup_root: self }, name),
+        }
+    }
+
+    /// Select a resource of type GlobalImage, identified by its id
+    pub fn global_image_id<'b>(self, id: Uuid) -> GlobalImage<'b>
+    where
+        'a: 'b,
+    {
+        GlobalImage {
+            key: GlobalImageKey::PrimaryKey(Root { lookup_root: self }, id),
+        }
+    }
 }
 
 /// Represents the head of the selection path for a resource
@@ -377,6 +398,24 @@ lookup_resource! {
     name = "Silo",
     ancestors = [],
     children = [ "Organization" ],
+    lookup_by_name = true,
+    soft_deletes = true,
+    primary_key_columns = [ { column_name = "id", rust_type = Uuid } ]
+}
+
+lookup_resource! {
+    name = "SiloUser",
+    ancestors = [ "Silo" ],
+    children = [ "SshKey" ],
+    lookup_by_name = false,
+    soft_deletes = true,
+    primary_key_columns = [ { column_name = "id", rust_type = Uuid } ]
+}
+
+lookup_resource! {
+    name = "SshKey",
+    ancestors = [ "Silo", "SiloUser" ],
+    children = [],
     lookup_by_name = true,
     soft_deletes = true,
     primary_key_columns = [ { column_name = "id", rust_type = Uuid } ]
@@ -489,15 +528,6 @@ lookup_resource! {
 }
 
 lookup_resource! {
-    name = "SiloUser",
-    ancestors = [],
-    children = [],
-    lookup_by_name = false,
-    soft_deletes = true,
-    primary_key_columns = [ { column_name = "id", rust_type = Uuid } ]
-}
-
-lookup_resource! {
     name = "Sled",
     ancestors = [],
     children = [],
@@ -525,6 +555,15 @@ lookup_resource! {
     children = [],
     lookup_by_name = true,
     soft_deletes = false,
+    primary_key_columns = [ { column_name = "id", rust_type = Uuid } ]
+}
+
+lookup_resource! {
+    name = "GlobalImage",
+    ancestors = [],
+    children = [],
+    lookup_by_name = true,
+    soft_deletes = true,
     primary_key_columns = [ { column_name = "id", rust_type = Uuid } ]
 }
 

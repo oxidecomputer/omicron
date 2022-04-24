@@ -16,6 +16,7 @@ use sp_sim::SimulatedSp;
 
 mod bulk_state_get;
 mod commands;
+mod location_discovery;
 mod serial_console;
 mod setup;
 

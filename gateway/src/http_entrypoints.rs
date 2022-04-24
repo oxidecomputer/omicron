@@ -28,11 +28,11 @@ use dropshot::TypedBody;
 use dropshot::WhichPage;
 use gateway_messages::IgnitionCommand;
 use gateway_sp_comms::error::Error as SpCommsError;
+use gateway_sp_comms::Timeout as SpTimeout;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::time::Instant;
 
 #[derive(
     Debug,
@@ -268,7 +268,7 @@ async fn sp_list(
                 .unwrap_or(apictx.timeouts.bulk_request_default)
                 // TODO do we also want a floor for the timeout?
                 .min(apictx.timeouts.bulk_request_max);
-            let timeout = Instant::now() + timeout;
+            let timeout = SpTimeout::from_now(timeout);
 
             let request_id = apictx
                 .bulk_sp_state_requests
@@ -290,7 +290,7 @@ async fn sp_list(
         .get(
             &request_id,
             last_seen_target.map(Into::into),
-            Instant::now() + apictx.timeouts.bulk_request_page,
+            SpTimeout::from_now(apictx.timeouts.bulk_request_page),
             page_limit,
         )
         .await?;
@@ -316,8 +316,9 @@ async fn sp_list(
                     // TODO Treating "communication failed" and "we don't know
                     // the IP address" as "unresponsive" may not be right. Do we
                     // need more refined errors?
-                    SpCommsError::Timeout
+                    SpCommsError::Timeout { .. }
                     | SpCommsError::SpCommunicationFailed(_)
+                    | SpCommsError::LocalIgnitionControllerAddressUnknown
                     | SpCommsError::SpAddressUnknown(_) => {
                         SpState::Unresponsive
                     }
@@ -369,12 +370,13 @@ async fn sp_get(
     // putting it here, the time it takes us to query ignition counts against
     // the client's timeout; that seems right but puts us in a bind if their
     // timeout expires while we're still waiting for ignition.
-    let timeout = Instant::now()
-        + query
+    let timeout = SpTimeout::from_now(
+        query
             .into_inner()
             .timeout_millis
             .map(|n| Duration::from_millis(u64::from(n)))
-            .unwrap_or(apictx.timeouts.sp_request);
+            .unwrap_or(apictx.timeouts.sp_request),
+    );
 
     // ping the ignition controller first; if it says the SP is off or otherwise
     // unavailable, we're done.
@@ -387,7 +389,7 @@ async fn sp_get(
         // ignition indicates the SP is on; ask it for its state
         match comms.get_state(sp.into(), timeout).await {
             Ok(state) => SpState::from(state),
-            Err(SpCommsError::Timeout) => SpState::Unresponsive,
+            Err(SpCommsError::Timeout { .. }) => SpState::Unresponsive,
             Err(other) => return Err(http_err_from_comms_err(other)),
         }
     } else {
@@ -569,9 +571,9 @@ async fn ignition_list(
     let sp_comms = &apictx.sp_comms;
 
     let all_state = sp_comms
-        .get_ignition_state_all(
-            Instant::now() + apictx.timeouts.ignition_controller,
-        )
+        .get_ignition_state_all(SpTimeout::from_now(
+            apictx.timeouts.ignition_controller,
+        ))
         .await
         .map_err(http_err_from_comms_err)?;
 
@@ -602,7 +604,7 @@ async fn ignition_get(
         .sp_comms
         .get_ignition_state(
             sp.into(),
-            Instant::now() + apictx.timeouts.ignition_controller,
+            SpTimeout::from_now(apictx.timeouts.ignition_controller),
         )
         .await
         .map_err(http_err_from_comms_err)?;
@@ -628,7 +630,7 @@ async fn ignition_power_on(
         .send_ignition_command(
             sp.into(),
             IgnitionCommand::PowerOn,
-            Instant::now() + apictx.timeouts.ignition_controller,
+            SpTimeout::from_now(apictx.timeouts.ignition_controller),
         )
         .await
         .map_err(http_err_from_comms_err)?;
@@ -653,7 +655,7 @@ async fn ignition_power_off(
         .send_ignition_command(
             sp.into(),
             IgnitionCommand::PowerOff,
-            Instant::now() + apictx.timeouts.ignition_controller,
+            SpTimeout::from_now(apictx.timeouts.ignition_controller),
         )
         .await
         .map_err(http_err_from_comms_err)?;

@@ -36,9 +36,29 @@ table! {
         time_created -> Timestamptz,
         time_modified -> Timestamptz,
         time_deleted -> Nullable<Timestamptz>,
-        project_id -> Nullable<Uuid>,
+        project_id -> Uuid,
         volume_id -> Uuid,
-        url -> Text,
+        url -> Nullable<Text>,
+        version -> Nullable<Text>,
+        digest -> Nullable<Text>,
+        block_size -> crate::db::model::BlockSizeEnum,
+        size_bytes -> Int8,
+    }
+}
+
+table! {
+    global_image (id) {
+        id -> Uuid,
+        name -> Text,
+        description -> Text,
+        time_created -> Timestamptz,
+        time_modified -> Timestamptz,
+        time_deleted -> Nullable<Timestamptz>,
+        volume_id -> Uuid,
+        url -> Nullable<Text>,
+        version -> Nullable<Text>,
+        digest -> Nullable<Text>,
+        block_size -> crate::db::model::BlockSizeEnum,
         size_bytes -> Int8,
     }
 }
@@ -134,6 +154,19 @@ table! {
         time_created -> Timestamptz,
         time_modified -> Timestamptz,
         time_deleted -> Nullable<Timestamptz>,
+    }
+}
+
+table! {
+    ssh_key (id) {
+        id -> Uuid,
+        name -> Text,
+        description -> Text,
+        time_created -> Timestamptz,
+        time_modified -> Timestamptz,
+        time_deleted -> Nullable<Timestamptz>,
+        silo_user_id -> Uuid,
+        public_key -> Text,
     }
 }
 

@@ -118,6 +118,13 @@ project_snapshots_get                    /organizations/{organization_name}/proj
 project_snapshots_get_snapshot           /organizations/{organization_name}/projects/{project_name}/snapshots/{snapshot_name}
 project_snapshots_post                   /organizations/{organization_name}/projects/{project_name}/snapshots
 
+API operations found with tag "sshkeys"
+OPERATION ID                             URL PATH
+sshkeys_delete_key                       /session/me/sshkeys/{ssh_key_name}
+sshkeys_get                              /session/me/sshkeys
+sshkeys_get_key                          /session/me/sshkeys/{ssh_key_name}
+sshkeys_post                             /session/me/sshkeys
+
 API operations found with tag "subnets"
 OPERATION ID                             URL PATH
 subnet_network_interfaces_get            /organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/subnets/{subnet_name}/network-interfaces

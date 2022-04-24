@@ -422,8 +422,7 @@ fn remove_all_unless_already_removed<P: AsRef<Path>>(path: P) -> Result<()> {
     Ok(())
 }
 
-fn remove_all_except_databases<P: AsRef<Path>>(path: P) -> Result<()> {
-    const TO_KEEP: [&str; 2] = ["clickhouse", "cockroachdb"];
+fn remove_all_except<P: AsRef<Path>>(path: P, to_keep: &[&str]) -> Result<()> {
     let dir = match path.as_ref().read_dir() {
         Ok(dir) => dir,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
@@ -431,7 +430,10 @@ fn remove_all_except_databases<P: AsRef<Path>>(path: P) -> Result<()> {
     };
     for entry in dir {
         let entry = entry?;
-        if !TO_KEEP.contains(&&*(entry.file_name().to_string_lossy())) {
+        if to_keep.contains(&&*(entry.file_name().to_string_lossy())) {
+            println!(" Keeping: '{}'", entry.path().to_string_lossy());
+        } else {
+            println!(" Removing: '{}'", entry.path().to_string_lossy());
             if entry.metadata()?.is_dir() {
                 remove_all_unless_already_removed(entry.path())?;
             } else {
@@ -452,9 +454,16 @@ fn do_uninstall(
     println!("Uninstalling all packages");
     uninstall_all_packages(config);
     println!("Removing artifacts in: {}", artifact_dir.to_string_lossy());
-    remove_all_except_databases(artifact_dir)?;
-    println!("Removing: {}", install_dir.to_string_lossy());
-    remove_all_unless_already_removed(install_dir)?;
+
+    const ARTIFACTS_TO_KEEP: &[&str] = &["clickhouse", "cockroachdb", "xde"];
+    remove_all_except(artifact_dir, ARTIFACTS_TO_KEEP)?;
+
+    println!(
+        "Removing installed objects in: {}",
+        install_dir.to_string_lossy()
+    );
+    const INSTALLED_OBJECTS_TO_KEEP: &[&str] = &["opte"];
+    remove_all_except(install_dir, INSTALLED_OBJECTS_TO_KEEP)?;
     Ok(())
 }
 

@@ -10,6 +10,7 @@ use super::SpStateExt;
 use dropshot::test_util;
 use dropshot::Method;
 use dropshot::ResultsPage;
+use gateway_messages::SpPort;
 use http::StatusCode;
 use omicron_gateway::http_entrypoints::SpIdentifier;
 use omicron_gateway::http_entrypoints::SpIgnition;
@@ -34,7 +35,8 @@ macro_rules! assert_eq_unordered {
 
 #[tokio::test]
 async fn bulk_sp_get_all_online() {
-    let testctx = setup::test_setup("bulk_sp_get_all_online").await;
+    let testctx =
+        setup::test_setup("bulk_sp_get_all_online", SpPort::One).await;
     let client = &testctx.client;
 
     // simulator just started; all SPs are online
@@ -58,7 +60,8 @@ async fn bulk_sp_get_all_online() {
 
 #[tokio::test]
 async fn bulk_sp_get_one_sp_powered_off() {
-    let testctx = setup::test_setup("bulk_sp_get_all_online").await;
+    let testctx =
+        setup::test_setup("bulk_sp_get_all_online", SpPort::One).await;
     let client = &testctx.client;
 
     // simulator just started; all SPs are online
@@ -119,7 +122,8 @@ async fn bulk_sp_get_one_sp_powered_off() {
 
 #[tokio::test]
 async fn bulk_sp_get_one_sp_unresponsive() {
-    let testctx = setup::test_setup("bulk_sp_get_all_online").await;
+    let testctx =
+        setup::test_setup("bulk_sp_get_all_online", SpPort::One).await;
     let client = &testctx.client;
 
     // simulator just started; all SPs are online
