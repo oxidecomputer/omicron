@@ -17,8 +17,8 @@ use crate::params::{
 use crate::services::ServiceManager;
 use crate::storage_manager::StorageManager;
 use omicron_common::api::{
-    internal::nexus::DiskRuntimeState, internal::nexus::InstanceRuntimeState,
-    internal::nexus::UpdateArtifact,
+    external::Error as ExternalError, internal::nexus::DiskRuntimeState,
+    internal::nexus::InstanceRuntimeState, internal::nexus::UpdateArtifact,
 };
 use slog::Logger;
 use std::net::{SocketAddr, SocketAddrV6};
@@ -54,12 +54,20 @@ pub enum Error {
 
     #[error("Error updating: {0}")]
     Download(#[from] crate::updates::Error),
+
+    #[error("Not yet implemented")]
+    NotImplemented,
 }
 
-impl From<Error> for omicron_common::api::external::Error {
+impl From<Error> for ExternalError {
     fn from(err: Error) -> Self {
-        omicron_common::api::external::Error::InternalError {
-            internal_message: err.to_string(),
+        match err {
+            Error::NotImplemented => ExternalError::InternalError {
+                internal_message: "Method not implemented".to_string(),
+            },
+            _ => ExternalError::InternalError {
+                internal_message: err.to_string(),
+            },
         }
     }
 }
@@ -235,7 +243,7 @@ impl SledAgent {
         _initial_state: DiskRuntimeState,
         _target: DiskStateRequested,
     ) -> Result<DiskRuntimeState, Error> {
-        todo!("Disk attachment not yet implemented");
+        Err(Error::NotImplemented)
     }
 
     /// Downloads and applies an artifact.
