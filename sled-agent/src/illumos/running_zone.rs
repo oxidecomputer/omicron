@@ -163,7 +163,7 @@ impl RunningZone {
             .map_err(|err| EnsureAddressError::AddrObject {
                 request: addrtype,
                 zone: self.inner.name.clone(),
-                err: err.into(),
+                err,
             })?;
         let network =
             Zones::ensure_address(Some(&self.inner.name), &addrobj, addrtype)?;

@@ -4,7 +4,10 @@
 
 //! Request body types for the bootstrap agent
 
-use omicron_common::api::external::Ipv6Net;
+use omicron_common::{
+    api::external::Ipv6Net,
+    address::SLED_PREFIX,
+};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -17,8 +20,10 @@ pub struct ShareRequest {
 
 #[derive(thiserror::Error, Debug)]
 pub enum SubnetError {
-    #[error("Subnet has unexpected prefix length: {0}")]
-    BadPrefixLength(u8),
+    #[error("Subnet {subnet} has unexpected prefix length, wanted {}", SLED_PREFIX)]
+    BadPrefixLength {
+        subnet: ipnetwork::Ipv6Network,
+    },
 }
 
 /// Represents subnets belonging to Sleds.
@@ -33,12 +38,12 @@ pub enum SubnetError {
 pub struct SledSubnet(Ipv6Net);
 
 impl SledSubnet {
-    pub fn new(ip: Ipv6Net) -> Result<Self, SubnetError> {
-        let prefix = ip.0.prefix();
-        if prefix != 64 {
-            return Err(SubnetError::BadPrefixLength(prefix));
+    pub fn new(net: Ipv6Net) -> Result<Self, SubnetError> {
+        let prefix = net.0.prefix();
+        if prefix != SLED_PREFIX {
+            return Err(SubnetError::BadPrefixLength { subnet: net.0 });
         }
-        Ok(SledSubnet(ip))
+        Ok(SledSubnet(net))
     }
 }
 

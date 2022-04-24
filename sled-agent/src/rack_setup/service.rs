@@ -19,14 +19,19 @@ use serde::{Deserialize, Serialize};
 use slog::Logger;
 use std::collections::{HashMap, HashSet};
 use std::net::{Ipv6Addr, SocketAddr, SocketAddrV6};
+use std::path::PathBuf;
 use thiserror::Error;
 use tokio::sync::Mutex;
 
 /// Describes errors which may occur while operating the setup service.
 #[derive(Error, Debug)]
 pub enum SetupServiceError {
-    #[error("Error accessing filesystem: {0}")]
-    Io(#[from] std::io::Error),
+    #[error("I/O error while {message}: {err}")]
+    Io {
+        message: String,
+        #[source]
+        err: std::io::Error,
+    },
 
     #[error("Error making HTTP request to Bootstrap Agent: {0}")]
     BootstrapApi(
@@ -35,19 +40,25 @@ pub enum SetupServiceError {
     ),
 
     #[error("Error making HTTP request to Sled Agent: {0}")]
-    SledApi(#[from] sled_agent_client::Error<sled_agent_client::types::Error>),
+    SledApi(
+        #[from]
+        sled_agent_client::Error<sled_agent_client::types::Error>,
+    ),
 
-    #[error("Cannot deserialize TOML file")]
-    Toml(#[from] toml::de::Error),
+    #[error("Cannot deserialize TOML file at {path}: {err}")]
+    Toml {
+        path: PathBuf,
+        err: toml::de::Error,
+    },
 
     #[error("Failed to monitor for peers: {0}")]
-    PeerMonitor(#[from] tokio::sync::broadcast::error::RecvError),
+    PeerMonitor(
+        #[from]
+        tokio::sync::broadcast::error::RecvError
+    ),
 
-    #[error(transparent)]
-    Http(#[from] reqwest::Error),
-
-    #[error("Configuration changed")]
-    Configuration,
+    #[error("Failed to construct an HTTP client: {0}")]
+    HttpClient(reqwest::Error),
 }
 
 // The workload / information allocated to a single sled.
@@ -143,7 +154,8 @@ impl ServiceInner {
         let client = reqwest::ClientBuilder::new()
             .connect_timeout(dur)
             .timeout(dur)
-            .build()?;
+            .build()
+            .map_err(SetupServiceError::HttpClient)?;
 
         let url = format!("http://{}", bootstrap_addr);
         info!(self.log, "Sending request to peer agent: {}", url);
@@ -198,7 +210,8 @@ impl ServiceInner {
         let client = reqwest::ClientBuilder::new()
             .connect_timeout(dur)
             .timeout(dur)
-            .build()?;
+            .build()
+            .map_err(SetupServiceError::HttpClient)?;
         let client = sled_agent_client::Client::new_with_client(
             &format!("http://{}", sled_address),
             client,
@@ -244,7 +257,8 @@ impl ServiceInner {
         let client = reqwest::ClientBuilder::new()
             .connect_timeout(dur)
             .timeout(dur)
-            .build()?;
+            .build()
+            .map_err(SetupServiceError::HttpClient)?;
         let client = sled_agent_client::Client::new_with_client(
             &format!("http://{}", sled_address),
             client,
@@ -290,8 +304,20 @@ impl ServiceInner {
 
             let plan: std::collections::HashMap<SocketAddrV6, SledAllocation> =
                 toml::from_str(
-                    &tokio::fs::read_to_string(&rss_plan_path).await?,
-                )?;
+                    &tokio::fs::read_to_string(&rss_plan_path)
+                        .await
+                        .map_err(|err| {
+                            SetupServiceError::Io {
+                                message: format!("Loading RSS plan {rss_plan_path:?}"),
+                                err,
+                            }
+                        })?,
+                ).map_err(|err| {
+                    SetupServiceError::Toml {
+                        path: rss_plan_path,
+                        err,
+                    }
+                })?;
             Ok(Some(plan))
         } else {
             Ok(None)
@@ -374,7 +400,15 @@ impl ServiceInner {
             .expect("Cannot turn config to string");
 
         info!(self.log, "Plan serialized as: {}", plan_str);
-        tokio::fs::write(&rss_plan_path(), plan_str).await?;
+        let path = rss_plan_path();
+        tokio::fs::write(&path, plan_str)
+            .await
+            .map_err(|err| {
+                SetupServiceError::Io {
+                    message: format!("Storing RSS plan to {path:?}"),
+                    err,
+                }
+            })?;
         info!(self.log, "Plan written to storage");
 
         Ok(plan)
@@ -451,7 +485,14 @@ impl ServiceInner {
 
         // We expect this directory to exist - ensure that it does, before any
         // subsequent operations which may write configs here.
-        tokio::fs::create_dir_all(omicron_common::OMICRON_CONFIG_PATH).await?;
+        tokio::fs::create_dir_all(omicron_common::OMICRON_CONFIG_PATH)
+            .await
+            .map_err(|err| {
+                SetupServiceError::Io {
+                    message: format!("Creating config directory {}", omicron_common::OMICRON_CONFIG_PATH),
+                    err,
+                }
+            })?;
 
         // Check if a previous RSS plan has completed successfully.
         //
@@ -593,7 +634,15 @@ impl ServiceInner {
 
         // Finally, make sure the configuration is saved so we don't inject
         // the requests on the next iteration.
-        tokio::fs::rename(rss_plan_path(), rss_completed_plan_path).await?;
+        let plan_path = rss_plan_path();
+        tokio::fs::rename(&plan_path, &rss_completed_plan_path)
+            .await
+            .map_err(|err| {
+                SetupServiceError::Io {
+                    message: format!("renaming {plan_path:?} to {rss_completed_plan_path:?}"),
+                    err,
+                }
+            })?;
 
         // TODO Questions to consider:
         // - What if a sled comes online *right after* this setup? How does
