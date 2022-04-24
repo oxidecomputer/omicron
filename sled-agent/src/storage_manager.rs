@@ -52,9 +52,6 @@ const CRUCIBLE_AGENT_DEFAULT_SVC: &str = "svc:/oxide/crucible/agent:default";
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
     #[error(transparent)]
-    Datalink(#[from] crate::illumos::dladm::Error),
-
-    #[error(transparent)]
     Zfs(#[from] crate::illumos::zfs::Error),
 
     #[error(transparent)]

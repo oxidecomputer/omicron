@@ -119,7 +119,7 @@ fn mac_to_socket_addr(mac: MacAddr) -> SocketAddrV6 {
 // could be randomly generated when it no longer needs to be durable.
 pub fn bootstrap_address(
     link: PhysicalLink,
-) -> Result<SocketAddrV6, dladm::Error> {
+) -> Result<SocketAddrV6, dladm::GetMacError> {
     let mac = Dladm::get_mac(link)?;
     Ok(mac_to_socket_addr(mac))
 }

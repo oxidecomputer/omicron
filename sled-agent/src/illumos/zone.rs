@@ -72,7 +72,7 @@ pub struct DeleteAddressError {
 /// Error which may be returned accessing the control interface of a zone.
 #[derive(thiserror::Error, Debug)]
 pub enum GetControlInterfaceError {
-    #[error(transparent)]
+    #[error("Failed to query for control interface: {0}")]
     Execution(#[from] crate::illumos::ExecutionError),
 
     #[error("VNIC starting with 'oxControl' not found in {zone}")]

@@ -41,8 +41,9 @@ pub enum Error {
     #[error("Failed to wait for service: {0}")]
     Timeout(String),
 
-    #[error("Failure accessing data links: {0}")]
-    Datalink(#[from] crate::illumos::dladm::Error),
+    // TODO: Who are we allocating the VNIC for?
+    #[error("Failed to create VNIC: {0}")]
+    VnicCreation(#[from] crate::illumos::dladm::CreateVnicError),
 
     #[error("Failure from Propolis Client: {0}")]
     Propolis(#[from] propolis_client::Error),

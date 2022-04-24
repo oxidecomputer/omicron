@@ -37,8 +37,10 @@ pub enum Error {
     #[error("Zone management command failed: {0}")]
     ZoneOperation(#[from] crate::illumos::zone::AdmError),
 
-    #[error("Zone error accessing datalink: {0}")]
-    Datalink(#[from] crate::illumos::dladm::Error),
+    // TODO: Extra context could be useful - who were we allocating the VNIC
+    // for?
+    #[error("Failed to create VNIC: {0}")]
+    VnicCreation(#[from] crate::illumos::dladm::CreateVnicError),
 
     #[error(transparent)]
     AddrObject(#[from] crate::illumos::addrobj::ParseError),

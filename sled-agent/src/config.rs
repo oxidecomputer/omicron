@@ -49,7 +49,9 @@ impl Config {
         Ok(config)
     }
 
-    pub fn get_link(&self) -> Result<PhysicalLink, dladm::Error> {
+    pub fn get_link(
+        &self,
+    ) -> Result<PhysicalLink, dladm::FindPhysicalLinkError> {
         let link = if let Some(link) = self.data_link.clone() {
             link
         } else {

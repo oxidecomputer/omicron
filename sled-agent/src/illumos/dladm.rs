@@ -15,19 +15,54 @@ pub const VNIC_PREFIX_CONTROL: &str = "oxControl";
 
 pub const DLADM: &str = "/usr/sbin/dladm";
 
+/// Errors returned from [`Dladm::find_physical`].
 #[derive(thiserror::Error, Debug)]
-pub enum Error {
-    #[error("Device not found")]
-    NotFound,
-
-    #[error("Subcommand failure: {0}")]
+pub enum FindPhysicalLinkError {
+    #[error("Failed to execute command to find physical link: {0}")]
     Execution(#[from] ExecutionError),
 
-    #[error("Failed to parse output: {0}")]
-    Parse(#[from] std::string::FromUtf8Error),
+    #[error("No Physical Link devices found")]
+    NoPhysicalLinkFound,
+}
+
+/// Errors returned from [`Dladm::get_mac`].
+#[derive(thiserror::Error, Debug)]
+pub enum GetMacError {
+    #[error("Mac Address cannot be looked up; Link not found: {0:?}")]
+    NotFound(PhysicalLink),
+
+    #[error("Failed to execute command to get MAC address: {0}")]
+    Execution(#[from] ExecutionError),
 
     #[error("Failed to parse MAC: {0}")]
     ParseMac(#[from] macaddr::ParseError),
+}
+
+/// Errors returned from [`Dladm::create_vnic`].
+#[derive(thiserror::Error, Debug)]
+#[error("Failed to create VNIC {name} on link {link:?}: {err}")]
+pub struct CreateVnicError {
+    name: String,
+    link: PhysicalLink,
+    #[source]
+    err: ExecutionError,
+}
+
+/// Errors returned from [`Dladm::get_vnics`].
+#[derive(thiserror::Error, Debug)]
+#[error("Failed to get vnics: {err}")]
+pub struct GetVnicError {
+    #[source]
+    err: ExecutionError,
+}
+
+/// Errors returned from [`Dladm::delete_vnic`].
+#[derive(thiserror::Error, Debug)]
+#[error("Failed to delete vnic {name}: {err}")]
+pub struct DeleteVnicError {
+    name: String,
+    #[source]
+    err: ExecutionError,
 }
 
 /// The name of a physical datalink.
@@ -40,24 +75,24 @@ pub struct Dladm {}
 #[cfg_attr(test, mockall::automock, allow(dead_code))]
 impl Dladm {
     /// Returns the name of the first observed physical data link.
-    pub fn find_physical() -> Result<PhysicalLink, Error> {
+    pub fn find_physical() -> Result<PhysicalLink, FindPhysicalLinkError> {
         let mut command = std::process::Command::new(PFEXEC);
         let cmd = command.args(&[DLADM, "show-phys", "-p", "-o", "LINK"]);
         let output = execute(cmd)?;
-        let name = String::from_utf8(output.stdout)?
+        let name = String::from_utf8_lossy(&output.stdout)
             .lines()
             // TODO: This is arbitrary, but we're currently grabbing the first
             // physical device. Should we have a more sophisticated method for
             // selection?
             .next()
             .map(|s| s.trim())
-            .ok_or_else(|| Error::NotFound)?
+            .ok_or_else(|| FindPhysicalLinkError::NoPhysicalLinkFound)?
             .to_string();
         Ok(PhysicalLink(name))
     }
 
     /// Returns the MAC address of a physical link.
-    pub fn get_mac(link: PhysicalLink) -> Result<MacAddr, Error> {
+    pub fn get_mac(link: PhysicalLink) -> Result<MacAddr, GetMacError> {
         let mut command = std::process::Command::new(PFEXEC);
         let cmd = command.args(&[
             DLADM,
@@ -69,11 +104,11 @@ impl Dladm {
             &link.0,
         ]);
         let output = execute(cmd)?;
-        let name = String::from_utf8(output.stdout)?
+        let name = String::from_utf8_lossy(&output.stdout)
             .lines()
             .next()
             .map(|s| s.trim())
-            .ok_or_else(|| Error::NotFound)?
+            .ok_or_else(|| GetMacError::NotFound(link))?
             .to_string();
 
         // Ensure the MAC address is zero-padded, so it may be parsed as a
@@ -99,7 +134,7 @@ impl Dladm {
         vnic_name: &str,
         mac: Option<MacAddr>,
         vlan: Option<VlanID>,
-    ) -> Result<(), Error> {
+    ) -> Result<(), CreateVnicError> {
         let mut command = std::process::Command::new(PFEXEC);
         let mut args = vec![
             DLADM.to_string(),
@@ -121,17 +156,21 @@ impl Dladm {
 
         args.push(vnic_name.to_string());
         let cmd = command.args(&args);
-        execute(cmd)?;
+        execute(cmd).map_err(|err| CreateVnicError {
+            name: vnic_name.to_string(),
+            link: physical.clone(),
+            err,
+        })?;
         Ok(())
     }
 
     /// Returns all VNICs that may be managed by the Sled Agent.
-    pub fn get_vnics() -> Result<Vec<String>, Error> {
+    pub fn get_vnics() -> Result<Vec<String>, GetVnicError> {
         let mut command = std::process::Command::new(PFEXEC);
         let cmd = command.args(&[DLADM, "show-vnic", "-p", "-o", "LINK"]);
-        let output = execute(cmd)?;
+        let output = execute(cmd).map_err(|err| GetVnicError { err })?;
 
-        let vnics = String::from_utf8(output.stdout)?
+        let vnics = String::from_utf8_lossy(&output.stdout)
             .lines()
             .filter(|vnic| vnic.starts_with(VNIC_PREFIX))
             .map(|s| s.to_owned())
@@ -140,10 +179,11 @@ impl Dladm {
     }
 
     /// Remove a vnic from the sled.
-    pub fn delete_vnic(name: &str) -> Result<(), Error> {
+    pub fn delete_vnic(name: &str) -> Result<(), DeleteVnicError> {
         let mut command = std::process::Command::new(PFEXEC);
         let cmd = command.args(&[DLADM, "delete-vnic", name]);
-        execute(cmd)?;
+        execute(cmd)
+            .map_err(|err| DeleteVnicError { name: name.to_string(), err })?;
         Ok(())
     }
 }

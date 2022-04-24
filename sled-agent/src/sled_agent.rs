@@ -34,8 +34,14 @@ use crate::illumos::{
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
-    #[error("Datalink error: {message}, {err}")]
-    Datalink { message: String, err: crate::illumos::dladm::Error },
+    #[error("Physical link not in config, nor found automatically: {0}")]
+    FindPhysicalLink(#[from] crate::illumos::dladm::FindPhysicalLinkError),
+
+    #[error("Failed to lookup VNICs on boot: {0}")]
+    GetVnics(#[from] crate::illumos::dladm::GetVnicError),
+
+    #[error("Failed to delete VNIC on boot: {0}")]
+    DeleteVnic(#[from] crate::illumos::dladm::DeleteVnicError),
 
     #[error(transparent)]
     Services(#[from] crate::services::Error),
@@ -101,10 +107,7 @@ impl SledAgent {
         let data_link = if let Some(link) = config.data_link.clone() {
             link
         } else {
-            Dladm::find_physical().map_err(|err| Error::Datalink {
-                message: "Looking up physical link".to_string(),
-                err,
-            })?
+            Dladm::find_physical()?
         };
 
         // Before we start creating zones, we need to ensure that the
@@ -153,16 +156,10 @@ impl SledAgent {
         //
         // This should be accessible via:
         // $ dladm show-linkprop -c -p zone -o LINK,VALUE
-        let vnics = Dladm::get_vnics().map_err(|err| Error::Datalink {
-            message: "Looking up VNICs on boot".to_string(),
-            err,
-        })?;
+        let vnics = Dladm::get_vnics()?;
         for vnic in vnics {
             warn!(log, "Deleting VNIC: {}", vnic);
-            Dladm::delete_vnic(&vnic).map_err(|err| Error::Datalink {
-                message: "Deleting VNIC during boot".to_string(),
-                err,
-            })?;
+            Dladm::delete_vnic(&vnic)?;
         }
 
         let storage = StorageManager::new(

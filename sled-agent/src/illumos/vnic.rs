@@ -5,7 +5,10 @@
 //! API for controlling a single instance.
 
 use crate::common::vlan::VlanID;
-use crate::illumos::dladm::{PhysicalLink, VNIC_PREFIX, VNIC_PREFIX_CONTROL};
+use crate::illumos::dladm::{
+    CreateVnicError, DeleteVnicError, PhysicalLink, VNIC_PREFIX,
+    VNIC_PREFIX_CONTROL,
+};
 use omicron_common::api::external::MacAddr;
 use std::sync::{
     atomic::{AtomicU64, Ordering},
@@ -16,8 +19,6 @@ use std::sync::{
 use crate::illumos::dladm::Dladm;
 #[cfg(test)]
 use crate::illumos::dladm::MockDladm as Dladm;
-
-type Error = crate::illumos::dladm::Error;
 
 /// A shareable wrapper around an atomic counter.
 /// May be used to allocate runtime-unique IDs for objects
@@ -54,7 +55,7 @@ impl VnicAllocator {
         &self,
         mac: Option<MacAddr>,
         vlan: Option<VlanID>,
-    ) -> Result<Vnic, Error> {
+    ) -> Result<Vnic, CreateVnicError> {
         let allocator = self.new_superscope("Guest");
         let name = allocator.next();
         debug_assert!(name.starts_with(VNIC_PREFIX));
@@ -64,7 +65,10 @@ impl VnicAllocator {
 
     /// Creates a new NIC, intended for allowing Propolis to communicate
     /// with the control plane.
-    pub fn new_control(&self, mac: Option<MacAddr>) -> Result<Vnic, Error> {
+    pub fn new_control(
+        &self,
+        mac: Option<MacAddr>,
+    ) -> Result<Vnic, CreateVnicError> {
         let allocator = self.new_superscope("Control");
         let name = allocator.next();
         debug_assert!(name.starts_with(VNIC_PREFIX));
@@ -111,7 +115,7 @@ impl Vnic {
     }
 
     /// Deletes a NIC (if it has not already been deleted).
-    pub fn delete(&mut self) -> Result<(), Error> {
+    pub fn delete(&mut self) -> Result<(), DeleteVnicError> {
         if self.deleted {
             Ok(())
         } else {
