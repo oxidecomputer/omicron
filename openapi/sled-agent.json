@@ -965,7 +965,8 @@
           "addresses": {
             "type": "array",
             "items": {
-              "type": "string"
+              "type": "string",
+              "format": "ipv6"
             }
           },
           "gz_addresses": {

@@ -244,7 +244,7 @@ impl From<ServiceRequest> for sled_agent_client::types::ServiceRequest {
     fn from(s: ServiceRequest) -> Self {
         Self {
             name: s.name,
-            addresses: s.addresses.into_iter().map(|s| s.to_string()).collect(),
+            addresses: s.addresses,
             gz_addresses: s.gz_addresses,
         }
     }
