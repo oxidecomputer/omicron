@@ -355,7 +355,7 @@ impl ServiceInner {
                 bootstrap_addr,
                 SledAllocation {
                     initialization_request: SledAgentRequest { subnet },
-                    services_request: request.clone(),
+                    services_request: request,
                 },
             )
         });
