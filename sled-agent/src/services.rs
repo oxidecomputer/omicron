@@ -37,6 +37,12 @@ pub enum Error {
     #[error(transparent)]
     Dladm(#[from] crate::illumos::dladm::Error),
 
+    #[error("Could not initialize service as requested: {message}")]
+    BadServiceRequest {
+        service: String,
+        message: String,
+    },
+
     #[error("Services already configured for this Sled Agent")]
     ServicesAlreadyConfigured,
 }
@@ -211,11 +217,12 @@ impl ServiceManager {
             match service.name.as_str() {
                 "internal-dns" => {
                     info!(self.log, "Setting up internal-dns service");
-                    // TODO: This is a hack!
-                    // - Should we only supply one address, and drop the port?
-                    //      ^ this seems like a good start
-                    // - Should we provide a mechanism for providing multiple addresses?
-                    let address = service.addresses[0];
+                    let address = service.addresses.get(0).ok_or_else(|| {
+                        Error::BadServiceRequest {
+                            service: service.name.clone(),
+                            message: "Not enough addresses".to_string(),
+                        }
+                    })?;
                     running_zone.run_cmd(&[
                         crate::illumos::zone::SVCCFG,
                         "-s",

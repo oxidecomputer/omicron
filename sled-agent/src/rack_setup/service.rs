@@ -529,7 +529,6 @@ impl ServiceInner {
                     allocation.initialization_request.subnet.as_ref().0,
                 ));
 
-                // TODO: also tell sled to make GZ address
                 self.initialize_services(
                     sled_address,
                     &allocation.services_request.dns_services,
