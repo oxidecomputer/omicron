@@ -30,7 +30,7 @@ use uuid::Uuid;
 #[derive(
     AsExpression, FromSqlRow, Clone, Copy, Eq, Ord, PartialEq, PartialOrd,
 )]
-#[sql_type = "sql_types::Uuid"]
+#[diesel(sql_type = sql_types::Uuid)]
 pub struct SecId(pub Uuid);
 
 impl<DB> ToSql<sql_types::Uuid, DB> for SecId
@@ -76,7 +76,7 @@ impl From<&SecId> for Uuid {
 #[derive(
     AsExpression, Copy, Clone, Debug, FromSqlRow, PartialEq, PartialOrd,
 )]
-#[sql_type = "sql_types::Uuid"]
+#[diesel(sql_type = sql_types::Uuid)]
 pub struct SagaId(pub steno::SagaId);
 
 NewtypeFrom! { () pub struct SagaId(steno::SagaId); }
@@ -113,7 +113,7 @@ where
 #[derive(
     AsExpression, Copy, Clone, Debug, FromSqlRow, PartialEq, PartialOrd,
 )]
-#[sql_type = "sql_types::BigInt"]
+#[diesel(sql_type = sql_types::BigInt)]
 pub struct SagaNodeId(pub steno::SagaNodeId);
 
 NewtypeFrom! { () pub struct SagaNodeId(steno::SagaNodeId); }
@@ -144,7 +144,7 @@ where
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, SqlType)]
-#[postgres(type_name = "saga_state", type_schema = "public")]
+#[postgres(type_name = "saga_state")]
 pub struct SagaCachedStateEnum;
 
 /// Newtype wrapper around [`steno::SagaCachedState`] which implements
@@ -153,7 +153,7 @@ pub struct SagaCachedStateEnum;
 /// This exists because Omicron cannot implement foreign traits
 /// for foreign types.
 #[derive(AsExpression, FromSqlRow, Clone, Copy, Debug, PartialEq)]
-#[sql_type = "SagaCachedStateEnum"]
+#[diesel(sql_type = SagaCachedStateEnum)]
 pub struct SagaCachedState(pub steno::SagaCachedState);
 
 NewtypeFrom! { () pub struct SagaCachedState(steno::SagaCachedState); }
@@ -190,7 +190,7 @@ where
 
 /// Represents a row in the "Saga" table
 #[derive(Queryable, Insertable, Clone, Debug, Selectable)]
-#[table_name = "saga"]
+#[diesel(table_name = saga)]
 pub struct Saga {
     pub id: SagaId,
     pub creator: SecId,
@@ -222,7 +222,7 @@ impl Saga {
 
 /// Represents a row in the "SagaNodeEvent" table
 #[derive(Queryable, Insertable, Clone, Debug)]
-#[table_name = "saga_node_event"]
+#[diesel(table_name = saga_node_event)]
 pub struct SagaNodeEvent {
     pub saga_id: SagaId,
     pub node_id: SagaNodeId,

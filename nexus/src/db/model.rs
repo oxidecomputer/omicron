@@ -193,7 +193,7 @@ macro_rules! impl_enum_type {
     Serialize,
     Deserialize,
 )]
-#[sql_type = "sql_types::Text"]
+#[diesel(sql_type = sql_types::Text)]
 #[serde(transparent)]
 #[repr(transparent)]
 #[display("{0}")]
@@ -236,7 +236,7 @@ where
     Deserialize,
     PartialEq,
 )]
-#[sql_type = "sql_types::BigInt"]
+#[diesel(sql_type = sql_types::BigInt)]
 pub struct ByteCount(pub external::ByteCount);
 
 NewtypeFrom! { () pub struct ByteCount(external::ByteCount); }
@@ -292,7 +292,7 @@ impl From<BlockSize> for ByteCount {
     Serialize,
     Deserialize,
 )]
-#[sql_type = "sql_types::BigInt"]
+#[diesel(sql_type = sql_types::BigInt)]
 #[repr(transparent)]
 pub struct Generation(pub external::Generation);
 
@@ -342,7 +342,7 @@ impl From<Generation> for sled_agent_client::types::Generation {
 #[derive(
     Copy, Clone, Debug, Eq, Ord, PartialEq, PartialOrd, AsExpression, FromSqlRow,
 )]
-#[sql_type = "sql_types::Int4"]
+#[diesel(sql_type = sql_types::Int4)]
 #[repr(transparent)]
 pub struct SqlU16(pub u16);
 
@@ -379,7 +379,7 @@ where
 }
 
 #[derive(Copy, Clone, Debug, AsExpression, FromSqlRow)]
-#[sql_type = "sql_types::BigInt"]
+#[diesel(sql_type = sql_types::BigInt)]
 pub struct InstanceCpuCount(pub external::InstanceCpuCount);
 
 NewtypeFrom! { () pub struct InstanceCpuCount(external::InstanceCpuCount); }
@@ -417,7 +417,7 @@ impl From<InstanceCpuCount> for sled_agent_client::types::InstanceCpuCount {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, AsExpression, FromSqlRow)]
-#[sql_type = "sql_types::Inet"]
+#[diesel(sql_type = sql_types::Inet)]
 pub struct Ipv4Net(pub external::Ipv4Net);
 
 NewtypeFrom! { () pub struct Ipv4Net(external::Ipv4Net); }
@@ -468,7 +468,7 @@ where
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, AsExpression, FromSqlRow)]
-#[sql_type = "sql_types::Inet"]
+#[diesel(sql_type = sql_types::Inet)]
 pub struct Ipv6Net(pub external::Ipv6Net);
 
 NewtypeFrom! { () pub struct Ipv6Net(external::Ipv6Net); }
@@ -564,7 +564,7 @@ where
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, AsExpression, FromSqlRow)]
-#[sql_type = "sql_types::Text"]
+#[diesel(sql_type = sql_types::Text)]
 pub struct MacAddr(pub external::MacAddr);
 
 impl MacAddr {
@@ -619,7 +619,7 @@ where
 // However, it likely will be in the future - for the single-rack
 // case, however, it is synthesized.
 #[derive(Queryable, Insertable, Debug, Clone, Selectable, Asset)]
-#[table_name = "rack"]
+#[diesel(table_name = rack)]
 pub struct Rack {
     #[diesel(embed)]
     pub identity: RackIdentity,
@@ -629,7 +629,7 @@ pub struct Rack {
 
 /// Database representation of a Sled.
 #[derive(Queryable, Insertable, Debug, Clone, Selectable, Asset)]
-#[table_name = "sled"]
+#[diesel(table_name = sled)]
 pub struct Sled {
     #[diesel(embed)]
     identity: SledIdentity,
@@ -696,7 +696,7 @@ impl DatastoreCollection<Zpool> for Sled {
 /// A zpool represents a ZFS storage pool, allocated on a single
 /// physical sled.
 #[derive(Queryable, Insertable, Debug, Clone, Selectable, Asset)]
-#[table_name = "zpool"]
+#[diesel(table_name = zpool)]
 pub struct Zpool {
     #[diesel(embed)]
     identity: ZpoolIdentity,
@@ -736,11 +736,11 @@ impl DatastoreCollection<Dataset> for Zpool {
 
 impl_enum_type!(
     #[derive(SqlType, Debug, QueryId)]
-    #[postgres(type_name = "dataset_kind", type_schema = "public")]
+    #[diesel(postgres_type(name = "dataset_kind"))]
     pub struct DatasetKindEnum;
 
     #[derive(Clone, Debug, AsExpression, FromSqlRow, Serialize, Deserialize, PartialEq)]
-    #[sql_type = "DatasetKindEnum"]
+    #[diesel(sql_type = DatasetKindEnum)]
     pub enum DatasetKind;
 
     // Enum values
@@ -780,7 +780,7 @@ impl From<internal_api::params::DatasetKind> for DatasetKind {
     Serialize,
     PartialEq,
 )]
-#[table_name = "dataset"]
+#[diesel(table_name = dataset)]
 pub struct Dataset {
     #[diesel(embed)]
     identity: DatasetIdentity,
@@ -860,7 +860,7 @@ impl DatastoreCollection<Region> for Volume {
     Deserialize,
     PartialEq,
 )]
-#[table_name = "region"]
+#[diesel(table_name = region)]
 pub struct Region {
     #[diesel(embed)]
     identity: RegionIdentity,
@@ -923,7 +923,7 @@ impl Region {
     Deserialize,
     Clone,
 )]
-#[table_name = "volume"]
+#[diesel(table_name = volume)]
 pub struct Volume {
     #[diesel(embed)]
     identity: VolumeIdentity,
@@ -951,7 +951,7 @@ impl Volume {
 
 /// Describes a silo within the database.
 #[derive(Queryable, Insertable, Debug, Resource, Selectable)]
-#[table_name = "silo"]
+#[diesel(table_name = silo)]
 pub struct Silo {
     #[diesel(embed)]
     identity: SiloIdentity,
@@ -986,7 +986,7 @@ impl DatastoreCollection<Organization> for Silo {
 
 /// Describes a silo user within the database.
 #[derive(Asset, Queryable, Insertable, Debug, Selectable)]
-#[table_name = "silo_user"]
+#[diesel(table_name = silo_user)]
 pub struct SiloUser {
     #[diesel(embed)]
     identity: SiloUserIdentity,
@@ -1006,7 +1006,7 @@ impl SiloUser {
 
 /// Describes a user's public SSH key within the database.
 #[derive(Clone, Debug, Insertable, Queryable, Resource, Selectable)]
-#[table_name = "ssh_key"]
+#[diesel(table_name = ssh_key)]
 pub struct SshKey {
     #[diesel(embed)]
     identity: SshKeyIdentity,
@@ -1035,7 +1035,7 @@ impl SshKey {
 
 /// Describes an organization within the database.
 #[derive(Queryable, Insertable, Debug, Resource, Selectable)]
-#[table_name = "organization"]
+#[diesel(table_name = organization)]
 pub struct Organization {
     #[diesel(embed)]
     identity: OrganizationIdentity,
@@ -1067,7 +1067,7 @@ impl DatastoreCollection<Project> for Organization {
 
 /// Describes a set of updates for the [`Organization`] model.
 #[derive(AsChangeset)]
-#[table_name = "organization"]
+#[diesel(table_name = organization)]
 pub struct OrganizationUpdate {
     pub name: Option<Name>,
     pub description: Option<String>,
@@ -1086,7 +1086,7 @@ impl From<params::OrganizationUpdate> for OrganizationUpdate {
 
 /// Describes a project within the database.
 #[derive(Selectable, Queryable, Insertable, Debug, Resource)]
-#[table_name = "project"]
+#[diesel(table_name = project)]
 pub struct Project {
     #[diesel(embed)]
     identity: ProjectIdentity,
@@ -1106,7 +1106,7 @@ impl Project {
 
 /// Describes a set of updates for the [`Project`] model.
 #[derive(AsChangeset)]
-#[table_name = "project"]
+#[diesel(table_name = project)]
 pub struct ProjectUpdate {
     pub name: Option<Name>,
     pub description: Option<String>,
@@ -1125,7 +1125,7 @@ impl From<params::ProjectUpdate> for ProjectUpdate {
 
 /// An Instance (VM).
 #[derive(Queryable, Insertable, Debug, Selectable, Resource)]
-#[table_name = "instance"]
+#[diesel(table_name = instance)]
 pub struct Instance {
     #[diesel(embed)]
     identity: InstanceIdentity,
@@ -1182,36 +1182,36 @@ impl Into<external::Instance> for Instance {
 ///
 /// This state is owned by the sled agent running that Instance.
 #[derive(Clone, Debug, AsChangeset, Selectable, Insertable, Queryable)]
-#[table_name = "instance"]
+#[diesel(table_name = instance)]
 pub struct InstanceRuntimeState {
     /// runtime state of the Instance
-    #[column_name = "state"]
+    #[diesel(column_name = state)]
     pub state: InstanceState,
     /// timestamp for this information
     // TODO: Is this redundant with "time_modified"?
-    #[column_name = "time_state_updated"]
+    #[diesel(column_name = time_state_updated)]
     pub time_updated: DateTime<Utc>,
     /// generation number for this state
-    #[column_name = "state_generation"]
+    #[diesel(column_name = state_generation)]
     pub gen: Generation,
     /// which sled is running this Instance
     // TODO: should this be optional?
-    #[column_name = "active_server_id"]
+    #[diesel(column_name = active_server_id)]
     pub sled_uuid: Uuid,
-    #[column_name = "active_propolis_id"]
+    #[diesel(column_name = active_propolis_id)]
     pub propolis_uuid: Uuid,
-    #[column_name = "active_propolis_ip"]
+    #[diesel(column_name = active_propolis_ip)]
     pub propolis_ip: Option<ipnetwork::IpNetwork>,
-    #[column_name = "target_propolis_id"]
+    #[diesel(column_name = target_propolis_id)]
     pub dst_propolis_uuid: Option<Uuid>,
-    #[column_name = "migration_id"]
+    #[diesel(column_name = migration_id)]
     pub migration_uuid: Option<Uuid>,
-    #[column_name = "ncpus"]
+    #[diesel(column_name = ncpus)]
     pub ncpus: InstanceCpuCount,
-    #[column_name = "memory"]
+    #[diesel(column_name = memory)]
     pub memory: ByteCount,
     // TODO-cleanup: Different type?
-    #[column_name = "hostname"]
+    #[diesel(column_name = hostname)]
     pub hostname: String,
 }
 
@@ -1289,11 +1289,11 @@ impl Into<internal::nexus::InstanceRuntimeState> for InstanceRuntimeState {
 
 impl_enum_wrapper!(
     #[derive(SqlType, Debug)]
-    #[postgres(type_name = "instance_state", type_schema = "public")]
+    #[diesel(postgres_type(name = "instance_state"))]
     pub struct InstanceStateEnum;
 
     #[derive(Clone, Debug, PartialEq, AsExpression, FromSqlRow)]
-    #[sql_type = "InstanceStateEnum"]
+    #[diesel(sql_type = InstanceStateEnum)]
     pub struct InstanceState(pub external::InstanceState);
 
     // Enum values
@@ -1340,11 +1340,11 @@ impl From<InstanceState> for sled_agent_client::types::InstanceState {
 
 impl_enum_type!(
     #[derive(SqlType, Debug, QueryId)]
-    #[postgres(type_name = "block_size", type_schema = "public")]
+    #[diesel(postgres_type(name = "block_size"))]
     pub struct BlockSizeEnum;
 
     #[derive(Copy, Clone, Debug, AsExpression, FromSqlRow, Serialize, Deserialize, PartialEq)]
-    #[sql_type = "BlockSizeEnum"]
+    #[diesel(sql_type = BlockSizeEnum)]
     pub enum BlockSize;
 
     // Enum values
@@ -1392,7 +1392,7 @@ impl TryFrom<params::BlockSize> for BlockSize {
     Serialize,
     Deserialize,
 )]
-#[table_name = "disk"]
+#[diesel(table_name = disk)]
 pub struct Disk {
     #[diesel(embed)]
     identity: DiskIdentity,
@@ -1411,7 +1411,7 @@ pub struct Disk {
     pub runtime_state: DiskRuntimeState,
 
     /// size of the Disk
-    #[column_name = "size_bytes"]
+    #[diesel(column_name = size_bytes)]
     pub size: ByteCount,
 
     /// size of blocks (512, 2048, or 4096)
@@ -1419,12 +1419,12 @@ pub struct Disk {
 
     /// id for the snapshot from which this Disk was created (None means a blank
     /// disk)
-    #[column_name = "origin_snapshot"]
+    #[diesel(column_name = origin_snapshot)]
     pub create_snapshot_id: Option<Uuid>,
 
     /// id for the image from which this Disk was created (None means a blank
     /// disk)
-    #[column_name = "origin_image"]
+    #[diesel(column_name = origin_image)]
     pub create_image_id: Option<Uuid>,
 }
 
@@ -1504,19 +1504,19 @@ impl Into<external::Disk> for Disk {
     Serialize,
     Deserialize,
 )]
-#[table_name = "disk"]
+#[diesel(table_name = disk)]
 // When "attach_instance_id" is set to None, we'd like to
 // clear it from the DB, rather than ignore the update.
-#[changeset_options(treat_none_as_null = "true")]
+#[diesel(treat_none_as_null = true)]
 pub struct DiskRuntimeState {
     /// runtime state of the Disk
     pub disk_state: String,
     pub attach_instance_id: Option<Uuid>,
     /// generation number for this state
-    #[column_name = "state_generation"]
+    #[diesel(column_name = state_generation)]
     pub gen: Generation,
     /// timestamp for this information
-    #[column_name = "time_state_updated"]
+    #[diesel(column_name = time_state_updated)]
     pub time_updated: DateTime<Utc>,
 }
 
@@ -1648,7 +1648,7 @@ impl Into<external::DiskState> for DiskState {
     Serialize,
     Deserialize,
 )]
-#[sql_type = "sql_types::Text"]
+#[diesel(sql_type = sql_types::Text)]
 #[serde(transparent)]
 #[repr(transparent)]
 #[display("{0}")]
@@ -1693,7 +1693,7 @@ where
     Serialize,
     Deserialize,
 )]
-#[table_name = "image"]
+#[diesel(table_name = image)]
 pub struct Image {
     #[diesel(embed)]
     pub identity: ImageIdentity,
@@ -1706,7 +1706,7 @@ pub struct Image {
 
     pub block_size: BlockSize,
 
-    #[column_name = "size_bytes"]
+    #[diesel(column_name = size_bytes)]
     pub size: ByteCount,
 }
 
@@ -1736,7 +1736,7 @@ impl From<Image> for views::Image {
     Serialize,
     Deserialize,
 )]
-#[table_name = "global_image"]
+#[diesel(table_name = global_image)]
 pub struct GlobalImage {
     #[diesel(embed)]
     pub identity: GlobalImageIdentity,
@@ -1748,7 +1748,7 @@ pub struct GlobalImage {
 
     pub block_size: BlockSize,
 
-    #[column_name = "size_bytes"]
+    #[diesel(column_name = size_bytes)]
     pub size: ByteCount,
 }
 
@@ -1775,7 +1775,7 @@ impl From<GlobalImage> for views::GlobalImage {
     Serialize,
     Deserialize,
 )]
-#[table_name = "snapshot"]
+#[diesel(table_name = snapshot)]
 pub struct Snapshot {
     #[diesel(embed)]
     identity: SnapshotIdentity,
@@ -1784,7 +1784,7 @@ pub struct Snapshot {
     disk_id: Uuid,
     volume_id: Uuid,
 
-    #[column_name = "size_bytes"]
+    #[diesel(column_name = size_bytes)]
     pub size: ByteCount,
 }
 
@@ -1802,7 +1802,7 @@ impl From<Snapshot> for views::Snapshot {
 /// Information announced by a metric server, used so that clients can contact it and collect
 /// available metric data from it.
 #[derive(Queryable, Insertable, Debug, Clone, Selectable, Asset)]
-#[table_name = "metric_producer"]
+#[diesel(table_name = metric_producer)]
 pub struct ProducerEndpoint {
     #[diesel(embed)]
     identity: ProducerEndpointIdentity,
@@ -1840,7 +1840,7 @@ impl ProducerEndpoint {
 
 /// Message used to notify Nexus that this oximeter instance is up and running.
 #[derive(Queryable, Insertable, Debug, Clone, Copy)]
-#[table_name = "oximeter"]
+#[diesel(table_name = oximeter)]
 pub struct OximeterInfo {
     /// The ID for this oximeter instance.
     pub id: Uuid,
@@ -1868,7 +1868,7 @@ impl OximeterInfo {
 }
 
 #[derive(Queryable, Insertable, Clone, Debug, Selectable, Resource)]
-#[table_name = "vpc"]
+#[diesel(table_name = vpc)]
 pub struct Vpc {
     #[diesel(embed)]
     identity: VpcIdentity,
@@ -1924,7 +1924,7 @@ impl DatastoreCollection<VpcFirewallRule> for Vpc {
 }
 
 #[derive(AsChangeset)]
-#[table_name = "vpc"]
+#[diesel(table_name = vpc)]
 pub struct VpcUpdate {
     pub name: Option<Name>,
     pub description: Option<String>,
@@ -1944,7 +1944,7 @@ impl From<params::VpcUpdate> for VpcUpdate {
 }
 
 #[derive(Queryable, Insertable, Clone, Debug, Selectable, Resource)]
-#[table_name = "vpc_subnet"]
+#[diesel(table_name = vpc_subnet)]
 pub struct VpcSubnet {
     #[diesel(embed)]
     identity: VpcSubnetIdentity,
@@ -2008,7 +2008,7 @@ impl VpcSubnet {
 }
 
 #[derive(AsChangeset)]
-#[table_name = "vpc_subnet"]
+#[diesel(table_name = vpc_subnet)]
 pub struct VpcSubnetUpdate {
     pub name: Option<Name>,
     pub description: Option<String>,
@@ -2031,11 +2031,11 @@ impl From<params::VpcSubnetUpdate> for VpcSubnetUpdate {
 
 impl_enum_type!(
     #[derive(SqlType, Debug)]
-    #[postgres(type_name = "vpc_router_kind", type_schema = "public")]
+    #[diesel(postgres_type(name = "vpc_router_kind"))]
     pub struct VpcRouterKindEnum;
 
     #[derive(Clone, Copy, Debug, AsExpression, FromSqlRow, PartialEq)]
-    #[sql_type = "VpcRouterKindEnum"]
+    #[diesel(sql_type = VpcRouterKindEnum)]
     pub enum VpcRouterKind;
 
     // Enum values
@@ -2044,7 +2044,7 @@ impl_enum_type!(
 );
 
 #[derive(Queryable, Insertable, Clone, Debug, Selectable, Resource)]
-#[table_name = "vpc_router"]
+#[diesel(table_name = vpc_router)]
 pub struct VpcRouter {
     #[diesel(embed)]
     identity: VpcRouterIdentity,
@@ -2074,7 +2074,7 @@ impl DatastoreCollection<RouterRoute> for VpcRouter {
 }
 
 #[derive(AsChangeset)]
-#[table_name = "vpc_router"]
+#[diesel(table_name = vpc_router)]
 pub struct VpcRouterUpdate {
     pub name: Option<Name>,
     pub description: Option<String>,
@@ -2093,11 +2093,11 @@ impl From<params::VpcRouterUpdate> for VpcRouterUpdate {
 
 impl_enum_wrapper!(
     #[derive(SqlType, Debug)]
-    #[postgres(type_name = "router_route_kind", type_schema = "public")]
+    #[diesel(postgres_type(name = "router_route_kind"))]
     pub struct RouterRouteKindEnum;
 
     #[derive(Clone, Debug, AsExpression, FromSqlRow)]
-    #[sql_type = "RouterRouteKindEnum"]
+    #[diesel(sql_type = RouterRouteKindEnum)]
     pub struct RouterRouteKind(pub external::RouterRouteKind);
 
     // Enum values
@@ -2108,7 +2108,7 @@ impl_enum_wrapper!(
 );
 
 #[derive(Clone, Debug, AsExpression, FromSqlRow)]
-#[sql_type = "sql_types::Text"]
+#[diesel(sql_type = sql_types::Text)]
 pub struct RouteTarget(pub external::RouteTarget);
 
 impl<DB> ToSql<sql_types::Text, DB> for RouteTarget
@@ -2137,7 +2137,7 @@ where
 }
 
 #[derive(Clone, Debug, AsExpression, FromSqlRow)]
-#[sql_type = "sql_types::Text"]
+#[diesel(sql_type = sql_types::Text)]
 pub struct RouteDestination(pub external::RouteDestination);
 
 impl RouteDestination {
@@ -2176,7 +2176,7 @@ where
 }
 
 #[derive(Queryable, Insertable, Clone, Debug, Selectable, Resource)]
-#[table_name = "router_route"]
+#[diesel(table_name = router_route)]
 pub struct RouterRoute {
     #[diesel(embed)]
     identity: RouterRouteIdentity,
@@ -2218,7 +2218,7 @@ impl Into<external::RouterRoute> for RouterRoute {
 }
 
 #[derive(AsChangeset)]
-#[table_name = "router_route"]
+#[diesel(table_name = router_route)]
 pub struct RouterRouteUpdate {
     pub name: Option<Name>,
     pub description: Option<String>,
@@ -2241,11 +2241,11 @@ impl From<external::RouterRouteUpdateParams> for RouterRouteUpdate {
 
 impl_enum_wrapper!(
     #[derive(SqlType, Debug)]
-    #[postgres(type_name = "vpc_firewall_rule_status", type_schema = "public")]
+    #[diesel(postgres_type(name = "vpc_firewall_rule_status"))]
     pub struct VpcFirewallRuleStatusEnum;
 
     #[derive(Clone, Debug, AsExpression, FromSqlRow)]
-    #[sql_type = "VpcFirewallRuleStatusEnum"]
+    #[diesel(sql_type = VpcFirewallRuleStatusEnum)]
     pub struct VpcFirewallRuleStatus(pub external::VpcFirewallRuleStatus);
 
     Disabled => b"disabled"
@@ -2256,11 +2256,11 @@ NewtypeDeref! { () pub struct VpcFirewallRuleStatus(external::VpcFirewallRuleSta
 
 impl_enum_wrapper!(
     #[derive(SqlType, Debug)]
-    #[postgres(type_name = "vpc_firewall_rule_direction", type_schema = "public")]
+    #[diesel(postgres_type(name = "vpc_firewall_rule_direction"))]
     pub struct VpcFirewallRuleDirectionEnum;
 
     #[derive(Clone, Debug, AsExpression, FromSqlRow)]
-    #[sql_type = "VpcFirewallRuleDirectionEnum"]
+    #[diesel(sql_type = VpcFirewallRuleDirectionEnum)]
     pub struct VpcFirewallRuleDirection(pub external::VpcFirewallRuleDirection);
 
     Inbound => b"inbound"
@@ -2271,11 +2271,11 @@ NewtypeDeref! { () pub struct VpcFirewallRuleDirection(external::VpcFirewallRule
 
 impl_enum_wrapper!(
     #[derive(SqlType, Debug)]
-    #[postgres(type_name = "vpc_firewall_rule_action", type_schema = "public")]
+    #[diesel(postgres_type(name = "vpc_firewall_rule_action"))]
     pub struct VpcFirewallRuleActionEnum;
 
     #[derive(Clone, Debug, AsExpression, FromSqlRow)]
-    #[sql_type = "VpcFirewallRuleActionEnum"]
+    #[diesel(sql_type = VpcFirewallRuleActionEnum)]
     pub struct VpcFirewallRuleAction(pub external::VpcFirewallRuleAction);
 
     Allow => b"allow"
@@ -2286,11 +2286,11 @@ NewtypeDeref! { () pub struct VpcFirewallRuleAction(external::VpcFirewallRuleAct
 
 impl_enum_wrapper!(
     #[derive(SqlType, Debug)]
-    #[postgres(type_name = "vpc_firewall_rule_protocol", type_schema = "public")]
+    #[diesel(postgres_type(name = "vpc_firewall_rule_protocol"))]
     pub struct VpcFirewallRuleProtocolEnum;
 
     #[derive(Clone, Debug, AsExpression, FromSqlRow)]
-    #[sql_type = "VpcFirewallRuleProtocolEnum"]
+    #[diesel(sql_type = VpcFirewallRuleProtocolEnum)]
     pub struct VpcFirewallRuleProtocol(pub external::VpcFirewallRuleProtocol);
 
     Tcp => b"TCP"
@@ -2303,7 +2303,7 @@ NewtypeDeref! { () pub struct VpcFirewallRuleProtocol(external::VpcFirewallRuleP
 /// Newtype wrapper around [`external::VpcFirewallRuleTarget`] so we can derive
 /// diesel traits for it
 #[derive(Clone, Debug, AsExpression, FromSqlRow)]
-#[sql_type = "sql_types::Text"]
+#[diesel(sql_type = sql_types::Text)]
 #[repr(transparent)]
 pub struct VpcFirewallRuleTarget(pub external::VpcFirewallRuleTarget);
 NewtypeFrom! { () pub struct VpcFirewallRuleTarget(external::VpcFirewallRuleTarget); }
@@ -2339,7 +2339,7 @@ where
 /// Newtype wrapper around [`external::VpcFirewallRuleHostFilter`] so we can derive
 /// diesel traits for it
 #[derive(Clone, Debug, AsExpression, FromSqlRow)]
-#[sql_type = "sql_types::Text"]
+#[diesel(sql_type = sql_types::Text)]
 #[repr(transparent)]
 pub struct VpcFirewallRuleHostFilter(pub external::VpcFirewallRuleHostFilter);
 NewtypeFrom! { () pub struct VpcFirewallRuleHostFilter(external::VpcFirewallRuleHostFilter); }
@@ -2375,7 +2375,7 @@ where
 /// Newtype wrapper around [`external::L4PortRange`] so we can derive
 /// diesel traits for it
 #[derive(Clone, Copy, Debug, AsExpression, FromSqlRow)]
-#[sql_type = "sql_types::Text"]
+#[diesel(sql_type = sql_types::Text)]
 #[repr(transparent)]
 pub struct L4PortRange(pub external::L4PortRange);
 NewtypeFrom! { () pub struct L4PortRange(external::L4PortRange); }
@@ -2409,7 +2409,7 @@ where
 /// diesel traits for it
 #[derive(Clone, Copy, Debug, AsExpression, FromSqlRow)]
 #[repr(transparent)]
-#[sql_type = "sql_types::Int4"]
+#[diesel(sql_type = sql_types::Int4)]
 pub struct VpcFirewallRulePriority(pub external::VpcFirewallRulePriority);
 NewtypeFrom! { () pub struct VpcFirewallRulePriority(external::VpcFirewallRulePriority); }
 NewtypeDeref! { () pub struct VpcFirewallRulePriority(external::VpcFirewallRulePriority); }
@@ -2441,7 +2441,7 @@ where
 }
 
 #[derive(Queryable, Insertable, Clone, Debug, Selectable, Resource)]
-#[table_name = "vpc_firewall_rule"]
+#[diesel(table_name = vpc_firewall_rule)]
 pub struct VpcFirewallRule {
     #[diesel(embed)]
     pub identity: VpcFirewallRuleIdentity,
@@ -2570,7 +2570,7 @@ impl IncompleteNetworkInterface {
 }
 
 #[derive(Selectable, Queryable, Insertable, Clone, Debug, Resource)]
-#[table_name = "network_interface"]
+#[diesel(table_name = network_interface)]
 pub struct NetworkInterface {
     #[diesel(embed)]
     pub identity: NetworkInterfaceIdentity,
@@ -2604,7 +2604,7 @@ impl From<NetworkInterface> for external::NetworkInterface {
 // TODO: `struct SessionToken(String)` for session token
 
 #[derive(Queryable, Insertable, Clone, Debug, Selectable)]
-#[table_name = "console_session"]
+#[diesel(table_name = console_session)]
 pub struct ConsoleSession {
     pub token: String,
     pub time_created: DateTime<Utc>,
@@ -2625,7 +2625,7 @@ impl ConsoleSession {
 
 /// Describes a built-in user, as stored in the database
 #[derive(Queryable, Insertable, Debug, Resource, Selectable)]
-#[table_name = "user_builtin"]
+#[diesel(table_name = user_builtin)]
 pub struct UserBuiltin {
     #[diesel(embed)]
     pub identity: UserBuiltinIdentity,
@@ -2640,7 +2640,7 @@ impl UserBuiltin {
 
 /// Describes a built-in role, as stored in the database
 #[derive(Queryable, Insertable, Debug, Selectable)]
-#[table_name = "role_builtin"]
+#[diesel(table_name = role_builtin)]
 pub struct RoleBuiltin {
     pub resource_type: String,
     pub role_name: String,
@@ -2668,7 +2668,7 @@ impl RoleBuiltin {
 
 /// Describes an assignment of a built-in role for a built-in user
 #[derive(Queryable, Insertable, Debug, Selectable)]
-#[table_name = "role_assignment_builtin"]
+#[diesel(table_name = role_assignment_builtin)]
 pub struct RoleAssignmentBuiltin {
     pub user_builtin_id: Uuid,
     pub resource_type: String,
@@ -2695,12 +2695,12 @@ impl RoleAssignmentBuiltin {
 
 impl_enum_wrapper!(
     #[derive(SqlType, Debug, QueryId)]
-    #[postgres(type_name = "update_artifact_kind", type_schema = "public")]
+    #[diesel(postgres_type(name = "update_artifact_kind"))]
     pub struct UpdateArtifactKindEnum;
 
     #[derive(Clone, Copy, Debug, Display, AsExpression, FromSqlRow, PartialEq, Eq)]
     #[display("{0}")]
-    #[sql_type = "UpdateArtifactKindEnum"]
+    #[diesel(sql_type = UpdateArtifactKindEnum)]
     pub struct UpdateArtifactKind(pub internal::nexus::UpdateArtifactKind);
 
     // Enum values
@@ -2710,7 +2710,7 @@ impl_enum_wrapper!(
 #[derive(
     Queryable, Insertable, Clone, Debug, Display, Selectable, AsChangeset,
 )]
-#[table_name = "update_available_artifact"]
+#[diesel(table_name = update_available_artifact)]
 #[display("{kind} \"{name}\" v{version}")]
 pub struct UpdateAvailableArtifact {
     pub name: String,

@@ -184,7 +184,7 @@ mod test {
     use schema::test_users;
 
     #[derive(Clone, Debug, Queryable, Insertable, PartialEq, Selectable)]
-    #[table_name = "test_users"]
+    #[diesel(table_name = test_users)]
     struct User {
         id: Uuid,
         age: i64,

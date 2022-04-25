@@ -49,7 +49,7 @@ use std::marker::PhantomData;
 /// # }
 ///
 /// #[derive(Queryable, Insertable, Debug, Selectable)]
-/// #[table_name = "project"]
+/// #[diesel(table_name = project)]
 /// struct Project {
 ///     pub id: uuid::Uuid,
 ///     pub time_deleted: Option<chrono::DateTime<chrono::Utc>>,
@@ -57,7 +57,7 @@ use std::marker::PhantomData;
 /// }
 ///
 /// #[derive(Queryable, Insertable, Debug, Selectable)]
-/// #[table_name = "organization"]
+/// #[diesel(table_name = organization)]
 /// struct Organization {
 ///     pub id: uuid::Uuid,
 ///     pub time_deleted: Option<chrono::DateTime<chrono::Utc>>,
@@ -209,7 +209,7 @@ where
     ) -> AsyncInsertIntoCollectionResult<ResourceType>
     where
         // We require this bound to ensure that "Self" is runnable as query.
-        Self: query_methods::LoadQuery<DbConnection, ResourceType>,
+        Self: query_methods::LoadQuery<'static, DbConnection, ResourceType>,
     {
         self.get_result_async::<ResourceType>(pool)
             .await
@@ -228,7 +228,7 @@ where
     ) -> AsyncInsertIntoCollectionResult<Vec<ResourceType>>
     where
         // We require this bound to ensure that "Self" is runnable as query.
-        Self: query_methods::LoadQuery<DbConnection, ResourceType>,
+        Self: query_methods::LoadQuery<'static, DbConnection, ResourceType>,
     {
         self.get_results_async::<ResourceType>(pool)
             .await
@@ -247,7 +247,7 @@ where
     ) -> SyncInsertIntoCollectionResult<ResourceType>
     where
         // We require this bound to ensure that "Self" is runnable as query.
-        Self: query_methods::LoadQuery<DbConnection, ResourceType>,
+        Self: query_methods::LoadQuery<'static, DbConnection, ResourceType>,
     {
         self.get_result::<ResourceType>(conn)
             .map_err(Self::translate_sync_error)
@@ -265,7 +265,7 @@ where
     ) -> SyncInsertIntoCollectionResult<Vec<ResourceType>>
     where
         // We require this bound to ensure that "Self" is runnable as query.
-        Self: query_methods::LoadQuery<DbConnection, ResourceType>,
+        Self: query_methods::LoadQuery<'static, DbConnection, ResourceType>,
     {
         self.get_results::<ResourceType>(conn)
             .map_err(Self::translate_sync_error)
@@ -549,7 +549,7 @@ mod test {
 
     /// Describes an organization within the database.
     #[derive(Queryable, Insertable, Debug, Resource, Selectable)]
-    #[table_name = "resource"]
+    #[diesel(table_name = resource)]
     struct Resource {
         #[diesel(embed)]
         pub identity: ResourceIdentity,

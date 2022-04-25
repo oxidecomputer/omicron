@@ -19,7 +19,7 @@ use omicron_common::api::external::Error;
 #[derive(
     Clone, Copy, AsExpression, FromSqlRow, PartialEq, Ord, PartialOrd, Eq,
 )]
-#[sql_type = "Inet"]
+#[diesel(sql_type = Inet)]
 pub struct Ipv6Addr(std::net::Ipv6Addr);
 
 NewtypeDebug! { () pub struct Ipv6Addr(std::net::Ipv6Addr); }

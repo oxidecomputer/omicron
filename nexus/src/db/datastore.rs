@@ -94,7 +94,7 @@ const REGION_REDUNDANCY_THRESHOLD: usize = 3;
 trait RunnableQuery<U>:
     RunQueryDsl<DbConnection>
     + QueryFragment<Pg>
-    + LoadQuery<DbConnection, U>
+    + LoadQuery<'static, DbConnection, U>
     + QueryId
 {
 }
@@ -102,7 +102,7 @@ trait RunnableQuery<U>:
 impl<U, T> RunnableQuery<U> for T where
     T: RunQueryDsl<DbConnection>
         + QueryFragment<Pg>
-        + LoadQuery<DbConnection, U>
+        + LoadQuery<'static, DbConnection, U>
         + QueryId
 {
 }

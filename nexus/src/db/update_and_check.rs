@@ -147,7 +147,7 @@ where
     ) -> Result<UpdateAndQueryResult<Q>, PoolError>
     where
         // We require this bound to ensure that "Self" is runnable as query.
-        Self: LoadQuery<DbConnection, (Option<K>, Option<K>, Q)>,
+        Self: LoadQuery<'static, DbConnection, (Option<K>, Option<K>, Q)>,
     {
         let (id0, id1, found) =
             self.get_result_async::<(Option<K>, Option<K>, Q)>(pool).await?;
