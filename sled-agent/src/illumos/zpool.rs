@@ -25,7 +25,7 @@ enum Error {
 }
 
 #[derive(thiserror::Error, Debug)]
-#[error("Failed to get info for zpool {name}: {err}")]
+#[error("Failed to get info for zpool '{name}': {err}")]
 pub struct GetInfoError {
     name: String,
     #[source]

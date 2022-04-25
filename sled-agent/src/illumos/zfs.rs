@@ -161,7 +161,7 @@ impl Zfs {
             "-o",
             "zoned=on",
             "-o",
-            &format!("mountpoint={}", &mountpoint),
+            &format!("mountpoint={}", mountpoint),
             name,
         ]);
         execute(cmd).map_err(|err| EnsureFilesystemError {

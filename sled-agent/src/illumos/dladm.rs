@@ -18,7 +18,7 @@ pub const DLADM: &str = "/usr/sbin/dladm";
 /// Errors returned from [`Dladm::find_physical`].
 #[derive(thiserror::Error, Debug)]
 pub enum FindPhysicalLinkError {
-    #[error("Failed to execute command to find physical link: {0}")]
+    #[error("Failed to find physical link: {0}")]
     Execution(#[from] ExecutionError),
 
     #[error("No Physical Link devices found")]
@@ -31,7 +31,7 @@ pub enum GetMacError {
     #[error("Mac Address cannot be looked up; Link not found: {0:?}")]
     NotFound(PhysicalLink),
 
-    #[error("Failed to execute command to get MAC address: {0}")]
+    #[error("Failed to get MAC address: {0}")]
     Execution(#[from] ExecutionError),
 
     #[error("Failed to parse MAC: {0}")]

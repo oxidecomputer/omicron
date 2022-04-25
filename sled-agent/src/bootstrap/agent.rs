@@ -140,7 +140,7 @@ impl Agent {
         };
 
         Zones::ensure_has_global_zone_v6_address(
-            data_link.clone(),
+            data_link,
             address,
             "bootstrap6",
         )
