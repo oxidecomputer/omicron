@@ -15,7 +15,7 @@ authz-macros = { path = "src/authz/authz-macros" }
 base64 = "0.13.0"
 bb8 = "0.8.0"
 cookie = "0.16"
-crucible-agent-client = { git = "https://github.com/oxidecomputer/crucible", rev = "a70d458984acaf6144d36fa79670f97af148e98b" }
+crucible-agent-client = { git = "https://github.com/oxidecomputer/crucible", rev = "257032d1e842901d427f344a396d78b9b85b183f" }
 # Tracking pending 2.0 version.
 diesel = { git = "https://github.com/diesel-rs/diesel", rev = "ce77c382", features = ["postgres", "r2d2", "chrono", "serde_json", "network-address", "uuid"] }
 fatfs = "0.3.5"
