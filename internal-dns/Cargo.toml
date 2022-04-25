@@ -7,6 +7,7 @@ license = "MPL-2.0"
 [dependencies]
 anyhow = "1.0"
 clap = { version = "3.1", features = [ "derive" ] }
+internal-dns-client = { path = "../internal-dns-client" }
 dropshot = { git = "https://github.com/oxidecomputer/dropshot", branch = "main", features = [ "usdt-probes" ] }
 pretty-hex = "0.3.0"
 schemars = "0.8"
@@ -26,7 +27,6 @@ trust-dns-server = "0.21"
 
 [dev-dependencies]
 expectorate = "1.0.5"
-internal-dns-client = { path = "../internal-dns-client" }
 omicron-test-utils = { path = "../test-utils" }
 openapiv3 = "1.0"
 openapi-lint = { git = "https://github.com/oxidecomputer/openapi-lint", branch = "main" }

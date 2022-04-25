@@ -128,6 +128,7 @@ unique local addresses in the subnet of the first Sled Agent: `fd00:1122:3344:1:
 | Crucible Downstairs 1      | `[fd00:1122:3344:1::6]:32345`
 | Crucible Downstairs 2      | `[fd00:1122:3344:1::7]:32345`
 | Crucible Downstairs 3      | `[fd00:1122:3344:1::8]:32345`
+| Internal DNS               | `[fd00:1122:3344:1::9]:5353`
 |===================================================================================================
 
 Note that Sled Agent runs in the global zone and is the one responsible for bringing up all the other

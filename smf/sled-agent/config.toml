@@ -23,4 +23,6 @@ zpools = [
 
 [log]
 level = "info"
-mode = "stderr-terminal"
+mode = "file"
+path = "/var/oxide/sled-agent.log"
+if_exists = "append"

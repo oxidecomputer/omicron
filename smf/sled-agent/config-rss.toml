@@ -54,3 +54,7 @@ name = "oximeter"
 addresses = [
   "[fd00:1122:3344:1::4]:12223",
 ]
+
+[[request.service]]
+name = "internal-dns"
+addresses = [ "[fd00:1122:3344:1::9]:5353" ]
