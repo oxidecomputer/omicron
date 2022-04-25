@@ -14,7 +14,7 @@ const ZFS: &str = "/usr/sbin/zfs";
 
 /// Error returned by [`Zfs::list_filesystems`].
 #[derive(thiserror::Error, Debug)]
-#[error("Could not list filesystems within dataset {name}: {err}")]
+#[error("Could not list filesystems within zpool {name}: {err}")]
 pub struct ListFilesystemsError {
     name: String,
     #[source]
@@ -97,7 +97,7 @@ impl fmt::Display for Mountpoint {
 
 #[cfg_attr(test, mockall::automock, allow(dead_code))]
 impl Zfs {
-    /// Lists all filesystems within a dataset.
+    /// Lists all filesystems within a zpool.
     pub fn list_filesystems(
         name: &str,
     ) -> Result<Vec<String>, ListFilesystemsError> {

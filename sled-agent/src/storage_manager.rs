@@ -77,26 +77,43 @@ pub enum Error {
     #[error(transparent)]
     ZoneInstall(#[from] crate::illumos::running_zone::InstallZoneError),
 
-    #[error("Error parsing pool size: {0}")]
-    BadPoolSize(#[from] ByteCountRangeError),
+    #[error("Error parsing pool {name}'s size: {err}")]
+    BadPoolSize {
+        name: String,
+        #[source]
+        err: ByteCountRangeError,
+    },
 
-    #[error("Failed to parse as UUID: {0}")]
-    Parse(#[from] uuid::Error),
+    #[error("Failed to parse the dataset {name}'s UUID: {err}")]
+    ParseDatasetUuid {
+        name: String,
+        #[source]
+        err: uuid::Error,
+    },
 
-    #[error("Timed out waiting for service: {0}")]
-    Timeout(String),
+    #[error("Zpool Not Found: {0}")]
+    ZpoolNotFound(String),
 
-    #[error("Object Not Found: {0}")]
-    NotFound(String),
+    #[error("Failed to serialize toml (intended for {path:?}): {err}")]
+    Serialize {
+        path: PathBuf,
+        #[source]
+        err: toml::ser::Error,
+    },
 
-    #[error("Failed to serialize toml: {0}")]
-    Serialize(#[from] toml::ser::Error),
+    #[error("Failed to deserialize toml from {path:?}: {err}")]
+    Deserialize {
+        path: PathBuf,
+        #[source]
+        err: toml::de::Error,
+    },
 
-    #[error("Failed to deserialize toml: {0}")]
-    Deserialize(#[from] toml::de::Error),
-
-    #[error("Failed to perform I/O: {0}")]
-    Io(#[from] std::io::Error),
+    #[error("Failed to perform I/O: {message}: {err}")]
+    Io {
+        message: String,
+        #[source]
+        err: std::io::Error,
+    },
 }
 
 /// A ZFS storage pool.
@@ -148,7 +165,10 @@ impl Pool {
     ) -> Result<PathBuf, Error> {
         let path = std::path::Path::new(omicron_common::OMICRON_CONFIG_PATH)
             .join(self.id.to_string());
-        create_dir_all(&path).await?;
+        create_dir_all(&path).await.map_err(|err| Error::Io {
+            message: format!("creating config dir {path:?}, which would contain config for {dataset_id}"),
+            err,
+        })?;
         let mut path = path.join(dataset_id.to_string());
         path.set_extension("toml");
         Ok(path)
@@ -691,11 +711,15 @@ impl StorageWorker {
         let mut pools = self.pools.lock().await;
         let name = ZpoolName::new(request.zpool_id);
         let pool = pools.get_mut(&name).ok_or_else(|| {
-            Error::NotFound(format!("zpool: {}", request.zpool_id))
+            Error::ZpoolNotFound(format!(
+                "{}, looked up while trying to add dataset",
+                request.zpool_id
+            ))
         })?;
 
+        let pool_name = pool.info.name();
         let dataset_info = DatasetInfo::new(
-            pool.info.name(),
+            pool_name,
             request.dataset_kind.clone(),
             request.address,
         );
@@ -714,10 +738,18 @@ impl StorageWorker {
 
         // Now that the dataset has been initialized, record the configuration
         // so it can re-initialize itself after a reboot.
-        let info_str = toml::to_string(&dataset_info)?;
         let path = pool.dataset_config_path(id).await?;
-        let mut file = File::create(path).await?;
-        file.write_all(info_str.as_bytes()).await?;
+        let info_str = toml::to_string(&dataset_info)
+            .map_err(|err| Error::Serialize { path: path.clone(), err })?;
+        let pool_name = pool.info.name();
+        let mut file = File::create(&path).await.map_err(|err| Error::Io {
+            message: format!("Failed creating config file at {path:?} for pool {pool_name}, dataset: {id}"),
+            err,
+        })?;
+        file.write_all(info_str.as_bytes()).await.map_err(|err| Error::Io {
+            message: format!("Failed writing config to {path:?} for pool {pool_name}, dataset: {id}"),
+            err,
+        })?;
 
         self.add_datasets_notify(
             nexus_notifications,
@@ -733,16 +765,29 @@ impl StorageWorker {
         pool: &mut Pool,
         dataset_name: &DatasetName,
     ) -> Result<(Uuid, SocketAddr, DatasetKind), Error> {
-        let id = Zfs::get_oxide_value(&dataset_name.full(), "uuid")?
-            .parse::<Uuid>()?;
+        let name = dataset_name.full();
+        let id = Zfs::get_oxide_value(&name, "uuid")?
+            .parse::<Uuid>()
+            .map_err(|err| Error::ParseDatasetUuid { name, err })?;
         let config_path = pool.dataset_config_path(id).await?;
         info!(
             self.log,
             "Loading Dataset from {}",
             config_path.to_string_lossy()
         );
+        let pool_name = pool.info.name();
         let dataset_info: DatasetInfo =
-            toml::from_slice(&tokio::fs::read(config_path).await?)?;
+            toml::from_slice(
+                &tokio::fs::read(&config_path).await.map_err(|err| Error::Io {
+                    message: format!("read config for pool {pool_name}, dataset {dataset_name:?} from {config_path:?}"),
+                    err,
+                })?
+            ).map_err(|err| {
+                Error::Deserialize {
+                    path: config_path,
+                    err,
+                }
+            })?;
         self.initialize_dataset_and_zone(
             pool,
             &dataset_info,
@@ -783,7 +828,8 @@ impl StorageWorker {
                         "Storage manager processing zpool: {:#?}", pool.info
                     );
 
-                    let size = ByteCount::try_from(pool.info.size())?;
+                    let size = ByteCount::try_from(pool.info.size())
+                        .map_err(|err| Error::BadPoolSize { name: pool_name.to_string(), err })?;
 
                     // If we find filesystems within our datasets, ensure their
                     // zones are up-and-running.

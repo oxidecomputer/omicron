@@ -214,7 +214,7 @@ impl ServiceManager {
                 )
                 .map_err(|err| Error::GzAddress {
                     message: format!(
-                        "Failed adding address for {}",
+                        "adding address on behalf of service '{}'",
                         service.name
                     ),
                     err,
