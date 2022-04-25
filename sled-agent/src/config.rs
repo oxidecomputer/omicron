@@ -10,7 +10,7 @@ use crate::illumos::zpool::ZpoolName;
 use dropshot::ConfigLogging;
 use serde::Deserialize;
 use std::net::SocketAddr;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use uuid::Uuid;
 
 /// Configuration for a sled agent
@@ -35,17 +35,27 @@ pub struct Config {
 
 #[derive(Debug, thiserror::Error)]
 pub enum ConfigError {
-    #[error("Failed to read config: {0}")]
-    Io(#[from] std::io::Error),
-    #[error("Failed to parse config: {0}")]
-    Parse(#[from] toml::de::Error),
+    #[error("Failed to read config from {path}: {err}")]
+    Io {
+        path: PathBuf,
+        #[source]
+        err: std::io::Error,
+    },
+    #[error("Failed to parse config from {path}: {err}")]
+    Parse {
+        path: PathBuf,
+        #[source]
+        err: toml::de::Error,
+    },
 }
 
 impl Config {
     pub fn from_file<P: AsRef<Path>>(path: P) -> Result<Self, ConfigError> {
         let path = path.as_ref();
-        let contents = std::fs::read_to_string(path)?;
-        let config = toml::from_str(&contents)?;
+        let contents = std::fs::read_to_string(&path)
+            .map_err(|err| ConfigError::Io { path: path.into(), err })?;
+        let config = toml::from_str(&contents)
+            .map_err(|err| ConfigError::Parse { path: path.into(), err })?;
         Ok(config)
     }
 

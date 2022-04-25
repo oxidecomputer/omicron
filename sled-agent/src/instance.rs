@@ -41,7 +41,6 @@ pub enum Error {
     #[error("Failed to wait for service: {0}")]
     Timeout(String),
 
-    // TODO: Who are we allocating the VNIC for?
     #[error("Failed to create VNIC: {0}")]
     VnicCreation(#[from] crate::illumos::dladm::CreateVnicError),
 
@@ -71,9 +70,6 @@ pub enum Error {
 
     #[error(transparent)]
     ZoneInstall(#[from] crate::illumos::running_zone::InstallZoneError),
-
-    #[error("serde_json failure: {0}")]
-    SerdeJsonError(#[from] serde_json::Error),
 }
 
 // Issues read-only, idempotent HTTP requests at propolis until it responds with

@@ -58,8 +58,10 @@ fn new_network(addr: Ipv6Addr, prefix: u8) -> Ipv6Network {
 impl SetupServiceConfig {
     pub fn from_file<P: AsRef<Path>>(path: P) -> Result<Self, ConfigError> {
         let path = path.as_ref();
-        let contents = std::fs::read_to_string(path)?;
-        let config = toml::from_str(&contents)?;
+        let contents = std::fs::read_to_string(&path)
+            .map_err(|err| ConfigError::Io { path: path.into(), err })?;
+        let config = toml::from_str(&contents)
+            .map_err(|err| ConfigError::Parse { path: path.into(), err })?;
         Ok(config)
     }
 
