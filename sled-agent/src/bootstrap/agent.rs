@@ -31,20 +31,21 @@ use tokio::sync::Mutex;
 /// Describes errors which may occur while operating the bootstrap service.
 #[derive(Error, Debug)]
 pub enum BootstrapError {
-    #[error("Error accessing filesystem: {0}")]
-    Io(#[from] std::io::Error),
-
-    #[error("Error configuring SMF: {0}")]
-    SmfConfig(#[from] smf::ConfigError),
-
-    #[error("Error modifying SMF service: {0}")]
-    SmfAdm(#[from] smf::AdmError),
+    #[error("IO error: {message}: {err}")]
+    Io {
+        message: String,
+        #[source]
+        err: std::io::Error,
+    },
 
     #[error("Error starting sled agent: {0}")]
     SledError(String),
 
-    #[error(transparent)]
-    Toml(#[from] toml::de::Error),
+    #[error("Error deserializing toml from {path}: {err}")]
+    Toml {
+        path: PathBuf,
+        err: toml::de::Error,
+    },
 
     #[error(transparent)]
     TrustQuorum(#[from] TrustQuorumError),
@@ -70,11 +71,11 @@ fn read_key_share() -> Result<Option<ShareDistribution>, BootstrapError> {
 
     match ShareDistribution::read(&key_share_dir) {
         Ok(share) => Ok(Some(share)),
-        Err(TrustQuorumError::Io(err)) => {
+        Err(TrustQuorumError::Io { message, err }) => {
             if err.kind() == io::ErrorKind::NotFound {
                 Ok(None)
             } else {
-                Err(BootstrapError::Io(err))
+                Err(BootstrapError::Io { message, err })
             }
         }
         Err(e) => Err(e.into()),
@@ -135,7 +136,7 @@ impl Agent {
         } else {
             Dladm::find_physical().map_err(|err| {
                 BootstrapError::SledError(format!(
-                    "Can't access physical link: {}",
+                    "Can't access physical link, and none in config: {}",
                     err
                 ))
             })?
@@ -148,7 +149,13 @@ impl Agent {
         )
         .map_err(|err| BootstrapError::BootstrapAddress { err })?;
 
-        let peer_monitor = discovery::PeerMonitor::new(&log, address)?;
+        let peer_monitor = discovery::PeerMonitor::new(&log, address)
+            .map_err(|err| {
+                BootstrapError::Io {
+                    message: format!("Monitoring for peers from {address}"),
+                    err,
+                }
+            })?;
         let share = read_key_share()?;
         let agent = Agent {
             log,
@@ -163,8 +170,20 @@ impl Agent {
         if subnet_path.exists() {
             info!(agent.log, "Sled already configured, loading sled agent");
             let sled_request: SledAgentRequest = toml::from_str(
-                &tokio::fs::read_to_string(&subnet_path).await?,
-            )?;
+                &tokio::fs::read_to_string(&subnet_path)
+                    .await
+                    .map_err(|err| {
+                        BootstrapError::Io {
+                            message: format!("Reading subnet path from {subnet_path:?}"),
+                            err,
+                        }
+                    })?,
+            ).map_err(|err| {
+                BootstrapError::Toml {
+                    path: subnet_path,
+                    err,
+                }
+            })?;
             agent.request_agent(sled_request).await?;
         }
 
@@ -216,21 +235,28 @@ impl Agent {
         // Server does not exist, initialize it.
         let server = SledServer::start(&self.sled_config, sled_address)
             .await
-            .map_err(|e| BootstrapError::SledError(e))?;
+            .map_err(|e| BootstrapError::SledError(format!("Could not start sled agent server: {e}")))?;
         maybe_agent.replace(server);
         info!(&self.log, "Sled Agent loaded; recording configuration");
 
         // Record the subnet, so the sled agent can be automatically
         // initialized on the next boot.
+        let path = get_subnet_path();
         tokio::fs::write(
-            get_subnet_path(),
+            &path,
             &toml::to_string(
                 &toml::Value::try_from(&request.subnet)
                     .expect("Cannot serialize IP"),
             )
             .expect("Cannot convert toml to string"),
         )
-        .await?;
+        .await
+        .map_err(|err| {
+            BootstrapError::Io {
+                message: format!("Recording subnet to {path:?}"),
+                err,
+            }
+        })?;
 
         Ok(SledAgentResponse { id: self.sled_config.id })
     }
@@ -337,7 +363,13 @@ impl Agent {
 
     async fn run_trust_quorum_server(&self) -> Result<(), BootstrapError> {
         let my_share = self.share.as_ref().unwrap().share.clone();
-        let mut server = trust_quorum::Server::new(&self.log, my_share)?;
+        let mut server = trust_quorum::Server::new(&self.log, my_share)
+            .map_err(|err| {
+                BootstrapError::Io {
+                    message: "Cannot run trust quorum server".to_string(),
+                    err,
+                }
+            })?;
         tokio::spawn(async move { server.run().await });
         Ok(())
     }

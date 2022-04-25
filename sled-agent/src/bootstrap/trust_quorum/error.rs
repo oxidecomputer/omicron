@@ -29,6 +29,10 @@ pub enum TrustQuorumError {
     #[error("Rack secret construction failed: {0:?}")]
     RackSecretConstructionFailed(vsss_rs::Error),
 
-    #[error("IO error: {0}")]
-    Io(#[from] std::io::Error),
+    #[error("IO error {message}: {err}")]
+    Io {
+        message: String,
+        #[source]
+        err: std::io::Error,
+    },
 }
