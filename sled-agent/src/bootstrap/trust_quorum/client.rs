@@ -31,13 +31,12 @@ impl Client {
     // Connect to a trust quorum server, establish an SPDM channel, and retrieve
     // a share.
     pub async fn get_share(&self) -> Result<Share, TrustQuorumError> {
-        let sock = TcpStream::connect(&self.addr).await
-            .map_err(|err| {
-                TrustQuorumError::Io {
-                    message: format!("Connecting to {}", self.addr),
-                    err,
-                }
-            })?;
+        let sock = TcpStream::connect(&self.addr).await.map_err(|err| {
+            TrustQuorumError::Io {
+                message: format!("Connecting to {}", self.addr),
+                err,
+            }
+        })?;
         let transport = spdm::Transport::new(sock, self.log.clone());
 
         // Complete SPDM negotiation and return a secure transport

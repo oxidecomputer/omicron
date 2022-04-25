@@ -32,11 +32,9 @@ impl ShareDistribution {
         let mut path = PathBuf::from(dir.as_ref());
         path.push(FILENAME);
         let json = serde_json::to_string(&self)?;
-        fs::write(&path, &json).map_err(|err| {
-            TrustQuorumError::Io {
-                message: format!("Writing share to {path:?}"),
-                err,
-            }
+        fs::write(&path, &json).map_err(|err| TrustQuorumError::Io {
+            message: format!("Writing share to {path:?}"),
+            err,
         })?;
         Ok(())
     }
@@ -46,8 +44,8 @@ impl ShareDistribution {
     ) -> Result<ShareDistribution, TrustQuorumError> {
         let mut path = PathBuf::from(dir.as_ref());
         path.push(FILENAME);
-        let json = fs::read_to_string(path.to_str().unwrap())
-            .map_err(|err| {
+        let json =
+            fs::read_to_string(path.to_str().unwrap()).map_err(|err| {
                 TrustQuorumError::Io {
                     message: format!("Reading share from {path:?}"),
                     err,

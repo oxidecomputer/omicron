@@ -40,22 +40,13 @@ pub enum SetupServiceError {
     ),
 
     #[error("Error making HTTP request to Sled Agent: {0}")]
-    SledApi(
-        #[from]
-        sled_agent_client::Error<sled_agent_client::types::Error>,
-    ),
+    SledApi(#[from] sled_agent_client::Error<sled_agent_client::types::Error>),
 
     #[error("Cannot deserialize TOML file at {path}: {err}")]
-    Toml {
-        path: PathBuf,
-        err: toml::de::Error,
-    },
+    Toml { path: PathBuf, err: toml::de::Error },
 
     #[error("Failed to monitor for peers: {0}")]
-    PeerMonitor(
-        #[from]
-        tokio::sync::broadcast::error::RecvError
-    ),
+    PeerMonitor(#[from] tokio::sync::broadcast::error::RecvError),
 
     #[error("Failed to construct an HTTP client: {0}")]
     HttpClient(reqwest::Error),
@@ -304,19 +295,18 @@ impl ServiceInner {
 
             let plan: std::collections::HashMap<SocketAddrV6, SledAllocation> =
                 toml::from_str(
-                    &tokio::fs::read_to_string(&rss_plan_path)
-                        .await
-                        .map_err(|err| {
-                            SetupServiceError::Io {
-                                message: format!("Loading RSS plan {rss_plan_path:?}"),
-                                err,
-                            }
-                        })?,
-                ).map_err(|err| {
-                    SetupServiceError::Toml {
-                        path: rss_plan_path,
-                        err,
-                    }
+                    &tokio::fs::read_to_string(&rss_plan_path).await.map_err(
+                        |err| SetupServiceError::Io {
+                            message: format!(
+                                "Loading RSS plan {rss_plan_path:?}"
+                            ),
+                            err,
+                        },
+                    )?,
+                )
+                .map_err(|err| SetupServiceError::Toml {
+                    path: rss_plan_path,
+                    err,
                 })?;
             Ok(Some(plan))
         } else {
@@ -401,14 +391,12 @@ impl ServiceInner {
 
         info!(self.log, "Plan serialized as: {}", plan_str);
         let path = rss_plan_path();
-        tokio::fs::write(&path, plan_str)
-            .await
-            .map_err(|err| {
-                SetupServiceError::Io {
-                    message: format!("Storing RSS plan to {path:?}"),
-                    err,
-                }
-            })?;
+        tokio::fs::write(&path, plan_str).await.map_err(|err| {
+            SetupServiceError::Io {
+                message: format!("Storing RSS plan to {path:?}"),
+                err,
+            }
+        })?;
         info!(self.log, "Plan written to storage");
 
         Ok(plan)
@@ -487,11 +475,12 @@ impl ServiceInner {
         // subsequent operations which may write configs here.
         tokio::fs::create_dir_all(omicron_common::OMICRON_CONFIG_PATH)
             .await
-            .map_err(|err| {
-                SetupServiceError::Io {
-                    message: format!("Creating config directory {}", omicron_common::OMICRON_CONFIG_PATH),
-                    err,
-                }
+            .map_err(|err| SetupServiceError::Io {
+                message: format!(
+                    "Creating config directory {}",
+                    omicron_common::OMICRON_CONFIG_PATH
+                ),
+                err,
             })?;
 
         // Check if a previous RSS plan has completed successfully.
@@ -635,14 +624,14 @@ impl ServiceInner {
         // Finally, make sure the configuration is saved so we don't inject
         // the requests on the next iteration.
         let plan_path = rss_plan_path();
-        tokio::fs::rename(&plan_path, &rss_completed_plan_path)
-            .await
-            .map_err(|err| {
-                SetupServiceError::Io {
-                    message: format!("renaming {plan_path:?} to {rss_completed_plan_path:?}"),
-                    err,
-                }
-            })?;
+        tokio::fs::rename(&plan_path, &rss_completed_plan_path).await.map_err(
+            |err| SetupServiceError::Io {
+                message: format!(
+                    "renaming {plan_path:?} to {rss_completed_plan_path:?}"
+                ),
+                err,
+            },
+        )?;
 
         // TODO Questions to consider:
         // - What if a sled comes online *right after* this setup? How does
