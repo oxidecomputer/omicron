@@ -620,7 +620,7 @@ dependencies = [
 [[package]]
 name = "crucible"
 version = "0.0.1"
-source = "git+https://github.com/oxidecomputer/crucible?rev=4090a023b77dcab7a5000057cf2c96cdbb0469b6#4090a023b77dcab7a5000057cf2c96cdbb0469b6"
+source = "git+https://github.com/oxidecomputer/crucible?rev=257032d1e842901d427f344a396d78b9b85b183f#257032d1e842901d427f344a396d78b9b85b183f"
 dependencies = [
  "aes-gcm-siv",
  "anyhow",
@@ -647,12 +647,13 @@ dependencies = [
  "tracing",
  "usdt",
  "uuid",
+ "version_check",
 ]
 
 [[package]]
 name = "crucible-agent-client"
 version = "0.0.1"
-source = "git+https://github.com/oxidecomputer/crucible?rev=945daedb88cefa790f1d994b3a038b8fa9ac514a#945daedb88cefa790f1d994b3a038b8fa9ac514a"
+source = "git+https://github.com/oxidecomputer/crucible?rev=257032d1e842901d427f344a396d78b9b85b183f#257032d1e842901d427f344a396d78b9b85b183f"
 dependencies = [
  "anyhow",
  "chrono",
@@ -667,11 +668,11 @@ dependencies = [
 [[package]]
 name = "crucible-common"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/crucible?rev=4090a023b77dcab7a5000057cf2c96cdbb0469b6#4090a023b77dcab7a5000057cf2c96cdbb0469b6"
+source = "git+https://github.com/oxidecomputer/crucible?rev=257032d1e842901d427f344a396d78b9b85b183f#257032d1e842901d427f344a396d78b9b85b183f"
 dependencies = [
  "anyhow",
  "rusqlite",
- "rustls-pemfile",
+ "rustls-pemfile 1.0.0",
  "serde",
  "serde_json",
  "tempfile",
@@ -685,7 +686,7 @@ dependencies = [
 [[package]]
 name = "crucible-protocol"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/crucible?rev=4090a023b77dcab7a5000057cf2c96cdbb0469b6#4090a023b77dcab7a5000057cf2c96cdbb0469b6"
+source = "git+https://github.com/oxidecomputer/crucible?rev=257032d1e842901d427f344a396d78b9b85b183f#257032d1e842901d427f344a396d78b9b85b183f"
 dependencies = [
  "anyhow",
  "bincode",
@@ -699,7 +700,7 @@ dependencies = [
 [[package]]
 name = "crucible-scope"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/crucible?rev=4090a023b77dcab7a5000057cf2c96cdbb0469b6#4090a023b77dcab7a5000057cf2c96cdbb0469b6"
+source = "git+https://github.com/oxidecomputer/crucible?rev=257032d1e842901d427f344a396d78b9b85b183f#257032d1e842901d427f344a396d78b9b85b183f"
 dependencies = [
  "anyhow",
  "futures",
@@ -987,7 +988,7 @@ dependencies = [
  "percent-encoding",
  "proc-macro2",
  "rustls",
- "rustls-pemfile",
+ "rustls-pemfile 0.3.0",
  "schemars",
  "serde",
  "serde_json",
@@ -3342,7 +3343,7 @@ dependencies = [
 [[package]]
 name = "propolis-client"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=abd372deb0a7dfa33f138f7741c5107184fa7088#abd372deb0a7dfa33f138f7741c5107184fa7088"
+source = "git+https://github.com/oxidecomputer/propolis?rev=ec4f3a41a638ea6c3316a86f30f1895f4877f2ef#ec4f3a41a638ea6c3316a86f30f1895f4877f2ef"
 dependencies = [
  "crucible",
  "reqwest",
@@ -3587,7 +3588,7 @@ dependencies = [
  "percent-encoding",
  "pin-project-lite",
  "rustls",
- "rustls-pemfile",
+ "rustls-pemfile 0.3.0",
  "serde",
  "serde_json",
  "serde_urlencoded",
@@ -3698,6 +3699,15 @@ name = "rustls-pemfile"
 version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1ee86d63972a7c661d1536fefe8c3c8407321c3df668891286de28abcd087360"
+dependencies = [
+ "base64",
+]
+
+[[package]]
+name = "rustls-pemfile"
+version = "1.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e7522c9de787ff061458fe9a829dc790a3f5b22dc571694fc5883f448b94d9a9"
 dependencies = [
  "base64",
 ]
