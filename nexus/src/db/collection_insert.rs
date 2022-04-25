@@ -148,6 +148,7 @@ pub struct InsertIntoCollectionStatement<ResourceType, ISR, C>
 where
     C: DatastoreCollection<ResourceType>,
     ResourceTable<ResourceType, C>: Copy + Debug,
+    <ResourceTable<ResourceType, C> as QuerySource>::FromClause: Copy + Debug,
 {
     insert_statement: InsertStatement<ResourceTable<ResourceType, C>, ISR>,
     key: CollectionId<ResourceType, C>,
@@ -340,7 +341,7 @@ type SerializedCollectionPrimaryKey<ResourceType, C> =
     <CollectionPrimaryKey<ResourceType, C> as diesel::Expression>::SqlType;
 
 type TableSqlType<T> = <T as AsQuery>::SqlType;
-type BoxedQuery<T> = BoxedSelectStatement<'static, TableSqlType<T>, T, Pg>;
+type BoxedQuery<T> = IntoBoxed<'static, TableSqlType<T>, Pg>;
 
 /// This implementation uses the following CTE:
 ///

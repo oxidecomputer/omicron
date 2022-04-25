@@ -37,9 +37,9 @@ where
     DB: Backend,
     IpNetwork: ToSql<Inet, DB>,
 {
-    fn to_sql<W: std::io::Write>(
-        &self,
-        out: &mut Output<W, DB>,
+    fn to_sql<'a>(
+        &'a self,
+        out: &mut Output<'a, '_, DB>,
     ) -> serialize::Result {
         IpNetwork::V6(Ipv6Network::from(self.0)).to_sql(out)
     }

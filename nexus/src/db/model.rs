@@ -21,7 +21,7 @@ use crate::external_api::views;
 use crate::internal_api;
 use chrono::{DateTime, Utc};
 use db_macros::{Asset, Resource};
-use diesel::backend::{Backend, BinaryRawValue, RawValue};
+use diesel::backend::{Backend, RawValue};
 use diesel::deserialize::{self, FromSql};
 use diesel::serialize::{self, IsNull, ToSql};
 use diesel::sql_types;
@@ -76,9 +76,9 @@ macro_rules! impl_enum_wrapper {
         where
             DB: Backend,
         {
-            fn to_sql<W: std::io::Write>(
-                &self,
-                out: &mut serialize::Output<W, DB>,
+            fn to_sql<'a>(
+                &'a self,
+                out: &mut serialize::Output<'a, '_, DB>,
             ) -> serialize::Result {
                 match self.0 {
                     $(
@@ -93,7 +93,7 @@ macro_rules! impl_enum_wrapper {
 
         impl<DB> FromSql<$diesel_type, DB> for $model_type
         where
-            DB: Backend + for<'a> BinaryRawValue<'a>,
+            DB: Backend, // + for<'a> BinaryRawValue<'a>,
         {
             fn from_sql(bytes: RawValue<DB>) -> deserialize::Result<Self> {
                 match DB::as_bytes(bytes) {
@@ -140,9 +140,9 @@ macro_rules! impl_enum_type {
         where
             DB: Backend,
         {
-            fn to_sql<W: std::io::Write>(
-                &self,
-                out: &mut serialize::Output<W, DB>,
+            fn to_sql<'a>(
+                &'a self,
+                out: &mut serialize::Output<'a, '_, DB>,
             ) -> serialize::Result {
                 match self {
                     $(
@@ -157,7 +157,7 @@ macro_rules! impl_enum_type {
 
         impl<DB> FromSql<$diesel_type, DB> for $model_type
         where
-            DB: Backend + for<'a> BinaryRawValue<'a>,
+            DB: Backend, // + for<'a> BinaryRawValue<'a>,
         {
             fn from_sql(bytes: RawValue<DB>) -> deserialize::Result<Self> {
                 match DB::as_bytes(bytes) {
@@ -207,9 +207,9 @@ where
     DB: Backend,
     str: ToSql<sql_types::Text, DB>,
 {
-    fn to_sql<W: std::io::Write>(
-        &self,
-        out: &mut serialize::Output<W, DB>,
+    fn to_sql<'a>(
+        &'a self,
+        out: &mut serialize::Output<'a, '_, DB>,
     ) -> serialize::Result {
         self.as_str().to_sql(out)
     }
@@ -247,9 +247,9 @@ where
     DB: Backend,
     i64: ToSql<sql_types::BigInt, DB>,
 {
-    fn to_sql<W: std::io::Write>(
-        &self,
-        out: &mut serialize::Output<W, DB>,
+    fn to_sql<'a>(
+        &'a self,
+        out: &mut serialize::Output<'a, '_, DB>,
     ) -> serialize::Result {
         i64::from(self.0).to_sql(out)
     }
@@ -310,9 +310,9 @@ where
     DB: Backend,
     i64: ToSql<sql_types::BigInt, DB>,
 {
-    fn to_sql<W: std::io::Write>(
-        &self,
-        out: &mut serialize::Output<W, DB>,
+    fn to_sql<'a>(
+        &'a self,
+        out: &mut serialize::Output<'a, '_, DB>,
     ) -> serialize::Result {
         i64::from(&self.0).to_sql(out)
     }
@@ -360,9 +360,9 @@ where
     DB: Backend,
     i32: ToSql<sql_types::Int4, DB>,
 {
-    fn to_sql<W: std::io::Write>(
-        &self,
-        out: &mut serialize::Output<W, DB>,
+    fn to_sql<'a>(
+        &'a self,
+        out: &mut serialize::Output<'a, '_, DB>,
     ) -> serialize::Result {
         i32::from(self.0).to_sql(out)
     }
@@ -390,9 +390,9 @@ where
     DB: Backend,
     i64: ToSql<sql_types::BigInt, DB>,
 {
-    fn to_sql<W: std::io::Write>(
-        &self,
-        out: &mut serialize::Output<W, DB>,
+    fn to_sql<'a>(
+        &'a self,
+        out: &mut serialize::Output<'a, '_, DB>,
     ) -> serialize::Result {
         i64::from(&self.0).to_sql(out)
     }
@@ -445,9 +445,9 @@ where
     DB: Backend,
     IpNetwork: ToSql<sql_types::Inet, DB>,
 {
-    fn to_sql<W: std::io::Write>(
-        &self,
-        out: &mut serialize::Output<W, DB>,
+    fn to_sql<'a>(
+        &'a self,
+        out: &mut serialize::Output<'a, '_, DB>,
     ) -> serialize::Result {
         IpNetwork::V4(*self.0).to_sql(out)
     }
@@ -541,9 +541,9 @@ where
     DB: Backend,
     IpNetwork: ToSql<sql_types::Inet, DB>,
 {
-    fn to_sql<W: std::io::Write>(
-        &self,
-        out: &mut serialize::Output<W, DB>,
+    fn to_sql<'a>(
+        &'a self,
+        out: &mut serialize::Output<'a, '_, DB>,
     ) -> serialize::Result {
         IpNetwork::V6(self.0 .0).to_sql(out)
     }
@@ -594,9 +594,9 @@ where
     DB: Backend,
     String: ToSql<sql_types::Text, DB>,
 {
-    fn to_sql<W: std::io::Write>(
-        &self,
-        out: &mut serialize::Output<W, DB>,
+    fn to_sql<'a>(
+        &'a self,
+        out: &mut serialize::Output<'a, '_, DB>,
     ) -> serialize::Result {
         self.0.to_string().to_sql(out)
     }
@@ -1599,6 +1599,7 @@ impl Into<internal::nexus::DiskRuntimeState> for DiskRuntimeState {
 }
 
 #[derive(Clone, Debug, AsExpression)]
+#[diesel(sql_type = sql_types::Text)]
 pub struct DiskState(external::DiskState);
 
 impl DiskState {
@@ -1662,9 +1663,9 @@ where
     DB: Backend,
     str: ToSql<sql_types::Text, DB>,
 {
-    fn to_sql<W: std::io::Write>(
-        &self,
-        out: &mut serialize::Output<W, DB>,
+    fn to_sql<'a>(
+        &'a self,
+        out: &mut serialize::Output<'a, '_, DB>,
     ) -> serialize::Result {
         self.to_string().as_str().to_sql(out)
     }
@@ -2116,9 +2117,9 @@ where
     DB: Backend,
     str: ToSql<sql_types::Text, DB>,
 {
-    fn to_sql<W: std::io::Write>(
-        &self,
-        out: &mut serialize::Output<W, DB>,
+    fn to_sql<'a>(
+        &'a self,
+        out: &mut serialize::Output<'a, '_, DB>,
     ) -> serialize::Result {
         self.0.to_string().as_str().to_sql(out)
     }
@@ -2155,9 +2156,9 @@ where
     DB: Backend,
     str: ToSql<sql_types::Text, DB>,
 {
-    fn to_sql<W: std::io::Write>(
-        &self,
-        out: &mut serialize::Output<W, DB>,
+    fn to_sql<'a>(
+        &'a self,
+        out: &mut serialize::Output<'a, '_, DB>,
     ) -> serialize::Result {
         self.0.to_string().as_str().to_sql(out)
     }
@@ -2314,9 +2315,9 @@ where
     DB: Backend,
     String: ToSql<sql_types::Text, DB>,
 {
-    fn to_sql<W: std::io::Write>(
-        &self,
-        out: &mut serialize::Output<W, DB>,
+    fn to_sql<'a>(
+        &'a self,
+        out: &mut serialize::Output<'a, '_, DB>,
     ) -> serialize::Result {
         self.0.to_string().to_sql(out)
     }
@@ -2350,9 +2351,9 @@ where
     DB: Backend,
     String: ToSql<sql_types::Text, DB>,
 {
-    fn to_sql<W: std::io::Write>(
-        &self,
-        out: &mut serialize::Output<W, DB>,
+    fn to_sql<'a>(
+        &'a self,
+        out: &mut serialize::Output<'a, '_, DB>,
     ) -> serialize::Result {
         self.0.to_string().to_sql(out)
     }
@@ -2386,9 +2387,9 @@ where
     DB: Backend,
     String: ToSql<sql_types::Text, DB>,
 {
-    fn to_sql<W: std::io::Write>(
-        &self,
-        out: &mut serialize::Output<W, DB>,
+    fn to_sql<'a>(
+        &'a self,
+        out: &mut serialize::Output<'a, '_, DB>,
     ) -> serialize::Result {
         self.0.to_string().to_sql(out)
     }
@@ -2419,9 +2420,9 @@ where
     DB: Backend,
     SqlU16: ToSql<sql_types::Int4, DB>,
 {
-    fn to_sql<W: std::io::Write>(
-        &self,
-        out: &mut serialize::Output<W, DB>,
+    fn to_sql<'a>(
+        &'a self,
+        out: &mut serialize::Output<'a, '_, DB>,
     ) -> serialize::Result {
         SqlU16(self.0 .0).to_sql(out)
     }

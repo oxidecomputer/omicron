@@ -10,7 +10,6 @@ use diesel::expression_methods::BoolExpressionMethods;
 use diesel::helper_types::*;
 use diesel::pg::Pg;
 use diesel::query_builder::AsQuery;
-use diesel::query_builder::BoxedSelectStatement;
 use diesel::query_dsl::methods as query_methods;
 use diesel::sql_types::{Bool, SqlType};
 use diesel::AppearsOnTable;
@@ -22,7 +21,7 @@ use omicron_common::api::external::DataPageParams;
 type TableSqlType<T> = <T as AsQuery>::SqlType;
 
 // Shorthand alias for the type made from "table.into_boxed()".
-type BoxedQuery<T> = BoxedSelectStatement<'static, TableSqlType<T>, T, Pg>;
+type BoxedQuery<T> = IntoBoxed<'static, TableSqlType<T>, Pg>;
 
 /// Uses `pagparams` to list a subset of rows in `table`, ordered by `column`.
 pub fn paginated<T, C, M>(

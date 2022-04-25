@@ -38,9 +38,9 @@ where
     DB: Backend,
     Uuid: ToSql<sql_types::Uuid, DB>,
 {
-    fn to_sql<W: std::io::Write>(
-        &self,
-        out: &mut serialize::Output<W, DB>,
+    fn to_sql<'a>(
+        &'a self,
+        out: &mut serialize::Output<'a, '_, DB>,
     ) -> serialize::Result {
         (&self.0 as &Uuid).to_sql(out)
     }
@@ -86,9 +86,9 @@ where
     DB: Backend,
     Uuid: ToSql<sql_types::Uuid, DB>,
 {
-    fn to_sql<W: std::io::Write>(
-        &self,
-        out: &mut serialize::Output<'_, W, DB>,
+    fn to_sql<'a>(
+        &'a self,
+        out: &mut serialize::Output<'a, '_, DB>,
     ) -> serialize::Result {
         (&self.0.into() as &Uuid).to_sql(out)
     }
@@ -123,9 +123,9 @@ where
     DB: Backend,
     i64: ToSql<sql_types::BigInt, DB>,
 {
-    fn to_sql<W: std::io::Write>(
-        &self,
-        out: &mut serialize::Output<'_, W, DB>,
+    fn to_sql<'a>(
+        &'a self,
+        out: &mut serialize::Output<'a, '_, DB>,
     ) -> serialize::Result {
         // Diesel newtype -> steno type -> u32 -> i64 -> SQL
         (u32::from(self.0) as i64).to_sql(out)
@@ -144,7 +144,7 @@ where
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, SqlType)]
-#[postgres(type_name = "saga_state")]
+#[diesel(postgres_type(name = "saga_state"))]
 pub struct SagaCachedStateEnum;
 
 /// Newtype wrapper around [`steno::SagaCachedState`] which implements
@@ -162,9 +162,9 @@ impl<DB> ToSql<SagaCachedStateEnum, DB> for SagaCachedState
 where
     DB: Backend,
 {
-    fn to_sql<W: std::io::Write>(
-        &self,
-        out: &mut serialize::Output<'_, W, DB>,
+    fn to_sql<'a>(
+        &'a self,
+        out: &mut serialize::Output<'a, '_, DB>,
     ) -> serialize::Result {
         use steno::SagaCachedState;
         out.write_all(match self.0 {
@@ -178,7 +178,7 @@ where
 
 impl<DB> FromSql<SagaCachedStateEnum, DB> for SagaCachedState
 where
-    DB: Backend + for<'a> diesel::backend::BinaryRawValue<'a>,
+    DB: Backend, // + for<'a> diesel::backend::BinaryRawValue<'a>,
 {
     fn from_sql(bytes: RawValue<DB>) -> deserialize::Result<Self> {
         let bytes = DB::as_bytes(bytes);

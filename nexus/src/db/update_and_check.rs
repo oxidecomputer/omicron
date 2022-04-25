@@ -83,7 +83,7 @@ where
 
 /// An UPDATE statement which can be combined (via a CTE)
 /// with other statements to also SELECT a row.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 #[must_use = "Queries must be executed"]
 pub struct UpdateAndQueryStatement<US, K, Q>
 where

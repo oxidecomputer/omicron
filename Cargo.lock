@@ -112,11 +112,11 @@ dependencies = [
 [[package]]
 name = "async-bb8-diesel"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/async-bb8-diesel?rev=8c6685f0b33c7bbc6418384850cb9c897896cda5#8c6685f0b33c7bbc6418384850cb9c897896cda5"
+source = "git+https://github.com/oxidecomputer/async-bb8-diesel?branch=diesel2#9b05720d1df1b664daae4cc7104198d5d5b3e986"
 dependencies = [
  "async-trait",
  "bb8",
- "diesel",
+ "diesel 2.0.0-rc.0",
  "thiserror",
  "tokio",
 ]
@@ -845,15 +845,16 @@ dependencies = [
 
 [[package]]
 name = "diesel"
-version = "2.0.0"
-source = "git+https://github.com/diesel-rs/diesel?rev=ce77c382#ce77c382d2836f6b385225991cf58cb2d2dd65d6"
+version = "2.0.0-rc.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e531d0abf8147036383c88ce3785d9cda6fe1b8b1183021ffa01cf49c5819d24"
 dependencies = [
  "bitflags",
  "byteorder",
  "chrono",
- "diesel_derives",
+ "diesel_derives 2.0.0-rc.0",
  "ipnetwork",
- "itoa 0.4.8",
+ "itoa 1.0.1",
  "libc",
  "pq-sys",
  "r2d2",
@@ -862,14 +863,37 @@ dependencies = [
 ]
 
 [[package]]
+name = "diesel"
+version = "2.0.0"
+source = "git+https://github.com/diesel-rs/diesel?rev=ce77c382#ce77c382d2836f6b385225991cf58cb2d2dd65d6"
+dependencies = [
+ "byteorder",
+ "diesel_derives 2.0.0",
+ "itoa 0.4.8",
+ "r2d2",
+]
+
+[[package]]
 name = "diesel-dtrace"
 version = "0.1.0"
 source = "git+https://github.com/oxidecomputer/diesel-dtrace?branch=main#3bce2661bca09feded88f6415a877c2996e302f0"
 dependencies = [
- "diesel",
+ "diesel 2.0.0",
  "serde",
  "usdt",
  "uuid",
+]
+
+[[package]]
+name = "diesel_derives"
+version = "2.0.0-rc.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "212ba0cdc611523c37f26c7b3b4aedb4af7cbfe9239c4e7736a8a7c82284d77b"
+dependencies = [
+ "proc-macro-error",
+ "proc-macro2",
+ "quote",
+ "syn",
 ]
 
 [[package]]
@@ -2436,7 +2460,7 @@ dependencies = [
  "criterion",
  "crucible-agent-client",
  "db-macros",
- "diesel",
+ "diesel 2.0.0-rc.0",
  "diesel-dtrace",
  "dropshot",
  "expectorate",
