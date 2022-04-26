@@ -3891,6 +3891,25 @@ impl Nexus {
         assert_eq!(authz_user.id(), silo_user_id);
         self.db_datastore.ssh_key_delete(opctx, &authz_ssh_key).await
     }
+
+    // Role assignments
+
+    // XXX-dap TODO-doc
+    pub async fn organization_list_roles(
+        &self,
+        opctx: &OpContext,
+        organization_name: &Name,
+        pagparams: &DataPageParams<'_, (String, Uuid)>,
+    ) -> ListResultVec<db::model::RoleAssignmentBuiltin> {
+        // XXX-dap define a new action for ListRoles?
+        let (.., authz_org) = LookupPath::new(opctx, &self.db_datastore)
+            .organization_name(organization_name)
+            .lookup_for(authz::Action::Read)
+            .await?;
+        self.db_datastore
+            .role_assignment_list(opctx, &authz_org, pagparams)
+            .await
+    }
 }
 
 /// For unimplemented endpoints, indicates whether the resource identified

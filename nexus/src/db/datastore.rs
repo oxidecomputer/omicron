@@ -2839,6 +2839,41 @@ impl DataStore {
             })?;
         Ok(())
     }
+
+    // Role assignments
+
+    // XXX-dap TODO-doc
+    pub async fn role_assignment_list<
+        T: authz::ApiResource + authz::ApiResourceError,
+    >(
+        &self,
+        opctx: &OpContext,
+        authz_resource: &T,
+        pagparams: &DataPageParams<'_, (String, Uuid)>,
+    ) -> ListResultVec<db::model::RoleAssignmentBuiltin> {
+        // XXX-dap consider a different action
+        opctx.authorize(authz::Action::Read, authz_resource).await?;
+        if let Some((resource_type, resource_id)) = authz_resource.db_resource()
+        {
+            use db::schema::role_assignment_builtin::dsl;
+            paginated_multicolumn(
+                dsl::role_assignment_builtin,
+                (dsl::role_name, dsl::user_builtin_id),
+                pagparams,
+            )
+            .filter(dsl::resource_type.eq(resource_type.to_string()))
+            .filter(dsl::resource_id.eq(resource_id))
+            .select(RoleAssignmentBuiltin::as_select())
+            .load_async::<RoleAssignmentBuiltin>(
+                self.pool_authorized(opctx).await?,
+            )
+            .await
+            .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
+        } else {
+            // XXX-dap Ideally, we couldn't even be invoked in this case.
+            Ok(Vec::new())
+        }
+    }
 }
 
 /// Constructs a DataStore for use in test suites that has preloaded the

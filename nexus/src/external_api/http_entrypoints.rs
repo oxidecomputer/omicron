@@ -4,9 +4,9 @@
 
 //! Handler functions (entrypoints) for external HTTP APIs
 
-use crate::db;
 use crate::db::model::Name;
 use crate::ServerContext;
+use crate::{db, external_api::views::RoleAssignment};
 
 use super::{
     console_api, params,
@@ -80,6 +80,11 @@ pub fn external_api() -> NexusApiDescription {
         api.register(organizations_get_organization)?;
         api.register(organizations_delete_organization)?;
         api.register(organizations_put_organization)?;
+
+        api.register(organization_roles_get)?;
+        //api.register(organization_roles_post)?;
+        //api.register(organization_roles_get_role)?;
+        //api.register(organization_roles_delete_role)?;
 
         api.register(organization_projects_get)?;
         api.register(organization_projects_post)?;
@@ -491,6 +496,78 @@ async fn organizations_put_organization(
         Ok(HttpResponseOk(new_organization.into()))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+#[derive(Deserialize, JsonSchema, Serialize)]
+struct RoleAssignmentPage {
+    role_name: String,
+    user_id: Uuid,
+}
+
+/// List all role assignments for this Organization
+#[endpoint {
+    method = GET,
+    path = "/organizations/{organization_name}/roles",
+    tags = ["organizations"],
+}]
+async fn organization_roles_get(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    query_params: Query<PaginationParams<EmptyScanParams, RoleAssignmentPage>>,
+    path_params: Path<OrganizationPathParam>,
+) -> Result<HttpResponseOk<ResultsPage<RoleAssignment>>, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let query = query_params.into_inner();
+    let path = path_params.into_inner();
+    let organization_name = &path.organization_name;
+
+    let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let marker = role_asgn_marker(&query);
+        let pagparams = role_asgn_pagparams(&*rqctx, &query, &marker)?;
+        let role_asgns = nexus
+            .organization_list_roles(&opctx, organization_name, &pagparams)
+            .await?;
+        role_asgns_page(role_asgns)
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+fn role_asgn_marker<'a, 'b>(
+    query: &'b PaginationParams<EmptyScanParams, RoleAssignmentPage>,
+) -> Option<(String, Uuid)> {
+    match &query.page {
+        WhichPage::First(..) => None,
+        WhichPage::Next(RoleAssignmentPage { role_name, user_id }) => {
+            Some((role_name.clone(), *user_id))
+        }
+    }
+}
+
+fn role_asgn_pagparams<'a, 'b>(
+    rqctx: &'a RequestContext<Arc<ServerContext>>,
+    query: &'b PaginationParams<EmptyScanParams, RoleAssignmentPage>,
+    marker: &'b Option<(String, Uuid)>,
+) -> Result<DataPageParams<'b, (String, Uuid)>, HttpError> {
+    Ok(DataPageParams {
+        limit: rqctx.page_limit(&query)?,
+        direction: PaginationOrder::Ascending,
+        marker: marker.as_ref(),
+    })
+}
+
+fn role_asgns_page(
+    role_asgns: Vec<db::model::RoleAssignmentBuiltin>,
+) -> Result<HttpResponseOk<ResultsPage<RoleAssignment>>, HttpError> {
+    let role_asgns = role_asgns.into_iter().map(|i| i.into()).collect();
+    Ok(HttpResponseOk(dropshot::ResultsPage::new(
+        role_asgns,
+        &EmptyScanParams {},
+        |role_asgn: &RoleAssignment, _| RoleAssignmentPage {
+            role_name: role_asgn.role_name.clone(),
+            user_id: role_asgn.user_id,
+        },
+    )?))
 }
 
 /// List all projects.

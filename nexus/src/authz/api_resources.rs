@@ -47,7 +47,9 @@ use uuid::Uuid;
 
 /// Describes an authz resource that corresponds to an API resource that has a
 /// corresponding ResourceType and is stored in the database
-pub trait ApiResource: Clone + Send + Sync + 'static {
+pub trait ApiResource:
+    Clone + std::fmt::Debug + oso::PolarClass + Send + Sync + 'static
+{
     /// If roles can be assigned to this resource, return the type and id of the
     /// database record describing this resource
     ///

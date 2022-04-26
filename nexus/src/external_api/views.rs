@@ -318,6 +318,26 @@ impl From<model::RoleBuiltin> for Role {
     }
 }
 
+/// Client view of a [`RoleAssignment`]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
+pub struct RoleAssignment {
+    pub user_id: Uuid,
+    pub resource_type: String,
+    pub resource_id: Uuid,
+    pub role_name: String,
+}
+
+impl From<model::RoleAssignmentBuiltin> for RoleAssignment {
+    fn from(role_asgn: model::RoleAssignmentBuiltin) -> Self {
+        Self {
+            user_id: role_asgn.user_builtin_id,
+            resource_type: role_asgn.resource_type,
+            resource_id: role_asgn.resource_id,
+            role_name: role_asgn.role_name,
+        }
+    }
+}
+
 // SSH KEYS
 
 /// Client view of a [`SshKey`]
