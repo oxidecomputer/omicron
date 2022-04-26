@@ -235,7 +235,7 @@ mod test {
         let success_case = authn_spoof(Some(&test_header));
         match success_case {
             SchemeResult::Authenticated(details) => {
-                assert_eq!(details.actor.id, test_uuid);
+                assert_eq!(details.actor.actor_id(), test_uuid);
             }
             _ => {
                 assert!(false);

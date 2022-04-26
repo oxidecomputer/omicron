@@ -1032,7 +1032,7 @@ CREATE TABLE omicron.public.role_builtin (
 
 CREATE TYPE omicron.public.actor_type AS ENUM (
   'user_builtin',
-  'silo_user',
+  'silo_user'
 );
 
 CREATE TABLE omicron.public.role_assignment (
@@ -1053,8 +1053,15 @@ CREATE TABLE omicron.public.role_assignment (
     actor_id UUID NOT NULL,
     actor_type omicron.public.actor_type NOT NULL,
 
-    /* The entire row is the primary key. */
-    PRIMARY KEY(actor_type, actor_id, resource_type, resource_id, role_name)
+    /*
+     * Only one assignment may be granted for a given actor on a given resource,
+     * so the primary key includes the user and resource information but not the
+     * role_name.
+     *
+     * The primary key is organized by (resource_type, resource_id) first so
+     * that we can do paginated listings of role assignments for a resource.
+     */
+    PRIMARY KEY(resource_type, resource_id, actor_type, actor_id)
 );
 
 /*******************************************************************/

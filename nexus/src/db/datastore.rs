@@ -2426,7 +2426,6 @@ impl DataStore {
                 dsl::actor_id,
                 dsl::resource_type,
                 dsl::resource_id,
-                dsl::role_name,
             ))
             .do_nothing()
             .execute_async(self.pool_authorized(opctx).await?)

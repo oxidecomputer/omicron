@@ -191,27 +191,27 @@ mod test {
         // The privileges are (or will be) verified in authz tests.
         let authn = Context::internal_test_user();
         let actor = authn.actor().unwrap();
-        assert_eq!(actor.id, USER_TEST_PRIVILEGED.id);
+        assert_eq!(actor.actor_id(), USER_TEST_PRIVILEGED.id);
 
         let authn = Context::internal_read();
         let actor = authn.actor().unwrap();
-        assert_eq!(actor.id, USER_INTERNAL_READ.id);
+        assert_eq!(actor.actor_id(), USER_INTERNAL_READ.id);
 
         let authn = Context::external_authn();
         let actor = authn.actor().unwrap();
-        assert_eq!(actor.id, USER_EXTERNAL_AUTHN.id);
+        assert_eq!(actor.actor_id(), USER_EXTERNAL_AUTHN.id);
 
         let authn = Context::internal_db_init();
         let actor = authn.actor().unwrap();
-        assert_eq!(actor.id, USER_DB_INIT.id);
+        assert_eq!(actor.actor_id(), USER_DB_INIT.id);
 
         let authn = Context::internal_saga_recovery();
         let actor = authn.actor().unwrap();
-        assert_eq!(actor.id, USER_SAGA_RECOVERY.id);
+        assert_eq!(actor.actor_id(), USER_SAGA_RECOVERY.id);
 
         let authn = Context::internal_api();
         let actor = authn.actor().unwrap();
-        assert_eq!(actor.id, USER_INTERNAL_API.id);
+        assert_eq!(actor.actor_id(), USER_INTERNAL_API.id);
     }
 }
 
