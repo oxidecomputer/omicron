@@ -132,19 +132,20 @@ pub async fn load_roles_for_resource(
     roleset: &mut RoleSet,
 ) -> Result<(), Error> {
     // If the user is authenticated ...
-    if let Some(actor_id) = authn.actor() {
+    if let Some(actor) = authn.actor() {
         // ... then fetch all the roles for this user that are associated with
         // this resource.
         trace!(opctx.log, "loading roles";
-            "actor_id" => actor_id.id.to_string(),
+            "actor" => ?actor,
             "resource_type" => ?resource_type,
             "resource_id" => resource_id.to_string(),
         );
 
         let roles = datastore
-            .role_asgn_builtin_list_for(
+            .role_asgn_list_for(
                 opctx,
-                actor_id.id,
+                actor.actor_type(),
+                actor.actor_id(),
                 resource_type,
                 resource_id,
             )

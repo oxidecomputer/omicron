@@ -296,7 +296,7 @@ pub struct SessionUser {
 
 impl From<authn::Actor> for SessionUser {
     fn from(actor: authn::Actor) -> Self {
-        Self { id: actor.id }
+        Self { id: actor.actor_id() }
     }
 }
 
@@ -330,7 +330,7 @@ pub struct RoleAssignment {
 impl From<model::RoleAssignment> for RoleAssignment {
     fn from(role_asgn: model::RoleAssignment) -> Self {
         Self {
-            user_id: role_asgn.user_builtin_id,
+            user_id: role_asgn.actor_id,
             resource_type: role_asgn.resource_type,
             resource_id: role_asgn.resource_id,
             role_name: role_asgn.role_name,

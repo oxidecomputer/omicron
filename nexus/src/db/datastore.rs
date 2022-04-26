@@ -58,6 +58,7 @@ use crate::db::{
 use crate::external_api::params;
 use async_bb8_diesel::{AsyncConnection, AsyncRunQueryDsl, ConnectionManager};
 use chrono::Utc;
+use db::model::ActorType;
 use diesel::pg::Pg;
 use diesel::prelude::*;
 use diesel::query_builder::{QueryFragment, QueryId};
@@ -2439,10 +2440,12 @@ impl DataStore {
 
     /// Return the built-in roles that the given built-in user has for the given
     /// resource
-    pub async fn role_asgn_builtin_list_for(
+    // XXX-dap rename
+    pub async fn role_asgn_list_for(
         &self,
         opctx: &OpContext,
-        user_builtin_id: Uuid,
+        actor_type: ActorType,
+        actor_id: Uuid,
         resource_type: ResourceType,
         resource_id: Uuid,
     ) -> Result<Vec<RoleAssignment>, Error> {
@@ -2451,19 +2454,20 @@ impl DataStore {
         // There is no resource-specific authorization check because all
         // authenticated users need to be able to list their own roles --
         // otherwise we can't do any authorization checks.
+        // TODO-security rethink this -- how do we know the user is looking up
+        // their own roles?  Maybe this should use an internal authz context.
 
         // TODO-scalability TODO-security This needs to be paginated.  It's not
         // exposed via an external API right now but someone could still put us
         // into some hurt by assigning loads of roles to someone and having that
         // person attempt to access anything.
         dsl::role_assignment
-            .filter(dsl::user_builtin_id.eq(user_builtin_id))
+            .filter(dsl::actor_type.eq(actor_type))
+            .filter(dsl::actor_id.eq(actor_id))
             .filter(dsl::resource_type.eq(resource_type.to_string()))
             .filter(dsl::resource_id.eq(resource_id))
             .select(RoleAssignment::as_select())
-            .load_async::<RoleAssignment>(
-                self.pool_authorized(opctx).await?,
-            )
+            .load_async::<RoleAssignment>(self.pool_authorized(opctx).await?)
             .await
             .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
     }
@@ -2858,16 +2862,14 @@ impl DataStore {
         {
             use db::schema::role_assignment::dsl;
             paginated_multicolumn(
-                dsl::role_assignment_builtin,
-                (dsl::role_name, dsl::user_builtin_id),
+                dsl::role_assignment,
+                (dsl::role_name, dsl::actor_id),
                 pagparams,
             )
             .filter(dsl::resource_type.eq(resource_type.to_string()))
             .filter(dsl::resource_id.eq(resource_id))
             .select(RoleAssignment::as_select())
-            .load_async::<RoleAssignment>(
-                self.pool_authorized(opctx).await?,
-            )
+            .load_async::<RoleAssignment>(self.pool_authorized(opctx).await?)
             .await
             .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
         } else {

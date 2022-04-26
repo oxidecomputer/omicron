@@ -107,8 +107,10 @@ where
             }
         };
 
-        let actor =
-            Actor { id: session.silo_user_id(), silo_id: session.silo_id() };
+        let actor = Actor::SiloUser {
+            silo_user_id: session.silo_user_id(),
+            silo_id: session.silo_id(),
+        };
 
         // if the session has gone unused for longer than idle_timeout, it is
         // expired

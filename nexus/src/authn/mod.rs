@@ -37,6 +37,7 @@ pub use crate::db::fixed_data::user_builtin::USER_TEST_UNPRIVILEGED;
 use crate::db::model::ConsoleSession;
 
 use crate::authz;
+use crate::db;
 use omicron_common::api::external::LookupType;
 use serde::Deserialize;
 use serde::Serialize;
@@ -85,11 +86,8 @@ impl Context {
         &self,
     ) -> Result<authz::Silo, omicron_common::api::external::Error> {
         self.actor_required().map(|actor| {
-            authz::Silo::new(
-                authz::FLEET,
-                actor.silo_id,
-                LookupType::ById(actor.silo_id),
-            )
+            let silo_id = actor.silo_id();
+            authz::Silo::new(authz::FLEET, silo_id, LookupType::ById(silo_id))
         })
     }
 
@@ -107,7 +105,7 @@ impl Context {
 
     /// Returns an authenticated context for handling internal API contexts
     pub fn internal_api() -> Context {
-        Context::context_for_actor(
+        Context::context_for_builtin_user(
             USER_INTERNAL_API.id,
             USER_INTERNAL_API.silo_id,
         )
@@ -115,7 +113,7 @@ impl Context {
 
     /// Returns an authenticated context for saga recovery
     pub fn internal_saga_recovery() -> Context {
-        Context::context_for_actor(
+        Context::context_for_builtin_user(
             USER_SAGA_RECOVERY.id,
             USER_SAGA_RECOVERY.silo_id,
         )
@@ -123,7 +121,7 @@ impl Context {
 
     /// Returns an authenticated context for use by internal resource allocation
     pub fn internal_read() -> Context {
-        Context::context_for_actor(
+        Context::context_for_builtin_user(
             USER_INTERNAL_READ.id,
             USER_INTERNAL_READ.silo_id,
         )
@@ -132,7 +130,7 @@ impl Context {
     /// Returns an authenticated context for use for authenticating external
     /// requests
     pub fn external_authn() -> Context {
-        Context::context_for_actor(
+        Context::context_for_builtin_user(
             USER_EXTERNAL_AUTHN.id,
             USER_EXTERNAL_AUTHN.silo_id,
         )
@@ -141,13 +139,16 @@ impl Context {
     /// Returns an authenticated context for Nexus-startup database
     /// initialization
     pub fn internal_db_init() -> Context {
-        Context::context_for_actor(USER_DB_INIT.id, USER_DB_INIT.silo_id)
+        Context::context_for_builtin_user(USER_DB_INIT.id, USER_DB_INIT.silo_id)
     }
 
-    fn context_for_actor(actor_id: Uuid, silo_id: Uuid) -> Context {
+    fn context_for_builtin_user(
+        user_builtin_id: Uuid,
+        silo_id: Uuid,
+    ) -> Context {
         Context {
             kind: Kind::Authenticated(Details {
-                actor: Actor { id: actor_id, silo_id: silo_id },
+                actor: Actor::UserBuiltin { user_builtin_id, silo_id },
             }),
             schemes_tried: Vec::new(),
         }
@@ -155,14 +156,14 @@ impl Context {
 
     /// Returns an authenticated context for a special testing user
     pub fn internal_test_user() -> Context {
-        Context::test_context_for_actor(USER_TEST_PRIVILEGED.id)
+        Context::test_context_for_builtin_user(USER_TEST_PRIVILEGED.id)
     }
 
     /// Returns an authenticated context for a specific user
     ///
     /// This is used for testing.
-    pub fn test_context_for_actor(actor_id: Uuid) -> Context {
-        Context::context_for_actor(
+    pub fn test_context_for_builtin_user(actor_id: Uuid) -> Context {
+        Context::context_for_builtin_user(
             actor_id,
             *crate::db::fixed_data::silo::SILO_ID,
         )
@@ -236,9 +237,33 @@ pub struct Details {
 
 /// Who is performing an operation
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
-pub struct Actor {
-    pub id: Uuid, // silo user id
-    pub silo_id: Uuid,
+pub enum Actor {
+    UserBuiltin { user_builtin_id: Uuid, silo_id: Uuid },
+    SiloUser { silo_user_id: Uuid, silo_id: Uuid },
+}
+
+impl Actor {
+    pub fn actor_type(&self) -> db::model::ActorType {
+        match self {
+            Actor::UserBuiltin { .. } => db::model::ActorType::UserBuiltin,
+            Actor::SiloUser { .. } => db::model::ActorType::SiloUser,
+        }
+    }
+
+    pub fn actor_id(&self) -> Uuid {
+        match self {
+            Actor::UserBuiltin { user_builtin_id, .. } => *user_builtin_id,
+            Actor::SiloUser { silo_user_id, .. } => *silo_user_id,
+        }
+    }
+
+    // XXX-dap should internal users have silos?
+    pub fn silo_id(&self) -> Uuid {
+        match self {
+            Actor::UserBuiltin { silo_id, .. } => *silo_id,
+            Actor::SiloUser { silo_id, .. } => *silo_id,
+        }
+    }
 }
 
 /// A console session with the silo id of the authenticated user

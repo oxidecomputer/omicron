@@ -2957,7 +2957,7 @@ async fn sshkeys_get(
         let page_params =
             data_page_params_for(&rqctx, &query)?.map_name(Name::ref_cast);
         let ssh_keys = nexus
-            .ssh_keys_list(&opctx, actor.id, &page_params)
+            .ssh_keys_list(&opctx, actor.actor_id(), &page_params)
             .await?
             .into_iter()
             .map(SshKey::from)
@@ -2983,7 +2983,7 @@ async fn sshkeys_post(
         let opctx = OpContext::for_external_api(&rqctx).await?;
         let &actor = opctx.authn.actor_required()?;
         let ssh_key = nexus
-            .ssh_key_create(&opctx, actor.id, new_key.into_inner())
+            .ssh_key_create(&opctx, actor.actor_id(), new_key.into_inner())
             .await?;
         Ok(HttpResponseCreated(ssh_key.into()))
     };
@@ -3014,7 +3014,7 @@ async fn sshkeys_get_key(
         let opctx = OpContext::for_external_api(&rqctx).await?;
         let &actor = opctx.authn.actor_required()?;
         let ssh_key =
-            nexus.ssh_key_fetch(&opctx, actor.id, ssh_key_name).await?;
+            nexus.ssh_key_fetch(&opctx, actor.actor_id(), ssh_key_name).await?;
         Ok(HttpResponseOk(ssh_key.into()))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
@@ -3037,7 +3037,7 @@ async fn sshkeys_delete_key(
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
         let &actor = opctx.authn.actor_required()?;
-        nexus.ssh_key_delete(&opctx, actor.id, ssh_key_name).await?;
+        nexus.ssh_key_delete(&opctx, actor.actor_id(), ssh_key_name).await?;
         Ok(HttpResponseDeleted())
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
