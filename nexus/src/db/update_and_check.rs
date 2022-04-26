@@ -75,13 +75,18 @@ where
 impl<US, K> UpdateAndCheck<US, K> for US
 where
     US: UpdateStatementExt,
+    US::Table: HasTable<Table = US::Table>
+        + Table
+        + diesel::query_dsl::methods::FindDsl<K>,
+    <US::Table as diesel::query_dsl::methods::FindDsl<K>>::Output: QueryFragment<Pg> + Send + 'static,
+    K: 'static + Copy + Send,
 {
     fn check_if_exists<Q>(self, key: K) -> UpdateAndQueryStatement<US, K, Q> {
-        let find_subquery =  US::Table::table().find(key);
+        let find_subquery = Box::new(US::Table::table().find(key));
         UpdateAndQueryStatement {
             update_statement: self.statement(),
             find_subquery,
-            key,
+            key_type: PhantomData,
             query_type: PhantomData,
         }
     }
@@ -95,8 +100,8 @@ where
     US: UpdateStatementExt,
 {
     update_statement: UpdateStatement<US::Table, US::WhereClause, US::Changeset>,
-    find_subquery: i32,
-    key: K,
+    find_subquery: Box<dyn QueryFragment<Pg> + Send>,
+    key_type: PhantomData<K>,
     query_type: PhantomData<Q>,
 }
 
@@ -165,18 +170,6 @@ where
 
         Ok(UpdateAndQueryResult { status, found })
     }
-
-    /*
-    fn lookup_by_pk_subquery(&self) -> impl QueryFragment<Pg>
-    where
-        US::Table: HasTable<Table = US::Table>
-            + Table
-            + diesel::query_dsl::methods::FindDsl<K>,
-        <US::Table as diesel::query_dsl::methods::FindDsl<K>>::Output: QueryFragment<Pg>,
-    {
-        diesel::QueryDsl::find(US::Table::table(), self.key)
-    }
-    */
 }
 
 type SelectableSqlType<Q> =
@@ -221,21 +214,14 @@ where
 impl<US, K, Q> QueryFragment<Pg> for UpdateAndQueryStatement<US, K, Q>
 where
     US: UpdateStatementExt,
-    US::Table: HasTable<Table = US::Table>
-        + Table
-        + diesel::query_dsl::methods::FindDsl<K>,
-    K: 'static + Copy + Send,
-    Find<US::Table, K>: QueryFragment<Pg> + Send,
+    US::Table: HasTable<Table = US::Table> + Table,
     PrimaryKey<US>: diesel::Column,
     UpdateStatement<US::Table, US::WhereClause, US::Changeset>:
         QueryFragment<Pg>,
 {
     fn walk_ast<'b>(&'b self, mut out: AstPass<'_, 'b, Pg>) -> QueryResult<()> {
         out.push_sql("WITH found AS (");
-        let subquery = US::Table::table().find(self.key);
-        // XXX XXX XXX lifetime issues
-//        let subquery = self.lookup_by_pk_subquery();
-//        QueryFragment::walk_ast(&subquery, out.reborrow())?;
+        self.find_subquery.walk_ast(out.reborrow())?;
         out.push_sql("), updated AS (");
         self.update_statement.walk_ast(out.reborrow())?;
         // TODO: Only need primary? Or would we actually want
