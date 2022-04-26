@@ -20,7 +20,7 @@ use std::marker::PhantomData;
 /// allows referencing generics with names (and extending usage
 /// without re-stating those generic parameters everywhere).
 pub trait UpdateStatementExt {
-    type Table;
+    type Table: QuerySource;
     type WhereClause;
     type Changeset;
 
@@ -29,7 +29,7 @@ pub trait UpdateStatementExt {
     ) -> UpdateStatement<Self::Table, Self::WhereClause, Self::Changeset>;
 }
 
-impl<T, U, V> UpdateStatementExt for UpdateStatement<T, U, V> {
+impl<T: QuerySource, U, V> UpdateStatementExt for UpdateStatement<T, U, V> {
     type Table = T;
     type WhereClause = U;
     type Changeset = V;
@@ -212,7 +212,7 @@ where
     UpdateStatement<US::Table, US::WhereClause, US::Changeset>:
         QueryFragment<Pg>,
 {
-    fn walk_ast(&self, mut out: AstPass<Pg>) -> QueryResult<()> {
+    fn walk_ast<'b>(&'b self, mut out: AstPass<'_, 'b, Pg>) -> QueryResult<()> {
         out.push_sql("WITH found AS (");
         let subquery = US::Table::table().find(self.key);
         subquery.walk_ast(out.reborrow())?;

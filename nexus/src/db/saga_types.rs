@@ -17,9 +17,11 @@ use diesel::backend::{Backend, RawValue};
 use diesel::deserialize::{self, FromSql};
 use diesel::serialize::{self, ToSql};
 use diesel::sql_types;
+use diesel::pg::Pg;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::Generation;
 use std::convert::TryFrom;
+use std::io::Write;
 use std::sync::Arc;
 use uuid::Uuid;
 
@@ -158,13 +160,10 @@ pub struct SagaCachedState(pub steno::SagaCachedState);
 
 NewtypeFrom! { () pub struct SagaCachedState(steno::SagaCachedState); }
 
-impl<DB> ToSql<SagaCachedStateEnum, DB> for SagaCachedState
-where
-    DB: Backend,
-{
+impl ToSql<SagaCachedStateEnum, Pg> for SagaCachedState {
     fn to_sql<'a>(
         &'a self,
-        out: &mut serialize::Output<'a, '_, DB>,
+        out: &mut serialize::Output<'a, '_, Pg>,
     ) -> serialize::Result {
         use steno::SagaCachedState;
         out.write_all(match self.0 {
@@ -176,12 +175,9 @@ where
     }
 }
 
-impl<DB> FromSql<SagaCachedStateEnum, DB> for SagaCachedState
-where
-    DB: Backend, // + for<'a> diesel::backend::BinaryRawValue<'a>,
-{
-    fn from_sql(bytes: RawValue<DB>) -> deserialize::Result<Self> {
-        let bytes = DB::as_bytes(bytes);
+impl FromSql<SagaCachedStateEnum, Pg> for SagaCachedState {
+    fn from_sql(bytes: RawValue<Pg>) -> deserialize::Result<Self> {
+        let bytes = RawValue::<Pg>::as_bytes(&bytes);
         let s = std::str::from_utf8(bytes)?;
         let state = steno::SagaCachedState::try_from(s)?;
         Ok(Self(state))

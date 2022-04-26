@@ -21,7 +21,8 @@ use omicron_common::api::external::DataPageParams;
 type TableSqlType<T> = <T as AsQuery>::SqlType;
 
 // Shorthand alias for the type made from "table.into_boxed()".
-type BoxedQuery<T> = IntoBoxed<'static, TableSqlType<T>, Pg>;
+// type BoxedQuery<T> = diesel::internal::table_macro::BoxedSelectStatement<'static, TableSqlType<T>, T, Pg>;
+type BoxedQuery<T> = diesel::helper_types::IntoBoxed<'static, T, Pg>;
 
 /// Uses `pagparams` to list a subset of rows in `table`, ordered by `column`.
 pub fn paginated<T, C, M>(
@@ -32,7 +33,7 @@ pub fn paginated<T, C, M>(
 where
     // T is a table which can create a BoxedQuery.
     T: diesel::Table,
-    T: query_methods::BoxedDsl<'static, Pg, Output = BoxedQuery<T>>,
+    T: query_methods::BoxedDsl<'static, Pg>, // , Output = TableSqlType<T>>,
     // C is a column which appears in T.
     C: 'static + Column + Copy + ExpressionMethods + AppearsOnTable<T>,
     // Required to compare the column with the marker type.
@@ -79,7 +80,7 @@ pub fn paginated_multicolumn<T, C1, C2, M1, M2>(
 where
     // T is a table which can create a BoxedQuery.
     T: diesel::Table,
-    T: query_methods::BoxedDsl<'static, Pg, Output = BoxedQuery<T>>,
+    T: query_methods::BoxedDsl<'static, Pg, Output = TableSqlType<T>>,
     // C1 & C2 are columns which appear in T.
     C1: 'static + Column + Copy + ExpressionMethods + AppearsOnTable<T>,
     C2: 'static + Column + Copy + ExpressionMethods + AppearsOnTable<T>,

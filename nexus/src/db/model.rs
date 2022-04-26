@@ -25,6 +25,7 @@ use diesel::backend::{Backend, RawValue};
 use diesel::deserialize::{self, FromSql};
 use diesel::serialize::{self, IsNull, ToSql};
 use diesel::sql_types;
+use diesel::pg::Pg;
 use ipnetwork::IpNetwork;
 use omicron_common::api::external;
 use omicron_common::api::internal;
@@ -35,6 +36,7 @@ use ref_cast::RefCast;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::convert::TryFrom;
+use std::io::Write;
 use std::net::IpAddr;
 use std::net::Ipv4Addr;
 use std::net::Ipv6Addr;
@@ -72,13 +74,10 @@ macro_rules! impl_enum_wrapper {
         $(#[$model_meta])*
         pub struct $model_type(pub $ext_type);
 
-        impl<DB> ToSql<$diesel_type, DB> for $model_type
-        where
-            DB: Backend,
-        {
+        impl ToSql<$diesel_type, Pg> for $model_type {
             fn to_sql<'a>(
                 &'a self,
-                out: &mut serialize::Output<'a, '_, DB>,
+                out: &mut serialize::Output<'a, '_, Pg>,
             ) -> serialize::Result {
                 match self.0 {
                     $(
@@ -91,12 +90,9 @@ macro_rules! impl_enum_wrapper {
             }
         }
 
-        impl<DB> FromSql<$diesel_type, DB> for $model_type
-        where
-            DB: Backend, // + for<'a> BinaryRawValue<'a>,
-        {
-            fn from_sql(bytes: RawValue<DB>) -> deserialize::Result<Self> {
-                match DB::as_bytes(bytes) {
+        impl FromSql<$diesel_type, Pg> for $model_type {
+            fn from_sql(bytes: RawValue<Pg>) -> deserialize::Result<Self> {
+                match RawValue::<Pg>::as_bytes(&bytes) {
                     $(
                     $sql_value => {
                         Ok($model_type(<$ext_type>::$enum_item))
@@ -136,13 +132,10 @@ macro_rules! impl_enum_type {
             )*
         }
 
-        impl<DB> ToSql<$diesel_type, DB> for $model_type
-        where
-            DB: Backend,
-        {
+        impl ToSql<$diesel_type, Pg> for $model_type {
             fn to_sql<'a>(
                 &'a self,
-                out: &mut serialize::Output<'a, '_, DB>,
+                out: &mut serialize::Output<'a, '_, Pg>,
             ) -> serialize::Result {
                 match self {
                     $(
@@ -155,12 +148,9 @@ macro_rules! impl_enum_type {
             }
         }
 
-        impl<DB> FromSql<$diesel_type, DB> for $model_type
-        where
-            DB: Backend, // + for<'a> BinaryRawValue<'a>,
-        {
-            fn from_sql(bytes: RawValue<DB>) -> deserialize::Result<Self> {
-                match DB::as_bytes(bytes) {
+        impl FromSql<$diesel_type, Pg> for $model_type {
+            fn from_sql(bytes: RawValue<Pg>) -> deserialize::Result<Self> {
+                match RawValue::<Pg>::as_bytes(&bytes) {
                     $(
                     $sql_value => {
                         Ok($model_type::$enum_item)

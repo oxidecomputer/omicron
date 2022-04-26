@@ -113,6 +113,7 @@ pub trait DatastoreCollection<ResourceType> {
         ): TypesAreSame,
         Self: Sized,
         ResourceTable<ResourceType, Self>: Copy + Debug,
+        <ResourceTable<ResourceType, Self> as QuerySource>::FromClause: Copy + Debug,
         ResourceType: Selectable<Pg>,
     {
         InsertIntoCollectionStatement {
@@ -160,6 +161,7 @@ impl<ResourceType, ISR, C> QueryId
 where
     C: DatastoreCollection<ResourceType>,
     ResourceTable<ResourceType, C>: Copy + Debug,
+    <ResourceTable<ResourceType, C> as QuerySource>::FromClause: Copy + Debug,
 {
     type QueryId = ();
     const HAS_STATIC_QUERY_ID: bool = false;
@@ -195,6 +197,7 @@ where
     C: 'static + DatastoreCollection<ResourceType> + Send,
     CollectionId<ResourceType, C>: 'static + PartialEq + Send,
     ResourceTable<ResourceType, C>: 'static + Table + Send + Copy + Debug,
+    <ResourceTable<ResourceType, C> as QuerySource>::FromClause: Copy + Debug,
     ISR: 'static + Send,
     InsertIntoCollectionStatement<ResourceType, ISR, C>: Send,
 {
@@ -321,6 +324,7 @@ where
     ResourceType: Selectable<Pg>,
     C: DatastoreCollection<ResourceType>,
     ResourceTable<ResourceType, C>: Copy + Debug,
+    <ResourceTable<ResourceType, C> as QuerySource>::FromClause: Copy + Debug,
 {
     type SqlType = SelectableSqlType<ResourceType>;
 }
@@ -329,6 +333,7 @@ impl<ResourceType, ISR, C> RunQueryDsl<DbConnection>
     for InsertIntoCollectionStatement<ResourceType, ISR, C>
 where
     ResourceTable<ResourceType, C>: Table + Copy + Debug,
+    <ResourceTable<ResourceType, C> as QuerySource>::FromClause: Copy + Debug,
     C: DatastoreCollection<ResourceType>,
 {
 }
@@ -341,7 +346,10 @@ type SerializedCollectionPrimaryKey<ResourceType, C> =
     <CollectionPrimaryKey<ResourceType, C> as diesel::Expression>::SqlType;
 
 type TableSqlType<T> = <T as AsQuery>::SqlType;
-type BoxedQuery<T> = IntoBoxed<'static, TableSqlType<T>, Pg>;
+
+// type BoxedQuery<T> = IntoBoxed<'static, TableSqlType<T>, Pg>;
+// type BoxedQuery<T> = diesel::internal::table_macro::BoxedSelectStatement<'static, TableSqlType<T>, T, Pg>;
+type BoxedQuery<T> = diesel::helper_types::IntoBoxed<'static, T, Pg>;
 
 /// This implementation uses the following CTE:
 ///
@@ -387,13 +395,30 @@ where
     ResourceType: Selectable<Pg>,
     <ResourceType as Selectable<Pg>>::SelectExpression: QueryFragment<Pg>,
     C: DatastoreCollection<ResourceType>,
+
+    /* ... */
+
+    ResourceTable<ResourceType, C>: Copy + Debug,
+    <ResourceTable<ResourceType, C> as QuerySource>::FromClause: Copy + Debug,
+{
+    fn walk_ast<'b>(&self, mut out: AstPass<'_, 'b, Pg>) -> QueryResult<()> {
+        todo!();
+    }
+}
+/*
+impl<ResourceType, ISR, C> QueryFragment<Pg>
+    for InsertIntoCollectionStatement<ResourceType, ISR, C>
+where
+    ResourceType: Selectable<Pg>,
+    <ResourceType as Selectable<Pg>>::SelectExpression: QueryFragment<Pg>,
+    C: DatastoreCollection<ResourceType>,
     CollectionTable<ResourceType, C>: HasTable<Table = CollectionTable<ResourceType, C>>
         + Table
         + IntoUpdateTarget
         + query_methods::BoxedDsl<
             'static,
             Pg,
-            Output = BoxedQuery<CollectionTable<ResourceType, C>>,
+            Output = TableSqlType<CollectionTable<ResourceType, C>>,
         >,
     ResourceTable<ResourceType, C>: Copy + Debug,
     <CollectionPrimaryKey<ResourceType, C> as Expression>::SqlType: SingleValue,
@@ -425,7 +450,7 @@ where
     >,
     <ResourceTable<ResourceType, C> as Table>::AllColumns: QueryFragment<Pg>,
 {
-    fn walk_ast(&self, mut out: AstPass<Pg>) -> QueryResult<()> {
+    fn walk_ast<'b>(&self, mut out: AstPass<'_, 'b, Pg>) -> QueryResult<()> {
         let subquery = CollectionTable::<ResourceType, C>::table()
             .into_boxed()
             .filter(
@@ -478,6 +503,7 @@ where
         Ok(())
     }
 }
+*/
 
 #[cfg(test)]
 mod test {

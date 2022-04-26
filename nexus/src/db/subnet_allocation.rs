@@ -145,10 +145,10 @@ impl SubnetError {
 /// The input may be either an IPv4 or IPv6 subnet, and the corresponding column
 /// is compared against. Note that the exact input IP range is returned on
 /// purpose.
-fn push_select_overlapping_ip_range(
-    mut out: AstPass<Pg>,
-    vpc_id: &Uuid,
-    ip: &ipnetwork::IpNetwork,
+fn push_select_overlapping_ip_range<'a>(
+    mut out: AstPass<'_, 'a, Pg>,
+    vpc_id: &'a Uuid,
+    ip: &'a ipnetwork::IpNetwork,
 ) -> diesel::QueryResult<()> {
     use crate::db::schema::vpc_subnet::dsl;
     out.push_sql("SELECT ");
@@ -189,10 +189,10 @@ fn push_select_overlapping_ip_range(
 /// the first expression otherwise. That is, this returns NULL if there exists
 /// an overlapping IP range already in the VPC Subnet table, and the requested
 /// IP range if not.
-fn push_null_if_overlapping_ip_range(
-    mut out: AstPass<Pg>,
-    vpc_id: &Uuid,
-    ip: &ipnetwork::IpNetwork,
+fn push_null_if_overlapping_ip_range<'a>(
+    mut out: AstPass<'_, 'a, Pg>,
+    vpc_id: &'a Uuid,
+    ip: &'a ipnetwork::IpNetwork,
 ) -> diesel::QueryResult<()> {
     out.push_sql("SELECT NULLIF(");
     out.push_bind_param::<sql_types::Inet, ipnetwork::IpNetwork>(ip)?;
@@ -258,7 +258,7 @@ impl QueryId for FilterConflictingVpcSubnetRangesQuery {
 }
 
 impl QueryFragment<Pg> for FilterConflictingVpcSubnetRangesQuery {
-    fn walk_ast(&self, mut out: AstPass<Pg>) -> diesel::QueryResult<()> {
+    fn walk_ast<'a>(&'a self, mut out: AstPass<'_, 'a, Pg>) -> diesel::QueryResult<()> {
         use db::schema::vpc_subnet::dsl;
 
         // Create the base `candidate` from values provided that need no
@@ -358,7 +358,7 @@ impl diesel::insertable::CanInsertInSingleQuery<Pg>
 }
 
 impl QueryFragment<Pg> for FilterConflictingVpcSubnetRangesQueryValues {
-    fn walk_ast(&self, mut out: AstPass<Pg>) -> diesel::QueryResult<()> {
+    fn walk_ast<'a>(&'a self, mut out: AstPass<'_, 'a, Pg>) -> diesel::QueryResult<()> {
         use db::schema::vpc_subnet::dsl;
         out.push_sql("(");
         out.push_identifier(dsl::id::NAME)?;
@@ -665,10 +665,10 @@ fn decode_database_error(
 /// Note that the `COALESCE` expression is there to handle the case where there
 /// _is_ no record with the given `instance_id`. In that case, the `vpc_id`
 /// provided is returned directly, so everything works as if the IDs matched.
-fn push_ensure_unique_vpc_expression(
-    mut out: AstPass<Pg>,
-    vpc_id: &Uuid,
-    instance_id: &Uuid,
+fn push_ensure_unique_vpc_expression<'a>(
+    mut out: AstPass<'_, 'a, Pg>,
+    vpc_id: &'a Uuid,
+    instance_id: &'a Uuid,
 ) -> diesel::QueryResult<()> {
     use db::schema::network_interface::dsl;
 
@@ -741,10 +741,10 @@ fn push_ensure_unique_vpc_expression(
 /// the picture. We'd need a more complex data structure to manage the ranges of
 /// available address for each subnet, especially to manage coalescing those
 /// ranges as addresses are released back to the pool.
-fn push_select_next_available_ip_subquery(
-    mut out: AstPass<Pg>,
-    subnet: &IpNetwork,
-    subnet_id: &Uuid,
+fn push_select_next_available_ip_subquery<'a>(
+    mut out: AstPass<'_, 'a, Pg>,
+    subnet: &'a IpNetwork,
+    subnet_id: &'a Uuid,
 ) -> diesel::QueryResult<()> {
     use db::schema::network_interface::dsl;
     let last_address_offset = generate_last_address_offset(&subnet);
@@ -858,10 +858,10 @@ fn push_select_next_available_ip_subquery(
 /// portion of the query might need to be placed behind a conditional evaluation
 /// expression, such as `IF` or `COALESCE`, which only runs the subquery when
 /// the instance-validation check passes.
-fn push_interface_allocation_subquery(
-    mut out: AstPass<Pg>,
-    interface: &IncompleteNetworkInterface,
-    now: &DateTime<Utc>,
+fn push_interface_allocation_subquery<'a>(
+    mut out: AstPass<'_, 'a, Pg>,
+    interface: &'a IncompleteNetworkInterface,
+    now: &'a DateTime<Utc>,
 ) -> diesel::QueryResult<()> {
     use db::schema::network_interface::dsl;
     // Push the CTE that ensures that any other interface with the same
@@ -1007,9 +1007,9 @@ fn push_interface_allocation_subquery(
 /// slot number is 7), this query will return 8. However, this violates the
 /// check on the slot column being between `[0, 8)`. This check violation is
 /// used to detect the case when there are no slots available.
-fn push_select_next_available_nic_slot_query(
-    mut out: AstPass<Pg>,
-    instance_id: &Uuid,
+fn push_select_next_available_nic_slot_query<'a>(
+    mut out: AstPass<'_, 'a, Pg>,
+    instance_id: &'a Uuid,
 ) -> QueryResult<()> {
     use db::schema::network_interface::dsl;
     out.push_sql(&format!(
@@ -1121,9 +1121,9 @@ impl Insertable<db::schema::network_interface::table>
 }
 
 impl QueryFragment<Pg> for InsertNetworkInterfaceQuery {
-    fn walk_ast(&self, mut out: AstPass<Pg>) -> diesel::QueryResult<()> {
+    fn walk_ast<'a>(&'a self, mut out: AstPass<'_, 'a, Pg>) -> diesel::QueryResult<()> {
         use db::schema::network_interface::dsl;
-        let push_columns = |mut out: AstPass<Pg>| -> diesel::QueryResult<()> {
+        let push_columns = |mut out: AstPass<'_, 'a, Pg>| -> diesel::QueryResult<()> {
             out.push_identifier(dsl::id::NAME)?;
             out.push_sql(", ");
             out.push_identifier(dsl::name::NAME)?;
@@ -1199,7 +1199,7 @@ impl diesel::insertable::CanInsertInSingleQuery<Pg>
 }
 
 impl QueryFragment<Pg> for InsertNetworkInterfaceQueryValues {
-    fn walk_ast(&self, mut out: AstPass<Pg>) -> diesel::QueryResult<()> {
+    fn walk_ast<'a>(&'a self, mut out: AstPass<'_, 'a, Pg>) -> diesel::QueryResult<()> {
         use db::schema::network_interface::dsl;
         out.push_sql("(");
         out.push_identifier(dsl::id::NAME)?;
