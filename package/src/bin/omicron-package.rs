@@ -9,11 +9,9 @@ use futures::stream::{self, StreamExt, TryStreamExt};
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 use omicron_package::{parse, BuildCommand, DeployCommand};
 use omicron_sled_agent::zone;
-use omicron_zone_package::package::{Package, Progress};
+use omicron_zone_package::package::Package;
 use rayon::prelude::*;
 use ring::digest::{Context as DigestContext, Digest, SHA256};
-use serde_derive::Deserialize;
-use std::collections::BTreeMap;
 use std::env;
 use std::fs::create_dir_all;
 use std::path::{Path, PathBuf};
@@ -22,40 +20,8 @@ use structopt::StructOpt;
 use tokio::io::{AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::process::Command;
 
-/// Describes the origin of an externally-built package.
-#[derive(Deserialize, Debug)]
-#[serde(tag = "type", rename_all = "lowercase")]
-enum ExternalPackageSource {
-    /// Downloads the package from the following URL:
-    ///
-    /// <https://buildomat.eng.oxide.computer/public/file/oxidecomputer/REPO/image/COMMIT/PACKAGE>
-    Prebuilt { repo: String, commit: String, sha256: String },
-    /// Expects that a package will be manually built and placed into the output
-    /// directory.
-    Manual,
-}
-
-/// Describes a package which originates from outside this repo.
-#[derive(Deserialize, Debug)]
-struct ExternalPackage {
-    #[serde(flatten)]
-    package: Package,
-
-    source: ExternalPackageSource,
-}
-
-/// Describes the configuration for a set of packages.
-#[derive(Deserialize, Debug)]
-struct Config {
-    /// Packages to be built and installed.
-    #[serde(default, rename = "package")]
-    packages: BTreeMap<String, Package>,
-
-    /// Packages to be installed, but which have been created outside this
-    /// repository.
-    #[serde(default, rename = "external_package")]
-    external_packages: BTreeMap<String, ExternalPackage>,
-}
+use omicron_package::{Config, ExternalPackage, ExternalPackageSource};
+use omicron_zone_package::package::Progress;
 
 /// All packaging subcommands.
 #[derive(Debug, StructOpt)]
