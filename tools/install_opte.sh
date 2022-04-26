@@ -6,6 +6,12 @@ set -e
 set -u
 set -x
 
+MARKER=/etc/opt/oxide/NO_INSTALL
+if [[ -f "$MARKER" ]]; then
+    echo "This system has the marker file $MARKER, aborting." >&2
+    exit 1
+fi
+
 if [[ "$(uname)" != "SunOS" ]]; then
     echo "This script is intended for Helios only"
 fi
