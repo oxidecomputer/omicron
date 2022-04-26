@@ -1054,14 +1054,22 @@ CREATE TABLE omicron.public.role_assignment (
     actor_type omicron.public.actor_type NOT NULL,
 
     /*
-     * Only one assignment may be granted for a given actor on a given resource,
-     * so the primary key includes the user and resource information but not the
-     * role_name.
+     * The resource_id, actor_id, and role_name uniquely identify the role
+     * assignment.  We include the resource_type and actor_type as
+     * belt-and-suspenders, but there should only be one resource type for any
+     * resource id and one actor type for any actor id.
      *
-     * The primary key is organized by (resource_type, resource_id) first so
-     * that we can do paginated listings of role assignments for a resource.
+     * By organizing the primary key by resource id, then role name, then actor
+     * information, we can use it to generated paginated listings of role
+     * assignments for a resource, ordered by role name.  It's surprisingly
+     * load-bearing that "actor_type" appears last.  That's because when we list
+     * a page of role assignments for a resource sorted by role name and then
+     * actor id, every field _except_ actor_type is used in the query's filter
+     * or sort order.  If actor_type appeared before one of those fields,
+     * CockroachDB wouldn't necessarily know it could use the primary key index
+     * to efficiently serve the query.
      */
-    PRIMARY KEY(resource_type, resource_id, actor_type, actor_id)
+    PRIMARY KEY(resource_id, resource_type, role_name, actor_id, actor_type)
 );
 
 /*******************************************************************/

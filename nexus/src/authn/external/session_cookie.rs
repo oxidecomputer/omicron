@@ -107,8 +107,9 @@ where
             }
         };
 
-        let actor = Actor::SiloUser {
-            silo_user_id: session.silo_user_id(),
+        // XXX-dap This might be a built-in user
+        let actor = Actor::UserBuiltin {
+            user_builtin_id: session.silo_user_id(),
             silo_id: session.silo_id(),
         };
 
