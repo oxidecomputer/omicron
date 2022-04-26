@@ -378,7 +378,7 @@ fn generate_misc_helpers(config: &Config) -> TokenStream {
         ) -> authz::#resource_name {
             authz::#resource_name::new(
                 authz_parent.clone(),
-                db_row.id(),
+                db_row.id().clone(),
                 lookup_type
             )
         }

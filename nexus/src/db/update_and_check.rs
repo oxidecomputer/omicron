@@ -10,6 +10,7 @@ use diesel::associations::HasTable;
 use diesel::helper_types::*;
 use diesel::pg::Pg;
 use diesel::prelude::*;
+use diesel::QuerySource;
 use diesel::query_builder::*;
 use diesel::query_dsl::methods::LoadQuery;
 use diesel::query_source::Table;
@@ -29,7 +30,10 @@ pub trait UpdateStatementExt {
     ) -> UpdateStatement<Self::Table, Self::WhereClause, Self::Changeset>;
 }
 
-impl<T: QuerySource, U, V> UpdateStatementExt for UpdateStatement<T, U, V> {
+impl<T, U, V> UpdateStatementExt for UpdateStatement<T, U, V>
+where
+    T: QuerySource,
+{
     type Table = T;
     type WhereClause = U;
     type Changeset = V;
@@ -73,8 +77,10 @@ where
     US: UpdateStatementExt,
 {
     fn check_if_exists<Q>(self, key: K) -> UpdateAndQueryStatement<US, K, Q> {
+        let find_subquery =  US::Table::table().find(key);
         UpdateAndQueryStatement {
             update_statement: self.statement(),
+            find_subquery,
             key,
             query_type: PhantomData,
         }
@@ -83,14 +89,13 @@ where
 
 /// An UPDATE statement which can be combined (via a CTE)
 /// with other statements to also SELECT a row.
-#[derive(Debug, Clone)]
 #[must_use = "Queries must be executed"]
 pub struct UpdateAndQueryStatement<US, K, Q>
 where
     US: UpdateStatementExt,
 {
-    update_statement:
-        UpdateStatement<US::Table, US::WhereClause, US::Changeset>,
+    update_statement: UpdateStatement<US::Table, US::WhereClause, US::Changeset>,
+    find_subquery: i32,
     key: K,
     query_type: PhantomData<Q>,
 }
@@ -128,8 +133,9 @@ type SerializedPrimaryKey<US> = <PrimaryKey<US> as diesel::Expression>::SqlType;
 
 impl<US, K, Q> UpdateAndQueryStatement<US, K, Q>
 where
+    Self: Send,
     US: 'static + UpdateStatementExt,
-    K: 'static + PartialEq + Send,
+    K: 'static + Copy + PartialEq + Send,
     US::Table: 'static + Table + Send,
     US::WhereClause: 'static + Send,
     US::Changeset: 'static + Send,
@@ -159,6 +165,18 @@ where
 
         Ok(UpdateAndQueryResult { status, found })
     }
+
+    /*
+    fn lookup_by_pk_subquery(&self) -> impl QueryFragment<Pg>
+    where
+        US::Table: HasTable<Table = US::Table>
+            + Table
+            + diesel::query_dsl::methods::FindDsl<K>,
+        <US::Table as diesel::query_dsl::methods::FindDsl<K>>::Output: QueryFragment<Pg>,
+    {
+        diesel::QueryDsl::find(US::Table::table(), self.key)
+    }
+    */
 }
 
 type SelectableSqlType<Q> =
@@ -206,8 +224,8 @@ where
     US::Table: HasTable<Table = US::Table>
         + Table
         + diesel::query_dsl::methods::FindDsl<K>,
-    K: Copy,
-    Find<US::Table, K>: QueryFragment<Pg>,
+    K: 'static + Copy + Send,
+    Find<US::Table, K>: QueryFragment<Pg> + Send,
     PrimaryKey<US>: diesel::Column,
     UpdateStatement<US::Table, US::WhereClause, US::Changeset>:
         QueryFragment<Pg>,
@@ -215,7 +233,9 @@ where
     fn walk_ast<'b>(&'b self, mut out: AstPass<'_, 'b, Pg>) -> QueryResult<()> {
         out.push_sql("WITH found AS (");
         let subquery = US::Table::table().find(self.key);
-        subquery.walk_ast(out.reborrow())?;
+        // XXX XXX XXX lifetime issues
+//        let subquery = self.lookup_by_pk_subquery();
+//        QueryFragment::walk_ast(&subquery, out.reborrow())?;
         out.push_sql("), updated AS (");
         self.update_statement.walk_ast(out.reborrow())?;
         // TODO: Only need primary? Or would we actually want

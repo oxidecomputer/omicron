@@ -412,7 +412,7 @@ impl DataStore {
                     .iter()
                     .map(|dataset| {
                         Region::new(
-                            dataset.id(),
+                            *dataset.id(),
                             volume_id,
                             block_size.into(),
                             blocks_per_extent,
@@ -436,7 +436,7 @@ impl DataStore {
                 }
 
                 let dataset_ids: Vec<Uuid> =
-                    source_datasets.iter().map(|ds| ds.id()).collect();
+                    source_datasets.iter().map(|ds| *ds.id()).collect();
                 diesel::update(dataset_dsl::dataset)
                     .filter(dataset_dsl::id.eq_any(dataset_ids))
                     .set(
@@ -1675,7 +1675,7 @@ impl DataStore {
         Ok((
             authz::Vpc::new(
                 authz_project.clone(),
-                vpc.id(),
+                *vpc.id(),
                 LookupType::ByName(vpc.name().to_string()),
             ),
             vpc,
@@ -1897,7 +1897,7 @@ impl DataStore {
         subnet: VpcSubnet,
     ) -> Result<VpcSubnet, SubnetError> {
         use db::schema::vpc_subnet::dsl;
-        let values = FilterConflictingVpcSubnetRangesQuery(subnet.clone());
+        let values = FilterConflictingVpcSubnetRangesQuery::new(subnet.clone());
         diesel::insert_into(dsl::vpc_subnet)
             .values(values)
             .returning(VpcSubnet::as_returning())
@@ -2024,8 +2024,8 @@ impl DataStore {
         Ok((
             authz::VpcRouter::new(
                 authz_vpc.clone(),
-                router.id(),
-                LookupType::ById(router.id()),
+                *router.id(),
+                LookupType::ById(*router.id()),
             ),
             router,
         ))
@@ -2559,7 +2559,7 @@ impl DataStore {
     ) -> CreateResult<Silo> {
         opctx.authorize(authz::Action::CreateChild, &authz::FLEET).await?;
 
-        let silo_id = silo.id();
+        let silo_id = *silo.id();
 
         use db::schema::silo::dsl;
         diesel::insert_into(dsl::silo)
@@ -2618,7 +2618,7 @@ impl DataStore {
         authz_silo: &authz::Silo,
         db_silo: &db::model::Silo,
     ) -> DeleteResult {
-        assert_eq!(authz_silo.id(), db_silo.id());
+        assert_eq!(authz_silo.id(), *db_silo.id());
         opctx.authorize(authz::Action::Delete, authz_silo).await?;
 
         use db::schema::organization;
@@ -3362,7 +3362,7 @@ mod test {
             external::Ipv4Net("172.30.0.0/22".parse().unwrap()),
             external::Ipv6Net("fd00::/64".parse().unwrap()),
         );
-        let values = FilterConflictingVpcSubnetRangesQuery(subnet);
+        let values = FilterConflictingVpcSubnetRangesQuery::new(subnet);
         let query =
             diesel::insert_into(db::schema::vpc_subnet::dsl::vpc_subnet)
                 .values(values)

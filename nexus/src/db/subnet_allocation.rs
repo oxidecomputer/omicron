@@ -19,7 +19,7 @@ use std::convert::TryFrom;
 use uuid::Uuid;
 
 // Helper to return the offset of the last valid/allocatable IP in a subnet.
-fn generate_last_address_offset(subnet: &ipnetwork::IpNetwork) -> i64 {
+pub fn generate_last_address_offset(subnet: &ipnetwork::IpNetwork) -> i64 {
     // Generate last address in the range.
     //
     // NOTE: First subtraction is to convert from the subnet size to an
@@ -154,7 +154,7 @@ fn push_select_overlapping_ip_range<'a>(
     out.push_sql("SELECT ");
     out.push_bind_param::<sql_types::Inet, ipnetwork::IpNetwork>(ip)?;
     out.push_sql(" FROM ");
-    dsl::vpc_subnet.from_clause().walk_ast(out.reborrow())?;
+    VPC_SUBNET_FROM_CLAUSE.walk_ast(out.reborrow())?;
     out.push_sql(" WHERE ");
     out.push_identifier(dsl::vpc_id::NAME)?;
     out.push_sql(" = ");
@@ -250,7 +250,23 @@ fn push_null_if_overlapping_ip_range<'a>(
 /// SELECT *
 /// FROM candidate, candidate_ipv4, candidate_ipv6
 /// ```
-pub struct FilterConflictingVpcSubnetRangesQuery(pub VpcSubnet);
+pub struct FilterConflictingVpcSubnetRangesQuery {
+    subnet: VpcSubnet,
+    ipv4_block: ipnetwork::IpNetwork,
+    ipv6_block: ipnetwork::IpNetwork,
+}
+
+impl FilterConflictingVpcSubnetRangesQuery {
+    pub fn new(subnet: VpcSubnet) -> Self {
+        let ipv4_block = ipnetwork::IpNetwork::from(subnet.ipv4_block.0.0);
+        let ipv6_block = ipnetwork::IpNetwork::from(subnet.ipv6_block.0.0);
+        Self {
+            subnet,
+            ipv4_block,
+            ipv6_block,
+        }
+    }
+}
 
 impl QueryId for FilterConflictingVpcSubnetRangesQuery {
     type QueryId = ();
@@ -278,24 +294,24 @@ impl QueryFragment<Pg> for FilterConflictingVpcSubnetRangesQuery {
         out.push_sql(", ");
         out.push_identifier(dsl::vpc_id::NAME)?;
         out.push_sql(") AS (VALUES (");
-        out.push_bind_param::<sql_types::Uuid, Uuid>(&self.0.id())?;
+        out.push_bind_param::<sql_types::Uuid, Uuid>(self.subnet.id())?;
         out.push_sql(", ");
-        out.push_bind_param::<sql_types::Text, String>(
-            &self.0.name().to_string(),
+        out.push_bind_param::<sql_types::Text, db::model::Name>(
+            &self.subnet.name(),
         )?;
         out.push_sql(", ");
-        out.push_bind_param::<sql_types::Text, &str>(&self.0.description())?;
+        out.push_bind_param::<sql_types::Text, String>(&self.subnet.identity.description)?;
         out.push_sql(", ");
         out.push_bind_param::<sql_types::Timestamptz, DateTime<Utc>>(
-            &self.0.time_created(),
+            &self.subnet.identity.time_created,
         )?;
         out.push_sql(", ");
         out.push_bind_param::<sql_types::Timestamptz, DateTime<Utc>>(
-            &self.0.time_modified(),
+            &self.subnet.identity.time_modified,
         )?;
         out.push_sql(", ");
         out.push_sql("NULL::TIMESTAMPTZ, ");
-        out.push_bind_param::<sql_types::Uuid, Uuid>(&self.0.vpc_id)?;
+        out.push_bind_param::<sql_types::Uuid, Uuid>(&self.subnet.vpc_id)?;
         out.push_sql(")), ");
 
         // Push the candidate IPv4 and IPv6 selection subqueries, which return
@@ -305,8 +321,8 @@ impl QueryFragment<Pg> for FilterConflictingVpcSubnetRangesQuery {
         out.push_sql(") AS (");
         push_null_if_overlapping_ip_range(
             out.reborrow(),
-            &self.0.vpc_id,
-            &ipnetwork::IpNetwork::from(self.0.ipv4_block.0 .0),
+            &self.subnet.vpc_id,
+            &self.ipv4_block,
         )?;
 
         out.push_sql("), candidate_ipv6(");
@@ -314,8 +330,8 @@ impl QueryFragment<Pg> for FilterConflictingVpcSubnetRangesQuery {
         out.push_sql(") AS (");
         push_null_if_overlapping_ip_range(
             out.reborrow(),
-            &self.0.vpc_id,
-            &ipnetwork::IpNetwork::from(self.0.ipv6_block.0 .0),
+            &self.subnet.vpc_id,
+            &self.ipv6_block,
         )?;
         out.push_sql(") ");
 
@@ -668,6 +684,7 @@ fn decode_database_error(
 fn push_ensure_unique_vpc_expression<'a>(
     mut out: AstPass<'_, 'a, Pg>,
     vpc_id: &'a Uuid,
+    vpc_id_str: &'a String,
     instance_id: &'a Uuid,
 ) -> diesel::QueryResult<()> {
     use db::schema::network_interface::dsl;
@@ -675,7 +692,7 @@ fn push_ensure_unique_vpc_expression<'a>(
     out.push_sql("CAST(IF(COALESCE((SELECT ");
     out.push_identifier(dsl::vpc_id::NAME)?;
     out.push_sql(" FROM ");
-    dsl::network_interface.from_clause().walk_ast(out.reborrow())?;
+    NETWORK_INTERFACE_FROM_CLAUSE.walk_ast(out.reborrow())?;
     out.push_sql(" WHERE ");
     out.push_identifier(dsl::time_deleted::NAME)?;
     out.push_sql(" IS NULL AND ");
@@ -710,7 +727,7 @@ fn push_ensure_unique_vpc_expression<'a>(
     // type, a UUID. That's the exact error we're trying to produce, but it's
     // evaluated too early. So we ensure both are strings here, and then ask the
     // DB to cast them after that condition is evaluated.
-    out.push_bind_param::<sql_types::Text, String>(&vpc_id.to_string())?;
+    out.push_bind_param::<sql_types::Text, String>(vpc_id_str)?;
     out.push_sql(", '') AS UUID)");
     Ok(())
 }
@@ -743,14 +760,11 @@ fn push_ensure_unique_vpc_expression<'a>(
 /// ranges as addresses are released back to the pool.
 fn push_select_next_available_ip_subquery<'a>(
     mut out: AstPass<'_, 'a, Pg>,
-    subnet: &'a IpNetwork,
-    subnet_id: &'a Uuid,
+    interface: &'a IncompleteNetworkInterface,
 ) -> diesel::QueryResult<()> {
     use db::schema::network_interface::dsl;
-    let last_address_offset = generate_last_address_offset(&subnet);
-    let network_address = IpNetwork::from(subnet.network());
     out.push_sql("SELECT ");
-    out.push_bind_param::<sql_types::Inet, IpNetwork>(&network_address)?;
+    out.push_bind_param::<sql_types::Inet, IpNetwork>(&interface.network_address_v4_sql)?;
     out.push_sql(" + ");
     out.push_identifier("address_offset")?;
     out.push_sql(" AS ");
@@ -763,11 +777,11 @@ fn push_select_next_available_ip_subquery<'a>(
         )
         .as_str(),
     );
-    out.push_bind_param::<sql_types::BigInt, _>(&last_address_offset)?;
+    out.push_bind_param::<sql_types::BigInt, _>(&interface.last_address_offset_v4)?;
     out.push_sql(") AS ");
     out.push_identifier("address_offset")?;
     out.push_sql(" LEFT OUTER JOIN ");
-    dsl::network_interface.from_clause().walk_ast(out.reborrow())?;
+    NETWORK_INTERFACE_FROM_CLAUSE.walk_ast(out.reborrow())?;
     out.push_sql(" ON (");
     out.push_identifier(dsl::subnet_id::NAME)?;
     out.push_sql(", ");
@@ -775,9 +789,9 @@ fn push_select_next_available_ip_subquery<'a>(
     out.push_sql(", ");
     out.push_identifier(dsl::time_deleted::NAME)?;
     out.push_sql(" IS NULL) = (");
-    out.push_bind_param::<sql_types::Uuid, Uuid>(&subnet_id)?;
+    out.push_bind_param::<sql_types::Uuid, Uuid>(&interface.subnet.id())?;
     out.push_sql(", ");
-    out.push_bind_param::<sql_types::Inet, IpNetwork>(&network_address)?;
+    out.push_bind_param::<sql_types::Inet, IpNetwork>(&interface.network_address_v4_sql)?;
     out.push_sql(" + ");
     out.push_identifier("address_offset")?;
     out.push_sql(", TRUE) ");
@@ -876,6 +890,7 @@ fn push_interface_allocation_subquery<'a>(
     push_ensure_unique_vpc_expression(
         out.reborrow(),
         &interface.vpc_id,
+        &interface.vpc_id_str,
         &interface.instance_id,
     )?;
     out.push_sql(") ");
@@ -889,15 +904,15 @@ fn push_interface_allocation_subquery<'a>(
     out.push_identifier(dsl::id::NAME)?;
     out.push_sql(", ");
 
-    out.push_bind_param::<sql_types::Text, &str>(
-        &interface.identity.name.as_str(),
+    out.push_bind_param::<sql_types::Text, db::model::Name>(
+        &interface.identity.name,
     )?;
     out.push_sql(" AS ");
     out.push_identifier(dsl::name::NAME)?;
     out.push_sql(", ");
 
-    out.push_bind_param::<sql_types::Text, &str>(
-        &interface.identity.description.as_str(),
+    out.push_bind_param::<sql_types::Text, String>(
+        &interface.identity.description,
     )?;
     out.push_sql(" AS ");
     out.push_identifier(dsl::description::NAME)?;
@@ -933,7 +948,7 @@ fn push_interface_allocation_subquery<'a>(
     out.push_identifier(dsl::subnet_id::NAME)?;
     out.push_sql(", ");
 
-    out.push_bind_param::<sql_types::Text, String>(&interface.mac.to_string())?;
+    out.push_bind_param::<sql_types::Text, String>(&interface.mac_sql)?;
     out.push_sql(" AS ");
     out.push_identifier(dsl::mac::NAME)?;
     out.push_sql(", ");
@@ -941,16 +956,13 @@ fn push_interface_allocation_subquery<'a>(
     // If the user specified an IP address, then insert it by value. If they
     // did not, meaning we're allocating the next available one on their
     // behalf, then insert that subquery here.
-    if let Some(ip) = interface.ip {
-        out.push_bind_param::<sql_types::Inet, IpNetwork>(&ip.into())?;
+    if let Some(ref ip) = &interface.ip_sql {
+        out.push_bind_param::<sql_types::Inet, IpNetwork>(ip)?;
     } else {
-        let subnet =
-            ipnetwork::IpNetwork::from(interface.subnet.ipv4_block.0 .0);
         out.push_sql("(");
         push_select_next_available_ip_subquery(
             out.reborrow(),
-            &subnet,
-            &interface.subnet.id(),
+            &interface,
         )?;
         out.push_sql(")");
     }
@@ -1017,7 +1029,7 @@ fn push_select_next_available_nic_slot_query<'a>(
         crate::nexus::MAX_NICS_PER_INSTANCE,
     ));
     out.push_sql("AS next_slot LEFT OUTER JOIN ");
-    dsl::network_interface.from_clause().walk_ast(out.reborrow())?;
+    NETWORK_INTERFACE_FROM_CLAUSE.walk_ast(out.reborrow())?;
     out.push_sql(" ON (");
     out.push_identifier(dsl::instance_id::NAME)?;
     out.push_sql(", ");
@@ -1105,6 +1117,13 @@ pub struct InsertNetworkInterfaceQuery {
     pub now: DateTime<Utc>,
 }
 
+type FromClause<T> = diesel::internal::table_macro::StaticQueryFragmentInstance<T>;
+type NetworkInterfaceFromClause = FromClause<db::schema::network_interface::table>;
+type VpcSubnetFromClause = FromClause<db::schema::network_interface::table>;
+
+const NETWORK_INTERFACE_FROM_CLAUSE: NetworkInterfaceFromClause = NetworkInterfaceFromClause::new();
+const VPC_SUBNET_FROM_CLAUSE: VpcSubnetFromClause= VpcSubnetFromClause::new();
+
 impl QueryId for InsertNetworkInterfaceQuery {
     type QueryId = ();
     const HAS_STATIC_QUERY_ID: bool = false;
@@ -1157,7 +1176,7 @@ impl QueryFragment<Pg> for InsertNetworkInterfaceQuery {
         out.push_sql("SELECT ");
         push_columns(out.reborrow())?;
         out.push_sql(" FROM ");
-        dsl::network_interface.from_clause().walk_ast(out.reborrow())?;
+        NETWORK_INTERFACE_FROM_CLAUSE.walk_ast(out.reborrow())?;
         out.push_sql(" WHERE ");
         out.push_identifier(dsl::id::NAME)?;
         out.push_sql(" = ");

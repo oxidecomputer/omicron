@@ -12,7 +12,7 @@ impl Instance {
     pub fn generate_cidata(&self) -> Result<Vec<u8>, Error> {
         // cloud-init meta-data is YAML, but YAML is a strict superset of JSON.
         let meta_data = serde_json::to_vec(&MetaData {
-            instance_id: self.id(),
+            instance_id: *self.id(),
             local_hostname: &self.runtime().hostname,
             public_keys: &[], // TODO
         })

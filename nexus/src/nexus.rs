@@ -558,7 +558,7 @@ impl Nexus {
             );
             for producer in producers.into_iter() {
                 let producer_info = oximeter_client::types::ProducerEndpoint {
-                    id: producer.id(),
+                    id: *producer.id(),
                     address: SocketAddr::new(
                         producer.ip.ip(),
                         producer.port.try_into().unwrap(),
@@ -1225,7 +1225,7 @@ impl Nexus {
                         Uuid::new_v4(),
                         params.identity.clone(),
                     ),
-                    volume_id: volume.id(),
+                    volume_id: *volume.id(),
                     url: Some(url.clone()),
                     version: etag,
                     digest: None, // not computed for URL type
@@ -1411,7 +1411,7 @@ impl Nexus {
                     "no sleds available for new Instance",
                 ),
             })
-            .map(|s| s.id())
+            .map(|s| *s.id())
     }
 
     pub async fn project_list_instances(
@@ -1883,7 +1883,7 @@ impl Nexus {
 
         let new_runtime = sa
             .instance_put(
-                &db_instance.id(),
+                db_instance.id(),
                 &sled_agent_client::types::InstanceEnsureBody {
                     initial: instance_hardware,
                     target: requested,
@@ -1897,7 +1897,7 @@ impl Nexus {
             new_runtime.into_inner().into();
 
         self.db_datastore
-            .instance_update_runtime(&db_instance.id(), &new_runtime.into())
+            .instance_update_runtime(db_instance.id(), &new_runtime.into())
             .await
             .map(|_| ())
     }
@@ -2794,7 +2794,7 @@ impl Nexus {
                 }
                 let subnet = db::model::VpcSubnet::new(
                     subnet_id,
-                    db_vpc.id(),
+                    *db_vpc.id(),
                     params.identity.clone(),
                     params.ipv4_block,
                     ipv6_block,

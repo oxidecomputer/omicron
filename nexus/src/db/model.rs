@@ -232,16 +232,15 @@ pub struct ByteCount(pub external::ByteCount);
 NewtypeFrom! { () pub struct ByteCount(external::ByteCount); }
 NewtypeDeref! { () pub struct ByteCount(external::ByteCount); }
 
-impl<DB> ToSql<sql_types::BigInt, DB> for ByteCount
-where
-    DB: Backend,
-    i64: ToSql<sql_types::BigInt, DB>,
-{
+impl ToSql<sql_types::BigInt, Pg> for ByteCount {
     fn to_sql<'a>(
         &'a self,
-        out: &mut serialize::Output<'a, '_, DB>,
+        out: &mut serialize::Output<'a, '_, Pg>,
     ) -> serialize::Result {
-        i64::from(self.0).to_sql(out)
+        <i64 as ToSql<sql_types::BigInt, Pg>>::to_sql(
+            &i64::from(self.0),
+            &mut out.reborrow(),
+        )
     }
 }
 
@@ -295,16 +294,15 @@ impl Generation {
     }
 }
 
-impl<DB> ToSql<sql_types::BigInt, DB> for Generation
-where
-    DB: Backend,
-    i64: ToSql<sql_types::BigInt, DB>,
-{
+impl ToSql<sql_types::BigInt, Pg> for Generation {
     fn to_sql<'a>(
         &'a self,
-        out: &mut serialize::Output<'a, '_, DB>,
+        out: &mut serialize::Output<'a, '_, Pg>,
     ) -> serialize::Result {
-        i64::from(&self.0).to_sql(out)
+        <i64 as ToSql<sql_types::BigInt, Pg>>::to_sql(
+            &i64::from(&self.0),
+            &mut out.reborrow(),
+        )
     }
 }
 
@@ -330,7 +328,7 @@ impl From<Generation> for sled_agent_client::types::Generation {
 /// We need this because the database does not support unsigned types.
 /// This handles converting from the database's INT4 to the actual u16.
 #[derive(
-    Copy, Clone, Debug, Eq, Ord, PartialEq, PartialOrd, AsExpression, FromSqlRow,
+    Copy, Clone, Debug, Eq, Ord, PartialEq, PartialOrd, FromSqlRow,
 )]
 #[diesel(sql_type = sql_types::Int4)]
 #[repr(transparent)]
@@ -345,16 +343,16 @@ impl SqlU16 {
     }
 }
 
-impl<DB> ToSql<sql_types::Int4, DB> for SqlU16
-where
-    DB: Backend,
-    i32: ToSql<sql_types::Int4, DB>,
-{
+impl ToSql<sql_types::Int4, Pg> for SqlU16 {
+//    i32: ToSql<sql_types::Int4, DB>,
     fn to_sql<'a>(
         &'a self,
-        out: &mut serialize::Output<'a, '_, DB>,
+        out: &mut serialize::Output<'a, '_, Pg>,
     ) -> serialize::Result {
-        i32::from(self.0).to_sql(out)
+        <i32 as ToSql<sql_types::Int4, Pg>>::to_sql(
+            &i32::from(self.0),
+            &mut out.reborrow(),
+        )
     }
 }
 
@@ -375,16 +373,15 @@ pub struct InstanceCpuCount(pub external::InstanceCpuCount);
 NewtypeFrom! { () pub struct InstanceCpuCount(external::InstanceCpuCount); }
 NewtypeDeref! { () pub struct InstanceCpuCount(external::InstanceCpuCount); }
 
-impl<DB> ToSql<sql_types::BigInt, DB> for InstanceCpuCount
-where
-    DB: Backend,
-    i64: ToSql<sql_types::BigInt, DB>,
-{
+impl ToSql<sql_types::BigInt, Pg> for InstanceCpuCount {
     fn to_sql<'a>(
         &'a self,
-        out: &mut serialize::Output<'a, '_, DB>,
+        out: &mut serialize::Output<'a, '_, Pg>,
     ) -> serialize::Result {
-        i64::from(&self.0).to_sql(out)
+        <i64 as ToSql<sql_types::BigInt, Pg>>::to_sql(
+            &i64::from(&self.0),
+            &mut out.reborrow(),
+        )
     }
 }
 
@@ -430,16 +427,16 @@ impl Ipv4Net {
     }
 }
 
-impl<DB> ToSql<sql_types::Inet, DB> for Ipv4Net
-where
-    DB: Backend,
-    IpNetwork: ToSql<sql_types::Inet, DB>,
-{
+impl ToSql<sql_types::Inet, Pg> for Ipv4Net {
     fn to_sql<'a>(
         &'a self,
-        out: &mut serialize::Output<'a, '_, DB>,
+        out: &mut serialize::Output<'a, '_, Pg>,
     ) -> serialize::Result {
-        IpNetwork::V4(*self.0).to_sql(out)
+        let net = IpNetwork::V4(*self.0);
+        <IpNetwork as ToSql<sql_types::Inet, Pg>>::to_sql(
+            &net,
+            &mut out.reborrow(),
+        )
     }
 }
 
@@ -526,16 +523,15 @@ impl Ipv6Net {
     }
 }
 
-impl<DB> ToSql<sql_types::Inet, DB> for Ipv6Net
-where
-    DB: Backend,
-    IpNetwork: ToSql<sql_types::Inet, DB>,
-{
+impl ToSql<sql_types::Inet, Pg> for Ipv6Net {
     fn to_sql<'a>(
         &'a self,
-        out: &mut serialize::Output<'a, '_, DB>,
+        out: &mut serialize::Output<'a, '_, Pg>,
     ) -> serialize::Result {
-        IpNetwork::V6(self.0 .0).to_sql(out)
+        <IpNetwork as ToSql<sql_types::Inet, Pg>>::to_sql(
+            &IpNetwork::V6(self.0 .0),
+            &mut out.reborrow(),
+        )
     }
 }
 
@@ -579,16 +575,15 @@ impl MacAddr {
 NewtypeFrom! { () pub struct MacAddr(external::MacAddr); }
 NewtypeDeref! { () pub struct MacAddr(external::MacAddr); }
 
-impl<DB> ToSql<sql_types::Text, DB> for MacAddr
-where
-    DB: Backend,
-    String: ToSql<sql_types::Text, DB>,
-{
+impl ToSql<sql_types::Text, Pg> for MacAddr {
     fn to_sql<'a>(
         &'a self,
-        out: &mut serialize::Output<'a, '_, DB>,
+        out: &mut serialize::Output<'a, '_, Pg>,
     ) -> serialize::Result {
-        self.0.to_string().to_sql(out)
+        <String as ToSql<sql_types::Text, Pg>>::to_sql(
+            &self.0.to_string(),
+            &mut out.reborrow(),
+        )
     }
 }
 
@@ -1448,7 +1443,7 @@ impl Disk {
             volume_id,
             runtime_state: runtime_initial,
             size: params.size.into(),
-            block_size: block_size,
+            block_size,
             create_snapshot_id,
             create_image_id,
         })
@@ -1648,16 +1643,15 @@ pub struct Digest(pub external::Digest);
 NewtypeFrom! { () pub struct Digest(external::Digest); }
 NewtypeDeref! { () pub struct Digest(external::Digest); }
 
-impl<DB> ToSql<sql_types::Text, DB> for Digest
-where
-    DB: Backend,
-    str: ToSql<sql_types::Text, DB>,
-{
+impl ToSql<sql_types::Text, Pg> for Digest {
     fn to_sql<'a>(
         &'a self,
-        out: &mut serialize::Output<'a, '_, DB>,
+        out: &mut serialize::Output<'a, '_, Pg>,
     ) -> serialize::Result {
-        self.to_string().as_str().to_sql(out)
+        <String as ToSql<sql_types::Text, Pg>>::to_sql(
+            &self.0.to_string(),
+            &mut out.reborrow(),
+        )
     }
 }
 
@@ -1938,7 +1932,7 @@ impl From<params::VpcUpdate> for VpcUpdate {
 #[diesel(table_name = vpc_subnet)]
 pub struct VpcSubnet {
     #[diesel(embed)]
-    identity: VpcSubnetIdentity,
+    pub identity: VpcSubnetIdentity,
 
     pub vpc_id: Uuid,
     pub ipv4_block: Ipv4Net,
@@ -2102,16 +2096,15 @@ impl_enum_wrapper!(
 #[diesel(sql_type = sql_types::Text)]
 pub struct RouteTarget(pub external::RouteTarget);
 
-impl<DB> ToSql<sql_types::Text, DB> for RouteTarget
-where
-    DB: Backend,
-    str: ToSql<sql_types::Text, DB>,
-{
+impl ToSql<sql_types::Text, Pg> for RouteTarget {
     fn to_sql<'a>(
         &'a self,
-        out: &mut serialize::Output<'a, '_, DB>,
+        out: &mut serialize::Output<'a, '_, Pg>,
     ) -> serialize::Result {
-        self.0.to_string().as_str().to_sql(out)
+        <String as ToSql<sql_types::Text, Pg>>::to_sql(
+            &self.0.to_string(),
+            &mut out.reborrow(),
+        )
     }
 }
 
@@ -2141,16 +2134,15 @@ impl RouteDestination {
     }
 }
 
-impl<DB> ToSql<sql_types::Text, DB> for RouteDestination
-where
-    DB: Backend,
-    str: ToSql<sql_types::Text, DB>,
-{
+impl ToSql<sql_types::Text, Pg> for RouteDestination {
     fn to_sql<'a>(
         &'a self,
-        out: &mut serialize::Output<'a, '_, DB>,
+        out: &mut serialize::Output<'a, '_, Pg>,
     ) -> serialize::Result {
-        self.0.to_string().as_str().to_sql(out)
+        <String as ToSql<sql_types::Text, Pg>>::to_sql(
+            &self.0.to_string(),
+            &mut out.reborrow(),
+        )
     }
 }
 
@@ -2300,16 +2292,15 @@ pub struct VpcFirewallRuleTarget(pub external::VpcFirewallRuleTarget);
 NewtypeFrom! { () pub struct VpcFirewallRuleTarget(external::VpcFirewallRuleTarget); }
 NewtypeDeref! { () pub struct VpcFirewallRuleTarget(external::VpcFirewallRuleTarget); }
 
-impl<DB> ToSql<sql_types::Text, DB> for VpcFirewallRuleTarget
-where
-    DB: Backend,
-    String: ToSql<sql_types::Text, DB>,
-{
+impl ToSql<sql_types::Text, Pg> for VpcFirewallRuleTarget {
     fn to_sql<'a>(
         &'a self,
-        out: &mut serialize::Output<'a, '_, DB>,
+        out: &mut serialize::Output<'a, '_, Pg>,
     ) -> serialize::Result {
-        self.0.to_string().to_sql(out)
+        <String as ToSql<sql_types::Text, Pg>>::to_sql(
+            &self.0.to_string(),
+            &mut out.reborrow(),
+        )
     }
 }
 
@@ -2336,16 +2327,15 @@ pub struct VpcFirewallRuleHostFilter(pub external::VpcFirewallRuleHostFilter);
 NewtypeFrom! { () pub struct VpcFirewallRuleHostFilter(external::VpcFirewallRuleHostFilter); }
 NewtypeDeref! { () pub struct VpcFirewallRuleHostFilter(external::VpcFirewallRuleHostFilter); }
 
-impl<DB> ToSql<sql_types::Text, DB> for VpcFirewallRuleHostFilter
-where
-    DB: Backend,
-    String: ToSql<sql_types::Text, DB>,
-{
+impl ToSql<sql_types::Text, Pg> for VpcFirewallRuleHostFilter {
     fn to_sql<'a>(
         &'a self,
-        out: &mut serialize::Output<'a, '_, DB>,
+        out: &mut serialize::Output<'a, '_, Pg>,
     ) -> serialize::Result {
-        self.0.to_string().to_sql(out)
+        <String as ToSql<sql_types::Text, Pg>>::to_sql(
+            &self.0.to_string(),
+            &mut out.reborrow(),
+        )
     }
 }
 
@@ -2372,16 +2362,15 @@ pub struct L4PortRange(pub external::L4PortRange);
 NewtypeFrom! { () pub struct L4PortRange(external::L4PortRange); }
 NewtypeDeref! { () pub struct L4PortRange(external::L4PortRange); }
 
-impl<DB> ToSql<sql_types::Text, DB> for L4PortRange
-where
-    DB: Backend,
-    String: ToSql<sql_types::Text, DB>,
-{
+impl ToSql<sql_types::Text, Pg> for L4PortRange {
     fn to_sql<'a>(
         &'a self,
-        out: &mut serialize::Output<'a, '_, DB>,
+        out: &mut serialize::Output<'a, '_, Pg>,
     ) -> serialize::Result {
-        self.0.to_string().to_sql(out)
+        <String as ToSql<sql_types::Text, Pg>>::to_sql(
+            &self.0.to_string(),
+            &mut out.reborrow(),
+        )
     }
 }
 
@@ -2405,16 +2394,12 @@ pub struct VpcFirewallRulePriority(pub external::VpcFirewallRulePriority);
 NewtypeFrom! { () pub struct VpcFirewallRulePriority(external::VpcFirewallRulePriority); }
 NewtypeDeref! { () pub struct VpcFirewallRulePriority(external::VpcFirewallRulePriority); }
 
-impl<DB> ToSql<sql_types::Int4, DB> for VpcFirewallRulePriority
-where
-    DB: Backend,
-    SqlU16: ToSql<sql_types::Int4, DB>,
-{
+impl ToSql<sql_types::Int4, Pg> for VpcFirewallRulePriority {
     fn to_sql<'a>(
         &'a self,
-        out: &mut serialize::Output<'a, '_, DB>,
+        out: &mut serialize::Output<'a, '_, Pg>,
     ) -> serialize::Result {
-        SqlU16(self.0 .0).to_sql(out)
+        SqlU16(self.0 .0).to_sql(&mut out.reborrow())
     }
 }
 
@@ -2540,6 +2525,15 @@ pub struct IncompleteNetworkInterface {
     pub subnet: VpcSubnet,
     pub mac: MacAddr,
     pub ip: Option<std::net::IpAddr>,
+
+    // TODO: Reduce the "non-serialized" variants, if they aren't needed?
+    // TODO: Maybe a different struct?
+    pub vpc_id_str: String,
+    pub ip_sql: Option<IpNetwork>,
+    pub subnet_v4_sql: IpNetwork,
+    pub network_address_v4_sql: IpNetwork,
+    pub mac_sql: String,
+    pub last_address_offset_v4: i64,
 }
 
 impl IncompleteNetworkInterface {
@@ -2556,7 +2550,27 @@ impl IncompleteNetworkInterface {
             subnet.check_requestable_addr(ip)?;
         };
         let identity = NetworkInterfaceIdentity::new(interface_id, identity);
-        Ok(Self { identity, instance_id, subnet, vpc_id, mac, ip })
+
+        let vpc_id_str = vpc_id.to_string();
+        let ip_sql = ip.map(|ip| ip.into());
+        let subnet_v4_sql = IpNetwork::from(subnet.ipv4_block.0.0);
+        let network_address_v4_sql = IpNetwork::from(subnet_v4_sql.network());
+        let mac_sql = mac.to_string();
+        let last_address_offset_v4 = super::subnet_allocation::generate_last_address_offset(&subnet_v4_sql);
+        Ok(Self {
+            identity,
+            instance_id,
+            subnet,
+            vpc_id,
+            mac,
+            ip,
+            vpc_id_str,
+            ip_sql,
+            subnet_v4_sql,
+            network_address_v4_sql,
+            mac_sql,
+            last_address_offset_v4,
+        })
     }
 }
 

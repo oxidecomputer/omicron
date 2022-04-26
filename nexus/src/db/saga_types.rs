@@ -83,16 +83,16 @@ pub struct SagaId(pub steno::SagaId);
 
 NewtypeFrom! { () pub struct SagaId(steno::SagaId); }
 
-impl<DB> ToSql<sql_types::Uuid, DB> for SagaId
-where
-    DB: Backend,
-    Uuid: ToSql<sql_types::Uuid, DB>,
-{
+impl ToSql<sql_types::Uuid, Pg> for SagaId {
     fn to_sql<'a>(
         &'a self,
-        out: &mut serialize::Output<'a, '_, DB>,
+        out: &mut serialize::Output<'a, '_, Pg>,
     ) -> serialize::Result {
-        (&self.0.into() as &Uuid).to_sql(out)
+        let id = Uuid::from(self.0);
+        <Uuid as ToSql<sql_types::Uuid, Pg>>::to_sql(
+            &id,
+            &mut out.reborrow()
+        )
     }
 }
 
@@ -120,17 +120,17 @@ pub struct SagaNodeId(pub steno::SagaNodeId);
 
 NewtypeFrom! { () pub struct SagaNodeId(steno::SagaNodeId); }
 
-impl<DB> ToSql<sql_types::BigInt, DB> for SagaNodeId
-where
-    DB: Backend,
-    i64: ToSql<sql_types::BigInt, DB>,
-{
+impl ToSql<sql_types::BigInt, Pg> for SagaNodeId {
     fn to_sql<'a>(
         &'a self,
-        out: &mut serialize::Output<'a, '_, DB>,
+        out: &mut serialize::Output<'a, '_, Pg>,
     ) -> serialize::Result {
         // Diesel newtype -> steno type -> u32 -> i64 -> SQL
-        (u32::from(self.0) as i64).to_sql(out)
+        let id = u32::from(self.0) as i64;
+        <i64 as ToSql<sql_types::BigInt, Pg>>::to_sql(
+            &id,
+            &mut out.reborrow(),
+        )
     }
 }
 

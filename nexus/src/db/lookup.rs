@@ -95,7 +95,7 @@ use uuid::Uuid;
 /// let disk_name = db::model::Name("my-disk".parse().unwrap());
 /// let (.., authz_disk, db_disk) =
 ///     LookupPath::new(opctx, datastore)
-///         .project_id(authz_project.id())
+///         .project_id(*authz_project.id())
 ///         .disk_name(&disk_name)
 ///         .fetch()
 ///         .await?;
