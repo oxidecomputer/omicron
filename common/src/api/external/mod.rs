@@ -345,6 +345,40 @@ impl JsonSchema for RoleName {
     }
 }
 
+///// Describes the actor for a role assignment
+//#[derive(
+//    Clone,
+//    Debug,
+//    Deserialize,
+//    Eq,
+//    Ord,
+//    PartialEq,
+//    PartialOrd,
+//    Serialize,
+//    JsonSchema,
+//)]
+//#[serde(tag = "actor_type", content = "actor_id", rename_all = "snake_case")]
+//pub enum Actor {
+//    UserBuiltin { internal_user_id: Uuid },
+//    SiloUser { silo_user_id: Uuid },
+//}
+//
+//impl Actor {
+//    pub fn type_string(&self) -> &'static str {
+//        match self {
+//            Actor::UserBuiltin { .. } => "user_builtin",
+//            Actor::SiloUser { .. } => "silo_user",
+//        }
+//    }
+//
+//    pub fn actor_id(&self) -> Uuid {
+//        match self {
+//            Actor::UserBuiltin { internal_user_id } => *internal_user_id,
+//            Actor::SiloUser { silo_user_id } => *silo_user_id,
+//        }
+//    }
+//}
+
 /// A count of bytes, typically used either for memory or storage capacity
 ///
 /// The maximum supported byte count is [`i64::MAX`].  This makes it somewhat

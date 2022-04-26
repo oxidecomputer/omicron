@@ -327,8 +327,8 @@ pub struct RoleAssignment {
     pub role_name: String,
 }
 
-impl From<model::RoleAssignmentBuiltin> for RoleAssignment {
-    fn from(role_asgn: model::RoleAssignmentBuiltin) -> Self {
+impl From<model::RoleAssignment> for RoleAssignment {
+    fn from(role_asgn: model::RoleAssignment) -> Self {
         Self {
             user_id: role_asgn.user_builtin_id,
             resource_type: role_asgn.resource_type,

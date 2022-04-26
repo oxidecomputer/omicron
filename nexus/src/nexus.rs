@@ -3900,7 +3900,7 @@ impl Nexus {
         opctx: &OpContext,
         organization_name: &Name,
         pagparams: &DataPageParams<'_, (String, Uuid)>,
-    ) -> ListResultVec<db::model::RoleAssignmentBuiltin> {
+    ) -> ListResultVec<db::model::RoleAssignment> {
         // XXX-dap define a new action for ListRoles?
         let (.., authz_org) = LookupPath::new(opctx, &self.db_datastore)
             .organization_name(organization_name)

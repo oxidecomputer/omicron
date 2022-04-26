@@ -10,10 +10,9 @@ use crate::db::ipv6;
 use crate::db::schema::{
     console_session, dataset, disk, global_image, image, instance,
     metric_producer, network_interface, organization, oximeter, project, rack,
-    region, role_assignment_builtin, role_builtin, router_route, silo,
-    silo_user, sled, snapshot, ssh_key, update_available_artifact,
-    user_builtin, volume, vpc, vpc_firewall_rule, vpc_router, vpc_subnet,
-    zpool,
+    region, role_assignment, role_builtin, router_route, silo, silo_user, sled,
+    snapshot, ssh_key, update_available_artifact, user_builtin, volume, vpc,
+    vpc_firewall_rule, vpc_router, vpc_subnet, zpool,
 };
 use crate::defaults;
 use crate::external_api::params;
@@ -2666,26 +2665,51 @@ impl RoleBuiltin {
     }
 }
 
-/// Describes an assignment of a built-in role for a built-in user
+impl_enum_type!(
+    #[derive(SqlType, Debug, QueryId)]
+    #[postgres(type_name = "actor_type", type_schema = "public")]
+    pub struct ActorTypeEnum;
+
+    #[derive(
+        Clone,
+        Debug,
+        AsExpression,
+        FromSqlRow,
+        Serialize,
+        Deserialize,
+        PartialEq
+    )]
+    #[sql_type = "ActorTypeEnum"]
+    pub enum ActorType;
+
+    // Enum values
+    UserBuiltin => b"user_builtin"
+    SiloUser => b"silo_user"
+);
+
+/// Describes an assignment of a built-in role for a user
 #[derive(Queryable, Insertable, Debug, Selectable)]
-#[table_name = "role_assignment_builtin"]
-pub struct RoleAssignmentBuiltin {
-    pub user_builtin_id: Uuid,
+#[table_name = "role_assignment"]
+pub struct RoleAssignment {
+    pub actor_type: ActorType,
+    pub actor_id: Uuid,
     pub resource_type: String,
     pub resource_id: Uuid,
     pub role_name: String,
 }
 
-impl RoleAssignmentBuiltin {
-    /// Creates a new database RoleAssignmentBuiltin object.
+impl RoleAssignment {
+    /// Creates a new database RoleAssignment object.
     pub fn new(
-        user_builtin_id: Uuid,
+        actor_type: ActorType,
+        actor_id: Uuid,
         resource_type: omicron_common::api::external::ResourceType,
         resource_id: Uuid,
         role_name: &str,
     ) -> Self {
         Self {
-            user_builtin_id,
+            actor_type,
+            actor_id,
             resource_type: resource_type.to_string(),
             resource_id,
             role_name: String::from(role_name),

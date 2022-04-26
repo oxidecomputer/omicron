@@ -71,6 +71,8 @@
 //! so is the relationship that says a particular user has a particular role for
 //! a particular resource.
 //!
+//! XXX-dap TODO-doc
+//!
 //! Suppose a built-in user "cookie-monster" has the "viewer" role for a Project
 //! "monster-foodies".  It looks like this:
 //!

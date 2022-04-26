@@ -1008,7 +1008,7 @@ INSERT INTO omicron.public.user_builtin (
  *
  * If the set of roles and their permissions are fixed, why store them in the
  * database at all?  Because what's dynamic is the assignment of roles to users.
- * We [will] have a separate table that says "user U has role ROLE on resource
+ * We have a separate table that says "user U has role ROLE on resource
  * RESOURCE".  How do we represent the ROLE part of this association?  We use a
  * foreign key into this "role_builtin" table.
  */
@@ -1023,14 +1023,19 @@ CREATE TABLE omicron.public.role_builtin (
 /*
  * Assignments between users, roles, and resources
  *
- * A built-in user has role on a resource if there's a record in this table that
- * points to that user, role, and resource.
+ * An actor has a role on a resource if there's a record in this table that
+ * points to that actor, role, and resource.
  *
  * For more details and a worked example, see the omicron_nexus::authz
  * module-level documentation.
  */
 
-CREATE TABLE omicron.public.role_assignment_builtin (
+CREATE TYPE omicron.public.actor_type AS ENUM (
+  'user_builtin',
+  'silo_user',
+);
+
+CREATE TABLE omicron.public.role_assignment (
     /* Composite foreign key into "role_builtin" table */
     resource_type STRING(63) NOT NULL,
     role_name STRING(63) NOT NULL,
@@ -1042,12 +1047,14 @@ CREATE TABLE omicron.public.role_assignment_builtin (
     resource_id UUID NOT NULL,
 
     /*
-     * Foreign key into table of built-in users.
+     * Foreign key into some other user table.  Which table?  That's determined
+     * by "actor_kind".
      */
-    user_builtin_id UUID NOT NULL,
+    actor_id UUID NOT NULL,
+    actor_type omicron.public.actor_type NOT NULL,
 
     /* The entire row is the primary key. */
-    PRIMARY KEY(user_builtin_id, resource_type, resource_id, role_name)
+    PRIMARY KEY(actor_type, actor_id, resource_type, resource_id, role_name)
 );
 
 /*******************************************************************/

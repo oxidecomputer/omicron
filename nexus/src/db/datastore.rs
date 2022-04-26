@@ -29,7 +29,7 @@ use crate::authn;
 use crate::authz;
 use crate::authz::ApiResourceError;
 use crate::context::OpContext;
-use crate::db::fixed_data::role_assignment_builtin::BUILTIN_ROLE_ASSIGNMENTS;
+use crate::db::fixed_data::role_assignment::BUILTIN_ROLE_ASSIGNMENTS;
 use crate::db::fixed_data::role_builtin::BUILTIN_ROLES;
 use crate::db::fixed_data::silo::{DEFAULT_SILO, SILO_ID};
 use crate::db::lookup::LookupPath;
@@ -41,7 +41,7 @@ use crate::db::{
         Generation, GlobalImage, IncompleteNetworkInterface, Instance,
         InstanceRuntimeState, Name, NetworkInterface, Organization,
         OrganizationUpdate, OximeterInfo, ProducerEndpoint, Project,
-        ProjectUpdate, Region, RoleAssignmentBuiltin, RoleBuiltin, RouterRoute,
+        ProjectUpdate, Region, RoleAssignment, RoleBuiltin, RouterRoute,
         RouterRouteUpdate, Silo, SiloUser, Sled, SshKey,
         UpdateAvailableArtifact, UserBuiltin, Volume, Vpc, VpcFirewallRule,
         VpcRouter, VpcRouterUpdate, VpcSubnet, VpcSubnetUpdate, VpcUpdate,
@@ -2412,16 +2412,17 @@ impl DataStore {
         &self,
         opctx: &OpContext,
     ) -> Result<(), Error> {
-        use db::schema::role_assignment_builtin::dsl;
+        use db::schema::role_assignment::dsl;
 
         opctx.authorize(authz::Action::Modify, &authz::DATABASE).await?;
 
         // The built-in "test-privileged" user gets the "fleet admin" role.
         debug!(opctx.log, "attempting to create built-in role assignments");
-        let count = diesel::insert_into(dsl::role_assignment_builtin)
+        let count = diesel::insert_into(dsl::role_assignment)
             .values(&*BUILTIN_ROLE_ASSIGNMENTS)
             .on_conflict((
-                dsl::user_builtin_id,
+                dsl::actor_type,
+                dsl::actor_id,
                 dsl::resource_type,
                 dsl::resource_id,
                 dsl::role_name,
@@ -2444,8 +2445,8 @@ impl DataStore {
         user_builtin_id: Uuid,
         resource_type: ResourceType,
         resource_id: Uuid,
-    ) -> Result<Vec<RoleAssignmentBuiltin>, Error> {
-        use db::schema::role_assignment_builtin::dsl;
+    ) -> Result<Vec<RoleAssignment>, Error> {
+        use db::schema::role_assignment::dsl;
 
         // There is no resource-specific authorization check because all
         // authenticated users need to be able to list their own roles --
@@ -2455,12 +2456,12 @@ impl DataStore {
         // exposed via an external API right now but someone could still put us
         // into some hurt by assigning loads of roles to someone and having that
         // person attempt to access anything.
-        dsl::role_assignment_builtin
+        dsl::role_assignment
             .filter(dsl::user_builtin_id.eq(user_builtin_id))
             .filter(dsl::resource_type.eq(resource_type.to_string()))
             .filter(dsl::resource_id.eq(resource_id))
-            .select(RoleAssignmentBuiltin::as_select())
-            .load_async::<RoleAssignmentBuiltin>(
+            .select(RoleAssignment::as_select())
+            .load_async::<RoleAssignment>(
                 self.pool_authorized(opctx).await?,
             )
             .await
@@ -2850,12 +2851,12 @@ impl DataStore {
         opctx: &OpContext,
         authz_resource: &T,
         pagparams: &DataPageParams<'_, (String, Uuid)>,
-    ) -> ListResultVec<db::model::RoleAssignmentBuiltin> {
+    ) -> ListResultVec<db::model::RoleAssignment> {
         // XXX-dap consider a different action
         opctx.authorize(authz::Action::Read, authz_resource).await?;
         if let Some((resource_type, resource_id)) = authz_resource.db_resource()
         {
-            use db::schema::role_assignment_builtin::dsl;
+            use db::schema::role_assignment::dsl;
             paginated_multicolumn(
                 dsl::role_assignment_builtin,
                 (dsl::role_name, dsl::user_builtin_id),
@@ -2863,8 +2864,8 @@ impl DataStore {
             )
             .filter(dsl::resource_type.eq(resource_type.to_string()))
             .filter(dsl::resource_id.eq(resource_id))
-            .select(RoleAssignmentBuiltin::as_select())
-            .load_async::<RoleAssignmentBuiltin>(
+            .select(RoleAssignment::as_select())
+            .load_async::<RoleAssignment>(
                 self.pool_authorized(opctx).await?,
             )
             .await

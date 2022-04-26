@@ -557,7 +557,7 @@ fn role_asgn_pagparams<'a, 'b>(
 }
 
 fn role_asgns_page(
-    role_asgns: Vec<db::model::RoleAssignmentBuiltin>,
+    role_asgns: Vec<db::model::RoleAssignment>,
 ) -> Result<HttpResponseOk<ResultsPage<RoleAssignment>>, HttpError> {
     let role_asgns = role_asgns.into_iter().map(|i| i.into()).collect();
     Ok(HttpResponseOk(dropshot::ResultsPage::new(

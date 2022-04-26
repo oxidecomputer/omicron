@@ -8,7 +8,7 @@
 //! said there that in evaluating the authorization decision, Oso winds up
 //! checking whether the actor has one of many different roles on many different
 //! resources.  It's essentially looking for specific rows in the
-//! "role_assignment_builtin" table.
+//! "role_assignment" table.
 //!
 //! To achieve this, before calling into Oso, we load _all_ of the roles that
 //! the actor has on this resource _or any related resource_ that might affect
