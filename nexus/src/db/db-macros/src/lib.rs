@@ -88,9 +88,7 @@ fn get_nv_attr(attrs: &[syn::Attribute], name: &str) -> Option<NameValue> {
     attrs
         .iter()
         .filter(|attr| attr.path.is_ident("diesel"))
-        .filter_map(|attr| {
-            attr.parse_args::<NameValue>().ok()
-        })
+        .filter_map(|attr| attr.parse_args::<NameValue>().ok())
         .find(|nv| nv.name.is_ident(name))
 }
 
@@ -180,17 +178,16 @@ fn derive_impl(
     let name = &item.ident;
 
     // Ensure that the "table_name" attribute exists, and get it.
-    let table_nv =
-        get_nv_attr(&item.attrs, "table_name").ok_or_else(|| {
-            Error::new(
-                item.span(),
-                format!(
-                    "Resource needs 'table_name' attribute.\n\
+    let table_nv = get_nv_attr(&item.attrs, "table_name").ok_or_else(|| {
+        Error::new(
+            item.span(),
+            format!(
+                "Resource needs 'table_name' attribute.\n\
                      Try adding #[diesel(table_name = your_table_name)] to {}.",
-                    name
-                ),
-            )
-        })?;
+                name
+            ),
+        )
+    })?;
     let table_name = table_nv.value;
 
     // Ensure that a field named "identity" exists within this struct.
@@ -284,7 +281,10 @@ fn build_resource_identity(
 }
 
 // Builds an "Identity" structure for an asset.
-fn build_asset_identity(struct_name: &Ident, table_name: &syn::Path) -> TokenStream {
+fn build_asset_identity(
+    struct_name: &Ident,
+    table_name: &syn::Path,
+) -> TokenStream {
     let identity_doc = format!(
         "Auto-generated identity for [`{}`] from deriving [`macro@Asset`].",
         struct_name,
@@ -440,7 +440,8 @@ mod tests {
         );
         assert!(out.is_err());
         assert_eq!(
-            "'table_name' needs to be a name-value pair, like #[diesel(table_name = foo)]",
+            "Resource needs 'table_name' attribute.\n\
+             Try adding #[diesel(table_name = your_table_name)] to MyTarget.",
             out.unwrap_err().to_string()
         );
     }

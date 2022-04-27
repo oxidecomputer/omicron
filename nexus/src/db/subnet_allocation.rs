@@ -258,13 +258,9 @@ pub struct FilterConflictingVpcSubnetRangesQuery {
 
 impl FilterConflictingVpcSubnetRangesQuery {
     pub fn new(subnet: VpcSubnet) -> Self {
-        let ipv4_block = ipnetwork::IpNetwork::from(subnet.ipv4_block.0.0);
-        let ipv6_block = ipnetwork::IpNetwork::from(subnet.ipv6_block.0.0);
-        Self {
-            subnet,
-            ipv4_block,
-            ipv6_block,
-        }
+        let ipv4_block = ipnetwork::IpNetwork::from(subnet.ipv4_block.0 .0);
+        let ipv6_block = ipnetwork::IpNetwork::from(subnet.ipv6_block.0 .0);
+        Self { subnet, ipv4_block, ipv6_block }
     }
 }
 
@@ -274,7 +270,10 @@ impl QueryId for FilterConflictingVpcSubnetRangesQuery {
 }
 
 impl QueryFragment<Pg> for FilterConflictingVpcSubnetRangesQuery {
-    fn walk_ast<'a>(&'a self, mut out: AstPass<'_, 'a, Pg>) -> diesel::QueryResult<()> {
+    fn walk_ast<'a>(
+        &'a self,
+        mut out: AstPass<'_, 'a, Pg>,
+    ) -> diesel::QueryResult<()> {
         use db::schema::vpc_subnet::dsl;
 
         // Create the base `candidate` from values provided that need no
@@ -300,7 +299,9 @@ impl QueryFragment<Pg> for FilterConflictingVpcSubnetRangesQuery {
             &self.subnet.name(),
         )?;
         out.push_sql(", ");
-        out.push_bind_param::<sql_types::Text, String>(&self.subnet.identity.description)?;
+        out.push_bind_param::<sql_types::Text, String>(
+            &self.subnet.identity.description,
+        )?;
         out.push_sql(", ");
         out.push_bind_param::<sql_types::Timestamptz, DateTime<Utc>>(
             &self.subnet.identity.time_created,
@@ -374,7 +375,10 @@ impl diesel::insertable::CanInsertInSingleQuery<Pg>
 }
 
 impl QueryFragment<Pg> for FilterConflictingVpcSubnetRangesQueryValues {
-    fn walk_ast<'a>(&'a self, mut out: AstPass<'_, 'a, Pg>) -> diesel::QueryResult<()> {
+    fn walk_ast<'a>(
+        &'a self,
+        mut out: AstPass<'_, 'a, Pg>,
+    ) -> diesel::QueryResult<()> {
         use db::schema::vpc_subnet::dsl;
         out.push_sql("(");
         out.push_identifier(dsl::id::NAME)?;
@@ -764,7 +768,9 @@ fn push_select_next_available_ip_subquery<'a>(
 ) -> diesel::QueryResult<()> {
     use db::schema::network_interface::dsl;
     out.push_sql("SELECT ");
-    out.push_bind_param::<sql_types::Inet, IpNetwork>(&interface.network_address_v4_sql)?;
+    out.push_bind_param::<sql_types::Inet, IpNetwork>(
+        &interface.network_address_v4_sql,
+    )?;
     out.push_sql(" + ");
     out.push_identifier("address_offset")?;
     out.push_sql(" AS ");
@@ -777,7 +783,9 @@ fn push_select_next_available_ip_subquery<'a>(
         )
         .as_str(),
     );
-    out.push_bind_param::<sql_types::BigInt, _>(&interface.last_address_offset_v4)?;
+    out.push_bind_param::<sql_types::BigInt, _>(
+        &interface.last_address_offset_v4,
+    )?;
     out.push_sql(") AS ");
     out.push_identifier("address_offset")?;
     out.push_sql(" LEFT OUTER JOIN ");
@@ -789,9 +797,13 @@ fn push_select_next_available_ip_subquery<'a>(
     out.push_sql(", ");
     out.push_identifier(dsl::time_deleted::NAME)?;
     out.push_sql(" IS NULL) = (");
-    out.push_bind_param::<sql_types::Uuid, Uuid>(&interface.subnet.identity.id)?;
+    out.push_bind_param::<sql_types::Uuid, Uuid>(
+        &interface.subnet.identity.id,
+    )?;
     out.push_sql(", ");
-    out.push_bind_param::<sql_types::Inet, IpNetwork>(&interface.network_address_v4_sql)?;
+    out.push_bind_param::<sql_types::Inet, IpNetwork>(
+        &interface.network_address_v4_sql,
+    )?;
     out.push_sql(" + ");
     out.push_identifier("address_offset")?;
     out.push_sql(", TRUE) ");
@@ -943,7 +955,9 @@ fn push_interface_allocation_subquery<'a>(
     out.push_identifier(dsl::vpc_id::NAME)?;
     out.push_sql(", ");
 
-    out.push_bind_param::<sql_types::Uuid, Uuid>(&interface.subnet.identity.id)?;
+    out.push_bind_param::<sql_types::Uuid, Uuid>(
+        &interface.subnet.identity.id,
+    )?;
     out.push_sql(" AS ");
     out.push_identifier(dsl::subnet_id::NAME)?;
     out.push_sql(", ");
@@ -960,10 +974,7 @@ fn push_interface_allocation_subquery<'a>(
         out.push_bind_param::<sql_types::Inet, IpNetwork>(ip)?;
     } else {
         out.push_sql("(");
-        push_select_next_available_ip_subquery(
-            out.reborrow(),
-            &interface,
-        )?;
+        push_select_next_available_ip_subquery(out.reborrow(), &interface)?;
         out.push_sql(")");
     }
     out.push_sql(" AS ");
@@ -1117,11 +1128,14 @@ pub struct InsertNetworkInterfaceQuery {
     pub now: DateTime<Utc>,
 }
 
-type FromClause<T> = diesel::internal::table_macro::StaticQueryFragmentInstance<T>;
-type NetworkInterfaceFromClause = FromClause<db::schema::network_interface::table>;
-type VpcSubnetFromClause = FromClause<db::schema::network_interface::table>;
+type FromClause<T> =
+    diesel::internal::table_macro::StaticQueryFragmentInstance<T>;
+type NetworkInterfaceFromClause =
+    FromClause<db::schema::network_interface::table>;
+type VpcSubnetFromClause = FromClause<db::schema::vpc_subnet::table>;
 
-const NETWORK_INTERFACE_FROM_CLAUSE: NetworkInterfaceFromClause = NetworkInterfaceFromClause::new();
+const NETWORK_INTERFACE_FROM_CLAUSE: NetworkInterfaceFromClause =
+    NetworkInterfaceFromClause::new();
 const VPC_SUBNET_FROM_CLAUSE: VpcSubnetFromClause = VpcSubnetFromClause::new();
 
 impl QueryId for InsertNetworkInterfaceQuery {
@@ -1140,34 +1154,38 @@ impl Insertable<db::schema::network_interface::table>
 }
 
 impl QueryFragment<Pg> for InsertNetworkInterfaceQuery {
-    fn walk_ast<'a>(&'a self, mut out: AstPass<'_, 'a, Pg>) -> diesel::QueryResult<()> {
+    fn walk_ast<'a>(
+        &'a self,
+        mut out: AstPass<'_, 'a, Pg>,
+    ) -> diesel::QueryResult<()> {
         use db::schema::network_interface::dsl;
-        let push_columns = |mut out: AstPass<'_, 'a, Pg>| -> diesel::QueryResult<()> {
-            out.push_identifier(dsl::id::NAME)?;
-            out.push_sql(", ");
-            out.push_identifier(dsl::name::NAME)?;
-            out.push_sql(", ");
-            out.push_identifier(dsl::description::NAME)?;
-            out.push_sql(", ");
-            out.push_identifier(dsl::time_created::NAME)?;
-            out.push_sql(", ");
-            out.push_identifier(dsl::time_modified::NAME)?;
-            out.push_sql(", ");
-            out.push_identifier(dsl::time_deleted::NAME)?;
-            out.push_sql(", ");
-            out.push_identifier(dsl::instance_id::NAME)?;
-            out.push_sql(", ");
-            out.push_identifier(dsl::vpc_id::NAME)?;
-            out.push_sql(", ");
-            out.push_identifier(dsl::subnet_id::NAME)?;
-            out.push_sql(", ");
-            out.push_identifier(dsl::mac::NAME)?;
-            out.push_sql(", ");
-            out.push_identifier(dsl::ip::NAME)?;
-            out.push_sql(", ");
-            out.push_identifier(dsl::slot::NAME)?;
-            Ok(())
-        };
+        let push_columns =
+            |mut out: AstPass<'_, 'a, Pg>| -> diesel::QueryResult<()> {
+                out.push_identifier(dsl::id::NAME)?;
+                out.push_sql(", ");
+                out.push_identifier(dsl::name::NAME)?;
+                out.push_sql(", ");
+                out.push_identifier(dsl::description::NAME)?;
+                out.push_sql(", ");
+                out.push_identifier(dsl::time_created::NAME)?;
+                out.push_sql(", ");
+                out.push_identifier(dsl::time_modified::NAME)?;
+                out.push_sql(", ");
+                out.push_identifier(dsl::time_deleted::NAME)?;
+                out.push_sql(", ");
+                out.push_identifier(dsl::instance_id::NAME)?;
+                out.push_sql(", ");
+                out.push_identifier(dsl::vpc_id::NAME)?;
+                out.push_sql(", ");
+                out.push_identifier(dsl::subnet_id::NAME)?;
+                out.push_sql(", ");
+                out.push_identifier(dsl::mac::NAME)?;
+                out.push_sql(", ");
+                out.push_identifier(dsl::ip::NAME)?;
+                out.push_sql(", ");
+                out.push_identifier(dsl::slot::NAME)?;
+                Ok(())
+            };
 
         out.push_sql("SELECT (candidate).* FROM (SELECT COALESCE((");
 
@@ -1218,7 +1236,10 @@ impl diesel::insertable::CanInsertInSingleQuery<Pg>
 }
 
 impl QueryFragment<Pg> for InsertNetworkInterfaceQueryValues {
-    fn walk_ast<'a>(&'a self, mut out: AstPass<'_, 'a, Pg>) -> diesel::QueryResult<()> {
+    fn walk_ast<'a>(
+        &'a self,
+        mut out: AstPass<'_, 'a, Pg>,
+    ) -> diesel::QueryResult<()> {
         use db::schema::network_interface::dsl;
         out.push_sql("(");
         out.push_identifier(dsl::id::NAME)?;

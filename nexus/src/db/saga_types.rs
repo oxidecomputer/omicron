@@ -15,9 +15,9 @@
 use super::schema::{saga, saga_node_event};
 use diesel::backend::{Backend, RawValue};
 use diesel::deserialize::{self, FromSql};
+use diesel::pg::Pg;
 use diesel::serialize::{self, ToSql};
 use diesel::sql_types;
-use diesel::pg::Pg;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::Generation;
 use std::convert::TryFrom;
@@ -89,10 +89,7 @@ impl ToSql<sql_types::Uuid, Pg> for SagaId {
         out: &mut serialize::Output<'a, '_, Pg>,
     ) -> serialize::Result {
         let id = Uuid::from(self.0);
-        <Uuid as ToSql<sql_types::Uuid, Pg>>::to_sql(
-            &id,
-            &mut out.reborrow()
-        )
+        <Uuid as ToSql<sql_types::Uuid, Pg>>::to_sql(&id, &mut out.reborrow())
     }
 }
 
@@ -127,10 +124,7 @@ impl ToSql<sql_types::BigInt, Pg> for SagaNodeId {
     ) -> serialize::Result {
         // Diesel newtype -> steno type -> u32 -> i64 -> SQL
         let id = u32::from(self.0) as i64;
-        <i64 as ToSql<sql_types::BigInt, Pg>>::to_sql(
-            &id,
-            &mut out.reborrow(),
-        )
+        <i64 as ToSql<sql_types::BigInt, Pg>>::to_sql(&id, &mut out.reborrow())
     }
 }
 

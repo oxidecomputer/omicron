@@ -23,9 +23,9 @@ use chrono::{DateTime, Utc};
 use db_macros::{Asset, Resource};
 use diesel::backend::{Backend, RawValue};
 use diesel::deserialize::{self, FromSql};
+use diesel::pg::Pg;
 use diesel::serialize::{self, IsNull, ToSql};
 use diesel::sql_types;
-use diesel::pg::Pg;
 use ipnetwork::IpNetwork;
 use omicron_common::api::external;
 use omicron_common::api::internal;
@@ -327,9 +327,7 @@ impl From<Generation> for sled_agent_client::types::Generation {
 /// Representation of a [`u16`] in the database.
 /// We need this because the database does not support unsigned types.
 /// This handles converting from the database's INT4 to the actual u16.
-#[derive(
-    Copy, Clone, Debug, Eq, Ord, PartialEq, PartialOrd, FromSqlRow,
-)]
+#[derive(Copy, Clone, Debug, Eq, Ord, PartialEq, PartialOrd, FromSqlRow)]
 #[diesel(sql_type = sql_types::Int4)]
 #[repr(transparent)]
 pub struct SqlU16(pub u16);
@@ -344,7 +342,7 @@ impl SqlU16 {
 }
 
 impl ToSql<sql_types::Int4, Pg> for SqlU16 {
-//    i32: ToSql<sql_types::Int4, DB>,
+    //    i32: ToSql<sql_types::Int4, DB>,
     fn to_sql<'a>(
         &'a self,
         out: &mut serialize::Output<'a, '_, Pg>,
@@ -432,9 +430,8 @@ impl ToSql<sql_types::Inet, Pg> for Ipv4Net {
         &'a self,
         out: &mut serialize::Output<'a, '_, Pg>,
     ) -> serialize::Result {
-        let net = IpNetwork::V4(*self.0);
         <IpNetwork as ToSql<sql_types::Inet, Pg>>::to_sql(
-            &net,
+            &IpNetwork::V4(*self.0),
             &mut out.reborrow(),
         )
     }
@@ -2553,10 +2550,13 @@ impl IncompleteNetworkInterface {
 
         let vpc_id_str = vpc_id.to_string();
         let ip_sql = ip.map(|ip| ip.into());
-        let subnet_v4_sql = IpNetwork::from(subnet.ipv4_block.0.0);
+        let subnet_v4_sql = IpNetwork::from(subnet.ipv4_block.0 .0);
         let network_address_v4_sql = IpNetwork::from(subnet_v4_sql.network());
         let mac_sql = mac.to_string();
-        let last_address_offset_v4 = super::subnet_allocation::generate_last_address_offset(&subnet_v4_sql);
+        let last_address_offset_v4 =
+            super::subnet_allocation::generate_last_address_offset(
+                &subnet_v4_sql,
+            );
         Ok(Self {
             identity,
             instance_id,

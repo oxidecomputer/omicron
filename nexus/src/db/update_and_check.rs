@@ -9,11 +9,11 @@ use async_bb8_diesel::{AsyncRunQueryDsl, ConnectionManager, PoolError};
 use diesel::associations::HasTable;
 use diesel::pg::Pg;
 use diesel::prelude::*;
-use diesel::QuerySource;
 use diesel::query_builder::*;
 use diesel::query_dsl::methods::LoadQuery;
 use diesel::query_source::Table;
 use diesel::sql_types::Nullable;
+use diesel::QuerySource;
 use std::marker::PhantomData;
 
 /// A simple wrapper type for Diesel's [`UpdateStatement`], which
@@ -77,7 +77,8 @@ where
     US::Table: HasTable<Table = US::Table>
         + Table
         + diesel::query_dsl::methods::FindDsl<K>,
-    <US::Table as diesel::query_dsl::methods::FindDsl<K>>::Output: QueryFragment<Pg> + Send + 'static,
+    <US::Table as diesel::query_dsl::methods::FindDsl<K>>::Output:
+        QueryFragment<Pg> + Send + 'static,
     K: 'static + Copy + Send,
 {
     fn check_if_exists<Q>(self, key: K) -> UpdateAndQueryStatement<US, K, Q> {
@@ -98,7 +99,8 @@ pub struct UpdateAndQueryStatement<US, K, Q>
 where
     US: UpdateStatementExt,
 {
-    update_statement: UpdateStatement<US::Table, US::WhereClause, US::Changeset>,
+    update_statement:
+        UpdateStatement<US::Table, US::WhereClause, US::Changeset>,
     find_subquery: Box<dyn QueryFragment<Pg> + Send>,
     key_type: PhantomData<K>,
     query_type: PhantomData<Q>,

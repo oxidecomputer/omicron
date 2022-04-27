@@ -101,9 +101,9 @@ pub trait DatastoreCollection<ResourceType> {
     /// of the collection id within the inserted row.
     fn insert_resource<ISR>(
         key: Self::CollectionId,
-        // Note that InsertStatement's fourth argument defaults to Ret =
-        // NoReturningClause. This enforces that the given input statement does
-        // not have a RETURNING clause.
+    // Note that InsertStatement's fourth argument defaults to Ret =
+    // NoReturningClause. This enforces that the given input statement does
+    // not have a RETURNING clause.
         insert: InsertStatement<ResourceTable<ResourceType, Self>, ISR>,
     ) -> InsertIntoCollectionStatement<ResourceType, ISR, Self>
     where
@@ -157,17 +157,15 @@ pub trait DatastoreCollection<ResourceType> {
                         .primary_key()
                         .eq(key),
                 )
-                .filter(Self::CollectionTimeDeletedColumn::default().is_null())
+                .filter(Self::CollectionTimeDeletedColumn::default().is_null()),
         );
 
         // TODO: less box?
         let from_clause = Box::new(
             <CollectionTable<ResourceType, Self> as HasTable>::table()
-                .from_clause()
+                .from_clause(),
         );
-        let returning_clause = Box::new(
-            ResourceType::as_returning()
-        );
+        let returning_clause = Box::new(ResourceType::as_returning());
 
         InsertIntoCollectionStatement {
             insert_statement: insert,
@@ -516,8 +514,7 @@ where
         // Write the update manually instead of with the dsl, to avoid the
         // explosion in complexity of type traits
         out.push_sql("updated_row AS MATERIALIZED (UPDATE ");
-        self.from_clause
-            .walk_ast(out.reborrow())?;
+        self.from_clause.walk_ast(out.reborrow())?;
         out.push_sql(" SET ");
         out.push_identifier(GenerationNumberColumn::<ResourceType, C>::NAME)?;
         out.push_sql(" = ");

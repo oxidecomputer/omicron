@@ -8,11 +8,11 @@ use diesel::backend::Backend;
 use diesel::backend::RawValue;
 use diesel::deserialize;
 use diesel::deserialize::FromSql;
+use diesel::pg::Pg;
 use diesel::serialize;
 use diesel::serialize::Output;
 use diesel::serialize::ToSql;
 use diesel::sql_types::Inet;
-use diesel::pg::Pg;
 use ipnetwork::IpNetwork;
 use ipnetwork::Ipv6Network;
 use omicron_common::api::external::Error;
@@ -34,15 +34,9 @@ impl From<&std::net::Ipv6Addr> for Ipv6Addr {
 }
 
 impl ToSql<Inet, Pg> for Ipv6Addr {
-    fn to_sql<'a>(
-        &'a self,
-        out: &mut Output<'a, '_, Pg>,
-    ) -> serialize::Result {
+    fn to_sql<'a>(&'a self, out: &mut Output<'a, '_, Pg>) -> serialize::Result {
         let net = IpNetwork::V6(Ipv6Network::from(self.0));
-        <IpNetwork as ToSql<Inet, Pg>>::to_sql(
-            &net,
-            &mut out.reborrow(),
-        )
+        <IpNetwork as ToSql<Inet, Pg>>::to_sql(&net, &mut out.reborrow())
     }
 }
 

@@ -39,11 +39,7 @@ pub fn paginated<T, C, M>(
 where
     // T is a table which can create a BoxedQuery.
     T: diesel::Table,
-    T: query_methods::BoxedDsl<
-        'static,
-        Pg,
-        Output = BoxedDslOutput<T>,
-    >,
+    T: query_methods::BoxedDsl<'static, Pg, Output = BoxedDslOutput<T>>,
     // C is a column which appears in T.
     C: 'static + Column + Copy + ExpressionMethods + AppearsOnTable<T>,
     // Required to compare the column with the marker type.
