@@ -88,9 +88,9 @@ pkg set-publisher -p "$XDE_REPO_PATH" --search-first
 RC=0
 pkg update || RC=$?;
 if [[ "$RC" -eq 0 ]] || [[ "$RC" -eq 4 ]]; then
-    return 0
+    exit 0
 else
-    return "$RC"
+    exit "$RC"
 fi
 
 # Actually install the xde kernel module and opteadm tool
