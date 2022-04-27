@@ -342,7 +342,6 @@ impl SqlU16 {
 }
 
 impl ToSql<sql_types::Int4, Pg> for SqlU16 {
-    //    i32: ToSql<sql_types::Int4, DB>,
     fn to_sql<'a>(
         &'a self,
         out: &mut serialize::Output<'a, '_, Pg>,
