@@ -294,7 +294,7 @@ impl QueryFragment<Pg> for FilterConflictingVpcSubnetRangesQuery {
         out.push_sql(", ");
         out.push_identifier(dsl::vpc_id::NAME)?;
         out.push_sql(") AS (VALUES (");
-        out.push_bind_param::<sql_types::Uuid, Uuid>(self.subnet.id())?;
+        out.push_bind_param::<sql_types::Uuid, Uuid>(&self.subnet.identity.id)?;
         out.push_sql(", ");
         out.push_bind_param::<sql_types::Text, db::model::Name>(
             &self.subnet.name(),
@@ -789,7 +789,7 @@ fn push_select_next_available_ip_subquery<'a>(
     out.push_sql(", ");
     out.push_identifier(dsl::time_deleted::NAME)?;
     out.push_sql(" IS NULL) = (");
-    out.push_bind_param::<sql_types::Uuid, Uuid>(&interface.subnet.id())?;
+    out.push_bind_param::<sql_types::Uuid, Uuid>(&interface.subnet.identity.id)?;
     out.push_sql(", ");
     out.push_bind_param::<sql_types::Inet, IpNetwork>(&interface.network_address_v4_sql)?;
     out.push_sql(" + ");
@@ -943,7 +943,7 @@ fn push_interface_allocation_subquery<'a>(
     out.push_identifier(dsl::vpc_id::NAME)?;
     out.push_sql(", ");
 
-    out.push_bind_param::<sql_types::Uuid, Uuid>(&interface.subnet.id())?;
+    out.push_bind_param::<sql_types::Uuid, Uuid>(&interface.subnet.identity.id)?;
     out.push_sql(" AS ");
     out.push_identifier(dsl::subnet_id::NAME)?;
     out.push_sql(", ");

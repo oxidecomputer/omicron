@@ -928,7 +928,7 @@ async fn sim_migrate_prep(
         .map_err(ActionError::action_failed)?;
     let instance_id = instance.id();
 
-    Ok((*instance_id, instance.runtime_state.into()))
+    Ok((instance_id, instance.runtime_state.into()))
 }
 
 // Allocate an IP address on the destination sled for the Propolis server.

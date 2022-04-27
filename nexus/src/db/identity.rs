@@ -21,7 +21,7 @@ use uuid::Uuid;
 ///
 /// May be derived from [`macro@db_macros::Resource`].
 pub trait Resource {
-    fn id(&self) -> &Uuid;
+    fn id(&self) -> Uuid;
     fn name(&self) -> &Name;
     fn description(&self) -> &str;
     fn time_created(&self) -> DateTime<Utc>;
@@ -30,7 +30,7 @@ pub trait Resource {
 
     fn identity(&self) -> external::IdentityMetadata {
         external::IdentityMetadata {
-            id: *self.id(),
+            id: self.id(),
             name: self.name().clone().into(),
             description: self.description().to_string(),
             time_created: self.time_created(),
@@ -46,13 +46,13 @@ pub trait Resource {
 ///
 /// May be derived from [`macro@db_macros::Asset`].
 pub trait Asset {
-    fn id(&self) -> &Uuid;
+    fn id(&self) -> Uuid;
     fn time_created(&self) -> DateTime<Utc>;
     fn time_modified(&self) -> DateTime<Utc>;
 
     fn identity(&self) -> external::IdentityMetadata {
         external::IdentityMetadata {
-            id: *self.id(),
+            id: self.id(),
             name: "no-name".parse().unwrap(),
             description: "no description".to_string(),
             time_created: self.time_created(),
