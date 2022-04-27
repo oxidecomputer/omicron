@@ -1299,10 +1299,7 @@ impl DataStore {
         interface: IncompleteNetworkInterface,
     ) -> Result<NetworkInterface, NetworkInterfaceError> {
         use db::schema::network_interface::dsl;
-        let query = InsertNetworkInterfaceQuery {
-            interface: interface.clone(),
-            now: Utc::now(),
-        };
+        let query = InsertNetworkInterfaceQuery::new(interface.clone());
         diesel::insert_into(dsl::network_interface)
             .values(query)
             .returning(NetworkInterface::as_returning())

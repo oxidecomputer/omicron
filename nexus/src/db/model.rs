@@ -2522,15 +2522,6 @@ pub struct IncompleteNetworkInterface {
     pub subnet: VpcSubnet,
     pub mac: MacAddr,
     pub ip: Option<std::net::IpAddr>,
-
-    // TODO: Reduce the "non-serialized" variants, if they aren't needed?
-    // TODO: Maybe a different struct?
-    pub vpc_id_str: String,
-    pub ip_sql: Option<IpNetwork>,
-    pub subnet_v4_sql: IpNetwork,
-    pub network_address_v4_sql: IpNetwork,
-    pub mac_sql: String,
-    pub last_address_offset_v4: i64,
 }
 
 impl IncompleteNetworkInterface {
@@ -2548,29 +2539,7 @@ impl IncompleteNetworkInterface {
         };
         let identity = NetworkInterfaceIdentity::new(interface_id, identity);
 
-        let vpc_id_str = vpc_id.to_string();
-        let ip_sql = ip.map(|ip| ip.into());
-        let subnet_v4_sql = IpNetwork::from(subnet.ipv4_block.0 .0);
-        let network_address_v4_sql = IpNetwork::from(subnet_v4_sql.network());
-        let mac_sql = mac.to_string();
-        let last_address_offset_v4 =
-            super::subnet_allocation::generate_last_address_offset(
-                &subnet_v4_sql,
-            );
-        Ok(Self {
-            identity,
-            instance_id,
-            subnet,
-            vpc_id,
-            mac,
-            ip,
-            vpc_id_str,
-            ip_sql,
-            subnet_v4_sql,
-            network_address_v4_sql,
-            mac_sql,
-            last_address_offset_v4,
-        })
+        Ok(Self { identity, instance_id, subnet, vpc_id, mac, ip })
     }
 }
 

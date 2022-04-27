@@ -19,7 +19,7 @@ use std::convert::TryFrom;
 use uuid::Uuid;
 
 // Helper to return the offset of the last valid/allocatable IP in a subnet.
-pub fn generate_last_address_offset(subnet: &ipnetwork::IpNetwork) -> i64 {
+fn generate_last_address_offset(subnet: &ipnetwork::IpNetwork) -> i64 {
     // Generate last address in the range.
     //
     // NOTE: First subtraction is to convert from the subnet size to an
@@ -764,12 +764,12 @@ fn push_ensure_unique_vpc_expression<'a>(
 /// ranges as addresses are released back to the pool.
 fn push_select_next_available_ip_subquery<'a>(
     mut out: AstPass<'_, 'a, Pg>,
-    interface: &'a IncompleteNetworkInterface,
+    query: &'a InsertNetworkInterfaceQuery,
 ) -> diesel::QueryResult<()> {
     use db::schema::network_interface::dsl;
     out.push_sql("SELECT ");
     out.push_bind_param::<sql_types::Inet, IpNetwork>(
-        &interface.network_address_v4_sql,
+        &query.network_address_v4_sql,
     )?;
     out.push_sql(" + ");
     out.push_identifier("address_offset")?;
@@ -783,9 +783,7 @@ fn push_select_next_available_ip_subquery<'a>(
         )
         .as_str(),
     );
-    out.push_bind_param::<sql_types::BigInt, _>(
-        &interface.last_address_offset_v4,
-    )?;
+    out.push_bind_param::<sql_types::BigInt, _>(&query.last_address_offset_v4)?;
     out.push_sql(") AS ");
     out.push_identifier("address_offset")?;
     out.push_sql(" LEFT OUTER JOIN ");
@@ -798,11 +796,11 @@ fn push_select_next_available_ip_subquery<'a>(
     out.push_identifier(dsl::time_deleted::NAME)?;
     out.push_sql(" IS NULL) = (");
     out.push_bind_param::<sql_types::Uuid, Uuid>(
-        &interface.subnet.identity.id,
+        &query.interface.subnet.identity.id,
     )?;
     out.push_sql(", ");
     out.push_bind_param::<sql_types::Inet, IpNetwork>(
-        &interface.network_address_v4_sql,
+        &query.network_address_v4_sql,
     )?;
     out.push_sql(" + ");
     out.push_identifier("address_offset")?;
@@ -886,8 +884,7 @@ fn push_select_next_available_ip_subquery<'a>(
 /// the instance-validation check passes.
 fn push_interface_allocation_subquery<'a>(
     mut out: AstPass<'_, 'a, Pg>,
-    interface: &'a IncompleteNetworkInterface,
-    now: &'a DateTime<Utc>,
+    query: &'a InsertNetworkInterfaceQuery,
 ) -> diesel::QueryResult<()> {
     use db::schema::network_interface::dsl;
     // Push the CTE that ensures that any other interface with the same
@@ -901,9 +898,9 @@ fn push_interface_allocation_subquery<'a>(
     out.push_sql("(SELECT ");
     push_ensure_unique_vpc_expression(
         out.reborrow(),
-        &interface.vpc_id,
-        &interface.vpc_id_str,
-        &interface.instance_id,
+        &query.interface.vpc_id,
+        &query.vpc_id_str,
+        &query.interface.instance_id,
     )?;
     out.push_sql(") ");
 
@@ -911,31 +908,31 @@ fn push_interface_allocation_subquery<'a>(
     // are known regardless of whether we're allocating an IP address. These
     // are all written as `SELECT <value1> AS <name1>, <value2> AS <name2>, ...
     out.push_sql("SELECT ");
-    out.push_bind_param::<sql_types::Uuid, Uuid>(&interface.identity.id)?;
+    out.push_bind_param::<sql_types::Uuid, Uuid>(&query.interface.identity.id)?;
     out.push_sql(" AS ");
     out.push_identifier(dsl::id::NAME)?;
     out.push_sql(", ");
 
     out.push_bind_param::<sql_types::Text, db::model::Name>(
-        &interface.identity.name,
+        &query.interface.identity.name,
     )?;
     out.push_sql(" AS ");
     out.push_identifier(dsl::name::NAME)?;
     out.push_sql(", ");
 
     out.push_bind_param::<sql_types::Text, String>(
-        &interface.identity.description,
+        &query.interface.identity.description,
     )?;
     out.push_sql(" AS ");
     out.push_identifier(dsl::description::NAME)?;
     out.push_sql(", ");
 
-    out.push_bind_param::<sql_types::Timestamptz, DateTime<Utc>>(&now)?;
+    out.push_bind_param::<sql_types::Timestamptz, DateTime<Utc>>(&query.now)?;
     out.push_sql(" AS ");
     out.push_identifier(dsl::time_created::NAME)?;
     out.push_sql(", ");
 
-    out.push_bind_param::<sql_types::Timestamptz, DateTime<Utc>>(&now)?;
+    out.push_bind_param::<sql_types::Timestamptz, DateTime<Utc>>(&query.now)?;
     out.push_sql(" AS ");
     out.push_identifier(dsl::time_modified::NAME)?;
     out.push_sql(", ");
@@ -945,7 +942,7 @@ fn push_interface_allocation_subquery<'a>(
     out.push_identifier(dsl::time_deleted::NAME)?;
     out.push_sql(", ");
 
-    out.push_bind_param::<sql_types::Uuid, Uuid>(&interface.instance_id)?;
+    out.push_bind_param::<sql_types::Uuid, Uuid>(&query.interface.instance_id)?;
     out.push_sql(" AS ");
     out.push_identifier(dsl::instance_id::NAME)?;
     out.push_sql(", ");
@@ -956,13 +953,13 @@ fn push_interface_allocation_subquery<'a>(
     out.push_sql(", ");
 
     out.push_bind_param::<sql_types::Uuid, Uuid>(
-        &interface.subnet.identity.id,
+        &query.interface.subnet.identity.id,
     )?;
     out.push_sql(" AS ");
     out.push_identifier(dsl::subnet_id::NAME)?;
     out.push_sql(", ");
 
-    out.push_bind_param::<sql_types::Text, String>(&interface.mac_sql)?;
+    out.push_bind_param::<sql_types::Text, String>(&query.mac_sql)?;
     out.push_sql(" AS ");
     out.push_identifier(dsl::mac::NAME)?;
     out.push_sql(", ");
@@ -970,11 +967,11 @@ fn push_interface_allocation_subquery<'a>(
     // If the user specified an IP address, then insert it by value. If they
     // did not, meaning we're allocating the next available one on their
     // behalf, then insert that subquery here.
-    if let Some(ref ip) = &interface.ip_sql {
+    if let Some(ref ip) = &query.ip_sql {
         out.push_bind_param::<sql_types::Inet, IpNetwork>(ip)?;
     } else {
         out.push_sql("(");
-        push_select_next_available_ip_subquery(out.reborrow(), &interface)?;
+        push_select_next_available_ip_subquery(out.reborrow(), &query)?;
         out.push_sql(")");
     }
     out.push_sql(" AS ");
@@ -986,7 +983,7 @@ fn push_interface_allocation_subquery<'a>(
     out.push_sql(", (");
     push_select_next_available_nic_slot_query(
         out.reborrow(),
-        &interface.instance_id,
+        &query.interface.instance_id,
     )?;
     out.push_sql(") AS ");
     out.push_identifier(dsl::slot::NAME)?;
@@ -1124,8 +1121,43 @@ fn push_select_next_available_nic_slot_query<'a>(
 /// constructing the subqueries in this type for more details.
 #[derive(Debug, Clone)]
 pub struct InsertNetworkInterfaceQuery {
-    pub interface: IncompleteNetworkInterface,
-    pub now: DateTime<Utc>,
+    interface: IncompleteNetworkInterface,
+    now: DateTime<Utc>,
+
+    // The following fields are derived from the previous fields. This begs the
+    // question: "Why bother storing them at all?"
+    //
+    // Diesel's [`diesel::query_builder::ast_pass::AstPass:push_bind_param`] method
+    // requires that the provided value now live as long as the entire AstPass
+    // type. By storing these values in the struct, they'll live at least as
+    // long as the entire call to [`QueryFragment<Pg>::walk_ast`].
+    vpc_id_str: String,
+    ip_sql: Option<IpNetwork>,
+    network_address_v4_sql: IpNetwork,
+    mac_sql: String,
+    last_address_offset_v4: i64,
+}
+
+impl InsertNetworkInterfaceQuery {
+    pub fn new(interface: IncompleteNetworkInterface) -> Self {
+        let vpc_id_str = interface.vpc_id.to_string();
+        let ip_sql = interface.ip.map(|ip| ip.into());
+        let subnet_v4_sql = IpNetwork::from(interface.subnet.ipv4_block.0 .0);
+        let network_address_v4_sql = IpNetwork::from(subnet_v4_sql.network());
+        let mac_sql = interface.mac.to_string();
+        let last_address_offset_v4 =
+            generate_last_address_offset(&subnet_v4_sql);
+
+        Self {
+            interface,
+            now: Utc::now(),
+            vpc_id_str,
+            ip_sql,
+            network_address_v4_sql,
+            mac_sql,
+            last_address_offset_v4,
+        }
+    }
 }
 
 type FromClause<T> =
@@ -1207,11 +1239,7 @@ impl QueryFragment<Pg> for InsertNetworkInterfaceQuery {
 
         // Push the main, data-validating subquery.
         out.push_sql(", (");
-        push_interface_allocation_subquery(
-            out.reborrow(),
-            &self.interface,
-            &self.now,
-        )?;
+        push_interface_allocation_subquery(out.reborrow(), &self)?;
         out.push_sql(")) AS candidate)");
         Ok(())
     }

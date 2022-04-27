@@ -21,7 +21,6 @@ use omicron_common::api::external::DataPageParams;
 type TableSqlType<T> = <T as AsQuery>::SqlType;
 
 // Shorthand alias for the type made from "table.into_boxed()".
-// type BoxedQuery<T> = diesel::internal::table_macro::BoxedSelectStatement<'static, TableSqlType<T>, T, Pg>;
 type BoxedQuery<T> = diesel::helper_types::IntoBoxed<'static, T, Pg>;
 type BoxedDslOutput<T> = diesel::internal::table_macro::BoxedSelectStatement<
     'static,
