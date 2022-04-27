@@ -14,7 +14,6 @@ use async_bb8_diesel::{
     AsyncRunQueryDsl, ConnectionError, ConnectionManager, PoolError,
 };
 use diesel::associations::HasTable;
-// use diesel::expression::SelectBy;
 use diesel::helper_types::*;
 use diesel::pg::Pg;
 use diesel::prelude::*;
@@ -102,9 +101,9 @@ pub trait DatastoreCollection<ResourceType> {
     /// of the collection id within the inserted row.
     fn insert_resource<ISR>(
         key: Self::CollectionId,
-    // Note that InsertStatement's fourth argument defaults to Ret =
-    // NoReturningClause. This enforces that the given input statement does
-    // not have a RETURNING clause.
+        // Note that InsertStatement's fourth argument defaults to Ret =
+        // NoReturningClause. This enforces that the given input statement does
+        // not have a RETURNING clause.
         insert: InsertStatement<ResourceTable<ResourceType, Self>, ISR>,
     ) -> InsertIntoCollectionStatement<ResourceType, ISR, Self>
     where
@@ -113,42 +112,44 @@ pub trait DatastoreCollection<ResourceType> {
             <Self::CollectionTimeDeletedColumn as Column>::Table,
         ): TypesAreSame,
         Self: Sized,
+        // Enables the "table()" method.
         CollectionTable<ResourceType, Self>: HasTable<Table = CollectionTable<ResourceType, Self>>
-           + 'static
-           + Send
-           + Table
-           + query_methods::BoxedDsl<
-               'static,
-               Pg,
-               Output = BoxedDslOutput<CollectionTable<ResourceType, Self>>,
-           >,
-        <CollectionTable<ResourceType, Self> as QuerySource>::FromClause: QueryFragment<Pg> + Send,
+            + 'static
+            + Send
+            + Table
+            // Allows calling ".into_boxed()" on the table.
+            + query_methods::BoxedDsl<
+                'static,
+                Pg,
+                Output = BoxedDslOutput<CollectionTable<ResourceType, Self>>,
+            >,
+        // Allows treating "filter_subquery" as a boxed "dyn QueryFragment<Pg>".
+        <CollectionTable<ResourceType, Self> as QuerySource>::FromClause:
+            QueryFragment<Pg> + Send,
+        // Allows sending "filter_subquery" between threads.
         <CollectionTable<ResourceType, Self> as AsQuery>::SqlType: Send,
+        // Allows calling ".filter()" on the boxed table.
         BoxedQuery<CollectionTable<ResourceType, Self>>:
             query_methods::FilterDsl<
-                Eq<
-                    CollectionPrimaryKey<ResourceType, Self>,
-                    CollectionId<ResourceType, Self>,
+                    Eq<
+                        CollectionPrimaryKey<ResourceType, Self>,
+                        CollectionId<ResourceType, Self>,
+                    >,
+                    Output = BoxedQuery<CollectionTable<ResourceType, Self>>,
+                > + query_methods::FilterDsl<
+                    IsNull<CollectionTimeDeletedColumn<ResourceType, Self>>,
+                    Output = BoxedQuery<CollectionTable<ResourceType, Self>>,
                 >,
-                Output = BoxedQuery<CollectionTable<ResourceType, Self>>,
-            > +
-            query_methods::FilterDsl<
-                IsNull<CollectionTimeDeletedColumn<ResourceType, Self>>,
-                Output = BoxedQuery<CollectionTable<ResourceType, Self>>,
-            >,
-        <CollectionPrimaryKey<ResourceType, Self> as Expression>::SqlType: SingleValue,
-        CollectionTimeDeletedColumn<ResourceType, Self>: ExpressionMethods,
+        // Allows using "key" in in ".eq(...)".
         CollectionId<ResourceType, Self>: diesel::expression::AsExpression<
-                SerializedCollectionPrimaryKey<ResourceType, Self>,
-            > + diesel::serialize::ToSql<
-                SerializedCollectionPrimaryKey<ResourceType, Self>,
-                Pg,
-            >,
-        ResourceTable<ResourceType, Self>: Copy + Debug,
-        <ResourceTable<ResourceType, Self> as QuerySource>::FromClause: Copy + Debug,
-        <CollectionTable<ResourceType, Self> as QuerySource>::FromClause: QueryFragment<Pg>,
-        ResourceType: 'static + Selectable<Pg> + Send,
-        <ResourceType as Selectable<Pg>>::SelectExpression: QueryFragment<Pg> + Send,
+            SerializedCollectionPrimaryKey<ResourceType, Self>,
+        >,
+        <CollectionPrimaryKey<ResourceType, Self> as Expression>::SqlType:
+            SingleValue,
+        // Allows calling "is_null()" on the time deleted column.
+        CollectionTimeDeletedColumn<ResourceType, Self>: ExpressionMethods,
+        // Necessary for output type (`InsertIntoCollectionStatement`).
+        ResourceType: Selectable<Pg>,
     {
         let filter_subquery = Box::new(
             <CollectionTable<ResourceType, Self> as HasTable>::table()
@@ -161,8 +162,9 @@ pub trait DatastoreCollection<ResourceType> {
                 .filter(Self::CollectionTimeDeletedColumn::default().is_null()),
         );
 
-        let from_clause = <CollectionTable<ResourceType, Self> as HasTable>::table()
-            .from_clause();
+        let from_clause =
+            <CollectionTable<ResourceType, Self> as HasTable>::table()
+                .from_clause();
         let returning_clause = ResourceType::as_returning();
         InsertIntoCollectionStatement {
             insert_statement: insert,
@@ -202,8 +204,6 @@ pub struct InsertIntoCollectionStatement<ResourceType, ISR, C>
 where
     ResourceType: Selectable<Pg>,
     C: DatastoreCollection<ResourceType>,
-    ResourceTable<ResourceType, C>: Copy + Debug,
-    <ResourceTable<ResourceType, C> as QuerySource>::FromClause: Copy + Debug,
 {
     insert_statement: InsertStatement<ResourceTable<ResourceType, C>, ISR>,
     filter_subquery: Box<dyn QueryFragment<Pg> + Send>,
@@ -216,8 +216,6 @@ impl<ResourceType, ISR, C> QueryId
     for InsertIntoCollectionStatement<ResourceType, ISR, C>
 where
     C: DatastoreCollection<ResourceType>,
-    ResourceTable<ResourceType, C>: Copy + Debug,
-    <ResourceTable<ResourceType, C> as QuerySource>::FromClause: Copy + Debug,
     ResourceType: Selectable<Pg>,
 {
     type QueryId = ();
@@ -254,7 +252,6 @@ where
     C: 'static + DatastoreCollection<ResourceType> + Send,
     CollectionId<ResourceType, C>: 'static + PartialEq + Send,
     ResourceTable<ResourceType, C>: 'static + Table + Send + Copy + Debug,
-    <ResourceTable<ResourceType, C> as QuerySource>::FromClause: Copy + Debug,
     ISR: 'static + Send,
     InsertIntoCollectionStatement<ResourceType, ISR, C>: Send,
 {
@@ -380,8 +377,6 @@ impl<ResourceType, ISR, C> Query
 where
     ResourceType: Selectable<Pg>,
     C: DatastoreCollection<ResourceType>,
-    ResourceTable<ResourceType, C>: Copy + Debug,
-    <ResourceTable<ResourceType, C> as QuerySource>::FromClause: Copy + Debug,
 {
     type SqlType = SelectableSqlType<ResourceType>;
 }
@@ -391,8 +386,6 @@ impl<ResourceType, ISR, C> RunQueryDsl<DbConnection>
 where
     ResourceType: Selectable<Pg>,
     C: DatastoreCollection<ResourceType>,
-    ResourceTable<ResourceType, C>: Table + Copy + Debug,
-    <ResourceTable<ResourceType, C> as QuerySource>::FromClause: Copy + Debug,
 {
 }
 
@@ -456,11 +449,10 @@ impl<ResourceType, ISR, C> QueryFragment<Pg>
 where
     ResourceType: Selectable<Pg>,
     C: DatastoreCollection<ResourceType>,
-    ResourceTable<ResourceType, C>: Copy + Debug,
-    <ResourceTable<ResourceType, C> as QuerySource>::FromClause: Copy + Debug,
     CollectionPrimaryKey<ResourceType, C>: diesel::Column,
     // Necessary to "walk_ast" over "select.from_clause".
-    <CollectionTable<ResourceType, C> as QuerySource>::FromClause: QueryFragment<Pg>,
+    <CollectionTable<ResourceType, C> as QuerySource>::FromClause:
+        QueryFragment<Pg>,
     // Necessary to "walk_ast" over "self.insert_statement".
     InsertStatement<ResourceTable<ResourceType, C>, ISR>: QueryFragment<Pg>,
     // Necessary to "walk_ast" over "self.returning_clause".
