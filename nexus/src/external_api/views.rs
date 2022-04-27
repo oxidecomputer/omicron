@@ -318,6 +318,13 @@ impl From<model::RoleBuiltin> for Role {
     }
 }
 
+/// Client view of a [`Policy`]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
+pub struct Policy {
+    // XXX-dap can we limit the length of this in schemars/serde?
+    pub role_assignments: Vec<RoleAssignment>,
+}
+
 /// Client view of a [`RoleAssignment`]
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
 pub struct RoleAssignment {

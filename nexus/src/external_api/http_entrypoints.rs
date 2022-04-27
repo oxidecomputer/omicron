@@ -4,10 +4,6 @@
 
 //! Handler functions (entrypoints) for external HTTP APIs
 
-use crate::db::model::Name;
-use crate::ServerContext;
-use crate::{db, external_api::views::RoleAssignment};
-
 use super::{
     console_api, params,
     views::{
@@ -16,6 +12,10 @@ use super::{
     },
 };
 use crate::context::OpContext;
+use crate::db;
+use crate::db::model::Name;
+use crate::external_api::views::Policy;
+use crate::ServerContext;
 use dropshot::endpoint;
 use dropshot::ApiDescription;
 use dropshot::EmptyScanParams;
@@ -65,6 +65,21 @@ use serde::Serialize;
 use std::sync::Arc;
 use uuid::Uuid;
 
+/// Maximum number of role assignments allowed on any one resource
+// Today's implementation assumes a relatively small number of role assignments
+// per resource.  Things should work if we bump this up, but we'll want to look
+// into scalability improvements (e.g., use pagination for fetching and updating
+// the role assignments, and consider the impact on authz checks as well).
+//
+// Most importantly: by keeping this low to start with, it's impossible for
+// customers to develop a dependency on a huge number of role assignments.  That
+// maximizes our flexibility in the future.
+//
+// TODO This should be runtime-configurable.  But it doesn't belong in the Nexus
+// configuration file, since it's a constraint on database objects more than it
+// is Nexus.  We should have some kinds of config that lives in the database.
+const NMAX_ROLE_ASSIGNMENTS_PER_RESOURCE: usize = 32;
+
 type NexusApiDescription = ApiDescription<Arc<ServerContext>>;
 
 /// Returns a description of the external nexus API
@@ -81,10 +96,8 @@ pub fn external_api() -> NexusApiDescription {
         api.register(organizations_delete_organization)?;
         api.register(organizations_put_organization)?;
 
-        api.register(organization_roles_get)?;
-        //api.register(organization_roles_post)?;
-        //api.register(organization_roles_get_role)?;
-        //api.register(organization_roles_delete_role)?;
+        api.register(organization_get_policy)?;
+        api.register(organization_put_policy)?;
 
         api.register(organization_projects_get)?;
         api.register(organization_projects_post)?;
@@ -498,76 +511,77 @@ async fn organizations_put_organization(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-#[derive(Deserialize, JsonSchema, Serialize)]
-struct RoleAssignmentPage {
-    role_name: String,
-    user_id: Uuid,
-}
-
-/// List all role assignments for this Organization
+/// List the role assignments for this Organization
 #[endpoint {
     method = GET,
-    path = "/organizations/{organization_name}/roles",
+    path = "/organizations/{organization_name}/policy",
     tags = ["organizations"],
 }]
-async fn organization_roles_get(
+async fn organization_get_policy(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
-    query_params: Query<PaginationParams<EmptyScanParams, RoleAssignmentPage>>,
     path_params: Path<OrganizationPathParam>,
-) -> Result<HttpResponseOk<ResultsPage<RoleAssignment>>, HttpError> {
+) -> Result<HttpResponseOk<Policy>, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
-    let query = query_params.into_inner();
     let path = path_params.into_inner();
     let organization_name = &path.organization_name;
 
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
-        let marker = role_asgn_marker(&query);
-        let pagparams = role_asgn_pagparams(&*rqctx, &query, &marker)?;
-        let role_asgns = nexus
-            .organization_list_roles(&opctx, organization_name, &pagparams)
-            .await?;
-        role_asgns_page(role_asgns)
+        let role_assignments = nexus
+            .organization_fetch_all_role_assignments(&opctx, organization_name)
+            .await?
+            .into_iter()
+            .map(|c| c.into())
+            .collect();
+        Ok(HttpResponseOk(Policy { role_assignments }))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-fn role_asgn_marker<'a, 'b>(
-    query: &'b PaginationParams<EmptyScanParams, RoleAssignmentPage>,
-) -> Option<(String, Uuid)> {
-    match &query.page {
-        WhichPage::First(..) => None,
-        WhichPage::Next(RoleAssignmentPage { role_name, user_id }) => {
-            Some((role_name.clone(), *user_id))
+/// Update the role assignments for this Organization
+#[endpoint {
+    method = PUT,
+    path = "/organizations/{organization_name}/policy",
+    tags = ["organizations"],
+}]
+async fn organization_put_policy(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    path_params: Path<OrganizationPathParam>,
+    new_policy: TypedBody<Policy>,
+) -> Result<HttpResponseOk<Policy>, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let path = path_params.into_inner();
+    let new_policy = new_policy.into_inner();
+    let organization_name = &path.organization_name;
+
+    let handler = async {
+        let nasgns = new_policy.role_assignments.len();
+        let max = NMAX_ROLE_ASSIGNMENTS_PER_RESOURCE;
+        if nasgns > max {
+            return Err(HttpError::from(Error::InvalidValue {
+                label: String::from("role_assignments"),
+                message: format!(
+                    "expected at most {} in list, found {}",
+                    max, nasgns
+                ),
+            }));
         }
-    }
-}
-
-fn role_asgn_pagparams<'a, 'b>(
-    rqctx: &'a RequestContext<Arc<ServerContext>>,
-    query: &'b PaginationParams<EmptyScanParams, RoleAssignmentPage>,
-    marker: &'b Option<(String, Uuid)>,
-) -> Result<DataPageParams<'b, (String, Uuid)>, HttpError> {
-    Ok(DataPageParams {
-        limit: rqctx.page_limit(&query)?,
-        direction: PaginationOrder::Ascending,
-        marker: marker.as_ref(),
-    })
-}
-
-fn role_asgns_page(
-    role_asgns: Vec<db::model::RoleAssignment>,
-) -> Result<HttpResponseOk<ResultsPage<RoleAssignment>>, HttpError> {
-    let role_asgns = role_asgns.into_iter().map(|i| i.into()).collect();
-    Ok(HttpResponseOk(dropshot::ResultsPage::new(
-        role_asgns,
-        &EmptyScanParams {},
-        |role_asgn: &RoleAssignment, _| RoleAssignmentPage {
-            role_name: role_asgn.role_name.clone(),
-            user_id: role_asgn.user_id,
-        },
-    )?))
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let role_assignments = nexus
+            .organization_replace_all_role_assignments(
+                &opctx,
+                organization_name,
+                &new_policy.role_assignments,
+            )
+            .await?
+            .into_iter()
+            .map(|c| c.into())
+            .collect();
+        Ok(HttpResponseOk(Policy { role_assignments }))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
 /// List all projects.

@@ -2440,7 +2440,6 @@ impl DataStore {
 
     /// Return the built-in roles that the given built-in user has for the given
     /// resource
-    // XXX-dap rename
     pub async fn role_asgn_list_for(
         &self,
         opctx: &OpContext,
@@ -2848,30 +2847,31 @@ impl DataStore {
     // Role assignments
 
     // XXX-dap TODO-doc
-    pub async fn role_assignment_list<
+    pub async fn role_assignment_fetch_all<
         T: authz::ApiResource + authz::ApiResourceError,
     >(
         &self,
         opctx: &OpContext,
         authz_resource: &T,
-        pagparams: &DataPageParams<'_, (String, Uuid)>,
     ) -> ListResultVec<db::model::RoleAssignment> {
         // XXX-dap consider a different action
         opctx.authorize(authz::Action::Read, authz_resource).await?;
         if let Some((resource_type, resource_id)) = authz_resource.db_resource()
         {
             use db::schema::role_assignment::dsl;
-            paginated_multicolumn(
-                dsl::role_assignment,
-                (dsl::role_name, dsl::actor_id),
-                pagparams,
-            )
-            .filter(dsl::resource_type.eq(resource_type.to_string()))
-            .filter(dsl::resource_id.eq(resource_id))
-            .select(RoleAssignment::as_select())
-            .load_async::<RoleAssignment>(self.pool_authorized(opctx).await?)
-            .await
-            .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
+            dsl::role_assignment
+                .filter(dsl::resource_type.eq(resource_type.to_string()))
+                .filter(dsl::resource_id.eq(resource_id))
+                .order(dsl::role_name.asc())
+                .then_order_by(dsl::actor_id.asc())
+                .select(RoleAssignment::as_select())
+                .load_async::<RoleAssignment>(
+                    self.pool_authorized(opctx).await?,
+                )
+                .await
+                .map_err(|e| {
+                    public_error_from_diesel_pool(e, ErrorHandler::Server)
+                })
         } else {
             // XXX-dap Ideally, we couldn't even be invoked in this case.
             Ok(Vec::new())

@@ -24,6 +24,7 @@ use crate::db::subnet_allocation::NetworkInterfaceError;
 use crate::db::subnet_allocation::SubnetError;
 use crate::defaults;
 use crate::external_api::params;
+use crate::external_api::views::RoleAssignment;
 use crate::internal_api::params::{OximeterInfo, ZpoolPutRequest};
 use crate::populate::populate_start;
 use crate::populate::PopulateStatus;
@@ -3895,20 +3896,29 @@ impl Nexus {
     // Role assignments
 
     // XXX-dap TODO-doc
-    pub async fn organization_list_roles(
+    // XXX-dap maybe we should have Nexus fake up the "Policy" abstraction
+    // instead of the HTTP layer.
+    pub async fn organization_fetch_all_role_assignments(
         &self,
         opctx: &OpContext,
         organization_name: &Name,
-        pagparams: &DataPageParams<'_, (String, Uuid)>,
     ) -> ListResultVec<db::model::RoleAssignment> {
         // XXX-dap define a new action for ListRoles?
         let (.., authz_org) = LookupPath::new(opctx, &self.db_datastore)
             .organization_name(organization_name)
             .lookup_for(authz::Action::Read)
             .await?;
-        self.db_datastore
-            .role_assignment_list(opctx, &authz_org, pagparams)
-            .await
+        self.db_datastore.role_assignment_fetch_all(opctx, &authz_org).await
+    }
+
+    pub async fn organization_replace_all_role_assignments(
+        &self,
+        _opctx: &OpContext,
+        _organization_name: &Name,
+        _role_assignments: &[RoleAssignment], // XXX-dap
+    ) -> ListResultVec<db::model::RoleAssignment> {
+        // XXX-dap
+        todo!();
     }
 }
 
