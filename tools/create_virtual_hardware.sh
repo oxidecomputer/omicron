@@ -17,6 +17,12 @@ set -x
 SOURCE_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
 OMICRON_TOP="$SOURCE_DIR/.."
 
+MARKER=/etc/opt/oxide/NO_INSTALL
+if [[ -f "$MARKER" ]]; then
+    echo "This system has the marker file $MARKER, aborting." >&2
+    exit 1
+fi
+
 # Select the physical link over which to simulate the Chelsio links
 if [[ $# -ge 1 ]]; then
     PHYSICAL_LINK="$1"
