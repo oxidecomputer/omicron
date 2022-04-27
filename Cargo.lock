@@ -116,7 +116,7 @@ source = "git+https://github.com/oxidecomputer/async-bb8-diesel?branch=diesel2#9
 dependencies = [
  "async-trait",
  "bb8",
- "diesel 2.0.0-rc.0",
+ "diesel",
  "thiserror",
  "tokio",
 ]
@@ -852,7 +852,7 @@ dependencies = [
  "bitflags",
  "byteorder",
  "chrono",
- "diesel_derives 2.0.0-rc.0",
+ "diesel_derives",
  "ipnetwork",
  "itoa 1.0.1",
  "libc",
@@ -863,22 +863,11 @@ dependencies = [
 ]
 
 [[package]]
-name = "diesel"
-version = "2.0.0"
-source = "git+https://github.com/diesel-rs/diesel?rev=ce77c382#ce77c382d2836f6b385225991cf58cb2d2dd65d6"
-dependencies = [
- "byteorder",
- "diesel_derives 2.0.0",
- "itoa 0.4.8",
- "r2d2",
-]
-
-[[package]]
 name = "diesel-dtrace"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/diesel-dtrace?branch=main#3bce2661bca09feded88f6415a877c2996e302f0"
+source = "git+https://github.com/oxidecomputer/diesel-dtrace?branch=diesel2#9bf301cc546c966646c3265494c14d62460f22b3"
 dependencies = [
- "diesel 2.0.0",
+ "diesel",
  "serde",
  "usdt",
  "uuid",
@@ -891,16 +880,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "212ba0cdc611523c37f26c7b3b4aedb4af7cbfe9239c4e7736a8a7c82284d77b"
 dependencies = [
  "proc-macro-error",
- "proc-macro2",
- "quote",
- "syn",
-]
-
-[[package]]
-name = "diesel_derives"
-version = "2.0.0"
-source = "git+https://github.com/diesel-rs/diesel?rev=ce77c382#ce77c382d2836f6b385225991cf58cb2d2dd65d6"
-dependencies = [
  "proc-macro2",
  "quote",
  "syn",
@@ -2460,7 +2439,7 @@ dependencies = [
  "criterion",
  "crucible-agent-client",
  "db-macros",
- "diesel 2.0.0-rc.0",
+ "diesel",
  "diesel-dtrace",
  "dropshot",
  "expectorate",
