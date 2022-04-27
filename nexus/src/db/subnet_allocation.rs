@@ -1122,7 +1122,7 @@ type NetworkInterfaceFromClause = FromClause<db::schema::network_interface::tabl
 type VpcSubnetFromClause = FromClause<db::schema::network_interface::table>;
 
 const NETWORK_INTERFACE_FROM_CLAUSE: NetworkInterfaceFromClause = NetworkInterfaceFromClause::new();
-const VPC_SUBNET_FROM_CLAUSE: VpcSubnetFromClause= VpcSubnetFromClause::new();
+const VPC_SUBNET_FROM_CLAUSE: VpcSubnetFromClause = VpcSubnetFromClause::new();
 
 impl QueryId for InsertNetworkInterfaceQuery {
     type QueryId = ();

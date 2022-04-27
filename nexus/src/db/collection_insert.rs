@@ -112,13 +112,68 @@ pub trait DatastoreCollection<ResourceType> {
             <Self::CollectionTimeDeletedColumn as Column>::Table,
         ): TypesAreSame,
         Self: Sized,
+        CollectionTable<ResourceType, Self>: HasTable<Table = CollectionTable<ResourceType, Self>>
+           + 'static
+           + Send
+           + Table
+           + query_methods::BoxedDsl<
+               'static,
+               Pg,
+               Output = BoxedDslOutput<CollectionTable<ResourceType, Self>>,
+           >,
+        <CollectionTable<ResourceType, Self> as QuerySource>::FromClause: QueryFragment<Pg> + Send,
+        <CollectionTable<ResourceType, Self> as AsQuery>::SqlType: Send,
+        BoxedQuery<CollectionTable<ResourceType, Self>>:
+            query_methods::FilterDsl<
+                Eq<
+                    CollectionPrimaryKey<ResourceType, Self>,
+                    CollectionId<ResourceType, Self>,
+                >,
+                Output = BoxedQuery<CollectionTable<ResourceType, Self>>,
+            > +
+            query_methods::FilterDsl<
+                IsNull<CollectionTimeDeletedColumn<ResourceType, Self>>,
+                Output = BoxedQuery<CollectionTable<ResourceType, Self>>,
+            >,
+        <CollectionPrimaryKey<ResourceType, Self> as Expression>::SqlType: SingleValue,
+        CollectionTimeDeletedColumn<ResourceType, Self>: ExpressionMethods,
+        CollectionId<ResourceType, Self>: diesel::expression::AsExpression<
+                SerializedCollectionPrimaryKey<ResourceType, Self>,
+            > + diesel::serialize::ToSql<
+                SerializedCollectionPrimaryKey<ResourceType, Self>,
+                Pg,
+            >,
         ResourceTable<ResourceType, Self>: Copy + Debug,
         <ResourceTable<ResourceType, Self> as QuerySource>::FromClause: Copy + Debug,
-        ResourceType: Selectable<Pg>,
+        <CollectionTable<ResourceType, Self> as diesel::QuerySource>::FromClause: QueryFragment<Pg>,
+        ResourceType: 'static + Selectable<Pg> + Send,
+        <ResourceType as Selectable<Pg>>::SelectExpression: QueryFragment<Pg> + Send,
     {
+        let filter_subquery = Box::new(
+            <CollectionTable<ResourceType, Self> as HasTable>::table()
+                .into_boxed()
+                .filter(
+                    <CollectionTable<ResourceType, Self> as HasTable>::table()
+                        .primary_key()
+                        .eq(key),
+                )
+                .filter(Self::CollectionTimeDeletedColumn::default().is_null())
+        );
+
+        // TODO: less box?
+        let from_clause = Box::new(
+            <CollectionTable<ResourceType, Self> as HasTable>::table()
+                .from_clause()
+        );
+        let returning_clause = Box::new(
+            ResourceType::as_returning()
+        );
+
         InsertIntoCollectionStatement {
             insert_statement: insert,
-            key,
+            filter_subquery,
+            from_clause,
+            returning_clause,
             query_type: PhantomData,
         }
     }
@@ -127,9 +182,13 @@ pub trait DatastoreCollection<ResourceType> {
 /// Utility type to make trait bounds below easier to read.
 type CollectionId<ResourceType, C> =
     <C as DatastoreCollection<ResourceType>>::CollectionId;
+/// The table representing the collection. The resource references
+/// this table.
 type CollectionTable<ResourceType, C> = <<C as DatastoreCollection<
     ResourceType,
 >>::GenerationNumberColumn as Column>::Table;
+/// The table representing the resource. This table contains an
+/// ID acting as a foreign key into the collection table.
 type ResourceTable<ResourceType, C> = <<C as DatastoreCollection<
     ResourceType,
 >>::CollectionIdColumn as Column>::Table;
@@ -143,7 +202,6 @@ pub trait TypesAreSame {}
 impl<T> TypesAreSame for (T, T) {}
 
 /// The CTE described in the module docs
-#[derive(Debug, Clone, Copy)]
 #[must_use = "Queries must be executed"]
 pub struct InsertIntoCollectionStatement<ResourceType, ISR, C>
 where
@@ -152,7 +210,9 @@ where
     <ResourceTable<ResourceType, C> as QuerySource>::FromClause: Copy + Debug,
 {
     insert_statement: InsertStatement<ResourceTable<ResourceType, C>, ISR>,
-    key: CollectionId<ResourceType, C>,
+    filter_subquery: Box<dyn QueryFragment<Pg> + Send>,
+    from_clause: Box<dyn QueryFragment<Pg> + Send>,
+    returning_clause: Box<dyn QueryFragment<Pg> + Send>,
     query_type: PhantomData<ResourceType>,
 }
 
@@ -193,7 +253,7 @@ pub enum SyncInsertError {
 
 impl<ResourceType, ISR, C> InsertIntoCollectionStatement<ResourceType, ISR, C>
 where
-    ResourceType: 'static + Debug + Send,
+    ResourceType: 'static + Debug + Send + Selectable<Pg>,
     C: 'static + DatastoreCollection<ResourceType> + Send,
     CollectionId<ResourceType, C>: 'static + PartialEq + Send,
     ResourceTable<ResourceType, C>: 'static + Table + Send + Copy + Debug,
@@ -350,6 +410,12 @@ type TableSqlType<T> = <T as AsQuery>::SqlType;
 // type BoxedQuery<T> = IntoBoxed<'static, TableSqlType<T>, Pg>;
 // type BoxedQuery<T> = diesel::internal::table_macro::BoxedSelectStatement<'static, TableSqlType<T>, T, Pg>;
 type BoxedQuery<T> = diesel::helper_types::IntoBoxed<'static, T, Pg>;
+type BoxedDslOutput<T> = diesel::internal::table_macro::BoxedSelectStatement<
+    'static,
+    TableSqlType<T>,
+    diesel::internal::table_macro::FromClause<T>,
+    Pg,
+>;
 
 /// This implementation uses the following CTE:
 ///
@@ -395,32 +461,16 @@ where
     ResourceType: Selectable<Pg>,
     <ResourceType as Selectable<Pg>>::SelectExpression: QueryFragment<Pg>,
     C: DatastoreCollection<ResourceType>,
-
-    /* ... */
-
-    ResourceTable<ResourceType, C>: Copy + Debug,
-    <ResourceTable<ResourceType, C> as QuerySource>::FromClause: Copy + Debug,
-{
-    fn walk_ast<'b>(&self, mut out: AstPass<'_, 'b, Pg>) -> QueryResult<()> {
-        todo!();
-    }
-}
-/*
-impl<ResourceType, ISR, C> QueryFragment<Pg>
-    for InsertIntoCollectionStatement<ResourceType, ISR, C>
-where
-    ResourceType: Selectable<Pg>,
-    <ResourceType as Selectable<Pg>>::SelectExpression: QueryFragment<Pg>,
-    C: DatastoreCollection<ResourceType>,
     CollectionTable<ResourceType, C>: HasTable<Table = CollectionTable<ResourceType, C>>
         + Table
         + IntoUpdateTarget
         + query_methods::BoxedDsl<
             'static,
             Pg,
-            Output = TableSqlType<CollectionTable<ResourceType, C>>,
+            Output = BoxedDslOutput<CollectionTable<ResourceType, C>>,
         >,
     ResourceTable<ResourceType, C>: Copy + Debug,
+    <ResourceTable<ResourceType, C> as QuerySource>::FromClause: Copy + Debug,
     <CollectionPrimaryKey<ResourceType, C> as Expression>::SqlType: SingleValue,
     CollectionPrimaryKey<ResourceType, C>: diesel::Column,
     CollectionTimeDeletedColumn<ResourceType, C>: ExpressionMethods,
@@ -450,17 +500,9 @@ where
     >,
     <ResourceTable<ResourceType, C> as Table>::AllColumns: QueryFragment<Pg>,
 {
-    fn walk_ast<'b>(&self, mut out: AstPass<'_, 'b, Pg>) -> QueryResult<()> {
-        let subquery = CollectionTable::<ResourceType, C>::table()
-            .into_boxed()
-            .filter(
-                CollectionTable::<ResourceType, C>::table()
-                    .primary_key()
-                    .eq(self.key),
-            )
-            .filter(C::CollectionTimeDeletedColumn::default().is_null());
+    fn walk_ast<'b>(&'b self, mut out: AstPass<'_, 'b, Pg>) -> QueryResult<()> {
         out.push_sql("WITH found_row AS MATERIALIZED (");
-        subquery.walk_ast(out.reborrow())?;
+        self.filter_subquery.walk_ast(out.reborrow())?;
         // Manually add the FOR_UPDATE, since .for_update() is incompatible with
         // BoxedQuery
         out.push_sql(" FOR UPDATE), ");
@@ -474,8 +516,7 @@ where
         // Write the update manually instead of with the dsl, to avoid the
         // explosion in complexity of type traits
         out.push_sql("updated_row AS MATERIALIZED (UPDATE ");
-        CollectionTable::<ResourceType, C>::table()
-            .from_clause()
+        self.from_clause
             .walk_ast(out.reborrow())?;
         out.push_sql(" SET ");
         out.push_identifier(GenerationNumberColumn::<ResourceType, C>::NAME)?;
@@ -497,13 +538,12 @@ where
         // We manually write the RETURNING clause here because the wrapper type
         // used for InsertStatement's Ret generic is private to diesel and so we
         // cannot express it.
-        ResourceType::as_returning().walk_ast(out.reborrow())?;
+        self.returning_clause.walk_ast(out.reborrow())?;
 
         out.push_sql(") SELECT * FROM inserted_row");
         Ok(())
     }
 }
-*/
 
 #[cfg(test)]
 mod test {

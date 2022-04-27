@@ -23,6 +23,12 @@ type TableSqlType<T> = <T as AsQuery>::SqlType;
 // Shorthand alias for the type made from "table.into_boxed()".
 // type BoxedQuery<T> = diesel::internal::table_macro::BoxedSelectStatement<'static, TableSqlType<T>, T, Pg>;
 type BoxedQuery<T> = diesel::helper_types::IntoBoxed<'static, T, Pg>;
+type BoxedDslOutput<T> = diesel::internal::table_macro::BoxedSelectStatement<
+    'static,
+    TableSqlType<T>,
+    diesel::internal::table_macro::FromClause<T>,
+    Pg,
+>;
 
 /// Uses `pagparams` to list a subset of rows in `table`, ordered by `column`.
 pub fn paginated<T, C, M>(
@@ -36,12 +42,7 @@ where
     T: query_methods::BoxedDsl<
         'static,
         Pg,
-        Output = diesel::internal::table_macro::BoxedSelectStatement<
-            'static,
-            TableSqlType<T>,
-            diesel::internal::table_macro::FromClause<T>,
-            Pg,
-        >,
+        Output = BoxedDslOutput<T>,
     >,
     // C is a column which appears in T.
     C: 'static + Column + Copy + ExpressionMethods + AppearsOnTable<T>,
