@@ -77,6 +77,8 @@ panic = "abort"
 #[patch."https://github.com/oxidecomputer/propolis"]
 #propolis-client = { path = "../propolis/client" }
 #propolis-server = { path = "../propolis/server" }
+#[patch."https://github.com/oxidecomputer/crucible"]
+#crucible = { path = "../crucible/upstairs" }
 
 #
 # Local client generation during development.
