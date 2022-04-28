@@ -16,6 +16,7 @@ use crate::illumos::dladm::{self, Dladm, PhysicalLink};
 use crate::illumos::zone::{self, Zones};
 use crate::rack_setup::service::Service as RackSetupService;
 use crate::server::Server as SledServer;
+use omicron_common::address::get_sled_address;
 use omicron_common::api::external::{Error as ExternalError, MacAddr};
 use omicron_common::backoff::{
     internal_service_policy, retry_notify, BackoffError,
@@ -181,9 +182,7 @@ impl Agent {
     ) -> Result<SledAgentResponse, BootstrapError> {
         info!(&self.log, "Loading Sled Agent: {:?}", request);
 
-        let sled_address = omicron_common::address::get_sled_address(
-            request.subnet.as_ref().0,
-        );
+        let sled_address = get_sled_address(request.subnet);
 
         let mut maybe_agent = self.sled_agent.lock().await;
         if let Some(server) = &*maybe_agent {

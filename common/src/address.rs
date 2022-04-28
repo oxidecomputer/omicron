@@ -7,7 +7,9 @@
 //! This addressing functionality is shared by both initialization services
 //! and Nexus, who need to agree upon addressing schemes.
 
+use crate::api::external::Ipv6Net;
 use ipnetwork::Ipv6Network;
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::net::{Ipv6Addr, SocketAddrV6};
 
@@ -29,10 +31,43 @@ pub const DNS_PORT: u16 = 53;
 pub const DNS_SERVER_PORT: u16 = 5353;
 pub const SLED_AGENT_PORT: u16 = 12345;
 
+// Anycast is a mechanism in which a single IP address is shared by multiple
+// devices, and the destination is located based on routing distance.
+//
+// This is covered by RFC 4291 in much more detail:
+// <https://datatracker.ietf.org/doc/html/rfc4291#section-2.6>
+//
+// Anycast addresses are always the "zeroeth" address within a subnet.  We
+// always explicitly skip these addresses within our network.
+const _ANYCAST_ADDRESS_INDEX: usize = 0;
+const DNS_ADDRESS_INDEX: usize = 1;
+const GZ_ADDRESS_INDEX: usize = 2;
+
+/// Wraps an [`Ipv6Network`] with a compile-time prefix length.
+#[derive(Debug, Clone, Copy, JsonSchema, Serialize, Deserialize, PartialEq)]
+pub struct Ipv6Subnet<const N: u8> {
+    net: Ipv6Net,
+}
+
+impl<const N: u8> Ipv6Subnet<N> {
+    pub fn new(addr: Ipv6Addr) -> Self {
+        // Create a network with the compile-time prefix length.
+        let net = Ipv6Network::new(addr, N).unwrap();
+        // Ensure the address is set to within-prefix only components.
+        let net = Ipv6Network::new(net.network(), N).unwrap();
+        Self { net: Ipv6Net(net) }
+    }
+
+    /// Returns the underlying network.
+    pub fn net(&self) -> Ipv6Network {
+        self.net.0
+    }
+}
+
 /// Represents a subnet which may be used for contacting DNS services.
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
 pub struct DnsSubnet {
-    network: Ipv6Network,
+    subnet: Ipv6Subnet<SLED_PREFIX>,
 }
 
 impl DnsSubnet {
@@ -40,10 +75,11 @@ impl DnsSubnet {
     ///
     /// This is the first address within the subnet.
     pub fn dns_address(&self) -> Ipv6Network {
-        let mut iter = self.network.iter();
-        let _anycast_ip = iter.next().unwrap();
-        let dns_ip = iter.next().unwrap();
-        Ipv6Network::new(dns_ip, SLED_PREFIX).unwrap()
+        Ipv6Network::new(
+            self.subnet.net().iter().nth(DNS_ADDRESS_INDEX).unwrap(),
+            SLED_PREFIX,
+        )
+        .unwrap()
     }
 
     /// Returns the address which the Global Zone should create
@@ -51,68 +87,63 @@ impl DnsSubnet {
     ///
     /// This is the second address within the subnet.
     pub fn gz_address(&self) -> Ipv6Network {
-        let mut iter = self.network.iter();
-        let _anycast_ip = iter.next().unwrap();
-        let _dns_ip = iter.next().unwrap();
-        Ipv6Network::new(iter.next().unwrap(), SLED_PREFIX).unwrap()
+        Ipv6Network::new(
+            self.subnet.net().iter().nth(GZ_ADDRESS_INDEX).unwrap(),
+            SLED_PREFIX,
+        )
+        .unwrap()
     }
 }
 
 /// A wrapper around an IPv6 network, indicating it is a "reserved" rack
 /// subnet which can be used for AZ-wide services.
 #[derive(Debug, Clone)]
-pub struct ReservedRackSubnet(pub Ipv6Network);
+pub struct ReservedRackSubnet(pub Ipv6Subnet<RACK_PREFIX>);
 
 impl ReservedRackSubnet {
     /// Returns the subnet for the reserved rack subnet.
-    pub fn new(subnet: Ipv6Network) -> Self {
-        let net = Ipv6Network::new(subnet.network(), AZ_PREFIX).unwrap();
-        ReservedRackSubnet(
-            Ipv6Network::new(net.network(), RACK_PREFIX).unwrap(),
-        )
+    pub fn new(subnet: Ipv6Subnet<AZ_PREFIX>) -> Self {
+        ReservedRackSubnet(Ipv6Subnet::<RACK_PREFIX>::new(subnet.net().ip()))
     }
 
-    /// Given a particular rack subnet, return the DNS addresses.
+    /// Returns the DNS addresses from this reserved rack subnet.
     ///
     /// These addresses will come from the first [`DNS_REDUNDANCY`] `/64s` of the
     /// [`RACK_PREFIX`] subnet.
     pub fn get_dns_subnets(&self) -> Vec<DnsSubnet> {
-        assert_eq!(self.0.prefix(), RACK_PREFIX);
-
         (0..DNS_REDUNDANCY)
             .map(|idx| {
-                let network =
+                let subnet =
                     get_64_subnet(self.0, u8::try_from(idx + 1).unwrap());
-
-                DnsSubnet { network }
+                DnsSubnet { subnet }
             })
             .collect()
     }
 }
 
+const SLED_AGENT_ADDRESS_INDEX: usize = 1;
+
 /// Return the sled agent address for a subnet.
 ///
 /// This address will come from the first address of the [`SLED_PREFIX`] subnet.
-pub fn get_sled_address(sled_subnet: Ipv6Network) -> SocketAddrV6 {
-    assert_eq!(sled_subnet.prefix(), SLED_PREFIX);
-
-    let mut iter = sled_subnet.iter();
-    let _anycast_ip = iter.next().unwrap();
-    let sled_agent_ip = iter.next().unwrap();
+pub fn get_sled_address(sled_subnet: Ipv6Subnet<SLED_PREFIX>) -> SocketAddrV6 {
+    let sled_agent_ip =
+        sled_subnet.net().iter().nth(SLED_AGENT_ADDRESS_INDEX).unwrap();
     SocketAddrV6::new(sled_agent_ip, SLED_AGENT_PORT, 0, 0)
 }
 
 /// Returns a sled subnet within a rack subnet.
 ///
 /// The subnet at index == 0 is used for rack-local services.
-pub fn get_64_subnet(rack_subnet: Ipv6Network, index: u8) -> Ipv6Network {
-    assert_eq!(rack_subnet.prefix(), RACK_PREFIX);
-
-    let mut rack_network = rack_subnet.network().octets();
+pub fn get_64_subnet(
+    rack_subnet: Ipv6Subnet<RACK_PREFIX>,
+    index: u8,
+) -> Ipv6Subnet<SLED_PREFIX> {
+    let mut rack_network = rack_subnet.net().network().octets();
 
     // To set bits distinguishing the /64 from the /56, we modify the 7th octet.
     rack_network[7] = index;
-    Ipv6Network::new(Ipv6Addr::from(rack_network), 64).unwrap()
+    Ipv6Subnet::<SLED_PREFIX>::new(Ipv6Addr::from(rack_network))
 }
 
 #[cfg(test)]
@@ -121,14 +152,16 @@ mod test {
 
     #[test]
     fn test_dns_subnets() {
-        let subnet = "fd00:1122:3344:0100::/64".parse::<Ipv6Network>().unwrap();
+        let subnet = Ipv6Subnet::<AZ_PREFIX>::new(
+            "fd00:1122:3344:0100::".parse::<Ipv6Addr>().unwrap(),
+        );
         let rack_subnet = ReservedRackSubnet::new(subnet);
 
         assert_eq!(
             //              Note that these bits (indicating the rack) are zero.
             //              vv
             "fd00:1122:3344:0000::/56".parse::<Ipv6Network>().unwrap(),
-            rack_subnet.0,
+            rack_subnet.0.net(),
         );
 
         // Observe the first DNS subnet within this reserved rack subnet.
@@ -148,13 +181,17 @@ mod test {
 
     #[test]
     fn test_sled_address() {
-        let subnet = "fd00:1122:3344:0101::/64".parse::<Ipv6Network>().unwrap();
+        let subnet = Ipv6Subnet::<SLED_PREFIX>::new(
+            "fd00:1122:3344:0101::".parse::<Ipv6Addr>().unwrap(),
+        );
         assert_eq!(
             "[fd00:1122:3344:0101::1]:12345".parse::<SocketAddrV6>().unwrap(),
             get_sled_address(subnet)
         );
 
-        let subnet = "fd00:1122:3344:0308::/64".parse::<Ipv6Network>().unwrap();
+        let subnet = Ipv6Subnet::<SLED_PREFIX>::new(
+            "fd00:1122:3344:0308::".parse::<Ipv6Addr>().unwrap(),
+        );
         assert_eq!(
             "[fd00:1122:3344:0308::1]:12345".parse::<SocketAddrV6>().unwrap(),
             get_sled_address(subnet)
