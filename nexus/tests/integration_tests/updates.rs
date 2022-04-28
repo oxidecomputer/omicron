@@ -99,6 +99,7 @@ async fn test_update_end_to_end() {
 
     server.close().await.expect("failed to shut down dropshot server");
     cptestctx.teardown().await;
+    logctx.cleanup_successful();
 }
 
 // =^..^=   =^..^=   =^..^=   =^..^=   =^..^=   =^..^=   =^..^=   =^..^=

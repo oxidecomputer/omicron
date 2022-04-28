@@ -3158,6 +3158,7 @@ mod test {
         assert_eq!(0, disk1_datasets.intersection(&disk2_datasets).count());
 
         let _ = db.cleanup().await;
+        logctx.cleanup_successful();
     }
 
     #[tokio::test]
@@ -3224,6 +3225,7 @@ mod test {
         }
 
         let _ = db.cleanup().await;
+        logctx.cleanup_successful();
     }
 
     #[tokio::test]
@@ -3272,6 +3274,7 @@ mod test {
         assert!(matches!(err, Error::ServiceUnavailable { .. }));
 
         let _ = db.cleanup().await;
+        logctx.cleanup_successful();
     }
 
     // TODO: This test should be updated when the correct handling
@@ -3318,6 +3321,7 @@ mod test {
         datastore.region_allocate(&opctx, volume1_id, &params).await.unwrap();
 
         let _ = db.cleanup().await;
+        logctx.cleanup_successful();
     }
 
     // Validate that queries which should be executable without a full table
@@ -3376,6 +3380,7 @@ mod test {
         );
 
         let _ = db.cleanup().await;
+        logctx.cleanup_successful();
     }
 
     // Test sled-specific IPv6 address allocation
