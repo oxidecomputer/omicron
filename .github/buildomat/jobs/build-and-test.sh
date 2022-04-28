@@ -26,6 +26,7 @@ ptime -m bash ./tools/ci_download_cockroachdb
 #
 TEST_TMPDIR="${TMPDIR:-/var/tmp}/omicron_tmp"
 echo "tests will store output in $TEST_TMPDIR"
+mkdir $TEST_TMPDIR
 
 #
 # Put "./cockroachdb/bin" and "./clickhouse" on the PATH for the test
