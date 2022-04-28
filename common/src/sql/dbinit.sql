@@ -755,7 +755,7 @@ CREATE TABLE omicron.public.vpc_firewall_rule (
     priority INT4 CHECK (priority BETWEEN 0 AND 65535) NOT NULL
 );
 
-CREATE UNIQUE INDEX ON omicron.public.vpc_router (
+CREATE UNIQUE INDEX ON omicron.public.vpc_firewall_rule (
     vpc_id,
     name
 ) WHERE
