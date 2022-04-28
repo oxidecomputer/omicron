@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
+use std::net::{Ipv6Addr, SocketAddr, SocketAddrV6};
 use std::sync::Arc;
 
 use anyhow::{anyhow, Context, Result};
@@ -10,7 +10,6 @@ use internal_dns_client::{
     types::{DnsKv, DnsRecord, DnsRecordKey, Srv},
     Client,
 };
-use std::net::Ipv6Addr;
 use trust_dns_resolver::config::{
     NameServerConfig, Protocol, ResolverConfig, ResolverOpts,
 };
@@ -116,16 +115,16 @@ async fn init_client_server(
     let db = Arc::new(sled::open(&config.data.storage_path)?);
     db.clear()?;
 
-    let client = Client::new(
-        &format!("http://127.0.0.1:{}", dropshot_port),
-        log.clone(),
-    );
+    let client =
+        Client::new(&format!("http://[::1]:{}", dropshot_port), log.clone());
 
     let mut rc = ResolverConfig::new();
     rc.add_name_server(NameServerConfig {
-        socket_addr: SocketAddr::V4(SocketAddrV4::new(
-            Ipv4Addr::new(127, 0, 0, 1),
+        socket_addr: SocketAddr::V6(SocketAddrV6::new(
+            Ipv6Addr::LOCALHOST,
             dns_port,
+            0,
+            0,
         )),
         protocol: Protocol::Udp,
         tls_dns_name: None,
@@ -141,7 +140,7 @@ async fn init_client_server(
         let db = db.clone();
         let log = log.clone();
         let dns_config = internal_dns::dns_server::Config {
-            bind_address: format!("127.0.0.1:{}", dns_port),
+            bind_address: format!("[::1]:{}", dns_port),
         };
 
         tokio::spawn(async move {
@@ -176,9 +175,7 @@ fn test_config() -> Result<(internal_dns::Config, u16, u16), anyhow::Error> {
             level: dropshot::ConfigLoggingLevel::Info,
         },
         dropshot: dropshot::ConfigDropshot {
-            bind_address: format!("127.0.0.1:{}", dropshot_port)
-                .parse()
-                .unwrap(),
+            bind_address: format!("[::1]:{}", dropshot_port).parse().unwrap(),
             request_body_max_bytes: 1024,
             ..Default::default()
         },

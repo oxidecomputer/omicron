@@ -520,20 +520,26 @@ impl ServiceInner {
         .collect::<Result<_, SetupServiceError>>()?;
 
         // Set up internal DNS services.
-        futures::future::join_all(plan.iter().map(
-            |(_, allocation)| async move {
-                let sled_address = SocketAddr::V6(get_sled_address(
-                    allocation.initialization_request.subnet,
-                ));
+        futures::future::join_all(
+            plan.iter()
+                .filter(|(_, allocation)| {
+                    // Only send requests to sleds that are supposed to be running
+                    // DNS services.
+                    !allocation.services_request.dns_services.is_empty()
+                })
+                .map(|(_, allocation)| async move {
+                    let sled_address = SocketAddr::V6(get_sled_address(
+                        allocation.initialization_request.subnet,
+                    ));
 
-                self.initialize_services(
-                    sled_address,
-                    &allocation.services_request.dns_services,
-                )
-                .await?;
-                Ok(())
-            },
-        ))
+                    self.initialize_services(
+                        sled_address,
+                        &allocation.services_request.dns_services,
+                    )
+                    .await?;
+                    Ok(())
+                }),
+        )
         .await
         .into_iter()
         .collect::<Result<_, SetupServiceError>>()?;
