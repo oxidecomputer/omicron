@@ -2326,8 +2326,10 @@ impl DataStore {
         })
         .collect::<Vec<UserBuiltin>>();
 
+        // TODO: This should probably be removed when we can switch
+        // "test-privileged" and "test-unprivileged" to normal silo users rather
+        // than built-in users.
         debug!(opctx.log, "creating silo_user entries for built-in users");
-
         for builtin_user in &builtin_users {
             self.silo_user_create(SiloUser::new(
                 *SILO_ID,
@@ -2335,7 +2337,6 @@ impl DataStore {
             ))
             .await?;
         }
-
         info!(opctx.log, "created silo_user entries for built-in users");
 
         debug!(opctx.log, "attempting to create built-in users");
@@ -2510,23 +2511,27 @@ impl DataStore {
             })
     }
 
+    // NOTE: This function is only used for testing and for initial population
+    // of built-in users as silo users.  The error handling here assumes (1)
+    // that the caller expects no user input error from the database, and (2)
+    // that if a Silo user with the same id already exists in the database,
+    // that's not an error (it's assumed to be the same user).
     pub async fn silo_user_create(
         &self,
         silo_user: SiloUser,
-    ) -> CreateResult<SiloUser> {
+    ) -> Result<(), Error> {
         use db::schema::silo_user::dsl;
 
-        diesel::insert_into(dsl::silo_user)
+        let _ = diesel::insert_into(dsl::silo_user)
             .values(silo_user)
-            .returning(SiloUser::as_returning())
-            .get_result_async(self.pool())
+            .on_conflict(dsl::id)
+            .do_nothing()
+            .execute_async(self.pool())
             .await
             .map_err(|e| {
-                Error::internal_error(&format!(
-                    "error creating silo user: {:?}",
-                    e
-                ))
-            })
+                public_error_from_diesel_pool(e, ErrorHandler::Server)
+            })?;
+        Ok(())
     }
 
     /// Load built-in silos into the database
@@ -2959,7 +2964,7 @@ mod test {
             datastore.session_create(&opctx, session.clone()).await.unwrap();
 
         // Associate silo with user
-        let silo_user = datastore
+        datastore
             .silo_user_create(SiloUser::new(*SILO_ID, silo_user_id))
             .await
             .unwrap();
@@ -2969,7 +2974,7 @@ mod test {
             .fetch()
             .await
             .unwrap();
-        assert_eq!(silo_user.silo_id, db_silo_user.silo_id,);
+        assert_eq!(*SILO_ID, db_silo_user.silo_id);
 
         // fetch the one we just created
         let (.., fetched) = LookupPath::new(&opctx, &datastore)
@@ -3457,11 +3462,10 @@ mod test {
 
         // Create a new Silo user so that we can lookup their keys.
         let silo_user_id = Uuid::new_v4();
-        let silo_user = datastore
+        datastore
             .silo_user_create(SiloUser::new(*SILO_ID, silo_user_id))
             .await
             .unwrap();
-        assert_eq!(silo_user.id(), silo_user_id);
 
         let (.., authz_user) = LookupPath::new(&opctx, &datastore)
             .silo_user_id(silo_user_id)
