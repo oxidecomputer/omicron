@@ -71,4 +71,6 @@ ptime -m cargo +'nightly-2021-11-24' test --workspace --locked --verbose
 # to check is to try to remove it with `rmdir`.
 #
 unset TMPDIR
+echo "files in $TEST_TMPDIR (none expected on success):"
+find $TEST_TMPDIR -ls
 rmdir $TEST_TMPDIR
