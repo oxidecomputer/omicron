@@ -32,7 +32,7 @@ struct Server {
 
 #[derive(Deserialize, Debug)]
 struct Deployment {
-    servers: BTreeSet<String>,
+    rss_server: String,
     rack_secret_threshold: usize,
     staging_dir: PathBuf,
 }
@@ -300,10 +300,8 @@ fn do_uninstall(
 ) -> Result<()> {
     let mut deployment_src = PathBuf::from(&config.deployment.staging_dir);
     deployment_src.push(&artifact_dir);
-    for server_name in &config.deployment.servers {
-        let builder = &config.servers[&config.builder.server];
-        let server = &config.servers[server_name];
-
+    let builder = &config.servers[&config.builder.server];
+    for server in config.servers.values() {
         copy_omicron_package_binary_to_staging(config, builder, server)?;
 
         // Run `omicron-package uninstall` on the deployment server
@@ -331,7 +329,7 @@ fn do_install(config: &Config, artifact_dir: &Path, install_dir: &Path) {
             Vec::<(String, ScopedJoinHandle<'_, Result<()>>)>::new();
 
         // Spawn a thread for each server install
-        for server_name in &config.deployment.servers {
+        for server_name in config.servers.keys() {
             handles.push((
                 server_name.to_owned(),
                 s.spawn(move |_| -> Result<()> {
@@ -372,30 +370,61 @@ fn do_install(config: &Config, artifact_dir: &Path, install_dir: &Path) {
 }
 
 fn do_overlay(config: &Config) -> Result<()> {
+    let builder = &config.servers[&config.builder.server];
     let mut root_path = PathBuf::from(&config.builder.omicron_path);
     // TODO: This needs to match the artifact_dir in `package`
     root_path.push("out/overlay");
-    let server_dirs = dir_per_deploy_server(config, &root_path);
-    let builder = &config.servers[&config.builder.server];
-    overlay_sled_agent(&builder, config, &server_dirs)
+
+    // Build a list of directories for each server to be deployed and tag which
+    // one is the server to run RSS; e.g., for servers ["foo", "bar", "baz"]
+    // with root_path "/my/path", we produce
+    // [
+    //     "/my/path/foo/sled-agent/pkg",
+    //     "/my/path/bar/sled-agent/pkg",
+    //     "/my/path/baz/sled-agent/pkg",
+    // ]
+    // As we're doing so, record which directory is the one for the server that
+    // will run RSS.
+    let mut rss_server_dir = None;
+    let sled_agent_dirs = config
+        .servers
+        .keys()
+        .map(|server_name| {
+            let mut dir = root_path.clone();
+            dir.push(server_name);
+            dir.push("sled-agent/pkg");
+            if *server_name == config.deployment.rss_server {
+                rss_server_dir = Some(dir.clone());
+            }
+            dir
+        })
+        .collect::<Vec<_>>();
+
+    // we know exactly one of the servers matches `rss_server` from our config
+    // validation, so we can unwrap here
+    let rss_server_dir = rss_server_dir.unwrap();
+
+    overlay_sled_agent(builder, config, &sled_agent_dirs)?;
+    overlay_rss_config(builder, config, &rss_server_dir)?;
+
+    Ok(())
 }
 
 fn overlay_sled_agent(
-    server: &Server,
+    builder: &Server,
     config: &Config,
-    server_dirs: &[PathBuf],
+    sled_agent_dirs: &[PathBuf],
 ) -> Result<()> {
-    let sled_agent_dirs: Vec<PathBuf> = server_dirs
-        .iter()
-        .map(|dir| {
-            let mut dir = PathBuf::from(dir);
-            dir.push("sled-agent/pkg");
-            dir
-        })
-        .collect();
+    // Send SSH command to create directories on builder and generate share
+    // secrets.
 
-    // Create directories on builder
-    let dirs = dir_string(&sled_agent_dirs);
+    // TODO do we need any escaping here? this will definitely break if any dir
+    // names have spaces
+    let dirs = sled_agent_dirs
+        .iter()
+        .map(|dir| format!("{} ", dir.display()))
+        .collect::<String>();
+
     let cmd = format!(
         "sh -c 'for dir in {}; do mkdir -p $dir; done' && \
             cd {} && \
@@ -406,7 +435,38 @@ fn overlay_sled_agent(
         config.deployment.rack_secret_threshold,
         dirs
     );
-    ssh_exec(server, &cmd, false)
+    ssh_exec(builder, &cmd, false)
+}
+
+fn overlay_rss_config(
+    builder: &Server,
+    config: &Config,
+    rss_server_dir: &Path,
+) -> Result<()> {
+    // Sync `config-rss.toml` to the directory for the RSS server on the
+    // builder.
+    let src = config.omicron_path.join("smf/sled-agent/config-rss.toml");
+    let dst = format!(
+        "{}@{}:{}",
+        builder.username,
+        builder.addr,
+        rss_server_dir.display()
+    );
+
+    let mut cmd = rsync_common();
+    cmd.arg(&src).arg(&dst);
+
+    let status =
+        cmd.status().context(format!("Failed to run command: ({:?})", cmd))?;
+    if !status.success() {
+        return Err(FlingError::FailedSync {
+            src: src.to_string_lossy().to_string(),
+            dst,
+        }
+        .into());
+    }
+
+    Ok(())
 }
 
 fn single_server_install(
@@ -573,29 +633,6 @@ fn restart_services(destination: &Server) -> Result<()> {
     ssh_exec(destination, "svcadm restart sled-agent", false)
 }
 
-fn dir_string(dirs: &[PathBuf]) -> String {
-    dirs.iter().map(|dir| dir.to_string_lossy().to_string() + " ").collect()
-}
-
-// For each server to be deployed, append the server name to `root`.
-//
-// Example (for servers "foo", "bar", "baz"):
-//
-//  dir_per_deploy_server(&config, "/my/path") ->
-//  vec!["/my/path/foo", "/my/path/bar", "/my/path/baz"]
-fn dir_per_deploy_server(config: &Config, root: &Path) -> Vec<PathBuf> {
-    config
-        .deployment
-        .servers
-        .iter()
-        .map(|server_dir| {
-            let mut dir = PathBuf::from(root);
-            dir.push(server_dir);
-            dir
-        })
-        .collect()
-}
-
 fn ssh_exec(
     server: &Server,
     remote_cmd: &str,
@@ -661,10 +698,11 @@ fn validate(config: &Config) -> Result<(), FlingError> {
         "deployment.staging_dir",
     )?;
 
-    validate_servers(&config.deployment.servers, &config.servers)?;
-
     validate_servers(
-        &BTreeSet::from([config.builder.server.clone()]),
+        &BTreeSet::from([
+            config.builder.server.clone(),
+            config.deployment.rss_server.clone(),
+        ]),
         &config.servers,
     )
 }
