@@ -69,6 +69,8 @@ pub fn make_omicron_oso(log: &slog::Logger) -> Result<Oso, anyhow::Error> {
         SshKey::init(),
         Silo::init(),
         SiloUser::init(),
+        SiloIdentityProvider::init(),
+        SiloSamlIdentityProvider::init(),
         Sled::init(),
         UpdateAvailableArtifact::init(),
         UserBuiltin::init(),

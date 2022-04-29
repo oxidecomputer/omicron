@@ -217,15 +217,6 @@ lazy_static! {
     pub static ref DEMO_IMAGE_NAME: Name = "demo-image".parse().unwrap();
     pub static ref DEMO_PROJECT_IMAGE_URL: String =
         format!("{}/{}", *DEMO_PROJECT_URL_IMAGES, *DEMO_IMAGE_NAME);
-    pub static ref DEMO_IMAGE_CREATE: params::ImageCreate =
-        params::ImageCreate {
-            identity: IdentityMetadataCreateParams {
-                name: DEMO_IMAGE_NAME.clone(),
-                description: String::from(""),
-            },
-            source: params::ImageSource::Url(String::from("http://127.0.0.1:5555/image.raw")),
-            block_size: params::BlockSize::try_from(4096).unwrap(),
-        };
 
     // Global Images
     pub static ref DEMO_GLOBAL_IMAGE_URL: String =
@@ -249,6 +240,7 @@ lazy_static! {
 ///
 /// These structs are also used to check whether we're covering all endpoints in
 /// the public OpenAPI spec.
+#[derive(Clone)]
 pub struct VerifyEndpoint {
     /// URL path for the HTTP resource to test
     ///
@@ -281,6 +273,7 @@ pub struct VerifyEndpoint {
 }
 
 /// Describes the visibility of an HTTP resource
+#[derive(Clone)]
 pub enum Visibility {
     /// All users can see the resource (including unauthenticated or
     /// unauthorized users)
@@ -295,6 +288,7 @@ pub enum Visibility {
 }
 
 /// Describes an HTTP method supported by a particular API endpoint
+#[derive(Clone)]
 pub enum AllowedMethod {
     /// HTTP "DELETE" method
     Delete,
@@ -382,7 +376,6 @@ lazy_static! {
                 AllowedMethod::Delete,
             ],
         },
-
 
         /* Organizations */
 
@@ -650,28 +643,6 @@ lazy_static! {
             ],
         },
 
-        /* Project images */
-
-        VerifyEndpoint {
-            url: &*DEMO_PROJECT_URL_IMAGES,
-            visibility: Visibility::Protected,
-            allowed_methods: vec![
-                AllowedMethod::GetUnimplemented,
-                AllowedMethod::Post(
-                    serde_json::to_value(&*DEMO_IMAGE_CREATE).unwrap()
-                ),
-            ],
-        },
-
-        VerifyEndpoint {
-            url: &*DEMO_PROJECT_IMAGE_URL,
-            visibility: Visibility::Protected,
-            allowed_methods: vec![
-                AllowedMethod::GetUnimplemented,
-                AllowedMethod::Delete,
-            ],
-        },
-
         /* Snapshots */
 
         VerifyEndpoint {
@@ -847,28 +818,6 @@ lazy_static! {
             allowed_methods: vec![AllowedMethod::Post(
                 serde_json::Value::Null
             )],
-        },
-
-        /* Global Images */
-
-        VerifyEndpoint {
-            url: "/images",
-            visibility: Visibility::Public,
-            allowed_methods: vec![
-                AllowedMethod::Get,
-                AllowedMethod::Post(
-                    serde_json::to_value(&*DEMO_IMAGE_CREATE).unwrap()
-                ),
-            ],
-        },
-
-        VerifyEndpoint {
-            url: &*DEMO_GLOBAL_IMAGE_URL,
-            visibility: Visibility::Protected,
-            allowed_methods: vec![
-                AllowedMethod::Get,
-                AllowedMethod::Delete,
-            ],
         },
     ];
 }

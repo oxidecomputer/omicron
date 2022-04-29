@@ -3827,6 +3827,116 @@ impl Nexus {
         Ok(db_silo_user)
     }
 
+    // Silo authn identity providers
+
+    pub async fn silo_saml_identity_provider_create(
+        &self,
+        opctx: &OpContext,
+        silo_name: &Name,
+        params: params::SiloSamlIdentityProviderCreate,
+    ) -> CreateResult<db::model::SiloSamlIdentityProvider> {
+        let (.., db_silo) = LookupPath::new(opctx, &self.db_datastore)
+            .silo_name(silo_name)
+            .fetch_for(authz::Action::CreateChild)
+            .await?;
+
+        // Download the SAML IdP descriptor, and write it into the DB. This is
+        // so that it can be deserialized later.
+        //
+        // Importantly, do this only once and store it. It would introduce
+        // attack surface to download it each time it was required.
+        let idp_metadata_document_string =
+            reqwest::get(&params.idp_metadata_url)
+                .await
+                .map_err(|e| Error::invalid_request(&e.to_string()))?
+                .text()
+                .await
+                .map_err(|e| Error::invalid_request(&e.to_string()))?;
+
+        let provider = db::model::SiloSamlIdentityProvider {
+            identity: db::model::SiloSamlIdentityProviderIdentity::new(
+                Uuid::new_v4(),
+                params.identity,
+            ),
+            silo_id: db_silo.id(),
+
+            idp_metadata_url: params.idp_metadata_url,
+            idp_metadata_document_string,
+
+            idp_entity_id: params.idp_entity_id,
+            sp_client_id: params.sp_client_id,
+            acs_url: params.acs_url,
+            slo_url: params.slo_url,
+            technical_contact_email: params.technical_contact_email,
+            public_cert: params.public_cert,
+            private_key: params.private_key,
+        };
+
+        provider
+            .validate()
+            .map_err(|e| Error::invalid_request(&e.to_string()))?;
+
+        self.db_datastore.silo_saml_identity_provider_create(provider).await
+    }
+
+    pub async fn silo_saml_identity_provider_fetch(
+        &self,
+        opctx: &OpContext,
+        silo_name: &Name,
+        provider_name: &Name,
+    ) -> LookupResult<db::model::SiloSamlIdentityProvider> {
+        let (.., silo_saml_identity_provider) =
+            LookupPath::new(opctx, &self.datastore())
+                .silo_name(silo_name)
+                .silo_saml_identity_provider_name(provider_name)
+                .fetch()
+                .await?;
+        Ok(silo_saml_identity_provider)
+    }
+
+    /// First, look up the row in silo_identity_provider to get provider type,
+    /// then look in a specific table for the provider details.
+    pub async fn get_silo_identity_provider(
+        &self,
+        opctx: &OpContext,
+        silo_name: &Name,
+        provider_name: &Name,
+    ) -> LookupResult<authn::silos::SiloIdentityProviderType> {
+        let (.., silo_identity_provider) =
+            LookupPath::new(opctx, &self.datastore())
+                .silo_name(silo_name)
+                .silo_identity_provider_name(provider_name)
+                .fetch()
+                .await?;
+
+        match silo_identity_provider.provider_type {
+            db::model::SiloIdentityProviderTypeEnum::Local => {
+                return Err(Error::unavail(
+                    &"local silo authn provider not yet supported",
+                ));
+            }
+
+            db::model::SiloIdentityProviderTypeEnum::Ldap => {
+                return Err(Error::unavail(
+                    &"ldap silo authn provider not yet supported",
+                ));
+            }
+
+            db::model::SiloIdentityProviderTypeEnum::Saml => {
+                let (.., silo_saml_identity_provider) =
+                    LookupPath::new(opctx, &self.datastore())
+                        .silo_name(silo_name)
+                        .silo_saml_identity_provider_name(provider_name)
+                        .fetch()
+                        .await?;
+
+                Ok(authn::silos::SiloIdentityProviderType::Saml(Box::new(
+                    silo_saml_identity_provider,
+                )))
+            }
+        }
+    }
+
     // SSH public keys
 
     pub async fn ssh_keys_list(

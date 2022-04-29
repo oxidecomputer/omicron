@@ -21,7 +21,6 @@ mod ssh_keys;
 mod subnet_allocation;
 mod timeseries;
 mod unauthorized;
-mod unauthorized_coverage;
 mod updates;
 mod users_builtin;
 mod vpc_firewall;

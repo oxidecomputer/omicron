@@ -11,14 +11,15 @@ use crate::db::schema::{
     console_session, dataset, disk, global_image, image, instance,
     metric_producer, network_interface, organization, oximeter, project, rack,
     region, role_assignment_builtin, role_builtin, router_route, silo,
-    silo_user, sled, snapshot, ssh_key, update_available_artifact,
-    user_builtin, volume, vpc, vpc_firewall_rule, vpc_router, vpc_subnet,
-    zpool,
+    silo_identity_provider, silo_saml_identity_provider, silo_user, sled,
+    snapshot, ssh_key, update_available_artifact, user_builtin, volume, vpc,
+    vpc_firewall_rule, vpc_router, vpc_subnet, zpool,
 };
 use crate::defaults;
 use crate::external_api::params;
 use crate::external_api::views;
 use crate::internal_api;
+use anyhow::bail;
 use chrono::{DateTime, Utc};
 use db_macros::{Asset, Resource};
 use diesel::backend::{Backend, BinaryRawValue, RawValue};
@@ -40,6 +41,8 @@ use std::net::Ipv4Addr;
 use std::net::Ipv6Addr;
 use std::net::SocketAddr;
 use std::net::SocketAddrV6;
+use std::str::FromStr;
+use std::string::ToString;
 use uuid::Uuid;
 
 // TODO: Break up types into multiple files
@@ -1000,6 +1003,117 @@ impl SiloUser {
             identity: SiloUserIdentity::new(user_id),
             silo_id,
             time_deleted: None,
+        }
+    }
+}
+
+#[derive(Debug, Copy, Clone, AsExpression, FromSqlRow)]
+#[sql_type = "sql_types::Text"]
+pub enum SiloIdentityProviderTypeEnum {
+    Local,
+    Saml,
+    Ldap,
+}
+
+impl ToString for SiloIdentityProviderTypeEnum {
+    fn to_string(&self) -> String {
+        match self {
+            SiloIdentityProviderTypeEnum::Local => "local".to_string(),
+            SiloIdentityProviderTypeEnum::Saml => "saml".to_string(),
+            SiloIdentityProviderTypeEnum::Ldap => "ldap".to_string(),
+        }
+    }
+}
+
+impl<DB> ToSql<sql_types::Text, DB> for SiloIdentityProviderTypeEnum
+where
+    DB: Backend,
+    str: ToSql<sql_types::Text, DB>,
+{
+    fn to_sql<W: std::io::Write>(
+        &self,
+        out: &mut serialize::Output<W, DB>,
+    ) -> serialize::Result {
+        out.write_all(self.to_string().as_bytes())?;
+        Ok(serialize::IsNull::No)
+    }
+}
+
+impl FromStr for SiloIdentityProviderTypeEnum {
+    type Err = anyhow::Error;
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        Ok(match value {
+            "local" => SiloIdentityProviderTypeEnum::Local,
+            "saml" => SiloIdentityProviderTypeEnum::Saml,
+            "ldap" => SiloIdentityProviderTypeEnum::Ldap,
+            &_ => {
+                bail!(
+                    "unrecognized value for SiloIdentityProviderTypeEnum: {}",
+                    &value
+                );
+            }
+        })
+    }
+}
+
+impl<DB> FromSql<sql_types::Text, DB> for SiloIdentityProviderTypeEnum
+where
+    DB: Backend,
+    String: FromSql<sql_types::Text, DB>,
+{
+    fn from_sql(bytes: RawValue<DB>) -> deserialize::Result<Self> {
+        let bytes_string = String::from_sql(bytes)?;
+        Ok(bytes_string.parse()?)
+    }
+}
+
+#[derive(Queryable, Insertable, Clone, Debug, Selectable)]
+#[table_name = "silo_identity_provider"]
+pub struct SiloIdentityProvider {
+    pub silo_id: Uuid,
+    pub provider_type: SiloIdentityProviderTypeEnum,
+    pub name: Name,
+    pub provider_id: Uuid,
+}
+
+impl SiloIdentityProvider {
+    pub fn id(&self) -> Uuid {
+        self.provider_id
+    }
+}
+
+#[derive(Queryable, Insertable, Clone, Debug, Selectable, Resource)]
+#[table_name = "silo_saml_identity_provider"]
+pub struct SiloSamlIdentityProvider {
+    #[diesel(embed)]
+    pub identity: SiloSamlIdentityProviderIdentity,
+
+    pub silo_id: Uuid,
+
+    pub idp_metadata_url: String,
+    pub idp_metadata_document_string: String,
+
+    pub idp_entity_id: String,
+    pub sp_client_id: String,
+    pub acs_url: String,
+    pub slo_url: String,
+    pub technical_contact_email: String,
+    pub public_cert: Option<String>,
+    pub private_key: Option<String>,
+}
+
+impl Into<external::SiloSamlIdentityProvider> for SiloSamlIdentityProvider {
+    fn into(self) -> external::SiloSamlIdentityProvider {
+        external::SiloSamlIdentityProvider {
+            identity: self.identity(),
+            idp_metadata_url: self.idp_metadata_url.clone(),
+            idp_entity_id: self.idp_entity_id.clone(),
+            sp_client_id: self.sp_client_id.clone(),
+            acs_url: self.acs_url.clone(),
+            slo_url: self.slo_url.clone(),
+            technical_contact_email: self.technical_contact_email.clone(),
+            public_cert: self.public_cert,
+            private_key: self.private_key,
         }
     }
 }

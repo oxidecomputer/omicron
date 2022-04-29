@@ -2688,7 +2688,84 @@ impl DataStore {
 
         info!(opctx.log, "deleted {} silo users for silo {}", updated_rows, id);
 
+        // delete all silo identity providers
+        use db::schema::silo_identity_provider::dsl as idp_dsl;
+
+        let updated_rows = diesel::delete(idp_dsl::silo_identity_provider)
+            .filter(idp_dsl::silo_id.eq(id))
+            .execute_async(self.pool())
+            .await
+            .map_err(|e| {
+                public_error_from_diesel_pool(
+                    e,
+                    ErrorHandler::NotFoundByLookup(
+                        ResourceType::Silo,
+                        LookupType::ById(id),
+                    ),
+                )
+            })?;
+
+        info!(opctx.log, "deleted {} silo IdPs for silo {}", updated_rows, id);
+
+        use db::schema::silo_saml_identity_provider::dsl as saml_idp_dsl;
+
+        let updated_rows =
+            diesel::delete(saml_idp_dsl::silo_saml_identity_provider)
+                .filter(saml_idp_dsl::silo_id.eq(id))
+                .execute_async(self.pool())
+                .await
+                .map_err(|e| {
+                    public_error_from_diesel_pool(
+                        e,
+                        ErrorHandler::NotFoundByLookup(
+                            ResourceType::Silo,
+                            LookupType::ById(id),
+                        ),
+                    )
+                })?;
+
+        info!(
+            opctx.log,
+            "deleted {} silo saml IdPs for silo {}", updated_rows, id
+        );
+
         Ok(())
+    }
+
+    pub async fn silo_saml_identity_provider_create(
+        &self,
+        provider: db::model::SiloSamlIdentityProvider,
+    ) -> CreateResult<db::model::SiloSamlIdentityProvider> {
+        self.pool()
+            .transaction(move |conn| {
+                // insert silo identity provider record with type Saml
+                use db::schema::silo_identity_provider::dsl as idp_dsl;
+                diesel::insert_into(idp_dsl::silo_identity_provider)
+                    .values(db::model::SiloIdentityProvider {
+                        silo_id: provider.silo_id,
+                        name: provider.name().clone(),
+                        provider_type:
+                            db::model::SiloIdentityProviderTypeEnum::Saml,
+                        provider_id: provider.id(),
+                    })
+                    .execute(conn)?;
+
+                // insert silo saml identity provider record
+                use db::schema::silo_saml_identity_provider::dsl;
+                let result =
+                    diesel::insert_into(dsl::silo_saml_identity_provider)
+                        .values(provider)
+                        .returning(
+                            db::model::SiloSamlIdentityProvider::as_returning(),
+                        )
+                        .get_result(conn)?;
+
+                Ok(result)
+            })
+            .await
+            .map_err(|e: TransactionError<Error>| {
+                Error::internal_error(&format!("Transaction error: {}", e))
+            })
     }
 
     /// Return the next available IPv6 address for an Oxide service running on

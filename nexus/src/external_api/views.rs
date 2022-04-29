@@ -36,6 +36,23 @@ impl Into<Silo> for model::Silo {
     }
 }
 
+// SILO IDENTITY PROVIDER
+
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct SiloIdentityProvider {
+    pub provider_id: Uuid,
+    pub provider_type: String,
+}
+
+impl Into<SiloIdentityProvider> for model::SiloIdentityProvider {
+    fn into(self) -> SiloIdentityProvider {
+        SiloIdentityProvider {
+            provider_id: self.provider_id,
+            provider_type: self.provider_type.to_string(),
+        }
+    }
+}
+
 // ORGANIZATIONS
 
 /// Client view of an [`Organization`]

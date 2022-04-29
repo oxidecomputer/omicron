@@ -436,6 +436,22 @@ authz_resource! {
 }
 
 authz_resource! {
+    name = "SiloIdentityProvider",
+    parent = "Silo",
+    primary_key = Uuid,
+    roles_allowed = false,
+    polar_snippet = Custom,
+}
+
+authz_resource! {
+    name = "SiloSamlIdentityProvider",
+    parent = "Silo",
+    primary_key = Uuid,
+    roles_allowed = false,
+    polar_snippet = Custom,
+}
+
+authz_resource! {
     name = "SshKey",
     parent = "SiloUser",
     primary_key = Uuid,

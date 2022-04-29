@@ -15,7 +15,10 @@ use crate::authn::external::{
         SessionStore, SESSION_COOKIE_COOKIE_NAME,
     },
 };
-use crate::authn::{USER_TEST_PRIVILEGED, USER_TEST_UNPRIVILEGED};
+use crate::authn::{
+    silos::SiloIdentityProviderType, USER_TEST_PRIVILEGED,
+    USER_TEST_UNPRIVILEGED,
+};
 use crate::context::OpContext;
 use crate::ServerContext;
 use dropshot::{
@@ -84,6 +87,116 @@ pub async fn spoof_login(
             ),
         )
         .body("ok".into())?) // TODO: what do we return from login?
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub struct LoginToProviderPathParam {
+    pub silo_name: crate::db::model::Name,
+    pub provider_name: crate::db::model::Name,
+}
+
+/// Ask the user to login to their identity provider
+///
+/// Either display a page asking a user for their credentials, or redirect them
+/// to their identity provider.
+#[endpoint {
+   method = GET,
+   path = "/login/{silo_name}/{provider_name}",
+   tags = ["login"],
+}]
+pub async fn ask_user_to_login_to_provider(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    path_params: Path<LoginToProviderPathParam>,
+) -> Result<Response<Body>, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let nexus = &apictx.nexus;
+        let path_params = path_params.into_inner();
+
+        // Use opctx_external_authn because this request will be
+        // unauthenticated.
+        let opctx = nexus.opctx_external_authn();
+
+        let identity_provider = nexus
+            .get_silo_identity_provider(
+                &opctx,
+                &path_params.silo_name,
+                &path_params.provider_name,
+            )
+            .await?;
+
+        match identity_provider {
+            SiloIdentityProviderType::Local => {
+                todo!()
+            }
+            SiloIdentityProviderType::Ldap => {
+                todo!()
+            }
+            SiloIdentityProviderType::Saml(silo_saml_identity_provider) => {
+                let relay_state = None;
+                let sign_in_url = silo_saml_identity_provider
+                    .sign_in_url(relay_state)
+                    .map_err(|e| {
+                        HttpError::for_internal_error(e.to_string())
+                    })?;
+
+                Ok(Response::builder()
+                    .status(StatusCode::FOUND)
+                    .header(http::header::LOCATION, sign_in_url)
+                    .body("".into())?)
+            }
+        }
+    };
+    // TODO figure out why this fails
+    //apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+    handler.await
+}
+
+/// Consume some sort of credentials, and authenticate a user.
+///
+/// Either receive a username and password, or some sort of identity provider
+/// data (like a SAMLResponse). Use these to set the user's session cookie.
+#[endpoint {
+   method = POST,
+   path = "/login/{silo_name}/{provider_name}",
+   tags = ["login"],
+}]
+pub async fn consume_credentials_and_authn_user(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    path_params: Path<LoginToProviderPathParam>,
+) -> Result<Response<Body>, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let nexus = &apictx.nexus;
+        let path_params = path_params.into_inner();
+
+        // Use opctx_external_authn because this request will be
+        // unauthenticated.
+        let opctx = nexus.opctx_external_authn();
+
+        let identity_provider = nexus
+            .get_silo_identity_provider(
+                &opctx,
+                &path_params.silo_name,
+                &path_params.provider_name,
+            )
+            .await?;
+
+        match identity_provider {
+            SiloIdentityProviderType::Local => {
+                todo!()
+            }
+            SiloIdentityProviderType::Ldap => {
+                todo!()
+            }
+            SiloIdentityProviderType::Saml(_silo_saml_identity_provider) => {
+                todo!()
+            }
+        }
+    };
+    // TODO figure out why this fails
+    //apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+    handler.await
 }
 
 // Log user out of web console by deleting session in both server and browser
