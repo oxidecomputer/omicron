@@ -153,6 +153,19 @@ fn do_exec(
     Ok(())
 }
 
+// start an `rsync` command with args common to all our uses
+fn rsync_common() -> Command {
+    let mut cmd = Command::new("rsync");
+    cmd.arg("-az")
+        .arg("-e")
+        .arg("ssh")
+        .arg("--delete")
+        .arg("--progress")
+        .arg("--out-format")
+        .arg("File changed: %o %t %f");
+    cmd
+}
+
 fn do_sync(config: &Config) -> Result<()> {
     let builder =
         config.servers.get(&config.builder.server).ok_or_else(|| {
@@ -161,8 +174,17 @@ fn do_sync(config: &Config) -> Result<()> {
 
     // For rsync to copy from the source appropriately we must guarantee a
     // trailing slash.
-    let src =
-        format!("{}/", config.omicron_path.canonicalize()?.to_string_lossy());
+    let src = format!(
+        "{}/",
+        config
+            .omicron_path
+            .canonicalize()
+            .with_context(|| format!(
+                "could not canonicalize {}",
+                config.omicron_path.display()
+            ))?
+            .to_string_lossy()
+    );
     let dst = format!(
         "{}@{}:{}",
         builder.username,
@@ -171,29 +193,45 @@ fn do_sync(config: &Config) -> Result<()> {
     );
 
     println!("Synchronizing source files to: {}", dst);
+    let mut cmd = rsync_common();
 
-    let mut cmd = Command::new("rsync");
-    cmd.arg("-az")
-        .arg("-e")
-        .arg("ssh")
-        .arg("--delete")
-        .arg("--progress")
-        .arg("--exclude")
+    // exclude build and development environment artifacts
+    cmd.arg("--exclude")
         .arg("target/")
         .arg("--exclude")
-        .arg("out/")
-        .arg("--exclude")
-        .arg("/cockroachdb/")
-        .arg("--exclude")
-        .arg("/clickhouse/")
+        .arg("*.vdev")
         .arg("--exclude")
         .arg("*.swp")
         .arg("--exclude")
-        .arg(".git/")
-        .arg("--out-format")
-        .arg("File changed: %o %t %f")
-        .arg(&src)
-        .arg(&dst);
+        .arg(".git/");
+
+    // exclude `config-rss.toml`, which needs to be sent to only one target
+    // system. we handle this in `do_overlay` below.
+    cmd.arg("--exclude").arg("**/config-rss.toml");
+
+    // Exclude `out/`, except for the prebuilt dependencies we keep there.
+    // The include/include/exclude dance is specific to how rsync applies
+    // patterns: it checks each file or directory against all supplied patterns,
+    // and stops on the first match.
+    //
+    // The steps below ensure:
+    //
+    // 1. We include exactly `out/`, allowing rsync to recurse into it.
+    // 2. We include each of the specific children of `out/` we want to sync.
+    // 3. We exclude `out/*`, skipping any other children of `out/`.
+    cmd.arg("--include")
+        .arg("out/")
+        .arg("--include")
+        .arg("out/clickhouse")
+        .arg("--include")
+        .arg("out/cockroachdb")
+        .arg("--include")
+        .arg("out/console-assets")
+        .arg("--exclude")
+        .arg("out/*");
+
+    // finish with src/dst
+    cmd.arg(&src).arg(&dst);
     let status =
         cmd.status().context(format!("Failed to run command: ({:?})", cmd))?;
     if !status.success() {
