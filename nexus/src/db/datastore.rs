@@ -2503,6 +2503,8 @@ impl DataStore {
             .await
             .map(|_rows_deleted| ())
             .map_err(|e| {
+                // TODO-correctness TODO-availability This should be using
+                // public_error_from_diesel_pool()
                 Error::internal_error(&format!(
                     "error deleting outdated available artifacts: {:?}",
                     e
@@ -2676,6 +2678,7 @@ impl DataStore {
         // TODO-scalability This needs to happen in batches
         let updated_rows = diesel::update(silo_user::dsl::silo_user)
             .filter(silo_user::dsl::silo_id.eq(id))
+            .filter(silo_user::dsl::time_deleted.is_null())
             .set(silo_user::dsl::time_deleted.eq(now))
             .execute_async(self.pool_authorized(opctx).await?)
             .await
@@ -2838,6 +2841,27 @@ impl DataStore {
                 )
             })?;
         Ok(())
+    }
+
+    // Test interfaces
+
+    #[cfg(test)]
+    async fn test_try_table_scan(&self, opctx: &OpContext) -> Error {
+        use db::schema::project::dsl;
+        let conn = self.pool_authorized(opctx).await;
+        if let Err(error) = conn {
+            return error;
+        }
+        let result = dsl::project
+            .select(diesel::dsl::count_star())
+            .first_async::<i64>(conn.unwrap())
+            .await;
+        match result {
+            Ok(_) => Error::internal_error("table scan unexpectedly succeeded"),
+            Err(error) => {
+                public_error_from_diesel_pool(error, ErrorHandler::Server)
+            }
+        }
     }
 }
 
@@ -3514,6 +3538,32 @@ mod test {
 
         // Delete the key we just created.
         datastore.ssh_key_delete(&opctx, &authz_ssh_key).await.unwrap();
+
+        // Clean up.
+        db.cleanup().await.unwrap();
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn test_table_scan() {
+        let logctx = dev::test_setup_log("test_table_scan");
+        let mut db = test_setup_database(&logctx.log).await;
+        let (opctx, datastore) = datastore_test(&logctx, &db).await;
+
+        let error = datastore.test_try_table_scan(&opctx).await;
+        println!("error from attempted table scan: {:#}", error);
+        match error {
+            Error::InternalError { internal_message } => {
+                assert!(internal_message.contains(
+                    "contains a full table/index scan which is \
+                    explicitly disallowed"
+                ));
+            }
+            error => panic!(
+                "expected internal error with specific message, found {:?}",
+                error
+            ),
+        }
 
         // Clean up.
         db.cleanup().await.unwrap();
