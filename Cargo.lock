@@ -620,7 +620,7 @@ dependencies = [
 [[package]]
 name = "crucible"
 version = "0.0.1"
-source = "git+https://github.com/oxidecomputer/crucible?rev=257032d1e842901d427f344a396d78b9b85b183f#257032d1e842901d427f344a396d78b9b85b183f"
+source = "git+https://github.com/oxidecomputer/crucible?rev=dc6f870f893a3da1b47877143e2bc9e3aef8113a#dc6f870f893a3da1b47877143e2bc9e3aef8113a"
 dependencies = [
  "aes-gcm-siv",
  "anyhow",
@@ -653,7 +653,7 @@ dependencies = [
 [[package]]
 name = "crucible-agent-client"
 version = "0.0.1"
-source = "git+https://github.com/oxidecomputer/crucible?rev=257032d1e842901d427f344a396d78b9b85b183f#257032d1e842901d427f344a396d78b9b85b183f"
+source = "git+https://github.com/oxidecomputer/crucible?rev=dc6f870f893a3da1b47877143e2bc9e3aef8113a#dc6f870f893a3da1b47877143e2bc9e3aef8113a"
 dependencies = [
  "anyhow",
  "chrono",
@@ -668,7 +668,7 @@ dependencies = [
 [[package]]
 name = "crucible-common"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/crucible?rev=257032d1e842901d427f344a396d78b9b85b183f#257032d1e842901d427f344a396d78b9b85b183f"
+source = "git+https://github.com/oxidecomputer/crucible?rev=dc6f870f893a3da1b47877143e2bc9e3aef8113a#dc6f870f893a3da1b47877143e2bc9e3aef8113a"
 dependencies = [
  "anyhow",
  "rusqlite",
@@ -686,7 +686,7 @@ dependencies = [
 [[package]]
 name = "crucible-protocol"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/crucible?rev=257032d1e842901d427f344a396d78b9b85b183f#257032d1e842901d427f344a396d78b9b85b183f"
+source = "git+https://github.com/oxidecomputer/crucible?rev=dc6f870f893a3da1b47877143e2bc9e3aef8113a#dc6f870f893a3da1b47877143e2bc9e3aef8113a"
 dependencies = [
  "anyhow",
  "bincode",
@@ -700,7 +700,7 @@ dependencies = [
 [[package]]
 name = "crucible-scope"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/crucible?rev=257032d1e842901d427f344a396d78b9b85b183f#257032d1e842901d427f344a396d78b9b85b183f"
+source = "git+https://github.com/oxidecomputer/crucible?rev=dc6f870f893a3da1b47877143e2bc9e3aef8113a#dc6f870f893a3da1b47877143e2bc9e3aef8113a"
 dependencies = [
  "anyhow",
  "futures",
@@ -3343,7 +3343,7 @@ dependencies = [
 [[package]]
 name = "propolis-client"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=ec4f3a41a638ea6c3316a86f30f1895f4877f2ef#ec4f3a41a638ea6c3316a86f30f1895f4877f2ef"
+source = "git+https://github.com/oxidecomputer/propolis?rev=de0ac67e5e1e19a905e9a6e02da342dbbabf2d09#de0ac67e5e1e19a905e9a6e02da342dbbabf2d09"
 dependencies = [
  "crucible",
  "reqwest",

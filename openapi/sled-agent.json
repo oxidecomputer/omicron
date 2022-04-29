@@ -1101,6 +1101,30 @@
               "opts",
               "type"
             ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "block_size": {
+                "type": "integer",
+                "format": "uint64",
+                "minimum": 0
+              },
+              "path": {
+                "type": "string"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "File"
+                ]
+              }
+            },
+            "required": [
+              "block_size",
+              "path",
+              "type"
+            ]
           }
         ]
       }
