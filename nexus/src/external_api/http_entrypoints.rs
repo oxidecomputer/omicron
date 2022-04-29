@@ -78,7 +78,7 @@ use uuid::Uuid;
 // TODO This should be runtime-configurable.  But it doesn't belong in the Nexus
 // configuration file, since it's a constraint on database objects more than it
 // is Nexus.  We should have some kinds of config that lives in the database.
-const NMAX_ROLE_ASSIGNMENTS_PER_RESOURCE: usize = 32;
+const NMAX_ROLE_ASSIGNMENTS_PER_RESOURCE: usize = 64;
 
 type NexusApiDescription = ApiDescription<Arc<ServerContext>>;
 
