@@ -54,7 +54,11 @@ thing-flinger, pointing out room for improvement.
 
 `thing-flinger` defines three types of nodes:
 
- * Client - Where a user typically edits their code and runs thing-flinger. This can run any OS.
+ * Client - Where a user typically edits their code and runs thing-flinger. In
+   theory this can run any OS, but currently it needs to be a Helios system.
+   omicron downloads prebuilt dependencies (clickhouse, cockroachDB) for the
+   current system, and we will sync those binaries from the client to the
+   builder (and ultimately to the deployment servers).
  * Builder - A Helios box where Omicron is built and packaged
  * Deployed Server - Helios machines where Omicron will be installed and run
 
@@ -83,42 +87,55 @@ all the dependencies for Omicron installed. Following the *prerequisites* in the
 https://github.com/oxidecomputer/omicron/#build-and-run[Build and run] section of the main Omicron
 README is probably a good idea.
 
+==== Update `config-rss.toml`
+
+Currently rack setup is driven by a configuration file that lives at
+`smf/sled-agent/config-rss.toml` in the root of this repository. The committed
+configuration of that file contains a single `[[requests]]` entry (with many
+services inside it), which means it will start services on only one sled. To
+start services (e.g., nexus) on multiple sleds, add additional entries to that
+configuration file before proceeding.
+
 === Command Based Workflow
-
-==== Build thing-flinger on client
-`thing-flinger` is part of the `omicron-package` crate.
-
-`cargo build -p omicron-package`
 
 ==== sync
 Copy your source code to the builder. Note that this copies over your `.git` subdirectory on purpose so
 that a branch can be configured for building with the `git_treeish` field in the toml `builder`
 table.
 
-`./target/debug/thing-flinger -c <CONFIG.toml> sync`
+`cargo run --bin thing-flinger -- -c <CONFIG> sync`
 
-==== build-minimal
-Build necessary parts of omicron on the builder, required for future use by thing-flinger.
+==== check (optional)
+Run `cargo check` on the builder against the copy of `omicron` that was sync'd
+to it in the previous step.
 
-`./target/debug/thing-flinger -c <CONFIG> build-minimal`
+`cargo run --bin thing-flinger -- -c <CONFIG> build check`
 
-==== package 
+==== package
 Build and package omicron using `omicron-package` on the builder.
 
-`./target/debug/thing-flinger -c <CONFIG> package`
+`cargo run --bin thing-flinger -- -c <CONFIG> build package`
 
 ==== overlay
 Create files that are unique to each deployment server.
 
-`./target/debug/thing-flinger -c <CONFIG> overlay`
+`cargo run --bin thing-flinger -- -c <CONFIG> overlay`
 
-==== install 
+==== install
 Install omicron to all machines, in parallel. This consists of copying the packaged omicron tarballs
 along with overlay files, and omicron-package and its manifest to a `staging` directory on each
 deployment server, and then running omicron-package, installing overlay files, and restarting
 services.
 
-`./target/debug/thing-flinger -c <CONFIG> install`
+`cargo run --bin thing-flinger -- -c <CONFIG> deploy install`
+
+==== uninstall
+Uninstall omicron from all machines.
+
+`cargo run --bin thing-flinger -- -c <CONFIG> deploy uninstall`
+
+Note: This does not fully undo everything done by the `install` step above;
+noteably overlay files are not removed.
 
 === Current Limitations
 
@@ -140,3 +157,59 @@ effort to use securely. This particular implementation wraps the openssh ssh cli
 `std::process::Command`, rather than using the `ssh2` crate, because ssh2, as a wrapper around
 `libssh`, does not support agent-forwarding.
 
+== Notes on Using VMs as Deployed Servers on a Linux Host
+
+TODO: This section should be fleshed out more and potentially lifted to its own
+document; for now this is a collection of rough notes.
+
+It's possible to use a Linux libvirt host running multiple helios VMs as the
+builder/deployment server targets, but it requires some additional setup beyond
+what [`helios-engvm`](https://github.com/oxidecomputer/helios-engvm).
+
+To enable communication between the VMs over their IPv6 bootstrap networks:
+
+1. Enable IPv6 and DHCP on the virtual network libvirt uses for the VMs; e.g.,
+
+```xml
+  <ip family="ipv6" address="fdb0:5254::1" prefix="96">
+    <dhcp>
+      <range start="fdb0:5254::100" end="fdb0:5254::1ff"/>
+    </dhcp>
+  </ip>
+```
+
+After booting the VMs with this enabled, they should be able to ping each other
+over their acquired IPv6 addresses, but connecting to each other over the
+`bootstrap6` interface that sled-agent creates will fail.
+
+2. Explicitly add routes in the Linux host for the `bootstrap6` addresses,
+specifying the virtual interface libvirt created that is used by the VMs.
+
+```
+bash% sudo ip -6 route add fdb0:5254:13:7331::1/64 dev virbr1
+bash% sudo ip -6 route add fdb0:5254:f0:acfd::1/64 dev virbr1
+```
+
+3. Once the sled-agents advance sufficiently to set up `sled6` interfaces,
+routes need to be added for them both in the Linux host and in the Helios VMs.
+Assuming two sleds with these interfaces:
+
+```
+# VM 1
+vioif0/sled6      static   ok           fd00:1122:3344:1::1/64
+# VM 2
+vioif0/sled6      static   ok           fd00:1122:3344:2::1/64
+```
+
+The Linux host needs to be told to route that subnet to the appropriate virtual
+interface:
+
+```
+bash% ip -6 route add fd00:1122:3344::1/48 dev virbr1
+```
+
+and each Helios VM needs to be told to route that subnet to the host gateway:
+
+```
+vm% pfexec route add -inet6 fd00:1122:3344::/48 $IPV6_HOST_GATEWAY_ADDR
+```
