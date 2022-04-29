@@ -51,6 +51,8 @@ if [[ "${HOST_OS}" == "Linux" ]]; then
   packages=(
     'libpq-dev'
     'pkg-config'
+    'xmlsec1'
+    'libxmlsec1-openssl'
   )
   confirm "Install (or update) [${packages[*]}]?" && sudo apt-get install ${packages[@]}
 elif [[ "${HOST_OS}" == "SunOS" ]]; then
@@ -79,6 +81,7 @@ elif [[ "${HOST_OS}" == "Darwin" ]]; then
   packages=(
     'postgresql'
     'pkg-config'
+    'libxmlsec1'
   )
   confirm "Install (or update) [${packages[*]}]?" && brew install ${packages[@]}
 else

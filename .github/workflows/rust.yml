@@ -31,12 +31,6 @@ jobs:
       if: ${{ github.ref != 'refs/heads/main' }}
     - name: Report cargo version
       run: cargo --version
-    - name: Install pre-reqs
-      run: apt install -y xmlsec1 libxmlsec1-openssl
-      if: ${{ runner.os == "ubuntu-18.04" }}
-    - name: Install pre-reqs
-      run: brew install libxmlsec1
-      if: ${{ runner.os == "macos-11" }}
     - name: Check build of deployed Omicron packages
       run: cargo run --bin omicron-package -- check
 
