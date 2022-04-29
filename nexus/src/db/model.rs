@@ -175,6 +175,16 @@ macro_rules! impl_enum_type {
                 }
             }
         }
+
+        impl ToString for $model_type {
+            fn to_string(&self) -> String {
+                match self {
+                    $(
+                    $model_type::$enum_item => String::from_utf8($sql_value.to_vec()).unwrap(),
+                    )*
+                }
+            }
+        }
     }
 }
 
@@ -1019,16 +1029,6 @@ impl_enum_type!(
     Saml => b"saml"
     Ldap => b"ldap"
 );
-
-impl ToString for SiloIdentityProviderType {
-    fn to_string(&self) -> String {
-        match self {
-            SiloIdentityProviderType::Local => "local".to_string(),
-            SiloIdentityProviderType::Saml => "saml".to_string(),
-            SiloIdentityProviderType::Ldap => "ldap".to_string(),
-        }
-    }
-}
 
 #[derive(Queryable, Insertable, Clone, Debug, Selectable)]
 #[table_name = "silo_identity_provider"]
