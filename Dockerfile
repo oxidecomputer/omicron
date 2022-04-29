@@ -29,6 +29,7 @@ RUN apt-get update && apt-get install -y \
 	libpq5 \
 	libssl1.1 \
 	libsqlite3-0 \
+	libxmlsec1-openssl \
 	--no-install-recommends \
 	&& rm -rf /var/lib/apt/lists/*
 
