@@ -23,15 +23,10 @@ pub fn parse<P: AsRef<Path>, C: DeserializeOwned>(
 ) -> Result<C, ParseError> {
     let path = path.as_ref();
     let contents = std::fs::read_to_string(path).map_err(|err| {
-        ParseError::Io {
-            message: format!("failed reading {path:?}"),
-            err,
-        }
+        ParseError::Io { message: format!("failed reading {path:?}"), err }
     })?;
-    let cfg = toml::from_str::<C>(&contents).map_err(|err| ParseError::Toml {
-        path: path.to_path_buf(),
-        err,
-    })?;
+    let cfg = toml::from_str::<C>(&contents)
+        .map_err(|err| ParseError::Toml { path: path.to_path_buf(), err })?;
     Ok(cfg)
 }
 
