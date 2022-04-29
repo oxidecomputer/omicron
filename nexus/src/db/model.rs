@@ -19,7 +19,6 @@ use crate::defaults;
 use crate::external_api::params;
 use crate::external_api::views;
 use crate::internal_api;
-use anyhow::bail;
 use chrono::{DateTime, Utc};
 use db_macros::{Asset, Resource};
 use diesel::backend::{Backend, BinaryRawValue, RawValue};
@@ -41,7 +40,6 @@ use std::net::Ipv4Addr;
 use std::net::Ipv6Addr;
 use std::net::SocketAddr;
 use std::net::SocketAddrV6;
-use std::str::FromStr;
 use std::string::ToString;
 use uuid::Uuid;
 
@@ -1007,63 +1005,28 @@ impl SiloUser {
     }
 }
 
-#[derive(Debug, Copy, Clone, AsExpression, FromSqlRow)]
-#[sql_type = "sql_types::Text"]
-pub enum SiloIdentityProviderTypeEnum {
-    Local,
-    Saml,
-    Ldap,
-}
+impl_enum_type!(
+    #[derive(SqlType, Debug, QueryId)]
+    #[postgres(type_name = "provider_type", type_schema = "public")]
+    pub struct SiloIdentityProviderTypeEnum;
 
-impl ToString for SiloIdentityProviderTypeEnum {
+    #[derive(Copy, Clone, Debug, AsExpression, FromSqlRow, Serialize, Deserialize, PartialEq)]
+    #[sql_type = "SiloIdentityProviderTypeEnum"]
+    pub enum SiloIdentityProviderType;
+
+    // Enum values
+    Local => b"local"
+    Saml => b"saml"
+    Ldap => b"ldap"
+);
+
+impl ToString for SiloIdentityProviderType {
     fn to_string(&self) -> String {
         match self {
-            SiloIdentityProviderTypeEnum::Local => "local".to_string(),
-            SiloIdentityProviderTypeEnum::Saml => "saml".to_string(),
-            SiloIdentityProviderTypeEnum::Ldap => "ldap".to_string(),
+            SiloIdentityProviderType::Local => "local".to_string(),
+            SiloIdentityProviderType::Saml => "saml".to_string(),
+            SiloIdentityProviderType::Ldap => "ldap".to_string(),
         }
-    }
-}
-
-impl<DB> ToSql<sql_types::Text, DB> for SiloIdentityProviderTypeEnum
-where
-    DB: Backend,
-    str: ToSql<sql_types::Text, DB>,
-{
-    fn to_sql<W: std::io::Write>(
-        &self,
-        out: &mut serialize::Output<W, DB>,
-    ) -> serialize::Result {
-        out.write_all(self.to_string().as_bytes())?;
-        Ok(serialize::IsNull::No)
-    }
-}
-
-impl FromStr for SiloIdentityProviderTypeEnum {
-    type Err = anyhow::Error;
-    fn from_str(value: &str) -> Result<Self, Self::Err> {
-        Ok(match value {
-            "local" => SiloIdentityProviderTypeEnum::Local,
-            "saml" => SiloIdentityProviderTypeEnum::Saml,
-            "ldap" => SiloIdentityProviderTypeEnum::Ldap,
-            &_ => {
-                bail!(
-                    "unrecognized value for SiloIdentityProviderTypeEnum: {}",
-                    &value
-                );
-            }
-        })
-    }
-}
-
-impl<DB> FromSql<sql_types::Text, DB> for SiloIdentityProviderTypeEnum
-where
-    DB: Backend,
-    String: FromSql<sql_types::Text, DB>,
-{
-    fn from_sql(bytes: RawValue<DB>) -> deserialize::Result<Self> {
-        let bytes_string = String::from_sql(bytes)?;
-        Ok(bytes_string.parse()?)
     }
 }
 
@@ -1071,7 +1034,7 @@ where
 #[table_name = "silo_identity_provider"]
 pub struct SiloIdentityProvider {
     pub silo_id: Uuid,
-    pub provider_type: SiloIdentityProviderTypeEnum,
+    pub provider_type: SiloIdentityProviderType,
     pub name: Name,
     pub provider_id: Uuid,
 }

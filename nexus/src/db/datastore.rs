@@ -2745,7 +2745,7 @@ impl DataStore {
                         silo_id: provider.silo_id,
                         name: provider.name().clone(),
                         provider_type:
-                            db::model::SiloIdentityProviderTypeEnum::Saml,
+                            db::model::SiloIdentityProviderType::Saml,
                         provider_id: provider.id(),
                     })
                     .execute(conn)?;

@@ -213,12 +213,18 @@ CREATE TABLE omicron.public.silo_user (
     time_deleted TIMESTAMPTZ
 );
 
+CREATE TYPE omicron.public.provider_type AS ENUM (
+  'local',
+  'saml',
+  'ldap'
+);
+
 /*
  * Silo identity provider list
  */
 CREATE TABLE omicron.public.silo_identity_provider (
     silo_id UUID NOT NULL,
-    provider_type TEXT NOT NULL,
+    provider_type omicron.public.provider_type NOT NULL,
     name TEXT NOT NULL,
     provider_id UUID NOT NULL,
 

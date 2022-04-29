@@ -161,7 +161,7 @@ table! {
 table! {
     silo_identity_provider (silo_id, provider_id) {
         silo_id -> Uuid,
-        provider_type -> Text,
+        provider_type -> crate::db::model::SiloIdentityProviderTypeEnum,
         name -> Text,
         provider_id -> Uuid,
     }

@@ -3910,19 +3910,19 @@ impl Nexus {
                 .await?;
 
         match silo_identity_provider.provider_type {
-            db::model::SiloIdentityProviderTypeEnum::Local => {
+            db::model::SiloIdentityProviderType::Local => {
                 return Err(Error::unavail(
                     &"local silo authn provider not yet supported",
                 ));
             }
 
-            db::model::SiloIdentityProviderTypeEnum::Ldap => {
+            db::model::SiloIdentityProviderType::Ldap => {
                 return Err(Error::unavail(
                     &"ldap silo authn provider not yet supported",
                 ));
             }
 
-            db::model::SiloIdentityProviderTypeEnum::Saml => {
+            db::model::SiloIdentityProviderType::Saml => {
                 let (.., silo_saml_identity_provider) =
                     LookupPath::new(opctx, &self.datastore())
                         .silo_name(silo_name)
