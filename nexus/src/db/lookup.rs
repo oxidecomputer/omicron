@@ -617,5 +617,6 @@ mod test {
         } if *o == org_id && **p == project_name));
 
         db.cleanup().await.unwrap();
+        logctx.cleanup_successful();
     }
 }
