@@ -203,32 +203,13 @@ fn do_sync(config: &Config) -> Result<()> {
         .arg("--exclude")
         .arg("*.swp")
         .arg("--exclude")
-        .arg(".git/");
+        .arg(".git/")
+        .arg("--exclude")
+        .arg("out/");
 
     // exclude `config-rss.toml`, which needs to be sent to only one target
     // system. we handle this in `do_overlay` below.
     cmd.arg("--exclude").arg("**/config-rss.toml");
-
-    // Exclude `out/`, except for the prebuilt dependencies we keep there.
-    // The include/include/exclude dance is specific to how rsync applies
-    // patterns: it checks each file or directory against all supplied patterns,
-    // and stops on the first match.
-    //
-    // The steps below ensure:
-    //
-    // 1. We include exactly `out/`, allowing rsync to recurse into it.
-    // 2. We include each of the specific children of `out/` we want to sync.
-    // 3. We exclude `out/*`, skipping any other children of `out/`.
-    cmd.arg("--include")
-        .arg("out/")
-        .arg("--include")
-        .arg("out/clickhouse")
-        .arg("--include")
-        .arg("out/cockroachdb")
-        .arg("--include")
-        .arg("out/console-assets")
-        .arg("--exclude")
-        .arg("out/*");
 
     // finish with src/dst
     cmd.arg(&src).arg(&dst);
@@ -525,7 +506,11 @@ fn copy_package_artifacts_to_staging(
 ) -> Result<()> {
     let cmd = format!(
         "rsync -avz -e 'ssh -o StrictHostKeyChecking=no' \
-                    --exclude overlay/ {} {}@{}:{}",
+            --include 'out/' \
+            --include 'out/*.tar' \
+            --include 'out/*.tar.gz' \
+            --exclude '*' \
+            {} {}@{}:{}",
         pkg_dir,
         destination.username,
         destination.addr,
