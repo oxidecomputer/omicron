@@ -2861,8 +2861,7 @@ impl DataStore {
         opctx: &OpContext,
         authz_resource: &T,
     ) -> ListResultVec<db::model::RoleAssignment> {
-        // XXX-dap consider a different action
-        opctx.authorize(authz::Action::Read, authz_resource).await?;
+        opctx.authorize(authz::Action::ReadPolicy, authz_resource).await?;
         let resource_type = authz_resource.resource_type();
         let resource_id = authz_resource.resource_id();
         use db::schema::role_assignment::dsl;
@@ -2886,8 +2885,9 @@ impl DataStore {
         authz_resource: &T,
         new_assignments: &[shared::RoleAssignment],
     ) -> ListResultVec<db::model::RoleAssignment> {
-        // XXX-dap consider a different action
-        opctx.authorize(authz::Action::Modify, authz_resource).await?;
+        // TODO-security We should carefully review what permissions are
+        // required for modifying the policy of a resource.
+        opctx.authorize(authz::Action::ModifyPolicy, authz_resource).await?;
         bail_unless!(
             new_assignments.len() <= shared::MAX_ROLE_ASSIGNMENTS_PER_RESOURCE
         );

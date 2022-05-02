@@ -3901,10 +3901,9 @@ impl Nexus {
         opctx: &OpContext,
         organization_name: &Name,
     ) -> LookupResult<shared::Policy> {
-        // XXX-dap define a new action for ReadPolicy?
         let (.., authz_org) = LookupPath::new(opctx, &self.db_datastore)
             .organization_name(organization_name)
-            .lookup_for(authz::Action::Read)
+            .lookup_for(authz::Action::ReadPolicy)
             .await?;
         let role_assignments = self
             .db_datastore
@@ -3923,10 +3922,9 @@ impl Nexus {
         organization_name: &Name,
         policy: &shared::Policy,
     ) -> UpdateResult<shared::Policy> {
-        // XXX-dap define a new action for ModifyPolicy?
         let (.., authz_org) = LookupPath::new(opctx, &self.db_datastore)
             .organization_name(organization_name)
-            .lookup_for(authz::Action::Modify)
+            .lookup_for(authz::Action::ModifyPolicy)
             .await?;
 
         let role_assignments = self

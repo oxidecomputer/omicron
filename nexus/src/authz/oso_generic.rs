@@ -98,7 +98,9 @@ pub fn make_omicron_oso(log: &slog::Logger) -> Result<Oso, anyhow::Error> {
 pub enum Action {
     Query, // only used for [`Database`]
     Read,
+    ReadPolicy,
     Modify,
+    ModifyPolicy,
     Delete,
     ListChildren,
     CreateChild,
@@ -137,7 +139,9 @@ impl From<&Action> for Perm {
         match a {
             Action::Query => Perm::Query,
             Action::Read => Perm::Read,
+            Action::ReadPolicy => Perm::Read,
             Action::Modify => Perm::Modify,
+            Action::ModifyPolicy => Perm::Modify,
             Action::Delete => Perm::Modify,
             Action::ListChildren => Perm::ListChildren,
             Action::CreateChild => Perm::CreateChild,
