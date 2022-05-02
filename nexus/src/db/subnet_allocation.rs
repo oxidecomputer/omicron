@@ -252,6 +252,14 @@ fn push_null_if_overlapping_ip_range<'a>(
 /// ```
 pub struct FilterConflictingVpcSubnetRangesQuery {
     subnet: VpcSubnet,
+
+    // The following fields are derived from the previous field. This begs the
+    // question: "Why bother storing them at all?"
+    //
+    // Diesel's [`diesel::query_builder::ast_pass::AstPass:push_bind_param`] method
+    // requires that the provided value now live as long as the entire AstPass
+    // type. By storing these values in the struct, they'll live at least as
+    // long as the entire call to [`QueryFragment<Pg>::walk_ast`].
     ipv4_block: ipnetwork::IpNetwork,
     ipv6_block: ipnetwork::IpNetwork,
 }
