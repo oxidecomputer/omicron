@@ -54,11 +54,7 @@ thing-flinger, pointing out room for improvement.
 
 `thing-flinger` defines three types of nodes:
 
- * Client - Where a user typically edits their code and runs thing-flinger. In
-   theory this can run any OS, but currently it needs to be a Helios system.
-   omicron downloads prebuilt dependencies (clickhouse, cockroachDB) for the
-   current system, and we will sync those binaries from the client to the
-   builder (and ultimately to the deployment servers).
+ * Client - Where a user typically edits their code and runs thing-flinger. This can run any OS.
  * Builder - A Helios box where Omicron is built and packaged
  * Deployed Server - Helios machines where Omicron will be installed and run
 
@@ -104,6 +100,14 @@ that a branch can be configured for building with the `git_treeish` field in the
 table.
 
 `cargo run --bin thing-flinger -- -c <CONFIG> sync`
+
+==== Install Prerequisites
+Install necessary build and runtime dependencies (including downloading prebuilt
+binaries like Clickhouse and CockroachDB) on the builder and all deployment
+targets. This step only needs to be performed once, absent any changes to the
+dependencies, but is idempotent so may be run multiple times.
+
+`cargo run --bin thing-flinger -- -c <CONFIG> install-prereqs`
 
 ==== check (optional)
 Run `cargo check` on the builder against the copy of `omicron` that was sync'd

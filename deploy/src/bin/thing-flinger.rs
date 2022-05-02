@@ -78,6 +78,10 @@ enum SubCommand {
         servers: Option<BTreeSet<String>>,
     },
 
+    /// Install necessary prerequisites on the "builder" server and all "deploy"
+    /// servers.
+    InstallPrereqs,
+
     /// Sync our local source to the build host
     Sync,
 
@@ -217,6 +221,76 @@ fn do_sync(config: &Config) -> Result<()> {
         cmd.status().context(format!("Failed to run command: ({:?})", cmd))?;
     if !status.success() {
         return Err(FlingError::FailedSync { src, dst }.into());
+    }
+
+    Ok(())
+}
+
+fn do_install_prereqs(config: &Config) -> Result<()> {
+    // we need to rsync `./tools/*` to each of the deployment targets (the
+    // "builder" already has it via `do_sync()`), and then run `pfxec
+    // tools/install_prerequisites.sh` on each system.
+    let src = format!(
+        // the `./` here is load-bearing; it interacts with `--relative` to tell
+        // rsync to create `tools` but none of its parents
+        "{}/./tools/",
+        config
+            .omicron_path
+            .canonicalize()
+            .with_context(|| format!(
+                "could not canonicalize {}",
+                config.omicron_path.display()
+            ))?
+            .to_string_lossy()
+    );
+    let partial_cmd = || {
+        let mut cmd = rsync_common();
+        cmd.arg("--relative");
+        cmd.arg(&src);
+        cmd
+    };
+
+    for server in config.servers.values() {
+        let dst = format!(
+            "{}@{}:{}",
+            server.username,
+            server.addr,
+            config.deployment.staging_dir.to_str().unwrap()
+        );
+        let mut cmd = partial_cmd();
+        cmd.arg(&dst);
+        let status = cmd
+            .status()
+            .context(format!("Failed to run command: ({:?})", cmd))?;
+        if !status.success() {
+            return Err(FlingError::FailedSync { src, dst }.into());
+        }
+    }
+
+    // run install_prereqs on each server
+    let builder = &config.servers[&config.builder.server];
+    let build_server = (builder, &config.builder.omicron_path);
+    let all_servers = std::iter::once(build_server).chain(
+        config.servers.iter().filter_map(|(name, server)| {
+            // skip running prereq installing on a deployment target if it is
+            // also the builder, because we're already running it on the builder
+            if *name == config.builder.server {
+                None
+            } else {
+                Some((server, &config.deployment.staging_dir))
+            }
+        }),
+    );
+
+    for (server, root_path) in all_servers {
+        // -y: assume yes instead of prompting
+        // -p: skip check that deps end up in $PATH
+        let cmd = format!(
+            "cd {} && mkdir -p out && pfexec ./tools/install_prerequisites.sh -y -p",
+            root_path.display()
+        );
+        println!("install prerequisites on {}", server.addr);
+        ssh_exec(server, &cmd, false)?;
     }
 
     Ok(())
@@ -715,6 +789,7 @@ fn main() -> Result<()> {
             do_exec(&config, cmd, servers)?;
         }
         SubCommand::Sync => do_sync(&config)?,
+        SubCommand::InstallPrereqs => do_install_prereqs(&config)?,
         SubCommand::Builder(BuildCommand::Package { artifact_dir }) => {
             do_package(&config, artifact_dir)?;
         }
