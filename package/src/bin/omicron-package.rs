@@ -421,7 +421,8 @@ fn do_uninstall(
     uninstall_all_packages(config);
     println!("Removing artifacts in: {}", artifact_dir.to_string_lossy());
 
-    const ARTIFACTS_TO_KEEP: &[&str] = &["clickhouse", "cockroachdb", "xde"];
+    const ARTIFACTS_TO_KEEP: &[&str] =
+        &["clickhouse", "cockroachdb", "xde", "console-assets", "downloads"];
     remove_all_except(artifact_dir, ARTIFACTS_TO_KEEP)?;
 
     println!(

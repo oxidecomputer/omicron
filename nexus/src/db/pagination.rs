@@ -214,16 +214,21 @@ mod test {
     async fn populate_users(pool: &db::Pool, values: &Vec<(i64, i64)>) {
         use schema::test_users::dsl;
 
+        // The indexes here work around the check that prevents full table
+        // scans.
         pool.pool()
             .get()
             .await
             .unwrap()
             .batch_execute_async(
                 "CREATE TABLE test_users (
-                id UUID PRIMARY KEY,
-                age INT NOT NULL,
-                height INT NOT NULL
-            )",
+                    id UUID PRIMARY KEY,
+                    age INT NOT NULL,
+                    height INT NOT NULL
+                );
+
+                CREATE INDEX ON test_users (age, height);
+                CREATE INDEX ON test_users (height, age);",
             )
             .await
             .unwrap();

@@ -190,6 +190,7 @@ mod test {
             )
             .await
             .unwrap();
+        logctx.cleanup_successful();
     }
 
     // Tests the ".explain_async()" method in an asynchronous context.
@@ -211,6 +212,7 @@ mod test {
             .unwrap();
 
         assert_contents("tests/output/test-explain-output", &explanation);
+        logctx.cleanup_successful();
     }
 
     // Tests that ".explain()" can tell us when we're doing full table scans.
@@ -236,5 +238,6 @@ mod test {
             "Expected [{}] to contain 'FULL SCAN'",
             explanation
         );
+        logctx.cleanup_successful();
     }
 }
