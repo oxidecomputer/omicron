@@ -62,7 +62,7 @@ features = [ "serde" ]
 
 [dependencies.diesel-dtrace]
 git = "https://github.com/oxidecomputer/diesel-dtrace"
-branch = "diesel2"
+rev = "bec89c2f2b01a79ae99b4db667bfcea5fb2fef04"
 
 [dependencies.dropshot]
 git = "https://github.com/oxidecomputer/dropshot"
