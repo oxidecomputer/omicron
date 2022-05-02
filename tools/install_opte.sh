@@ -6,6 +6,12 @@ set -e
 set -u
 set -x
 
+MARKER=/etc/opt/oxide/NO_INSTALL
+if [[ -f "$MARKER" ]]; then
+    echo "This system has the marker file $MARKER, aborting." >&2
+    exit 1
+fi
+
 if [[ "$(uname)" != "SunOS" ]]; then
     echo "This script is intended for Helios only"
 fi
@@ -82,9 +88,9 @@ pkg set-publisher -p "$XDE_REPO_PATH" --search-first
 RC=0
 pkg update || RC=$?;
 if [[ "$RC" -eq 0 ]] || [[ "$RC" -eq 4 ]]; then
-    return 0
+    exit 0
 else
-    return "$RC"
+    exit "$RC"
 fi
 
 # Actually install the xde kernel module and opteadm tool

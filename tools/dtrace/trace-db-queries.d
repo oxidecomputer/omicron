@@ -1,6 +1,6 @@
 #!/usr/sbin/dtrace -qs
 
-#pragma strsize=16k
+#pragma D option strsize=16k
 
 /* Trace all queries to the control plane database with their latency */
 

@@ -6,8 +6,9 @@
 
 use crate::config::ConfigError;
 use crate::params::{DatasetEnsureBody, ServiceRequest};
-use ipnetwork::Ipv6Network;
-use omicron_common::address::{AZ_PREFIX, RACK_PREFIX};
+use omicron_common::address::{
+    get_64_subnet, Ipv6Subnet, AZ_PREFIX, RACK_PREFIX, SLED_PREFIX,
+};
 use serde::Deserialize;
 use serde::Serialize;
 use std::net::Ipv6Addr;
@@ -47,14 +48,6 @@ pub struct SledRequest {
     pub dns_services: Vec<ServiceRequest>,
 }
 
-fn new_network(addr: Ipv6Addr, prefix: u8) -> Ipv6Network {
-    let net = Ipv6Network::new(addr, prefix).unwrap();
-
-    // ipnetwork inputs/outputs the provided IPv6 address, unmodified by the
-    // prefix. We manually mask `addr` based on `prefix` ourselves.
-    Ipv6Network::new(net.network(), prefix).unwrap()
-}
-
 impl SetupServiceConfig {
     pub fn from_file<P: AsRef<Path>>(path: P) -> Result<Self, ConfigError> {
         let path = path.as_ref();
@@ -65,18 +58,18 @@ impl SetupServiceConfig {
         Ok(config)
     }
 
-    pub fn az_subnet(&self) -> Ipv6Network {
-        new_network(self.rack_subnet, AZ_PREFIX)
+    pub fn az_subnet(&self) -> Ipv6Subnet<AZ_PREFIX> {
+        Ipv6Subnet::<AZ_PREFIX>::new(self.rack_subnet)
     }
 
     /// Returns the subnet for our rack.
-    pub fn rack_subnet(&self) -> Ipv6Network {
-        new_network(self.rack_subnet, RACK_PREFIX)
+    pub fn rack_subnet(&self) -> Ipv6Subnet<RACK_PREFIX> {
+        Ipv6Subnet::<RACK_PREFIX>::new(self.rack_subnet)
     }
 
     /// Returns the subnet for the `index`-th sled in the rack.
-    pub fn sled_subnet(&self, index: u8) -> Ipv6Network {
-        omicron_common::address::get_64_subnet(self.rack_subnet(), index)
+    pub fn sled_subnet(&self, index: u8) -> Ipv6Subnet<SLED_PREFIX> {
+        get_64_subnet(self.rack_subnet(), index)
     }
 }
 
@@ -92,33 +85,43 @@ mod test {
         };
 
         assert_eq!(
-            //              Masked out in AZ Subnet
-            //              vv
-            "fd00:1122:3344:0000::/48".parse::<Ipv6Network>().unwrap(),
+            Ipv6Subnet::<AZ_PREFIX>::new(
+                //              Masked out in AZ Subnet
+                //              vv
+                "fd00:1122:3344:0000::".parse::<Ipv6Addr>().unwrap(),
+            ),
             cfg.az_subnet()
         );
         assert_eq!(
-            //              Shows up from Rack Subnet
-            //              vv
-            "fd00:1122:3344:0100::/56".parse::<Ipv6Network>().unwrap(),
+            Ipv6Subnet::<RACK_PREFIX>::new(
+                //              Shows up from Rack Subnet
+                //              vv
+                "fd00:1122:3344:0100::".parse::<Ipv6Addr>().unwrap(),
+            ),
             cfg.rack_subnet()
         );
         assert_eq!(
-            //                0th Sled Subnet
-            //                vv
-            "fd00:1122:3344:0100::/64".parse::<Ipv6Network>().unwrap(),
+            Ipv6Subnet::<SLED_PREFIX>::new(
+                //                0th Sled Subnet
+                //                vv
+                "fd00:1122:3344:0100::".parse::<Ipv6Addr>().unwrap(),
+            ),
             cfg.sled_subnet(0)
         );
         assert_eq!(
-            //                1st Sled Subnet
-            //                vv
-            "fd00:1122:3344:0101::/64".parse::<Ipv6Network>().unwrap(),
+            Ipv6Subnet::<SLED_PREFIX>::new(
+                //                1st Sled Subnet
+                //                vv
+                "fd00:1122:3344:0101::".parse::<Ipv6Addr>().unwrap(),
+            ),
             cfg.sled_subnet(1)
         );
         assert_eq!(
-            //                Last Sled Subnet
-            //                vv
-            "fd00:1122:3344:01ff::/64".parse::<Ipv6Network>().unwrap(),
+            Ipv6Subnet::<SLED_PREFIX>::new(
+                //                Last Sled Subnet
+                //                vv
+                "fd00:1122:3344:01ff::".parse::<Ipv6Addr>().unwrap(),
+            ),
             cfg.sled_subnet(255)
         );
     }

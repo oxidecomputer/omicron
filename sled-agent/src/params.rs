@@ -236,6 +236,11 @@ pub struct ServiceRequest {
     pub addresses: Vec<Ipv6Addr>,
     // The addresses in the global zone which should be created, if necessary
     // to route to the service.
+    //
+    // For addresses allocated within the Sled's Subnet, no extra address should
+    // be necessary. However, for other services - such the DNS service, which
+    // exists outside the sleds's typical subnet - adding an address in the GZ
+    // is necessary to allow inter-zone traffic routing.
     #[serde(default)]
     pub gz_addresses: Vec<Ipv6Addr>,
 }

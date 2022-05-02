@@ -148,6 +148,10 @@ impl ServiceManager {
     }
 
     // Populates `existing_zones` according to the requests in `services`.
+    //
+    // At the point this function is invoked, IP addresses have already been
+    // allocated (by either RSS or Nexus). However, this function explicitly
+    // assigns such addresses to interfaces within zones.
     async fn initialize_services_locked(
         &self,
         existing_zones: &mut Vec<RunningZone>,

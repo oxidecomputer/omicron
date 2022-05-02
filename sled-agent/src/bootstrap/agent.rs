@@ -16,6 +16,7 @@ use crate::illumos::dladm::{self, Dladm, PhysicalLink};
 use crate::illumos::zone::Zones;
 use crate::rack_setup::service::Service as RackSetupService;
 use crate::server::Server as SledServer;
+use omicron_common::address::get_sled_address;
 use omicron_common::api::external::{Error as ExternalError, MacAddr};
 use omicron_common::backoff::{
     internal_service_policy, retry_notify, BackoffError,
@@ -91,8 +92,9 @@ pub(crate) struct Agent {
     sled_config: SledConfig,
 }
 
-fn get_subnet_path() -> PathBuf {
-    Path::new(omicron_common::OMICRON_CONFIG_PATH).join("subnet.toml")
+fn get_sled_agent_request_path() -> PathBuf {
+    Path::new(omicron_common::OMICRON_CONFIG_PATH)
+        .join("sled-agent-request.toml")
 }
 
 fn mac_to_socket_addr(mac: MacAddr) -> SocketAddrV6 {
@@ -163,20 +165,20 @@ impl Agent {
             sled_config,
         };
 
-        let subnet_path = get_subnet_path();
-        if subnet_path.exists() {
+        let request_path = get_sled_agent_request_path();
+        if request_path.exists() {
             info!(agent.log, "Sled already configured, loading sled agent");
             let sled_request: SledAgentRequest = toml::from_str(
-                &tokio::fs::read_to_string(&subnet_path).await.map_err(
+                &tokio::fs::read_to_string(&request_path).await.map_err(
                     |err| BootstrapError::Io {
                         message: format!(
-                            "Reading subnet path from {subnet_path:?}"
+                            "Reading subnet path from {request_path:?}"
                         ),
                         err,
                     },
                 )?,
             )
-            .map_err(|err| BootstrapError::Toml { path: subnet_path, err })?;
+            .map_err(|err| BootstrapError::Toml { path: request_path, err })?;
             agent.request_agent(sled_request).await?;
         }
 
@@ -205,9 +207,7 @@ impl Agent {
     ) -> Result<SledAgentResponse, BootstrapError> {
         info!(&self.log, "Loading Sled Agent: {:?}", request);
 
-        let sled_address = omicron_common::address::get_sled_address(
-            request.subnet.as_ref().0,
-        );
+        let sled_address = get_sled_address(request.subnet);
 
         let mut maybe_agent = self.sled_agent.lock().await;
         if let Some(server) = &*maybe_agent {
@@ -236,20 +236,20 @@ impl Agent {
         maybe_agent.replace(server);
         info!(&self.log, "Sled Agent loaded; recording configuration");
 
-        // Record the subnet, so the sled agent can be automatically
+        // Record this request so the sled agent can be automatically
         // initialized on the next boot.
-        let path = get_subnet_path();
+        let path = get_sled_agent_request_path();
         tokio::fs::write(
             &path,
             &toml::to_string(
-                &toml::Value::try_from(&request.subnet)
-                    .expect("Cannot serialize IP"),
+                &toml::Value::try_from(&request)
+                    .expect("Cannot serialize request"),
             )
             .expect("Cannot convert toml to string"),
         )
         .await
         .map_err(|err| BootstrapError::Io {
-            message: format!("Recording subnet to {path:?}"),
+            message: format!("Recording Sled Agent request to {path:?}"),
             err,
         })?;
 
