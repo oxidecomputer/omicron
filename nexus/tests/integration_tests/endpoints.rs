@@ -26,6 +26,7 @@ use omicron_nexus::authn;
 use omicron_nexus::external_api::params;
 use std::net::IpAddr;
 use std::net::Ipv4Addr;
+use omicron_nexus::external_api::shared;
 
 lazy_static! {
     pub static ref HARDWARE_RACK_URL: String =
@@ -50,6 +51,8 @@ lazy_static! {
     pub static ref DEMO_ORG_NAME: Name = "demo-org".parse().unwrap();
     pub static ref DEMO_ORG_URL: String =
         format!("/organizations/{}", *DEMO_ORG_NAME);
+    pub static ref DEMO_ORG_POLICY_URL: String =
+        format!("{}/policy", *DEMO_ORG_URL);
     pub static ref DEMO_ORG_PROJECTS_URL: String =
         format!("{}/projects", *DEMO_ORG_URL);
     pub static ref DEMO_ORG_CREATE: params::OrganizationCreate =
@@ -408,6 +411,18 @@ lazy_static! {
                             name: None,
                             description: Some("different".to_string())
                         }
+                    }).unwrap()
+                ),
+            ],
+        },
+        VerifyEndpoint {
+            url: &*DEMO_ORG_POLICY_URL,
+            visibility: Visibility::Protected,
+            allowed_methods: vec![
+                AllowedMethod::Get,
+                AllowedMethod::Put(
+                    serde_json::to_value(&shared::Policy {
+                        role_assignments: vec![]
                     }).unwrap()
                 ),
             ],
