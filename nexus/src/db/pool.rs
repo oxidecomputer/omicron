@@ -53,6 +53,16 @@ impl Pool {
         Pool { pool }
     }
 
+    pub fn new_failfast(db_config: &DbConfig) -> Self {
+        let manager =
+            ConnectionManager::<DbConnection>::new(&db_config.url.url());
+        let pool = bb8::Builder::new()
+            .connection_customizer(Box::new(DisallowFullTableScans {}))
+            .connection_timeout(std::time::Duration::from_millis(1))
+            .build_unchecked(manager);
+        Pool { pool }
+    }
+
     /// Returns a reference to the underlying pool.
     pub fn pool(&self) -> &bb8::Pool<ConnectionManager<DbConnection>> {
         &self.pool

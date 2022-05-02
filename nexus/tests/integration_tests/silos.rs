@@ -2,8 +2,6 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use uuid::Uuid;
-
 use nexus_test_utils::http_testing::{AuthnMode, NexusRequest};
 use omicron_nexus::external_api::views::{Organization, Silo};
 use omicron_nexus::TestInterfaces as _;
@@ -16,7 +14,6 @@ use nexus_test_utils::resource_helpers::{
 
 use nexus_test_utils::ControlPlaneTestContext;
 use nexus_test_utils_macros::nexus_test;
-use omicron_nexus::db::identity::Asset;
 
 #[nexus_test]
 async fn test_silos(cptestctx: &ControlPlaneTestContext) {
@@ -67,10 +64,12 @@ async fn test_silos(cptestctx: &ControlPlaneTestContext) {
     assert_eq!(silos[0].identity.name, "discoverable");
 
     // Create a new user in the discoverable silo
-    let new_silo_user = nexus
+    let new_silo_user_id =
+        "6922f0b2-9a92-659b-da6b-93ad4955a3a3".parse().unwrap();
+    nexus
         .silo_user_create(
             silos[0].identity.id, /* silo id */
-            Uuid::new_v4(),       /* silo user id */
+            new_silo_user_id,
         )
         .await
         .unwrap();
@@ -134,7 +133,7 @@ async fn test_silos(cptestctx: &ControlPlaneTestContext) {
 
     // Verify silo user was also deleted
     nexus
-        .silo_user_fetch(authn_opctx, new_silo_user.id())
+        .silo_user_fetch(authn_opctx, new_silo_user_id)
         .await
         .expect_err("unexpected success");
 }
