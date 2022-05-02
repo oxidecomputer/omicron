@@ -7,7 +7,3 @@
 [build]
 rustdocflags = "--document-private-items"
 
-[target.x86_64-unknown-linux-gnu]
-# Attempt to get more verbose output from the linker in the event that linking
-# fails.
-rustflags = ["-C", "link-args=-Wl,-V"]
