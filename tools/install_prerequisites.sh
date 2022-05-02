@@ -23,10 +23,12 @@ trap on_exit ERR
 #
 # -y  Assume "yes" intead of showing confirmation prompts.
 ASSUME_YES="false"
-while getopts y flag
+SKIP_PATH_CHECK="false"
+while getopts yp flag
 do
   case "${flag}" in
-    y) ASSUME_YES="true" ;
+    y) ASSUME_YES="true" ;;
+    p) SKIP_PATH_CHECK="true" ;;
   esac
 done
 
@@ -166,7 +168,12 @@ function show_hint
   esac
 }
 
-# Check all paths before returning an error.
+# Check all paths before returning an error, unless we were told not too.
+if [[ "$SKIP_PATH_CHECK" == "true" ]]; then
+  echo "All prerequisites installed successfully"
+  exit 0
+fi
+
 ANY_PATH_ERROR="false"
 for command in "${expected_in_path[@]}"; do
   rc=0
