@@ -19,13 +19,28 @@ function on_exit
 
 trap on_exit ERR
 
-# Offers a confirmation prompt.
+# Parse command line options:
+#
+# -y  Assume "yes" intead of showing confirmation prompts.
+ASSUME_YES="false"
+while getopts y flag
+do
+  case "${flag}" in
+    y) ASSUME_YES="true" ;
+  esac
+done
+
+# Offers a confirmation prompt, unless we were passed `-y`.
 #
 # Args:
 #  $1: Text to be displayed
 function confirm
 {
-  read -r -p "$1 (y/n): " response
+  if [[ "${ASSUME_YES}" == "true" ]]; then
+    response=y
+  else
+    read -r -p "$1 (y/n): " response
+  fi
   case $response in
     [yY])
       true
