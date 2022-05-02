@@ -14,7 +14,7 @@ use super::{
 use crate::context::OpContext;
 use crate::db;
 use crate::db::model::Name;
-use crate::external_api::views::Policy;
+use crate::external_api::shared::Policy;
 use crate::ServerContext;
 use dropshot::endpoint;
 use dropshot::ApiDescription;
@@ -511,7 +511,7 @@ async fn organizations_put_organization(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// List the role assignments for this Organization
+/// Fetch the IAM policy for this Organization
 #[endpoint {
     method = GET,
     path = "/organizations/{organization_name}/policy",
@@ -528,18 +528,14 @@ async fn organization_get_policy(
 
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
-        let role_assignments = nexus
-            .organization_fetch_all_role_assignments(&opctx, organization_name)
-            .await?
-            .into_iter()
-            .map(|c| c.into())
-            .collect();
-        Ok(HttpResponseOk(Policy { role_assignments }))
+        let policy =
+            nexus.organization_fetch_policy(&opctx, organization_name).await?;
+        Ok(HttpResponseOk(policy.into()))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Update the role assignments for this Organization
+/// Update the IAM policy for this Organization
 #[endpoint {
     method = PUT,
     path = "/organizations/{organization_name}/policy",
@@ -569,17 +565,10 @@ async fn organization_put_policy(
             }));
         }
         let opctx = OpContext::for_external_api(&rqctx).await?;
-        let role_assignments = nexus
-            .organization_replace_all_role_assignments(
-                &opctx,
-                organization_name,
-                &new_policy.role_assignments,
-            )
-            .await?
-            .into_iter()
-            .map(|c| c.into())
-            .collect();
-        Ok(HttpResponseOk(Policy { role_assignments }))
+        let policy = nexus
+            .organization_update_policy(&opctx, organization_name, &new_policy)
+            .await?;
+        Ok(HttpResponseOk(policy.into()))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }

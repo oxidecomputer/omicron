@@ -15,8 +15,8 @@ use crate::db::schema::{
     vpc_firewall_rule, vpc_router, vpc_subnet, zpool,
 };
 use crate::defaults;
-use crate::external_api::params;
 use crate::external_api::views;
+use crate::external_api::{params, shared};
 use crate::internal_api;
 use chrono::{DateTime, Utc};
 use db_macros::{Asset, Resource};
@@ -2686,6 +2686,16 @@ impl_enum_type!(
     UserBuiltin => b"user_builtin"
     SiloUser => b"silo_user"
 );
+
+// XXX-dap Is this how you're supposed to do this?
+impl From<shared::IdentityType> for ActorType {
+    fn from(other: shared::IdentityType) -> Self {
+        match other {
+            shared::IdentityType::UserBuiltin => ActorType::UserBuiltin,
+            shared::IdentityType::SiloUser => ActorType::SiloUser,
+        }
+    }
+}
 
 /// Describes an assignment of a built-in role for a user
 #[derive(Queryable, Insertable, Debug, Selectable)]

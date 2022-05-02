@@ -24,7 +24,7 @@ use crate::db::subnet_allocation::NetworkInterfaceError;
 use crate::db::subnet_allocation::SubnetError;
 use crate::defaults;
 use crate::external_api::params;
-use crate::external_api::views::RoleAssignment;
+use crate::external_api::shared;
 use crate::internal_api::params::{OximeterInfo, ZpoolPutRequest};
 use crate::populate::populate_start;
 use crate::populate::PopulateStatus;
@@ -3896,29 +3896,51 @@ impl Nexus {
     // Role assignments
 
     // XXX-dap TODO-doc
-    // XXX-dap maybe we should have Nexus fake up the "Policy" abstraction
-    // instead of the HTTP layer.
-    pub async fn organization_fetch_all_role_assignments(
+    pub async fn organization_fetch_policy(
         &self,
         opctx: &OpContext,
         organization_name: &Name,
-    ) -> ListResultVec<db::model::RoleAssignment> {
-        // XXX-dap define a new action for ListRoles?
+    ) -> LookupResult<shared::Policy> {
+        // XXX-dap define a new action for ReadPolicy?
         let (.., authz_org) = LookupPath::new(opctx, &self.db_datastore)
             .organization_name(organization_name)
             .lookup_for(authz::Action::Read)
             .await?;
-        self.db_datastore.role_assignment_fetch_all(opctx, &authz_org).await
+        let role_assignments = self
+            .db_datastore
+            .role_assignment_fetch_all(opctx, &authz_org)
+            .await?
+            .into_iter()
+            .map(|r| r.into())
+            .collect();
+        Ok(shared::Policy { role_assignments })
     }
 
-    pub async fn organization_replace_all_role_assignments(
+    // XXX-dap TODO-doc
+    pub async fn organization_update_policy(
         &self,
-        _opctx: &OpContext,
-        _organization_name: &Name,
-        _role_assignments: &[RoleAssignment], // XXX-dap
-    ) -> ListResultVec<db::model::RoleAssignment> {
-        // XXX-dap
-        todo!();
+        opctx: &OpContext,
+        organization_name: &Name,
+        policy: &shared::Policy,
+    ) -> UpdateResult<shared::Policy> {
+        // XXX-dap define a new action for ModifyPolicy?
+        let (.., authz_org) = LookupPath::new(opctx, &self.db_datastore)
+            .organization_name(organization_name)
+            .lookup_for(authz::Action::Modify)
+            .await?;
+
+        let role_assignments = self
+            .db_datastore
+            .role_assignment_replace_all(
+                opctx,
+                &authz_org,
+                &policy.role_assignments,
+            )
+            .await?
+            .into_iter()
+            .map(|r| r.into())
+            .collect();
+        Ok(shared::Policy { role_assignments })
     }
 }
 

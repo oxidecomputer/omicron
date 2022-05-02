@@ -55,7 +55,7 @@ use crate::db::{
     subnet_allocation::SubnetError,
     update_and_check::{UpdateAndCheck, UpdateStatus},
 };
-use crate::external_api::params;
+use crate::external_api::{params, shared};
 use async_bb8_diesel::{AsyncConnection, AsyncRunQueryDsl, ConnectionManager};
 use chrono::Utc;
 use db::model::ActorType;
@@ -2876,6 +2876,76 @@ impl DataStore {
             // XXX-dap Ideally, we couldn't even be invoked in this case.
             Ok(Vec::new())
         }
+    }
+
+    // XXX-dap TODO-doc
+    pub async fn role_assignment_replace_all<
+        T: authz::ApiResource + authz::ApiResourceError,
+    >(
+        &self,
+        opctx: &OpContext,
+        authz_resource: &T,
+        new_assignments: &[shared::RoleAssignment],
+    ) -> ListResultVec<db::model::RoleAssignment> {
+        // XXX-dap consider a different action
+        opctx.authorize(authz::Action::Modify, authz_resource).await?;
+        if authz_resource.db_resource().is_none() {
+            // This is an InternalError because we should not be able to reach
+            // this code path without a bug in the caller.
+            return Err(Error::internal_error(&format!(
+                "modifying policy on {:?} is not supported",
+                authz_resource
+            )));
+        }
+
+        // XXX-dap check length of new_assignments
+
+        let (resource_type, resource_id) =
+            authz_resource.db_resource().unwrap();
+
+        // Sort the records in the same order that we would return them when
+        // listing them.  This is because we're going to use RETURNING to return
+        // the inserted rows from the database and we want them to come back in
+        // the same order that we would normally list them.
+        let mut new_assignments = new_assignments
+            .iter()
+            .map(|r| {
+                db::model::RoleAssignment::new(
+                    db::model::ActorType::from(r.identity_type),
+                    r.identity_id,
+                    resource_type,
+                    resource_id,
+                    &r.role_name,
+                )
+            })
+            .collect::<Vec<_>>();
+        new_assignments.sort_by(|r1, r2| {
+            (&r1.role_name, r1.actor_id).cmp(&(&r2.role_name, r2.actor_id))
+        });
+
+        use db::schema::role_assignment::dsl;
+        let delete_old_query = diesel::delete(dsl::role_assignment)
+            .filter(dsl::resource_id.eq(resource_id))
+            .filter(dsl::resource_type.eq(resource_type.to_string()));
+        let insert_new_query = diesel::insert_into(dsl::role_assignment)
+            .values(new_assignments)
+            .returning(RoleAssignment::as_returning());
+
+        // TODO-scalability: Ideally this would be a batched transaction so we
+        // don't need to hold a transaction open across multiple roundtrips from
+        // the database, but for now we're using a transaction due to the
+        // severely decreased legibility of CTEs via diesel right now.
+        // We might instead want to first-class the idea of Policies in the
+        // database so that we can build up a whole new Policy in batches and
+        // then flip the resource over to using it.
+        self.pool_authorized(opctx)
+            .await?
+            .transaction(move |conn| {
+                delete_old_query.execute(conn)?;
+                Ok(insert_new_query.get_results(conn)?)
+            })
+            .await
+            .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
     }
 }
 
