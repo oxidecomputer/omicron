@@ -1211,8 +1211,7 @@ impl Nexus {
                 let etag = response
                     .headers()
                     .get(reqwest::header::ETAG)
-                    .map(|x| x.to_str().ok())
-                    .flatten()
+                    .and_then(|x| x.to_str().ok())
                     .map(|x| x.to_string());
 
                 let new_image_volume =
@@ -3128,10 +3127,9 @@ impl Nexus {
                 })
             }
         }
-        Ok(self
-            .db_datastore
+        self.db_datastore
             .router_update_route(&opctx, &authz_route, params.clone().into())
-            .await?)
+            .await
     }
 
     // Racks.  We simulate just one for now.
@@ -3502,7 +3500,7 @@ impl Nexus {
         let session =
             db::model::ConsoleSession::new(generate_session_token(), user_id);
 
-        Ok(self.db_datastore.session_create(opctx, session).await?)
+        self.db_datastore.session_create(opctx, session).await
     }
 
     // update last_used to now
@@ -3516,10 +3514,7 @@ impl Nexus {
             token.to_string(),
             LookupType::ByCompositeId(token.to_string()),
         );
-        Ok(self
-            .db_datastore
-            .session_update_last_used(opctx, &authz_session)
-            .await?)
+        self.db_datastore.session_update_last_used(opctx, &authz_session).await
     }
 
     pub async fn session_hard_delete(
@@ -3870,10 +3865,7 @@ impl Nexus {
             .lookup_for(authz::Action::CreateChild)
             .await?;
         assert_eq!(authz_user.id(), silo_user_id);
-        Ok(self
-            .db_datastore
-            .ssh_key_create(opctx, &authz_user, ssh_key)
-            .await?)
+        self.db_datastore.ssh_key_create(opctx, &authz_user, ssh_key).await
     }
 
     pub async fn ssh_key_delete(
@@ -3982,6 +3974,6 @@ impl TestInterfaces for Nexus {
         silo_user_id: Uuid,
     ) -> CreateResult<SiloUser> {
         let silo_user = SiloUser::new(silo_id, silo_user_id);
-        Ok(self.db_datastore.silo_user_create(silo_user).await?)
+        self.db_datastore.silo_user_create(silo_user).await
     }
 }

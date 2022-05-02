@@ -190,7 +190,7 @@ impl CockroachStarterBuilder {
             .arg("--listen-addr")
             .arg(&listen_arg)
             .arg("--listening-url-file")
-            .arg(listen_url_file.as_os_str().to_owned());
+            .arg(listen_url_file.as_os_str());
 
         if self.redirect_stdio {
             let temp_dir_path = temp_dir.path();
