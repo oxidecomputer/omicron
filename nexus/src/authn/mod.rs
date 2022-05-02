@@ -257,7 +257,10 @@ impl Actor {
         }
     }
 
-    // XXX-dap should internal users have silos?
+    // TODO-security Built-in users should not need any silo id associated with
+    // them.  They need one today because without support for real SiloUsers,
+    // "test-privileged" and "test-unprivileged" are built-in users, and they're
+    // used for all of our testing.
     pub fn silo_id(&self) -> Uuid {
         match self {
             Actor::UserBuiltin { silo_id, .. } => *silo_id,

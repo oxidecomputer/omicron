@@ -2906,7 +2906,9 @@ impl DataStore {
             )));
         }
 
-        // XXX-dap check length of new_assignments
+        bail_unless!(
+            new_assignments.len() <= shared::MAX_ROLE_ASSIGNMENTS_PER_RESOURCE
+        );
 
         let (resource_type, resource_id) =
             authz_resource.db_resource().unwrap();

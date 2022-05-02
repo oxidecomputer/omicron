@@ -6,15 +6,52 @@
 
 use crate::db;
 use schemars::JsonSchema;
+use serde::de::Error;
 use serde::Deserialize;
+use serde::Deserializer;
 use serde::Serialize;
 use uuid::Uuid;
+
+/// Maximum number of role assignments allowed on any one resource
+// Today's implementation assumes a relatively small number of role assignments
+// per resource.  Things should work if we bump this up, but we'll want to look
+// into scalability improvements (e.g., use pagination for fetching and updating
+// the role assignments, and consider the impact on authz checks as well).
+//
+// Most importantly: by keeping this low to start with, it's impossible for
+// customers to develop a dependency on a huge number of role assignments.  That
+// maximizes our flexibility in the future.
+//
+// TODO This should be runtime-configurable.  But it doesn't belong in the Nexus
+// configuration file, since it's a constraint on database objects more than it
+// is Nexus.  We should have some kinds of config that lives in the database.
+pub const MAX_ROLE_ASSIGNMENTS_PER_RESOURCE: usize = 64;
 
 /// Client view of a [`Policy`]
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
 pub struct Policy {
-    // XXX-dap can we limit the length of this in schemars/serde?
+    #[serde(deserialize_with = "role_assignments_deserialize")]
     pub role_assignments: Vec<RoleAssignment>,
+}
+
+fn role_assignments_deserialize<'de, D>(
+    d: D,
+) -> Result<Vec<RoleAssignment>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let v = <Vec<RoleAssignment> as Deserialize>::deserialize(d)?;
+    if v.len() > MAX_ROLE_ASSIGNMENTS_PER_RESOURCE {
+        return Err(D::Error::invalid_length(
+            v.len(),
+            &format!(
+                "a list of at most {} role assignments",
+                MAX_ROLE_ASSIGNMENTS_PER_RESOURCE
+            )
+            .as_str(),
+        ));
+    }
+    Ok(v)
 }
 
 /// Describes the assignment of a particular role on a particular resource to a
@@ -55,5 +92,39 @@ impl From<db::model::IdentityType> for IdentityType {
             db::model::IdentityType::UserBuiltin => IdentityType::UserBuiltin,
             db::model::IdentityType::SiloUser => IdentityType::SiloUser,
         }
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::Policy;
+    use super::MAX_ROLE_ASSIGNMENTS_PER_RESOURCE;
+
+    #[test]
+    fn test_policy_length_limit() {
+        let role_assignment = serde_json::json!({
+            "identity_type": "user_builtin",
+            "identity_id": "75ec4a39-67cf-4549-9e74-44b92947c37c",
+            "role_name": "bogus"
+        });
+        const MAX: usize = MAX_ROLE_ASSIGNMENTS_PER_RESOURCE;
+        let okay_input =
+            serde_json::Value::Array(vec![role_assignment.clone(); MAX]);
+        let policy: Policy = serde_json::from_value(serde_json::json!({
+            "role_assignments": okay_input
+        }))
+        .expect("unexpectedly failed with okay input");
+        assert_eq!(policy.role_assignments[0].role_name, "bogus");
+
+        let bad_input =
+            serde_json::Value::Array(vec![role_assignment; MAX + 1]);
+        let error = serde_json::from_value::<Policy>(serde_json::json!({
+            "role_assignments": bad_input
+        }))
+        .expect_err("unexpectedly succeeded with too many items");
+        assert_eq!(
+            error.to_string(),
+            "invalid length 65, expected a list of at most 64 role assignments"
+        );
     }
 }

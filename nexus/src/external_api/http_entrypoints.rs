@@ -14,7 +14,7 @@ use super::{
 use crate::context::OpContext;
 use crate::db;
 use crate::db::model::Name;
-use crate::external_api::shared::Policy;
+use crate::external_api::shared;
 use crate::ServerContext;
 use dropshot::endpoint;
 use dropshot::ApiDescription;
@@ -33,7 +33,6 @@ use dropshot::RequestContext;
 use dropshot::ResultsPage;
 use dropshot::TypedBody;
 use dropshot::WhichPage;
-use omicron_common::api::external::http_pagination::data_page_params_for;
 use omicron_common::api::external::http_pagination::data_page_params_nameid_id;
 use omicron_common::api::external::http_pagination::data_page_params_nameid_name;
 use omicron_common::api::external::http_pagination::pagination_field_for_scan_params;
@@ -58,27 +57,15 @@ use omicron_common::api::external::RouterRouteUpdateParams;
 use omicron_common::api::external::Saga;
 use omicron_common::api::external::VpcFirewallRuleUpdateParams;
 use omicron_common::api::external::VpcFirewallRules;
+use omicron_common::{
+    api::external::http_pagination::data_page_params_for, bail_unless,
+};
 use ref_cast::RefCast;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
 use std::sync::Arc;
 use uuid::Uuid;
-
-/// Maximum number of role assignments allowed on any one resource
-// Today's implementation assumes a relatively small number of role assignments
-// per resource.  Things should work if we bump this up, but we'll want to look
-// into scalability improvements (e.g., use pagination for fetching and updating
-// the role assignments, and consider the impact on authz checks as well).
-//
-// Most importantly: by keeping this low to start with, it's impossible for
-// customers to develop a dependency on a huge number of role assignments.  That
-// maximizes our flexibility in the future.
-//
-// TODO This should be runtime-configurable.  But it doesn't belong in the Nexus
-// configuration file, since it's a constraint on database objects more than it
-// is Nexus.  We should have some kinds of config that lives in the database.
-const NMAX_ROLE_ASSIGNMENTS_PER_RESOURCE: usize = 64;
 
 type NexusApiDescription = ApiDescription<Arc<ServerContext>>;
 
@@ -520,7 +507,7 @@ async fn organizations_put_organization(
 async fn organization_get_policy(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<OrganizationPathParam>,
-) -> Result<HttpResponseOk<Policy>, HttpError> {
+) -> Result<HttpResponseOk<shared::Policy>, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
     let path = path_params.into_inner();
@@ -544,8 +531,8 @@ async fn organization_get_policy(
 async fn organization_put_policy(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<OrganizationPathParam>,
-    new_policy: TypedBody<Policy>,
-) -> Result<HttpResponseOk<Policy>, HttpError> {
+    new_policy: TypedBody<shared::Policy>,
+) -> Result<HttpResponseOk<shared::Policy>, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
     let path = path_params.into_inner();
@@ -554,16 +541,8 @@ async fn organization_put_policy(
 
     let handler = async {
         let nasgns = new_policy.role_assignments.len();
-        let max = NMAX_ROLE_ASSIGNMENTS_PER_RESOURCE;
-        if nasgns > max {
-            return Err(HttpError::from(Error::InvalidValue {
-                label: String::from("role_assignments"),
-                message: format!(
-                    "expected at most {} in list, found {}",
-                    max, nasgns
-                ),
-            }));
-        }
+        // This should have been validated during parsing.
+        bail_unless!(nasgns <= shared::MAX_ROLE_ASSIGNMENTS_PER_RESOURCE);
         let opctx = OpContext::for_external_api(&rqctx).await?;
         let policy = nexus
             .organization_update_policy(&opctx, organization_name, &new_policy)
