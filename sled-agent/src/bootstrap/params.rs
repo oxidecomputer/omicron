@@ -4,10 +4,7 @@
 
 //! Request body types for the bootstrap agent
 
-use omicron_common::address::{
-    SLED_PREFIX,
-    Ipv6Subnet,
-};
+use omicron_common::address::{Ipv6Subnet, SLED_PREFIX};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
