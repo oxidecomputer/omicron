@@ -2885,6 +2885,9 @@ impl DataStore {
         authz_resource: &T,
         new_assignments: &[shared::RoleAssignment],
     ) -> ListResultVec<db::model::RoleAssignment> {
+        // XXX-dap we need to validate that this is one of the valid roles for
+        // this resource!
+
         // TODO-security We should carefully review what permissions are
         // required for modifying the policy of a resource.
         opctx.authorize(authz::Action::ModifyPolicy, authz_resource).await?;

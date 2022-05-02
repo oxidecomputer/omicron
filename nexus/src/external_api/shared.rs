@@ -63,7 +63,7 @@ where
 pub struct RoleAssignment {
     pub identity_type: IdentityType,
     pub identity_id: Uuid,
-    pub role_name: String, // XXX-dap should this be RoleName?
+    pub role_name: String,
 }
 
 impl From<db::model::RoleAssignment> for RoleAssignment {
