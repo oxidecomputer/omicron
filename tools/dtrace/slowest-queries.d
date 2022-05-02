@@ -1,6 +1,6 @@
 #!/usr/sbin/dtrace -qs
 
-#pragma strsize=4k
+#pragma D option strsize=4k
 
 /* Print out the slowest 5 queries every 10 seconds. */
 

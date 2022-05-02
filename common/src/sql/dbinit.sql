@@ -216,6 +216,13 @@ CREATE TABLE omicron.public.silo_user (
     time_deleted TIMESTAMPTZ
 );
 
+/* This index lets us quickly find users for a given silo. */
+CREATE INDEX ON omicron.public.silo_user (
+    silo_id,
+    id
+) WHERE
+    time_deleted IS NULL;
+
 /*
  * Users' public SSH keys, per RFD 44
  */
@@ -755,7 +762,7 @@ CREATE TABLE omicron.public.vpc_firewall_rule (
     priority INT4 CHECK (priority BETWEEN 0 AND 65535) NOT NULL
 );
 
-CREATE UNIQUE INDEX ON omicron.public.vpc_router (
+CREATE UNIQUE INDEX ON omicron.public.vpc_firewall_rule (
     vpc_id,
     name
 ) WHERE
@@ -920,6 +927,11 @@ CREATE TABLE omicron.public.update_available_artifact (
     PRIMARY KEY (name, version, kind)
 );
 
+/* This index is used to quickly find outdated artifacts. */
+CREATE INDEX ON omicron.public.update_available_artifact (
+    targets_role_version
+);
+
 /*******************************************************************/
 
 /*
@@ -1065,7 +1077,6 @@ CREATE TABLE omicron.public.db_metadata (
 INSERT INTO omicron.public.db_metadata (
     name,
     value
-) VALUES (
-    'schema_version',
-    '1.0.0'
-);
+) VALUES
+    ( 'schema_version', '1.0.0' ),
+    ( 'schema_time_created', CAST(NOW() AS STRING) );

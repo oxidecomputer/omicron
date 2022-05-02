@@ -5,7 +5,7 @@
 use std::net::{Ipv6Addr, SocketAddr, SocketAddrV6};
 use std::sync::Arc;
 
-use anyhow::{anyhow, Context, Result};
+use anyhow::{Context, Result};
 use internal_dns_client::{
     types::{DnsKv, DnsRecord, DnsRecordKey, Srv},
     Client,
@@ -17,7 +17,9 @@ use trust_dns_resolver::TokioAsyncResolver;
 
 #[tokio::test]
 pub async fn aaaa_crud() -> Result<(), anyhow::Error> {
-    let (client, resolver) = init_client_server().await?;
+    let test_ctx = init_client_server().await?;
+    let client = &test_ctx.client;
+    let resolver = &test_ctx.resolver;
 
     // records should initially be empty
     let records = client.dns_records_get().await?;
@@ -52,12 +54,15 @@ pub async fn aaaa_crud() -> Result<(), anyhow::Error> {
     let address = response.iter().next().expect("no addresses returned!");
     assert_eq!(address, addr);
 
+    test_ctx.cleanup().await;
     Ok(())
 }
 
 #[tokio::test]
 pub async fn srv_crud() -> Result<(), anyhow::Error> {
-    let (client, resolver) = init_client_server().await?;
+    let test_ctx = init_client_server().await?;
+    let client = &test_ctx.client;
+    let resolver = &test_ctx.resolver;
 
     // records should initially be empty
     let records = client.dns_records_get().await?;
@@ -99,13 +104,27 @@ pub async fn srv_crud() -> Result<(), anyhow::Error> {
     assert_eq!(srvr.port(), srv.port);
     assert_eq!(srvr.target().to_string(), srv.target + ".");
 
+    test_ctx.cleanup().await;
     Ok(())
 }
 
-async fn init_client_server(
-) -> Result<(Client, TokioAsyncResolver), anyhow::Error> {
+struct TestContext {
+    client: Client,
+    resolver: TokioAsyncResolver,
+    server: dropshot::HttpServer<Arc<internal_dns::dropshot_server::Context>>,
+    tmp: tempdir::TempDir,
+}
+
+impl TestContext {
+    async fn cleanup(self) {
+        self.server.close().await.expect("Failed to clean up server");
+        self.tmp.close().expect("Failed to clean up tmp directory");
+    }
+}
+
+async fn init_client_server() -> Result<TestContext, anyhow::Error> {
     // initialize dns server config
-    let (config, dropshot_port, dns_port) = test_config()?;
+    let (tmp, config, dropshot_port, dns_port) = test_config()?;
     let log = config
         .log
         .to_logger("internal-dns")
@@ -149,20 +168,16 @@ async fn init_client_server(
     }
 
     // launch a dropshot server
-    tokio::spawn(async move {
-        let server = internal_dns::start_server(config, log, db).await?;
-        server.await.map_err(|error_message| {
-            anyhow!("server exiting: {}", error_message)
-        })
-    });
+    let server = internal_dns::start_server(config, log, db).await?;
 
     // wait for server to start
     tokio::time::sleep(tokio::time::Duration::from_millis(250)).await;
 
-    Ok((client, resolver))
+    Ok(TestContext { client, resolver, server, tmp })
 }
 
-fn test_config() -> Result<(internal_dns::Config, u16, u16), anyhow::Error> {
+fn test_config(
+) -> Result<(tempdir::TempDir, internal_dns::Config, u16, u16), anyhow::Error> {
     let dropshot_port = portpicker::pick_unused_port().expect("pick port");
     let dns_port = portpicker::pick_unused_port().expect("pick port");
     let tmp_dir = tempdir::TempDir::new("internal-dns-test")?;
@@ -185,5 +200,5 @@ fn test_config() -> Result<(internal_dns::Config, u16, u16), anyhow::Error> {
         },
     };
 
-    Ok((config, dropshot_port, dns_port))
+    Ok((tmp_dir, config, dropshot_port, dns_port))
 }
