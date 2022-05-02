@@ -101,12 +101,13 @@ async fn serial_console_communication() {
             Message::Binary(msg_from_sp)
         );
     }
+
+    testctx.teardown().await;
 }
 
 #[tokio::test]
 async fn serial_console_detach() {
-    let testctx =
-        setup::test_setup("serial_console_communication", SpPort::One).await;
+    let testctx = setup::test_setup("serial_console_detach", SpPort::One).await;
     let client = &testctx.client;
     let simrack = &testctx.simrack;
 
@@ -185,4 +186,6 @@ async fn serial_console_detach() {
         ws.next().await.unwrap().unwrap(),
         Message::Binary(b"world".to_vec())
     );
+
+    testctx.teardown().await;
 }

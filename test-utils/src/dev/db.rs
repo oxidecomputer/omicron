@@ -620,11 +620,11 @@ fn make_pg_config(
 ) -> Result<PostgresConfigWithUrl, anyhow::Error> {
     // TODO-design This is really irritating.
     //
-    // CockroachDB reports a listen URL that does not specify a database to
-    // connect to.  (This makes sense.)  But we want to expose a client URL that
-    // does specify a database (since `CockroachInstance` essentially hardcodes
-    // a specific database name (via dbinit.sql and has_omicron_schema())) and
-    // user.
+    // Recent versions of CockroachDB report a listen URL that specifies a
+    // specific database to connect to, which is not our database.  (This is
+    // fine.)  But we want to expose a client URL that specifies the omicron
+    // database (since `CockroachInstance` essentially hardcodes a specific
+    // database name (via dbinit.sql and has_omicron_schema())) and user.
     //
     // We can parse the listen URL here into a tokio_postgres::Config, then use
     // methods on that struct to modify it as needed.  But if we do that, we'd
@@ -661,7 +661,6 @@ fn make_pg_config(
         pg_config.get_connect_timeout().map(|_| "connect_timeout"),
         pg_config.get_options().map(|_| "options"),
         pg_config.get_password().map(|_| "password"),
-        pg_config.get_dbname().map(|_| "dbname"),
     ];
 
     let unsupported_values =
@@ -673,6 +672,20 @@ fn make_pg_config(
             unsupported_values.join(", "),
             listen_url
         );
+    }
+
+    if let Some(dbname) = pg_config.get_dbname() {
+        if dbname != "defaultdb" {
+            // Again, we're just checking our assumptions about CockroachDB
+            // here.  If we somehow found a different database name here, it'd
+            // be good to understand why and whether it's correct to just
+            // replace it below.
+            bail!(
+                "unsupported PostgreSQL listen URL (unexpected database name \
+                other than \"defaultdb\"): {:?}",
+                listen_url
+            )
+        }
     }
 
     // As a side note: it's rather absurd that the default configuration enables
@@ -740,7 +753,7 @@ pub async fn has_omicron_schema(client: &tokio_postgres::Client) -> bool {
                 e.code().expect("got non-SQL error checking for schema");
             assert_eq!(
                 *sql_error,
-                tokio_postgres::error::SqlState::UNDEFINED_TABLE
+                tokio_postgres::error::SqlState::UNDEFINED_DATABASE
             );
             false
         }
@@ -1190,7 +1203,7 @@ mod test {
         eprintln!("found error: {}", error);
         assert!(error.contains("unsupported PostgreSQL listen URL"));
 
-        // unexpected contents in initial listen URL
+        // unexpected contents in initial listen URL (wrong db name)
         let error = make_pg_config(
             "postgresql://root@127.0.0.1:45913/foobar?sslmode=disable",
         )
@@ -1199,7 +1212,19 @@ mod test {
         eprintln!("found error: {}", error);
         assert!(error.contains(
             "unsupported PostgreSQL listen URL \
-            (did not expect any of these fields: dbname)"
+            (unexpected database name other than \"defaultdb\"): "
+        ));
+
+        // unexpected contents in initial listen URL (extra param)
+        let error = make_pg_config(
+            "postgresql://root@127.0.0.1:45913/foobar?application_name=foo",
+        )
+        .unwrap_err()
+        .to_string();
+        eprintln!("found error: {}", error);
+        assert!(error.contains(
+            "unsupported PostgreSQL listen URL \
+            (did not expect any of these fields: application_name)"
         ));
     }
 }

@@ -2,6 +2,12 @@
 
 set -eu
 
+MARKER=/etc/opt/oxide/NO_INSTALL
+if [[ -f "$MARKER" ]]; then
+  echo "This system has the marker file $MARKER, aborting." >&2
+  exit 1
+fi
+
 # Set the CWD to Omicron's source.
 SOURCE_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
 cd "${SOURCE_DIR}/.."
