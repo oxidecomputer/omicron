@@ -57,6 +57,7 @@ impl Pool {
         let manager =
             ConnectionManager::<DbConnection>::new(&db_config.url.url());
         let pool = bb8::Builder::new()
+            .connection_customizer(Box::new(DisallowFullTableScans {}))
             .connection_timeout(std::time::Duration::from_millis(1))
             .build_unchecked(manager);
         Pool { pool }
