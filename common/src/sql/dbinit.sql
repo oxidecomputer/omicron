@@ -1042,7 +1042,7 @@ CREATE TABLE omicron.public.role_builtin (
  * module-level documentation.
  */
 
-CREATE TYPE omicron.public.actor_type AS ENUM (
+CREATE TYPE omicron.public.identity_type AS ENUM (
   'user_builtin',
   'silo_user'
 );
@@ -1060,28 +1060,34 @@ CREATE TABLE omicron.public.role_assignment (
 
     /*
      * Foreign key into some other user table.  Which table?  That's determined
-     * by "actor_kind".
+     * by "identity_type".
      */
-    actor_id UUID NOT NULL,
-    actor_type omicron.public.actor_type NOT NULL,
+    identity_id UUID NOT NULL,
+    identity_type omicron.public.identity_type NOT NULL,
 
     /*
-     * The resource_id, actor_id, and role_name uniquely identify the role
-     * assignment.  We include the resource_type and actor_type as
+     * The resource_id, identity_id, and role_name uniquely identify the role
+     * assignment.  We include the resource_type and identity_type as
      * belt-and-suspenders, but there should only be one resource type for any
-     * resource id and one actor type for any actor id.
+     * resource id and one identity type for any identity id.
      *
-     * By organizing the primary key by resource id, then role name, then actor
-     * information, we can use it to generated paginated listings of role
-     * assignments for a resource, ordered by role name.  It's surprisingly
-     * load-bearing that "actor_type" appears last.  That's because when we list
-     * a page of role assignments for a resource sorted by role name and then
-     * actor id, every field _except_ actor_type is used in the query's filter
-     * or sort order.  If actor_type appeared before one of those fields,
-     * CockroachDB wouldn't necessarily know it could use the primary key index
-     * to efficiently serve the query.
+     * By organizing the primary key by resource id, then role name, then
+     * identity information, we can use it to generated paginated listings of
+     * role assignments for a resource, ordered by role name.  It's surprisingly
+     * load-bearing that "identity_type" appears last.  That's because when we
+     * list a page of role assignments for a resource sorted by role name and
+     * then identity id, every field _except_ identity_type is used in the
+     * query's filter or sort order.  If identity_type appeared before one of
+     * those fields, CockroachDB wouldn't necessarily know it could use the
+     * primary key index to efficiently serve the query.
      */
-    PRIMARY KEY(resource_id, resource_type, role_name, actor_id, actor_type)
+    PRIMARY KEY(
+        resource_id,
+	resource_type,
+	role_name,
+	identity_id,
+	identity_type
+     )
 );
 
 /*******************************************************************/

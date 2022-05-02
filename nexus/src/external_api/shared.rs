@@ -32,8 +32,8 @@ pub struct RoleAssignment {
 impl From<db::model::RoleAssignment> for RoleAssignment {
     fn from(role_asgn: db::model::RoleAssignment) -> Self {
         Self {
-            identity_type: IdentityType::from(role_asgn.actor_type),
-            identity_id: role_asgn.actor_id,
+            identity_type: IdentityType::from(role_asgn.identity_type),
+            identity_id: role_asgn.identity_id,
             role_name: role_asgn.role_name,
         }
     }
@@ -49,11 +49,11 @@ pub enum IdentityType {
     SiloUser,
 }
 
-impl From<db::model::ActorType> for IdentityType {
-    fn from(other: db::model::ActorType) -> Self {
+impl From<db::model::IdentityType> for IdentityType {
+    fn from(other: db::model::IdentityType) -> Self {
         match other {
-            db::model::ActorType::UserBuiltin => IdentityType::UserBuiltin,
-            db::model::ActorType::SiloUser => IdentityType::SiloUser,
+            db::model::IdentityType::UserBuiltin => IdentityType::UserBuiltin,
+            db::model::IdentityType::SiloUser => IdentityType::SiloUser,
         }
     }
 }

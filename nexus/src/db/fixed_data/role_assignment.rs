@@ -6,7 +6,7 @@
 use super::role_builtin;
 use super::user_builtin;
 use super::FLEET_ID;
-use crate::db::model::ActorType;
+use crate::db::model::IdentityType;
 use crate::db::model::RoleAssignment;
 use lazy_static::lazy_static;
 
@@ -16,7 +16,7 @@ lazy_static! {
             // The "test-privileged" user gets the "admin" role on the sole
             // Fleet.  This will grant them all permissions on all resources.
             RoleAssignment::new(
-                ActorType::UserBuiltin,
+                IdentityType::UserBuiltin,
                 user_builtin::USER_TEST_PRIVILEGED.id,
                 role_builtin::FLEET_ADMIN.resource_type,
                 *FLEET_ID,
@@ -26,7 +26,7 @@ lazy_static! {
             // The same user also needs "fleet authenticator" to be able to
             // create test sessions.
             RoleAssignment::new(
-                ActorType::UserBuiltin,
+                IdentityType::UserBuiltin,
                 user_builtin::USER_TEST_PRIVILEGED.id,
                 role_builtin::FLEET_AUTHENTICATOR.resource_type,
                 *FLEET_ID,
@@ -38,7 +38,7 @@ lazy_static! {
             // TODO-security We should scope this down (or, really, figure out a
             // better internal authn/authz story).
             RoleAssignment::new(
-                ActorType::UserBuiltin,
+                IdentityType::UserBuiltin,
                 user_builtin::USER_INTERNAL_API.id,
                 role_builtin::FLEET_ADMIN.resource_type,
                 *FLEET_ID,
@@ -50,7 +50,7 @@ lazy_static! {
             // plane data (like the list of sleds), which is in turn used to
             // talk to sleds or allocate resources.
             RoleAssignment::new(
-                ActorType::UserBuiltin,
+                IdentityType::UserBuiltin,
                 user_builtin::USER_INTERNAL_READ.id,
                 role_builtin::FLEET_VIEWER.resource_type,
                 *FLEET_ID,
@@ -61,7 +61,7 @@ lazy_static! {
             // on the sole fleet.  This grants them the ability to create
             // sessions.
             RoleAssignment::new(
-                ActorType::UserBuiltin,
+                IdentityType::UserBuiltin,
                 user_builtin::USER_EXTERNAL_AUTHN.id,
                 role_builtin::FLEET_AUTHENTICATOR.resource_type,
                 *FLEET_ID,

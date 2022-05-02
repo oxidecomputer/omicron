@@ -426,14 +426,14 @@ table! {
 
 table! {
     role_assignment (
-        actor_type,
-        actor_id,
+        identity_type,
+        identity_id,
         resource_type,
         resource_id,
         role_name
     ) {
-        actor_type -> crate::db::model::ActorTypeEnum,
-        actor_id -> Uuid,
+        identity_type -> crate::db::model::IdentityTypeEnum,
+        identity_id -> Uuid,
         resource_type -> Text,
         role_name -> Text,
         resource_id -> Uuid,

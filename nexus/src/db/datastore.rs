@@ -58,7 +58,7 @@ use crate::db::{
 use crate::external_api::{params, shared};
 use async_bb8_diesel::{AsyncConnection, AsyncRunQueryDsl, ConnectionManager};
 use chrono::Utc;
-use db::model::ActorType;
+use db::model::IdentityType;
 use diesel::pg::Pg;
 use diesel::prelude::*;
 use diesel::query_builder::{QueryFragment, QueryId};
@@ -2423,8 +2423,8 @@ impl DataStore {
         let count = diesel::insert_into(dsl::role_assignment)
             .values(&*BUILTIN_ROLE_ASSIGNMENTS)
             .on_conflict((
-                dsl::actor_type,
-                dsl::actor_id,
+                dsl::identity_type,
+                dsl::identity_id,
                 dsl::resource_type,
                 dsl::resource_id,
                 dsl::role_name,
@@ -2444,8 +2444,8 @@ impl DataStore {
     pub async fn role_asgn_list_for(
         &self,
         opctx: &OpContext,
-        actor_type: ActorType,
-        actor_id: Uuid,
+        identity_type: IdentityType,
+        identity_id: Uuid,
         resource_type: ResourceType,
         resource_id: Uuid,
     ) -> Result<Vec<RoleAssignment>, Error> {
@@ -2462,8 +2462,8 @@ impl DataStore {
         // into some hurt by assigning loads of roles to someone and having that
         // person attempt to access anything.
         dsl::role_assignment
-            .filter(dsl::actor_type.eq(actor_type))
-            .filter(dsl::actor_id.eq(actor_id))
+            .filter(dsl::identity_type.eq(identity_type))
+            .filter(dsl::identity_id.eq(identity_id))
             .filter(dsl::resource_type.eq(resource_type.to_string()))
             .filter(dsl::resource_id.eq(resource_id))
             .select(RoleAssignment::as_select())
@@ -2871,7 +2871,7 @@ impl DataStore {
                 .filter(dsl::resource_type.eq(resource_type.to_string()))
                 .filter(dsl::resource_id.eq(resource_id))
                 .order(dsl::role_name.asc())
-                .then_order_by(dsl::actor_id.asc())
+                .then_order_by(dsl::identity_id.asc())
                 .select(RoleAssignment::as_select())
                 .load_async::<RoleAssignment>(
                     self.pool_authorized(opctx).await?,
@@ -2919,7 +2919,7 @@ impl DataStore {
             .iter()
             .map(|r| {
                 db::model::RoleAssignment::new(
-                    db::model::ActorType::from(r.identity_type),
+                    db::model::IdentityType::from(r.identity_type),
                     r.identity_id,
                     resource_type,
                     resource_id,
@@ -2928,7 +2928,8 @@ impl DataStore {
             })
             .collect::<Vec<_>>();
         new_assignments.sort_by(|r1, r2| {
-            (&r1.role_name, r1.actor_id).cmp(&(&r2.role_name, r2.actor_id))
+            (&r1.role_name, r1.identity_id)
+                .cmp(&(&r2.role_name, r2.identity_id))
         });
 
         use db::schema::role_assignment::dsl;

@@ -243,10 +243,10 @@ pub enum Actor {
 }
 
 impl Actor {
-    pub fn actor_type(&self) -> db::model::ActorType {
+    pub fn actor_type(&self) -> db::model::IdentityType {
         match self {
-            Actor::UserBuiltin { .. } => db::model::ActorType::UserBuiltin,
-            Actor::SiloUser { .. } => db::model::ActorType::SiloUser,
+            Actor::UserBuiltin { .. } => db::model::IdentityType::UserBuiltin,
+            Actor::SiloUser { .. } => db::model::IdentityType::SiloUser,
         }
     }
 

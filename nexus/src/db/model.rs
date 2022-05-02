@@ -2667,8 +2667,8 @@ impl RoleBuiltin {
 
 impl_enum_type!(
     #[derive(SqlType, Debug, QueryId)]
-    #[postgres(type_name = "actor_type", type_schema = "public")]
-    pub struct ActorTypeEnum;
+    #[postgres(type_name = "identity_type", type_schema = "public")]
+    pub struct IdentityTypeEnum;
 
     #[derive(
         Clone,
@@ -2679,8 +2679,8 @@ impl_enum_type!(
         Deserialize,
         PartialEq
     )]
-    #[sql_type = "ActorTypeEnum"]
-    pub enum ActorType;
+    #[sql_type = "IdentityTypeEnum"]
+    pub enum IdentityType;
 
     // Enum values
     UserBuiltin => b"user_builtin"
@@ -2688,11 +2688,11 @@ impl_enum_type!(
 );
 
 // XXX-dap Is this how you're supposed to do this?
-impl From<shared::IdentityType> for ActorType {
+impl From<shared::IdentityType> for IdentityType {
     fn from(other: shared::IdentityType) -> Self {
         match other {
-            shared::IdentityType::UserBuiltin => ActorType::UserBuiltin,
-            shared::IdentityType::SiloUser => ActorType::SiloUser,
+            shared::IdentityType::UserBuiltin => IdentityType::UserBuiltin,
+            shared::IdentityType::SiloUser => IdentityType::SiloUser,
         }
     }
 }
@@ -2701,8 +2701,8 @@ impl From<shared::IdentityType> for ActorType {
 #[derive(Queryable, Insertable, Debug, Selectable)]
 #[table_name = "role_assignment"]
 pub struct RoleAssignment {
-    pub actor_type: ActorType,
-    pub actor_id: Uuid,
+    pub identity_type: IdentityType,
+    pub identity_id: Uuid,
     pub resource_type: String,
     pub resource_id: Uuid,
     pub role_name: String,
@@ -2711,15 +2711,15 @@ pub struct RoleAssignment {
 impl RoleAssignment {
     /// Creates a new database RoleAssignment object.
     pub fn new(
-        actor_type: ActorType,
-        actor_id: Uuid,
+        identity_type: IdentityType,
+        identity_id: Uuid,
         resource_type: omicron_common::api::external::ResourceType,
         resource_id: Uuid,
         role_name: &str,
     ) -> Self {
         Self {
-            actor_type,
-            actor_id,
+            identity_type,
+            identity_id,
             resource_type: resource_type.to_string(),
             resource_id,
             role_name: String::from(role_name),
