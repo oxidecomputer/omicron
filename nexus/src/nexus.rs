@@ -114,7 +114,7 @@ pub trait TestInterfaces {
         &self,
         silo_id: Uuid,
         silo_user_id: Uuid,
-    ) -> CreateResult<SiloUser>;
+    ) -> Result<(), Error>;
 }
 
 pub static BASE_ARTIFACT_DIR: &str = "/var/tmp/oxide_artifacts";
@@ -4031,7 +4031,7 @@ impl TestInterfaces for Nexus {
         &self,
         silo_id: Uuid,
         silo_user_id: Uuid,
-    ) -> CreateResult<SiloUser> {
+    ) -> Result<(), Error> {
         let silo_user = SiloUser::new(silo_id, silo_user_id);
         Ok(self.db_datastore.silo_user_create(silo_user).await?)
     }

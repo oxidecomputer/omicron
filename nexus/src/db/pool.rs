@@ -25,7 +25,12 @@
 // TODO-design Need TLS support (the types below hardcode NoTls).
 
 use super::Config as DbConfig;
+use async_bb8_diesel::AsyncSimpleConnection;
+use async_bb8_diesel::Connection;
+use async_bb8_diesel::ConnectionError;
 use async_bb8_diesel::ConnectionManager;
+use async_trait::async_trait;
+use bb8::CustomizeConnection;
 use diesel::PgConnection;
 use diesel_dtrace::DTraceConnection;
 
@@ -42,12 +47,42 @@ impl Pool {
     pub fn new(db_config: &DbConfig) -> Self {
         let manager =
             ConnectionManager::<DbConnection>::new(&db_config.url.url());
-        let pool = bb8::Builder::new().build_unchecked(manager);
+        let pool = bb8::Builder::new()
+            .connection_customizer(Box::new(DisallowFullTableScans {}))
+            .build_unchecked(manager);
+        Pool { pool }
+    }
+
+    pub fn new_failfast(db_config: &DbConfig) -> Self {
+        let manager =
+            ConnectionManager::<DbConnection>::new(&db_config.url.url());
+        let pool = bb8::Builder::new()
+            .connection_customizer(Box::new(DisallowFullTableScans {}))
+            .connection_timeout(std::time::Duration::from_millis(1))
+            .build_unchecked(manager);
         Pool { pool }
     }
 
     /// Returns a reference to the underlying pool.
     pub fn pool(&self) -> &bb8::Pool<ConnectionManager<DbConnection>> {
         &self.pool
+    }
+}
+
+#[derive(Debug)]
+struct DisallowFullTableScans {}
+#[async_trait]
+impl CustomizeConnection<Connection<DbConnection>, ConnectionError>
+    for DisallowFullTableScans
+{
+    async fn on_acquire(
+        &self,
+        conn: &mut Connection<DbConnection>,
+    ) -> Result<(), ConnectionError> {
+        conn.batch_execute_async(
+            "set disallow_full_table_scans = on;\
+            set large_full_scan_rows = 0;",
+        )
+        .await
     }
 }
