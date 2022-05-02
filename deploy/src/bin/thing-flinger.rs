@@ -460,16 +460,25 @@ fn single_server_install(
 ) -> Result<()> {
     let server = &config.servers[server_name];
 
-    println!("COPYING packages from builder -> deploy server");
+    println!(
+        "COPYING packages from builder ({}) -> deploy server ({})",
+        builder.addr, server_name
+    );
     copy_package_artifacts_to_staging(config, pkg_dir, builder, server)?;
 
-    println!("COPYING deploy tool from builder -> deploy server");
+    println!(
+        "COPYING deploy tool from builder ({}) -> deploy server ({})",
+        builder.addr, server_name
+    );
     copy_omicron_package_binary_to_staging(config, builder, server)?;
 
-    println!("COPYING manifest from builder -> deploy server");
+    println!(
+        "COPYING manifest from builder ({}) -> deploy server ({})",
+        builder.addr, server_name
+    );
     copy_package_manifest_to_staging(config, builder, server)?;
 
-    println!("INSTALLING packages on deploy server");
+    println!("INSTALLING packages on deploy server ({})", server_name);
     run_omicron_package_install_from_staging(
         config,
         server,
@@ -477,7 +486,10 @@ fn single_server_install(
         &install_dir,
     )?;
 
-    println!("COPYING overlay files from builder -> deploy server");
+    println!(
+        "COPYING overlay files from builder ({}) -> deploy server ({})",
+        builder.addr, server_name
+    );
     copy_overlay_files_to_staging(
         config,
         pkg_dir,
@@ -486,10 +498,10 @@ fn single_server_install(
         server_name,
     )?;
 
-    println!("INSTALLING overlay files into the install directory of the deploy server");
+    println!("INSTALLING overlay files into the install directory of the deploy server ({})", server_name);
     install_overlay_files_from_staging(config, server, &install_dir)?;
 
-    println!("RESTARTING services on the deploy server");
+    println!("RESTARTING services on the deploy server ({})", server_name);
     restart_services(server)
 }
 
