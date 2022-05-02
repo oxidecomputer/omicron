@@ -866,9 +866,10 @@ dependencies = [
 [[package]]
 name = "diesel-dtrace"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/diesel-dtrace?branch=diesel2#9bf301cc546c966646c3265494c14d62460f22b3"
+source = "git+https://github.com/oxidecomputer/diesel-dtrace?rev=bec89c2f2b01a79ae99b4db667bfcea5fb2fef04#bec89c2f2b01a79ae99b4db667bfcea5fb2fef04"
 dependencies = [
  "diesel",
+ "lock_api",
  "serde",
  "usdt",
  "uuid",
