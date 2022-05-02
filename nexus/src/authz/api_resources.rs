@@ -48,39 +48,35 @@ use uuid::Uuid;
 /// Describes an authz resource that corresponds to an API resource that has a
 /// corresponding ResourceType and is stored in the database
 pub trait ApiResource:
-    Clone + std::fmt::Debug + oso::PolarClass + Send + Sync + 'static
+    std::fmt::Debug + oso::ToPolar + Send + Sync + 'static
 {
-    /// If roles can be assigned to this resource, return the type and id of the
-    /// database record describing this resource
+    /// If roles can be assigned to this resource, return this object as a
+    /// [`ApiResourceWithRoles`]
     ///
     /// If roles cannot be assigned to this resource, returns `None`.
-    fn db_resource(&self) -> Option<(ResourceType, Uuid)>;
+    fn as_resource_with_roles(&self) -> Option<&dyn ApiResourceWithRoles>;
 
     /// If this resource has a parent in the API hierarchy whose assigned roles
     /// can affect access to this resource, return the parent resource.
     /// Otherwise, returns `None`.
     fn parent(&self) -> Option<&dyn AuthorizedResource>;
-}
 
-/// Practically, all objects which implement [`ApiResourceError`]
-/// also implement [`ApiResource`]. However, [`ApiResource`] is not object
-/// safe because it implements [`std::clone::Clone`].
-///
-/// This allows callers to use [`ApiResourceError`] as a trait object.
-pub trait ApiResourceError {
+    fn resource_type(&self) -> ResourceType;
+    fn lookup_type(&self) -> &LookupType;
+
     /// Returns an error as though this resource were not found, suitable for
     /// use when an actor should not be able to see that this resource exists
     fn not_found(&self) -> Error {
         self.lookup_type().clone().into_not_found(self.resource_type())
     }
-
-    fn resource_type(&self) -> ResourceType;
-    fn lookup_type(&self) -> &LookupType;
 }
 
-impl<T: ApiResource + ApiResourceError + oso::PolarClass> AuthorizedResource
-    for T
-{
+/// Describes an authz resource on which we allow users to assign roles
+pub trait ApiResourceWithRoles: ApiResource {
+    fn resource_id(&self) -> Uuid;
+}
+
+impl<T: ApiResource + oso::ToPolar + Clone> AuthorizedResource for T {
     fn load_roles<'a, 'b, 'c, 'd, 'e, 'f>(
         &'a self,
         opctx: &'b OpContext,

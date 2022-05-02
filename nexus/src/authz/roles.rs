@@ -95,7 +95,9 @@ where
     R: ApiResource,
 {
     // If roles can be assigned directly on this resource, load them.
-    if let Some((resource_type, resource_id)) = resource.db_resource() {
+    if let Some(with_roles) = resource.as_resource_with_roles() {
+        let resource_type = resource.resource_type();
+        let resource_id = with_roles.resource_id();
         load_roles_for_resource(
             opctx,
             datastore,

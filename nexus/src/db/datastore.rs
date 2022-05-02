@@ -26,8 +26,7 @@ use super::identity::{Asset, Resource};
 use super::pool::DbConnection;
 use super::Pool;
 use crate::authn;
-use crate::authz;
-use crate::authz::ApiResourceError;
+use crate::authz::{self, ApiResource};
 use crate::context::OpContext;
 use crate::db::fixed_data::role_assignment::BUILTIN_ROLE_ASSIGNMENTS;
 use crate::db::fixed_data::role_builtin::BUILTIN_ROLES;
@@ -2856,7 +2855,7 @@ impl DataStore {
 
     // XXX-dap TODO-doc
     pub async fn role_assignment_fetch_all<
-        T: authz::ApiResource + authz::ApiResourceError,
+        T: authz::ApiResourceWithRoles + Clone,
     >(
         &self,
         opctx: &OpContext,
@@ -2864,31 +2863,23 @@ impl DataStore {
     ) -> ListResultVec<db::model::RoleAssignment> {
         // XXX-dap consider a different action
         opctx.authorize(authz::Action::Read, authz_resource).await?;
-        if let Some((resource_type, resource_id)) = authz_resource.db_resource()
-        {
-            use db::schema::role_assignment::dsl;
-            dsl::role_assignment
-                .filter(dsl::resource_type.eq(resource_type.to_string()))
-                .filter(dsl::resource_id.eq(resource_id))
-                .order(dsl::role_name.asc())
-                .then_order_by(dsl::identity_id.asc())
-                .select(RoleAssignment::as_select())
-                .load_async::<RoleAssignment>(
-                    self.pool_authorized(opctx).await?,
-                )
-                .await
-                .map_err(|e| {
-                    public_error_from_diesel_pool(e, ErrorHandler::Server)
-                })
-        } else {
-            // XXX-dap Ideally, we couldn't even be invoked in this case.
-            Ok(Vec::new())
-        }
+        let resource_type = authz_resource.resource_type();
+        let resource_id = authz_resource.resource_id();
+        use db::schema::role_assignment::dsl;
+        dsl::role_assignment
+            .filter(dsl::resource_type.eq(resource_type.to_string()))
+            .filter(dsl::resource_id.eq(resource_id))
+            .order(dsl::role_name.asc())
+            .then_order_by(dsl::identity_id.asc())
+            .select(RoleAssignment::as_select())
+            .load_async::<RoleAssignment>(self.pool_authorized(opctx).await?)
+            .await
+            .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
     }
 
     // XXX-dap TODO-doc
     pub async fn role_assignment_replace_all<
-        T: authz::ApiResource + authz::ApiResourceError,
+        T: authz::ApiResourceWithRoles + Clone,
     >(
         &self,
         opctx: &OpContext,
@@ -2897,21 +2888,12 @@ impl DataStore {
     ) -> ListResultVec<db::model::RoleAssignment> {
         // XXX-dap consider a different action
         opctx.authorize(authz::Action::Modify, authz_resource).await?;
-        if authz_resource.db_resource().is_none() {
-            // This is an InternalError because we should not be able to reach
-            // this code path without a bug in the caller.
-            return Err(Error::internal_error(&format!(
-                "modifying policy on {:?} is not supported",
-                authz_resource
-            )));
-        }
-
         bail_unless!(
             new_assignments.len() <= shared::MAX_ROLE_ASSIGNMENTS_PER_RESOURCE
         );
 
-        let (resource_type, resource_id) =
-            authz_resource.db_resource().unwrap();
+        let resource_type = authz_resource.resource_type();
+        let resource_id = authz_resource.resource_id();
 
         // Sort the records in the same order that we would return them when
         // listing them.  This is because we're going to use RETURNING to return

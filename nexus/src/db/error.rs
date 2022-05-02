@@ -88,18 +88,18 @@ pub fn diesel_pool_result_optional<T>(
 /// etc.
 pub enum ErrorHandler<'a> {
     /// The operation expected to fetch, update, or delete exactly one resource
-    /// identified by the [`crate::authz::ApiResourceError`].
+    /// identified by the [`crate::authz::ApiResource`].
     /// If that row is not found, an appropriate "Not Found" error will be
     /// returned.
-    NotFoundByResource(&'a dyn crate::authz::ApiResourceError),
+    NotFoundByResource(&'a dyn crate::authz::ApiResource),
     /// The operation was attempting to lookup or update a resource.
     /// If that row is not found, an appropriate "Not Found" error will be
     /// returned.
     ///
     /// NOTE: If you already have an [`crate::authz::ApiResource`] object, you
-    /// should use the [`ErrorHandler::NotFoundByResource`] variant instead. Eventually,
-    /// the only uses of this function should be in the DataStore functions
-    /// that actually look up a record for the first time.
+    /// should use the [`ErrorHandler::NotFoundByResource`] variant instead.
+    /// Eventually, the only uses of this function should be in the DataStore
+    /// functions that actually look up a record for the first time.
     NotFoundByLookup(ResourceType, LookupType),
     /// The operation was attempting to create a resource with a name.
     /// If a resource already exists with that name, an "Object Already Exists"
