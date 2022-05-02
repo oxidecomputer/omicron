@@ -166,9 +166,17 @@ effort to use securely. This particular implementation wraps the openssh ssh cli
 TODO: This section should be fleshed out more and potentially lifted to its own
 document; for now this is a collection of rough notes.
 
+---
+
 It's possible to use a Linux libvirt host running multiple helios VMs as the
 builder/deployment server targets, but it requires some additional setup beyond
 what [`helios-engvm`](https://github.com/oxidecomputer/helios-engvm).
+
+`thing-flinger` does not have any support for running the
+`tools/create_virtual_hardware.sh` script; this will need to be done by hand on
+each VM.
+
+---
 
 To enable communication between the VMs over their IPv6 bootstrap networks:
 
