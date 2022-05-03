@@ -3895,7 +3895,6 @@ impl Nexus {
 
     // Role assignments
 
-    // XXX-dap TODO-doc
     pub async fn organization_fetch_policy(
         &self,
         opctx: &OpContext,
@@ -3915,7 +3914,6 @@ impl Nexus {
         Ok(shared::Policy { role_assignments })
     }
 
-    // XXX-dap TODO-doc
     pub async fn organization_update_policy(
         &self,
         opctx: &OpContext,

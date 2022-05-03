@@ -2687,7 +2687,6 @@ impl_enum_type!(
     SiloUser => b"silo_user"
 );
 
-// XXX-dap Is this how you're supposed to do this?
 impl From<shared::IdentityType> for IdentityType {
     fn from(other: shared::IdentityType) -> Self {
         match other {
