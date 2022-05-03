@@ -6,21 +6,7 @@ name: Rust
 on: [ push, pull_request ]
 
 jobs:
-  skip_duplicate_jobs:
-    runs-on: ubuntu-18.04
-    outputs:
-      should_skip: ${{ steps.skip_check.outputs.should_skip }}
-    steps:
-      - id: skip_check
-        # fkirc/skip-duplicate-actions@v3.4.0 (plus a bit)
-        uses: fkirc/skip-duplicate-actions@f75dd6564bb646f95277dc8c3b80612e46a4a1ea
-        with:
-          # For workflows which are triggered concurrently with the same
-          # contents, attempt to execute them exactly once.
-          concurrent_skipping: 'same_content_newer'
   check-style:
-    needs: skip_duplicate_jobs
-    if: ${{ needs.skip_duplicate_jobs.outputs.should_skip != 'true' }}
     runs-on: ubuntu-18.04
     steps:
     # actions/checkout@v2
@@ -33,8 +19,6 @@ jobs:
       run: cargo fmt -- --check
 
   check-omicron-deployment:
-    needs: skip_duplicate_jobs
-    if: ${{ needs.skip_duplicate_jobs.outputs.should_skip != 'true' }}
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -51,8 +35,6 @@ jobs:
       run: cargo run --bin omicron-package -- check
 
   clippy-lint:
-    needs: skip_duplicate_jobs
-    if: ${{ needs.skip_duplicate_jobs.outputs.should_skip != 'true' }}
     runs-on: ubuntu-18.04
     steps:
     # actions/checkout@v2
@@ -74,8 +56,6 @@ jobs:
   # This is just a test build of docs.  Publicly available docs are built via
   # the separate "rustdocs" repo.
   build-docs:
-    needs: skip_duplicate_jobs
-    if: ${{ needs.skip_duplicate_jobs.outputs.should_skip != 'true' }}
     runs-on: ubuntu-18.04
     steps:
     # actions/checkout@v2
@@ -90,8 +70,6 @@ jobs:
   build-and-test:
     env:
       OMICRON_TMP: /tmp/omicron_tmp
-    needs: skip_duplicate_jobs
-    if: ${{ needs.skip_duplicate_jobs.outputs.should_skip != 'true' }}
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false

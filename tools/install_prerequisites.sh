@@ -2,6 +2,12 @@
 
 set -eu
 
+MARKER=/etc/opt/oxide/NO_INSTALL
+if [[ -f "$MARKER" ]]; then
+  echo "This system has the marker file $MARKER, aborting." >&2
+  exit 1
+fi
+
 # Set the CWD to Omicron's source.
 SOURCE_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
 cd "${SOURCE_DIR}/.."
@@ -13,13 +19,30 @@ function on_exit
 
 trap on_exit ERR
 
-# Offers a confirmation prompt.
+# Parse command line options:
+#
+# -y  Assume "yes" intead of showing confirmation prompts.
+ASSUME_YES="false"
+SKIP_PATH_CHECK="false"
+while getopts yp flag
+do
+  case "${flag}" in
+    y) ASSUME_YES="true" ;;
+    p) SKIP_PATH_CHECK="true" ;;
+  esac
+done
+
+# Offers a confirmation prompt, unless we were passed `-y`.
 #
 # Args:
 #  $1: Text to be displayed
 function confirm
 {
-  read -r -p "$1 (y/n): " response
+  if [[ "${ASSUME_YES}" == "true" ]]; then
+    response=y
+  else
+    read -r -p "$1 (y/n): " response
+  fi
   case $response in
     [yY])
       true
@@ -100,6 +123,18 @@ fi
 ./tools/ci_download_cockroachdb
 ./tools/ci_download_clickhouse
 
+# Install static console assets. These are used when packaging Nexus.
+./tools/ci_download_console
+
+# Install OPTE
+#
+# OPTE is a Rust package that is consumed by a kernel module called xde. This
+# installs the `xde` driver and some kernel bits required to work with that
+# driver.
+if [[ "${HOST_OS}" == "SunOS" ]]; then
+    pfexec ./tools/install_opte.sh
+fi
+
 # Validate the PATH:
 expected_in_path=(
   'pg_config'
@@ -132,7 +167,12 @@ function show_hint
   esac
 }
 
-# Check all paths before returning an error.
+# Check all paths before returning an error, unless we were told not too.
+if [[ "$SKIP_PATH_CHECK" == "true" ]]; then
+  echo "All prerequisites installed successfully"
+  exit 0
+fi
+
 ANY_PATH_ERROR="false"
 for command in "${expected_in_path[@]}"; do
   rc=0

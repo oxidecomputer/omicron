@@ -1,5 +1,6 @@
 #
 # Oso configuration for Omicron
+# This file is augmented by generated snippets.
 #
 
 
@@ -43,9 +44,13 @@ has_role(_actor: AuthenticatedActor, "user", _resource: Database);
 has_role(actor: AuthenticatedActor, "init", _resource: Database)
 	if actor = USER_DB_INIT;
 
+# Define role relationships
+has_role(actor: AuthenticatedActor, role: String, resource: Resource)
+	if resource.has_role(actor, role);
+
 #
 # Permissions and predefined roles for resources in the
-# Fleet/Organization/Project hierarchy
+# Fleet/Silo/Organization/Project hierarchy
 #
 # For now, we define the following permissions for most resources in the system:
 #
@@ -74,8 +79,11 @@ has_role(actor: AuthenticatedActor, "init", _resource: Database)
 # The complete set of predefined roles:
 #
 # - fleet.admin           (superuser for the whole system)
-# - fleet.collaborator    (can create and own orgs)
-# - fleet.viewer    	  (can read fleet-wide data)
+# - fleet.collaborator    (can create and own silos)
+# - fleet.viewer          (can read fleet-wide data)
+# - silo.admin            (superuser for the silo)
+# - silo.collaborator     (can create and own orgs)
+# - silo.viewer           (can read silo-wide data)
 # - organization.admin    (complete control over an organization)
 # - organization.collaborator (can create, modify, and delete projects)
 # - project.admin         (complete control over a project)
@@ -83,7 +91,7 @@ has_role(actor: AuthenticatedActor, "init", _resource: Database)
 #                         the project, but cannot modify or delete the project
 #                         itself)
 # - project.viewer        (can see everything in the project, but cannot modify
-#     			  anything)
+#                         anything)
 #
 
 # At the top level is the "Fleet" resource.
@@ -95,7 +103,14 @@ resource Fleet {
 	    "create_child",
 	];
 
-	roles = [ "admin", "collaborator", "viewer" ];
+	roles = [
+	    "admin",
+	    "collaborator",
+	    "viewer",
+
+	    # internal roles
+	    "external-authenticator"
+	];
 
 	# Fleet viewers can view Fleet-wide data
 	"list_children" if "viewer";
@@ -112,6 +127,32 @@ resource Fleet {
 	"collaborator" if "admin";
 	"modify" if "admin";
 }
+
+resource Silo {
+	permissions = [
+	    "list_children",
+	    "modify",
+	    "read",
+	    "create_child",
+	];
+	roles = [ "admin", "collaborator", "viewer" ];
+
+	"list_children" if "viewer";
+	"read" if "viewer";
+
+	"viewer" if "collaborator";
+	"create_child" if "collaborator";
+	"collaborator" if "admin";
+	"modify" if "admin";
+	relations = { parent_fleet: Fleet };
+	"admin" if "admin" on "parent_fleet";
+	"collaborator" if "collaborator" on "parent_fleet";
+	"viewer" if "viewer" on "parent_fleet";
+}
+has_relation(fleet: Fleet, "parent_fleet", silo: Silo)
+	if silo.fleet = fleet;
+has_role(actor: AuthenticatedActor, "viewer", silo: Silo)
+	if actor.silo = silo;
 
 resource Organization {
 	permissions = [
@@ -136,9 +177,11 @@ resource Organization {
 	"collaborator" if "admin";
 	"modify" if "admin";
 
-	relations = { parent_fleet: Fleet };
-	"admin" if "admin" on "parent_fleet";
+	relations = { parent_silo: Silo };
+	"admin" if "admin" on "parent_silo";
 }
+has_relation(silo: Silo, "parent_silo", organization: Organization)
+	if organization.silo = silo;
 
 resource Project {
 	permissions = [
@@ -169,69 +212,70 @@ resource Project {
 	relations = { parent_organization: Organization };
 	"admin" if "admin" on "parent_organization";
 }
-
-# For now, we use one generic resource to represent every kind of thing inside
-# the Project.  That's because they all have the same behavior.
-resource ProjectChild {
-	permissions = [
-		"list_children",
-		"modify",
-		"read",
-		"create_child",
-	];
-
-	relations = { parent_project: Project };
-	"list_children" if "viewer" on "parent_project";
-	"read" if "viewer" on "parent_project";
-
-	"modify" if "collaborator" on "parent_project";
-	"create_child" if "collaborator" on "parent_project";
-}
-
-# Similarly, we use a generic resource to represent every kind of fleet-wide
-# resource that's not part of the Organization/Project hierarchy and not a Sled.
-resource FleetChild {
-	permissions = [
-		"list_children",
-		"modify",
-		"read",
-		"create_child",
-	];
-
-	relations = { parent_fleet: Fleet };
-	"list_children" if "viewer" on "parent_fleet";
-	"read" if "viewer" on "parent_fleet";
-	"modify" if "admin" on "parent_fleet";
-	"create_child" if "admin" on "parent_fleet";
-}
-
-resource Sled {
-	permissions = [
-		"list_children",
-		"modify",
-		"read",
-		"create_child",
-	];
-
-	relations = { parent_fleet: Fleet };
-	"list_children" if "viewer" on "parent_fleet";
-	"read" if "viewer" on "parent_fleet";
-	"modify" if "admin" on "parent_fleet";
-	"create_child" if "admin" on "parent_fleet";
-}
-
-# Define relationships
-has_relation(fleet: Fleet, "parent_fleet", organization: Organization)
-	if organization.fleet = fleet;
 has_relation(organization: Organization, "parent_organization", project: Project)
 	if project.organization = organization;
-has_relation(project: Project, "parent_project", project_child: ProjectChild)
-	if project_child.project = project;
-has_relation(fleet: Fleet, "parent_fleet", fleet_child: FleetChild)
-	if fleet_child.fleet = fleet;
-has_relation(fleet: Fleet, "parent_fleet", sled: Sled)
-	if sled.fleet = fleet;
 
-# Define role relationships
-has_role(actor: AuthenticatedActor, role: String, resource: Resource)
-	if resource.has_role(actor, role);
+resource GlobalImageList {
+	permissions = [
+	    "list_children",
+	    "modify",
+	    "create_child",
+	];
+
+	# Only admins can create or modify the global images list
+	relations = { parent_fleet: Fleet };
+	"modify" if "admin" on "parent_fleet";
+	"create_child" if "admin" on "parent_fleet";
+
+	# Anyone with viewer can list global images
+	"list_children" if "viewer" on "parent_fleet";
+}
+has_relation(fleet: Fleet, "parent_fleet", global_image_list: GlobalImageList)
+	if global_image_list.fleet = fleet;
+
+# ConsoleSessionList is a synthetic resource used for modeling who has access
+# to create sessions.
+resource ConsoleSessionList {
+	permissions = [ "create_child" ];
+	relations = { parent_fleet: Fleet };
+	"create_child" if "external-authenticator" on "parent_fleet";
+}
+has_relation(fleet: Fleet, "parent_fleet", collection: ConsoleSessionList)
+	if collection.fleet = fleet;
+
+# These rules grants the external authenticator role the permissions it needs to
+# read silo users and modify their sessions.  This is necessary for login to
+# work.
+has_permission(actor: AuthenticatedActor, "read", user: SiloUser)
+	if has_role(actor, "external-authenticator", user.silo.fleet);
+has_permission(actor: AuthenticatedActor, "read", session: ConsoleSession)
+	if has_role(actor, "external-authenticator", session.fleet);
+has_permission(actor: AuthenticatedActor, "modify", session: ConsoleSession)
+	if has_role(actor, "external-authenticator", session.fleet);
+
+resource SiloUser {
+	permissions = [
+	    "list_children",
+	    "modify",
+	    "read",
+	    "create_child",
+	];
+	relations = { parent_silo: Silo };
+
+	"list_children" if "viewer" on "parent_silo";
+	"read" if "viewer" on "parent_silo";
+	"modify" if "admin" on "parent_silo";
+	"create_child" if "admin" on "parent_silo";
+}
+has_relation(silo: Silo, "parent_silo", user: SiloUser)
+	if user.silo = silo;
+
+resource SshKey {
+	permissions = [ "read", "modify" ];
+	relations = { silo_user: SiloUser };
+
+	"read" if "read" on "silo_user";
+	"modify" if "modify" on "silo_user";
+}
+has_relation(user: SiloUser, "silo_user", ssh_key: SshKey)
+	if ssh_key.silo_user = user;

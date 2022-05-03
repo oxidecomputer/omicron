@@ -8,13 +8,14 @@ license = "MPL-2.0"
 anyhow = "1.0"
 async-trait = "0.1.53"
 dropshot = { git = "https://github.com/oxidecomputer/dropshot", branch = "main", features = [ "usdt-probes" ] }
+futures = "0.3"
 gateway-messages = { path = "../gateway-messages" }
 hex = "0.4.3"
 omicron-common = { path = "../common" }
 slog-dtrace = "0.2"
 structopt = "0.3"
 thiserror = "1.0"
-toml = "0.5.6"
+toml = "0.5.9"
 
 [dependencies.serde]
 version = "1.0"

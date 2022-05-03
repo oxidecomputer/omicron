@@ -54,7 +54,8 @@ pub enum ClickHouseError {
 impl ClickHouseInstance {
     /// Start a new ClickHouse server
     pub async fn new(port: u16) -> Result<Self, anyhow::Error> {
-        let data_dir = TempDir::new()?;
+        let data_dir = TempDir::new()
+            .context("failed to create tempdir for ClickHouse data")?;
         let log_path = data_dir.path().join("clickhouse-server.log");
         let err_log_path = data_dir.path().join("clickhouse-server.errlog");
         let args = vec![
@@ -72,24 +73,32 @@ impl ClickHouseInstance {
 
         let child = tokio::process::Command::new("clickhouse")
             .args(&args)
-            // ClickHouse internall tees its logs to a file, so we throw away std{in,out,err}
+            // ClickHouse internally tees its logs to a file, so we throw away
+            // std{in,out,err}
             .stdin(Stdio::null())
             .stdout(Stdio::null())
             .stderr(Stdio::null())
-            // By default ClickHouse forks a child if it's been explicitly requested via the
-            // following environment variable, _or_ if it's not attached to a TTY. Avoid this
-            // behavior, so that we can correctly deliver SIGINT. The "watchdog" masks SIGINT,
-            // meaning we'd have to deliver that to the _child_, which is more complicated.
+            // By default ClickHouse forks a child if it's been explicitly
+            // requested via the following environment variable, _or_ if it's
+            // not attached to a TTY. Avoid this behavior, so that we can
+            // correctly deliver SIGINT. The "watchdog" masks SIGINT, meaning
+            // we'd have to deliver that to the _child_, which is more
+            // complicated.
             .env("CLICKHOUSE_WATCHDOG_ENABLE", "0")
-            .spawn()?;
+            .spawn()
+            .with_context(|| {
+                format!("failed to spawn `clickhouse` (with args: {:?})", &args)
+            })?;
 
-        // Wait for the ClickHouse log file to become available, including the port number.
+        // Wait for the ClickHouse log file to become available, including the
+        // port number.
         //
-        // We extract the port number from the log-file regardless of whether we know it already,
-        // as this is a more reliable check that the server is up and listening. Previously we only
-        // did this in the case we need to _learn_ the port, which introduces the possibility that
-        // we return from this function successfully, but the server itself is not yet ready to
-        // accept connections.
+        // We extract the port number from the log-file regardless of whether we
+        // know it already, as this is a more reliable check that the server is
+        // up and listening. Previously we only did this in the case we need to
+        // _learn_ the port, which introduces the possibility that we return
+        // from this function successfully, but the server itself is not yet
+        // ready to accept connections.
         let data_path = data_dir.path().to_path_buf();
         let port = poll::wait_for_condition(
             || async {
@@ -120,7 +129,8 @@ impl ClickHouseInstance {
             &Duration::from_millis(500),
             &CLICKHOUSE_TIMEOUT,
         )
-        .await?;
+        .await
+        .context("waiting to discover ClickHouse port")?;
 
         Ok(Self {
             data_dir: Some(data_dir),

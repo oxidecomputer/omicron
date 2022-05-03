@@ -25,6 +25,7 @@ use omicron_common::backoff;
 use propolis_client::api::DiskRequest;
 use propolis_client::Client as PropolisClient;
 use slog::Logger;
+use std::net::IpAddr;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::task::JoinHandle;
@@ -88,14 +89,14 @@ async fn wait_for_http_server(
     backoff::retry_notify(
         backoff::internal_service_policy(),
         || async {
-            // This request is nonsensical - we don't expect an instance to be
-            // using the nil UUID - but getting a response that isn't a
-            // connection-based error informs us the HTTP server is alive.
-            match client.instance_get(Uuid::nil()).await {
+            // This request is nonsensical - we don't expect an instance to
+            // exist - but getting a response that isn't a connection-based
+            // error informs us the HTTP server is alive.
+            match client.instance_get().await {
                 Ok(_) => return Ok(()),
                 Err(value) => {
                     if let propolis_client::Error::Status(_) = &value {
-                        // This means the propolis server responded to our garbage
+                        // This means the propolis server responded to our
                         // request, instead of a connection error.
                         return Ok(());
                     }
@@ -181,6 +182,9 @@ struct InstanceInner {
     // The ID of the Propolis server (and zone) running this instance
     propolis_id: Uuid,
 
+    // The IP address of the Propolis server running this instance
+    propolis_ip: IpAddr,
+
     // NIC-related properties
     vnic_allocator: VnicAllocator,
     requested_nics: Vec<NetworkInterface>,
@@ -188,6 +192,7 @@ struct InstanceInner {
 
     // Disk related properties
     requested_disks: Vec<DiskRequest>,
+    cloud_init_bytes: Option<String>,
 
     // Internal State management
     state: InstanceStates,
@@ -249,7 +254,7 @@ impl InstanceInner {
             .as_ref()
             .expect("Propolis client should be initialized before usage")
             .client
-            .instance_state_put(*self.id(), request)
+            .instance_state_put(request)
             .await?;
         Ok(())
     }
@@ -294,7 +299,7 @@ impl InstanceInner {
             nics,
             disks: self.requested_disks.clone(),
             migrate,
-            cloud_init_bytes: None,
+            cloud_init_bytes: self.cloud_init_bytes.clone(),
         };
 
         info!(self.log, "Sending ensure request to propolis: {:?}", request);
@@ -422,9 +427,11 @@ impl Instance {
                 vcpus: initial.runtime.ncpus.0 as u8,
             },
             propolis_id: initial.runtime.propolis_uuid,
+            propolis_ip: initial.runtime.propolis_addr.unwrap().ip(),
             vnic_allocator,
             requested_nics: initial.nics,
             requested_disks: initial.disks,
+            cloud_init_bytes: initial.cloud_init_bytes,
             vlan,
             state: InstanceStates::new(initial.runtime),
             running_state: None,
@@ -480,12 +487,12 @@ impl Instance {
         .await?;
 
         let running_zone = RunningZone::boot(installed_zone).await?;
-        let network = running_zone.ensure_address(AddressRequest::Dhcp).await?;
+        let addr_request = AddressRequest::new_static(inner.propolis_ip, None);
+        let network = running_zone.ensure_address(addr_request).await?;
         info!(inner.log, "Created address {} for zone: {}", network, zname);
 
         // Run Propolis in the Zone.
-        let server_addr = SocketAddr::new(network.ip(), PROPOLIS_PORT);
-
+        let server_addr = SocketAddr::new(inner.propolis_ip, PROPOLIS_PORT);
         running_zone.run_cmd(&[
             crate::illumos::zone::SVCCFG,
             "import",
@@ -567,7 +574,7 @@ impl Instance {
 
         let zname = propolis_zone_name(inner.propolis_id());
         warn!(inner.log, "Halting and removing zone: {}", zname);
-        Zones::halt_and_remove(&inner.log, &zname).unwrap();
+        Zones::halt_and_remove_logged(&inner.log, &zname).unwrap();
 
         inner.running_state.as_mut().unwrap().ticket.terminate();
 
@@ -583,19 +590,16 @@ impl Instance {
         //
         // They aren't modified after being initialized, so it's fine to grab
         // a copy.
-        let (instance_id, client) = {
+        let client = {
             let inner = self.inner.lock().await;
-            let id = *inner.id();
-            let client = inner.running_state.as_ref().unwrap().client.clone();
-            (id, client)
+            inner.running_state.as_ref().unwrap().client.clone()
         };
 
         let mut gen = 0;
         loop {
             // State monitoring always returns the most recent state/gen pair
             // known to Propolis.
-            let response =
-                client.instance_state_monitor(instance_id, gen).await?;
+            let response = client.instance_state_monitor(gen).await?;
             let reaction =
                 self.inner.lock().await.observe_state(response.state).await?;
 
@@ -678,7 +682,7 @@ mod test {
                 sled_uuid: Uuid::new_v4(),
                 propolis_uuid: test_propolis_uuid(),
                 dst_propolis_uuid: None,
-                propolis_addr: None,
+                propolis_addr: Some("[fd00:1de::74]:12400".parse().unwrap()),
                 migration_uuid: None,
                 ncpus: InstanceCpuCount(2),
                 memory: ByteCount::from_mebibytes_u32(512),
@@ -688,6 +692,7 @@ mod test {
             },
             nics: vec![],
             disks: vec![],
+            cloud_init_bytes: None,
         }
     }
 

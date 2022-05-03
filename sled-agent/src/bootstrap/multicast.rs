@@ -81,13 +81,7 @@ fn new_ipv6_udp_listener(
     socket.set_reuse_address(true)?;
 
     socket.join_multicast_v6(addr.ip(), interface)?;
-
-    // TODO: I tried binding on the input value of "addr.ip()", but doing so
-    // returns errno 22 ("Invalid Input").
-    //
-    // This may be binding to a larger address range than we want.
-    let bind_address =
-        SocketAddrV6::new(Ipv6Addr::UNSPECIFIED, addr.port(), 0, 0);
+    let bind_address = SocketAddrV6::new(*addr.ip(), addr.port(), 0, 0);
     socket.bind(&(bind_address).into())?;
 
     // Convert from: socket2 -> std -> tokio
@@ -96,99 +90,41 @@ fn new_ipv6_udp_listener(
 
 /// Create a new sending socket, capable of sending IPv6 multicast traffic.
 fn new_ipv6_udp_sender(
+    addr: &Ipv6Addr,
     loopback: bool,
     interface: u32,
 ) -> io::Result<UdpSocket> {
     let socket = new_ipv6_udp_socket()?;
     socket.set_multicast_loop_v6(loopback)?;
     socket.set_multicast_if_v6(interface)?;
-    let address = SocketAddrV6::new(Ipv6Addr::UNSPECIFIED, 0, 0, 0);
+    let address = SocketAddrV6::new(*addr, 0, 0, 0);
     socket.bind(&address.into())?;
 
     UdpSocket::from_std(std::net::UdpSocket::from(socket))
 }
 
+pub fn multicast_address() -> SocketAddrV6 {
+    let scope = Ipv6MulticastScope::LinkLocal.first_hextet();
+    SocketAddrV6::new(Ipv6Addr::new(scope, 0, 0, 0, 0, 0, 0, 0x1), 7645, 0, 0)
+}
+
 /// Returns the (sender, receiver) sockets of an IPv6 UDP multicast group.
 ///
-/// * `address`: The address to use. Consider a value from:
-/// <https://www.iana.org/assignments/ipv6-multicast-addresses/ipv6-multicast-addresses.xhtml>,
-/// and the [`Ipv6MulticastScope`] helper to provide the first hextet.
+/// * `address`: The address to use for sending.
 /// * `loopback`: If true, the receiver packet will see multicast packets sent
 /// on our sender, in addition to those sent by everyone else in the multicast
 /// group.
 /// * `interface`: The index of the interface to join (zero indicates "any
 /// interface").
 pub fn new_ipv6_udp_pair(
-    address: &SocketAddrV6,
+    address: &Ipv6Addr,
     loopback: bool,
     interface: u32,
 ) -> io::Result<(UdpSocket, UdpSocket)> {
-    let sender = new_ipv6_udp_sender(loopback, interface)?;
-    let listener = new_ipv6_udp_listener(address, interface)?;
+    let sender = new_ipv6_udp_sender(&address, loopback, interface)?;
+    let listener = new_ipv6_udp_listener(&multicast_address(), interface)?;
 
     Ok((sender, listener))
 }
 
-#[cfg(test)]
-mod test {
-    use super::*;
-
-    // NOTE: This test is ignored by default - it relies on a networking
-    // setup that isn't consistent between our automated test infrastructure.
-    // It can still be run locally with:
-    //
-    // $ cargo test -p omicron-sled-agent -- --ignored
-    #[tokio::test]
-    #[ignore]
-    async fn test_multicast_ipv6() {
-        let message = b"Hello World!";
-        let scope = Ipv6MulticastScope::LinkLocal.first_hextet();
-        let address = SocketAddrV6::new(
-            Ipv6Addr::new(scope, 0, 0, 0, 0, 0, 0, 0x1),
-            7645,
-            0,
-            0,
-        );
-
-        // For this test, we want to see our own transmission.
-        // Unlike most usage in the Sled Agent, this means we want
-        // loopback to be enabled.
-        let loopback = true;
-        let interface = 0;
-        let (sender, listener) =
-            new_ipv6_udp_pair(&address, loopback, interface).unwrap();
-
-        // Create a receiver task which reads for messages that have
-        // been broadcast, verifies the message, and returns the
-        // calling address.
-        let receiver_task_handle = tokio::task::spawn(async move {
-            let mut buf = vec![0u8; 32];
-            let (len, addr) = listener.recv_from(&mut buf).await?;
-            assert_eq!(message.len(), len);
-            assert_eq!(message, &buf[..message.len()]);
-            Ok::<_, io::Error>(addr)
-        });
-
-        // Send a message repeatedly, and exit successfully if we
-        // manage to receive the response.
-        tokio::pin!(receiver_task_handle);
-        let mut send_count = 0;
-        loop {
-            tokio::select! {
-                result = sender.send_to(message, address) => {
-                    assert_eq!(message.len(), result.unwrap());
-                    send_count += 1;
-                    if send_count > 10 {
-                        panic!("10 multicast UDP messages sent with no response");
-                    }
-                    tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
-                }
-                result = &mut receiver_task_handle => {
-                    let addr = result.unwrap().unwrap();
-                    eprintln!("Receiver received message: {:#?}", addr);
-                    break;
-                }
-            }
-        }
-    }
-}
+// Refer to sled-agent/tests/integration_tests/multicast.rs for tests.

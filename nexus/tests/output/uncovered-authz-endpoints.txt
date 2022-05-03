@@ -1,8 +1,8 @@
 API endpoints with no coverage in authz tests:
-silos_delete_silo                        (delete "/silos/{silo_name}")
+sshkeys_delete_key                       (delete "/session/me/sshkeys/{ssh_key_name}")
 session_me                               (get    "/session/me")
-silos_get                                (get    "/silos")
-silos_get_silo                           (get    "/silos/{silo_name}")
+sshkeys_get                              (get    "/session/me/sshkeys")
+sshkeys_get_key                          (get    "/session/me/sshkeys/{ssh_key_name}")
 spoof_login                              (post   "/login")
 logout                                   (post   "/logout")
-silos_post                               (post   "/silos")
+sshkeys_post                             (post   "/session/me/sshkeys")

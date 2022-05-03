@@ -15,6 +15,8 @@ use crate::db::model::DatasetKind;
 use crate::db::model::Name;
 use crate::db::model::RouterRoute;
 use crate::db::model::SiloUser;
+use crate::db::model::SshKey;
+use crate::db::model::UpdateArtifactKind;
 use crate::db::model::VpcRouter;
 use crate::db::model::VpcRouterKind;
 use crate::db::model::VpcSubnet;
@@ -72,8 +74,10 @@ use sled_agent_client::Client as SledAgentClient;
 use slog::Logger;
 use std::convert::{TryFrom, TryInto};
 use std::net::SocketAddr;
+use std::net::SocketAddrV6;
 use std::num::NonZeroU32;
 use std::path::Path;
+use std::str::FromStr;
 use std::sync::Arc;
 use std::time::Duration;
 use steno::SagaId;
@@ -103,18 +107,13 @@ pub trait TestInterfaces {
         id: &Uuid,
     ) -> Result<Arc<SledAgentClient>, Error>;
 
-    async fn session_create_with(
-        &self,
-        session: db::model::ConsoleSession,
-    ) -> CreateResult<db::model::ConsoleSession>;
-
     async fn set_disk_as_faulted(&self, disk_id: &Uuid) -> Result<bool, Error>;
 
     async fn silo_user_create(
         &self,
         silo_id: Uuid,
         silo_user_id: Uuid,
-    ) -> CreateResult<SiloUser>;
+    ) -> Result<(), Error>;
 }
 
 pub static BASE_ARTIFACT_DIR: &str = "/var/tmp/oxide_artifacts";
@@ -160,6 +159,9 @@ pub struct Nexus {
 
     /// Operational context used for Instance allocation
     opctx_alloc: OpContext,
+
+    /// Operational context used for external request authentication
+    opctx_external_authn: OpContext,
 }
 
 // TODO Is it possible to make some of these operations more generic?  A
@@ -228,6 +230,12 @@ impl Nexus {
                 authn::Context::internal_read(),
                 Arc::clone(&db_datastore),
             ),
+            opctx_external_authn: OpContext::for_background(
+                log.new(o!("component" => "ExternalAuthn")),
+                Arc::clone(&authz),
+                authn::Context::external_authn(),
+                Arc::clone(&db_datastore),
+            ),
         };
 
         // TODO-cleanup all the extra Arcs here seems wrong
@@ -271,6 +279,11 @@ impl Nexus {
                 }
             };
         }
+    }
+
+    /// Returns an [`OpContext`] used for authenticating external requests
+    pub fn opctx_external_authn(&self) -> &OpContext {
+        &self.opctx_external_authn
     }
 
     /// Used as the body of a "stub" endpoint -- one that's currently
@@ -465,7 +478,7 @@ impl Nexus {
     pub async fn upsert_sled(
         &self,
         id: Uuid,
-        address: SocketAddr,
+        address: SocketAddrV6,
     ) -> Result<(), Error> {
         info!(self.log, "registered sled agent"; "sled_uuid" => id.to_string());
         let sled = db::model::Sled::new(id, address);
@@ -700,7 +713,11 @@ impl Nexus {
         opctx: &OpContext,
         name: &Name,
     ) -> LookupResult<db::model::Silo> {
-        self.db_datastore.silo_fetch(opctx, name).await
+        let (.., db_silo) = LookupPath::new(opctx, &self.db_datastore)
+            .silo_name(name)
+            .fetch()
+            .await?;
+        Ok(db_silo)
     }
 
     pub async fn silos_list_by_name(
@@ -724,7 +741,12 @@ impl Nexus {
         opctx: &OpContext,
         name: &Name,
     ) -> DeleteResult {
-        self.db_datastore.silo_delete(opctx, name).await
+        let (.., authz_silo, db_silo) =
+            LookupPath::new(opctx, &self.db_datastore)
+                .silo_name(name)
+                .fetch_for(authz::Action::Delete)
+                .await?;
+        self.db_datastore.silo_delete(opctx, &authz_silo, &db_silo).await
     }
 
     // Organizations
@@ -734,10 +756,7 @@ impl Nexus {
         opctx: &OpContext,
         new_organization: &params::OrganizationCreate,
     ) -> CreateResult<db::model::Organization> {
-        let silo_id = opctx.authn.silo_required()?;
-        let db_org =
-            db::model::Organization::new(new_organization.clone(), silo_id);
-        self.db_datastore.organization_create(opctx, db_org).await
+        self.db_datastore.organization_create(opctx, new_organization).await
     }
 
     pub async fn organization_fetch(
@@ -873,7 +892,7 @@ impl Nexus {
         organization_name: &Name,
         pagparams: &DataPageParams<'_, Name>,
     ) -> ListResultVec<db::model::Project> {
-        let (authz_org,) = LookupPath::new(opctx, &self.db_datastore)
+        let (.., authz_org) = LookupPath::new(opctx, &self.db_datastore)
             .organization_name(organization_name)
             .lookup_for(authz::Action::CreateChild)
             .await?;
@@ -888,7 +907,7 @@ impl Nexus {
         organization_name: &Name,
         pagparams: &DataPageParams<'_, Uuid>,
     ) -> ListResultVec<db::model::Project> {
-        let (authz_org,) = LookupPath::new(opctx, &self.db_datastore)
+        let (.., authz_org) = LookupPath::new(opctx, &self.db_datastore)
             .organization_name(organization_name)
             .lookup_for(authz::Action::CreateChild)
             .await?;
@@ -960,13 +979,70 @@ impl Nexus {
             .lookup_for(authz::Action::CreateChild)
             .await?;
 
-        // Until we implement snapshots, do not allow disks to be created with a
-        // snapshot id.
-        if params.snapshot_id.is_some() {
-            return Err(Error::InvalidValue {
-                label: String::from("snapshot_id"),
-                message: String::from("snapshots are not yet supported"),
-            });
+        match &params.disk_source {
+            params::DiskSource::Blank { block_size } => {
+                // Reject disks where the block size doesn't evenly divide the
+                // total size
+                if (params.size.to_bytes() % block_size.0 as u64) != 0 {
+                    return Err(Error::InvalidValue {
+                        label: String::from("size and block_size"),
+                        message: String::from(
+                            "total size must be a multiple of block size",
+                        ),
+                    });
+                }
+            }
+            params::DiskSource::Snapshot { snapshot_id: _ } => {
+                // Until we implement snapshots, do not allow disks to be
+                // created from a snapshot.
+                return Err(Error::InvalidValue {
+                    label: String::from("snapshot"),
+                    message: String::from("snapshots are not yet supported"),
+                });
+            }
+            params::DiskSource::Image { image_id: _ } => {
+                // Until we implement project images, do not allow disks to be
+                // created from a project image.
+                return Err(Error::InvalidValue {
+                    label: String::from("image"),
+                    message: String::from(
+                        "project image are not yet supported",
+                    ),
+                });
+            }
+            params::DiskSource::GlobalImage { image_id } => {
+                let (.., db_global_image) =
+                    LookupPath::new(opctx, &self.db_datastore)
+                        .global_image_id(*image_id)
+                        .fetch()
+                        .await?;
+
+                // Reject disks where the block size doesn't evenly divide the
+                // total size
+                if (params.size.to_bytes()
+                    % db_global_image.block_size.to_bytes() as u64)
+                    != 0
+                {
+                    return Err(Error::InvalidValue {
+                        label: String::from("size and block_size"),
+                        message: String::from(
+                            "total size must be a multiple of global image's block size",
+                        ),
+                    });
+                }
+
+                // If the size of the image is greater than the size of the
+                // disk, return an error.
+                if db_global_image.size.to_bytes() > params.size.to_bytes() {
+                    return Err(Error::invalid_request(
+                        &format!(
+                            "disk size {} must be greater than or equal to image size {}",
+                            params.size.to_bytes(),
+                            db_global_image.size.to_bytes(),
+                        ),
+                    ));
+                }
+            }
         }
 
         let saga_params = Arc::new(sagas::ParamsDiskCreate {
@@ -1031,35 +1107,155 @@ impl Nexus {
         Ok(())
     }
 
-    pub async fn images_list(
+    pub async fn global_images_list(
         &self,
         opctx: &OpContext,
-        _pagparams: &DataPageParams<'_, Name>,
-    ) -> ListResultVec<db::model::Image> {
-        Err(self.unimplemented_todo(opctx, Unimpl::Public).await)
+        pagparams: &DataPageParams<'_, Name>,
+    ) -> ListResultVec<db::model::GlobalImage> {
+        self.db_datastore.global_image_list_images(opctx, pagparams).await
     }
 
-    pub async fn image_create(
+    pub async fn global_image_create(
         self: &Arc<Self>,
         opctx: &OpContext,
-        _params: &params::ImageCreate,
-    ) -> CreateResult<db::model::Image> {
-        Err(self.unimplemented_todo(opctx, Unimpl::Public).await)
+        params: &params::ImageCreate,
+    ) -> CreateResult<db::model::GlobalImage> {
+        let new_image = match &params.source {
+            params::ImageSource::Url(url) => {
+                let db_block_size = db::model::BlockSize::try_from(
+                    params.block_size,
+                )
+                .map_err(|e| Error::InvalidValue {
+                    label: String::from("block_size"),
+                    message: format!("block_size is invalid: {}", e),
+                })?;
+
+                let volume_construction_request = sled_agent_client::types::VolumeConstructionRequest::Volume {
+                    block_size: db_block_size.to_bytes().into(),
+                    sub_volumes: vec![
+                        sled_agent_client::types::VolumeConstructionRequest::Url {
+                            block_size: db_block_size.to_bytes().into(),
+                            url: url.clone(),
+                        }
+                    ],
+                    read_only_parent: None,
+                };
+
+                let volume_data =
+                    serde_json::to_string(&volume_construction_request)?;
+
+                // use reqwest to query url for size
+                let response =
+                    reqwest::Client::new().head(url).send().await.map_err(
+                        |e| Error::InvalidValue {
+                            label: String::from("url"),
+                            message: format!("error querying url: {}", e),
+                        },
+                    )?;
+
+                if !response.status().is_success() {
+                    return Err(Error::InvalidValue {
+                        label: String::from("url"),
+                        message: format!(
+                            "querying url returned: {}",
+                            response.status()
+                        ),
+                    });
+                }
+
+                // grab total size from content length
+                let content_length = response
+                    .headers()
+                    .get(reqwest::header::CONTENT_LENGTH)
+                    .ok_or("no content length!")
+                    .map_err(|e| Error::InvalidValue {
+                        label: String::from("url"),
+                        message: format!("error querying url: {}", e),
+                    })?;
+
+                let total_size =
+                    u64::from_str(content_length.to_str().map_err(|e| {
+                        Error::InvalidValue {
+                            label: String::from("url"),
+                            message: format!("content length invalid: {}", e),
+                        }
+                    })?)
+                    .map_err(|e| {
+                        Error::InvalidValue {
+                            label: String::from("url"),
+                            message: format!("content length invalid: {}", e),
+                        }
+                    })?;
+
+                let size: external::ByteCount = total_size.try_into().map_err(
+                    |e: external::ByteCountRangeError| Error::InvalidValue {
+                        label: String::from("size"),
+                        message: format!("total size is invalid: {}", e),
+                    },
+                )?;
+
+                // validate total size is divisible by block size
+                let block_size: u64 = params.block_size.into();
+                if (size.to_bytes() % block_size) != 0 {
+                    return Err(Error::InvalidValue {
+                        label: String::from("size"),
+                        message: format!(
+                            "total size {} must be divisible by block size {}",
+                            size.to_bytes(),
+                            block_size
+                        ),
+                    });
+                }
+
+                // for images backed by a url, store the ETag as the version
+                let etag = response
+                    .headers()
+                    .get(reqwest::header::ETAG)
+                    .and_then(|x| x.to_str().ok())
+                    .map(|x| x.to_string());
+
+                let new_image_volume =
+                    db::model::Volume::new(Uuid::new_v4(), volume_data);
+                let volume =
+                    self.db_datastore.volume_create(new_image_volume).await?;
+
+                db::model::GlobalImage {
+                    identity: db::model::GlobalImageIdentity::new(
+                        Uuid::new_v4(),
+                        params.identity.clone(),
+                    ),
+                    volume_id: volume.id(),
+                    url: Some(url.clone()),
+                    version: etag,
+                    digest: None, // not computed for URL type
+                    block_size: db_block_size,
+                    size: size.into(),
+                }
+            }
+
+            params::ImageSource::Snapshot(_id) => {
+                return Err(Error::unavail(
+                    &"creating images from snapshots not supported",
+                ));
+            }
+        };
+
+        self.db_datastore.global_image_create_image(opctx, new_image).await
     }
 
-    pub async fn image_fetch(
+    pub async fn global_image_fetch(
         &self,
         opctx: &OpContext,
         image_name: &Name,
-    ) -> LookupResult<db::model::Image> {
-        let lookup_type = LookupType::ByName(image_name.to_string());
-        let error = lookup_type.into_not_found(ResourceType::Image);
-        Err(self
-            .unimplemented_todo(opctx, Unimpl::ProtectedLookup(error))
-            .await)
+    ) -> LookupResult<db::model::GlobalImage> {
+        let (.., db_disk) = LookupPath::new(opctx, &self.db_datastore)
+            .global_image_name(image_name)
+            .fetch()
+            .await?;
+        Ok(db_disk)
     }
 
-    pub async fn image_delete(
+    pub async fn global_image_delete(
         self: &Arc<Self>,
         opctx: &OpContext,
         image_name: &Name,
@@ -1677,6 +1873,9 @@ impl Nexus {
             ),
             nics: nics.iter().map(|nic| nic.clone().into()).collect(),
             disks: disk_reqs,
+            cloud_init_bytes: Some(base64::encode(
+                db_instance.generate_cidata()?,
+            )),
         };
 
         let sa = self.instance_sled(&db_instance).await?;
@@ -1731,14 +1930,14 @@ impl Nexus {
         instance_name: &Name,
         disk_name: &Name,
     ) -> UpdateResult<db::model::Disk> {
-        let (_, authz_project, authz_disk, db_disk) =
+        let (.., authz_project, authz_disk, db_disk) =
             LookupPath::new(opctx, &self.db_datastore)
                 .organization_name(organization_name)
                 .project_name(project_name)
                 .disk_name(disk_name)
                 .fetch()
                 .await?;
-        let (_, _, authz_instance, db_instance) =
+        let (.., authz_instance, db_instance) =
             LookupPath::new(opctx, &self.db_datastore)
                 .project_id(authz_project.id())
                 .instance_name(instance_name)
@@ -1880,14 +2079,14 @@ impl Nexus {
         instance_name: &Name,
         disk_name: &Name,
     ) -> UpdateResult<db::model::Disk> {
-        let (_, authz_project, authz_disk, db_disk) =
+        let (.., authz_project, authz_disk, db_disk) =
             LookupPath::new(opctx, &self.db_datastore)
                 .organization_name(organization_name)
                 .project_name(project_name)
                 .disk_name(disk_name)
                 .fetch()
                 .await?;
-        let (_, _, authz_instance, db_instance) =
+        let (.., authz_instance, db_instance) =
             LookupPath::new(opctx, &self.db_datastore)
                 .project_id(authz_project.id())
                 .instance_name(instance_name)
@@ -2029,7 +2228,7 @@ impl Nexus {
         instance_name: &Name,
         params: &params::NetworkInterfaceCreate,
     ) -> CreateResult<db::model::NetworkInterface> {
-        let (_, authz_project, authz_instance, db_instance) =
+        let (.., authz_project, authz_instance, db_instance) =
             LookupPath::new(opctx, &self.db_datastore)
                 .organization_name(organization_name)
                 .project_name(project_name)
@@ -2353,8 +2552,8 @@ impl Nexus {
                 .fetch()
                 .await?;
 
-        let authz_vpc_router = authz_vpc.child_generic(
-            ResourceType::VpcRouter,
+        let authz_vpc_router = authz::VpcRouter::new(
+            authz_vpc.clone(),
             db_vpc.system_router_id,
             LookupType::ById(db_vpc.system_router_id),
         );
@@ -2928,10 +3127,9 @@ impl Nexus {
                 })
             }
         }
-        Ok(self
-            .db_datastore
+        self.db_datastore
             .router_update_route(&opctx, &authz_route, params.clone().into())
-            .await?)
+            .await
     }
 
     // Racks.  We simulate just one for now.
@@ -2964,8 +3162,11 @@ impl Nexus {
         opctx: &OpContext,
         rack_id: &Uuid,
     ) -> LookupResult<db::model::Rack> {
-        let authz_rack = authz::FLEET
-            .child_generic(ResourceType::Rack, LookupType::ById(*rack_id));
+        let authz_rack = authz::Rack::new(
+            authz::FLEET,
+            *rack_id,
+            LookupType::ById(*rack_id),
+        );
         opctx.authorize(authz::Action::Read, &authz_rack).await?;
 
         if *rack_id == self.rack_id {
@@ -2990,9 +3191,11 @@ impl Nexus {
         opctx: &OpContext,
         sled_id: &Uuid,
     ) -> LookupResult<db::model::Sled> {
-        let authz_sled =
-            authz::FLEET.sled(*sled_id, LookupType::ById(*sled_id));
-        self.db_datastore.sled_fetch(&opctx, &authz_sled).await
+        let (.., db_sled) = LookupPath::new(opctx, &self.db_datastore)
+            .sled_id(*sled_id)
+            .fetch()
+            .await?;
+        Ok(db_sled)
     }
 
     // Sagas
@@ -3050,7 +3253,11 @@ impl Nexus {
         opctx: &OpContext,
         name: &Name,
     ) -> LookupResult<db::model::UserBuiltin> {
-        self.db_datastore.user_builtin_fetch(opctx, name).await
+        let (.., db_user_builtin) = LookupPath::new(opctx, &self.db_datastore)
+            .user_builtin_name(name)
+            .fetch()
+            .await?;
+        Ok(db_user_builtin)
     }
 
     // Built-in roles
@@ -3068,7 +3275,11 @@ impl Nexus {
         opctx: &OpContext,
         name: &str,
     ) -> LookupResult<db::model::RoleBuiltin> {
-        self.db_datastore.role_builtin_fetch(opctx, name).await
+        let (.., db_role_builtin) = LookupPath::new(opctx, &self.db_datastore)
+            .role_builtin_name(name)
+            .fetch()
+            .await?;
+        Ok(db_role_builtin)
     }
 
     // Internal control plane interfaces.
@@ -3255,16 +3466,32 @@ impl Nexus {
 
     pub async fn session_fetch(
         &self,
+        opctx: &OpContext,
         token: String,
     ) -> LookupResult<authn::ConsoleSessionWithSiloId> {
-        self.db_datastore.session_fetch(token).await
+        let (.., db_console_session) =
+            LookupPath::new(opctx, &self.db_datastore)
+                .console_session_token(&token)
+                .fetch()
+                .await?;
+
+        let (.., db_silo_user) = LookupPath::new(opctx, &self.db_datastore)
+            .silo_user_id(db_console_session.silo_user_id)
+            .fetch()
+            .await?;
+
+        Ok(authn::ConsoleSessionWithSiloId {
+            console_session: db_console_session,
+            silo_id: db_silo_user.silo_id,
+        })
     }
 
     pub async fn session_create(
         &self,
+        opctx: &OpContext,
         user_id: Uuid,
     ) -> CreateResult<db::model::ConsoleSession> {
-        if !self.login_allowed(user_id).await? {
+        if !self.login_allowed(opctx, user_id).await? {
             return Err(Error::Unauthenticated {
                 internal_message: "User not allowed to login".to_string(),
             });
@@ -3273,19 +3500,34 @@ impl Nexus {
         let session =
             db::model::ConsoleSession::new(generate_session_token(), user_id);
 
-        Ok(self.db_datastore.session_create(session).await?)
+        self.db_datastore.session_create(opctx, session).await
     }
 
     // update last_used to now
     pub async fn session_update_last_used(
         &self,
-        token: String,
+        opctx: &OpContext,
+        token: &str,
     ) -> UpdateResult<authn::ConsoleSessionWithSiloId> {
-        Ok(self.db_datastore.session_update_last_used(token).await?)
+        let authz_session = authz::ConsoleSession::new(
+            authz::FLEET,
+            token.to_string(),
+            LookupType::ByCompositeId(token.to_string()),
+        );
+        self.db_datastore.session_update_last_used(opctx, &authz_session).await
     }
 
-    pub async fn session_hard_delete(&self, token: String) -> DeleteResult {
-        self.db_datastore.session_hard_delete(token).await
+    pub async fn session_hard_delete(
+        &self,
+        opctx: &OpContext,
+        token: &str,
+    ) -> DeleteResult {
+        let authz_session = authz::ConsoleSession::new(
+            authz::FLEET,
+            token.to_string(),
+            LookupType::ByCompositeId(token.to_string()),
+        );
+        self.db_datastore.session_hard_delete(opctx, &authz_session).await
     }
 
     fn tuf_base_url(&self) -> Option<String> {
@@ -3402,9 +3644,13 @@ impl Nexus {
 
         // We cache the artifact based on its checksum, so fetch that from the
         // database.
-        let artifact_entry = self
-            .db_datastore
-            .update_available_artifact_fetch(opctx, &artifact)
+        let (.., artifact_entry) = LookupPath::new(opctx, &self.db_datastore)
+            .update_available_artifact_tuple(
+                &artifact.name,
+                artifact.version,
+                UpdateArtifactKind(artifact.kind),
+            )
+            .fetch()
             .await?;
         let filename = format!(
             "{}.{}.{}-{}",
@@ -3530,10 +3776,16 @@ impl Nexus {
         Ok(body)
     }
 
-    async fn login_allowed(&self, silo_user_id: Uuid) -> Result<bool, Error> {
+    async fn login_allowed(
+        &self,
+        opctx: &OpContext,
+        silo_user_id: Uuid,
+    ) -> Result<bool, Error> {
         // Was this silo user deleted?
-        let fetch_result =
-            self.db_datastore.silo_user_fetch(silo_user_id).await;
+        let fetch_result = LookupPath::new(opctx, &self.db_datastore)
+            .silo_user_id(silo_user_id)
+            .fetch()
+            .await;
 
         match fetch_result {
             Err(e) => {
@@ -3560,9 +3812,76 @@ impl Nexus {
 
     pub async fn silo_user_fetch(
         &self,
+        opctx: &OpContext,
         silo_user_id: Uuid,
-    ) -> LookupResult<SiloUser> {
-        self.db_datastore.silo_user_fetch(silo_user_id).await
+    ) -> LookupResult<db::model::SiloUser> {
+        let (.., db_silo_user) = LookupPath::new(opctx, &self.datastore())
+            .silo_user_id(silo_user_id)
+            .fetch()
+            .await?;
+        Ok(db_silo_user)
+    }
+
+    // SSH public keys
+
+    pub async fn ssh_keys_list(
+        &self,
+        opctx: &OpContext,
+        silo_user_id: Uuid,
+        page_params: &DataPageParams<'_, Name>,
+    ) -> ListResultVec<SshKey> {
+        let (.., authz_user) = LookupPath::new(opctx, &self.datastore())
+            .silo_user_id(silo_user_id)
+            .lookup_for(authz::Action::ListChildren)
+            .await?;
+        assert_eq!(authz_user.id(), silo_user_id);
+        self.db_datastore.ssh_keys_list(opctx, &authz_user, page_params).await
+    }
+
+    pub async fn ssh_key_fetch(
+        &self,
+        opctx: &OpContext,
+        silo_user_id: Uuid,
+        ssh_key_name: &Name,
+    ) -> LookupResult<SshKey> {
+        let (.., ssh_key) = LookupPath::new(opctx, &self.datastore())
+            .silo_user_id(silo_user_id)
+            .ssh_key_name(ssh_key_name)
+            .fetch()
+            .await?;
+        assert_eq!(ssh_key.name(), ssh_key_name);
+        Ok(ssh_key)
+    }
+
+    pub async fn ssh_key_create(
+        &self,
+        opctx: &OpContext,
+        silo_user_id: Uuid,
+        params: params::SshKeyCreate,
+    ) -> CreateResult<db::model::SshKey> {
+        let ssh_key = db::model::SshKey::new(silo_user_id, params);
+        let (.., authz_user) = LookupPath::new(opctx, &self.datastore())
+            .silo_user_id(silo_user_id)
+            .lookup_for(authz::Action::CreateChild)
+            .await?;
+        assert_eq!(authz_user.id(), silo_user_id);
+        self.db_datastore.ssh_key_create(opctx, &authz_user, ssh_key).await
+    }
+
+    pub async fn ssh_key_delete(
+        &self,
+        opctx: &OpContext,
+        silo_user_id: Uuid,
+        ssh_key_name: &Name,
+    ) -> DeleteResult {
+        let (.., authz_user, authz_ssh_key) =
+            LookupPath::new(opctx, &self.datastore())
+                .silo_user_id(silo_user_id)
+                .ssh_key_name(ssh_key_name)
+                .lookup_for(authz::Action::Delete)
+                .await?;
+        assert_eq!(authz_user.id(), silo_user_id);
+        self.db_datastore.ssh_key_delete(opctx, &authz_ssh_key).await
     }
 }
 
@@ -3630,13 +3949,6 @@ impl TestInterfaces for Nexus {
         self.instance_sled(&db_instance).await
     }
 
-    async fn session_create_with(
-        &self,
-        session: db::model::ConsoleSession,
-    ) -> CreateResult<db::model::ConsoleSession> {
-        Ok(self.db_datastore.session_create(session).await?)
-    }
-
     async fn set_disk_as_faulted(&self, disk_id: &Uuid) -> Result<bool, Error> {
         let opctx = OpContext::for_tests(
             self.log.new(o!()),
@@ -3660,8 +3972,8 @@ impl TestInterfaces for Nexus {
         &self,
         silo_id: Uuid,
         silo_user_id: Uuid,
-    ) -> CreateResult<SiloUser> {
+    ) -> Result<(), Error> {
         let silo_user = SiloUser::new(silo_id, silo_user_id);
-        Ok(self.db_datastore.silo_user_create(silo_user).await?)
+        self.db_datastore.silo_user_create(silo_user).await
     }
 }

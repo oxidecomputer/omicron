@@ -8,6 +8,8 @@
 
 use proc_macro2::TokenStream;
 use quote::{format_ident, quote};
+use serde_tokenstream::ParseWrapper;
+use std::ops::Deref;
 
 //
 // INPUT (arguments to the macro)
@@ -34,27 +36,18 @@ pub struct Input {
     /// unordered list of resources that are direct children of this resource
     /// (e.g., for a Project, these would include "Instance" and "Disk")
     children: Vec<String>,
-    /// describes how the authz object for a resource is constructed from its
-    /// parent's authz object
-    authz_kind: AuthzKind,
+    /// whether lookup by name is supported (usually within the parent collection)
+    lookup_by_name: bool,
+    /// Description of the primary key columns
+    primary_key_columns: Vec<PrimaryKeyColumn>,
+    /// This resources supports soft-deletes
+    soft_deletes: bool,
 }
 
-/// Describes how the authz object for a resource is constructed from its
-/// parent's authz object
-///
-/// By "authz object", we mean the objects in nexus/src/authz/api_resources.rs.
-///
-/// This ought to be made more uniform with more typed authz objects, but that's
-/// not the way they work today.
 #[derive(serde::Deserialize)]
-enum AuthzKind {
-    /// The authz object is constructed using
-    /// `authz_parent.child_generic(ResourceType, Uuid, LookupType)`
-    Generic,
-
-    /// The authz object is constructed using
-    /// `authz_parent.$resource_type(Uuid, LookupType)`.
-    Typed,
+struct PrimaryKeyColumn {
+    column_name: String,
+    rust_type: ParseWrapper<syn::Type>,
 }
 
 //
@@ -71,8 +64,14 @@ pub struct Config {
     /// Basic information about the resource we're generating
     resource: Resource,
 
-    /// See [`AuthzKind`]
-    authz_kind: AuthzKind,
+    /// This resources supports soft-deletes
+    soft_deletes: bool,
+
+    /// This resource is nested under the Silo hierarchy
+    siloed: bool,
+
+    /// Name of the enum describing how we're looking up this resource
+    lookup_enum: syn::Ident,
 
     // The path to the resource
     /// list of type names for this resource and its parents
@@ -80,8 +79,8 @@ pub struct Config {
     path_types: Vec<syn::Ident>,
 
     /// list of identifiers used for the authz objects for this resource and its
-    /// parents, in the same order as `authz_path_types`
-    /// (e.g., [`authz_organization`, `authz_project`])
+    /// parents, in the same order as `authz_path_types` (e.g.,
+    /// [`authz_organization`, `authz_project`])
     path_authz_names: Vec<syn::Ident>,
 
     // Child resources
@@ -92,11 +91,18 @@ pub struct Config {
     // Parent resource, if any
     /// Information about the parent resource, if any
     parent: Option<Resource>,
+
+    /// whether lookup by name is supported
+    lookup_by_name: bool,
+
+    /// Description of the primary key columns
+    primary_key_columns: Vec<PrimaryKeyColumn>,
 }
 
 impl Config {
     fn for_input(input: Input) -> Config {
         let resource = Resource::for_name(&input.name);
+        let lookup_enum = format_ident!("{}Key", resource.name);
 
         let mut path_types: Vec<_> =
             input.ancestors.iter().map(|a| format_ident!("{}", a)).collect();
@@ -111,13 +117,21 @@ impl Config {
             .collect();
         path_authz_names.push(resource.authz_name.clone());
 
+        let child_resources = input.children;
+        let parent = input.ancestors.last().map(|s| Resource::for_name(&s));
+        let siloed = input.ancestors.iter().any(|s| s == "Silo");
+
         Config {
             resource,
-            authz_kind: input.authz_kind,
+            siloed,
+            lookup_enum,
             path_types,
             path_authz_names,
-            parent: input.ancestors.last().map(|s| Resource::for_name(&s)),
-            child_resources: input.children,
+            parent,
+            child_resources,
+            lookup_by_name: input.lookup_by_name,
+            primary_key_columns: input.primary_key_columns,
+            soft_deletes: input.soft_deletes,
         }
     }
 }
@@ -148,7 +162,7 @@ impl Resource {
 // MACRO IMPLEMENTATION
 //
 
-/// Implementation of [`lookup_resource!]'.
+/// Implementation of [`lookup_resource!`]
 pub fn lookup_resource(
     raw_input: TokenStream,
 ) -> Result<TokenStream, syn::Error> {
@@ -156,14 +170,14 @@ pub fn lookup_resource(
     let config = Config::for_input(input);
 
     let resource_name = &config.resource.name;
-    let the_struct = generate_struct(&config);
+    let the_basics = generate_struct(&config);
     let misc_helpers = generate_misc_helpers(&config);
     let child_selectors = generate_child_selectors(&config);
     let lookup_methods = generate_lookup_methods(&config);
     let database_functions = generate_database_functions(&config);
 
     Ok(quote! {
-        #the_struct
+        #the_basics
 
         impl<'a> #resource_name<'a> {
             #child_selectors
@@ -179,20 +193,52 @@ pub fn lookup_resource(
 
 /// Generates the struct definition for this resource
 fn generate_struct(config: &Config) -> TokenStream {
-    let root_sym = format_ident!("Root");
     let resource_name = &config.resource.name;
-    let parent_resource_name =
-        config.parent.as_ref().map(|p| &p.name).unwrap_or_else(|| &root_sym);
     let doc_struct = format!(
         "Selects a resource of type {} (or any of its children, using the \
         functions on this struct) for lookup or fetch",
         resource_name
     );
+    let pkey_types =
+        config.primary_key_columns.iter().map(|c| c.rust_type.deref());
+
+    /* configure the lookup enum */
+    let lookup_enum = &config.lookup_enum;
+    let name_variant = if config.lookup_by_name {
+        let root_sym = format_ident!("Root");
+        let parent_resource_name = config
+            .parent
+            .as_ref()
+            .map(|p| &p.name)
+            .unwrap_or_else(|| &root_sym);
+        quote! {
+            /// We're looking for a resource with the given name in the given
+            /// parent collection
+            Name(#parent_resource_name<'a>, &'a Name),
+        }
+    } else {
+        quote! {}
+    };
 
     quote! {
         #[doc = #doc_struct]
         pub struct #resource_name<'a> {
-            key: Key<'a, #parent_resource_name<'a>>
+            key: #lookup_enum<'a>
+        }
+
+        /// Describes how we're looking up this resource
+        enum #lookup_enum<'a>{
+            /// An error occurred while selecting the resource
+            ///
+            /// This error will be returned by any lookup/fetch attempts.
+            Error(Root<'a>, Error),
+
+            #name_variant
+
+            /// We're looking for a resource with the given primary key
+            ///
+            /// This has no parent container -- a by-id lookup is always global
+            PrimaryKey(Root<'a> #(,#pkey_types)*),
         }
     }
 }
@@ -205,6 +251,11 @@ fn generate_struct(config: &Config) -> TokenStream {
 fn generate_child_selectors(config: &Config) -> TokenStream {
     let child_resource_types: Vec<_> =
         config.child_resources.iter().map(|c| format_ident!("{}", c)).collect();
+    let child_resource_key_types: Vec<_> = config
+        .child_resources
+        .iter()
+        .map(|c| format_ident!("{}Key", c))
+        .collect();
     let child_selector_fn_names: Vec<_> = config
         .child_resources
         .iter()
@@ -234,7 +285,7 @@ fn generate_child_selectors(config: &Config) -> TokenStream {
                 'b: 'c,
             {
                 #child_resource_types {
-                    key: Key::Name(self, name),
+                    key: #child_resource_key_types::Name(self, name),
                 }
             }
         )*
@@ -245,25 +296,77 @@ fn generate_child_selectors(config: &Config) -> TokenStream {
 fn generate_misc_helpers(config: &Config) -> TokenStream {
     let fleet_name = format_ident!("Fleet");
     let resource_name = &config.resource.name;
+    let resource_name_str = resource_name.to_string();
     let parent_resource_name =
         config.parent.as_ref().map(|p| &p.name).unwrap_or(&fleet_name);
+    let lookup_enum = &config.lookup_enum;
 
-    // Given a parent authz type, when we want to construct an authz object for
-    // a child resource, there are two different patterns.  We need to pick the
-    // right one.  For "typed" resources (`AuthzKind::Typed`), the parent
-    // resource has a method with the snake case name of the child resource.
-    // For example: `authz_organization.project()`.  For "generic" resources
-    // (`AuthzKind::Generic`), the parent has a function called `child_generic`
-    // that's used to construct all child resources, and there's an extra
-    // `ResourceType` argument to say what resource it is.
-    let (mkauthz_func, mkauthz_arg) = match &config.authz_kind {
-        AuthzKind::Generic => (
-            format_ident!("child_generic"),
-            quote! { ResourceType::#resource_name, },
-        ),
-        AuthzKind::Typed => {
-            (format_ident!("{}", config.resource.name_as_snake), quote! {})
+    let name_variant = if config.lookup_by_name {
+        quote! { #lookup_enum::Name(parent, _) => parent.lookup_root(), }
+    } else {
+        quote! {}
+    };
+
+    let resource_authz_name = &config.resource.authz_name;
+    let silo_check_fn = if config.siloed {
+        quote! {
+            /// For a "siloed" resource (i.e., one that's nested under "Silo" in
+            /// the resource hierarchy), check whether a given resource's Silo
+            /// (given by `authz_silo`) matches the Silo of the actor doing the
+            /// fetch/lookup (given by `opctx`).
+            ///
+            /// This check should not be strictly necessary.  We should never
+            /// wind up hitting the error conditions here.  That's because in
+            /// order to reach this check, we must have done a successful authz
+            /// check.  That check should have failed because there's no way to
+            /// grant users access to resources in other Silos.  So why do this
+            /// check at all?  As a belt-and-suspenders way to make sure we
+            /// never return objects to a user that are from a different Silo
+            /// than the one they're attached to.  But what do we do if the
+            /// check fails?  We definitely want to know about it so that we can
+            /// determine if there's an authz bug here, and if so, fix it.
+            /// That's why we log this at "error" level.  We also override the
+            /// lookup return value with a suitable error indicating the
+            /// resource does not exist or the caller did not supply
+            /// credentials, just as if they didn't have access to the object.
+            // TODO-support These log messages should trigger support cases.
+            fn silo_check(
+                opctx: &OpContext,
+                authz_silo: &authz::Silo,
+                #resource_authz_name: &authz::#resource_name,
+            ) -> Result<(), Error> {
+                let log = &opctx.log;
+                let maybe_silo = opctx.authn.silo_required();
+                if let Err(_) = &maybe_silo {
+                    error!(
+                        log,
+                        "unexpected successful lookup of siloed resource \
+                        {:?} with no silo in OpContext",
+                        #resource_name_str,
+                    );
+                };
+                let actor_silo_id = maybe_silo?.id();
+
+                let resource_silo_id = authz_silo.id();
+                if resource_silo_id != actor_silo_id {
+                    use crate::authz::ApiResourceError;
+                    error!(
+                        log,
+                        "unexpected successful lookup of siloed resource \
+                        {:?} in a different Silo from current actor (resource \
+                        Silo {}, actor Silo {})",
+                        #resource_name_str,
+                        resource_silo_id,
+                        actor_silo_id,
+                    );
+                    Err(#resource_authz_name.not_found())
+                } else {
+                    Ok(())
+                }
+            }
         }
+    } else {
+        quote! {}
     };
 
     quote! {
@@ -273,8 +376,8 @@ fn generate_misc_helpers(config: &Config) -> TokenStream {
             db_row: &model::#resource_name,
             lookup_type: LookupType,
         ) -> authz::#resource_name {
-            authz_parent.#mkauthz_func(
-                #mkauthz_arg
+            authz::#resource_name::new(
+                authz_parent.clone(),
                 db_row.id(),
                 lookup_type
             )
@@ -287,10 +390,15 @@ fn generate_misc_helpers(config: &Config) -> TokenStream {
         /// used for this lookup.
         fn lookup_root(&self) -> &LookupPath<'a> {
             match &self.key {
-                Key::Name(parent, _) => parent.lookup_root(),
-                Key::Id(root, _) => root.lookup_root(),
+                #lookup_enum::Error(root, ..) => root.lookup_root(),
+
+                #name_variant
+
+                #lookup_enum::PrimaryKey(root, ..) => root.lookup_root(),
             }
         }
+
+        #silo_check_fn
     }
 }
 
@@ -301,6 +409,13 @@ fn generate_lookup_methods(config: &Config) -> TokenStream {
     let path_authz_names = &config.path_authz_names;
     let resource_name = &config.resource.name;
     let resource_authz_name = &config.resource.authz_name;
+    let lookup_enum = &config.lookup_enum;
+    let pkey_names: Vec<_> = config
+        .primary_key_columns
+        .iter()
+        .enumerate()
+        .map(|(i, _)| format_ident!("v{}", i))
+        .collect();
     let (ancestors_authz_names_assign, parent_lookup_arg_actual) =
         if let Some(p) = &config.parent {
             let nancestors = config.path_authz_names.len() - 1;
@@ -315,6 +430,86 @@ fn generate_lookup_methods(config: &Config) -> TokenStream {
         } else {
             (quote! {}, quote! {})
         };
+
+    // Generate the by-name branch of the match arm in "fetch_for()"
+    let fetch_for_name_variant = if config.lookup_by_name {
+        quote! {
+            #lookup_enum::Name(parent, name) => {
+                #ancestors_authz_names_assign
+                let (#resource_authz_name, db_row) = Self::fetch_by_name_for(
+                    opctx,
+                    datastore,
+                    #parent_lookup_arg_actual
+                    *name,
+                    action,
+                ).await?;
+                Ok((#(#path_authz_names,)* db_row))
+            }
+        }
+    } else {
+        quote! {}
+    };
+
+    // Generate the by-name branch of the match arm in "lookup()"
+    let lookup_name_variant = if config.lookup_by_name {
+        quote! {
+            #lookup_enum::Name(parent, name) => {
+                // When doing a by-name lookup, we have to look up the
+                // parent first.  Since this is recursive, we wind up
+                // hitting the database once for each item in the path,
+                // in order descending from the root of the tree.  (So
+                // we'll look up Organization, then Project, then
+                // Instance, etc.)
+                // TODO-performance Instead of doing database queries at
+                // each level of recursion, we could be building up one
+                // big "join" query and hit the database just once.
+                #ancestors_authz_names_assign
+                let (#resource_authz_name, _) =
+                    Self::lookup_by_name_no_authz(
+                        opctx,
+                        datastore,
+                        #parent_lookup_arg_actual
+                        *name
+                    ).await?;
+                Ok((#(#path_authz_names,)*))
+            }
+        }
+    } else {
+        quote! {}
+    };
+
+    // If this resource is "Siloed", then tack on an extra check that the
+    // resource's Silo matches the Silo of the actor doing the fetch/lookup.
+    // See the generation of `silo_check()` for details.
+    let (silo_check_lookup, silo_check_fetch) = if config.siloed {
+        (
+            quote! {
+                .and_then(|input| {
+                    let (
+                        ref authz_silo,
+                        ..,
+                        ref #resource_authz_name,
+                    ) = &input;
+                    Self::silo_check(opctx, authz_silo, #resource_authz_name)?;
+                    Ok(input)
+                })
+            },
+            quote! {
+                .and_then(|input| {
+                    let (
+                        ref authz_silo,
+                        ..,
+                        ref #resource_authz_name,
+                        ref _db_row,
+                    ) = &input;
+                    Self::silo_check(opctx, authz_silo, #resource_authz_name)?;
+                    Ok(input)
+                })
+            },
+        )
+    } else {
+        (quote! {}, quote! {})
+    };
 
     quote! {
         /// Fetch the record corresponding to the selected resource
@@ -344,26 +539,20 @@ fn generate_lookup_methods(config: &Config) -> TokenStream {
             let datastore = &lookup.datastore;
 
             match &self.key {
-                Key::Name(parent, name) => {
-                    #ancestors_authz_names_assign
-                    let (#resource_authz_name, db_row) = Self::fetch_by_name_for(
-                        opctx,
-                        datastore,
-                        #parent_lookup_arg_actual
-                        *name,
-                        action,
-                    ).await?;
-                    Ok((#(#path_authz_names,)* db_row))
-                }
-                Key::Id(_, id) => {
+                #lookup_enum::Error(_, error) => Err(error.clone()),
+
+                #fetch_for_name_variant
+
+                #lookup_enum::PrimaryKey(_, #(#pkey_names,)*) => {
                     Self::fetch_by_id_for(
                         opctx,
                         datastore,
-                        *id,
-                        action,
+                        #(#pkey_names,)*
+                        action
                     ).await
                 }
             }
+            #silo_check_fetch
         }
 
         /// Fetch an `authz` object for the selected resource and check
@@ -384,6 +573,7 @@ fn generate_lookup_methods(config: &Config) -> TokenStream {
             let (#(#path_authz_names,)*) = self.lookup().await?;
             opctx.authorize(action, &#resource_authz_name).await?;
             Ok((#(#path_authz_names,)*))
+            #silo_check_lookup
         }
 
         /// Fetch the "authz" objects for the selected resource and all its
@@ -402,27 +592,11 @@ fn generate_lookup_methods(config: &Config) -> TokenStream {
             let datastore = &lookup.datastore;
 
             match &self.key {
-                Key::Name(parent, name) => {
-                    // When doing a by-name lookup, we have to look up the
-                    // parent first.  Since this is recursive, we wind up
-                    // hitting the database once for each item in the path,
-                    // in order descending from the root of the tree.  (So
-                    // we'll look up Organization, then Project, then
-                    // Instance, etc.)
-                    // TODO-performance Instead of doing database queries at
-                    // each level of recursion, we could be building up one
-                    // big "join" query and hit the database just once.
-                    #ancestors_authz_names_assign
-                    let (#resource_authz_name, _) =
-                        Self::lookup_by_name_no_authz(
-                            opctx,
-                            datastore,
-                            #parent_lookup_arg_actual
-                            *name
-                        ).await?;
-                    Ok((#(#path_authz_names,)*))
-                }
-                Key::Id(_, id) => {
+                #lookup_enum::Error(_, error) => Err(error.clone()),
+
+                #lookup_name_variant
+
+                #lookup_enum::PrimaryKey(_, #(#pkey_names,)*) => {
                     // When doing a by-id lookup, we start directly with the
                     // resource we're looking up.  But we still want to
                     // return a full path of authz objects.  So we look up
@@ -438,7 +612,7 @@ fn generate_lookup_methods(config: &Config) -> TokenStream {
                         Self::lookup_by_id_no_authz(
                             opctx,
                             datastore,
-                            *id
+                            #(#pkey_names,)*
                         ).await?;
                     Ok((#(#path_authz_names,)*))
                 }
@@ -458,6 +632,21 @@ fn generate_database_functions(config: &Config) -> TokenStream {
     let resource_as_snake = format_ident!("{}", &config.resource.name_as_snake);
     let path_types = &config.path_types;
     let path_authz_names = &config.path_authz_names;
+    let pkey_types: Vec<_> = config
+        .primary_key_columns
+        .iter()
+        .map(|c| c.rust_type.deref())
+        .collect();
+    let pkey_column_names = config
+        .primary_key_columns
+        .iter()
+        .map(|c| format_ident!("{}", c.column_name));
+    let pkey_names: Vec<_> = config
+        .primary_key_columns
+        .iter()
+        .enumerate()
+        .map(|(i, _)| format_ident!("v{}", i))
+        .collect();
     let (
         parent_lookup_arg_formal,
         parent_lookup_arg_actual,
@@ -476,7 +665,7 @@ fn generate_database_functions(config: &Config) -> TokenStream {
             quote! {
                 let (#(#ancestors_authz_names,)* _) =
                     #parent_resource_name::lookup_by_id_no_authz(
-                        opctx, datastore, db_row.#parent_id
+                        opctx, datastore, &db_row.#parent_id
                     ).await?;
             },
             quote! { .filter(dsl::#parent_id.eq(#parent_authz_name.id())) },
@@ -486,71 +675,107 @@ fn generate_database_functions(config: &Config) -> TokenStream {
         (quote! {}, quote! {}, quote! {}, quote! {}, quote! { &authz::FLEET })
     };
 
-    quote! {
-        /// Fetch the database row for a resource by doing a lookup by name,
-        /// possibly within a collection
-        ///
-        /// This function checks whether the caller has permissions to read
-        /// the requested data.  However, it's not intended to be used
-        /// outside this module.  See `fetch_for(authz::Action)`.
-        // Do NOT make this function public.
-        async fn fetch_by_name_for(
-            opctx: &OpContext,
-            datastore: &DataStore,
-            #parent_lookup_arg_formal
-            name: &Name,
-            action: authz::Action,
-        ) -> LookupResult<(authz::#resource_name, model::#resource_name)> {
-            let (#resource_authz_name, db_row) = Self::lookup_by_name_no_authz(
-                opctx,
-                datastore,
-                #parent_lookup_arg_actual
-                name
-            ).await?;
-            opctx.authorize(action, &#resource_authz_name).await?;
-            Ok((#resource_authz_name, db_row))
-        }
+    let soft_delete_filter = if config.soft_deletes {
+        quote! { .filter(dsl::time_deleted.is_null()) }
+    } else {
+        quote! {}
+    };
 
-        /// Lowest-level function for looking up a resource in the database
-        /// by name, possibly within a collection
-        ///
-        /// This function does not check whether the caller has permission
-        /// to read this information.  That's why it's not `pub`.  Outside
-        /// this module, you want `fetch()` or `lookup_for(authz::Action)`.
-        // Do NOT make this function public.
-        async fn lookup_by_name_no_authz(
-            opctx: &OpContext,
-            datastore: &DataStore,
-            #parent_lookup_arg_formal
-            name: &Name,
-        ) -> LookupResult<(authz::#resource_name, model::#resource_name)> {
-            use db::schema::#resource_as_snake::dsl;
+    let by_name_funcs = if config.lookup_by_name {
+        quote! {
+            /// Fetch the database row for a resource by doing a lookup by
+            /// name, possibly within a collection
+            ///
+            /// This function checks whether the caller has permissions to
+            /// read the requested data.  However, it's not intended to be
+            /// used outside this module.  See `fetch_for(authz::Action)`.
+            // Do NOT make this function public.
+            async fn fetch_by_name_for(
+                opctx: &OpContext,
+                datastore: &DataStore,
+                #parent_lookup_arg_formal
+                name: &Name,
+                action: authz::Action,
+            ) -> LookupResult<(authz::#resource_name, model::#resource_name)> {
+                let (#resource_authz_name, db_row) =
+                    Self::lookup_by_name_no_authz(
+                        opctx,
+                        datastore,
+                        #parent_lookup_arg_actual
+                        name
+                    ).await?;
+                opctx.authorize(action, &#resource_authz_name).await?;
+                Ok((#resource_authz_name, db_row))
+            }
 
-            dsl::#resource_as_snake
-                .filter(dsl::time_deleted.is_null())
-                .filter(dsl::name.eq(name.clone()))
-                #lookup_filter
-                .select(model::#resource_name::as_select())
-                .get_result_async(datastore.pool_authorized(opctx).await?)
-                .await
-                .map_err(|e| {
-                    public_error_from_diesel_pool(
-                        e,
-                        ErrorHandler::NotFoundByLookup(
-                            ResourceType::#resource_name,
-                            LookupType::ByName(name.as_str().to_string())
-                        )
+            /// Lowest-level function for looking up a resource in the
+            /// database by name, possibly within a collection
+            ///
+            /// This function does not check whether the caller has
+            /// permission to read this information.  That's why it's not
+            /// `pub`.  Outside this module, you want `fetch()` or
+            /// `lookup_for(authz::Action)`.
+            // Do NOT make this function public.
+            async fn lookup_by_name_no_authz(
+                opctx: &OpContext,
+                datastore: &DataStore,
+                #parent_lookup_arg_formal
+                name: &Name,
+            ) -> LookupResult<
+                (authz::#resource_name, model::#resource_name)
+            > {
+                use db::schema::#resource_as_snake::dsl;
+
+                dsl::#resource_as_snake
+                    #soft_delete_filter
+                    .filter(dsl::name.eq(name.clone()))
+                    #lookup_filter
+                    .select(model::#resource_name::as_select())
+                    .get_result_async(
+                        datastore.pool_authorized(opctx).await?
                     )
-                })
-                .map(|db_row| {(
-                    Self::make_authz(
-                        #parent_authz_value,
-                        &db_row,
-                        LookupType::ByName(name.as_str().to_string())
-                    ),
-                    db_row
-                )})
+                    .await
+                    .map_err(|e| {
+                        public_error_from_diesel_pool(
+                            e,
+                            ErrorHandler::NotFoundByLookup(
+                                ResourceType::#resource_name,
+                                LookupType::ByName(
+                                    name.as_str().to_string()
+                                )
+                            )
+                        )
+                    })
+                    .map(|db_row| {(
+                        Self::make_authz(
+                            #parent_authz_value,
+                            &db_row,
+                            LookupType::ByName(name.as_str().to_string())
+                        ),
+                        db_row
+                    )})
+            }
         }
+    } else {
+        quote! {}
+    };
+
+    let lookup_type = if config.primary_key_columns.len() == 1
+        && config.primary_key_columns[0].column_name == "id"
+    {
+        quote! { LookupType::ById(#(#pkey_names.clone())*) }
+    } else {
+        let fmtstr = config
+            .primary_key_columns
+            .iter()
+            .map(|c| format!("{} = {{:?}}", c.column_name))
+            .collect::<Vec<_>>()
+            .join(", ");
+        quote! { LookupType::ByCompositeId(format!(#fmtstr, #(#pkey_names,)*)) }
+    };
+
+    quote! {
+        #by_name_funcs
 
         /// Fetch the database row for a resource by doing a lookup by id
         ///
@@ -561,14 +786,14 @@ fn generate_database_functions(config: &Config) -> TokenStream {
         async fn fetch_by_id_for(
             opctx: &OpContext,
             datastore: &DataStore,
-            id: Uuid,
+            #(#pkey_names: &#pkey_types,)*
             action: authz::Action,
         ) -> LookupResult<(#(authz::#path_types,)* model::#resource_name)> {
             let (#(#path_authz_names,)* db_row) =
                 Self::lookup_by_id_no_authz(
                     opctx,
                     datastore,
-                    id
+                    #(#pkey_names,)*
                 ).await?;
             opctx.authorize(action, &#resource_authz_name).await?;
             Ok((#(#path_authz_names,)* db_row))
@@ -584,13 +809,13 @@ fn generate_database_functions(config: &Config) -> TokenStream {
         async fn lookup_by_id_no_authz(
             opctx: &OpContext,
             datastore: &DataStore,
-            id: Uuid,
+            #(#pkey_names: &#pkey_types,)*
         ) -> LookupResult<(#(authz::#path_types,)* model::#resource_name)> {
             use db::schema::#resource_as_snake::dsl;
 
             let db_row = dsl::#resource_as_snake
-                .filter(dsl::time_deleted.is_null())
-                .filter(dsl::id.eq(id))
+                #soft_delete_filter
+                #(.filter(dsl::#pkey_column_names.eq(#pkey_names.clone())))*
                 .select(model::#resource_name::as_select())
                 .get_result_async(datastore.pool_authorized(opctx).await?)
                 .await
@@ -599,7 +824,7 @@ fn generate_database_functions(config: &Config) -> TokenStream {
                         e,
                         ErrorHandler::NotFoundByLookup(
                             ResourceType::#resource_name,
-                            LookupType::ById(id)
+                            #lookup_type
                         )
                     )
                 })?;
@@ -607,7 +832,7 @@ fn generate_database_functions(config: &Config) -> TokenStream {
             let #resource_authz_name = Self::make_authz(
                 &#parent_authz_value,
                 &db_row,
-                LookupType::ById(id)
+                #lookup_type
             );
             Ok((#(#path_authz_names,)* db_row))
         }
@@ -622,29 +847,72 @@ fn generate_database_functions(config: &Config) -> TokenStream {
 // lookup.rs, replacing the call to the macro, then reformat the file, and then
 // build it in order to see the compiler error in context.
 #[cfg(test)]
-#[test]
-fn test_lookup_dump() {
-    let output = lookup_resource(
-        quote! {
-            name = "Organization",
-            ancestors = [],
-            children = [ "Project" ],
-            authz_kind = Typed
-        }
-        .into(),
-    )
-    .unwrap();
-    println!("{}", output);
+mod test {
+    use super::lookup_resource;
+    use quote::quote;
+    use rustfmt_wrapper::rustfmt;
 
-    let output = lookup_resource(
-        quote! {
-            name = "Project",
-            ancestors = ["Organization"],
-            children = [ "Disk", "Instance" ],
-            authz_kind = Typed
-        }
-        .into(),
-    )
-    .unwrap();
-    println!("{}", output);
+    #[test]
+    #[ignore]
+    fn test_lookup_dump() {
+        let output = lookup_resource(
+            quote! {
+                name = "Organization",
+                ancestors = ["Silo"],
+                children = [ "Project" ],
+                lookup_by_name = true,
+                soft_deletes = true,
+                primary_key_columns = [ { column_name = "id", rust_type = Uuid } ]
+            }
+            .into(),
+        )
+        .unwrap();
+        println!("{}", rustfmt(output).unwrap());
+
+        let output = lookup_resource(
+            quote! {
+                name = "Project",
+                ancestors = ["Organization"],
+                children = [ "Disk", "Instance" ],
+                lookup_by_name = true,
+                soft_deletes = true,
+                primary_key_columns = [ { column_name = "id", rust_type = Uuid } ]
+            }
+            .into(),
+        )
+        .unwrap();
+        println!("{}", rustfmt(output).unwrap());
+
+        let output = lookup_resource(
+            quote! {
+                name = "SiloUser",
+                ancestors = [],
+                children = [],
+                lookup_by_name = false,
+                soft_deletes = true,
+                primary_key_columns = [ { column_name = "id", rust_type = Uuid } ]
+            }
+            .into(),
+        )
+        .unwrap();
+        println!("{}", rustfmt(output).unwrap());
+
+        let output = lookup_resource(
+            quote! {
+                name = "UpdateAvailableArtifact",
+                ancestors = [],
+                children = [],
+                lookup_by_name = false,
+                soft_deletes = false,
+                primary_key_columns = [
+                    { column_name = "name", rust_type = String },
+                    { column_name = "version", rust_type = i64 },
+                    { column_name = "kind", rust_type = UpdateArtifactKind }
+                ]
+            }
+            .into(),
+        )
+        .unwrap();
+        println!("{}", rustfmt(output).unwrap());
+    }
 }

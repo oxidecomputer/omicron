@@ -9,14 +9,15 @@ path = "../rpaths"
 
 [dependencies]
 anyhow = "1.0"
-async-bb8-diesel = { git = "https://github.com/oxidecomputer/async-bb8-diesel", rev = "8c6685f0b33c7bbc6418384850cb9c897896cda5" }
+async-bb8-diesel = { git = "https://github.com/oxidecomputer/async-bb8-diesel", rev = "ab1f49e0b3f95557aa96bf593282199fafeef4bd" }
 async-trait = "0.1.53"
+authz-macros = { path = "src/authz/authz-macros" }
 base64 = "0.13.0"
 bb8 = "0.8.0"
 cookie = "0.16"
-crucible-agent-client = { git = "https://github.com/oxidecomputer/crucible", rev = "945daedb88cefa790f1d994b3a038b8fa9ac514a" }
-# Tracking pending 2.0 version.
-diesel = { git = "https://github.com/diesel-rs/diesel", rev = "ce77c382", features = ["postgres", "r2d2", "chrono", "serde_json", "network-address", "uuid"] }
+crucible-agent-client = { git = "https://github.com/oxidecomputer/crucible", rev = "257032d1e842901d427f344a396d78b9b85b183f" }
+diesel = { version = "2.0.0-rc.0", features = ["postgres", "r2d2", "chrono", "serde_json", "network-address", "uuid"] }
+fatfs = "0.3.5"
 futures = "0.3.21"
 headers = "0.3.7"
 hex = "0.4.3"
@@ -25,10 +26,11 @@ hyper = "0.14"
 db-macros = { path = "src/db/db-macros" }
 ipnetwork = "0.18"
 lazy_static = "1.4.0"
-libc = "0.2.119"
+libc = "0.2.123"
 macaddr = { version = "1.0.1", features = [ "serde_std" ]}
 mime_guess = "2.0.4"
 newtype_derive = "0.1.6"
+num-integer = "0.1.44"
 oso = "0.26"
 oximeter-client = { path = "../oximeter-client" }
 oximeter-db = { path = "../oximeter/db/" }
@@ -41,13 +43,13 @@ reqwest = { version = "0.11.8", features = [ "json" ] }
 ring = "0.16"
 serde_json = "1.0"
 serde_urlencoded = "0.7.1"
-serde_with = "1.12.0"
+serde_with = "1.12.1"
 sled-agent-client = { path = "../sled-agent-client" }
 slog-dtrace = "0.2"
 structopt = "0.3"
 tempfile = "3.3"
 thiserror = "1.0"
-toml = "0.5.6"
+toml = "0.5.9"
 tough = { version = "0.12", features = [ "http" ] }
 usdt = "0.3.1"
 
@@ -60,7 +62,7 @@ features = [ "serde" ]
 
 [dependencies.diesel-dtrace]
 git = "https://github.com/oxidecomputer/diesel-dtrace"
-branch = "main"
+rev = "bec89c2f2b01a79ae99b4db667bfcea5fb2fef04"
 
 [dependencies.dropshot]
 git = "https://github.com/oxidecomputer/dropshot"
@@ -116,7 +118,7 @@ features = [ "serde", "v4" ]
 
 [dev-dependencies]
 criterion = { version = "0.3", features = [ "async_tokio" ] }
-expectorate = "1.0.4"
+expectorate = "1.0.5"
 nexus-test-utils-macros = { path = "test-utils-macros" }
 nexus-test-utils = { path = "test-utils" }
 omicron-test-utils = { path = "../test-utils" }
@@ -124,6 +126,7 @@ openapiv3 = "1.0"
 regex = "1.5.5"
 subprocess = "0.2.8"
 term = "0.7"
+httptest = "0.15.4"
 
 [dev-dependencies.openapi-lint]
 git = "https://github.com/oxidecomputer/openapi-lint"

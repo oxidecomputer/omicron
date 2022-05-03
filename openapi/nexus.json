@@ -256,7 +256,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ImageResultsPage"
+                  "$ref": "#/components/schemas/GlobalImageResultsPage"
                 }
               }
             }
@@ -293,7 +293,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Image"
+                  "$ref": "#/components/schemas/GlobalImage"
                 }
               }
             }
@@ -332,7 +332,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Image"
+                  "$ref": "#/components/schemas/GlobalImage"
                 }
               }
             }
@@ -4400,6 +4400,168 @@
         }
       }
     },
+    "/session/me/sshkeys": {
+      "get": {
+        "tags": [
+          "sshkeys"
+        ],
+        "summary": "List the current user's SSH public keys",
+        "operationId": "sshkeys_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "description": "Maximum number of items returned by a single call",
+            "schema": {
+              "nullable": true,
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 1
+            },
+            "style": "form"
+          },
+          {
+            "in": "query",
+            "name": "page_token",
+            "description": "Token returned by previous call to retreive the subsequent page",
+            "schema": {
+              "nullable": true,
+              "type": "string"
+            },
+            "style": "form"
+          },
+          {
+            "in": "query",
+            "name": "sort_by",
+            "schema": {
+              "$ref": "#/components/schemas/NameSortMode"
+            },
+            "style": "form"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SshKeyResultsPage"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-dropshot-pagination": true
+      },
+      "post": {
+        "tags": [
+          "sshkeys"
+        ],
+        "summary": "Create a new SSH public key for the current user",
+        "operationId": "sshkeys_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SshKeyCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "successful creation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SshKey"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/session/me/sshkeys/{ssh_key_name}": {
+      "get": {
+        "tags": [
+          "sshkeys"
+        ],
+        "summary": "Get (by name) an SSH public key belonging to the current user",
+        "operationId": "sshkeys_get_key",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "ssh_key_name",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Name"
+            },
+            "style": "simple"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SshKey"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "sshkeys"
+        ],
+        "summary": "Delete (by name) an SSH public key belonging to the current user",
+        "operationId": "sshkeys_delete_key",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "ssh_key_name",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Name"
+            },
+            "style": "simple"
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "successful deletion"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/silos": {
       "get": {
         "tags": [
@@ -4749,6 +4911,15 @@
       }
     },
     "schemas": {
+      "BlockSize": {
+        "title": "disk block size in bytes",
+        "type": "integer",
+        "enum": [
+          512,
+          2048,
+          4096
+        ]
+      },
       "ByteCount": {
         "description": "A count of bytes, typically used either for memory or storage capacity\n\nThe maximum supported byte count is [`i64::MAX`].  This makes it somewhat inconvenient to define constructors: a u32 constructor can be infallible, but an i64 constructor can fail (if the value is negative) and a u64 constructor can fail (if the value is larger than i64::MAX).  We provide all of these for consumers' convenience.",
         "type": "integer",
@@ -4770,10 +4941,29 @@
           "HistogramF64"
         ]
       },
+      "Digest": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "Sha256": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "Sha256"
+            ],
+            "additionalProperties": false
+          }
+        ]
+      },
       "Disk": {
         "description": "Client view of an [`Disk`]",
         "type": "object",
         "properties": {
+          "block_size": {
+            "$ref": "#/components/schemas/ByteCount"
+          },
           "description": {
             "description": "human-readable free-form text about a resource",
             "type": "string"
@@ -4783,6 +4973,11 @@
           },
           "id": {
             "description": "unique, immutable, system-controlled identifier for each resource",
+            "type": "string",
+            "format": "uuid"
+          },
+          "image_id": {
+            "nullable": true,
             "type": "string",
             "format": "uuid"
           },
@@ -4821,6 +5016,7 @@
           }
         },
         "required": [
+          "block_size",
           "description",
           "device_path",
           "id",
@@ -4839,26 +5035,29 @@
           "description": {
             "type": "string"
           },
+          "disk_source": {
+            "description": "initial source for this disk",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/DiskSource"
+              }
+            ]
+          },
           "name": {
             "$ref": "#/components/schemas/Name"
           },
           "size": {
-            "description": "size of the Disk",
+            "description": "total size of the Disk in bytes",
             "allOf": [
               {
                 "$ref": "#/components/schemas/ByteCount"
               }
             ]
-          },
-          "snapshot_id": {
-            "nullable": true,
-            "description": "id for snapshot from which the Disk should be created, if any",
-            "type": "string",
-            "format": "uuid"
           }
         },
         "required": [
           "description",
+          "disk_source",
           "name",
           "size"
         ]
@@ -4867,12 +5066,12 @@
         "description": "Parameters for the [`Disk`](omicron_common::api::external::Disk) to be attached or detached to an instance",
         "type": "object",
         "properties": {
-          "disk": {
+          "name": {
             "$ref": "#/components/schemas/Name"
           }
         },
         "required": [
-          "disk"
+          "name"
         ]
       },
       "DiskResultsPage": {
@@ -4894,6 +5093,95 @@
         },
         "required": [
           "items"
+        ]
+      },
+      "DiskSource": {
+        "description": "Different sources for a disk",
+        "oneOf": [
+          {
+            "description": "Create a blank disk",
+            "type": "object",
+            "properties": {
+              "block_size": {
+                "description": "size of blocks for this Disk. valid values are: 512, 2048, or 4096",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/BlockSize"
+                  }
+                ]
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "Blank"
+                ]
+              }
+            },
+            "required": [
+              "block_size",
+              "type"
+            ]
+          },
+          {
+            "description": "Create a disk from a disk snapshot",
+            "type": "object",
+            "properties": {
+              "snapshot_id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "Snapshot"
+                ]
+              }
+            },
+            "required": [
+              "snapshot_id",
+              "type"
+            ]
+          },
+          {
+            "description": "Create a disk from a project image",
+            "type": "object",
+            "properties": {
+              "image_id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "Image"
+                ]
+              }
+            },
+            "required": [
+              "image_id",
+              "type"
+            ]
+          },
+          {
+            "description": "Create a disk from a global image",
+            "type": "object",
+            "properties": {
+              "image_id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "GlobalImage"
+                ]
+              }
+            },
+            "required": [
+              "image_id",
+              "type"
+            ]
+          }
         ]
       },
       "DiskState": {
@@ -5079,13 +5367,128 @@
           "Bool"
         ]
       },
-      "Image": {
-        "description": "Client view of Images",
+      "GlobalImage": {
+        "description": "Client view of global Images",
         "type": "object",
         "properties": {
+          "block_size": {
+            "description": "size of blocks in bytes",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ByteCount"
+              }
+            ]
+          },
           "description": {
             "description": "human-readable free-form text about a resource",
             "type": "string"
+          },
+          "digest": {
+            "nullable": true,
+            "description": "Hash of the image contents, if applicable",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Digest"
+              }
+            ]
+          },
+          "id": {
+            "description": "unique, immutable, system-controlled identifier for each resource",
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "description": "unique, mutable, user-controlled identifier for each resource",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Name"
+              }
+            ]
+          },
+          "size": {
+            "description": "total size in bytes",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ByteCount"
+              }
+            ]
+          },
+          "time_created": {
+            "description": "timestamp when this resource was created",
+            "type": "string",
+            "format": "date-time"
+          },
+          "time_modified": {
+            "description": "timestamp when this resource was last modified",
+            "type": "string",
+            "format": "date-time"
+          },
+          "url": {
+            "nullable": true,
+            "description": "URL source of this image, if any",
+            "type": "string"
+          },
+          "version": {
+            "nullable": true,
+            "description": "Version of this, if any",
+            "type": "string"
+          }
+        },
+        "required": [
+          "block_size",
+          "description",
+          "id",
+          "name",
+          "size",
+          "time_created",
+          "time_modified"
+        ]
+      },
+      "GlobalImageResultsPage": {
+        "description": "A single page of results",
+        "type": "object",
+        "properties": {
+          "items": {
+            "description": "list of items on this page of results",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/GlobalImage"
+            }
+          },
+          "next_page": {
+            "nullable": true,
+            "description": "token used to fetch the next page of results (if any)",
+            "type": "string"
+          }
+        },
+        "required": [
+          "items"
+        ]
+      },
+      "Image": {
+        "description": "Client view of project Images",
+        "type": "object",
+        "properties": {
+          "block_size": {
+            "description": "size of blocks in bytes",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ByteCount"
+              }
+            ]
+          },
+          "description": {
+            "description": "human-readable free-form text about a resource",
+            "type": "string"
+          },
+          "digest": {
+            "nullable": true,
+            "description": "Hash of the image contents, if applicable",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Digest"
+              }
+            ]
           },
           "id": {
             "description": "unique, immutable, system-controlled identifier for each resource",
@@ -5101,12 +5504,17 @@
             ]
           },
           "project_id": {
-            "nullable": true,
+            "description": "The project the disk belongs to",
             "type": "string",
             "format": "uuid"
           },
           "size": {
-            "$ref": "#/components/schemas/ByteCount"
+            "description": "total size in bytes",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ByteCount"
+              }
+            ]
           },
           "time_created": {
             "description": "timestamp when this resource was created",
@@ -5120,13 +5528,21 @@
           },
           "url": {
             "nullable": true,
+            "description": "URL source of this image, if any",
+            "type": "string"
+          },
+          "version": {
+            "nullable": true,
+            "description": "Version of this, if any",
             "type": "string"
           }
         },
         "required": [
+          "block_size",
           "description",
           "id",
           "name",
+          "project_id",
           "size",
           "time_created",
           "time_modified"
@@ -5136,6 +5552,14 @@
         "description": "Create-time parameters for an [`Image`](omicron_common::api::external::Image)",
         "type": "object",
         "properties": {
+          "block_size": {
+            "description": "block size in bytes",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/BlockSize"
+              }
+            ]
+          },
           "description": {
             "type": "string"
           },
@@ -5152,6 +5576,7 @@
           }
         },
         "required": [
+          "block_size",
           "description",
           "name",
           "source"
@@ -5325,6 +5750,10 @@
                 "$ref": "#/components/schemas/InstanceNetworkInterfaceAttachment"
               }
             ]
+          },
+          "user_data": {
+            "description": "User data for instance initialization systems (such as cloud-init). Must be a Base64-encoded string, as specified in RFC 4648 § 4 (+ and / characters with padding). Maximum 32 KiB unencoded data.",
+            "type": "string"
           }
         },
         "required": [
@@ -5345,22 +5774,24 @@
               "description": {
                 "type": "string"
               },
+              "disk_source": {
+                "description": "initial source for this disk",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/DiskSource"
+                  }
+                ]
+              },
               "name": {
                 "$ref": "#/components/schemas/Name"
               },
               "size": {
-                "description": "size of the Disk",
+                "description": "total size of the Disk in bytes",
                 "allOf": [
                   {
                     "$ref": "#/components/schemas/ByteCount"
                   }
                 ]
-              },
-              "snapshot_id": {
-                "nullable": true,
-                "description": "id for snapshot from which the Disk should be created, if any",
-                "type": "string",
-                "format": "uuid"
               },
               "type": {
                 "type": "string",
@@ -5371,6 +5802,7 @@
             },
             "required": [
               "description",
+              "disk_source",
               "name",
               "size",
               "type"
@@ -5380,7 +5812,7 @@
             "description": "During instance creation, attach this disk",
             "type": "object",
             "properties": {
-              "disk": {
+              "name": {
                 "description": "A disk name to attach",
                 "allOf": [
                   {
@@ -5396,7 +5828,7 @@
               }
             },
             "required": [
-              "disk",
+              "name",
               "type"
             ]
           }
@@ -6792,6 +7224,99 @@
           "items"
         ]
       },
+      "SshKey": {
+        "description": "Client view of a [`SshKey`]",
+        "type": "object",
+        "properties": {
+          "description": {
+            "description": "human-readable free-form text about a resource",
+            "type": "string"
+          },
+          "id": {
+            "description": "unique, immutable, system-controlled identifier for each resource",
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "description": "unique, mutable, user-controlled identifier for each resource",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Name"
+              }
+            ]
+          },
+          "public_key": {
+            "description": "SSH public key, e.g., `\"ssh-ed25519 AAAAC3NzaC...\"`",
+            "type": "string"
+          },
+          "silo_user_id": {
+            "description": "The user to whom this key belongs",
+            "type": "string",
+            "format": "uuid"
+          },
+          "time_created": {
+            "description": "timestamp when this resource was created",
+            "type": "string",
+            "format": "date-time"
+          },
+          "time_modified": {
+            "description": "timestamp when this resource was last modified",
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "description",
+          "id",
+          "name",
+          "public_key",
+          "silo_user_id",
+          "time_created",
+          "time_modified"
+        ]
+      },
+      "SshKeyCreate": {
+        "description": "Create-time parameters for an [`SshKey`](crate::external_api::views::SshKey)",
+        "type": "object",
+        "properties": {
+          "description": {
+            "type": "string"
+          },
+          "name": {
+            "$ref": "#/components/schemas/Name"
+          },
+          "public_key": {
+            "description": "SSH public key, e.g., `\"ssh-ed25519 AAAAC3NzaC...\"`",
+            "type": "string"
+          }
+        },
+        "required": [
+          "description",
+          "name",
+          "public_key"
+        ]
+      },
+      "SshKeyResultsPage": {
+        "description": "A single page of results",
+        "type": "object",
+        "properties": {
+          "items": {
+            "description": "list of items on this page of results",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SshKey"
+            }
+          },
+          "next_page": {
+            "nullable": true,
+            "description": "token used to fetch the next page of results (if any)",
+            "type": "string"
+          }
+        },
+        "required": [
+          "items"
+        ]
+      },
       "TimeseriesName": {
         "title": "The name of a timeseries",
         "description": "Names are constructed by concatenating the target and metric names with ':'. Target and metric names must be lowercase alphanumeric characters with '_' separating words.",
@@ -7922,6 +8447,13 @@
     {
       "name": "snapshots",
       "description": "Snapshots of Virtual Disks at a particular point in time.",
+      "externalDocs": {
+        "url": "http://oxide.computer/docs/#xxx"
+      }
+    },
+    {
+      "name": "sshkeys",
+      "description": "Public SSH keys for an individual user",
       "externalDocs": {
         "url": "http://oxide.computer/docs/#xxx"
       }

@@ -31,7 +31,30 @@ use crate::authz::ApiResourceError;
 use crate::context::OpContext;
 use crate::db::fixed_data::role_assignment_builtin::BUILTIN_ROLE_ASSIGNMENTS;
 use crate::db::fixed_data::role_builtin::BUILTIN_ROLES;
-use crate::db::fixed_data::silo_builtin::SILO_ID;
+use crate::db::fixed_data::silo::{DEFAULT_SILO, SILO_ID};
+use crate::db::lookup::LookupPath;
+use crate::db::{
+    self,
+    error::{public_error_from_diesel_pool, ErrorHandler, TransactionError},
+    model::{
+        ConsoleSession, Dataset, DatasetKind, Disk, DiskRuntimeState,
+        Generation, GlobalImage, IncompleteNetworkInterface, Instance,
+        InstanceRuntimeState, Name, NetworkInterface, Organization,
+        OrganizationUpdate, OximeterInfo, ProducerEndpoint, Project,
+        ProjectUpdate, Region, RoleAssignmentBuiltin, RoleBuiltin, RouterRoute,
+        RouterRouteUpdate, Silo, SiloUser, Sled, SshKey,
+        UpdateAvailableArtifact, UserBuiltin, Volume, Vpc, VpcFirewallRule,
+        VpcRouter, VpcRouterUpdate, VpcSubnet, VpcSubnetUpdate, VpcUpdate,
+        Zpool,
+    },
+    pagination::paginated,
+    pagination::paginated_multicolumn,
+    subnet_allocation::FilterConflictingVpcSubnetRangesQuery,
+    subnet_allocation::InsertNetworkInterfaceQuery,
+    subnet_allocation::NetworkInterfaceError,
+    subnet_allocation::SubnetError,
+    update_and_check::{UpdateAndCheck, UpdateStatus},
+};
 use crate::external_api::params;
 use async_bb8_diesel::{AsyncConnection, AsyncRunQueryDsl, ConnectionManager};
 use chrono::Utc;
@@ -53,34 +76,11 @@ use omicron_common::api::external::UpdateResult;
 use omicron_common::api::external::{
     CreateResult, IdentityMetadataCreateParams,
 };
-use omicron_common::api::internal::nexus::UpdateArtifact;
 use omicron_common::bail_unless;
 use std::convert::{TryFrom, TryInto};
+use std::net::Ipv6Addr;
 use std::sync::Arc;
 use uuid::Uuid;
-
-use crate::db::lookup::LookupPath;
-use crate::db::{
-    self,
-    error::{public_error_from_diesel_pool, ErrorHandler, TransactionError},
-    model::{
-        ConsoleSession, Dataset, DatasetKind, Disk, DiskRuntimeState,
-        Generation, IncompleteNetworkInterface, Instance, InstanceRuntimeState,
-        Name, NetworkInterface, Organization, OrganizationUpdate, OximeterInfo,
-        ProducerEndpoint, Project, ProjectUpdate, Region,
-        RoleAssignmentBuiltin, RoleBuiltin, RouterRoute, RouterRouteUpdate,
-        Silo, SiloUser, Sled, UpdateArtifactKind, UpdateAvailableArtifact,
-        UserBuiltin, Volume, Vpc, VpcFirewallRule, VpcRouter, VpcRouterUpdate,
-        VpcSubnet, VpcSubnetUpdate, VpcUpdate, Zpool,
-    },
-    pagination::paginated,
-    pagination::paginated_multicolumn,
-    subnet_allocation::FilterConflictingVpcSubnetRangesQuery,
-    subnet_allocation::InsertNetworkInterfaceQuery,
-    subnet_allocation::NetworkInterfaceError,
-    subnet_allocation::SubnetError,
-    update_and_check::{UpdateAndCheck, UpdateStatus},
-};
 
 // Number of unique datasets required to back a region.
 // TODO: This should likely turn into a configuration option.
@@ -94,7 +94,7 @@ const REGION_REDUNDANCY_THRESHOLD: usize = 3;
 trait RunnableQuery<U>:
     RunQueryDsl<DbConnection>
     + QueryFragment<Pg>
-    + LoadQuery<DbConnection, U>
+    + LoadQuery<'static, DbConnection, U>
     + QueryId
 {
 }
@@ -102,7 +102,7 @@ trait RunnableQuery<U>:
 impl<U, T> RunnableQuery<U> for T where
     T: RunQueryDsl<DbConnection>
         + QueryFragment<Pg>
-        + LoadQuery<DbConnection, U>
+        + LoadQuery<'static, DbConnection, U>
         + QueryId
 {
 }
@@ -171,26 +171,6 @@ impl DataStore {
             .load_async(self.pool_authorized(opctx).await?)
             .await
             .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
-    }
-
-    pub async fn sled_fetch(
-        &self,
-        opctx: &OpContext,
-        authz_sled: &authz::Sled,
-    ) -> LookupResult<Sled> {
-        opctx.authorize(authz::Action::Read, authz_sled).await?;
-        use db::schema::sled::dsl;
-        dsl::sled
-            .filter(dsl::id.eq(authz_sled.id()))
-            .select(Sled::as_select())
-            .first_async(self.pool_authorized(opctx).await?)
-            .await
-            .map_err(|e| {
-                public_error_from_diesel_pool(
-                    e,
-                    ErrorHandler::NotFoundByResource(authz_sled),
-                )
-            })
     }
 
     /// Stores a new zpool in the database.
@@ -317,12 +297,52 @@ impl DataStore {
             .limit(REGION_REDUNDANCY_THRESHOLD.try_into().unwrap())
     }
 
+    async fn get_block_size_from_disk_create(
+        &self,
+        opctx: &OpContext,
+        disk_create: &params::DiskCreate,
+    ) -> Result<db::model::BlockSize, Error> {
+        match &disk_create.disk_source {
+            params::DiskSource::Blank { block_size } => {
+                Ok(db::model::BlockSize::try_from(*block_size)
+                    .map_err(|e| Error::invalid_request(&e.to_string()))?)
+            }
+            params::DiskSource::Snapshot { snapshot_id: _ } => {
+                // Until we implement snapshots, do not allow disks to be
+                // created from a snapshot.
+                return Err(Error::InvalidValue {
+                    label: String::from("snapshot"),
+                    message: String::from("snapshots are not yet supported"),
+                });
+            }
+            params::DiskSource::Image { image_id: _ } => {
+                // Until we implement project images, do not allow disks to be
+                // created from a project image.
+                return Err(Error::InvalidValue {
+                    label: String::from("image"),
+                    message: String::from(
+                        "project image are not yet supported",
+                    ),
+                });
+            }
+            params::DiskSource::GlobalImage { image_id } => {
+                let (.., db_global_image) = LookupPath::new(opctx, &self)
+                    .global_image_id(*image_id)
+                    .fetch()
+                    .await?;
+
+                Ok(db_global_image.block_size)
+            }
+        }
+    }
+
     /// Idempotently allocates enough regions to back a disk.
     ///
     /// Returns the allocated regions, as well as the datasets to which they
     /// belong.
     pub async fn region_allocate(
         &self,
+        opctx: &OpContext,
         volume_id: Uuid,
         params: &params::DiskCreate,
     ) -> Result<Vec<(Dataset, Region)>, Error> {
@@ -354,7 +374,13 @@ impl DataStore {
             NotEnoughDatasets(usize),
         }
         type TxnError = TransactionError<RegionAllocateError>;
+
         let params: params::DiskCreate = params.clone();
+        let block_size =
+            self.get_block_size_from_disk_create(opctx, &params).await?;
+        let blocks_per_extent =
+            params.extent_size() / block_size.to_bytes() as i64;
+
         self.pool()
             .transaction(move |conn| {
                 // First, for idempotency, check if regions are already
@@ -388,8 +414,8 @@ impl DataStore {
                         Region::new(
                             dataset.id(),
                             volume_id,
-                            params.block_size().into(),
-                            params.blocks_per_extent(),
+                            block_size.into(),
+                            blocks_per_extent,
                             params.extent_count(),
                         )
                     })
@@ -401,8 +427,8 @@ impl DataStore {
 
                 // Update the tallied sizes in the source datasets containing
                 // those regions.
-                let region_size = i64::from(params.block_size())
-                    * params.blocks_per_extent()
+                let region_size = i64::from(block_size.to_bytes())
+                    * blocks_per_extent
                     * params.extent_count();
                 for dataset in source_datasets.iter_mut() {
                     dataset.size_used =
@@ -536,14 +562,15 @@ impl DataStore {
     pub async fn organization_create(
         &self,
         opctx: &OpContext,
-        organization: Organization,
+        organization: &params::OrganizationCreate,
     ) -> CreateResult<Organization> {
+        let authz_silo = opctx.authn.silo_required()?;
+        opctx.authorize(authz::Action::CreateChild, &authz_silo).await?;
+
         use db::schema::organization::dsl;
-
-        opctx.authorize(authz::Action::CreateChild, &authz::FLEET).await?;
-
+        let silo_id = authz_silo.id();
+        let organization = Organization::new(organization.clone(), silo_id);
         let name = organization.name().as_str().to_string();
-        let silo_id = organization.silo_id();
 
         Silo::insert_resource(
             silo_id,
@@ -553,7 +580,11 @@ impl DataStore {
         .await
         .map_err(|e| match e {
             AsyncInsertError::CollectionNotFound => Error::InternalError {
-                internal_message: format!("attempting to create an organization under non-existent silo {}", silo_id),
+                internal_message: format!(
+                    "attempting to create an \
+                    organization under non-existent silo {}",
+                    silo_id
+                ),
             },
             AsyncInsertError::DatabaseError(e) => {
                 public_error_from_diesel_pool(
@@ -623,10 +654,13 @@ impl DataStore {
         opctx: &OpContext,
         pagparams: &DataPageParams<'_, Uuid>,
     ) -> ListResultVec<Organization> {
+        let authz_silo = opctx.authn.silo_required()?;
+        opctx.authorize(authz::Action::ListChildren, &authz_silo).await?;
+
         use db::schema::organization::dsl;
-        opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
         paginated(dsl::organization, dsl::id, pagparams)
             .filter(dsl::time_deleted.is_null())
+            .filter(dsl::silo_id.eq(authz_silo.id()))
             .select(Organization::as_select())
             .load_async::<Organization>(self.pool_authorized(opctx).await?)
             .await
@@ -638,10 +672,13 @@ impl DataStore {
         opctx: &OpContext,
         pagparams: &DataPageParams<'_, Name>,
     ) -> ListResultVec<Organization> {
-        use db::schema::organization::dsl;
+        let authz_silo = opctx.authn.silo_required()?;
         opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
+
+        use db::schema::organization::dsl;
         paginated(dsl::organization, dsl::name, pagparams)
             .filter(dsl::time_deleted.is_null())
+            .filter(dsl::silo_id.eq(authz_silo.id()))
             .select(Organization::as_select())
             .load_async::<Organization>(self.pool_authorized(opctx).await?)
             .await
@@ -1262,10 +1299,7 @@ impl DataStore {
         interface: IncompleteNetworkInterface,
     ) -> Result<NetworkInterface, NetworkInterfaceError> {
         use db::schema::network_interface::dsl;
-        let query = InsertNetworkInterfaceQuery {
-            interface: interface.clone(),
-            now: Utc::now(),
-        };
+        let query = InsertNetworkInterfaceQuery::new(interface.clone());
         diesel::insert_into(dsl::network_interface)
             .values(query)
             .returning(NetworkInterface::as_returning())
@@ -1636,8 +1670,8 @@ impl DataStore {
                 )
             })?;
         Ok((
-            authz_project.child_generic(
-                ResourceType::Vpc,
+            authz::Vpc::new(
+                authz_project.clone(),
                 vpc.id(),
                 LookupType::ByName(vpc.name().to_string()),
             ),
@@ -1860,7 +1894,7 @@ impl DataStore {
         subnet: VpcSubnet,
     ) -> Result<VpcSubnet, SubnetError> {
         use db::schema::vpc_subnet::dsl;
-        let values = FilterConflictingVpcSubnetRangesQuery(subnet.clone());
+        let values = FilterConflictingVpcSubnetRangesQuery::new(subnet.clone());
         diesel::insert_into(dsl::vpc_subnet)
             .values(values)
             .returning(VpcSubnet::as_returning())
@@ -1985,8 +2019,8 @@ impl DataStore {
                 )
             })?;
         Ok((
-            authz_vpc.child_generic(
-                ResourceType::VpcRouter,
+            authz::VpcRouter::new(
+                authz_vpc.clone(),
                 router.id(),
                 LookupType::ById(router.id()),
             ),
@@ -2156,47 +2190,23 @@ impl DataStore {
     // the conversion to serializable user-facing errors happens elsewhere (see
     // issue #347) these methods can safely return more accurate errors, and
     // showing/hiding that info as appropriate will be handled higher up
-
-    pub async fn session_fetch(
-        &self,
-        token: String,
-    ) -> LookupResult<authn::ConsoleSessionWithSiloId> {
-        use db::schema::console_session::dsl;
-
-        let console_session = dsl::console_session
-            .filter(dsl::token.eq(token.clone()))
-            .select(ConsoleSession::as_select())
-            .first_async(self.pool())
-            .await
-            .map_err(|e| {
-                public_error_from_diesel_pool(
-                    e,
-                    ErrorHandler::NotFoundByLookup(
-                        ResourceType::ConsoleSession,
-                        LookupType::BySessionToken(token),
-                    ),
-                )
-            })?;
-
-        let silo_user =
-            self.silo_user_fetch(console_session.silo_user_id).await?;
-
-        Ok(authn::ConsoleSessionWithSiloId {
-            console_session,
-            silo_id: silo_user.silo_id,
-        })
-    }
+    // TODO-correctness this may apply at the Nexus level as well.
 
     pub async fn session_create(
         &self,
+        opctx: &OpContext,
         session: ConsoleSession,
     ) -> CreateResult<ConsoleSession> {
+        opctx
+            .authorize(authz::Action::CreateChild, &authz::CONSOLE_SESSION_LIST)
+            .await?;
+
         use db::schema::console_session::dsl;
 
         diesel::insert_into(dsl::console_session)
             .values(session)
             .returning(ConsoleSession::as_returning())
-            .get_result_async(self.pool())
+            .get_result_async(self.pool_authorized(opctx).await?)
             .await
             .map_err(|e| {
                 Error::internal_error(&format!(
@@ -2208,15 +2218,17 @@ impl DataStore {
 
     pub async fn session_update_last_used(
         &self,
-        token: String,
+        opctx: &OpContext,
+        authz_session: &authz::ConsoleSession,
     ) -> UpdateResult<authn::ConsoleSessionWithSiloId> {
-        use db::schema::console_session::dsl;
+        opctx.authorize(authz::Action::Modify, authz_session).await?;
 
+        use db::schema::console_session::dsl;
         let console_session = diesel::update(dsl::console_session)
-            .filter(dsl::token.eq(token.clone()))
+            .filter(dsl::token.eq(authz_session.id()))
             .set((dsl::time_last_used.eq(Utc::now()),))
             .returning(ConsoleSession::as_returning())
-            .get_result_async(self.pool())
+            .get_result_async(self.pool_authorized(opctx).await?)
             .await
             .map_err(|e| {
                 Error::internal_error(&format!(
@@ -2225,8 +2237,9 @@ impl DataStore {
                 ))
             })?;
 
-        let silo_user = self
-            .silo_user_fetch(console_session.silo_user_id)
+        let (.., db_silo_user) = LookupPath::new(opctx, &self)
+            .silo_user_id(console_session.silo_user_id)
+            .fetch()
             .await
             .map_err(|e| {
                 Error::internal_error(&format!(
@@ -2237,17 +2250,22 @@ impl DataStore {
 
         Ok(authn::ConsoleSessionWithSiloId {
             console_session,
-            silo_id: silo_user.silo_id,
+            silo_id: db_silo_user.silo_id,
         })
     }
 
     // putting "hard" in the name because we don't do this with any other model
-    pub async fn session_hard_delete(&self, token: String) -> DeleteResult {
-        use db::schema::console_session::dsl;
+    pub async fn session_hard_delete(
+        &self,
+        opctx: &OpContext,
+        authz_session: &authz::ConsoleSession,
+    ) -> DeleteResult {
+        opctx.authorize(authz::Action::Delete, authz_session).await?;
 
+        use db::schema::console_session::dsl;
         diesel::delete(dsl::console_session)
-            .filter(dsl::token.eq(token.clone()))
-            .execute_async(self.pool())
+            .filter(dsl::token.eq(authz_session.id()))
+            .execute_async(self.pool_authorized(opctx).await?)
             .await
             .map(|_rows_deleted| ())
             .map_err(|e| {
@@ -2272,37 +2290,6 @@ impl DataStore {
             .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
     }
 
-    pub async fn user_builtin_fetch(
-        &self,
-        opctx: &OpContext,
-        name: &Name,
-    ) -> LookupResult<UserBuiltin> {
-        use db::schema::user_builtin::dsl;
-        opctx
-            .authorize(
-                authz::Action::Read,
-                &authz::FLEET.child_generic(
-                    ResourceType::User,
-                    LookupType::from(&name.0),
-                ),
-            )
-            .await?;
-        dsl::user_builtin
-            .filter(dsl::name.eq(name.clone()))
-            .select(UserBuiltin::as_select())
-            .first_async::<UserBuiltin>(self.pool_authorized(opctx).await?)
-            .await
-            .map_err(|e| {
-                public_error_from_diesel_pool(
-                    e,
-                    ErrorHandler::NotFoundByLookup(
-                        ResourceType::User,
-                        LookupType::ByName(name.as_str().to_owned()),
-                    ),
-                )
-            })
-    }
-
     /// Load built-in users into the database
     pub async fn load_builtin_users(
         &self,
@@ -2317,6 +2304,7 @@ impl DataStore {
             // is created with the database.
             &*authn::USER_INTERNAL_API,
             &*authn::USER_INTERNAL_READ,
+            &*authn::USER_EXTERNAL_AUTHN,
             &*authn::USER_SAGA_RECOVERY,
             &*authn::USER_TEST_PRIVILEGED,
             &*authn::USER_TEST_UNPRIVILEGED,
@@ -2335,8 +2323,10 @@ impl DataStore {
         })
         .collect::<Vec<UserBuiltin>>();
 
+        // TODO: This should probably be removed when we can switch
+        // "test-privileged" and "test-unprivileged" to normal silo users rather
+        // than built-in users.
         debug!(opctx.log, "creating silo_user entries for built-in users");
-
         for builtin_user in &builtin_users {
             self.silo_user_create(SiloUser::new(
                 *SILO_ID,
@@ -2344,7 +2334,6 @@ impl DataStore {
             ))
             .await?;
         }
-
         info!(opctx.log, "created silo_user entries for built-in users");
 
         debug!(opctx.log, "attempting to create built-in users");
@@ -2379,43 +2368,6 @@ impl DataStore {
         .load_async::<RoleBuiltin>(self.pool_authorized(opctx).await?)
         .await
         .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
-    }
-
-    pub async fn role_builtin_fetch(
-        &self,
-        opctx: &OpContext,
-        name: &str,
-    ) -> LookupResult<RoleBuiltin> {
-        use db::schema::role_builtin::dsl;
-        opctx
-            .authorize(
-                authz::Action::Read,
-                &authz::FLEET
-                    .child_generic(ResourceType::Role, LookupType::from(name)),
-            )
-            .await?;
-
-        let (resource_type, role_name) =
-            name.split_once(".").ok_or_else(|| Error::ObjectNotFound {
-                type_name: ResourceType::Role,
-                lookup_type: LookupType::ByName(String::from(name)),
-            })?;
-
-        dsl::role_builtin
-            .filter(dsl::resource_type.eq(String::from(resource_type)))
-            .filter(dsl::role_name.eq(String::from(role_name)))
-            .select(RoleBuiltin::as_select())
-            .first_async::<RoleBuiltin>(self.pool_authorized(opctx).await?)
-            .await
-            .map_err(|e| {
-                public_error_from_diesel_pool(
-                    e,
-                    ErrorHandler::NotFoundByLookup(
-                        ResourceType::Role,
-                        LookupType::ByName(String::from(name)),
-                    ),
-                )
-            })
     }
 
     /// Load built-in roles into the database
@@ -2549,6 +2501,8 @@ impl DataStore {
             .await
             .map(|_rows_deleted| ())
             .map_err(|e| {
+                // TODO-correctness TODO-availability This should be using
+                // public_error_from_diesel_pool()
                 Error::internal_error(&format!(
                     "error deleting outdated available artifacts: {:?}",
                     e
@@ -2556,69 +2510,27 @@ impl DataStore {
             })
     }
 
-    pub async fn update_available_artifact_fetch(
-        &self,
-        opctx: &OpContext,
-        artifact: &UpdateArtifact,
-    ) -> LookupResult<UpdateAvailableArtifact> {
-        opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
-
-        use db::schema::update_available_artifact::dsl;
-        dsl::update_available_artifact
-            .filter(
-                dsl::name
-                    .eq(artifact.name.clone())
-                    .and(dsl::version.eq(artifact.version))
-                    .and(dsl::kind.eq(UpdateArtifactKind(artifact.kind))),
-            )
-            .select(UpdateAvailableArtifact::as_select())
-            .first_async(self.pool_authorized(opctx).await?)
-            .await
-            .map_err(|e| {
-                Error::internal_error(&format!(
-                    "error fetching artifact: {:?}",
-                    e
-                ))
-            })
-    }
-
-    pub async fn silo_user_fetch(
-        &self,
-        silo_user_id: Uuid,
-    ) -> LookupResult<SiloUser> {
-        use db::schema::silo_user::dsl;
-
-        dsl::silo_user
-            .filter(dsl::id.eq(silo_user_id))
-            .filter(dsl::time_deleted.is_null())
-            .select(SiloUser::as_select())
-            .first_async(self.pool())
-            .await
-            .map_err(|e| {
-                Error::internal_error(&format!(
-                    "error fetching silo user: {:?}",
-                    e
-                ))
-            })
-    }
-
+    // NOTE: This function is only used for testing and for initial population
+    // of built-in users as silo users.  The error handling here assumes (1)
+    // that the caller expects no user input error from the database, and (2)
+    // that if a Silo user with the same id already exists in the database,
+    // that's not an error (it's assumed to be the same user).
     pub async fn silo_user_create(
         &self,
         silo_user: SiloUser,
-    ) -> CreateResult<SiloUser> {
+    ) -> Result<(), Error> {
         use db::schema::silo_user::dsl;
 
-        diesel::insert_into(dsl::silo_user)
+        let _ = diesel::insert_into(dsl::silo_user)
             .values(silo_user)
-            .returning(SiloUser::as_returning())
-            .get_result_async(self.pool())
+            .on_conflict(dsl::id)
+            .do_nothing()
+            .execute_async(self.pool())
             .await
             .map_err(|e| {
-                Error::internal_error(&format!(
-                    "error creating silo user: {:?}",
-                    e
-                ))
-            })
+                public_error_from_diesel_pool(e, ErrorHandler::Server)
+            })?;
+        Ok(())
     }
 
     /// Load built-in silos into the database
@@ -2626,22 +2538,21 @@ impl DataStore {
         &self,
         opctx: &OpContext,
     ) -> Result<(), Error> {
+        opctx.authorize(authz::Action::Modify, &authz::DATABASE).await?;
+
         debug!(opctx.log, "attempting to create built-in silo");
 
-        let builtin_silo = Silo::new_with_id(
-            *SILO_ID,
-            params::SiloCreate {
-                identity: IdentityMetadataCreateParams {
-                    name: "fakesilo".parse().unwrap(),
-                    description: "fake silo".to_string(),
-                },
-                discoverable: false,
-            },
-        );
-
-        let _create_result = self.silo_create(opctx, builtin_silo).await?;
-        info!(opctx.log, "created built-in silo");
-
+        use db::schema::silo::dsl;
+        let count = diesel::insert_into(dsl::silo)
+            .values(&*DEFAULT_SILO)
+            .on_conflict(dsl::id)
+            .do_nothing()
+            .execute_async(self.pool_authorized(opctx).await?)
+            .await
+            .map_err(|e| {
+                public_error_from_diesel_pool(e, ErrorHandler::Server)
+            })?;
+        info!(opctx.log, "created {} built-in silos", count);
         Ok(())
     }
 
@@ -2650,12 +2561,11 @@ impl DataStore {
         opctx: &OpContext,
         silo: Silo,
     ) -> CreateResult<Silo> {
-        use db::schema::silo::dsl;
-
-        // TODO opctx.authorize
+        opctx.authorize(authz::Action::CreateChild, &authz::FLEET).await?;
 
         let silo_id = silo.id();
 
+        use db::schema::silo::dsl;
         diesel::insert_into(dsl::silo)
             .values(silo)
             .returning(Silo::as_returning())
@@ -2677,8 +2587,9 @@ impl DataStore {
         opctx: &OpContext,
         pagparams: &DataPageParams<'_, Uuid>,
     ) -> ListResultVec<Silo> {
+        opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
+
         use db::schema::silo::dsl;
-        // TODO opctx.authorize
         paginated(dsl::silo, dsl::id, pagparams)
             .filter(dsl::time_deleted.is_null())
             .filter(dsl::discoverable.eq(true))
@@ -2693,8 +2604,9 @@ impl DataStore {
         opctx: &OpContext,
         pagparams: &DataPageParams<'_, Name>,
     ) -> ListResultVec<Silo> {
+        opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
+
         use db::schema::silo::dsl;
-        // TODO opctx.authorize
         paginated(dsl::silo, dsl::name, pagparams)
             .filter(dsl::time_deleted.is_null())
             .filter(dsl::discoverable.eq(true))
@@ -2704,77 +2616,29 @@ impl DataStore {
             .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
     }
 
-    pub async fn silo_fetch(
-        &self,
-        _opctx: &OpContext,
-        name: &Name,
-    ) -> LookupResult<Silo> {
-        // TODO opctx.authorize
-        self.silo_lookup_noauthz(name).await
-    }
-
-    async fn silo_lookup_noauthz(
-        &self,
-        // XXX enable when all endpoints are protected by authn
-        // opctx: &OpContext,
-        name: &Name,
-    ) -> LookupResult<Silo> {
-        use db::schema::silo::dsl;
-
-        // TODO opctx.authorize
-
-        dsl::silo
-            .filter(dsl::time_deleted.is_null())
-            .filter(dsl::name.eq(name.clone()))
-            .select(Silo::as_select())
-            .get_result_async::<Silo>(self.pool())
-            .await
-            .map_err(|e| {
-                public_error_from_diesel_pool(
-                    e,
-                    ErrorHandler::NotFoundByLookup(
-                        ResourceType::Silo,
-                        LookupType::ByName(name.as_str().to_owned()),
-                    ),
-                )
-            })
-    }
-
     pub async fn silo_delete(
         &self,
         opctx: &OpContext,
-        name: &Name,
+        authz_silo: &authz::Silo,
+        db_silo: &db::model::Silo,
     ) -> DeleteResult {
+        assert_eq!(authz_silo.id(), db_silo.id());
+        opctx.authorize(authz::Action::Delete, authz_silo).await?;
+
         use db::schema::organization;
         use db::schema::silo;
         use db::schema::silo_user;
 
-        // TODO opctx.authorize
-
-        let (id, rcgen) = silo::dsl::silo
-            .filter(silo::dsl::time_deleted.is_null())
-            .filter(silo::dsl::name.eq(name.clone()))
-            .select((silo::dsl::id, silo::dsl::rcgen))
-            .get_result_async::<(Uuid, Generation)>(self.pool())
-            .await
-            .map_err(|e| {
-                public_error_from_diesel_pool(
-                    e,
-                    ErrorHandler::NotFoundByLookup(
-                        ResourceType::Silo,
-                        LookupType::ByName(name.to_string()),
-                    ),
-                )
-            })?;
-
         // Make sure there are no organizations present within this silo.
+        let id = authz_silo.id();
+        let rcgen = db_silo.rcgen;
         let org_found = diesel_pool_result_optional(
             organization::dsl::organization
                 .filter(organization::dsl::silo_id.eq(id))
                 .filter(organization::dsl::time_deleted.is_null())
                 .select(organization::dsl::id)
                 .limit(1)
-                .first_async::<Uuid>(self.pool())
+                .first_async::<Uuid>(self.pool_authorized(opctx).await?)
                 .await,
         )
         .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))?;
@@ -2792,15 +2656,12 @@ impl DataStore {
             .filter(silo::dsl::id.eq(id))
             .filter(silo::dsl::rcgen.eq(rcgen))
             .set(silo::dsl::time_deleted.eq(now))
-            .execute_async(self.pool())
+            .execute_async(self.pool_authorized(opctx).await?)
             .await
             .map_err(|e| {
                 public_error_from_diesel_pool(
                     e,
-                    ErrorHandler::NotFoundByLookup(
-                        ResourceType::Silo,
-                        LookupType::ById(id),
-                    ),
+                    ErrorHandler::NotFoundByResource(authz_silo),
                 )
             })?;
 
@@ -2814,24 +2675,195 @@ impl DataStore {
         info!(opctx.log, "deleted silo {}", id);
 
         // If silo deletion succeeded, delete all silo users
+        // TODO-correctness This needs to happen in a saga or some other
+        // mechanism that ensures it happens even if we crash at this point.
+        // TODO-scalability This needs to happen in batches
         let updated_rows = diesel::update(silo_user::dsl::silo_user)
             .filter(silo_user::dsl::silo_id.eq(id))
+            .filter(silo_user::dsl::time_deleted.is_null())
             .set(silo_user::dsl::time_deleted.eq(now))
-            .execute_async(self.pool())
+            .execute_async(self.pool_authorized(opctx).await?)
             .await
             .map_err(|e| {
                 public_error_from_diesel_pool(
                     e,
-                    ErrorHandler::NotFoundByLookup(
-                        ResourceType::Silo,
-                        LookupType::ById(id),
-                    ),
+                    ErrorHandler::NotFoundByResource(authz_silo),
                 )
             })?;
 
-        info!(opctx.log, "deleted {} silo users for silo {}", updated_rows, id,);
+        info!(opctx.log, "deleted {} silo users for silo {}", updated_rows, id);
 
         Ok(())
+    }
+
+    /// Return the next available IPv6 address for an Oxide service running on
+    /// the provided sled.
+    pub async fn next_ipv6_address(
+        &self,
+        opctx: &OpContext,
+        sled_id: Uuid,
+    ) -> Result<Ipv6Addr, Error> {
+        use db::schema::sled::dsl;
+        let net = diesel::update(
+            dsl::sled.find(sled_id).filter(dsl::time_deleted.is_null()),
+        )
+        .set(dsl::last_used_address.eq(dsl::last_used_address + 1))
+        .returning(dsl::last_used_address)
+        .get_result_async(self.pool_authorized(opctx).await?)
+        .await
+        .map_err(|e| {
+            public_error_from_diesel_pool(
+                e,
+                ErrorHandler::NotFoundByLookup(
+                    ResourceType::Sled,
+                    LookupType::ById(sled_id),
+                ),
+            )
+        })?;
+
+        // TODO-correctness: We need to ensure that this address is actually
+        // within the sled's underlay prefix, once that's included in the
+        // database record.
+        match net {
+            ipnetwork::IpNetwork::V6(net) => Ok(net.ip()),
+            _ => Err(Error::InternalError {
+                internal_message: String::from("Sled IP address must be IPv6"),
+            }),
+        }
+    }
+
+    pub async fn global_image_list_images(
+        &self,
+        opctx: &OpContext,
+        pagparams: &DataPageParams<'_, Name>,
+    ) -> ListResultVec<GlobalImage> {
+        opctx
+            .authorize(authz::Action::ListChildren, &authz::GLOBAL_IMAGE_LIST)
+            .await?;
+
+        use db::schema::global_image::dsl;
+        paginated(dsl::global_image, dsl::name, pagparams)
+            .filter(dsl::time_deleted.is_null())
+            .select(GlobalImage::as_select())
+            .load_async::<GlobalImage>(self.pool_authorized(opctx).await?)
+            .await
+            .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
+    }
+
+    pub async fn global_image_create_image(
+        &self,
+        opctx: &OpContext,
+        image: GlobalImage,
+    ) -> CreateResult<GlobalImage> {
+        opctx
+            .authorize(authz::Action::CreateChild, &authz::GLOBAL_IMAGE_LIST)
+            .await?;
+
+        use db::schema::global_image::dsl;
+        let name = image.name().clone();
+        diesel::insert_into(dsl::global_image)
+            .values(image)
+            .on_conflict(dsl::id)
+            .do_nothing()
+            .returning(GlobalImage::as_returning())
+            .get_result_async(self.pool())
+            .await
+            .map_err(|e| {
+                public_error_from_diesel_pool(
+                    e,
+                    ErrorHandler::Conflict(ResourceType::Image, name.as_str()),
+                )
+            })
+    }
+
+    // SSH public keys
+
+    pub async fn ssh_keys_list(
+        &self,
+        opctx: &OpContext,
+        authz_user: &authz::SiloUser,
+        page_params: &DataPageParams<'_, Name>,
+    ) -> ListResultVec<SshKey> {
+        opctx.authorize(authz::Action::ListChildren, authz_user).await?;
+
+        use db::schema::ssh_key::dsl;
+        paginated(dsl::ssh_key, dsl::name, page_params)
+            .filter(dsl::silo_user_id.eq(authz_user.id()))
+            .filter(dsl::time_deleted.is_null())
+            .select(SshKey::as_select())
+            .load_async(self.pool_authorized(opctx).await?)
+            .await
+            .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
+    }
+
+    /// Create a new SSH public key for a user.
+    pub async fn ssh_key_create(
+        &self,
+        opctx: &OpContext,
+        authz_user: &authz::SiloUser,
+        ssh_key: SshKey,
+    ) -> CreateResult<SshKey> {
+        assert_eq!(authz_user.id(), ssh_key.silo_user_id);
+        opctx.authorize(authz::Action::CreateChild, authz_user).await?;
+
+        use db::schema::ssh_key::dsl;
+        diesel::insert_into(dsl::ssh_key)
+            .values(ssh_key)
+            .returning(SshKey::as_returning())
+            .get_result_async(self.pool_authorized(opctx).await?)
+            .await
+            .map_err(|e| {
+                Error::internal_error(&format!(
+                    "error creating SSH key: {:?}",
+                    e
+                ))
+            })
+    }
+
+    /// Delete an existing SSH public key.
+    pub async fn ssh_key_delete(
+        &self,
+        opctx: &OpContext,
+        authz_ssh_key: &authz::SshKey,
+    ) -> DeleteResult {
+        opctx.authorize(authz::Action::Delete, authz_ssh_key).await?;
+
+        use db::schema::ssh_key::dsl;
+        diesel::update(dsl::ssh_key)
+            .filter(dsl::id.eq(authz_ssh_key.id()))
+            .filter(dsl::time_deleted.is_null())
+            .set(dsl::time_deleted.eq(Utc::now()))
+            .check_if_exists::<SshKey>(authz_ssh_key.id())
+            .execute_and_check(self.pool_authorized(opctx).await?)
+            .await
+            .map_err(|e| {
+                public_error_from_diesel_pool(
+                    e,
+                    ErrorHandler::NotFoundByResource(authz_ssh_key),
+                )
+            })?;
+        Ok(())
+    }
+
+    // Test interfaces
+
+    #[cfg(test)]
+    async fn test_try_table_scan(&self, opctx: &OpContext) -> Error {
+        use db::schema::project::dsl;
+        let conn = self.pool_authorized(opctx).await;
+        if let Err(error) = conn {
+            return error;
+        }
+        let result = dsl::project
+            .select(diesel::dsl::count_star())
+            .first_async::<i64>(conn.unwrap())
+            .await;
+        match result {
+            Ok(_) => Error::internal_error("table scan unexpectedly succeeded"),
+            Err(error) => {
+                public_error_from_diesel_pool(error, ErrorHandler::Server)
+            }
+        }
     }
 }
 
@@ -2851,7 +2883,7 @@ pub async fn datastore_test(
     // purpose of loading the built-in users, roles, and assignments.
     let opctx = OpContext::for_background(
         logctx.log.new(o!()),
-        Arc::new(authz::Authz::new()),
+        Arc::new(authz::Authz::new(&logctx.log)),
         authn::Context::internal_db_init(),
         Arc::clone(&datastore),
     );
@@ -2875,9 +2907,7 @@ mod test {
     use crate::db::explain::ExplainableAsync;
     use crate::db::identity::Resource;
     use crate::db::lookup::LookupPath;
-    use crate::db::model::{
-        ConsoleSession, DatasetKind, Organization, Project,
-    };
+    use crate::db::model::{ConsoleSession, DatasetKind, Project};
     use crate::external_api::params;
     use chrono::{Duration, Utc};
     use nexus_test_utils::db::test_setup_database;
@@ -2886,6 +2916,8 @@ mod test {
     };
     use omicron_test_utils::dev;
     use std::collections::HashSet;
+    use std::net::Ipv6Addr;
+    use std::net::SocketAddrV6;
     use std::net::{IpAddr, Ipv4Addr, SocketAddr};
     use std::sync::Arc;
     use uuid::Uuid;
@@ -2895,18 +2927,15 @@ mod test {
         let logctx = dev::test_setup_log("test_project_creation");
         let mut db = test_setup_database(&logctx.log).await;
         let (opctx, datastore) = datastore_test(&logctx, &db).await;
-        let organization = Organization::new(
-            params::OrganizationCreate {
-                identity: IdentityMetadataCreateParams {
-                    name: "org".parse().unwrap(),
-                    description: "desc".to_string(),
-                },
+        let organization = params::OrganizationCreate {
+            identity: IdentityMetadataCreateParams {
+                name: "org".parse().unwrap(),
+                description: "desc".to_string(),
             },
-            *SILO_ID,
-        );
+        };
 
         let organization =
-            datastore.organization_create(&opctx, organization).await.unwrap();
+            datastore.organization_create(&opctx, &organization).await.unwrap();
 
         let project = Project::new(
             organization.id(),
@@ -2917,11 +2946,12 @@ mod test {
                 },
             },
         );
-        let org = authz::FLEET.organization(
-            organization.id(),
-            LookupType::ById(organization.id()),
-        );
-        datastore.project_create(&opctx, &org, project).await.unwrap();
+        let (.., authz_org) = LookupPath::new(&opctx, &datastore)
+            .organization_id(organization.id())
+            .lookup_for(authz::Action::CreateChild)
+            .await
+            .unwrap();
+        datastore.project_create(&opctx, &authz_org, project).await.unwrap();
 
         let (.., organization_after_project_create) =
             LookupPath::new(&opctx, &datastore)
@@ -2939,7 +2969,7 @@ mod test {
     async fn test_session_methods() {
         let logctx = dev::test_setup_log("test_session_methods");
         let mut db = test_setup_database(&logctx.log).await;
-        let (_, datastore) = datastore_test(&logctx, &db).await;
+        let (opctx, datastore) = datastore_test(&logctx, &db).await;
 
         let token = "a_token".to_string();
         let silo_user_id = Uuid::new_v4();
@@ -2951,63 +2981,77 @@ mod test {
             silo_user_id,
         };
 
-        let _ = datastore.session_create(session.clone()).await;
+        let _ =
+            datastore.session_create(&opctx, session.clone()).await.unwrap();
 
         // Associate silo with user
-        let silo_user = datastore
-            .silo_user_create(SiloUser::new(
-                Uuid::new_v4(), /* silo id */
-                silo_user_id,
-            ))
+        datastore
+            .silo_user_create(SiloUser::new(*SILO_ID, silo_user_id))
             .await
             .unwrap();
 
-        assert_eq!(
-            silo_user.silo_id,
-            datastore
-                .silo_user_fetch(session.silo_user_id)
-                .await
-                .unwrap()
-                .silo_id,
-        );
+        let (.., db_silo_user) = LookupPath::new(&opctx, &datastore)
+            .silo_user_id(session.silo_user_id)
+            .fetch()
+            .await
+            .unwrap();
+        assert_eq!(*SILO_ID, db_silo_user.silo_id);
 
         // fetch the one we just created
-        let fetched = datastore.session_fetch(token.clone()).await.unwrap();
-        assert_eq!(session.silo_user_id, fetched.console_session.silo_user_id);
+        let (.., fetched) = LookupPath::new(&opctx, &datastore)
+            .console_session_token(&token)
+            .fetch()
+            .await
+            .unwrap();
+        assert_eq!(session.silo_user_id, fetched.silo_user_id);
 
         // trying to insert the same one again fails
-        let duplicate = datastore.session_create(session.clone()).await;
+        let duplicate = datastore.session_create(&opctx, session.clone()).await;
         assert!(matches!(
             duplicate,
             Err(Error::InternalError { internal_message: _ })
         ));
 
         // update last used (i.e., renew token)
-        let renewed =
-            datastore.session_update_last_used(token.clone()).await.unwrap();
+        let authz_session = authz::ConsoleSession::new(
+            authz::FLEET,
+            token.clone(),
+            LookupType::ByCompositeId(token.clone()),
+        );
+        let renewed = datastore
+            .session_update_last_used(&opctx, &authz_session)
+            .await
+            .unwrap();
         assert!(
             renewed.console_session.time_last_used > session.time_last_used
         );
 
         // time_last_used change persists in DB
-        let fetched = datastore.session_fetch(token.clone()).await.unwrap();
-        assert!(
-            fetched.console_session.time_last_used > session.time_last_used
-        );
+        let (.., fetched) = LookupPath::new(&opctx, &datastore)
+            .console_session_token(&token)
+            .fetch()
+            .await
+            .unwrap();
+        assert!(fetched.time_last_used > session.time_last_used);
 
         // delete it and fetch should come back with nothing
-        let delete = datastore.session_hard_delete(token.clone()).await;
+        let delete =
+            datastore.session_hard_delete(&opctx, &authz_session).await;
         assert_eq!(delete, Ok(()));
 
         // this will be a not found after #347
-        let fetched = datastore.session_fetch(token.clone()).await;
+        let fetched = LookupPath::new(&opctx, &datastore)
+            .console_session_token(&token)
+            .fetch()
+            .await;
         assert!(matches!(
             fetched,
             Err(Error::ObjectNotFound { type_name: _, lookup_type: _ })
         ));
 
         // deleting an already nonexistent is considered a success
-        let delete_again = datastore.session_hard_delete(token.clone()).await;
+        let delete_again =
+            datastore.session_hard_delete(&opctx, &authz_session).await;
         assert_eq!(delete_again, Ok(()));
 
         db.cleanup().await.unwrap();
@@ -3016,8 +3060,12 @@ mod test {
 
     // Creates a test sled, returns its UUID.
     async fn create_test_sled(datastore: &DataStore) -> Uuid {
-        let bogus_addr =
-            SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 8080);
+        let bogus_addr = SocketAddrV6::new(
+            Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 0, 1),
+            8080,
+            0,
+            0,
+        );
         let sled_id = Uuid::new_v4();
         let sled = Sled::new(sled_id, bogus_addr.clone());
         datastore.sled_upsert(sled).await.unwrap();
@@ -3051,7 +3099,9 @@ mod test {
                 name: Name::try_from(name.to_string()).unwrap(),
                 description: name.to_string(),
             },
-            snapshot_id: None,
+            disk_source: params::DiskSource::Blank {
+                block_size: params::BlockSize::try_from(4096).unwrap(),
+            },
             size,
         }
     }
@@ -3062,7 +3112,9 @@ mod test {
         let mut db = test_setup_database(&logctx.log).await;
         let cfg = db::Config { url: db.pg_config().clone() };
         let pool = db::Pool::new(&cfg);
-        let datastore = DataStore::new(Arc::new(pool));
+        let datastore = Arc::new(DataStore::new(Arc::new(pool)));
+        let opctx =
+            OpContext::for_tests(logctx.log.new(o!()), datastore.clone());
 
         // Create a sled...
         let sled_id = create_test_sled(&datastore).await;
@@ -3090,8 +3142,10 @@ mod test {
         let volume1_id = Uuid::new_v4();
         // Currently, we only allocate one Region Set per volume.
         let expected_region_count = REGION_REDUNDANCY_THRESHOLD;
-        let dataset_and_regions =
-            datastore.region_allocate(volume1_id, &params).await.unwrap();
+        let dataset_and_regions = datastore
+            .region_allocate(&opctx, volume1_id, &params)
+            .await
+            .unwrap();
 
         // Verify the allocation.
         assert_eq!(expected_region_count, dataset_and_regions.len());
@@ -3099,8 +3153,8 @@ mod test {
         for (dataset, region) in dataset_and_regions {
             assert!(disk1_datasets.insert(dataset.id()));
             assert_eq!(volume1_id, region.volume_id());
-            assert_eq!(params.block_size(), region.block_size());
-            assert_eq!(params.blocks_per_extent(), region.blocks_per_extent());
+            assert_eq!(ByteCount::from(4096), region.block_size());
+            assert_eq!(params.extent_size() / 4096, region.blocks_per_extent());
             assert_eq!(params.extent_count(), region.extent_count());
         }
 
@@ -3111,15 +3165,17 @@ mod test {
             ByteCount::from_mebibytes_u32(500),
         );
         let volume2_id = Uuid::new_v4();
-        let dataset_and_regions =
-            datastore.region_allocate(volume2_id, &params).await.unwrap();
+        let dataset_and_regions = datastore
+            .region_allocate(&opctx, volume2_id, &params)
+            .await
+            .unwrap();
         assert_eq!(expected_region_count, dataset_and_regions.len());
         let mut disk2_datasets = HashSet::new();
         for (dataset, region) in dataset_and_regions {
             assert!(disk2_datasets.insert(dataset.id()));
             assert_eq!(volume2_id, region.volume_id());
-            assert_eq!(params.block_size(), region.block_size());
-            assert_eq!(params.blocks_per_extent(), region.blocks_per_extent());
+            assert_eq!(ByteCount::from(4096), region.block_size());
+            assert_eq!(params.extent_size() / 4096, region.blocks_per_extent());
             assert_eq!(params.extent_count(), region.extent_count());
         }
 
@@ -3128,6 +3184,7 @@ mod test {
         assert_eq!(0, disk1_datasets.intersection(&disk2_datasets).count());
 
         let _ = db.cleanup().await;
+        logctx.cleanup_successful();
     }
 
     #[tokio::test]
@@ -3137,7 +3194,9 @@ mod test {
         let mut db = test_setup_database(&logctx.log).await;
         let cfg = db::Config { url: db.pg_config().clone() };
         let pool = db::Pool::new(&cfg);
-        let datastore = DataStore::new(Arc::new(pool));
+        let datastore = Arc::new(DataStore::new(Arc::new(pool)));
+        let opctx =
+            OpContext::for_tests(logctx.log.new(o!()), datastore.clone());
 
         // Create a sled...
         let sled_id = create_test_sled(&datastore).await;
@@ -3163,10 +3222,14 @@ mod test {
             ByteCount::from_mebibytes_u32(500),
         );
         let volume_id = Uuid::new_v4();
-        let mut dataset_and_regions1 =
-            datastore.region_allocate(volume_id, &params).await.unwrap();
-        let mut dataset_and_regions2 =
-            datastore.region_allocate(volume_id, &params).await.unwrap();
+        let mut dataset_and_regions1 = datastore
+            .region_allocate(&opctx, volume_id, &params)
+            .await
+            .unwrap();
+        let mut dataset_and_regions2 = datastore
+            .region_allocate(&opctx, volume_id, &params)
+            .await
+            .unwrap();
 
         // Give them a consistent order so we can easily compare them.
         let sort_vec = |v: &mut Vec<(Dataset, Region)>| {
@@ -3188,6 +3251,7 @@ mod test {
         }
 
         let _ = db.cleanup().await;
+        logctx.cleanup_successful();
     }
 
     #[tokio::test]
@@ -3197,7 +3261,9 @@ mod test {
         let mut db = test_setup_database(&logctx.log).await;
         let cfg = db::Config { url: db.pg_config().clone() };
         let pool = db::Pool::new(&cfg);
-        let datastore = DataStore::new(Arc::new(pool));
+        let datastore = Arc::new(DataStore::new(Arc::new(pool)));
+        let opctx =
+            OpContext::for_tests(logctx.log.new(o!()), datastore.clone());
 
         // Create a sled...
         let sled_id = create_test_sled(&datastore).await;
@@ -3223,8 +3289,10 @@ mod test {
             ByteCount::from_mebibytes_u32(500),
         );
         let volume1_id = Uuid::new_v4();
-        let err =
-            datastore.region_allocate(volume1_id, &params).await.unwrap_err();
+        let err = datastore
+            .region_allocate(&opctx, volume1_id, &params)
+            .await
+            .unwrap_err();
         assert!(err
             .to_string()
             .contains("Not enough datasets to allocate disks"));
@@ -3232,6 +3300,7 @@ mod test {
         assert!(matches!(err, Error::ServiceUnavailable { .. }));
 
         let _ = db.cleanup().await;
+        logctx.cleanup_successful();
     }
 
     // TODO: This test should be updated when the correct handling
@@ -3244,7 +3313,9 @@ mod test {
         let mut db = test_setup_database(&logctx.log).await;
         let cfg = db::Config { url: db.pg_config().clone() };
         let pool = db::Pool::new(&cfg);
-        let datastore = DataStore::new(Arc::new(pool));
+        let datastore = Arc::new(DataStore::new(Arc::new(pool)));
+        let opctx =
+            OpContext::for_tests(logctx.log.new(o!()), datastore.clone());
 
         // Create a sled...
         let sled_id = create_test_sled(&datastore).await;
@@ -3273,9 +3344,10 @@ mod test {
         let volume1_id = Uuid::new_v4();
 
         // NOTE: This *should* be an error, rather than succeeding.
-        datastore.region_allocate(volume1_id, &params).await.unwrap();
+        datastore.region_allocate(&opctx, volume1_id, &params).await.unwrap();
 
         let _ = db.cleanup().await;
+        logctx.cleanup_successful();
     }
 
     // Validate that queries which should be executable without a full table
@@ -3320,7 +3392,7 @@ mod test {
             external::Ipv4Net("172.30.0.0/22".parse().unwrap()),
             external::Ipv6Net("fd00::/64".parse().unwrap()),
         );
-        let values = FilterConflictingVpcSubnetRangesQuery(subnet);
+        let values = FilterConflictingVpcSubnetRangesQuery::new(subnet);
         let query =
             diesel::insert_into(db::schema::vpc_subnet::dsl::vpc_subnet)
                 .values(values)
@@ -3334,5 +3406,168 @@ mod test {
         );
 
         let _ = db.cleanup().await;
+        logctx.cleanup_successful();
+    }
+
+    // Test sled-specific IPv6 address allocation
+    #[tokio::test]
+    async fn test_sled_ipv6_address_allocation() {
+        use crate::db::model::STATIC_IPV6_ADDRESS_OFFSET;
+        use std::net::Ipv6Addr;
+
+        let logctx = dev::test_setup_log("test_sled_ipv6_address_allocation");
+        let mut db = test_setup_database(&logctx.log).await;
+        let cfg = db::Config { url: db.pg_config().clone() };
+        let pool = Arc::new(db::Pool::new(&cfg));
+        let datastore = Arc::new(DataStore::new(Arc::clone(&pool)));
+        let opctx =
+            OpContext::for_tests(logctx.log.new(o!()), datastore.clone());
+
+        let addr1 = "[fd00:1de::1]:12345".parse().unwrap();
+        let sled1_id = "0de4b299-e0b4-46f0-d528-85de81a7095f".parse().unwrap();
+        let sled1 = db::model::Sled::new(sled1_id, addr1);
+        datastore.sled_upsert(sled1).await.unwrap();
+
+        let addr2 = "[fd00:1df::1]:12345".parse().unwrap();
+        let sled2_id = "66285c18-0c79-43e0-e54f-95271f271314".parse().unwrap();
+        let sled2 = db::model::Sled::new(sled2_id, addr2);
+        datastore.sled_upsert(sled2).await.unwrap();
+
+        let ip = datastore.next_ipv6_address(&opctx, sled1_id).await.unwrap();
+        let expected_ip = Ipv6Addr::new(
+            0xfd00,
+            0x1de,
+            0,
+            0,
+            0,
+            0,
+            0,
+            2 + STATIC_IPV6_ADDRESS_OFFSET,
+        );
+        assert_eq!(ip, expected_ip);
+        let ip = datastore.next_ipv6_address(&opctx, sled1_id).await.unwrap();
+        let expected_ip = Ipv6Addr::new(
+            0xfd00,
+            0x1de,
+            0,
+            0,
+            0,
+            0,
+            0,
+            3 + STATIC_IPV6_ADDRESS_OFFSET,
+        );
+        assert_eq!(ip, expected_ip);
+
+        let ip = datastore.next_ipv6_address(&opctx, sled2_id).await.unwrap();
+        let expected_ip = Ipv6Addr::new(
+            0xfd00,
+            0x1df,
+            0,
+            0,
+            0,
+            0,
+            0,
+            2 + STATIC_IPV6_ADDRESS_OFFSET,
+        );
+        assert_eq!(ip, expected_ip);
+
+        let _ = db.cleanup().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn test_ssh_keys() {
+        let logctx = dev::test_setup_log("test_ssh_keys");
+        let mut db = test_setup_database(&logctx.log).await;
+        let (opctx, datastore) = datastore_test(&logctx, &db).await;
+
+        // Create a new Silo user so that we can lookup their keys.
+        let silo_user_id = Uuid::new_v4();
+        datastore
+            .silo_user_create(SiloUser::new(*SILO_ID, silo_user_id))
+            .await
+            .unwrap();
+
+        let (.., authz_user) = LookupPath::new(&opctx, &datastore)
+            .silo_user_id(silo_user_id)
+            .lookup_for(authz::Action::CreateChild)
+            .await
+            .unwrap();
+        assert_eq!(authz_user.id(), silo_user_id);
+
+        // Create a new SSH public key for the new user.
+        let key_name = Name::try_from(String::from("sshkey")).unwrap();
+        let public_key = "ssh-test AAAAAAAAKEY".to_string();
+        let ssh_key = SshKey::new(
+            silo_user_id,
+            params::SshKeyCreate {
+                identity: IdentityMetadataCreateParams {
+                    name: key_name.clone(),
+                    description: "my SSH public key".to_string(),
+                },
+                public_key,
+            },
+        );
+        let created = datastore
+            .ssh_key_create(&opctx, &authz_user, ssh_key.clone())
+            .await
+            .unwrap();
+        assert_eq!(created.silo_user_id, ssh_key.silo_user_id);
+        assert_eq!(created.public_key, ssh_key.public_key);
+
+        // Lookup the key we just created.
+        let (authz_silo, authz_silo_user, authz_ssh_key, found) =
+            LookupPath::new(&opctx, &datastore)
+                .silo_user_id(silo_user_id)
+                .ssh_key_name(&key_name.into())
+                .fetch()
+                .await
+                .unwrap();
+        assert_eq!(authz_silo.id(), *SILO_ID);
+        assert_eq!(authz_silo_user.id(), silo_user_id);
+        assert_eq!(found.silo_user_id, ssh_key.silo_user_id);
+        assert_eq!(found.public_key, ssh_key.public_key);
+
+        // Trying to insert the same one again fails.
+        let duplicate = datastore
+            .ssh_key_create(&opctx, &authz_user, ssh_key.clone())
+            .await;
+        assert!(matches!(
+            duplicate,
+            Err(Error::InternalError { internal_message: _ })
+        ));
+
+        // Delete the key we just created.
+        datastore.ssh_key_delete(&opctx, &authz_ssh_key).await.unwrap();
+
+        // Clean up.
+        db.cleanup().await.unwrap();
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn test_table_scan() {
+        let logctx = dev::test_setup_log("test_table_scan");
+        let mut db = test_setup_database(&logctx.log).await;
+        let (opctx, datastore) = datastore_test(&logctx, &db).await;
+
+        let error = datastore.test_try_table_scan(&opctx).await;
+        println!("error from attempted table scan: {:#}", error);
+        match error {
+            Error::InternalError { internal_message } => {
+                assert!(internal_message.contains(
+                    "contains a full table/index scan which is \
+                    explicitly disallowed"
+                ));
+            }
+            error => panic!(
+                "expected internal error with specific message, found {:?}",
+                error
+            ),
+        }
+
+        // Clean up.
+        db.cleanup().await.unwrap();
+        logctx.cleanup_successful();
     }
 }

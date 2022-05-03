@@ -38,7 +38,7 @@ pub struct Server {
 impl Server {
     /// Start a gateway server.
     pub async fn start(
-        config: &Config,
+        config: Config,
         _rack_id: Uuid,
         log: &Logger,
     ) -> Result<Server, String> {
@@ -52,8 +52,9 @@ impl Server {
             }
         }
 
-        let apictx =
-            ServerContext::new(config, &log).await.map_err(|error| {
+        let apictx = ServerContext::new(config.switch, config.timeouts, &log)
+            .await
+            .map_err(|error| {
                 format!("initializing server context: {}", error)
             })?;
 
@@ -90,7 +91,7 @@ impl Server {
 }
 
 /// Run an instance of the [Server].
-pub async fn run_server(config: &Config) -> Result<(), String> {
+pub async fn run_server(config: Config) -> Result<(), String> {
     use slog::Drain;
     let (drain, registration) = slog_dtrace::with_drain(
         config

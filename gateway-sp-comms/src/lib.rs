@@ -6,7 +6,6 @@
 
 // Required nightly features for `usdt`
 #![cfg_attr(target_os = "macos", feature(asm_sym))]
-#![feature(asm)]
 
 //! This crate provides UDP-based communication across the Oxide management
 //! switch to a collection of SPs.
@@ -16,6 +15,7 @@
 mod communicator;
 mod management_switch;
 mod recv_handler;
+mod timeout;
 
 pub use usdt::register_probes;
 
@@ -23,13 +23,11 @@ pub mod error;
 
 pub use communicator::Communicator;
 pub use communicator::FuturesUnorderedImpl;
+pub use management_switch::LocationConfig;
+pub use management_switch::LocationDeterminationConfig;
 pub use management_switch::SpIdentifier;
 pub use management_switch::SpType;
-pub use recv_handler::SerialConsoleChunk;
-pub use recv_handler::SerialConsoleContents;
-
-// TODO these will remain public for a while, but eventually will be removed
-// altogther; currently these provide a way to hard-code the rack topology,
-// which is not what we want.
-pub use management_switch::KnownSp;
-pub use management_switch::KnownSps;
+pub use management_switch::SwitchConfig;
+pub use management_switch::SwitchPortConfig;
+pub use timeout::Elapsed;
+pub use timeout::Timeout;

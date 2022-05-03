@@ -13,7 +13,7 @@
 /// ^    ^
 /// |    | AddrObject name
 /// | Interface name
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub struct AddrObject {
     interface: String,
     name: String,
@@ -50,8 +50,8 @@ impl AddrObject {
     }
 }
 
-impl ToString for AddrObject {
-    fn to_string(&self) -> String {
-        format!("{}/{}", self.interface, self.name)
+impl std::fmt::Display for AddrObject {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        write!(f, "{}/{}", self.interface, self.name)
     }
 }

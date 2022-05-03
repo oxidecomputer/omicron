@@ -2,11 +2,12 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use crate::{bulk_state_get::BulkSpStateRequests, Config};
-use gateway_sp_comms::error::StartupError;
+use crate::bulk_state_get::BulkSpStateRequests;
 use gateway_sp_comms::Communicator;
+use gateway_sp_comms::{error::StartupError, SwitchConfig};
 use slog::Logger;
 use std::{sync::Arc, time::Duration};
+use tokio::time::Instant;
 
 /// Shared state used by API request handlers
 pub struct ServerContext {
@@ -49,15 +50,19 @@ impl From<&'_ crate::config::Timeouts> for Timeouts {
 
 impl ServerContext {
     pub async fn new(
-        config: &Config,
+        switch_config: SwitchConfig,
+        timeouts: crate::config::Timeouts,
         log: &Logger,
     ) -> Result<Arc<Self>, StartupError> {
-        let comms =
-            Arc::new(Communicator::new(config.known_sps.clone(), log).await?);
+        let discovery_deadline =
+            Instant::now() + Duration::from_millis(timeouts.discovery_millis);
+        let comms = Arc::new(
+            Communicator::new(switch_config, discovery_deadline, log).await?,
+        );
         Ok(Arc::new(ServerContext {
             sp_comms: Arc::clone(&comms),
             bulk_sp_state_requests: BulkSpStateRequests::new(comms, log),
-            timeouts: Timeouts::from(&config.timeouts),
+            timeouts: Timeouts::from(&timeouts),
         }))
     }
 }

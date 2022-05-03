@@ -10,7 +10,7 @@ anyhow = "1.0"
 async-trait = "0.1.53"
 bytes = { version = "1.0.1", features = [ "serde" ] }
 chrono = { version = "0.4.19", features = [ "serde" ] }
-dropshot = { git = "https://github.com/oxidecomputer/dropshot", branch = "main" }
+dropshot = { git = "https://github.com/oxidecomputer/dropshot", branch = "main", features = [ "usdt-probes" ] }
 oximeter = { path = "../oximeter" }
 regex = "1.5.5"
 reqwest = { version = "0.11.8", features = [ "json" ] }
@@ -28,7 +28,7 @@ uuid = { version = "0.8.2", features = [ "v4", "serde" ] }
 [dev-dependencies]
 itertools = "0.10.1"
 omicron-test-utils = { path = "../../test-utils" }
-slog-dtrace = "0.2.0"
+slog-dtrace = "0.2.1"
 
 [[bin]]
 name = "oxdb"

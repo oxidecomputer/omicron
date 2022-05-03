@@ -6,7 +6,7 @@
 //! configuration
 
 use dropshot::{ConfigDropshot, ConfigLogging};
-use gateway_sp_comms::KnownSps;
+use gateway_sp_comms::SwitchConfig;
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 use std::path::PathBuf;
@@ -14,6 +14,9 @@ use thiserror::Error;
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct Timeouts {
+    /// Timeout for running the discovery process to determine logical mappings
+    /// of switches/sleds.
+    pub discovery_millis: u64,
     /// Timeout for messages to our local ignition controller SP.
     pub ignition_controller_millis: u64,
     /// Timeout for requests sent to arbitrary SPs.
@@ -46,8 +49,8 @@ pub struct Config {
     pub timeouts: Timeouts,
     /// Dropshot configuration for API server
     pub dropshot: ConfigDropshot,
-    /// Placeholder description of all known SPs in the system.
-    pub known_sps: KnownSps,
+    /// Configuration of the management switch.
+    pub switch: SwitchConfig,
     /// Server-wide logging configuration.
     pub log: ConfigLogging,
 }

@@ -22,6 +22,9 @@ to = "/opt/ooce/pgsql-13/lib/amd64"
 [[package.omicron-nexus.paths]]
 from = "smf/nexus"
 to = "/var/svc/manifest/site/nexus"
+[[package.omicron-nexus.paths]]
+from = "out/console-assets"
+to = "/var/nexus/static"
 
 [package.oximeter-collector]
 rust.binary_names = ["oximeter"]
@@ -55,6 +58,15 @@ to = "/opt/oxide/cockroachdb/sql"
 from = "smf/cockroachdb"
 to = "/var/svc/manifest/site/cockroachdb"
 
+[package.internal-dns]
+rust.binary_names = ["dnsadm", "dns-server"]
+rust.release = true
+service_name = "internal-dns"
+zone = true
+[[package.internal-dns.paths]]
+from = "smf/internal-dns"
+to = "/var/svc/manifest/site/internal-dns"
+
 # Packages not built within Omicron, but which must be imported.
 
 # Refer to
@@ -72,10 +84,10 @@ zone = true
 # 3. Use type = "manual" instead of the "prebuilt"
 type = "prebuilt"
 repo = "crucible"
-commit = "aec731421ddbb6f5ec733185b82493bcf62c8011"
+commit = "257032d1e842901d427f344a396d78b9b85b183f"
 # The SHA256 digest is automatically posted to:
 # https://buildomat.eng.oxide.computer/public/file/oxidecomputer/crucible/image/<commit>/crucible.sha256.txt
-sha256 = "c024e5ea6715f43e416e83bbc0327ec166e22886a81dcd9fe5adff36cc327dcc"
+sha256 = "9f73687e4d883a7277af6655e77026188144ada144e4243c90cc139a9a9df6d7"
 
 # Refer to
 #   https://github.com/oxidecomputer/propolis/blob/master/package/README.md
@@ -86,5 +98,7 @@ zone = true
 [external_package.propolis-server.source]
 type = "prebuilt"
 repo = "propolis"
-commit = "e984409a425df97338efa2c53ba3e40c73668638"
-sha256 = "206ef42e90d157e3314f4745ddb4422b3c93a16881749824037853e6f39f3762"
+commit = "ec4f3a41a638ea6c3316a86f30f1895f4877f2ef"
+# The SHA256 digest is automatically posted to:
+# https://buildomat.eng.oxide.computer/public/file/oxidecomputer/propolis/image/<commit>/propolis-server.sha256.txt
+sha256 = "fd3ac7cfa6659033051bb29ecc297240c519c5db339045f17ecccf594a266811"

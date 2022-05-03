@@ -13,16 +13,17 @@ bytes = "1.1"
 cfg-if = "1.0"
 chrono = { version = "0.4", features = [ "serde" ] }
 # Only used by the simulated sled agent.
-crucible-agent-client = { git = "https://github.com/oxidecomputer/crucible", rev = "945daedb88cefa790f1d994b3a038b8fa9ac514a" }
+crucible-agent-client = { git = "https://github.com/oxidecomputer/crucible", rev = "257032d1e842901d427f344a396d78b9b85b183f" }
 dropshot = { git = "https://github.com/oxidecomputer/dropshot", branch = "main", features = [ "usdt-probes" ] }
 futures = "0.3.21"
 ipnetwork = "0.18"
+macaddr = { version = "1.0.1", features = [ "serde_std" ] }
 nexus-client = { path = "../nexus-client" }
 omicron-common = { path = "../common" }
 p256 = "0.9.0"
 percent-encoding = "2.1.0"
 progenitor = { git = "https://github.com/oxidecomputer/progenitor" }
-propolis-client = { git = "https://github.com/oxidecomputer/propolis", rev = "3a4fd8fa54ce8e1117bfa259bea39bca87f8ea14" }
+propolis-client = { git = "https://github.com/oxidecomputer/propolis", rev = "ec4f3a41a638ea6c3316a86f30f1895f4877f2ef" }
 rand = { version = "0.8.5", features = ["getrandom"] }
 reqwest = { version = "0.11.8", default-features = false, features = ["rustls-tls", "stream"] }
 schemars = { version = "0.8", features = [ "chrono", "uuid" ] }
@@ -40,13 +41,13 @@ tempfile = "3.3"
 thiserror = "1.0"
 tokio = { version = "1.17", features = [ "full" ] }
 tokio-util = { version = "0.7", features = ["codec"] }
-toml = "0.5.6"
+toml = "0.5.9"
 uuid = { version = "0.8", features = [ "serde", "v4" ] }
 vsss-rs = { version = "2.0.0-pre0", default-features = false, features = ["std"] }
 zone = "0.1"
 
 [dev-dependencies]
-expectorate = "1.0.4"
+expectorate = "1.0.5"
 http = "0.2.5"
 mockall = "0.11"
 omicron-test-utils = { path = "../test-utils" }

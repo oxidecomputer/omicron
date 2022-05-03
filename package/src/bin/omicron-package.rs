@@ -8,11 +8,10 @@ use anyhow::{anyhow, bail, Context, Result};
 use futures::stream::{self, StreamExt, TryStreamExt};
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 use omicron_package::{parse, BuildCommand, DeployCommand};
-use omicron_zone_package::package::{Package, Progress};
+use omicron_sled_agent::zone;
+use omicron_zone_package::package::Package;
 use rayon::prelude::*;
 use ring::digest::{Context as DigestContext, Digest, SHA256};
-use serde_derive::Deserialize;
-use std::collections::BTreeMap;
 use std::env;
 use std::fs::create_dir_all;
 use std::path::{Path, PathBuf};
@@ -21,40 +20,8 @@ use structopt::StructOpt;
 use tokio::io::{AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::process::Command;
 
-/// Describes the origin of an externally-built package.
-#[derive(Deserialize, Debug)]
-#[serde(tag = "type", rename_all = "lowercase")]
-enum ExternalPackageSource {
-    /// Downloads the package from the following URL:
-    ///
-    /// <https://buildomat.eng.oxide.computer/public/file/oxidecomputer/REPO/image/COMMIT/PACKAGE>
-    Prebuilt { repo: String, commit: String, sha256: String },
-    /// Expects that a package will be manually built and placed into the output
-    /// directory.
-    Manual,
-}
-
-/// Describes a package which originates from outside this repo.
-#[derive(Deserialize, Debug)]
-struct ExternalPackage {
-    #[serde(flatten)]
-    package: Package,
-
-    source: ExternalPackageSource,
-}
-
-/// Describes the configuration for a set of packages.
-#[derive(Deserialize, Debug)]
-struct Config {
-    /// Packages to be built and installed.
-    #[serde(default, rename = "package")]
-    packages: BTreeMap<String, Package>,
-
-    /// Packages to be installed, but which have been created outside this
-    /// repository.
-    #[serde(default, rename = "external_package")]
-    external_packages: BTreeMap<String, ExternalPackage>,
-}
+use omicron_package::{Config, ExternalPackage, ExternalPackageSource};
+use omicron_zone_package::package::Progress;
 
 /// All packaging subcommands.
 #[derive(Debug, StructOpt)]
@@ -157,12 +124,19 @@ async fn do_build(config: &Config) -> Result<()> {
 
 // Calculates the SHA256 digest for a file.
 async fn get_sha256_digest(path: &PathBuf) -> Result<Digest> {
-    let mut reader = BufReader::new(tokio::fs::File::open(&path).await?);
+    let mut reader = BufReader::new(
+        tokio::fs::File::open(&path)
+            .await
+            .with_context(|| format!("could not open {path:?}"))?,
+    );
     let mut context = DigestContext::new(&SHA256);
     let mut buffer = [0; 1024];
 
     loop {
-        let count = reader.read(&mut buffer).await?;
+        let count = reader
+            .read(&mut buffer)
+            .await
+            .with_context(|| format!("failed to read {path:?}"))?;
         if count == 0 {
             break;
         } else {
@@ -203,21 +177,31 @@ async fn get_external_package(
                     commit,
                     path.as_path().file_name().unwrap().to_string_lossy(),
                 );
-                let response = reqwest::Client::new().get(url).send().await?;
+                let response = reqwest::Client::new()
+                    .get(&url)
+                    .send()
+                    .await
+                    .with_context(|| format!("failed to get {url}"))?;
                 progress.set_length(
                     response
                         .content_length()
                         .ok_or_else(|| anyhow!("Missing Content Length"))?,
                 );
-                let mut file = tokio::fs::File::create(path).await?;
+                let mut file = tokio::fs::File::create(&path)
+                    .await
+                    .with_context(|| format!("failed to create {path:?}"))?;
                 let mut stream = response.bytes_stream();
                 let mut context = DigestContext::new(&SHA256);
                 while let Some(chunk) = stream.next().await {
-                    let chunk = chunk?;
+                    let chunk = chunk.with_context(|| {
+                        format!("failed reading response from {url}")
+                    })?;
                     // Update the running SHA digest
                     context.update(&chunk);
                     // Update the downloaded file
-                    file.write_all(&chunk).await?;
+                    file.write_all(&chunk)
+                        .await
+                        .with_context(|| format!("failed writing {path:?}"))?;
                     // Record progress in the UI
                     progress.increment(chunk.len().try_into().unwrap());
                 }
@@ -288,7 +272,10 @@ async fn do_package(config: &Config, output_directory: &Path) -> Result<()> {
                 progress.set_message("bundle package".to_string());
                 package
                     .create_with_progress(&progress, &output_directory)
-                    .await?;
+                    .await
+                    .with_context(|| {
+                        format!("failed to create {package_name} in {output_directory:?}")
+                    })?;
                 progress.finish();
                 Ok(())
             },
@@ -373,29 +360,42 @@ fn do_install(
     Ok(())
 }
 
+fn uninstall_all_omicron_zones() -> Result<()> {
+    for zone in zone::Zones::get()? {
+        zone::Zones::halt_and_remove(zone.name())?;
+    }
+    Ok(())
+}
+
 // Attempts to both disable and delete all requested packages.
 fn uninstall_all_packages(config: &Config) {
     for package in config
         .packages
         .values()
         .chain(config.external_packages.values().map(|epkg| &epkg.package))
+        .filter(|package| !package.zone)
     {
-        if package.zone {
-            // TODO(https://github.com/oxidecomputer/omicron/issues/723):
-            // At the moment, zones are entirely managed by the sled agent,
-            // but could be removed here.
-        } else {
-            let _ = smf::Adm::new()
-                .disable()
-                .synchronous()
-                .run(smf::AdmSelection::ByPattern(&[&package.service_name]));
-            let _ = smf::Config::delete().force().run(&package.service_name);
-        }
+        let _ = smf::Adm::new()
+            .disable()
+            .synchronous()
+            .run(smf::AdmSelection::ByPattern(&[&package.service_name]));
+        let _ = smf::Config::delete().force().run(&package.service_name);
     }
 
     // Once all packages have been removed, also remove any locally-stored
     // configuration.
-    std::fs::remove_dir_all(omicron_common::OMICRON_CONFIG_PATH).unwrap();
+    remove_all_unless_already_removed(omicron_common::OMICRON_CONFIG_PATH)
+        .unwrap();
+}
+
+fn remove_file_unless_already_removed<P: AsRef<Path>>(path: P) -> Result<()> {
+    if let Err(e) = std::fs::remove_file(path.as_ref()) {
+        match e.kind() {
+            std::io::ErrorKind::NotFound => {}
+            _ => bail!(e),
+        }
+    }
+    Ok(())
 }
 
 fn remove_all_unless_already_removed<P: AsRef<Path>>(path: P) -> Result<()> {
@@ -408,17 +408,49 @@ fn remove_all_unless_already_removed<P: AsRef<Path>>(path: P) -> Result<()> {
     Ok(())
 }
 
+fn remove_all_except<P: AsRef<Path>>(path: P, to_keep: &[&str]) -> Result<()> {
+    let dir = match path.as_ref().read_dir() {
+        Ok(dir) => dir,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(e) => bail!(e),
+    };
+    for entry in dir {
+        let entry = entry?;
+        if to_keep.contains(&&*(entry.file_name().to_string_lossy())) {
+            println!(" Keeping: '{}'", entry.path().to_string_lossy());
+        } else {
+            println!(" Removing: '{}'", entry.path().to_string_lossy());
+            if entry.metadata()?.is_dir() {
+                remove_all_unless_already_removed(entry.path())?;
+            } else {
+                remove_file_unless_already_removed(entry.path())?;
+            }
+        }
+    }
+    Ok(())
+}
+
 fn do_uninstall(
     config: &Config,
     artifact_dir: &Path,
     install_dir: &Path,
 ) -> Result<()> {
+    println!("Removing all Omicron zones");
+    uninstall_all_omicron_zones()?;
     println!("Uninstalling all packages");
     uninstall_all_packages(config);
-    println!("Removing: {}", artifact_dir.to_string_lossy());
-    remove_all_unless_already_removed(artifact_dir)?;
-    println!("Removing: {}", install_dir.to_string_lossy());
-    remove_all_unless_already_removed(install_dir)?;
+    println!("Removing artifacts in: {}", artifact_dir.to_string_lossy());
+
+    const ARTIFACTS_TO_KEEP: &[&str] =
+        &["clickhouse", "cockroachdb", "xde", "console-assets", "downloads"];
+    remove_all_except(artifact_dir, ARTIFACTS_TO_KEEP)?;
+
+    println!(
+        "Removing installed objects in: {}",
+        install_dir.to_string_lossy()
+    );
+    const INSTALLED_OBJECTS_TO_KEEP: &[&str] = &["opte"];
+    remove_all_except(install_dir, INSTALLED_OBJECTS_TO_KEEP)?;
     Ok(())
 }
 

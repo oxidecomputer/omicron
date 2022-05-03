@@ -1,6 +1,9 @@
 //! Common code shared between `omicron-package` and `thing-flinger` binaries.
 
+use omicron_zone_package::package::Package;
 use serde::de::DeserializeOwned;
+use serde_derive::Deserialize;
+use std::collections::BTreeMap;
 use std::path::Path;
 use std::path::PathBuf;
 use structopt::StructOpt;
@@ -9,17 +12,21 @@ use thiserror::Error;
 /// Errors which may be returned when parsing the server configuration.
 #[derive(Error, Debug)]
 pub enum ParseError {
-    #[error("Cannot parse toml: {0}")]
-    Toml(#[from] toml::de::Error),
-    #[error("IO error: {0}")]
-    Io(#[from] std::io::Error),
+    #[error("Error deserializing toml from {path}: {err}")]
+    Toml { path: PathBuf, err: toml::de::Error },
+    #[error("IO error: {message}: {err}")]
+    Io { message: String, err: std::io::Error },
 }
 
 pub fn parse<P: AsRef<Path>, C: DeserializeOwned>(
     path: P,
 ) -> Result<C, ParseError> {
-    let contents = std::fs::read_to_string(path.as_ref())?;
-    let cfg = toml::from_str::<C>(&contents)?;
+    let path = path.as_ref();
+    let contents = std::fs::read_to_string(path).map_err(|err| {
+        ParseError::Io { message: format!("failed reading {path:?}"), err }
+    })?;
+    let cfg = toml::from_str::<C>(&contents)
+        .map_err(|err| ParseError::Toml { path: path.to_path_buf(), err })?;
     Ok(cfg)
 }
 
@@ -70,4 +77,39 @@ pub enum DeployCommand {
         #[structopt(long = "out", default_value = "/opt/oxide")]
         install_dir: PathBuf,
     },
+}
+
+/// Describes the origin of an externally-built package.
+#[derive(Deserialize, Debug)]
+#[serde(tag = "type", rename_all = "lowercase")]
+pub enum ExternalPackageSource {
+    /// Downloads the package from the following URL:
+    ///
+    /// <https://buildomat.eng.oxide.computer/public/file/oxidecomputer/REPO/image/COMMIT/PACKAGE>
+    Prebuilt { repo: String, commit: String, sha256: String },
+    /// Expects that a package will be manually built and placed into the output
+    /// directory.
+    Manual,
+}
+
+/// Describes a package which originates from outside this repo.
+#[derive(Deserialize, Debug)]
+pub struct ExternalPackage {
+    #[serde(flatten)]
+    pub package: Package,
+
+    pub source: ExternalPackageSource,
+}
+
+/// Describes the configuration for a set of packages.
+#[derive(Deserialize, Debug)]
+pub struct Config {
+    /// Packages to be built and installed.
+    #[serde(default, rename = "package")]
+    pub packages: BTreeMap<String, Package>,
+
+    /// Packages to be installed, but which have been created outside this
+    /// repository.
+    #[serde(default, rename = "external_package")]
+    pub external_packages: BTreeMap<String, ExternalPackage>,
 }

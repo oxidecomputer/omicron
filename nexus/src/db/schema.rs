@@ -22,7 +22,9 @@ table! {
         state_generation -> Int8,
         time_state_updated -> Timestamptz,
         size_bytes -> Int8,
+        block_size -> crate::db::model::BlockSizeEnum,
         origin_snapshot -> Nullable<Uuid>,
+        origin_image -> Nullable<Uuid>,
     }
 }
 
@@ -34,9 +36,29 @@ table! {
         time_created -> Timestamptz,
         time_modified -> Timestamptz,
         time_deleted -> Nullable<Timestamptz>,
-        project_id -> Nullable<Uuid>,
+        project_id -> Uuid,
         volume_id -> Uuid,
-        url -> Text,
+        url -> Nullable<Text>,
+        version -> Nullable<Text>,
+        digest -> Nullable<Text>,
+        block_size -> crate::db::model::BlockSizeEnum,
+        size_bytes -> Int8,
+    }
+}
+
+table! {
+    global_image (id) {
+        id -> Uuid,
+        name -> Text,
+        description -> Text,
+        time_created -> Timestamptz,
+        time_modified -> Timestamptz,
+        time_deleted -> Nullable<Timestamptz>,
+        volume_id -> Uuid,
+        url -> Nullable<Text>,
+        version -> Nullable<Text>,
+        digest -> Nullable<Text>,
+        block_size -> crate::db::model::BlockSizeEnum,
         size_bytes -> Int8,
     }
 }
@@ -66,13 +88,14 @@ table! {
         time_modified -> Timestamptz,
         time_deleted -> Nullable<Timestamptz>,
         project_id -> Uuid,
+        user_data -> Binary,
         state -> crate::db::model::InstanceStateEnum,
         time_state_updated -> Timestamptz,
         state_generation -> Int8,
         active_server_id -> Uuid,
         active_propolis_id -> Uuid,
-        target_propolis_id -> Nullable<Uuid>,
         active_propolis_ip -> Nullable<Inet>,
+        target_propolis_id -> Nullable<Uuid>,
         migration_id -> Nullable<Uuid>,
         ncpus -> Int8,
         memory -> Int8,
@@ -131,6 +154,19 @@ table! {
         time_created -> Timestamptz,
         time_modified -> Timestamptz,
         time_deleted -> Nullable<Timestamptz>,
+    }
+}
+
+table! {
+    ssh_key (id) {
+        id -> Uuid,
+        name -> Text,
+        description -> Text,
+        time_created -> Timestamptz,
+        time_modified -> Timestamptz,
+        time_deleted -> Nullable<Timestamptz>,
+        silo_user_id -> Uuid,
+        public_key -> Text,
     }
 }
 
@@ -222,6 +258,7 @@ table! {
 
         ip -> Inet,
         port -> Int4,
+        last_used_address -> Inet,
     }
 }
 

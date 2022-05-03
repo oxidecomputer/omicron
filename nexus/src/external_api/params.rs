@@ -10,6 +10,7 @@ use omicron_common::api::external::{
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 use std::net::IpAddr;
 use uuid::Uuid;
 
@@ -125,7 +126,7 @@ pub enum InstanceDiskAttachment {
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct InstanceDiskAttach {
     /// A disk name to attach
-    pub disk: Name,
+    pub name: Name,
 }
 
 /// Create-time parameters for an [`Instance`](omicron_common::api::external::Instance)
@@ -137,6 +138,15 @@ pub struct InstanceCreate {
     pub memory: ByteCount,
     pub hostname: String, // TODO-cleanup different type?
 
+    /// User data for instance initialization systems (such as cloud-init).
+    /// Must be a Base64-encoded string, as specified in RFC 4648 § 4 (+ and /
+    /// characters with padding). Maximum 32 KiB unencoded data.
+    // TODO: this should emit `"format": "byte"`, but progenitor doesn't
+    // understand that yet.
+    #[schemars(default, with = "String")]
+    #[serde(default, with = "serde_user_data")]
+    pub user_data: Vec<u8>,
+
     /// The network interfaces to be created for this instance.
     #[serde(default)]
     pub network_interfaces: InstanceNetworkInterfaceAttachment,
@@ -144,6 +154,43 @@ pub struct InstanceCreate {
     /// The disks to be created or attached for this instance.
     #[serde(default)]
     pub disks: Vec<InstanceDiskAttachment>,
+}
+
+mod serde_user_data {
+    use serde::{de::Error, Deserialize, Deserializer, Serialize, Serializer};
+
+    pub fn serialize<S>(
+        data: &Vec<u8>,
+        serializer: S,
+    ) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        base64::encode(data).serialize(serializer)
+    }
+
+    pub fn deserialize<'de, D>(deserializer: D) -> Result<Vec<u8>, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        match base64::decode(<&str>::deserialize(deserializer)?) {
+            Ok(buf) => {
+                // if you change this, also update the stress test in crate::cidata
+                if buf.len() > crate::cidata::MAX_USER_DATA_BYTES {
+                    Err(D::Error::invalid_length(
+                        buf.len(),
+                        &"less than 32 KiB",
+                    ))
+                } else {
+                    Ok(buf)
+                }
+            }
+            Err(_) => Err(D::Error::invalid_value(
+                serde::de::Unexpected::Other("invalid base64 string"),
+                &"a valid base64 string",
+            )),
+        }
+    }
 }
 
 /// Migration parameters for an [`Instance`](omicron_common::api::external::Instance)
@@ -229,28 +276,107 @@ pub struct VpcRouterUpdate {
 
 // DISKS
 
+#[derive(Copy, Clone, Debug, Deserialize, Serialize)]
+#[serde(try_from = "u32")] // invoke the try_from validation routine below
+pub struct BlockSize(pub u32);
+
+impl TryFrom<u32> for BlockSize {
+    type Error = anyhow::Error;
+    fn try_from(x: u32) -> Result<BlockSize, Self::Error> {
+        if ![512, 2048, 4096].contains(&x) {
+            anyhow::bail!("invalid block size {}", x);
+        }
+
+        Ok(BlockSize(x))
+    }
+}
+
+impl Into<ByteCount> for BlockSize {
+    fn into(self) -> ByteCount {
+        ByteCount::from(self.0)
+    }
+}
+
+impl From<BlockSize> for u64 {
+    fn from(bs: BlockSize) -> u64 {
+        bs.0 as u64
+    }
+}
+
+impl JsonSchema for BlockSize {
+    fn schema_name() -> String {
+        "BlockSize".to_string()
+    }
+
+    fn json_schema(
+        _gen: &mut schemars::gen::SchemaGenerator,
+    ) -> schemars::schema::Schema {
+        schemars::schema::Schema::Object(schemars::schema::SchemaObject {
+            metadata: Some(Box::new(schemars::schema::Metadata {
+                id: None,
+                title: Some("disk block size in bytes".to_string()),
+                description: None,
+                default: None,
+                deprecated: false,
+                read_only: false,
+                write_only: false,
+                examples: vec![],
+            })),
+            instance_type: Some(schemars::schema::SingleOrVec::Single(
+                Box::new(schemars::schema::InstanceType::Integer),
+            )),
+            format: None,
+            enum_values: Some(vec![
+                serde_json::json!(512),
+                serde_json::json!(2048),
+                serde_json::json!(4096),
+            ]),
+            const_value: None,
+            subschemas: None,
+            number: None,
+            string: None,
+            array: None,
+            object: None,
+            reference: None,
+            extensions: BTreeMap::new(),
+        })
+    }
+}
+
+/// Different sources for a disk
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(tag = "type")]
+pub enum DiskSource {
+    /// Create a blank disk
+    Blank {
+        /// size of blocks for this Disk. valid values are: 512, 2048, or 4096
+        block_size: BlockSize,
+    },
+    /// Create a disk from a disk snapshot
+    Snapshot { snapshot_id: Uuid },
+    /// Create a disk from a project image
+    Image { image_id: Uuid },
+    /// Create a disk from a global image
+    GlobalImage { image_id: Uuid },
+}
+
 /// Create-time parameters for a [`Disk`](omicron_common::api::external::Disk)
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct DiskCreate {
     /// common identifying metadata
     #[serde(flatten)]
     pub identity: IdentityMetadataCreateParams,
-    /// id for snapshot from which the Disk should be created, if any
-    pub snapshot_id: Option<Uuid>, // TODO should be a name?
-    /// size of the Disk
+    /// initial source for this disk
+    pub disk_source: DiskSource,
+    /// total size of the Disk in bytes
     pub size: ByteCount,
 }
 
-const BLOCK_SIZE: u32 = 1_u32 << 12;
 const EXTENT_SIZE: u32 = 1_u32 << 20;
 
 impl DiskCreate {
-    pub fn block_size(&self) -> ByteCount {
-        ByteCount::from(BLOCK_SIZE)
-    }
-
-    pub fn blocks_per_extent(&self) -> i64 {
-        EXTENT_SIZE as i64 / BLOCK_SIZE as i64
+    pub fn extent_size(&self) -> i64 {
+        EXTENT_SIZE as i64
     }
 
     pub fn extent_count(&self) -> i64 {
@@ -265,7 +391,7 @@ impl DiskCreate {
 /// attached or detached to an instance
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct DiskIdentifier {
-    pub disk: Name,
+    pub name: Name,
 }
 
 /// Parameters for the
@@ -292,6 +418,9 @@ pub struct ImageCreate {
     /// common identifying metadata
     #[serde(flatten)]
     pub identity: IdentityMetadataCreateParams,
+
+    /// block size in bytes
+    pub block_size: BlockSize,
 
     /// The source of the image's contents.
     pub source: ImageSource,
@@ -323,6 +452,22 @@ pub struct UserBuiltinCreate {
     pub identity: IdentityMetadataCreateParams,
 }
 
+// SSH PUBLIC KEYS
+//
+// The SSH key mangement endpoints are currently under `/session/me`,
+// and so have an implicit silo user ID which must be passed seperately
+// to the creation routine. Note that this disagrees with RFD 44.
+
+/// Create-time parameters for an [`SshKey`](crate::external_api::views::SshKey)
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct SshKeyCreate {
+    #[serde(flatten)]
+    pub identity: IdentityMetadataCreateParams,
+
+    /// SSH public key, e.g., `"ssh-ed25519 AAAAC3NzaC..."`
+    pub public_key: String,
+}
+
 #[cfg(test)]
 mod test {
     use super::*;
@@ -334,7 +479,9 @@ mod test {
                 name: Name::try_from("myobject".to_string()).unwrap(),
                 description: "desc".to_string(),
             },
-            snapshot_id: None,
+            disk_source: DiskSource::Blank {
+                block_size: BlockSize::try_from(4096).unwrap(),
+            },
             size,
         }
     }
@@ -360,13 +507,24 @@ mod test {
         assert_eq!(2, params.extent_count());
 
         // Mostly just checking we don't blow up on an unwrap here.
-        let params =
+        let _params =
             new_disk_create_params(ByteCount::try_from(i64::MAX).unwrap());
+
+        // Note that i64::MAX bytes is an invalid disk size as it's not
+        // divisible by 4096.
+        let max_disk_size = i64::MAX - (i64::MAX % 4096);
+        let params =
+            new_disk_create_params(ByteCount::try_from(max_disk_size).unwrap());
+        let block_size: u64 = 4096;
+        let blocks_per_extent: u64 = params.extent_size() as u64 / block_size;
+        assert_eq!(params.extent_count() as u64, 8796093022208_u64);
+
+        // Assert that the regions allocated will fit this disk
         assert!(
-            params.size.to_bytes()
+            params.size.to_bytes() as u64
                 <= (params.extent_count() as u64)
-                    * (params.blocks_per_extent() as u64)
-                    * params.block_size().to_bytes()
+                    * blocks_per_extent
+                    * block_size
         );
     }
 }

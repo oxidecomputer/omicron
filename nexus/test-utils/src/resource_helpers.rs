@@ -132,7 +132,9 @@ pub async fn create_disk(
                 name: disk_name.parse().unwrap(),
                 description: String::from("sells rainsticks"),
             },
-            snapshot_id: None,
+            disk_source: params::DiskSource::Blank {
+                block_size: params::BlockSize::try_from(512).unwrap(),
+            },
             size: ByteCount::from_gibibytes_u32(1),
         },
     )
@@ -160,6 +162,9 @@ pub async fn create_instance(
             ncpus: InstanceCpuCount(4),
             memory: ByteCount::from_mebibytes_u32(256),
             hostname: String::from("the_host"),
+            user_data:
+                b"#cloud-config\nsystem_info:\n  default_user:\n    name: oxide"
+                    .to_vec(),
             network_interfaces:
                 params::InstanceNetworkInterfaceAttachment::Default,
             disks: vec![],

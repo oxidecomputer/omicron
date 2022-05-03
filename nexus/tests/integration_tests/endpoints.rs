@@ -33,6 +33,19 @@ lazy_static! {
     pub static ref HARDWARE_SLED_URL: String =
         format!("/hardware/sleds/{}", SLED_AGENT_UUID);
 
+    // Silo used for testing
+    pub static ref DEMO_SILO_NAME: Name = "demo-silo".parse().unwrap();
+    pub static ref DEMO_SILO_URL: String =
+        format!("/silos/{}", *DEMO_SILO_NAME);
+    pub static ref DEMO_SILO_CREATE: params::SiloCreate =
+        params::SiloCreate {
+            identity: IdentityMetadataCreateParams {
+                name: DEMO_SILO_NAME.clone(),
+                description: String::from(""),
+            },
+            discoverable: true,
+        };
+
     // Organization used for testing
     pub static ref DEMO_ORG_NAME: Name = "demo-org".parse().unwrap();
     pub static ref DEMO_ORG_URL: String =
@@ -146,7 +159,7 @@ lazy_static! {
                 name: DEMO_DISK_NAME.clone(),
                 description: "".parse().unwrap(),
             },
-            snapshot_id: None,
+            disk_source: params::DiskSource::Blank { block_size: params::BlockSize::try_from(4096).unwrap() },
             size: ByteCount::from_gibibytes_u32(16),
         };
 
@@ -179,6 +192,7 @@ lazy_static! {
             ncpus: InstanceCpuCount(1),
             memory: ByteCount::from_gibibytes_u32(16),
             hostname: String::from("demo-instance"),
+            user_data: vec![],
             network_interfaces:
                 params::InstanceNetworkInterfaceAttachment::Default,
             disks: vec![],
@@ -199,10 +213,8 @@ lazy_static! {
             ip: None,
         };
 
-    // Images
+    // Project Images
     pub static ref DEMO_IMAGE_NAME: Name = "demo-image".parse().unwrap();
-    pub static ref DEMO_IMAGE_URL: String =
-        format!("/images/{}", *DEMO_IMAGE_NAME);
     pub static ref DEMO_PROJECT_IMAGE_URL: String =
         format!("{}/{}", *DEMO_PROJECT_URL_IMAGES, *DEMO_IMAGE_NAME);
     pub static ref DEMO_IMAGE_CREATE: params::ImageCreate =
@@ -211,8 +223,13 @@ lazy_static! {
                 name: DEMO_IMAGE_NAME.clone(),
                 description: String::from(""),
             },
-            source: params::ImageSource::Url(String::from("dummy"))
+            source: params::ImageSource::Url(String::from("http://127.0.0.1:5555/image.raw")),
+            block_size: params::BlockSize::try_from(4096).unwrap(),
         };
+
+    // Global Images
+    pub static ref DEMO_GLOBAL_IMAGE_URL: String =
+        format!("/images/{}", *DEMO_IMAGE_NAME);
 
     // Snapshots
     pub static ref DEMO_SNAPSHOT_NAME: Name = "demo-snapshot".parse().unwrap();
@@ -346,6 +363,27 @@ lazy_static! {
 
     /// List of endpoints to be verified
     pub static ref VERIFY_ENDPOINTS: Vec<VerifyEndpoint> = vec![
+        /* Silos */
+        VerifyEndpoint {
+            url: "/silos",
+            visibility: Visibility::Public,
+            allowed_methods: vec![
+                AllowedMethod::Get,
+                AllowedMethod::Post(
+                    serde_json::to_value(&*DEMO_SILO_CREATE).unwrap()
+                )
+            ],
+        },
+        VerifyEndpoint {
+            url: &*DEMO_SILO_URL,
+            visibility: Visibility::Protected,
+            allowed_methods: vec![
+                AllowedMethod::Get,
+                AllowedMethod::Delete,
+            ],
+        },
+
+
         /* Organizations */
 
         VerifyEndpoint {
@@ -595,7 +633,7 @@ lazy_static! {
             allowed_methods: vec![
                 AllowedMethod::Post(
                     serde_json::to_value(params::DiskIdentifier {
-                        disk: DEMO_DISK_NAME.clone()
+                        name: DEMO_DISK_NAME.clone()
                     }).unwrap()
                 )
             ],
@@ -606,7 +644,7 @@ lazy_static! {
             allowed_methods: vec![
                 AllowedMethod::Post(
                     serde_json::to_value(params::DiskIdentifier {
-                        disk: DEMO_DISK_NAME.clone()
+                        name: DEMO_DISK_NAME.clone()
                     }).unwrap()
                 )
             ],
@@ -811,23 +849,24 @@ lazy_static! {
             )],
         },
 
-        /* Images */
+        /* Global Images */
 
         VerifyEndpoint {
             url: "/images",
             visibility: Visibility::Public,
             allowed_methods: vec![
-                AllowedMethod::GetUnimplemented,
+                AllowedMethod::Get,
                 AllowedMethod::Post(
                     serde_json::to_value(&*DEMO_IMAGE_CREATE).unwrap()
                 ),
             ],
         },
+
         VerifyEndpoint {
-            url: &*DEMO_IMAGE_URL,
+            url: &*DEMO_GLOBAL_IMAGE_URL,
             visibility: Visibility::Protected,
             allowed_methods: vec![
-                AllowedMethod::GetUnimplemented,
+                AllowedMethod::Get,
                 AllowedMethod::Delete,
             ],
         },

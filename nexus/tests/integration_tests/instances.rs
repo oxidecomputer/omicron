@@ -146,6 +146,7 @@ async fn test_instances_create_reboot_halt(
                 ncpus: instance.ncpus,
                 memory: instance.memory,
                 hostname: instance.hostname.clone(),
+                user_data: vec![],
                 network_interfaces:
                     params::InstanceNetworkInterfaceAttachment::Default,
                 disks: vec![],
@@ -563,6 +564,7 @@ async fn test_instance_create_saga_removes_instance_database_record(
         ncpus: InstanceCpuCount::try_from(2).unwrap(),
         memory: ByteCount::from_mebibytes_u32(4),
         hostname: String::from("inst"),
+        user_data: vec![],
         network_interfaces: interface_params.clone(),
         disks: vec![],
     };
@@ -584,6 +586,7 @@ async fn test_instance_create_saga_removes_instance_database_record(
         ncpus: InstanceCpuCount::try_from(2).unwrap(),
         memory: ByteCount::from_mebibytes_u32(4),
         hostname: String::from("inst2"),
+        user_data: vec![],
         network_interfaces: interface_params,
         disks: vec![],
     };
@@ -669,6 +672,7 @@ async fn test_instance_with_single_explicit_ip_address(
         ncpus: InstanceCpuCount::try_from(2).unwrap(),
         memory: ByteCount::from_mebibytes_u32(4),
         hostname: String::from("nic-test"),
+        user_data: vec![],
         network_interfaces: interface_params,
         disks: vec![],
     };
@@ -785,6 +789,7 @@ async fn test_instance_with_new_custom_network_interfaces(
         ncpus: InstanceCpuCount::try_from(2).unwrap(),
         memory: ByteCount::from_mebibytes_u32(4),
         hostname: String::from("nic-test"),
+        user_data: vec![],
         network_interfaces: interface_params,
         disks: vec![],
     };
@@ -878,6 +883,7 @@ async fn test_instance_create_delete_network_interface(
         ncpus: InstanceCpuCount::try_from(2).unwrap(),
         memory: ByteCount::from_mebibytes_u32(4),
         hostname: String::from("nic-test"),
+        user_data: vec![],
         network_interfaces: params::InstanceNetworkInterfaceAttachment::None,
         disks: vec![],
     };
@@ -1061,6 +1067,7 @@ async fn test_instance_with_multiple_nics_unwinds_completely(
         ncpus: InstanceCpuCount::try_from(2).unwrap(),
         memory: ByteCount::from_mebibytes_u32(4),
         hostname: String::from("nic-test"),
+        user_data: vec![],
         network_interfaces: interface_params,
         disks: vec![],
     };
@@ -1134,10 +1141,11 @@ async fn test_attach_one_disk_to_instance(cptestctx: &ControlPlaneTestContext) {
         ncpus: InstanceCpuCount::try_from(2).unwrap(),
         memory: ByteCount::from_mebibytes_u32(4),
         hostname: String::from("nfs"),
+        user_data: vec![],
         network_interfaces: params::InstanceNetworkInterfaceAttachment::Default,
         disks: vec![params::InstanceDiskAttachment::Attach(
             params::InstanceDiskAttach {
-                disk: Name::try_from(String::from("probablydata")).unwrap(),
+                name: Name::try_from(String::from("probablydata")).unwrap(),
             },
         )],
     };
@@ -1229,12 +1237,13 @@ async fn test_attach_eight_disks_to_instance(
         ncpus: InstanceCpuCount::try_from(2).unwrap(),
         memory: ByteCount::from_mebibytes_u32(4),
         hostname: String::from("nfs"),
+        user_data: vec![],
         network_interfaces: params::InstanceNetworkInterfaceAttachment::Default,
         disks: (0..8)
             .map(|i| {
                 params::InstanceDiskAttachment::Attach(
                     params::InstanceDiskAttach {
-                        disk: Name::try_from(
+                        name: Name::try_from(
                             format!("probablydata{}", i).to_string(),
                         )
                         .unwrap(),
@@ -1334,12 +1343,13 @@ async fn test_cannot_attach_nine_disks_to_instance(
         ncpus: InstanceCpuCount::try_from(2).unwrap(),
         memory: ByteCount::from_mebibytes_u32(4),
         hostname: String::from("nfs"),
+        user_data: vec![],
         network_interfaces: params::InstanceNetworkInterfaceAttachment::Default,
         disks: (0..9)
             .map(|i| {
                 params::InstanceDiskAttachment::Attach(
                     params::InstanceDiskAttach {
-                        disk: Name::try_from(
+                        name: Name::try_from(
                             format!("probablydata{}", i).to_string(),
                         )
                         .unwrap(),
@@ -1460,12 +1470,13 @@ async fn test_cannot_attach_faulted_disks(cptestctx: &ControlPlaneTestContext) {
         ncpus: InstanceCpuCount::try_from(2).unwrap(),
         memory: ByteCount::from_mebibytes_u32(4),
         hostname: String::from("nfs"),
+        user_data: vec![],
         network_interfaces: params::InstanceNetworkInterfaceAttachment::Default,
         disks: (0..8)
             .map(|i| {
                 params::InstanceDiskAttachment::Attach(
                     params::InstanceDiskAttach {
-                        disk: Name::try_from(
+                        name: Name::try_from(
                             format!("probablydata{}", i).to_string(),
                         )
                         .unwrap(),

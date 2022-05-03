@@ -8,8 +8,12 @@ pub mod sp_impl;
 mod variable_packet;
 
 use bitflags::bitflags;
-use core::{fmt, str};
-use serde::{Deserialize, Serialize};
+use core::fmt;
+use core::str;
+use serde::Deserialize;
+use serde::Serialize;
+use serde_repr::Deserialize_repr;
+use serde_repr::Serialize_repr;
 
 pub use hubpack::error::Error as HubpackError;
 pub use hubpack::{deserialize, serialize, SerializedSize};
@@ -31,7 +35,7 @@ pub struct Request {
 
 #[derive(Debug, Clone, SerializedSize, Serialize, Deserialize)]
 pub enum RequestKind {
-    Ping,
+    Discover,
     // TODO do we want to be able to request IgnitionState for all targets in
     // one message?
     IgnitionState { target: u8 },
@@ -41,17 +45,41 @@ pub enum RequestKind {
     SerialConsoleWrite(SerialConsole),
 }
 
+/// Identifier for one of of an SP's KSZ8463 management-network-facing ports.
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    PartialEq,
+    Eq,
+    Hash,
+    Serialize_repr,
+    Deserialize_repr,
+    SerializedSize,
+)]
+#[repr(u8)]
+pub enum SpPort {
+    One = 1,
+    Two = 2,
+}
+
 // TODO: Not all SPs are capable of crafting all these response kinds, but the
 // way we're using hubpack requires everyone to allocate Response::MAX_SIZE. Is
 // that okay, or should we break this up more?
 #[derive(Debug, Clone, SerializedSize, Serialize, Deserialize)]
 pub enum ResponseKind {
-    Pong,
+    Discover(DiscoverResponse),
     IgnitionState(IgnitionState),
     BulkIgnitionState(BulkIgnitionState),
     IgnitionCommandAck,
     SpState(SpState),
     SerialConsoleWriteAck,
+}
+
+#[derive(Debug, Clone, Copy, SerializedSize, Serialize, Deserialize)]
+pub struct DiscoverResponse {
+    /// Which SP port received the `Discover` request.
+    pub sp_port: SpPort,
 }
 
 // TODO how is this reported? Same/different for components?
@@ -64,6 +92,11 @@ pub struct SpState {
 
 #[derive(Debug, Clone, Copy, SerializedSize, Serialize, Deserialize)]
 pub enum ResponseError {
+    /// The SP is busy; retry the request mometarily.
+    ///
+    /// E.g., the request requires communicating on a USART whose FIFO is
+    /// currently full.
+    Busy,
     /// The [`RequestKind`] is not supported by the receiving SP; e.g., asking an
     /// SP without an attached ignition controller for ignition state.
     RequestUnsupportedForSp,
@@ -78,6 +111,9 @@ pub enum ResponseError {
 impl fmt::Display for ResponseError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            ResponseError::Busy => {
+                write!(f, "SP busy")
+            }
             ResponseError::RequestUnsupportedForSp => {
                 write!(f, "unsupported request for this SP")
             }

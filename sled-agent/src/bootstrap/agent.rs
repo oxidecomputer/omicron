@@ -4,21 +4,27 @@
 
 //! Bootstrap-related APIs.
 
-use super::config::Config;
+use super::config::{Config, BOOTSTRAP_AGENT_PORT};
 use super::discovery;
+use super::params::SledAgentRequest;
 use super::trust_quorum::{
     self, RackSecret, ShareDistribution, TrustQuorumError,
 };
-use super::views::ShareResponse;
+use super::views::{ShareResponse, SledAgentResponse};
+use crate::config::Config as SledConfig;
+use crate::illumos::dladm::{self, Dladm, PhysicalLink};
+use crate::illumos::zone::{self, Zones};
 use crate::rack_setup::service::Service as RackSetupService;
-use omicron_common::api::external::Error as ExternalError;
+use crate::server::Server as SledServer;
+use omicron_common::api::external::{Error as ExternalError, MacAddr};
 use omicron_common::backoff::{
     internal_service_policy, retry_notify, BackoffError,
 };
 
 use slog::Logger;
 use std::io;
-use std::path::Path;
+use std::net::{Ipv6Addr, SocketAddrV6};
+use std::path::{Path, PathBuf};
 use thiserror::Error;
 use tokio::sync::Mutex;
 
@@ -34,8 +40,17 @@ pub enum BootstrapError {
     #[error("Error modifying SMF service: {0}")]
     SmfAdm(#[from] smf::AdmError),
 
+    #[error("Error starting sled agent: {0}")]
+    SledError(String),
+
+    #[error(transparent)]
+    Toml(#[from] toml::de::Error),
+
     #[error(transparent)]
     TrustQuorum(#[from] TrustQuorumError),
+
+    #[error(transparent)]
+    Zone(#[from] zone::Error),
 }
 
 impl From<BootstrapError> for ExternalError {
@@ -74,13 +89,75 @@ pub(crate) struct Agent {
     share: Option<ShareDistribution>,
 
     rss: Mutex<Option<RackSetupService>>,
+    sled_agent: Mutex<Option<SledServer>>,
+    sled_config: SledConfig,
+}
+
+fn get_sled_agent_request_path() -> PathBuf {
+    Path::new(omicron_common::OMICRON_CONFIG_PATH)
+        .join("sled-agent-request.toml")
+}
+
+fn mac_to_socket_addr(mac: MacAddr) -> SocketAddrV6 {
+    let mac_bytes = mac.into_array();
+    assert_eq!(6, mac_bytes.len());
+
+    let address = Ipv6Addr::new(
+        0xfdb0,
+        ((mac_bytes[0] as u16) << 8) | mac_bytes[1] as u16,
+        ((mac_bytes[2] as u16) << 8) | mac_bytes[3] as u16,
+        ((mac_bytes[4] as u16) << 8) | mac_bytes[5] as u16,
+        0,
+        0,
+        0,
+        1,
+    );
+
+    SocketAddrV6::new(address, BOOTSTRAP_AGENT_PORT, 0, 0)
+}
+
+// TODO(https://github.com/oxidecomputer/omicron/issues/945): This address
+// could be randomly generated when it no longer needs to be durable.
+pub fn bootstrap_address(
+    link: PhysicalLink,
+) -> Result<SocketAddrV6, dladm::Error> {
+    let mac = Dladm::get_mac(link)?;
+    Ok(mac_to_socket_addr(mac))
 }
 
 impl Agent {
-    pub fn new(log: Logger) -> Result<Self, BootstrapError> {
-        let peer_monitor = discovery::PeerMonitor::new(&log)?;
+    pub async fn new(
+        log: Logger,
+        sled_config: SledConfig,
+        address: Ipv6Addr,
+    ) -> Result<Self, BootstrapError> {
+        Zones::ensure_has_global_zone_v6_address(
+            sled_config.data_link.clone(),
+            address,
+            "bootstrap6",
+        )?;
+
+        let peer_monitor = discovery::PeerMonitor::new(&log, address)?;
         let share = read_key_share()?;
-        Ok(Agent { log, peer_monitor, share, rss: Mutex::new(None) })
+        let agent = Agent {
+            log,
+            peer_monitor,
+            share,
+            rss: Mutex::new(None),
+            sled_agent: Mutex::new(None),
+            sled_config,
+        };
+
+        let request_path = get_sled_agent_request_path();
+        if request_path.exists() {
+            info!(agent.log, "Sled already configured, loading sled agent");
+            let sled_request: SledAgentRequest = toml::from_str(
+                &tokio::fs::read_to_string(&request_path).await?,
+            )?;
+            agent.request_agent(sled_request).await?;
+        }
+
+        Ok(agent)
     }
 
     /// Implements the "request share" API.
@@ -97,6 +174,55 @@ impl Agent {
         Ok(ShareResponse { shared_secret: vec![] })
     }
 
+    /// Initializes the Sled Agent on behalf of the RSS, if one has not already
+    /// been initialized.
+    pub async fn request_agent(
+        &self,
+        request: SledAgentRequest,
+    ) -> Result<SledAgentResponse, BootstrapError> {
+        info!(&self.log, "Loading Sled Agent: {:?}", request);
+
+        let sled_address =
+            crate::config::get_sled_address(*request.subnet.as_ref());
+
+        let mut maybe_agent = self.sled_agent.lock().await;
+        if let Some(server) = &*maybe_agent {
+            // Server already exists, return it.
+            info!(&self.log, "Sled Agent already loaded");
+
+            if &server.address().ip() != sled_address.ip() {
+                let err_str = format!(
+                    "Sled Agent already running on address {}, but {} was requested",
+                    server.address().ip(),
+                    sled_address.ip(),
+                );
+                return Err(BootstrapError::SledError(err_str));
+            }
+
+            return Ok(SledAgentResponse { id: server.id() });
+        }
+        // Server does not exist, initialize it.
+        let server = SledServer::start(&self.sled_config, sled_address)
+            .await
+            .map_err(|e| BootstrapError::SledError(e))?;
+        maybe_agent.replace(server);
+        info!(&self.log, "Sled Agent loaded; recording configuration");
+
+        // Record this request so the sled agent can be automatically
+        // initialized on the next boot.
+        tokio::fs::write(
+            get_sled_agent_request_path(),
+            &toml::to_string(
+                &toml::Value::try_from(&request)
+                    .expect("Cannot serialize request"),
+            )
+            .expect("Cannot convert toml to string"),
+        )
+        .await?;
+
+        Ok(SledAgentResponse { id: self.sled_config.id })
+    }
+
     /// Communicates with peers, sharing secrets, until the rack has been
     /// sufficiently unlocked.
     async fn establish_sled_quorum(
@@ -105,7 +231,7 @@ impl Agent {
         let rack_secret = retry_notify(
             internal_service_policy(),
             || async {
-                let other_agents = self.peer_monitor.addrs().await;
+                let other_agents = self.peer_monitor.peer_addrs().await;
                 info!(
                     &self.log,
                     "Bootstrap: Communicating with peers: {:?}", other_agents
@@ -131,8 +257,13 @@ impl Agent {
                 // Retrieve verified rack_secret shares from a quorum of agents
                 let other_agents: Vec<trust_quorum::Client> = other_agents
                     .into_iter()
-                    .map(|mut addr| {
-                        addr.set_port(trust_quorum::PORT);
+                    .map(|addr| {
+                        let addr = SocketAddrV6::new(
+                            addr,
+                            trust_quorum::PORT,
+                            0,
+                            0,
+                        );
                         trust_quorum::Client::new(
                             &self.log,
                             share.verifier.clone(),
@@ -205,6 +336,7 @@ impl Agent {
             let rss = RackSetupService::new(
                 self.log.new(o!("component" => "RSS")),
                 rss_config.clone(),
+                self.peer_monitor.observer().await,
             );
             self.rss.lock().await.replace(rss);
         }
@@ -231,5 +363,21 @@ impl Agent {
         self.start_rss(config).await?;
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use macaddr::MacAddr6;
+
+    #[test]
+    fn test_mac_to_socket_addr() {
+        let mac = MacAddr("a8:40:25:10:00:01".parse::<MacAddr6>().unwrap());
+
+        assert_eq!(
+            mac_to_socket_addr(mac).ip(),
+            &"fdb0:a840:2510:1::1".parse::<Ipv6Addr>().unwrap(),
+        );
     }
 }

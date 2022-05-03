@@ -4,43 +4,70 @@
 
 //! Behavior implemented by both real and simulated SPs.
 
-use crate::{
-    version, BulkIgnitionState, IgnitionCommand, IgnitionState, Request,
-    RequestKind, ResponseError, ResponseKind, SerialConsole, SpComponent,
-    SpMessage, SpMessageKind, SpState,
-};
+use crate::version;
+use crate::BulkIgnitionState;
+use crate::DiscoverResponse;
+use crate::IgnitionCommand;
+use crate::IgnitionState;
+use crate::Request;
+use crate::RequestKind;
+use crate::ResponseError;
+use crate::ResponseKind;
+use crate::SerialConsole;
+use crate::SpComponent;
+use crate::SpMessage;
+use crate::SpMessageKind;
+use crate::SpPort;
+use crate::SpState;
 use hubpack::SerializedSize;
+use std::net::SocketAddr;
 
 pub trait SpHandler {
-    fn ping(&mut self) -> Result<(), ResponseError>;
+    fn discover(
+        &mut self,
+        sender: SocketAddr,
+        port: SpPort,
+    ) -> Result<DiscoverResponse, ResponseError>;
 
     fn ignition_state(
         &mut self,
+        sender: SocketAddr,
+        port: SpPort,
         target: u8,
     ) -> Result<IgnitionState, ResponseError>;
 
     fn bulk_ignition_state(
         &mut self,
+        sender: SocketAddr,
+        port: SpPort,
     ) -> Result<BulkIgnitionState, ResponseError>;
 
     fn ignition_command(
         &mut self,
+        sender: SocketAddr,
+        port: SpPort,
         target: u8,
         command: IgnitionCommand,
     ) -> Result<(), ResponseError>;
 
-    fn sp_state(&mut self) -> Result<SpState, ResponseError>;
+    fn sp_state(
+        &mut self,
+        sender: SocketAddr,
+        port: SpPort,
+    ) -> Result<SpState, ResponseError>;
 
     // TODO Should we return "number of bytes written" here, or is it sufficient
     // to say "all or none"? Would be nice for the caller to not have to resend
     // UDP chunks; can SP ensure it writes all data locally?
     fn serial_console_write(
         &mut self,
+        sender: SocketAddr,
+        port: SpPort,
         packet: SerialConsole,
     ) -> Result<(), ResponseError>;
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Error {
     /// Incoming data packet is larger than the largest [`Request`].
     DataTooLarge,
@@ -76,6 +103,36 @@ impl SerialConsolePacketizer {
         SerialConsolePackets { parent: self, data }
     }
 
+    /// Extract the first packet from `data`, returning that packet and any
+    /// remaining data (which may be empty).
+    ///
+    /// Panics if `data` is empty.
+    pub fn first_packet<'a>(
+        &mut self,
+        data: &'a [u8],
+    ) -> (SerialConsole, &'a [u8]) {
+        if data.is_empty() {
+            panic!();
+        }
+
+        let (this_packet, remaining) = data.split_at(usize::min(
+            data.len(),
+            SerialConsole::MAX_DATA_PER_PACKET,
+        ));
+
+        let mut packet = SerialConsole {
+            component: self.component,
+            offset: self.offset,
+            len: this_packet.len() as u16,
+            data: [0; SerialConsole::MAX_DATA_PER_PACKET],
+        };
+        packet.data[..this_packet.len()].copy_from_slice(this_packet);
+
+        self.offset += this_packet.len() as u64;
+
+        (packet, remaining)
+    }
+
     // TODO this function exists only to allow callers to inject artifical gaps
     // in the data they're sending; should we gate it behind a cargo feature?
     pub fn danger_emulate_dropped_packets(&mut self, bytes_to_skip: u64) {
@@ -97,21 +154,8 @@ impl Iterator for SerialConsolePackets<'_, '_> {
             return None;
         }
 
-        let (this_packet, remaining) = self.data.split_at(usize::min(
-            self.data.len(),
-            SerialConsole::MAX_DATA_PER_PACKET,
-        ));
-
-        let mut packet = SerialConsole {
-            component: self.parent.component,
-            offset: self.parent.offset,
-            len: this_packet.len() as u16,
-            data: [0; SerialConsole::MAX_DATA_PER_PACKET],
-        };
-        packet.data[..this_packet.len()].copy_from_slice(this_packet);
-
+        let (packet, remaining) = self.parent.first_packet(self.data);
         self.data = remaining;
-        self.parent.offset += this_packet.len() as u64;
 
         Some(packet)
     }
@@ -131,12 +175,14 @@ impl Default for SpServer {
 impl SpServer {
     /// Handler for incoming UDP requests.
     ///
-    /// `data` should be a UDP packet that has arrived for the current SP. It
-    /// will be parsed (into a [`Request`]), the appropriate method will be
-    /// called on `handler`, and a serialized response will
-    /// be returned, which the caller should send back to the requester.
+    /// `data` should be a UDP packet that has arrived from `sender` on `port`.
+    /// It will be parsed (into a [`Request`]), the appropriate method will be
+    /// called on `handler`, and a serialized response will be returned, which
+    /// the caller should send back to the requester.
     pub fn dispatch<H: SpHandler>(
         &mut self,
+        sender: SocketAddr,
+        port: SpPort,
         data: &[u8],
         handler: &mut H,
     ) -> Result<&[u8], Error> {
@@ -157,21 +203,23 @@ impl SpServer {
 
         // call out to handler to provide response
         let result = match request.kind {
-            RequestKind::Ping => handler.ping().map(|()| ResponseKind::Pong),
-            RequestKind::IgnitionState { target } => {
-                handler.ignition_state(target).map(ResponseKind::IgnitionState)
+            RequestKind::Discover => {
+                handler.discover(sender, port).map(ResponseKind::Discover)
             }
+            RequestKind::IgnitionState { target } => handler
+                .ignition_state(sender, port, target)
+                .map(ResponseKind::IgnitionState),
             RequestKind::BulkIgnitionState => handler
-                .bulk_ignition_state()
+                .bulk_ignition_state(sender, port)
                 .map(ResponseKind::BulkIgnitionState),
             RequestKind::IgnitionCommand { target, command } => handler
-                .ignition_command(target, command)
+                .ignition_command(sender, port, target, command)
                 .map(|()| ResponseKind::IgnitionCommandAck),
             RequestKind::SpState => {
-                handler.sp_state().map(ResponseKind::SpState)
+                handler.sp_state(sender, port).map(ResponseKind::SpState)
             }
             RequestKind::SerialConsoleWrite(packet) => handler
-                .serial_console_write(packet)
+                .serial_console_write(sender, port, packet)
                 .map(|()| ResponseKind::SerialConsoleWriteAck),
         };
 

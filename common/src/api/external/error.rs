@@ -24,7 +24,7 @@ use uuid::Uuid;
 /// General best practices for error design apply here.  Where possible, we want
 /// to reuse existing variants rather than inventing new ones to distinguish
 /// cases that no programmatic consumer needs to distinguish.
-#[derive(Debug, Deserialize, thiserror::Error, PartialEq, Serialize)]
+#[derive(Clone, Debug, Deserialize, thiserror::Error, PartialEq, Serialize)]
 pub enum Error {
     /// An object needed as part of this operation was not found.
     #[error("Object (of type {lookup_type:?}) not found: {type_name}")]
@@ -68,6 +68,9 @@ pub enum LookupType {
     ById(Uuid),
     /// a session token was requested
     BySessionToken(String),
+    /// a specific id was requested with some composite type
+    /// (caller summarizes it)
+    ByCompositeId(String),
 }
 
 impl LookupType {
@@ -87,6 +90,12 @@ impl From<&str> for LookupType {
 impl From<&Name> for LookupType {
     fn from(name: &Name) -> Self {
         LookupType::from(name.as_str())
+    }
+}
+
+impl From<Uuid> for LookupType {
+    fn from(uuid: Uuid) -> Self {
+        LookupType::ById(uuid)
     }
 }
 
@@ -160,6 +169,7 @@ impl From<Error> for HttpError {
                 let (lookup_field, lookup_value) = match lt {
                     LookupType::ByName(name) => ("name", name),
                     LookupType::ById(id) => ("id", id.to_string()),
+                    LookupType::ByCompositeId(label) => ("id", label),
                     LookupType::BySessionToken(token) => {
                         ("session token", token)
                     }

@@ -12,7 +12,7 @@
   "paths": {
     "/request_share": {
       "get": {
-        "operationId": "api_request_share",
+        "operationId": "request_share",
         "requestBody": {
           "content": {
             "application/json": {
@@ -30,6 +30,39 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ShareResponse"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/start_sled": {
+      "put": {
+        "operationId": "start_sled",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SledAgentRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SledAgentResponse"
                 }
               }
             }
@@ -77,6 +110,13 @@
           "request_id"
         ]
       },
+      "Ipv6Net": {
+        "title": "An IPv6 subnet",
+        "description": "An IPv6 subnet, including prefix and subnet mask",
+        "type": "string",
+        "pattern": "^(fd|FD)[0-9a-fA-F]{2}:((([0-9a-fA-F]{1,4}\\:){6}[0-9a-fA-F]{1,4})|(([0-9a-fA-F]{1,4}:){1,6}:))/(6[4-9]|[7-9][0-9]|1[0-1][0-9]|12[0-6])$",
+        "maxLength": 43
+      },
       "ShareRequest": {
         "description": "Identity signed by local RoT and Oxide certificate chain.",
         "type": "object",
@@ -109,6 +149,44 @@
         },
         "required": [
           "shared_secret"
+        ]
+      },
+      "SledAgentRequest": {
+        "description": "Configuration information for launching a Sled Agent.",
+        "type": "object",
+        "properties": {
+          "subnet": {
+            "description": "Portion of the IP space to be managed by the Sled Agent.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SledSubnet"
+              }
+            ]
+          }
+        },
+        "required": [
+          "subnet"
+        ]
+      },
+      "SledAgentResponse": {
+        "description": "Describes the Sled Agent running on the device.",
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "required": [
+          "id"
+        ]
+      },
+      "SledSubnet": {
+        "description": "Represents subnets belonging to Sleds.\n\nThis is a thin wrapper around the [`Ipv6Net`] type - which may be accessed by [`AsRef<Ipv6Net>`] - which adds additional validation that this is a /64 subnet with an expected prefix.",
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/Ipv6Net"
+          }
         ]
       }
     }

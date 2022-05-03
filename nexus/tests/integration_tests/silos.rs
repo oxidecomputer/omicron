@@ -2,8 +2,6 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use uuid::Uuid;
-
 use nexus_test_utils::http_testing::{AuthnMode, NexusRequest};
 use omicron_nexus::external_api::views::{Organization, Silo};
 use omicron_nexus::TestInterfaces as _;
@@ -65,16 +63,21 @@ async fn test_silos(cptestctx: &ControlPlaneTestContext) {
     assert_eq!(silos.len(), 1);
     assert_eq!(silos[0].identity.name, "discoverable");
 
-    // Create a new user in the discoverable silo, then create a console session
-    let new_silo_user = nexus
+    // Create a new user in the discoverable silo
+    let new_silo_user_id =
+        "6922f0b2-9a92-659b-da6b-93ad4955a3a3".parse().unwrap();
+    nexus
         .silo_user_create(
             silos[0].identity.id, /* silo id */
-            Uuid::new_v4(),       /* silo user id */
+            new_silo_user_id,
         )
         .await
         .unwrap();
 
-    let session = nexus.session_create(new_silo_user.id).await.unwrap();
+    // TODO-coverage, TODO-security: Add test for Silo-local session
+    // when we can use users in another Silo.
+
+    let authn_opctx = nexus.opctx_external_authn();
 
     // Create organization with built-in user auth
     // Note: this currently goes to the built-in silo!
@@ -107,7 +110,7 @@ async fn test_silos(cptestctx: &ControlPlaneTestContext) {
         &client,
         StatusCode::BAD_REQUEST,
         Method::DELETE,
-        &"/silos/fakesilo",
+        &"/silos/default-silo",
     )
     .authn_as(AuthnMode::PrivilegedUser)
     .execute()
@@ -130,13 +133,7 @@ async fn test_silos(cptestctx: &ControlPlaneTestContext) {
 
     // Verify silo user was also deleted
     nexus
-        .silo_user_fetch(new_silo_user.id)
-        .await
-        .expect_err("unexpected success");
-
-    // Verify new user's console session isn't valid anymore.
-    nexus
-        .session_fetch(session.token.clone())
+        .silo_user_fetch(authn_opctx, new_silo_user_id)
         .await
         .expect_err("unexpected success");
 }

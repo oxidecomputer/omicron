@@ -9,12 +9,12 @@ use crate::db::identity::{Asset, Resource};
 use crate::db::model;
 use api_identity::ObjectIdentity;
 use omicron_common::api::external::{
-    ByteCount, IdentityMetadata, Ipv4Net, Ipv6Net, Name, ObjectIdentity,
-    RoleName,
+    ByteCount, Digest, IdentityMetadata, Ipv4Net, Ipv6Net, Name,
+    ObjectIdentity, RoleName,
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use std::net::SocketAddr;
+use std::net::SocketAddrV6;
 use uuid::Uuid;
 
 // SILOS
@@ -75,14 +75,50 @@ impl From<model::Project> for Project {
 
 // IMAGES
 
-/// Client view of Images
+/// Client view of global Images
+#[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct GlobalImage {
+    #[serde(flatten)]
+    pub identity: IdentityMetadata,
+
+    /// URL source of this image, if any
+    pub url: Option<String>,
+
+    /// Version of this, if any
+    pub version: Option<String>,
+
+    /// Hash of the image contents, if applicable
+    pub digest: Option<Digest>,
+
+    /// size of blocks in bytes
+    pub block_size: ByteCount,
+
+    /// total size in bytes
+    pub size: ByteCount,
+}
+
+/// Client view of project Images
 #[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct Image {
     #[serde(flatten)]
     pub identity: IdentityMetadata,
 
-    pub project_id: Option<Uuid>,
+    /// The project the disk belongs to
+    pub project_id: Uuid,
+
+    /// URL source of this image, if any
     pub url: Option<String>,
+
+    /// Version of this, if any
+    pub version: Option<String>,
+
+    /// Hash of the image contents, if applicable
+    pub digest: Option<Digest>,
+
+    /// size of blocks in bytes
+    pub block_size: ByteCount,
+
+    /// total size in bytes
     pub size: ByteCount,
 }
 
@@ -224,7 +260,7 @@ impl From<model::Rack> for Rack {
 pub struct Sled {
     #[serde(flatten)]
     pub identity: IdentityMetadata,
-    pub service_address: SocketAddr,
+    pub service_address: SocketAddrV6,
 }
 
 impl From<model::Sled> for Sled {
@@ -278,6 +314,31 @@ impl From<model::RoleBuiltin> for Role {
         Self {
             name: RoleName::new(&role.resource_type, &role.role_name),
             description: role.description,
+        }
+    }
+}
+
+// SSH KEYS
+
+/// Client view of a [`SshKey`]
+#[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct SshKey {
+    #[serde(flatten)]
+    pub identity: IdentityMetadata,
+
+    /// The user to whom this key belongs
+    pub silo_user_id: Uuid,
+
+    /// SSH public key, e.g., `"ssh-ed25519 AAAAC3NzaC..."`
+    pub public_key: String,
+}
+
+impl From<model::SshKey> for SshKey {
+    fn from(ssh_key: model::SshKey) -> Self {
+        Self {
+            identity: ssh_key.identity(),
+            silo_user_id: ssh_key.silo_user_id,
+            public_key: ssh_key.public_key,
         }
     }
 }

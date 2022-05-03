@@ -5,12 +5,12 @@
 //! Bootstrap-related utilities
 
 pub mod agent;
-mod client;
+pub mod client;
 pub mod config;
-mod discovery;
+pub mod discovery;
 mod http_entrypoints;
-mod multicast;
-mod params;
+pub mod multicast;
+pub(crate) mod params;
 pub mod server;
 mod spdm;
 pub mod trust_quorum;

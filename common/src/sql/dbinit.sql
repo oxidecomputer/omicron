@@ -64,8 +64,12 @@ CREATE TABLE omicron.public.sled (
     time_deleted TIMESTAMPTZ,
     rcgen INT NOT NULL,
 
+    /* The IP address and bound port of the sled agent server. */
     ip INET NOT NULL,
-    port INT4 NOT NULL
+    port INT4 NOT NULL,
+
+    /* The last address allocated to an Oxide service on this sled. */
+    last_used_address INET NOT NULL
 );
 
 /*
@@ -212,6 +216,40 @@ CREATE TABLE omicron.public.silo_user (
     time_deleted TIMESTAMPTZ
 );
 
+/* This index lets us quickly find users for a given silo. */
+CREATE INDEX ON omicron.public.silo_user (
+    silo_id,
+    id
+) WHERE
+    time_deleted IS NULL;
+
+/*
+ * Users' public SSH keys, per RFD 44
+ */
+CREATE TABLE omicron.public.ssh_key (
+    id UUID PRIMARY KEY,
+    name STRING(63) NOT NULL,
+    description STRING(512) NOT NULL,
+    time_created TIMESTAMPTZ NOT NULL,
+    time_modified TIMESTAMPTZ NOT NULL,
+    time_deleted TIMESTAMPTZ,
+
+    /* FK into silo_user table */
+    silo_user_id UUID NOT NULL,
+
+    /*
+     * A 4096 bit RSA key without comment encodes to 726 ASCII characters.
+     * A (256 bit) Ed25519 key w/o comment encodes to 82 ASCII characters.
+     */
+    public_key STRING(1023) NOT NULL
+);
+
+CREATE UNIQUE INDEX ON omicron.public.ssh_key (
+    silo_user_id,
+    name
+) WHERE
+    time_deleted IS NULL;
+
 /*
  * Organizations
  */
@@ -299,6 +337,9 @@ CREATE TABLE omicron.public.instance (
     /* Every Instance is in exactly one Project at a time. */
     project_id UUID NOT NULL,
 
+    /* user data for instance initialization systems (e.g. cloud-init) */
+    user_data BYTES NOT NULL,
+
     /*
      * TODO Would it make sense for the runtime state to live in a separate
      * table?
@@ -365,6 +406,12 @@ CREATE UNIQUE INDEX ON omicron.public.instance (
 --     'faulted'
 -- );
 
+CREATE TYPE omicron.public.block_size AS ENUM (
+  '512',
+  '2048',
+  '4096'
+);
+
 CREATE TABLE omicron.public.disk (
     /* Identity metadata (resource) */
     id UUID PRIMARY KEY,
@@ -400,7 +447,9 @@ CREATE TABLE omicron.public.disk (
 
     /* Disk configuration */
     size_bytes INT NOT NULL,
-    origin_snapshot UUID
+    block_size omicron.public.block_size NOT NULL,
+    origin_snapshot UUID,
+    origin_image UUID
 );
 
 CREATE UNIQUE INDEX ON omicron.public.disk (
@@ -424,17 +473,42 @@ CREATE TABLE omicron.public.image (
     /* Indicates that the object has been deleted */
     time_deleted TIMESTAMPTZ,
 
-    /* Optional project UUID: Images may or may not be global */
-    project_id UUID,
-    /* Optional volume ID: Images may exist without backing volumes */
-    volume_id UUID,
-    /* Optional URL: Images may be backed by either a URL or a volume */
+    project_id UUID NOT NULL,
+    volume_id UUID NOT NULL,
+
     url STRING(8192),
+    version STRING(64),
+    digest TEXT,
+    block_size omicron.public.block_size NOT NULL,
     size_bytes INT NOT NULL
 );
 
 CREATE UNIQUE INDEX on omicron.public.image (
     project_id,
+    name
+) WHERE
+    time_deleted is NULL;
+
+CREATE TABLE omicron.public.global_image (
+    /* Identity metadata (resource) */
+    id UUID PRIMARY KEY,
+    name STRING(63) NOT NULL,
+    description STRING(512) NOT NULL,
+    time_created TIMESTAMPTZ NOT NULL,
+    time_modified TIMESTAMPTZ NOT NULL,
+    /* Indicates that the object has been deleted */
+    time_deleted TIMESTAMPTZ,
+
+    volume_id UUID NOT NULL,
+
+    url STRING(8192),
+    version STRING(64),
+    digest TEXT,
+    block_size omicron.public.block_size NOT NULL,
+    size_bytes INT NOT NULL
+);
+
+CREATE UNIQUE INDEX on omicron.public.global_image (
     name
 ) WHERE
     time_deleted is NULL;
@@ -688,7 +762,7 @@ CREATE TABLE omicron.public.vpc_firewall_rule (
     priority INT4 CHECK (priority BETWEEN 0 AND 65535) NOT NULL
 );
 
-CREATE UNIQUE INDEX ON omicron.public.vpc_router (
+CREATE UNIQUE INDEX ON omicron.public.vpc_firewall_rule (
     vpc_id,
     name
 ) WHERE
@@ -853,6 +927,11 @@ CREATE TABLE omicron.public.update_available_artifact (
     PRIMARY KEY (name, version, kind)
 );
 
+/* This index is used to quickly find outdated artifacts. */
+CREATE INDEX ON omicron.public.update_available_artifact (
+    targets_role_version
+);
+
 /*******************************************************************/
 
 /*
@@ -998,7 +1077,6 @@ CREATE TABLE omicron.public.db_metadata (
 INSERT INTO omicron.public.db_metadata (
     name,
     value
-) VALUES (
-    'schema_version',
-    '1.0.0'
-);
+) VALUES
+    ( 'schema_version', '1.0.0' ),
+    ( 'schema_time_created', CAST(NOW() AS STRING) );

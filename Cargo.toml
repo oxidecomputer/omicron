@@ -3,12 +3,14 @@ members = [
     "common",
     "deploy",
     "gateway",
+    "gateway-cli",
     "gateway-client",
     "gateway-messages",
     "gateway-sp-comms",
     "internal-dns",
     "internal-dns-client",
     "nexus",
+    "nexus/src/authz/authz-macros",
     "nexus/src/db/db-macros",
     "nexus/test-utils",
     "nexus/test-utils-macros",
@@ -32,11 +34,14 @@ default-members = [
     "common",
     "deploy",
     "gateway",
+    "gateway-cli",
     "gateway-client",
     "gateway-messages",
+    "gateway-sp-comms",
     "internal-dns",
     "internal-dns-client",
     "nexus",
+    "nexus/src/authz/authz-macros",
     "nexus/src/db/db-macros",
     "package",
     "rpaths",
@@ -72,6 +77,8 @@ panic = "abort"
 #[patch."https://github.com/oxidecomputer/propolis"]
 #propolis-client = { path = "../propolis/client" }
 #propolis-server = { path = "../propolis/server" }
+#[patch."https://github.com/oxidecomputer/crucible"]
+#crucible = { path = "../crucible/upstairs" }
 
 #
 # Local client generation during development.

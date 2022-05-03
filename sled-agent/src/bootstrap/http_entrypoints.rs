@@ -34,14 +34,18 @@ use omicron_common::api::external::Error as ExternalError;
 use std::sync::Arc;
 
 use super::agent::Agent;
-use super::{params::ShareRequest, views::ShareResponse};
+use super::{
+    params::{ShareRequest, SledAgentRequest},
+    views::{ShareResponse, SledAgentResponse},
+};
 
 /// Returns a description of the bootstrap agent API
 pub(crate) fn ba_api() -> ApiDescription<Arc<Agent>> {
     fn register_endpoints(
         api: &mut ApiDescription<Arc<Agent>>,
     ) -> Result<(), String> {
-        api.register(api_request_share)?;
+        api.register(request_share)?;
+        api.register(start_sled)?;
         Ok(())
     }
 
@@ -56,7 +60,7 @@ pub(crate) fn ba_api() -> ApiDescription<Arc<Agent>> {
     method = GET,
     path = "/request_share",
 }]
-async fn api_request_share(
+async fn request_share(
     rqctx: Arc<RequestContext<Arc<Agent>>>,
     request: TypedBody<ShareRequest>,
 ) -> Result<HttpResponseOk<ShareResponse>, HttpError> {
@@ -66,6 +70,25 @@ async fn api_request_share(
     Ok(HttpResponseOk(
         bootstrap_agent
             .request_share(request.identity)
+            .await
+            .map_err(|e| ExternalError::from(e))?,
+    ))
+}
+
+#[endpoint {
+    method = PUT,
+    path = "/start_sled",
+}]
+async fn start_sled(
+    rqctx: Arc<RequestContext<Arc<Agent>>>,
+    request: TypedBody<SledAgentRequest>,
+) -> Result<HttpResponseOk<SledAgentResponse>, HttpError> {
+    let bootstrap_agent = rqctx.context();
+
+    let request = request.into_inner();
+    Ok(HttpResponseOk(
+        bootstrap_agent
+            .request_agent(request)
             .await
             .map_err(|e| ExternalError::from(e))?,
     ))

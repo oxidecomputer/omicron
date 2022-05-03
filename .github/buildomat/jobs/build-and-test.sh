@@ -2,8 +2,8 @@
 #:
 #: name = "helios / build-and-test"
 #: variety = "basic"
-#: target = "helios-20220404"
-#: rust_toolchain = "nightly-2021-11-24"
+#: target = "helios"
+#: rust_toolchain = "nightly-2022-04-27"
 #: output_rules = []
 #:
 
@@ -40,7 +40,7 @@ ptime -m bash ./tools/install_prerequisites.sh
 banner build
 export RUSTFLAGS="-D warnings"
 export RUSTDOCFLAGS="-D warnings"
-ptime -m cargo +'nightly-2021-11-24' build --locked --all-targets --verbose
+ptime -m cargo +'nightly-2022-04-27' build --locked --all-targets --verbose
 
 #
 # Check that building individual packages as when deploying Omicron succeeds
@@ -53,4 +53,4 @@ ptime -m cargo run --bin omicron-package -- check
 # having to rebuild here.
 #
 banner test
-ptime -m cargo +'nightly-2021-11-24' test --workspace --locked --verbose
+ptime -m cargo +'nightly-2022-04-27' test --workspace --locked --verbose

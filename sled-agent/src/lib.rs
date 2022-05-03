@@ -22,7 +22,7 @@ pub mod common;
 pub mod bootstrap;
 pub mod config;
 mod http_entrypoints;
-mod illumos;
+pub mod illumos;
 mod instance;
 mod instance_manager;
 mod nexus;
@@ -33,6 +33,8 @@ mod services;
 mod sled_agent;
 mod storage_manager;
 mod updates;
+
+pub use illumos::zone;
 
 #[cfg(test)]
 mod mocks;
