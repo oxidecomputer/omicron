@@ -2640,7 +2640,7 @@ impl RoleBuiltin {
 
 impl_enum_type!(
     #[derive(SqlType, Debug, QueryId)]
-    #[postgres(type_name = "identity_type", type_schema = "public")]
+    #[diesel(postgres_type(name = "identity_type"))]
     pub struct IdentityTypeEnum;
 
     #[derive(
@@ -2652,7 +2652,7 @@ impl_enum_type!(
         Deserialize,
         PartialEq
     )]
-    #[sql_type = "IdentityTypeEnum"]
+    #[diesel(sql_type = IdentityTypeEnum)]
     pub enum IdentityType;
 
     // Enum values
@@ -2671,7 +2671,7 @@ impl From<shared::IdentityType> for IdentityType {
 
 /// Describes an assignment of a built-in role for a user
 #[derive(Queryable, Insertable, Debug, Selectable)]
-#[table_name = role_assignment]
+#[diesel(table_name = role_assignment)]
 pub struct RoleAssignment {
     pub identity_type: IdentityType,
     pub identity_id: Uuid,
