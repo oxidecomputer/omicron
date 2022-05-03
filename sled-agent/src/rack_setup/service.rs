@@ -129,6 +129,47 @@ enum PeerExpectation {
     CreateNewPlan(usize),
 }
 
+async fn insert_dns_record(
+    log: &Logger,
+    dns_servers: &internal_dns_client::multiclient::Updater,
+    name: &str,
+    addr: Ipv6Addr,
+) -> Result<(), SetupServiceError> {
+    let aaaa = DnsRecord::Aaaa(addr);
+    let set_record = || async {
+        dns_servers.dns_records_set(
+            &vec![
+                DnsKv {
+                    key: DnsRecordKey {
+                        name: name.into(),
+                    },
+                    record: aaaa.clone(),
+                }
+            ],
+        )
+        .await
+        .map_err(BackoffError::transient)?;
+        Ok::<
+            (),
+            BackoffError<
+                internal_dns_client::Error<
+                    internal_dns_client::types::Error,
+                >,
+            >,
+        >(())
+    };
+    let log_failure = |error, _| {
+        warn!(log, "Failed to set DNS records"; "error" => ?error);
+    };
+
+    retry_notify(
+        internal_service_policy(),
+        set_record,
+        log_failure,
+    ).await?;
+    Ok(())
+}
+
 /// The implementation of the Rack Setup Service.
 struct ServiceInner {
     log: Logger,
@@ -586,51 +627,22 @@ impl ServiceInner {
         );
 
         // XXX Test record insertion
-
-        let name = "hello.world";
-        let addr = Ipv6Addr::new(0xfd, 0, 0, 0, 0, 0, 0, 0x1);
-        let aaaa = DnsRecord::Aaaa(addr);
-
-        let set_record = || async {
-            dns_servers.dns_records_set(
-                &vec![
-                    DnsKv {
-                        key: DnsRecordKey {
-                            name: name.into(),
-                        },
-                        record: aaaa.clone(),
-                    }
-                ],
-            )
-            .await
-            .map_err(BackoffError::transient)?;
-            Ok::<
-                (),
-                BackoffError<
-                    internal_dns_client::Error<
-                        internal_dns_client::types::Error,
-                    >,
-                >,
-            >(())
-        };
-        let log_failure = |error, _| {
-            warn!(self.log, "Failed to set DNS records"; "error" => ?error);
-        };
-
-        retry_notify(
-            internal_service_policy(),
-            set_record,
-            log_failure,
+        insert_dns_record(
+            &self.log,
+            &dns_servers,
+            "hello.world",
+            Ipv6Addr::new(0xfd, 0, 0, 0, 0, 0, 0, 0x1),
         ).await?;
 
         // XXX test record retreival
 
+/*
         let resolver = internal_dns_client::multiclient::create_resolver(config.az_subnet())
             .expect("Failed to create DNS resolver");
         let response = resolver.lookup_ip(name.to_owned() + ".").await.expect("Failed to lookup IP");
         let address = response.iter().next().expect("no addresses returned from DNS resolver");
         assert_eq!(address, addr);
-
+*/
 
         // Issue the dataset initialization requests to all sleds.
         futures::future::join_all(plan.iter().map(
