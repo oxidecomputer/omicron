@@ -512,8 +512,7 @@ where
             vec![<T as num_traits::Zero>::zero()],
             (start_decade..end_decade)
                 .into_iter()
-                .map(|x| x.span_decade())
-                .flatten()
+                .flat_map(|x| x.span_decade())
                 .collect(),
         ]
         .concat();
