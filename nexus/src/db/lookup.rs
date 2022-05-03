@@ -278,7 +278,7 @@ impl<'a> LookupPath<'a> {
 
     /// Select a resource of type RoleBuiltin, identified by its `name`
     pub fn role_builtin_name(self, name: &str) -> RoleBuiltin<'a> {
-        let parts = name.split_once(".");
+        let parts = name.split_once('.');
         let key = if let Some((resource_type, role_name)) = parts {
             RoleBuiltinKey::PrimaryKey(
                 Root { lookup_root: self },
