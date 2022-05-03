@@ -68,7 +68,7 @@ async fn filesystem_put(
     let body_args = body.into_inner();
     sa.filesystem_ensure(
         body_args.zpool_uuid,
-        body_args.partition_kind,
+        body_args.dataset_kind,
         body_args.address,
     )
     .await

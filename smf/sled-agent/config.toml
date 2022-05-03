@@ -26,7 +26,7 @@ zpools = [
 # as Nexus (within a Zone) is effectively "on a different machine" from the
 # sled agent.
 [dropshot]
-bind_address = "[fd00:1de::]:12345"
+bind_address = "[fd00:1de::1]:12345"
 
 [log]
 level = "info"

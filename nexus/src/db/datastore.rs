@@ -121,7 +121,7 @@ impl DataStore {
     // the database.  Eventually, this function should only be used for doing
     // authentication in the first place (since we can't do an authz check in
     // that case).
-    pub(super) fn pool(&self) -> &bb8::Pool<ConnectionManager<DbConnection>> {
+    fn pool(&self) -> &bb8::Pool<ConnectionManager<DbConnection>> {
         self.pool.pool()
     }
 

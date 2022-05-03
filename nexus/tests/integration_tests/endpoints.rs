@@ -53,8 +53,12 @@ lazy_static! {
         format!("{}/{}", *DEMO_ORG_PROJECTS_URL, *DEMO_PROJECT_NAME);
     pub static ref DEMO_PROJECT_URL_DISKS: String =
         format!("{}/disks", *DEMO_PROJECT_URL);
+    pub static ref DEMO_PROJECT_URL_IMAGES: String =
+        format!("{}/images", *DEMO_PROJECT_URL);
     pub static ref DEMO_PROJECT_URL_INSTANCES: String =
         format!("{}/instances", *DEMO_PROJECT_URL);
+    pub static ref DEMO_PROJECT_URL_SNAPSHOTS: String =
+        format!("{}/snapshots", *DEMO_PROJECT_URL);
     pub static ref DEMO_PROJECT_URL_VPCS: String =
         format!("{}/vpcs", *DEMO_PROJECT_URL);
     pub static ref DEMO_PROJECT_CREATE: params::ProjectCreate =
@@ -90,6 +94,8 @@ lazy_static! {
         "demo-vpc-subnet".parse().unwrap();
     pub static ref DEMO_VPC_SUBNET_URL: String =
         format!("{}/{}", *DEMO_VPC_URL_SUBNETS, *DEMO_VPC_SUBNET_NAME);
+    pub static ref DEMO_VPC_SUBNET_INTERFACES_URL: String =
+        format!("{}/network-interfaces", *DEMO_VPC_SUBNET_URL);
     pub static ref DEMO_VPC_SUBNET_CREATE: params::VpcSubnetCreate =
         params::VpcSubnetCreate {
             identity: IdentityMetadataCreateParams {
@@ -162,11 +168,13 @@ lazy_static! {
         format!("{}/attach", *DEMO_INSTANCE_DISKS_URL);
     pub static ref DEMO_INSTANCE_DISKS_DETACH_URL: String =
         format!("{}/detach", *DEMO_INSTANCE_DISKS_URL);
+    pub static ref DEMO_INSTANCE_NICS_URL: String =
+        format!("{}/network-interfaces", *DEMO_INSTANCE_URL);
     pub static ref DEMO_INSTANCE_CREATE: params::InstanceCreate =
         params::InstanceCreate {
             identity: IdentityMetadataCreateParams {
                 name: DEMO_INSTANCE_NAME.clone(),
-                description: "".parse().unwrap(),
+                description: String::from(""),
             },
             ncpus: InstanceCpuCount(1),
             memory: ByteCount::from_gibibytes_u32(16),
@@ -174,6 +182,49 @@ lazy_static! {
             network_interfaces:
                 params::InstanceNetworkInterfaceAttachment::Default,
             disks: vec![],
+        };
+
+    // The instance needs a network interface, too.
+    pub static ref DEMO_INSTANCE_NIC_NAME: Name = "default".parse().unwrap();
+    pub static ref DEMO_INSTANCE_NIC_URL: String =
+        format!("{}/{}", *DEMO_INSTANCE_NICS_URL, *DEMO_INSTANCE_NIC_NAME);
+    pub static ref DEMO_INSTANCE_NIC_CREATE: params::NetworkInterfaceCreate =
+        params::NetworkInterfaceCreate {
+            identity: IdentityMetadataCreateParams {
+                name: DEMO_INSTANCE_NIC_NAME.clone(),
+                description: String::from(""),
+            },
+            vpc_name: DEMO_VPC_NAME.clone(),
+            subnet_name: DEMO_VPC_SUBNET_NAME.clone(),
+            ip: None,
+        };
+
+    // Images
+    pub static ref DEMO_IMAGE_NAME: Name = "demo-image".parse().unwrap();
+    pub static ref DEMO_IMAGE_URL: String =
+        format!("/images/{}", *DEMO_IMAGE_NAME);
+    pub static ref DEMO_PROJECT_IMAGE_URL: String =
+        format!("{}/{}", *DEMO_PROJECT_URL_IMAGES, *DEMO_IMAGE_NAME);
+    pub static ref DEMO_IMAGE_CREATE: params::ImageCreate =
+        params::ImageCreate {
+            identity: IdentityMetadataCreateParams {
+                name: DEMO_IMAGE_NAME.clone(),
+                description: String::from(""),
+            },
+            source: params::ImageSource::Url(String::from("dummy"))
+        };
+
+    // Snapshots
+    pub static ref DEMO_SNAPSHOT_NAME: Name = "demo-snapshot".parse().unwrap();
+    pub static ref DEMO_SNAPSHOT_URL: String =
+        format!("{}/{}", *DEMO_PROJECT_URL_SNAPSHOTS, *DEMO_SNAPSHOT_NAME);
+    pub static ref DEMO_SNAPSHOT_CREATE: params::SnapshotCreate =
+        params::SnapshotCreate {
+            identity: IdentityMetadataCreateParams {
+                name: DEMO_SNAPSHOT_NAME.clone(),
+                description: String::from(""),
+            },
+            disk: DEMO_DISK_NAME.clone(),
         };
 }
 
@@ -237,7 +288,21 @@ pub enum AllowedMethod {
     /// be uncommon.  In most cases, resources are identified either by names
     /// that we define here or uuids that we control in the test suite (e.g.,
     /// the rack and sled uuids).
+    ///
+    /// This is not necessary for methods other than `GET`.  We only need this
+    /// to configure the test's expectation for *privileged* requests.  For the
+    /// other HTTP methods, we only make unprivileged requests, and they should
+    /// always fail in the correct way.
     GetNonexistent,
+    /// HTTP "GET" method that is not yet implemented
+    ///
+    /// This should be a transient state, used only for stub APIs.
+    ///
+    /// This is not necessary for methods other than `GET`.  We only need this
+    /// to configure the test's expectation for *privileged* requests.  For the
+    /// other HTTP methods, we only make unprivileged requests, and they should
+    /// always fail in the correct way.
+    GetUnimplemented,
     /// HTTP "POST" method, with sample input (which should be valid input for
     /// this endpoint)
     Post(serde_json::Value),
@@ -253,6 +318,7 @@ impl AllowedMethod {
             AllowedMethod::Delete => &Method::DELETE,
             AllowedMethod::Get => &Method::GET,
             AllowedMethod::GetNonexistent => &Method::GET,
+            AllowedMethod::GetUnimplemented => &Method::GET,
             AllowedMethod::Post(_) => &Method::POST,
             AllowedMethod::Put(_) => &Method::PUT,
         }
@@ -266,7 +332,8 @@ impl AllowedMethod {
         match self {
             AllowedMethod::Delete
             | AllowedMethod::Get
-            | AllowedMethod::GetNonexistent => None,
+            | AllowedMethod::GetNonexistent
+            | AllowedMethod::GetUnimplemented => None,
             AllowedMethod::Post(body) => Some(&body),
             AllowedMethod::Put(body) => Some(&body),
         }
@@ -420,6 +487,14 @@ lazy_static! {
             ],
         },
 
+        VerifyEndpoint {
+            url: &*DEMO_VPC_SUBNET_INTERFACES_URL,
+            visibility: Visibility::Protected,
+            allowed_methods: vec![
+                AllowedMethod::Get,
+            ],
+        },
+
         /* VPC Routers */
 
         VerifyEndpoint {
@@ -508,6 +583,13 @@ lazy_static! {
         },
 
         VerifyEndpoint {
+            url: &*DEMO_INSTANCE_DISKS_URL,
+            visibility: Visibility::Protected,
+            allowed_methods: vec![
+                AllowedMethod::Get,
+            ],
+        },
+        VerifyEndpoint {
             url: &*DEMO_INSTANCE_DISKS_ATTACH_URL,
             visibility: Visibility::Protected,
             allowed_methods: vec![
@@ -528,6 +610,49 @@ lazy_static! {
                     }).unwrap()
                 )
             ],
+        },
+
+        /* Project images */
+
+        VerifyEndpoint {
+            url: &*DEMO_PROJECT_URL_IMAGES,
+            visibility: Visibility::Protected,
+            allowed_methods: vec![
+                AllowedMethod::GetUnimplemented,
+                AllowedMethod::Post(
+                    serde_json::to_value(&*DEMO_IMAGE_CREATE).unwrap()
+                ),
+            ],
+        },
+
+        VerifyEndpoint {
+            url: &*DEMO_PROJECT_IMAGE_URL,
+            visibility: Visibility::Protected,
+            allowed_methods: vec![
+                AllowedMethod::GetUnimplemented,
+                AllowedMethod::Delete,
+            ],
+        },
+
+        /* Snapshots */
+
+        VerifyEndpoint {
+            url: &*DEMO_PROJECT_URL_SNAPSHOTS,
+            visibility: Visibility::Protected,
+            allowed_methods: vec![
+                AllowedMethod::GetUnimplemented,
+                AllowedMethod::Post(
+                    serde_json::to_value(DEMO_SNAPSHOT_CREATE.clone()).unwrap(),
+                )
+            ]
+        },
+        VerifyEndpoint {
+            url: &*DEMO_SNAPSHOT_URL,
+            visibility: Visibility::Protected,
+            allowed_methods: vec![
+                AllowedMethod::GetUnimplemented,
+                AllowedMethod::Delete,
+            ]
         },
 
         /* Instances */
@@ -581,6 +706,26 @@ lazy_static! {
                         dst_sled_uuid: uuid::Uuid::new_v4(),
                     }
                 ).unwrap()),
+            ],
+        },
+
+        /* Instance NICs */
+        VerifyEndpoint {
+            url: &*DEMO_INSTANCE_NICS_URL,
+            visibility: Visibility::Protected,
+            allowed_methods: vec![
+                AllowedMethod::Get,
+                AllowedMethod::Post(
+                    serde_json::to_value(&*DEMO_INSTANCE_NIC_CREATE).unwrap()
+                ),
+            ],
+        },
+        VerifyEndpoint {
+            url: &*DEMO_INSTANCE_NIC_URL,
+            visibility: Visibility::Protected,
+            allowed_methods: vec![
+                AllowedMethod::Get,
+                AllowedMethod::Delete,
             ],
         },
 
@@ -664,6 +809,27 @@ lazy_static! {
             allowed_methods: vec![AllowedMethod::Post(
                 serde_json::Value::Null
             )],
+        },
+
+        /* Images */
+
+        VerifyEndpoint {
+            url: "/images",
+            visibility: Visibility::Public,
+            allowed_methods: vec![
+                AllowedMethod::GetUnimplemented,
+                AllowedMethod::Post(
+                    serde_json::to_value(&*DEMO_IMAGE_CREATE).unwrap()
+                ),
+            ],
+        },
+        VerifyEndpoint {
+            url: &*DEMO_IMAGE_URL,
+            visibility: Visibility::Protected,
+            allowed_methods: vec![
+                AllowedMethod::GetUnimplemented,
+                AllowedMethod::Delete,
+            ],
         },
     ];
 }
