@@ -2,8 +2,6 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use uuid::Uuid;
-
 use nexus_test_utils::http_testing::{AuthnMode, NexusRequest, RequestBuilder};
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::SiloSamlIdentityProvider;

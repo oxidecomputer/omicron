@@ -238,6 +238,11 @@ CREATE TABLE omicron.public.silo_identity_provider (
     PRIMARY KEY (silo_id, provider_id)
 );
 
+CREATE INDEX ON omicron.public.silo_identity_provider (
+    silo_id,
+    provider_id
+);
+
 /*
  * Silo SAML identity provider
  */
@@ -263,6 +268,10 @@ CREATE TABLE omicron.public.silo_saml_identity_provider (
 
     public_cert TEXT,
     private_key TEXT
+);
+
+CREATE INDEX ON omicron.public.silo_saml_identity_provider (
+    silo_id
 );
 
 /*
