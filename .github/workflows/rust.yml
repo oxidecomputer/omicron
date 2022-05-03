@@ -139,6 +139,13 @@ jobs:
       #   failed test outputs will be in a known place that we can grab at the
       #   end without also grabbing random other temporary files.
       run: TMPDIR=$OMICRON_TMP PATH="$PATH:$PWD/out/cockroachdb/bin:$PWD/out/clickhouse" RUSTFLAGS="-D warnings" RUSTDOCFLAGS="-D warnings" cargo build --locked --all-targets --verbose
+    - name: DEBUGGING output disk space DEBUGGING
+      run: |
+        echo "Disk space:"
+        df -h
+
+        echo "Disk usage (kib):"
+        du -ks *
     - name: Run tests
       # Use the same RUSTFLAGS and RUSTDOCFLAGS as above to avoid having to
       # rebuild here.
