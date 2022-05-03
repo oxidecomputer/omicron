@@ -517,7 +517,7 @@ async fn organization_get_policy(
         let opctx = OpContext::for_external_api(&rqctx).await?;
         let policy =
             nexus.organization_fetch_policy(&opctx, organization_name).await?;
-        Ok(HttpResponseOk(policy.into()))
+        Ok(HttpResponseOk(policy))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
@@ -547,7 +547,7 @@ async fn organization_put_policy(
         let policy = nexus
             .organization_update_policy(&opctx, organization_name, &new_policy)
             .await?;
-        Ok(HttpResponseOk(policy.into()))
+        Ok(HttpResponseOk(policy))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
