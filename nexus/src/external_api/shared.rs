@@ -27,9 +27,15 @@ use uuid::Uuid;
 // is Nexus.  We should have some kinds of config that lives in the database.
 pub const MAX_ROLE_ASSIGNMENTS_PER_RESOURCE: usize = 64;
 
-/// Client view of a [`Policy`]
+/// Client view of a [`Policy`], which describes how this resource may be
+/// accessed
+///
+/// Note that the Policy only describes access granted explicitly for this
+/// resource.  The policies of parent resources can also cause a user to have
+/// access to this resource.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
 pub struct Policy {
+    /// Roles directly assigned on this resource
     #[serde(deserialize_with = "role_assignments_deserialize")]
     pub role_assignments: Vec<RoleAssignment>,
 }

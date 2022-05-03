@@ -29,6 +29,18 @@ lazy_static! {
         role_name: "viewer",
         description: "Fleet Viewer",
     };
+    pub static ref ORGANIZATION_ADMINISTRATOR: RoleBuiltinConfig =
+        RoleBuiltinConfig {
+            resource_type: api::external::ResourceType::Organization,
+            role_name: "admin",
+            description: "Organization Administrator",
+        };
+    pub static ref ORGANIZATION_COLLABORATOR: RoleBuiltinConfig =
+        RoleBuiltinConfig {
+            resource_type: api::external::ResourceType::Organization,
+            role_name: "admin",
+            description: "Organization Administrator",
+        };
     pub static ref BUILTIN_ROLES: Vec<RoleBuiltinConfig> = vec![
         FLEET_ADMIN.clone(),
         FLEET_AUTHENTICATOR.clone(),
@@ -38,16 +50,8 @@ lazy_static! {
             role_name: "collaborator",
             description: "Fleet Collaborator",
         },
-        RoleBuiltinConfig {
-            resource_type: api::external::ResourceType::Organization,
-            role_name: "admin",
-            description: "Organization Administrator",
-        },
-        RoleBuiltinConfig {
-            resource_type: api::external::ResourceType::Organization,
-            role_name: "collaborator",
-            description: "Organization Collaborator",
-        },
+        ORGANIZATION_ADMINISTRATOR.clone(),
+        ORGANIZATION_COLLABORATOR.clone(),
         RoleBuiltinConfig {
             resource_type: api::external::ResourceType::Project,
             role_name: "admin",
