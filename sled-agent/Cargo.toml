@@ -16,6 +16,7 @@ chrono = { version = "0.4", features = [ "serde" ] }
 crucible-agent-client = { git = "https://github.com/oxidecomputer/crucible", rev = "257032d1e842901d427f344a396d78b9b85b183f" }
 dropshot = { git = "https://github.com/oxidecomputer/dropshot", branch = "main", features = [ "usdt-probes" ] }
 futures = "0.3.21"
+internal-dns-client = { path = "../internal-dns-client" }
 ipnetwork = "0.18"
 macaddr = { version = "1.0.1", features = [ "serde_std" ] }
 nexus-client = { path = "../nexus-client" }

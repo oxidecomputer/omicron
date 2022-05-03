@@ -27,7 +27,9 @@ pub const DNS_REDUNDANCY: usize = 1;
 /// reserved for DNS servers.
 pub const MAX_DNS_REDUNDANCY: usize = 5;
 
+/// The port for the UDP-based internal DNS name server.
 pub const DNS_PORT: u16 = 53;
+/// The port for the HTTP-based internal DNS dropshot server.
 pub const DNS_SERVER_PORT: u16 = 5353;
 pub const SLED_AGENT_PORT: u16 = 12345;
 

@@ -10,6 +10,7 @@ use crate::bootstrap::{
     discovery::PeerMonitorObserver, params::SledAgentRequest,
 };
 use crate::params::ServiceRequest;
+use internal_dns_client::types::{DnsRecord, DnsKv, DnsRecordKey};
 use omicron_common::address::{get_sled_address, ReservedRackSubnet};
 use omicron_common::backoff::{
     internal_service_policy, retry_notify, BackoffError,
@@ -49,6 +50,11 @@ pub enum SetupServiceError {
 
     #[error("Failed to construct an HTTP client: {0}")]
     HttpClient(reqwest::Error),
+
+    // XXX CLEAN UP
+
+    #[error(transparent)]
+    Dns(#[from] internal_dns_client::Error<internal_dns_client::types::Error>),
 }
 
 // The workload / information allocated to a single sled.
@@ -573,6 +579,58 @@ impl ServiceInner {
         .await
         .into_iter()
         .collect::<Result<_, SetupServiceError>>()?;
+
+        let dns_servers = internal_dns_client::multiclient::Updater::new(
+            config.az_subnet(),
+            self.log.new(o!("client" => "DNS")),
+        );
+
+        // XXX Test record insertion
+
+        let name = "hello.world";
+        let addr = Ipv6Addr::new(0xfd, 0, 0, 0, 0, 0, 0, 0x1);
+        let aaaa = DnsRecord::Aaaa(addr);
+
+        let set_record = || async {
+            dns_servers.dns_records_set(
+                &vec![
+                    DnsKv {
+                        key: DnsRecordKey {
+                            name: name.into(),
+                        },
+                        record: aaaa.clone(),
+                    }
+                ],
+            )
+            .await
+            .map_err(BackoffError::transient)?;
+            Ok::<
+                (),
+                BackoffError<
+                    internal_dns_client::Error<
+                        internal_dns_client::types::Error,
+                    >,
+                >,
+            >(())
+        };
+        let log_failure = |error, _| {
+            warn!(self.log, "Failed to set DNS records"; "error" => ?error);
+        };
+
+        retry_notify(
+            internal_service_policy(),
+            set_record,
+            log_failure,
+        ).await?;
+
+        // XXX test record retreival
+
+        let resolver = internal_dns_client::multiclient::create_resolver(config.az_subnet())
+            .expect("Failed to create DNS resolver");
+        let response = resolver.lookup_ip(name.to_owned() + ".").await.expect("Failed to lookup IP");
+        let address = response.iter().next().expect("no addresses returned from DNS resolver");
+        assert_eq!(address, addr);
+
 
         // Issue the dataset initialization requests to all sleds.
         futures::future::join_all(plan.iter().map(
