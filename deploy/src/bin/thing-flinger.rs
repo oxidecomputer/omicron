@@ -470,8 +470,8 @@ fn overlay_sled_agent(
     config: &Config,
     sled_agent_dirs: &[PathBuf],
 ) -> Result<()> {
-    // Send SSH command to create directories on builder and generate share
-    // secrets.
+    // Send SSH command to create directories on builder and generate secret
+    // shares.
 
     // TODO do we need any escaping here? this will definitely break if any dir
     // names have spaces

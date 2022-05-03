@@ -95,9 +95,7 @@ configuration file before proceeding.
 === Command Based Workflow
 
 ==== sync
-Copy your source code to the builder. Note that this copies over your `.git` subdirectory on purpose so
-that a branch can be configured for building with the `git_treeish` field in the toml `builder`
-table.
+Copy your source code to the builder.
 
 `cargo run --bin thing-flinger -- -c <CONFIG> sync`
 
@@ -138,9 +136,6 @@ Uninstall omicron from all machines.
 
 `cargo run --bin thing-flinger -- -c <CONFIG> deploy uninstall`
 
-Note: This does not fully undo everything done by the `install` step above;
-noteably overlay files are not removed.
-
 === Current Limitations
 
 `thing-flinger` is an early prototype. It has served so far to demonstrate that unique files,
@@ -170,7 +165,7 @@ document; for now this is a collection of rough notes.
 
 It's possible to use a Linux libvirt host running multiple helios VMs as the
 builder/deployment server targets, but it requires some additional setup beyond
-what [`helios-engvm`](https://github.com/oxidecomputer/helios-engvm).
+[`helios-engvm`](https://github.com/oxidecomputer/helios-engvm).
 
 `thing-flinger` does not have any support for running the
 `tools/create_virtual_hardware.sh` script; this will need to be done by hand on
