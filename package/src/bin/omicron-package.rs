@@ -124,12 +124,19 @@ async fn do_build(config: &Config) -> Result<()> {
 
 // Calculates the SHA256 digest for a file.
 async fn get_sha256_digest(path: &PathBuf) -> Result<Digest> {
-    let mut reader = BufReader::new(tokio::fs::File::open(&path).await?);
+    let mut reader = BufReader::new(
+        tokio::fs::File::open(&path)
+            .await
+            .with_context(|| format!("could not open {path:?}"))?,
+    );
     let mut context = DigestContext::new(&SHA256);
     let mut buffer = [0; 1024];
 
     loop {
-        let count = reader.read(&mut buffer).await?;
+        let count = reader
+            .read(&mut buffer)
+            .await
+            .with_context(|| format!("failed to read {path:?}"))?;
         if count == 0 {
             break;
         } else {
@@ -170,21 +177,31 @@ async fn get_external_package(
                     commit,
                     path.as_path().file_name().unwrap().to_string_lossy(),
                 );
-                let response = reqwest::Client::new().get(url).send().await?;
+                let response = reqwest::Client::new()
+                    .get(&url)
+                    .send()
+                    .await
+                    .with_context(|| format!("failed to get {url}"))?;
                 progress.set_length(
                     response
                         .content_length()
                         .ok_or_else(|| anyhow!("Missing Content Length"))?,
                 );
-                let mut file = tokio::fs::File::create(path).await?;
+                let mut file = tokio::fs::File::create(&path)
+                    .await
+                    .with_context(|| format!("failed to create {path:?}"))?;
                 let mut stream = response.bytes_stream();
                 let mut context = DigestContext::new(&SHA256);
                 while let Some(chunk) = stream.next().await {
-                    let chunk = chunk?;
+                    let chunk = chunk.with_context(|| {
+                        format!("failed reading response from {url}")
+                    })?;
                     // Update the running SHA digest
                     context.update(&chunk);
                     // Update the downloaded file
-                    file.write_all(&chunk).await?;
+                    file.write_all(&chunk)
+                        .await
+                        .with_context(|| format!("failed writing {path:?}"))?;
                     // Record progress in the UI
                     progress.increment(chunk.len().try_into().unwrap());
                 }
@@ -255,7 +272,10 @@ async fn do_package(config: &Config, output_directory: &Path) -> Result<()> {
                 progress.set_message("bundle package".to_string());
                 package
                     .create_with_progress(&progress, &output_directory)
-                    .await?;
+                    .await
+                    .with_context(|| {
+                        format!("failed to create {package_name} in {output_directory:?}")
+                    })?;
                 progress.finish();
                 Ok(())
             },

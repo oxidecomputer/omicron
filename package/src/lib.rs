@@ -12,17 +12,21 @@ use thiserror::Error;
 /// Errors which may be returned when parsing the server configuration.
 #[derive(Error, Debug)]
 pub enum ParseError {
-    #[error("Cannot parse toml: {0}")]
-    Toml(#[from] toml::de::Error),
-    #[error("IO error: {0}")]
-    Io(#[from] std::io::Error),
+    #[error("Error deserializing toml from {path}: {err}")]
+    Toml { path: PathBuf, err: toml::de::Error },
+    #[error("IO error: {message}: {err}")]
+    Io { message: String, err: std::io::Error },
 }
 
 pub fn parse<P: AsRef<Path>, C: DeserializeOwned>(
     path: P,
 ) -> Result<C, ParseError> {
-    let contents = std::fs::read_to_string(path.as_ref())?;
-    let cfg = toml::from_str::<C>(&contents)?;
+    let path = path.as_ref();
+    let contents = std::fs::read_to_string(path).map_err(|err| {
+        ParseError::Io { message: format!("failed reading {path:?}"), err }
+    })?;
+    let cfg = toml::from_str::<C>(&contents)
+        .map_err(|err| ParseError::Toml { path: path.to_path_buf(), err })?;
     Ok(cfg)
 }
 
