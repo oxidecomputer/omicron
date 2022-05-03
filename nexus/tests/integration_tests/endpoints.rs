@@ -24,9 +24,9 @@ use omicron_common::api::external::RouterRouteUpdateParams;
 use omicron_common::api::external::VpcFirewallRuleUpdateParams;
 use omicron_nexus::authn;
 use omicron_nexus::external_api::params;
+use omicron_nexus::external_api::shared;
 use std::net::IpAddr;
 use std::net::Ipv4Addr;
-use omicron_nexus::external_api::shared;
 
 lazy_static! {
     pub static ref HARDWARE_RACK_URL: String =

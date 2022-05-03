@@ -2853,7 +2853,13 @@ impl DataStore {
 
     // Role assignments
 
-    // XXX-dap TODO-doc
+    /// Fetches all of the role assignments for the specified resource
+    ///
+    /// This function is generic over all resources that can accept roles (e.g.,
+    /// Fleet, Silo, Organization, etc.).
+    // TODO-scalability In an ideal world, this would be paginated.  The impact
+    // is mitigated because we cap the number of role assignments per resource
+    // pretty tightly.
     pub async fn role_assignment_fetch_all<
         T: authz::ApiResourceWithRoles + Clone,
     >(
@@ -2876,7 +2882,20 @@ impl DataStore {
             .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
     }
 
-    // XXX-dap TODO-doc
+    /// Removes all existing role assignments on `authz_resource` and adds those
+    /// specified by `new_assignments`
+    ///
+    /// The expectation is that the caller will have just fetched the role
+    /// assignments, modified them, and is giving us the complete new list.
+    ///
+    /// This function is generic over all resources that can accept roles (e.g.,
+    /// Fleet, Silo, Organization, etc.).
+    // TODO-correctness As with the rest of the API, we're lacking an ability
+    // for an ETag precondition check here.
+    // TODO-scalability In an ideal world, this would update in batches.  That's
+    // tricky without first-classing the Policy in the database.  The impact is
+    // mitigated because we cap the number of role assignments per resource
+    // pretty tightly.
     pub async fn role_assignment_replace_all<
         T: authz::ApiResourceWithRoles + Clone,
     >(
@@ -2885,8 +2904,8 @@ impl DataStore {
         authz_resource: &T,
         new_assignments: &[shared::RoleAssignment],
     ) -> ListResultVec<db::model::RoleAssignment> {
-        // XXX-dap we need to validate that this is one of the valid roles for
-        // this resource!
+        // XXX-dap we need to validate each of these is one of the valid roles
+        // for this resource!
 
         // TODO-security We should carefully review what permissions are
         // required for modifying the policy of a resource.
