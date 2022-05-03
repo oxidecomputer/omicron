@@ -1083,10 +1083,10 @@ CREATE TABLE omicron.public.role_assignment (
      */
     PRIMARY KEY(
         resource_id,
-	resource_type,
-	role_name,
-	identity_id,
-	identity_type
+        resource_type,
+        role_name,
+        identity_id,
+        identity_type
      )
 );
 

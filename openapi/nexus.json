@@ -6342,10 +6342,11 @@
         }
       },
       "Policy": {
-        "description": "Client view of a [`Policy`]",
+        "description": "Client view of a [`Policy`], which describes how this resource may be accessed\n\nNote that the Policy only describes access granted explicitly for this resource.  The policies of parent resources can also cause a user to have access to this resource.",
         "type": "object",
         "properties": {
           "role_assignments": {
+            "description": "Roles directly assigned on this resource",
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/RoleAssignment"

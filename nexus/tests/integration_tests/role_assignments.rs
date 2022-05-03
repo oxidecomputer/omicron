@@ -52,7 +52,7 @@ async fn test_role_assignments_basic(cptestctx: &ControlPlaneTestContext) {
     let role_assignment = shared::RoleAssignment {
         identity_type: shared::IdentityType::UserBuiltin,
         identity_id: USER_TEST_UNPRIVILEGED.id,
-        role_name: ORGANIZATION_COLLABORATOR.role_name.to_string(),
+        role_name: ORGANIZATION_ADMINISTRATOR.role_name.to_string(),
     };
     new_policy.role_assignments.push(role_assignment.clone());
 
