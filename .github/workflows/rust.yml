@@ -105,7 +105,7 @@ jobs:
     - name: Update PATH
       run: echo "$PWD/out/cockroachdb/bin:$PWD/out/clickhouse" >> "$GITHUB_PATH"
     - name: Install Pre-Requisites
-      run: ./tools/install_prerequisites.sh
+      run: ./tools/install_prerequisites.sh -y
     - name: Create temporary directory for test outputs
       run: mkdir -p $OMICRON_TMP
     - name: Build

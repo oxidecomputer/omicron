@@ -79,7 +79,16 @@ function do_download_curl
 
 function do_sha256sum
 {
-	sha256sum < "$1" | awk '{print $1}'
+	case "$OSTYPE" in
+		darwin*)
+			SHA="shasum -a 256"
+			;;
+		*)
+			SHA="sha256sum"
+			;;
+	esac
+
+	$SHA < "$1" | awk '{print $1}'
 }
 
 function do_untar

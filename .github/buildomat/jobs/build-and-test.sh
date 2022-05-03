@@ -21,7 +21,7 @@ rustc --version
 export PATH="$PATH:$PWD/out/cockroachdb/bin:$PWD/out/clickhouse"
 
 banner prerequisites
-ptime -m bash ./tools/install_prerequisites.sh
+ptime -m bash ./tools/install_prerequisites.sh -y
 
 #
 # We build with:
