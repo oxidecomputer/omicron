@@ -11,11 +11,11 @@ use nexus_test_utils::http_testing::NexusRequest;
 use nexus_test_utils::resource_helpers::create_organization;
 use nexus_test_utils::ControlPlaneTestContext;
 use nexus_test_utils_macros::nexus_test;
+use omicron_common::api::external::ObjectIdentity;
 use omicron_nexus::authn::USER_TEST_UNPRIVILEGED;
 use omicron_nexus::db::fixed_data::role_builtin::ORGANIZATION_COLLABORATOR;
 use omicron_nexus::external_api::shared;
 use omicron_nexus::external_api::views;
-use omicron_common::api::external::ObjectIdentity;
 
 // TODO-coverage A more comprehensive test would be useful when we have proper
 // Silo users
