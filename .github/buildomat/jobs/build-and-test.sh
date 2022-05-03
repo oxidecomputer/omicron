@@ -3,7 +3,7 @@
 #: name = "helios / build-and-test"
 #: variety = "basic"
 #: target = "helios"
-#: rust_toolchain = "nightly-2021-11-24"
+#: rust_toolchain = "nightly-2022-04-27"
 #: output_rules = []
 #:
 
@@ -52,7 +52,7 @@ banner build
 export RUSTFLAGS="-D warnings"
 export RUSTDOCFLAGS="-D warnings"
 export TMPDIR=$TEST_TMPDIR
-ptime -m cargo +'nightly-2021-11-24' build --locked --all-targets --verbose
+ptime -m cargo +'nightly-2022-04-27' build --locked --all-targets --verbose
 
 #
 # Check that building individual packages as when deploying Omicron succeeds
@@ -65,7 +65,7 @@ ptime -m cargo run --bin omicron-package -- check
 # having to rebuild here.
 #
 banner test
-ptime -m cargo +'nightly-2021-11-24' test --workspace --locked --verbose
+ptime -m cargo +'nightly-2022-04-27' test --workspace --locked --verbose
 
 #
 # Make sure that we have left nothing around in $TEST_TMPDIR.  The easiest way

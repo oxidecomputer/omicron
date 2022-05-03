@@ -8,6 +8,7 @@ use diesel::backend::Backend;
 use diesel::backend::RawValue;
 use diesel::deserialize;
 use diesel::deserialize::FromSql;
+use diesel::pg::Pg;
 use diesel::serialize;
 use diesel::serialize::Output;
 use diesel::serialize::ToSql;
@@ -19,7 +20,7 @@ use omicron_common::api::external::Error;
 #[derive(
     Clone, Copy, AsExpression, FromSqlRow, PartialEq, Ord, PartialOrd, Eq,
 )]
-#[sql_type = "Inet"]
+#[diesel(sql_type = Inet)]
 pub struct Ipv6Addr(std::net::Ipv6Addr);
 
 NewtypeDebug! { () pub struct Ipv6Addr(std::net::Ipv6Addr); }
@@ -32,16 +33,10 @@ impl From<&std::net::Ipv6Addr> for Ipv6Addr {
     }
 }
 
-impl<DB> ToSql<Inet, DB> for Ipv6Addr
-where
-    DB: Backend,
-    IpNetwork: ToSql<Inet, DB>,
-{
-    fn to_sql<W: std::io::Write>(
-        &self,
-        out: &mut Output<W, DB>,
-    ) -> serialize::Result {
-        IpNetwork::V6(Ipv6Network::from(self.0)).to_sql(out)
+impl ToSql<Inet, Pg> for Ipv6Addr {
+    fn to_sql<'a>(&'a self, out: &mut Output<'a, '_, Pg>) -> serialize::Result {
+        let net = IpNetwork::V6(Ipv6Network::from(self.0));
+        <IpNetwork as ToSql<Inet, Pg>>::to_sql(&net, &mut out.reborrow())
     }
 }
 

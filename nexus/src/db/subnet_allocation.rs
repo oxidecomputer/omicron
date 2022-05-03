@@ -145,16 +145,16 @@ impl SubnetError {
 /// The input may be either an IPv4 or IPv6 subnet, and the corresponding column
 /// is compared against. Note that the exact input IP range is returned on
 /// purpose.
-fn push_select_overlapping_ip_range(
-    mut out: AstPass<Pg>,
-    vpc_id: &Uuid,
-    ip: &ipnetwork::IpNetwork,
+fn push_select_overlapping_ip_range<'a>(
+    mut out: AstPass<'_, 'a, Pg>,
+    vpc_id: &'a Uuid,
+    ip: &'a ipnetwork::IpNetwork,
 ) -> diesel::QueryResult<()> {
     use crate::db::schema::vpc_subnet::dsl;
     out.push_sql("SELECT ");
     out.push_bind_param::<sql_types::Inet, ipnetwork::IpNetwork>(ip)?;
     out.push_sql(" FROM ");
-    dsl::vpc_subnet.from_clause().walk_ast(out.reborrow())?;
+    VPC_SUBNET_FROM_CLAUSE.walk_ast(out.reborrow())?;
     out.push_sql(" WHERE ");
     out.push_identifier(dsl::vpc_id::NAME)?;
     out.push_sql(" = ");
@@ -189,10 +189,10 @@ fn push_select_overlapping_ip_range(
 /// the first expression otherwise. That is, this returns NULL if there exists
 /// an overlapping IP range already in the VPC Subnet table, and the requested
 /// IP range if not.
-fn push_null_if_overlapping_ip_range(
-    mut out: AstPass<Pg>,
-    vpc_id: &Uuid,
-    ip: &ipnetwork::IpNetwork,
+fn push_null_if_overlapping_ip_range<'a>(
+    mut out: AstPass<'_, 'a, Pg>,
+    vpc_id: &'a Uuid,
+    ip: &'a ipnetwork::IpNetwork,
 ) -> diesel::QueryResult<()> {
     out.push_sql("SELECT NULLIF(");
     out.push_bind_param::<sql_types::Inet, ipnetwork::IpNetwork>(ip)?;
@@ -250,7 +250,27 @@ fn push_null_if_overlapping_ip_range(
 /// SELECT *
 /// FROM candidate, candidate_ipv4, candidate_ipv6
 /// ```
-pub struct FilterConflictingVpcSubnetRangesQuery(pub VpcSubnet);
+pub struct FilterConflictingVpcSubnetRangesQuery {
+    subnet: VpcSubnet,
+
+    // The following fields are derived from the previous field. This begs the
+    // question: "Why bother storing them at all?"
+    //
+    // Diesel's [`diesel::query_builder::ast_pass::AstPass:push_bind_param`] method
+    // requires that the provided value now live as long as the entire AstPass
+    // type. By storing these values in the struct, they'll live at least as
+    // long as the entire call to [`QueryFragment<Pg>::walk_ast`].
+    ipv4_block: ipnetwork::IpNetwork,
+    ipv6_block: ipnetwork::IpNetwork,
+}
+
+impl FilterConflictingVpcSubnetRangesQuery {
+    pub fn new(subnet: VpcSubnet) -> Self {
+        let ipv4_block = ipnetwork::IpNetwork::from(subnet.ipv4_block.0 .0);
+        let ipv6_block = ipnetwork::IpNetwork::from(subnet.ipv6_block.0 .0);
+        Self { subnet, ipv4_block, ipv6_block }
+    }
+}
 
 impl QueryId for FilterConflictingVpcSubnetRangesQuery {
     type QueryId = ();
@@ -258,7 +278,10 @@ impl QueryId for FilterConflictingVpcSubnetRangesQuery {
 }
 
 impl QueryFragment<Pg> for FilterConflictingVpcSubnetRangesQuery {
-    fn walk_ast(&self, mut out: AstPass<Pg>) -> diesel::QueryResult<()> {
+    fn walk_ast<'a>(
+        &'a self,
+        mut out: AstPass<'_, 'a, Pg>,
+    ) -> diesel::QueryResult<()> {
         use db::schema::vpc_subnet::dsl;
 
         // Create the base `candidate` from values provided that need no
@@ -278,24 +301,26 @@ impl QueryFragment<Pg> for FilterConflictingVpcSubnetRangesQuery {
         out.push_sql(", ");
         out.push_identifier(dsl::vpc_id::NAME)?;
         out.push_sql(") AS (VALUES (");
-        out.push_bind_param::<sql_types::Uuid, Uuid>(&self.0.id())?;
+        out.push_bind_param::<sql_types::Uuid, Uuid>(&self.subnet.identity.id)?;
+        out.push_sql(", ");
+        out.push_bind_param::<sql_types::Text, db::model::Name>(
+            &self.subnet.name(),
+        )?;
         out.push_sql(", ");
         out.push_bind_param::<sql_types::Text, String>(
-            &self.0.name().to_string(),
-        )?;
-        out.push_sql(", ");
-        out.push_bind_param::<sql_types::Text, &str>(&self.0.description())?;
-        out.push_sql(", ");
-        out.push_bind_param::<sql_types::Timestamptz, DateTime<Utc>>(
-            &self.0.time_created(),
+            &self.subnet.identity.description,
         )?;
         out.push_sql(", ");
         out.push_bind_param::<sql_types::Timestamptz, DateTime<Utc>>(
-            &self.0.time_modified(),
+            &self.subnet.identity.time_created,
+        )?;
+        out.push_sql(", ");
+        out.push_bind_param::<sql_types::Timestamptz, DateTime<Utc>>(
+            &self.subnet.identity.time_modified,
         )?;
         out.push_sql(", ");
         out.push_sql("NULL::TIMESTAMPTZ, ");
-        out.push_bind_param::<sql_types::Uuid, Uuid>(&self.0.vpc_id)?;
+        out.push_bind_param::<sql_types::Uuid, Uuid>(&self.subnet.vpc_id)?;
         out.push_sql(")), ");
 
         // Push the candidate IPv4 and IPv6 selection subqueries, which return
@@ -305,8 +330,8 @@ impl QueryFragment<Pg> for FilterConflictingVpcSubnetRangesQuery {
         out.push_sql(") AS (");
         push_null_if_overlapping_ip_range(
             out.reborrow(),
-            &self.0.vpc_id,
-            &ipnetwork::IpNetwork::from(self.0.ipv4_block.0 .0),
+            &self.subnet.vpc_id,
+            &self.ipv4_block,
         )?;
 
         out.push_sql("), candidate_ipv6(");
@@ -314,8 +339,8 @@ impl QueryFragment<Pg> for FilterConflictingVpcSubnetRangesQuery {
         out.push_sql(") AS (");
         push_null_if_overlapping_ip_range(
             out.reborrow(),
-            &self.0.vpc_id,
-            &ipnetwork::IpNetwork::from(self.0.ipv6_block.0 .0),
+            &self.subnet.vpc_id,
+            &self.ipv6_block,
         )?;
         out.push_sql(") ");
 
@@ -358,7 +383,10 @@ impl diesel::insertable::CanInsertInSingleQuery<Pg>
 }
 
 impl QueryFragment<Pg> for FilterConflictingVpcSubnetRangesQueryValues {
-    fn walk_ast(&self, mut out: AstPass<Pg>) -> diesel::QueryResult<()> {
+    fn walk_ast<'a>(
+        &'a self,
+        mut out: AstPass<'_, 'a, Pg>,
+    ) -> diesel::QueryResult<()> {
         use db::schema::vpc_subnet::dsl;
         out.push_sql("(");
         out.push_identifier(dsl::id::NAME)?;
@@ -665,17 +693,18 @@ fn decode_database_error(
 /// Note that the `COALESCE` expression is there to handle the case where there
 /// _is_ no record with the given `instance_id`. In that case, the `vpc_id`
 /// provided is returned directly, so everything works as if the IDs matched.
-fn push_ensure_unique_vpc_expression(
-    mut out: AstPass<Pg>,
-    vpc_id: &Uuid,
-    instance_id: &Uuid,
+fn push_ensure_unique_vpc_expression<'a>(
+    mut out: AstPass<'_, 'a, Pg>,
+    vpc_id: &'a Uuid,
+    vpc_id_str: &'a String,
+    instance_id: &'a Uuid,
 ) -> diesel::QueryResult<()> {
     use db::schema::network_interface::dsl;
 
     out.push_sql("CAST(IF(COALESCE((SELECT ");
     out.push_identifier(dsl::vpc_id::NAME)?;
     out.push_sql(" FROM ");
-    dsl::network_interface.from_clause().walk_ast(out.reborrow())?;
+    NETWORK_INTERFACE_FROM_CLAUSE.walk_ast(out.reborrow())?;
     out.push_sql(" WHERE ");
     out.push_identifier(dsl::time_deleted::NAME)?;
     out.push_sql(" IS NULL AND ");
@@ -710,7 +739,7 @@ fn push_ensure_unique_vpc_expression(
     // type, a UUID. That's the exact error we're trying to produce, but it's
     // evaluated too early. So we ensure both are strings here, and then ask the
     // DB to cast them after that condition is evaluated.
-    out.push_bind_param::<sql_types::Text, String>(&vpc_id.to_string())?;
+    out.push_bind_param::<sql_types::Text, String>(vpc_id_str)?;
     out.push_sql(", '') AS UUID)");
     Ok(())
 }
@@ -741,16 +770,15 @@ fn push_ensure_unique_vpc_expression(
 /// the picture. We'd need a more complex data structure to manage the ranges of
 /// available address for each subnet, especially to manage coalescing those
 /// ranges as addresses are released back to the pool.
-fn push_select_next_available_ip_subquery(
-    mut out: AstPass<Pg>,
-    subnet: &IpNetwork,
-    subnet_id: &Uuid,
+fn push_select_next_available_ip_subquery<'a>(
+    mut out: AstPass<'_, 'a, Pg>,
+    query: &'a InsertNetworkInterfaceQuery,
 ) -> diesel::QueryResult<()> {
     use db::schema::network_interface::dsl;
-    let last_address_offset = generate_last_address_offset(&subnet);
-    let network_address = IpNetwork::from(subnet.network());
     out.push_sql("SELECT ");
-    out.push_bind_param::<sql_types::Inet, IpNetwork>(&network_address)?;
+    out.push_bind_param::<sql_types::Inet, IpNetwork>(
+        &query.network_address_v4_sql,
+    )?;
     out.push_sql(" + ");
     out.push_identifier("address_offset")?;
     out.push_sql(" AS ");
@@ -763,11 +791,11 @@ fn push_select_next_available_ip_subquery(
         )
         .as_str(),
     );
-    out.push_bind_param::<sql_types::BigInt, _>(&last_address_offset)?;
+    out.push_bind_param::<sql_types::BigInt, _>(&query.last_address_offset_v4)?;
     out.push_sql(") AS ");
     out.push_identifier("address_offset")?;
     out.push_sql(" LEFT OUTER JOIN ");
-    dsl::network_interface.from_clause().walk_ast(out.reborrow())?;
+    NETWORK_INTERFACE_FROM_CLAUSE.walk_ast(out.reborrow())?;
     out.push_sql(" ON (");
     out.push_identifier(dsl::subnet_id::NAME)?;
     out.push_sql(", ");
@@ -775,9 +803,13 @@ fn push_select_next_available_ip_subquery(
     out.push_sql(", ");
     out.push_identifier(dsl::time_deleted::NAME)?;
     out.push_sql(" IS NULL) = (");
-    out.push_bind_param::<sql_types::Uuid, Uuid>(&subnet_id)?;
+    out.push_bind_param::<sql_types::Uuid, Uuid>(
+        &query.interface.subnet.identity.id,
+    )?;
     out.push_sql(", ");
-    out.push_bind_param::<sql_types::Inet, IpNetwork>(&network_address)?;
+    out.push_bind_param::<sql_types::Inet, IpNetwork>(
+        &query.network_address_v4_sql,
+    )?;
     out.push_sql(" + ");
     out.push_identifier("address_offset")?;
     out.push_sql(", TRUE) ");
@@ -858,10 +890,9 @@ fn push_select_next_available_ip_subquery(
 /// portion of the query might need to be placed behind a conditional evaluation
 /// expression, such as `IF` or `COALESCE`, which only runs the subquery when
 /// the instance-validation check passes.
-fn push_interface_allocation_subquery(
-    mut out: AstPass<Pg>,
-    interface: &IncompleteNetworkInterface,
-    now: &DateTime<Utc>,
+fn push_interface_allocation_subquery<'a>(
+    mut out: AstPass<'_, 'a, Pg>,
+    query: &'a InsertNetworkInterfaceQuery,
 ) -> diesel::QueryResult<()> {
     use db::schema::network_interface::dsl;
     // Push the CTE that ensures that any other interface with the same
@@ -875,8 +906,9 @@ fn push_interface_allocation_subquery(
     out.push_sql("(SELECT ");
     push_ensure_unique_vpc_expression(
         out.reborrow(),
-        &interface.vpc_id,
-        &interface.instance_id,
+        &query.interface.vpc_id,
+        &query.vpc_id_str,
+        &query.interface.instance_id,
     )?;
     out.push_sql(") ");
 
@@ -884,31 +916,31 @@ fn push_interface_allocation_subquery(
     // are known regardless of whether we're allocating an IP address. These
     // are all written as `SELECT <value1> AS <name1>, <value2> AS <name2>, ...
     out.push_sql("SELECT ");
-    out.push_bind_param::<sql_types::Uuid, Uuid>(&interface.identity.id)?;
+    out.push_bind_param::<sql_types::Uuid, Uuid>(&query.interface.identity.id)?;
     out.push_sql(" AS ");
     out.push_identifier(dsl::id::NAME)?;
     out.push_sql(", ");
 
-    out.push_bind_param::<sql_types::Text, &str>(
-        &interface.identity.name.as_str(),
+    out.push_bind_param::<sql_types::Text, db::model::Name>(
+        &query.interface.identity.name,
     )?;
     out.push_sql(" AS ");
     out.push_identifier(dsl::name::NAME)?;
     out.push_sql(", ");
 
-    out.push_bind_param::<sql_types::Text, &str>(
-        &interface.identity.description.as_str(),
+    out.push_bind_param::<sql_types::Text, String>(
+        &query.interface.identity.description,
     )?;
     out.push_sql(" AS ");
     out.push_identifier(dsl::description::NAME)?;
     out.push_sql(", ");
 
-    out.push_bind_param::<sql_types::Timestamptz, DateTime<Utc>>(&now)?;
+    out.push_bind_param::<sql_types::Timestamptz, DateTime<Utc>>(&query.now)?;
     out.push_sql(" AS ");
     out.push_identifier(dsl::time_created::NAME)?;
     out.push_sql(", ");
 
-    out.push_bind_param::<sql_types::Timestamptz, DateTime<Utc>>(&now)?;
+    out.push_bind_param::<sql_types::Timestamptz, DateTime<Utc>>(&query.now)?;
     out.push_sql(" AS ");
     out.push_identifier(dsl::time_modified::NAME)?;
     out.push_sql(", ");
@@ -918,7 +950,7 @@ fn push_interface_allocation_subquery(
     out.push_identifier(dsl::time_deleted::NAME)?;
     out.push_sql(", ");
 
-    out.push_bind_param::<sql_types::Uuid, Uuid>(&interface.instance_id)?;
+    out.push_bind_param::<sql_types::Uuid, Uuid>(&query.interface.instance_id)?;
     out.push_sql(" AS ");
     out.push_identifier(dsl::instance_id::NAME)?;
     out.push_sql(", ");
@@ -928,12 +960,14 @@ fn push_interface_allocation_subquery(
     out.push_identifier(dsl::vpc_id::NAME)?;
     out.push_sql(", ");
 
-    out.push_bind_param::<sql_types::Uuid, Uuid>(&interface.subnet.id())?;
+    out.push_bind_param::<sql_types::Uuid, Uuid>(
+        &query.interface.subnet.identity.id,
+    )?;
     out.push_sql(" AS ");
     out.push_identifier(dsl::subnet_id::NAME)?;
     out.push_sql(", ");
 
-    out.push_bind_param::<sql_types::Text, String>(&interface.mac.to_string())?;
+    out.push_bind_param::<sql_types::Text, String>(&query.mac_sql)?;
     out.push_sql(" AS ");
     out.push_identifier(dsl::mac::NAME)?;
     out.push_sql(", ");
@@ -941,17 +975,11 @@ fn push_interface_allocation_subquery(
     // If the user specified an IP address, then insert it by value. If they
     // did not, meaning we're allocating the next available one on their
     // behalf, then insert that subquery here.
-    if let Some(ip) = interface.ip {
-        out.push_bind_param::<sql_types::Inet, IpNetwork>(&ip.into())?;
+    if let Some(ref ip) = &query.ip_sql {
+        out.push_bind_param::<sql_types::Inet, IpNetwork>(ip)?;
     } else {
-        let subnet =
-            ipnetwork::IpNetwork::from(interface.subnet.ipv4_block.0 .0);
         out.push_sql("(");
-        push_select_next_available_ip_subquery(
-            out.reborrow(),
-            &subnet,
-            &interface.subnet.id(),
-        )?;
+        push_select_next_available_ip_subquery(out.reborrow(), &query)?;
         out.push_sql(")");
     }
     out.push_sql(" AS ");
@@ -963,7 +991,7 @@ fn push_interface_allocation_subquery(
     out.push_sql(", (");
     push_select_next_available_nic_slot_query(
         out.reborrow(),
-        &interface.instance_id,
+        &query.interface.instance_id,
     )?;
     out.push_sql(") AS ");
     out.push_identifier(dsl::slot::NAME)?;
@@ -1007,9 +1035,9 @@ fn push_interface_allocation_subquery(
 /// slot number is 7), this query will return 8. However, this violates the
 /// check on the slot column being between `[0, 8)`. This check violation is
 /// used to detect the case when there are no slots available.
-fn push_select_next_available_nic_slot_query(
-    mut out: AstPass<Pg>,
-    instance_id: &Uuid,
+fn push_select_next_available_nic_slot_query<'a>(
+    mut out: AstPass<'_, 'a, Pg>,
+    instance_id: &'a Uuid,
 ) -> QueryResult<()> {
     use db::schema::network_interface::dsl;
     out.push_sql(&format!(
@@ -1017,7 +1045,7 @@ fn push_select_next_available_nic_slot_query(
         crate::nexus::MAX_NICS_PER_INSTANCE,
     ));
     out.push_sql("AS next_slot LEFT OUTER JOIN ");
-    dsl::network_interface.from_clause().walk_ast(out.reborrow())?;
+    NETWORK_INTERFACE_FROM_CLAUSE.walk_ast(out.reborrow())?;
     out.push_sql(" ON (");
     out.push_identifier(dsl::instance_id::NAME)?;
     out.push_sql(", ");
@@ -1101,9 +1129,54 @@ fn push_select_next_available_nic_slot_query(
 /// constructing the subqueries in this type for more details.
 #[derive(Debug, Clone)]
 pub struct InsertNetworkInterfaceQuery {
-    pub interface: IncompleteNetworkInterface,
-    pub now: DateTime<Utc>,
+    interface: IncompleteNetworkInterface,
+    now: DateTime<Utc>,
+
+    // The following fields are derived from the previous fields. This begs the
+    // question: "Why bother storing them at all?"
+    //
+    // Diesel's [`diesel::query_builder::ast_pass::AstPass:push_bind_param`] method
+    // requires that the provided value now live as long as the entire AstPass
+    // type. By storing these values in the struct, they'll live at least as
+    // long as the entire call to [`QueryFragment<Pg>::walk_ast`].
+    vpc_id_str: String,
+    ip_sql: Option<IpNetwork>,
+    network_address_v4_sql: IpNetwork,
+    mac_sql: String,
+    last_address_offset_v4: i64,
 }
+
+impl InsertNetworkInterfaceQuery {
+    pub fn new(interface: IncompleteNetworkInterface) -> Self {
+        let vpc_id_str = interface.vpc_id.to_string();
+        let ip_sql = interface.ip.map(|ip| ip.into());
+        let subnet_v4_sql = IpNetwork::from(interface.subnet.ipv4_block.0 .0);
+        let network_address_v4_sql = IpNetwork::from(subnet_v4_sql.network());
+        let mac_sql = interface.mac.to_string();
+        let last_address_offset_v4 =
+            generate_last_address_offset(&subnet_v4_sql);
+
+        Self {
+            interface,
+            now: Utc::now(),
+            vpc_id_str,
+            ip_sql,
+            network_address_v4_sql,
+            mac_sql,
+            last_address_offset_v4,
+        }
+    }
+}
+
+type FromClause<T> =
+    diesel::internal::table_macro::StaticQueryFragmentInstance<T>;
+type NetworkInterfaceFromClause =
+    FromClause<db::schema::network_interface::table>;
+type VpcSubnetFromClause = FromClause<db::schema::vpc_subnet::table>;
+
+const NETWORK_INTERFACE_FROM_CLAUSE: NetworkInterfaceFromClause =
+    NetworkInterfaceFromClause::new();
+const VPC_SUBNET_FROM_CLAUSE: VpcSubnetFromClause = VpcSubnetFromClause::new();
 
 impl QueryId for InsertNetworkInterfaceQuery {
     type QueryId = ();
@@ -1121,34 +1194,38 @@ impl Insertable<db::schema::network_interface::table>
 }
 
 impl QueryFragment<Pg> for InsertNetworkInterfaceQuery {
-    fn walk_ast(&self, mut out: AstPass<Pg>) -> diesel::QueryResult<()> {
+    fn walk_ast<'a>(
+        &'a self,
+        mut out: AstPass<'_, 'a, Pg>,
+    ) -> diesel::QueryResult<()> {
         use db::schema::network_interface::dsl;
-        let push_columns = |mut out: AstPass<Pg>| -> diesel::QueryResult<()> {
-            out.push_identifier(dsl::id::NAME)?;
-            out.push_sql(", ");
-            out.push_identifier(dsl::name::NAME)?;
-            out.push_sql(", ");
-            out.push_identifier(dsl::description::NAME)?;
-            out.push_sql(", ");
-            out.push_identifier(dsl::time_created::NAME)?;
-            out.push_sql(", ");
-            out.push_identifier(dsl::time_modified::NAME)?;
-            out.push_sql(", ");
-            out.push_identifier(dsl::time_deleted::NAME)?;
-            out.push_sql(", ");
-            out.push_identifier(dsl::instance_id::NAME)?;
-            out.push_sql(", ");
-            out.push_identifier(dsl::vpc_id::NAME)?;
-            out.push_sql(", ");
-            out.push_identifier(dsl::subnet_id::NAME)?;
-            out.push_sql(", ");
-            out.push_identifier(dsl::mac::NAME)?;
-            out.push_sql(", ");
-            out.push_identifier(dsl::ip::NAME)?;
-            out.push_sql(", ");
-            out.push_identifier(dsl::slot::NAME)?;
-            Ok(())
-        };
+        let push_columns =
+            |mut out: AstPass<'_, 'a, Pg>| -> diesel::QueryResult<()> {
+                out.push_identifier(dsl::id::NAME)?;
+                out.push_sql(", ");
+                out.push_identifier(dsl::name::NAME)?;
+                out.push_sql(", ");
+                out.push_identifier(dsl::description::NAME)?;
+                out.push_sql(", ");
+                out.push_identifier(dsl::time_created::NAME)?;
+                out.push_sql(", ");
+                out.push_identifier(dsl::time_modified::NAME)?;
+                out.push_sql(", ");
+                out.push_identifier(dsl::time_deleted::NAME)?;
+                out.push_sql(", ");
+                out.push_identifier(dsl::instance_id::NAME)?;
+                out.push_sql(", ");
+                out.push_identifier(dsl::vpc_id::NAME)?;
+                out.push_sql(", ");
+                out.push_identifier(dsl::subnet_id::NAME)?;
+                out.push_sql(", ");
+                out.push_identifier(dsl::mac::NAME)?;
+                out.push_sql(", ");
+                out.push_identifier(dsl::ip::NAME)?;
+                out.push_sql(", ");
+                out.push_identifier(dsl::slot::NAME)?;
+                Ok(())
+            };
 
         out.push_sql("SELECT (candidate).* FROM (SELECT COALESCE((");
 
@@ -1157,7 +1234,7 @@ impl QueryFragment<Pg> for InsertNetworkInterfaceQuery {
         out.push_sql("SELECT ");
         push_columns(out.reborrow())?;
         out.push_sql(" FROM ");
-        dsl::network_interface.from_clause().walk_ast(out.reborrow())?;
+        NETWORK_INTERFACE_FROM_CLAUSE.walk_ast(out.reborrow())?;
         out.push_sql(" WHERE ");
         out.push_identifier(dsl::id::NAME)?;
         out.push_sql(" = ");
@@ -1170,11 +1247,7 @@ impl QueryFragment<Pg> for InsertNetworkInterfaceQuery {
 
         // Push the main, data-validating subquery.
         out.push_sql(", (");
-        push_interface_allocation_subquery(
-            out.reborrow(),
-            &self.interface,
-            &self.now,
-        )?;
+        push_interface_allocation_subquery(out.reborrow(), &self)?;
         out.push_sql(")) AS candidate)");
         Ok(())
     }
@@ -1199,7 +1272,10 @@ impl diesel::insertable::CanInsertInSingleQuery<Pg>
 }
 
 impl QueryFragment<Pg> for InsertNetworkInterfaceQueryValues {
-    fn walk_ast(&self, mut out: AstPass<Pg>) -> diesel::QueryResult<()> {
+    fn walk_ast<'a>(
+        &'a self,
+        mut out: AstPass<'_, 'a, Pg>,
+    ) -> diesel::QueryResult<()> {
         use db::schema::network_interface::dsl;
         out.push_sql("(");
         out.push_identifier(dsl::id::NAME)?;

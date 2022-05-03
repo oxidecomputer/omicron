@@ -94,7 +94,7 @@ const REGION_REDUNDANCY_THRESHOLD: usize = 3;
 trait RunnableQuery<U>:
     RunQueryDsl<DbConnection>
     + QueryFragment<Pg>
-    + LoadQuery<DbConnection, U>
+    + LoadQuery<'static, DbConnection, U>
     + QueryId
 {
 }
@@ -102,7 +102,7 @@ trait RunnableQuery<U>:
 impl<U, T> RunnableQuery<U> for T where
     T: RunQueryDsl<DbConnection>
         + QueryFragment<Pg>
-        + LoadQuery<DbConnection, U>
+        + LoadQuery<'static, DbConnection, U>
         + QueryId
 {
 }
@@ -1299,10 +1299,7 @@ impl DataStore {
         interface: IncompleteNetworkInterface,
     ) -> Result<NetworkInterface, NetworkInterfaceError> {
         use db::schema::network_interface::dsl;
-        let query = InsertNetworkInterfaceQuery {
-            interface: interface.clone(),
-            now: Utc::now(),
-        };
+        let query = InsertNetworkInterfaceQuery::new(interface.clone());
         diesel::insert_into(dsl::network_interface)
             .values(query)
             .returning(NetworkInterface::as_returning())
@@ -1897,7 +1894,7 @@ impl DataStore {
         subnet: VpcSubnet,
     ) -> Result<VpcSubnet, SubnetError> {
         use db::schema::vpc_subnet::dsl;
-        let values = FilterConflictingVpcSubnetRangesQuery(subnet.clone());
+        let values = FilterConflictingVpcSubnetRangesQuery::new(subnet.clone());
         diesel::insert_into(dsl::vpc_subnet)
             .values(values)
             .returning(VpcSubnet::as_returning())
@@ -2326,8 +2323,10 @@ impl DataStore {
         })
         .collect::<Vec<UserBuiltin>>();
 
+        // TODO: This should probably be removed when we can switch
+        // "test-privileged" and "test-unprivileged" to normal silo users rather
+        // than built-in users.
         debug!(opctx.log, "creating silo_user entries for built-in users");
-
         for builtin_user in &builtin_users {
             self.silo_user_create(SiloUser::new(
                 *SILO_ID,
@@ -2335,7 +2334,6 @@ impl DataStore {
             ))
             .await?;
         }
-
         info!(opctx.log, "created silo_user entries for built-in users");
 
         debug!(opctx.log, "attempting to create built-in users");
@@ -2503,6 +2501,8 @@ impl DataStore {
             .await
             .map(|_rows_deleted| ())
             .map_err(|e| {
+                // TODO-correctness TODO-availability This should be using
+                // public_error_from_diesel_pool()
                 Error::internal_error(&format!(
                     "error deleting outdated available artifacts: {:?}",
                     e
@@ -2510,23 +2510,27 @@ impl DataStore {
             })
     }
 
+    // NOTE: This function is only used for testing and for initial population
+    // of built-in users as silo users.  The error handling here assumes (1)
+    // that the caller expects no user input error from the database, and (2)
+    // that if a Silo user with the same id already exists in the database,
+    // that's not an error (it's assumed to be the same user).
     pub async fn silo_user_create(
         &self,
         silo_user: SiloUser,
-    ) -> CreateResult<SiloUser> {
+    ) -> Result<(), Error> {
         use db::schema::silo_user::dsl;
 
-        diesel::insert_into(dsl::silo_user)
+        let _ = diesel::insert_into(dsl::silo_user)
             .values(silo_user)
-            .returning(SiloUser::as_returning())
-            .get_result_async(self.pool())
+            .on_conflict(dsl::id)
+            .do_nothing()
+            .execute_async(self.pool())
             .await
             .map_err(|e| {
-                Error::internal_error(&format!(
-                    "error creating silo user: {:?}",
-                    e
-                ))
-            })
+                public_error_from_diesel_pool(e, ErrorHandler::Server)
+            })?;
+        Ok(())
     }
 
     /// Load built-in silos into the database
@@ -2676,6 +2680,7 @@ impl DataStore {
         // TODO-scalability This needs to happen in batches
         let updated_rows = diesel::update(silo_user::dsl::silo_user)
             .filter(silo_user::dsl::silo_id.eq(id))
+            .filter(silo_user::dsl::time_deleted.is_null())
             .set(silo_user::dsl::time_deleted.eq(now))
             .execute_async(self.pool_authorized(opctx).await?)
             .await
@@ -2839,6 +2844,27 @@ impl DataStore {
             })?;
         Ok(())
     }
+
+    // Test interfaces
+
+    #[cfg(test)]
+    async fn test_try_table_scan(&self, opctx: &OpContext) -> Error {
+        use db::schema::project::dsl;
+        let conn = self.pool_authorized(opctx).await;
+        if let Err(error) = conn {
+            return error;
+        }
+        let result = dsl::project
+            .select(diesel::dsl::count_star())
+            .first_async::<i64>(conn.unwrap())
+            .await;
+        match result {
+            Ok(_) => Error::internal_error("table scan unexpectedly succeeded"),
+            Err(error) => {
+                public_error_from_diesel_pool(error, ErrorHandler::Server)
+            }
+        }
+    }
 }
 
 /// Constructs a DataStore for use in test suites that has preloaded the
@@ -2959,7 +2985,7 @@ mod test {
             datastore.session_create(&opctx, session.clone()).await.unwrap();
 
         // Associate silo with user
-        let silo_user = datastore
+        datastore
             .silo_user_create(SiloUser::new(*SILO_ID, silo_user_id))
             .await
             .unwrap();
@@ -2969,7 +2995,7 @@ mod test {
             .fetch()
             .await
             .unwrap();
-        assert_eq!(silo_user.silo_id, db_silo_user.silo_id,);
+        assert_eq!(*SILO_ID, db_silo_user.silo_id);
 
         // fetch the one we just created
         let (.., fetched) = LookupPath::new(&opctx, &datastore)
@@ -3366,7 +3392,7 @@ mod test {
             external::Ipv4Net("172.30.0.0/22".parse().unwrap()),
             external::Ipv6Net("fd00::/64".parse().unwrap()),
         );
-        let values = FilterConflictingVpcSubnetRangesQuery(subnet);
+        let values = FilterConflictingVpcSubnetRangesQuery::new(subnet);
         let query =
             diesel::insert_into(db::schema::vpc_subnet::dsl::vpc_subnet)
                 .values(values)
@@ -3457,11 +3483,10 @@ mod test {
 
         // Create a new Silo user so that we can lookup their keys.
         let silo_user_id = Uuid::new_v4();
-        let silo_user = datastore
+        datastore
             .silo_user_create(SiloUser::new(*SILO_ID, silo_user_id))
             .await
             .unwrap();
-        assert_eq!(silo_user.id(), silo_user_id);
 
         let (.., authz_user) = LookupPath::new(&opctx, &datastore)
             .silo_user_id(silo_user_id)
@@ -3514,6 +3539,32 @@ mod test {
 
         // Delete the key we just created.
         datastore.ssh_key_delete(&opctx, &authz_ssh_key).await.unwrap();
+
+        // Clean up.
+        db.cleanup().await.unwrap();
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn test_table_scan() {
+        let logctx = dev::test_setup_log("test_table_scan");
+        let mut db = test_setup_database(&logctx.log).await;
+        let (opctx, datastore) = datastore_test(&logctx, &db).await;
+
+        let error = datastore.test_try_table_scan(&opctx).await;
+        println!("error from attempted table scan: {:#}", error);
+        match error {
+            Error::InternalError { internal_message } => {
+                assert!(internal_message.contains(
+                    "contains a full table/index scan which is \
+                    explicitly disallowed"
+                ));
+            }
+            error => panic!(
+                "expected internal error with specific message, found {:?}",
+                error
+            ),
+        }
 
         // Clean up.
         db.cleanup().await.unwrap();

@@ -129,14 +129,13 @@ impl Communicator {
         let request =
             RequestKind::IgnitionState { target: port.as_ignition_target() };
 
-        Ok(self
-            .request_response(
-                &controller,
-                request,
-                ResponseKindExt::try_into_ignition_state,
-                Some(timeout),
-            )
-            .await?)
+        self.request_response(
+            &controller,
+            request,
+            ResponseKindExt::try_into_ignition_state,
+            Some(timeout),
+        )
+        .await
     }
 
     /// Ask the local ignition controller for the ignition state of all SPs.
@@ -195,14 +194,13 @@ impl Communicator {
         let target = self.id_to_port(target_sp)?.as_ignition_target();
         let request = RequestKind::IgnitionCommand { target, command };
 
-        Ok(self
-            .request_response(
-                &controller,
-                request,
-                ResponseKindExt::try_into_ignition_command_ack,
-                Some(timeout),
-            )
-            .await?)
+        self.request_response(
+            &controller,
+            request,
+            ResponseKindExt::try_into_ignition_command_ack,
+            Some(timeout),
+        )
+        .await
     }
 
     /// Set up a websocket connection that forwards data to and from the given
@@ -327,14 +325,13 @@ impl Communicator {
         let sp =
             self.switch.sp_socket(port).expect("lost address of attached SP");
 
-        Ok(self
-            .request_response(
-                &sp,
-                RequestKind::SerialConsoleWrite(packet),
-                ResponseKindExt::try_into_serial_console_write_ack,
-                Some(timeout),
-            )
-            .await?)
+        self.request_response(
+            &sp,
+            RequestKind::SerialConsoleWrite(packet),
+            ResponseKindExt::try_into_serial_console_write_ack,
+            Some(timeout),
+        )
+        .await
     }
 
     /// Get the state of a given SP.
@@ -370,14 +367,13 @@ impl Communicator {
             self.switch.sp_socket(port).ok_or(Error::SpAddressUnknown(sp))?;
         let request = RequestKind::SpState;
 
-        Ok(self
-            .request_response(
-                &sp,
-                request,
-                ResponseKindExt::try_into_sp_state,
-                timeout,
-            )
-            .await?)
+        self.request_response(
+            &sp,
+            request,
+            ResponseKindExt::try_into_sp_state,
+            timeout,
+        )
+        .await
     }
 
     /// Query all online SPs.
