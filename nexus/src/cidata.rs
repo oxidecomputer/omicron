@@ -70,10 +70,10 @@ fn build_vfat(meta_data: &[u8], user_data: &[u8]) -> io::Result<Vec<u8>> {
         let root_dir = fs.root_dir();
         for (file, data) in [("meta-data", meta_data), ("user-data", user_data)]
         {
-            if !data.is_empty() {
-                let mut file = root_dir.create_file(file)?;
-                file.write_all(data)?;
-            }
+            // Cloud-init requires the files `meta-data` and `user-data`
+            // to be present, even if empty.
+            let mut file = root_dir.create_file(file)?;
+            file.write_all(data)?;
         }
     }
 
