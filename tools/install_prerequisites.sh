@@ -123,7 +123,6 @@ fi
 ./tools/ci_download_cockroachdb
 ./tools/ci_download_clickhouse
 
-
 # Install static console assets. These are used when packaging Nexus.
 ./tools/ci_download_console
 
