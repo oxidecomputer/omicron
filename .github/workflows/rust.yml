@@ -45,6 +45,8 @@ jobs:
       run: cargo --version
     - name: Report Clippy version
       run: cargo clippy -- --version
+    - name: Install Pre-Requisites
+      run: ./tools/install_prerequisites.sh -y
     - name: Run Clippy Lints
       #
       # Clippy's style nits are useful, but not worth keeping in CI.  This
