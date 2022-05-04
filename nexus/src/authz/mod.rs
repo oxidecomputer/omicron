@@ -71,8 +71,6 @@
 //! so is the relationship that says a particular user has a particular role for
 //! a particular resource.
 //!
-//! XXX-dap TODO-doc
-//!
 //! Suppose a built-in user "cookie-monster" has the "viewer" role for a Project
 //! "monster-foodies".  It looks like this:
 //!
@@ -94,24 +92,24 @@
 //! |   |    +---------------------------------------------------------------+
 //! |   |                                                                    |
 //! |   | table: "role_builtin"                                              |
-//! |   | primary key: (resource_type, role_name)
+//! |   | primary key: (resource_type, role_name)                            |
 //! |   | +---------------+-----------+-----+                                |
 //! |   | | resource_type | role_name | ... |                                |
 //! |   | +---------------+-----------+-----+                                |
 //! +---|-> "project "    | "viewer"  | ... |                                |
 //! |   | +---------------+--^--------+-----+                                |
-//! |   |                    |
+//! |   |                    |                                               |
 //! | +-|--------------------+                                               |
 //! | | |                                                                    |
-//! | | | table: "role_assignment_builtin"                                   |
-//! | | | (assigns built-in roles to built-in users on arbitrary resources)  |
-//! | | | +---------------+-----------+-------------+-----------------+      |
-//! | | | | resource_type | role_name | resource_id | user_builtin_id |      |
-//! | | | +---------------+-----------+-------------+-----------------+      |
-//! | | | | "project "    | "viewer"  |         234 |             123 <------+
-//! | | | +--^------------+--^--------+----------^--+-----------------+
-//! | | |    |               |                   |
-//! +-|-|----+               |                   |
+//! | | | table: "role_assignment"                                           |
+//! | | | (assigns built-in roles to users on arbitrary resources)           |
+//! | | | +---------------+-----------+-------------+-------------+---+      |
+//! | | | | resource_type | role_name | resource_id | identity_id |...|      |
+//! | | | +---------------+-----------+-------------+-------------+---+      |
+//! | | | | "project "    | "viewer"  |         234 |          123|...|      |
+//! | | | +--^------------+--^--------+----------^--+-----------^-+---+      |
+//! | | |    |               |                   |              |            |
+//! +-|-|----+               |                   |              +------------+
 //!   +-|--------------------+                   |
 //!     +----------------------------------------+
 //! ```
@@ -120,6 +118,14 @@
 //! "project" with id 123.  (Note that ids are really uuids, and some of these
 //! tables have other columns.)  See the [`roles`] module for more details on
 //! how we find these records and make them available for the authz check.
+//!
+//! Built-in users are only one possible target for role assignments.  IdP users
+//! (Silo users) an also be assigned roles.  This all works the same way, except
+//! that in that case `role_assignment.identity_id` refers to an entry in the
+//! `silo_user` table rather than `user_builtin`.  How do we know the
+//! difference?  There's also an `identity_type` column in the "role_assignment"
+//! table that specifies which foreign table contains the identity.  It would
+//! have value `silo_user`.
 //!
 //! ## Authorization control flow
 //!
