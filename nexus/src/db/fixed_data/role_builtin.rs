@@ -50,6 +50,21 @@ lazy_static! {
             role_name: "collaborator",
             description: "Fleet Collaborator",
         },
+        RoleBuiltinConfig {
+            resource_type: api::external::ResourceType::Silo,
+            role_name: "admin",
+            description: "Silo Administrator",
+        },
+        RoleBuiltinConfig {
+            resource_type: api::external::ResourceType::Silo,
+            role_name: "collaborator",
+            description: "Silo Collaborator",
+        },
+        RoleBuiltinConfig {
+            resource_type: api::external::ResourceType::Silo,
+            role_name: "viewer",
+            description: "Silo Viewer",
+        },
         ORGANIZATION_ADMINISTRATOR.clone(),
         ORGANIZATION_COLLABORATOR.clone(),
         RoleBuiltinConfig {

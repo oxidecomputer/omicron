@@ -43,6 +43,11 @@ use authz_macros::authz_resource;
 use futures::future::BoxFuture;
 use futures::FutureExt;
 use omicron_common::api::external::{Error, LookupType, ResourceType};
+use parse_display::Display;
+use parse_display::FromStr;
+use schemars::JsonSchema;
+use serde_with::DeserializeFromStr;
+use serde_with::SerializeDisplay;
 use uuid::Uuid;
 
 /// Describes an authz resource that corresponds to an API resource that has a
@@ -74,6 +79,13 @@ pub trait ApiResource:
 /// Describes an authz resource on which we allow users to assign roles
 pub trait ApiResourceWithRoles: ApiResource {
     fn resource_id(&self) -> Uuid;
+}
+
+/// Describes the specific roles for an `ApiResourceWithRoles`
+pub trait ApiResourceWithRolesType: ApiResourceWithRoles {
+    type AllowedRoles: std::fmt::Display
+        + serde::Serialize
+        + serde::de::DeserializeOwned;
 }
 
 impl<T: ApiResource + oso::ToPolar + Clone> AuthorizedResource for T {
@@ -319,12 +331,49 @@ authz_resource! {
     polar_snippet = Custom,
 }
 
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    DeserializeFromStr,
+    Display,
+    Eq,
+    FromStr,
+    PartialEq,
+    SerializeDisplay,
+    JsonSchema,
+)]
+#[display(style = "kebab-case")]
+pub enum OrganizationRoles {
+    Admin,
+    Collaborator,
+}
+
 authz_resource! {
     name = "Project",
     parent = "Organization",
     primary_key = Uuid,
     roles_allowed = true,
     polar_snippet = Custom,
+}
+
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    DeserializeFromStr,
+    Display,
+    Eq,
+    FromStr,
+    PartialEq,
+    SerializeDisplay,
+    JsonSchema,
+)]
+#[display(style = "kebab-case")]
+pub enum ProjectRoles {
+    Admin,
+    Collaborator,
+    Viewer,
 }
 
 authz_resource! {
@@ -423,6 +472,25 @@ authz_resource! {
     primary_key = Uuid,
     roles_allowed = true,
     polar_snippet = Custom,
+}
+
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    DeserializeFromStr,
+    Display,
+    Eq,
+    FromStr,
+    PartialEq,
+    SerializeDisplay,
+    JsonSchema,
+)]
+#[display(style = "kebab-case")]
+pub enum SiloRoles {
+    Admin,
+    Collaborator,
+    Viewer,
 }
 
 authz_resource! {

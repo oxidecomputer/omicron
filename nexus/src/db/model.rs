@@ -2670,7 +2670,7 @@ impl From<shared::IdentityType> for IdentityType {
 }
 
 /// Describes an assignment of a built-in role for a user
-#[derive(Queryable, Insertable, Debug, Selectable)]
+#[derive(Clone, Queryable, Insertable, Debug, Selectable)]
 #[diesel(table_name = role_assignment)]
 pub struct RoleAssignment {
     pub identity_type: IdentityType,

@@ -11,11 +11,11 @@ use super::{
         Snapshot, SshKey, User, Vpc, VpcRouter, VpcSubnet,
     },
 };
-use crate::context::OpContext;
 use crate::db;
 use crate::db::model::Name;
 use crate::external_api::shared;
 use crate::ServerContext;
+use crate::{authz::OrganizationRoles, context::OpContext};
 use dropshot::endpoint;
 use dropshot::ApiDescription;
 use dropshot::EmptyScanParams;
@@ -507,7 +507,7 @@ async fn organizations_put_organization(
 async fn organization_get_policy(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<OrganizationPathParam>,
-) -> Result<HttpResponseOk<shared::Policy>, HttpError> {
+) -> Result<HttpResponseOk<shared::Policy<OrganizationRoles>>, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
     let path = path_params.into_inner();
@@ -531,8 +531,8 @@ async fn organization_get_policy(
 async fn organization_put_policy(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<OrganizationPathParam>,
-    new_policy: TypedBody<shared::Policy>,
-) -> Result<HttpResponseOk<shared::Policy>, HttpError> {
+    new_policy: TypedBody<shared::Policy<OrganizationRoles>>,
+) -> Result<HttpResponseOk<shared::Policy<OrganizationRoles>>, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
     let path = path_params.into_inner();

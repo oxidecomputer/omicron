@@ -6,6 +6,7 @@
 
 use crate::authn;
 use crate::authz;
+use crate::authz::OrganizationRoles;
 use crate::config;
 use crate::context::OpContext;
 use crate::db;
@@ -3891,7 +3892,7 @@ impl Nexus {
         &self,
         opctx: &OpContext,
         organization_name: &Name,
-    ) -> LookupResult<shared::Policy> {
+    ) -> LookupResult<shared::Policy<OrganizationRoles>> {
         let (.., authz_org) = LookupPath::new(opctx, &self.db_datastore)
             .organization_name(organization_name)
             .lookup_for(authz::Action::ReadPolicy)
@@ -3901,8 +3902,9 @@ impl Nexus {
             .role_assignment_fetch_all(opctx, &authz_org)
             .await?
             .into_iter()
-            .map(|r| r.into())
-            .collect();
+            .map(|r| r.try_into().context("parsing database role assignment"))
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|error| Error::internal_error(&format!("{:#}", error)))?;
         Ok(shared::Policy { role_assignments })
     }
 
@@ -3910,8 +3912,8 @@ impl Nexus {
         &self,
         opctx: &OpContext,
         organization_name: &Name,
-        policy: &shared::Policy,
-    ) -> UpdateResult<shared::Policy> {
+        policy: &shared::Policy<OrganizationRoles>,
+    ) -> UpdateResult<shared::Policy<OrganizationRoles>> {
         let (.., authz_org) = LookupPath::new(opctx, &self.db_datastore)
             .organization_name(organization_name)
             .lookup_for(authz::Action::ModifyPolicy)
@@ -3926,8 +3928,8 @@ impl Nexus {
             )
             .await?
             .into_iter()
-            .map(|r| r.into())
-            .collect();
+            .map(|r| r.try_into())
+            .collect::<Result<Vec<_>, _>>()?;
         Ok(shared::Policy { role_assignments })
     }
 }

@@ -23,6 +23,7 @@ use omicron_common::api::external::RouterRouteCreateParams;
 use omicron_common::api::external::RouterRouteUpdateParams;
 use omicron_common::api::external::VpcFirewallRuleUpdateParams;
 use omicron_nexus::authn;
+use omicron_nexus::authz::OrganizationRoles;
 use omicron_nexus::external_api::params;
 use omicron_nexus::external_api::shared;
 use std::net::IpAddr;
@@ -421,7 +422,7 @@ lazy_static! {
             allowed_methods: vec![
                 AllowedMethod::Get,
                 AllowedMethod::Put(
-                    serde_json::to_value(&shared::Policy {
+                    serde_json::to_value(&shared::Policy::<OrganizationRoles> {
                         role_assignments: vec![]
                     }).unwrap()
                 ),

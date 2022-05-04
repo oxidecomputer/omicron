@@ -2894,16 +2894,13 @@ impl DataStore {
     // mitigated because we cap the number of role assignments per resource
     // pretty tightly.
     pub async fn role_assignment_replace_all<
-        T: authz::ApiResourceWithRoles + Clone,
+        T: authz::ApiResourceWithRolesType + Clone,
     >(
         &self,
         opctx: &OpContext,
         authz_resource: &T,
-        new_assignments: &[shared::RoleAssignment],
+        new_assignments: &[shared::RoleAssignment<T::AllowedRoles>],
     ) -> ListResultVec<db::model::RoleAssignment> {
-        // XXX-dap we need to validate each of these is one of the valid roles
-        // for this resource!
-
         // TODO-security We should carefully review what permissions are
         // required for modifying the policy of a resource.
         opctx.authorize(authz::Action::ModifyPolicy, authz_resource).await?;
@@ -2926,7 +2923,7 @@ impl DataStore {
                     r.identity_id,
                     resource_type,
                     resource_id,
-                    &r.role_name,
+                    &r.role_name.to_string(),
                 )
             })
             .collect::<Vec<_>>();

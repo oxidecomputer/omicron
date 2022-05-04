@@ -150,28 +150,38 @@ fn do_authz_resource(
     let parent_resource_name = format_ident!("{}", input.parent);
     let parent_as_snake = heck::AsSnakeCase(&input.parent).to_string();
     let primary_key_type = &*input.primary_key;
-    let (has_role_body, as_roles_body, api_resource_roles_trait) =
-        if input.roles_allowed {
-            (
-                quote! {
-                    actor.has_role_resource(
-                        ResourceType::#resource_name,
-                        r.key,
-                        &role
-                    )
-                },
-                quote! { Some(self) },
-                quote! {
-                    impl ApiResourceWithRoles for #resource_name {
-                        fn resource_id(&self) -> Uuid {
-                            self.key
-                        }
+    let (
+        has_role_body,
+        as_roles_body,
+        api_resource_roles_trait,
+        api_resource_roles_type_trait,
+    ) = if input.roles_allowed {
+        let role_enum_name = format_ident!("{}Roles", input.name);
+        (
+            quote! {
+                actor.has_role_resource(
+                    ResourceType::#resource_name,
+                    r.key,
+                    &role
+                )
+            },
+            quote! { Some(self) },
+            quote! {
+                impl ApiResourceWithRoles for #resource_name {
+                    fn resource_id(&self) -> Uuid {
+                        self.key
                     }
-                },
-            )
-        } else {
-            (quote! { false }, quote! { None }, quote! {})
-        };
+                }
+            },
+            quote! {
+                impl ApiResourceWithRolesType for #resource_name {
+                    type AllowedRoles = #role_enum_name;
+                }
+            },
+        )
+    } else {
+        (quote! { false }, quote! { None }, quote! {}, quote! {})
+    };
 
     let polar_snippet = match (input.polar_snippet, input.parent.as_str()) {
         (PolarSnippet::Custom, _) => String::new(),
@@ -362,6 +372,8 @@ fn do_authz_resource(
         }
 
         #api_resource_roles_trait
+
+        #api_resource_roles_type_trait
     })
 }
 

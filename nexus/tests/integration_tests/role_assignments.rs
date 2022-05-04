@@ -13,7 +13,7 @@ use nexus_test_utils::ControlPlaneTestContext;
 use nexus_test_utils_macros::nexus_test;
 use omicron_common::api::external::ObjectIdentity;
 use omicron_nexus::authn::USER_TEST_UNPRIVILEGED;
-use omicron_nexus::db::fixed_data::role_builtin::ORGANIZATION_ADMINISTRATOR;
+use omicron_nexus::authz::OrganizationRoles;
 use omicron_nexus::external_api::shared;
 use omicron_nexus::external_api::views;
 
@@ -52,7 +52,7 @@ async fn test_role_assignments_basic(cptestctx: &ControlPlaneTestContext) {
     let role_assignment = shared::RoleAssignment {
         identity_type: shared::IdentityType::UserBuiltin,
         identity_id: USER_TEST_UNPRIVILEGED.id,
-        role_name: ORGANIZATION_ADMINISTRATOR.role_name.to_string(),
+        role_name: OrganizationRoles::Admin,
     };
     new_policy.role_assignments.push(role_assignment.clone());
 
@@ -82,17 +82,18 @@ async fn test_role_assignments_basic(cptestctx: &ControlPlaneTestContext) {
     .unwrap();
 
     // Okay, really grant them access.
-    let updated_policy: shared::Policy = NexusRequest::object_put(
-        client,
-        &format!("{}/policy", org_url),
-        Some(&new_policy),
-    )
-    .authn_as(AuthnMode::PrivilegedUser)
-    .execute()
-    .await
-    .unwrap()
-    .parsed_body()
-    .unwrap();
+    let updated_policy: shared::Policy<OrganizationRoles> =
+        NexusRequest::object_put(
+            client,
+            &format!("{}/policy", org_url),
+            Some(&new_policy),
+        )
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .unwrap()
+        .parsed_body()
+        .unwrap();
     assert_eq!(updated_policy, new_policy);
 
     // Double-check that the policy reflects that.
@@ -113,17 +114,18 @@ async fn test_role_assignments_basic(cptestctx: &ControlPlaneTestContext) {
 
     // The way we've defined things, the so-called unprivileged user ought to be
     // able to revoke their own access.
-    let updated_policy: shared::Policy = NexusRequest::object_put(
-        client,
-        &format!("{}/policy", org_url),
-        Some(&initial_policy),
-    )
-    .authn_as(AuthnMode::UnprivilegedUser)
-    .execute()
-    .await
-    .unwrap()
-    .parsed_body()
-    .unwrap();
+    let updated_policy: shared::Policy<OrganizationRoles> =
+        NexusRequest::object_put(
+            client,
+            &format!("{}/policy", org_url),
+            Some(&initial_policy),
+        )
+        .authn_as(AuthnMode::UnprivilegedUser)
+        .execute()
+        .await
+        .unwrap()
+        .parsed_body()
+        .unwrap();
     assert_eq!(updated_policy, initial_policy);
 
     // Double-check that the policy reflects that.
@@ -146,7 +148,7 @@ async fn test_role_assignments_basic(cptestctx: &ControlPlaneTestContext) {
 async fn policy_fetch(
     client: &ClientTestContext,
     resource_url: &str,
-) -> shared::Policy {
+) -> shared::Policy<OrganizationRoles> {
     let policy_url = format!("{}/policy", resource_url);
     NexusRequest::object_get(client, &policy_url)
         .authn_as(AuthnMode::PrivilegedUser)
