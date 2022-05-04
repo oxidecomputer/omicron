@@ -11,7 +11,7 @@ backoff = { version = "0.4.0", features = [ "tokio" ] }
 chrono = { version = "0.4", features = [ "serde" ] }
 dropshot = {  git = "https://github.com/oxidecomputer/dropshot", branch = "main", features = [ "usdt-probes" ] }
 futures = "0.3.21"
-http = "0.2.5"
+http = "0.2.7"
 hyper = "0.14"
 ipnetwork = "0.18"
 macaddr = { version = "1.0.1", features = [ "serde_std" ] }
