@@ -50,7 +50,7 @@ where
     D: Deserializer<'de>,
     R: serde::de::DeserializeOwned,
 {
-    let v = <Vec<RoleAssignment<R>> as Deserialize>::deserialize(d)?;
+    let v = Vec::<_>::deserialize(d)?;
     if v.len() > MAX_ROLE_ASSIGNMENTS_PER_RESOURCE {
         return Err(D::Error::invalid_length(
             v.len(),
