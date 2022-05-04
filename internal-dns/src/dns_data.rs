@@ -61,7 +61,7 @@ pub struct DnsResponse<T> {
 #[serde(rename = "DnsKv")]
 pub struct DnsKV {
     key: DnsRecordKey,
-    record: DnsRecord,
+    records: Vec<DnsRecord>,
 }
 
 // XXX some refactors to help
@@ -202,7 +202,7 @@ impl Server {
                     return;
                 }
             };
-            let record: DnsRecord = match serde_json::from_slice(bits.as_ref())
+            let records: Vec<DnsRecord> = match serde_json::from_slice(bits.as_ref())
             {
                 Ok(r) => r,
                 Err(e) => {
@@ -216,7 +216,7 @@ impl Server {
                     return;
                 }
             };
-            match response.tx.send(vec![DnsKV { key, record }]) {
+            match response.tx.send(vec![DnsKV { key, records }]) {
                 Ok(_) => {}
                 Err(e) => {
                     error!(self.log, "response tx: {:?}", e);
@@ -228,7 +228,7 @@ impl Server {
             loop {
                 match iter.next() {
                     Some(Ok((k, v))) => {
-                        let record: DnsRecord =
+                        let records: Vec<DnsRecord> =
                             match serde_json::from_slice(v.as_ref()) {
                                 Ok(r) => r,
                                 Err(e) => {
@@ -266,7 +266,7 @@ impl Server {
                         };
                         result.push(DnsKV {
                             key: DnsRecordKey { name: key },
-                            record,
+                            records,
                         });
                     }
                     Some(Err(e)) => {
@@ -291,7 +291,7 @@ impl Server {
         response: DnsResponse<()>,
     ) {
         for kv in records {
-            let bits = match serde_json::to_string(&kv.record) {
+            let bits = match serde_json::to_string(&kv.records) {
                 Ok(bits) => bits,
                 Err(e) => {
                     error!(self.log, "serialize record: {}", e);

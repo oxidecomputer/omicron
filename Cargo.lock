@@ -1909,6 +1909,7 @@ dependencies = [
  "structopt",
  "trust-dns-proto",
  "trust-dns-resolver",
+ "uuid",
 ]
 
 [[package]]

@@ -2,6 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+use crate::types::{DnsRecord, DnsKv, DnsRecordKey, Srv};
 use omicron_common::address::{
     Ipv6Subnet,
     ReservedRackSubnet,
@@ -9,13 +10,17 @@ use omicron_common::address::{
     DNS_SERVER_PORT,
     DNS_PORT,
 };
-use slog::{info, Logger};
+use omicron_common::backoff::{
+    internal_service_policy, retry_notify, BackoffError,
+};
+use slog::{info, warn, Logger};
 use std::net::{SocketAddr, SocketAddrV6};
 use trust_dns_resolver::config::{
     NameServerConfig, Protocol, ResolverConfig, ResolverOpts,
 };
 use trust_dns_resolver::TokioAsyncResolver;
 
+type DnsError = crate::Error<crate::types::Error>;
 
 /// A connection used to update multiple DNS servers.
 pub struct Updater {
@@ -39,13 +44,71 @@ impl Updater {
         }
     }
 
+    /// Utility function to insert:
+    /// - A set of uniquely-named AAAA records, each corresponding to an address
+    /// - An SRV record, pointing to each of the AAAA records.
+    pub async fn insert_dns_records(
+        &self,
+        log: &Logger,
+        aaaa: Vec<(crate::names::AAAA, SocketAddrV6)>,
+        srv_key: crate::names::SRV,
+    ) -> Result<(), DnsError> {
+        let mut records = Vec::with_capacity(aaaa.len() + 1);
+
+        // Add one DnsKv per AAAA, each with a single record.
+        records.extend(
+            aaaa.iter().map(|(name, addr)| {
+                DnsKv {
+                    key: DnsRecordKey {
+                        name: name.to_string(),
+                    },
+                    records: vec![DnsRecord::Aaaa(*addr.ip())],
+                }
+            })
+        );
+
+        // Add the DnsKv for the SRV, with a record for each AAAA.
+        records.push(
+            DnsKv {
+                key: DnsRecordKey {
+                    name: srv_key.to_string(),
+                },
+                records: aaaa.iter().map(|(name, addr)| {
+                    DnsRecord::Srv(Srv{
+                        prio: 0,
+                        weight: 0,
+                        port: addr.port(),
+                        target: name.to_string(),
+                    })
+                }).collect::<Vec<_>>(),
+            }
+        );
+
+        let set_record = || async {
+            self.dns_records_set(&records)
+            .await
+            .map_err(BackoffError::transient)?;
+            Ok::<(), BackoffError<DnsError>>(())
+        };
+        let log_failure = |error, _| {
+            warn!(log, "Failed to set DNS records"; "error" => ?error);
+        };
+
+        retry_notify(
+            internal_service_policy(),
+            set_record,
+            log_failure,
+        ).await?;
+        Ok(())
+    }
+
     /// Sets a records on all DNS servers.
     ///
     /// Returns an error if setting the record fails on any server.
     pub async fn dns_records_set<'a>(
         &'a self,
         body: &'a Vec<crate::types::DnsKv>
-    ) -> Result<(), crate::Error<crate::types::Error>> {
+    ) -> Result<(), DnsError> {
 
         // TODO: Could be sent concurrently.
         for client in &self.clients {
@@ -61,7 +124,7 @@ impl Updater {
     pub async fn dns_records_delete<'a>(
         &'a self,
         body: &'a Vec<crate::types::DnsRecordKey>
-    ) -> Result<(), crate::Error<crate::types::Error>> {
+    ) -> Result<(), DnsError> {
         // TODO: Could be sent concurrently
         for client in &self.clients {
             client.dns_records_delete(body).await?;

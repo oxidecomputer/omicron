@@ -143,7 +143,7 @@ async fn insert_dns_record(
                     key: DnsRecordKey {
                         name: name.into(),
                     },
-                    record: aaaa.clone(),
+                    records: vec![aaaa.clone()],
                 }
             ],
         )
