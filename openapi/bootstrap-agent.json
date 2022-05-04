@@ -111,6 +111,7 @@
         ]
       },
       "Ipv6Net": {
+        "example": "fd12:3456::/64",
         "title": "An IPv6 subnet",
         "description": "An IPv6 subnet, including prefix and subnet mask",
         "type": "string",
