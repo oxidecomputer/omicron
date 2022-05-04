@@ -327,8 +327,8 @@ macro_rules! bail_unless {
     };
     ($cond:expr, $($arg:tt)+) => {
         if !$cond {
-            return Err($crate::api::external::Error::internal_error(&format!(
-                $($arg)*)))
+            Err($crate::api::external::Error::internal_error(&format!(
+                $($arg)*)))?;
         }
     };
 }
@@ -341,11 +341,11 @@ mod test {
     fn test_bail_unless() {
         #![allow(clippy::eq_op)]
         // Success cases
-        let no_bail = || {
+        let no_bail = || -> Result<(), Error> {
             bail_unless!(1 + 1 == 2, "wrong answer: {}", 3);
             Ok(())
         };
-        let no_bail_label_args = || {
+        let no_bail_label_args = || -> Result<(), Error> {
             bail_unless!(1 + 1 == 2, "wrong answer: {}", 3);
             Ok(())
         };

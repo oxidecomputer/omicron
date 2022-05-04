@@ -224,7 +224,7 @@ mod test {
         ));
         let authz_nobody = authz_context_for_actor(
             &logctx.log,
-            authn::Context::test_context_for_actor(
+            authn::Context::test_context_for_builtin_user(
                 authn::USER_TEST_UNPRIVILEGED.id,
             ),
             Arc::clone(&datastore),
@@ -264,7 +264,7 @@ mod test {
             );
         let authz_nobody = authz_context_for_actor(
             &logctx.log,
-            authn::Context::test_context_for_actor(
+            authn::Context::test_context_for_builtin_user(
                 authn::USER_TEST_UNPRIVILEGED.id,
             ),
             Arc::clone(&datastore),

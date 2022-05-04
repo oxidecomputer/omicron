@@ -296,7 +296,7 @@ pub struct SessionUser {
 
 impl From<authn::Actor> for SessionUser {
     fn from(actor: authn::Actor) -> Self {
-        Self { id: actor.id }
+        Self { id: actor.actor_id() }
     }
 }
 
