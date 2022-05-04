@@ -998,11 +998,11 @@ impl SiloUser {
 
 impl_enum_type!(
     #[derive(SqlType, Debug, QueryId)]
-    #[postgres(type_name = "provider_type", type_schema = "public")]
+    #[diesel(postgres_type(name = "provider_type"))]
     pub struct SiloIdentityProviderTypeEnum;
 
     #[derive(Copy, Clone, Debug, AsExpression, FromSqlRow, Serialize, Deserialize, PartialEq)]
-    #[sql_type = "SiloIdentityProviderTypeEnum"]
+    #[diesel(sql_type = SiloIdentityProviderTypeEnum)]
     pub enum SiloIdentityProviderType;
 
     // Enum values
@@ -1012,7 +1012,7 @@ impl_enum_type!(
 );
 
 #[derive(Queryable, Insertable, Clone, Debug, Selectable)]
-#[table_name = "silo_identity_provider"]
+#[diesel(table_name = silo_identity_provider)]
 pub struct SiloIdentityProvider {
     pub silo_id: Uuid,
     pub provider_type: SiloIdentityProviderType,
@@ -1027,7 +1027,7 @@ impl SiloIdentityProvider {
 }
 
 #[derive(Queryable, Insertable, Clone, Debug, Selectable, Resource)]
-#[table_name = "silo_saml_identity_provider"]
+#[diesel(table_name = silo_saml_identity_provider)]
 pub struct SiloSamlIdentityProvider {
     #[diesel(embed)]
     pub identity: SiloSamlIdentityProviderIdentity,
