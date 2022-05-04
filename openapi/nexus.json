@@ -5971,6 +5971,7 @@
         ]
       },
       "Ipv4Net": {
+        "example": "192.168.1.0/24",
         "title": "An IPv4 subnet",
         "description": "An IPv4 subnet, including prefix and subnet mask",
         "type": "string",
@@ -5978,6 +5979,7 @@
         "maxLength": 18
       },
       "Ipv6Net": {
+        "example": "fd12:3456::/64",
         "title": "An IPv6 subnet",
         "description": "An IPv6 subnet, including prefix and subnet mask",
         "type": "string",
@@ -5985,6 +5987,7 @@
         "maxLength": 43
       },
       "L4PortRange": {
+        "example": "22",
         "title": "A range of IP ports",
         "description": "An inclusive-inclusive range of IP ports. The second port may be omitted to represent a single port",
         "type": "string",
@@ -6004,6 +6007,7 @@
         ]
       },
       "MacAddr": {
+        "example": "ff:ff:ff:ff:ff:ff",
         "title": "A MAC address",
         "description": "A Media Access Control address, in EUI-48 format",
         "type": "string",
