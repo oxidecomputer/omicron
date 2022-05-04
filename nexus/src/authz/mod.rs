@@ -11,10 +11,10 @@
 //! an *action* on a *resource* if the actor is associated with a *role* on the
 //! resource that grants *permissions* for the action.  Let's unpack that.
 //!
-//! - **actor** is a built-in user, a service account, or in the future a user
-//!   from the customer's Identity Provider (IdP, such as company LDAP or Active
+//! - **actor** is a built-in user, a service account, or a user from the
+//!   customer's Identity Provider (IdP, such as company LDAP or Active
 //!   Directory or the like).
-//! - **resource** is usually an API resource, like a Project or Instance
+//! - **resource** is usually an API resource, like a Project or Instance.
 //! - **action** is usually one of a handful of things like "modify", "delete",
 //!   or "create a child resource".  Actions are nearly the same as
 //!   **permissions**.  The set of actions is fixed by the system.
