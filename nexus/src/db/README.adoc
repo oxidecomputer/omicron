@@ -60,7 +60,7 @@ that a structure may be inserted into a table.
 [source,rust]
 ----
 #[derive(Insertable)]
-#[table_name = "instance"]
+#[diesel(table_name = instance)]
 struct Instance {
   ...
 }

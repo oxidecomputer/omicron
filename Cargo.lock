@@ -112,7 +112,7 @@ dependencies = [
 [[package]]
 name = "async-bb8-diesel"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/async-bb8-diesel?rev=8c6685f0b33c7bbc6418384850cb9c897896cda5#8c6685f0b33c7bbc6418384850cb9c897896cda5"
+source = "git+https://github.com/oxidecomputer/async-bb8-diesel?rev=ab1f49e0b3f95557aa96bf593282199fafeef4bd#ab1f49e0b3f95557aa96bf593282199fafeef4bd"
 dependencies = [
  "async-trait",
  "bb8",
@@ -846,15 +846,16 @@ dependencies = [
 
 [[package]]
 name = "diesel"
-version = "2.0.0"
-source = "git+https://github.com/diesel-rs/diesel?rev=ce77c382#ce77c382d2836f6b385225991cf58cb2d2dd65d6"
+version = "2.0.0-rc.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e531d0abf8147036383c88ce3785d9cda6fe1b8b1183021ffa01cf49c5819d24"
 dependencies = [
  "bitflags",
  "byteorder",
  "chrono",
  "diesel_derives",
  "ipnetwork",
- "itoa 0.4.8",
+ "itoa 1.0.1",
  "libc",
  "pq-sys",
  "r2d2",
@@ -865,9 +866,10 @@ dependencies = [
 [[package]]
 name = "diesel-dtrace"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/diesel-dtrace?branch=main#3bce2661bca09feded88f6415a877c2996e302f0"
+source = "git+https://github.com/oxidecomputer/diesel-dtrace?rev=bec89c2f2b01a79ae99b4db667bfcea5fb2fef04#bec89c2f2b01a79ae99b4db667bfcea5fb2fef04"
 dependencies = [
  "diesel",
+ "lock_api",
  "serde",
  "usdt",
  "uuid",
@@ -875,9 +877,11 @@ dependencies = [
 
 [[package]]
 name = "diesel_derives"
-version = "2.0.0"
-source = "git+https://github.com/diesel-rs/diesel?rev=ce77c382#ce77c382d2836f6b385225991cf58cb2d2dd65d6"
+version = "2.0.0-rc.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "212ba0cdc611523c37f26c7b3b4aedb4af7cbfe9239c4e7736a8a7c82284d77b"
 dependencies = [
+ "proc-macro-error",
  "proc-macro2",
  "quote",
  "syn",

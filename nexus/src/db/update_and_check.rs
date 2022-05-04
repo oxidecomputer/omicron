@@ -7,20 +7,20 @@
 use super::pool::DbConnection;
 use async_bb8_diesel::{AsyncRunQueryDsl, ConnectionManager, PoolError};
 use diesel::associations::HasTable;
-use diesel::helper_types::*;
 use diesel::pg::Pg;
 use diesel::prelude::*;
 use diesel::query_builder::*;
 use diesel::query_dsl::methods::LoadQuery;
 use diesel::query_source::Table;
 use diesel::sql_types::Nullable;
+use diesel::QuerySource;
 use std::marker::PhantomData;
 
 /// A simple wrapper type for Diesel's [`UpdateStatement`], which
 /// allows referencing generics with names (and extending usage
 /// without re-stating those generic parameters everywhere).
 pub trait UpdateStatementExt {
-    type Table;
+    type Table: QuerySource;
     type WhereClause;
     type Changeset;
 
@@ -29,7 +29,10 @@ pub trait UpdateStatementExt {
     ) -> UpdateStatement<Self::Table, Self::WhereClause, Self::Changeset>;
 }
 
-impl<T, U, V> UpdateStatementExt for UpdateStatement<T, U, V> {
+impl<T, U, V> UpdateStatementExt for UpdateStatement<T, U, V>
+where
+    T: QuerySource,
+{
     type Table = T;
     type WhereClause = U;
     type Changeset = V;
@@ -71,11 +74,19 @@ where
 impl<US, K> UpdateAndCheck<US, K> for US
 where
     US: UpdateStatementExt,
+    US::Table: HasTable<Table = US::Table>
+        + Table
+        + diesel::query_dsl::methods::FindDsl<K>,
+    <US::Table as diesel::query_dsl::methods::FindDsl<K>>::Output:
+        QueryFragment<Pg> + Send + 'static,
+    K: 'static + Copy + Send,
 {
     fn check_if_exists<Q>(self, key: K) -> UpdateAndQueryStatement<US, K, Q> {
+        let find_subquery = Box::new(US::Table::table().find(key));
         UpdateAndQueryStatement {
             update_statement: self.statement(),
-            key,
+            find_subquery,
+            key_type: PhantomData,
             query_type: PhantomData,
         }
     }
@@ -83,7 +94,6 @@ where
 
 /// An UPDATE statement which can be combined (via a CTE)
 /// with other statements to also SELECT a row.
-#[derive(Debug, Clone, Copy)]
 #[must_use = "Queries must be executed"]
 pub struct UpdateAndQueryStatement<US, K, Q>
 where
@@ -91,7 +101,8 @@ where
 {
     update_statement:
         UpdateStatement<US::Table, US::WhereClause, US::Changeset>,
-    key: K,
+    find_subquery: Box<dyn QueryFragment<Pg> + Send>,
+    key_type: PhantomData<K>,
     query_type: PhantomData<Q>,
 }
 
@@ -128,8 +139,9 @@ type SerializedPrimaryKey<US> = <PrimaryKey<US> as diesel::Expression>::SqlType;
 
 impl<US, K, Q> UpdateAndQueryStatement<US, K, Q>
 where
+    Self: Send,
     US: 'static + UpdateStatementExt,
-    K: 'static + PartialEq + Send,
+    K: 'static + Copy + PartialEq + Send,
     US::Table: 'static + Table + Send,
     US::WhereClause: 'static + Send,
     US::Changeset: 'static + Send,
@@ -147,7 +159,7 @@ where
     ) -> Result<UpdateAndQueryResult<Q>, PoolError>
     where
         // We require this bound to ensure that "Self" is runnable as query.
-        Self: LoadQuery<DbConnection, (Option<K>, Option<K>, Q)>,
+        Self: LoadQuery<'static, DbConnection, (Option<K>, Option<K>, Q)>,
     {
         let (id0, id1, found) =
             self.get_result_async::<(Option<K>, Option<K>, Q)>(pool).await?;
@@ -203,19 +215,14 @@ where
 impl<US, K, Q> QueryFragment<Pg> for UpdateAndQueryStatement<US, K, Q>
 where
     US: UpdateStatementExt,
-    US::Table: HasTable<Table = US::Table>
-        + Table
-        + diesel::query_dsl::methods::FindDsl<K>,
-    K: Copy,
-    Find<US::Table, K>: QueryFragment<Pg>,
+    US::Table: HasTable<Table = US::Table> + Table,
     PrimaryKey<US>: diesel::Column,
     UpdateStatement<US::Table, US::WhereClause, US::Changeset>:
         QueryFragment<Pg>,
 {
-    fn walk_ast(&self, mut out: AstPass<Pg>) -> QueryResult<()> {
+    fn walk_ast<'b>(&'b self, mut out: AstPass<'_, 'b, Pg>) -> QueryResult<()> {
         out.push_sql("WITH found AS (");
-        let subquery = US::Table::table().find(self.key);
-        subquery.walk_ast(out.reborrow())?;
+        self.find_subquery.walk_ast(out.reborrow())?;
         out.push_sql("), updated AS (");
         self.update_statement.walk_ast(out.reborrow())?;
         // TODO: Only need primary? Or would we actually want
