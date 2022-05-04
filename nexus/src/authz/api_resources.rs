@@ -331,6 +331,10 @@ authz_resource! {
     polar_snippet = Custom,
 }
 
+impl ApiResourceWithRolesType for Organization {
+    type AllowedRoles = OrganizationRoles;
+}
+
 #[derive(
     Clone,
     Copy,
@@ -355,25 +359,6 @@ authz_resource! {
     primary_key = Uuid,
     roles_allowed = true,
     polar_snippet = Custom,
-}
-
-#[derive(
-    Clone,
-    Copy,
-    Debug,
-    DeserializeFromStr,
-    Display,
-    Eq,
-    FromStr,
-    PartialEq,
-    SerializeDisplay,
-    JsonSchema,
-)]
-#[display(style = "kebab-case")]
-pub enum ProjectRoles {
-    Admin,
-    Collaborator,
-    Viewer,
 }
 
 authz_resource! {
@@ -472,25 +457,6 @@ authz_resource! {
     primary_key = Uuid,
     roles_allowed = true,
     polar_snippet = Custom,
-}
-
-#[derive(
-    Clone,
-    Copy,
-    Debug,
-    DeserializeFromStr,
-    Display,
-    Eq,
-    FromStr,
-    PartialEq,
-    SerializeDisplay,
-    JsonSchema,
-)]
-#[display(style = "kebab-case")]
-pub enum SiloRoles {
-    Admin,
-    Collaborator,
-    Viewer,
 }
 
 authz_resource! {
