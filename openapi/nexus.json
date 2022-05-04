@@ -658,7 +658,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Policy"
+                  "$ref": "#/components/schemas/OrganizationRolesPolicy"
                 }
               }
             }
@@ -693,7 +693,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/Policy"
+                "$ref": "#/components/schemas/OrganizationRolesPolicy"
               }
             }
           },
@@ -705,7 +705,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Policy"
+                  "$ref": "#/components/schemas/OrganizationRolesPolicy"
                 }
               }
             }
@@ -6323,6 +6323,50 @@
           "items"
         ]
       },
+      "OrganizationRoles": {
+        "type": "string",
+        "enum": [
+          "Admin",
+          "Collaborator"
+        ]
+      },
+      "OrganizationRolesPolicy": {
+        "description": "Client view of a [`Policy`], which describes how this resource may be accessed\n\nNote that the Policy only describes access granted explicitly for this resource.  The policies of parent resources can also cause a user to have access to this resource.",
+        "type": "object",
+        "properties": {
+          "role_assignments": {
+            "description": "Roles directly assigned on this resource",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/OrganizationRolesRoleAssignment"
+            }
+          }
+        },
+        "required": [
+          "role_assignments"
+        ]
+      },
+      "OrganizationRolesRoleAssignment": {
+        "description": "Describes the assignment of a particular role on a particular resource to a particular identity (user, group, etc.)\n\nThe resource is not part of this structure.  Rather, [`RoleAssignment`]s are put into a [`Policy`] and that Policy is applied to a particular resource.",
+        "type": "object",
+        "properties": {
+          "identity_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "identity_type": {
+            "$ref": "#/components/schemas/IdentityType"
+          },
+          "role_name": {
+            "$ref": "#/components/schemas/OrganizationRoles"
+          }
+        },
+        "required": [
+          "identity_id",
+          "identity_type",
+          "role_name"
+        ]
+      },
       "OrganizationUpdate": {
         "description": "Updateable properties of an [`Organization`](crate::external_api::views::Organization)",
         "type": "object",
@@ -6340,22 +6384,6 @@
             ]
           }
         }
-      },
-      "Policy": {
-        "description": "Client view of a [`Policy`], which describes how this resource may be accessed\n\nNote that the Policy only describes access granted explicitly for this resource.  The policies of parent resources can also cause a user to have access to this resource.",
-        "type": "object",
-        "properties": {
-          "role_assignments": {
-            "description": "Roles directly assigned on this resource",
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/RoleAssignment"
-            }
-          }
-        },
-        "required": [
-          "role_assignments"
-        ]
       },
       "Project": {
         "description": "Client view of a [`Project`]",
@@ -6532,27 +6560,6 @@
         "required": [
           "description",
           "name"
-        ]
-      },
-      "RoleAssignment": {
-        "description": "Describes the assignment of a particular role on a particular resource to a particular identity (user, group, etc.)\n\nThe resource is not part of this structure.  Rather, [`RoleAssignment`]s are put into a [`Policy`] and that Policy is applied to a particular resource.",
-        "type": "object",
-        "properties": {
-          "identity_id": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "identity_type": {
-            "$ref": "#/components/schemas/IdentityType"
-          },
-          "role_name": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "identity_id",
-          "identity_type",
-          "role_name"
         ]
       },
       "RoleName": {

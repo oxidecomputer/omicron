@@ -36,6 +36,7 @@ pub const MAX_ROLE_ASSIGNMENTS_PER_RESOURCE: usize = 64;
 /// resource.  The policies of parent resources can also cause a user to have
 /// access to this resource.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
+#[schemars(rename = "{AllowedRoles}Policy")]
 pub struct Policy<AllowedRoles: serde::de::DeserializeOwned> {
     /// Roles directly assigned on this resource
     #[serde(deserialize_with = "role_assignments_deserialize")]
@@ -69,6 +70,7 @@ where
 /// The resource is not part of this structure.  Rather, [`RoleAssignment`]s are
 /// put into a [`Policy`] and that Policy is applied to a particular resource.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
+#[schemars(rename = "{AllowedRoles}RoleAssignment")]
 pub struct RoleAssignment<AllowedRoles> {
     pub identity_type: IdentityType,
     pub identity_id: Uuid,
