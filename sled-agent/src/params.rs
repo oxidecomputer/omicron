@@ -9,7 +9,7 @@ use omicron_common::api::internal::nexus::{
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::fmt::{Debug, Display, Formatter, Result as FormatResult};
-use std::net::SocketAddr;
+use std::net::{Ipv6Addr, SocketAddr};
 use uuid::Uuid;
 
 /// Used to request a Disk state change
@@ -233,14 +233,24 @@ pub struct ServiceRequest {
     // The name of the service to be created.
     pub name: String,
     // The addresses on which the service should listen for requests.
-    pub addresses: Vec<SocketAddr>,
+    pub addresses: Vec<Ipv6Addr>,
+    // The addresses in the global zone which should be created, if necessary
+    // to route to the service.
+    //
+    // For addresses allocated within the Sled's Subnet, no extra address should
+    // be necessary. However, for other services - such the DNS service, which
+    // exists outside the sleds's typical subnet - adding an address in the GZ
+    // is necessary to allow inter-zone traffic routing.
+    #[serde(default)]
+    pub gz_addresses: Vec<Ipv6Addr>,
 }
 
 impl From<ServiceRequest> for sled_agent_client::types::ServiceRequest {
     fn from(s: ServiceRequest) -> Self {
         Self {
             name: s.name,
-            addresses: s.addresses.into_iter().map(|s| s.to_string()).collect(),
+            addresses: s.addresses,
+            gz_addresses: s.gz_addresses,
         }
     }
 }

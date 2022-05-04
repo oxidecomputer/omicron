@@ -7,11 +7,13 @@
 use crate::illumos::dladm::PhysicalLink;
 use crate::illumos::running_zone::{InstalledZone, RunningZone};
 use crate::illumos::vnic::VnicAllocator;
-use crate::illumos::zone::AddressRequest;
+use crate::illumos::zone::{AddressRequest, Zones};
 use crate::params::{ServiceEnsureBody, ServiceRequest};
+use omicron_common::address::{DNS_PORT, DNS_SERVER_PORT};
 use slog::Logger;
 use std::collections::HashSet;
 use std::iter::FromIterator;
+use std::net::IpAddr;
 use std::path::{Path, PathBuf};
 use tokio::sync::Mutex;
 
@@ -29,8 +31,14 @@ pub enum Error {
     #[error(transparent)]
     RunningZone(#[from] crate::illumos::running_zone::Error),
 
+    #[error("Failed to add address to the global zone: {0}")]
+    GzAddressFailure(crate::illumos::zone::Error),
+
     #[error(transparent)]
     Dladm(#[from] crate::illumos::dladm::Error),
+
+    #[error("Could not initialize service as requested: {message}")]
+    BadServiceRequest { service: String, message: String },
 
     #[error("Services already configured for this Sled Agent")]
     ServicesAlreadyConfigured,
@@ -56,6 +64,7 @@ pub struct ServiceManager {
     config_path: Option<PathBuf>,
     zones: Mutex<Vec<RunningZone>>,
     vnic_allocator: VnicAllocator,
+    physical_link: Option<PhysicalLink>,
 }
 
 impl ServiceManager {
@@ -79,7 +88,11 @@ impl ServiceManager {
             log,
             config_path,
             zones: Mutex::new(vec![]),
-            vnic_allocator: VnicAllocator::new("Service", physical_link)?,
+            vnic_allocator: VnicAllocator::new(
+                "Service",
+                physical_link.clone(),
+            )?,
+            physical_link,
         };
 
         let config_path = mgr.services_config_path();
@@ -117,6 +130,10 @@ impl ServiceManager {
     }
 
     // Populates `existing_zones` according to the requests in `services`.
+    //
+    // At the point this function is invoked, IP addresses have already been
+    // allocated (by either RSS or Nexus). However, this function explicitly
+    // assigns such addresses to interfaces within zones.
     async fn initialize_services_locked(
         &self,
         existing_zones: &mut Vec<RunningZone>,
@@ -157,13 +174,31 @@ impl ServiceManager {
 
             for addr in &service.addresses {
                 info!(self.log, "Ensuring address {} exists", addr.to_string());
-                let addr_request = AddressRequest::new_static(addr.ip(), None);
+                let addr_request =
+                    AddressRequest::new_static(IpAddr::V6(*addr), None);
                 running_zone.ensure_address(addr_request).await?;
                 info!(
                     self.log,
                     "Ensuring address {} exists - OK",
                     addr.to_string()
                 );
+            }
+
+            info!(self.log, "GZ addresses: {:#?}", service.gz_addresses);
+            for addr in &service.gz_addresses {
+                info!(
+                    self.log,
+                    "Ensuring GZ address {} exists",
+                    addr.to_string()
+                );
+
+                let addr_name = service.name.replace(&['-', '_'][..], "");
+                Zones::ensure_has_global_zone_v6_address(
+                    self.physical_link.clone(),
+                    *addr,
+                    &addr_name,
+                )
+                .map_err(|e| Error::GzAddressFailure(e))?;
             }
 
             debug!(self.log, "importing manifest");
@@ -177,13 +212,65 @@ impl ServiceManager {
                 ),
             ])?;
 
+            let smf_name = format!("svc:/system/illumos/{}", service.name);
+            let default_smf_name = format!("{}:default", smf_name);
+
+            match service.name.as_str() {
+                "internal-dns" => {
+                    info!(self.log, "Setting up internal-dns service");
+                    let address =
+                        service.addresses.get(0).ok_or_else(|| {
+                            Error::BadServiceRequest {
+                                service: service.name.clone(),
+                                message: "Not enough addresses".to_string(),
+                            }
+                        })?;
+                    running_zone.run_cmd(&[
+                        crate::illumos::zone::SVCCFG,
+                        "-s",
+                        &smf_name,
+                        "setprop",
+                        &format!(
+                            "config/server_address=[{}]:{}",
+                            address, DNS_SERVER_PORT
+                        ),
+                    ])?;
+
+                    running_zone.run_cmd(&[
+                        crate::illumos::zone::SVCCFG,
+                        "-s",
+                        &smf_name,
+                        "setprop",
+                        &format!(
+                            "config/dns_address=[{}]:{}",
+                            address, DNS_PORT
+                        ),
+                    ])?;
+
+                    // Refresh the manifest with the new properties we set,
+                    // so they become "effective" properties when the service is enabled.
+                    running_zone.run_cmd(&[
+                        crate::illumos::zone::SVCCFG,
+                        "-s",
+                        &default_smf_name,
+                        "refresh",
+                    ])?;
+                }
+                _ => {
+                    info!(
+                        self.log,
+                        "Service name {} did not match", service.name
+                    );
+                }
+            }
+
             debug!(self.log, "enabling service");
 
             running_zone.run_cmd(&[
                 crate::illumos::zone::SVCADM,
                 "enable",
                 "-t",
-                &format!("svc:/system/illumos/{}:default", service.name),
+                &default_smf_name,
             ])?;
 
             existing_zones.push(running_zone);
@@ -201,35 +288,45 @@ impl ServiceManager {
     ) -> Result<(), Error> {
         let mut existing_zones = self.zones.lock().await;
         let config_path = self.services_config_path();
-        if config_path.exists() {
-            let cfg: ServiceEnsureBody = toml::from_str(
-                &tokio::fs::read_to_string(&config_path).await?,
-            )?;
-            let known_services = cfg.services;
 
-            let known_set: HashSet<&ServiceRequest> =
-                HashSet::from_iter(known_services.iter());
-            let requested_set = HashSet::from_iter(request.services.iter());
+        let services_to_initialize = {
+            if config_path.exists() {
+                let cfg: ServiceEnsureBody = toml::from_str(
+                    &tokio::fs::read_to_string(&config_path).await?,
+                )?;
+                let known_services = cfg.services;
 
-            if known_set != requested_set {
-                // If the caller is requesting we instantiate a
-                // zone that exists, but isn't what they're asking for, throw an
-                // error.
-                //
-                // We may want to use a different mechanism for zone removal, in
-                // the case of changing configurations, rather than just doing
-                // that removal implicitly.
-                warn!(
-                    self.log,
-                    "Cannot request services on this sled, differing configurations: {:?}",
-                    known_set.symmetric_difference(&requested_set)
-                );
-                return Err(Error::ServicesAlreadyConfigured);
+                let known_set: HashSet<&ServiceRequest> =
+                    HashSet::from_iter(known_services.iter());
+                let requested_set = HashSet::from_iter(request.services.iter());
+
+                if !requested_set.is_superset(&known_set) {
+                    // The caller may only request services additively.
+                    //
+                    // We may want to use a different mechanism for zone removal, in
+                    // the case of changing configurations, rather than just doing
+                    // that removal implicitly.
+                    warn!(
+                        self.log,
+                        "Cannot request services on this sled, differing configurations: {:?}",
+                        known_set.symmetric_difference(&requested_set)
+                    );
+                    return Err(Error::ServicesAlreadyConfigured);
+                }
+                requested_set
+                    .difference(&known_set)
+                    .map(|s| (*s).clone())
+                    .collect::<Vec<ServiceRequest>>()
+            } else {
+                request.services.clone()
             }
-        }
+        };
 
-        self.initialize_services_locked(&mut existing_zones, &request.services)
-            .await?;
+        self.initialize_services_locked(
+            &mut existing_zones,
+            &services_to_initialize,
+        )
+        .await?;
 
         let serialized_services = toml::Value::try_from(&request)
             .expect("Cannot serialize service list");
@@ -305,6 +402,7 @@ mod test {
             services: vec![ServiceRequest {
                 name: SVC_NAME.to_string(),
                 addresses: vec![],
+                gz_addresses: vec![],
             }],
         })
         .await
@@ -318,6 +416,7 @@ mod test {
             services: vec![ServiceRequest {
                 name: SVC_NAME.to_string(),
                 addresses: vec![],
+                gz_addresses: vec![],
             }],
         })
         .await
