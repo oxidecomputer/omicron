@@ -12,7 +12,7 @@ num-traits = "0.2.14"
 oximeter-macro-impl = { path = "../oximeter-macro-impl" }
 schemars = { version = "0.8.8", features = [ "uuid", "bytes", "chrono" ] }
 serde = { version = "1", features = [ "derive" ] }
-thiserror = "1.0.30"
+thiserror = "1.0.31"
 uuid = { version = "0.8.2", features = [ "v4", "serde" ] }
 
 [dev-dependencies]
