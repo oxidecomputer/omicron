@@ -8,9 +8,9 @@ use super::config::{SetupServiceConfig as Config, SledRequest};
 use crate::bootstrap::{
     client as bootstrap_agent_client, config::BOOTSTRAP_AGENT_PORT,
     discovery::PeerMonitorObserver, params::SledAgentRequest,
-    params::SledSubnet,
 };
-use crate::config::get_sled_address;
+use crate::params::ServiceRequest;
+use omicron_common::address::{get_sled_address, ReservedRackSubnet};
 use omicron_common::backoff::{
     internal_service_policy, retry_notify, BackoffError,
 };
@@ -155,11 +155,11 @@ impl ServiceInner {
         let sled_agent_initialize = || async {
             client
                 .start_sled(&bootstrap_agent_client::types::SledAgentRequest {
-                    subnet: bootstrap_agent_client::types::SledSubnet(
-                        bootstrap_agent_client::types::Ipv6Net(
-                            request.subnet.as_ref().to_string(),
+                    subnet: bootstrap_agent_client::types::Ipv6Subnet {
+                        net: bootstrap_agent_client::types::Ipv6Net(
+                            request.subnet.net().to_string(),
                         ),
-                    ),
+                    },
                 })
                 .await
                 .map_err(BackoffError::transient)?;
@@ -300,14 +300,40 @@ impl ServiceInner {
     async fn create_plan(
         &self,
         config: &Config,
-        addrs: impl IntoIterator<Item = Ipv6Addr>,
+        bootstrap_addrs: impl IntoIterator<Item = Ipv6Addr>,
     ) -> Result<HashMap<SocketAddrV6, SledAllocation>, SetupServiceError> {
-        let addrs = addrs.into_iter().enumerate();
+        let bootstrap_addrs = bootstrap_addrs.into_iter().enumerate();
+        let reserved_rack_subnet = ReservedRackSubnet::new(config.az_subnet());
+        let dns_subnets = reserved_rack_subnet.get_dns_subnets();
 
-        // TODO: The use of "zip" here means that if we have more addrs than
-        // requests, we won't initialize some of them. Maybe that's okay?
-        // Maybe that's the responsibility of Nexus?
-        let requests_and_sleds = config.requests.iter().zip(addrs);
+        info!(self.log, "dns_subnets: {:#?}", dns_subnets);
+
+        let requests_and_sleds =
+            bootstrap_addrs.map(|(idx, bootstrap_addr)| {
+                // If a sled was explicitly requested from the RSS configuration,
+                // use that. Otherwise, just give it a "default" (empty) set of
+                // services.
+                let mut request = {
+                    if idx < config.requests.len() {
+                        config.requests[idx].clone()
+                    } else {
+                        SledRequest::default()
+                    }
+                };
+
+                // The first enumerated addresses get assigned the additional
+                // responsibility of being internal DNS servers.
+                if idx < dns_subnets.len() {
+                    let dns_subnet = &dns_subnets[idx];
+                    request.dns_services.push(ServiceRequest {
+                        name: "internal-dns".to_string(),
+                        addresses: vec![dns_subnet.dns_address().ip()],
+                        gz_addresses: vec![dns_subnet.gz_address().ip()],
+                    });
+                }
+
+                (request, (idx, bootstrap_addr))
+            });
 
         let allocations = requests_and_sleds.map(|(request, sled)| {
             let (idx, bootstrap_addr) = sled;
@@ -319,15 +345,13 @@ impl ServiceInner {
                 SocketAddrV6::new(bootstrap_addr, BOOTSTRAP_AGENT_PORT, 0, 0);
             let sled_subnet_index =
                 u8::try_from(idx + 1).expect("Too many peers!");
-            let subnet =
-                SledSubnet::new(config.sled_subnet(sled_subnet_index).into())
-                    .expect("Created Invalid Subnet");
+            let subnet = config.sled_subnet(sled_subnet_index);
 
             (
                 bootstrap_addr,
                 SledAllocation {
                     initialization_request: SledAgentRequest { subnet },
-                    services_request: request.clone(),
+                    services_request: request,
                 },
             )
         });
@@ -488,10 +512,43 @@ impl ServiceInner {
                     "Initialized sled agent on sled with bootstrap address: {}",
                     bootstrap_addr
                 );
+                Ok(())
+            },
+        ))
+        .await
+        .into_iter()
+        .collect::<Result<_, SetupServiceError>>()?;
 
-                // Next, initialize any datasets on sleds that need it.
+        // Set up internal DNS services.
+        futures::future::join_all(
+            plan.iter()
+                .filter(|(_, allocation)| {
+                    // Only send requests to sleds that are supposed to be running
+                    // DNS services.
+                    !allocation.services_request.dns_services.is_empty()
+                })
+                .map(|(_, allocation)| async move {
+                    let sled_address = SocketAddr::V6(get_sled_address(
+                        allocation.initialization_request.subnet,
+                    ));
+
+                    self.initialize_services(
+                        sled_address,
+                        &allocation.services_request.dns_services,
+                    )
+                    .await?;
+                    Ok(())
+                }),
+        )
+        .await
+        .into_iter()
+        .collect::<Result<_, SetupServiceError>>()?;
+
+        // Issue the dataset initialization requests to all sleds.
+        futures::future::join_all(plan.iter().map(
+            |(_, allocation)| async move {
                 let sled_address = SocketAddr::V6(get_sled_address(
-                    *allocation.initialization_request.subnet.as_ref(),
+                    allocation.initialization_request.subnet,
                 ));
                 self.initialize_datasets(
                     sled_address,
@@ -515,13 +572,18 @@ impl ServiceInner {
         futures::future::join_all(plan.iter().map(
             |(_, allocation)| async move {
                 let sled_address = SocketAddr::V6(get_sled_address(
-                    *allocation.initialization_request.subnet.as_ref(),
+                    allocation.initialization_request.subnet,
                 ));
-                self.initialize_services(
-                    sled_address,
-                    &allocation.services_request.services,
-                )
-                .await?;
+
+                let all_services = allocation
+                    .services_request
+                    .services
+                    .iter()
+                    .chain(allocation.services_request.dns_services.iter())
+                    .map(|s| s.clone())
+                    .collect::<Vec<_>>();
+
+                self.initialize_services(sled_address, &all_services).await?;
                 Ok(())
             },
         ))

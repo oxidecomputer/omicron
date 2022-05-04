@@ -974,7 +974,7 @@ checksum = "1435fa1053d8b2fbbe9be7e97eca7f33d37b28409959813daefc1446a14247f1"
 [[package]]
 name = "dropshot"
 version = "0.6.1-dev"
-source = "git+https://github.com/oxidecomputer/dropshot?branch=main#da09c39441e2d4c984d076f90cd550d9c6f76951"
+source = "git+https://github.com/oxidecomputer/dropshot?branch=main#0e971f5c554390273622b37cd2a6aaec1dff815b"
 dependencies = [
  "async-stream",
  "async-trait",
@@ -992,7 +992,7 @@ dependencies = [
  "percent-encoding",
  "proc-macro2",
  "rustls",
- "rustls-pemfile 0.3.0",
+ "rustls-pemfile 1.0.0",
  "schemars",
  "serde",
  "serde_json",
@@ -1013,7 +1013,7 @@ dependencies = [
 [[package]]
 name = "dropshot_endpoint"
 version = "0.6.1-dev"
-source = "git+https://github.com/oxidecomputer/dropshot?branch=main#da09c39441e2d4c984d076f90cd550d9c6f76951"
+source = "git+https://github.com/oxidecomputer/dropshot?branch=main#0e971f5c554390273622b37cd2a6aaec1dff815b"
 dependencies = [
  "proc-macro2",
  "quote",

@@ -18,7 +18,6 @@ pub struct Config {
     pub log: dropshot::ConfigLogging,
     pub dropshot: dropshot::ConfigDropshot,
     pub data: dns_data::Config,
-    pub dns: dns_server::Config,
 }
 
 pub async fn start_server(

@@ -15,7 +15,9 @@ server = "foo"
 omicron_path = "/remote/path/to/omicron"
 
 [deployment]
-servers = ["foo", "bar"]
+# which server is responsible for running the rack setup service; must
+# refer to one of the `servers` in the servers table
+rss_server = "foo"
 rack_secret_threshold = 2
 # Location where files to install will be placed before running
 # `omicron-package install`
