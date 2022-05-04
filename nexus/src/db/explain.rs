@@ -103,7 +103,7 @@ impl<Q> QueryFragment<Pg> for ExplainStatement<Q>
 where
     Q: QueryFragment<Pg>,
 {
-    fn walk_ast(&self, mut out: AstPass<Pg>) -> QueryResult<()> {
+    fn walk_ast<'b>(&'b self, mut out: AstPass<'_, 'b, Pg>) -> QueryResult<()> {
         out.push_sql("EXPLAIN ");
         self.query.walk_ast(out.reborrow())?;
         Ok(())
@@ -137,7 +137,7 @@ mod test {
     use schema::test_users;
 
     #[derive(Clone, Debug, Queryable, Insertable, PartialEq, Selectable)]
-    #[table_name = "test_users"]
+    #[diesel(table_name = test_users)]
     struct User {
         id: Uuid,
         age: i64,
@@ -166,7 +166,7 @@ mod test {
     #[tokio::test]
     async fn test_explain() {
         let logctx = dev::test_setup_log("test_explain");
-        let db = test_setup_database(&logctx.log).await;
+        let mut db = test_setup_database(&logctx.log).await;
         let cfg = db::Config { url: db.pg_config().clone() };
         let pool = db::Pool::new(&cfg);
 
@@ -190,6 +190,7 @@ mod test {
             )
             .await
             .unwrap();
+        db.cleanup().await.unwrap();
         logctx.cleanup_successful();
     }
 
@@ -197,7 +198,7 @@ mod test {
     #[tokio::test]
     async fn test_explain_async() {
         let logctx = dev::test_setup_log("test_explain_async");
-        let db = test_setup_database(&logctx.log).await;
+        let mut db = test_setup_database(&logctx.log).await;
         let cfg = db::Config { url: db.pg_config().clone() };
         let pool = db::Pool::new(&cfg);
 
@@ -212,6 +213,7 @@ mod test {
             .unwrap();
 
         assert_contents("tests/output/test-explain-output", &explanation);
+        db.cleanup().await.unwrap();
         logctx.cleanup_successful();
     }
 
@@ -219,7 +221,7 @@ mod test {
     #[tokio::test]
     async fn test_explain_full_table_scan() {
         let logctx = dev::test_setup_log("test_explain_full_table_scan");
-        let db = test_setup_database(&logctx.log).await;
+        let mut db = test_setup_database(&logctx.log).await;
         let cfg = db::Config { url: db.pg_config().clone() };
         let pool = db::Pool::new(&cfg);
 
@@ -238,6 +240,7 @@ mod test {
             "Expected [{}] to contain 'FULL SCAN'",
             explanation
         );
+        db.cleanup().await.unwrap();
         logctx.cleanup_successful();
     }
 }

@@ -32,7 +32,7 @@ struct Server {
 
 #[derive(Deserialize, Debug)]
 struct Deployment {
-    servers: BTreeSet<String>,
+    rss_server: String,
     rack_secret_threshold: usize,
     staging_dir: PathBuf,
 }
@@ -77,6 +77,10 @@ enum SubCommand {
         #[structopt(short, long, parse(from_str = parse_into_set))]
         servers: Option<BTreeSet<String>>,
     },
+
+    /// Install necessary prerequisites on the "builder" server and all "deploy"
+    /// servers.
+    InstallPrereqs,
 
     /// Sync our local source to the build host
     Sync,
@@ -153,6 +157,19 @@ fn do_exec(
     Ok(())
 }
 
+// start an `rsync` command with args common to all our uses
+fn rsync_common() -> Command {
+    let mut cmd = Command::new("rsync");
+    cmd.arg("-az")
+        .arg("-e")
+        .arg("ssh")
+        .arg("--delete")
+        .arg("--progress")
+        .arg("--out-format")
+        .arg("File changed: %o %t %f");
+    cmd
+}
+
 fn do_sync(config: &Config) -> Result<()> {
     let builder =
         config.servers.get(&config.builder.server).ok_or_else(|| {
@@ -161,8 +178,17 @@ fn do_sync(config: &Config) -> Result<()> {
 
     // For rsync to copy from the source appropriately we must guarantee a
     // trailing slash.
-    let src =
-        format!("{}/", config.omicron_path.canonicalize()?.to_string_lossy());
+    let src = format!(
+        "{}/",
+        config
+            .omicron_path
+            .canonicalize()
+            .with_context(|| format!(
+                "could not canonicalize {}",
+                config.omicron_path.display()
+            ))?
+            .to_string_lossy()
+    );
     let dst = format!(
         "{}@{}:{}",
         builder.username,
@@ -171,33 +197,100 @@ fn do_sync(config: &Config) -> Result<()> {
     );
 
     println!("Synchronizing source files to: {}", dst);
+    let mut cmd = rsync_common();
 
-    let mut cmd = Command::new("rsync");
-    cmd.arg("-az")
-        .arg("-e")
-        .arg("ssh")
-        .arg("--delete")
-        .arg("--progress")
-        .arg("--exclude")
+    // exclude build and development environment artifacts
+    cmd.arg("--exclude")
         .arg("target/")
         .arg("--exclude")
-        .arg("out/")
-        .arg("--exclude")
-        .arg("/cockroachdb/")
-        .arg("--exclude")
-        .arg("/clickhouse/")
+        .arg("*.vdev")
         .arg("--exclude")
         .arg("*.swp")
         .arg("--exclude")
         .arg(".git/")
-        .arg("--out-format")
-        .arg("File changed: %o %t %f")
-        .arg(&src)
-        .arg(&dst);
+        .arg("--exclude")
+        .arg("out/");
+
+    // exclude `config-rss.toml`, which needs to be sent to only one target
+    // system. we handle this in `do_overlay` below.
+    cmd.arg("--exclude").arg("**/config-rss.toml");
+
+    // finish with src/dst
+    cmd.arg(&src).arg(&dst);
     let status =
         cmd.status().context(format!("Failed to run command: ({:?})", cmd))?;
     if !status.success() {
         return Err(FlingError::FailedSync { src, dst }.into());
+    }
+
+    Ok(())
+}
+
+fn do_install_prereqs(config: &Config) -> Result<()> {
+    // we need to rsync `./tools/*` to each of the deployment targets (the
+    // "builder" already has it via `do_sync()`), and then run `pfxec
+    // tools/install_prerequisites.sh` on each system.
+    let src = format!(
+        // the `./` here is load-bearing; it interacts with `--relative` to tell
+        // rsync to create `tools` but none of its parents
+        "{}/./tools/",
+        config
+            .omicron_path
+            .canonicalize()
+            .with_context(|| format!(
+                "could not canonicalize {}",
+                config.omicron_path.display()
+            ))?
+            .to_string_lossy()
+    );
+    let partial_cmd = || {
+        let mut cmd = rsync_common();
+        cmd.arg("--relative");
+        cmd.arg(&src);
+        cmd
+    };
+
+    for server in config.servers.values() {
+        let dst = format!(
+            "{}@{}:{}",
+            server.username,
+            server.addr,
+            config.deployment.staging_dir.to_str().unwrap()
+        );
+        let mut cmd = partial_cmd();
+        cmd.arg(&dst);
+        let status = cmd
+            .status()
+            .context(format!("Failed to run command: ({:?})", cmd))?;
+        if !status.success() {
+            return Err(FlingError::FailedSync { src, dst }.into());
+        }
+    }
+
+    // run install_prereqs on each server
+    let builder = &config.servers[&config.builder.server];
+    let build_server = (builder, &config.builder.omicron_path);
+    let all_servers = std::iter::once(build_server).chain(
+        config.servers.iter().filter_map(|(name, server)| {
+            // skip running prereq installing on a deployment target if it is
+            // also the builder, because we're already running it on the builder
+            if *name == config.builder.server {
+                None
+            } else {
+                Some((server, &config.deployment.staging_dir))
+            }
+        }),
+    );
+
+    for (server, root_path) in all_servers {
+        // -y: assume yes instead of prompting
+        // -p: skip check that deps end up in $PATH
+        let cmd = format!(
+            "cd {} && mkdir -p out && pfexec ./tools/install_prerequisites.sh -y -p",
+            root_path.display()
+        );
+        println!("install prerequisites on {}", server.addr);
+        ssh_exec(server, &cmd, false)?;
     }
 
     Ok(())
@@ -262,10 +355,8 @@ fn do_uninstall(
 ) -> Result<()> {
     let mut deployment_src = PathBuf::from(&config.deployment.staging_dir);
     deployment_src.push(&artifact_dir);
-    for server_name in &config.deployment.servers {
-        let builder = &config.servers[&config.builder.server];
-        let server = &config.servers[server_name];
-
+    let builder = &config.servers[&config.builder.server];
+    for server in config.servers.values() {
         copy_omicron_package_binary_to_staging(config, builder, server)?;
 
         // Run `omicron-package uninstall` on the deployment server
@@ -293,7 +384,7 @@ fn do_install(config: &Config, artifact_dir: &Path, install_dir: &Path) {
             Vec::<(String, ScopedJoinHandle<'_, Result<()>>)>::new();
 
         // Spawn a thread for each server install
-        for server_name in &config.deployment.servers {
+        for server_name in config.servers.keys() {
             handles.push((
                 server_name.to_owned(),
                 s.spawn(move |_| -> Result<()> {
@@ -334,30 +425,61 @@ fn do_install(config: &Config, artifact_dir: &Path, install_dir: &Path) {
 }
 
 fn do_overlay(config: &Config) -> Result<()> {
+    let builder = &config.servers[&config.builder.server];
     let mut root_path = PathBuf::from(&config.builder.omicron_path);
     // TODO: This needs to match the artifact_dir in `package`
     root_path.push("out/overlay");
-    let server_dirs = dir_per_deploy_server(config, &root_path);
-    let builder = &config.servers[&config.builder.server];
-    overlay_sled_agent(&builder, config, &server_dirs)
+
+    // Build a list of directories for each server to be deployed and tag which
+    // one is the server to run RSS; e.g., for servers ["foo", "bar", "baz"]
+    // with root_path "/my/path", we produce
+    // [
+    //     "/my/path/foo/sled-agent/pkg",
+    //     "/my/path/bar/sled-agent/pkg",
+    //     "/my/path/baz/sled-agent/pkg",
+    // ]
+    // As we're doing so, record which directory is the one for the server that
+    // will run RSS.
+    let mut rss_server_dir = None;
+    let sled_agent_dirs = config
+        .servers
+        .keys()
+        .map(|server_name| {
+            let mut dir = root_path.clone();
+            dir.push(server_name);
+            dir.push("sled-agent/pkg");
+            if *server_name == config.deployment.rss_server {
+                rss_server_dir = Some(dir.clone());
+            }
+            dir
+        })
+        .collect::<Vec<_>>();
+
+    // we know exactly one of the servers matches `rss_server` from our config
+    // validation, so we can unwrap here
+    let rss_server_dir = rss_server_dir.unwrap();
+
+    overlay_sled_agent(builder, config, &sled_agent_dirs)?;
+    overlay_rss_config(builder, config, &rss_server_dir)?;
+
+    Ok(())
 }
 
 fn overlay_sled_agent(
-    server: &Server,
+    builder: &Server,
     config: &Config,
-    server_dirs: &[PathBuf],
+    sled_agent_dirs: &[PathBuf],
 ) -> Result<()> {
-    let sled_agent_dirs: Vec<PathBuf> = server_dirs
-        .iter()
-        .map(|dir| {
-            let mut dir = PathBuf::from(dir);
-            dir.push("sled-agent/pkg");
-            dir
-        })
-        .collect();
+    // Send SSH command to create directories on builder and generate secret
+    // shares.
 
-    // Create directories on builder
-    let dirs = dir_string(&sled_agent_dirs);
+    // TODO do we need any escaping here? this will definitely break if any dir
+    // names have spaces
+    let dirs = sled_agent_dirs
+        .iter()
+        .map(|dir| format!("{} ", dir.display()))
+        .collect::<String>();
+
     let cmd = format!(
         "sh -c 'for dir in {}; do mkdir -p $dir; done' && \
             cd {} && \
@@ -368,7 +490,38 @@ fn overlay_sled_agent(
         config.deployment.rack_secret_threshold,
         dirs
     );
-    ssh_exec(server, &cmd, false)
+    ssh_exec(builder, &cmd, false)
+}
+
+fn overlay_rss_config(
+    builder: &Server,
+    config: &Config,
+    rss_server_dir: &Path,
+) -> Result<()> {
+    // Sync `config-rss.toml` to the directory for the RSS server on the
+    // builder.
+    let src = config.omicron_path.join("smf/sled-agent/config-rss.toml");
+    let dst = format!(
+        "{}@{}:{}",
+        builder.username,
+        builder.addr,
+        rss_server_dir.display()
+    );
+
+    let mut cmd = rsync_common();
+    cmd.arg(&src).arg(&dst);
+
+    let status =
+        cmd.status().context(format!("Failed to run command: ({:?})", cmd))?;
+    if !status.success() {
+        return Err(FlingError::FailedSync {
+            src: src.to_string_lossy().to_string(),
+            dst,
+        }
+        .into());
+    }
+
+    Ok(())
 }
 
 fn single_server_install(
@@ -381,16 +534,25 @@ fn single_server_install(
 ) -> Result<()> {
     let server = &config.servers[server_name];
 
-    println!("COPYING packages from builder -> deploy server");
+    println!(
+        "COPYING packages from builder ({}) -> deploy server ({})",
+        builder.addr, server_name
+    );
     copy_package_artifacts_to_staging(config, pkg_dir, builder, server)?;
 
-    println!("COPYING deploy tool from builder -> deploy server");
+    println!(
+        "COPYING deploy tool from builder ({}) -> deploy server ({})",
+        builder.addr, server_name
+    );
     copy_omicron_package_binary_to_staging(config, builder, server)?;
 
-    println!("COPYING manifest from builder -> deploy server");
+    println!(
+        "COPYING manifest from builder ({}) -> deploy server ({})",
+        builder.addr, server_name
+    );
     copy_package_manifest_to_staging(config, builder, server)?;
 
-    println!("INSTALLING packages on deploy server");
+    println!("INSTALLING packages on deploy server ({})", server_name);
     run_omicron_package_install_from_staging(
         config,
         server,
@@ -398,7 +560,10 @@ fn single_server_install(
         &install_dir,
     )?;
 
-    println!("COPYING overlay files from builder -> deploy server");
+    println!(
+        "COPYING overlay files from builder ({}) -> deploy server ({})",
+        builder.addr, server_name
+    );
     copy_overlay_files_to_staging(
         config,
         pkg_dir,
@@ -407,10 +572,10 @@ fn single_server_install(
         server_name,
     )?;
 
-    println!("INSTALLING overlay files into the install directory of the deploy server");
+    println!("INSTALLING overlay files into the install directory of the deploy server ({})", server_name);
     install_overlay_files_from_staging(config, server, &install_dir)?;
 
-    println!("RESTARTING services on the deploy server");
+    println!("RESTARTING services on the deploy server ({})", server_name);
     restart_services(server)
 }
 
@@ -427,7 +592,11 @@ fn copy_package_artifacts_to_staging(
 ) -> Result<()> {
     let cmd = format!(
         "rsync -avz -e 'ssh -o StrictHostKeyChecking=no' \
-                    --exclude overlay/ {} {}@{}:{}",
+            --include 'out/' \
+            --include 'out/*.tar' \
+            --include 'out/*.tar.gz' \
+            --exclude '*' \
+            {} {}@{}:{}",
         pkg_dir,
         destination.username,
         destination.addr,
@@ -535,29 +704,6 @@ fn restart_services(destination: &Server) -> Result<()> {
     ssh_exec(destination, "svcadm restart sled-agent", false)
 }
 
-fn dir_string(dirs: &[PathBuf]) -> String {
-    dirs.iter().map(|dir| dir.to_string_lossy().to_string() + " ").collect()
-}
-
-// For each server to be deployed, append the server name to `root`.
-//
-// Example (for servers "foo", "bar", "baz"):
-//
-//  dir_per_deploy_server(&config, "/my/path") ->
-//  vec!["/my/path/foo", "/my/path/bar", "/my/path/baz"]
-fn dir_per_deploy_server(config: &Config, root: &Path) -> Vec<PathBuf> {
-    config
-        .deployment
-        .servers
-        .iter()
-        .map(|server_dir| {
-            let mut dir = PathBuf::from(root);
-            dir.push(server_dir);
-            dir
-        })
-        .collect()
-}
-
 fn ssh_exec(
     server: &Server,
     remote_cmd: &str,
@@ -623,10 +769,11 @@ fn validate(config: &Config) -> Result<(), FlingError> {
         "deployment.staging_dir",
     )?;
 
-    validate_servers(&config.deployment.servers, &config.servers)?;
-
     validate_servers(
-        &BTreeSet::from([config.builder.server.clone()]),
+        &BTreeSet::from([
+            config.builder.server.clone(),
+            config.deployment.rss_server.clone(),
+        ]),
         &config.servers,
     )
 }
@@ -642,6 +789,7 @@ fn main() -> Result<()> {
             do_exec(&config, cmd, servers)?;
         }
         SubCommand::Sync => do_sync(&config)?,
+        SubCommand::InstallPrereqs => do_install_prereqs(&config)?,
         SubCommand::Builder(BuildCommand::Package { artifact_dir }) => {
             do_package(&config, artifact_dir)?;
         }

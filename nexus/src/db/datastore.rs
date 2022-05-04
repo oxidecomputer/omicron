@@ -94,7 +94,7 @@ const REGION_REDUNDANCY_THRESHOLD: usize = 3;
 trait RunnableQuery<U>:
     RunQueryDsl<DbConnection>
     + QueryFragment<Pg>
-    + LoadQuery<DbConnection, U>
+    + LoadQuery<'static, DbConnection, U>
     + QueryId
 {
 }
@@ -102,7 +102,7 @@ trait RunnableQuery<U>:
 impl<U, T> RunnableQuery<U> for T where
     T: RunQueryDsl<DbConnection>
         + QueryFragment<Pg>
-        + LoadQuery<DbConnection, U>
+        + LoadQuery<'static, DbConnection, U>
         + QueryId
 {
 }
@@ -1299,10 +1299,7 @@ impl DataStore {
         interface: IncompleteNetworkInterface,
     ) -> Result<NetworkInterface, NetworkInterfaceError> {
         use db::schema::network_interface::dsl;
-        let query = InsertNetworkInterfaceQuery {
-            interface: interface.clone(),
-            now: Utc::now(),
-        };
+        let query = InsertNetworkInterfaceQuery::new(interface.clone());
         diesel::insert_into(dsl::network_interface)
             .values(query)
             .returning(NetworkInterface::as_returning())
@@ -1897,7 +1894,7 @@ impl DataStore {
         subnet: VpcSubnet,
     ) -> Result<VpcSubnet, SubnetError> {
         use db::schema::vpc_subnet::dsl;
-        let values = FilterConflictingVpcSubnetRangesQuery(subnet.clone());
+        let values = FilterConflictingVpcSubnetRangesQuery::new(subnet.clone());
         diesel::insert_into(dsl::vpc_subnet)
             .values(values)
             .returning(VpcSubnet::as_returning())
@@ -3395,7 +3392,7 @@ mod test {
             external::Ipv4Net("172.30.0.0/22".parse().unwrap()),
             external::Ipv6Net("fd00::/64".parse().unwrap()),
         );
-        let values = FilterConflictingVpcSubnetRangesQuery(subnet);
+        let values = FilterConflictingVpcSubnetRangesQuery::new(subnet);
         let query =
             diesel::insert_into(db::schema::vpc_subnet::dsl::vpc_subnet)
                 .values(values)
