@@ -272,9 +272,9 @@ impl Actor {
 impl std::fmt::Debug for Actor {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         // This `Debug` impl is approximately the same as what we'd get by
-        // deriving it.  We impl it by hand so that adding sensitive fields to
-        // `Actor` doesn't result in them showing up in `Debug` output (e.g.,
-        // log messages) unless someone explicitly adds it here.
+        // deriving it.  We impl it by hand so that adding fields to `Actor`
+        // doesn't result in them showing up in `Debug` output (e.g., log
+        // messages) unless someone explicitly adds them here.
         //
         // Do NOT include sensitive fields (e.g., private key or a bearer
         // token) in this output!
