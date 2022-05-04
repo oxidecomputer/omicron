@@ -145,8 +145,7 @@ jobs:
       # Put "./cockroachdb/bin" and "./clickhouse" on the PATH for the test
       # suite.
       run: TMPDIR=$OMICRON_TMP PATH="$PATH:$PWD/out/cockroachdb/bin:$PWD/out/clickhouse" RUSTFLAGS="-D warnings" RUSTDOCFLAGS="-D warnings" cargo test --no-fail-fast --workspace --locked --verbose
-    - name: Archive any failed test results
-      if: ${{ failure() }}
+    - name: Archive results left by tests
       # actions/upload-artifact@v2.3.1
       uses: actions/upload-artifact@82c141cc518b40d92cc801eee768e7aafc9c2fa2
       with:
@@ -156,3 +155,9 @@ jobs:
           ${{ env.OMICRON_TMP }}
           !${{ env.OMICRON_TMP }}/crdb-base
           !${{ env.OMICRON_TMP }}/rustc*
+    # Fail the build if successful tests leave detritus in $TMPDIR.  The easiest
+    # way to check if the directory is empty is to try to remove it with
+    # `rmdir`.
+    - name: Remove temporary directory on success (if this fails, tests leaked files in TMPDIR)
+      if: ${{ success() }}
+      run: rmdir $OMICRON_TMP

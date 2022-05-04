@@ -182,15 +182,25 @@ impl CockroachStarterBuilder {
                 CockroachStarterBuilder::temp_path(&temp_dir, "data")
                     .into_os_string()
             });
+
+        // Disable the CockroachDB automatic emergency ballast file. By default
+        // CockroachDB creates a 1 GiB ballast file on startup; because we start
+        // many instances while running tests in parallel, this can quickly eat
+        // a large amount of disk space. Disable it by setting the size to 0.
+        //
+        // https://www.cockroachlabs.com/docs/v21.2/cluster-setup-troubleshooting#automatic-ballast-files
+        let mut store_arg = OsString::from("--store=path=");
+        store_arg.push(&store_dir);
+        store_arg.push(",ballast-size=0");
+
         let listen_url_file =
             CockroachStarterBuilder::temp_path(&temp_dir, "listen-url");
         let listen_arg = format!("127.0.0.1:{}", self.listen_port);
-        self.arg("--store")
-            .arg(&store_dir)
+        self.arg(&store_arg)
             .arg("--listen-addr")
             .arg(&listen_arg)
             .arg("--listening-url-file")
-            .arg(listen_url_file.as_os_str().to_owned());
+            .arg(listen_url_file.as_os_str());
 
         if self.redirect_stdio {
             let temp_dir_path = temp_dir.path();

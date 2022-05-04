@@ -6,7 +6,6 @@
 
 // Required nightly features for `usdt`
 #![cfg_attr(target_os = "macos", feature(asm_sym))]
-#![feature(asm)]
 
 //! This crate provides UDP-based communication across the Oxide management
 //! switch to a collection of SPs.

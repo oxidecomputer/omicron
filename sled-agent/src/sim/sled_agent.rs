@@ -85,10 +85,9 @@ impl SledAgent {
         initial_hardware: InstanceHardware,
         target: InstanceRuntimeStateRequested,
     ) -> Result<InstanceRuntimeState, Error> {
-        Ok(self
-            .instances
+        self.instances
             .sim_ensure(&instance_id, initial_hardware.runtime, target)
-            .await?)
+            .await
     }
 
     /// Idempotently ensures that the given API Disk (described by `api_disk`)
@@ -100,7 +99,7 @@ impl SledAgent {
         initial_state: DiskRuntimeState,
         target: DiskStateRequested,
     ) -> Result<DiskRuntimeState, Error> {
-        Ok(self.disks.sim_ensure(&disk_id, initial_state, target).await?)
+        self.disks.sim_ensure(&disk_id, initial_state, target).await
     }
 
     pub async fn instance_poke(&self, id: Uuid) {

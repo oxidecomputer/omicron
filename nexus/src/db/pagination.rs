@@ -10,7 +10,6 @@ use diesel::expression_methods::BoolExpressionMethods;
 use diesel::helper_types::*;
 use diesel::pg::Pg;
 use diesel::query_builder::AsQuery;
-use diesel::query_builder::BoxedSelectStatement;
 use diesel::query_dsl::methods as query_methods;
 use diesel::sql_types::{Bool, SqlType};
 use diesel::AppearsOnTable;
@@ -22,7 +21,13 @@ use omicron_common::api::external::DataPageParams;
 type TableSqlType<T> = <T as AsQuery>::SqlType;
 
 // Shorthand alias for the type made from "table.into_boxed()".
-type BoxedQuery<T> = BoxedSelectStatement<'static, TableSqlType<T>, T, Pg>;
+type BoxedQuery<T> = diesel::helper_types::IntoBoxed<'static, T, Pg>;
+type BoxedDslOutput<T> = diesel::internal::table_macro::BoxedSelectStatement<
+    'static,
+    TableSqlType<T>,
+    diesel::internal::table_macro::FromClause<T>,
+    Pg,
+>;
 
 /// Uses `pagparams` to list a subset of rows in `table`, ordered by `column`.
 pub fn paginated<T, C, M>(
@@ -33,7 +38,7 @@ pub fn paginated<T, C, M>(
 where
     // T is a table which can create a BoxedQuery.
     T: diesel::Table,
-    T: query_methods::BoxedDsl<'static, Pg, Output = BoxedQuery<T>>,
+    T: query_methods::BoxedDsl<'static, Pg, Output = BoxedDslOutput<T>>,
     // C is a column which appears in T.
     C: 'static + Column + Copy + ExpressionMethods + AppearsOnTable<T>,
     // Required to compare the column with the marker type.
@@ -67,7 +72,7 @@ where
 /// Uses `pagparams` to list a subset of rows in `table`, ordered by `c1, and
 /// then by `c2.
 ///
-/// This is a two-column varaiation of the [`paginated`] function.
+/// This is a two-column variation of the [`paginated`] function.
 // NOTE: This function could probably be made generic over an arbitrary number
 // of columns, but that'll either require modifying Diesel (to make "tuples of
 // columns" implement a subset of ExpressionMethods) or making a macro to generate
@@ -80,7 +85,16 @@ pub fn paginated_multicolumn<T, C1, C2, M1, M2>(
 where
     // T is a table which can create a BoxedQuery.
     T: diesel::Table,
-    T: query_methods::BoxedDsl<'static, Pg, Output = BoxedQuery<T>>,
+    T: query_methods::BoxedDsl<
+        'static,
+        Pg,
+        Output = diesel::internal::table_macro::BoxedSelectStatement<
+            'static,
+            TableSqlType<T>,
+            diesel::internal::table_macro::FromClause<T>,
+            Pg,
+        >,
+    >,
     // C1 & C2 are columns which appear in T.
     C1: 'static + Column + Copy + ExpressionMethods + AppearsOnTable<T>,
     C2: 'static + Column + Copy + ExpressionMethods + AppearsOnTable<T>,
@@ -184,7 +198,7 @@ mod test {
     use schema::test_users;
 
     #[derive(Clone, Debug, Queryable, Insertable, PartialEq, Selectable)]
-    #[table_name = "test_users"]
+    #[diesel(table_name = test_users)]
     struct User {
         id: Uuid,
         age: i64,
