@@ -236,7 +236,7 @@ pub struct Details {
 }
 
 /// Who is performing an operation
-#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[derive(Clone, Copy, Deserialize, Eq, PartialEq, Serialize)]
 pub enum Actor {
     UserBuiltin { user_builtin_id: Uuid, silo_id: Uuid },
     SiloUser { silo_user_id: Uuid, silo_id: Uuid },
@@ -265,6 +265,30 @@ impl Actor {
         match self {
             Actor::UserBuiltin { silo_id, .. } => *silo_id,
             Actor::SiloUser { silo_id, .. } => *silo_id,
+        }
+    }
+}
+
+impl std::fmt::Debug for Actor {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // This `Debug` impl is approximately the same as what we'd get by
+        // deriving it.  We impl it by hand so that adding sensitive fields to
+        // `Actor` doesn't result in them showing up in `Debug` output (e.g.,
+        // log messages) unless someone explicitly adds it here.
+        //
+        // Do NOT include sensitive fields (e.g., private key or a bearer
+        // token) in this output!
+        match self {
+            Actor::UserBuiltin { user_builtin_id, silo_id } => f
+                .debug_struct("Actor::UserBuiltin")
+                .field("user_builtin_id", &user_builtin_id)
+                .field("silo_id", &silo_id)
+                .finish_non_exhaustive(),
+            Actor::SiloUser { silo_user_id, silo_id } => f
+                .debug_struct("Actor::SiloUser")
+                .field("silo_user_id", &silo_user_id)
+                .field("silo_id", &silo_id)
+                .finish_non_exhaustive(),
         }
     }
 }
