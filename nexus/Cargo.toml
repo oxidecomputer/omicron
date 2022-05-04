@@ -21,7 +21,7 @@ fatfs = "0.3.5"
 futures = "0.3.21"
 headers = "0.3.7"
 hex = "0.4.3"
-http = "0.2.5"
+http = "0.2.7"
 hyper = "0.14"
 db-macros = { path = "src/db/db-macros" }
 ipnetwork = "0.18"

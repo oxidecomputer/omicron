@@ -9,7 +9,7 @@ clap = { version = "3.1", features = ["derive"] }
 dropshot = { git = "https://github.com/oxidecomputer/dropshot", branch = "main", features = [ "usdt-probes" ] }
 futures = "0.3.21"
 hex = "0.4"
-http = "0.2.6"
+http = "0.2.7"
 hyper = "0.14.17"
 ringbuffer = "0.8"
 schemars = "0.8"
@@ -34,7 +34,7 @@ features = [ "full" ]
 
 [dev-dependencies]
 expectorate = "1.0.5"
-http = "0.2.5"
+http = "0.2.7"
 omicron-test-utils = { path = "../test-utils" }
 openapi-lint = { git = "https://github.com/oxidecomputer/openapi-lint", branch = "main" }
 openapiv3 = "1.0"
