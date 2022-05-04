@@ -85,6 +85,7 @@ elif [[ "${HOST_OS}" == "SunOS" ]]; then
     'library/postgresql-13'
     'pkg-config'
     'brand/omicron1/tools'
+    'library/libxmlsec1'
   )
 
   # Install/update the set of packages.
