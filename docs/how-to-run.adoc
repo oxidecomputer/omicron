@@ -119,16 +119,16 @@ unique local addresses in the subnet of the first Sled Agent: `fd00:1122:3344:1:
 |===================================================================================================
 | Service                    | Endpoint
 | Sled Agent: Bootstrap      | Derived from MAC address of physical data link.
-| Sled Agent: Dropshot API   | `[fd00:1122:3344:1::1]:12345`
-| Cockroach DB               | `[fd00:1122:3344:1::2]:32221`
-| Nexus: External API        | `[fd00:1122:3344:1::3]:12220`
-| Nexus: Internal API        | `[fd00:1122:3344:1::3]:12221`
-| Oximeter                   | `[fd00:1122:3344:1::4]:12223`
-| Clickhouse                 | `[fd00:1122:3344:1::5]:8123`
-| Crucible Downstairs 1      | `[fd00:1122:3344:1::6]:32345`
-| Crucible Downstairs 2      | `[fd00:1122:3344:1::7]:32345`
-| Crucible Downstairs 3      | `[fd00:1122:3344:1::8]:32345`
-| Internal DNS               | `[fd00:1122:3344:1::9]:5353`
+| Sled Agent: Dropshot API   | `[fd00:1122:3344:0101::1]:12345`
+| Cockroach DB               | `[fd00:1122:3344:0101::2]:32221`
+| Nexus: External API        | `[fd00:1122:3344:0101::3]:12220`
+| Nexus: Internal API        | `[fd00:1122:3344:0101::3]:12221`
+| Oximeter                   | `[fd00:1122:3344:0101::4]:12223`
+| Clickhouse                 | `[fd00:1122:3344:0101::5]:8123`
+| Crucible Downstairs 1      | `[fd00:1122:3344:0101::6]:32345`
+| Crucible Downstairs 2      | `[fd00:1122:3344:0101::7]:32345`
+| Crucible Downstairs 3      | `[fd00:1122:3344:0101::8]:32345`
+| Internal DNS Service       | `[fd00:1122:3344:0001::1]:5353`
 |===================================================================================================
 
 Note that Sled Agent runs in the global zone and is the one responsible for bringing up all the other

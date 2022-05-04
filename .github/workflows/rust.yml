@@ -102,26 +102,10 @@ jobs:
 
         echo "Disk space:"
         df -h
-    - name: Configure GitHub cache for CockroachDB binaries
-      id: cache-cockroachdb
-      # actions/cache@v2.1.4
-      uses: actions/cache@26968a09c0ea4f3e233fdddbafd1166051a095f6
-      with:
-        key: ${{ runner.os }}-cockroach-binary-${{ hashFiles('tools/cockroachdb_checksums') }}
-        path: "./out/cockroachdb"
-    - name: Configure GitHub cache for ClickHouse binaries
-      id: cache-clickhouse
-      # actions/cache@v2.1.4
-      uses: actions/cache@26968a09c0ea4f3e233fdddbafd1166051a095f6
-      with:
-        key: ${{ runner.os }}-clickhouse-binary-${{ hashFiles('tools/clickhouse_checksums') }}
-        path: "./out/clickhouse"
-    - name: Download ClickHouse
-      if: steps.cache-clickhouse.outputs.cache-hit != 'true'
-      run: ./tools/ci_download_clickhouse
-    - name: Download CockroachDB binary
-      if: steps.cache-cockroachdb.outputs.cache-hit != 'true'
-      run: bash ./tools/ci_download_cockroachdb
+    - name: Update PATH
+      run: echo "$PWD/out/cockroachdb/bin:$PWD/out/clickhouse" >> "$GITHUB_PATH"
+    - name: Install Pre-Requisites
+      run: ./tools/install_prerequisites.sh -y
     - name: Create temporary directory for test outputs
       run: mkdir -p $OMICRON_TMP
     - name: Build
@@ -138,15 +122,12 @@ jobs:
       # - TMPDIR=$OMICRON_TMP: we specify a specific temporary directory so that
       #   failed test outputs will be in a known place that we can grab at the
       #   end without also grabbing random other temporary files.
-      run: TMPDIR=$OMICRON_TMP PATH="$PATH:$PWD/out/cockroachdb/bin:$PWD/out/clickhouse" RUSTFLAGS="-D warnings" RUSTDOCFLAGS="-D warnings" cargo build --locked --all-targets --verbose
+      run: TMPDIR=$OMICRON_TMP RUSTFLAGS="-D warnings" RUSTDOCFLAGS="-D warnings" cargo build --locked --all-targets --verbose
     - name: Run tests
       # Use the same RUSTFLAGS and RUSTDOCFLAGS as above to avoid having to
       # rebuild here.
-      # Put "./cockroachdb/bin" and "./clickhouse" on the PATH for the test
-      # suite.
-      run: TMPDIR=$OMICRON_TMP PATH="$PATH:$PWD/out/cockroachdb/bin:$PWD/out/clickhouse" RUSTFLAGS="-D warnings" RUSTDOCFLAGS="-D warnings" cargo test --no-fail-fast --workspace --locked --verbose
-    - name: Archive any failed test results
-      if: ${{ failure() }}
+      run: TMPDIR=$OMICRON_TMP RUSTFLAGS="-D warnings" RUSTDOCFLAGS="-D warnings" cargo test --no-fail-fast --workspace --locked --verbose
+    - name: Archive results left by tests
       # actions/upload-artifact@v2.3.1
       uses: actions/upload-artifact@82c141cc518b40d92cc801eee768e7aafc9c2fa2
       with:
@@ -156,3 +137,9 @@ jobs:
           ${{ env.OMICRON_TMP }}
           !${{ env.OMICRON_TMP }}/crdb-base
           !${{ env.OMICRON_TMP }}/rustc*
+    # Fail the build if successful tests leave detritus in $TMPDIR.  The easiest
+    # way to check if the directory is empty is to try to remove it with
+    # `rmdir`.
+    - name: Remove temporary directory on success (if this fails, tests leaked files in TMPDIR)
+      if: ${{ success() }}
+      run: rmdir $OMICRON_TMP

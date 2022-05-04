@@ -16,7 +16,7 @@ extern crate proc_macro;
 use proc_macro2::TokenStream;
 use quote::{format_ident, quote};
 use syn::spanned::Spanned;
-use syn::{Data, DataStruct, DeriveInput, Error, Fields, Ident, Lit, Meta};
+use syn::{Data, DataStruct, DeriveInput, Error, Fields, Ident};
 
 mod lookup;
 
@@ -82,22 +82,14 @@ pub fn lookup_resource(
 
 /// Looks for a Meta-style attribute with a particular identifier.
 ///
-/// As an example, for an attribute like `#[foo = "bar"]`, we can find this
-/// attribute by calling `get_meta_attr(&item.attrs, "foo")`.
-fn get_meta_attr(attrs: &[syn::Attribute], name: &str) -> Option<Meta> {
+/// As an example, for an attribute like `#[diesel(foo = bar)]`, we can find this
+/// attribute by calling `get_nv_attr(&item.attrs, "foo")`.
+fn get_nv_attr(attrs: &[syn::Attribute], name: &str) -> Option<NameValue> {
     attrs
         .iter()
-        .filter_map(|attr| attr.parse_meta().ok())
-        .find(|meta| meta.path().is_ident(name))
-}
-
-/// Accesses the "value" part of a name-value Meta attribute.
-fn get_attribute_value(meta: &Meta) -> Option<&Lit> {
-    if let Meta::NameValue(ref nv) = meta {
-        Some(&nv.lit)
-    } else {
-        None
-    }
+        .filter(|attr| attr.path.is_ident("diesel"))
+        .filter_map(|attr| attr.parse_args::<NameValue>().ok())
+        .find(|nv| nv.name.is_ident(name))
 }
 
 /// Looks up a named field within a struct.
@@ -160,6 +152,23 @@ pub fn asset_target(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
         .into()
 }
 
+#[derive(Debug)]
+struct NameValue {
+    name: syn::Path,
+    _eq_token: syn::token::Eq,
+    value: syn::Path,
+}
+
+impl syn::parse::Parse for NameValue {
+    fn parse(input: syn::parse::ParseStream) -> syn::Result<Self> {
+        Ok(Self {
+            name: input.parse()?,
+            _eq_token: input.parse()?,
+            value: input.parse()?,
+        })
+    }
+}
+
 // Implementation of `#[derive(Resource)]` and `#[derive(Asset)]`.
 fn derive_impl(
     tokens: TokenStream,
@@ -169,24 +178,17 @@ fn derive_impl(
     let name = &item.ident;
 
     // Ensure that the "table_name" attribute exists, and get it.
-    let table_meta =
-        get_meta_attr(&item.attrs, "table_name").ok_or_else(|| {
-            Error::new(
-                item.span(),
-                format!(
-                    "Resource needs 'table_name' attribute.\n\
-                     Try adding #[table_name = \"your_table_name\"] to {}.",
-                    name
-                ),
-            )
-        })?;
-    let table_name = get_attribute_value(&table_meta)
-        .ok_or_else(|| {
-            Error::new(
-                item.span(),
-                "'table_name' needs to be a name-value pair, like #[table_name = foo]"
-            )
-        })?;
+    let table_nv = get_nv_attr(&item.attrs, "table_name").ok_or_else(|| {
+        Error::new(
+            item.span(),
+            format!(
+                "Resource needs 'table_name' attribute.\n\
+                     Try adding #[diesel(table_name = your_table_name)] to {}.",
+                name
+            ),
+        )
+    })?;
+    let table_name = table_nv.value;
 
     // Ensure that a field named "identity" exists within this struct.
     if let Data::Struct(ref data) = item.data {
@@ -205,7 +207,7 @@ fn derive_impl(
                 )
             })?;
 
-        return Ok(build(name, table_name, &field.ty, flavor));
+        return Ok(build(name, &table_name, &field.ty, flavor));
     }
 
     Err(Error::new(item.span(), "Resource can only be derived for structs"))
@@ -214,7 +216,7 @@ fn derive_impl(
 // Emits generated structures, depending on the requested flavor of identity.
 fn build(
     struct_name: &Ident,
-    table_name: &Lit,
+    table_name: &syn::Path,
     observed_identity_ty: &syn::Type,
     flavor: IdentityVariant,
 ) -> TokenStream {
@@ -239,7 +241,7 @@ fn build(
 // Builds an "Identity" structure for a resource.
 fn build_resource_identity(
     struct_name: &Ident,
-    table_name: &Lit,
+    table_name: &syn::Path,
 ) -> TokenStream {
     let identity_doc = format!(
         "Auto-generated identity for [`{}`] from deriving [`macro@Resource`].",
@@ -249,7 +251,7 @@ fn build_resource_identity(
     quote! {
         #[doc = #identity_doc]
         #[derive(Clone, Debug, PartialEq, Selectable, Queryable, Insertable, serde::Serialize, serde::Deserialize)]
-        #[table_name = #table_name ]
+        #[diesel(table_name = #table_name) ]
         pub struct #identity_name {
             pub id: ::uuid::Uuid,
             pub name: crate::db::model::Name,
@@ -279,7 +281,10 @@ fn build_resource_identity(
 }
 
 // Builds an "Identity" structure for an asset.
-fn build_asset_identity(struct_name: &Ident, table_name: &Lit) -> TokenStream {
+fn build_asset_identity(
+    struct_name: &Ident,
+    table_name: &syn::Path,
+) -> TokenStream {
     let identity_doc = format!(
         "Auto-generated identity for [`{}`] from deriving [`macro@Asset`].",
         struct_name,
@@ -288,7 +293,7 @@ fn build_asset_identity(struct_name: &Ident, table_name: &Lit) -> TokenStream {
     quote! {
         #[doc = #identity_doc]
         #[derive(Clone, Debug, PartialEq, Selectable, Queryable, Insertable, serde::Serialize, serde::Deserialize)]
-        #[table_name = #table_name ]
+        #[diesel(table_name = #table_name) ]
         pub struct #identity_name {
             pub id: ::uuid::Uuid,
             pub time_created: ::chrono::DateTime<::chrono::Utc>,
@@ -413,7 +418,7 @@ mod tests {
         assert!(out.is_err());
         assert_eq!(
             "Resource needs 'table_name' attribute.\n\
-             Try adding #[table_name = \"your_table_name\"] to MyTarget.",
+             Try adding #[diesel(table_name = your_table_name)] to MyTarget.",
             out.unwrap_err().to_string()
         );
     }
@@ -423,7 +428,7 @@ mod tests {
         let out = derive_impl(
             quote! {
                 #[derive(Resource)]
-                #[table_name]
+                #[diesel(table_name)]
                 struct MyTarget {
                     identity: MyTargetIdentity,
                     name: String,
@@ -435,7 +440,8 @@ mod tests {
         );
         assert!(out.is_err());
         assert_eq!(
-            "'table_name' needs to be a name-value pair, like #[table_name = foo]",
+            "Resource needs 'table_name' attribute.\n\
+             Try adding #[diesel(table_name = your_table_name)] to MyTarget.",
             out.unwrap_err().to_string()
         );
     }
@@ -445,7 +451,7 @@ mod tests {
         let out = derive_impl(
             quote! {
                 #[derive(Resource)]
-                #[table_name = "foo"]
+                #[diesel(table_name = foo)]
                 enum MyTarget {
                     Foo,
                     Bar,
@@ -466,7 +472,7 @@ mod tests {
         let out = derive_impl(
             quote! {
                 #[derive(Resource)]
-                #[table_name = "my_target"]
+                #[diesel(table_name = my_target)]
                 struct MyTarget {
                     name: String,
                     is_cool: bool,
@@ -489,7 +495,7 @@ mod tests {
         let out = derive_impl(
             quote! {
                 #[derive(Resource)]
-                #[table_name = "my_target"]
+                #[diesel(table_name = my_target)]
                 struct MyTarget {
                     identity: MyTargetIdentity,
                     name: String,

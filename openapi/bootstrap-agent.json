@@ -111,11 +111,24 @@
         ]
       },
       "Ipv6Net": {
+        "example": "fd12:3456::/64",
         "title": "An IPv6 subnet",
         "description": "An IPv6 subnet, including prefix and subnet mask",
         "type": "string",
         "pattern": "^(fd|FD)[0-9a-fA-F]{2}:((([0-9a-fA-F]{1,4}\\:){6}[0-9a-fA-F]{1,4})|(([0-9a-fA-F]{1,4}:){1,6}:))/(6[4-9]|[7-9][0-9]|1[0-1][0-9]|12[0-6])$",
         "maxLength": 43
+      },
+      "Ipv6Subnet": {
+        "description": "Wraps an [`Ipv6Network`] with a compile-time prefix length.",
+        "type": "object",
+        "properties": {
+          "net": {
+            "$ref": "#/components/schemas/Ipv6Net"
+          }
+        },
+        "required": [
+          "net"
+        ]
       },
       "ShareRequest": {
         "description": "Identity signed by local RoT and Oxide certificate chain.",
@@ -159,7 +172,7 @@
             "description": "Portion of the IP space to be managed by the Sled Agent.",
             "allOf": [
               {
-                "$ref": "#/components/schemas/SledSubnet"
+                "$ref": "#/components/schemas/Ipv6Subnet"
               }
             ]
           }
@@ -179,14 +192,6 @@
         },
         "required": [
           "id"
-        ]
-      },
-      "SledSubnet": {
-        "description": "Represents subnets belonging to Sleds.\n\nThis is a thin wrapper around the [`Ipv6Net`] type - which may be accessed by [`AsRef<Ipv6Net>`] - which adds additional validation that this is a /64 subnet with an expected prefix.",
-        "allOf": [
-          {
-            "$ref": "#/components/schemas/Ipv6Net"
-          }
         ]
       }
     }

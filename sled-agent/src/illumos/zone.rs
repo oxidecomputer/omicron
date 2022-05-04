@@ -479,7 +479,10 @@ impl Zones {
         Self::ensure_address(
             None,
             &gz_link_local_addrobj.on_same_interface(name)?,
-            AddressRequest::new_static(IpAddr::V6(address), Some(64)),
+            AddressRequest::new_static(
+                IpAddr::V6(address),
+                Some(omicron_common::address::SLED_PREFIX),
+            ),
         )?;
         Ok(())
     }
