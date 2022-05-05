@@ -2,15 +2,28 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use omicron_common::api::external::NetworkInterface;
+use omicron_common::api::external;
 use omicron_common::api::internal::nexus::{
     DiskRuntimeState, InstanceRuntimeState,
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::fmt::{Debug, Display, Formatter, Result as FormatResult};
-use std::net::{Ipv6Addr, SocketAddr};
+use std::net::IpAddr;
+use std::net::Ipv6Addr;
+use std::net::SocketAddr;
 use uuid::Uuid;
+
+/// Information required to construct a virtual network interface for a guest
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct NetworkInterface {
+    pub name: external::Name,
+    pub ip: IpAddr,
+    pub mac: external::MacAddr,
+    pub subnet: external::IpNet,
+    pub vni: external::Vni,
+    pub slot: u8,
+}
 
 /// Used to request a Disk state change
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]

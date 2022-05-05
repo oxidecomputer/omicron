@@ -59,16 +59,20 @@ function sha_from_url {
     curl -L "$SHA_URL" 2> /dev/null | cut -d ' ' -f 1
 }
 
-# The `helios-netdev` provides the XDE kernel driver and the `opteadm` userland
-# tool for interacting with it.
-HELIOS_NETDEV_REPO_URL="https://buildomat.eng.oxide.computer/wg/0/artefact/01G11AT7E4XV9J1J54GE2YDJT6/CB4WF4BVgnbvf5NI573z9osAV2LNIKogPtWJ5sfW2cNxUYQO/01G11ATFVTWAC2HSNV148PQ4ER/01G11B5MPQRBX3Q5EF45YDAW6Q/opte-0.1.60.p5p"
-HELIOS_NETDEV_REPO_SHA_URL="https://buildomat.eng.oxide.computer/wg/0/artefact/01G11AT7E4XV9J1J54GE2YDJT6/CB4WF4BVgnbvf5NI573z9osAV2LNIKogPtWJ5sfW2cNxUYQO/01G11ATFVTWAC2HSNV148PQ4ER/01G11B5MR60H4N13NJKGWEEA69/opte-0.1.60.p5p.sha256"
+# `helios-netdev` provides the xde kernel driver and the `opteadm` userland tool
+# for interacting with it.
+HELIOS_NETDEV_BASE_URL="https://buildomat.eng.oxide.computer/public/file/oxidecomputer/opte/repo"
+HELIOS_NETDEV_COMMIT="cb1767c80d4e9d97cb79901eed3c9d08e1fb3826"
+HELIOS_NETDEV_REPO_URL="$HELIOS_NETDEV_BASE_URL/$HELIOS_NETDEV_COMMIT/opte.p5p"
+HELIOS_NETDEV_REPO_SHA_URL="$HELIOS_NETDEV_BASE_URL/$HELIOS_NETDEV_COMMIT/opte.p5p.sha256"
 HELIOS_NETDEV_REPO_PATH="$XDE_DIR/$(basename "$HELIOS_NETDEV_REPO_URL")"
 
-# The XDE repo provides a full OS/Net incorporation, with updated kernel bits
+# The xde repo provides a full OS/Net incorporation, with updated kernel bits
 # that the `xde` kernel module and OPTE rely on.
-XDE_REPO_URL="https://buildomat.eng.oxide.computer/wg/0/artefact/01G0ZKH44GQF88GB0GQBG9TQGW/7eOYj8L8E4MLrtvdTgGMyMu5qjYTRheV250bEvh2OkBrggX4/01G0ZKHBQ33K40S5ABZMRNWS5P/01G0ZYDDRXQ3Y4E5SG9QX8N9FK/repo.p5p"
-XDE_REPO_SHA_URL="https://buildomat.eng.oxide.computer/wg/0/artefact/01G0ZKH44GQF88GB0GQBG9TQGW/7eOYj8L8E4MLrtvdTgGMyMu5qjYTRheV250bEvh2OkBrggX4/01G0ZKHBQ33K40S5ABZMRNWS5P/01G0ZYDJDMJAYHFV9Z6XVE30X5/repo.p5p.sha256"
+XDE_REPO_BASE_URL="https://buildomat.eng.oxide.computer/public/file/oxidecomputer/os-build/xde"
+XDE_REPO_COMMIT="485065f3b3292e2198db0629341492672b1e29f7"
+XDE_REPO_URL="$XDE_REPO_BASE_URL/$XDE_REPO_COMMIT/repo.p5p"
+XDE_REPO_SHA_URL="$XDE_REPO_BASE_URL/$XDE_REPO_COMMIT/repo.p5p.sha256"
 XDE_REPO_PATH="$XDE_DIR/$(basename "$XDE_REPO_URL")"
 
 # Download and verify the package repositorieies
@@ -80,7 +84,7 @@ download_and_check_sha "$XDE_REPO_URL" "$(sha_from_url "$XDE_REPO_SHA_URL")"
 # provides newer versions of the packages.
 pkg set-publisher --non-sticky helios-dev
 
-# Add the OPTE and XDE repositories and update packages.
+# Add the OPTE and xde repositories and update packages.
 pkg set-publisher -p "$HELIOS_NETDEV_REPO_PATH" --search-first
 pkg set-publisher -p "$XDE_REPO_PATH" --search-first
 

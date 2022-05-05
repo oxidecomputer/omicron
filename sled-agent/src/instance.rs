@@ -4,9 +4,8 @@
 
 //! API for controlling a single instance.
 
-use crate::common::{
-    instance::{Action as InstanceAction, InstanceStates, PROPOLIS_PORT},
-    vlan::VlanID,
+use crate::common::instance::{
+    Action as InstanceAction, InstanceStates, PROPOLIS_PORT,
 };
 use crate::illumos::running_zone::{InstalledZone, RunningZone};
 use crate::illumos::svc::wait_for_service;
@@ -14,18 +13,21 @@ use crate::illumos::vnic::VnicAllocator;
 use crate::illumos::zone::{AddressRequest, PROPOLIS_ZONE_PREFIX};
 use crate::instance_manager::InstanceTicket;
 use crate::nexus::NexusClient;
+use crate::opte::OptePort;
+use crate::opte::OptePortAllocator;
+use crate::params::NetworkInterface;
 use crate::params::{
     InstanceHardware, InstanceMigrateParams, InstanceRuntimeStateRequested,
 };
 use anyhow::anyhow;
 use futures::lock::{Mutex, MutexGuard};
-use omicron_common::api::external::NetworkInterface;
 use omicron_common::api::internal::nexus::InstanceRuntimeState;
 use omicron_common::backoff;
 use propolis_client::api::DiskRequest;
 use propolis_client::Client as PropolisClient;
 use slog::Logger;
 use std::net::IpAddr;
+use std::net::Ipv6Addr;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::task::JoinHandle;
@@ -70,6 +72,12 @@ pub enum Error {
 
     #[error(transparent)]
     ZoneInstall(#[from] crate::illumos::running_zone::InstallZoneError),
+
+    #[error("serde_json failure: {0}")]
+    SerdeJsonError(#[from] serde_json::Error),
+
+    #[error(transparent)]
+    Opte(#[from] crate::opte::Error),
 }
 
 // Issues read-only, idempotent HTTP requests at propolis until it responds with
@@ -190,8 +198,11 @@ struct InstanceInner {
 
     // NIC-related properties
     vnic_allocator: VnicAllocator,
+
+    // OPTE port related properties
+    underlay_addr: Ipv6Addr,
+    port_allocator: OptePortAllocator,
     requested_nics: Vec<NetworkInterface>,
-    vlan: Option<VlanID>,
 
     // Disk related properties
     requested_disks: Vec<DiskRequest>,
@@ -271,14 +282,15 @@ impl InstanceInner {
     ) -> Result<(), Error> {
         let PropolisSetup { client, running_zone } = setup;
 
-        // TODO: Store slot in NetworkInterface, make this more stable.
         let nics = self
             .requested_nics
             .iter()
-            .enumerate()
-            .map(|(i, _)| propolis_client::api::NetworkInterfaceRequest {
-                name: running_zone.get_guest_vnics()[i].name().to_string(),
-                slot: propolis_client::api::Slot(i as u8),
+            .zip(running_zone.get_opte_ports().iter())
+            .map(|(nic, port)| propolis_client::api::NetworkInterfaceRequest {
+                // TODO-correctness: Remove `.vnic()` call when we use the port
+                // directly.
+                name: port.vnic().name().to_string(),
+                slot: propolis_client::api::Slot(nic.slot),
             })
             .collect();
 
@@ -372,8 +384,9 @@ mockall::mock! {
             log: Logger,
             id: Uuid,
             vnic_allocator: VnicAllocator,
+            underlay_addr: Ipv6Addr,
+            port_allocator: OptePortAllocator,
             initial: InstanceHardware,
-            vlan: Option<VlanID>,
             nexus_client: Arc<NexusClient>,
         ) -> Result<Self, Error>;
         pub async fn start(
@@ -401,21 +414,25 @@ impl Instance {
     /// * `vnic_allocator`: A unique (to the sled) ID generator to
     /// refer to a VNIC. (This exists because of a restriction on VNIC name
     /// lengths, otherwise the UUID would be used instead).
+    /// * `underlay_addr`: The IPv6 underlay address for the sled hosting this
+    /// instance.
+    /// * `port_allocator`: A unique (to the sled) ID generator to
+    /// refer to an OPTE port for the guest network interfaces.
     /// * `initial`: State of the instance at initialization time.
     /// * `nexus_client`: Connection to Nexus, used for sending notifications.
-    /// * `vlan`: An optional VLAN ID for tagging guest VNICs.
     // TODO: This arg list is getting a little long; can we clean this up?
     pub fn new(
         log: Logger,
         id: Uuid,
         vnic_allocator: VnicAllocator,
+        underlay_addr: Ipv6Addr,
+        port_allocator: OptePortAllocator,
         initial: InstanceHardware,
-        vlan: Option<VlanID>,
         nexus_client: Arc<NexusClient>,
     ) -> Result<Self, Error> {
         info!(log, "Instance::new w/initial HW: {:?}", initial);
         let instance = InstanceInner {
-            log: log.new(o!("instance id" => id.to_string())),
+            log: log.new(o!("instance_id" => id.to_string())),
             // NOTE: Mostly lies.
             properties: propolis_client::api::InstanceProperties {
                 id,
@@ -432,10 +449,11 @@ impl Instance {
             propolis_id: initial.runtime.propolis_uuid,
             propolis_ip: initial.runtime.propolis_addr.unwrap().ip(),
             vnic_allocator,
+            underlay_addr,
+            port_allocator,
             requested_nics: initial.nics,
             requested_disks: initial.disks,
             cloud_init_bytes: initial.cloud_init_bytes,
-            vlan,
             state: InstanceStates::new(initial.runtime),
             running_state: None,
             nexus_client,
@@ -446,28 +464,31 @@ impl Instance {
         Ok(Instance { inner })
     }
 
+    fn create_opte_ports(
+        &self,
+        inner: &mut MutexGuard<'_, InstanceInner>,
+    ) -> Result<Vec<OptePort>, Error> {
+        let mut ports = Vec::with_capacity(inner.requested_nics.len());
+        for nic in inner.requested_nics.iter() {
+            let vni = crate::opte::Vni::new(nic.vni).expect("Invalid VNI");
+            let port = inner.port_allocator.new_port(
+                nic.ip,
+                *nic.mac,
+                ipnetwork::IpNetwork::from(nic.subnet),
+                vni,
+                inner.underlay_addr,
+            )?;
+            info!(inner.log, "created OPTE port for guest"; "port_info" => ?port);
+            ports.push(port);
+        }
+        Ok(ports)
+    }
+
     async fn setup_propolis_locked(
         &self,
         inner: &mut MutexGuard<'_, InstanceInner>,
     ) -> Result<PropolisSetup, Error> {
-        // Instantiate all guest-requested VNICs.
-        //
-        // TODO: Ideally, we'd allocate VNICs directly within the Zone.
-        // However, this seems to have been a SmartOS feature which
-        // doesn't exist in illumos.
-        //
-        // https://github.com/illumos/ipd/blob/master/ipd/0003/README.md
-        let guest_nics = inner
-            .requested_nics
-            .clone()
-            .into_iter()
-            .map(|nic| {
-                inner
-                    .vnic_allocator
-                    .new_guest(Some(nic.mac), inner.vlan)
-                    .map_err(|e| e.into())
-            })
-            .collect::<Result<Vec<_>, Error>>()?;
+        let opte_ports = self.create_opte_ports(inner)?;
 
         // Create a zone for the propolis instance, using the previously
         // configured VNICs.
@@ -485,7 +506,7 @@ impl Instance {
                 zone::Device { name: "/dev/vmmctl".to_string() },
                 zone::Device { name: "/dev/viona".to_string() },
             ],
-            guest_nics,
+            opte_ports,
         )
         .await?;
 
@@ -652,6 +673,7 @@ mod test {
     use super::*;
     use crate::illumos::dladm::PhysicalLink;
     use crate::mocks::MockNexusClient;
+    use crate::opte::OptePortAllocator;
     use crate::params::InstanceStateRequested;
     use chrono::Utc;
     use omicron_common::api::external::{
@@ -722,14 +744,18 @@ mod test {
             "Test".to_string(),
             PhysicalLink("mylink".to_string()),
         );
+        let port_allocator = OptePortAllocator::new();
         let nexus_client = MockNexusClient::default();
 
         let inst = Instance::new(
             log.clone(),
             test_uuid(),
             vnic_allocator,
+            std::net::Ipv6Addr::new(
+                0xfd00, 0x1de, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01,
+            ),
+            port_allocator,
             new_initial_instance(),
-            None,
             Arc::new(nexus_client),
         )
         .unwrap();

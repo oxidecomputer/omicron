@@ -4,16 +4,17 @@
 
 //! API for controlling multiple instances on a sled.
 
-use crate::common::vlan::VlanID;
 use crate::illumos::dladm::PhysicalLink;
 use crate::illumos::vnic::VnicAllocator;
 use crate::nexus::NexusClient;
+use crate::opte::OptePortAllocator;
 use crate::params::{
     InstanceHardware, InstanceMigrateParams, InstanceRuntimeStateRequested,
 };
 use omicron_common::api::internal::nexus::InstanceRuntimeState;
 use slog::Logger;
 use std::collections::BTreeMap;
+use std::net::Ipv6Addr;
 use std::sync::{Arc, Mutex};
 use uuid::Uuid;
 
@@ -38,8 +39,9 @@ struct InstanceManagerInternal {
     /// A mapping from a Sled Agent "Instance ID" to ("Propolis ID", [Instance]).
     instances: Mutex<BTreeMap<Uuid, (Uuid, Instance)>>,
 
-    vlan: Option<VlanID>,
     vnic_allocator: VnicAllocator,
+    underlay_addr: Ipv6Addr,
+    port_allocator: OptePortAllocator,
 }
 
 /// All instances currently running on the sled.
@@ -51,17 +53,18 @@ impl InstanceManager {
     /// Initializes a new [`InstanceManager`] object.
     pub fn new(
         log: Logger,
-        vlan: Option<VlanID>,
         nexus_client: Arc<NexusClient>,
         physical_link: PhysicalLink,
+        underlay_addr: Ipv6Addr,
     ) -> InstanceManager {
         InstanceManager {
             inner: Arc::new(InstanceManagerInternal {
                 log,
                 nexus_client,
                 instances: Mutex::new(BTreeMap::new()),
-                vlan,
                 vnic_allocator: VnicAllocator::new("Instance", physical_link),
+                underlay_addr,
+                port_allocator: OptePortAllocator::new(),
             }),
         }
     }
@@ -108,16 +111,14 @@ impl InstanceManager {
                     // Instance does not exist or one does but we're performing
                     // a intra-sled migration. Either way - create an instance
                     info!(&self.inner.log, "new instance");
-                    let instance_log = self
-                        .inner
-                        .log
-                        .new(o!("instance" => instance_id.to_string()));
+                    let instance_log = self.inner.log.new(o!());
                     let instance = Instance::new(
                         instance_log,
                         instance_id,
                         self.inner.vnic_allocator.clone(),
+                        self.inner.underlay_addr,
+                        self.inner.port_allocator.clone(),
                         initial_hardware,
-                        self.inner.vlan,
                         self.inner.nexus_client.clone(),
                     )?;
                     let instance_clone = instance.clone();
@@ -258,9 +259,11 @@ mod test {
 
         let im = InstanceManager::new(
             log,
-            None,
             nexus_client,
             PhysicalLink("mylink".to_string()),
+            std::net::Ipv6Addr::new(
+                0xfd00, 0x1de, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01,
+            ),
         );
 
         // Verify that no instances exist.
@@ -278,7 +281,7 @@ mod test {
         let ticket = Arc::new(std::sync::Mutex::new(None));
         let ticket_clone = ticket.clone();
         let instance_new_ctx = MockInstance::new_context();
-        instance_new_ctx.expect().return_once(move |_, _, _, _, _, _| {
+        instance_new_ctx.expect().return_once(move |_, _, _, _, _, _, _| {
             let mut inst = MockInstance::default();
             inst.expect_clone().return_once(move || {
                 let mut inst = MockInstance::default();
@@ -338,16 +341,18 @@ mod test {
 
         let im = InstanceManager::new(
             log,
-            None,
             nexus_client,
             PhysicalLink("mylink".to_string()),
+            std::net::Ipv6Addr::new(
+                0xfd00, 0x1de, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01,
+            ),
         );
 
         let ticket = Arc::new(std::sync::Mutex::new(None));
         let ticket_clone = ticket.clone();
         let instance_new_ctx = MockInstance::new_context();
         let mut seq = mockall::Sequence::new();
-        instance_new_ctx.expect().return_once(move |_, _, _, _, _, _| {
+        instance_new_ctx.expect().return_once(move |_, _, _, _, _, _, _| {
             let mut inst = MockInstance::default();
             // First call to ensure (start + transition).
             inst.expect_clone().times(1).in_sequence(&mut seq).return_once(

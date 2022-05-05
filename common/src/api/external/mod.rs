@@ -1170,6 +1170,15 @@ impl FromStr for IpNet {
     }
 }
 
+impl From<IpNet> for ipnetwork::IpNetwork {
+    fn from(net: IpNet) -> ipnetwork::IpNetwork {
+        match net {
+            IpNet::V4(net) => ipnetwork::IpNetwork::from(net.0),
+            IpNet::V6(net) => ipnetwork::IpNetwork::from(net.0),
+        }
+    }
+}
+
 /// A `RouteTarget` describes the possible locations that traffic matching a
 /// route destination can be sent.
 #[derive(
@@ -1665,6 +1674,62 @@ impl JsonSchema for MacAddr {
             })),
             ..Default::default()
         })
+    }
+}
+
+/// A Geneve Virtual Network Identifier
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Hash,
+    PartialOrd,
+    Ord,
+    Deserialize,
+    Serialize,
+    JsonSchema,
+)]
+pub struct Vni(u32);
+
+impl Vni {
+    const MAX_VNI: u32 = 1 << 24;
+
+    /// Create a new random VNI.
+    pub fn random() -> Self {
+        use rand::Rng;
+        Self(rand::thread_rng().gen_range(0..=Self::MAX_VNI))
+    }
+}
+
+impl From<Vni> for u32 {
+    fn from(vni: Vni) -> u32 {
+        vni.0
+    }
+}
+
+impl TryFrom<u32> for Vni {
+    type Error = Error;
+
+    fn try_from(x: u32) -> Result<Self, Error> {
+        if x <= Self::MAX_VNI {
+            Ok(Self(x))
+        } else {
+            Err(Error::internal_error(
+                format!("Invalid Geneve VNI: {}", x).as_str(),
+            ))
+        }
+    }
+}
+
+impl TryFrom<i32> for Vni {
+    type Error = Error;
+
+    fn try_from(x: i32) -> Result<Self, Error> {
+        Self::try_from(u32::try_from(x).map_err(|_| {
+            Error::internal_error(format!("Invalid Geneve VNI: {}", x).as_str())
+        })?)
     }
 }
 

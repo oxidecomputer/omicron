@@ -26,6 +26,7 @@ pub mod illumos;
 mod instance;
 mod instance_manager;
 mod nexus;
+mod opte;
 mod params;
 pub mod rack_setup;
 pub mod server;

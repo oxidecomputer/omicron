@@ -61,7 +61,7 @@ impl Server {
 
         let sa_log = log.new(o!(
             "component" => "SledAgent",
-            "server" => config.id.clone().to_string()
+            "sled_id" => config.id.clone().to_string()
         ));
         let sled_agent =
             SledAgent::new(&config, sa_log, nexus_client.clone(), addr)
