@@ -41,11 +41,8 @@ pub enum Error {
     #[error("Failed to wait for service: {0}")]
     Timeout(String),
 
-    #[error("Failure accessing data links: {0}")]
-    Datalink(#[from] crate::illumos::dladm::Error),
-
-    #[error("Error accessing zones: {0}")]
-    Zone(#[from] crate::illumos::zone::Error),
+    #[error("Failed to create VNIC: {0}")]
+    VnicCreation(#[from] crate::illumos::dladm::CreateVnicError),
 
     #[error("Failure from Propolis Client: {0}")]
     Propolis(#[from] propolis_client::Error),
@@ -63,10 +60,16 @@ pub enum Error {
     Migration(anyhow::Error),
 
     #[error(transparent)]
-    RunningZone(#[from] crate::illumos::running_zone::Error),
+    ZoneCommand(#[from] crate::illumos::running_zone::RunCommandError),
 
-    #[error("serde_json failure: {0}")]
-    SerdeJsonError(#[from] serde_json::Error),
+    #[error(transparent)]
+    ZoneBoot(#[from] crate::illumos::running_zone::BootError),
+
+    #[error(transparent)]
+    ZoneEnsureAddress(#[from] crate::illumos::running_zone::EnsureAddressError),
+
+    #[error(transparent)]
+    ZoneInstall(#[from] crate::illumos::running_zone::InstallZoneError),
 }
 
 // Issues read-only, idempotent HTTP requests at propolis until it responds with
@@ -717,9 +720,8 @@ mod test {
         let log = logger();
         let vnic_allocator = VnicAllocator::new(
             "Test".to_string(),
-            Some(PhysicalLink("mylink".to_string())),
-        )
-        .unwrap();
+            PhysicalLink("mylink".to_string()),
+        );
         let nexus_client = MockNexusClient::default();
 
         let inst = Instance::new(

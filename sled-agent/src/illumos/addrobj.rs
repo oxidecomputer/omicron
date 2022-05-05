@@ -19,28 +19,48 @@ pub struct AddrObject {
     name: String,
 }
 
+#[derive(Debug, PartialEq, Clone)]
+enum BadName {
+    Interface(String),
+    Object(String),
+}
+
+impl std::fmt::Display for BadName {
+    fn fmt(
+        &self,
+        f: &mut std::fmt::Formatter<'_>,
+    ) -> Result<(), std::fmt::Error> {
+        match self {
+            BadName::Interface(s) => write!(f, "Bad interface name: {}", s),
+            BadName::Object(s) => write!(f, "Bad object name: {}", s),
+        }
+    }
+}
+
 /// Errors which may be returned from constructing an [`AddrObject`].
 #[derive(Debug, thiserror::Error)]
-pub enum Error {
-    #[error("Failed to parse addrobj name: {0}")]
-    Parse(String),
+#[error("Failed to parse addrobj name: {name}")]
+pub struct ParseError {
+    name: BadName,
 }
 
 impl AddrObject {
-    pub fn new_control(interface: &str) -> Result<Self, Error> {
+    pub fn new_control(interface: &str) -> Result<Self, ParseError> {
         Self::new(interface, "omicron")
     }
 
-    pub fn on_same_interface(&self, name: &str) -> Result<Self, Error> {
+    pub fn on_same_interface(&self, name: &str) -> Result<Self, ParseError> {
         Self::new(&self.interface, name)
     }
 
-    pub fn new(interface: &str, name: &str) -> Result<Self, Error> {
+    pub fn new(interface: &str, name: &str) -> Result<Self, ParseError> {
         if interface.contains('/') {
-            return Err(Error::Parse(interface.to_string()));
+            return Err(ParseError {
+                name: BadName::Interface(interface.to_string()),
+            });
         }
         if name.contains('/') {
-            return Err(Error::Parse(name.to_string()));
+            return Err(ParseError { name: BadName::Object(name.to_string()) });
         }
         Ok(Self { interface: interface.to_string(), name: name.to_string() })
     }
