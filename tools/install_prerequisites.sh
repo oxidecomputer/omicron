@@ -88,6 +88,7 @@ elif [[ "${HOST_OS}" == "SunOS" ]]; then
     'pkg-config'
     'brand/omicron1/tools'
     'library/libxmlsec1'
+    'pkg:/ooce/developer/clang-120'
   )
 
   # Install/update the set of packages.
