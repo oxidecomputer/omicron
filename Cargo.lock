@@ -3909,7 +3909,7 @@ checksum = "73b4b750c782965c211b42f022f59af1fbceabdd026623714f104152f1ec149f"
 [[package]]
 name = "samael"
 version = "0.0.8"
-source = "git+https://github.com/njaremko/samael?rev=441a244120eeb5995b2e47a52dc1beafa890d2b2#441a244120eeb5995b2e47a52dc1beafa890d2b2"
+source = "git+https://github.com/njaremko/samael?branch=master#9fd1fcb99ab2e4c7f5037550680f311b48417d77"
 dependencies = [
  "base64",
  "bindgen",
