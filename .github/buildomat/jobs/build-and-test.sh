@@ -2,7 +2,7 @@
 #:
 #: name = "helios / build-and-test"
 #: variety = "basic"
-#: target = "helios"
+#: target = "helios-latest"
 #: rust_toolchain = "nightly-2022-04-27"
 #: output_rules = []
 #:
@@ -13,12 +13,6 @@ set -o xtrace
 
 cargo --version
 rustc --version
-
-banner clickhouse
-ptime -m ./tools/ci_download_clickhouse
-
-banner cockroach
-ptime -m bash ./tools/ci_download_cockroachdb
 
 #
 # Set up a custom temporary directory within whatever one we were given so that
@@ -33,6 +27,9 @@ mkdir $TEST_TMPDIR
 # suite.
 #
 export PATH="$PATH:$PWD/out/cockroachdb/bin:$PWD/out/clickhouse"
+
+banner prerequisites
+ptime -m bash ./tools/install_prerequisites.sh -y
 
 #
 # We build with:

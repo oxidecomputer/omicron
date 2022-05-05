@@ -349,7 +349,7 @@ fn generate_misc_helpers(config: &Config) -> TokenStream {
 
                 let resource_silo_id = authz_silo.id();
                 if resource_silo_id != actor_silo_id {
-                    use crate::authz::ApiResourceError;
+                    use crate::authz::ApiResource;
                     error!(
                         log,
                         "unexpected successful lookup of siloed resource \

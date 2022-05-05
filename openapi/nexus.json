@@ -633,6 +633,92 @@
         }
       }
     },
+    "/organizations/{organization_name}/policy": {
+      "get": {
+        "tags": [
+          "organizations"
+        ],
+        "summary": "Fetch the IAM policy for this Organization",
+        "operationId": "organization_get_policy",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "organization_name",
+            "description": "The organization's unique name.",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Name"
+            },
+            "style": "simple"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrganizationRolesPolicy"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "organizations"
+        ],
+        "summary": "Update the IAM policy for this Organization",
+        "operationId": "organization_put_policy",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "organization_name",
+            "description": "The organization's unique name.",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Name"
+            },
+            "style": "simple"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OrganizationRolesPolicy"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrganizationRolesPolicy"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/organizations/{organization_name}/projects": {
       "get": {
         "tags": [
@@ -5465,6 +5551,14 @@
           "items"
         ]
       },
+      "IdentityType": {
+        "description": "Describes what kind of identity is described by an id",
+        "type": "string",
+        "enum": [
+          "user_builtin",
+          "silo_user"
+        ]
+      },
       "Image": {
         "description": "Client view of project Images",
         "type": "object",
@@ -5971,6 +6065,7 @@
         ]
       },
       "Ipv4Net": {
+        "example": "192.168.1.0/24",
         "title": "An IPv4 subnet",
         "description": "An IPv4 subnet, including prefix and subnet mask",
         "type": "string",
@@ -5978,6 +6073,7 @@
         "maxLength": 18
       },
       "Ipv6Net": {
+        "example": "fd12:3456::/64",
         "title": "An IPv6 subnet",
         "description": "An IPv6 subnet, including prefix and subnet mask",
         "type": "string",
@@ -5985,6 +6081,7 @@
         "maxLength": 43
       },
       "L4PortRange": {
+        "example": "22",
         "title": "A range of IP ports",
         "description": "An inclusive-inclusive range of IP ports. The second port may be omitted to represent a single port",
         "type": "string",
@@ -6004,6 +6101,7 @@
         ]
       },
       "MacAddr": {
+        "example": "ff:ff:ff:ff:ff:ff",
         "title": "A MAC address",
         "description": "A Media Access Control address, in EUI-48 format",
         "type": "string",
@@ -6227,6 +6325,50 @@
         },
         "required": [
           "items"
+        ]
+      },
+      "OrganizationRoles": {
+        "type": "string",
+        "enum": [
+          "Admin",
+          "Collaborator"
+        ]
+      },
+      "OrganizationRolesPolicy": {
+        "description": "Client view of a [`Policy`], which describes how this resource may be accessed\n\nNote that the Policy only describes access granted explicitly for this resource.  The policies of parent resources can also cause a user to have access to this resource.",
+        "type": "object",
+        "properties": {
+          "role_assignments": {
+            "description": "Roles directly assigned on this resource",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/OrganizationRolesRoleAssignment"
+            }
+          }
+        },
+        "required": [
+          "role_assignments"
+        ]
+      },
+      "OrganizationRolesRoleAssignment": {
+        "description": "Describes the assignment of a particular role on a particular resource to a particular identity (user, group, etc.)\n\nThe resource is not part of this structure.  Rather, [`RoleAssignment`]s are put into a [`Policy`] and that Policy is applied to a particular resource.",
+        "type": "object",
+        "properties": {
+          "identity_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "identity_type": {
+            "$ref": "#/components/schemas/IdentityType"
+          },
+          "role_name": {
+            "$ref": "#/components/schemas/OrganizationRoles"
+          }
+        },
+        "required": [
+          "identity_id",
+          "identity_type",
+          "role_name"
         ]
       },
       "OrganizationUpdate": {

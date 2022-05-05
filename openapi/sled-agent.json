@@ -862,6 +862,7 @@
         ]
       },
       "MacAddr": {
+        "example": "ff:ff:ff:ff:ff:ff",
         "title": "A MAC address",
         "description": "A Media Access Control address, in EUI-48 format",
         "type": "string",

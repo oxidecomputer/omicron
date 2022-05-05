@@ -14,16 +14,14 @@ use uuid::Uuid;
 /// unauthenticated actor) for Polar
 #[derive(Clone, Debug)]
 pub struct AnyActor {
-    authenticated: bool,
-    actor_info: Option<(Uuid, Uuid)>,
+    actor: Option<authn::Actor>,
     roles: RoleSet,
 }
 
 impl AnyActor {
     pub fn new(authn: &authn::Context, roles: RoleSet) -> Self {
-        let actor = authn.actor();
-        let actor_info = actor.map(|a| (a.id, a.silo_id));
-        AnyActor { authenticated: actor.is_some(), actor_info, roles }
+        let actor = authn.actor().cloned();
+        AnyActor { actor, roles }
     }
 }
 
@@ -31,12 +29,12 @@ impl oso::PolarClass for AnyActor {
     fn get_polar_class_builder() -> oso::ClassBuilder<Self> {
         oso::Class::builder()
             .add_attribute_getter("authenticated", |a: &AnyActor| {
-                a.authenticated
+                a.actor.is_some()
             })
             .add_attribute_getter("authn_actor", |a: &AnyActor| {
-                a.actor_info.map(|(actor_id, silo_id)| AuthenticatedActor {
-                    actor_id,
-                    silo_id,
+                a.actor.map(|actor| AuthenticatedActor {
+                    actor_id: actor.actor_id(),
+                    silo_id: actor.silo_id(),
                     roles: a.roles.clone(),
                 })
             })

@@ -30,7 +30,7 @@ async fn test_multicast_bootstrap_address() {
     let address_name = "testbootstrap6";
     let addrobj = AddrObject::new(&link.0, address_name).unwrap();
     zone::Zones::ensure_has_global_zone_v6_address(
-        Some(link),
+        link,
         *address.ip(),
         address_name,
     )

@@ -49,7 +49,7 @@ zone = "0.1"
 
 [dev-dependencies]
 expectorate = "1.0.5"
-http = "0.2.5"
+http = "0.2.7"
 mockall = "0.11"
 omicron-test-utils = { path = "../test-utils" }
 openapi-lint = { git = "https://github.com/oxidecomputer/openapi-lint", branch = "main" }

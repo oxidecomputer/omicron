@@ -37,6 +37,9 @@ async fn test_roles_builtin(cptestctx: &ControlPlaneTestContext) {
         ("project.admin", "Project Administrator"),
         ("project.collaborator", "Project Collaborator"),
         ("project.viewer", "Project Viewer"),
+        ("silo.admin", "Silo Administrator"),
+        ("silo.collaborator", "Silo Collaborator"),
+        ("silo.viewer", "Silo Viewer"),
     ];
     for (actual, expected) in roles.iter().zip(expected.iter()) {
         let (expected_name, expected_description) = expected;

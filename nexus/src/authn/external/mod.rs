@@ -187,8 +187,10 @@ mod test {
         let count1 = Arc::new(AtomicU8::new(0));
         let mut expected_count1 = 0;
         let name1 = authn::SchemeName("grunt1");
-        let actor1 = authn::Actor {
-            id: "1c91bab2-4841-669f-cc32-de80da5bbf39".parse().unwrap(),
+        let actor1 = authn::Actor::UserBuiltin {
+            user_builtin_id: "1c91bab2-4841-669f-cc32-de80da5bbf39"
+                .parse()
+                .unwrap(),
             silo_id: *crate::db::fixed_data::silo::SILO_ID,
         };
         let grunt1 = Box::new(GruntScheme {
@@ -202,8 +204,10 @@ mod test {
         let count2 = Arc::new(AtomicU8::new(0));
         let mut expected_count2 = 0;
         let name2 = authn::SchemeName("grunt2");
-        let actor2 = authn::Actor {
-            id: "799684af-533a-cb66-b5ac-ab55a791d5ef".parse().unwrap(),
+        let actor2 = authn::Actor::UserBuiltin {
+            user_builtin_id: "799684af-533a-cb66-b5ac-ab55a791d5ef"
+                .parse()
+                .unwrap(),
             silo_id: *crate::db::fixed_data::silo::SILO_ID,
         };
         let grunt2 = Box::new(GruntScheme {
