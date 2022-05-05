@@ -75,9 +75,11 @@ if [[ "${HOST_OS}" == "Linux" ]]; then
     'libpq-dev'
     'pkg-config'
     'xmlsec1'
+    'libxmlsec1-dev'
     'libxmlsec1-openssl'
   )
-  confirm "Install (or update) [${packages[*]}]?" && sudo apt-get install ${packages[@]}
+  sudo apt update
+  confirm "Install (or update) [${packages[*]}]?" && sudo apt install ${packages[@]}
 elif [[ "${HOST_OS}" == "SunOS" ]]; then
   packages=(
     'pkg:/package/pkg'
