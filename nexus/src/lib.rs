@@ -19,7 +19,7 @@ mod cidata;
 pub mod config; // Public for testing
 pub mod context; // Public for documentation examples
 pub mod db; // Public for documentation examples
-mod defaults;
+pub mod defaults; // Public for testing
 pub mod external_api; // Public for testing
 pub mod internal_api; // Public for testing
 pub mod nexus; // Public for documentation examples

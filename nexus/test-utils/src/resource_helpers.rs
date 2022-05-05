@@ -147,28 +147,12 @@ pub async fn create_instance(
     project_name: &str,
     instance_name: &str,
 ) -> Instance {
-    let url = format!(
-        "/organizations/{}/projects/{}/instances",
-        organization_name, project_name
-    );
-    object_create(
+    create_instance_with_nics(
         client,
-        &url,
-        &params::InstanceCreate {
-            identity: IdentityMetadataCreateParams {
-                name: instance_name.parse().unwrap(),
-                description: format!("instance {:?}", instance_name),
-            },
-            ncpus: InstanceCpuCount(4),
-            memory: ByteCount::from_mebibytes_u32(256),
-            hostname: String::from("the_host"),
-            user_data:
-                b"#cloud-config\nsystem_info:\n  default_user:\n    name: oxide"
-                    .to_vec(),
-            network_interfaces:
-                params::InstanceNetworkInterfaceAttachment::Default,
-            disks: vec![],
-        },
+        organization_name,
+        project_name,
+        instance_name,
+        &params::InstanceNetworkInterfaceAttachment::Default,
     )
     .await
 }

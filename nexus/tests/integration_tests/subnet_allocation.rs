@@ -5,6 +5,8 @@
 //! Tests that subnet allocation will successfully allocate the entire space of a
 //! subnet and error appropriately when the space is exhausted.
 
+use dropshot::test_util::ClientTestContext;
+use dropshot::HttpErrorResponseBody;
 use http::method::Method;
 use http::StatusCode;
 use nexus_test_utils::http_testing::AuthnMode;
@@ -12,18 +14,15 @@ use nexus_test_utils::http_testing::NexusRequest;
 use nexus_test_utils::http_testing::RequestBuilder;
 use nexus_test_utils::resource_helpers::create_instance_with_nics;
 use nexus_test_utils::resource_helpers::objects_list_page_authz;
+use nexus_test_utils::resource_helpers::{create_organization, create_project};
+use nexus_test_utils::ControlPlaneTestContext;
+use nexus_test_utils_macros::nexus_test;
 use omicron_common::api::external::{
     ByteCount, IdentityMetadataCreateParams, InstanceCpuCount, Ipv4Net,
     NetworkInterface,
 };
+use omicron_nexus::defaults::NUM_INITIAL_RESERVED_IP_ADDRESSES;
 use omicron_nexus::external_api::params;
-
-use dropshot::test_util::ClientTestContext;
-use dropshot::HttpErrorResponseBody;
-
-use nexus_test_utils::resource_helpers::{create_organization, create_project};
-use nexus_test_utils::ControlPlaneTestContext;
-use nexus_test_utils_macros::nexus_test;
 
 async fn create_instance_expect_failure(
     client: &ClientTestContext,
@@ -35,6 +34,8 @@ async fn create_instance_expect_failure(
         params::InstanceNetworkInterfaceAttachment::Create(vec![
             params::NetworkInterfaceCreate {
                 identity: IdentityMetadataCreateParams {
+                    // We're using the name of the instance purposefully, to
+                    // avoid any naming conflicts on the interface.
                     name: name.parse().unwrap(),
                     description: String::from("description"),
                 },
@@ -121,15 +122,13 @@ async fn test_subnet_allocation(cptestctx: &ControlPlaneTestContext) {
         },
     ]);
 
-    // Create a shit-ton of instances, up to the size of the IP subnet.
-    //
-    // The first 5 addresses in an IP subnet are reserved, as is the broadcast
-    // address.
-    let n_initial_reserved_addresses = 5;
+    // Create enough instances to fill the subnet. There should be 58 instances
+    // total created here. The subnet is a /26, and there are 6 reserved
+    // addresses. So 2 ** (32 - 26) - 6 = 2 ** 6 - 6 = 64 - 6 = 58.
     let n_final_reserved_addresses = 1;
     let n_reserved_addresses =
-        n_initial_reserved_addresses + n_final_reserved_addresses;
-    let subnet_size = subnet.size() - n_reserved_addresses;
+        NUM_INITIAL_RESERVED_IP_ADDRESSES + n_final_reserved_addresses;
+    let subnet_size = subnet.size() as usize - n_reserved_addresses;
     for i in 0..subnet_size {
         create_instance_with_nics(
             client,
@@ -163,7 +162,7 @@ async fn test_subnet_allocation(cptestctx: &ControlPlaneTestContext) {
     network_interfaces.sort_by(|a, b| a.ip.cmp(&b.ip));
     for (iface, addr) in network_interfaces
         .iter()
-        .zip(subnet.iter().skip(n_initial_reserved_addresses as usize))
+        .zip(subnet.iter().skip(NUM_INITIAL_RESERVED_IP_ADDRESSES as usize))
     {
         assert_eq!(
             iface.ip,
