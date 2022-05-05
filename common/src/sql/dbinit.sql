@@ -90,6 +90,11 @@ CREATE TABLE omicron.public.service (
     port INT4 CHECK (port BETWEEN 0 AND 65535) NOT NULL
 );
 
+/* Add an index which lets us look up the services on a sled */
+CREATE INDEX ON omicron.public.service (
+    sled_id
+)
+
 /*
  * ZPools of Storage, attached to Sleds.
  * Typically these are backed by a single physical disk.
