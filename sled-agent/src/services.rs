@@ -324,57 +324,60 @@ impl ServiceManager {
                                 message: "Not enough addresses".to_string(),
                             }
                         })?;
-                    running_zone.run_cmd(&[
-                        crate::illumos::zone::SVCCFG,
-                        "-s",
-                        &smf_name,
-                        "setprop",
-                        &format!(
-                            "config/server_address=[{}]:{}",
-                            address, DNS_SERVER_PORT
-                        ),
-                    ])
-                    .map_err(|err| Error::ZoneCommand {
-                        intent: format!(
-                            "Setting DNS server address [{}]:{}",
-                            address, DNS_SERVER_PORT
-                        ),
-                        err,
-                    })?;
+                    running_zone
+                        .run_cmd(&[
+                            crate::illumos::zone::SVCCFG,
+                            "-s",
+                            &smf_name,
+                            "setprop",
+                            &format!(
+                                "config/server_address=[{}]:{}",
+                                address, DNS_SERVER_PORT
+                            ),
+                        ])
+                        .map_err(|err| Error::ZoneCommand {
+                            intent: format!(
+                                "Setting DNS server address [{}]:{}",
+                                address, DNS_SERVER_PORT
+                            ),
+                            err,
+                        })?;
 
-                    running_zone.run_cmd(&[
-                        crate::illumos::zone::SVCCFG,
-                        "-s",
-                        &smf_name,
-                        "setprop",
-                        &format!(
-                            "config/dns_address=[{}]:{}",
-                            address, DNS_PORT
-                        ),
-                    ])
-                    .map_err(|err| Error::ZoneCommand {
-                        intent: format!(
-                            "Setting DNS address [{}]:{}",
-                            address, DNS_SERVER_PORT
-                        ),
-                        err,
-                    })?;
+                    running_zone
+                        .run_cmd(&[
+                            crate::illumos::zone::SVCCFG,
+                            "-s",
+                            &smf_name,
+                            "setprop",
+                            &format!(
+                                "config/dns_address=[{}]:{}",
+                                address, DNS_PORT
+                            ),
+                        ])
+                        .map_err(|err| Error::ZoneCommand {
+                            intent: format!(
+                                "Setting DNS address [{}]:{}",
+                                address, DNS_SERVER_PORT
+                            ),
+                            err,
+                        })?;
 
                     // Refresh the manifest with the new properties we set,
                     // so they become "effective" properties when the service is enabled.
-                    running_zone.run_cmd(&[
-                        crate::illumos::zone::SVCCFG,
-                        "-s",
-                        &default_smf_name,
-                        "refresh",
-                    ])
-                    .map_err(|err| Error::ZoneCommand {
-                        intent: format!(
-                            "Refreshing DNS service config for {}",
-                            default_smf_name
-                        ),
-                        err,
-                    })?;
+                    running_zone
+                        .run_cmd(&[
+                            crate::illumos::zone::SVCCFG,
+                            "-s",
+                            &default_smf_name,
+                            "refresh",
+                        ])
+                        .map_err(|err| Error::ZoneCommand {
+                            intent: format!(
+                                "Refreshing DNS service config for {}",
+                                default_smf_name
+                            ),
+                            err,
+                        })?;
                 }
                 _ => {
                     info!(
