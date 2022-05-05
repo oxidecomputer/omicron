@@ -407,6 +407,7 @@ mod test {
         dladm::MockDladm, dladm::PhysicalLink, svc, zone::MockZones,
     };
     use std::os::unix::process::ExitStatusExt;
+    use uuid::Uuid;
 
     const SVC_NAME: &str = "my_svc";
     const EXPECTED_ZONE_NAME: &str = "oxz_my_svc";
@@ -458,11 +459,12 @@ mod test {
     }
 
     // Prepare to call "ensure" for a new service, then actually call "ensure".
-    async fn ensure_new_service(mgr: &ServiceManager) {
+    async fn ensure_new_service(mgr: &ServiceManager, id: Uuid) {
         let _expectations = expect_new_service();
 
         mgr.ensure(ServiceEnsureBody {
             services: vec![ServiceRequest {
+                id,
                 name: SVC_NAME.to_string(),
                 addresses: vec![],
                 gz_addresses: vec![],
@@ -474,9 +476,10 @@ mod test {
 
     // Prepare to call "ensure" for a service which already exists. We should
     // return the service without actually installing a new zone.
-    async fn ensure_existing_service(mgr: &ServiceManager) {
+    async fn ensure_existing_service(mgr: &ServiceManager, id: Uuid) {
         mgr.ensure(ServiceEnsureBody {
             services: vec![ServiceRequest {
+                id,
                 name: SVC_NAME.to_string(),
                 addresses: vec![],
                 gz_addresses: vec![],
@@ -520,7 +523,8 @@ mod test {
         .await
         .unwrap();
 
-        ensure_new_service(&mgr).await;
+        let id = Uuid::new_v4();
+        ensure_new_service(&mgr, id).await;
         drop_service_manager(mgr);
 
         logctx.cleanup_successful();
@@ -544,8 +548,9 @@ mod test {
         .await
         .unwrap();
 
-        ensure_new_service(&mgr).await;
-        ensure_existing_service(&mgr).await;
+        let id = Uuid::new_v4();
+        ensure_new_service(&mgr, id).await;
+        ensure_existing_service(&mgr, id).await;
         drop_service_manager(mgr);
 
         logctx.cleanup_successful();
@@ -570,7 +575,9 @@ mod test {
         )
         .await
         .unwrap();
-        ensure_new_service(&mgr).await;
+
+        let id = Uuid::new_v4();
+        ensure_new_service(&mgr, id).await;
         drop_service_manager(mgr);
 
         // Before we re-create the service manager - notably, using the same
@@ -607,7 +614,8 @@ mod test {
         )
         .await
         .unwrap();
-        ensure_new_service(&mgr).await;
+        let id = Uuid::new_v4();
+        ensure_new_service(&mgr, id).await;
         drop_service_manager(mgr);
 
         // Next, delete the config. This means the service we just created will

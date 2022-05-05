@@ -5,7 +5,6 @@
 //! Interfaces for working with RSS config.
 
 use crate::config::ConfigError;
-use crate::params::{DatasetEnsureBody, ServiceRequest};
 use omicron_common::address::{
     get_64_subnet, Ipv6Subnet, AZ_PREFIX, RACK_PREFIX, SLED_PREFIX,
 };
@@ -13,6 +12,7 @@ use serde::Deserialize;
 use serde::Serialize;
 use std::net::Ipv6Addr;
 use std::path::Path;
+use uuid::Uuid;
 
 /// Configuration for the "rack setup service", which is controlled during
 /// bootstrap.
@@ -29,23 +29,38 @@ pub struct SetupServiceConfig {
     pub rack_subnet: Ipv6Addr,
 
     #[serde(default, rename = "request")]
-    pub requests: Vec<SledRequest>,
+    pub requests: Vec<HardcodedSledRequest>,
+}
+
+/// Hard-coded configurations for where to place CRDB datasets.
+///
+/// Converts into a [`crate::params::DatasetEnsureBody`].
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+pub struct CockroachDataset {
+    pub zpool_uuid: Uuid,
+}
+
+/// Hard-coded configurations for where to place services
+///
+/// Converts into a [`crate::params::ServiceRequest`].
+// TODO: Should this exist? It should just be Nexus + DNS servers.
+// We could hard-code their bringup in the RSS, since we know where
+// it's coming from.
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+pub struct Service {
+    pub name: String,
 }
 
 /// A request to initialize a sled.
 #[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq)]
-pub struct SledRequest {
+pub struct HardcodedSledRequest {
     /// Datasets to be created.
     #[serde(default, rename = "dataset")]
-    pub datasets: Vec<DatasetEnsureBody>,
+    pub datasets: Vec<CockroachDataset>,
 
     /// Services to be instantiated.
     #[serde(default, rename = "service")]
-    pub services: Vec<ServiceRequest>,
-
-    /// DNS Services to be instantiated.
-    #[serde(default, rename = "dns_service")]
-    pub dns_services: Vec<ServiceRequest>,
+    pub services: Vec<Service>,
 }
 
 impl SetupServiceConfig {

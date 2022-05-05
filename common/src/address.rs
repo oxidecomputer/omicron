@@ -33,6 +33,9 @@ pub const DNS_PORT: u16 = 53;
 pub const DNS_SERVER_PORT: u16 = 5353;
 pub const SLED_AGENT_PORT: u16 = 12345;
 
+pub const COCKROACH_PORT: u16 = 32221;
+pub const CRUCIBLE_PORT: u16 = 32345;
+
 // Anycast is a mechanism in which a single IP address is shared by multiple
 // devices, and the destination is located based on routing distance.
 //
@@ -123,14 +126,16 @@ impl ReservedRackSubnet {
     }
 }
 
-const SLED_AGENT_ADDRESS_INDEX: usize = 1;
+pub const SLED_AGENT_ADDRESS_INDEX: u16 = 1;
+/// The maximum number of addresses per sled subnet reserved for RSS.
+pub const RSS_RESERVED_ADDRESSES: u16 = 10;
 
 /// Return the sled agent address for a subnet.
 ///
 /// This address will come from the first address of the [`SLED_PREFIX`] subnet.
 pub fn get_sled_address(sled_subnet: Ipv6Subnet<SLED_PREFIX>) -> SocketAddrV6 {
     let sled_agent_ip =
-        sled_subnet.net().iter().nth(SLED_AGENT_ADDRESS_INDEX).unwrap();
+        sled_subnet.net().iter().nth(SLED_AGENT_ADDRESS_INDEX.into()).unwrap();
     SocketAddrV6::new(sled_agent_ip, SLED_AGENT_PORT, 0, 0)
 }
 

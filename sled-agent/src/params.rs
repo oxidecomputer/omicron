@@ -9,7 +9,7 @@ use omicron_common::api::internal::nexus::{
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::fmt::{Debug, Display, Formatter, Result as FormatResult};
-use std::net::{Ipv6Addr, SocketAddr};
+use std::net::{Ipv6Addr, SocketAddr, SocketAddrV6};
 use uuid::Uuid;
 
 /// Used to request a Disk state change
@@ -152,7 +152,7 @@ pub struct InstanceRuntimeStateRequested {
 pub enum DatasetKind {
     CockroachDb {
         /// The addresses of all nodes within the cluster.
-        all_addresses: Vec<SocketAddr>,
+        all_addresses: Vec<SocketAddrV6>,
     },
     Crucible,
     Clickhouse,
@@ -200,12 +200,14 @@ impl std::fmt::Display for DatasetKind {
 /// instantiated when the dataset is detected.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
 pub struct DatasetEnsureBody {
+    // The UUID of the dataset, as well as the service using it directly.
+    pub id: Uuid,
     // The name (and UUID) of the Zpool which we are inserting into.
     pub zpool_uuid: Uuid,
     // The type of the filesystem.
     pub dataset_kind: DatasetKind,
     // The address on which the zone will listen for requests.
-    pub address: SocketAddr,
+    pub address: SocketAddrV6,
     // NOTE: We could insert a UUID here, if we want that to be set by the
     // caller explicitly? Currently, the lack of a UUID implies that
     // "at most one dataset type" exists within a zpool.
@@ -222,6 +224,7 @@ impl From<DatasetEnsureBody> for sled_agent_client::types::DatasetEnsureBody {
             zpool_uuid: p.zpool_uuid,
             dataset_kind: p.dataset_kind.into(),
             address: p.address.to_string(),
+            id: p.id,
         }
     }
 }
@@ -230,6 +233,8 @@ impl From<DatasetEnsureBody> for sled_agent_client::types::DatasetEnsureBody {
     Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq, Hash,
 )]
 pub struct ServiceRequest {
+    // The UUID of the service to be initialized.
+    pub id: Uuid,
     // The name of the service to be created.
     pub name: String,
     // The addresses on which the service should listen for requests.
@@ -248,6 +253,7 @@ pub struct ServiceRequest {
 impl From<ServiceRequest> for sled_agent_client::types::ServiceRequest {
     fn from(s: ServiceRequest) -> Self {
         Self {
+            id: s.id,
             name: s.name,
             addresses: s.addresses,
             gz_addresses: s.gz_addresses,

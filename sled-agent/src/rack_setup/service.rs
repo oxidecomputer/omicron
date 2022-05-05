@@ -4,14 +4,13 @@
 
 //! Rack Setup Service implementation
 
-use super::config::{SetupServiceConfig as Config, SledRequest};
+use super::config::{SetupServiceConfig as Config};
 use crate::bootstrap::{
     client as bootstrap_agent_client, config::BOOTSTRAP_AGENT_PORT,
     discovery::PeerMonitorObserver, params::SledAgentRequest,
 };
-use crate::params::ServiceRequest;
-use internal_dns_client::types::{DnsRecord, DnsKv, DnsRecordKey};
-use omicron_common::address::{get_sled_address, ReservedRackSubnet};
+use crate::params::{DatasetEnsureBody, ServiceRequest};
+use omicron_common::address::{get_sled_address, ReservedRackSubnet, RSS_RESERVED_ADDRESSES};
 use omicron_common::backoff::{
     internal_service_policy, retry_notify, BackoffError,
 };
@@ -21,7 +20,8 @@ use std::collections::{HashMap, HashSet};
 use std::net::{Ipv6Addr, SocketAddr, SocketAddrV6};
 use std::path::PathBuf;
 use thiserror::Error;
-use tokio::sync::Mutex;
+use tokio::sync::{Mutex, OnceCell};
+use uuid::Uuid;
 
 /// Describes errors which may occur while operating the setup service.
 #[derive(Error, Debug)]
@@ -55,6 +55,21 @@ pub enum SetupServiceError {
 
     #[error(transparent)]
     Dns(#[from] internal_dns_client::Error<internal_dns_client::types::Error>),
+}
+
+#[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq)]
+pub struct SledRequest {
+    /// Datasets to be created.
+    #[serde(default, rename = "dataset")]
+    pub datasets: Vec<DatasetEnsureBody>,
+
+    /// Services to be instantiated.
+    #[serde(default, rename = "service")]
+    pub services: Vec<ServiceRequest>,
+
+    /// DNS Services to be instantiated.
+    #[serde(default, rename = "dns_service")]
+    pub dns_services: Vec<ServiceRequest>,
 }
 
 // The workload / information allocated to a single sled.
@@ -129,56 +144,43 @@ enum PeerExpectation {
     CreateNewPlan(usize),
 }
 
-async fn insert_dns_record(
-    log: &Logger,
-    dns_servers: &internal_dns_client::multiclient::Updater,
-    name: &str,
-    addr: Ipv6Addr,
-) -> Result<(), SetupServiceError> {
-    let aaaa = DnsRecord::Aaaa(addr);
-    let set_record = || async {
-        dns_servers.dns_records_set(
-            &vec![
-                DnsKv {
-                    key: DnsRecordKey {
-                        name: name.into(),
-                    },
-                    records: vec![aaaa.clone()],
-                }
-            ],
-        )
-        .await
-        .map_err(BackoffError::transient)?;
-        Ok::<
-            (),
-            BackoffError<
-                internal_dns_client::Error<
-                    internal_dns_client::types::Error,
-                >,
-            >,
-        >(())
-    };
-    let log_failure = |error, _| {
-        warn!(log, "Failed to set DNS records"; "error" => ?error);
-    };
+struct AddressBumpAllocator {
+    last_addr: Ipv6Addr,
+}
 
-    retry_notify(
-        internal_service_policy(),
-        set_record,
-        log_failure,
-    ).await?;
-    Ok(())
+// TODO: Testable?
+impl AddressBumpAllocator {
+    fn new(sled_addr: Ipv6Addr) -> Self {
+        Self {
+            last_addr: sled_addr,
+        }
+    }
+
+    fn next(&mut self) -> Option<Ipv6Addr> {
+        let mut segments: [u16; 8] = self.last_addr.segments();
+        segments[7] = segments[7].checked_add(1)?;
+        if segments[7] > RSS_RESERVED_ADDRESSES {
+            return None;
+        }
+        self.last_addr = Ipv6Addr::from(segments);
+        Some(self.last_addr)
+    }
 }
 
 /// The implementation of the Rack Setup Service.
 struct ServiceInner {
     log: Logger,
     peer_monitor: Mutex<PeerMonitorObserver>,
+    dns_servers: OnceCell<internal_dns_client::multiclient::Updater>,
 }
 
 impl ServiceInner {
     fn new(log: Logger, peer_monitor: PeerMonitorObserver) -> Self {
-        ServiceInner { log, peer_monitor: Mutex::new(peer_monitor) }
+        ServiceInner {
+            log,
+            peer_monitor: Mutex::new(peer_monitor),
+            dns_servers: OnceCell::new()
+        }
     }
 
     async fn initialize_sled_agent(
@@ -282,13 +284,40 @@ impl ServiceInner {
             )
             .await?;
         }
+
+        // CRDB datasets are treated as services.
+        let crdb_datasets = datasets.iter().filter(|dataset| {
+            matches!(dataset.dataset_kind, crate::params::DatasetKind::CockroachDb { .. })
+        });
+
+        let aaaa = crdb_datasets.map(|dataset| {
+            (
+                internal_dns_client::names::AAAA::Zone(dataset.id),
+                dataset.address,
+            )
+        }).collect::<Vec<_>>();
+        let srv_key = internal_dns_client::names::SRV::Service("cockroachdb".into());
+
+        self.dns_servers
+            .get()
+            .expect("DNS servers must be initialized first")
+            .insert_dns_records(
+                &self.log,
+                aaaa,
+                srv_key
+            ).await?;
+
+
+        // TODO: add dns records for non-crdb datasets too
+        // TODO: alternatively, REMOVE THEM
+
         Ok(())
     }
 
     async fn initialize_services(
         &self,
         sled_address: SocketAddr,
-        services: &Vec<crate::params::ServiceRequest>,
+        services: &Vec<ServiceRequest>,
     ) -> Result<(), SetupServiceError> {
         let dur = std::time::Duration::from_secs(60);
         let client = reqwest::ClientBuilder::new()
@@ -378,17 +407,56 @@ impl ServiceInner {
                 // services.
                 let mut request = {
                     if idx < config.requests.len() {
-                        config.requests[idx].clone()
+
+                        let sled_subnet_index =
+                            u8::try_from(idx + 1).expect("Too many peers!");
+                        let subnet = config.sled_subnet(sled_subnet_index);
+                        let mut addr_alloc = AddressBumpAllocator::new(*get_sled_address(subnet).ip());
+
+                        let datasets = config.requests[idx].datasets.iter().map(|dataset| {
+                            let address = SocketAddrV6::new(
+                                addr_alloc.next().expect("Not enough addrs"),
+                                omicron_common::address::COCKROACH_PORT,
+                                0,
+                                0,
+                            );
+                            DatasetEnsureBody {
+                                id: Uuid::new_v4(),
+                                zpool_uuid: dataset.zpool_uuid,
+                                dataset_kind: crate::params::DatasetKind::CockroachDb {
+                                    all_addresses: vec![ address ],
+                                },
+                                address,
+                            }
+                        }).collect::<Vec<_>>();
+
+                        let services = config.requests[idx].services.iter().map(|svc| {
+                            let address  = addr_alloc.next().expect("Not enough addrs");
+                            ServiceRequest {
+                                id: Uuid::new_v4(),
+                                name: svc.name.clone(),
+                                addresses: vec![ address ],
+                                gz_addresses: vec![],
+
+                            }
+                        }).collect::<Vec<_>>();
+
+                        SledRequest {
+                            datasets,
+                            services,
+                            ..Default::default()
+                        }
                     } else {
                         SledRequest::default()
                     }
                 };
 
-                // The first enumerated addresses get assigned the additional
+                // The first enumerated sleds get assigned the additional
                 // responsibility of being internal DNS servers.
                 if idx < dns_subnets.len() {
                     let dns_subnet = &dns_subnets[idx];
                     request.dns_services.push(ServiceRequest {
+                        id: Uuid::new_v4(),
                         name: "internal-dns".to_string(),
                         addresses: vec![dns_subnet.dns_address().ip()],
                         gz_addresses: vec![dns_subnet.gz_address().ip()],
@@ -625,8 +693,10 @@ impl ServiceInner {
             config.az_subnet(),
             self.log.new(o!("client" => "DNS")),
         );
+        self.dns_servers.set(dns_servers).map_err(|_| ()).expect("Already set DNS servers");
 
         // XXX Test record insertion
+/*
         insert_dns_record(
             &self.log,
             &dns_servers,
@@ -636,7 +706,6 @@ impl ServiceInner {
 
         // XXX test record retreival
 
-/*
         let resolver = internal_dns_client::multiclient::create_resolver(config.az_subnet())
             .expect("Failed to create DNS resolver");
         let response = resolver.lookup_ip(name.to_owned() + ".").await.expect("Failed to lookup IP");
