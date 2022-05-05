@@ -3412,7 +3412,7 @@ mod test {
     // Test sled-specific IPv6 address allocation
     #[tokio::test]
     async fn test_sled_ipv6_address_allocation() {
-        use crate::db::model::STATIC_IPV6_ADDRESS_OFFSET;
+        use omicron_common::address::RSS_RESERVED_ADDRESSES as STATIC_IPV6_ADDRESS_OFFSET;
         use std::net::Ipv6Addr;
 
         let logctx = dev::test_setup_log("test_sled_ipv6_address_allocation");

@@ -263,6 +263,19 @@ table! {
 }
 
 table! {
+    service (id) {
+        id -> Uuid,
+        time_created -> Timestamptz,
+        time_modified -> Timestamptz,
+
+        sled_id -> Uuid,
+
+        ip -> Inet,
+        port -> Int4,
+    }
+}
+
+table! {
     zpool (id) {
         id -> Uuid,
         time_created -> Timestamptz,

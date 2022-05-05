@@ -247,6 +247,10 @@
           "dataset_kind": {
             "$ref": "#/components/schemas/DatasetKind"
           },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
           "zpool_uuid": {
             "type": "string",
             "format": "uuid"
@@ -255,6 +259,7 @@
         "required": [
           "address",
           "dataset_kind",
+          "id",
           "zpool_uuid"
         ]
       },
@@ -976,12 +981,17 @@
               "format": "ipv6"
             }
           },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
           "name": {
             "type": "string"
           }
         },
         "required": [
           "addresses",
+          "id",
           "name"
         ]
       },

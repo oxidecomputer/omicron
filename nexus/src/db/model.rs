@@ -11,7 +11,7 @@ use crate::db::schema::{
     console_session, dataset, disk, global_image, image, instance,
     metric_producer, network_interface, organization, oximeter, project, rack,
     region, role_assignment_builtin, role_builtin, router_route, silo,
-    silo_user, sled, snapshot, ssh_key, update_available_artifact,
+    silo_user, sled, service, snapshot, ssh_key, update_available_artifact,
     user_builtin, volume, vpc, vpc_firewall_rule, vpc_router, vpc_subnet,
     zpool,
 };
@@ -626,19 +626,11 @@ pub struct Sled {
     pub last_used_address: ipv6::Ipv6Addr,
 }
 
-// TODO-correctness: We need a small offset here, while services and
-// their addresses are still hardcoded in the mock RSS config file at
-// `./smf/sled-agent/config-rss.toml`. This avoids conflicts with those
-// addresses, but should be removed when they are entirely under the
-// control of Nexus or RSS.
-//
-// See https://github.com/oxidecomputer/omicron/issues/732 for tracking issue.
-pub(crate) const STATIC_IPV6_ADDRESS_OFFSET: u16 = 20;
 impl Sled {
     pub fn new(id: Uuid, addr: SocketAddrV6) -> Self {
         let last_used_address = {
             let mut segments = addr.ip().segments();
-            segments[7] += STATIC_IPV6_ADDRESS_OFFSET;
+            segments[7] += omicron_common::address::RSS_RESERVED_ADDRESSES;
             ipv6::Ipv6Addr::from(Ipv6Addr::from(segments))
         };
         Self {
@@ -670,6 +662,27 @@ impl DatastoreCollection<Zpool> for Sled {
     type GenerationNumberColumn = sled::dsl::rcgen;
     type CollectionTimeDeletedColumn = sled::dsl::time_deleted;
     type CollectionIdColumn = zpool::dsl::sled_id;
+}
+
+impl DatastoreCollection<Service> for Sled {
+    type CollectionId = Uuid;
+    type GenerationNumberColumn = sled::dsl::rcgen;
+    type CollectionTimeDeletedColumn = sled::dsl::time_deleted;
+    type CollectionIdColumn = service::dsl::sled_id;
+}
+
+#[derive(Queryable, Insertable, Debug, Clone, Selectable, Asset)]
+#[diesel(table_name = service)]
+pub struct Service {
+    #[diesel(embed)]
+    identity: ServiceIdentity,
+
+    // Sled to which this Zpool belongs.
+    pub sled_id: Uuid,
+
+    // ServiceAddress (Sled Agent).
+    pub ip: ipv6::Ipv6Addr,
+    pub port: i32,
 }
 
 /// Database representation of a Pool.

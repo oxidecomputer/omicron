@@ -73,6 +73,24 @@ CREATE TABLE omicron.public.sled (
 );
 
 /*
+ * Services
+ */
+
+CREATE TABLE omicron.public.service (
+    /* Identity metadata (asset) */
+    id UUID PRIMARY KEY,
+    time_created TIMESTAMPTZ NOT NULL,
+    time_modified TIMESTAMPTZ NOT NULL,
+
+    /* FK into the Sled table */
+    sled_id UUID NOT NULL,
+
+    /* The IP address and bound port of the service. */
+    ip INET NOT NULL,
+    port INT4 NOT NULL,
+);
+
+/*
  * ZPools of Storage, attached to Sleds.
  * Typically these are backed by a single physical disk.
  */
