@@ -17,31 +17,79 @@ use crate::illumos::zone::MockZones as Zones;
 #[cfg(not(test))]
 use crate::illumos::zone::Zones;
 
+/// Errors returned from [`RunningZone::run_cmd`].
 #[derive(thiserror::Error, Debug)]
-pub enum Error {
-    #[error("Zone not found")]
-    NotFound,
+#[error("Error running command in zone '{zone}': {err}")]
+pub struct RunCommandError {
+    zone: String,
+    #[source]
+    err: crate::illumos::ExecutionError,
+}
 
-    #[error("Zone is not running; it is in the {0:?} state instead")]
-    NotRunning(zone::State),
+/// Errors returned from [`RunningZone::boot`].
+#[derive(thiserror::Error, Debug)]
+pub enum BootError {
+    #[error("Error booting zone: {0}")]
+    Booting(#[from] crate::illumos::zone::AdmError),
 
-    #[error("Execution error: {0}")]
-    Execution(#[from] crate::illumos::ExecutionError),
+    #[error("Zone booted, but timed out waiting for {service} in {zone}")]
+    Timeout { service: String, zone: String },
+}
 
-    #[error("Failed to parse output: {0}")]
-    Parse(#[from] std::string::FromUtf8Error),
-
-    #[error("Zone operation failed: {0}")]
-    Operation(#[from] crate::illumos::zone::Error),
-
-    #[error("Zone error accessing datalink: {0}")]
-    Datalink(#[from] crate::illumos::dladm::Error),
+/// Errors returned from [`RunningZone::ensure_address`].
+#[derive(thiserror::Error, Debug)]
+pub enum EnsureAddressError {
+    #[error("Failed ensuring address {request:?} in {zone}: could not construct addrobj name: {err}")]
+    AddrObject {
+        request: AddressRequest,
+        zone: String,
+        err: crate::illumos::addrobj::ParseError,
+    },
 
     #[error(transparent)]
-    AddrObject(#[from] crate::illumos::addrobj::Error),
+    EnsureAddressError(#[from] crate::illumos::zone::EnsureAddressError),
+}
 
-    #[error("Timeout waiting for a service: {0}")]
-    Timeout(String),
+/// Erros returned from [`RunningZone::get_zone`].
+#[derive(thiserror::Error, Debug)]
+pub enum GetZoneError {
+    #[error("While looking up zones with prefix '{prefix}', could not get zones: {err}")]
+    GetZones {
+        prefix: String,
+        #[source]
+        err: crate::illumos::zone::AdmError,
+    },
+
+    #[error("Zone with prefix '{prefix}' not found")]
+    NotFound { prefix: String },
+
+    #[error("Cannot get zone '{name}': it is in the {state:?} state instead of running")]
+    NotRunning { name: String, state: zone::State },
+
+    #[error(
+        "Cannot get zone '{name}': Failed to acquire control interface {err}"
+    )]
+    ControlInterface {
+        name: String,
+        #[source]
+        err: crate::illumos::zone::GetControlInterfaceError,
+    },
+
+    #[error("Cannot get zone '{name}': Failed to create addrobj: {err}")]
+    AddrObject {
+        name: String,
+        #[source]
+        err: crate::illumos::addrobj::ParseError,
+    },
+
+    #[error(
+        "Cannot get zone '{name}': Failed to ensure address exists: {err}"
+    )]
+    EnsureAddress {
+        name: String,
+        #[source]
+        err: crate::illumos::zone::EnsureAddressError,
+    },
 }
 
 /// Represents a running zone.
@@ -55,7 +103,7 @@ impl RunningZone {
     }
 
     /// Runs a command within the Zone, return the output.
-    pub fn run_cmd<I, S>(&self, args: I) -> Result<String, Error>
+    pub fn run_cmd<I, S>(&self, args: I) -> Result<String, RunCommandError>
     where
         I: IntoIterator<Item = S>,
         S: AsRef<std::ffi::OsStr>,
@@ -71,15 +119,16 @@ impl RunningZone {
             .chain(suffix.iter().map(|a| a.as_ref()));
 
         let cmd = command.args(full_args);
-        let output = crate::illumos::execute(cmd)?;
-        let stdout = String::from_utf8(output.stdout)?;
-        Ok(stdout)
+        let output = crate::illumos::execute(cmd)
+            .map_err(|err| RunCommandError { zone: name.to_string(), err })?;
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        Ok(stdout.to_string())
     }
 
     /// Boots a new zone.
     ///
     /// Note that the zone must already be configured to be booted.
-    pub async fn boot(zone: InstalledZone) -> Result<Self, Error> {
+    pub async fn boot(zone: InstalledZone) -> Result<Self, BootError> {
         // Boot the zone.
         info!(zone.log, "Zone booting");
 
@@ -88,9 +137,12 @@ impl RunningZone {
         // Wait for the network services to come online, so future
         // requests to create addresses can operate immediately.
         let fmri = "svc:/milestone/network:default";
-        wait_for_service(Some(&zone.name), fmri)
-            .await
-            .map_err(|_| Error::Timeout(fmri.to_string()))?;
+        wait_for_service(Some(&zone.name), fmri).await.map_err(|_| {
+            BootError::Timeout {
+                service: fmri.to_string(),
+                zone: zone.name.to_string(),
+            }
+        })?;
 
         Ok(RunningZone { inner: zone })
     }
@@ -98,7 +150,7 @@ impl RunningZone {
     pub async fn ensure_address(
         &self,
         addrtype: AddressRequest,
-    ) -> Result<IpNetwork, Error> {
+    ) -> Result<IpNetwork, EnsureAddressError> {
         info!(self.inner.log, "Adding address: {:?}", addrtype);
         let name = match addrtype {
             AddressRequest::Dhcp => "omicron",
@@ -107,7 +159,12 @@ impl RunningZone {
                 std::net::IpAddr::V6(_) => "omicron6",
             },
         };
-        let addrobj = AddrObject::new(self.inner.control_vnic.name(), name)?;
+        let addrobj = AddrObject::new(self.inner.control_vnic.name(), name)
+            .map_err(|err| EnsureAddressError::AddrObject {
+                request: addrtype,
+                zone: self.inner.name.clone(),
+                err,
+            })?;
         let network =
             Zones::ensure_address(Some(&self.inner.name), &addrobj, addrtype)?;
         Ok(network)
@@ -126,20 +183,42 @@ impl RunningZone {
         log: &Logger,
         zone_prefix: &str,
         addrtype: AddressRequest,
-    ) -> Result<Self, Error> {
-        let zone_info = Zones::get()?
+    ) -> Result<Self, GetZoneError> {
+        let zone_info = Zones::get()
+            .map_err(|err| GetZoneError::GetZones {
+                prefix: zone_prefix.to_string(),
+                err,
+            })?
             .into_iter()
             .find(|zone_info| zone_info.name().starts_with(&zone_prefix))
-            .ok_or_else(|| Error::NotFound)?;
+            .ok_or_else(|| GetZoneError::NotFound {
+                prefix: zone_prefix.to_string(),
+            })?;
 
         if zone_info.state() != zone::State::Running {
-            return Err(Error::NotRunning(zone_info.state()));
+            return Err(GetZoneError::NotRunning {
+                name: zone_info.name().to_string(),
+                state: zone_info.state(),
+            });
         }
 
         let zone_name = zone_info.name();
-        let vnic_name = Zones::get_control_interface(zone_name)?;
-        let addrobj = AddrObject::new_control(&vnic_name)?;
-        Zones::ensure_address(Some(zone_name), &addrobj, addrtype)?;
+        let vnic_name =
+            Zones::get_control_interface(zone_name).map_err(|err| {
+                GetZoneError::ControlInterface {
+                    name: zone_name.to_string(),
+                    err,
+                }
+            })?;
+        let addrobj = AddrObject::new_control(&vnic_name).map_err(|err| {
+            GetZoneError::AddrObject { name: zone_name.to_string(), err }
+        })?;
+        Zones::ensure_address(Some(zone_name), &addrobj, addrtype).map_err(
+            |err| GetZoneError::EnsureAddress {
+                name: zone_name.to_string(),
+                err,
+            },
+        )?;
 
         Ok(Self {
             inner: InstalledZone {
@@ -170,6 +249,25 @@ impl Drop for RunningZone {
             }
         }
     }
+}
+
+/// Errors returned from [`InstalledZone::install`].
+#[derive(thiserror::Error, Debug)]
+pub enum InstallZoneError {
+    #[error("Cannot create '{service}': failed to create control VNIC: {err}")]
+    CreateVnic {
+        service: String,
+        #[source]
+        err: crate::illumos::dladm::CreateVnicError,
+    },
+
+    #[error("Failed to install zone '{zone}' from '{image_path}': {err}")]
+    InstallZone {
+        zone: String,
+        image_path: PathBuf,
+        #[source]
+        err: crate::illumos::zone::AdmError,
+    },
 }
 
 pub struct InstalledZone {
@@ -215,8 +313,13 @@ impl InstalledZone {
         datasets: &[zone::Dataset],
         devices: &[zone::Device],
         vnics: Vec<Vnic>,
-    ) -> Result<InstalledZone, Error> {
-        let control_vnic = vnic_allocator.new_control(None)?;
+    ) -> Result<InstalledZone, InstallZoneError> {
+        let control_vnic = vnic_allocator.new_control(None).map_err(|err| {
+            InstallZoneError::CreateVnic {
+                service: service_name.to_string(),
+                err,
+            }
+        })?;
 
         let zone_name = Self::get_zone_name(service_name, unique_name);
         let zone_image_path =
@@ -235,7 +338,12 @@ impl InstalledZone {
             &datasets,
             &devices,
             vnic_names,
-        )?;
+        )
+        .map_err(|err| InstallZoneError::InstallZone {
+            zone: zone_name.to_string(),
+            image_path: zone_image_path.clone(),
+            err,
+        })?;
 
         Ok(InstalledZone {
             log: log.new(o!("zone" => zone_name.clone())),

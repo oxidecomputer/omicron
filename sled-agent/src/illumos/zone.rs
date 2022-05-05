@@ -4,12 +4,13 @@
 
 //! API for interacting with Zones running Propolis.
 
+use anyhow::anyhow;
 use ipnetwork::IpNetwork;
 use slog::Logger;
 use std::net::{IpAddr, Ipv6Addr};
 
 use crate::illumos::addrobj::AddrObject;
-use crate::illumos::dladm::{Dladm, PhysicalLink, VNIC_PREFIX_CONTROL};
+use crate::illumos::dladm::{PhysicalLink, VNIC_PREFIX_CONTROL};
 use crate::illumos::zfs::ZONE_ZFS_DATASET_MOUNTPOINT;
 use crate::illumos::{execute, PFEXEC};
 
@@ -24,50 +25,86 @@ pub const ZONE_PREFIX: &str = "oxz_";
 pub const PROPOLIS_ZONE_PREFIX: &str = "oxz_propolis-server_";
 
 #[derive(thiserror::Error, Debug)]
-pub enum Error {
-    // TODO: These could be grouped into an "operation" error with an enum
-    // variant, if we want...
-    #[error("Cannot halt zone: {0}")]
-    Halt(zone::ZoneError),
-
-    #[error("Cannot uninstall zone: {0}")]
-    Uninstall(zone::ZoneError),
-
-    #[error("Cannot delete zone: {0}")]
-    Delete(zone::ZoneError),
-
-    #[error("Cannot install zone: {0}")]
-    Install(zone::ZoneError),
-
-    #[error("Cannot configure zone: {0}")]
-    Configure(zone::ZoneError),
-
-    #[error("Cannot clone zone: {0}")]
-    Clone(zone::ZoneError),
-
-    #[error("Cannot boot zone: {0}")]
-    Boot(zone::ZoneError),
-
-    #[error("Cannot list zones: {0}")]
-    List(zone::ZoneError),
-
+enum Error {
     #[error("Zone execution error: {0}")]
     Execution(#[from] crate::illumos::ExecutionError),
 
-    #[error("Failed to parse output: {0}")]
-    Parse(#[from] std::string::FromUtf8Error),
-
     #[error(transparent)]
-    Dladm(#[from] crate::illumos::dladm::Error),
+    AddrObject(#[from] crate::illumos::addrobj::ParseError),
 
-    #[error(transparent)]
-    AddrObject(#[from] crate::illumos::addrobj::Error),
+    #[error("Address not found: {addrobj}")]
+    AddressNotFound { addrobj: AddrObject },
+}
 
-    #[error("Error accessing filesystem: {0}")]
-    Filesystem(std::io::Error),
+/// Operations issued via [`zone::Adm`].
+#[derive(Debug, Clone)]
+pub enum Operation {
+    Boot,
+    Configure,
+    Delete,
+    Halt,
+    Install,
+    List,
+    Uninstall,
+}
 
-    #[error("Value not found")]
-    NotFound,
+/// Errors from issuing [`zone::Adm`] commands.
+#[derive(thiserror::Error, Debug)]
+#[error("Failed to execute zoneadm command '{op:?}' for zone '{zone}': {err}")]
+pub struct AdmError {
+    op: Operation,
+    zone: String,
+    #[source]
+    err: zone::ZoneError,
+}
+
+/// Errors which may be encountered when deleting addresses.
+#[derive(thiserror::Error, Debug)]
+#[error("Failed to delete address '{addrobj}' in zone '{zone}': {err}")]
+pub struct DeleteAddressError {
+    zone: String,
+    addrobj: AddrObject,
+    #[source]
+    err: crate::illumos::ExecutionError,
+}
+
+/// Errors from [`Zones::get_control_interface`].
+/// Error which may be returned accessing the control interface of a zone.
+#[derive(thiserror::Error, Debug)]
+pub enum GetControlInterfaceError {
+    #[error("Failed to query zone '{zone}' for control interface: {err}")]
+    Execution {
+        zone: String,
+        #[source]
+        err: crate::illumos::ExecutionError,
+    },
+
+    #[error("VNIC starting with 'oxControl' not found in {zone}")]
+    NotFound { zone: String },
+}
+
+/// Errors which may be encountered ensuring addresses.
+#[derive(thiserror::Error, Debug)]
+#[error(
+    "Failed to create address {request:?} with name {name} in {zone}: {err}"
+)]
+pub struct EnsureAddressError {
+    zone: String,
+    request: AddressRequest,
+    name: AddrObject,
+    #[source]
+    err: anyhow::Error,
+}
+
+/// Errors from [`Zones::ensure_has_global_zone_v6_address`].
+#[derive(thiserror::Error, Debug)]
+#[error("Failed to create address {address} with name {name} in the GZ on {link:?}: {err}")]
+pub struct EnsureGzAddressError {
+    address: Ipv6Addr,
+    link: PhysicalLink,
+    name: String,
+    #[source]
+    err: anyhow::Error,
 }
 
 /// Describes the type of addresses which may be requested from a zone.
@@ -101,7 +138,9 @@ impl Zones {
     ///
     /// Returns the state the zone was in before it was removed, or None if the
     /// zone did not exist.
-    pub fn halt_and_remove(name: &str) -> Result<Option<zone::State>, Error> {
+    pub fn halt_and_remove(
+        name: &str,
+    ) -> Result<Option<zone::State>, AdmError> {
         match Self::find(name)? {
             None => Ok(None),
             Some(zone) => {
@@ -117,17 +156,29 @@ impl Zones {
                 };
 
                 if halt {
-                    zone::Adm::new(name).halt().map_err(Error::Halt)?;
+                    zone::Adm::new(name).halt().map_err(|err| AdmError {
+                        op: Operation::Halt,
+                        zone: name.to_string(),
+                        err,
+                    })?;
                 }
                 if uninstall {
-                    zone::Adm::new(name)
-                        .uninstall(/* force= */ true)
-                        .map_err(Error::Uninstall)?;
+                    zone::Adm::new(name).uninstall(/* force= */ true).map_err(
+                        |err| AdmError {
+                            op: Operation::Uninstall,
+                            zone: name.to_string(),
+                            err,
+                        },
+                    )?;
                 }
                 zone::Config::new(name)
                     .delete(/* force= */ true)
                     .run()
-                    .map_err(Error::Delete)?;
+                    .map_err(|err| AdmError {
+                        op: Operation::Delete,
+                        zone: name.to_string(),
+                        err,
+                    })?;
                 Ok(Some(state))
             }
         }
@@ -137,7 +188,7 @@ impl Zones {
     pub fn halt_and_remove_logged(
         log: &Logger,
         name: &str,
-    ) -> Result<(), Error> {
+    ) -> Result<(), AdmError> {
         if let Some(state) = Self::halt_and_remove(name)? {
             info!(
                 log,
@@ -154,7 +205,7 @@ impl Zones {
         datasets: &[zone::Dataset],
         devices: &[zone::Device],
         vnics: Vec<String>,
-    ) -> Result<(), Error> {
+    ) -> Result<(), AdmError> {
         if let Some(zone) = Self::find(zone_name)? {
             info!(
                 log,
@@ -204,28 +255,44 @@ impl Zones {
                 ..Default::default()
             });
         }
-        cfg.run().map_err(Error::Configure)?;
+        cfg.run().map_err(|err| AdmError {
+            op: Operation::Configure,
+            zone: zone_name.to_string(),
+            err,
+        })?;
 
         info!(log, "Installing Omicron zone: {}", zone_name);
 
-        zone::Adm::new(zone_name)
-            .install(&[zone_image.as_ref()])
-            .map_err(Error::Install)?;
+        zone::Adm::new(zone_name).install(&[zone_image.as_ref()]).map_err(
+            |err| AdmError {
+                op: Operation::Install,
+                zone: zone_name.to_string(),
+                err,
+            },
+        )?;
         Ok(())
     }
 
     /// Boots a zone (named `name`).
-    pub fn boot(name: &str) -> Result<(), Error> {
-        zone::Adm::new(name).boot().map_err(Error::Boot)?;
+    pub fn boot(name: &str) -> Result<(), AdmError> {
+        zone::Adm::new(name).boot().map_err(|err| AdmError {
+            op: Operation::Boot,
+            zone: name.to_string(),
+            err,
+        })?;
         Ok(())
     }
 
     /// Returns all zones that may be managed by the Sled Agent.
     ///
     /// These zones must have names starting with [`ZONE_PREFIX`].
-    pub fn get() -> Result<Vec<zone::Zone>, Error> {
+    pub fn get() -> Result<Vec<zone::Zone>, AdmError> {
         Ok(zone::Adm::list()
-            .map_err(Error::List)?
+            .map_err(|err| AdmError {
+                op: Operation::List,
+                zone: "<all>".to_string(),
+                err,
+            })?
             .into_iter()
             .filter(|z| z.name().starts_with(ZONE_PREFIX))
             .collect())
@@ -235,12 +302,14 @@ impl Zones {
     ///
     /// Can only return zones that start with [`ZONE_PREFIX`], as they
     /// are managed by the Sled Agent.
-    pub fn find(name: &str) -> Result<Option<zone::Zone>, Error> {
+    pub fn find(name: &str) -> Result<Option<zone::Zone>, AdmError> {
         Ok(Self::get()?.into_iter().find(|zone| zone.name() == name))
     }
 
     /// Returns the name of the VNIC used to communicate with the control plane.
-    pub fn get_control_interface(zone: &str) -> Result<String, Error> {
+    pub fn get_control_interface(
+        zone: &str,
+    ) -> Result<String, GetControlInterfaceError> {
         let mut command = std::process::Command::new(PFEXEC);
         let cmd = command.args(&[
             ZLOGIN,
@@ -251,9 +320,10 @@ impl Zones {
             "-o",
             "LINK",
         ]);
-        let output = execute(cmd)?;
-        String::from_utf8(output.stdout)
-            .map_err(Error::Parse)?
+        let output = execute(cmd).map_err(|err| {
+            GetControlInterfaceError::Execution { zone: zone.to_string(), err }
+        })?;
+        String::from_utf8_lossy(&output.stdout)
             .lines()
             .find_map(|name| {
                 if name.starts_with(VNIC_PREFIX_CONTROL) {
@@ -262,7 +332,9 @@ impl Zones {
                     None
                 }
             })
-            .ok_or(Error::NotFound)
+            .ok_or(GetControlInterfaceError::NotFound {
+                zone: zone.to_string(),
+            })
     }
 
     /// Ensures that an IP address on an interface matches the requested value.
@@ -277,23 +349,36 @@ impl Zones {
         zone: Option<&'a str>,
         addrobj: &AddrObject,
         addrtype: AddressRequest,
-    ) -> Result<IpNetwork, Error> {
-        match Self::get_address(zone, addrobj) {
-            Ok(addr) => {
-                if let AddressRequest::Static(expected_addr) = addrtype {
-                    // If the address is static, we need to validate that it
-                    // matches the value we asked for.
-                    if addr != expected_addr {
-                        // If the address doesn't match, try removing the old
-                        // value before using the new one.
-                        Self::delete_address(zone, addrobj)?;
-                        return Self::create_address(zone, addrobj, addrtype);
+    ) -> Result<IpNetwork, EnsureAddressError> {
+        |zone, addrobj, addrtype| -> Result<IpNetwork, anyhow::Error> {
+            match Self::get_address(zone, addrobj) {
+                Ok(addr) => {
+                    if let AddressRequest::Static(expected_addr) = addrtype {
+                        // If the address is static, we need to validate that it
+                        // matches the value we asked for.
+                        if addr != expected_addr {
+                            // If the address doesn't match, try removing the old
+                            // value before using the new one.
+                            Self::delete_address(zone, addrobj)
+                                .map_err(|e| anyhow!(e))?;
+                            return Self::create_address(
+                                zone, addrobj, addrtype,
+                            )
+                            .map_err(|e| anyhow!(e));
+                        }
                     }
+                    Ok(addr)
                 }
-                Ok(addr)
+                Err(_) => Self::create_address(zone, addrobj, addrtype)
+                    .map_err(|e| anyhow!(e)),
             }
-            Err(_) => Self::create_address(zone, addrobj, addrtype),
-        }
+        }(zone, addrobj, addrtype)
+        .map_err(|err| EnsureAddressError {
+            zone: zone.unwrap_or("global").to_string(),
+            request: addrtype,
+            name: addrobj.clone(),
+            err,
+        })
     }
 
     /// Gets the IP address of an interface.
@@ -317,10 +402,10 @@ impl Zones {
 
         let cmd = command.args(args);
         let output = execute(cmd)?;
-        String::from_utf8(output.stdout)?
+        String::from_utf8_lossy(&output.stdout)
             .lines()
             .find_map(|s| s.parse().ok())
-            .ok_or(Error::NotFound)
+            .ok_or(Error::AddressNotFound { addrobj: addrobj.clone() })
     }
 
     /// Returns Ok(()) if `addrobj` has a corresponding link-local IPv6 address.
@@ -344,13 +429,13 @@ impl Zones {
         let args = prefix.iter().chain(show_addr_args);
         let cmd = command.args(args);
         let output = execute(cmd)?;
-        if let Some(_) = String::from_utf8(output.stdout)?
+        if let Some(_) = String::from_utf8_lossy(&output.stdout)
             .lines()
             .find(|s| s.trim() == "addrconf")
         {
             return Ok(());
         }
-        Err(Error::NotFound)
+        Err(Error::AddressNotFound { addrobj: addrobj.clone() })
     }
 
     // Attempts to create the requested address.
@@ -361,7 +446,7 @@ impl Zones {
         zone: Option<&'a str>,
         addrobj: &AddrObject,
         addrtype: AddressRequest,
-    ) -> Result<(), Error> {
+    ) -> Result<(), crate::illumos::ExecutionError> {
         let mut command = std::process::Command::new(PFEXEC);
         let mut args = vec![];
         if let Some(zone) = zone {
@@ -396,7 +481,7 @@ impl Zones {
     pub fn delete_address<'a>(
         zone: Option<&'a str>,
         addrobj: &AddrObject,
-    ) -> Result<(), Error> {
+    ) -> Result<(), DeleteAddressError> {
         let mut command = std::process::Command::new(PFEXEC);
         let mut args = vec![];
         if let Some(zone) = zone {
@@ -409,7 +494,11 @@ impl Zones {
         args.push(addrobj.to_string());
 
         let cmd = command.args(args);
-        execute(cmd)?;
+        execute(cmd).map_err(|err| DeleteAddressError {
+            zone: zone.unwrap_or("global").to_string(),
+            addrobj: addrobj.clone(),
+            err,
+        })?;
         Ok(())
     }
 
@@ -423,12 +512,8 @@ impl Zones {
     fn ensure_has_link_local_v6_address<'a>(
         zone: Option<&'a str>,
         addrobj: &AddrObject,
-    ) -> Result<(), Error> {
-        let link_local_addrobj = addrobj.on_same_interface("linklocal")?;
-
-        if let Ok(()) =
-            Self::has_link_local_v6_address(zone, &link_local_addrobj)
-        {
+    ) -> Result<(), crate::illumos::ExecutionError> {
+        if let Ok(()) = Self::has_link_local_v6_address(zone, &addrobj) {
             return Ok(());
         }
 
@@ -444,7 +529,7 @@ impl Zones {
             "-t",
             "-T",
             "addrconf",
-            &link_local_addrobj.to_string(),
+            &addrobj.to_string(),
         ];
         let args = prefix.iter().chain(create_addr_args);
 
@@ -457,33 +542,46 @@ impl Zones {
     // should remove this function when Sled Agents are provided IPv6 addresses
     // from RSS.
     pub fn ensure_has_global_zone_v6_address(
-        physical_link: Option<PhysicalLink>,
+        link: PhysicalLink,
         address: Ipv6Addr,
         name: &str,
-    ) -> Result<(), Error> {
-        // Ensure that addrconf has been set up in the Global Zone.
-        let link = if let Some(link) = physical_link {
-            link
-        } else {
-            Dladm::find_physical()?
-        };
-        let gz_link_local_addrobj = AddrObject::new(&link.0, "linklocal")?;
-        Self::ensure_has_link_local_v6_address(None, &gz_link_local_addrobj)?;
+    ) -> Result<(), EnsureGzAddressError> {
+        // Call the guts of this function within a closure to make it easier
+        // to wrap the error with appropriate context.
+        |link: PhysicalLink, address, name| -> Result<(), anyhow::Error> {
+            let gz_link_local_addrobj = AddrObject::new(&link.0, "linklocal")
+                .map_err(|err| anyhow!(err))?;
+            Self::ensure_has_link_local_v6_address(
+                None,
+                &gz_link_local_addrobj,
+            )
+            .map_err(|err| anyhow!(err))?;
 
-        // Ensure that a static IPv6 address has been allocated
-        // to the Global Zone. Without this, we don't have a way
-        // to route to IP addresses that we want to create in
-        // the non-GZ. Note that we use a `/64` prefix, as all addresses
-        // allocated for services on this sled itself are within the underlay
-        // prefix. Anything else must be routed through Sidecar.
-        Self::ensure_address(
-            None,
-            &gz_link_local_addrobj.on_same_interface(name)?,
-            AddressRequest::new_static(
-                IpAddr::V6(address),
-                Some(omicron_common::address::SLED_PREFIX),
-            ),
-        )?;
+            // Ensure that a static IPv6 address has been allocated
+            // to the Global Zone. Without this, we don't have a way
+            // to route to IP addresses that we want to create in
+            // the non-GZ. Note that we use a `/64` prefix, as all addresses
+            // allocated for services on this sled itself are within the underlay
+            // prefix. Anything else must be routed through Sidecar.
+            Self::ensure_address(
+                None,
+                &gz_link_local_addrobj
+                    .on_same_interface(name)
+                    .map_err(|err| anyhow!(err))?,
+                AddressRequest::new_static(
+                    IpAddr::V6(address),
+                    Some(omicron_common::address::SLED_PREFIX),
+                ),
+            )
+            .map_err(|err| anyhow!(err))?;
+            Ok(())
+        }(link.clone(), address, name)
+        .map_err(|err| EnsureGzAddressError {
+            address,
+            link,
+            name: name.to_string(),
+            err,
+        })?;
         Ok(())
     }
 
@@ -506,9 +604,11 @@ impl Zones {
                     if addr.is_ipv6() {
                         // Finally, actually ensure that the v6 address we want
                         // exists within the zone.
+                        let link_local_addrobj =
+                            addrobj.on_same_interface("linklocal")?;
                         Self::ensure_has_link_local_v6_address(
                             Some(zone),
-                            addrobj,
+                            &link_local_addrobj,
                         )?;
                     }
                 }

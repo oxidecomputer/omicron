@@ -13,7 +13,7 @@ use super::trust_quorum::{
 use super::views::{ShareResponse, SledAgentResponse};
 use crate::config::Config as SledConfig;
 use crate::illumos::dladm::{self, Dladm, PhysicalLink};
-use crate::illumos::zone::{self, Zones};
+use crate::illumos::zone::Zones;
 use crate::rack_setup::service::Service as RackSetupService;
 use crate::server::Server as SledServer;
 use omicron_common::address::get_sled_address;
@@ -32,26 +32,24 @@ use tokio::sync::Mutex;
 /// Describes errors which may occur while operating the bootstrap service.
 #[derive(Error, Debug)]
 pub enum BootstrapError {
-    #[error("Error accessing filesystem: {0}")]
-    Io(#[from] std::io::Error),
-
-    #[error("Error configuring SMF: {0}")]
-    SmfConfig(#[from] smf::ConfigError),
-
-    #[error("Error modifying SMF service: {0}")]
-    SmfAdm(#[from] smf::AdmError),
+    #[error("IO error: {message}: {err}")]
+    Io {
+        message: String,
+        #[source]
+        err: std::io::Error,
+    },
 
     #[error("Error starting sled agent: {0}")]
     SledError(String),
 
-    #[error(transparent)]
-    Toml(#[from] toml::de::Error),
+    #[error("Error deserializing toml from {path}: {err}")]
+    Toml { path: PathBuf, err: toml::de::Error },
 
     #[error(transparent)]
     TrustQuorum(#[from] TrustQuorumError),
 
-    #[error(transparent)]
-    Zone(#[from] zone::Error),
+    #[error("Failed to initialize bootstrap address: {err}")]
+    BootstrapAddress { err: crate::illumos::zone::EnsureGzAddressError },
 }
 
 impl From<BootstrapError> for ExternalError {
@@ -71,11 +69,11 @@ fn read_key_share() -> Result<Option<ShareDistribution>, BootstrapError> {
 
     match ShareDistribution::read(&key_share_dir) {
         Ok(share) => Ok(Some(share)),
-        Err(TrustQuorumError::Io(err)) => {
+        Err(TrustQuorumError::Io { message, err }) => {
             if err.kind() == io::ErrorKind::NotFound {
                 Ok(None)
             } else {
-                Err(BootstrapError::Io(err))
+                Err(BootstrapError::Io { message, err })
             }
         }
         Err(e) => Err(e.into()),
@@ -121,7 +119,7 @@ fn mac_to_socket_addr(mac: MacAddr) -> SocketAddrV6 {
 // could be randomly generated when it no longer needs to be durable.
 pub fn bootstrap_address(
     link: PhysicalLink,
-) -> Result<SocketAddrV6, dladm::Error> {
+) -> Result<SocketAddrV6, dladm::GetMacError> {
     let mac = Dladm::get_mac(link)?;
     Ok(mac_to_socket_addr(mac))
 }
@@ -132,13 +130,31 @@ impl Agent {
         sled_config: SledConfig,
         address: Ipv6Addr,
     ) -> Result<Self, BootstrapError> {
+        let data_link = if let Some(link) = sled_config.data_link.clone() {
+            link
+        } else {
+            Dladm::find_physical().map_err(|err| {
+                BootstrapError::SledError(format!(
+                    "Can't access physical link, and none in config: {}",
+                    err
+                ))
+            })?
+        };
+
         Zones::ensure_has_global_zone_v6_address(
-            sled_config.data_link.clone(),
+            data_link,
             address,
             "bootstrap6",
-        )?;
+        )
+        .map_err(|err| BootstrapError::BootstrapAddress { err })?;
 
-        let peer_monitor = discovery::PeerMonitor::new(&log, address)?;
+        let peer_monitor =
+            discovery::PeerMonitor::new(&log, address).map_err(|err| {
+                BootstrapError::Io {
+                    message: format!("Monitoring for peers from {address}"),
+                    err,
+                }
+            })?;
         let share = read_key_share()?;
         let agent = Agent {
             log,
@@ -153,8 +169,16 @@ impl Agent {
         if request_path.exists() {
             info!(agent.log, "Sled already configured, loading sled agent");
             let sled_request: SledAgentRequest = toml::from_str(
-                &tokio::fs::read_to_string(&request_path).await?,
-            )?;
+                &tokio::fs::read_to_string(&request_path).await.map_err(
+                    |err| BootstrapError::Io {
+                        message: format!(
+                            "Reading subnet path from {request_path:?}"
+                        ),
+                        err,
+                    },
+                )?,
+            )
+            .map_err(|err| BootstrapError::Toml { path: request_path, err })?;
             agent.request_agent(sled_request).await?;
         }
 
@@ -204,21 +228,30 @@ impl Agent {
         // Server does not exist, initialize it.
         let server = SledServer::start(&self.sled_config, sled_address)
             .await
-            .map_err(|e| BootstrapError::SledError(e))?;
+            .map_err(|e| {
+            BootstrapError::SledError(format!(
+                "Could not start sled agent server: {e}"
+            ))
+        })?;
         maybe_agent.replace(server);
         info!(&self.log, "Sled Agent loaded; recording configuration");
 
         // Record this request so the sled agent can be automatically
         // initialized on the next boot.
+        let path = get_sled_agent_request_path();
         tokio::fs::write(
-            get_sled_agent_request_path(),
+            &path,
             &toml::to_string(
                 &toml::Value::try_from(&request)
                     .expect("Cannot serialize request"),
             )
             .expect("Cannot convert toml to string"),
         )
-        .await?;
+        .await
+        .map_err(|err| BootstrapError::Io {
+            message: format!("Recording Sled Agent request to {path:?}"),
+            err,
+        })?;
 
         Ok(SledAgentResponse { id: self.sled_config.id })
     }
@@ -325,7 +358,11 @@ impl Agent {
 
     async fn run_trust_quorum_server(&self) -> Result<(), BootstrapError> {
         let my_share = self.share.as_ref().unwrap().share.clone();
-        let mut server = trust_quorum::Server::new(&self.log, my_share)?;
+        let mut server = trust_quorum::Server::new(&self.log, my_share)
+            .map_err(|err| BootstrapError::Io {
+                message: "Cannot run trust quorum server".to_string(),
+                err,
+            })?;
         tokio::spawn(async move { server.run().await });
         Ok(())
     }

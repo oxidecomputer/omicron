@@ -5,7 +5,10 @@
 //! API for controlling a single instance.
 
 use crate::common::vlan::VlanID;
-use crate::illumos::dladm::{PhysicalLink, VNIC_PREFIX, VNIC_PREFIX_CONTROL};
+use crate::illumos::dladm::{
+    CreateVnicError, DeleteVnicError, PhysicalLink, VNIC_PREFIX,
+    VNIC_PREFIX_CONTROL,
+};
 use omicron_common::api::external::MacAddr;
 use std::sync::{
     atomic::{AtomicU64, Ordering},
@@ -16,8 +19,6 @@ use std::sync::{
 use crate::illumos::dladm::Dladm;
 #[cfg(test)]
 use crate::illumos::dladm::MockDladm as Dladm;
-
-type Error = crate::illumos::dladm::Error;
 
 /// A shareable wrapper around an atomic counter.
 /// May be used to allocate runtime-unique IDs for objects
@@ -41,20 +42,12 @@ impl VnicAllocator {
     ///
     /// VnicAllocator::new("Storage") produces
     /// - oxControlStorage[NNN]
-    pub fn new<S: AsRef<str>>(
-        scope: S,
-        physical_link: Option<PhysicalLink>,
-    ) -> Result<Self, crate::illumos::dladm::Error> {
-        let data_link = if let Some(link) = physical_link {
-            link
-        } else {
-            Dladm::find_physical()?
-        };
-        Ok(Self {
+    pub fn new<S: AsRef<str>>(scope: S, physical_link: PhysicalLink) -> Self {
+        Self {
             value: Arc::new(AtomicU64::new(0)),
             scope: scope.as_ref().to_string(),
-            data_link,
-        })
+            data_link: physical_link,
+        }
     }
 
     /// Creates a new NIC, intended for usage by the guest.
@@ -62,7 +55,7 @@ impl VnicAllocator {
         &self,
         mac: Option<MacAddr>,
         vlan: Option<VlanID>,
-    ) -> Result<Vnic, Error> {
+    ) -> Result<Vnic, CreateVnicError> {
         let allocator = self.new_superscope("Guest");
         let name = allocator.next();
         debug_assert!(name.starts_with(VNIC_PREFIX));
@@ -72,7 +65,10 @@ impl VnicAllocator {
 
     /// Creates a new NIC, intended for allowing Propolis to communicate
     /// with the control plane.
-    pub fn new_control(&self, mac: Option<MacAddr>) -> Result<Vnic, Error> {
+    pub fn new_control(
+        &self,
+        mac: Option<MacAddr>,
+    ) -> Result<Vnic, CreateVnicError> {
         let allocator = self.new_superscope("Control");
         let name = allocator.next();
         debug_assert!(name.starts_with(VNIC_PREFIX));
@@ -119,7 +115,7 @@ impl Vnic {
     }
 
     /// Deletes a NIC (if it has not already been deleted).
-    pub fn delete(&mut self) -> Result<(), Error> {
+    pub fn delete(&mut self) -> Result<(), DeleteVnicError> {
         if self.deleted {
             Ok(())
         } else {
@@ -149,8 +145,7 @@ mod test {
     #[test]
     fn test_allocate() {
         let allocator =
-            VnicAllocator::new("Foo", Some(PhysicalLink("mylink".to_string())))
-                .unwrap();
+            VnicAllocator::new("Foo", PhysicalLink("mylink".to_string()));
         assert_eq!("oxFoo0", allocator.next());
         assert_eq!("oxFoo1", allocator.next());
         assert_eq!("oxFoo2", allocator.next());
@@ -159,8 +154,7 @@ mod test {
     #[test]
     fn test_allocate_within_scopes() {
         let allocator =
-            VnicAllocator::new("Foo", Some(PhysicalLink("mylink".to_string())))
-                .unwrap();
+            VnicAllocator::new("Foo", PhysicalLink("mylink".to_string()));
         assert_eq!("oxFoo0", allocator.next());
         let allocator = allocator.new_superscope("Baz");
         assert_eq!("oxBazFoo1", allocator.next());

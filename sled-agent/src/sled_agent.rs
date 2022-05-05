@@ -34,17 +34,26 @@ use crate::illumos::{
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
-    #[error(transparent)]
-    Datalink(#[from] crate::illumos::dladm::Error),
+    #[error("Physical link not in config, nor found automatically: {0}")]
+    FindPhysicalLink(#[from] crate::illumos::dladm::FindPhysicalLinkError),
+
+    #[error("Failed to lookup VNICs on boot: {0}")]
+    GetVnics(#[from] crate::illumos::dladm::GetVnicError),
+
+    #[error("Failed to delete VNIC on boot: {0}")]
+    DeleteVnic(#[from] crate::illumos::dladm::DeleteVnicError),
 
     #[error(transparent)]
     Services(#[from] crate::services::Error),
 
     #[error(transparent)]
-    Zone(#[from] crate::illumos::zone::Error),
+    ZoneOperation(#[from] crate::illumos::zone::AdmError),
+
+    #[error("Failed to create Sled Subnet: {err}")]
+    SledSubnet { err: crate::illumos::zone::EnsureGzAddressError },
 
     #[error(transparent)]
-    Zfs(#[from] crate::illumos::zfs::Error),
+    ZfsEnsureFilesystem(#[from] crate::illumos::zfs::EnsureFilesystemError),
 
     #[error("Error managing instances: {0}")]
     Instance(#[from] crate::instance_manager::Error),
@@ -95,6 +104,12 @@ impl SledAgent {
         let vlan = config.vlan;
         info!(&log, "created sled agent"; "id" => ?id);
 
+        let data_link = if let Some(link) = config.data_link.clone() {
+            link
+        } else {
+            Dladm::find_physical()?
+        };
+
         // Before we start creating zones, we need to ensure that the
         // necessary ZFS and Zone resources are ready.
         Zfs::ensure_zoned_filesystem(
@@ -113,10 +128,11 @@ impl SledAgent {
         // RSS-provided IP address. In the meantime, we use one from the
         // configuration file.
         Zones::ensure_has_global_zone_v6_address(
-            config.data_link.clone(),
+            data_link.clone(),
             *sled_address.ip(),
             "sled6",
-        )?;
+        )
+        .map_err(|err| Error::SledSubnet { err })?;
 
         // Identify all existing zones which should be managed by the Sled
         // Agent.
@@ -150,9 +166,9 @@ impl SledAgent {
             &log,
             *id,
             nexus_client.clone(),
-            config.data_link.clone(),
+            data_link.clone(),
         )
-        .await?;
+        .await;
         if let Some(pools) = &config.zpools {
             for pool in pools {
                 info!(
@@ -167,11 +183,10 @@ impl SledAgent {
             log.clone(),
             vlan,
             nexus_client.clone(),
-            config.data_link.clone(),
-        )?;
+            data_link.clone(),
+        );
         let services =
-            ServiceManager::new(log.clone(), config.data_link.clone(), None)
-                .await?;
+            ServiceManager::new(log.clone(), data_link.clone(), None).await?;
 
         Ok(SledAgent {
             id: config.id,
