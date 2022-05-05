@@ -8,21 +8,10 @@ use crate::common::vlan::VlanID;
 use crate::illumos::dladm::{self, Dladm, PhysicalLink};
 use crate::illumos::zpool::ZpoolName;
 use dropshot::ConfigLogging;
-use omicron_common::api::external::Ipv6Net;
 use serde::Deserialize;
-use std::net::{SocketAddr, SocketAddrV6};
-use std::path::Path;
+use std::net::SocketAddr;
+use std::path::{Path, PathBuf};
 use uuid::Uuid;
-
-pub const SLED_AGENT_PORT: u16 = 12345;
-
-/// Given a subnet, return the sled agent address.
-pub(crate) fn get_sled_address(subnet: Ipv6Net) -> SocketAddrV6 {
-    let mut iter = subnet.iter();
-    let _anycast_ip = iter.next().unwrap();
-    let sled_agent_ip = iter.next().unwrap();
-    SocketAddrV6::new(sled_agent_ip, SLED_AGENT_PORT, 0, 0)
-}
 
 /// Configuration for a sled agent
 #[derive(Clone, Debug, Deserialize)]
@@ -46,21 +35,33 @@ pub struct Config {
 
 #[derive(Debug, thiserror::Error)]
 pub enum ConfigError {
-    #[error("Failed to read config: {0}")]
-    Io(#[from] std::io::Error),
-    #[error("Failed to parse config: {0}")]
-    Parse(#[from] toml::de::Error),
+    #[error("Failed to read config from {path}: {err}")]
+    Io {
+        path: PathBuf,
+        #[source]
+        err: std::io::Error,
+    },
+    #[error("Failed to parse config from {path}: {err}")]
+    Parse {
+        path: PathBuf,
+        #[source]
+        err: toml::de::Error,
+    },
 }
 
 impl Config {
     pub fn from_file<P: AsRef<Path>>(path: P) -> Result<Self, ConfigError> {
         let path = path.as_ref();
-        let contents = std::fs::read_to_string(path)?;
-        let config = toml::from_str(&contents)?;
+        let contents = std::fs::read_to_string(&path)
+            .map_err(|err| ConfigError::Io { path: path.into(), err })?;
+        let config = toml::from_str(&contents)
+            .map_err(|err| ConfigError::Parse { path: path.into(), err })?;
         Ok(config)
     }
 
-    pub fn get_link(&self) -> Result<PhysicalLink, dladm::Error> {
+    pub fn get_link(
+        &self,
+    ) -> Result<PhysicalLink, dladm::FindPhysicalLinkError> {
         let link = if let Some(link) = self.data_link.clone() {
             link
         } else {

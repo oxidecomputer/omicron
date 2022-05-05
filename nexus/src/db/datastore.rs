@@ -26,10 +26,9 @@ use super::identity::{Asset, Resource};
 use super::pool::DbConnection;
 use super::Pool;
 use crate::authn;
-use crate::authz;
-use crate::authz::ApiResourceError;
+use crate::authz::{self, ApiResource};
 use crate::context::OpContext;
-use crate::db::fixed_data::role_assignment_builtin::BUILTIN_ROLE_ASSIGNMENTS;
+use crate::db::fixed_data::role_assignment::BUILTIN_ROLE_ASSIGNMENTS;
 use crate::db::fixed_data::role_builtin::BUILTIN_ROLES;
 use crate::db::fixed_data::silo::{DEFAULT_SILO, SILO_ID};
 use crate::db::lookup::LookupPath;
@@ -41,7 +40,7 @@ use crate::db::{
         Generation, GlobalImage, IncompleteNetworkInterface, Instance,
         InstanceRuntimeState, Name, NetworkInterface, Organization,
         OrganizationUpdate, OximeterInfo, ProducerEndpoint, Project,
-        ProjectUpdate, Region, RoleAssignmentBuiltin, RoleBuiltin, RouterRoute,
+        ProjectUpdate, Region, RoleAssignment, RoleBuiltin, RouterRoute,
         RouterRouteUpdate, Silo, SiloUser, Sled, SshKey,
         UpdateAvailableArtifact, UserBuiltin, Volume, Vpc, VpcFirewallRule,
         VpcRouter, VpcRouterUpdate, VpcSubnet, VpcSubnetUpdate, VpcUpdate,
@@ -55,9 +54,10 @@ use crate::db::{
     subnet_allocation::SubnetError,
     update_and_check::{UpdateAndCheck, UpdateStatus},
 };
-use crate::external_api::params;
+use crate::external_api::{params, shared};
 use async_bb8_diesel::{AsyncConnection, AsyncRunQueryDsl, ConnectionManager};
 use chrono::Utc;
+use db::model::IdentityType;
 use diesel::pg::Pg;
 use diesel::prelude::*;
 use diesel::query_builder::{QueryFragment, QueryId};
@@ -94,7 +94,7 @@ const REGION_REDUNDANCY_THRESHOLD: usize = 3;
 trait RunnableQuery<U>:
     RunQueryDsl<DbConnection>
     + QueryFragment<Pg>
-    + LoadQuery<DbConnection, U>
+    + LoadQuery<'static, DbConnection, U>
     + QueryId
 {
 }
@@ -102,7 +102,7 @@ trait RunnableQuery<U>:
 impl<U, T> RunnableQuery<U> for T where
     T: RunQueryDsl<DbConnection>
         + QueryFragment<Pg>
-        + LoadQuery<DbConnection, U>
+        + LoadQuery<'static, DbConnection, U>
         + QueryId
 {
 }
@@ -1299,10 +1299,7 @@ impl DataStore {
         interface: IncompleteNetworkInterface,
     ) -> Result<NetworkInterface, NetworkInterfaceError> {
         use db::schema::network_interface::dsl;
-        let query = InsertNetworkInterfaceQuery {
-            interface: interface.clone(),
-            now: Utc::now(),
-        };
+        let query = InsertNetworkInterfaceQuery::new(interface.clone());
         diesel::insert_into(dsl::network_interface)
             .values(query)
             .returning(NetworkInterface::as_returning())
@@ -1897,7 +1894,7 @@ impl DataStore {
         subnet: VpcSubnet,
     ) -> Result<VpcSubnet, SubnetError> {
         use db::schema::vpc_subnet::dsl;
-        let values = FilterConflictingVpcSubnetRangesQuery(subnet.clone());
+        let values = FilterConflictingVpcSubnetRangesQuery::new(subnet.clone());
         diesel::insert_into(dsl::vpc_subnet)
             .values(values)
             .returning(VpcSubnet::as_returning())
@@ -2326,8 +2323,10 @@ impl DataStore {
         })
         .collect::<Vec<UserBuiltin>>();
 
+        // TODO: This should probably be removed when we can switch
+        // "test-privileged" and "test-unprivileged" to normal silo users rather
+        // than built-in users.
         debug!(opctx.log, "creating silo_user entries for built-in users");
-
         for builtin_user in &builtin_users {
             self.silo_user_create(SiloUser::new(
                 *SILO_ID,
@@ -2335,7 +2334,6 @@ impl DataStore {
             ))
             .await?;
         }
-
         info!(opctx.log, "created silo_user entries for built-in users");
 
         debug!(opctx.log, "attempting to create built-in users");
@@ -2412,16 +2410,17 @@ impl DataStore {
         &self,
         opctx: &OpContext,
     ) -> Result<(), Error> {
-        use db::schema::role_assignment_builtin::dsl;
+        use db::schema::role_assignment::dsl;
 
         opctx.authorize(authz::Action::Modify, &authz::DATABASE).await?;
 
         // The built-in "test-privileged" user gets the "fleet admin" role.
         debug!(opctx.log, "attempting to create built-in role assignments");
-        let count = diesel::insert_into(dsl::role_assignment_builtin)
+        let count = diesel::insert_into(dsl::role_assignment)
             .values(&*BUILTIN_ROLE_ASSIGNMENTS)
             .on_conflict((
-                dsl::user_builtin_id,
+                dsl::identity_type,
+                dsl::identity_id,
                 dsl::resource_type,
                 dsl::resource_id,
                 dsl::role_name,
@@ -2438,31 +2437,33 @@ impl DataStore {
 
     /// Return the built-in roles that the given built-in user has for the given
     /// resource
-    pub async fn role_asgn_builtin_list_for(
+    pub async fn role_asgn_list_for(
         &self,
         opctx: &OpContext,
-        user_builtin_id: Uuid,
+        identity_type: IdentityType,
+        identity_id: Uuid,
         resource_type: ResourceType,
         resource_id: Uuid,
-    ) -> Result<Vec<RoleAssignmentBuiltin>, Error> {
-        use db::schema::role_assignment_builtin::dsl;
+    ) -> Result<Vec<RoleAssignment>, Error> {
+        use db::schema::role_assignment::dsl;
 
         // There is no resource-specific authorization check because all
         // authenticated users need to be able to list their own roles --
         // otherwise we can't do any authorization checks.
+        // TODO-security rethink this -- how do we know the user is looking up
+        // their own roles?  Maybe this should use an internal authz context.
 
         // TODO-scalability TODO-security This needs to be paginated.  It's not
         // exposed via an external API right now but someone could still put us
         // into some hurt by assigning loads of roles to someone and having that
         // person attempt to access anything.
-        dsl::role_assignment_builtin
-            .filter(dsl::user_builtin_id.eq(user_builtin_id))
+        dsl::role_assignment
+            .filter(dsl::identity_type.eq(identity_type))
+            .filter(dsl::identity_id.eq(identity_id))
             .filter(dsl::resource_type.eq(resource_type.to_string()))
             .filter(dsl::resource_id.eq(resource_id))
-            .select(RoleAssignmentBuiltin::as_select())
-            .load_async::<RoleAssignmentBuiltin>(
-                self.pool_authorized(opctx).await?,
-            )
+            .select(RoleAssignment::as_select())
+            .load_async::<RoleAssignment>(self.pool_authorized(opctx).await?)
             .await
             .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
     }
@@ -2512,23 +2513,27 @@ impl DataStore {
             })
     }
 
+    // NOTE: This function is only used for testing and for initial population
+    // of built-in users as silo users.  The error handling here assumes (1)
+    // that the caller expects no user input error from the database, and (2)
+    // that if a Silo user with the same id already exists in the database,
+    // that's not an error (it's assumed to be the same user).
     pub async fn silo_user_create(
         &self,
         silo_user: SiloUser,
-    ) -> CreateResult<SiloUser> {
+    ) -> Result<(), Error> {
         use db::schema::silo_user::dsl;
 
-        diesel::insert_into(dsl::silo_user)
+        let _ = diesel::insert_into(dsl::silo_user)
             .values(silo_user)
-            .returning(SiloUser::as_returning())
-            .get_result_async(self.pool())
+            .on_conflict(dsl::id)
+            .do_nothing()
+            .execute_async(self.pool())
             .await
             .map_err(|e| {
-                Error::internal_error(&format!(
-                    "error creating silo user: {:?}",
-                    e
-                ))
-            })
+                public_error_from_diesel_pool(e, ErrorHandler::Server)
+            })?;
+        Ok(())
     }
 
     /// Load built-in silos into the database
@@ -2843,6 +2848,115 @@ impl DataStore {
         Ok(())
     }
 
+    // Role assignments
+
+    /// Fetches all of the role assignments for the specified resource
+    ///
+    /// This function is generic over all resources that can accept roles (e.g.,
+    /// Fleet, Silo, Organization, etc.).
+    // TODO-scalability In an ideal world, this would be paginated.  The impact
+    // is mitigated because we cap the number of role assignments per resource
+    // pretty tightly.
+    pub async fn role_assignment_fetch_all<
+        T: authz::ApiResourceWithRoles + Clone,
+    >(
+        &self,
+        opctx: &OpContext,
+        authz_resource: &T,
+    ) -> ListResultVec<db::model::RoleAssignment> {
+        opctx.authorize(authz::Action::ReadPolicy, authz_resource).await?;
+        let resource_type = authz_resource.resource_type();
+        let resource_id = authz_resource.resource_id();
+        use db::schema::role_assignment::dsl;
+        dsl::role_assignment
+            .filter(dsl::resource_type.eq(resource_type.to_string()))
+            .filter(dsl::resource_id.eq(resource_id))
+            .order(dsl::role_name.asc())
+            .then_order_by(dsl::identity_id.asc())
+            .select(RoleAssignment::as_select())
+            .load_async::<RoleAssignment>(self.pool_authorized(opctx).await?)
+            .await
+            .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
+    }
+
+    /// Removes all existing role assignments on `authz_resource` and adds those
+    /// specified by `new_assignments`
+    ///
+    /// The expectation is that the caller will have just fetched the role
+    /// assignments, modified them, and is giving us the complete new list.
+    ///
+    /// This function is generic over all resources that can accept roles (e.g.,
+    /// Fleet, Silo, Organization, etc.).
+    // TODO-correctness As with the rest of the API, we're lacking an ability
+    // for an ETag precondition check here.
+    // TODO-scalability In an ideal world, this would update in batches.  That's
+    // tricky without first-classing the Policy in the database.  The impact is
+    // mitigated because we cap the number of role assignments per resource
+    // pretty tightly.
+    pub async fn role_assignment_replace_all<
+        T: authz::ApiResourceWithRolesType + Clone,
+    >(
+        &self,
+        opctx: &OpContext,
+        authz_resource: &T,
+        new_assignments: &[shared::RoleAssignment<T::AllowedRoles>],
+    ) -> ListResultVec<db::model::RoleAssignment> {
+        // TODO-security We should carefully review what permissions are
+        // required for modifying the policy of a resource.
+        opctx.authorize(authz::Action::ModifyPolicy, authz_resource).await?;
+        bail_unless!(
+            new_assignments.len() <= shared::MAX_ROLE_ASSIGNMENTS_PER_RESOURCE
+        );
+
+        let resource_type = authz_resource.resource_type();
+        let resource_id = authz_resource.resource_id();
+
+        // Sort the records in the same order that we would return them when
+        // listing them.  This is because we're going to use RETURNING to return
+        // the inserted rows from the database and we want them to come back in
+        // the same order that we would normally list them.
+        let mut new_assignments = new_assignments
+            .iter()
+            .map(|r| {
+                db::model::RoleAssignment::new(
+                    db::model::IdentityType::from(r.identity_type),
+                    r.identity_id,
+                    resource_type,
+                    resource_id,
+                    &r.role_name.to_string(),
+                )
+            })
+            .collect::<Vec<_>>();
+        new_assignments.sort_by(|r1, r2| {
+            (&r1.role_name, r1.identity_id)
+                .cmp(&(&r2.role_name, r2.identity_id))
+        });
+
+        use db::schema::role_assignment::dsl;
+        let delete_old_query = diesel::delete(dsl::role_assignment)
+            .filter(dsl::resource_id.eq(resource_id))
+            .filter(dsl::resource_type.eq(resource_type.to_string()));
+        let insert_new_query = diesel::insert_into(dsl::role_assignment)
+            .values(new_assignments)
+            .returning(RoleAssignment::as_returning());
+
+        // TODO-scalability: Ideally this would be a batched transaction so we
+        // don't need to hold a transaction open across multiple roundtrips from
+        // the database, but for now we're using a transaction due to the
+        // severely decreased legibility of CTEs via diesel right now.
+        // We might instead want to first-class the idea of Policies in the
+        // database so that we can build up a whole new Policy in batches and
+        // then flip the resource over to using it.
+        self.pool_authorized(opctx)
+            .await?
+            .transaction(move |conn| {
+                delete_old_query.execute(conn)?;
+                Ok(insert_new_query.get_results(conn)?)
+            })
+            .await
+            .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
+    }
+
     // Test interfaces
 
     #[cfg(test)]
@@ -2983,7 +3097,7 @@ mod test {
             datastore.session_create(&opctx, session.clone()).await.unwrap();
 
         // Associate silo with user
-        let silo_user = datastore
+        datastore
             .silo_user_create(SiloUser::new(*SILO_ID, silo_user_id))
             .await
             .unwrap();
@@ -2993,7 +3107,7 @@ mod test {
             .fetch()
             .await
             .unwrap();
-        assert_eq!(silo_user.silo_id, db_silo_user.silo_id,);
+        assert_eq!(*SILO_ID, db_silo_user.silo_id);
 
         // fetch the one we just created
         let (.., fetched) = LookupPath::new(&opctx, &datastore)
@@ -3390,7 +3504,7 @@ mod test {
             external::Ipv4Net("172.30.0.0/22".parse().unwrap()),
             external::Ipv6Net("fd00::/64".parse().unwrap()),
         );
-        let values = FilterConflictingVpcSubnetRangesQuery(subnet);
+        let values = FilterConflictingVpcSubnetRangesQuery::new(subnet);
         let query =
             diesel::insert_into(db::schema::vpc_subnet::dsl::vpc_subnet)
                 .values(values)
@@ -3481,11 +3595,10 @@ mod test {
 
         // Create a new Silo user so that we can lookup their keys.
         let silo_user_id = Uuid::new_v4();
-        let silo_user = datastore
+        datastore
             .silo_user_create(SiloUser::new(*SILO_ID, silo_user_id))
             .await
             .unwrap();
-        assert_eq!(silo_user.id(), silo_user_id);
 
         let (.., authz_user) = LookupPath::new(&opctx, &datastore)
             .silo_user_id(silo_user_id)

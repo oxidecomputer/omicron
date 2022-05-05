@@ -65,7 +65,12 @@ impl Server {
         &mut self,
     ) -> Result<JoinHandle<Result<(), TrustQuorumError>>, TrustQuorumError>
     {
-        let (sock, addr) = self.listener.accept().await?;
+        let (sock, addr) = self.listener.accept().await.map_err(|err| {
+            TrustQuorumError::Io {
+                message: "Accepting a connection from TCP listener".to_string(),
+                err,
+            }
+        })?;
         debug!(self.log, "Accepted connection from {}", addr);
         let share = self.share.clone();
         let log = self.log.clone();

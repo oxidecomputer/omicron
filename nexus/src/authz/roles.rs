@@ -8,7 +8,7 @@
 //! said there that in evaluating the authorization decision, Oso winds up
 //! checking whether the actor has one of many different roles on many different
 //! resources.  It's essentially looking for specific rows in the
-//! "role_assignment_builtin" table.
+//! "role_assignment" table.
 //!
 //! To achieve this, before calling into Oso, we load _all_ of the roles that
 //! the actor has on this resource _or any related resource_ that might affect
@@ -95,7 +95,9 @@ where
     R: ApiResource,
 {
     // If roles can be assigned directly on this resource, load them.
-    if let Some((resource_type, resource_id)) = resource.db_resource() {
+    if let Some(with_roles) = resource.as_resource_with_roles() {
+        let resource_type = resource.resource_type();
+        let resource_id = with_roles.resource_id();
         load_roles_for_resource(
             opctx,
             datastore,
@@ -132,19 +134,20 @@ pub async fn load_roles_for_resource(
     roleset: &mut RoleSet,
 ) -> Result<(), Error> {
     // If the user is authenticated ...
-    if let Some(actor_id) = authn.actor() {
+    if let Some(actor) = authn.actor() {
         // ... then fetch all the roles for this user that are associated with
         // this resource.
         trace!(opctx.log, "loading roles";
-            "actor_id" => actor_id.id.to_string(),
+            "actor" => ?actor,
             "resource_type" => ?resource_type,
             "resource_id" => resource_id.to_string(),
         );
 
         let roles = datastore
-            .role_asgn_builtin_list_for(
+            .role_asgn_list_for(
                 opctx,
-                actor_id.id,
+                actor.actor_type(),
+                actor.actor_id(),
                 resource_type,
                 resource_id,
             )

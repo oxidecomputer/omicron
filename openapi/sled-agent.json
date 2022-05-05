@@ -857,6 +857,7 @@
         ]
       },
       "MacAddr": {
+        "example": "ff:ff:ff:ff:ff:ff",
         "title": "A MAC address",
         "description": "A Media Access Control address, in EUI-48 format",
         "type": "string",
@@ -965,7 +966,15 @@
           "addresses": {
             "type": "array",
             "items": {
-              "type": "string"
+              "type": "string",
+              "format": "ipv6"
+            }
+          },
+          "gz_addresses": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "ipv6"
             }
           },
           "name": {

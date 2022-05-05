@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
+use std::net::{Ipv6Addr, SocketAddr, SocketAddrV6};
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
@@ -10,7 +10,6 @@ use internal_dns_client::{
     types::{DnsKv, DnsRecord, DnsRecordKey, Srv},
     Client,
 };
-use std::net::Ipv6Addr;
 use trust_dns_resolver::config::{
     NameServerConfig, Protocol, ResolverConfig, ResolverOpts,
 };
@@ -135,16 +134,16 @@ async fn init_client_server() -> Result<TestContext, anyhow::Error> {
     let db = Arc::new(sled::open(&config.data.storage_path)?);
     db.clear()?;
 
-    let client = Client::new(
-        &format!("http://127.0.0.1:{}", dropshot_port),
-        log.clone(),
-    );
+    let client =
+        Client::new(&format!("http://[::1]:{}", dropshot_port), log.clone());
 
     let mut rc = ResolverConfig::new();
     rc.add_name_server(NameServerConfig {
-        socket_addr: SocketAddr::V4(SocketAddrV4::new(
-            Ipv4Addr::new(127, 0, 0, 1),
+        socket_addr: SocketAddr::V6(SocketAddrV6::new(
+            Ipv6Addr::LOCALHOST,
             dns_port,
+            0,
+            0,
         )),
         protocol: Protocol::Udp,
         tls_dns_name: None,
@@ -159,10 +158,12 @@ async fn init_client_server() -> Result<TestContext, anyhow::Error> {
     {
         let db = db.clone();
         let log = log.clone();
-        let config = config.dns.clone();
+        let dns_config = internal_dns::dns_server::Config {
+            bind_address: format!("[::1]:{}", dns_port),
+        };
 
         tokio::spawn(async move {
-            internal_dns::dns_server::run(log, db, config).await
+            internal_dns::dns_server::run(log, db, dns_config).await
         });
     }
 
@@ -189,18 +190,13 @@ fn test_config(
             level: dropshot::ConfigLoggingLevel::Info,
         },
         dropshot: dropshot::ConfigDropshot {
-            bind_address: format!("127.0.0.1:{}", dropshot_port)
-                .parse()
-                .unwrap(),
+            bind_address: format!("[::1]:{}", dropshot_port).parse().unwrap(),
             request_body_max_bytes: 1024,
             ..Default::default()
         },
         data: internal_dns::dns_data::Config {
             nmax_messages: 16,
             storage_path,
-        },
-        dns: internal_dns::dns_server::Config {
-            bind_address: format!("127.0.0.1:{}", dns_port).parse().unwrap(),
         },
     };
 

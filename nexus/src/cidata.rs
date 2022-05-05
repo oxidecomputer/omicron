@@ -40,8 +40,8 @@ struct MetaData<'a> {
 }
 
 fn build_vfat(meta_data: &[u8], user_data: &[u8]) -> io::Result<Vec<u8>> {
-    let file_sectors =
-        meta_data.len().div_ceil(&512) + user_data.len().div_ceil(&512);
+    let file_sectors = Integer::div_ceil(&meta_data.len(), &512)
+        + Integer::div_ceil(&user_data.len(), &512);
     // vfat can hold more data than this, but we don't expect to ever need that for cloud-init
     // purposes.
     if file_sectors > 512 {

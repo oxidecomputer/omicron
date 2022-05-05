@@ -12,8 +12,12 @@ use std::path::PathBuf;
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
-    #[error("I/O Error: {0}")]
-    Io(#[from] std::io::Error),
+    #[error("I/O Error: {message}: {err}")]
+    Io {
+        message: String,
+        #[source]
+        err: std::io::Error,
+    },
 
     #[error("Failed to contact nexus: {0}")]
     Nexus(anyhow::Error),
@@ -29,7 +33,12 @@ pub async fn download_artifact(
     match artifact.kind {
         UpdateArtifactKind::Zone => {
             let directory = PathBuf::from("/var/tmp/zones");
-            tokio::fs::create_dir_all(&directory).await?;
+            tokio::fs::create_dir_all(&directory).await.map_err(|err| {
+                Error::Io {
+                    message: format!("creating diretory {directory:?}"),
+                    err,
+                }
+            })?;
 
             // We download the file to a location named "<artifact-name>-<version>".
             // We then rename it to "<artifact-name>" after it has successfully
@@ -57,10 +66,25 @@ pub async fn download_artifact(
                 .map_err(Error::Response)?;
             let contents =
                 response.bytes().await.map_err(|e| Error::Response(e))?;
-            tokio::fs::write(&tmp_path, contents).await?;
+            tokio::fs::write(&tmp_path, contents).await.map_err(|err| {
+                Error::Io {
+                    message: format!(
+                        "Downloading artifact to temporary path: {tmp_path:?}"
+                    ),
+                    err,
+                }
+            })?;
 
             // Write the file to its final path.
-            tokio::fs::rename(&tmp_path, directory.join(artifact.name)).await?;
+            let destination = directory.join(artifact.name);
+            tokio::fs::rename(&tmp_path, &destination).await.map_err(
+                |err| Error::Io {
+                    message: format!(
+                        "Renaming {tmp_path:?} to {destination:?}"
+                    ),
+                    err,
+                },
+            )?;
             Ok(())
         }
     }
