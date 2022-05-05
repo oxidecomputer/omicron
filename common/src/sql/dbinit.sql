@@ -66,7 +66,7 @@ CREATE TABLE omicron.public.sled (
 
     /* The IP address and bound port of the sled agent server. */
     ip INET NOT NULL,
-    port INT4 NOT NULL,
+    port INT4 CHECK (port BETWEEN 0 AND 65535) NOT NULL,
 
     /* The last address allocated to an Oxide service on this sled. */
     last_used_address INET NOT NULL
@@ -137,7 +137,7 @@ CREATE TABLE omicron.public.Dataset (
 
     /* Contact information for the dataset */
     ip INET NOT NULL,
-    port INT4 NOT NULL,
+    port INT4 CHECK (port BETWEEN 0 AND 65535) NOT NULL,
 
     kind omicron.public.dataset_kind NOT NULL,
 
@@ -573,7 +573,7 @@ CREATE TABLE omicron.public.oximeter (
     time_created TIMESTAMPTZ NOT NULL,
     time_modified TIMESTAMPTZ NOT NULL,
     ip INET NOT NULL,
-    port INT4 NOT NULL
+    port INT4 CHECK (port BETWEEN 0 AND 65535) NOT NULL
 );
 
 /*
@@ -584,7 +584,7 @@ CREATE TABLE omicron.public.metric_producer (
     time_created TIMESTAMPTZ NOT NULL,
     time_modified TIMESTAMPTZ NOT NULL,
     ip INET NOT NULL,
-    port INT4 NOT NULL,
+    port INT4 CHECK (port BETWEEN 0 AND 65535) NOT NULL,
     interval FLOAT NOT NULL,
     /* TODO: Is this length appropriate? */
     base_route STRING(512) NOT NULL,
@@ -615,6 +615,13 @@ CREATE TABLE omicron.public.vpc (
     system_router_id UUID NOT NULL,
     dns_name STRING(63) NOT NULL,
 
+    /*
+     * The Geneve Virtual Network Identifier for this VPC. Note that this is a
+     * 24-bit unsigned value, properties which are checked in the application,
+     * not the database.
+     */
+    vni INT4 NOT NULL,
+
     /* The IPv6 prefix allocated to subnets. */
     ipv6_prefix INET NOT NULL,
 
@@ -626,6 +633,11 @@ CREATE TABLE omicron.public.vpc (
 CREATE UNIQUE INDEX ON omicron.public.vpc (
     project_id,
     name
+) WHERE
+    time_deleted IS NULL;
+
+CREATE UNIQUE INDEX ON omicron.public.vpc (
+    vni
 ) WHERE
     time_deleted IS NULL;
 

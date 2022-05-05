@@ -1847,22 +1847,10 @@ impl Nexus {
             });
         }
 
-        let nics: Vec<external::NetworkInterface> = self
+        let nics = self
             .db_datastore
-            .instance_list_network_interfaces(
-                &opctx,
-                &authz_instance,
-                &DataPageParams {
-                    marker: None,
-                    direction: dropshot::PaginationOrder::Ascending,
-                    limit: std::num::NonZeroU32::new(MAX_NICS_PER_INSTANCE)
-                        .unwrap(),
-                },
-            )
-            .await?
-            .iter()
-            .map(|x| x.clone().into())
-            .collect();
+            .derive_guest_network_interface_info(&opctx, &authz_instance)
+            .await?;
 
         // Ask the sled agent to begin the state change.  Then update the
         // database to reflect the new intermediate state.  If this update is
@@ -1873,7 +1861,7 @@ impl Nexus {
             runtime: sled_agent_client::types::InstanceRuntimeState::from(
                 db_instance.runtime().clone(),
             ),
-            nics: nics.iter().map(|nic| nic.clone().into()).collect(),
+            nics,
             disks: disk_reqs,
             cloud_init_bytes: Some(base64::encode(
                 db_instance.generate_cidata()?,

@@ -193,34 +193,43 @@ impl From<types::DiskState> for omicron_common::api::external::DiskState {
     }
 }
 
-impl From<omicron_common::api::external::NetworkInterface>
-    for types::NetworkInterface
-{
-    fn from(s: omicron_common::api::external::NetworkInterface) -> Self {
-        Self {
-            description: s.identity.description.clone(),
-            id: s.identity.id,
-            name: (&s.identity.name).into(),
-            time_created: s.identity.time_created,
-            time_modified: s.identity.time_modified,
-            ip: s.ip.to_string(),
-            instance_id: s.instance_id,
-            mac: s.mac.into(),
-            subnet_id: s.subnet_id,
-            vpc_id: s.vpc_id,
-        }
-    }
-}
-
 impl From<&omicron_common::api::external::Name> for types::Name {
     fn from(s: &omicron_common::api::external::Name) -> Self {
         Self(<&str>::from(s).to_string())
     }
 }
 
+impl From<omicron_common::api::external::Vni> for types::Vni {
+    fn from(v: omicron_common::api::external::Vni) -> Self {
+        Self(u32::from(v))
+    }
+}
+
 impl From<omicron_common::api::external::MacAddr> for types::MacAddr {
     fn from(s: omicron_common::api::external::MacAddr) -> Self {
         Self(s.0.to_string())
+    }
+}
+
+impl From<omicron_common::api::external::Ipv4Net> for types::Ipv4Net {
+    fn from(n: omicron_common::api::external::Ipv4Net) -> Self {
+        Self(n.to_string())
+    }
+}
+
+impl From<omicron_common::api::external::Ipv6Net> for types::Ipv6Net {
+    fn from(n: omicron_common::api::external::Ipv6Net) -> Self {
+        Self(n.to_string())
+    }
+}
+
+impl From<omicron_common::api::external::IpNet> for types::IpNet {
+    fn from(s: omicron_common::api::external::IpNet) -> Self {
+        use omicron_common::api::external::IpNet;
+        match s {
+            IpNet::V4(v4) => Self::V4(v4.into()),
+            IpNet::V6(v6) => Self::V6(v6.into()),
+        }
     }
 }
 

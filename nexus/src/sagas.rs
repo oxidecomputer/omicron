@@ -28,7 +28,6 @@ use omicron_common::api::external::Generation;
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::InstanceState;
 use omicron_common::api::external::Name;
-use omicron_common::api::external::NetworkInterface;
 use omicron_common::api::internal::nexus::InstanceRuntimeState;
 use omicron_common::backoff::{self, BackoffError};
 use rand::{rngs::StdRng, RngCore, SeedableRng};
@@ -326,9 +325,9 @@ async fn sic_allocate_network_interface_ids(
 
 async fn sic_create_network_interfaces(
     sagactx: ActionContext<SagaInstanceCreate>,
-) -> Result<Option<Vec<NetworkInterface>>, ActionError> {
+) -> Result<(), ActionError> {
     match sagactx.saga_params().create_params.network_interfaces {
-        params::InstanceNetworkInterfaceAttachment::None => Ok(None),
+        params::InstanceNetworkInterfaceAttachment::None => Ok(()),
         params::InstanceNetworkInterfaceAttachment::Default => {
             sic_create_default_network_interface(&sagactx).await
         }
@@ -345,9 +344,9 @@ async fn sic_create_network_interfaces(
 async fn sic_create_custom_network_interfaces(
     sagactx: &ActionContext<SagaInstanceCreate>,
     interface_params: &[params::NetworkInterfaceCreate],
-) -> Result<Option<Vec<NetworkInterface>>, ActionError> {
+) -> Result<(), ActionError> {
     if interface_params.is_empty() {
-        return Ok(Some(vec![]));
+        return Ok(());
     }
 
     let osagactx = sagactx.user_data();
@@ -381,7 +380,6 @@ async fn sic_create_custom_network_interfaces(
         )));
     }
 
-    let mut interfaces = Vec::with_capacity(interface_params.len());
     if ids.len() != interface_params.len() {
         return Err(ActionError::action_failed(Error::internal_error(
             "found differing number of network interface IDs and interface \
@@ -392,7 +390,7 @@ async fn sic_create_custom_network_interfaces(
         // TODO-correctness: It seems racy to fetch the subnet and create the
         // interface in separate requests, but outside of a transaction. This
         // should probably either be in a transaction, or the
-        // `subnet_create_network_interface` function/query needs some JOIN
+        // `instance_create_network_interface` function/query needs some JOIN
         // on the `vpc_subnet` table.
         let (.., authz_subnet, db_subnet) = LookupPath::new(&opctx, &datastore)
             .vpc_id(authz_vpc.id())
@@ -406,7 +404,7 @@ async fn sic_create_custom_network_interfaces(
             interface_id,
             instance_id,
             authz_vpc.id(),
-            db_subnet,
+            db_subnet.clone(),
             mac,
             params.identity.clone(),
             params.ip,
@@ -422,8 +420,8 @@ async fn sic_create_custom_network_interfaces(
             .await;
 
         use crate::db::subnet_allocation::NetworkInterfaceError;
-        let interface = match result {
-            Ok(interface) => Ok(interface),
+        match result {
+            Ok(_) => Ok(()),
 
             // Detect the specific error arising from this node being partially
             // completed.
@@ -453,30 +451,19 @@ async fn sic_create_custom_network_interfaces(
                     instance_id;
                     "primary_key" => interface_id.to_string(),
                 );
-
-                // Refetch the interface itself, to serialize it for the next
-                // saga node.
-                LookupPath::new(&opctx, &datastore)
-                    .instance_id(authz_instance.id())
-                    .network_interface_name(&db::model::Name(
-                        params.identity.name.clone(),
-                    ))
-                    .fetch()
-                    .await
-                    .map(|(.., db_interface)| db_interface)
+                Ok(())
             }
             Err(e) => Err(e.into_external()),
         }
         .map_err(ActionError::action_failed)?;
-        interfaces.push(NetworkInterface::from(interface))
     }
-    Ok(Some(interfaces))
+    Ok(())
 }
 
 /// Create the default network interface for an instance during the create saga
 async fn sic_create_default_network_interface(
     sagactx: &ActionContext<SagaInstanceCreate>,
-) -> Result<Option<Vec<NetworkInterface>>, ActionError> {
+) -> Result<(), ActionError> {
     let osagactx = sagactx.user_data();
     let datastore = osagactx.datastore();
     let saga_params = sagactx.saga_params();
@@ -519,13 +506,13 @@ async fn sic_create_default_network_interface(
         interface_id,
         instance_id,
         authz_vpc.id(),
-        db_subnet,
+        db_subnet.clone(),
         mac,
         interface_params.identity.clone(),
         interface_params.ip,
     )
     .map_err(ActionError::action_failed)?;
-    let interface = datastore
+    datastore
         .instance_create_network_interface(
             &opctx,
             &authz_subnet,
@@ -535,17 +522,17 @@ async fn sic_create_default_network_interface(
         .await
         .map_err(db::subnet_allocation::NetworkInterfaceError::into_external)
         .map_err(ActionError::action_failed)?;
-    Ok(Some(vec![interface.into()]))
+    Ok(())
 }
 
 async fn sic_create_network_interfaces_undo(
     sagactx: ActionContext<SagaInstanceCreate>,
 ) -> Result<(), anyhow::Error> {
-    // We issue a request to delete any interfaces associated with this
-    // instance.  In the case we failed partway through allocating interfaces,
-    // we won't have cached the interface records in the saga log, but they're
-    // definitely still in the database. Just delete every interface that
-    // exists, even if there are zero such records.
+    // We issue a request to delete any interfaces associated with this instance.
+    // In the case we failed partway through allocating interfaces, we need to
+    // clean up any previously-created interface records from the database.
+    // Just delete every interface that exists, even if there are zero such
+    // records.
     let osagactx = sagactx.user_data();
     let datastore = osagactx.datastore();
     let saga_params = sagactx.saga_params();

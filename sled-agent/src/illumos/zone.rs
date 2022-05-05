@@ -502,14 +502,15 @@ impl Zones {
         Ok(())
     }
 
-    // Ensures a link local IPv6 exists for the object.
-    //
-    // This is necessary for allocating IPv6 addresses on illumos.
-    //
-    // For more context, see:
-    // <https://ry.goodwu.net/tinkering/a-day-in-the-life-of-an-ipv6-address-on-illumos/>
+    /// Ensures a link-local IPv6 exists with the name provided in `addrobj`.
+    ///
+    /// A link-local address is necessary for allocating a static address on an
+    /// interface on illumos.
+    ///
+    /// For more context, see:
+    /// <https://ry.goodwu.net/tinkering/a-day-in-the-life-of-an-ipv6-address-on-illumos/>
     #[allow(clippy::needless_lifetimes)]
-    fn ensure_has_link_local_v6_address<'a>(
+    pub fn ensure_has_link_local_v6_address<'a>(
         zone: Option<&'a str>,
         addrobj: &AddrObject,
     ) -> Result<(), crate::illumos::ExecutionError> {

@@ -63,6 +63,9 @@ pub enum Error {
 
     #[error("Error updating: {0}")]
     Download(#[from] crate::updates::Error),
+
+    #[error("Error managing guest networking: {0}")]
+    Opte(#[from] crate::opte::Error),
 }
 
 impl From<Error> for omicron_common::api::external::Error {
@@ -101,7 +104,6 @@ impl SledAgent {
         sled_address: SocketAddrV6,
     ) -> Result<SledAgent, Error> {
         let id = &config.id;
-        let vlan = config.vlan;
         info!(&log, "created sled agent"; "id" => ?id);
 
         let data_link = if let Some(link) = config.data_link.clone() {
@@ -134,6 +136,9 @@ impl SledAgent {
         )
         .map_err(|err| Error::SledSubnet { err })?;
 
+        // Initialize the xde kernel driver with the underlay devices.
+        crate::opte::initialize_xde_driver(&log)?;
+
         // Identify all existing zones which should be managed by the Sled
         // Agent.
         //
@@ -156,8 +161,15 @@ impl SledAgent {
         //
         // This should be accessible via:
         // $ dladm show-linkprop -c -p zone -o LINK,VALUE
+        //
+        // Note that this currently deletes only VNICs that start with the
+        // prefix the sled-agent uses. We'll need to generate an alert or
+        // otherwise handle VNICs that we _don't_ expect.
         let vnics = Dladm::get_vnics()?;
-        for vnic in vnics {
+        for vnic in vnics
+            .iter()
+            .filter(|vnic| vnic.starts_with(crate::illumos::dladm::VNIC_PREFIX))
+        {
             warn!(log, "Deleting VNIC: {}", vnic);
             Dladm::delete_vnic(&vnic)?;
         }
@@ -181,9 +193,9 @@ impl SledAgent {
         }
         let instances = InstanceManager::new(
             log.clone(),
-            vlan,
             nexus_client.clone(),
             data_link.clone(),
+            *sled_address.ip(),
         );
         let services =
             ServiceManager::new(log.clone(), data_link.clone(), None).await?;
