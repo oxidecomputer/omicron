@@ -6,8 +6,7 @@
 
 use crate::db;
 use crate::db::identity::Resource;
-use crate::db::model::IncompleteNetworkInterface;
-use crate::db::model::VpcSubnet;
+use crate::db::model::{IncompleteNetworkInterface, VpcSubnet};
 use chrono::{DateTime, Utc};
 use diesel::pg::Pg;
 use diesel::prelude::*;
