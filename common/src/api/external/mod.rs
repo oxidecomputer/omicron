@@ -1745,7 +1745,8 @@ impl std::fmt::Display for Digest {
     }
 }
 
-/// A SAML configuration specifies both IDP and SP details
+/// A SAML configuration specifies both identity provider and service provider
+/// details
 #[derive(Clone, Debug, Serialize, JsonSchema, Deserialize)]
 pub struct SiloSamlIdentityProvider {
     #[serde(flatten)]
@@ -1754,19 +1755,19 @@ pub struct SiloSamlIdentityProvider {
     /// url where identity provider metadata descriptor is
     pub idp_metadata_url: String,
 
-    /// idp's entity id
+    /// identity provider's entity id
     pub idp_entity_id: String,
 
-    /// sp's client id
+    /// service provider's client id
     pub sp_client_id: String,
 
     /// service provider endpoint where the response will be sent
     pub acs_url: String,
 
-    /// service provider endpoint where the idp should send log out requests
+    /// service provider endpoint where the identity provider should send log out requests
     pub slo_url: String,
 
-    /// customer's technical contact for saml configuration
+    /// customer's technical contact for SAML configuration
     pub technical_contact_email: String,
 
     /// optional request signing key pair (base64 encoded der files)
