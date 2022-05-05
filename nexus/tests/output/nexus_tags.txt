@@ -59,6 +59,8 @@ timeseries_schema_get                    /timeseries/schema
 
 API operations found with tag "organizations"
 OPERATION ID                             URL PATH
+organization_get_policy                  /organizations/{organization_name}/policy
+organization_put_policy                  /organizations/{organization_name}/policy
 organizations_delete_organization        /organizations/{organization_name}
 organizations_get                        /organizations
 organizations_get_organization           /organizations/{organization_name}

@@ -4,10 +4,6 @@
 
 //! Handler functions (entrypoints) for external HTTP APIs
 
-use crate::db;
-use crate::db::model::Name;
-use crate::ServerContext;
-
 use super::{
     console_api, params,
     views::{
@@ -15,7 +11,11 @@ use super::{
         Snapshot, SshKey, User, Vpc, VpcRouter, VpcSubnet,
     },
 };
-use crate::context::OpContext;
+use crate::db;
+use crate::db::model::Name;
+use crate::external_api::shared;
+use crate::ServerContext;
+use crate::{authz::OrganizationRoles, context::OpContext};
 use dropshot::endpoint;
 use dropshot::ApiDescription;
 use dropshot::EmptyScanParams;
@@ -33,7 +33,6 @@ use dropshot::RequestContext;
 use dropshot::ResultsPage;
 use dropshot::TypedBody;
 use dropshot::WhichPage;
-use omicron_common::api::external::http_pagination::data_page_params_for;
 use omicron_common::api::external::http_pagination::data_page_params_nameid_id;
 use omicron_common::api::external::http_pagination::data_page_params_nameid_name;
 use omicron_common::api::external::http_pagination::pagination_field_for_scan_params;
@@ -59,6 +58,9 @@ use omicron_common::api::external::Saga;
 use omicron_common::api::external::SiloSamlIdentityProvider;
 use omicron_common::api::external::VpcFirewallRuleUpdateParams;
 use omicron_common::api::external::VpcFirewallRules;
+use omicron_common::{
+    api::external::http_pagination::data_page_params_for, bail_unless,
+};
 use ref_cast::RefCast;
 use schemars::JsonSchema;
 use serde::Deserialize;
@@ -84,6 +86,9 @@ pub fn external_api() -> NexusApiDescription {
         api.register(organizations_get_organization)?;
         api.register(organizations_delete_organization)?;
         api.register(organizations_put_organization)?;
+
+        api.register(organization_get_policy)?;
+        api.register(organization_put_policy)?;
 
         api.register(organization_projects_get)?;
         api.register(organization_projects_post)?;
@@ -566,6 +571,60 @@ async fn organizations_put_organization(
             )
             .await?;
         Ok(HttpResponseOk(new_organization.into()))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Fetch the IAM policy for this Organization
+#[endpoint {
+    method = GET,
+    path = "/organizations/{organization_name}/policy",
+    tags = ["organizations"],
+}]
+async fn organization_get_policy(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    path_params: Path<OrganizationPathParam>,
+) -> Result<HttpResponseOk<shared::Policy<OrganizationRoles>>, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let path = path_params.into_inner();
+    let organization_name = &path.organization_name;
+
+    let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let policy =
+            nexus.organization_fetch_policy(&opctx, organization_name).await?;
+        Ok(HttpResponseOk(policy))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Update the IAM policy for this Organization
+#[endpoint {
+    method = PUT,
+    path = "/organizations/{organization_name}/policy",
+    tags = ["organizations"],
+}]
+async fn organization_put_policy(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    path_params: Path<OrganizationPathParam>,
+    new_policy: TypedBody<shared::Policy<OrganizationRoles>>,
+) -> Result<HttpResponseOk<shared::Policy<OrganizationRoles>>, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let path = path_params.into_inner();
+    let new_policy = new_policy.into_inner();
+    let organization_name = &path.organization_name;
+
+    let handler = async {
+        let nasgns = new_policy.role_assignments.len();
+        // This should have been validated during parsing.
+        bail_unless!(nasgns <= shared::MAX_ROLE_ASSIGNMENTS_PER_RESOURCE);
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let policy = nexus
+            .organization_update_policy(&opctx, organization_name, &new_policy)
+            .await?;
+        Ok(HttpResponseOk(policy))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
@@ -2957,7 +3016,7 @@ async fn sshkeys_get(
         let page_params =
             data_page_params_for(&rqctx, &query)?.map_name(Name::ref_cast);
         let ssh_keys = nexus
-            .ssh_keys_list(&opctx, actor.id, &page_params)
+            .ssh_keys_list(&opctx, actor.actor_id(), &page_params)
             .await?
             .into_iter()
             .map(SshKey::from)
@@ -2983,7 +3042,7 @@ async fn sshkeys_post(
         let opctx = OpContext::for_external_api(&rqctx).await?;
         let &actor = opctx.authn.actor_required()?;
         let ssh_key = nexus
-            .ssh_key_create(&opctx, actor.id, new_key.into_inner())
+            .ssh_key_create(&opctx, actor.actor_id(), new_key.into_inner())
             .await?;
         Ok(HttpResponseCreated(ssh_key.into()))
     };
@@ -3014,7 +3073,7 @@ async fn sshkeys_get_key(
         let opctx = OpContext::for_external_api(&rqctx).await?;
         let &actor = opctx.authn.actor_required()?;
         let ssh_key =
-            nexus.ssh_key_fetch(&opctx, actor.id, ssh_key_name).await?;
+            nexus.ssh_key_fetch(&opctx, actor.actor_id(), ssh_key_name).await?;
         Ok(HttpResponseOk(ssh_key.into()))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
@@ -3037,7 +3096,7 @@ async fn sshkeys_delete_key(
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
         let &actor = opctx.authn.actor_required()?;
-        nexus.ssh_key_delete(&opctx, actor.id, ssh_key_name).await?;
+        nexus.ssh_key_delete(&opctx, actor.actor_id(), ssh_key_name).await?;
         Ok(HttpResponseDeleted())
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await

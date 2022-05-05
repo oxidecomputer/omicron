@@ -387,7 +387,7 @@ async fn whoami_get(
 ) -> Result<dropshot::HttpResponseOk<WhoamiResponse>, dropshot::HttpError> {
     let whoami_state = rqctx.context();
     let authn = whoami_state.authn.authn_request(&rqctx).await?;
-    let actor = authn.actor().map(|a| a.id.to_string());
+    let actor = authn.actor().map(|a| a.actor_id().to_string());
     let authenticated = actor.is_some();
     let schemes_tried =
         authn.schemes_tried().iter().map(|s| s.to_string()).collect();

@@ -6,6 +6,7 @@
 
 use crate::authn;
 use crate::authz;
+use crate::authz::OrganizationRoles;
 use crate::config;
 use crate::context::OpContext;
 use crate::db;
@@ -24,6 +25,7 @@ use crate::db::subnet_allocation::NetworkInterfaceError;
 use crate::db::subnet_allocation::SubnetError;
 use crate::defaults;
 use crate::external_api::params;
+use crate::external_api::shared;
 use crate::internal_api::params::{OximeterInfo, ZpoolPutRequest};
 use crate::populate::populate_start;
 use crate::populate::PopulateStatus;
@@ -3992,6 +3994,53 @@ impl Nexus {
                 .await?;
         assert_eq!(authz_user.id(), silo_user_id);
         self.db_datastore.ssh_key_delete(opctx, &authz_ssh_key).await
+    }
+
+    // Role assignments
+
+    pub async fn organization_fetch_policy(
+        &self,
+        opctx: &OpContext,
+        organization_name: &Name,
+    ) -> LookupResult<shared::Policy<OrganizationRoles>> {
+        let (.., authz_org) = LookupPath::new(opctx, &self.db_datastore)
+            .organization_name(organization_name)
+            .lookup_for(authz::Action::ReadPolicy)
+            .await?;
+        let role_assignments = self
+            .db_datastore
+            .role_assignment_fetch_all(opctx, &authz_org)
+            .await?
+            .into_iter()
+            .map(|r| r.try_into().context("parsing database role assignment"))
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|error| Error::internal_error(&format!("{:#}", error)))?;
+        Ok(shared::Policy { role_assignments })
+    }
+
+    pub async fn organization_update_policy(
+        &self,
+        opctx: &OpContext,
+        organization_name: &Name,
+        policy: &shared::Policy<OrganizationRoles>,
+    ) -> UpdateResult<shared::Policy<OrganizationRoles>> {
+        let (.., authz_org) = LookupPath::new(opctx, &self.db_datastore)
+            .organization_name(organization_name)
+            .lookup_for(authz::Action::ModifyPolicy)
+            .await?;
+
+        let role_assignments = self
+            .db_datastore
+            .role_assignment_replace_all(
+                opctx,
+                &authz_org,
+                &policy.role_assignments,
+            )
+            .await?
+            .into_iter()
+            .map(|r| r.try_into())
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(shared::Policy { role_assignments })
     }
 }
 

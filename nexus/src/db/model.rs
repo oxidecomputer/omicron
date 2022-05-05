@@ -10,14 +10,13 @@ use crate::db::ipv6;
 use crate::db::schema::{
     console_session, dataset, disk, global_image, image, instance,
     metric_producer, network_interface, organization, oximeter, project, rack,
-    region, role_assignment_builtin, role_builtin, router_route, silo,
-    silo_identity_provider, silo_saml_identity_provider, silo_user, sled,
+    region, role_assignment, role_builtin, router_route, silo, silo_identity_provider, silo_saml_identity_provider, silo_user, sled,
     snapshot, ssh_key, update_available_artifact, user_builtin, volume, vpc,
     vpc_firewall_rule, vpc_router, vpc_subnet, zpool,
 };
 use crate::defaults;
-use crate::external_api::params;
 use crate::external_api::views;
+use crate::external_api::{params, shared};
 use crate::internal_api;
 use chrono::{DateTime, Utc};
 use db_macros::{Asset, Resource};
@@ -2716,26 +2715,60 @@ impl RoleBuiltin {
     }
 }
 
-/// Describes an assignment of a built-in role for a built-in user
-#[derive(Queryable, Insertable, Debug, Selectable)]
-#[diesel(table_name = role_assignment_builtin)]
-pub struct RoleAssignmentBuiltin {
-    pub user_builtin_id: Uuid,
+impl_enum_type!(
+    #[derive(SqlType, Debug, QueryId)]
+    #[diesel(postgres_type(name = "identity_type"))]
+    pub struct IdentityTypeEnum;
+
+    #[derive(
+        Clone,
+        Debug,
+        AsExpression,
+        FromSqlRow,
+        Serialize,
+        Deserialize,
+        PartialEq
+    )]
+    #[diesel(sql_type = IdentityTypeEnum)]
+    pub enum IdentityType;
+
+    // Enum values
+    UserBuiltin => b"user_builtin"
+    SiloUser => b"silo_user"
+);
+
+impl From<shared::IdentityType> for IdentityType {
+    fn from(other: shared::IdentityType) -> Self {
+        match other {
+            shared::IdentityType::UserBuiltin => IdentityType::UserBuiltin,
+            shared::IdentityType::SiloUser => IdentityType::SiloUser,
+        }
+    }
+}
+
+/// Describes an assignment of a built-in role for a user
+#[derive(Clone, Queryable, Insertable, Debug, Selectable)]
+#[diesel(table_name = role_assignment)]
+pub struct RoleAssignment {
+    pub identity_type: IdentityType,
+    pub identity_id: Uuid,
     pub resource_type: String,
     pub resource_id: Uuid,
     pub role_name: String,
 }
 
-impl RoleAssignmentBuiltin {
-    /// Creates a new database RoleAssignmentBuiltin object.
+impl RoleAssignment {
+    /// Creates a new database RoleAssignment object.
     pub fn new(
-        user_builtin_id: Uuid,
+        identity_type: IdentityType,
+        identity_id: Uuid,
         resource_type: omicron_common::api::external::ResourceType,
         resource_id: Uuid,
         role_name: &str,
     ) -> Self {
         Self {
-            user_builtin_id,
+            identity_type,
+            identity_id,
             resource_type: resource_type.to_string(),
             resource_id,
             role_name: String::from(role_name),
