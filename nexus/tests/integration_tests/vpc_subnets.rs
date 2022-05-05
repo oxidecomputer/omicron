@@ -2,7 +2,6 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use dropshot::test_util::ClientTestContext;
 use http::method::Method;
 use http::StatusCode;
 use nexus_test_utils::http_testing::AuthnMode;
@@ -20,7 +19,6 @@ use omicron_common::api::external::IdentityMetadataUpdateParams;
 use omicron_common::api::external::Ipv4Net;
 use omicron_common::api::external::Ipv6Net;
 use omicron_nexus::external_api::{params, views::VpcSubnet};
-use serde_json::json;
 
 #[nexus_test]
 async fn test_vpc_subnets(cptestctx: &ControlPlaneTestContext) {
@@ -113,24 +111,6 @@ async fn test_vpc_subnets(cptestctx: &ControlPlaneTestContext) {
     assert_eq!(subnet.ipv4_block, ipv4_block);
     assert_eq!(subnet.ipv6_block, ipv6_block.unwrap());
     assert!(subnet.ipv6_block.is_vpc_subnet(&vpc.ipv6_prefix));
-
-    // try to update ipv4_block with IPv6 value, should 400
-    assert_put_400(
-        client,
-        &subnet_url,
-        &json!({ "ipv4_block": "2001:db8::0/96" }),
-        "unable to parse body: invalid address: 2001:db8::0",
-    )
-    .await;
-
-    // try to update ipv6_block with IPv4 value, should 400
-    assert_put_400(
-        client,
-        &subnet_url,
-        &json!({ "ipv6_block": "10.1.9.32/16" }),
-        "unable to parse body: invalid address: 10.1.9.32",
-    )
-    .await;
 
     // get subnet, should be the same
     let same_subnet = NexusRequest::object_get(client, &subnet_url)
@@ -252,8 +232,6 @@ async fn test_vpc_subnets(cptestctx: &ControlPlaneTestContext) {
             name: Some("new-name".parse().unwrap()),
             description: Some("another description".to_string()),
         },
-        ipv4_block: None,
-        ipv6_block: None,
     };
     NexusRequest::object_put(client, &subnet_url, Some(&update_params))
         .authn_as(AuthnMode::PrivilegedUser)
@@ -369,24 +347,4 @@ async fn test_vpc_subnets(cptestctx: &ControlPlaneTestContext) {
 fn subnets_eq(sn1: &VpcSubnet, sn2: &VpcSubnet) {
     identity_eq(&sn1.identity, &sn2.identity);
     assert_eq!(sn1.vpc_id, sn2.vpc_id);
-}
-
-async fn assert_put_400(
-    client: &ClientTestContext,
-    url: &str,
-    body: &serde_json::Value,
-    message: &str,
-) {
-    let error: dropshot::HttpErrorResponseBody = NexusRequest::new(
-        RequestBuilder::new(client, Method::PUT, &url)
-            .expect_status(Some(StatusCode::BAD_REQUEST))
-            .body(Some(&body)),
-    )
-    .authn_as(AuthnMode::PrivilegedUser)
-    .execute()
-    .await
-    .unwrap()
-    .parsed_body()
-    .unwrap();
-    assert!(error.message.starts_with(message));
 }
