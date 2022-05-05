@@ -150,20 +150,28 @@ fn do_authz_resource(
     let parent_resource_name = format_ident!("{}", input.parent);
     let parent_as_snake = heck::AsSnakeCase(&input.parent).to_string();
     let primary_key_type = &*input.primary_key;
-    let (has_role_body, db_resource_body) = if input.roles_allowed {
-        (
-            quote! {
-                actor.has_role_resource(
-                    ResourceType::#resource_name,
-                    r.key,
-                    &role
-                )
-            },
-            quote! { Some((ResourceType::#resource_name, self.key)) },
-        )
-    } else {
-        (quote! { false }, quote! { None })
-    };
+    let (has_role_body, as_roles_body, api_resource_roles_trait) =
+        if input.roles_allowed {
+            (
+                quote! {
+                    actor.has_role_resource(
+                        ResourceType::#resource_name,
+                        r.key,
+                        &role
+                    )
+                },
+                quote! { Some(self) },
+                quote! {
+                    impl ApiResourceWithRoles for #resource_name {
+                        fn resource_id(&self) -> Uuid {
+                            self.key
+                        }
+                    }
+                },
+            )
+        } else {
+            (quote! { false }, quote! { None }, quote! {})
+        };
 
     let polar_snippet = match (input.polar_snippet, input.parent.as_str()) {
         (PolarSnippet::Custom, _) => String::new(),
@@ -334,16 +342,10 @@ fn do_authz_resource(
         }
 
         impl ApiResource for #resource_name {
-            fn db_resource(&self) -> Option<(ResourceType, Uuid)> {
-                #db_resource_body
-            }
-
             fn parent(&self) -> Option<&dyn AuthorizedResource> {
                 Some(&self.parent)
             }
-        }
 
-        impl ApiResourceError for #resource_name {
             fn resource_type(&self) -> ResourceType {
                 ResourceType::#resource_name
             }
@@ -351,7 +353,15 @@ fn do_authz_resource(
             fn lookup_type(&self) -> &LookupType {
                 &self.lookup_type
             }
+
+            fn as_resource_with_roles(
+                &self,
+            ) -> Option<&dyn ApiResourceWithRoles> {
+                #as_roles_body
+            }
         }
+
+        #api_resource_roles_trait
     })
 }
 

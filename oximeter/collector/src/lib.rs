@@ -79,6 +79,7 @@ async fn collection_task(
                 match message {
                     None => {
                         debug!(log, "collection task inbox closed, shutting down");
+                        return;
                     }
                     Some(CollectionMessage::Shutdown) => {
                         debug!(log, "collection task received shutdown request");
