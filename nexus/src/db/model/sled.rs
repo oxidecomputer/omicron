@@ -8,7 +8,6 @@ use crate::db::ipv6;
 use crate::db::schema::{sled, zpool};
 use chrono::{DateTime, Utc};
 use db_macros::Asset;
-use std::convert::TryFrom;
 use std::net::Ipv6Addr;
 use std::net::SocketAddrV6;
 use uuid::Uuid;
@@ -60,8 +59,7 @@ impl Sled {
     }
 
     pub fn address(&self) -> SocketAddrV6 {
-        // TODO: avoid this unwrap
-        self.address_with_port(u16::try_from(self.port).unwrap())
+        self.address_with_port(self.port.into())
     }
 
     pub fn address_with_port(&self, port: u16) -> SocketAddrV6 {

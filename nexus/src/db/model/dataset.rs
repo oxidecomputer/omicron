@@ -66,8 +66,7 @@ impl Dataset {
     }
 
     pub fn address(&self) -> SocketAddr {
-        // TODO: avoid this unwrap
-        self.address_with_port(u16::try_from(self.port).unwrap())
+        self.address_with_port(self.port.into())
     }
 
     pub fn address_with_port(&self, port: u16) -> SocketAddr {
