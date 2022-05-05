@@ -5,7 +5,8 @@
 //! Management of sled-local storage.
 
 use crate::illumos::dladm::PhysicalLink;
-use crate::illumos::running_zone::{InstalledZone, RunningZone}; use crate::illumos::vnic::VnicAllocator;
+use crate::illumos::running_zone::{InstalledZone, RunningZone};
+use crate::illumos::vnic::VnicAllocator;
 use crate::illumos::zone::AddressRequest;
 use crate::illumos::zpool::ZpoolName;
 use crate::illumos::{zfs::Mountpoint, zone::ZONE_PREFIX, zpool::ZpoolInfo};
