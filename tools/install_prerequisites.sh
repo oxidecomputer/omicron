@@ -88,6 +88,7 @@ elif [[ "${HOST_OS}" == "SunOS" ]]; then
     'pkg-config'
     'brand/omicron1/tools'
     'library/libxmlsec1'
+    # "bindgen leverages libclang to preprocess, parse, and type check C and C++ header files."
     'pkg:/ooce/developer/clang-120'
   )
 

@@ -49,6 +49,10 @@ banner build
 export RUSTFLAGS="-D warnings"
 export RUSTDOCFLAGS="-D warnings"
 export TMPDIR=$TEST_TMPDIR
+
+# "bindgen leverages libclang to preprocess, parse, and type check C and C++ header files."
+export LIBCLANG_PATH=/opt/ooce/clang-12.0/lib/
+
 ptime -m cargo +'nightly-2022-04-27' build --locked --all-targets --verbose
 
 #
