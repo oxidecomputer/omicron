@@ -160,7 +160,10 @@ impl ToSql<sql_types::Int4, Pg> for VpcFirewallRulePriority {
         &'a self,
         out: &mut serialize::Output<'a, '_, Pg>,
     ) -> serialize::Result {
-        SqlU16(self.0 .0).to_sql(&mut out.reborrow())
+        <SqlU16 as ToSql<sql_types::Int4, Pg>>::to_sql(
+            &SqlU16(self.0 .0),
+            &mut out.reborrow(),
+        )
     }
 }
 

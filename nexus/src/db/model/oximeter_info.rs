@@ -2,6 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+use super::SqlU16;
 use crate::db::schema::oximeter;
 use crate::internal_api;
 use chrono::{DateTime, Utc};
@@ -19,8 +20,7 @@ pub struct OximeterInfo {
     pub time_modified: DateTime<Utc>,
     /// The address on which this oximeter instance listens for requests
     pub ip: ipnetwork::IpNetwork,
-    // TODO: Make use of SqlU16
-    pub port: i32,
+    pub port: SqlU16,
 }
 
 impl OximeterInfo {

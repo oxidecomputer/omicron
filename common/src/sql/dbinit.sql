@@ -66,7 +66,7 @@ CREATE TABLE omicron.public.sled (
 
     /* The IP address and bound port of the sled agent server. */
     ip INET NOT NULL,
-    port INT4 NOT NULL,
+    port INT4 CHECK (port BETWEEN 0 AND 65535) NOT NULL,
 
     /* The last address allocated to an Oxide service on this sled. */
     last_used_address INET NOT NULL
@@ -114,7 +114,7 @@ CREATE TABLE omicron.public.Dataset (
 
     /* Contact information for the dataset */
     ip INET NOT NULL,
-    port INT4 NOT NULL,
+    port INT4 CHECK (port BETWEEN 0 AND 65535) NOT NULL,
 
     kind omicron.public.dataset_kind NOT NULL,
 
@@ -550,7 +550,7 @@ CREATE TABLE omicron.public.oximeter (
     time_created TIMESTAMPTZ NOT NULL,
     time_modified TIMESTAMPTZ NOT NULL,
     ip INET NOT NULL,
-    port INT4 NOT NULL
+    port INT4 CHECK (port BETWEEN 0 AND 65535) NOT NULL
 );
 
 /*
@@ -561,7 +561,7 @@ CREATE TABLE omicron.public.metric_producer (
     time_created TIMESTAMPTZ NOT NULL,
     time_modified TIMESTAMPTZ NOT NULL,
     ip INET NOT NULL,
-    port INT4 NOT NULL,
+    port INT4 CHECK (port BETWEEN 0 AND 65535) NOT NULL,
     interval FLOAT NOT NULL,
     /* TODO: Is this length appropriate? */
     base_route STRING(512) NOT NULL,

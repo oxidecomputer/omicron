@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use super::{DatasetKind, Generation, Region};
+use super::{DatasetKind, Generation, Region, SqlU16};
 use crate::db::collection_insert::DatastoreCollection;
 use crate::db::schema::{dataset, region};
 use chrono::{DateTime, Utc};
@@ -36,7 +36,7 @@ pub struct Dataset {
     pub pool_id: Uuid,
 
     ip: ipnetwork::IpNetwork,
-    port: i32,
+    port: SqlU16,
 
     kind: DatasetKind,
     pub size_used: Option<i64>,
@@ -66,8 +66,7 @@ impl Dataset {
     }
 
     pub fn address(&self) -> SocketAddr {
-        // TODO: avoid this unwrap
-        self.address_with_port(u16::try_from(self.port).unwrap())
+        self.address_with_port(self.port.into())
     }
 
     pub fn address_with_port(&self, port: u16) -> SocketAddr {
