@@ -13,6 +13,7 @@
 // Clippy's style lints are useful, but not worth running automatically.
 #![allow(clippy::style)]
 
+pub mod app; // Public for documentation examples
 pub mod authn; // Public only for testing
 pub mod authz; // Public for documentation examples
 mod cidata;
@@ -22,7 +23,6 @@ pub mod db; // Public for documentation examples
 mod defaults;
 pub mod external_api; // Public for testing
 pub mod internal_api; // Public for testing
-pub mod nexus; // Public for documentation examples
 mod populate;
 mod saga_interface;
 mod sagas;
@@ -33,8 +33,8 @@ pub use context::ServerContext;
 pub use crucible_agent_client;
 use external_api::http_entrypoints::external_api;
 use internal_api::http_entrypoints::internal_api;
-pub use nexus::Nexus;
-pub use nexus::TestInterfaces;
+pub use app::Nexus;
+pub use app::TestInterfaces;
 use slog::Logger;
 use std::sync::Arc;
 use uuid::Uuid;
