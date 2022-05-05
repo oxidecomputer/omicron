@@ -326,7 +326,7 @@ impl From<Generation> for sled_agent_client::types::Generation {
 /// Representation of a [`u16`] in the database.
 /// We need this because the database does not support unsigned types.
 /// This handles converting from the database's INT4 to the actual u16.
-#[derive(Copy, Clone, Debug, Eq, Ord, PartialEq, PartialOrd, FromSqlRow)]
+#[derive(Copy, Clone, Debug, AsExpression, FromSqlRow, Serialize, Deserialize, Eq, Ord, PartialEq, PartialOrd)]
 #[diesel(sql_type = sql_types::Int4)]
 #[repr(transparent)]
 pub struct SqlU16(pub u16);
@@ -681,7 +681,7 @@ pub struct Service {
 
     // ServiceAddress (Sled Agent).
     pub ip: ipv6::Ipv6Addr,
-    pub port: i32,
+    pub port: SqlU16,
 }
 
 /// Database representation of a Pool.
@@ -2407,7 +2407,10 @@ impl ToSql<sql_types::Int4, Pg> for VpcFirewallRulePriority {
         &'a self,
         out: &mut serialize::Output<'a, '_, Pg>,
     ) -> serialize::Result {
-        SqlU16(self.0 .0).to_sql(&mut out.reborrow())
+        <SqlU16 as ToSql<sql_types::Int4, Pg>>::to_sql(
+            &SqlU16(self.0.0),
+            &mut out.reborrow(),
+        )
     }
 }
 

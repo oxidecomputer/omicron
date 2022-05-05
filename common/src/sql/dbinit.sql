@@ -87,7 +87,7 @@ CREATE TABLE omicron.public.service (
 
     /* The IP address and bound port of the service. */
     ip INET NOT NULL,
-    port INT4 NOT NULL,
+    port INT4 CHECK (port BETWEEN 0 AND 65535) NOT NULL
 );
 
 /*
