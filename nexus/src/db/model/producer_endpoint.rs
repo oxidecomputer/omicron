@@ -2,6 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+use super::SqlU16;
 use crate::db::identity::Asset;
 use crate::db::schema::metric_producer;
 use db_macros::Asset;
@@ -17,8 +18,7 @@ pub struct ProducerEndpoint {
     identity: ProducerEndpointIdentity,
 
     pub ip: ipnetwork::IpNetwork,
-    // TODO: Make use of SqlU16
-    pub port: i32,
+    pub port: SqlU16,
     pub interval: f64,
     pub base_route: String,
     pub oximeter_id: Uuid,

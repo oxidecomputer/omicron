@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use super::Generation;
+use super::{Generation, SqlU16};
 use crate::db::collection_insert::DatastoreCollection;
 use crate::db::ipv6;
 use crate::db::schema::{sled, zpool};
@@ -24,8 +24,7 @@ pub struct Sled {
 
     // ServiceAddress (Sled Agent).
     pub ip: ipv6::Ipv6Addr,
-    // TODO: Make use of SqlU16
-    pub port: i32,
+    pub port: SqlU16,
 
     /// The last IP address provided to an Oxide service on this sled
     pub last_used_address: ipv6::Ipv6Addr,
