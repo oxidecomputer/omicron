@@ -10,7 +10,8 @@ use crate::db::ipv6;
 use crate::db::schema::{
     console_session, dataset, disk, global_image, image, instance,
     metric_producer, network_interface, organization, oximeter, project, rack,
-    region, role_assignment, role_builtin, router_route, silo, silo_identity_provider, silo_saml_identity_provider, silo_user, sled,
+    region, role_assignment, role_builtin, router_route, silo,
+    silo_identity_provider, silo_saml_identity_provider, silo_user, sled,
     snapshot, ssh_key, update_available_artifact, user_builtin, volume, vpc,
     vpc_firewall_rule, vpc_router, vpc_subnet, zpool,
 };
