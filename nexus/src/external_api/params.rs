@@ -251,11 +251,6 @@ pub struct VpcSubnetCreate {
 pub struct VpcSubnetUpdate {
     #[serde(flatten)]
     pub identity: IdentityMetadataUpdateParams,
-    // TODO-correctness: These need to be removed. Changing these is effectively
-    // creating a new resource, so we should require explicit
-    // deletion/recreation by the client.
-    pub ipv4_block: Option<Ipv4Net>,
-    pub ipv6_block: Option<Ipv6Net>,
 }
 
 // VPC ROUTERS
