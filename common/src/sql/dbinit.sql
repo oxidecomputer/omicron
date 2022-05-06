@@ -93,7 +93,7 @@ CREATE TABLE omicron.public.service (
 /* Add an index which lets us look up the services on a sled */
 CREATE INDEX ON omicron.public.service (
     sled_id
-)
+);
 
 /*
  * ZPools of Storage, attached to Sleds.
