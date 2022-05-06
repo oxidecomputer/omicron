@@ -8396,22 +8396,6 @@
             "nullable": true,
             "type": "string"
           },
-          "ipv4_block": {
-            "nullable": true,
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/Ipv4Net"
-              }
-            ]
-          },
-          "ipv6_block": {
-            "nullable": true,
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/Ipv6Net"
-              }
-            ]
-          },
           "name": {
             "nullable": true,
             "allOf": [

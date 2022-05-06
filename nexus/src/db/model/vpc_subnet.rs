@@ -81,8 +81,6 @@ pub struct VpcSubnetUpdate {
     pub name: Option<Name>,
     pub description: Option<String>,
     pub time_modified: DateTime<Utc>,
-    pub ipv4_block: Option<Ipv4Net>,
-    pub ipv6_block: Option<Ipv6Net>,
 }
 
 impl From<params::VpcSubnetUpdate> for VpcSubnetUpdate {
@@ -91,8 +89,6 @@ impl From<params::VpcSubnetUpdate> for VpcSubnetUpdate {
             name: params.identity.name.map(Name),
             description: params.identity.description,
             time_modified: Utc::now(),
-            ipv4_block: params.ipv4_block.map(Ipv4Net),
-            ipv6_block: params.ipv6_block.map(Ipv6Net),
         }
     }
 }

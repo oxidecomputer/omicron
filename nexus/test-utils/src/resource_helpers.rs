@@ -147,6 +147,23 @@ pub async fn create_instance(
     project_name: &str,
     instance_name: &str,
 ) -> Instance {
+    create_instance_with_nics(
+        client,
+        organization_name,
+        project_name,
+        instance_name,
+        &params::InstanceNetworkInterfaceAttachment::Default,
+    )
+    .await
+}
+
+pub async fn create_instance_with_nics(
+    client: &ClientTestContext,
+    organization_name: &str,
+    project_name: &str,
+    instance_name: &str,
+    nics: &params::InstanceNetworkInterfaceAttachment,
+) -> Instance {
     let url = format!(
         "/organizations/{}/projects/{}/instances",
         organization_name, project_name
@@ -165,8 +182,7 @@ pub async fn create_instance(
             user_data:
                 b"#cloud-config\nsystem_info:\n  default_user:\n    name: oxide"
                     .to_vec(),
-            network_interfaces:
-                params::InstanceNetworkInterfaceAttachment::Default,
+            network_interfaces: nics.clone(),
             disks: vec![],
         },
     )
