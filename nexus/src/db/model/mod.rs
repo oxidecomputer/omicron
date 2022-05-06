@@ -218,7 +218,7 @@ macro_rules! impl_enum_type {
             fn to_string(&self) -> String {
                 match self {
                     $(
-                    $model_type::$enum_item => String::from_utf8($sql_value.to_vec()).unwrap(),
+                    $model_type::$enum_item => String::from_utf8_lossy($sql_value).to_string(),
                     )*
                 }
             }
@@ -389,7 +389,13 @@ mod tests {
             RawByteStringLiteral => br##"please " ignore"##
 
             // raw byte string literals can be any ASCII (i.e. 0x00 to 0x7F)
-            HexSixRawByteStringLiteral => br"\x06"
+            HexSixRawByteStringLiteral => b"\x06"
+
+            // make sure non-utf8 works
+            NonUtf8ByteStringLiteral => b"\xF6"
+
+            // Sure why not
+            Rocketship => b"\xF0\x9F\x9A\x80" // 🚀
 
             // none of these compile
             //IntegerLiteral1 => 123i32
@@ -414,7 +420,15 @@ mod tests {
         );
         assert_eq!(
             TestType::HexSixRawByteStringLiteral.to_string(),
-            "\\x06".to_string()
+            "\u{6}".to_string()
+        );
+        assert_eq!(
+            TestType::NonUtf8ByteStringLiteral.to_string(),
+            "�".to_string()
+        );
+        assert_eq!(
+            TestType::Rocketship.to_string(),
+            "🚀".to_string(),
         );
     }
 }
