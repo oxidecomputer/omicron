@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! Silos and Users.
+//! Silos, Users, SSH Keys and Roles.
 
 use crate::authz;
 use crate::context::OpContext;
@@ -146,5 +146,49 @@ impl super::Nexus {
                 .await?;
         assert_eq!(authz_user.id(), silo_user_id);
         self.db_datastore.ssh_key_delete(opctx, &authz_ssh_key).await
+    }
+
+    // Built-in users
+
+    pub async fn users_builtin_list(
+        &self,
+        opctx: &OpContext,
+        pagparams: &DataPageParams<'_, Name>,
+    ) -> ListResultVec<db::model::UserBuiltin> {
+        self.db_datastore.users_builtin_list_by_name(opctx, pagparams).await
+    }
+
+    pub async fn user_builtin_fetch(
+        &self,
+        opctx: &OpContext,
+        name: &Name,
+    ) -> LookupResult<db::model::UserBuiltin> {
+        let (.., db_user_builtin) = LookupPath::new(opctx, &self.db_datastore)
+            .user_builtin_name(name)
+            .fetch()
+            .await?;
+        Ok(db_user_builtin)
+    }
+
+    // Built-in roles
+
+    pub async fn roles_builtin_list(
+        &self,
+        opctx: &OpContext,
+        pagparams: &DataPageParams<'_, (String, String)>,
+    ) -> ListResultVec<db::model::RoleBuiltin> {
+        self.db_datastore.roles_builtin_list_by_name(opctx, pagparams).await
+    }
+
+    pub async fn role_builtin_fetch(
+        &self,
+        opctx: &OpContext,
+        name: &str,
+    ) -> LookupResult<db::model::RoleBuiltin> {
+        let (.., db_role_builtin) = LookupPath::new(opctx, &self.db_datastore)
+            .role_builtin_name(name)
+            .fetch()
+            .await?;
+        Ok(db_role_builtin)
     }
 }
