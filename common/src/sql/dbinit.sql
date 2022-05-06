@@ -221,9 +221,7 @@ CREATE INDEX ON omicron.public.silo_user (
     time_deleted IS NULL;
 
 CREATE TYPE omicron.public.provider_type AS ENUM (
-  'local',
-  'saml',
-  'ldap'
+  'saml'
 );
 
 /*
