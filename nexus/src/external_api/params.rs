@@ -367,7 +367,7 @@ pub struct DiskCreate {
     pub size: ByteCount,
 }
 
-const EXTENT_SIZE: u32 = 1_u32 << 20;
+const EXTENT_SIZE: u32 = 256_u32 << 20;
 
 impl DiskCreate {
     pub fn extent_size(&self) -> i64 {
