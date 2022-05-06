@@ -78,8 +78,8 @@ if [[ "${HOST_OS}" == "Linux" ]]; then
     'libxmlsec1-dev'
     'libxmlsec1-openssl'
   )
-  sudo apt update
-  confirm "Install (or update) [${packages[*]}]?" && sudo apt install ${packages[@]}
+  sudo apt-get update
+  confirm "Install (or update) [${packages[*]}]?" && sudo apt-get install ${packages[@]}
 elif [[ "${HOST_OS}" == "SunOS" ]]; then
   packages=(
     'pkg:/package/pkg'
