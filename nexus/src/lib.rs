@@ -25,9 +25,9 @@ pub mod external_api; // Public for testing
 pub mod internal_api; // Public for testing
 mod populate;
 mod saga_interface;
-mod sagas;
 pub mod updates; // public for testing
 
+pub use app::sagas;
 pub use app::test_interfaces::TestInterfaces;
 pub use app::Nexus;
 pub use config::Config;

@@ -108,15 +108,15 @@ impl super::Nexus {
             }
         }
 
-        let saga_params = Arc::new(sagas::ParamsDiskCreate {
+        let saga_params = Arc::new(sagas::disk_create::Params {
             serialized_authn: authn::saga::Serialized::for_opctx(opctx),
             project_id: authz_project.id(),
             create_params: params.clone(),
         });
         let saga_outputs = self
             .execute_saga(
-                Arc::clone(&sagas::SAGA_DISK_CREATE_TEMPLATE),
-                sagas::SAGA_DISK_CREATE_NAME,
+                Arc::clone(&sagas::disk_create::SAGA_TEMPLATE),
+                sagas::disk_create::SAGA_NAME,
                 saga_params,
             )
             .await?;
@@ -271,10 +271,10 @@ impl super::Nexus {
             .await?;
 
         let saga_params =
-            Arc::new(sagas::ParamsDiskDelete { disk_id: authz_disk.id() });
+            Arc::new(sagas::disk_delete::Params { disk_id: authz_disk.id() });
         self.execute_saga(
-            Arc::clone(&sagas::SAGA_DISK_DELETE_TEMPLATE),
-            sagas::SAGA_DISK_DELETE_NAME,
+            Arc::clone(&sagas::disk_delete::SAGA_TEMPLATE),
+            sagas::disk_delete::SAGA_NAME,
             saga_params,
         )
         .await?;

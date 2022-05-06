@@ -14,7 +14,6 @@ use crate::db::model::Name;
 use crate::populate::populate_start;
 use crate::populate::PopulateStatus;
 use crate::saga_interface::SagaContext;
-use crate::sagas;
 use anyhow::anyhow;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
@@ -47,6 +46,10 @@ mod update;
 mod vpc;
 mod vpc_router;
 mod vpc_subnet;
+
+// Sagas are not part of the "Nexus" implementation, but they are
+// application logic.
+pub mod sagas;
 
 // TODO: When referring to API types, we should try to include
 // the prefix unless it is unambiguous.
