@@ -3832,7 +3832,7 @@ impl Nexus {
         silo_name: &Name,
         params: params::SiloSamlIdentityProviderCreate,
     ) -> CreateResult<db::model::SiloSamlIdentityProvider> {
-        let (.., db_silo) = LookupPath::new(opctx, &self.db_datastore)
+        let (authz_silo, db_silo) = LookupPath::new(opctx, &self.db_datastore)
             .silo_name(silo_name)
             .fetch_for(authz::Action::CreateChild)
             .await?;
@@ -3873,7 +3873,9 @@ impl Nexus {
             .validate()
             .map_err(|e| Error::invalid_request(&e.to_string()))?;
 
-        self.db_datastore.silo_saml_identity_provider_create(provider).await
+        self.db_datastore
+            .silo_saml_identity_provider_create(opctx, &authz_silo, provider)
+            .await
     }
 
     pub async fn silo_saml_identity_provider_fetch(

@@ -2701,7 +2701,7 @@ impl DataStore {
 
         let updated_rows = diesel::delete(idp_dsl::silo_identity_provider)
             .filter(idp_dsl::silo_id.eq(id))
-            .execute_async(self.pool())
+            .execute_async(self.pool_authorized(opctx).await?)
             .await
             .map_err(|e| {
                 public_error_from_diesel_pool(
@@ -2722,7 +2722,7 @@ impl DataStore {
                 .filter(saml_idp_dsl::silo_id.eq(id))
                 .filter(saml_idp_dsl::time_deleted.is_null())
                 .set(saml_idp_dsl::time_deleted.eq(Utc::now()))
-                .execute_async(self.pool())
+                .execute_async(self.pool_authorized(opctx).await?)
                 .await
                 .map_err(|e| {
                     public_error_from_diesel_pool(
@@ -2744,9 +2744,14 @@ impl DataStore {
 
     pub async fn silo_saml_identity_provider_create(
         &self,
+        opctx: &OpContext,
+        authz_silo: &authz::Silo,
         provider: db::model::SiloSamlIdentityProvider,
     ) -> CreateResult<db::model::SiloSamlIdentityProvider> {
-        self.pool()
+        opctx.authorize(authz::Action::CreateChild, authz_silo).await?;
+
+        self.pool_authorized(opctx)
+            .await?
             .transaction(move |conn| {
                 // insert silo identity provider record with type Saml
                 use db::schema::silo_identity_provider::dsl as idp_dsl;
