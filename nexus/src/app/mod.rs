@@ -31,12 +31,8 @@ mod project;
 mod rack;
 mod saga;
 mod session;
+mod silo;
 mod sled;
-// TODO: We should strongly consider moving all tests which depend on these
-// interfaces into unit tests, rather than integration tests.
-//
-// This would enable us to conditionally compile the test interfaces out of
-// the non-test builds, with #[cfg(test)]
 pub mod test_interfaces;
 mod update;
 mod vpc;
