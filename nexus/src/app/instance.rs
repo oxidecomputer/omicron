@@ -136,7 +136,7 @@ impl super::Nexus {
             .await
     }
 
-    pub async fn project_instance_fetch(
+    pub async fn instance_fetch(
         &self,
         opctx: &OpContext,
         organization_name: &Name,

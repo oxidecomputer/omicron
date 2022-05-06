@@ -193,7 +193,7 @@ impl super::Nexus {
             .await
     }
 
-    pub async fn project_vpc_fetch(
+    pub async fn vpc_fetch(
         &self,
         opctx: &OpContext,
         organization_name: &Name,

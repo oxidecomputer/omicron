@@ -145,7 +145,7 @@ impl super::Nexus {
             .await
     }
 
-    pub async fn project_disk_fetch(
+    pub async fn disk_fetch(
         &self,
         opctx: &OpContext,
         organization_name: &Name,
@@ -314,7 +314,7 @@ impl super::Nexus {
         Err(self.unimplemented_todo(opctx, Unimpl::Public).await)
     }
 
-    pub async fn project_snapshot_fetch(
+    pub async fn snapshot_fetch(
         &self,
         opctx: &OpContext,
         _organization_name: &Name,

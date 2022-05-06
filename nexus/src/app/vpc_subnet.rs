@@ -217,7 +217,7 @@ impl super::Nexus {
         Ok(db_vpc)
     }
 
-    pub async fn subnet_update(
+    pub async fn vpc_update_subnet(
         &self,
         opctx: &OpContext,
         organization_name: &Name,

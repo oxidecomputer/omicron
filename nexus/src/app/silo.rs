@@ -31,18 +31,6 @@ impl super::Nexus {
         self.db_datastore.silo_create(opctx, silo).await
     }
 
-    pub async fn silo_fetch(
-        &self,
-        opctx: &OpContext,
-        name: &Name,
-    ) -> LookupResult<db::model::Silo> {
-        let (.., db_silo) = LookupPath::new(opctx, &self.db_datastore)
-            .silo_name(name)
-            .fetch()
-            .await?;
-        Ok(db_silo)
-    }
-
     pub async fn silos_list_by_name(
         &self,
         opctx: &OpContext,
@@ -57,6 +45,18 @@ impl super::Nexus {
         pagparams: &DataPageParams<'_, Uuid>,
     ) -> ListResultVec<db::model::Silo> {
         self.db_datastore.silos_list_by_id(opctx, pagparams).await
+    }
+
+    pub async fn silo_fetch(
+        &self,
+        opctx: &OpContext,
+        name: &Name,
+    ) -> LookupResult<db::model::Silo> {
+        let (.., db_silo) = LookupPath::new(opctx, &self.db_datastore)
+            .silo_name(name)
+            .fetch()
+            .await?;
+        Ok(db_silo)
     }
 
     pub async fn silo_delete(

@@ -20,6 +20,8 @@ use std::sync::Arc;
 use uuid::Uuid;
 
 impl super::Nexus {
+    // Sleds
+
     // TODO-robustness we should have a limit on how many sled agents there can
     // be (for graceful degradation at large scale).
     pub async fn upsert_sled(
@@ -110,6 +112,8 @@ impl super::Nexus {
         )))
     }
 
+    // Zpools (contained within sleds)
+
     /// Upserts a Zpool into the database, updating it if it already exists.
     pub async fn upsert_zpool(
         &self,
@@ -122,6 +126,8 @@ impl super::Nexus {
         self.db_datastore.zpool_upsert(zpool).await?;
         Ok(())
     }
+
+    // Datasets (contained within zpools)
 
     /// Upserts a dataset into the database, updating it if it already exists.
     pub async fn upsert_dataset(
