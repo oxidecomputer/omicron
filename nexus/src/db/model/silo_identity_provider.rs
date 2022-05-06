@@ -22,9 +22,7 @@ impl_enum_type!(
     pub enum SiloIdentityProviderType;
 
     // Enum values
-    Local => b"local"
     Saml => b"saml"
-    Ldap => b"ldap"
 );
 
 #[derive(Queryable, Insertable, Clone, Debug, Selectable)]
