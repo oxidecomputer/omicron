@@ -826,7 +826,7 @@ async fn project_disks_get_disk(
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
         let disk = nexus
-            .disk_fetch(&opctx, &organization_name, &project_name, &disk_name)
+            .project_disk_fetch(&opctx, &organization_name, &project_name, &disk_name)
             .await?;
         Ok(HttpResponseOk(disk.into()))
     };
@@ -968,7 +968,7 @@ async fn project_instances_get_instance(
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
         let instance = nexus
-            .instance_fetch(
+            .project_instance_fetch(
                 &opctx,
                 &organization_name,
                 &project_name,
@@ -1032,7 +1032,7 @@ async fn project_instances_migrate_instance(
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
         let instance = nexus
-            .project_migrate_instance(
+            .instance_migrate(
                 &opctx,
                 &organization_name,
                 &project_name,
@@ -1643,7 +1643,7 @@ async fn instance_network_interfaces_get_interface(
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
         let interface = nexus
-            .network_interface_fetch(
+            .instance_network_interface_fetch(
                 &opctx,
                 organization_name,
                 project_name,
@@ -1753,7 +1753,7 @@ async fn project_snapshots_get_snapshot(
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
         let snapshot = nexus
-            .snapshot_fetch(
+            .project_snapshot_fetch(
                 &opctx,
                 &organization_name,
                 &project_name,
@@ -1862,7 +1862,7 @@ async fn project_vpcs_get_vpc(
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
         let vpc = nexus
-            .vpc_fetch(&opctx, &organization_name, &project_name, &vpc_name)
+            .project_vpc_fetch(&opctx, &organization_name, &project_name, &vpc_name)
             .await?;
         Ok(HttpResponseOk(vpc.into()))
     };
@@ -2111,7 +2111,7 @@ async fn vpc_subnets_put_subnet(
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
         let subnet = nexus
-            .vpc_update_subnet(
+            .subnet_update(
                 &opctx,
                 &path.organization_name,
                 &path.project_name,

@@ -4,6 +4,7 @@
 
 //! Diesel queries used for subnet and IP allocation
 
+use crate::app::MAX_NICS_PER_INSTANCE;
 use crate::db;
 use crate::db::identity::Resource;
 use crate::db::model::{IncompleteNetworkInterface, VpcSubnet};
@@ -491,7 +492,7 @@ impl NetworkInterfaceError {
             NetworkInterfaceError::NoSlotsAvailable => {
                 external::Error::invalid_request(&format!(
                     "Instances may not have more than {} network interfaces",
-                    crate::nexus::MAX_NICS_PER_INSTANCE
+                    MAX_NICS_PER_INSTANCE
                 ))
             }
             NetworkInterfaceError::External(e) => e,
@@ -552,7 +553,7 @@ fn decode_database_error(
     const PRIMARY_KEY_CONSTRAINT: &str = "primary";
 
     // The check  violated in the case where we try to insert more that the
-    // maximum number of NICs (`crate::nexus::MAX_NICS_PER_INSTANCE`).
+    // maximum number of NICs (`MAX_NICS_PER_INSTANCE`).
     const NO_SLOTS_AVAILABLE_ERROR_MESSAGE: &str = concat!(
         "failed to satisfy CHECK constraint ",
         "((slot >= 0:::INT8) AND (slot < 8:::INT8))",
@@ -1041,7 +1042,7 @@ fn push_select_next_available_nic_slot_query<'a>(
     use db::schema::network_interface::dsl;
     out.push_sql(&format!(
         "SELECT COALESCE((SELECT next_slot FROM generate_series(0, {}) ",
-        crate::nexus::MAX_NICS_PER_INSTANCE,
+        MAX_NICS_PER_INSTANCE,
     ));
     out.push_sql("AS next_slot LEFT OUTER JOIN ");
     NETWORK_INTERFACE_FROM_CLAUSE.walk_ast(out.reborrow())?;
@@ -1307,6 +1308,7 @@ impl QueryFragment<Pg> for InsertNetworkInterfaceQueryValues {
 
 #[cfg(test)]
 mod test {
+    use super::MAX_NICS_PER_INSTANCE;
     use super::NetworkInterfaceError;
     use super::SubnetError;
     use crate::context::OpContext;
@@ -1851,7 +1853,7 @@ mod test {
         );
         let instance_id =
             "90d8542f-52dc-cacb-fa2b-ea0940d6bcb7".parse().unwrap();
-        for slot in 0..crate::nexus::MAX_NICS_PER_INSTANCE {
+        for slot in 0..MAX_NICS_PER_INSTANCE {
             let interface = IncompleteNetworkInterface::new(
                 Uuid::new_v4(),
                 instance_id,

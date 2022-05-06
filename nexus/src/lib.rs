@@ -34,7 +34,7 @@ pub use crucible_agent_client;
 use external_api::http_entrypoints::external_api;
 use internal_api::http_entrypoints::internal_api;
 pub use app::Nexus;
-pub use app::TestInterfaces;
+pub use app::test_interfaces::TestInterfaces;
 use slog::Logger;
 use std::sync::Arc;
 use uuid::Uuid;
