@@ -468,6 +468,8 @@ mod test {
     use super::*;
     use std::convert::TryFrom;
 
+    const BLOCK_SIZE: u32 = 4096;
+
     fn new_disk_create_params(size: ByteCount) -> DiskCreate {
         DiskCreate {
             identity: IdentityMetadataCreateParams {
@@ -475,7 +477,7 @@ mod test {
                 description: "desc".to_string(),
             },
             disk_source: DiskSource::Blank {
-                block_size: BlockSize::try_from(4096).unwrap(),
+                block_size: BlockSize(BLOCK_SIZE),
             },
             size,
         }
@@ -507,19 +509,23 @@ mod test {
 
         // Note that i64::MAX bytes is an invalid disk size as it's not
         // divisible by 4096.
-        let max_disk_size = i64::MAX - (i64::MAX % 4096);
+        let max_disk_size = i64::MAX - (i64::MAX % (BLOCK_SIZE as i64));
         let params =
             new_disk_create_params(ByteCount::try_from(max_disk_size).unwrap());
-        let block_size: u64 = 4096;
-        let blocks_per_extent: u64 = params.extent_size() as u64 / block_size;
-        assert_eq!(params.extent_count() as u64, 8796093022208_u64);
+        let blocks_per_extent: u64 = params.extent_size() as u64 / BLOCK_SIZE as u64;
+
+        // We should still be rounding up to the nearest extent size.
+        assert_eq!(
+            params.extent_count() as u128 * EXTENT_SIZE as u128,
+            i64::MAX as u128 + 1,
+        );
 
         // Assert that the regions allocated will fit this disk
         assert!(
             params.size.to_bytes() as u64
                 <= (params.extent_count() as u64)
                     * blocks_per_extent
-                    * block_size
+                    * BLOCK_SIZE as u64
         );
     }
 }
