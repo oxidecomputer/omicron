@@ -155,9 +155,6 @@ has_relation(fleet: Fleet, "parent_fleet", silo: Silo)
 has_role(actor: AuthenticatedActor, "viewer", silo: Silo)
 	if actor.silo = silo;
 
-has_permission(actor: AuthenticatedActor, "read", silo: Silo)
-	if has_role(actor, "external-authenticator", silo.fleet);
-
 resource Organization {
 	permissions = [
 	    "list_children",
@@ -257,6 +254,17 @@ has_permission(actor: AuthenticatedActor, "read", session: ConsoleSession)
 has_permission(actor: AuthenticatedActor, "modify", session: ConsoleSession)
 	if has_role(actor, "external-authenticator", session.fleet);
 
+has_permission(actor: AuthenticatedActor, "read", silo: Silo)
+	if has_role(actor, "external-authenticator", silo.fleet);
+has_permission(actor: AuthenticatedActor, "read", silo_identity_provider: SiloIdentityProvider)
+	if has_role(actor, "external-authenticator", silo_identity_provider.silo.fleet);
+has_permission(actor: AuthenticatedActor, "list_children", silo_identity_provider: SiloIdentityProvider)
+	if has_role(actor, "external-authenticator", silo_identity_provider.silo.fleet);
+has_permission(actor: AuthenticatedActor, "read", silo_saml_identity_provider: SiloSamlIdentityProvider)
+	if has_role(actor, "external-authenticator", silo_saml_identity_provider.silo.fleet);
+has_permission(actor: AuthenticatedActor, "list_children", silo_saml_identity_provider: SiloSamlIdentityProvider)
+	if has_role(actor, "external-authenticator", silo_saml_identity_provider.silo.fleet);
+
 resource SiloUser {
 	permissions = [
 	    "list_children",
@@ -303,11 +311,6 @@ resource SiloIdentityProvider {
 has_relation(silo: Silo, "parent_silo", silo_identity_provider: SiloIdentityProvider)
 	if silo_identity_provider.silo = silo;
 
-has_permission(actor: AuthenticatedActor, "read", silo_identity_provider: SiloIdentityProvider)
-	if has_role(actor, "external-authenticator", silo_identity_provider.silo.fleet);
-has_permission(actor: AuthenticatedActor, "list_children", silo_identity_provider: SiloIdentityProvider)
-	if has_role(actor, "external-authenticator", silo_identity_provider.silo.fleet);
-
 resource SiloSamlIdentityProvider {
 	permissions = [
 	    "read",
@@ -327,7 +330,3 @@ resource SiloSamlIdentityProvider {
 has_relation(silo: Silo, "parent_silo", silo_saml_identity_provider: SiloSamlIdentityProvider)
 	if silo_saml_identity_provider.silo = silo;
 
-has_permission(actor: AuthenticatedActor, "read", silo_saml_identity_provider: SiloSamlIdentityProvider)
-	if has_role(actor, "external-authenticator", silo_saml_identity_provider.silo.fleet);
-has_permission(actor: AuthenticatedActor, "list_children", silo_saml_identity_provider: SiloSamlIdentityProvider)
-	if has_role(actor, "external-authenticator", silo_saml_identity_provider.silo.fleet);
