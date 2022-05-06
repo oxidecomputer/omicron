@@ -9,16 +9,11 @@ use crate::authz;
 use crate::config;
 use crate::context::OpContext;
 use crate::db;
-use crate::db::lookup::LookupPath;
-use crate::db::model::Name;
 use crate::populate::populate_start;
 use crate::populate::PopulateStatus;
 use crate::saga_interface::SagaContext;
 use anyhow::anyhow;
-use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
-use omicron_common::api::external::ListResultVec;
-use omicron_common::api::external::LookupResult;
 use slog::Logger;
 use std::sync::Arc;
 use uuid::Uuid;
@@ -26,6 +21,7 @@ use uuid::Uuid;
 // The implementation of Nexus is large, and split into a number of submodules
 // by resource.
 mod disk;
+mod iam;
 mod image;
 mod instance;
 mod organization;
@@ -36,11 +32,6 @@ mod saga;
 mod session;
 mod silo;
 mod sled;
-// TODO: We should strongly consider moving all tests which depend on these
-// interfaces into unit tests, rather than integration tests.
-//
-// This would enable us to conditionally compile the test interfaces out of
-// the non-test builds, with #[cfg(test)]
 pub mod test_interfaces;
 mod update;
 mod vpc;
@@ -411,50 +402,6 @@ impl Nexus {
 
     pub fn datastore(&self) -> &Arc<db::DataStore> {
         &self.db_datastore
-    }
-
-    // Built-in users
-
-    pub async fn users_builtin_list(
-        &self,
-        opctx: &OpContext,
-        pagparams: &DataPageParams<'_, Name>,
-    ) -> ListResultVec<db::model::UserBuiltin> {
-        self.db_datastore.users_builtin_list_by_name(opctx, pagparams).await
-    }
-
-    pub async fn user_builtin_fetch(
-        &self,
-        opctx: &OpContext,
-        name: &Name,
-    ) -> LookupResult<db::model::UserBuiltin> {
-        let (.., db_user_builtin) = LookupPath::new(opctx, &self.db_datastore)
-            .user_builtin_name(name)
-            .fetch()
-            .await?;
-        Ok(db_user_builtin)
-    }
-
-    // Built-in roles
-
-    pub async fn roles_builtin_list(
-        &self,
-        opctx: &OpContext,
-        pagparams: &DataPageParams<'_, (String, String)>,
-    ) -> ListResultVec<db::model::RoleBuiltin> {
-        self.db_datastore.roles_builtin_list_by_name(opctx, pagparams).await
-    }
-
-    pub async fn role_builtin_fetch(
-        &self,
-        opctx: &OpContext,
-        name: &str,
-    ) -> LookupResult<db::model::RoleBuiltin> {
-        let (.., db_role_builtin) = LookupPath::new(opctx, &self.db_datastore)
-            .role_builtin_name(name)
-            .fetch()
-            .await?;
-        Ok(db_role_builtin)
     }
 }
 

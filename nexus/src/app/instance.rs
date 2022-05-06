@@ -182,7 +182,7 @@ impl super::Nexus {
         self.db_datastore.project_delete_instance(opctx, &authz_instance).await
     }
 
-    pub async fn instance_migrate(
+    pub async fn project_instance_migrate(
         self: &Arc<Self>,
         opctx: &OpContext,
         organization_name: &Name,
@@ -860,7 +860,7 @@ impl super::Nexus {
     }
 
     /// Fetch a network interface attached to the given instance.
-    pub async fn instance_network_interface_fetch(
+    pub async fn network_interface_fetch(
         &self,
         opctx: &OpContext,
         organization_name: &Name,

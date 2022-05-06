@@ -1032,7 +1032,7 @@ async fn project_instances_migrate_instance(
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
         let instance = nexus
-            .instance_migrate(
+            .project_instance_migrate(
                 &opctx,
                 &organization_name,
                 &project_name,
@@ -1643,7 +1643,7 @@ async fn instance_network_interfaces_get_interface(
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
         let interface = nexus
-            .instance_network_interface_fetch(
+            .network_interface_fetch(
                 &opctx,
                 organization_name,
                 project_name,
