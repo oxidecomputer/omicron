@@ -16,9 +16,7 @@ use samael::service_provider::ServiceProvider;
 use samael::service_provider::ServiceProviderBuilder;
 
 pub enum SiloIdentityProviderType {
-    Local,
-    Ldap,
-    Saml(Box<SiloSamlIdentityProvider>),
+    Saml(SiloSamlIdentityProvider),
 }
 
 impl SiloSamlIdentityProvider {

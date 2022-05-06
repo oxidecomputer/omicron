@@ -3915,9 +3915,9 @@ impl Nexus {
                         .fetch()
                         .await?;
 
-                Ok(authn::silos::SiloIdentityProviderType::Saml(Box::new(
+                Ok(authn::silos::SiloIdentityProviderType::Saml(
                     silo_saml_identity_provider,
-                )))
+                ))
             }
         }
     }

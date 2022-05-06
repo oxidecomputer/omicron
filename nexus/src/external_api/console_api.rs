@@ -126,12 +126,6 @@ pub async fn ask_user_to_login_to_provider(
             .await?;
 
         match identity_provider {
-            SiloIdentityProviderType::Local => {
-                todo!()
-            }
-            SiloIdentityProviderType::Ldap => {
-                todo!()
-            }
             SiloIdentityProviderType::Saml(silo_saml_identity_provider) => {
                 let relay_state = None;
                 let sign_in_url = silo_saml_identity_provider
@@ -183,12 +177,6 @@ pub async fn consume_credentials_and_authn_user(
             .await?;
 
         match identity_provider {
-            SiloIdentityProviderType::Local => {
-                todo!()
-            }
-            SiloIdentityProviderType::Ldap => {
-                todo!()
-            }
             SiloIdentityProviderType::Saml(_silo_saml_identity_provider) => {
                 todo!()
             }
