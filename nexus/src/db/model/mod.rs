@@ -404,8 +404,17 @@ mod tests {
             //BooleanLiteral => false
         );
 
-        assert_eq!(TestType::ByteStringLiteral.to_string(), "test post".to_string());
-        assert_eq!(TestType::RawByteStringLiteral.to_string(), "please \" ignore".to_string());
-        assert_eq!(TestType::HexSixRawByteStringLiteral.to_string(), "\\x06".to_string());
+        assert_eq!(
+            TestType::ByteStringLiteral.to_string(),
+            "test post".to_string()
+        );
+        assert_eq!(
+            TestType::RawByteStringLiteral.to_string(),
+            "please \" ignore".to_string()
+        );
+        assert_eq!(
+            TestType::HexSixRawByteStringLiteral.to_string(),
+            "\\x06".to_string()
+        );
     }
 }
