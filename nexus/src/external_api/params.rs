@@ -512,7 +512,8 @@ mod test {
         let max_disk_size = i64::MAX - (i64::MAX % (BLOCK_SIZE as i64));
         let params =
             new_disk_create_params(ByteCount::try_from(max_disk_size).unwrap());
-        let blocks_per_extent: u64 = params.extent_size() as u64 / BLOCK_SIZE as u64;
+        let blocks_per_extent: u64 =
+            params.extent_size() as u64 / BLOCK_SIZE as u64;
 
         // We should still be rounding up to the nearest extent size.
         assert_eq!(
