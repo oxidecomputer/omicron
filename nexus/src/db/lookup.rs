@@ -419,6 +419,7 @@ lookup_resource! {
     lookup_by_name = true,
     soft_deletes = false,
     primary_key_columns = [
+        { column_name = "silo_id", rust_type = Uuid },
         { column_name = "provider_id", rust_type = Uuid }
     ]
 }
