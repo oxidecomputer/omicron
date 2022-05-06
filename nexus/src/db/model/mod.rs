@@ -351,4 +351,61 @@ mod tests {
         assert!(!subnet.check_requestable_addr("fd00::1".parse().unwrap()));
         assert!(subnet.check_requestable_addr("fd00::1:1".parse().unwrap()));
     }
+
+    #[test]
+    fn test_impl_enum_type_to_string() {
+        // Assert here that the to_string does not panic on the unwrap
+        use std::io::Write;
+
+        impl_enum_type!(
+            #[derive(SqlType, Debug, QueryId)]
+            #[diesel(postgres_type(name = "test_type"))]
+            pub struct TestTypeEnum;
+
+            #[derive(Copy, Clone, Debug, AsExpression, FromSqlRow, PartialEq)]
+            #[diesel(sql_type = TestTypeEnum)]
+            pub enum TestType;
+
+            // All possible macro_rules literals are listed below. Note that
+            // diesel::serialize::Output's write_all means that a &[u8] is
+            // expected for $sql_value, and impl_enum_type's ToString calls
+            // .to_vec() on the literal so that also must be implemented.
+
+            // to_vec not found in `char`
+            // CharLiteral => 'a'
+
+            // does not compile, says "consider adding a leading `b`"
+            //StringLiteral => "test post"
+
+            // does not compile
+            //RawStringLiteral => r"test post"
+
+            // does not compile: "expected `&[u8]`, found `u8`"
+            //ByteLiteral => b'a'
+            //HexByteLiteral => b'\x12'
+
+            // ok
+            ByteStringLiteral => b"test post"
+            RawByteStringLiteral => br##"please " ignore"##
+
+            // raw byte string literals can be any ASCII (i.e. 0x00 to 0x7F)
+            HexSixRawByteStringLiteral => br"\x06"
+
+            // none of these compile
+            //IntegerLiteral1 => 123i32
+            //IntegerLiteral2 => 123u32
+            //IntegerLiteral3 => 123_u32
+            //IntegerLiteral4 => 0xff_u8
+            //IntegerLiteral5 => 0o70_i16
+            //IntegerLiteral6 => 0b1111_1111_1001_0000_i64
+            //IntegerLiteral7 => 0b________1_i32
+            //IntegerLiteral8 => 0usize
+            //FloatLiteral => 123.0f64
+            //BooleanLiteral => false
+        );
+
+        assert_eq!(TestType::ByteStringLiteral.to_string(), "test post".to_string());
+        assert_eq!(TestType::RawByteStringLiteral.to_string(), "please \" ignore".to_string());
+        assert_eq!(TestType::HexSixRawByteStringLiteral.to_string(), "\\x06".to_string());
+    }
 }
