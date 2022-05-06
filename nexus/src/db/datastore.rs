@@ -2706,10 +2706,7 @@ impl DataStore {
             .map_err(|e| {
                 public_error_from_diesel_pool(
                     e,
-                    ErrorHandler::NotFoundByLookup(
-                        ResourceType::Silo,
-                        LookupType::ById(id),
-                    ),
+                    ErrorHandler::NotFoundByResource(authz_silo),
                 )
             })?;
 
@@ -2727,10 +2724,7 @@ impl DataStore {
                 .map_err(|e| {
                     public_error_from_diesel_pool(
                         e,
-                        ErrorHandler::NotFoundByLookup(
-                            ResourceType::Silo,
-                            LookupType::ById(id),
-                        ),
+                        ErrorHandler::NotFoundByResource(authz_silo),
                     )
                 })?;
 
