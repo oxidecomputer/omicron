@@ -9,12 +9,15 @@ use uuid::Uuid;
 pub const MAX_USER_DATA_BYTES: usize = 32 * 1024; // 32 KiB
 
 impl Instance {
-    pub fn generate_cidata(&self) -> Result<Vec<u8>, Error> {
+    pub fn generate_cidata(
+        &self,
+        public_keys: &[String],
+    ) -> Result<Vec<u8>, Error> {
         // cloud-init meta-data is YAML, but YAML is a strict superset of JSON.
         let meta_data = serde_json::to_vec(&MetaData {
             instance_id: self.id(),
             local_hostname: &self.runtime().hostname,
-            public_keys: &[], // TODO
+            public_keys,
         })
         .map_err(|_| Error::internal_error("failed to serialize meta-data"))?;
         let cidata =
@@ -67,10 +70,10 @@ fn build_vfat(meta_data: &[u8], user_data: &[u8]) -> io::Result<Vec<u8>> {
         let root_dir = fs.root_dir();
         for (file, data) in [("meta-data", meta_data), ("user-data", user_data)]
         {
-            if !data.is_empty() {
-                let mut file = root_dir.create_file(file)?;
-                file.write_all(data)?;
-            }
+            // Cloud-init requires the files `meta-data` and `user-data`
+            // to be present, even if empty.
+            let mut file = root_dir.create_file(file)?;
+            file.write_all(data)?;
         }
     }
 

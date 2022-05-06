@@ -31,6 +31,8 @@ use sled_agent_client::Client as SledAgentClient;
 use std::sync::Arc;
 use uuid::Uuid;
 
+const MAX_KEYS_PER_INSTANCE: u32 = 8;
+
 impl super::Nexus {
     pub async fn instance_migrate(
         self: &Arc<Self>,
@@ -296,6 +298,32 @@ impl super::Nexus {
             .derive_guest_network_interface_info(&opctx, &authz_instance)
             .await?;
 
+        // Gather the SSH public keys of the actor make the request so
+        // that they may be injected into the new image via cloud-init.
+        // TODO-security: this should be replaced with a lookup based on
+        // on `SiloUser` role assignments once those are in place.
+        let actor = opctx.authn.actor_required()?;
+        let (.., authz_user) = LookupPath::new(opctx, &self.db_datastore)
+            .silo_user_id(actor.actor_id())
+            .lookup_for(authz::Action::ListChildren)
+            .await?;
+        let public_keys = self
+            .db_datastore
+            .ssh_keys_list(
+                opctx,
+                &authz_user,
+                &DataPageParams {
+                    marker: None,
+                    direction: dropshot::PaginationOrder::Ascending,
+                    limit: std::num::NonZeroU32::new(MAX_KEYS_PER_INSTANCE)
+                        .unwrap(),
+                },
+            )
+            .await?
+            .into_iter()
+            .map(|ssh_key| ssh_key.public_key)
+            .collect::<Vec<String>>();
+
         // Ask the sled agent to begin the state change.  Then update the
         // database to reflect the new intermediate state.  If this update is
         // not the newest one, that's fine.  That might just mean the sled agent
@@ -308,7 +336,7 @@ impl super::Nexus {
             nics,
             disks: disk_reqs,
             cloud_init_bytes: Some(base64::encode(
-                db_instance.generate_cidata()?,
+                db_instance.generate_cidata(&public_keys)?,
             )),
         };
 

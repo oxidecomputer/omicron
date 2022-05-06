@@ -533,8 +533,6 @@ lazy_static! {
                             name: None,
                             description: Some("different".to_string())
                         },
-                        ipv4_block: None,
-                        ipv6_block: None,
                     }).unwrap()
                 ),
                 AllowedMethod::Delete,
