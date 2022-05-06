@@ -6,6 +6,7 @@ use super::SqlU16;
 use crate::db::schema::service;
 use crate::db::ipv6;
 use db_macros::Asset;
+use std::net::SocketAddrV6;
 use uuid::Uuid;
 
 #[derive(Queryable, Insertable, Debug, Clone, Selectable, Asset)]
@@ -22,3 +23,17 @@ pub struct Service {
     pub port: SqlU16,
 }
 
+impl Service {
+    pub fn new(
+        id: Uuid,
+        sled_id: Uuid,
+        addr: SocketAddrV6,
+    ) -> Self {
+        Self {
+            identity: ServiceIdentity::new(id),
+            sled_id,
+            ip: addr.ip().into(),
+            port: addr.port().into(),
+        }
+    }
+}

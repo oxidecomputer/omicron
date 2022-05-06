@@ -527,6 +527,7 @@ pub enum ResourceType {
     Instance,
     NetworkInterface,
     Rack,
+    Service,
     Sled,
     SagaDbg,
     Snapshot,

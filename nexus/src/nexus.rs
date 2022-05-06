@@ -517,6 +517,19 @@ impl Nexus {
         Ok(())
     }
 
+    /// Upserts a Service into the database, updating it if it already exists.
+    pub async fn upsert_service(
+        &self,
+        id: Uuid,
+        sled_id: Uuid,
+        info: ServicePutRequest,
+    ) -> Result<(), Error> {
+        info!(self.log, "upserting service"; "sled_id" => sled_id.to_string(), "service_id" => id.to_string());
+        let service = db::model::Service::new(id, sled_id, &info);
+        self.db_datastore.service_upsert(service).await?;
+        Ok(())
+    }
+
     /// Insert a new record of an Oximeter collector server.
     pub async fn upsert_oximeter_collector(
         &self,

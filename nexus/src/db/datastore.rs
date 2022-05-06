@@ -41,7 +41,7 @@ use crate::db::{
         InstanceRuntimeState, Name, NetworkInterface, Organization,
         OrganizationUpdate, OximeterInfo, ProducerEndpoint, Project,
         ProjectUpdate, Region, RoleAssignment, RoleBuiltin, RouterRoute,
-        RouterRouteUpdate, Silo, SiloUser, Sled, SshKey,
+        RouterRouteUpdate, Service, Silo, SiloUser, Sled, SshKey,
         UpdateAvailableArtifact, UserBuiltin, Volume, Vpc, VpcFirewallRule,
         VpcRouter, VpcRouterUpdate, VpcSubnet, VpcSubnetUpdate, VpcUpdate,
         Zpool,
@@ -246,6 +246,43 @@ impl DataStore {
                     ErrorHandler::Conflict(
                         ResourceType::Dataset,
                         &dataset.id().to_string(),
+                    ),
+                )
+            }
+        })
+    }
+
+    /// Stores a new service in the database.
+    pub async fn service_upsert(&self, service: Service) -> CreateResult<Service> {
+        use db::schema::service::dsl;
+
+        let sled_id = service.sled_id;
+        Sled::insert_resource(
+            sled_id,
+            diesel::insert_into(dsl::service)
+                .values(service.clone())
+                .on_conflict(dsl::id)
+                .do_update()
+                .set((
+                    dsl::time_modified.eq(Utc::now()),
+                    dsl::sled_id.eq(excluded(dsl::sled_id)),
+                    dsl::ip.eq(excluded(dsl::ip)),
+                    dsl::port.eq(excluded(dsl::port)),
+                )),
+        )
+        .insert_and_get_result_async(self.pool())
+        .await
+        .map_err(|e| match e {
+            AsyncInsertError::CollectionNotFound => Error::ObjectNotFound {
+                type_name: ResourceType::Sled,
+                lookup_type: LookupType::ById(sled_id),
+            },
+            AsyncInsertError::DatabaseError(e) => {
+                public_error_from_diesel_pool(
+                    e,
+                    ErrorHandler::Conflict(
+                        ResourceType::Service,
+                        &service.id().to_string(),
                     ),
                 )
             }
