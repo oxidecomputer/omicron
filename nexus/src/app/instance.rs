@@ -5,6 +5,7 @@
 //! Virtual Machine Instances
 
 use super::MAX_DISKS_PER_INSTANCE;
+use crate::app::sagas;
 use crate::authn;
 use crate::authz;
 use crate::context::OpContext;
@@ -14,7 +15,6 @@ use crate::db::lookup::LookupPath;
 use crate::db::model::Name;
 use crate::db::subnet_allocation::NetworkInterfaceError;
 use crate::external_api::params;
-use crate::sagas;
 use omicron_common::api::external;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DataPageParams;
@@ -57,7 +57,7 @@ impl super::Nexus {
             )));
         }
 
-        let saga_params = Arc::new(sagas::ParamsInstanceCreate {
+        let saga_params = Arc::new(sagas::instance_create::Params {
             serialized_authn: authn::saga::Serialized::for_opctx(opctx),
             organization_name: organization_name.clone().into(),
             project_name: project_name.clone().into(),
@@ -67,8 +67,8 @@ impl super::Nexus {
 
         let saga_outputs = self
             .execute_saga(
-                Arc::clone(&sagas::SAGA_INSTANCE_CREATE_TEMPLATE),
-                sagas::SAGA_INSTANCE_CREATE_NAME,
+                Arc::clone(&sagas::instance_create::SAGA_TEMPLATE),
+                sagas::instance_create::SAGA_NAME,
                 saga_params,
             )
             .await?;
@@ -198,14 +198,14 @@ impl super::Nexus {
             .await?;
 
         // Kick off the migration saga
-        let saga_params = Arc::new(sagas::ParamsInstanceMigrate {
+        let saga_params = Arc::new(sagas::instance_migrate::Params {
             serialized_authn: authn::saga::Serialized::for_opctx(opctx),
             instance_id: authz_instance.id(),
             migrate_params: params,
         });
         self.execute_saga(
-            Arc::clone(&sagas::SAGA_INSTANCE_MIGRATE_TEMPLATE),
-            sagas::SAGA_INSTANCE_MIGRATE_NAME,
+            Arc::clone(&sagas::instance_migrate::SAGA_TEMPLATE),
+            sagas::instance_migrate::SAGA_NAME,
             saga_params,
         )
         .await?;
