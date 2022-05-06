@@ -49,7 +49,7 @@ mod vpc_subnet;
 
 // Sagas are not part of the "Nexus" implementation, but they are
 // application logic.
-pub mod sagas;
+mod sagas;
 
 // TODO: When referring to API types, we should try to include
 // the prefix unless it is unambiguous.
