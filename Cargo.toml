@@ -96,3 +96,5 @@ panic = "abort"
 git = 'https://github.com/oxidecomputer/pq-sys'
 branch = "oxide/omicron"
 
+[patch."https://github.com/oxidecomputer/openapi-lint"]
+openapi-lint = { path = "../openapi-lint" }

@@ -149,27 +149,39 @@
           {
             "type": "object",
             "properties": {
-              "AAAA": {
+              "data": {
                 "type": "string",
                 "format": "ipv6"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "AAAA"
+                ]
               }
             },
             "required": [
-              "AAAA"
-            ],
-            "additionalProperties": false
+              "data",
+              "type"
+            ]
           },
           {
             "type": "object",
             "properties": {
-              "SRV": {
+              "data": {
                 "$ref": "#/components/schemas/Srv"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "SRV"
+                ]
               }
             },
             "required": [
-              "SRV"
-            ],
-            "additionalProperties": false
+              "data",
+              "type"
+            ]
           }
         ]
       },

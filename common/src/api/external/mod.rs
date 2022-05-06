@@ -1769,6 +1769,7 @@ pub struct NetworkInterface {
     Ord,
     PartialOrd,
 )]
+#[serde(tag = "type", content = "value", rename_all = "snake_case")]
 pub enum Digest {
     Sha256(String),
 }

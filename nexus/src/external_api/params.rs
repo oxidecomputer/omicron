@@ -92,7 +92,7 @@ pub struct NetworkInterfaceCreate {
 // _not_ scoped to a VPC, and so the VPC and/or VPC Subnet names are not present
 // in the path of endpoints handling instance operations.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-#[serde(tag = "type", content = "params")]
+#[serde(tag = "type", content = "params", rename_all = "snake_case")]
 pub enum InstanceNetworkInterfaceAttachment {
     /// Create one or more `NetworkInterface`s for the `Instance`
     Create(Vec<NetworkInterfaceCreate>),
@@ -340,7 +340,7 @@ impl JsonSchema for BlockSize {
 
 /// Different sources for a disk
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-#[serde(tag = "type")]
+#[serde(tag = "type", rename_all = "snake_case")]
 pub enum DiskSource {
     /// Create a blank disk
     Blank {
@@ -401,6 +401,7 @@ pub struct NetworkInterfaceIdentifier {
 
 /// The source of the underlying image.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(tag = "type", content = "src", rename_all = "snake_case")]
 pub enum ImageSource {
     Url(String),
     Snapshot(Uuid),

@@ -271,6 +271,7 @@ pub struct Timeseries {
     Serialize,
     JsonSchema,
 )]
+#[serde(rename_all = "snake_case")]
 pub enum FieldSource {
     Target,
     Metric,

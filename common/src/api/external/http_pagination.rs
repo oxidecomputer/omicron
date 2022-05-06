@@ -191,7 +191,7 @@ pub struct ScanByName {
 ///
 /// Currently, we only support scanning in ascending order.
 #[derive(Copy, Clone, Debug, Deserialize, JsonSchema, PartialEq, Serialize)]
-#[serde(rename_all = "kebab-case")]
+#[serde(rename_all = "snake_case")]
 pub enum NameSortMode {
     /// sort in increasing order of "name"
     NameAscending,
@@ -236,7 +236,7 @@ pub struct ScanById {
 ///
 /// Currently, we only support scanning in ascending order.
 #[derive(Copy, Clone, Debug, Deserialize, JsonSchema, PartialEq, Serialize)]
-#[serde(rename_all = "kebab-case")]
+#[serde(rename_all = "snake_case")]
 pub enum IdSortMode {
     /// sort in increasing order of "id"
     IdAscending,
@@ -278,7 +278,7 @@ pub struct ScanByNameOrId {
 }
 /// Supported set of sort modes for scanning by name or id
 #[derive(Copy, Clone, Debug, Deserialize, JsonSchema, PartialEq, Serialize)]
-#[serde(rename_all = "kebab-case")]
+#[serde(rename_all = "snake_case")]
 pub enum NameOrIdSortMode {
     /// sort in increasing order of "name"
     NameAscending,

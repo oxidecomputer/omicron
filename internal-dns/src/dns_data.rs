@@ -44,6 +44,7 @@ pub struct SRV {
 
 #[allow(clippy::upper_case_acronyms)]
 #[derive(Debug, Serialize, Deserialize, JsonSchema, PartialEq)]
+#[serde(tag = "type", content = "data")]
 pub enum DnsRecord {
     AAAA(Ipv6Addr),
     SRV(SRV),

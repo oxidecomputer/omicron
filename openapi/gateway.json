@@ -898,7 +898,7 @@
               "state": {
                 "type": "string",
                 "enum": [
-                  "Disabled"
+                  "disabled"
                 ]
               }
             },
@@ -912,7 +912,7 @@
               "state": {
                 "type": "string",
                 "enum": [
-                  "Unresponsive"
+                  "unresponsive"
                 ]
               }
             },
@@ -929,7 +929,7 @@
               "state": {
                 "type": "string",
                 "enum": [
-                  "Enabled"
+                  "enabled"
                 ]
               }
             },
