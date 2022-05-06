@@ -2,13 +2,13 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+//! VPCs and firewall rules
+
 use crate::authz;
 use crate::context::OpContext;
 use crate::db;
-use crate::db::identity::Resource;
 use crate::db::lookup::LookupPath;
 use crate::db::model::Name;
-use crate::db::model::VpcRouter;
 use crate::db::model::VpcRouterKind;
 use crate::db::subnet_allocation::SubnetError;
 use crate::defaults;
@@ -17,14 +17,252 @@ use omicron_common::api::external;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::DeleteResult;
-use omicron_common::api::external::Error;
+use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
+use omicron_common::api::external::LookupType;
+use omicron_common::api::external::RouteDestination;
+use omicron_common::api::external::RouteTarget;
+use omicron_common::api::external::RouterRouteCreateParams;
+use omicron_common::api::external::RouterRouteKind;
 use omicron_common::api::external::UpdateResult;
 use omicron_common::api::external::VpcFirewallRuleUpdateParams;
 use uuid::Uuid;
 
 impl super::Nexus {
+    // VPCs
+
+    pub async fn project_create_vpc(
+        &self,
+        opctx: &OpContext,
+        organization_name: &Name,
+        project_name: &Name,
+        params: &params::VpcCreate,
+    ) -> CreateResult<db::model::Vpc> {
+        let (.., authz_project) = LookupPath::new(opctx, &self.db_datastore)
+            .organization_name(organization_name)
+            .project_name(project_name)
+            .lookup_for(authz::Action::CreateChild)
+            .await?;
+        let vpc_id = Uuid::new_v4();
+        let system_router_id = Uuid::new_v4();
+        let default_route_id = Uuid::new_v4();
+        let default_subnet_id = Uuid::new_v4();
+
+        // TODO: This is both fake and utter nonsense. It should be eventually
+        // replaced with the proper behavior for creating the default route
+        // which may not even happen here. Creating the vpc, its system router,
+        // and that routers default route should all be a part of the same
+        // transaction.
+        let vpc = db::model::Vpc::new(
+            vpc_id,
+            authz_project.id(),
+            system_router_id,
+            params.clone(),
+        )?;
+        let (authz_vpc, db_vpc) = self
+            .db_datastore
+            .project_create_vpc(opctx, &authz_project, vpc)
+            .await?;
+
+        // TODO: Ultimately when the VPC is created a system router w/ an
+        // appropriate setup should also be created.  Given that the underlying
+        // systems aren't wired up yet this is a naive implementation to
+        // populate the database with a starting router. Eventually this code
+        // should be replaced with a saga that'll handle creating the VPC and
+        // its underlying system
+        let router = db::model::VpcRouter::new(
+            system_router_id,
+            vpc_id,
+            VpcRouterKind::System,
+            params::VpcRouterCreate {
+                identity: IdentityMetadataCreateParams {
+                    name: "system".parse().unwrap(),
+                    description: "Routes are automatically added to this \
+                        router as vpc subnets are created"
+                        .into(),
+                },
+            },
+        );
+        let (authz_router, _) = self
+            .db_datastore
+            .vpc_create_router(&opctx, &authz_vpc, router)
+            .await?;
+        let route = db::model::RouterRoute::new(
+            default_route_id,
+            system_router_id,
+            RouterRouteKind::Default,
+            RouterRouteCreateParams {
+                identity: IdentityMetadataCreateParams {
+                    name: "default".parse().unwrap(),
+                    description: "The default route of a vpc".to_string(),
+                },
+                target: RouteTarget::InternetGateway(
+                    "outbound".parse().unwrap(),
+                ),
+                destination: RouteDestination::Vpc(
+                    params.identity.name.clone(),
+                ),
+            },
+        );
+
+        self.db_datastore
+            .router_create_route(opctx, &authz_router, route)
+            .await?;
+
+        // Allocate the first /64 sub-range from the requested or created
+        // prefix.
+        let ipv6_block = external::Ipv6Net(
+            ipnetwork::Ipv6Network::new(db_vpc.ipv6_prefix.network(), 64)
+                .map_err(|_| {
+                    external::Error::internal_error(
+                        "Failed to allocate default IPv6 subnet",
+                    )
+                })?,
+        );
+
+        // TODO: batch this up with everything above
+        let subnet = db::model::VpcSubnet::new(
+            default_subnet_id,
+            vpc_id,
+            IdentityMetadataCreateParams {
+                name: "default".parse().unwrap(),
+                description: format!(
+                    "The default subnet for {}",
+                    params.identity.name
+                ),
+            },
+            *defaults::DEFAULT_VPC_SUBNET_IPV4_BLOCK,
+            ipv6_block,
+        );
+
+        // Create the subnet record in the database. Overlapping IP ranges
+        // should be translated into an internal error. That implies that
+        // there's already an existing VPC Subnet, but we're explicitly creating
+        // the _first_ VPC in the project. Something is wrong, and likely a bug
+        // in our code.
+        self.db_datastore
+            .vpc_create_subnet(opctx, &authz_vpc, subnet)
+            .await
+            .map_err(|err| match err {
+                SubnetError::OverlappingIpRange(ip) => {
+                    let ipv4_block = &defaults::DEFAULT_VPC_SUBNET_IPV4_BLOCK;
+                    error!(
+                        self.log,
+                        concat!(
+                            "failed to create default VPC Subnet, IP address ",
+                            "range '{}' overlaps with existing",
+                        ),
+                        ip;
+                        "vpc_id" => ?vpc_id,
+                        "subnet_id" => ?default_subnet_id,
+                        "ipv4_block" => ?**ipv4_block,
+                        "ipv6_block" => ?ipv6_block,
+                    );
+                    external::Error::internal_error(
+                        "Failed to create default VPC Subnet, \
+                            found overlapping IP address ranges",
+                    )
+                }
+                SubnetError::External(e) => e,
+            })?;
+        let rules = db::model::VpcFirewallRule::vec_from_params(
+            authz_vpc.id(),
+            defaults::DEFAULT_FIREWALL_RULES.clone(),
+        );
+        self.db_datastore
+            .vpc_update_firewall_rules(opctx, &authz_vpc, rules)
+            .await?;
+        Ok(db_vpc)
+    }
+
+    pub async fn project_list_vpcs(
+        &self,
+        opctx: &OpContext,
+        organization_name: &Name,
+        project_name: &Name,
+        pagparams: &DataPageParams<'_, Name>,
+    ) -> ListResultVec<db::model::Vpc> {
+        let (.., authz_project) = LookupPath::new(opctx, &self.db_datastore)
+            .organization_name(organization_name)
+            .project_name(project_name)
+            .lookup_for(authz::Action::ListChildren)
+            .await?;
+        self.db_datastore
+            .project_list_vpcs(&opctx, &authz_project, pagparams)
+            .await
+    }
+
+    pub async fn project_vpc_fetch(
+        &self,
+        opctx: &OpContext,
+        organization_name: &Name,
+        project_name: &Name,
+        vpc_name: &Name,
+    ) -> LookupResult<db::model::Vpc> {
+        let (.., db_vpc) = LookupPath::new(opctx, &self.db_datastore)
+            .organization_name(organization_name)
+            .project_name(project_name)
+            .vpc_name(vpc_name)
+            .fetch()
+            .await?;
+        Ok(db_vpc)
+    }
+
+    pub async fn project_update_vpc(
+        &self,
+        opctx: &OpContext,
+        organization_name: &Name,
+        project_name: &Name,
+        vpc_name: &Name,
+        params: &params::VpcUpdate,
+    ) -> UpdateResult<db::model::Vpc> {
+        let (.., authz_vpc) = LookupPath::new(opctx, &self.db_datastore)
+            .organization_name(organization_name)
+            .project_name(project_name)
+            .vpc_name(vpc_name)
+            .lookup_for(authz::Action::Modify)
+            .await?;
+        self.db_datastore
+            .project_update_vpc(opctx, &authz_vpc, params.clone().into())
+            .await
+    }
+
+    pub async fn project_delete_vpc(
+        &self,
+        opctx: &OpContext,
+        organization_name: &Name,
+        project_name: &Name,
+        vpc_name: &Name,
+    ) -> DeleteResult {
+        let (.., authz_vpc, db_vpc) =
+            LookupPath::new(opctx, &self.db_datastore)
+                .organization_name(organization_name)
+                .project_name(project_name)
+                .vpc_name(vpc_name)
+                .fetch()
+                .await?;
+
+        let authz_vpc_router = authz::VpcRouter::new(
+            authz_vpc.clone(),
+            db_vpc.system_router_id,
+            LookupType::ById(db_vpc.system_router_id),
+        );
+
+        // TODO: This should eventually use a saga to call the
+        // networking subsystem to have it clean up the networking resources
+        self.db_datastore.vpc_delete_router(&opctx, &authz_vpc_router).await?;
+        self.db_datastore.project_delete_vpc(opctx, &authz_vpc).await?;
+
+        // Delete all firewall rules after deleting the VPC, to ensure no
+        // firewall rules get added between rules deletion and VPC deletion.
+        self.db_datastore
+            .vpc_delete_all_firewall_rules(&opctx, &authz_vpc)
+            .await
+    }
+
+    // Firewall rules
+
     pub async fn vpc_list_firewall_rules(
         &self,
         opctx: &OpContext,
@@ -65,339 +303,6 @@ impl super::Nexus {
         );
         self.db_datastore
             .vpc_update_firewall_rules(opctx, &authz_vpc, rules)
-            .await
-    }
-
-    pub async fn vpc_list_subnets(
-        &self,
-        opctx: &OpContext,
-        organization_name: &Name,
-        project_name: &Name,
-        vpc_name: &Name,
-        pagparams: &DataPageParams<'_, Name>,
-    ) -> ListResultVec<db::model::VpcSubnet> {
-        let (.., authz_vpc) = LookupPath::new(opctx, &self.db_datastore)
-            .organization_name(organization_name)
-            .project_name(project_name)
-            .vpc_name(vpc_name)
-            .lookup_for(authz::Action::ListChildren)
-            .await?;
-        self.db_datastore.vpc_list_subnets(opctx, &authz_vpc, pagparams).await
-    }
-
-    pub async fn vpc_subnet_fetch(
-        &self,
-        opctx: &OpContext,
-        organization_name: &Name,
-        project_name: &Name,
-        vpc_name: &Name,
-        subnet_name: &Name,
-    ) -> LookupResult<db::model::VpcSubnet> {
-        let (.., db_vpc) = LookupPath::new(opctx, &self.db_datastore)
-            .organization_name(organization_name)
-            .project_name(project_name)
-            .vpc_name(vpc_name)
-            .vpc_subnet_name(subnet_name)
-            .fetch()
-            .await?;
-        Ok(db_vpc)
-    }
-
-    // TODO: When a subnet is created it should add a route entry into the VPC's
-    // system router
-    pub async fn vpc_create_subnet(
-        &self,
-        opctx: &OpContext,
-        organization_name: &Name,
-        project_name: &Name,
-        vpc_name: &Name,
-        params: &params::VpcSubnetCreate,
-    ) -> CreateResult<db::model::VpcSubnet> {
-        let (.., authz_vpc, db_vpc) =
-            LookupPath::new(opctx, &self.db_datastore)
-                .organization_name(organization_name)
-                .project_name(project_name)
-                .vpc_name(vpc_name)
-                .fetch()
-                .await?;
-
-        // Validate IPv4 range
-        if !params.ipv4_block.network().is_private() {
-            return Err(external::Error::invalid_request(
-                "VPC Subnet IPv4 address ranges must be from a private range",
-            ));
-        }
-        if params.ipv4_block.prefix() < defaults::MIN_VPC_IPV4_SUBNET_PREFIX
-            || params.ipv4_block.prefix() > defaults::MAX_VPC_IPV4_SUBNET_PREFIX
-        {
-            return Err(external::Error::invalid_request(&format!(
-                concat!(
-                    "VPC Subnet IPv4 address ranges must have prefix ",
-                    "length between {} and {}, inclusive"
-                ),
-                defaults::MIN_VPC_IPV4_SUBNET_PREFIX,
-                defaults::MAX_VPC_IPV4_SUBNET_PREFIX
-            )));
-        }
-
-        // Allocate an ID and insert the record.
-        //
-        // If the client provided an IPv6 range, we try to insert that or fail
-        // with a conflict error.
-        //
-        // If they did _not_, we randomly generate a subnet valid for the VPC's
-        // prefix, and the insert that. There's a small retry loop if we get
-        // unlucky and conflict with an existing IPv6 range. In the case we
-        // cannot find a subnet within a small number of retries, we fail the
-        // request with a 503.
-        //
-        // TODO-robustness: We'd really prefer to allocate deterministically.
-        // See <https://github.com/oxidecomputer/omicron/issues/685> for
-        // details.
-        let subnet_id = Uuid::new_v4();
-        match params.ipv6_block {
-            None => {
-                const NUM_RETRIES: usize = 2;
-                let mut retry = 0;
-                let result = loop {
-                    let ipv6_block = db_vpc
-                        .ipv6_prefix
-                        .random_subnet(
-                            external::Ipv6Net::VPC_SUBNET_IPV6_PREFIX_LENGTH,
-                        )
-                        .map(|block| block.0)
-                        .ok_or_else(|| {
-                            external::Error::internal_error(
-                                "Failed to create random IPv6 subnet",
-                            )
-                        })?;
-                    let subnet = db::model::VpcSubnet::new(
-                        subnet_id,
-                        authz_vpc.id(),
-                        params.identity.clone(),
-                        params.ipv4_block,
-                        ipv6_block,
-                    );
-                    let result = self
-                        .db_datastore
-                        .vpc_create_subnet(opctx, &authz_vpc, subnet)
-                        .await;
-                    match result {
-                        // Allow NUM_RETRIES retries, after the first attempt.
-                        //
-                        // Note that we only catch IPv6 overlaps. The client
-                        // always specifies the IPv4 range, so we fail the
-                        // request if that overlaps with an existing range.
-                        Err(SubnetError::OverlappingIpRange(ip))
-                            if retry <= NUM_RETRIES && ip.is_ipv6() =>
-                        {
-                            debug!(
-                                self.log,
-                                "autogenerated random IPv6 range overlap";
-                                "subnet_id" => ?subnet_id,
-                                "ipv6_block" => %ipv6_block.0
-                            );
-                            retry += 1;
-                            continue;
-                        }
-                        other => break other,
-                    }
-                };
-                match result {
-                    Err(SubnetError::OverlappingIpRange(ip))
-                        if ip.is_ipv6() =>
-                    {
-                        // TODO-monitoring TODO-debugging
-                        //
-                        // We should maintain a counter for this occurrence, and
-                        // export that via `oximeter`, so that we can see these
-                        // failures through the timeseries database. The main
-                        // goal here is for us to notice that this is happening
-                        // before it becomes a major issue for customers.
-                        let vpc_id = authz_vpc.id();
-                        error!(
-                            self.log,
-                            "failed to generate unique random IPv6 address \
-                            range in {} retries",
-                            NUM_RETRIES;
-                            "vpc_id" => ?vpc_id,
-                            "subnet_id" => ?subnet_id,
-                        );
-                        Err(external::Error::internal_error(
-                            "Unable to allocate unique IPv6 address range \
-                            for VPC Subnet",
-                        ))
-                    }
-                    Err(SubnetError::OverlappingIpRange(_)) => {
-                        // Overlapping IPv4 ranges, which is always a client error.
-                        Err(result.unwrap_err().into_external())
-                    }
-                    Err(SubnetError::External(e)) => Err(e),
-                    Ok(subnet) => Ok(subnet),
-                }
-            }
-            Some(ipv6_block) => {
-                if !ipv6_block.is_vpc_subnet(&db_vpc.ipv6_prefix) {
-                    return Err(external::Error::invalid_request(&format!(
-                        concat!(
-                        "VPC Subnet IPv6 address range '{}' is not valid for ",
-                        "VPC with IPv6 prefix '{}'",
-                    ),
-                        ipv6_block, db_vpc.ipv6_prefix.0 .0,
-                    )));
-                }
-                let subnet = db::model::VpcSubnet::new(
-                    subnet_id,
-                    db_vpc.id(),
-                    params.identity.clone(),
-                    params.ipv4_block,
-                    ipv6_block,
-                );
-                self.db_datastore
-                    .vpc_create_subnet(opctx, &authz_vpc, subnet)
-                    .await
-                    .map_err(SubnetError::into_external)
-            }
-        }
-    }
-
-    // TODO: When a subnet is deleted it should remove its entry from the VPC's
-    // system router.
-    pub async fn vpc_delete_subnet(
-        &self,
-        opctx: &OpContext,
-        organization_name: &Name,
-        project_name: &Name,
-        vpc_name: &Name,
-        subnet_name: &Name,
-    ) -> DeleteResult {
-        let (.., authz_subnet) = LookupPath::new(opctx, &self.db_datastore)
-            .organization_name(organization_name)
-            .project_name(project_name)
-            .vpc_name(vpc_name)
-            .vpc_subnet_name(subnet_name)
-            .lookup_for(authz::Action::Delete)
-            .await?;
-        self.db_datastore.vpc_delete_subnet(opctx, &authz_subnet).await
-    }
-
-    pub async fn vpc_list_routers(
-        &self,
-        opctx: &OpContext,
-        organization_name: &Name,
-        project_name: &Name,
-        vpc_name: &Name,
-        pagparams: &DataPageParams<'_, Name>,
-    ) -> ListResultVec<db::model::VpcRouter> {
-        let (.., authz_vpc) = LookupPath::new(opctx, &self.db_datastore)
-            .organization_name(organization_name)
-            .project_name(project_name)
-            .vpc_name(vpc_name)
-            .lookup_for(authz::Action::ListChildren)
-            .await?;
-        let routers = self
-            .db_datastore
-            .vpc_list_routers(opctx, &authz_vpc, pagparams)
-            .await?;
-        Ok(routers)
-    }
-
-    pub async fn vpc_router_fetch(
-        &self,
-        opctx: &OpContext,
-        organization_name: &Name,
-        project_name: &Name,
-        vpc_name: &Name,
-        router_name: &Name,
-    ) -> LookupResult<db::model::VpcRouter> {
-        let (.., db_router) = LookupPath::new(opctx, &self.db_datastore)
-            .organization_name(organization_name)
-            .project_name(project_name)
-            .vpc_name(vpc_name)
-            .vpc_router_name(router_name)
-            .fetch()
-            .await?;
-        Ok(db_router)
-    }
-
-    pub async fn vpc_create_router(
-        &self,
-        opctx: &OpContext,
-        organization_name: &Name,
-        project_name: &Name,
-        vpc_name: &Name,
-        kind: &VpcRouterKind,
-        params: &params::VpcRouterCreate,
-    ) -> CreateResult<db::model::VpcRouter> {
-        let (.., authz_vpc) = LookupPath::new(opctx, &self.db_datastore)
-            .organization_name(organization_name)
-            .project_name(project_name)
-            .vpc_name(vpc_name)
-            .lookup_for(authz::Action::CreateChild)
-            .await?;
-        let id = Uuid::new_v4();
-        let router = db::model::VpcRouter::new(
-            id,
-            authz_vpc.id(),
-            *kind,
-            params.clone(),
-        );
-        let (_, router) = self
-            .db_datastore
-            .vpc_create_router(&opctx, &authz_vpc, router)
-            .await?;
-        Ok(router)
-    }
-
-    // TODO: When a router is deleted all its routes should be deleted
-    // TODO: When a router is deleted it should be unassociated w/ any subnets it may be associated with
-    //       or trigger an error
-    pub async fn vpc_delete_router(
-        &self,
-        opctx: &OpContext,
-        organization_name: &Name,
-        project_name: &Name,
-        vpc_name: &Name,
-        router_name: &Name,
-    ) -> DeleteResult {
-        let (.., authz_router, db_router) =
-            LookupPath::new(opctx, &self.db_datastore)
-                .organization_name(organization_name)
-                .project_name(project_name)
-                .vpc_name(vpc_name)
-                .vpc_router_name(router_name)
-                .fetch()
-                .await?;
-        // TODO-performance shouldn't this check be part of the "update"
-        // database query?  This shouldn't affect correctness, assuming that a
-        // router kind cannot be changed, but it might be able to save us a
-        // database round-trip.
-        if db_router.kind == VpcRouterKind::System {
-            return Err(Error::MethodNotAllowed {
-                internal_message: "Cannot delete system router".to_string(),
-            });
-        }
-        self.db_datastore.vpc_delete_router(opctx, &authz_router).await
-    }
-
-    pub async fn vpc_update_router(
-        &self,
-        opctx: &OpContext,
-        organization_name: &Name,
-        project_name: &Name,
-        vpc_name: &Name,
-        router_name: &Name,
-        params: &params::VpcRouterUpdate,
-    ) -> UpdateResult<VpcRouter> {
-        let (.., authz_router) = LookupPath::new(opctx, &self.db_datastore)
-            .organization_name(organization_name)
-            .project_name(project_name)
-            .vpc_name(vpc_name)
-            .vpc_router_name(router_name)
-            .lookup_for(authz::Action::Modify)
-            .await?;
-        self.db_datastore
-            .vpc_update_router(opctx, &authz_router, params.clone().into())
             .await
     }
 }

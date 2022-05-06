@@ -2,16 +2,20 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+//! Sleds, and the hardware and services within them.
+
 use crate::context::OpContext;
 use crate::db;
 use crate::db::identity::Asset;
 use crate::db::lookup::LookupPath;
+use crate::db::model::DatasetKind;
+use crate::internal_api::params::ZpoolPutRequest;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
 use sled_agent_client::Client as SledAgentClient;
-use std::net::SocketAddrV6;
+use std::net::{SocketAddr, SocketAddrV6};
 use std::sync::Arc;
 use uuid::Uuid;
 
@@ -104,5 +108,32 @@ impl super::Nexus {
             client,
             log,
         )))
+    }
+
+    /// Upserts a Zpool into the database, updating it if it already exists.
+    pub async fn upsert_zpool(
+        &self,
+        id: Uuid,
+        sled_id: Uuid,
+        info: ZpoolPutRequest,
+    ) -> Result<(), Error> {
+        info!(self.log, "upserting zpool"; "sled_id" => sled_id.to_string(), "zpool_id" => id.to_string());
+        let zpool = db::model::Zpool::new(id, sled_id, &info);
+        self.db_datastore.zpool_upsert(zpool).await?;
+        Ok(())
+    }
+
+    /// Upserts a dataset into the database, updating it if it already exists.
+    pub async fn upsert_dataset(
+        &self,
+        id: Uuid,
+        zpool_id: Uuid,
+        address: SocketAddr,
+        kind: DatasetKind,
+    ) -> Result<(), Error> {
+        info!(self.log, "upserting dataset"; "zpool_id" => zpool_id.to_string(), "dataset_id" => id.to_string(), "address" => address.to_string());
+        let dataset = db::model::Dataset::new(id, zpool_id, address, kind);
+        self.db_datastore.dataset_upsert(dataset).await?;
+        Ok(())
     }
 }

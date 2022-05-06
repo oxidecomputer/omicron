@@ -26,11 +26,9 @@ use uuid::Uuid;
 
 // The implementation of Nexus is large, and split into a number of submodules
 // by resource.
-mod dataset;
 mod disk;
 mod image;
 mod instance;
-mod network_interface;
 mod organization;
 mod oximeter;
 mod project;
@@ -39,7 +37,6 @@ mod saga;
 mod session;
 mod silo;
 mod sled;
-mod ssh_key;
 // TODO: We should strongly consider moving all tests which depend on these
 // interfaces into unit tests, rather than integration tests.
 //
@@ -50,7 +47,6 @@ mod update;
 mod vpc;
 mod vpc_router;
 mod vpc_subnet;
-mod zpool;
 
 // TODO: When referring to API types, we should try to include
 // the prefix unless it is unambiguous.

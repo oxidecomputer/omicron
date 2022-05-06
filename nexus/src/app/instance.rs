@@ -2,6 +2,8 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+//! Virtual Machine Instances
+
 use super::MAX_DISKS_PER_INSTANCE;
 use crate::authn;
 use crate::authz;
@@ -34,6 +36,152 @@ use uuid::Uuid;
 const MAX_KEYS_PER_INSTANCE: u32 = 8;
 
 impl super::Nexus {
+    pub async fn project_create_instance(
+        self: &Arc<Self>,
+        opctx: &OpContext,
+        organization_name: &Name,
+        project_name: &Name,
+        params: &params::InstanceCreate,
+    ) -> CreateResult<db::model::Instance> {
+        let (.., authz_project) = LookupPath::new(opctx, &self.db_datastore)
+            .organization_name(organization_name)
+            .project_name(project_name)
+            .lookup_for(authz::Action::CreateChild)
+            .await?;
+
+        // Validate parameters
+        if params.disks.len() > MAX_DISKS_PER_INSTANCE as usize {
+            return Err(Error::invalid_request(&format!(
+                "cannot attach more than {} disks to instance!",
+                MAX_DISKS_PER_INSTANCE
+            )));
+        }
+
+        let saga_params = Arc::new(sagas::ParamsInstanceCreate {
+            serialized_authn: authn::saga::Serialized::for_opctx(opctx),
+            organization_name: organization_name.clone().into(),
+            project_name: project_name.clone().into(),
+            project_id: authz_project.id(),
+            create_params: params.clone(),
+        });
+
+        let saga_outputs = self
+            .execute_saga(
+                Arc::clone(&sagas::SAGA_INSTANCE_CREATE_TEMPLATE),
+                sagas::SAGA_INSTANCE_CREATE_NAME,
+                saga_params,
+            )
+            .await?;
+        // TODO-error more context would be useful
+        let instance_id =
+            saga_outputs.lookup_output::<Uuid>("instance_id").map_err(|e| {
+                Error::InternalError { internal_message: e.to_string() }
+            })?;
+        // TODO-correctness TODO-robustness TODO-design It's not quite correct
+        // to take this instance id and look it up again.  It's possible that
+        // it's been modified or even deleted since the saga executed.  In that
+        // case, we might return a different state of the Instance than the one
+        // that the user created or even fail with a 404!  Both of those are
+        // wrong behavior -- we should be returning the very instance that the
+        // user created.
+        //
+        // How can we fix this?  Right now we have internal representations like
+        // Instance and analaogous end-user-facing representations like
+        // Instance.  The former is not even serializable.  The saga
+        // _could_ emit the View version, but that's not great for two (related)
+        // reasons: (1) other sagas might want to provision instances and get
+        // back the internal representation to do other things with the
+        // newly-created instance, and (2) even within a saga, it would be
+        // useful to pass a single Instance representation along the saga,
+        // but they probably would want the internal representation, not the
+        // view.
+        //
+        // The saga could emit an Instance directly.  Today, Instance
+        // etc. aren't supposed to even be serializable -- we wanted to be able
+        // to have other datastore state there if needed.  We could have a third
+        // InstanceInternalView...but that's starting to feel pedantic.  We
+        // could just make Instance serializable, store that, and call it a
+        // day.  Does it matter that we might have many copies of the same
+        // objects in memory?
+        //
+        // If we make these serializable, it would be nice if we could leverage
+        // the type system to ensure that we never accidentally send them out a
+        // dropshot endpoint.  (On the other hand, maybe we _do_ want to do
+        // that, for internal interfaces!  Can we do this on a
+        // per-dropshot-server-basis?)
+        //
+        // TODO Even worse, post-authz, we do two lookups here instead of one.
+        // Maybe sagas should be able to emit `authz::Instance`-type objects.
+        let (.., db_instance) = LookupPath::new(opctx, &self.db_datastore)
+            .instance_id(instance_id)
+            .fetch()
+            .await?;
+        Ok(db_instance)
+    }
+
+    pub async fn project_list_instances(
+        &self,
+        opctx: &OpContext,
+        organization_name: &Name,
+        project_name: &Name,
+        pagparams: &DataPageParams<'_, Name>,
+    ) -> ListResultVec<db::model::Instance> {
+        let (.., authz_project) = LookupPath::new(opctx, &self.db_datastore)
+            .organization_name(organization_name)
+            .project_name(project_name)
+            .lookup_for(authz::Action::ListChildren)
+            .await?;
+        self.db_datastore
+            .project_list_instances(opctx, &authz_project, pagparams)
+            .await
+    }
+
+    pub async fn project_instance_fetch(
+        &self,
+        opctx: &OpContext,
+        organization_name: &Name,
+        project_name: &Name,
+        instance_name: &Name,
+    ) -> LookupResult<db::model::Instance> {
+        let (.., db_instance) = LookupPath::new(opctx, &self.db_datastore)
+            .organization_name(organization_name)
+            .project_name(project_name)
+            .instance_name(instance_name)
+            .fetch()
+            .await?;
+        Ok(db_instance)
+    }
+
+    // TODO-correctness It's not totally clear what the semantics and behavior
+    // should be here.  It might be nice to say that you can only do this
+    // operation if the Instance is already stopped, in which case we can
+    // execute this immediately by just removing it from the database, with the
+    // same race we have with disk delete (i.e., if someone else is requesting
+    // an instance boot, we may wind up in an inconsistent state).  On the other
+    // hand, we could always allow this operation, issue the request to the SA
+    // to destroy the instance (not just stop it), and proceed with deletion
+    // when that finishes.  But in that case, although the HTTP DELETE request
+    // completed, the object will still appear for a little while, which kind of
+    // sucks.
+    pub async fn project_destroy_instance(
+        &self,
+        opctx: &OpContext,
+        organization_name: &Name,
+        project_name: &Name,
+        instance_name: &Name,
+    ) -> DeleteResult {
+        // TODO-robustness We need to figure out what to do with Destroyed
+        // instances?  Presumably we need to clean them up at some point, but
+        // not right away so that callers can see that they've been destroyed.
+        let (.., authz_instance) = LookupPath::new(opctx, &self.db_datastore)
+            .organization_name(organization_name)
+            .project_name(project_name)
+            .instance_name(instance_name)
+            .lookup_for(authz::Action::Delete)
+            .await?;
+        self.db_datastore.project_delete_instance(opctx, &authz_instance).await
+    }
+
     pub async fn instance_migrate(
         self: &Arc<Self>,
         opctx: &OpContext,
@@ -620,26 +768,6 @@ impl super::Nexus {
         self.db_datastore.disk_refetch(opctx, &authz_disk).await
     }
 
-    /// Lists network interfaces attached to the instance.
-    pub async fn instance_list_network_interfaces(
-        &self,
-        opctx: &OpContext,
-        organization_name: &Name,
-        project_name: &Name,
-        instance_name: &Name,
-        pagparams: &DataPageParams<'_, Name>,
-    ) -> ListResultVec<db::model::NetworkInterface> {
-        let (.., authz_instance) = LookupPath::new(opctx, &self.db_datastore)
-            .organization_name(organization_name)
-            .project_name(project_name)
-            .instance_name(instance_name)
-            .lookup_for(authz::Action::ListChildren)
-            .await?;
-        self.db_datastore
-            .instance_list_network_interfaces(opctx, &authz_instance, pagparams)
-            .await
-    }
-
     /// Create a network interface attached to the provided instance.
     // TODO-performance: Add a version of this that accepts the instance ID
     // directly. This will avoid all the internal database lookups in the event
@@ -709,6 +837,26 @@ impl super::Nexus {
             .await
             .map_err(NetworkInterfaceError::into_external)?;
         Ok(interface)
+    }
+
+    /// Lists network interfaces attached to the instance.
+    pub async fn instance_list_network_interfaces(
+        &self,
+        opctx: &OpContext,
+        organization_name: &Name,
+        project_name: &Name,
+        instance_name: &Name,
+        pagparams: &DataPageParams<'_, Name>,
+    ) -> ListResultVec<db::model::NetworkInterface> {
+        let (.., authz_instance) = LookupPath::new(opctx, &self.db_datastore)
+            .organization_name(organization_name)
+            .project_name(project_name)
+            .instance_name(instance_name)
+            .lookup_for(authz::Action::ListChildren)
+            .await?;
+        self.db_datastore
+            .instance_list_network_interfaces(opctx, &authz_instance, pagparams)
+            .await
     }
 
     /// Fetch a network interface attached to the given instance.

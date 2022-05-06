@@ -31,28 +31,6 @@ fn generate_session_token() -> String {
 }
 
 impl super::Nexus {
-    pub async fn session_fetch(
-        &self,
-        opctx: &OpContext,
-        token: String,
-    ) -> LookupResult<authn::ConsoleSessionWithSiloId> {
-        let (.., db_console_session) =
-            LookupPath::new(opctx, &self.db_datastore)
-                .console_session_token(&token)
-                .fetch()
-                .await?;
-
-        let (.., db_silo_user) = LookupPath::new(opctx, &self.db_datastore)
-            .silo_user_id(db_console_session.silo_user_id)
-            .fetch()
-            .await?;
-
-        Ok(authn::ConsoleSessionWithSiloId {
-            console_session: db_console_session,
-            silo_id: db_silo_user.silo_id,
-        })
-    }
-
     async fn login_allowed(
         &self,
         opctx: &OpContext,
@@ -104,7 +82,29 @@ impl super::Nexus {
         self.db_datastore.session_create(opctx, session).await
     }
 
-    // update last_used to now
+    pub async fn session_fetch(
+        &self,
+        opctx: &OpContext,
+        token: String,
+    ) -> LookupResult<authn::ConsoleSessionWithSiloId> {
+        let (.., db_console_session) =
+            LookupPath::new(opctx, &self.db_datastore)
+                .console_session_token(&token)
+                .fetch()
+                .await?;
+
+        let (.., db_silo_user) = LookupPath::new(opctx, &self.db_datastore)
+            .silo_user_id(db_console_session.silo_user_id)
+            .fetch()
+            .await?;
+
+        Ok(authn::ConsoleSessionWithSiloId {
+            console_session: db_console_session,
+            silo_id: db_silo_user.silo_id,
+        })
+    }
+
+    /// Updates last_used to now.
     pub async fn session_update_last_used(
         &self,
         opctx: &OpContext,

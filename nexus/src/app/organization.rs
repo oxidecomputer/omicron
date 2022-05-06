@@ -2,6 +2,8 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+//! Organizations, and roles contained within
+
 use crate::authz;
 use crate::authz::OrganizationRoles;
 use crate::context::OpContext;

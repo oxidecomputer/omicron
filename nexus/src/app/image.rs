@@ -2,7 +2,10 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+//! Images (both project and globally scoped)
+
 use super::Unimpl;
+use crate::authz;
 use crate::context::OpContext;
 use crate::db;
 use crate::db::identity::Asset;
@@ -23,13 +26,65 @@ use std::sync::Arc;
 use uuid::Uuid;
 
 impl super::Nexus {
-    pub async fn global_images_list(
+    // Project-Scoped Images
+
+    pub async fn project_create_image(
+        self: &Arc<Self>,
+        opctx: &OpContext,
+        organization_name: &Name,
+        project_name: &Name,
+        _params: &params::ImageCreate,
+    ) -> CreateResult<db::model::Image> {
+        let _ = LookupPath::new(opctx, &self.db_datastore)
+            .organization_name(organization_name)
+            .project_name(project_name)
+            .lookup_for(authz::Action::CreateChild)
+            .await?;
+        Err(self.unimplemented_todo(opctx, Unimpl::Public).await)
+    }
+
+    pub async fn project_list_images(
         &self,
         opctx: &OpContext,
-        pagparams: &DataPageParams<'_, Name>,
-    ) -> ListResultVec<db::model::GlobalImage> {
-        self.db_datastore.global_image_list_images(opctx, pagparams).await
+        organization_name: &Name,
+        project_name: &Name,
+        _pagparams: &DataPageParams<'_, Name>,
+    ) -> ListResultVec<db::model::Image> {
+        let _ = LookupPath::new(opctx, &self.db_datastore)
+            .organization_name(organization_name)
+            .project_name(project_name)
+            .lookup_for(authz::Action::ListChildren)
+            .await?;
+        Err(self.unimplemented_todo(opctx, Unimpl::Public).await)
     }
+
+    pub async fn project_image_fetch(
+        &self,
+        opctx: &OpContext,
+        _organization_name: &Name,
+        _project_name: &Name,
+        image_name: &Name,
+    ) -> LookupResult<db::model::Image> {
+        let lookup_type = LookupType::ByName(image_name.to_string());
+        let not_found_error = lookup_type.into_not_found(ResourceType::Image);
+        let unimp = Unimpl::ProtectedLookup(not_found_error);
+        Err(self.unimplemented_todo(opctx, unimp).await)
+    }
+
+    pub async fn project_delete_image(
+        self: &Arc<Self>,
+        opctx: &OpContext,
+        _organization_name: &Name,
+        _project_name: &Name,
+        image_name: &Name,
+    ) -> DeleteResult {
+        let lookup_type = LookupType::ByName(image_name.to_string());
+        let not_found_error = lookup_type.into_not_found(ResourceType::Image);
+        let unimp = Unimpl::ProtectedLookup(not_found_error);
+        Err(self.unimplemented_todo(opctx, unimp).await)
+    }
+
+    // Globally-Scoped Images
 
     pub async fn global_image_create(
         self: &Arc<Self>,
@@ -157,6 +212,14 @@ impl super::Nexus {
         };
 
         self.db_datastore.global_image_create_image(opctx, new_image).await
+    }
+
+    pub async fn global_images_list(
+        &self,
+        opctx: &OpContext,
+        pagparams: &DataPageParams<'_, Name>,
+    ) -> ListResultVec<db::model::GlobalImage> {
+        self.db_datastore.global_image_list_images(opctx, pagparams).await
     }
 
     pub async fn global_image_fetch(
