@@ -426,9 +426,6 @@ mod tests {
             TestType::NonUtf8ByteStringLiteral.to_string(),
             "�".to_string()
         );
-        assert_eq!(
-            TestType::Rocketship.to_string(),
-            "🚀".to_string(),
-        );
+        assert_eq!(TestType::Rocketship.to_string(), "🚀".to_string(),);
     }
 }
