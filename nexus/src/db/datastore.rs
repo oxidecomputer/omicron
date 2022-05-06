@@ -2718,8 +2718,10 @@ impl DataStore {
         use db::schema::silo_saml_identity_provider::dsl as saml_idp_dsl;
 
         let updated_rows =
-            diesel::delete(saml_idp_dsl::silo_saml_identity_provider)
+            diesel::update(saml_idp_dsl::silo_saml_identity_provider)
                 .filter(saml_idp_dsl::silo_id.eq(id))
+                .filter(saml_idp_dsl::time_deleted.is_null())
+                .set(saml_idp_dsl::time_deleted.eq(Utc::now()))
                 .execute_async(self.pool())
                 .await
                 .map_err(|e| {

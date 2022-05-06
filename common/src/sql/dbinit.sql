@@ -238,11 +238,6 @@ CREATE TABLE omicron.public.silo_identity_provider (
     PRIMARY KEY (silo_id, provider_id)
 );
 
-CREATE INDEX ON omicron.public.silo_identity_provider (
-    silo_id,
-    provider_id
-);
-
 /*
  * Silo SAML identity provider
  */
@@ -272,7 +267,8 @@ CREATE TABLE omicron.public.silo_saml_identity_provider (
 
 CREATE INDEX ON omicron.public.silo_saml_identity_provider (
     silo_id
-);
+) WHERE
+    time_deleted IS NULL;
 
 /*
  * Users' public SSH keys, per RFD 44
