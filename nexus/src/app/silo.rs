@@ -66,4 +66,15 @@ impl super::Nexus {
         self.db_datastore.silo_delete(opctx, &authz_silo, &db_silo).await
     }
 
+    pub async fn silo_user_fetch(
+        &self,
+        opctx: &OpContext,
+        silo_user_id: Uuid,
+    ) -> LookupResult<db::model::SiloUser> {
+        let (.., db_silo_user) = LookupPath::new(opctx, &self.datastore())
+            .silo_user_id(silo_user_id)
+            .fetch()
+            .await?;
+        Ok(db_silo_user)
+    }
 }

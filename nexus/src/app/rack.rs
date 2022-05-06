@@ -10,13 +10,13 @@ use futures::StreamExt;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::ListResult;
-use omicron_common::api::external::LookupType;
 use omicron_common::api::external::LookupResult;
+use omicron_common::api::external::LookupType;
 use omicron_common::api::external::ResourceType;
 use uuid::Uuid;
 
 impl super::Nexus {
-    pub (crate) fn as_rack(&self) -> db::model::Rack {
+    pub(crate) fn as_rack(&self) -> db::model::Rack {
         db::model::Rack {
             identity: self.api_rack_identity.clone(),
             tuf_base_url: None,
@@ -57,5 +57,4 @@ impl super::Nexus {
             Err(Error::not_found_by_id(ResourceType::Rack, rack_id))
         }
     }
-
 }

@@ -826,7 +826,12 @@ async fn project_disks_get_disk(
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
         let disk = nexus
-            .project_disk_fetch(&opctx, &organization_name, &project_name, &disk_name)
+            .project_disk_fetch(
+                &opctx,
+                &organization_name,
+                &project_name,
+                &disk_name,
+            )
             .await?;
         Ok(HttpResponseOk(disk.into()))
     };
@@ -1862,7 +1867,12 @@ async fn project_vpcs_get_vpc(
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
         let vpc = nexus
-            .project_vpc_fetch(&opctx, &organization_name, &project_name, &vpc_name)
+            .project_vpc_fetch(
+                &opctx,
+                &organization_name,
+                &project_name,
+                &vpc_name,
+            )
             .await?;
         Ok(HttpResponseOk(vpc.into()))
     };

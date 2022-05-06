@@ -1308,9 +1308,9 @@ impl QueryFragment<Pg> for InsertNetworkInterfaceQueryValues {
 
 #[cfg(test)]
 mod test {
-    use super::MAX_NICS_PER_INSTANCE;
     use super::NetworkInterfaceError;
     use super::SubnetError;
+    use super::MAX_NICS_PER_INSTANCE;
     use crate::context::OpContext;
     use crate::db::model::{
         self, IncompleteNetworkInterface, NetworkInterface, VpcSubnet,

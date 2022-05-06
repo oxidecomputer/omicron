@@ -182,5 +182,4 @@ impl super::Nexus {
             .unimplemented_todo(opctx, Unimpl::ProtectedLookup(error))
             .await)
     }
-
 }

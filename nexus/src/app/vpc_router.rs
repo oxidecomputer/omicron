@@ -5,18 +5,18 @@
 use crate::authz;
 use crate::context::OpContext;
 use crate::db;
+use crate::db::lookup::LookupPath;
 use crate::db::model::Name;
 use crate::db::model::RouterRoute;
-use crate::db::lookup::LookupPath;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::DeleteResult;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::ListResultVec;
-use omicron_common::api::external::RouterRouteCreateParams;
-use omicron_common::api::external::RouterRouteUpdateParams;
-use omicron_common::api::external::RouterRouteKind;
 use omicron_common::api::external::LookupResult;
+use omicron_common::api::external::RouterRouteCreateParams;
+use omicron_common::api::external::RouterRouteKind;
+use omicron_common::api::external::RouterRouteUpdateParams;
 use omicron_common::api::external::UpdateResult;
 use uuid::Uuid;
 

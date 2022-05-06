@@ -9,8 +9,8 @@
 // correctness, idempotence, etc.  The more constrained this interface is, the
 // easier it will be to test, version, and update in deployed systems.
 
-use crate::context::OpContext;
 use crate::app::{MAX_DISKS_PER_INSTANCE, MAX_NICS_PER_INSTANCE};
+use crate::context::OpContext;
 use crate::db::identity::{Asset, Resource};
 use crate::db::lookup::LookupPath;
 use crate::external_api::params;
@@ -301,9 +301,7 @@ async fn sic_allocate_network_interface_ids(
         params::InstanceNetworkInterfaceAttachment::Create(
             ref create_params,
         ) => {
-            if create_params.len()
-                > MAX_NICS_PER_INSTANCE.try_into().unwrap()
-            {
+            if create_params.len() > MAX_NICS_PER_INSTANCE.try_into().unwrap() {
                 return Err(ActionError::action_failed(
                     Error::invalid_request(
                         format!(

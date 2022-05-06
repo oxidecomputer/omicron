@@ -6,10 +6,10 @@ use crate::authz;
 use crate::context::OpContext;
 use crate::db;
 use crate::db::identity::Resource;
+use crate::db::lookup::LookupPath;
 use crate::db::model::Name;
 use crate::db::model::VpcRouter;
 use crate::db::model::VpcRouterKind;
-use crate::db::lookup::LookupPath;
 use crate::db::subnet_allocation::SubnetError;
 use crate::defaults;
 use crate::external_api::params;
@@ -400,5 +400,4 @@ impl super::Nexus {
             .vpc_update_router(opctx, &authz_router, params.clone().into())
             .await
     }
-
 }

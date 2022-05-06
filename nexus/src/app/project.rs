@@ -24,10 +24,10 @@ use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::LookupType;
 use omicron_common::api::external::ResourceType;
-use omicron_common::api::external::RouterRouteCreateParams;
-use omicron_common::api::external::RouterRouteKind;
 use omicron_common::api::external::RouteDestination;
 use omicron_common::api::external::RouteTarget;
+use omicron_common::api::external::RouterRouteCreateParams;
+use omicron_common::api::external::RouterRouteKind;
 use omicron_common::api::external::UpdateResult;
 use std::sync::Arc;
 use uuid::Uuid;
@@ -814,5 +814,4 @@ impl super::Nexus {
             .vpc_delete_all_firewall_rules(&opctx, &authz_vpc)
             .await
     }
-
 }

@@ -3,31 +3,31 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use super::MAX_DISKS_PER_INSTANCE;
-use crate::authz;
 use crate::authn;
+use crate::authz;
 use crate::context::OpContext;
 use crate::db;
 use crate::db::identity::Resource;
-use crate::db::model::Name;
 use crate::db::lookup::LookupPath;
+use crate::db::model::Name;
 use crate::db::subnet_allocation::NetworkInterfaceError;
 use crate::external_api::params;
 use crate::sagas;
 use omicron_common::api::external;
 use omicron_common::api::external::CreateResult;
-use omicron_common::api::external::DiskState;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::DeleteResult;
+use omicron_common::api::external::DiskState;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::InstanceState;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::UpdateResult;
 use omicron_common::api::internal::nexus;
-use sled_agent_client::Client as SledAgentClient;
 use sled_agent_client::types::InstanceRuntimeStateMigrateParams;
 use sled_agent_client::types::InstanceRuntimeStateRequested;
 use sled_agent_client::types::InstanceStateRequested;
+use sled_agent_client::Client as SledAgentClient;
 use std::sync::Arc;
 use uuid::Uuid;
 
@@ -196,7 +196,7 @@ impl super::Nexus {
     }
 
     /// Returns the SledAgentClient for the host where this Instance is running.
-    pub (crate) async fn instance_sled(
+    pub(crate) async fn instance_sled(
         &self,
         instance: &db::model::Instance,
     ) -> Result<Arc<SledAgentClient>, Error> {
@@ -735,5 +735,64 @@ impl super::Nexus {
         self.db_datastore
             .instance_delete_network_interface(opctx, &authz_interface)
             .await
+    }
+
+    /// Invoked by a sled agent to publish an updated runtime state for an
+    /// Instance.
+    pub async fn notify_instance_updated(
+        &self,
+        id: &Uuid,
+        new_runtime_state: &nexus::InstanceRuntimeState,
+    ) -> Result<(), Error> {
+        let log = &self.log;
+
+        let result = self
+            .db_datastore
+            .instance_update_runtime(id, &(new_runtime_state.clone().into()))
+            .await;
+
+        match result {
+            Ok(true) => {
+                info!(log, "instance updated by sled agent";
+                    "instance_id" => %id,
+                    "propolis_id" => %new_runtime_state.propolis_uuid,
+                    "new_state" => %new_runtime_state.run_state);
+                Ok(())
+            }
+
+            Ok(false) => {
+                info!(log, "instance update from sled agent ignored (old)";
+                    "instance_id" => %id,
+                    "propolis_id" => %new_runtime_state.propolis_uuid,
+                    "requested_state" => %new_runtime_state.run_state);
+                Ok(())
+            }
+
+            // If the instance doesn't exist, swallow the error -- there's
+            // nothing to do here.
+            // TODO-robustness This could only be possible if we've removed an
+            // Instance from the datastore altogether.  When would we do that?
+            // We don't want to do it as soon as something's destroyed, I think,
+            // and in that case, we'd need some async task for cleaning these
+            // up.
+            Err(Error::ObjectNotFound { .. }) => {
+                warn!(log, "non-existent instance updated by sled agent";
+                    "instance_id" => %id,
+                    "new_state" => %new_runtime_state.run_state);
+                Ok(())
+            }
+
+            // If the datastore is unavailable, propagate that to the caller.
+            // TODO-robustness Really this should be any _transient_ error.  How
+            // can we distinguish?  Maybe datastore should emit something
+            // different from Error with an Into<Error>.
+            Err(error) => {
+                warn!(log, "failed to update instance from sled agent";
+                    "instance_id" => %id,
+                    "new_state" => %new_runtime_state.run_state,
+                    "error" => ?error);
+                Err(error)
+            }
+        }
     }
 }

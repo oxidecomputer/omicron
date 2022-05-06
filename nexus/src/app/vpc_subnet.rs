@@ -5,9 +5,9 @@
 use crate::authz;
 use crate::context::OpContext;
 use crate::db;
+use crate::db::lookup::LookupPath;
 use crate::db::model::Name;
 use crate::db::model::VpcSubnet;
-use crate::db::lookup::LookupPath;
 use crate::external_api::params;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::ListResultVec;

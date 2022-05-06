@@ -20,5 +20,4 @@ impl super::Nexus {
         self.db_datastore.zpool_upsert(zpool).await?;
         Ok(())
     }
-
 }
