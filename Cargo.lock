@@ -84,9 +84,9 @@ dependencies = [
 
 [[package]]
 name = "anyhow"
-version = "1.0.56"
+version = "1.0.57"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4361135be9122e0870de935d7c439aef945b9f9ddd4199a553b5270b49c82a27"
+checksum = "08f9b8508dccb7687a1d6c4ce66b2b0ecef467c94667de27d8d7fe1f8d2a9cdc"
 
 [[package]]
 name = "anymap"
@@ -3063,9 +3063,9 @@ checksum = "8e22443d1643a904602595ba1cd8f7d896afe56d26712531c5ff73a15b2fbf64"
 
 [[package]]
 name = "oso"
-version = "0.26.0"
+version = "0.26.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c527b33eaa5534f8a486051827f963dbc73de1a787b90e32adccce625613ca8c"
+checksum = "26f60e93371698d27da6df716b4523ed72eaf3cf85e7f36fa96a04d1e72ae29c"
 dependencies = [
  "impl-trait-for-tuples",
  "lazy_static",
@@ -3079,9 +3079,9 @@ dependencies = [
 
 [[package]]
 name = "oso-derive"
-version = "0.26.0"
+version = "0.26.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b6d027db8ed6ca7b074615f9c9dff2b4f01c352448c2d54b82087575ee5a58e8"
+checksum = "cca6cc08d0dda47f82240caafbc46b2701c4fe1a4692394d4292c4b2f2dd00a2"
 dependencies = [
  "quote",
  "syn",
@@ -3472,9 +3472,9 @@ dependencies = [
 
 [[package]]
 name = "polar-core"
-version = "0.26.0"
+version = "0.26.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fc2a1ed15352e3d6ca0575212741cbcd8db208bcca90ed8c92fb1c292f08f9d4"
+checksum = "a6d532b44ae9b5baa9561472c100a6b99b14d305cfe59422d04f550c9933c1d5"
 dependencies = [
  "indoc",
  "js-sys",
