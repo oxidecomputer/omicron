@@ -9,7 +9,7 @@ anyhow = "1.0"
 futures = "0.3.21"
 libc = "0.2.123"
 omicron-common = { path = "../common" }
-postgres-protocol = "0.6.3"
+postgres-protocol = "0.6.4"
 signal-hook = "0.3"
 structopt = "0.3"
 subprocess = "0.2.8"
