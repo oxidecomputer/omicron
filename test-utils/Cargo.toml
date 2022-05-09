@@ -7,7 +7,7 @@ license = "MPL-2.0"
 [dependencies]
 anyhow = "1.0"
 futures = "0.3.21"
-libc = "0.2.123"
+libc = "0.2.125"
 omicron-common = { path = "../common" }
 postgres-protocol = "0.6.4"
 signal-hook = "0.3"
