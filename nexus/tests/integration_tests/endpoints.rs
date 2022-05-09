@@ -39,6 +39,8 @@ lazy_static! {
     pub static ref DEMO_SILO_NAME: Name = "demo-silo".parse().unwrap();
     pub static ref DEMO_SILO_URL: String =
         format!("/silos/{}", *DEMO_SILO_NAME);
+    pub static ref DEMO_SILO_POLICY_URL: String =
+        format!("/silos/{}/policy", *DEMO_SILO_NAME);
     pub static ref DEMO_SILO_CREATE: params::SiloCreate =
         params::SiloCreate {
             identity: IdentityMetadataCreateParams {
@@ -386,6 +388,20 @@ lazy_static! {
             allowed_methods: vec![
                 AllowedMethod::Get,
                 AllowedMethod::Delete,
+            ],
+        },
+        VerifyEndpoint {
+            url: &*DEMO_SILO_POLICY_URL,
+            visibility: Visibility::Protected,
+            allowed_methods: vec![
+                AllowedMethod::Get,
+                AllowedMethod::Put(
+                    serde_json::to_value(
+                        &shared::Policy::<authz::SiloRoles> {
+                            role_assignments: vec![]
+                        }
+                    ).unwrap()
+                ),
             ],
         },
 
