@@ -364,7 +364,7 @@ async fn silos_delete_silo(
 /// Create a new SAML identity provider for a silo.
 #[endpoint {
     method = POST,
-    path = "/silos/{silo_name}/saml_identity_provider",
+    path = "/silos/{silo_name}/saml_identity_providers",
     tags = ["silos"],
 }]
 async fn silo_saml_idp_create(
@@ -401,7 +401,7 @@ struct SiloSamlPathParam {
 /// GET a silo's SAML identity provider
 #[endpoint {
     method = GET,
-    path = "/silos/{silo_name}/saml_identity_provider/{provider_name}",
+    path = "/silos/{silo_name}/saml_identity_providers/{provider_name}",
     tags = ["silos"],
 }]
 async fn silo_saml_idp_fetch(

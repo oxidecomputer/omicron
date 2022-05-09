@@ -4889,7 +4889,7 @@
         }
       }
     },
-    "/silos/{silo_name}/saml_identity_provider": {
+    "/silos/{silo_name}/saml_identity_providers": {
       "post": {
         "tags": [
           "silos"
@@ -4938,7 +4938,7 @@
         }
       }
     },
-    "/silos/{silo_name}/saml_identity_provider/{provider_name}": {
+    "/silos/{silo_name}/saml_identity_providers/{provider_name}": {
       "get": {
         "tags": [
           "silos"

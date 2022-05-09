@@ -213,7 +213,7 @@ async fn test_create_a_saml_idp(cptestctx: &ControlPlaneTestContext) {
 
     let silo_saml_idp: SiloSamlIdentityProvider = object_create(
         client,
-        &format!("/silos/{}/saml_identity_provider", SILO_NAME),
+        &format!("/silos/{}/saml_identity_providers", SILO_NAME),
         &params::SiloSamlIdentityProviderCreate {
             identity: IdentityMetadataCreateParams {
                 name: "some-totally-real-saml-provider"
@@ -280,7 +280,7 @@ async fn test_create_a_saml_idp(cptestctx: &ControlPlaneTestContext) {
         NexusRequest::object_get(
             &client,
             &format!(
-                "/silos/{}/saml_identity_provider/{}",
+                "/silos/{}/saml_identity_providers/{}",
                 silo.identity.name, silo_saml_idp.identity.name,
             ),
         )
@@ -338,7 +338,7 @@ async fn test_deleting_a_silo_deletes_the_idp(
 
     let _silo_saml_idp: SiloSamlIdentityProvider = object_create(
         client,
-        &format!("/silos/{}/saml_identity_provider", SILO_NAME),
+        &format!("/silos/{}/saml_identity_providers", SILO_NAME),
         &params::SiloSamlIdentityProviderCreate {
             identity: IdentityMetadataCreateParams {
                 name: "some-totally-real-saml-provider"
@@ -410,7 +410,7 @@ async fn test_create_a_saml_idp_invalid_descriptor_truncated(
         RequestBuilder::new(
             client,
             Method::POST,
-            &format!("/silos/{}/saml_identity_provider", SILO_NAME),
+            &format!("/silos/{}/saml_identity_providers", SILO_NAME),
         )
         .body(Some(&params::SiloSamlIdentityProviderCreate {
             identity: IdentityMetadataCreateParams {
@@ -488,7 +488,7 @@ async fn test_create_a_saml_idp_invalid_descriptor_no_redirect_binding(
         RequestBuilder::new(
             client,
             Method::POST,
-            &format!("/silos/{}/saml_identity_provider", SILO_NAME),
+            &format!("/silos/{}/saml_identity_providers", SILO_NAME),
         )
         .body(Some(&params::SiloSamlIdentityProviderCreate {
             identity: IdentityMetadataCreateParams {
@@ -540,7 +540,7 @@ async fn test_create_a_hidden_silo_saml_idp(
 
     let silo_saml_idp: SiloSamlIdentityProvider = object_create(
         client,
-        "/silos/hidden/saml_identity_provider",
+        "/silos/hidden/saml_identity_providers",
         &params::SiloSamlIdentityProviderCreate {
             identity: IdentityMetadataCreateParams {
                 name: "some-totally-real-saml-provider"
@@ -616,7 +616,7 @@ async fn test_saml_idp_metadata_url_404(cptestctx: &ControlPlaneTestContext) {
         RequestBuilder::new(
             client,
             Method::POST,
-            &format!("/silos/{}/saml_identity_provider", SILO_NAME),
+            &format!("/silos/{}/saml_identity_providers", SILO_NAME),
         )
         .body(Some(&params::SiloSamlIdentityProviderCreate {
             identity: IdentityMetadataCreateParams {
@@ -671,7 +671,7 @@ async fn test_saml_idp_metadata_url_invalid(
         RequestBuilder::new(
             client,
             Method::POST,
-            &format!("/silos/{}/saml_identity_provider", SILO_NAME),
+            &format!("/silos/{}/saml_identity_providers", SILO_NAME),
         )
         .body(Some(&params::SiloSamlIdentityProviderCreate {
             identity: IdentityMetadataCreateParams {
