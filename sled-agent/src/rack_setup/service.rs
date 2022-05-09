@@ -286,6 +286,8 @@ impl ServiceInner {
         }
 
         // CRDB datasets are treated as services.
+        //
+        // XXX: Hardcoding CRDB?
         let crdb_datasets = datasets.iter().filter(|dataset| {
             matches!(dataset.dataset_kind, crate::params::DatasetKind::CockroachDb { .. })
         });
@@ -309,7 +311,7 @@ impl ServiceInner {
 
 
         // TODO: add dns records for non-crdb datasets too
-        // TODO: alternatively, REMOVE THEM
+        // TODO: alternatively, REMOVE THEM! Make RSS set up crdb exclusively.
 
         Ok(())
     }

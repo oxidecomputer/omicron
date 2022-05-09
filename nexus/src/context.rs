@@ -90,7 +90,7 @@ impl ServerContext {
         let internal_authn = Arc::new(authn::Context::internal_api());
         let authz = Arc::new(authz::Authz::new(&log));
         let create_tracker = |name: &str| {
-            let target = HttpService { name: name.to_string(), id: config.id };
+            let target = HttpService { name: name.to_string(), id: config.runtime.id };
             const START_LATENCY_DECADE: i8 = -6;
             const END_LATENCY_DECADE: i8 = 3;
             LatencyTracker::with_latency_decades(
@@ -102,7 +102,7 @@ impl ServerContext {
         };
         let internal_latencies = create_tracker("nexus-internal");
         let external_latencies = create_tracker("nexus-external");
-        let producer_registry = ProducerRegistry::with_id(config.id);
+        let producer_registry = ProducerRegistry::with_id(config.runtime.id);
         producer_registry
             .register_producer(internal_latencies.clone())
             .unwrap();

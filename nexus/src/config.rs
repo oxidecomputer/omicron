@@ -5,10 +5,9 @@
 //! Interfaces for parsing configuration files and working with a nexus server
 //! configuration
 
-use crate::db;
 use anyhow::anyhow;
-use dropshot::ConfigDropshot;
 use dropshot::ConfigLogging;
+use omicron_common::nexus_config::RuntimeConfig;
 use serde::Deserialize;
 use serde::Serialize;
 use serde_with::DeserializeFromStr;
@@ -54,21 +53,17 @@ pub struct TimeseriesDbConfig {
 /// Configuration for a nexus server
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct Config {
-    /// Dropshot configuration for external API server
-    pub dropshot_external: ConfigDropshot,
-    /// Dropshot configuration for internal API server
-    pub dropshot_internal: ConfigDropshot,
-    /// Identifier for this instance of Nexus
-    pub id: uuid::Uuid,
+    /// A variety of configuration parameters only known at runtime.
+    #[serde(flatten)]
+    pub runtime: RuntimeConfig,
     /// Console-related tunables
     pub console: ConsoleConfig,
     /// Server-wide logging configuration.
     pub log: ConfigLogging,
-    /// Database parameters
-    pub database: db::Config,
     /// Authentication-related configuration
     pub authn: AuthnConfig,
     /// Timeseries database configuration.
+    // TODO: Should this be removed? Nexus needs to initialize it.
     pub timeseries_db: TimeseriesDbConfig,
     /// Updates-related configuration. Updates APIs return 400 Bad Request when this is
     /// unconfigured.
