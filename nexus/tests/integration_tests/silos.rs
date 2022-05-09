@@ -223,7 +223,6 @@ async fn test_create_a_saml_idp(cptestctx: &ControlPlaneTestContext) {
                 description: "a demo provider".to_string(),
             },
 
-            silo_id: silo.identity.id,
             idp_metadata_url: server.url("/descriptor").to_string(),
 
             idp_entity_id: "entity_id".to_string(),
@@ -349,7 +348,6 @@ async fn test_deleting_a_silo_deletes_the_idp(
                 description: "a demo provider".to_string(),
             },
 
-            silo_id: silo.identity.id,
             idp_metadata_url: server.url("/descriptor").to_string(),
 
             idp_entity_id: "entity_id".to_string(),
@@ -423,7 +421,6 @@ async fn test_create_a_saml_idp_invalid_descriptor_truncated(
                 description: "a demo provider".to_string(),
             },
 
-            silo_id: silo.identity.id,
             idp_metadata_url: server.url("/descriptor").to_string(),
 
             idp_entity_id: "entity_id".to_string(),
@@ -502,7 +499,6 @@ async fn test_create_a_saml_idp_invalid_descriptor_no_redirect_binding(
                 description: "a demo provider".to_string(),
             },
 
-            silo_id: silo.identity.id,
             idp_metadata_url: server.url("/descriptor").to_string(),
 
             idp_entity_id: "entity_id".to_string(),
@@ -554,7 +550,6 @@ async fn test_create_a_hidden_silo_saml_idp(
                 description: "a demo provider".to_string(),
             },
 
-            silo_id: silo.identity.id,
             idp_metadata_url: server.url("/descriptor").to_string(),
 
             idp_entity_id: "entity_id".to_string(),
@@ -632,7 +627,6 @@ async fn test_saml_idp_metadata_url_404(cptestctx: &ControlPlaneTestContext) {
                 description: "a demo provider".to_string(),
             },
 
-            silo_id: silo.identity.id,
             idp_metadata_url: server.url("/descriptor").to_string(),
 
             idp_entity_id: "entity_id".to_string(),
@@ -688,7 +682,6 @@ async fn test_saml_idp_metadata_url_invalid(
                 description: "a demo provider".to_string(),
             },
 
-            silo_id: silo.identity.id,
             idp_metadata_url: "htttps://fake.url".to_string(),
 
             idp_entity_id: "entity_id".to_string(),

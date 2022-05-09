@@ -32,8 +32,6 @@ pub struct SiloSamlIdentityProviderCreate {
     #[serde(flatten)]
     pub identity: IdentityMetadataCreateParams,
 
-    pub silo_id: Uuid,
-
     /// url where identity provider metadata descriptor is
     pub idp_metadata_url: String,
 

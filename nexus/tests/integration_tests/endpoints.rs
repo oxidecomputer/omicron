@@ -28,6 +28,7 @@ use omicron_nexus::external_api::params;
 use omicron_nexus::external_api::shared;
 use std::net::IpAddr;
 use std::net::Ipv4Addr;
+use crate::integration_tests::unauthorized::HTTP_SERVER;
 
 lazy_static! {
     pub static ref HARDWARE_RACK_URL: String =
@@ -221,6 +222,15 @@ lazy_static! {
     pub static ref DEMO_IMAGE_NAME: Name = "demo-image".parse().unwrap();
     pub static ref DEMO_PROJECT_IMAGE_URL: String =
         format!("{}/{}", *DEMO_PROJECT_URL_IMAGES, *DEMO_IMAGE_NAME);
+    pub static ref DEMO_IMAGE_CREATE: params::ImageCreate =
+        params::ImageCreate {
+            identity: IdentityMetadataCreateParams {
+                name: DEMO_IMAGE_NAME.clone(),
+                description: String::from(""),
+            },
+            source: params::ImageSource::Url(HTTP_SERVER.url("/image.raw").to_string()),
+            block_size: params::BlockSize::try_from(4096).unwrap(),
+        };
 
     // Global Images
     pub static ref DEMO_GLOBAL_IMAGE_URL: String =
@@ -237,6 +247,26 @@ lazy_static! {
                 description: String::from(""),
             },
             disk: DEMO_DISK_NAME.clone(),
+        };
+
+    // SAML identity provider
+    pub static ref SILO_SAML_IDENTITY_PROVIDER: params::SiloSamlIdentityProviderCreate =
+        params::SiloSamlIdentityProviderCreate {
+            identity: IdentityMetadataCreateParams {
+                name: "demo-saml-provider".to_string().parse().unwrap(),
+                description: "a demo provider".to_string(),
+            },
+
+            idp_metadata_url: HTTP_SERVER.url("/descriptor").to_string(),
+
+            idp_entity_id: "entity_id".to_string(),
+            sp_client_id: "client_id".to_string(),
+            acs_url: "http://acs".to_string(),
+            slo_url: "http://slo".to_string(),
+            technical_contact_email: "technical@fake".to_string(),
+
+            public_cert: None,
+            private_key: None,
         };
 }
 
@@ -659,6 +689,28 @@ lazy_static! {
             ],
         },
 
+        /* Project images */
+
+        VerifyEndpoint {
+            url: &*DEMO_PROJECT_URL_IMAGES,
+            visibility: Visibility::Protected,
+            allowed_methods: vec![
+                AllowedMethod::GetUnimplemented,
+                AllowedMethod::Post(
+                    serde_json::to_value(&*DEMO_IMAGE_CREATE).unwrap()
+                ),
+            ],
+        },
+
+        VerifyEndpoint {
+            url: &*DEMO_PROJECT_IMAGE_URL,
+            visibility: Visibility::Protected,
+            allowed_methods: vec![
+                AllowedMethod::GetUnimplemented,
+                AllowedMethod::Delete,
+            ],
+        },
+
         /* Snapshots */
 
         VerifyEndpoint {
@@ -834,6 +886,44 @@ lazy_static! {
             allowed_methods: vec![AllowedMethod::Post(
                 serde_json::Value::Null
             )],
+        },
+
+        /* Global Images */
+
+        VerifyEndpoint {
+            url: "/images",
+            visibility: Visibility::Public,
+            allowed_methods: vec![
+                AllowedMethod::Get,
+                AllowedMethod::Post(
+                    serde_json::to_value(&*DEMO_IMAGE_CREATE).unwrap()
+                ),
+            ],
+        },
+
+        VerifyEndpoint {
+            url: &*DEMO_GLOBAL_IMAGE_URL,
+            visibility: Visibility::Protected,
+            allowed_methods: vec![
+                AllowedMethod::Get,
+                AllowedMethod::Delete,
+            ],
+        },
+
+        /* Silo identity providers */
+
+        VerifyEndpoint {
+            url: "/silos/default-silo/saml_identity_provider",
+            visibility: Visibility::Public, // Users can see their own silo! This includes USER_TEST_UNPRIVILEGED
+            allowed_methods: vec![AllowedMethod::Post(
+                serde_json::to_value(&*SILO_SAML_IDENTITY_PROVIDER).unwrap(),
+            )],
+        },
+        VerifyEndpoint {
+            url:
+                "/silos/default-silo/saml_identity_provider/demo-saml-provider",
+            visibility: Visibility::Protected,
+            allowed_methods: vec![AllowedMethod::Get],
         },
     ];
 }
