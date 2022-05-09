@@ -1147,8 +1147,15 @@ impl Nexus {
                     serde_json::to_string(&volume_construction_request)?;
 
                 // use reqwest to query url for size
+                let dur = std::time::Duration::from_secs(5);
+                let client = reqwest::ClientBuilder::new()
+                    .connect_timeout(dur)
+                    .timeout(dur)
+                    .build()
+                    .map_err(|e| Error::internal_error(&format!("failed to build reqwest client: {}", e)))?;
+
                 let response =
-                    reqwest::Client::new().head(url).send().await.map_err(
+                    client.head(url).send().await.map_err(
                         |e| Error::InvalidValue {
                             label: String::from("url"),
                             message: format!("error querying url: {}", e),
@@ -3842,13 +3849,37 @@ impl Nexus {
         //
         // Importantly, do this only once and store it. It would introduce
         // attack surface to download it each time it was required.
-        let idp_metadata_document_string =
-            reqwest::get(&params.idp_metadata_url)
-                .await
-                .map_err(|e| Error::invalid_request(&e.to_string()))?
-                .text()
-                .await
-                .map_err(|e| Error::invalid_request(&e.to_string()))?;
+        let dur = std::time::Duration::from_secs(5);
+        let client = reqwest::ClientBuilder::new()
+            .connect_timeout(dur)
+            .timeout(dur)
+            .build()
+            .map_err(|e| Error::internal_error(&format!("failed to build reqwest client: {}", e)))?;
+
+        let response =
+            client.get(&params.idp_metadata_url).send().await.map_err(
+                |e| Error::InvalidValue {
+                    label: String::from("url"),
+                    message: format!("error querying url: {}", e),
+                },
+            )?;
+
+        if !response.status().is_success() {
+            return Err(Error::InvalidValue {
+                label: String::from("url"),
+                message: format!(
+                    "querying url returned: {}",
+                    response.status()
+                ),
+            });
+        }
+
+        let idp_metadata_document_string = response.text().await.map_err(|e|
+            Error::InvalidValue {
+                label: String::from("url"),
+                message: format!("error getting text from url: {}", e),
+            },
+        )?;
 
         let provider = db::model::SiloSamlIdentityProvider {
             identity: db::model::SiloSamlIdentityProviderIdentity::new(
