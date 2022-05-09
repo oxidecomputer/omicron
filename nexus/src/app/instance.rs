@@ -13,7 +13,7 @@ use crate::db;
 use crate::db::identity::Resource;
 use crate::db::lookup::LookupPath;
 use crate::db::model::Name;
-use crate::db::subnet_allocation::NetworkInterfaceError;
+use crate::db::queries::network_interface::NetworkInterfaceError;
 use crate::external_api::params;
 use omicron_common::api::external;
 use omicron_common::api::external::CreateResult;

@@ -18,10 +18,12 @@ pub mod ipv6;
 pub mod lookup;
 mod pagination;
 mod pool;
+// This is marked public because the error types are used elsewhere, e.g., in
+// sagas.
+pub mod queries;
 mod saga_recovery;
 mod saga_types;
 mod sec_store;
-pub(crate) mod subnet_allocation;
 mod update_and_check;
 
 #[cfg(test)]

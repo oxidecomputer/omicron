@@ -2,414 +2,28 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! Diesel queries used for subnet and IP allocation
+//! Query for inserting a guest network interface.
 
 use crate::app::MAX_NICS_PER_INSTANCE;
 use crate::db;
-use crate::db::identity::Resource;
-use crate::db::model::{IncompleteNetworkInterface, VpcSubnet};
-use chrono::{DateTime, Utc};
+use crate::db::model::IncompleteNetworkInterface;
+use crate::db::queries::next_item::NextItem;
+use crate::defaults::NUM_INITIAL_RESERVED_IP_ADDRESSES;
+use chrono::DateTime;
+use chrono::Utc;
 use diesel::pg::Pg;
-use diesel::prelude::*;
-use diesel::query_builder::*;
+use diesel::prelude::Column;
+use diesel::query_builder::AstPass;
+use diesel::query_builder::QueryFragment;
+use diesel::query_builder::QueryId;
 use diesel::sql_types;
+use diesel::Insertable;
+use diesel::QueryResult;
 use ipnetwork::IpNetwork;
+use ipnetwork::Ipv4Network;
 use omicron_common::api::external;
-use std::convert::TryFrom;
+use std::net::IpAddr;
 use uuid::Uuid;
-
-// Helper to return the offset of the last valid/allocatable IP in a subnet.
-fn generate_last_address_offset(subnet: &ipnetwork::IpNetwork) -> i64 {
-    // Generate last address in the range.
-    //
-    // NOTE: First subtraction is to convert from the subnet size to an
-    // offset, since `generate_series` is inclusive of the last value.
-    // Example: 256 -> 255.
-    let last_address_offset = match subnet {
-        ipnetwork::IpNetwork::V4(network) => network.size() as i64 - 1,
-        ipnetwork::IpNetwork::V6(network) => {
-            // If we're allocating from a v6 subnet with more than 2^63 - 1
-            // addresses, just cap the size we'll explore.  This will never
-            // fail in practice since we're never going to be storing 2^64
-            // rows in the network_interface table.
-            i64::try_from(network.size() - 1).unwrap_or(i64::MAX)
-        }
-    };
-
-    // This subtraction is because the last address in a subnet is
-    // explicitly reserved for Oxide use.
-    last_address_offset - 1
-}
-
-/// Errors related to allocating VPC Subnets.
-#[derive(Debug, PartialEq)]
-pub enum SubnetError {
-    /// An IPv4 or IPv6 subnet overlaps with an existing VPC Subnet
-    OverlappingIpRange(ipnetwork::IpNetwork),
-    /// An other error
-    External(external::Error),
-}
-
-impl SubnetError {
-    /// Construct a `SubnetError` from a Diesel error, catching the desired
-    /// cases and building useful errors.
-    pub fn from_pool(
-        e: async_bb8_diesel::PoolError,
-        subnet: &VpcSubnet,
-    ) -> Self {
-        use crate::db::error;
-        use async_bb8_diesel::ConnectionError;
-        use async_bb8_diesel::PoolError;
-        use diesel::result::DatabaseErrorKind;
-        use diesel::result::Error;
-        const IPV4_OVERLAP_ERROR_MESSAGE: &str =
-            r#"null value in column "ipv4_block" violates not-null constraint"#;
-        const IPV6_OVERLAP_ERROR_MESSAGE: &str =
-            r#"null value in column "ipv6_block" violates not-null constraint"#;
-        const NAME_CONFLICT_CONSTRAINT: &str = "vpc_subnet_vpc_id_name_key";
-        match e {
-            // Attempt to insert overlapping IPv4 subnet
-            PoolError::Connection(ConnectionError::Query(
-                Error::DatabaseError(
-                    DatabaseErrorKind::NotNullViolation,
-                    ref info,
-                ),
-            )) if info.message() == IPV4_OVERLAP_ERROR_MESSAGE => {
-                SubnetError::OverlappingIpRange(subnet.ipv4_block.0 .0.into())
-            }
-
-            // Attempt to insert overlapping IPv6 subnet
-            PoolError::Connection(ConnectionError::Query(
-                Error::DatabaseError(
-                    DatabaseErrorKind::NotNullViolation,
-                    ref info,
-                ),
-            )) if info.message() == IPV6_OVERLAP_ERROR_MESSAGE => {
-                SubnetError::OverlappingIpRange(subnet.ipv6_block.0 .0.into())
-            }
-
-            // Conflicting name for the subnet within a VPC
-            PoolError::Connection(ConnectionError::Query(
-                Error::DatabaseError(
-                    DatabaseErrorKind::UniqueViolation,
-                    ref info,
-                ),
-            )) if info.constraint_name() == Some(NAME_CONFLICT_CONSTRAINT) => {
-                SubnetError::External(error::public_error_from_diesel_pool(
-                    e,
-                    error::ErrorHandler::Conflict(
-                        external::ResourceType::VpcSubnet,
-                        subnet.identity().name.as_str(),
-                    ),
-                ))
-            }
-
-            // Any other error at all is a bug
-            _ => SubnetError::External(error::public_error_from_diesel_pool(
-                e,
-                error::ErrorHandler::Server,
-            )),
-        }
-    }
-
-    /// Convert into a public error
-    pub fn into_external(self) -> external::Error {
-        match self {
-            SubnetError::OverlappingIpRange(ip) => {
-                external::Error::invalid_request(
-                    format!("IP address range '{}' conflicts with an existing subnet", ip).as_str()
-                )
-            },
-            SubnetError::External(e) => e,
-        }
-    }
-}
-
-/// Generate a subquery that selects any overlapping address ranges of the same
-/// type as the input IP subnet.
-///
-/// This generates a query that, in full, looks like:
-///
-/// ```sql
-/// SELECT
-///     <ip>
-/// FROM
-///     vpc_subnet
-/// WHERE
-///     vpc_id = <vpc_id> AND
-///     time_deleted IS NULL AND
-///     inet_contains_or_equals(ipv*_block, <ip>)
-/// LIMIT 1
-/// ```
-///
-/// The input may be either an IPv4 or IPv6 subnet, and the corresponding column
-/// is compared against. Note that the exact input IP range is returned on
-/// purpose.
-fn push_select_overlapping_ip_range<'a>(
-    mut out: AstPass<'_, 'a, Pg>,
-    vpc_id: &'a Uuid,
-    ip: &'a ipnetwork::IpNetwork,
-) -> diesel::QueryResult<()> {
-    use crate::db::schema::vpc_subnet::dsl;
-    out.push_sql("SELECT ");
-    out.push_bind_param::<sql_types::Inet, ipnetwork::IpNetwork>(ip)?;
-    out.push_sql(" FROM ");
-    VPC_SUBNET_FROM_CLAUSE.walk_ast(out.reborrow())?;
-    out.push_sql(" WHERE ");
-    out.push_identifier(dsl::vpc_id::NAME)?;
-    out.push_sql(" = ");
-    out.push_bind_param::<sql_types::Uuid, Uuid>(vpc_id)?;
-    out.push_sql(" AND ");
-    out.push_identifier(dsl::time_deleted::NAME)?;
-    out.push_sql(" IS NULL AND inet_contains_or_equals(");
-    if ip.is_ipv4() {
-        out.push_identifier(dsl::ipv4_block::NAME)?;
-    } else {
-        out.push_identifier(dsl::ipv6_block::NAME)?;
-    }
-    out.push_sql(", ");
-    out.push_bind_param::<sql_types::Inet, ipnetwork::IpNetwork>(ip)?;
-    out.push_sql(")");
-    Ok(())
-}
-
-/// Generate a subquery that returns NULL if there is an overlapping IP address
-/// range of any type.
-///
-/// This specifically generates a query that looks like:
-///
-/// ```sql
-/// SELECT NULLIF(
-///     <ip>,
-///     push_select_overlapping_ip_range(<vpc_id>, <ip>)
-/// )
-/// ```
-///
-/// The `NULLIF` function returns NULL if those two expressions are equal, and
-/// the first expression otherwise. That is, this returns NULL if there exists
-/// an overlapping IP range already in the VPC Subnet table, and the requested
-/// IP range if not.
-fn push_null_if_overlapping_ip_range<'a>(
-    mut out: AstPass<'_, 'a, Pg>,
-    vpc_id: &'a Uuid,
-    ip: &'a ipnetwork::IpNetwork,
-) -> diesel::QueryResult<()> {
-    out.push_sql("SELECT NULLIF(");
-    out.push_bind_param::<sql_types::Inet, ipnetwork::IpNetwork>(ip)?;
-    out.push_sql(", (");
-    push_select_overlapping_ip_range(out.reborrow(), vpc_id, ip)?;
-    out.push_sql("))");
-    Ok(())
-}
-
-/// Generate a CTE that can be used to insert a VPC Subnet, only if the IP
-/// address ranges of that subnet don't overlap with existing Subnets in the
-/// same VPC.
-///
-/// In particular, this generates a CTE like so:
-///
-/// ```sql
-/// WITH candidate(
-///     id,
-///     name,
-///     description,
-///     time_created,
-///     time_modified,
-///     time_deleted,
-///     vpc_id
-/// ) AS (VALUES (
-///     <id>,
-///     <name>,
-///     <description>,
-///     <time_created>,
-///     <time_modified>,
-///     NULL::TIMESTAMPTZ,
-///     <vpc_id>,
-/// )),
-/// candidate_ipv4(ipv4_block) AS (
-///     SELECT(
-///         NULLIF(
-///             <ipv4_block>,
-///             (
-///                 SELECT
-///                     ipv4_block
-///                 FROM
-///                     vpc_subnet
-///                 WHERE
-///                     vpc_id = <vpc_id> AND
-///                     time_deleted IS NULL AND
-///                     inet_contains_or_equals(<ipv4_block>, ipv4_block)
-///                 LIMIT 1
-///             )
-///        )
-///   )
-/// ),
-/// candidate_ipv6(ipv6_block) AS (
-///     <same as above, for ipv6>
-/// )
-/// SELECT *
-/// FROM candidate, candidate_ipv4, candidate_ipv6
-/// ```
-pub struct FilterConflictingVpcSubnetRangesQuery {
-    subnet: VpcSubnet,
-
-    // The following fields are derived from the previous field. This begs the
-    // question: "Why bother storing them at all?"
-    //
-    // Diesel's [`diesel::query_builder::ast_pass::AstPass:push_bind_param`] method
-    // requires that the provided value now live as long as the entire AstPass
-    // type. By storing these values in the struct, they'll live at least as
-    // long as the entire call to [`QueryFragment<Pg>::walk_ast`].
-    ipv4_block: ipnetwork::IpNetwork,
-    ipv6_block: ipnetwork::IpNetwork,
-}
-
-impl FilterConflictingVpcSubnetRangesQuery {
-    pub fn new(subnet: VpcSubnet) -> Self {
-        let ipv4_block = ipnetwork::IpNetwork::from(subnet.ipv4_block.0 .0);
-        let ipv6_block = ipnetwork::IpNetwork::from(subnet.ipv6_block.0 .0);
-        Self { subnet, ipv4_block, ipv6_block }
-    }
-}
-
-impl QueryId for FilterConflictingVpcSubnetRangesQuery {
-    type QueryId = ();
-    const HAS_STATIC_QUERY_ID: bool = false;
-}
-
-impl QueryFragment<Pg> for FilterConflictingVpcSubnetRangesQuery {
-    fn walk_ast<'a>(
-        &'a self,
-        mut out: AstPass<'_, 'a, Pg>,
-    ) -> diesel::QueryResult<()> {
-        use db::schema::vpc_subnet::dsl;
-
-        // Create the base `candidate` from values provided that need no
-        // verificiation.
-        out.push_sql("SELECT * FROM (WITH candidate(");
-        out.push_identifier(dsl::id::NAME)?;
-        out.push_sql(", ");
-        out.push_identifier(dsl::name::NAME)?;
-        out.push_sql(", ");
-        out.push_identifier(dsl::description::NAME)?;
-        out.push_sql(", ");
-        out.push_identifier(dsl::time_created::NAME)?;
-        out.push_sql(", ");
-        out.push_identifier(dsl::time_modified::NAME)?;
-        out.push_sql(", ");
-        out.push_identifier(dsl::time_deleted::NAME)?;
-        out.push_sql(", ");
-        out.push_identifier(dsl::vpc_id::NAME)?;
-        out.push_sql(") AS (VALUES (");
-        out.push_bind_param::<sql_types::Uuid, Uuid>(&self.subnet.identity.id)?;
-        out.push_sql(", ");
-        out.push_bind_param::<sql_types::Text, db::model::Name>(
-            &self.subnet.name(),
-        )?;
-        out.push_sql(", ");
-        out.push_bind_param::<sql_types::Text, String>(
-            &self.subnet.identity.description,
-        )?;
-        out.push_sql(", ");
-        out.push_bind_param::<sql_types::Timestamptz, DateTime<Utc>>(
-            &self.subnet.identity.time_created,
-        )?;
-        out.push_sql(", ");
-        out.push_bind_param::<sql_types::Timestamptz, DateTime<Utc>>(
-            &self.subnet.identity.time_modified,
-        )?;
-        out.push_sql(", ");
-        out.push_sql("NULL::TIMESTAMPTZ, ");
-        out.push_bind_param::<sql_types::Uuid, Uuid>(&self.subnet.vpc_id)?;
-        out.push_sql(")), ");
-
-        // Push the candidate IPv4 and IPv6 selection subqueries, which return
-        // NULL if the corresponding address range overlaps.
-        out.push_sql("candidate_ipv4(");
-        out.push_identifier(dsl::ipv4_block::NAME)?;
-        out.push_sql(") AS (");
-        push_null_if_overlapping_ip_range(
-            out.reborrow(),
-            &self.subnet.vpc_id,
-            &self.ipv4_block,
-        )?;
-
-        out.push_sql("), candidate_ipv6(");
-        out.push_identifier(dsl::ipv6_block::NAME)?;
-        out.push_sql(") AS (");
-        push_null_if_overlapping_ip_range(
-            out.reborrow(),
-            &self.subnet.vpc_id,
-            &self.ipv6_block,
-        )?;
-        out.push_sql(") ");
-
-        // Select the entire set of candidate columns.
-        out.push_sql(
-            "SELECT * FROM candidate, candidate_ipv4, candidate_ipv6)",
-        );
-        Ok(())
-    }
-}
-
-impl Insertable<db::schema::vpc_subnet::table>
-    for FilterConflictingVpcSubnetRangesQuery
-{
-    type Values = FilterConflictingVpcSubnetRangesQueryValues;
-
-    fn values(self) -> Self::Values {
-        FilterConflictingVpcSubnetRangesQueryValues(self)
-    }
-}
-
-/// Used to allow inserting the result of the
-/// `FilterConflictingVpcSubnetRangesQuery`, as in
-/// `diesel::insert_into(foo).values(_). Should not be used directly.
-pub struct FilterConflictingVpcSubnetRangesQueryValues(
-    pub FilterConflictingVpcSubnetRangesQuery,
-);
-
-impl QueryId for FilterConflictingVpcSubnetRangesQueryValues {
-    type QueryId = ();
-    const HAS_STATIC_QUERY_ID: bool = false;
-}
-
-impl diesel::insertable::CanInsertInSingleQuery<Pg>
-    for FilterConflictingVpcSubnetRangesQueryValues
-{
-    fn rows_to_insert(&self) -> Option<usize> {
-        Some(1)
-    }
-}
-
-impl QueryFragment<Pg> for FilterConflictingVpcSubnetRangesQueryValues {
-    fn walk_ast<'a>(
-        &'a self,
-        mut out: AstPass<'_, 'a, Pg>,
-    ) -> diesel::QueryResult<()> {
-        use db::schema::vpc_subnet::dsl;
-        out.push_sql("(");
-        out.push_identifier(dsl::id::NAME)?;
-        out.push_sql(", ");
-        out.push_identifier(dsl::name::NAME)?;
-        out.push_sql(", ");
-        out.push_identifier(dsl::description::NAME)?;
-        out.push_sql(", ");
-        out.push_identifier(dsl::time_created::NAME)?;
-        out.push_sql(", ");
-        out.push_identifier(dsl::time_modified::NAME)?;
-        out.push_sql(", ");
-        out.push_identifier(dsl::time_deleted::NAME)?;
-        out.push_sql(", ");
-        out.push_identifier(dsl::vpc_id::NAME)?;
-        out.push_sql(", ");
-        out.push_identifier(dsl::ipv4_block::NAME)?;
-        out.push_sql(", ");
-        out.push_identifier(dsl::ipv6_block::NAME)?;
-        out.push_sql(") ");
-        self.0.walk_ast(out)
-    }
-}
 
 /// Errors related to inserting or attaching a NetworkInterface
 #[derive(Debug)]
@@ -642,6 +256,152 @@ fn decode_database_error(
     }
 }
 
+// Helper to return the offset of the last valid/allocatable IP in a subnet.
+// Note that this is the offset from the _first available address_, not the
+// network address.
+fn last_address_offset(subnet: &IpNetwork) -> u32 {
+    // Generate last address in the range.
+    //
+    // NOTE: First subtraction is to convert from the subnet size to an
+    // offset, since `generate_series` is inclusive of the last value.
+    // Example: 256 -> 255.
+    let last_address_offset = match subnet {
+        IpNetwork::V4(network) => network.size() - 1,
+        IpNetwork::V6(network) => {
+            // TODO-robustness: IPv6 subnets are always /64s, so in theory we
+            // could require searching all ~2^64 items for the next address.
+            // That won't happen in practice, because there will be other limits
+            // on the number of IPs (such as MAC addresses, or just project
+            // accounting limits). However, we should update this to be the
+            // actual maximum size we expect or want to support, once we get a
+            // better sense of what that is.
+            u32::try_from(network.size() - 1).unwrap_or(u32::MAX - 1)
+        }
+    };
+
+    // This subtraction is because the last address in a subnet is
+    // explicitly reserved for Oxide use.
+    last_address_offset
+        .checked_sub(1 + NUM_INITIAL_RESERVED_IP_ADDRESSES as u32)
+        .unwrap_or_else(|| panic!("Unexpectedly small IP subnet: '{}'", subnet))
+}
+
+// Return the first available address in a subnet. This is not the network
+// address, since Oxide reserves the first few addresses.
+fn first_available_address(subnet: &IpNetwork) -> IpAddr {
+    match subnet {
+        IpNetwork::V4(network) => network
+            .nth(NUM_INITIAL_RESERVED_IP_ADDRESSES as _)
+            .unwrap_or_else(|| {
+                panic!("Unexpectedly small IPv4 subnetwork: '{}'", network)
+            })
+            .into(),
+        IpNetwork::V6(network) => {
+            // TODO-performance: This is unfortunate. `ipnetwork` implements a
+            // direct addition-based approach for IPv4 but not IPv6. This will
+            // loop, which, while it may not matter much, can be nearly
+            // trivially avoided by converting to u128, adding, and converting
+            // back. Given that these spaces can be _really_ big, that is
+            // probably worth doing.
+            network
+                .iter()
+                .nth(NUM_INITIAL_RESERVED_IP_ADDRESSES as _)
+                .unwrap_or_else(|| {
+                    panic!("Unexpectedly small IPv4 subnetwork: '{}'", network)
+                })
+                .into()
+        }
+    }
+}
+
+/// The `NextGuestIpv4Address` query is a `NextItem` query for choosing the next
+/// available IPv4 address for a guest interface.
+#[derive(Debug, Clone, Copy)]
+pub struct NextGuestIpv4Address {
+    inner: NextItem<
+        db::schema::network_interface::table,
+        IpNetwork,
+        db::schema::network_interface::dsl::ip,
+        Uuid,
+        db::schema::network_interface::dsl::subnet_id,
+    >,
+}
+
+impl NextGuestIpv4Address {
+    pub fn new(subnet: Ipv4Network, subnet_id: Uuid) -> Self {
+        let subnet = IpNetwork::from(subnet);
+        let net = IpNetwork::from(first_available_address(&subnet));
+        let max_offset = last_address_offset(&subnet);
+        Self { inner: NextItem::new_scoped(net, subnet_id, max_offset) }
+    }
+}
+
+delegate_query_fragment_impl!(NextGuestIpv4Address);
+
+/// A `[NextItem`] subquery that selects the next empty slot for an interface.
+///
+/// Instances are limited to 8 interfaces (RFD 135). This pushes a subquery that
+/// looks like:
+///
+/// ```sql
+/// SELECT COALESCE((
+///     SELECT
+///         next_slot
+///     FROM
+///         generate_series(0, <max nics per instance>)
+///     AS
+///         next_slot
+///     LEFT OUTER JOIN
+///         network_interface
+///     ON
+///         (instance_id, time_deleted IS NULL, slot) =
+///         (<instance_id>, TRUE, next_slot)
+///     WHERE
+///         slot IS NULL
+///     LIMIT 1)
+/// ), 0)
+/// ```
+///
+/// That is, we select the lowest slot that has not yet been claimed by an
+/// interface on this instance, or zero if there is no such instance at all.
+///
+/// Errors
+/// ------
+///
+/// Note that the `generate_series` function is inclusive of its upper bound.
+/// We intentionally use the upper bound of the maximum number of NICs per
+/// instance. In the case where there are no available slots (the current max
+/// slot number is 7), this query will return 8. However, this violates the
+/// check on the slot column being between `[0, 8)`. This check violation is
+/// used to detect the case when there are no slots available.
+#[derive(Debug, Clone, Copy)]
+pub struct NextNicSlot {
+    inner: NextItem<
+        db::schema::network_interface::table,
+        i16,
+        db::schema::network_interface::dsl::slot,
+        Uuid,
+        db::schema::network_interface::dsl::instance_id,
+    >,
+}
+
+impl NextNicSlot {
+    pub fn new(instance_id: Uuid) -> Self {
+        Self {
+            inner: NextItem::new_scoped(0, instance_id, MAX_NICS_PER_INSTANCE),
+        }
+    }
+}
+
+impl QueryFragment<Pg> for NextNicSlot {
+    fn walk_ast<'a>(&'a self, mut out: AstPass<'_, 'a, Pg>) -> QueryResult<()> {
+        out.push_sql("SELECT COALESCE((");
+        self.inner.walk_ast(out.reborrow())?;
+        out.push_sql("), 0)");
+        Ok(())
+    }
+}
+
 /// Add a subquery intended to verify that an Instance's networking does not
 /// span multiple VPCs.
 ///
@@ -744,81 +504,6 @@ fn push_ensure_unique_vpc_expression<'a>(
     Ok(())
 }
 
-/// Push a subquery that selects the next available IP address from a subnet.
-///
-/// This adds a subquery like:
-///
-/// ```sql
-/// SELECT
-///     <network_address> + address_offset AS ip
-/// FROM
-///     generate_series(5, <last_address_offset>) AS address_offset
-/// LEFT OUTER JOIN
-///     network_interface
-/// ON
-///     (subnet_id, ip, time_deleted IS NULL) =
-///     (<subnet_id, <network_address> + address_offset, TRUE)
-/// WHERE ip IS NULL LIMIT 1
-/// ```
-///
-/// This is a linear, sequential scan for an IP from the subnet that's not yet
-/// been allocated. We'd ultimately like a better-performing allocation
-/// strategy; for example, we might be able to keep the lowest unallocated
-/// address for each subnet, and atomically return and increment that.
-///
-/// This would work fine, but explicit reservations of IP addresses complicate
-/// the picture. We'd need a more complex data structure to manage the ranges of
-/// available address for each subnet, especially to manage coalescing those
-/// ranges as addresses are released back to the pool.
-fn push_select_next_available_ip_subquery<'a>(
-    mut out: AstPass<'_, 'a, Pg>,
-    query: &'a InsertNetworkInterfaceQuery,
-) -> diesel::QueryResult<()> {
-    use db::schema::network_interface::dsl;
-    out.push_sql("SELECT ");
-    out.push_bind_param::<sql_types::Inet, IpNetwork>(
-        &query.network_address_v4_sql,
-    )?;
-    out.push_sql(" + ");
-    out.push_identifier("address_offset")?;
-    out.push_sql(" AS ");
-    out.push_identifier(dsl::ip::NAME)?;
-
-    out.push_sql(
-        format!(
-            " FROM generate_series({}, ",
-            crate::defaults::NUM_INITIAL_RESERVED_IP_ADDRESSES
-        )
-        .as_str(),
-    );
-    out.push_bind_param::<sql_types::BigInt, _>(&query.last_address_offset_v4)?;
-    out.push_sql(") AS ");
-    out.push_identifier("address_offset")?;
-    out.push_sql(" LEFT OUTER JOIN ");
-    NETWORK_INTERFACE_FROM_CLAUSE.walk_ast(out.reborrow())?;
-    out.push_sql(" ON (");
-    out.push_identifier(dsl::subnet_id::NAME)?;
-    out.push_sql(", ");
-    out.push_identifier(dsl::ip::NAME)?;
-    out.push_sql(", ");
-    out.push_identifier(dsl::time_deleted::NAME)?;
-    out.push_sql(" IS NULL) = (");
-    out.push_bind_param::<sql_types::Uuid, Uuid>(
-        &query.interface.subnet.identity.id,
-    )?;
-    out.push_sql(", ");
-    out.push_bind_param::<sql_types::Inet, IpNetwork>(
-        &query.network_address_v4_sql,
-    )?;
-    out.push_sql(" + ");
-    out.push_identifier("address_offset")?;
-    out.push_sql(", TRUE) ");
-    out.push_sql("WHERE ");
-    out.push_identifier(dsl::ip::NAME)?;
-    out.push_sql(" IS NULL LIMIT 1");
-    Ok(())
-}
-
 /// Subquery used to insert a _new_ `NetworkInterface` from parameters.
 ///
 /// This function is used to construct a query that allows inserting a
@@ -854,9 +539,9 @@ fn push_select_next_available_ip_subquery<'a>(
 ///
 /// If the user wants an address allocated, then this generates a subquery that
 /// tries to find the next available IP address (if any). See
-/// [`push_select_next_available_ip_subquery`] for details on that allocation
-/// subquery. If that fails, due to address exhaustion, this is detected and
-/// forwarded to the caller.
+/// [`NextGuestIpv4Address`] for details on that allocation subquery. If that
+/// fails, due to address exhaustion, this is detected and forwarded to the
+/// caller.
 ///
 /// Errors
 /// ------
@@ -979,7 +664,7 @@ fn push_interface_allocation_subquery<'a>(
         out.push_bind_param::<sql_types::Inet, IpNetwork>(ip)?;
     } else {
         out.push_sql("(");
-        push_select_next_available_ip_subquery(out.reborrow(), &query)?;
+        query.next_ipv4_address_subquery.walk_ast(out.reborrow())?;
         out.push_sql(")");
     }
     out.push_sql(" AS ");
@@ -989,74 +674,10 @@ fn push_interface_allocation_subquery<'a>(
     // interface, including validating that there are available slots on the
     // instance.
     out.push_sql(", (");
-    push_select_next_available_nic_slot_query(
-        out.reborrow(),
-        &query.interface.instance_id,
-    )?;
+    query.next_slot_subquery.walk_ast(out.reborrow())?;
     out.push_sql(") AS ");
     out.push_identifier(dsl::slot::NAME)?;
 
-    Ok(())
-}
-
-/// Push a subquery that selects the next empty slot for an interface.
-///
-/// Instances are limited to 8 interfaces (RFD 135). This pushes a subquery that
-/// looks like:
-///
-/// ```sql
-/// SELECT COALESCE((
-///     SELECT
-///         next_slot
-///     FROM
-///         generate_series(0, <max nics per instance>)
-///     AS
-///         next_slot
-///     LEFT OUTER JOIN
-///         network_interface
-///     ON
-///         (instance_id, time_deleted IS NULL, slot) =
-///         (<instance_id>, TRUE, next_slot)
-///     WHERE
-///         slot IS NULL
-///     LIMIT 1)
-/// ), 0)
-/// ```
-///
-/// That is, we select the lowest slot that has not yet been claimed by an
-/// interface on this instance, or zero if there is no such instance at all.
-///
-/// Errors
-/// ------
-///
-/// Note that the `generate_series` function is inclusive of its upper bound.
-/// We intentionally use the upper bound of the maximum number of NICs per
-/// instance. In the case where there are no available slots (the current max
-/// slot number is 7), this query will return 8. However, this violates the
-/// check on the slot column being between `[0, 8)`. This check violation is
-/// used to detect the case when there are no slots available.
-fn push_select_next_available_nic_slot_query<'a>(
-    mut out: AstPass<'_, 'a, Pg>,
-    instance_id: &'a Uuid,
-) -> QueryResult<()> {
-    use db::schema::network_interface::dsl;
-    out.push_sql(&format!(
-        "SELECT COALESCE((SELECT next_slot FROM generate_series(0, {}) ",
-        MAX_NICS_PER_INSTANCE,
-    ));
-    out.push_sql("AS next_slot LEFT OUTER JOIN ");
-    NETWORK_INTERFACE_FROM_CLAUSE.walk_ast(out.reborrow())?;
-    out.push_sql(" ON (");
-    out.push_identifier(dsl::instance_id::NAME)?;
-    out.push_sql(", ");
-    out.push_identifier(dsl::time_deleted::NAME)?;
-    out.push_sql(" IS NULL, ");
-    out.push_identifier(dsl::slot::NAME)?;
-    out.push_sql(") = (");
-    out.push_bind_param::<sql_types::Uuid, Uuid>(instance_id)?;
-    out.push_sql(", TRUE, next_slot) WHERE ");
-    out.push_identifier(dsl::slot::NAME)?;
-    out.push_sql(" IS NULL LIMIT 1), 0)");
     Ok(())
 }
 
@@ -1141,29 +762,31 @@ pub struct InsertNetworkInterfaceQuery {
     // long as the entire call to [`QueryFragment<Pg>::walk_ast`].
     vpc_id_str: String,
     ip_sql: Option<IpNetwork>,
-    network_address_v4_sql: IpNetwork,
     mac_sql: String,
-    last_address_offset_v4: i64,
+    next_ipv4_address_subquery: NextGuestIpv4Address,
+    next_slot_subquery: NextNicSlot,
 }
 
 impl InsertNetworkInterfaceQuery {
     pub fn new(interface: IncompleteNetworkInterface) -> Self {
         let vpc_id_str = interface.vpc_id.to_string();
         let ip_sql = interface.ip.map(|ip| ip.into());
-        let subnet_v4_sql = IpNetwork::from(interface.subnet.ipv4_block.0 .0);
-        let network_address_v4_sql = IpNetwork::from(subnet_v4_sql.network());
         let mac_sql = interface.mac.to_string();
-        let last_address_offset_v4 =
-            generate_last_address_offset(&subnet_v4_sql);
+
+        let next_ipv4_address_subquery = NextGuestIpv4Address::new(
+            interface.subnet.ipv4_block.0 .0,
+            interface.subnet.identity.id,
+        );
+        let next_slot_subquery = NextNicSlot::new(interface.instance_id);
 
         Self {
             interface,
             now: Utc::now(),
             vpc_id_str,
             ip_sql,
-            network_address_v4_sql,
             mac_sql,
-            last_address_offset_v4,
+            next_ipv4_address_subquery,
+            next_slot_subquery,
         }
     }
 }
@@ -1172,11 +795,8 @@ type FromClause<T> =
     diesel::internal::table_macro::StaticQueryFragmentInstance<T>;
 type NetworkInterfaceFromClause =
     FromClause<db::schema::network_interface::table>;
-type VpcSubnetFromClause = FromClause<db::schema::vpc_subnet::table>;
-
 const NETWORK_INTERFACE_FROM_CLAUSE: NetworkInterfaceFromClause =
     NetworkInterfaceFromClause::new();
-const VPC_SUBNET_FROM_CLAUSE: VpcSubnetFromClause = VpcSubnetFromClause::new();
 
 impl QueryId for InsertNetworkInterfaceQuery {
     type QueryId = ();
@@ -1307,164 +927,26 @@ impl QueryFragment<Pg> for InsertNetworkInterfaceQueryValues {
 }
 
 #[cfg(test)]
-mod test {
+mod tests {
+    use super::first_available_address;
+    use super::last_address_offset;
     use super::NetworkInterfaceError;
-    use super::SubnetError;
     use super::MAX_NICS_PER_INSTANCE;
     use crate::context::OpContext;
-    use crate::db::model::{
-        self, IncompleteNetworkInterface, NetworkInterface, VpcSubnet,
-    };
-    use ipnetwork::IpNetwork;
+    use crate::db::model;
+    use crate::db::model::IncompleteNetworkInterface;
+    use crate::db::model::NetworkInterface;
+    use crate::db::model::VpcSubnet;
     use nexus_test_utils::db::test_setup_database;
-    use omicron_common::api::external::{
-        Error, IdentityMetadataCreateParams, Ipv4Net, Ipv6Net, Name,
-    };
+    use omicron_common::api::external::Error;
+    use omicron_common::api::external::IdentityMetadataCreateParams;
+    use omicron_common::api::external::Ipv4Net;
+    use omicron_common::api::external::Ipv6Net;
     use omicron_test_utils::dev;
     use std::convert::TryInto;
+    use std::net::IpAddr;
     use std::sync::Arc;
     use uuid::Uuid;
-
-    #[tokio::test]
-    async fn test_filter_conflicting_vpc_subnet_ranges_query() {
-        let make_id =
-            |name: &Name, description: &str| IdentityMetadataCreateParams {
-                name: name.clone(),
-                description: description.to_string(),
-            };
-        let ipv4_block = Ipv4Net("172.30.0.0/22".parse().unwrap());
-        let other_ipv4_block = Ipv4Net("172.31.0.0/22".parse().unwrap());
-        let ipv6_block = Ipv6Net("fd12:3456:7890::/64".parse().unwrap());
-        let other_ipv6_block = Ipv6Net("fd00::/64".parse().unwrap());
-        let name = "a-name".to_string().try_into().unwrap();
-        let other_name = "b-name".to_string().try_into().unwrap();
-        let description = "some description".to_string();
-        let identity = make_id(&name, &description);
-        let vpc_id = "d402369d-c9ec-c5ad-9138-9fbee732d53e".parse().unwrap();
-        let other_vpc_id =
-            "093ad2db-769b-e3c2-bc1c-b46e84ce5532".parse().unwrap();
-        let subnet_id = "093ad2db-769b-e3c2-bc1c-b46e84ce5532".parse().unwrap();
-        let other_subnet_id =
-            "695debcc-e197-447d-ffb2-976150a7b7cf".parse().unwrap();
-        let row =
-            VpcSubnet::new(subnet_id, vpc_id, identity, ipv4_block, ipv6_block);
-
-        // Setup the test database
-        let logctx =
-            dev::test_setup_log("test_filter_conflicting_vpc_subnet_ranges");
-        let log = logctx.log.new(o!());
-        let mut db = test_setup_database(&log).await;
-        let cfg = crate::db::Config { url: db.pg_config().clone() };
-        let pool = Arc::new(crate::db::Pool::new(&cfg));
-        let db_datastore =
-            Arc::new(crate::db::DataStore::new(Arc::clone(&pool)));
-
-        // We should be able to insert anything into an empty table.
-        assert!(
-            matches!(db_datastore.vpc_create_subnet_raw(row).await, Ok(_)),
-            "Should be able to insert VPC subnet into empty table"
-        );
-
-        // We shouldn't be able to insert a row with the same IP ranges, even if
-        // the other data does not conflict.
-        let new_row = VpcSubnet::new(
-            other_subnet_id,
-            vpc_id,
-            make_id(&other_name, &description),
-            ipv4_block,
-            ipv6_block,
-        );
-        assert!(
-            matches!(
-                db_datastore.vpc_create_subnet_raw(new_row).await,
-                Err(SubnetError::OverlappingIpRange(IpNetwork::V4(_)))
-            ),
-            "Should not be able to insert new VPC subnet with the same IPv4 and IPv6 ranges"
-        );
-
-        // We should be able to insert data with the same ranges, if we change
-        // the VPC ID.
-        let new_row = VpcSubnet::new(
-            other_subnet_id,
-            other_vpc_id,
-            make_id(&name, &description),
-            ipv4_block,
-            ipv6_block,
-        );
-        assert!(
-            matches!(db_datastore.vpc_create_subnet_raw(new_row).await, Ok(_)),
-            "Should be able to insert a VPC Subnet with the same ranges in a different VPC",
-        );
-
-        // We shouldn't be able to insert a subnet if we change only the
-        // IPv4 or IPv6 block. They must _both_ be non-overlapping.
-        let new_row = VpcSubnet::new(
-            other_subnet_id,
-            vpc_id,
-            make_id(&other_name, &description),
-            other_ipv4_block,
-            ipv6_block,
-        );
-        let err = db_datastore
-            .vpc_create_subnet_raw(new_row)
-            .await
-            .expect_err("Should not be able to insert VPC Subnet with overlapping IPv6 range");
-        assert_eq!(
-            err,
-            SubnetError::OverlappingIpRange(IpNetwork::from(ipv6_block.0)),
-            "SubnetError variant should include the exact IP range that overlaps"
-        );
-        let new_row = VpcSubnet::new(
-            other_subnet_id,
-            vpc_id,
-            make_id(&other_name, &description),
-            ipv4_block,
-            other_ipv6_block,
-        );
-        let err = db_datastore
-            .vpc_create_subnet_raw(new_row)
-            .await
-            .expect_err("Should not be able to insert VPC Subnet with overlapping IPv4 range");
-        assert_eq!(
-            err,
-            SubnetError::OverlappingIpRange(IpNetwork::from(ipv4_block.0)),
-            "SubnetError variant should include the exact IP range that overlaps"
-        );
-
-        // We should get an _external error_ if the IP address ranges are OK,
-        // but the name conflicts.
-        let new_row = VpcSubnet::new(
-            other_subnet_id,
-            vpc_id,
-            make_id(&name, &description),
-            other_ipv4_block,
-            other_ipv6_block,
-        );
-        assert!(
-            matches!(
-                db_datastore.vpc_create_subnet_raw(new_row).await,
-                Err(SubnetError::External(_))
-            ),
-            "Should get an error inserting a VPC Subnet with unique IP ranges, but the same name"
-        );
-
-        // We should be able to insert the row if _both ranges_ are different,
-        // and the name is unique as well.
-        let new_row = VpcSubnet::new(
-            Uuid::new_v4(),
-            vpc_id,
-            make_id(&other_name, &description),
-            other_ipv4_block,
-            other_ipv6_block,
-        );
-        assert!(
-            matches!(db_datastore.vpc_create_subnet_raw(new_row).await, Ok(_)),
-            "Should be able to insert new VPC Subnet with non-overlapping IP ranges"
-        );
-
-        db.cleanup().await.unwrap();
-        logctx.cleanup_successful();
-    }
 
     #[tokio::test]
     async fn test_insert_network_interface_query() {
@@ -1904,5 +1386,37 @@ mod test {
 
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();
+    }
+
+    #[test]
+    fn test_last_address_offset() {
+        let subnet = "172.30.0.0/28".parse().unwrap();
+        assert_eq!(
+            last_address_offset(&subnet),
+            // /28 = 2 ** 4 = 16 total addresses
+            // ... - 1 for converting from size to index = 15
+            // ... - 1 for reserved broadcast address = 14
+            // ... - 5 for reserved initial addresses = 9
+            9,
+        );
+        let subnet = "fd00::/64".parse().unwrap();
+        assert_eq!(
+            last_address_offset(&subnet),
+            u32::MAX - 1 - 1 - super::NUM_INITIAL_RESERVED_IP_ADDRESSES as u32,
+        );
+    }
+
+    #[test]
+    fn test_first_available_address() {
+        let subnet = "172.30.0.0/28".parse().unwrap();
+        assert_eq!(
+            first_available_address(&subnet),
+            "172.30.0.5".parse::<IpAddr>().unwrap(),
+        );
+        let subnet = "fd00::/64".parse().unwrap();
+        assert_eq!(
+            first_available_address(&subnet),
+            "fd00::5".parse::<IpAddr>().unwrap(),
+        );
     }
 }
