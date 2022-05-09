@@ -11,11 +11,12 @@ use super::{
         Snapshot, SshKey, User, Vpc, VpcRouter, VpcSubnet,
     },
 };
+use crate::authz;
+use crate::context::OpContext;
 use crate::db;
 use crate::db::model::Name;
 use crate::external_api::shared;
 use crate::ServerContext;
-use crate::{authz::OrganizationRoles, context::OpContext};
 use dropshot::endpoint;
 use dropshot::ApiDescription;
 use dropshot::EmptyScanParams;
@@ -82,7 +83,6 @@ pub fn external_api() -> NexusApiDescription {
         api.register(organizations_get_organization)?;
         api.register(organizations_delete_organization)?;
         api.register(organizations_put_organization)?;
-
         api.register(organization_get_policy)?;
         api.register(organization_put_policy)?;
 
@@ -91,6 +91,8 @@ pub fn external_api() -> NexusApiDescription {
         api.register(organization_projects_get_project)?;
         api.register(organization_projects_delete_project)?;
         api.register(organization_projects_put_project)?;
+        api.register(organization_projects_get_project_policy)?;
+        api.register(organization_projects_put_project_policy)?;
 
         api.register(project_disks_get)?;
         api.register(project_disks_post)?;
@@ -507,7 +509,8 @@ async fn organizations_put_organization(
 async fn organization_get_policy(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<OrganizationPathParam>,
-) -> Result<HttpResponseOk<shared::Policy<OrganizationRoles>>, HttpError> {
+) -> Result<HttpResponseOk<shared::Policy<authz::OrganizationRoles>>, HttpError>
+{
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
     let path = path_params.into_inner();
@@ -531,8 +534,9 @@ async fn organization_get_policy(
 async fn organization_put_policy(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<OrganizationPathParam>,
-    new_policy: TypedBody<shared::Policy<OrganizationRoles>>,
-) -> Result<HttpResponseOk<shared::Policy<OrganizationRoles>>, HttpError> {
+    new_policy: TypedBody<shared::Policy<authz::OrganizationRoles>>,
+) -> Result<HttpResponseOk<shared::Policy<authz::OrganizationRoles>>, HttpError>
+{
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
     let path = path_params.into_inner();
@@ -724,6 +728,68 @@ async fn organization_projects_put_project(
             )
             .await?;
         Ok(HttpResponseOk(newproject.into()))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Fetch the IAM policy for this Project
+#[endpoint {
+    method = GET,
+    path = "/organizations/{organization_name}/projects/{project_name}/policy",
+    tags = ["projects"],
+}]
+async fn organization_projects_get_project_policy(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    path_params: Path<ProjectPathParam>,
+) -> Result<HttpResponseOk<shared::Policy<authz::ProjectRoles>>, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let path = path_params.into_inner();
+    let organization_name = &path.organization_name;
+    let project_name = &path.project_name;
+
+    let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let policy = nexus
+            .project_fetch_policy(&opctx, organization_name, project_name)
+            .await?;
+        Ok(HttpResponseOk(policy))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Update the IAM policy for this Project
+#[endpoint {
+    method = PUT,
+    path = "/organizations/{organization_name}/projects/{project_name}/policy",
+    tags = ["projects"],
+}]
+async fn organization_projects_put_project_policy(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    path_params: Path<ProjectPathParam>,
+    new_policy: TypedBody<shared::Policy<authz::ProjectRoles>>,
+) -> Result<HttpResponseOk<shared::Policy<authz::ProjectRoles>>, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let path = path_params.into_inner();
+    let new_policy = new_policy.into_inner();
+    let organization_name = &path.organization_name;
+    let project_name = &path.project_name;
+
+    let handler = async {
+        let nasgns = new_policy.role_assignments.len();
+        // This should have been validated during parsing.
+        bail_unless!(nasgns <= shared::MAX_ROLE_ASSIGNMENTS_PER_RESOURCE);
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let policy = nexus
+            .project_update_policy(
+                &opctx,
+                organization_name,
+                project_name,
+                &new_policy,
+            )
+            .await?;
+        Ok(HttpResponseOk(policy))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }

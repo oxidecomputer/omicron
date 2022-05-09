@@ -361,6 +361,29 @@ authz_resource! {
     polar_snippet = Custom,
 }
 
+impl ApiResourceWithRolesType for Project {
+    type AllowedRoles = ProjectRoles;
+}
+
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    DeserializeFromStr,
+    Display,
+    Eq,
+    FromStr,
+    PartialEq,
+    SerializeDisplay,
+    JsonSchema,
+)]
+#[display(style = "kebab-case")]
+pub enum ProjectRoles {
+    Admin,
+    Collaborator,
+    Viewer,
+}
+
 authz_resource! {
     name = "Disk",
     parent = "Project",

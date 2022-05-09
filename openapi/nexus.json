@@ -2429,6 +2429,112 @@
         }
       }
     },
+    "/organizations/{organization_name}/projects/{project_name}/policy": {
+      "get": {
+        "tags": [
+          "projects"
+        ],
+        "summary": "Fetch the IAM policy for this Project",
+        "operationId": "organization_projects_get_project_policy",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "organization_name",
+            "description": "The organization's unique name.",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Name"
+            },
+            "style": "simple"
+          },
+          {
+            "in": "path",
+            "name": "project_name",
+            "description": "The project's unique name within the organization.",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Name"
+            },
+            "style": "simple"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProjectRolesPolicy"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "projects"
+        ],
+        "summary": "Update the IAM policy for this Project",
+        "operationId": "organization_projects_put_project_policy",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "organization_name",
+            "description": "The organization's unique name.",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Name"
+            },
+            "style": "simple"
+          },
+          {
+            "in": "path",
+            "name": "project_name",
+            "description": "The project's unique name within the organization.",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Name"
+            },
+            "style": "simple"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProjectRolesPolicy"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProjectRolesPolicy"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/organizations/{organization_name}/projects/{project_name}/snapshots": {
       "get": {
         "tags": [
@@ -6469,6 +6575,51 @@
         },
         "required": [
           "items"
+        ]
+      },
+      "ProjectRoles": {
+        "type": "string",
+        "enum": [
+          "Admin",
+          "Collaborator",
+          "Viewer"
+        ]
+      },
+      "ProjectRolesPolicy": {
+        "description": "Client view of a [`Policy`], which describes how this resource may be accessed\n\nNote that the Policy only describes access granted explicitly for this resource.  The policies of parent resources can also cause a user to have access to this resource.",
+        "type": "object",
+        "properties": {
+          "role_assignments": {
+            "description": "Roles directly assigned on this resource",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ProjectRolesRoleAssignment"
+            }
+          }
+        },
+        "required": [
+          "role_assignments"
+        ]
+      },
+      "ProjectRolesRoleAssignment": {
+        "description": "Describes the assignment of a particular role on a particular resource to a particular identity (user, group, etc.)\n\nThe resource is not part of this structure.  Rather, [`RoleAssignment`]s are put into a [`Policy`] and that Policy is applied to a particular resource.",
+        "type": "object",
+        "properties": {
+          "identity_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "identity_type": {
+            "$ref": "#/components/schemas/IdentityType"
+          },
+          "role_name": {
+            "$ref": "#/components/schemas/ProjectRoles"
+          }
+        },
+        "required": [
+          "identity_id",
+          "identity_type",
+          "role_name"
         ]
       },
       "ProjectUpdate": {
