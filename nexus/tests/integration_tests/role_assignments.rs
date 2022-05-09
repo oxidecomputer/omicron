@@ -26,7 +26,7 @@ async fn test_role_assignments_organization(
     let org_name = "test-org";
     create_organization(client, org_name).await;
     let org_url = format!("/organizations/{}", org_name);
-    do_test::<_, views::Organization>(
+    do_test::<authz::OrganizationRoles, views::Organization>(
         client,
         &org_url,
         org_name,
@@ -44,7 +44,7 @@ async fn test_role_assignments_project(cptestctx: &ControlPlaneTestContext) {
     create_project(client, org_name, project_name).await;
     let project_url =
         format!("/organizations/{}/projects/{}", org_name, project_name);
-    do_test::<_, views::Project>(
+    do_test::<authz::ProjectRoles, views::Project>(
         client,
         &project_url,
         project_name,
