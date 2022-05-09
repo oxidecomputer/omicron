@@ -2744,6 +2744,7 @@ impl DataStore {
     ) -> CreateResult<db::model::SiloSamlIdentityProvider> {
         opctx.authorize(authz::Action::CreateChild, authz_silo).await?;
 
+        let name = provider.identity().name.to_string();
         self.pool_authorized(opctx)
             .await?
             .transaction(move |conn| {
@@ -2772,8 +2773,14 @@ impl DataStore {
                 Ok(result)
             })
             .await
-            .map_err(|e: TransactionError<Error>| {
-                Error::internal_error(&format!("Transaction error: {}", e))
+            .map_err(|e| {
+                public_error_from_diesel_pool(
+                    e,
+                    ErrorHandler::Conflict(
+                        ResourceType::SiloSamlIdentityProvider,
+                        &name,
+                    ),
+                )
             })
     }
 
