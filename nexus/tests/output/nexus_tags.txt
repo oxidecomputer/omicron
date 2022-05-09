@@ -67,8 +67,10 @@ OPERATION ID                             URL PATH
 organization_projects_delete_project     /organizations/{organization_name}/projects/{project_name}
 organization_projects_get                /organizations/{organization_name}/projects
 organization_projects_get_project        /organizations/{organization_name}/projects/{project_name}
+organization_projects_get_project_policy /organizations/{organization_name}/projects/{project_name}/policy
 organization_projects_post               /organizations/{organization_name}/projects
 organization_projects_put_project        /organizations/{organization_name}/projects/{project_name}
+organization_projects_put_project_policy /organizations/{organization_name}/projects/{project_name}/policy
 
 API operations found with tag "racks"
 OPERATION ID                             URL PATH
