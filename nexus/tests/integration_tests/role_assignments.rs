@@ -75,20 +75,20 @@ async fn test_role_assignments_project(cptestctx: &ControlPlaneTestContext) {
 /// Helper function for running a role assignment test on the given resource
 // TODO-coverage A more comprehensive test would be useful when we have proper
 // Silo users
-// TODO-coverage The "skip_checks" flag is needed only for Silos.  When
-// "skip_checks" is false, this function verifies that an unprivileged user
-// cannot see the given resource at the start, then creates a policy that grants
-// that user access, then checks that they _can_ see it.  Then it revokes access
-// and checks again that they can't.  For Silos, an unprivileged user can always
-// see their own Silo today so this doesn't work as expected.  Once we flesh out
-// Silos with more operations (e.g., a "modify" operation), we could check
-// enforcement of that instead.
+// TODO-coverage TODO-security The "always_visible" flag is needed only for
+// Silos.  When "always_visible" is false, this function verifies that an
+// unprivileged user cannot see the given resource at the start, then creates a
+// policy that grants that user access, then checks that they _can_ see it.
+// Then it revokes access and checks again that they can't.  For Silos, an
+// unprivileged user can always see their own Silo today so this doesn't work as
+// expected.  Once we flesh out Silos with more operations (e.g., a "modify"
+// operation), we could check enforcement of that instead.
 async fn do_test<T, V>(
     client: &dropshot::test_util::ClientTestContext,
     resource_url: &str,
     resource_name: &str,
     admin_role: T,
-    skip_checks: bool,
+    always_visible: bool,
 ) where
     T: Clone
         + std::fmt::Debug
@@ -105,7 +105,7 @@ async fn do_test<T, V>(
     // primarily tested in the separate "unauthorized" test, but we do it here
     // as a control to make sure that the checks below pass for the right
     // reasons.
-    if !skip_checks {
+    if !always_visible {
         NexusRequest::expect_failure(
             client,
             StatusCode::NOT_FOUND,
@@ -130,11 +130,16 @@ async fn do_test<T, V>(
     new_policy.role_assignments.push(role_assignment.clone());
 
     // First, make sure the unprivileged user can't grant themselves access!
+    let policy_url = format!("{}/policy", resource_url);
     NexusRequest::expect_failure_with_body(
         client,
-        StatusCode::NOT_FOUND,
-        Method::GET,
-        resource_url,
+        if always_visible {
+            StatusCode::FORBIDDEN
+        } else {
+            StatusCode::NOT_FOUND
+        },
+        Method::PUT,
+        &policy_url,
         &new_policy,
     )
     .authn_as(AuthnMode::UnprivilegedUser)
@@ -143,29 +148,28 @@ async fn do_test<T, V>(
     .unwrap();
 
     // And it really didn't work.
-    NexusRequest::expect_failure(
-        client,
-        StatusCode::NOT_FOUND,
-        Method::GET,
-        resource_url,
-    )
-    .authn_as(AuthnMode::UnprivilegedUser)
-    .execute()
-    .await
-    .unwrap();
+    if !always_visible {
+        NexusRequest::expect_failure(
+            client,
+            StatusCode::NOT_FOUND,
+            Method::GET,
+            resource_url,
+        )
+        .authn_as(AuthnMode::UnprivilegedUser)
+        .execute()
+        .await
+        .unwrap();
+    }
 
     // Okay, really grant them access.
-    let updated_policy: shared::Policy<T> = NexusRequest::object_put(
-        client,
-        &format!("{}/policy", resource_url),
-        Some(&new_policy),
-    )
-    .authn_as(AuthnMode::PrivilegedUser)
-    .execute()
-    .await
-    .unwrap()
-    .parsed_body()
-    .unwrap();
+    let updated_policy: shared::Policy<T> =
+        NexusRequest::object_put(client, &policy_url, Some(&new_policy))
+            .authn_as(AuthnMode::PrivilegedUser)
+            .execute()
+            .await
+            .unwrap()
+            .parsed_body()
+            .unwrap();
     assert_eq!(updated_policy, new_policy);
 
     // Double-check that the policy reflects that.
@@ -175,7 +179,7 @@ async fn do_test<T, V>(
 
     // Now that user ought to be able to fetch the resource.  (This is not
     // really a policy test so we're not going to check all possible actions.)
-    if !skip_checks {
+    if !always_visible {
         let resource: V = NexusRequest::object_get(client, resource_url)
             .authn_as(AuthnMode::UnprivilegedUser)
             .execute()
@@ -206,7 +210,7 @@ async fn do_test<T, V>(
     assert!(initial_policy.role_assignments.is_empty());
 
     // Now check that we enforce the change!
-    if !skip_checks {
+    if !always_visible {
         NexusRequest::expect_failure(
             client,
             StatusCode::NOT_FOUND,
