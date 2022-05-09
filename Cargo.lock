@@ -464,9 +464,9 @@ dependencies = [
 
 [[package]]
 name = "clap"
-version = "3.1.9"
+version = "3.1.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6aad2534fad53df1cc12519c5cda696dd3e20e6118a027e24054aea14a0bdcbe"
+checksum = "47582c09be7c8b32c0ab3a6181825ababb713fde6fff20fc573a3870dd45c6a0"
 dependencies = [
  "atty",
  "bitflags",
@@ -494,9 +494,9 @@ dependencies = [
 
 [[package]]
 name = "clap_lex"
-version = "0.1.1"
+version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "189ddd3b5d32a70b35e7686054371742a937b0d99128e76dde6340210e966669"
+checksum = "a37c35f1112dad5e6e0b1adaff798507497a18fceeb30cceb3bae7d1427b9213"
 dependencies = [
  "os_str_bytes",
 ]
@@ -1595,7 +1595,7 @@ name = "gateway-cli"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "clap 3.1.9",
+ "clap 3.1.17",
  "futures",
  "gateway-client",
  "libc",
@@ -2113,7 +2113,7 @@ name = "internal-dns"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "clap 3.1.9",
+ "clap 3.1.17",
  "dropshot",
  "expectorate",
  "internal-dns-client",
@@ -2245,9 +2245,9 @@ checksum = "e2abad23fbc42b3700f2f279844dc832adb2b2eb069b2df918f455c4e18cc646"
 
 [[package]]
 name = "libc"
-version = "0.2.123"
+version = "0.2.125"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cb691a747a7ab48abc15c5b42066eaafde10dc427e3b6ee2a1cf43db04c763bd"
+checksum = "5916d2ae698f6de9bfb891ad7a8d65c09d232dc58cc4ac433c7da3b2fd84bc2b"
 
 [[package]]
 name = "libnet"
@@ -2713,7 +2713,7 @@ dependencies = [
 name = "omicron-gateway"
 version = "0.1.0"
 dependencies = [
- "clap 3.1.9",
+ "clap 3.1.17",
  "dropshot",
  "expectorate",
  "futures",
@@ -5546,7 +5546,7 @@ version = "1.6.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4ee73e6e4924fe940354b8d4d98cad5231175d615cd855b758adc658c0aac6a0"
 dependencies = [
- "cfg-if 0.1.10",
+ "cfg-if 1.0.0",
  "rand 0.8.5",
  "static_assertions",
 ]
@@ -5805,9 +5805,9 @@ dependencies = [
 
 [[package]]
 name = "vsss-rs"
-version = "2.0.0-pre0"
+version = "2.0.0-pre2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "99cd0cd00b7a1e29f0a87aaeeb264cf87925829e5293c7f09a6d5addc4f52780"
+checksum = "6a56f1fe9df13cff48de34c468a28d38ebede6af79ef5f2bef0b8f6b4a4a28ea"
 dependencies = [
  "ff",
  "group",
@@ -5816,7 +5816,7 @@ dependencies = [
  "serde",
  "serde-big-array",
  "serde_cbor",
- "sha2 0.9.9",
+ "sha2 0.10.2",
  "zeroize",
 ]
 
