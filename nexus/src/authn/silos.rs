@@ -41,7 +41,8 @@ impl SiloSamlIdentityProvider {
             bail!("public and private key must be supplied together");
         }
 
-        // TODO validate DER keys
+        // TODO if supplied, validate that the cert and key pair of [u8] is
+        // actually DER formatted X509 keys
 
         Ok(())
     }

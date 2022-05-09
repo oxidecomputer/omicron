@@ -274,10 +274,6 @@ async fn test_create_a_saml_idp(cptestctx: &ControlPlaneTestContext) {
         omicron_nexus::authn::silos::SiloIdentityProviderType::Saml(_) => {
             // ok
         }
-
-        _ => {
-            assert!(false);
-        }
     }
 
     // Check that created identity provider exists
