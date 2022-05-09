@@ -7,8 +7,8 @@ use crate::context::OpContext;
 use crate::ServerContext;
 
 use super::params::{
-    DatasetPutRequest, DatasetPutResponse, OximeterInfo, SledAgentStartupInfo,
-    ZpoolPutRequest, ZpoolPutResponse,
+    DatasetPutRequest, DatasetPutResponse, OximeterInfo, ServicePutRequest,
+    SledAgentStartupInfo, ZpoolPutRequest, ZpoolPutResponse,
 };
 use dropshot::endpoint;
 use dropshot::ApiDescription;
@@ -37,6 +37,7 @@ type NexusApiDescription = ApiDescription<Arc<ServerContext>>;
 pub fn internal_api() -> NexusApiDescription {
     fn register_endpoints(api: &mut NexusApiDescription) -> Result<(), String> {
         api.register(cpapi_sled_agents_post)?;
+        api.register(service_put)?;
         api.register(zpool_put)?;
         api.register(dataset_put)?;
         api.register(cpapi_instances_put)?;
@@ -85,6 +86,37 @@ async fn cpapi_sled_agents_post(
         Ok(HttpResponseUpdatedNoContent())
     };
     apictx.internal_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+#[derive(Deserialize, JsonSchema)]
+struct ServicePathParam {
+    sled_id: Uuid,
+    service_id: Uuid,
+}
+
+/// Report that a service should be running on a sled.
+#[endpoint {
+     method = PUT,
+     path = "/sled_agents/{sled_id}/services/{service_id}",
+ }]
+async fn service_put(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    path_params: Path<ServicePathParam>,
+    info: TypedBody<ServicePutRequest>,
+) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let path = path_params.into_inner();
+    let info = info.into_inner();
+    nexus
+        .upsert_service(
+            path.service_id,
+            path.sled_id,
+            info.address,
+            info.kind.into(),
+        )
+        .await?;
+    Ok(HttpResponseUpdatedNoContent())
 }
 
 /// Path parameters for Sled Agent requests (internal API)

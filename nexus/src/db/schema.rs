@@ -272,6 +272,8 @@ table! {
 
         ip -> Inet,
         port -> Int4,
+
+        kind -> crate::db::model::ServiceKindEnum,
     }
 }
 
@@ -480,6 +482,7 @@ allow_tables_to_appear_in_same_query!(
     saga,
     saga_node_event,
     console_session,
+    service,
     sled,
     router_route,
     vpc,

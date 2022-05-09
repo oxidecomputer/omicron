@@ -97,6 +97,49 @@ pub struct DatasetPutResponse {
     pub quota: Option<ByteCount>,
 }
 
+/// Describes the purpose of the service.
+#[derive(Debug, Serialize, Deserialize, JsonSchema, Clone, Copy, PartialEq)]
+pub enum ServiceKind {
+    Nexus,
+    Oximeter,
+}
+
+impl fmt::Display for ServiceKind {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        use ServiceKind::*;
+        let s = match self {
+            Nexus => "nexus",
+            Oximeter => "oximeter",
+        };
+        write!(f, "{}", s)
+    }
+}
+
+impl FromStr for ServiceKind {
+    type Err = omicron_common::api::external::Error;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        use ServiceKind::*;
+        match s {
+            "nexus" => Ok(Nexus),
+            "oximeter" => Ok(Oximeter),
+            _ => Err(Self::Err::InternalError {
+                internal_message: format!("Unknown service kind: {}", s),
+            }),
+        }
+    }
+}
+
+/// Describes a service on a sled
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct ServicePutRequest {
+    /// Address on which a service is responding to requests.
+    pub address: SocketAddrV6,
+
+    /// Type of service being inserted.
+    pub kind: ServiceKind,
+}
+
 /// Message used to notify Nexus that this oximeter instance is up and running.
 #[derive(Debug, Clone, Copy, JsonSchema, Serialize, Deserialize)]
 pub struct OximeterInfo {

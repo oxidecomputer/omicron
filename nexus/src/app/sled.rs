@@ -9,6 +9,7 @@ use crate::db;
 use crate::db::identity::Asset;
 use crate::db::lookup::LookupPath;
 use crate::db::model::DatasetKind;
+use crate::db::model::ServiceKind;
 use crate::internal_api::params::ZpoolPutRequest;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
@@ -150,12 +151,12 @@ impl super::Nexus {
         &self,
         id: Uuid,
         sled_id: Uuid,
-        info: ServicePutRequest,
+        address: SocketAddrV6,
+        kind: ServiceKind,
     ) -> Result<(), Error> {
         info!(self.log, "upserting service"; "sled_id" => sled_id.to_string(), "service_id" => id.to_string());
-        let service = db::model::Service::new(id, sled_id, &info);
+        let service = db::model::Service::new(id, sled_id, address, kind);
         self.db_datastore.service_upsert(service).await?;
         Ok(())
     }
-
 }

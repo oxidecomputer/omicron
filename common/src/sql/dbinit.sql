@@ -95,6 +95,11 @@ CREATE INDEX ON omicron.public.service (
     sled_id
 );
 
+CREATE TYPE omicron.public.service_kind AS ENUM (
+  'nexus',
+  'oximeter'
+);
+
 /*
  * ZPools of Storage, attached to Sleds.
  * Typically these are backed by a single physical disk.
