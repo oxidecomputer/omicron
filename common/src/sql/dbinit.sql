@@ -264,6 +264,7 @@ CREATE TABLE omicron.public.silo_saml_identity_provider (
 );
 
 CREATE INDEX ON omicron.public.silo_saml_identity_provider (
+    id,
     silo_id
 ) WHERE
     time_deleted IS NULL;
