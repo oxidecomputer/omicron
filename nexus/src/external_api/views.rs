@@ -36,6 +36,56 @@ impl Into<Silo> for model::Silo {
     }
 }
 
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct DerEncodedKeyPair {
+    /// request signing public certificate (base64 encoded der file)
+    pub public_cert: String,
+}
+
+#[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct SiloSamlIdentityProvider {
+    #[serde(flatten)]
+    pub identity: IdentityMetadata,
+
+    /// url where identity provider metadata descriptor is
+    pub idp_metadata_url: String,
+
+    /// idp's entity id
+    pub idp_entity_id: String,
+
+    /// sp's client id
+    pub sp_client_id: String,
+
+    /// service provider endpoint where the response will be sent
+    pub acs_url: String,
+
+    /// service provider endpoint where the idp should send log out requests
+    pub slo_url: String,
+
+    /// customer's technical contact for saml configuration
+    pub technical_contact_email: String,
+
+    /// optional request signing key pair
+    pub signing_keypair: Option<DerEncodedKeyPair>,
+}
+
+impl From<model::SiloSamlIdentityProvider> for SiloSamlIdentityProvider {
+    fn from(saml_idp: model::SiloSamlIdentityProvider) -> Self {
+        Self {
+            identity: saml_idp.identity(),
+            idp_metadata_url: saml_idp.idp_metadata_url,
+            idp_entity_id: saml_idp.idp_entity_id,
+            sp_client_id: saml_idp.sp_client_id,
+            acs_url: saml_idp.acs_url,
+            slo_url: saml_idp.slo_url,
+            technical_contact_email: saml_idp.technical_contact_email,
+            signing_keypair: saml_idp.public_cert.map(|x| DerEncodedKeyPair {
+                    public_cert: x.clone(),
+            }),
+        }
+    }
+}
+
 // ORGANIZATIONS
 
 /// Client view of an [`Organization`]

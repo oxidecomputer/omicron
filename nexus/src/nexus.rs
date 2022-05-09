@@ -3896,8 +3896,8 @@ impl Nexus {
             acs_url: params.acs_url,
             slo_url: params.slo_url,
             technical_contact_email: params.technical_contact_email,
-            public_cert: params.public_cert,
-            private_key: params.private_key,
+            public_cert: params.signing_keypair.as_ref().map(|x| x.public_cert.clone()),
+            private_key: params.signing_keypair.as_ref().map(|x| x.private_key.clone()),
         };
 
         provider

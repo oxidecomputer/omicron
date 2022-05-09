@@ -6,6 +6,7 @@
 
 use super::{
     console_api, params,
+    views,
     views::{
         GlobalImage, Image, Organization, Project, Rack, Role, Silo, Sled,
         Snapshot, SshKey, User, Vpc, VpcRouter, VpcSubnet,
@@ -55,7 +56,6 @@ use omicron_common::api::external::RouterRouteCreateParams;
 use omicron_common::api::external::RouterRouteKind;
 use omicron_common::api::external::RouterRouteUpdateParams;
 use omicron_common::api::external::Saga;
-use omicron_common::api::external::SiloSamlIdentityProvider;
 use omicron_common::api::external::VpcFirewallRuleUpdateParams;
 use omicron_common::api::external::VpcFirewallRules;
 use omicron_common::{
@@ -371,7 +371,7 @@ async fn silo_saml_idp_create(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<SiloPathParam>,
     new_provider: TypedBody<params::SiloSamlIdentityProviderCreate>,
-) -> Result<HttpResponseCreated<SiloSamlIdentityProvider>, HttpError> {
+) -> Result<HttpResponseCreated<views::SiloSamlIdentityProvider>, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
 
@@ -407,7 +407,7 @@ struct SiloSamlPathParam {
 async fn silo_saml_idp_fetch(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<SiloSamlPathParam>,
-) -> Result<HttpResponseOk<SiloSamlIdentityProvider>, HttpError> {
+) -> Result<HttpResponseOk<views::SiloSamlIdentityProvider>, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
 

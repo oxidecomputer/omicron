@@ -31,6 +31,7 @@ macaddr = { version = "1.0.1", features = [ "serde_std" ]}
 mime_guess = "2.0.4"
 newtype_derive = "0.1.6"
 num-integer = "0.1.44"
+# must match samael's crate!
 openssl = "0.10"
 openssl-sys = "0.9"
 openssl-probe = "0.1.2"

@@ -28,6 +28,15 @@ pub struct SiloCreate {
 // Silo identity providers
 
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct DerEncodedKeyPair {
+    /// request signing public certificate (base64 encoded der file)
+    pub public_cert: String,
+
+    /// request signing private key (base64 encoded der file)
+    pub private_key: String,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct SiloSamlIdentityProviderCreate {
     #[serde(flatten)]
     pub identity: IdentityMetadataCreateParams,
@@ -50,12 +59,8 @@ pub struct SiloSamlIdentityProviderCreate {
     /// customer's technical contact for saml configuration
     pub technical_contact_email: String,
 
-    /// optional request signing public certificate (base64 encoded der file)
-    pub public_cert: Option<String>,
-
-    /// optional request signing private key (base64 encoded der file)
-    #[serde(skip_serializing)]
-    pub private_key: Option<String>,
+    /// optional request signing key pair
+    pub signing_keypair: Option<DerEncodedKeyPair>,
 }
 
 // ORGANIZATIONS

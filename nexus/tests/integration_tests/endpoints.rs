@@ -265,8 +265,7 @@ lazy_static! {
             slo_url: "http://slo".to_string(),
             technical_contact_email: "technical@fake".to_string(),
 
-            public_cert: None,
-            private_key: None,
+            signing_keypair: None,
         };
 }
 

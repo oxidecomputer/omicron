@@ -30,19 +30,30 @@ impl SiloSamlIdentityProvider {
         let _sign_in_url = self.sign_in_url(None)?;
 
         // if keys were supplied, check that both public and private are here
-        if self.get_public_cert_bytes()?.is_some()
-            && self.get_private_key_bytes()?.is_none()
+        if self.public_cert_bytes()?.is_some()
+            && self.private_key_bytes()?.is_none()
         {
             bail!("public and private key must be supplied together");
         }
-        if self.get_public_cert_bytes()?.is_none()
-            && self.get_private_key_bytes()?.is_some()
+        if self.public_cert_bytes()?.is_none()
+            && self.private_key_bytes()?.is_some()
         {
             bail!("public and private key must be supplied together");
         }
 
-        // TODO if supplied, validate that the cert and key pair of [u8] is
-        // actually DER formatted X509 keys
+        // If supplied, validate that the cert and key pair of [u8] is actually
+        // DER formatted X509 keys
+        if let Some(public_cert) = self.public_cert_bytes()? {
+            if openssl::x509::X509::from_der(&public_cert).is_err() {
+                bail!("public certificate must be DER formatted X509");
+            }
+        }
+
+        if let Some(private_key) = self.private_key_bytes()? {
+            if openssl::pkey::PKey::private_key_from_der(&private_key).is_err() {
+                bail!("private key must be DER formatted");
+            }
+        }
 
         Ok(())
     }
@@ -90,7 +101,7 @@ impl SiloSamlIdentityProvider {
         };
 
         let authn_request_url =
-            if let Some(key) = self.get_private_key_bytes()? {
+            if let Some(key) = self.private_key_bytes()? {
                 // sign authn request if keys were supplied
                 authn_request.signed_redirect(&encoded_relay_state, &key)
             } else {
@@ -137,7 +148,7 @@ impl SiloSamlIdentityProvider {
         Ok(sp_builder.build()?)
     }
 
-    fn get_public_cert_bytes(&self) -> Result<Option<Vec<u8>>> {
+    fn public_cert_bytes(&self) -> Result<Option<Vec<u8>>> {
         if let Some(cert) = &self.public_cert {
             Ok(Some(base64::decode(cert.as_bytes())?))
         } else {
@@ -145,7 +156,7 @@ impl SiloSamlIdentityProvider {
         }
     }
 
-    fn get_private_key_bytes(&self) -> Result<Option<Vec<u8>>> {
+    fn private_key_bytes(&self) -> Result<Option<Vec<u8>>> {
         if let Some(key) = &self.private_key {
             Ok(Some(base64::decode(key.as_bytes())?))
         } else {

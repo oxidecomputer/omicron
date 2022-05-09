@@ -231,8 +231,7 @@ async fn test_create_a_saml_idp(cptestctx: &ControlPlaneTestContext) {
             slo_url: "http://slo".to_string(),
             technical_contact_email: "technical@fake".to_string(),
 
-            public_cert: None,
-            private_key: None,
+            signing_keypair: None,
         },
     )
     .await;
@@ -356,8 +355,7 @@ async fn test_deleting_a_silo_deletes_the_idp(
             slo_url: "http://slo".to_string(),
             technical_contact_email: "technical@fake".to_string(),
 
-            public_cert: None,
-            private_key: None,
+            signing_keypair: None,
         },
     )
     .await;
@@ -429,8 +427,7 @@ async fn test_create_a_saml_idp_invalid_descriptor_truncated(
             slo_url: "http://slo".to_string(),
             technical_contact_email: "technical@fake".to_string(),
 
-            public_cert: None,
-            private_key: None,
+            signing_keypair: None,
         }))
         .expect_status(Some(StatusCode::BAD_REQUEST)),
     )
@@ -507,8 +504,7 @@ async fn test_create_a_saml_idp_invalid_descriptor_no_redirect_binding(
             slo_url: "http://slo".to_string(),
             technical_contact_email: "technical@fake".to_string(),
 
-            public_cert: None,
-            private_key: None,
+            signing_keypair: None,
         }))
         .expect_status(Some(StatusCode::BAD_REQUEST)),
     )
@@ -558,8 +554,7 @@ async fn test_create_a_hidden_silo_saml_idp(
             slo_url: "http://slo".to_string(),
             technical_contact_email: "technical@fake".to_string(),
 
-            public_cert: None,
-            private_key: None,
+            signing_keypair: None,
         },
     )
     .await;
@@ -635,8 +630,7 @@ async fn test_saml_idp_metadata_url_404(cptestctx: &ControlPlaneTestContext) {
             slo_url: "http://slo".to_string(),
             technical_contact_email: "technical@fake".to_string(),
 
-            public_cert: None,
-            private_key: None,
+            signing_keypair: None,
         }))
         .expect_status(Some(StatusCode::BAD_REQUEST)),
     )
@@ -690,8 +684,7 @@ async fn test_saml_idp_metadata_url_invalid(
             slo_url: "http://slo".to_string(),
             technical_contact_email: "technical@fake".to_string(),
 
-            public_cert: None,
-            private_key: None,
+            signing_keypair: None,
         }))
         .expect_status(Some(StatusCode::BAD_REQUEST)),
     )
