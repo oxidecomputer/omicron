@@ -62,6 +62,11 @@ organizations_get_organization           /organizations/{organization_name}
 organizations_post                       /organizations
 organizations_put_organization           /organizations/{organization_name}
 
+API operations found with tag "policy"
+OPERATION ID                             URL PATH
+policy_get                               /policy
+policy_put                               /policy
+
 API operations found with tag "projects"
 OPERATION ID                             URL PATH
 organization_projects_delete_project     /organizations/{organization_name}/projects/{project_name}

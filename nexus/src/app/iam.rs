@@ -4,15 +4,56 @@
 
 //! Built-ins and roles
 
+use crate::authz;
 use crate::context::OpContext;
 use crate::db;
 use crate::db::lookup::LookupPath;
 use crate::db::model::Name;
+use crate::external_api::shared;
+use anyhow::Context;
 use omicron_common::api::external::DataPageParams;
+use omicron_common::api::external::Error;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
+use omicron_common::api::external::UpdateResult;
 
 impl super::Nexus {
+    // Global (fleet-wide) policy
+
+    pub async fn fleet_fetch_policy(
+        &self,
+        opctx: &OpContext,
+    ) -> LookupResult<shared::Policy<authz::FleetRoles>> {
+        let role_assignments = self
+            .db_datastore
+            .role_assignment_fetch_all(opctx, &authz::FLEET)
+            .await?
+            .into_iter()
+            .map(|r| r.try_into().context("parsing database role assignment"))
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|error| Error::internal_error(&format!("{:#}", error)))?;
+        Ok(shared::Policy { role_assignments })
+    }
+
+    pub async fn fleet_update_policy(
+        &self,
+        opctx: &OpContext,
+        policy: &shared::Policy<authz::FleetRoles>,
+    ) -> UpdateResult<shared::Policy<authz::FleetRoles>> {
+        let role_assignments = self
+            .db_datastore
+            .role_assignment_replace_all(
+                opctx,
+                &authz::FLEET,
+                &policy.role_assignments,
+            )
+            .await?
+            .into_iter()
+            .map(|r| r.try_into())
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(shared::Policy { role_assignments })
+    }
+
     // Built-in users
 
     pub async fn users_builtin_list(
