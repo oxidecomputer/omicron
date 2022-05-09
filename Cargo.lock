@@ -3544,9 +3544,9 @@ dependencies = [
 
 [[package]]
 name = "postgres-types"
-version = "0.2.2"
+version = "0.2.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "04619f94ba0cc80999f4fc7073607cb825bc739a883cb6d20900fc5e009d6b0d"
+checksum = "ebd6e8b7189a73169290e89bd24c771071f1012d8fe6f738f5226531f0b03d89"
 dependencies = [
  "bytes",
  "chrono",
@@ -5229,9 +5229,9 @@ dependencies = [
 
 [[package]]
 name = "tokio-postgres"
-version = "0.7.5"
+version = "0.7.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4b6c8b33df661b548dcd8f9bf87debb8c56c05657ed291122e1188698c2ece95"
+checksum = "19c88a47a23c5d2dc9ecd28fb38fba5fc7e5ddc1fe64488ec145076b0c71c8ae"
 dependencies = [
  "async-trait",
  "byteorder",
@@ -5239,7 +5239,7 @@ dependencies = [
  "fallible-iterator",
  "futures",
  "log",
- "parking_lot 0.11.2",
+ "parking_lot 0.12.0",
  "percent-encoding",
  "phf",
  "pin-project-lite",
@@ -5247,7 +5247,7 @@ dependencies = [
  "postgres-types",
  "socket2",
  "tokio",
- "tokio-util 0.6.9",
+ "tokio-util 0.7.1",
 ]
 
 [[package]]
@@ -5546,7 +5546,7 @@ version = "1.6.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4ee73e6e4924fe940354b8d4d98cad5231175d615cd855b758adc658c0aac6a0"
 dependencies = [
- "cfg-if 0.1.10",
+ "cfg-if 1.0.0",
  "rand 0.8.5",
  "static_assertions",
 ]
@@ -5805,9 +5805,9 @@ dependencies = [
 
 [[package]]
 name = "vsss-rs"
-version = "2.0.0-pre0"
+version = "2.0.0-pre2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "99cd0cd00b7a1e29f0a87aaeeb264cf87925829e5293c7f09a6d5addc4f52780"
+checksum = "6a56f1fe9df13cff48de34c468a28d38ebede6af79ef5f2bef0b8f6b4a4a28ea"
 dependencies = [
  "ff",
  "group",
@@ -5816,7 +5816,7 @@ dependencies = [
  "serde",
  "serde-big-array",
  "serde_cbor",
- "sha2 0.9.9",
+ "sha2 0.10.2",
  "zeroize",
 ]
 
