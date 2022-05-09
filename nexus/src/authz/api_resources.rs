@@ -482,6 +482,29 @@ authz_resource! {
     polar_snippet = Custom,
 }
 
+impl ApiResourceWithRolesType for Silo {
+    type AllowedRoles = SiloRoles;
+}
+
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    DeserializeFromStr,
+    Display,
+    Eq,
+    FromStr,
+    PartialEq,
+    SerializeDisplay,
+    JsonSchema,
+)]
+#[display(style = "kebab-case")]
+pub enum SiloRoles {
+    Admin,
+    Collaborator,
+    Viewer,
+}
+
 authz_resource! {
     name = "SiloUser",
     parent = "Silo",

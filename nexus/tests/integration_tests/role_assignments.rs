@@ -15,8 +15,17 @@ use nexus_test_utils_macros::nexus_test;
 use omicron_common::api::external::ObjectIdentity;
 use omicron_nexus::authn::USER_TEST_UNPRIVILEGED;
 use omicron_nexus::authz;
+use omicron_nexus::db::fixed_data;
+use omicron_nexus::db::identity::Resource;
 use omicron_nexus::external_api::shared;
 use omicron_nexus::external_api::views;
+
+// TODO-coverage TODO-security We need a test that role assignments work on
+// Silos.  This isn't currently possible because there's not currently anything
+// you can do with a Silo as an admin user that you can't also do with an
+// unprivileged user.  In particular: even unprivileged users can see their own
+// Silo.  The only other operation we have is delete, which shouldn't work
+// within the Silo anyway.
 
 #[nexus_test]
 async fn test_role_assignments_organization(

@@ -77,6 +77,8 @@ pub fn external_api() -> NexusApiDescription {
         api.register(silos_post)?;
         api.register(silos_get_silo)?;
         api.register(silos_delete_silo)?;
+        api.register(silos_get_silo_policy)?;
+        api.register(silos_put_silo_policy)?;
 
         api.register(organizations_get)?;
         api.register(organizations_post)?;
@@ -349,6 +351,58 @@ async fn silos_delete_silo(
         let opctx = OpContext::for_external_api(&rqctx).await?;
         nexus.silo_delete(&opctx, &silo_name).await?;
         Ok(HttpResponseDeleted())
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Fetch the IAM policy for this Silo
+#[endpoint {
+    method = GET,
+    path = "/silos/{silo_name}/policy",
+    tags = ["silos"],
+}]
+async fn silos_get_silo_policy(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    path_params: Path<SiloPathParam>,
+) -> Result<HttpResponseOk<shared::Policy<authz::SiloRoles>>, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let path = path_params.into_inner();
+    let silo_name = &path.silo_name;
+
+    let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let policy = nexus.silo_fetch_policy(&opctx, silo_name).await?;
+        Ok(HttpResponseOk(policy))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Update the IAM policy for this Silo
+#[endpoint {
+    method = PUT,
+    path = "/silos/{silo_name}/policy",
+    tags = ["silos"],
+}]
+async fn silos_put_silo_policy(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    path_params: Path<SiloPathParam>,
+    new_policy: TypedBody<shared::Policy<authz::SiloRoles>>,
+) -> Result<HttpResponseOk<shared::Policy<authz::SiloRoles>>, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let path = path_params.into_inner();
+    let new_policy = new_policy.into_inner();
+    let silo_name = &path.silo_name;
+
+    let handler = async {
+        let nasgns = new_policy.role_assignments.len();
+        // This should have been validated during parsing.
+        bail_unless!(nasgns <= shared::MAX_ROLE_ASSIGNMENTS_PER_RESOURCE);
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let policy =
+            nexus.silo_update_policy(&opctx, silo_name, &new_policy).await?;
+        Ok(HttpResponseOk(policy))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
