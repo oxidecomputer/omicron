@@ -26,7 +26,6 @@ use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
 use serde_with::{DeserializeFromStr, SerializeDisplay};
-use std::collections::BTreeMap;
 use std::convert::TryFrom;
 use std::fmt::Debug;
 use std::fmt::Display;
@@ -213,7 +212,6 @@ impl JsonSchema for Name {
     ) -> schemars::schema::Schema {
         schemars::schema::Schema::Object(schemars::schema::SchemaObject {
             metadata: Some(Box::new(schemars::schema::Metadata {
-                id: None,
                 title: Some("A name used in the API".to_string()),
                 description: Some(
                     "Names must begin with a lower case ASCII letter, be \
@@ -221,29 +219,17 @@ impl JsonSchema for Name {
                      ASCII, numbers, and '-', and may not end with a '-'."
                         .to_string(),
                 ),
-                default: None,
-                deprecated: false,
-                read_only: false,
-                write_only: false,
-                examples: vec![],
+                ..Default::default()
             })),
             instance_type: Some(schemars::schema::SingleOrVec::Single(
                 Box::new(schemars::schema::InstanceType::String),
             )),
-            format: None,
-            enum_values: None,
-            const_value: None,
-            subschemas: None,
-            number: None,
             string: Some(Box::new(schemars::schema::StringValidation {
                 max_length: Some(63),
                 min_length: None,
                 pattern: Some("[a-z](|[a-zA-Z0-9-]*[a-zA-Z0-9])".to_string()),
             })),
-            array: None,
-            object: None,
-            reference: None,
-            extensions: BTreeMap::new(),
+            ..Default::default()
         })
     }
 }
@@ -311,36 +297,23 @@ impl JsonSchema for RoleName {
     ) -> schemars::schema::Schema {
         schemars::schema::Schema::Object(schemars::schema::SchemaObject {
             metadata: Some(Box::new(schemars::schema::Metadata {
-                id: None,
                 title: Some("A name for a built-in role".to_string()),
                 description: Some(
                     "Role names consist of two string components \
                      separated by dot (\".\")."
                         .to_string(),
                 ),
-                default: None,
-                deprecated: false,
-                read_only: false,
-                write_only: false,
-                examples: vec![],
+                ..Default::default()
             })),
             instance_type: Some(schemars::schema::SingleOrVec::Single(
                 Box::new(schemars::schema::InstanceType::String),
             )),
-            format: None,
-            enum_values: None,
-            const_value: None,
-            subschemas: None,
-            number: None,
             string: Some(Box::new(schemars::schema::StringValidation {
                 max_length: Some(63),
                 min_length: None,
                 pattern: Some("[a-z-]+\\.[a-z-]+".to_string()),
             })),
-            array: None,
-            object: None,
-            reference: None,
-            extensions: BTreeMap::new(),
+            ..Default::default()
         })
     }
 }
@@ -1116,9 +1089,7 @@ impl JsonSchema for Ipv6Net {
 }
 
 /// An `IpNet` represents an IP network, either IPv4 or IPv6.
-#[derive(
-    Clone, Copy, Debug, Deserialize, PartialEq, Hash, JsonSchema, Serialize,
-)]
+#[derive(Clone, Copy, Debug, PartialEq, Hash)]
 pub enum IpNet {
     V4(Ipv4Net),
     V6(Ipv6Net),
@@ -1177,6 +1148,86 @@ impl From<IpNet> for ipnetwork::IpNetwork {
             IpNet::V6(net) => ipnetwork::IpNetwork::from(net.0),
         }
     }
+}
+
+impl Serialize for IpNet {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        match self {
+            IpNet::V4(v4) => v4.serialize(serializer),
+            IpNet::V6(v6) => v6.serialize(serializer),
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for IpNet {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let net = ipnetwork::IpNetwork::deserialize(deserializer)?;
+        match net {
+            ipnetwork::IpNetwork::V4(net) => Ok(IpNet::from(Ipv4Net(net))),
+            ipnetwork::IpNetwork::V6(net) => Ok(IpNet::from(Ipv6Net(net))),
+        }
+    }
+}
+
+impl JsonSchema for IpNet {
+    fn schema_name() -> String {
+        "IpNet".to_string()
+    }
+
+    fn json_schema(
+        gen: &mut schemars::gen::SchemaGenerator,
+    ) -> schemars::schema::Schema {
+        schemars::schema::SchemaObject {
+            metadata: Some(
+                schemars::schema::Metadata { ..Default::default() }.into(),
+            ),
+            subschemas: Some(
+                schemars::schema::SubschemaValidation {
+                    one_of: Some(vec![
+                        label_schema("v4", gen.subschema_for::<Ipv4Net>()),
+                        label_schema("v6", gen.subschema_for::<Ipv6Net>()),
+                    ]),
+                    ..Default::default()
+                }
+                .into(),
+            ),
+            ..Default::default()
+        }
+        .into()
+    }
+}
+
+/// Insert another level of schema indirection in order to provide an
+/// additional title for a subschema. This allows generators to infer a better
+/// variant name for an "untagged" enum.
+fn label_schema(
+    label: &str,
+    schema: schemars::schema::Schema,
+) -> schemars::schema::Schema {
+    schemars::schema::SchemaObject {
+        metadata: Some(
+            schemars::schema::Metadata {
+                title: Some(label.to_string()),
+                ..Default::default()
+            }
+            .into(),
+        ),
+        subschemas: Some(
+            schemars::schema::SubschemaValidation {
+                all_of: Some(vec![schema]),
+                ..Default::default()
+            }
+            .into(),
+        ),
+        ..Default::default()
+    }
+    .into()
 }
 
 /// A `RouteTarget` describes the possible locations that traffic matching a
@@ -1811,6 +1862,7 @@ impl std::fmt::Display for Digest {
 
 #[cfg(test)]
 mod test {
+    use super::IpNet;
     use super::RouteDestination;
     use super::RouteTarget;
     use super::VpcFirewallRuleHostFilter;
@@ -1825,6 +1877,7 @@ mod test {
     use crate::api::external::Error;
     use crate::api::external::ResourceType;
     use std::convert::TryFrom;
+    use std::str::FromStr;
 
     #[test]
     fn test_name_parse() {
@@ -2317,5 +2370,24 @@ mod test {
 
         // Bad prefix
         assert!("hash:super_random".parse::<Digest>().is_err());
+    }
+
+    #[test]
+    fn test_ipnet_serde() {
+        let net_str = "fd00:2::/32";
+        let net = IpNet::from_str(net_str).unwrap();
+        let ser = serde_json::to_string(&net).unwrap();
+
+        assert_eq!(format!(r#""{}""#, net_str), ser);
+        let net_des = serde_json::from_str::<IpNet>(&ser).unwrap();
+        assert_eq!(net, net_des);
+
+        let net_str = "192.168.1.1/16";
+        let net = IpNet::from_str(net_str).unwrap();
+        let ser = serde_json::to_string(&net).unwrap();
+
+        assert_eq!(format!(r#""{}""#, net_str), ser);
+        let net_des = serde_json::from_str::<IpNet>(&ser).unwrap();
+        assert_eq!(net, net_des);
     }
 }

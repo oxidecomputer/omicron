@@ -102,7 +102,6 @@ impl JsonSchema for TimeseriesName {
     ) -> schemars::schema::Schema {
         schemars::schema::Schema::Object(schemars::schema::SchemaObject {
             metadata: Some(Box::new(schemars::schema::Metadata {
-                id: None,
                 title: Some("The name of a timeseries".to_string()),
                 description: Some(
                     "Names are constructed by concatenating the target \
@@ -111,29 +110,16 @@ impl JsonSchema for TimeseriesName {
                      with '_' separating words."
                         .to_string(),
                 ),
-                default: None,
-                deprecated: false,
-                read_only: false,
-                write_only: false,
-                examples: vec![],
+                ..Default::default()
             })),
             instance_type: Some(schemars::schema::SingleOrVec::Single(
                 Box::new(schemars::schema::InstanceType::String),
             )),
-            format: None,
-            enum_values: None,
-            const_value: None,
-            subschemas: None,
-            number: None,
             string: Some(Box::new(schemars::schema::StringValidation {
-                max_length: None,
-                min_length: None,
                 pattern: Some(TIMESERIES_NAME_REGEX.to_string()),
+                ..Default::default()
             })),
-            array: None,
-            object: None,
-            reference: None,
-            extensions: BTreeMap::new(),
+            ..Default::default()
         })
     }
 }

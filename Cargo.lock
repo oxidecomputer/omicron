@@ -562,12 +562,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6245d59a3e82a7fc217c5828a6692dbc6dfb63a0c8c90495621f7b9d79704a0e"
 
 [[package]]
-name = "convert_case"
-version = "0.5.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fb4a24b1aaf0fd0ce8b45161144d6f42cd91677fd5940fd431183eb023b3a2b8"
-
-[[package]]
 name = "cookie"
 version = "0.16.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2973,9 +2967,10 @@ checksum = "624a8340c38c1b80fd549087862da4ba43e08858af025b236e509b6649fc13d5"
 
 [[package]]
 name = "openapi-lint"
-version = "0.1.0"
+version = "0.2.0"
+source = "git+https://www.github.com/oxidecomputer/openapi-lint?branch=enums#2fcb98667b6df6a8f69232a27859f2118eed31b8"
 dependencies = [
- "convert_case 0.5.0",
+ "heck 0.4.0",
  "indexmap",
  "openapiv3",
 ]
@@ -3700,7 +3695,7 @@ name = "progenitor-impl"
 version = "0.0.0"
 source = "git+https://github.com/oxidecomputer/progenitor#bbf81dfe7d107302241f9eb37c74556ffb2854ac"
 dependencies = [
- "convert_case 0.4.0",
+ "convert_case",
  "getopts",
  "indexmap",
  "openapiv3",
@@ -5545,7 +5540,7 @@ version = "1.6.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4ee73e6e4924fe940354b8d4d98cad5231175d615cd855b758adc658c0aac6a0"
 dependencies = [
- "cfg-if 1.0.0",
+ "cfg-if 0.1.10",
  "rand 0.8.5",
  "static_assertions",
 ]
@@ -5570,7 +5565,7 @@ name = "typify-impl"
 version = "0.0.6-dev"
 source = "git+https://github.com/oxidecomputer/typify#6617df9800c81954ef2aa630f117f66e824f104d"
 dependencies = [
- "convert_case 0.4.0",
+ "convert_case",
  "log",
  "proc-macro2",
  "quote",
