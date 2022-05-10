@@ -170,9 +170,8 @@ impl Dladm {
         Ok(())
     }
 
-    /// Returns VNICs that may be managed by the Sled Agent of a particular
-    /// kind.
-    pub fn get_vnics(kind: VnicKind) -> Result<Vec<String>, GetVnicError> {
+    /// Returns VNICs that may be managed by the Sled Agent.
+    pub fn get_vnics() -> Result<Vec<String>, GetVnicError> {
         let mut command = std::process::Command::new(PFEXEC);
         let cmd = command.args(&[DLADM, "show-vnic", "-p", "-o", "LINK"]);
         let output = execute(cmd).map_err(|err| GetVnicError { err })?;
@@ -183,15 +182,7 @@ impl Dladm {
                 // Ensure this is a kind of VNIC that the sled agent could be
                 // responsible for.
                 match VnicKind::from_name(name) {
-                    Some(vnic_kind) => {
-                        // Ensure matches the caller-specified VnicKind
-                        if vnic_kind == kind {
-                            Some(name.to_owned())
-                        } else {
-                            None
-                        }
-                    }
-                    // Always ignore this VNIC if it's not a valid VnicKind.
+                    Some(_) => Some(name.to_owned()),
                     None => None,
                 }
             })

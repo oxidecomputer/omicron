@@ -163,19 +163,15 @@ impl SledAgent {
         // This should be accessible via:
         // $ dladm show-linkprop -c -p zone -o LINK,VALUE
         //
-        // Delete VNICs in this order:
-        //
-        // - Oxide control VNICs
-        // - Guest VNICs over xde devices
-        let vnics = Dladm::get_vnics(VnicKind::OxideControl)?
-            .into_iter()
-            .chain(Dladm::get_vnics(VnicKind::Guest)?);
-        for vnic in vnics {
+        // Note that we don't currently delete the VNICs in any particular
+        // order. That should be OK, since we're definitely deleting the guest
+        // VNICs before the xde devices, which is the main constraint.
+        for vnic in Dladm::get_vnics()? {
             warn!(
               log,
               "Deleting existing VNIC";
                 "vnic_name" => &vnic,
-                "vnic_kind" => ?VnicKind::from_name(&vnic),
+                "vnic_kind" => ?VnicKind::from_name(&vnic).unwrap(),
             );
             Dladm::delete_vnic(&vnic)?;
         }

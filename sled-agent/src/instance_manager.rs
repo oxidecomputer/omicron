@@ -255,7 +255,7 @@ mod test {
         zones_get_ctx.expect().return_once(|| Ok(vec![]));
 
         let dladm_get_vnics_ctx = MockDladm::get_vnics_context();
-        dladm_get_vnics_ctx.expect().return_once(|_| Ok(vec![]));
+        dladm_get_vnics_ctx.expect().return_once(|| Ok(vec![]));
 
         let im = InstanceManager::new(
             log,
@@ -337,7 +337,7 @@ mod test {
         zones_get_ctx.expect().return_once(|| Ok(vec![]));
 
         let dladm_get_vnics_ctx = MockDladm::get_vnics_context();
-        dladm_get_vnics_ctx.expect().return_once(|_| Ok(vec![]));
+        dladm_get_vnics_ctx.expect().return_once(|| Ok(vec![]));
 
         let im = InstanceManager::new(
             log,
