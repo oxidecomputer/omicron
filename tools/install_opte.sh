@@ -62,7 +62,7 @@ function sha_from_url {
 # `helios-netdev` provides the xde kernel driver and the `opteadm` userland tool
 # for interacting with it.
 HELIOS_NETDEV_BASE_URL="https://buildomat.eng.oxide.computer/public/file/oxidecomputer/opte/repo"
-HELIOS_NETDEV_COMMIT="cb1767c80d4e9d97cb79901eed3c9d08e1fb3826"
+HELIOS_NETDEV_COMMIT="7f57b5d959fcd91100feb14ac83aefcee1c96a50"
 HELIOS_NETDEV_REPO_URL="$HELIOS_NETDEV_BASE_URL/$HELIOS_NETDEV_COMMIT/opte.p5p"
 HELIOS_NETDEV_REPO_SHA_URL="$HELIOS_NETDEV_BASE_URL/$HELIOS_NETDEV_COMMIT/opte.p5p.sha256"
 HELIOS_NETDEV_REPO_PATH="$XDE_DIR/$(basename "$HELIOS_NETDEV_REPO_URL")"
@@ -70,7 +70,7 @@ HELIOS_NETDEV_REPO_PATH="$XDE_DIR/$(basename "$HELIOS_NETDEV_REPO_URL")"
 # The xde repo provides a full OS/Net incorporation, with updated kernel bits
 # that the `xde` kernel module and OPTE rely on.
 XDE_REPO_BASE_URL="https://buildomat.eng.oxide.computer/public/file/oxidecomputer/os-build/xde"
-XDE_REPO_COMMIT="485065f3b3292e2198db0629341492672b1e29f7"
+XDE_REPO_COMMIT="fc0717b76a92d1e317955ec33477133257982670"
 XDE_REPO_URL="$XDE_REPO_BASE_URL/$XDE_REPO_COMMIT/repo.p5p"
 XDE_REPO_SHA_URL="$XDE_REPO_BASE_URL/$XDE_REPO_COMMIT/repo.p5p.sha256"
 XDE_REPO_PATH="$XDE_DIR/$(basename "$XDE_REPO_URL")"
@@ -91,9 +91,8 @@ pkg set-publisher -p "$XDE_REPO_PATH" --search-first
 # Actually update packages, handling case where no updates are needed
 RC=0
 pkg update || RC=$?;
-if [[ "$RC" -eq 0 ]] || [[ "$RC" -eq 4 ]]; then
-    exit 0
-else
+if [[ "$RC" -ne 0 ]] && [[ "$RC" -ne 4 ]]; then
+    echo "Adding OPTE and/or xde package repositories failed"
     exit "$RC"
 fi
 

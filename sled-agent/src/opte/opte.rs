@@ -37,7 +37,13 @@ pub enum Error {
     CreateVnic(#[from] dladm::CreateVnicError),
 
     #[error("Failed to create an IPv6 link-local address for xde underlay devices: {0}")]
-    UnderlayDevice(#[from] crate::illumos::ExecutionError),
+    UnderlayDeviceAddress(#[from] crate::illumos::ExecutionError),
+
+    #[error("Failed to get VNICs for xde underlay devices: {0}")]
+    GetVnic(#[from] crate::illumos::dladm::GetVnicError),
+
+    #[error("No xde driver configuration file exists at '/kernel/drv/xde.conf'")]
+    NoXdeConf,
 
     #[error(transparent)]
     BadAddrObj(#[from] addrobj::ParseError),
@@ -263,11 +269,21 @@ impl Drop for OptePort {
 /// The xde driver needs information about the physical devices out which it can
 /// send traffic from the guests.
 pub fn initialize_xde_driver(log: &Logger) -> Result<(), Error> {
+    if !std::path::Path::new("/kernel/drv/xde.conf").exists() {
+        return Err(Error::NoXdeConf);
+    }
     let underlay_nics = find_chelsio_links()?;
     info!(log, "using '{:?}' as data links for xde driver", underlay_nics);
     if underlay_nics.len() < 2 {
+        const MESSAGE: &str = concat!(
+            "There must be at least two underlay NICs for the xde ",
+            "driver to operate. These are currently created by ",
+            "`./tools/create_virtual_hardware.sh`. Please ensure that ",
+            "script has been run, and that two VNICs named `net{0,1}` ",
+            "exist on the system."
+        );
         return Err(Error::Opte(opte_ioctl::Error::InvalidArgument(
-            String::from("There must be at least two underlay NICs"),
+            String::from(MESSAGE)
         )));
     }
     for nic in &underlay_nics {
@@ -294,5 +310,9 @@ fn find_chelsio_links() -> Result<Vec<PhysicalLink>, Error> {
     // `Dladm` to get the real Chelsio links on a Gimlet. These will likely be
     // called `cxgbeN`, but we explicitly call them `netN` to be clear that
     // they're likely VNICs for the time being.
-    Ok((0..2).map(|i| PhysicalLink(format!("net{}", i))).collect())
+    Ok(Dladm::get_vnics()?
+        .into_iter()
+        .filter(|name| name == "net0" || name == "net1")
+        .map(PhysicalLink)
+        .collect())
 }

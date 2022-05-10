@@ -13,6 +13,11 @@ use std::str::FromStr;
 pub const VNIC_PREFIX: &str = "ox";
 pub const VNIC_PREFIX_CONTROL: &str = "oxControl";
 
+/// Prefix used to name VNICs over xde devices / OPTE ports.
+// TODO-correctness: Remove this when `xde` devices can be directly used beneath
+// Viona, and thus plumbed directly to guests.
+pub const VNIC_PREFIX_OPTE: &str = "vopte";
+
 pub const DLADM: &str = "/usr/sbin/dladm";
 
 /// Errors returned from [`Dladm::find_physical`].
@@ -172,10 +177,20 @@ impl Dladm {
 
         let vnics = String::from_utf8_lossy(&output.stdout)
             .lines()
-            .filter(|vnic| vnic.starts_with(VNIC_PREFIX))
+            .filter(|name| Self::is_sled_agent_vnic(name))
             .map(|s| s.to_owned())
             .collect();
         Ok(vnics)
+    }
+
+    // Return true if a VNIC with the provided name may be managed by the sled
+    // agent.
+    fn is_sled_agent_vnic<S: AsRef<str>>(name: S) -> bool {
+        let name = name.as_ref();
+        name.starts_with(VNIC_PREFIX) ||
+            name.starts_with(VNIC_PREFIX_OPTE) ||
+            name == "net0" ||
+            name == "net1"
     }
 
     /// Remove a vnic from the sled.
