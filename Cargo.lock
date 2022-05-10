@@ -2135,6 +2135,7 @@ dependencies = [
  "tempdir",
  "tokio",
  "toml",
+ "trust-dns-client",
  "trust-dns-proto",
  "trust-dns-resolver",
  "trust-dns-server",

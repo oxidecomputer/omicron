@@ -12,7 +12,9 @@ use pretty_hex::*;
 use serde::Deserialize;
 use slog::{error, Logger};
 use tokio::net::UdpSocket;
+use trust_dns_client::rr::LowerName;
 use trust_dns_proto::op::header::Header;
+use trust_dns_proto::op::response_code::ResponseCode;
 use trust_dns_proto::rr::rdata::SRV;
 use trust_dns_proto::rr::record_data::RData;
 use trust_dns_proto::rr::record_type::RecordType;
@@ -27,6 +29,9 @@ use trust_dns_server::authority::{MessageRequest, MessageResponseBuilder};
 pub struct Config {
     /// The address to listen for DNS requests on
     pub bind_address: String,
+
+    /// The DNS zone this server presides over. This must be a valid DNS name
+    pub zone: String,
 }
 
 pub async fn run(log: Logger, db: Arc<sled::Db>, config: Config) -> Result<()> {
@@ -40,10 +45,11 @@ pub async fn run(log: Logger, db: Arc<sled::Db>, config: Config) -> Result<()> {
         let socket = socket.clone();
         let log = log.clone();
         let db = db.clone();
+        let zone = config.zone.clone();
 
-        tokio::spawn(
-            async move { handle_req(log, db, socket, src, buf).await },
-        );
+        tokio::spawn(async move {
+            handle_req(log, db, socket, src, buf, zone).await
+        });
     }
 }
 
@@ -53,6 +59,7 @@ async fn handle_req<'a, 'b, 'c>(
     socket: Arc<UdpSocket>,
     src: SocketAddr,
     buf: Vec<u8>,
+    zone: String,
 ) {
     println!("{:?}", buf.hex_dump());
 
@@ -67,21 +74,51 @@ async fn handle_req<'a, 'b, 'c>(
 
     println!("{:#?}", mr);
 
-    let rb = MessageResponseBuilder::from_message_request(&mr);
     let header = Header::response_from_request(mr.header());
+    let zone = LowerName::from(Name::from_str(&zone).unwrap());
+
+    // Ensure the query is for this zone, otherwise bail with servfail. This
+    // will cause resolvers to look to other DNS servers for this query.
+    let name = mr.query().name();
+    if !zone.zone_of(name) {
+        nack(&log, &mr, &socket, &header, &src).await;
+        return;
+    }
 
     let name = mr.query().original().name().clone();
     let key = name.to_string();
     let key = key.trim_end_matches('.');
 
+    let rb = MessageResponseBuilder::from_message_request(&mr);
+
     let bits = match db.get(key.as_bytes()) {
         Ok(Some(bits)) => bits,
-        Err(e) => {
-            error!(log, "db get: {}", e);
-            nack(&log, &mr, &socket, &header, &src).await;
+
+        // If no record is found bail with NXDOMAIN.
+        Ok(None) => {
+            let mresp = rb.error_msg(&header, ResponseCode::NXDomain);
+            let mut resp_data = Vec::new();
+            let mut enc = BinEncoder::new(&mut resp_data);
+            match mresp.destructive_emit(&mut enc) {
+                Ok(_) => {}
+                Err(e) => {
+                    error!(log, "NXDOMAIN destructive emit: {}", e);
+                    nack(&log, &mr, &socket, &header, &src).await;
+                    return;
+                }
+            }
+            match socket.send_to(&resp_data, &src).await {
+                Ok(_) => {}
+                Err(e) => {
+                    error!(log, "NXDOMAIN send: {}", e);
+                }
+            }
             return;
         }
-        _ => {
+
+        // If we encountered an error bail with SERVFAIL.
+        Err(e) => {
+            error!(log, "db get: {}", e);
             nack(&log, &mr, &socket, &header, &src).await;
             return;
         }
@@ -166,7 +203,7 @@ async fn nack(
     src: &SocketAddr,
 ) {
     let rb = MessageResponseBuilder::from_message_request(mr);
-    let mresp = rb.build_no_records(*header);
+    let mresp = rb.error_msg(header, ResponseCode::ServFail);
     let mut resp_data = Vec::new();
     let mut enc = BinEncoder::new(&mut resp_data);
     match mresp.destructive_emit(&mut enc) {
