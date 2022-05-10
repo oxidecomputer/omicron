@@ -80,7 +80,7 @@ function ensure_helios_dev_is_non_sticky {
     if [[ "$STICKINESS" = "sticky" ]]; then
         pkg set-publisher --non-sticky helios-dev
         STICKINESS="$(helios_dev_stickiness)"
-        if [[ "$STICKINESS" = "non-sticky" ]]; then
+        if [[ "$STICKINESS" = "sticky" ]]; then
             echo "Failed to make helios-dev publisher non-sticky"
             exit 1
         fi
