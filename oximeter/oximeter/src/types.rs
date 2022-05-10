@@ -34,13 +34,45 @@ use uuid::Uuid;
     Serialize,
     Deserialize,
 )]
-//#[serde(rename_all = "snake_case")]
+#[serde(rename_all = "snake_case")]
 pub enum FieldType {
     String,
     I64,
     IpAddr,
     Uuid,
     Bool,
+}
+
+#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+pub enum DbFieldType {
+    String,
+    I64,
+    IpAddr,
+    Uuid,
+    Bool,
+}
+
+impl From<DbFieldType> for FieldType {
+    fn from(src: DbFieldType) -> Self {
+        match src {
+            DbFieldType::String => FieldType::String,
+            DbFieldType::I64 => FieldType::I64,
+            DbFieldType::IpAddr => FieldType::IpAddr,
+            DbFieldType::Uuid => FieldType::Uuid,
+            DbFieldType::Bool => FieldType::Bool,
+        }
+    }
+}
+impl From<FieldType> for DbFieldType {
+    fn from(src: FieldType) -> Self {
+        match src {
+            FieldType::String => DbFieldType::String,
+            FieldType::I64 => DbFieldType::I64,
+            FieldType::IpAddr => DbFieldType::IpAddr,
+            FieldType::Uuid => DbFieldType::Uuid,
+            FieldType::Bool => DbFieldType::Bool,
+        }
+    }
 }
 
 impl std::fmt::Display for FieldType {
@@ -69,7 +101,7 @@ impl_field_type_from! { bool, FieldType::Bool }
 #[derive(
     Clone, Debug, Hash, PartialEq, Eq, JsonSchema, Serialize, Deserialize,
 )]
-//#[serde(tag = "type", content = "value", rename_all = "snake_case")]
+#[serde(tag = "type", content = "value", rename_all = "snake_case")]
 pub enum FieldValue {
     String(String),
     I64(i64),
@@ -221,7 +253,7 @@ impl Field {
     Serialize,
     Deserialize,
 )]
-// #[serde(rename_all = "snake_case")]
+#[serde(rename_all = "snake_case")]
 pub enum DatumType {
     Bool,
     I64,
@@ -232,6 +264,51 @@ pub enum DatumType {
     CumulativeF64,
     HistogramI64,
     HistogramF64,
+}
+
+#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+pub enum DbDatumType {
+    Bool,
+    I64,
+    F64,
+    String,
+    Bytes,
+    CumulativeI64,
+    CumulativeF64,
+    HistogramI64,
+    HistogramF64,
+}
+
+impl From<DatumType> for DbDatumType {
+    fn from(src: DatumType) -> Self {
+        match src {
+            DatumType::Bool => DbDatumType::Bool,
+            DatumType::I64 => DbDatumType::I64,
+            DatumType::F64 => DbDatumType::F64,
+            DatumType::String => DbDatumType::String,
+            DatumType::Bytes => DbDatumType::Bytes,
+            DatumType::CumulativeI64 => DbDatumType::CumulativeI64,
+            DatumType::CumulativeF64 => DbDatumType::CumulativeI64,
+            DatumType::HistogramI64 => DbDatumType::HistogramI64,
+            DatumType::HistogramF64 => DbDatumType::HistogramF64,
+        }
+    }
+}
+
+impl From<DbDatumType> for DatumType {
+    fn from(src: DbDatumType) -> Self {
+        match src {
+            DbDatumType::Bool => DatumType::Bool,
+            DbDatumType::I64 => DatumType::I64,
+            DbDatumType::F64 => DatumType::F64,
+            DbDatumType::String => DatumType::String,
+            DbDatumType::Bytes => DatumType::Bytes,
+            DbDatumType::CumulativeI64 => DatumType::CumulativeI64,
+            DbDatumType::CumulativeF64 => DatumType::CumulativeI64,
+            DbDatumType::HistogramI64 => DatumType::HistogramI64,
+            DbDatumType::HistogramF64 => DatumType::HistogramF64,
+        }
+    }
 }
 
 impl DatumType {
@@ -255,7 +332,7 @@ impl std::fmt::Display for DatumType {
 
 /// A `Datum` is a single sampled data point from a metric.
 #[derive(Clone, Debug, PartialEq, JsonSchema, Serialize, Deserialize)]
-// #[serde(tag = "type", content = "datum", rename_all = "snake_case")]
+#[serde(tag = "type", content = "datum", rename_all = "snake_case")]
 pub enum Datum {
     Bool(bool),
     I64(i64),

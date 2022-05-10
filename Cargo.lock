@@ -6137,3 +6137,8 @@ dependencies = [
  "quote",
  "syn",
 ]
+
+[[patch.unused]]
+name = "openapi-lint"
+version = "0.2.0"
+source = "git+https://www.github.com/oxidecomputer/openapi-lint?branch=enums#2fcb98667b6df6a8f69232a27859f2118eed31b8"

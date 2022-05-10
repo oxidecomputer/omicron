@@ -6,16 +6,16 @@
 // Copyright 2021 Oxide Computer Company
 
 use crate::{
-    FieldSchema, FieldSource, Metric, Target, TimeseriesKey, TimeseriesName,
-    TimeseriesSchema,
+    DbFieldSource, FieldSchema, FieldSource, Metric, Target, TimeseriesKey,
+    TimeseriesName, TimeseriesSchema,
 };
 use bytes::Bytes;
 use chrono::{DateTime, Utc};
 use oximeter::histogram::Histogram;
 use oximeter::traits;
 use oximeter::types::{
-    Cumulative, Datum, DatumType, Field, FieldType, FieldValue, Measurement,
-    Sample,
+    Cumulative, Datum, DatumType, DbDatumType, DbFieldType, Field, FieldType,
+    FieldValue, Measurement, Sample,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -77,14 +77,14 @@ impl From<DbBool> for Datum {
 //
 // Note that the fields are renamed so that ClickHouse interprets them as correctly referring to
 // the nested column names.
-#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub(crate) struct DbFieldList {
     #[serde(rename = "fields.name")]
     pub names: Vec<String>,
     #[serde(rename = "fields.type")]
-    pub types: Vec<FieldType>,
+    pub types: Vec<DbFieldType>,
     #[serde(rename = "fields.source")]
-    pub sources: Vec<FieldSource>,
+    pub sources: Vec<DbFieldSource>,
 }
 
 impl From<DbFieldList> for Vec<FieldSchema> {
@@ -93,7 +93,11 @@ impl From<DbFieldList> for Vec<FieldSchema> {
             .into_iter()
             .zip(list.types.into_iter())
             .zip(list.sources.into_iter())
-            .map(|((name, ty), source)| FieldSchema { name, ty, source })
+            .map(|((name, ty), source)| FieldSchema {
+                name,
+                ty: ty.into(),
+                source: source.into(),
+            })
             .collect()
     }
 }
@@ -105,8 +109,8 @@ impl From<Vec<FieldSchema>> for DbFieldList {
         let mut sources = Vec::with_capacity(list.len());
         for field in list.into_iter() {
             names.push(field.name);
-            types.push(field.ty);
-            sources.push(field.source);
+            types.push(field.ty.into());
+            sources.push(field.source.into());
         }
         DbFieldList { names, types, sources }
     }
@@ -118,7 +122,7 @@ pub(crate) struct DbTimeseriesSchema {
     pub timeseries_name: String,
     #[serde(flatten)]
     pub field_schema: DbFieldList,
-    pub datum_type: DatumType,
+    pub datum_type: DbDatumType,
     #[serde(with = "serde_timestamp")]
     pub created: DateTime<Utc>,
 }
@@ -128,7 +132,7 @@ impl From<TimeseriesSchema> for DbTimeseriesSchema {
         DbTimeseriesSchema {
             timeseries_name: schema.timeseries_name.to_string(),
             field_schema: schema.field_schema.into(),
-            datum_type: schema.datum_type,
+            datum_type: schema.datum_type.into(),
             created: schema.created,
         }
     }

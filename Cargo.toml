@@ -96,5 +96,5 @@ typify = { path = "../typify/typify" }
 git = 'https://github.com/oxidecomputer/pq-sys'
 branch = "oxide/omicron"
 
-#[patch."https://github.com/oxidecomputer/openapi-lint"]
-#openapi-lint = { git = "https://www.github.com/oxidecomputer/openapi-lint", branch = "enums" }
+[patch."https://github.com/oxidecomputer/openapi-lint"]
+openapi-lint = { git = "https://www.github.com/oxidecomputer/openapi-lint", branch = "enums" }

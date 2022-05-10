@@ -6339,8 +6339,8 @@
       "OrganizationRoles": {
         "type": "string",
         "enum": [
-          "admin",
-          "collaborator"
+          "Admin",
+          "Collaborator"
         ]
       },
       "OrganizationRolesPolicy": {
