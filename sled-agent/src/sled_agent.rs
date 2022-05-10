@@ -167,9 +167,9 @@ impl SledAgent {
         //
         // - Oxide control VNICs
         // - Guest VNICs over xde devices
-        let vnics = Dladm::get_vnics(Some(VnicKind::OxideControl))?
+        let vnics = Dladm::get_vnics(VnicKind::OxideControl)?
             .into_iter()
-            .chain(Dladm::get_vnics(Some(VnicKind::Guest))?);
+            .chain(Dladm::get_vnics(VnicKind::Guest)?);
         for vnic in vnics {
             warn!(
               log,

@@ -19,12 +19,6 @@ pub const VNIC_PREFIX_CONTROL: &str = "oxControl";
 // Viona, and thus plumbed directly to guests.
 pub const VNIC_PREFIX_GUEST: &str = "vopte";
 
-/// Names of VNICs used as underlay devices for the xde driver.
-pub const XDE_VNIC_NAMES: [&str; 2] = ["net0", "net1"];
-
-/// Prefix used to identify xde data links.
-pub const XDE_LINK_PREFIX: &str = "opte";
-
 pub const DLADM: &str = "/usr/sbin/dladm";
 
 /// Errors returned from [`Dladm::find_physical`].
@@ -176,25 +170,31 @@ impl Dladm {
         Ok(())
     }
 
-    /// Returns VNICs that may be managed by the Sled Agent, optionally
-    /// restricted to a particular kind.
-    pub fn get_vnics(
-        kind: Option<VnicKind>,
-    ) -> Result<Vec<String>, GetVnicError> {
+    /// Returns VNICs that may be managed by the Sled Agent of a particular
+    /// kind.
+    pub fn get_vnics(kind: VnicKind) -> Result<Vec<String>, GetVnicError> {
         let mut command = std::process::Command::new(PFEXEC);
         let cmd = command.args(&[DLADM, "show-vnic", "-p", "-o", "LINK"]);
         let output = execute(cmd).map_err(|err| GetVnicError { err })?;
 
         let vnics = String::from_utf8_lossy(&output.stdout)
             .lines()
-            .filter(|name| {
-                if let Some(kind) = kind {
-                    VnicKind::from_name(name) == kind
-                } else {
-                    false
+            .filter_map(|name| {
+                // Ensure this is a kind of VNIC that the sled agent could be
+                // responsible for.
+                match VnicKind::from_name(name) {
+                    Some(vnic_kind) => {
+                        // Ensure matches the caller-specified VnicKind
+                        if vnic_kind == kind {
+                            Some(name.to_owned())
+                        } else {
+                            None
+                        }
+                    }
+                    // Always ignore this VNIC if it's not a valid VnicKind.
+                    None => None,
                 }
             })
-            .map(|s| s.to_owned())
             .collect();
         Ok(vnics)
     }

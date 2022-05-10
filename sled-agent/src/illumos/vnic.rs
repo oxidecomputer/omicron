@@ -6,7 +6,7 @@
 
 use crate::illumos::dladm::{
     CreateVnicError, DeleteVnicError, PhysicalLink, VNIC_PREFIX,
-    VNIC_PREFIX_CONTROL, VNIC_PREFIX_GUEST, XDE_VNIC_NAMES,
+    VNIC_PREFIX_CONTROL, VNIC_PREFIX_GUEST,
 };
 use omicron_common::api::external::MacAddr;
 use std::sync::{
@@ -88,24 +88,25 @@ impl VnicAllocator {
 pub enum VnicKind {
     OxideControl,
     Guest,
-    XdeUnderlay,
-    Other,
 }
 
 impl VnicKind {
-    /// Infer the kind from a VNIC's name.
-    pub fn from_name(name: &str) -> Self {
+    /// Infer the kind from a VNIC's name, if this one the sled agent can
+    /// manage, and `None` otherwise.
+    pub fn from_name(name: &str) -> Option<Self> {
         if name.starts_with(VNIC_PREFIX) {
-            VnicKind::OxideControl
+            Some(VnicKind::OxideControl)
         } else if name.starts_with(VNIC_PREFIX_GUEST) {
-            VnicKind::Guest
-        } else if XDE_VNIC_NAMES.contains(&name) {
-            VnicKind::XdeUnderlay
+            Some(VnicKind::Guest)
         } else {
-            VnicKind::Other
+            None
         }
     }
 }
+
+#[derive(thiserror::Error, Debug)]
+#[error("VNIC with name '{0}' is not valid for sled agent management")]
+pub struct InvalidVnicKind(String);
 
 /// Represents an allocated VNIC on the system.
 /// The VNIC is de-allocated when it goes out of scope.
@@ -122,11 +123,16 @@ pub struct Vnic {
 
 impl Vnic {
     /// Takes ownership of an existing VNIC.
-    pub fn wrap_existing<S: AsRef<str>>(name: S) -> Self {
-        Vnic {
-            name: name.as_ref().to_owned(),
-            deleted: false,
-            kind: VnicKind::from_name(name.as_ref()),
+    pub fn wrap_existing<S: AsRef<str>>(
+        name: S,
+    ) -> Result<Self, InvalidVnicKind> {
+        match VnicKind::from_name(name.as_ref()) {
+            Some(kind) => Ok(Vnic {
+                name: name.as_ref().to_owned(),
+                deleted: false,
+                kind,
+            }),
+            None => Err(InvalidVnicKind(name.as_ref().to_owned())),
         }
     }
 

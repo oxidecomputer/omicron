@@ -9,9 +9,7 @@ use crate::illumos::addrobj::AddrObject;
 use crate::illumos::dladm;
 use crate::illumos::dladm::Dladm;
 use crate::illumos::dladm::PhysicalLink;
-use crate::illumos::dladm::XDE_LINK_PREFIX;
 use crate::illumos::vnic::Vnic;
-use crate::illumos::vnic::VnicKind;
 use crate::illumos::zone::Zones;
 use ipnetwork::IpNetwork;
 use macaddr::MacAddr6;
@@ -29,6 +27,12 @@ use std::net::Ipv6Addr;
 use std::sync::atomic::AtomicU64;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
+
+// Names of VNICs used as underlay devices for the xde driver.
+const XDE_VNIC_NAMES: [&str; 2] = ["net0", "net1"];
+
+// Prefix used to identify xde data links.
+const XDE_LINK_PREFIX: &str = "opte";
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
@@ -160,7 +164,9 @@ impl OptePortAllocator {
                 Some(omicron_common::api::external::MacAddr(mac)),
                 None,
             )?;
-            Some(Vnic::wrap_existing(vnic_name))
+            // Safety: We're explicitly creating the VNIC with the prefix
+            // `VNIC_PREFIX_GUEST`, so this call must return Some(_).
+            Some(Vnic::wrap_existing(vnic_name).unwrap())
         };
 
         Ok(OptePort {
@@ -329,8 +335,8 @@ fn find_chelsio_links() -> Result<Vec<PhysicalLink>, Error> {
     // `Dladm` to get the real Chelsio links on a Gimlet. These will likely be
     // called `cxgbeN`, but we explicitly call them `netN` to be clear that
     // they're likely VNICs for the time being.
-    Ok(Dladm::get_vnics(Some(VnicKind::XdeUnderlay))?
+    Ok(XDE_VNIC_NAMES
         .into_iter()
-        .map(PhysicalLink)
+        .map(|name| PhysicalLink(name.to_string()))
         .collect())
 }
