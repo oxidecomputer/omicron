@@ -59,10 +59,58 @@ function sha_from_url {
     curl -L "$SHA_URL" 2> /dev/null | cut -d ' ' -f 1
 }
 
+# Echo the stickiness, 'sticky' or 'non-sticky' of the `helios-dev` publisher
+function helios_dev_stickiness {
+    local LINE="$(pkg publisher | grep '^helios-dev')"
+    if [[ -z "$LINE" ]]; then
+        echo "Expected a publisher named helios-dev, exiting!"
+        exit 1
+    fi
+    if [[ -z "$(echo "$LINE" | grep 'non-sticky')" ]]; then
+        echo "sticky"
+    else
+        echo "non-sticky"
+    fi
+}
+
+# Ensure that the `helios-dev` publisher is non-sticky. This does not modify the
+# publisher, if it is already non-sticky.
+function ensure_helios_dev_is_non_sticky {
+    local STICKINESS="$(helios_dev_stickiness)"
+    if [[ "$STICKINESS" = "sticky" ]]; then
+        pkg set-publisher --non-sticky helios-dev
+        STICKINESS="$(helios_dev_stickiness)"
+        if [[ "$STICKINESS" = "non-sticky" ]]; then
+            echo "Failed to make helios-dev publisher non-sticky"
+            exit 1
+        fi
+    else
+        echo "helios-dev publisher is already non-sticky"
+    fi
+}
+
+function verify_publisher_search_order {
+    local EXPECTED=("on-nightly" "helios-netdev" "helios-dev")
+    local N_EXPECTED="${#EXPECTED[*]}"
+    readarray -t ACTUAL < <(pkg publisher -H | cut -d ' ' -f 1)
+    local N_ACTUAL="${#ACTUAL[*]}"
+    if [[ $N_EXPECTED -ne $N_ACTUAL ]]; then
+        echo "Mismatched number of publishers, expected: $N_EXPECTED, found: $N_ACTUAL"
+        exit 1
+    fi
+    for ((i=0;i<N_ACTUAL;i++))
+    do
+        if [[ "${EXPECTED[i]}" != "${ACTUAL[i]}" ]]; then
+            echo "Mismatched publishers: ${EXPECTED[i]} vs ${ACTUAL[i]}"
+            exit 1
+        fi
+    done
+}
+
 # `helios-netdev` provides the xde kernel driver and the `opteadm` userland tool
 # for interacting with it.
 HELIOS_NETDEV_BASE_URL="https://buildomat.eng.oxide.computer/public/file/oxidecomputer/opte/repo"
-HELIOS_NETDEV_COMMIT="7f57b5d959fcd91100feb14ac83aefcee1c96a50"
+HELIOS_NETDEV_COMMIT="b9980158540d15d44cfc5d17fc0a5d1848c5e1ae"
 HELIOS_NETDEV_REPO_URL="$HELIOS_NETDEV_BASE_URL/$HELIOS_NETDEV_COMMIT/opte.p5p"
 HELIOS_NETDEV_REPO_SHA_URL="$HELIOS_NETDEV_BASE_URL/$HELIOS_NETDEV_COMMIT/opte.p5p.sha256"
 HELIOS_NETDEV_REPO_PATH="$XDE_DIR/$(basename "$HELIOS_NETDEV_REPO_URL")"
@@ -82,11 +130,13 @@ download_and_check_sha "$XDE_REPO_URL" "$(sha_from_url "$XDE_REPO_SHA_URL")"
 # Set the `helios-dev` repo as non-sticky, meaning that packages that were
 # originally provided by it may be updated by another repository, if that repo
 # provides newer versions of the packages.
-pkg set-publisher --non-sticky helios-dev
+ensure_helios_dev_is_non_sticky
 
 # Add the OPTE and xde repositories and update packages.
 pkg set-publisher -p "$HELIOS_NETDEV_REPO_PATH" --search-first
 pkg set-publisher -p "$XDE_REPO_PATH" --search-first
+
+verify_publisher_search_order
 
 # Actually update packages, handling case where no updates are needed
 RC=0

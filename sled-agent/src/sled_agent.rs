@@ -5,6 +5,7 @@
 //! Sled agent implementation
 
 use crate::config::Config;
+use crate::illumos::vnic::VnicKind;
 use crate::illumos::zfs::{
     Mountpoint, ZONE_ZFS_DATASET, ZONE_ZFS_DATASET_MOUNTPOINT,
 };
@@ -148,7 +149,7 @@ impl SledAgent {
         // to leave the running Zones intact).
         let zones = Zones::get()?;
         for z in zones {
-            warn!(log, "Deleting zone: {}", z.name());
+            warn!(log, "Deleting existing zone"; "zone_name" => z.name());
             Zones::halt_and_remove_logged(&log, z.name())?;
         }
 
@@ -162,17 +163,31 @@ impl SledAgent {
         // This should be accessible via:
         // $ dladm show-linkprop -c -p zone -o LINK,VALUE
         //
-        // Note that this currently deletes only VNICs that start with the
-        // prefix the sled-agent uses. We'll need to generate an alert or
-        // otherwise handle VNICs that we _don't_ expect.
-        let vnics = Dladm::get_vnics()?;
-        for vnic in vnics
-            .iter()
-            .filter(|vnic| vnic.starts_with(crate::illumos::dladm::VNIC_PREFIX))
-        {
-            warn!(log, "Deleting VNIC: {}", vnic);
+        // Delete VNICs in this order:
+        //
+        // - Oxide control VNICs
+        // - Guest VNICs over xde devices
+        let vnics = Dladm::get_vnics(Some(VnicKind::OxideControl))?
+            .into_iter()
+            .chain(Dladm::get_vnics(Some(VnicKind::Guest))?);
+        for vnic in vnics {
+            warn!(
+              log,
+              "Deleting existing VNIC";
+                "vnic_name" => &vnic,
+                "vnic_kind" => ?VnicKind::from_name(&vnic),
+            );
             Dladm::delete_vnic(&vnic)?;
         }
+
+        // Also delete any extant xde devices. These should also eventually be
+        // recovered / tracked, to avoid interruption of any guests that are
+        // still running. That's currently irrelevant, since we're deleting the
+        // zones anyway.
+        //
+        // This is also tracked by
+        // https://github.com/oxidecomputer/omicron/issues/725.
+        crate::opte::delete_all_xde_devices(&log)?;
 
         let storage = StorageManager::new(
             &log,

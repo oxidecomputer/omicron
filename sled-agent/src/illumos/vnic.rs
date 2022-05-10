@@ -6,7 +6,7 @@
 
 use crate::illumos::dladm::{
     CreateVnicError, DeleteVnicError, PhysicalLink, VNIC_PREFIX,
-    VNIC_PREFIX_CONTROL,
+    VNIC_PREFIX_CONTROL, VNIC_PREFIX_GUEST, XDE_VNIC_NAMES,
 };
 use omicron_common::api::external::MacAddr;
 use std::sync::{
@@ -60,7 +60,7 @@ impl VnicAllocator {
         debug_assert!(name.starts_with(VNIC_PREFIX));
         debug_assert!(name.starts_with(VNIC_PREFIX_CONTROL));
         Dladm::create_vnic(&self.data_link, &name, mac, None)?;
-        Ok(Vnic { name, deleted: false })
+        Ok(Vnic { name, deleted: false, kind: VnicKind::OxideControl })
     }
 
     fn new_superscope<S: AsRef<str>>(&self, scope: S) -> Self {
@@ -82,6 +82,31 @@ impl VnicAllocator {
     }
 }
 
+/// Represents the kind of a VNIC, such as whether it's for guest networking or
+/// communicating with Oxide services.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum VnicKind {
+    OxideControl,
+    Guest,
+    XdeUnderlay,
+    Other,
+}
+
+impl VnicKind {
+    /// Infer the kind from a VNIC's name.
+    pub fn from_name(name: &str) -> Self {
+        if name.starts_with(VNIC_PREFIX) {
+            VnicKind::OxideControl
+        } else if name.starts_with(VNIC_PREFIX_GUEST) {
+            VnicKind::Guest
+        } else if XDE_VNIC_NAMES.contains(&name) {
+            VnicKind::XdeUnderlay
+        } else {
+            VnicKind::Other
+        }
+    }
+}
+
 /// Represents an allocated VNIC on the system.
 /// The VNIC is de-allocated when it goes out of scope.
 ///
@@ -92,12 +117,17 @@ impl VnicAllocator {
 pub struct Vnic {
     name: String,
     deleted: bool,
+    kind: VnicKind,
 }
 
 impl Vnic {
     /// Takes ownership of an existing VNIC.
     pub fn wrap_existing<S: AsRef<str>>(name: S) -> Self {
-        Vnic { name: name.as_ref().to_owned(), deleted: false }
+        Vnic {
+            name: name.as_ref().to_owned(),
+            deleted: false,
+            kind: VnicKind::from_name(name.as_ref()),
+        }
     }
 
     /// Deletes a NIC (if it has not already been deleted).
@@ -112,6 +142,10 @@ impl Vnic {
 
     pub fn name(&self) -> &str {
         &self.name
+    }
+
+    pub fn kind(&self) -> VnicKind {
+        self.kind
     }
 }
 

@@ -9,7 +9,9 @@ use crate::illumos::addrobj::AddrObject;
 use crate::illumos::dladm;
 use crate::illumos::dladm::Dladm;
 use crate::illumos::dladm::PhysicalLink;
+use crate::illumos::dladm::XDE_LINK_PREFIX;
 use crate::illumos::vnic::Vnic;
+use crate::illumos::vnic::VnicKind;
 use crate::illumos::zone::Zones;
 use ipnetwork::IpNetwork;
 use macaddr::MacAddr6;
@@ -62,7 +64,7 @@ impl OptePortAllocator {
     }
 
     fn next(&self) -> String {
-        format!("opte{}", self.next_id())
+        format!("{}{}", XDE_LINK_PREFIX, self.next_id())
     }
 
     fn next_id(&self) -> u64 {
@@ -266,6 +268,21 @@ impl Drop for OptePort {
     }
 }
 
+/// Delete all xde devices on the system.
+pub fn delete_all_xde_devices(log: &Logger) -> Result<(), Error> {
+    let hdl = OpteHdl::open(OpteHdl::DLD_CTL)?;
+    for port_info in hdl.list_ports()?.ports.into_iter() {
+        let name = &port_info.name;
+        info!(
+            log,
+            "deleting existing OPTE port and xde device";
+            "device_name" => name
+        );
+        hdl.delete_xde(name)?;
+    }
+    Ok(())
+}
+
 /// Initialize the underlay devices required for the xde kernel module.
 ///
 /// The xde driver needs information about the physical devices out which it can
@@ -312,9 +329,8 @@ fn find_chelsio_links() -> Result<Vec<PhysicalLink>, Error> {
     // `Dladm` to get the real Chelsio links on a Gimlet. These will likely be
     // called `cxgbeN`, but we explicitly call them `netN` to be clear that
     // they're likely VNICs for the time being.
-    Ok(Dladm::get_vnics()?
+    Ok(Dladm::get_vnics(Some(VnicKind::XdeUnderlay))?
         .into_iter()
-        .filter(|name| name == "net0" || name == "net1")
         .map(PhysicalLink)
         .collect())
 }

@@ -5,6 +5,7 @@
 //! Utilities for poking at data links.
 
 use crate::common::vlan::VlanID;
+use crate::illumos::vnic::VnicKind;
 use crate::illumos::{execute, ExecutionError, PFEXEC};
 use omicron_common::api::external::MacAddr;
 use serde::{Deserialize, Serialize};
@@ -16,7 +17,13 @@ pub const VNIC_PREFIX_CONTROL: &str = "oxControl";
 /// Prefix used to name VNICs over xde devices / OPTE ports.
 // TODO-correctness: Remove this when `xde` devices can be directly used beneath
 // Viona, and thus plumbed directly to guests.
-pub const VNIC_PREFIX_OPTE: &str = "vopte";
+pub const VNIC_PREFIX_GUEST: &str = "vopte";
+
+/// Names of VNICs used as underlay devices for the xde driver.
+pub const XDE_VNIC_NAMES: [&str; 2] = ["net0", "net1"];
+
+/// Prefix used to identify xde data links.
+pub const XDE_LINK_PREFIX: &str = "opte";
 
 pub const DLADM: &str = "/usr/sbin/dladm";
 
@@ -169,27 +176,27 @@ impl Dladm {
         Ok(())
     }
 
-    /// Returns all VNICs that may be managed by the Sled Agent.
-    pub fn get_vnics() -> Result<Vec<String>, GetVnicError> {
+    /// Returns VNICs that may be managed by the Sled Agent, optionally
+    /// restricted to a particular kind.
+    pub fn get_vnics(
+        kind: Option<VnicKind>,
+    ) -> Result<Vec<String>, GetVnicError> {
         let mut command = std::process::Command::new(PFEXEC);
         let cmd = command.args(&[DLADM, "show-vnic", "-p", "-o", "LINK"]);
         let output = execute(cmd).map_err(|err| GetVnicError { err })?;
 
         let vnics = String::from_utf8_lossy(&output.stdout)
             .lines()
-            .filter(|name| Self::is_sled_agent_vnic(name))
+            .filter(|name| {
+                if let Some(kind) = kind {
+                    VnicKind::from_name(name) == kind
+                } else {
+                    false
+                }
+            })
             .map(|s| s.to_owned())
             .collect();
         Ok(vnics)
-    }
-
-    // Return true if a VNIC with the provided name may be managed by the sled
-    // agent.
-    fn is_sled_agent_vnic(name: &str) -> bool {
-        name.starts_with(VNIC_PREFIX)
-            || name.starts_with(VNIC_PREFIX_OPTE)
-            || name == "net0"
-            || name == "net1"
     }
 
     /// Remove a vnic from the sled.
