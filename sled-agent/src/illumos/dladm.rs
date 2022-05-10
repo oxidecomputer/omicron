@@ -185,12 +185,11 @@ impl Dladm {
 
     // Return true if a VNIC with the provided name may be managed by the sled
     // agent.
-    fn is_sled_agent_vnic<S: AsRef<str>>(name: S) -> bool {
-        let name = name.as_ref();
-        name.starts_with(VNIC_PREFIX) ||
-            name.starts_with(VNIC_PREFIX_OPTE) ||
-            name == "net0" ||
-            name == "net1"
+    fn is_sled_agent_vnic(name: &str) -> bool {
+        name.starts_with(VNIC_PREFIX)
+            || name.starts_with(VNIC_PREFIX_OPTE)
+            || name == "net0"
+            || name == "net1"
     }
 
     /// Remove a vnic from the sled.

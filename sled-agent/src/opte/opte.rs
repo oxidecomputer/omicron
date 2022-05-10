@@ -42,7 +42,9 @@ pub enum Error {
     #[error("Failed to get VNICs for xde underlay devices: {0}")]
     GetVnic(#[from] crate::illumos::dladm::GetVnicError),
 
-    #[error("No xde driver configuration file exists at '/kernel/drv/xde.conf'")]
+    #[error(
+        "No xde driver configuration file exists at '/kernel/drv/xde.conf'"
+    )]
     NoXdeConf,
 
     #[error(transparent)]
@@ -283,7 +285,7 @@ pub fn initialize_xde_driver(log: &Logger) -> Result<(), Error> {
             "exist on the system."
         );
         return Err(Error::Opte(opte_ioctl::Error::InvalidArgument(
-            String::from(MESSAGE)
+            String::from(MESSAGE),
         )));
     }
     for nic in &underlay_nics {
