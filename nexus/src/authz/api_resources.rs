@@ -347,7 +347,7 @@ impl ApiResourceWithRolesType for Organization {
     SerializeDisplay,
     JsonSchema,
 )]
-#[serde(rename_all = "kebab-case")]
+#[display(style = "kebab-case")]
 pub enum OrganizationRoles {
     Admin,
     Collaborator,

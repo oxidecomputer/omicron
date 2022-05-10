@@ -221,7 +221,7 @@ impl From<model::DbTimeseriesSchema> for TimeseriesSchema {
 }
 
 /// The target identifies the resource or component about which metric data is produced.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, JsonSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct Target {
     pub name: String,
     pub fields: Vec<Field>,
@@ -236,7 +236,7 @@ pub struct Metric {
 }
 
 /// A list of timestamped measurements from a single timeseries.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, JsonSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct Timeseries {
     pub timeseries_name: String,
     pub target: Target,
