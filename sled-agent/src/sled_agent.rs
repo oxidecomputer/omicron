@@ -14,7 +14,7 @@ use crate::params::{
     DatasetKind, DiskStateRequested, InstanceHardware, InstanceMigrateParams,
     InstanceRuntimeStateRequested, ServiceEnsureBody,
 };
-use crate::services::ServiceManager;
+use crate::services::{self, ServiceManager};
 use crate::storage_manager::StorageManager;
 use omicron_common::address::{Ipv6Subnet, SLED_PREFIX};
 use omicron_common::api::{
@@ -202,7 +202,7 @@ impl SledAgent {
             log.clone(),
             data_link.clone(),
             Ipv6Subnet::<SLED_PREFIX>::new(*sled_address.ip()),
-            None,
+            services::Config::default(),
         ).await?;
 
         Ok(SledAgent {

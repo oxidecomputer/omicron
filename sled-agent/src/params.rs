@@ -257,6 +257,28 @@ pub enum ServiceType {
     },
 }
 
+impl From<ServiceType> for sled_agent_client::types::ServiceType {
+    fn from(s: ServiceType) -> Self {
+        use ServiceType as St;
+        use sled_agent_client::types::ServiceType as AutoSt;
+
+        match s {
+            St::Nexus { internal_address, external_address } => {
+                AutoSt::Nexus {
+                    internal_address: internal_address.to_string(),
+                    external_address: external_address.to_string(),
+                }
+            },
+            St::InternalDns { server_address, dns_address } => {
+                AutoSt::InternalDns {
+                    server_address: server_address.to_string(),
+                    dns_address: dns_address.to_string(),
+                }
+            },
+        }
+    }
+}
+
 /// Describes a request to create a service. This information
 /// should be sufficient for a Sled Agent to start a zone
 /// containing the requested service.
@@ -290,6 +312,7 @@ impl From<ServiceRequest> for sled_agent_client::types::ServiceRequest {
             name: s.name,
             addresses: s.addresses,
             gz_addresses: s.gz_addresses,
+            service_type: s.service_type.into(),
         }
     }
 }

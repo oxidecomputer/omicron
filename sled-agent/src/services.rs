@@ -21,6 +21,15 @@ use std::path::{Path, PathBuf};
 use tokio::io::AsyncWriteExt;
 use tokio::sync::Mutex;
 
+// The filename of ServiceManager's internal storage.
+const SERVICE_CONFIG_FILENAME: &str = "service.toml";
+// The filename of a half-completed config, in need of parameters supplied at
+// runtime.
+const PARTIAL_CONFIG_FILENAME: &str = "config-partial.toml";
+// The filename of a completed config, merging the partial config with
+// additional appended parameters known at runtime.
+const COMPLETE_CONFIG_FILENAME: &str = "config.toml";
+
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
     #[error("Cannot serialize TOML to file {path}: {err}")]
@@ -72,13 +81,40 @@ impl From<Error> for omicron_common::api::external::Error {
 /// The default path to service configuration, if one is not
 /// explicitly provided.
 pub fn default_services_config_path() -> PathBuf {
-    Path::new(omicron_common::OMICRON_CONFIG_PATH).join("services.toml")
+    Path::new(omicron_common::OMICRON_CONFIG_PATH).join(SERVICE_CONFIG_FILENAME)
+}
+
+/// Configuration parameters which modify the [`ServiceManager`]'s behavior.
+///
+/// These are typically used to make testing easier; production usage
+/// should generally prefer to use the defaults.
+pub struct Config {
+    /// The path for the ServiceManager to store information about
+    /// all running services.
+    pub all_svcs_config_path: PathBuf,
+    /// A function which returns the path the directory holding the
+    /// service's configuration file.
+    pub get_svc_config_dir: Box<dyn Fn(&str, &str) -> PathBuf + Send + Sync>,
+}
+
+impl Default for Config {
+    fn default() -> Self {
+        Self {
+            all_svcs_config_path: default_services_config_path(),
+            get_svc_config_dir: Box::new(|zone_name: &str, svc_name: &str| {
+                PathBuf::from(ZONE_ZFS_DATASET_MOUNTPOINT)
+                    .join(PathBuf::from(zone_name))
+                    .join("root")
+                    .join(format!("var/svc/manifest/site/{}", svc_name))
+            })
+        }
+    }
 }
 
 /// Manages miscellaneous Sled-local services.
 pub struct ServiceManager {
     log: Logger,
-    config_path: Option<PathBuf>,
+    config: Config,
     zones: Mutex<Vec<RunningZone>>,
     vnic_allocator: VnicAllocator,
     physical_link: PhysicalLink,
@@ -99,12 +135,12 @@ impl ServiceManager {
         log: Logger,
         physical_link: PhysicalLink,
         sled_subnet: Ipv6Subnet<SLED_PREFIX>,
-        config_path: Option<PathBuf>,
+        config: Config,
     ) -> Result<Self, Error> {
         debug!(log, "Creating new ServiceManager");
         let mgr = Self {
             log,
-            config_path,
+            config,
             zones: Mutex::new(vec![]),
             vnic_allocator: VnicAllocator::new(
                 "Service",
@@ -147,11 +183,7 @@ impl ServiceManager {
     // Returns either the path to the explicitly provided config path, or
     // chooses the default one.
     fn services_config_path(&self) -> PathBuf {
-        if let Some(path) = &self.config_path {
-            path.clone()
-        } else {
-            default_services_config_path()
-        }
+        self.config.all_svcs_config_path.clone()
     }
 
     // Populates `existing_zones` according to the requests in `services`.
@@ -251,8 +283,6 @@ impl ServiceManager {
             let smf_name = format!("svc:/system/illumos/{}", service.name);
             let default_smf_name = format!("{}:default", smf_name);
 
-            // TODO: match by type
-            // TODO: add nexus?
             match service.service_type {
                 ServiceType::Nexus {
                     internal_address,
@@ -276,14 +306,12 @@ impl ServiceManager {
                         database: nexus_config::Database::FromDns,
                     };
 
-                    // Copy the partial config file
-                    let partial_config_path = PathBuf::from(ZONE_ZFS_DATASET_MOUNTPOINT)
-                        .join(PathBuf::from(running_zone.name()))
-                        .join("root")
-                        .join("var/svc/manifest/site/nexus/config-partial.toml");
-                    let mut config_path = partial_config_path.clone();
-                    config_path.set_file_name("config.toml");
-
+                    // Copy the partial config file to the expected location.
+                    let config_dir = (self.config.get_svc_config_dir)(
+                        running_zone.name(), &service.name
+                    );
+                    let partial_config_path = config_dir.join(PARTIAL_CONFIG_FILENAME);
+                    let config_path = config_dir.join(COMPLETE_CONFIG_FILENAME);
                     tokio::fs::copy(partial_config_path, &config_path)
                         .await
                         .map_err(|err| Error::Io { path: config_path.clone(), err })?;
@@ -302,23 +330,6 @@ impl ServiceManager {
                         .await
                         .map_err(|err| Error::Io { path: config_path.clone(), err })?;
 
-                    /*
-                    running_zone
-                        .run_cmd(&[
-                            crate::illumos::zone::SVCCFG,
-                            "-s",
-                            &smf_name,
-                            "setprop",
-                            &format!(
-                                "config/runtime_config={}",
-                                runtime_config_path.to_string_lossy(),
-                            ),
-                        ])
-                        .map_err(|err| Error::ZoneCommand {
-                            intent: "setting runtime config path".to_string(),
-                            err,
-                        })?;
-                    */
                 },
                 ServiceType::InternalDns {
                     server_address,
@@ -356,25 +367,25 @@ impl ServiceManager {
                             intent: "Set DNS address".to_string(),
                             err,
                         })?;
+
+                    // Refresh the manifest with the new properties we set,
+                    // so they become "effective" properties when the service is enabled.
+                    running_zone
+                        .run_cmd(&[
+                            crate::illumos::zone::SVCCFG,
+                            "-s",
+                            &default_smf_name,
+                            "refresh",
+                        ])
+                        .map_err(|err| Error::ZoneCommand {
+                            intent: format!(
+                                "Refresh SMF manifest {}",
+                                default_smf_name
+                            ),
+                            err,
+                        })?;
                 }
             }
-
-            // Refresh the manifest with the new properties we set,
-            // so they become "effective" properties when the service is enabled.
-            running_zone
-                .run_cmd(&[
-                    crate::illumos::zone::SVCCFG,
-                    "-s",
-                    &default_smf_name,
-                    "refresh",
-                ])
-                .map_err(|err| Error::ZoneCommand {
-                    intent: format!(
-                        "Refresh SMF manifest {}",
-                        default_smf_name
-                    ),
-                    err,
-                })?;
 
             debug!(self.log, "enabling service");
 
@@ -580,20 +591,44 @@ mod test {
         drop(mgr);
     }
 
+    struct TestConfig {
+        config_dir: tempfile::TempDir,
+    }
+
+    impl TestConfig {
+        async fn new() -> Self {
+            let config_dir = tempfile::TempDir::new().unwrap();
+            tokio::fs::File::create(config_dir.path().join(PARTIAL_CONFIG_FILENAME)).await.unwrap();
+            Self {
+                config_dir
+            }
+        }
+
+        fn make_config(&self) -> Config {
+            let all_svcs_config_path = self.config_dir.path().join(SERVICE_CONFIG_FILENAME);
+            let svc_config_dir = self.config_dir.path().to_path_buf();
+            Config {
+                all_svcs_config_path,
+                get_svc_config_dir: Box::new(move |_zone_name: &str, _svc_name: &str| {
+                    svc_config_dir.clone()
+                })
+            }
+        }
+    }
+
     #[tokio::test]
     #[serial_test::serial]
     async fn test_ensure_service() {
         let logctx =
             omicron_test_utils::dev::test_setup_log("test_ensure_service");
         let log = logctx.log.clone();
+        let test_config = TestConfig::new().await;
 
-        let config_dir = tempfile::TempDir::new().unwrap();
-        let config = config_dir.path().join("services.toml");
         let mgr = ServiceManager::new(
             log,
             PhysicalLink(EXPECTED_LINK_NAME.to_string()),
             Ipv6Subnet::<SLED_PREFIX>::new(Ipv6Addr::LOCALHOST),
-            Some(config),
+            test_config.make_config(),
         )
         .await
         .unwrap();
@@ -612,14 +647,13 @@ mod test {
             "test_ensure_service_which_already_exists",
         );
         let log = logctx.log.clone();
+        let test_config = TestConfig::new().await;
 
-        let config_dir = tempfile::TempDir::new().unwrap();
-        let config = config_dir.path().join("services.toml");
         let mgr = ServiceManager::new(
             log,
             PhysicalLink(EXPECTED_LINK_NAME.to_string()),
             Ipv6Subnet::<SLED_PREFIX>::new(Ipv6Addr::LOCALHOST),
-            Some(config),
+            test_config.make_config(),
         )
         .await
         .unwrap();
@@ -638,9 +672,7 @@ mod test {
         let logctx = omicron_test_utils::dev::test_setup_log(
             "test_services_are_recreated_on_reboot",
         );
-
-        let config_dir = tempfile::TempDir::new().unwrap();
-        let config = config_dir.path().join("services.toml");
+        let test_config = TestConfig::new().await;
 
         // First, spin up a ServiceManager, create a new service, and tear it
         // down.
@@ -648,7 +680,7 @@ mod test {
             logctx.log.clone(),
             PhysicalLink(EXPECTED_LINK_NAME.to_string()),
             Ipv6Subnet::<SLED_PREFIX>::new(Ipv6Addr::LOCALHOST),
-            Some(config.clone()),
+            test_config.make_config(),
         )
         .await
         .unwrap();
@@ -664,7 +696,7 @@ mod test {
             logctx.log.clone(),
             PhysicalLink(EXPECTED_LINK_NAME.to_string()),
             Ipv6Subnet::<SLED_PREFIX>::new(Ipv6Addr::LOCALHOST),
-            Some(config.clone()),
+            test_config.make_config(),
         )
         .await
         .unwrap();
@@ -679,9 +711,7 @@ mod test {
         let logctx = omicron_test_utils::dev::test_setup_log(
             "test_services_do_not_persist_without_config",
         );
-
-        let config_dir = tempfile::TempDir::new().unwrap();
-        let config = config_dir.path().join("services.toml");
+        let test_config = TestConfig::new().await;
 
         // First, spin up a ServiceManager, create a new service, and tear it
         // down.
@@ -689,7 +719,7 @@ mod test {
             logctx.log.clone(),
             PhysicalLink(EXPECTED_LINK_NAME.to_string()),
             Ipv6Subnet::<SLED_PREFIX>::new(Ipv6Addr::LOCALHOST),
-            Some(config.clone()),
+            test_config.make_config(),
         )
         .await
         .unwrap();
@@ -699,14 +729,15 @@ mod test {
 
         // Next, delete the config. This means the service we just created will
         // not be remembered on the next initialization.
-        std::fs::remove_file(&config).unwrap();
+        let config = test_config.make_config();
+        std::fs::remove_file(&config.all_svcs_config_path).unwrap();
 
         // Observe that the old service is not re-initialized.
         let mgr = ServiceManager::new(
             logctx.log.clone(),
             PhysicalLink(EXPECTED_LINK_NAME.to_string()),
             Ipv6Subnet::<SLED_PREFIX>::new(Ipv6Addr::LOCALHOST),
-            Some(config.clone()),
+            config,
         )
         .await
         .unwrap();

@@ -973,6 +973,7 @@
         ]
       },
       "ServiceRequest": {
+        "description": "Describes a request to create a service. This information should be sufficient for a Sled Agent to start a zone containing the requested service.",
         "type": "object",
         "properties": {
           "addresses": {
@@ -995,12 +996,65 @@
           },
           "name": {
             "type": "string"
+          },
+          "service_type": {
+            "$ref": "#/components/schemas/ServiceType"
           }
         },
         "required": [
           "addresses",
           "id",
-          "name"
+          "name",
+          "service_type"
+        ]
+      },
+      "ServiceType": {
+        "description": "Describes service-specific parameters.",
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "external_address": {
+                "type": "string"
+              },
+              "internal_address": {
+                "type": "string"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "Nexus"
+                ]
+              }
+            },
+            "required": [
+              "external_address",
+              "internal_address",
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "dns_address": {
+                "type": "string"
+              },
+              "server_address": {
+                "type": "string"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "InternalDns"
+                ]
+              }
+            },
+            "required": [
+              "dns_address",
+              "server_address",
+              "type"
+            ]
+          }
         ]
       },
       "Slot": {
