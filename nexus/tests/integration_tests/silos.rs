@@ -5,6 +5,7 @@
 use nexus_test_utils::http_testing::{AuthnMode, NexusRequest, RequestBuilder};
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::SiloSamlIdentityProvider;
+use omicron_nexus::authn::silos::SiloIdentityProviderType;
 use omicron_nexus::external_api::params;
 use omicron_nexus::external_api::views::{Organization, Silo};
 use omicron_nexus::TestInterfaces as _;
@@ -251,25 +252,23 @@ async fn test_create_a_saml_idp(cptestctx: &ControlPlaneTestContext) {
         .await
         .unwrap();
 
-    let retrieved_silo_idp_from_nexus = nexus
-        .get_silo_identity_provider(
-            &nexus.opctx_external_authn(),
-            &omicron_common::api::external::Name::try_from(
-                SILO_NAME.to_string(),
-            )
+    let retrieved_silo_idp_from_nexus = SiloIdentityProviderType::lookup(
+        &nexus.datastore(),
+        &nexus.opctx_external_authn(),
+        &omicron_common::api::external::Name::try_from(SILO_NAME.to_string())
             .unwrap()
             .into(),
-            &omicron_common::api::external::Name::try_from(
-                "some-totally-real-saml-provider".to_string(),
-            )
-            .unwrap()
-            .into(),
+        &omicron_common::api::external::Name::try_from(
+            "some-totally-real-saml-provider".to_string(),
         )
-        .await
-        .unwrap();
+        .unwrap()
+        .into(),
+    )
+    .await
+    .unwrap();
 
     match retrieved_silo_idp_from_nexus {
-        omicron_nexus::authn::silos::SiloIdentityProviderType::Saml(_) => {
+        SiloIdentityProviderType::Saml(_) => {
             // ok
         }
     }

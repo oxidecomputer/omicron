@@ -4,7 +4,10 @@
 
 //! Silo related authentication types and functions
 
-use crate::db::model::SiloSamlIdentityProvider;
+use crate::context::OpContext;
+use crate::db::lookup::LookupPath;
+use crate::db::{model, DataStore};
+use omicron_common::api::external::LookupResult;
 
 use anyhow::{anyhow, Result};
 use samael::metadata::ContactPerson;
@@ -15,23 +18,86 @@ use samael::metadata::HTTP_REDIRECT_BINDING;
 use samael::service_provider::ServiceProvider;
 use samael::service_provider::ServiceProviderBuilder;
 
+pub struct SiloSamlIdentityProvider {
+    pub idp_metadata_document_string: String,
+    pub sp_client_id: String,
+    pub acs_url: String,
+    pub slo_url: String,
+    pub technical_contact_email: String,
+    pub public_cert: Option<String>,
+    pub private_key: Option<String>,
+}
+
+impl TryFrom<model::SiloSamlIdentityProvider> for SiloSamlIdentityProvider {
+    type Error = anyhow::Error;
+    fn try_from(
+        model: model::SiloSamlIdentityProvider,
+    ) -> Result<Self, Self::Error> {
+        let provider = SiloSamlIdentityProvider {
+            idp_metadata_document_string: model.idp_metadata_document_string,
+            sp_client_id: model.sp_client_id,
+            acs_url: model.acs_url,
+            slo_url: model.slo_url,
+            technical_contact_email: model.technical_contact_email,
+            public_cert: model.public_cert,
+            private_key: model.private_key,
+        };
+
+        // check that the idp metadata document string parses into an EntityDescriptor
+        let _idp_metadata: EntityDescriptor =
+            provider.idp_metadata_document_string.parse()?;
+
+        // check that there is a valid sign in url
+        let _sign_in_url = provider.sign_in_url(None)?;
+
+        Ok(provider)
+    }
+}
+
 pub enum SiloIdentityProviderType {
     Saml(SiloSamlIdentityProvider),
 }
 
-impl SiloSamlIdentityProvider {
-    /// return an error if this SiloSamlIdentityProvider is invalid
-    pub fn validate(&self) -> Result<()> {
-        // check that the idp metadata document string parses into an EntityDescriptor
-        let _idp_metadata: EntityDescriptor =
-            self.idp_metadata_document_string.parse()?;
+impl SiloIdentityProviderType {
+    /// First, look up the provider type, then look in for the specific
+    /// provider details.
+    pub async fn lookup(
+        datastore: &DataStore,
+        opctx: &OpContext,
+        silo_name: &model::Name,
+        provider_name: &model::Name,
+    ) -> LookupResult<Self> {
+        let (.., silo_identity_provider) = LookupPath::new(opctx, datastore)
+            .silo_name(silo_name)
+            .silo_identity_provider_name(provider_name)
+            .fetch()
+            .await?;
 
-        // check that there is a valid sign in url
-        let _sign_in_url = self.sign_in_url(None)?;
+        match silo_identity_provider.provider_type {
+            model::SiloIdentityProviderType::Saml => {
+                let (.., silo_saml_identity_provider) =
+                    LookupPath::new(opctx, datastore)
+                        .silo_name(silo_name)
+                        .silo_saml_identity_provider_name(provider_name)
+                        .fetch()
+                        .await?;
 
-        Ok(())
+                Ok(SiloIdentityProviderType::Saml(
+                    silo_saml_identity_provider.try_into()
+                        .map_err(|e: anyhow::Error|
+                            // If an error is encountered converting from the
+                            // model to the authn type here, this is a server
+                            // error: it was validated before it went into the
+                            // DB.
+                            omicron_common::api::external::Error::internal_error(&e.to_string())
+                        )?
+                ))
+            }
+        }
     }
+}
 
+impl SiloSamlIdentityProvider {
     pub fn sign_in_url(&self, relay_state: Option<String>) -> Result<String> {
         let idp_metadata: EntityDescriptor =
             self.idp_metadata_document_string.parse()?;

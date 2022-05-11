@@ -117,13 +117,13 @@ pub async fn ask_user_to_login_to_provider(
         // unauthenticated.
         let opctx = nexus.opctx_external_authn();
 
-        let identity_provider = nexus
-            .get_silo_identity_provider(
-                &opctx,
-                &path_params.silo_name,
-                &path_params.provider_name,
-            )
-            .await?;
+        let identity_provider = SiloIdentityProviderType::lookup(
+            &nexus.datastore(),
+            &opctx,
+            &path_params.silo_name,
+            &path_params.provider_name,
+        )
+        .await?;
 
         match identity_provider {
             SiloIdentityProviderType::Saml(silo_saml_identity_provider) => {
@@ -168,13 +168,13 @@ pub async fn consume_credentials_and_authn_user(
         // unauthenticated.
         let opctx = nexus.opctx_external_authn();
 
-        let identity_provider = nexus
-            .get_silo_identity_provider(
-                &opctx,
-                &path_params.silo_name,
-                &path_params.provider_name,
-            )
-            .await?;
+        let identity_provider = SiloIdentityProviderType::lookup(
+            &nexus.datastore(),
+            &opctx,
+            &path_params.silo_name,
+            &path_params.provider_name,
+        )
+        .await?;
 
         match identity_provider {
             SiloIdentityProviderType::Saml(_silo_saml_identity_provider) => {

@@ -3914,9 +3914,12 @@ impl Nexus {
                 .map(|x| x.private_key.clone()),
         };
 
-        provider
-            .validate()
-            .map_err(|e| Error::invalid_request(&e.to_string()))?;
+        let _authn_provider: authn::silos::SiloSamlIdentityProvider =
+            provider.clone().try_into().map_err(|e: anyhow::Error|
+                // If an error is encountered converting from the model to the
+                // authn type here, this is a request error: something about the
+                // parameters of this request doesn't work.
+                Error::invalid_request(&e.to_string()))?;
 
         self.db_datastore
             .silo_saml_identity_provider_create(opctx, &authz_silo, provider)
@@ -3936,37 +3939,6 @@ impl Nexus {
                 .fetch()
                 .await?;
         Ok(silo_saml_identity_provider)
-    }
-
-    /// First, look up the row in silo_identity_provider to get provider type,
-    /// then look in a specific table for the provider details.
-    pub async fn get_silo_identity_provider(
-        &self,
-        opctx: &OpContext,
-        silo_name: &Name,
-        provider_name: &Name,
-    ) -> LookupResult<authn::silos::SiloIdentityProviderType> {
-        let (.., silo_identity_provider) =
-            LookupPath::new(opctx, &self.datastore())
-                .silo_name(silo_name)
-                .silo_identity_provider_name(provider_name)
-                .fetch()
-                .await?;
-
-        match silo_identity_provider.provider_type {
-            db::model::SiloIdentityProviderType::Saml => {
-                let (.., silo_saml_identity_provider) =
-                    LookupPath::new(opctx, &self.datastore())
-                        .silo_name(silo_name)
-                        .silo_saml_identity_provider_name(provider_name)
-                        .fetch()
-                        .await?;
-
-                Ok(authn::silos::SiloIdentityProviderType::Saml(
-                    silo_saml_identity_provider,
-                ))
-            }
-        }
     }
 
     // SSH public keys
