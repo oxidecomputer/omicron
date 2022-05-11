@@ -129,6 +129,7 @@ async fn handle_req<'a, 'b, 'c>(
             Ok(r) => r,
             Err(e) => {
                 error!(log, "deserialize record: {}", e);
+                nack(&log, &mr, &socket, &header, &src).await;
                 return;
             }
         };
