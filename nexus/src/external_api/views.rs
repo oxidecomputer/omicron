@@ -43,7 +43,7 @@ pub struct DerEncodedKeyPair {
 }
 
 #[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
-pub struct SiloSamlIdentityProvider {
+pub struct SamlIdentityProvider {
     #[serde(flatten)]
     pub identity: IdentityMetadata,
 
@@ -69,8 +69,8 @@ pub struct SiloSamlIdentityProvider {
     pub signing_keypair: Option<DerEncodedKeyPair>,
 }
 
-impl From<model::SiloSamlIdentityProvider> for SiloSamlIdentityProvider {
-    fn from(saml_idp: model::SiloSamlIdentityProvider) -> Self {
+impl From<model::SamlIdentityProvider> for SamlIdentityProvider {
+    fn from(saml_idp: model::SamlIdentityProvider) -> Self {
         Self {
             identity: saml_idp.identity(),
             idp_metadata_url: saml_idp.idp_metadata_url,

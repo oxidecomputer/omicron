@@ -227,7 +227,7 @@ CREATE TYPE omicron.public.provider_type AS ENUM (
 /*
  * Silo identity provider list
  */
-CREATE TABLE omicron.public.silo_identity_provider (
+CREATE TABLE omicron.public.identity_provider (
     silo_id UUID NOT NULL,
     provider_type omicron.public.provider_type NOT NULL,
     name TEXT NOT NULL,
@@ -239,7 +239,7 @@ CREATE TABLE omicron.public.silo_identity_provider (
 /*
  * Silo SAML identity provider
  */
-CREATE TABLE omicron.public.silo_saml_identity_provider (
+CREATE TABLE omicron.public.saml_identity_provider (
     /* Identity metadata */
     id UUID PRIMARY KEY,
     name STRING(128) NOT NULL,
@@ -263,7 +263,7 @@ CREATE TABLE omicron.public.silo_saml_identity_provider (
     private_key TEXT
 );
 
-CREATE INDEX ON omicron.public.silo_saml_identity_provider (
+CREATE INDEX ON omicron.public.saml_identity_provider (
     id,
     silo_id
 ) WHERE

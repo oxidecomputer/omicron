@@ -18,7 +18,7 @@ use samael::metadata::HTTP_REDIRECT_BINDING;
 use samael::service_provider::ServiceProvider;
 use samael::service_provider::ServiceProviderBuilder;
 
-pub struct SiloSamlIdentityProvider {
+pub struct SamlIdentityProvider {
     pub idp_metadata_document_string: String,
     pub sp_client_id: String,
     pub acs_url: String,
@@ -28,12 +28,12 @@ pub struct SiloSamlIdentityProvider {
     pub private_key: Option<String>,
 }
 
-impl TryFrom<model::SiloSamlIdentityProvider> for SiloSamlIdentityProvider {
+impl TryFrom<model::SamlIdentityProvider> for SamlIdentityProvider {
     type Error = anyhow::Error;
     fn try_from(
-        model: model::SiloSamlIdentityProvider,
+        model: model::SamlIdentityProvider,
     ) -> Result<Self, Self::Error> {
-        let provider = SiloSamlIdentityProvider {
+        let provider = SamlIdentityProvider {
             idp_metadata_document_string: model.idp_metadata_document_string,
             sp_client_id: model.sp_client_id,
             acs_url: model.acs_url,
@@ -54,11 +54,11 @@ impl TryFrom<model::SiloSamlIdentityProvider> for SiloSamlIdentityProvider {
     }
 }
 
-pub enum SiloIdentityProviderType {
-    Saml(SiloSamlIdentityProvider),
+pub enum IdentityProviderType {
+    Saml(SamlIdentityProvider),
 }
 
-impl SiloIdentityProviderType {
+impl IdentityProviderType {
     /// First, look up the provider type, then look in for the specific
     /// provider details.
     pub async fn lookup(
@@ -67,23 +67,23 @@ impl SiloIdentityProviderType {
         silo_name: &model::Name,
         provider_name: &model::Name,
     ) -> LookupResult<Self> {
-        let (.., silo_identity_provider) = LookupPath::new(opctx, datastore)
+        let (.., identity_provider) = LookupPath::new(opctx, datastore)
             .silo_name(silo_name)
-            .silo_identity_provider_name(provider_name)
+            .identity_provider_name(provider_name)
             .fetch()
             .await?;
 
-        match silo_identity_provider.provider_type {
-            model::SiloIdentityProviderType::Saml => {
-                let (.., silo_saml_identity_provider) =
+        match identity_provider.provider_type {
+            model::IdentityProviderType::Saml => {
+                let (.., saml_identity_provider) =
                     LookupPath::new(opctx, datastore)
                         .silo_name(silo_name)
-                        .silo_saml_identity_provider_name(provider_name)
+                        .saml_identity_provider_name(provider_name)
                         .fetch()
                         .await?;
 
-                Ok(SiloIdentityProviderType::Saml(
-                    silo_saml_identity_provider.try_into()
+                Ok(IdentityProviderType::Saml(
+                    saml_identity_provider.try_into()
                         .map_err(|e: anyhow::Error|
                             // If an error is encountered converting from the
                             // model to the authn type here, this is a server
@@ -97,7 +97,7 @@ impl SiloIdentityProviderType {
     }
 }
 
-impl SiloSamlIdentityProvider {
+impl SamlIdentityProvider {
     pub fn sign_in_url(&self, relay_state: Option<String>) -> Result<String> {
         let idp_metadata: EntityDescriptor =
             self.idp_metadata_document_string.parse()?;

@@ -16,8 +16,7 @@ use crate::authn::external::{
     },
 };
 use crate::authn::{
-    silos::SiloIdentityProviderType, USER_TEST_PRIVILEGED,
-    USER_TEST_UNPRIVILEGED,
+    silos::IdentityProviderType, USER_TEST_PRIVILEGED, USER_TEST_UNPRIVILEGED,
 };
 use crate::context::OpContext;
 use crate::ServerContext;
@@ -117,7 +116,7 @@ pub async fn ask_user_to_login_to_provider(
         // unauthenticated.
         let opctx = nexus.opctx_external_authn();
 
-        let identity_provider = SiloIdentityProviderType::lookup(
+        let identity_provider = IdentityProviderType::lookup(
             &nexus.datastore(),
             &opctx,
             &path_params.silo_name,
@@ -126,13 +125,12 @@ pub async fn ask_user_to_login_to_provider(
         .await?;
 
         match identity_provider {
-            SiloIdentityProviderType::Saml(silo_saml_identity_provider) => {
+            IdentityProviderType::Saml(saml_identity_provider) => {
                 let relay_state = None;
-                let sign_in_url = silo_saml_identity_provider
-                    .sign_in_url(relay_state)
-                    .map_err(|e| {
-                        HttpError::for_internal_error(e.to_string())
-                    })?;
+                let sign_in_url =
+                    saml_identity_provider.sign_in_url(relay_state).map_err(
+                        |e| HttpError::for_internal_error(e.to_string()),
+                    )?;
 
                 Ok(Response::builder()
                     .status(StatusCode::FOUND)
@@ -168,7 +166,7 @@ pub async fn consume_credentials_and_authn_user(
         // unauthenticated.
         let opctx = nexus.opctx_external_authn();
 
-        let identity_provider = SiloIdentityProviderType::lookup(
+        let identity_provider = IdentityProviderType::lookup(
             &nexus.datastore(),
             &opctx,
             &path_params.silo_name,
@@ -177,7 +175,7 @@ pub async fn consume_credentials_and_authn_user(
         .await?;
 
         match identity_provider {
-            SiloIdentityProviderType::Saml(_silo_saml_identity_provider) => {
+            IdentityProviderType::Saml(_saml_identity_provider) => {
                 todo!()
             }
         }

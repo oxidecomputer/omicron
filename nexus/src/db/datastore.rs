@@ -2697,9 +2697,9 @@ impl DataStore {
         info!(opctx.log, "deleted {} silo users for silo {}", updated_rows, id);
 
         // delete all silo identity providers
-        use db::schema::silo_identity_provider::dsl as idp_dsl;
+        use db::schema::identity_provider::dsl as idp_dsl;
 
-        let updated_rows = diesel::delete(idp_dsl::silo_identity_provider)
+        let updated_rows = diesel::delete(idp_dsl::identity_provider)
             .filter(idp_dsl::silo_id.eq(id))
             .execute_async(self.pool_authorized(opctx).await?)
             .await
@@ -2712,21 +2712,20 @@ impl DataStore {
 
         info!(opctx.log, "deleted {} silo IdPs for silo {}", updated_rows, id);
 
-        use db::schema::silo_saml_identity_provider::dsl as saml_idp_dsl;
+        use db::schema::saml_identity_provider::dsl as saml_idp_dsl;
 
-        let updated_rows =
-            diesel::update(saml_idp_dsl::silo_saml_identity_provider)
-                .filter(saml_idp_dsl::silo_id.eq(id))
-                .filter(saml_idp_dsl::time_deleted.is_null())
-                .set(saml_idp_dsl::time_deleted.eq(Utc::now()))
-                .execute_async(self.pool_authorized(opctx).await?)
-                .await
-                .map_err(|e| {
-                    public_error_from_diesel_pool(
-                        e,
-                        ErrorHandler::NotFoundByResource(authz_silo),
-                    )
-                })?;
+        let updated_rows = diesel::update(saml_idp_dsl::saml_identity_provider)
+            .filter(saml_idp_dsl::silo_id.eq(id))
+            .filter(saml_idp_dsl::time_deleted.is_null())
+            .set(saml_idp_dsl::time_deleted.eq(Utc::now()))
+            .execute_async(self.pool_authorized(opctx).await?)
+            .await
+            .map_err(|e| {
+                public_error_from_diesel_pool(
+                    e,
+                    ErrorHandler::NotFoundByResource(authz_silo),
+                )
+            })?;
 
         info!(
             opctx.log,
@@ -2736,12 +2735,12 @@ impl DataStore {
         Ok(())
     }
 
-    pub async fn silo_saml_identity_provider_create(
+    pub async fn saml_identity_provider_create(
         &self,
         opctx: &OpContext,
         authz_silo: &authz::Silo,
-        provider: db::model::SiloSamlIdentityProvider,
-    ) -> CreateResult<db::model::SiloSamlIdentityProvider> {
+        provider: db::model::SamlIdentityProvider,
+    ) -> CreateResult<db::model::SamlIdentityProvider> {
         opctx.authorize(authz::Action::CreateChild, authz_silo).await?;
 
         let name = provider.identity().name.to_string();
@@ -2749,26 +2748,22 @@ impl DataStore {
             .await?
             .transaction(move |conn| {
                 // insert silo identity provider record with type Saml
-                use db::schema::silo_identity_provider::dsl as idp_dsl;
-                diesel::insert_into(idp_dsl::silo_identity_provider)
-                    .values(db::model::SiloIdentityProvider {
+                use db::schema::identity_provider::dsl as idp_dsl;
+                diesel::insert_into(idp_dsl::identity_provider)
+                    .values(db::model::IdentityProvider {
                         silo_id: provider.silo_id,
                         name: provider.name().clone(),
-                        provider_type:
-                            db::model::SiloIdentityProviderType::Saml,
+                        provider_type: db::model::IdentityProviderType::Saml,
                         provider_id: provider.id(),
                     })
                     .execute(conn)?;
 
                 // insert silo saml identity provider record
-                use db::schema::silo_saml_identity_provider::dsl;
-                let result =
-                    diesel::insert_into(dsl::silo_saml_identity_provider)
-                        .values(provider)
-                        .returning(
-                            db::model::SiloSamlIdentityProvider::as_returning(),
-                        )
-                        .get_result(conn)?;
+                use db::schema::saml_identity_provider::dsl;
+                let result = diesel::insert_into(dsl::saml_identity_provider)
+                    .values(provider)
+                    .returning(db::model::SamlIdentityProvider::as_returning())
+                    .get_result(conn)?;
 
                 Ok(result)
             })
@@ -2777,7 +2772,7 @@ impl DataStore {
                 public_error_from_diesel_pool(
                     e,
                     ErrorHandler::Conflict(
-                        ResourceType::SiloSamlIdentityProvider,
+                        ResourceType::SamlIdentityProvider,
                         &name,
                     ),
                 )

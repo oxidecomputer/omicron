@@ -3837,12 +3837,12 @@ impl Nexus {
 
     // Silo authn identity providers
 
-    pub async fn silo_saml_identity_provider_create(
+    pub async fn saml_identity_provider_create(
         &self,
         opctx: &OpContext,
         silo_name: &Name,
-        params: params::SiloSamlIdentityProviderCreate,
-    ) -> CreateResult<db::model::SiloSamlIdentityProvider> {
+        params: params::SamlIdentityProviderCreate,
+    ) -> CreateResult<db::model::SamlIdentityProvider> {
         let (authz_silo, db_silo) = LookupPath::new(opctx, &self.db_datastore)
             .silo_name(silo_name)
             .fetch_for(authz::Action::CreateChild)
@@ -3889,8 +3889,8 @@ impl Nexus {
                 message: format!("error getting text from url: {}", e),
             })?;
 
-        let provider = db::model::SiloSamlIdentityProvider {
-            identity: db::model::SiloSamlIdentityProviderIdentity::new(
+        let provider = db::model::SamlIdentityProvider {
+            identity: db::model::SamlIdentityProviderIdentity::new(
                 Uuid::new_v4(),
                 params.identity,
             ),
@@ -3914,7 +3914,7 @@ impl Nexus {
                 .map(|x| x.private_key.clone()),
         };
 
-        let _authn_provider: authn::silos::SiloSamlIdentityProvider =
+        let _authn_provider: authn::silos::SamlIdentityProvider =
             provider.clone().try_into().map_err(|e: anyhow::Error|
                 // If an error is encountered converting from the model to the
                 // authn type here, this is a request error: something about the
@@ -3922,23 +3922,23 @@ impl Nexus {
                 Error::invalid_request(&e.to_string()))?;
 
         self.db_datastore
-            .silo_saml_identity_provider_create(opctx, &authz_silo, provider)
+            .saml_identity_provider_create(opctx, &authz_silo, provider)
             .await
     }
 
-    pub async fn silo_saml_identity_provider_fetch(
+    pub async fn saml_identity_provider_fetch(
         &self,
         opctx: &OpContext,
         silo_name: &Name,
         provider_name: &Name,
-    ) -> LookupResult<db::model::SiloSamlIdentityProvider> {
-        let (.., silo_saml_identity_provider) =
+    ) -> LookupResult<db::model::SamlIdentityProvider> {
+        let (.., saml_identity_provider) =
             LookupPath::new(opctx, &self.datastore())
                 .silo_name(silo_name)
-                .silo_saml_identity_provider_name(provider_name)
+                .saml_identity_provider_name(provider_name)
                 .fetch()
                 .await?;
-        Ok(silo_saml_identity_provider)
+        Ok(saml_identity_provider)
     }
 
     // SSH public keys

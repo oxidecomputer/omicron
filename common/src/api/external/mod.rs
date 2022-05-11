@@ -516,8 +516,8 @@ pub enum ResourceType {
     Fleet,
     Silo,
     SiloUser,
-    SiloIdentityProvider,
-    SiloSamlIdentityProvider,
+    IdentityProvider,
+    SamlIdentityProvider,
     SshKey,
     ConsoleSession,
     GlobalImage,
@@ -1748,7 +1748,7 @@ impl std::fmt::Display for Digest {
 /// A SAML configuration specifies both identity provider and service provider
 /// details
 #[derive(Clone, Debug, Serialize, JsonSchema, Deserialize)]
-pub struct SiloSamlIdentityProvider {
+pub struct SamlIdentityProvider {
     #[serde(flatten)]
     pub identity: IdentityMetadata,
 

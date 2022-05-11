@@ -141,7 +141,7 @@ where
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-pub struct SiloSamlIdentityProviderCreate {
+pub struct SamlIdentityProviderCreate {
     #[serde(flatten)]
     pub identity: IdentityMetadataCreateParams,
 

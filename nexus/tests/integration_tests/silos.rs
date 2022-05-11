@@ -4,8 +4,8 @@
 
 use nexus_test_utils::http_testing::{AuthnMode, NexusRequest, RequestBuilder};
 use omicron_common::api::external::IdentityMetadataCreateParams;
-use omicron_common::api::external::SiloSamlIdentityProvider;
-use omicron_nexus::authn::silos::SiloIdentityProviderType;
+use omicron_common::api::external::SamlIdentityProvider;
+use omicron_nexus::authn::silos::IdentityProviderType;
 use omicron_nexus::external_api::params;
 use omicron_nexus::external_api::views::{Organization, Silo};
 use omicron_nexus::TestInterfaces as _;
@@ -212,10 +212,10 @@ async fn test_create_a_saml_idp(cptestctx: &ControlPlaneTestContext) {
             .respond_with(status_code(200).body(saml_idp_descriptor)),
     );
 
-    let silo_saml_idp: SiloSamlIdentityProvider = object_create(
+    let silo_saml_idp: SamlIdentityProvider = object_create(
         client,
         &format!("/silos/{}/saml_identity_providers", SILO_NAME),
-        &params::SiloSamlIdentityProviderCreate {
+        &params::SamlIdentityProviderCreate {
             identity: IdentityMetadataCreateParams {
                 name: "some-totally-real-saml-provider"
                     .to_string()
@@ -252,7 +252,7 @@ async fn test_create_a_saml_idp(cptestctx: &ControlPlaneTestContext) {
         .await
         .unwrap();
 
-    let retrieved_silo_idp_from_nexus = SiloIdentityProviderType::lookup(
+    let retrieved_silo_idp_from_nexus = IdentityProviderType::lookup(
         &nexus.datastore(),
         &nexus.opctx_external_authn(),
         &omicron_common::api::external::Name::try_from(SILO_NAME.to_string())
@@ -268,13 +268,13 @@ async fn test_create_a_saml_idp(cptestctx: &ControlPlaneTestContext) {
     .unwrap();
 
     match retrieved_silo_idp_from_nexus {
-        SiloIdentityProviderType::Saml(_) => {
+        IdentityProviderType::Saml(_) => {
             // ok
         }
     }
 
     // Check that created identity provider exists
-    let _retrieved_silo_saml_idp: SiloSamlIdentityProvider =
+    let _retrieved_silo_saml_idp: SamlIdentityProvider =
         NexusRequest::object_get(
             &client,
             &format!(
@@ -334,10 +334,10 @@ async fn test_deleting_a_silo_deletes_the_idp(
             .respond_with(status_code(200).body(saml_idp_descriptor)),
     );
 
-    let _silo_saml_idp: SiloSamlIdentityProvider = object_create(
+    let _silo_saml_idp: SamlIdentityProvider = object_create(
         client,
         &format!("/silos/{}/saml_identity_providers", SILO_NAME),
-        &params::SiloSamlIdentityProviderCreate {
+        &params::SamlIdentityProviderCreate {
             identity: IdentityMetadataCreateParams {
                 name: "some-totally-real-saml-provider"
                     .to_string()
@@ -401,7 +401,7 @@ async fn test_create_a_saml_idp_invalid_descriptor_truncated(
             Method::POST,
             &format!("/silos/{}/saml_identity_providers", SILO_NAME),
         )
-        .body(Some(&params::SiloSamlIdentityProviderCreate {
+        .body(Some(&params::SamlIdentityProviderCreate {
             identity: IdentityMetadataCreateParams {
                 name: "some-totally-real-saml-provider"
                     .to_string()
@@ -470,7 +470,7 @@ async fn test_create_a_saml_idp_invalid_descriptor_no_redirect_binding(
             Method::POST,
             &format!("/silos/{}/saml_identity_providers", SILO_NAME),
         )
-        .body(Some(&params::SiloSamlIdentityProviderCreate {
+        .body(Some(&params::SamlIdentityProviderCreate {
             identity: IdentityMetadataCreateParams {
                 name: "some-totally-real-saml-provider"
                     .to_string()
@@ -517,10 +517,10 @@ async fn test_create_a_hidden_silo_saml_idp(
             .respond_with(status_code(200).body(saml_idp_descriptor)),
     );
 
-    let silo_saml_idp: SiloSamlIdentityProvider = object_create(
+    let silo_saml_idp: SamlIdentityProvider = object_create(
         client,
         "/silos/hidden/saml_identity_providers",
-        &params::SiloSamlIdentityProviderCreate {
+        &params::SamlIdentityProviderCreate {
             identity: IdentityMetadataCreateParams {
                 name: "some-totally-real-saml-provider"
                     .to_string()
@@ -588,7 +588,7 @@ async fn test_saml_idp_metadata_url_404(cptestctx: &ControlPlaneTestContext) {
             Method::POST,
             &format!("/silos/{}/saml_identity_providers", SILO_NAME),
         )
-        .body(Some(&params::SiloSamlIdentityProviderCreate {
+        .body(Some(&params::SamlIdentityProviderCreate {
             identity: IdentityMetadataCreateParams {
                 name: "some-totally-real-saml-provider"
                     .to_string()
@@ -634,7 +634,7 @@ async fn test_saml_idp_metadata_url_invalid(
             Method::POST,
             &format!("/silos/{}/saml_identity_providers", SILO_NAME),
         )
-        .body(Some(&params::SiloSamlIdentityProviderCreate {
+        .body(Some(&params::SamlIdentityProviderCreate {
             identity: IdentityMetadataCreateParams {
                 name: "some-totally-real-saml-provider"
                     .to_string()
@@ -731,7 +731,7 @@ async fn test_saml_idp_reject_keypair(cptestctx: &ControlPlaneTestContext) {
                 Method::POST,
                 &format!("/silos/{}/saml_identity_providers", SILO_NAME),
             )
-            .body(Some(&params::SiloSamlIdentityProviderCreate {
+            .body(Some(&params::SamlIdentityProviderCreate {
                 identity: IdentityMetadataCreateParams {
                     name: "some-totally-real-saml-provider"
                         .to_string()
@@ -786,7 +786,7 @@ async fn test_saml_idp_rsa_keypair_ok(cptestctx: &ControlPlaneTestContext) {
             Method::POST,
             &format!("/silos/{}/saml_identity_providers", SILO_NAME),
         )
-        .body(Some(&params::SiloSamlIdentityProviderCreate {
+        .body(Some(&params::SamlIdentityProviderCreate {
             identity: IdentityMetadataCreateParams {
                 name: "some-totally-real-saml-provider"
                     .to_string()

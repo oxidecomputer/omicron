@@ -256,14 +256,14 @@ has_permission(actor: AuthenticatedActor, "modify", session: ConsoleSession)
 
 has_permission(actor: AuthenticatedActor, "read", silo: Silo)
 	if has_role(actor, "external-authenticator", silo.fleet);
-has_permission(actor: AuthenticatedActor, "read", silo_identity_provider: SiloIdentityProvider)
-	if has_role(actor, "external-authenticator", silo_identity_provider.silo.fleet);
-has_permission(actor: AuthenticatedActor, "list_children", silo_identity_provider: SiloIdentityProvider)
-	if has_role(actor, "external-authenticator", silo_identity_provider.silo.fleet);
-has_permission(actor: AuthenticatedActor, "read", silo_saml_identity_provider: SiloSamlIdentityProvider)
-	if has_role(actor, "external-authenticator", silo_saml_identity_provider.silo.fleet);
-has_permission(actor: AuthenticatedActor, "list_children", silo_saml_identity_provider: SiloSamlIdentityProvider)
-	if has_role(actor, "external-authenticator", silo_saml_identity_provider.silo.fleet);
+has_permission(actor: AuthenticatedActor, "read", identity_provider: IdentityProvider)
+	if has_role(actor, "external-authenticator", identity_provider.silo.fleet);
+has_permission(actor: AuthenticatedActor, "list_children", identity_provider: IdentityProvider)
+	if has_role(actor, "external-authenticator", identity_provider.silo.fleet);
+has_permission(actor: AuthenticatedActor, "read", saml_identity_provider: SamlIdentityProvider)
+	if has_role(actor, "external-authenticator", saml_identity_provider.silo.fleet);
+has_permission(actor: AuthenticatedActor, "list_children", saml_identity_provider: SamlIdentityProvider)
+	if has_role(actor, "external-authenticator", saml_identity_provider.silo.fleet);
 
 resource SiloUser {
 	permissions = [
@@ -292,7 +292,7 @@ resource SshKey {
 has_relation(user: SiloUser, "silo_user", ssh_key: SshKey)
 	if ssh_key.silo_user = user;
 
-resource SiloIdentityProvider {
+resource IdentityProvider {
 	permissions = [
 	    "read",
 	    "modify",
@@ -308,10 +308,10 @@ resource SiloIdentityProvider {
 	"modify" if "admin" on "parent_silo";
 	"create_child" if "admin" on "parent_silo";
 }
-has_relation(silo: Silo, "parent_silo", silo_identity_provider: SiloIdentityProvider)
-	if silo_identity_provider.silo = silo;
+has_relation(silo: Silo, "parent_silo", identity_provider: IdentityProvider)
+	if identity_provider.silo = silo;
 
-resource SiloSamlIdentityProvider {
+resource SamlIdentityProvider {
 	permissions = [
 	    "read",
 	    "modify",
@@ -327,6 +327,6 @@ resource SiloSamlIdentityProvider {
 	"modify" if "admin" on "parent_silo";
 	"create_child" if "admin" on "parent_silo";
 }
-has_relation(silo: Silo, "parent_silo", silo_saml_identity_provider: SiloSamlIdentityProvider)
-	if silo_saml_identity_provider.silo = silo;
+has_relation(silo: Silo, "parent_silo", saml_identity_provider: SamlIdentityProvider)
+	if saml_identity_provider.silo = silo;
 

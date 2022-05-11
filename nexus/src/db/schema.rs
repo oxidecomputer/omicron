@@ -159,16 +159,16 @@ table! {
 }
 
 table! {
-    silo_identity_provider (silo_id, provider_id) {
+    identity_provider (silo_id, provider_id) {
         silo_id -> Uuid,
-        provider_type -> crate::db::model::SiloIdentityProviderTypeEnum,
+        provider_type -> crate::db::model::IdentityProviderTypeEnum,
         name -> Text,
         provider_id -> Uuid,
     }
 }
 
 table! {
-    silo_saml_identity_provider (id) {
+    saml_identity_provider (id) {
         id -> Uuid,
         name -> Text,
         description -> Text,
@@ -500,7 +500,7 @@ allow_tables_to_appear_in_same_query!(
     saga,
     saga_node_event,
     silo,
-    silo_identity_provider,
+    identity_provider,
     console_session,
     sled,
     router_route,

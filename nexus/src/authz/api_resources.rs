@@ -468,7 +468,7 @@ authz_resource! {
 }
 
 authz_resource! {
-    name = "SiloIdentityProvider",
+    name = "IdentityProvider",
     parent = "Silo",
     primary_key = Uuid,
     roles_allowed = false,
@@ -476,7 +476,7 @@ authz_resource! {
 }
 
 authz_resource! {
-    name = "SiloSamlIdentityProvider",
+    name = "SamlIdentityProvider",
     parent = "Silo",
     primary_key = Uuid,
     roles_allowed = false,

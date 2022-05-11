@@ -250,8 +250,8 @@ lazy_static! {
         };
 
     // SAML identity provider
-    pub static ref SILO_SAML_IDENTITY_PROVIDER: params::SiloSamlIdentityProviderCreate =
-        params::SiloSamlIdentityProviderCreate {
+    pub static ref SAML_IDENTITY_PROVIDER: params::SamlIdentityProviderCreate =
+        params::SamlIdentityProviderCreate {
             identity: IdentityMetadataCreateParams {
                 name: "demo-saml-provider".to_string().parse().unwrap(),
                 description: "a demo provider".to_string(),
@@ -915,7 +915,7 @@ lazy_static! {
             url: "/silos/default-silo/saml_identity_providers",
             visibility: Visibility::Public, // Users can see their own silo! This includes USER_TEST_UNPRIVILEGED
             allowed_methods: vec![AllowedMethod::Post(
-                serde_json::to_value(&*SILO_SAML_IDENTITY_PROVIDER).unwrap(),
+                serde_json::to_value(&*SAML_IDENTITY_PROVIDER).unwrap(),
             )],
         },
         VerifyEndpoint {

@@ -204,7 +204,7 @@ lazy_static! {
         // Create a SAML identity provider
         SetupReq {
             url: "/silos/default-silo/saml_identity_providers",
-            body: serde_json::to_value(&*SILO_SAML_IDENTITY_PROVIDER).unwrap(),
+            body: serde_json::to_value(&*SAML_IDENTITY_PROVIDER).unwrap(),
         },
     ];
 }

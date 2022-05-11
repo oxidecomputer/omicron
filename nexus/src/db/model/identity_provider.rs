@@ -4,7 +4,7 @@
 
 use crate::db::identity::Resource;
 use crate::db::model::{impl_enum_type, Name};
-use crate::db::schema::{silo_identity_provider, silo_saml_identity_provider};
+use crate::db::schema::{identity_provider, saml_identity_provider};
 use db_macros::Resource;
 use omicron_common::api::external;
 
@@ -15,36 +15,36 @@ use uuid::Uuid;
 impl_enum_type!(
     #[derive(SqlType, Debug, QueryId)]
     #[diesel(postgres_type(name = "provider_type"))]
-    pub struct SiloIdentityProviderTypeEnum;
+    pub struct IdentityProviderTypeEnum;
 
     #[derive(Copy, Clone, Debug, AsExpression, FromSqlRow, Serialize, Deserialize, PartialEq)]
-    #[diesel(sql_type = SiloIdentityProviderTypeEnum)]
-    pub enum SiloIdentityProviderType;
+    #[diesel(sql_type = IdentityProviderTypeEnum)]
+    pub enum IdentityProviderType;
 
     // Enum values
     Saml => b"saml"
 );
 
 #[derive(Queryable, Insertable, Clone, Debug, Selectable)]
-#[diesel(table_name = silo_identity_provider)]
-pub struct SiloIdentityProvider {
+#[diesel(table_name = identity_provider)]
+pub struct IdentityProvider {
     pub silo_id: Uuid,
-    pub provider_type: SiloIdentityProviderType,
+    pub provider_type: IdentityProviderType,
     pub name: Name,
     pub provider_id: Uuid,
 }
 
-impl SiloIdentityProvider {
+impl IdentityProvider {
     pub fn id(&self) -> Uuid {
         self.provider_id
     }
 }
 
 #[derive(Queryable, Insertable, Clone, Debug, Selectable, Resource)]
-#[diesel(table_name = silo_saml_identity_provider)]
-pub struct SiloSamlIdentityProvider {
+#[diesel(table_name = saml_identity_provider)]
+pub struct SamlIdentityProvider {
     #[diesel(embed)]
-    pub identity: SiloSamlIdentityProviderIdentity,
+    pub identity: SamlIdentityProviderIdentity,
 
     pub silo_id: Uuid,
 
@@ -60,9 +60,9 @@ pub struct SiloSamlIdentityProvider {
     pub private_key: Option<String>,
 }
 
-impl Into<external::SiloSamlIdentityProvider> for SiloSamlIdentityProvider {
-    fn into(self) -> external::SiloSamlIdentityProvider {
-        external::SiloSamlIdentityProvider {
+impl Into<external::SamlIdentityProvider> for SamlIdentityProvider {
+    fn into(self) -> external::SamlIdentityProvider {
+        external::SamlIdentityProvider {
             identity: self.identity(),
             idp_metadata_url: self.idp_metadata_url.clone(),
             idp_entity_id: self.idp_entity_id.clone(),

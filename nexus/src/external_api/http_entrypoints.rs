@@ -369,15 +369,15 @@ async fn silos_delete_silo(
 async fn silo_saml_idp_create(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<SiloPathParam>,
-    new_provider: TypedBody<params::SiloSamlIdentityProviderCreate>,
-) -> Result<HttpResponseCreated<views::SiloSamlIdentityProvider>, HttpError> {
+    new_provider: TypedBody<params::SamlIdentityProviderCreate>,
+) -> Result<HttpResponseCreated<views::SamlIdentityProvider>, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
 
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
         let provider = nexus
-            .silo_saml_identity_provider_create(
+            .saml_identity_provider_create(
                 &opctx,
                 &path_params.into_inner().silo_name,
                 new_provider.into_inner(),
@@ -406,7 +406,7 @@ struct SiloSamlPathParam {
 async fn silo_saml_idp_fetch(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<SiloSamlPathParam>,
-) -> Result<HttpResponseOk<views::SiloSamlIdentityProvider>, HttpError> {
+) -> Result<HttpResponseOk<views::SamlIdentityProvider>, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
 
@@ -415,7 +415,7 @@ async fn silo_saml_idp_fetch(
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
         let provider = nexus
-            .silo_saml_identity_provider_fetch(
+            .saml_identity_provider_fetch(
                 &opctx,
                 &path_params.silo_name,
                 &path_params.provider_name,
