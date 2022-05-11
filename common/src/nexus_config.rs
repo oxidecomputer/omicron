@@ -67,11 +67,12 @@ impl std::cmp::PartialEq<std::io::Error> for LoadError {
 #[serde_as]
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
+#[allow(clippy::large_enum_variant)]
 pub enum Database {
     FromDns,
     FromUrl {
         #[serde_as(as = "DisplayFromStr")]
-        url: PostgresConfigWithUrl
+        url: PostgresConfigWithUrl,
     },
 }
 

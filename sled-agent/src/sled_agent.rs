@@ -203,7 +203,8 @@ impl SledAgent {
             data_link.clone(),
             Ipv6Subnet::<SLED_PREFIX>::new(*sled_address.ip()),
             services::Config::default(),
-        ).await?;
+        )
+        .await?;
 
         Ok(SledAgent {
             id: config.id,

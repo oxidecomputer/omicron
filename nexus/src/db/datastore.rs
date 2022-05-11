@@ -253,7 +253,10 @@ impl DataStore {
     }
 
     /// Stores a new service in the database.
-    pub async fn service_upsert(&self, service: Service) -> CreateResult<Service> {
+    pub async fn service_upsert(
+        &self,
+        service: Service,
+    ) -> CreateResult<Service> {
         use db::schema::service::dsl;
 
         let sled_id = service.sled_id;

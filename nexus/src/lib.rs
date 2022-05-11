@@ -153,13 +153,12 @@ impl Server {
 /// Run an instance of the [Server].
 pub async fn run_server(config: &Config) -> Result<(), String> {
     use slog::Drain;
-    let (drain, registration) = slog_dtrace::with_drain(
-        config
-            .pkg
-            .log
-            .to_logger("nexus")
-            .map_err(|message| format!("initializing logger: {}", message))?,
-    );
+    let (drain, registration) =
+        slog_dtrace::with_drain(
+            config.pkg.log.to_logger("nexus").map_err(|message| {
+                format!("initializing logger: {}", message)
+            })?,
+        );
     let log = slog::Logger::root(drain.fuse(), slog::o!());
     if let slog_dtrace::ProbeRegistration::Failed(e) = registration {
         let msg = format!("failed to register DTrace probes: {}", e);

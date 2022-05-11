@@ -202,20 +202,20 @@ impl Server {
                     return;
                 }
             };
-            let records: Vec<DnsRecord> = match serde_json::from_slice(bits.as_ref())
-            {
-                Ok(r) => r,
-                Err(e) => {
-                    error!(self.log, "deserialize record: {}", e);
-                    match response.tx.send(Vec::new()) {
-                        Ok(_) => {}
-                        Err(e) => {
-                            error!(self.log, "response tx: {:?}", e);
+            let records: Vec<DnsRecord> =
+                match serde_json::from_slice(bits.as_ref()) {
+                    Ok(r) => r,
+                    Err(e) => {
+                        error!(self.log, "deserialize record: {}", e);
+                        match response.tx.send(Vec::new()) {
+                            Ok(_) => {}
+                            Err(e) => {
+                                error!(self.log, "response tx: {:?}", e);
+                            }
                         }
+                        return;
                     }
-                    return;
-                }
-            };
+                };
             match response.tx.send(vec![DnsKV { key, records }]) {
                 Ok(_) => {}
                 Err(e) => {

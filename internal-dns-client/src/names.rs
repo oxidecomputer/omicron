@@ -25,7 +25,7 @@ impl fmt::Display for SRV {
         match &self {
             SRV::Service(name) => {
                 write!(f, "_{}._tcp.{}", name, DNS_ZONE)
-            },
+            }
             SRV::Backend(name, id) => {
                 write!(f, "_{}._tcp.{}.{}", name, id, DNS_ZONE)
             }
@@ -46,7 +46,7 @@ impl fmt::Display for AAAA {
         match &self {
             AAAA::Sled(id) => {
                 write!(f, "{}.sled.{}", id, DNS_ZONE)
-            },
+            }
             AAAA::Zone(id) => {
                 write!(f, "{}.host.{}", id, DNS_ZONE)
             }

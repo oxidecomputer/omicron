@@ -206,7 +206,11 @@ struct DatasetInfo {
 }
 
 impl DatasetInfo {
-    fn new(pool: &str, kind: DatasetKind, address: SocketAddrV6) -> DatasetInfo {
+    fn new(
+        pool: &str,
+        kind: DatasetKind,
+        address: SocketAddrV6,
+    ) -> DatasetInfo {
         match kind {
             DatasetKind::CockroachDb { .. } => DatasetInfo {
                 name: DatasetName::new(pool, "cockroachdb"),
@@ -303,9 +307,13 @@ impl DatasetInfo {
                 // Await liveness of the cluster.
                 info!(log, "start_zone: awaiting liveness of CRDB");
                 let check_health = || async {
-                    reqwest::get(format!("http://[{}]:{}/health?ready=1", address.ip(), 8080))
-                        .await
-                        .map_err(backoff::BackoffError::transient)
+                    reqwest::get(format!(
+                        "http://[{}]:{}/health?ready=1",
+                        address.ip(),
+                        8080
+                    ))
+                    .await
+                    .map_err(backoff::BackoffError::transient)
                 };
                 let log_failure = |_, _| {
                     warn!(log, "cockroachdb not yet alive");
@@ -455,8 +463,10 @@ async fn ensure_running_zone(
     dataset_name: &DatasetName,
     do_format: bool,
 ) -> Result<RunningZone, Error> {
-    let address_request =
-        AddressRequest::new_static(IpAddr::V6(*dataset_info.address.ip()), None);
+    let address_request = AddressRequest::new_static(
+        IpAddr::V6(*dataset_info.address.ip()),
+        None,
+    );
 
     let err =
         RunningZone::get(log, &dataset_info.zone_prefix(), address_request)

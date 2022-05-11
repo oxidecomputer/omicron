@@ -3,8 +3,8 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use super::{ServiceKind, SqlU16};
-use crate::db::schema::service;
 use crate::db::ipv6;
+use crate::db::schema::service;
 use db_macros::Asset;
 use std::net::SocketAddrV6;
 use uuid::Uuid;

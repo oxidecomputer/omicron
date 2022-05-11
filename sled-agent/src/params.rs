@@ -247,34 +247,26 @@ impl From<DatasetEnsureBody> for sled_agent_client::types::DatasetEnsureBody {
 // Struct variant enums require some assistance for serialization to TOML.
 #[serde(tag = "type")]
 pub enum ServiceType {
-    Nexus {
-        internal_address: SocketAddrV6,
-        external_address: SocketAddrV6,
-    },
-    InternalDns {
-        server_address: SocketAddrV6,
-        dns_address: SocketAddrV6,
-    },
+    Nexus { internal_address: SocketAddrV6, external_address: SocketAddrV6 },
+    InternalDns { server_address: SocketAddrV6, dns_address: SocketAddrV6 },
 }
 
 impl From<ServiceType> for sled_agent_client::types::ServiceType {
     fn from(s: ServiceType) -> Self {
-        use ServiceType as St;
         use sled_agent_client::types::ServiceType as AutoSt;
+        use ServiceType as St;
 
         match s {
-            St::Nexus { internal_address, external_address } => {
-                AutoSt::Nexus {
-                    internal_address: internal_address.to_string(),
-                    external_address: external_address.to_string(),
-                }
+            St::Nexus { internal_address, external_address } => AutoSt::Nexus {
+                internal_address: internal_address.to_string(),
+                external_address: external_address.to_string(),
             },
             St::InternalDns { server_address, dns_address } => {
                 AutoSt::InternalDns {
                     server_address: server_address.to_string(),
                     dns_address: dns_address.to_string(),
                 }
-            },
+            }
         }
     }
 }

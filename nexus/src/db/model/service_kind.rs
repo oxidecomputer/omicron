@@ -24,9 +24,7 @@ impl_enum_type!(
 impl From<internal_api::params::ServiceKind> for ServiceKind {
     fn from(k: internal_api::params::ServiceKind) -> Self {
         match k {
-            internal_api::params::ServiceKind::Nexus => {
-                ServiceKind::Nexus
-            }
+            internal_api::params::ServiceKind::Nexus => ServiceKind::Nexus,
             internal_api::params::ServiceKind::Oximeter => {
                 ServiceKind::Oximeter
             }

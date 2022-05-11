@@ -100,9 +100,8 @@ pub async fn test_setup_with_config(
     let clickhouse = dev::clickhouse::ClickHouseInstance::new(0).await.unwrap();
 
     // Store actual address/port information for the databases after they start.
-    config.runtime.database = nexus_config::Database::FromUrl {
-        url: database.pg_config().clone()
-    };
+    config.runtime.database =
+        nexus_config::Database::FromUrl { url: database.pg_config().clone() };
     config.pkg.timeseries_db.address.set_port(clickhouse.port());
 
     let server = omicron_nexus::Server::start(&config, rack_id, &logctx.log)

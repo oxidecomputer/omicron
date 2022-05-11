@@ -128,18 +128,20 @@ impl std::fmt::Display for SchemeName {
 #[cfg(test)]
 mod test {
     use super::{
-        AuthnConfig, Config, ConsoleConfig, LoadError,
-        PackageConfig, SchemeName, TimeseriesDbConfig, UpdatesConfig,
+        AuthnConfig, Config, ConsoleConfig, LoadError, PackageConfig,
+        SchemeName, TimeseriesDbConfig, UpdatesConfig,
     };
-    use omicron_common::address::{Ipv6Subnet, RACK_PREFIX};
-    use omicron_common::nexus_config::{LoadErrorKind, Database, RuntimeConfig};
     use dropshot::ConfigDropshot;
     use dropshot::ConfigLogging;
     use dropshot::ConfigLoggingIfExists;
     use dropshot::ConfigLoggingLevel;
     use libc;
-    use std::net::{SocketAddr, Ipv6Addr};
+    use omicron_common::address::{Ipv6Subnet, RACK_PREFIX};
+    use omicron_common::nexus_config::{
+        Database, LoadErrorKind, RuntimeConfig,
+    };
     use std::fs;
+    use std::net::{Ipv6Addr, SocketAddr};
     use std::path::Path;
     use std::path::PathBuf;
 
@@ -376,9 +378,13 @@ mod test {
         )
         .expect_err("expected failure");
         if let LoadErrorKind::Parse(error) = &error.kind {
-            assert!(error.to_string().starts_with(
-                "unsupported authn scheme: \"trust-me\""
-            ), "error = {}", error.to_string());
+            assert!(
+                error
+                    .to_string()
+                    .starts_with("unsupported authn scheme: \"trust-me\""),
+                "error = {}",
+                error.to_string()
+            );
         } else {
             panic!(
                 "Got an unexpected error, expected Parse but got {:?}",

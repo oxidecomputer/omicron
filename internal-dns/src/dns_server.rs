@@ -140,9 +140,9 @@ async fn handle_req<'a, 'b, 'c>(
                     return;
                 }
             };
-            srv.set_name(name)
-                .set_rr_type(RecordType::SRV)
-                .set_data(Some(RData::SRV(SRV::new(*prio, *weight, *port, tgt))));
+            srv.set_name(name).set_rr_type(RecordType::SRV).set_data(Some(
+                RData::SRV(SRV::new(*prio, *weight, *port, tgt)),
+            ));
 
             let mresp = rb.build(header, vec![&srv], vec![], vec![], vec![]);
 

@@ -7,11 +7,11 @@
 use crate::illumos::dladm::PhysicalLink;
 use crate::illumos::running_zone::{InstalledZone, RunningZone};
 use crate::illumos::vnic::VnicAllocator;
-use crate::illumos::zone::{AddressRequest, Zones};
 use crate::illumos::zfs::ZONE_ZFS_DATASET_MOUNTPOINT;
+use crate::illumos::zone::{AddressRequest, Zones};
 use crate::params::{ServiceEnsureBody, ServiceRequest, ServiceType};
 use dropshot::ConfigDropshot;
-use omicron_common::address::{Ipv6Subnet, SLED_PREFIX, RACK_PREFIX};
+use omicron_common::address::{Ipv6Subnet, RACK_PREFIX, SLED_PREFIX};
 use omicron_common::nexus_config::{self, RuntimeConfig as NexusRuntimeConfig};
 use slog::Logger;
 use std::collections::HashSet;
@@ -106,7 +106,7 @@ impl Default for Config {
                     .join(PathBuf::from(zone_name))
                     .join("root")
                     .join(format!("var/svc/manifest/site/{}", svc_name))
-            })
+            }),
         }
     }
 }
@@ -284,10 +284,7 @@ impl ServiceManager {
             let default_smf_name = format!("{}:default", smf_name);
 
             match service.service_type {
-                ServiceType::Nexus {
-                    internal_address,
-                    external_address,
-                } => {
+                ServiceType::Nexus { internal_address, external_address } => {
                     info!(self.log, "Setting up Nexus service");
 
                     // Nexus takes a separate config file for parameters which
@@ -302,39 +299,50 @@ impl ServiceManager {
                             bind_address: SocketAddr::V6(internal_address),
                             ..Default::default()
                         },
-                        subnet: Ipv6Subnet::<RACK_PREFIX>::new(self.sled_subnet.net().ip()),
+                        subnet: Ipv6Subnet::<RACK_PREFIX>::new(
+                            self.sled_subnet.net().ip(),
+                        ),
                         database: nexus_config::Database::FromDns,
                     };
 
                     // Copy the partial config file to the expected location.
                     let config_dir = (self.config.get_svc_config_dir)(
-                        running_zone.name(), &service.name
+                        running_zone.name(),
+                        &service.name,
                     );
-                    let partial_config_path = config_dir.join(PARTIAL_CONFIG_FILENAME);
+                    let partial_config_path =
+                        config_dir.join(PARTIAL_CONFIG_FILENAME);
                     let config_path = config_dir.join(COMPLETE_CONFIG_FILENAME);
                     tokio::fs::copy(partial_config_path, &config_path)
                         .await
-                        .map_err(|err| Error::Io { path: config_path.clone(), err })?;
+                        .map_err(|err| Error::Io {
+                            path: config_path.clone(),
+                            err,
+                        })?;
 
                     // Serialize the configuration and append it into the file.
                     let serialized_cfg = toml::Value::try_from(&runtime_config)
                         .expect("Cannot serialize config");
                     let config_str =
                         toml::to_string(&serialized_cfg).map_err(|err| {
-                            Error::TomlSerialize { path: config_path.clone(), err }
+                            Error::TomlSerialize {
+                                path: config_path.clone(),
+                                err,
+                            }
                         })?;
-                    let mut file = tokio::fs::OpenOptions::new().append(true).open(&config_path)
+                    let mut file = tokio::fs::OpenOptions::new()
+                        .append(true)
+                        .open(&config_path)
                         .await
-                        .map_err(|err| Error::Io { path: config_path.clone(), err })?;
-                    file.write_all(config_str.as_bytes())
-                        .await
-                        .map_err(|err| Error::Io { path: config_path.clone(), err })?;
-
-                },
-                ServiceType::InternalDns {
-                    server_address,
-                    dns_address,
-                } => {
+                        .map_err(|err| Error::Io {
+                            path: config_path.clone(),
+                            err,
+                        })?;
+                    file.write_all(config_str.as_bytes()).await.map_err(
+                        |err| Error::Io { path: config_path.clone(), err },
+                    )?;
+                }
+                ServiceType::InternalDns { server_address, dns_address } => {
                     info!(self.log, "Setting up internal-dns service");
                     running_zone
                         .run_cmd(&[
@@ -344,7 +352,8 @@ impl ServiceManager {
                             "setprop",
                             &format!(
                                 "config/server_address=[{}]:{}",
-                                server_address.ip(), server_address.port(),
+                                server_address.ip(),
+                                server_address.port(),
                             ),
                         ])
                         .map_err(|err| Error::ZoneCommand {
@@ -360,7 +369,8 @@ impl ServiceManager {
                             "setprop",
                             &format!(
                                 "config/dns_address=[{}]:{}",
-                                dns_address.ip(), dns_address.port(),
+                                dns_address.ip(),
+                                dns_address.port(),
                             ),
                         ])
                         .map_err(|err| Error::ZoneCommand {
@@ -482,7 +492,7 @@ mod test {
     use crate::illumos::{
         dladm::MockDladm, dladm::PhysicalLink, svc, zone::MockZones,
     };
-    use std::net::{SocketAddrV6, Ipv6Addr};
+    use std::net::{Ipv6Addr, SocketAddrV6};
     use std::os::unix::process::ExitStatusExt;
     use uuid::Uuid;
 
@@ -546,8 +556,18 @@ mod test {
                 addresses: vec![],
                 gz_addresses: vec![],
                 service_type: ServiceType::Nexus {
-                    internal_address: SocketAddrV6::new(Ipv6Addr::LOCALHOST, 0, 0, 0),
-                    external_address: SocketAddrV6::new(Ipv6Addr::LOCALHOST, 0, 0, 0),
+                    internal_address: SocketAddrV6::new(
+                        Ipv6Addr::LOCALHOST,
+                        0,
+                        0,
+                        0,
+                    ),
+                    external_address: SocketAddrV6::new(
+                        Ipv6Addr::LOCALHOST,
+                        0,
+                        0,
+                        0,
+                    ),
                 },
             }],
         })
@@ -565,8 +585,18 @@ mod test {
                 addresses: vec![],
                 gz_addresses: vec![],
                 service_type: ServiceType::Nexus {
-                    internal_address: SocketAddrV6::new(Ipv6Addr::LOCALHOST, 0, 0, 0),
-                    external_address: SocketAddrV6::new(Ipv6Addr::LOCALHOST, 0, 0, 0),
+                    internal_address: SocketAddrV6::new(
+                        Ipv6Addr::LOCALHOST,
+                        0,
+                        0,
+                        0,
+                    ),
+                    external_address: SocketAddrV6::new(
+                        Ipv6Addr::LOCALHOST,
+                        0,
+                        0,
+                        0,
+                    ),
                 },
             }],
         })
@@ -598,20 +628,25 @@ mod test {
     impl TestConfig {
         async fn new() -> Self {
             let config_dir = tempfile::TempDir::new().unwrap();
-            tokio::fs::File::create(config_dir.path().join(PARTIAL_CONFIG_FILENAME)).await.unwrap();
-            Self {
-                config_dir
-            }
+            tokio::fs::File::create(
+                config_dir.path().join(PARTIAL_CONFIG_FILENAME),
+            )
+            .await
+            .unwrap();
+            Self { config_dir }
         }
 
         fn make_config(&self) -> Config {
-            let all_svcs_config_path = self.config_dir.path().join(SERVICE_CONFIG_FILENAME);
+            let all_svcs_config_path =
+                self.config_dir.path().join(SERVICE_CONFIG_FILENAME);
             let svc_config_dir = self.config_dir.path().to_path_buf();
             Config {
                 all_svcs_config_path,
-                get_svc_config_dir: Box::new(move |_zone_name: &str, _svc_name: &str| {
-                    svc_config_dir.clone()
-                })
+                get_svc_config_dir: Box::new(
+                    move |_zone_name: &str, _svc_name: &str| {
+                        svc_config_dir.clone()
+                    },
+                ),
             }
         }
     }

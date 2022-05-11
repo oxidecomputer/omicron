@@ -5,7 +5,7 @@
 use super::{Generation, SqlU16};
 use crate::db::collection_insert::DatastoreCollection;
 use crate::db::ipv6;
-use crate::db::schema::{sled, service, zpool};
+use crate::db::schema::{service, sled, zpool};
 use chrono::{DateTime, Utc};
 use db_macros::Asset;
 use std::net::Ipv6Addr;
