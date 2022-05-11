@@ -8,12 +8,15 @@ use crate::illumos::dladm::PhysicalLink;
 use crate::illumos::running_zone::{InstalledZone, RunningZone};
 use crate::illumos::vnic::VnicAllocator;
 use crate::illumos::zone::{AddressRequest, Zones};
-use crate::params::{ServiceEnsureBody, ServiceRequest};
-use omicron_common::address::{DNS_PORT, DNS_SERVER_PORT};
+use crate::illumos::zfs::ZONE_ZFS_DATASET_MOUNTPOINT;
+use crate::params::{ServiceEnsureBody, ServiceRequest, ServiceType};
+use dropshot::ConfigDropshot;
+use omicron_common::address::{Ipv6Subnet, SLED_PREFIX, RACK_PREFIX};
+use omicron_common::nexus_config::RuntimeConfig as NexusRuntimeConfig;
 use slog::Logger;
 use std::collections::HashSet;
 use std::iter::FromIterator;
-use std::net::IpAddr;
+use std::net::{IpAddr, SocketAddr};
 use std::path::{Path, PathBuf};
 use tokio::sync::Mutex;
 
@@ -78,6 +81,7 @@ pub struct ServiceManager {
     zones: Mutex<Vec<RunningZone>>,
     vnic_allocator: VnicAllocator,
     physical_link: PhysicalLink,
+    sled_subnet: Ipv6Subnet<SLED_PREFIX>,
 }
 
 impl ServiceManager {
@@ -93,6 +97,7 @@ impl ServiceManager {
     pub async fn new(
         log: Logger,
         physical_link: PhysicalLink,
+        sled_subnet: Ipv6Subnet<SLED_PREFIX>,
         config_path: Option<PathBuf>,
     ) -> Result<Self, Error> {
         debug!(log, "Creating new ServiceManager");
@@ -105,6 +110,7 @@ impl ServiceManager {
                 physical_link.clone(),
             ),
             physical_link,
+            sled_subnet,
         };
 
         let config_path = mgr.services_config_path();
@@ -244,16 +250,82 @@ impl ServiceManager {
             let smf_name = format!("svc:/system/illumos/{}", service.name);
             let default_smf_name = format!("{}:default", smf_name);
 
-            match service.name.as_str() {
-                "internal-dns" => {
-                    info!(self.log, "Setting up internal-dns service");
-                    let address =
-                        service.addresses.get(0).ok_or_else(|| {
-                            Error::BadServiceRequest {
-                                service: service.name.clone(),
-                                message: "Not enough addresses".to_string(),
-                            }
+            // TODO: match by type
+            // TODO: add nexus?
+            match service.service_type {
+                ServiceType::Nexus {
+                    internal_address,
+                    external_address,
+                } => {
+                    info!(self.log, "Setting up Nexus service");
+
+                    // Nexus takes a separate config file for parameters which
+                    // cannot be known at packaging time.
+                    let runtime_config = NexusRuntimeConfig {
+                        id: service.id,
+                        dropshot_external: ConfigDropshot {
+                            bind_address: SocketAddr::V6(external_address),
+                            ..Default::default()
+                        },
+                        dropshot_internal: ConfigDropshot {
+                            bind_address: SocketAddr::V6(internal_address),
+                            ..Default::default()
+                        },
+                        subnet: Ipv6Subnet::<RACK_PREFIX>::new(self.sled_subnet.net().ip()),
+                        database_address: None,
+                    };
+
+                    // Construct a temporary file within the zone.
+                    let output = running_zone
+                        .run_cmd(&[
+                            "/usr/bin/mktemp",
+                            "nexus-config.toml.XXXXXX",
+                        ])
+                        .map_err(|err| Error::ZoneCommand {
+                            intent: "creating temporary file for nexus configuration".to_string(),
+                            err,
                         })?;
+                    let runtime_config_path = PathBuf::from(output);
+
+                    // Serialize the configuration and write it into the file.
+                    let serialized_cfg = toml::Value::try_from(&runtime_config)
+                        .expect("Cannot serialize config");
+                    let config_str =
+                        toml::to_string(&serialized_cfg).map_err(|err| {
+                            Error::TomlSerialize { path: runtime_config_path.clone(), err }
+                        })?;
+                    // Inject the path directly into the non-global Zone, based
+                    // on the result of the mktempcommand.
+                    let path_from_gz = PathBuf::from(ZONE_ZFS_DATASET_MOUNTPOINT)
+                        .join(PathBuf::from(running_zone.name()))
+                        .join("root")
+                        .join(runtime_config_path.strip_prefix("/").unwrap());
+                    tokio::fs::write(&path_from_gz, config_str)
+                        .await
+                        .map_err(|err| Error::Io { path: path_from_gz.clone(), err })?;
+
+                    running_zone
+                        .run_cmd(&[
+                            crate::illumos::zone::SVCCFG,
+                            "-s",
+                            &smf_name,
+                            "setprop",
+                            &format!(
+                                "config/runtime_config={}",
+                                runtime_config_path.to_string_lossy(),
+                            ),
+                        ])
+                        .map_err(|err| Error::ZoneCommand {
+                            intent: "setting runtime config path".to_string(),
+                            err,
+                        })?;
+
+                },
+                ServiceType::InternalDns {
+                    server_address,
+                    dns_address,
+                } => {
+                    info!(self.log, "Setting up internal-dns service");
                     running_zone
                         .run_cmd(&[
                             crate::illumos::zone::SVCCFG,
@@ -262,7 +334,7 @@ impl ServiceManager {
                             "setprop",
                             &format!(
                                 "config/server_address=[{}]:{}",
-                                address, DNS_SERVER_PORT
+                                server_address.ip(), server_address.port(),
                             ),
                         ])
                         .map_err(|err| Error::ZoneCommand {
@@ -278,38 +350,32 @@ impl ServiceManager {
                             "setprop",
                             &format!(
                                 "config/dns_address=[{}]:{}",
-                                address, DNS_PORT
+                                dns_address.ip(), dns_address.port(),
                             ),
                         ])
                         .map_err(|err| Error::ZoneCommand {
                             intent: "Set DNS address".to_string(),
                             err,
                         })?;
-
-                    // Refresh the manifest with the new properties we set,
-                    // so they become "effective" properties when the service is enabled.
-                    running_zone
-                        .run_cmd(&[
-                            crate::illumos::zone::SVCCFG,
-                            "-s",
-                            &default_smf_name,
-                            "refresh",
-                        ])
-                        .map_err(|err| Error::ZoneCommand {
-                            intent: format!(
-                                "Refresh SMF manifest {}",
-                                default_smf_name
-                            ),
-                            err,
-                        })?;
-                }
-                _ => {
-                    info!(
-                        self.log,
-                        "Service name {} did not match", service.name
-                    );
                 }
             }
+
+            // Refresh the manifest with the new properties we set,
+            // so they become "effective" properties when the service is enabled.
+            running_zone
+                .run_cmd(&[
+                    crate::illumos::zone::SVCCFG,
+                    "-s",
+                    &default_smf_name,
+                    "refresh",
+                ])
+                .map_err(|err| Error::ZoneCommand {
+                    intent: format!(
+                        "Refresh SMF manifest {}",
+                        default_smf_name
+                    ),
+                    err,
+                })?;
 
             debug!(self.log, "enabling service");
 

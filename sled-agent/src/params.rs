@@ -240,6 +240,26 @@ impl From<DatasetEnsureBody> for sled_agent_client::types::DatasetEnsureBody {
     }
 }
 
+/// Describes service-specific parameters.
+#[derive(
+    Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq, Hash,
+)]
+// Struct variant enums require some assistance for serialization to TOML.
+#[serde(tag = "type")]
+pub enum ServiceType {
+    Nexus {
+        internal_address: SocketAddrV6,
+        external_address: SocketAddrV6,
+    },
+    InternalDns {
+        server_address: SocketAddrV6,
+        dns_address: SocketAddrV6,
+    },
+}
+
+/// Describes a request to create a service. This information
+/// should be sufficient for a Sled Agent to start a zone
+/// containing the requested service.
 #[derive(
     Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq, Hash,
 )]
@@ -259,6 +279,8 @@ pub struct ServiceRequest {
     // is necessary to allow inter-zone traffic routing.
     #[serde(default)]
     pub gz_addresses: Vec<Ipv6Addr>,
+    // Any other service-specific parameters.
+    pub service_type: ServiceType,
 }
 
 impl From<ServiceRequest> for sled_agent_client::types::ServiceRequest {

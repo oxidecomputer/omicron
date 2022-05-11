@@ -7,12 +7,11 @@
 
 use anyhow::anyhow;
 use dropshot::ConfigLogging;
-use omicron_common::nexus_config::RuntimeConfig;
+use omicron_common::nexus_config::{LoadError, RuntimeConfig};
 use serde::Deserialize;
 use serde::Serialize;
 use serde_with::DeserializeFromStr;
 use serde_with::SerializeDisplay;
-use std::fmt;
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 
@@ -52,10 +51,7 @@ pub struct TimeseriesDbConfig {
 
 /// Configuration for a nexus server
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
-pub struct Config {
-    /// A variety of configuration parameters only known at runtime.
-    #[serde(flatten)]
-    pub runtime: RuntimeConfig,
+pub struct PackageConfig {
     /// Console-related tunables
     pub console: ConsoleConfig,
     /// Server-wide logging configuration.
@@ -71,52 +67,26 @@ pub struct Config {
     pub updates: Option<UpdatesConfig>,
 }
 
-#[derive(Debug)]
-pub struct LoadError {
-    path: PathBuf,
-    kind: LoadErrorKind,
-}
-#[derive(Debug)]
-pub enum LoadErrorKind {
-    Io(std::io::Error),
-    Parse(toml::de::Error),
-}
-
-impl From<(PathBuf, std::io::Error)> for LoadError {
-    fn from((path, err): (PathBuf, std::io::Error)) -> Self {
-        LoadError { path, kind: LoadErrorKind::Io(err) }
+impl PackageConfig {
+    /// Load a `PackageConfig` from the given TOML file
+    ///
+    /// This config object can then be used to create a new `Nexus`.
+    /// The format is described in the README.
+    pub fn from_file<P: AsRef<Path>>(path: P) -> Result<Self, LoadError> {
+        let path = path.as_ref();
+        let file_contents = std::fs::read_to_string(path)
+            .map_err(|e| (path.to_path_buf(), e))?;
+        let config_parsed: Self = toml::from_str(&file_contents)
+            .map_err(|e| (path.to_path_buf(), e))?;
+        Ok(config_parsed)
     }
 }
 
-impl From<(PathBuf, toml::de::Error)> for LoadError {
-    fn from((path, err): (PathBuf, toml::de::Error)) -> Self {
-        LoadError { path, kind: LoadErrorKind::Parse(err) }
-    }
-}
-
-impl std::error::Error for LoadError {}
-
-impl fmt::Display for LoadError {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match &self.kind {
-            LoadErrorKind::Io(e) => {
-                write!(f, "read \"{}\": {}", self.path.display(), e)
-            }
-            LoadErrorKind::Parse(e) => {
-                write!(f, "parse \"{}\": {}", self.path.display(), e)
-            }
-        }
-    }
-}
-
-impl std::cmp::PartialEq<std::io::Error> for LoadError {
-    fn eq(&self, other: &std::io::Error) -> bool {
-        if let LoadErrorKind::Io(e) = &self.kind {
-            e.kind() == other.kind()
-        } else {
-            false
-        }
-    }
+#[derive(Clone, Debug, PartialEq)]
+pub struct Config {
+    /// A variety of configuration parameters only known at runtime.
+    pub runtime: RuntimeConfig,
+    pub pkg: PackageConfig,
 }
 
 /// List of supported external authn schemes
@@ -150,21 +120,6 @@ impl std::fmt::Display for SchemeName {
             SchemeName::Spoof => "spoof",
             SchemeName::SessionCookie => "session_cookie",
         })
-    }
-}
-
-impl Config {
-    /// Load a `Config` from the given TOML file
-    ///
-    /// This config object can then be used to create a new `Nexus`.
-    /// The format is described in the README.
-    pub fn from_file<P: AsRef<Path>>(path: P) -> Result<Config, LoadError> {
-        let path = path.as_ref();
-        let file_contents = std::fs::read_to_string(path)
-            .map_err(|e| (path.to_path_buf(), e))?;
-        let config_parsed: Config = toml::from_str(&file_contents)
-            .map_err(|e| (path.to_path_buf(), e))?;
-        Ok(config_parsed)
     }
 }
 

@@ -38,10 +38,10 @@ dataset_kind.all_addresses = [ "[fd00:1122:3344:0101::2]:32221" ]
 # address = "[fd00:1122:3344:0101::5]:8123"
 # dataset_kind.type = "clickhouse"
 
-[[request.service]]
-name = "nexus"
-addresses = [ "fd00:1122:3344:0101::3" ]
-gz_addresses = []
+# [[request.service]]
+# name = "nexus"
+# addresses = [ "fd00:1122:3344:0101::3" ]
+# gz_addresses = []
 
 # TODO(https://github.com/oxidecomputer/omicron/issues/732): Nexus
 # should allocate Oximeter services.

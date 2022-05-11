@@ -2696,6 +2696,7 @@ dependencies = [
  "thiserror",
  "tokio",
  "tokio-postgres",
+ "toml",
  "uuid",
 ]
 
@@ -2773,6 +2774,7 @@ dependencies = [
  "http",
  "httptest",
  "hyper",
+ "internal-dns-client",
  "ipnetwork",
  "lazy_static",
  "libc",

@@ -29,7 +29,7 @@ pub mod updates; // public for testing
 
 pub use app::test_interfaces::TestInterfaces;
 pub use app::Nexus;
-pub use config::Config;
+pub use config::{Config, PackageConfig};
 pub use context::ServerContext;
 pub use crucible_agent_client;
 use external_api::http_entrypoints::external_api;
@@ -89,10 +89,8 @@ impl Server {
         info!(log, "setting up nexus server");
 
         let ctxlog = log.new(o!("component" => "ServerContext"));
-        let pool = db::Pool::new(&db::Config {
-            url: config.runtime.database_url.clone(),
-        });
-        let apictx = ServerContext::new(rack_id, ctxlog, pool, &config)?;
+
+        let apictx = ServerContext::new(rack_id, ctxlog, &config).await?;
 
         let http_server_starter_external = dropshot::HttpServerStarter::new(
             &config.runtime.dropshot_external,
@@ -157,6 +155,7 @@ pub async fn run_server(config: &Config) -> Result<(), String> {
     use slog::Drain;
     let (drain, registration) = slog_dtrace::with_drain(
         config
+            .pkg
             .log
             .to_logger("nexus")
             .map_err(|message| format!("initializing logger: {}", message))?,

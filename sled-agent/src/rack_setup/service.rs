@@ -9,8 +9,8 @@ use crate::bootstrap::{
     client as bootstrap_agent_client, config::BOOTSTRAP_AGENT_PORT,
     discovery::PeerMonitorObserver, params::SledAgentRequest,
 };
-use crate::params::{DatasetEnsureBody, ServiceRequest};
-use omicron_common::address::{get_sled_address, ReservedRackSubnet, RSS_RESERVED_ADDRESSES};
+use crate::params::{DatasetEnsureBody, ServiceRequest, ServiceType};
+use omicron_common::address::{get_sled_address, ReservedRackSubnet, RSS_RESERVED_ADDRESSES, NEXUS_INTERNAL_PORT, NEXUS_EXTERNAL_PORT, DNS_PORT, DNS_SERVER_PORT};
 use omicron_common::backoff::{
     internal_service_policy, retry_notify, BackoffError,
 };
@@ -22,6 +22,9 @@ use std::path::PathBuf;
 use thiserror::Error;
 use tokio::sync::{Mutex, OnceCell};
 use uuid::Uuid;
+
+// The number of Nexus instances to create from RSS.
+const NEXUS_COUNT: usize = 1;
 
 /// Describes errors which may occur while operating the setup service.
 #[derive(Error, Debug)]
@@ -149,6 +152,7 @@ struct AddressBumpAllocator {
 }
 
 // TODO: Testable?
+// TODO: Could exist in another file?
 impl AddressBumpAllocator {
     fn new(sled_addr: Ipv6Addr) -> Self {
         Self {
@@ -404,24 +408,40 @@ impl ServiceInner {
 
         let requests_and_sleds =
             bootstrap_addrs.map(|(idx, bootstrap_addr)| {
-                // If a sled was explicitly requested from the RSS configuration,
-                // use that. Otherwise, just give it a "default" (empty) set of
-                // services.
-                let mut request = {
-                    if idx < config.requests.len() {
+                let sled_subnet_index =
+                    u8::try_from(idx + 1).expect("Too many peers!");
+                let subnet = config.sled_subnet(sled_subnet_index);
+                let mut addr_alloc = AddressBumpAllocator::new(*get_sled_address(subnet).ip());
 
-                        let sled_subnet_index =
-                            u8::try_from(idx + 1).expect("Too many peers!");
-                        let subnet = config.sled_subnet(sled_subnet_index);
-                        let mut addr_alloc = AddressBumpAllocator::new(*get_sled_address(subnet).ip());
+                let mut request = SledRequest::default();
 
-                        let datasets = config.requests[idx].datasets.iter().map(|dataset| {
-                            let address = SocketAddrV6::new(
-                                addr_alloc.next().expect("Not enough addrs"),
-                                omicron_common::address::COCKROACH_PORT,
-                                0,
-                                0,
-                            );
+                // The first enumerated sleds get assigned the responsibility
+                // of hosting Nexus.
+                if idx < NEXUS_COUNT {
+                    let address = addr_alloc.next().expect("Not enough addrs");
+                    request.services.push(ServiceRequest {
+                        id: Uuid::new_v4(),
+                        name: "nexus".to_string(),
+                        addresses: vec![address],
+                        gz_addresses: vec![],
+                        service_type: ServiceType::Nexus {
+                            internal_address: SocketAddrV6::new(address, NEXUS_INTERNAL_PORT, 0, 0),
+                            external_address: SocketAddrV6::new(address, NEXUS_EXTERNAL_PORT, 0, 0),
+                        },
+                    })
+                }
+
+                // The first enumerated sleds host the CRDB datasets, using
+                // zpools described from the underlying config file.
+                if idx < config.requests.len() {
+                    for dataset in &config.requests[idx].datasets {
+                        let address = SocketAddrV6::new(
+                            addr_alloc.next().expect("Not enough addrs"),
+                            omicron_common::address::COCKROACH_PORT,
+                            0,
+                            0,
+                        );
+                        request.datasets.push(
                             DatasetEnsureBody {
                                 id: Uuid::new_v4(),
                                 zpool_uuid: dataset.zpool_uuid,
@@ -430,38 +450,24 @@ impl ServiceInner {
                                 },
                                 address,
                             }
-                        }).collect::<Vec<_>>();
-
-                        let services = config.requests[idx].services.iter().map(|svc| {
-                            let address  = addr_alloc.next().expect("Not enough addrs");
-                            ServiceRequest {
-                                id: Uuid::new_v4(),
-                                name: svc.name.clone(),
-                                addresses: vec![ address ],
-                                gz_addresses: vec![],
-
-                            }
-                        }).collect::<Vec<_>>();
-
-                        SledRequest {
-                            datasets,
-                            services,
-                            ..Default::default()
-                        }
-                    } else {
-                        SledRequest::default()
+                        );
                     }
-                };
+                }
 
                 // The first enumerated sleds get assigned the additional
                 // responsibility of being internal DNS servers.
                 if idx < dns_subnets.len() {
                     let dns_subnet = &dns_subnets[idx];
+                    let dns_addr = dns_subnet.dns_address().ip();
                     request.dns_services.push(ServiceRequest {
                         id: Uuid::new_v4(),
                         name: "internal-dns".to_string(),
-                        addresses: vec![dns_subnet.dns_address().ip()],
+                        addresses: vec![dns_addr],
                         gz_addresses: vec![dns_subnet.gz_address().ip()],
+                        service_type: ServiceType::InternalDns {
+                            server_address: SocketAddrV6::new(dns_addr, DNS_SERVER_PORT, 0, 0),
+                            dns_address: SocketAddrV6::new(dns_addr, DNS_PORT, 0, 0),
+                        },
                     });
                 }
 
@@ -498,7 +504,7 @@ impl ServiceInner {
 
         // Once we've constructed a plan, write it down to durable storage.
         let serialized_plan = toml::Value::try_from(&plan)
-            .expect("Cannot serialize configuration");
+            .expect(&format!("Cannot serialize configuration: {:#?}", plan));
         let plan_str = toml::to_string(&serialized_plan)
             .expect("Cannot turn config to string");
 

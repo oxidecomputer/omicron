@@ -19,13 +19,17 @@ use authn::external::spoof::HttpAuthnSpoof;
 use authn::external::HttpAuthnScheme;
 use chrono::{DateTime, Duration, Utc};
 use omicron_common::api::external::Error;
+use omicron_common::address::{Ipv6Subnet, AZ_PREFIX, COCKROACH_PORT};
+use omicron_common::postgres_config::PostgresConfigWithUrl;
 use oximeter::types::ProducerRegistry;
 use oximeter_instruments::http::{HttpService, LatencyTracker};
 use slog::Logger;
 use std::collections::BTreeMap;
 use std::env;
 use std::fmt::Debug;
+use std::net::SocketAddr;
 use std::path::PathBuf;
+use std::str::FromStr;
 use std::sync::Arc;
 use std::time::Instant;
 use std::time::SystemTime;
@@ -67,13 +71,13 @@ pub struct ConsoleConfig {
 impl ServerContext {
     /// Create a new context with the given rack id and log.  This creates the
     /// underlying nexus as well.
-    pub fn new(
+    pub async fn new(
         rack_id: Uuid,
         log: Logger,
-        pool: db::Pool,
         config: &config::Config,
     ) -> Result<Arc<ServerContext>, String> {
         let nexus_schemes = config
+            .pkg
             .authn
             .schemes_external
             .iter()
@@ -113,11 +117,11 @@ impl ServerContext {
         // Support both absolute and relative paths. If configured dir is
         // absolute, use it directly. If not, assume it's relative to the
         // current working directory.
-        let static_dir = if config.console.static_dir.is_absolute() {
-            Some(config.console.static_dir.to_owned())
+        let static_dir = if config.pkg.console.static_dir.is_absolute() {
+            Some(config.pkg.console.static_dir.to_owned())
         } else {
             env::current_dir()
-                .map(|root| root.join(&config.console.static_dir))
+                .map(|root| root.join(&config.pkg.console.static_dir))
                 .ok()
         };
 
@@ -131,6 +135,32 @@ impl ServerContext {
         // TODO: check that asset directory exists, check for particular assets
         // like console index.html. leaving that out for now so we don't break
         // nexus in dev for everyone
+
+        // Set up DNS Client
+        let az_subnet = Ipv6Subnet::<AZ_PREFIX>::new(config.runtime.subnet.net().ip());
+        let resolver = internal_dns_client::multiclient::create_resolver(az_subnet)
+            .map_err(|e| format!("Failed to create DNS resolver: {}", e.to_string()))?;
+
+        // Set up DB pool
+        let address = if let Some(address) = config.runtime.database_address {
+            address
+        } else {
+            let response = resolver.lookup_ip("cockroachdb.")
+                .await
+                .map_err(|e| format!("Failed to lookup IP: {}", e.to_string()))?;
+            let address = response
+                .iter()
+                .next()
+                .ok_or_else(|| "no addresses returned from DNS resolver".to_string())?;
+            SocketAddr::new(address, COCKROACH_PORT)
+        };
+        let url = PostgresConfigWithUrl::from_str(
+                &format!("postgresql://root@{}/omicron?sslmode=disable", address)
+            )
+            .map_err(|e| format!("Cannot parse Postgres URL: {}", e.to_string()))?;
+        let pool = db::Pool::new(&db::Config {
+            url
+        });
 
         Ok(Arc::new(ServerContext {
             nexus: Nexus::new_with_id(
@@ -149,14 +179,14 @@ impl ServerContext {
             producer_registry,
             console_config: ConsoleConfig {
                 session_idle_timeout: Duration::minutes(
-                    config.console.session_idle_timeout_minutes.into(),
+                    config.pkg.console.session_idle_timeout_minutes.into(),
                 ),
                 session_absolute_timeout: Duration::minutes(
-                    config.console.session_absolute_timeout_minutes.into(),
+                    config.pkg.console.session_absolute_timeout_minutes.into(),
                 ),
                 static_dir,
                 cache_control_max_age: Duration::minutes(
-                    config.console.cache_control_max_age_minutes.into(),
+                    config.pkg.console.cache_control_max_age_minutes.into(),
                 ),
             },
         }))

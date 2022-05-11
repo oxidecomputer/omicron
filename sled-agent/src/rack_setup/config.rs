@@ -40,27 +40,12 @@ pub struct CockroachDataset {
     pub zpool_uuid: Uuid,
 }
 
-/// Hard-coded configurations for where to place services
-///
-/// Converts into a [`crate::params::ServiceRequest`].
-// TODO: Should this exist? It should just be Nexus + DNS servers.
-// We could hard-code their bringup in the RSS, since we know where
-// it's coming from.
-#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
-pub struct Service {
-    pub name: String,
-}
-
 /// A request to initialize a sled.
 #[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq)]
 pub struct HardcodedSledRequest {
     /// Datasets to be created.
     #[serde(default, rename = "dataset")]
     pub datasets: Vec<CockroachDataset>,
-
-    /// Services to be instantiated.
-    #[serde(default, rename = "service")]
-    pub services: Vec<Service>,
 }
 
 impl SetupServiceConfig {

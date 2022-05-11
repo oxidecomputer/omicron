@@ -124,7 +124,7 @@ impl Nexus {
             sec_store,
         ));
         let timeseries_client =
-            oximeter_db::Client::new(config.timeseries_db.address, &log);
+            oximeter_db::Client::new(config.pkg.timeseries_db.address, &log);
 
         // TODO-cleanup We may want a first-class subsystem for managing startup
         // background tasks.  It could use a Future for each one, a status enum
@@ -150,7 +150,7 @@ impl Nexus {
             recovery_task: std::sync::Mutex::new(None),
             populate_status,
             timeseries_client,
-            updates_config: config.updates.clone(),
+            updates_config: config.pkg.updates.clone(),
             opctx_alloc: OpContext::for_background(
                 log.new(o!("component" => "InstanceAllocator")),
                 Arc::clone(&authz),
